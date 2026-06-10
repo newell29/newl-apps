@@ -1,0 +1,279 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PlatformRole {
+  ADMIN
+  MANAGER
+  SALES
+  OPERATIONS
+  FINANCE
+  READ_ONLY
+}
+
+enum ModuleKey {
+  LEAD_GEN
+  UPS_TOOLS
+  TRANSIT_LOOKUP
+  INVOICE_VERIFICATION
+  QUICKBOOKS_POSTING
+}
+
+enum IntegrationProvider {
+  APOLLO
+  TRADEMINING
+  GOOGLE_SHEETS
+  QUICKBOOKS
+  UPS
+  OPENCLAW
+  OPENAI
+}
+
+enum IntegrationStatus {
+  ACTIVE
+  DISABLED
+  ERROR
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  SUCCESS
+  ERROR
+  CANCELLED
+}
+
+enum LeadPipelineStage {
+  NEW
+  RESEARCHING
+  ENRICHED
+  QUALIFIED
+  CONTACTED
+  REPLIED
+  MEETING_BOOKED
+  QUOTED
+  WON
+  LOST
+  DISQUALIFIED
+}
+
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships            Membership[]
+  moduleAccess           TenantModuleAccess[]
+  integrationCredentials IntegrationCredential[]
+  auditLogs              AuditLog[]
+  jobRuns                AutomationJobRun[]
+  companies              Company[]
+  importRecords          TradeMiningImportRecord[]
+  contacts               Contact[]
+  leads                  Lead[]
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships Membership[]
+}
+
+model Membership {
+  id        String       @id @default(cuid())
+  tenantId  String
+  userId    String
+  role      PlatformRole
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId])
+  @@index([tenantId, role])
+}
+
+model Module {
+  id          String    @id @default(cuid())
+  key         ModuleKey @unique
+  name        String
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tenantAccess TenantModuleAccess[]
+}
+
+model TenantModuleAccess {
+  id        String   @id @default(cuid())
+  tenantId  String
+  moduleId  String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  module Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, moduleId])
+  @@index([tenantId, enabled])
+}
+
+model IntegrationCredential {
+  id          String              @id @default(cuid())
+  tenantId    String
+  provider    IntegrationProvider
+  name        String
+  status      IntegrationStatus   @default(DISABLED)
+  publicConfig Json?
+  secretRef   String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, provider])
+  @@index([tenantId, status])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  tenantId    String
+  actorUserId String?
+  action      String
+  entityType  String
+  entityId    String?
+  before      Json?
+  after       Json?
+  createdAt   DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, entityType, entityId])
+  @@index([tenantId, createdAt])
+}
+
+model AutomationJobRun {
+  id           String    @id @default(cuid())
+  tenantId     String
+  jobType      String
+  status       JobStatus
+  startedAt    DateTime  @default(now())
+  finishedAt   DateTime?
+  input        Json?
+  output       Json?
+  errorMessage String?
+  createdAt    DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, jobType, startedAt])
+  @@index([tenantId, status])
+}
+
+model Company {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  name                 String
+  normalizedName       String
+  domain               String?
+  source               String?
+  priorityScore        Int      @default(0)
+  apolloOrganizationId String?
+  doNotProspect        Boolean  @default(false)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  tenant        Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  importRecords TradeMiningImportRecord[]
+  contacts      Contact[]
+  leads         Lead[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, normalizedName])
+  @@index([tenantId, priorityScore])
+  @@index([tenantId, domain])
+}
+
+model TradeMiningImportRecord {
+  id                 String   @id @default(cuid())
+  tenantId           String
+  companyId          String?
+  rawRecordKey       String
+  sourcePort         String?
+  arrivalDate        DateTime?
+  importerName       String?
+  consigneeName      String?
+  shipperName        String?
+  destinationCity    String?
+  destinationState   String?
+  originCountry      String?
+  productDescription String?
+  rawJson            Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company Company? @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: NoAction)
+
+  @@unique([tenantId, rawRecordKey])
+  @@index([tenantId, arrivalDate])
+  @@index([tenantId, sourcePort])
+}
+
+model Contact {
+  id             String   @id @default(cuid())
+  tenantId       String
+  companyId      String
+  firstName      String?
+  lastName       String?
+  fullName       String
+  title          String?
+  email          String?
+  linkedinUrl    String?
+  apolloPersonId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  leads   Lead[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, email])
+  @@index([tenantId, linkedinUrl])
+  @@index([tenantId, companyId])
+}
+
+model Lead {
+  id          String            @id @default(cuid())
+  tenantId    String
+  companyId   String
+  contactId   String?
+  stage       LeadPipelineStage @default(NEW)
+  ownerUserId String?
+  score       Int               @default(0)
+  notes       String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company Company  @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  contact Contact? @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: NoAction)
+
+  @@index([tenantId, stage])
+  @@index([tenantId, ownerUserId])
+  @@index([tenantId, score])
+}

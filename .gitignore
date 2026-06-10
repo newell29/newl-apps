@@ -25,6 +25,7 @@ node_modules/
 
 # Framework and build output
 .next/
+out/
 dist/
 build/
 coverage/
@@ -54,6 +55,9 @@ pnpm-debug.log*
 *.duckdb.wal
 dev.db
 local.db
+
+# Generated TypeScript state
+tsconfig.tsbuildinfo
 
 # Temporary files
 tmp/
