@@ -4,26 +4,113 @@ Internal-first, SaaS-ready app platform for logistics operations.
 
 ## Purpose
 
-Newl Apps will host internal Newl Group tools such as Apollo + TradeMining lead generation, UPS calculators, transit time lookup, invoice verification, QuickBooks posting, and future sales, finance, and operations modules.
+Newl Apps hosts operational tools for Newl Group and is designed so individual modules can later become tenant-scoped SaaS products for other logistics companies.
 
-The platform must be multi-tenant from day one so individual modules can later be offered to other logistics companies as SaaS products.
+The first module is the Apollo + TradeMining lead generation app. This scaffold intentionally does not call Apollo, TradeMining, Google Sheets, QuickBooks, UPS, OpenClaw, or n8n yet. Those integrations are represented by tenant-scoped schema and service boundaries only.
 
-## Initial Foundation
+## What Is Built
 
-- `AGENTS.md` contains project instructions for future coding sessions.
-- `reference/OPENCLAW_LEAD_GEN_SPEC.md` documents the current OpenClaw, Google Sheets, Apollo, and TradeMining workflow.
-- `reference/MIGRATION_PLAN.md` contains the first migration path from the current workflow to Newl Apps.
-- `.env.example` lists expected environment variable names with placeholders only.
+- Next.js App Router application with TypeScript.
+- Tailwind CSS styling.
+- Prisma schema using PostgreSQL.
+- Multi-tenant core models:
+  - `Tenant`
+  - `User`
+  - `Membership`
+  - `Module`
+  - `TenantModuleAccess`
+  - `IntegrationCredential`
+  - `AuditLog`
+  - `AutomationJobRun`
+- Initial lead generation models:
+  - `Company`
+  - `TradeMiningImportRecord`
+  - `Contact`
+  - `Lead`
+- Seed data for Newl Group as the first tenant.
+- Minimal app shell with dashboard, candidate feed, pipeline, settings, and job/audit log pages.
+- Tenant-safe query helpers that require a tenant context for business data access.
 
 ## Architecture Principles
 
 - Every major business table includes `tenantId`.
-- Newl Group is the first seeded tenant, not a hardcoded business logic assumption.
+- Newl Group is seeded tenant data, not hardcoded business logic.
 - Modules are separated by entitlement so tenants can enable only the apps they need.
 - Integration credentials are tenant-scoped.
 - Permissions support Admin, Manager, Sales, Operations, Finance, and Read Only roles.
-- All queries must be tenant-safe.
+- All future queries must be tenant-safe.
 
-## Status
+## Local Development
 
-Repository foundation only. Application code will be added after GitHub setup.
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Copy environment placeholders:
+
+```bash
+cp .env.example .env
+```
+
+3. Set `DATABASE_URL` in `.env` to a local PostgreSQL database:
+
+```bash
+DATABASE_URL=postgresql://USER:PASSWORD@localhost:5432/newl_apps
+```
+
+4. Generate the Prisma client:
+
+```bash
+npm run prisma:generate
+```
+
+5. Create database tables:
+
+```bash
+npm run prisma:migrate
+```
+
+6. Seed the first tenant and sample lead-gen data:
+
+```bash
+npm run prisma:seed
+```
+
+7. Start the app:
+
+```bash
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+## Scripts
+
+- `npm run dev` - start the Next.js dev server.
+- `npm run build` - build the production app.
+- `npm run lint` - run ESLint.
+- `npm run typecheck` - run TypeScript without emitting files.
+- `npm run prisma:generate` - generate the Prisma client.
+- `npm run prisma:migrate` - run Prisma migrations locally.
+- `npm run prisma:seed` - seed the first tenant and mock/sample data.
+
+## Integration Boundaries
+
+Live external calls are intentionally not wired yet. Future integration clients should be implemented behind tenant-scoped service boundaries and use `IntegrationCredential` records with encrypted secret references.
+
+Planned boundaries:
+
+- Apollo company/contact matching and sequence push.
+- TradeMining import and BOL normalization.
+- Google Sheets legacy import/export.
+- QuickBooks posting.
+- UPS tools.
+- OpenClaw legacy operations reporting.
+
+## Reference
+
+- Project instructions: `AGENTS.md`
+- Lead generation rebuild source of truth: `reference/OPENCLAW_LEAD_GEN_SPEC.md`
+- Initial migration plan: `reference/MIGRATION_PLAN.md`
