@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { defaultTenantBranding } from "@/branding/tenant-branding";
+import { NewlLogo } from "@/components/newl-logo";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard" },
@@ -19,13 +19,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-background lg:flex">
       <aside className="border-b border-border bg-sidebar text-sidebarForeground lg:fixed lg:inset-y-0 lg:w-64 lg:border-b-0 lg:border-r">
         <div className="flex h-16 items-center gap-3 border-b border-sidebarForeground/10 px-5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-md bg-accent text-sm font-semibold text-accentForeground">
-            {defaultTenantBranding.mark}
-          </div>
-          <div>
-            <p className="text-lg font-semibold text-sidebarForeground">{defaultTenantBranding.name}</p>
-            <p className="text-xs font-medium uppercase tracking-wide text-sidebarMuted">Internal Platform</p>
-          </div>
+          <NewlLogo compact inverse />
         </div>
         <nav className="flex gap-1 overflow-x-auto p-3 lg:block lg:space-y-1 lg:overflow-visible">
           {navItems.map((item) => {
