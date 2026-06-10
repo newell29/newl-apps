@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { getDashboardSummary } from "@/modules/dashboard/queries";
@@ -17,6 +18,21 @@ export default async function DashboardPage() {
         description="Operational snapshot for enabled modules, lead generation, and platform activity."
       />
 
+      <div className="flex flex-wrap gap-3">
+        <Link
+          href="/lead-gen/candidates"
+          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primaryForeground shadow-sm transition-colors hover:bg-primary/90"
+        >
+          Candidate Feed
+        </Link>
+        <Link
+          href="/lead-gen/pipeline"
+          className="rounded-md border border-border bg-card px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-muted"
+        >
+          Pipeline
+        </Link>
+      </div>
+
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Candidate Companies" value={summary.companyCount} />
         <MetricCard label="Open Leads" value={summary.openLeadCount} />
@@ -25,16 +41,16 @@ export default async function DashboardPage() {
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-lg border border-line bg-white p-5 shadow-sm">
-          <h2 className="text-base font-semibold text-ink">Module Status</h2>
-          <div className="mt-4 divide-y divide-line">
+        <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
+          <h2 className="text-base font-semibold text-foreground">Module Status</h2>
+          <div className="mt-4 divide-y divide-border">
             {summary.modules.map((module) => (
               <div key={module.key} className="flex items-center justify-between py-3">
                 <div>
-                  <p className="font-medium text-ink">{module.name}</p>
-                  <p className="text-sm text-slate-500">{module.description}</p>
+                  <p className="font-medium text-foreground">{module.name}</p>
+                  <p className="text-sm text-mutedForeground">{module.description}</p>
                 </div>
-                <span className="rounded-full border border-line px-2.5 py-1 text-xs font-medium text-slate-600">
+                <span className="rounded-full border border-success/20 bg-success/10 px-2.5 py-1 text-xs font-medium text-success">
                   {module.enabled ? "Enabled" : "Disabled"}
                 </span>
               </div>
@@ -42,9 +58,9 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        <div className="rounded-lg border border-line bg-white p-5 shadow-sm">
-          <h2 className="text-base font-semibold text-ink">Implementation Boundary</h2>
-          <div className="mt-4 space-y-3 text-sm leading-6 text-slate-600">
+        <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
+          <h2 className="text-base font-semibold text-foreground">Implementation Boundary</h2>
+          <div className="mt-4 space-y-3 text-sm leading-6 text-mutedForeground">
             <p>
               This foundation uses seeded sample data only. Live Apollo, TradeMining, Google
               Sheets, QuickBooks, UPS, and OpenClaw calls are intentionally behind future

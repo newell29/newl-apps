@@ -4,8 +4,33 @@
 
 :root {
   color-scheme: light;
-  --background: #eef2f7;
-  --foreground: #111827;
+
+  /*
+   * Temporary Newl-inspired palette.
+   * Exact Newl Group brand hex values should be confirmed before public launch.
+   * Keep these semantic so future tenant-level branding can swap values without
+   * rewriting component styles.
+   */
+  --color-background: 239 243 248;
+  --color-foreground: 17 24 39;
+  --color-card: 255 255 255;
+  --color-card-foreground: 17 24 39;
+  --color-primary: 18 62 103;
+  --color-primary-foreground: 255 255 255;
+  --color-accent: 14 116 111;
+  --color-accent-foreground: 255 255 255;
+  --color-sidebar: 10 31 51;
+  --color-sidebar-foreground: 241 246 250;
+  --color-sidebar-muted: 156 178 198;
+  --color-border: 212 222 233;
+  --color-muted: 244 247 251;
+  --color-muted-foreground: 82 99 118;
+  --color-success: 22 122 85;
+  --color-success-foreground: 255 255 255;
+  --color-warning: 183 121 31;
+  --color-warning-foreground: 255 255 255;
+  --color-danger: 180 35 24;
+  --color-danger-foreground: 255 255 255;
 }
 
 * {
@@ -19,8 +44,8 @@ body {
 
 body {
   margin: 0;
-  background: var(--background);
-  color: var(--foreground);
+  background: rgb(var(--color-background));
+  color: rgb(var(--color-foreground));
 }
 
 a {

@@ -19,19 +19,19 @@ export default async function PipelinePage() {
 
       <div className="grid gap-4 xl:grid-cols-3">
         {leads.map((lead) => (
-          <article key={lead.id} className="rounded-lg border border-line bg-white p-4 shadow-sm">
+          <article key={lead.id} className="rounded-lg border border-border bg-card p-4 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="font-semibold text-ink">{lead.companyName}</h2>
-                <p className="mt-1 text-sm text-slate-500">{lead.contactName ?? "No contact yet"}</p>
+                <h2 className="font-semibold text-foreground">{lead.companyName}</h2>
+                <p className="mt-1 text-sm text-mutedForeground">{lead.contactName ?? "No contact yet"}</p>
               </div>
               <StageBadge stage={lead.stage} />
             </div>
-            <div className="mt-4 flex items-center justify-between text-sm text-slate-600">
+            <div className="mt-4 flex items-center justify-between text-sm text-mutedForeground">
               <span>Score {lead.score}</span>
               <span>{lead.updatedAt.toLocaleDateString("en-US")}</span>
             </div>
-            {lead.notes ? <p className="mt-3 text-sm leading-6 text-slate-600">{lead.notes}</p> : null}
+            {lead.notes ? <p className="mt-3 text-sm leading-6 text-mutedForeground">{lead.notes}</p> : null}
           </article>
         ))}
       </div>

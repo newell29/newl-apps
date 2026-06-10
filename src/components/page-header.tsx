@@ -9,9 +9,9 @@ export function PageHeader({
 }) {
   return (
     <header>
-      <p className="text-sm font-semibold uppercase tracking-wide text-newl-blue">{eyebrow}</p>
-      <h1 className="mt-2 text-3xl font-semibold text-ink">{title}</h1>
-      <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{description}</p>
+      <p className="text-sm font-semibold uppercase tracking-wide text-accent">{eyebrow}</p>
+      <h1 className="mt-2 text-3xl font-semibold text-foreground">{title}</h1>
+      <p className="mt-2 max-w-3xl text-sm leading-6 text-mutedForeground">{description}</p>
     </header>
   );
 }

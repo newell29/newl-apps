@@ -120,6 +120,14 @@ The temporary tenant resolver in `src/server/tenant-context.ts` is development-o
 
 Some future cross-cutting fields, such as `AuditLog.actorUserId` and `Lead.ownerUserId`, are currently stored as IDs without relations because user ownership and impersonation semantics need the auth layer first. Service code must validate those IDs through tenant membership before writing them.
 
+## Branding And Theming
+
+Newl Apps uses centralized semantic theme tokens in `src/app/globals.css` and `tailwind.config.ts`, including `primary`, `accent`, `sidebar`, `border`, `muted`, `success`, `warning`, and `danger`.
+
+The current palette is a temporary Newl-inspired theme chosen for a clean logistics/SaaS interface. Exact Newl Group brand hex values should be confirmed later and then updated in the CSS variables without rewriting component styles.
+
+The default text-based `Newl Apps` mark lives in `src/branding/tenant-branding.ts`. Future SaaS tenants should load branding from tenant-scoped settings instead of relying on the default internal Newl theme.
+
 ## Reference
 
 - Project instructions: `AGENTS.md`
