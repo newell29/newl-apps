@@ -1,0 +1,62 @@
+# Environment and secrets
+.env
+.env.local
+.env.*
+!.env.example
+*.pem
+*.key
+*.p8
+*.p12
+*.crt
+*.cer
+*.der
+*private-key*
+*private_key*
+*service-account*.json
+*service_account*.json
+*google*service*account*.json
+secrets/
+.secrets/
+secret/
+.secret/
+
+# Dependencies
+node_modules/
+
+# Framework and build output
+.next/
+dist/
+build/
+coverage/
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
+
+# Local databases
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+*.sqlite-shm
+*.sqlite-wal
+*.duckdb
+*.duckdb.wal
+dev.db
+local.db
+
+# Temporary files
+tmp/
+.tmp/
+temp/
+.cache/
