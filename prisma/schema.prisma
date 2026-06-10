@@ -132,15 +132,15 @@ model TenantModuleAccess {
 }
 
 model IntegrationCredential {
-  id        String              @id @default(cuid())
-  tenantId  String
-  provider  IntegrationProvider
-  name      String
-  status    IntegrationStatus   @default(DISABLED)
-  config    Json?
-  secretRef String?
-  createdAt DateTime            @default(now())
-  updatedAt DateTime            @updatedAt
+  id          String              @id @default(cuid())
+  tenantId    String
+  provider    IntegrationProvider
+  name        String
+  status      IntegrationStatus   @default(DISABLED)
+  publicConfig Json?
+  secretRef   String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -201,6 +201,7 @@ model Company {
   contacts      Contact[]
   leads         Lead[]
 
+  @@unique([tenantId, id])
   @@unique([tenantId, normalizedName])
   @@index([tenantId, priorityScore])
   @@index([tenantId, domain])
@@ -225,7 +226,7 @@ model TradeMiningImportRecord {
   updatedAt          DateTime @updatedAt
 
   tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  company Company? @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: NoAction)
 
   @@unique([tenantId, rawRecordKey])
   @@index([tenantId, arrivalDate])
@@ -247,9 +248,10 @@ model Contact {
   updatedAt      DateTime @updatedAt
 
   tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
   leads   Lead[]
 
+  @@unique([tenantId, id])
   @@index([tenantId, email])
   @@index([tenantId, linkedinUrl])
   @@index([tenantId, companyId])
@@ -268,8 +270,8 @@ model Lead {
   updatedAt   DateTime          @updatedAt
 
   tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  company Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  contact Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  company Company  @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  contact Contact? @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: NoAction)
 
   @@index([tenantId, stage])
   @@index([tenantId, ownerUserId])

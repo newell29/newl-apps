@@ -58,6 +58,7 @@ cp .env.example .env
 
 ```bash
 DATABASE_URL=postgresql://USER:PASSWORD@localhost:5432/newl_apps
+DEFAULT_TENANT_SLUG=newl-group
 ```
 
 4. Generate the Prisma client:
@@ -100,6 +101,8 @@ Open [http://localhost:3000](http://localhost:3000).
 
 Live external calls are intentionally not wired yet. Future integration clients should be implemented behind tenant-scoped service boundaries and use `IntegrationCredential` records with encrypted secret references.
 
+Use `IntegrationCredential.publicConfig` only for non-secret settings such as API base URLs, dry-run flags, enabled ports, display names, or placeholder external IDs. API keys, OAuth tokens, passwords, service account JSON, private keys, webhook secrets, refresh tokens, and production sequence/custom-field IDs must stay out of source and be referenced through `secretRef`.
+
 Planned boundaries:
 
 - Apollo company/contact matching and sequence push.
@@ -108,6 +111,14 @@ Planned boundaries:
 - QuickBooks posting.
 - UPS tools.
 - OpenClaw legacy operations reporting.
+
+## Tenant Safety
+
+All tenant-owned business tables include `tenantId`. Relations between tenant-owned lead generation records use composite tenant-scoped foreign keys where Prisma can enforce them, such as lead/contact/company links.
+
+The temporary tenant resolver in `src/server/tenant-context.ts` is development-only and reads `DEFAULT_TENANT_SLUG`. Production must replace it with authenticated membership/session tenant resolution before serving real users.
+
+Some future cross-cutting fields, such as `AuditLog.actorUserId` and `Lead.ownerUserId`, are currently stored as IDs without relations because user ownership and impersonation semantics need the auth layer first. Service code must validate those IDs through tenant membership before writing them.
 
 ## Reference
 

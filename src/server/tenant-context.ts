@@ -6,13 +6,21 @@ export type TenantContext = {
   tenantName: string;
 };
 
-const DEFAULT_TENANT_SLUG = "newl-group";
-
 export async function getCurrentTenantContext(): Promise<TenantContext> {
-  // TODO: Replace this seeded tenant fallback with authenticated membership lookup.
+  // Development-only fallback until authenticated tenant/session resolution exists.
   // The returned tenantId is the required input for all tenant-scoped service calls.
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("Production tenant resolution requires authenticated membership context.");
+  }
+
+  const defaultTenantSlug = process.env.DEFAULT_TENANT_SLUG;
+
+  if (!defaultTenantSlug) {
+    throw new Error("DEFAULT_TENANT_SLUG is required for development tenant resolution.");
+  }
+
   const tenant = await prisma.tenant.findUnique({
-    where: { slug: DEFAULT_TENANT_SLUG },
+    where: { slug: defaultTenantSlug },
     select: {
       id: true,
       slug: true,
@@ -21,7 +29,7 @@ export async function getCurrentTenantContext(): Promise<TenantContext> {
   });
 
   if (!tenant) {
-    throw new Error("Default tenant is missing. Run `npm run prisma:seed`.");
+    throw new Error("Default tenant is missing. Run `npm run prisma:seed` or update DEFAULT_TENANT_SLUG.");
   }
 
   return {

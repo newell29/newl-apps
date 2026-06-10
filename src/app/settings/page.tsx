@@ -36,8 +36,8 @@ export default async function SettingsPage() {
               <div key={provider} className="rounded-md border border-line p-3">
                 <p className="font-medium text-ink">{provider}</p>
                 <p className="mt-1">
-                  Placeholder only. Store tenant-scoped config and encrypted secret references here
-                  before enabling live API calls.
+                  Placeholder only. Store non-secret tenant config and encrypted secret references
+                  separately before enabling live API calls.
                 </p>
               </div>
             ))}
