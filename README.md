@@ -25,10 +25,12 @@ The first module is the Apollo + TradeMining lead generation app. This scaffold 
 - Initial lead generation models:
   - `Company`
   - `TradeMiningImportRecord`
+  - `TradeMiningSearchProfile`
   - `Contact`
   - `Lead`
 - Seed data for Newl Group as the first tenant.
-- Minimal app shell with dashboard, candidate feed, pipeline, settings, and job/audit log pages.
+- Sample TradeMining search profiles for Houston Import Leads and Charlotte Warehouse Leads.
+- Minimal app shell with dashboard, search profiles, candidate feed, pipeline, settings, and job/audit log pages.
 - Tenant-safe query helpers that require a tenant context for business data access.
 
 ## Architecture Principles
@@ -103,8 +105,11 @@ Live external calls are intentionally not wired yet. Future integration clients 
 
 Use `IntegrationCredential.publicConfig` only for non-secret settings such as API base URLs, dry-run flags, enabled ports, display names, or placeholder external IDs. API keys, OAuth tokens, passwords, service account JSON, private keys, webhook secrets, refresh tokens, and production sequence/custom-field IDs must stay out of source and be referenced through `secretRef`.
 
+TradeMining search profiles are now tenant-scoped configuration in Newl Apps. A future OpenClaw/n8n ingestion milestone should fetch active profiles from Newl Apps and post raw TradeMining batch results back; this profile admin milestone does not call TradeMining, OpenClaw, n8n, Apollo, or any external API.
+
 Planned boundaries:
 
+- OpenClaw/n8n profile fetch and TradeMining ingestion API.
 - Apollo company/contact matching and sequence push.
 - TradeMining import and BOL normalization.
 - Google Sheets legacy import/export.
