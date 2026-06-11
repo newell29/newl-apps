@@ -549,6 +549,25 @@ function buildRawJson(batch: BatchPayload, record: TradeMiningRecordInput): Pris
     source: batch.source,
     jobRunId: batch.jobRunId ?? null,
     searchProfileId: batch.searchProfileId ?? null,
+    record: {
+      importerName: record.importerName ?? null,
+      supplierName: record.supplierName ?? null,
+      consigneeName: record.consigneeName ?? null,
+      bolNumber: record.bolNumber ?? null,
+      shipmentDate: record.shipmentDate ?? null,
+      originCountry: record.originCountry ?? null,
+      originPort: record.originPort ?? null,
+      shipFromPort: record.shipFromPort ?? null,
+      destinationPort: record.destinationPort ?? null,
+      destinationMarket: record.destinationMarket ?? null,
+      destinationCity: record.destinationCity ?? null,
+      destinationState: record.destinationState ?? null,
+      productDescription: record.productDescription ?? null,
+      hsCode: record.hsCode ?? null,
+      containerCount: record.containerCount ?? null,
+      weight: record.weight ?? null,
+      volume: record.volume ?? null
+    },
     destinationPort: record.destinationPort ?? null,
     destinationMarket: record.destinationMarket ?? null,
     originPort: record.originPort ?? null,
@@ -557,7 +576,20 @@ function buildRawJson(batch: BatchPayload, record: TradeMiningRecordInput): Pris
     containerCount: record.containerCount ?? null,
     weight: record.weight ?? null,
     volume: record.volume ?? null,
+    scoreReasoning: buildScoreReasoning(record),
     rawData: record.rawData ?? {}
+  };
+}
+
+function buildScoreReasoning(record: TradeMiningRecordInput): Prisma.InputJsonObject {
+  return {
+    baseScore: 20,
+    containerScore: Math.min(25, Math.max(0, record.containerCount ?? 0) * 5),
+    weightScore: Math.min(20, Math.floor(Math.max(0, record.weight ?? 0) / 5000)),
+    productScore: record.productDescription || record.hsCode ? 15 : 0,
+    laneScore: record.destinationMarket || record.destinationPort ? 20 : 0,
+    recencyScore: record.shipmentDate ? 10 : 0,
+    note: "Temporary deterministic score for Candidate Feed readiness until ranked scoring milestone."
   };
 }
 
