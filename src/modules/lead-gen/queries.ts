@@ -20,14 +20,19 @@ export type CandidateFeedFilters = {
   query?: string;
   status?: CandidateStatus | "ACTIVE";
   searchProfileId?: string;
+  minScore?: number;
+  maxScore?: number;
+  minShipmentCount?: number;
   sort?: CandidateFeedSort;
 };
 
-export type LeadPipelineSort = "score_desc" | "updated_desc" | "approved_desc";
+export type LeadPipelineSort = "score_desc" | "updated_desc" | "approved_desc" | "company_name_asc";
 
 export type LeadPipelineFilters = {
   stage?: LeadPipelineStage | "ALL";
   ownerUserId?: string | "ALL" | "UNASSIGNED";
+  minScore?: number;
+  maxScore?: number;
   sort?: LeadPipelineSort;
 };
 
@@ -122,6 +127,8 @@ export async function getCandidateFeed(tenant: TenantContext, filters: Candidate
       };
     })
     .filter((candidate) => !filters.searchProfileId || candidate.matchedSearchProfileId === filters.searchProfileId)
+    .filter((candidate) => isWithinScoreRange(candidate.candidateScore, filters.minScore, filters.maxScore))
+    .filter((candidate) => filters.minShipmentCount === undefined || candidate.shipmentCount >= filters.minShipmentCount)
     .filter((candidate) => matchesFoundCompanyQuery(candidate, filters.query));
 
   return sortCandidates(candidates, filters.sort ?? "score_desc");
@@ -238,7 +245,7 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
     orderBy: buildLeadPipelineOrder(filters.sort ?? "approved_desc")
   });
 
-  return leads.map((lead) => {
+  const pipelineLeads = leads.map((lead) => {
     const contactCount = lead.company.contacts.length;
     const hasSelectedContact = Boolean(lead.contact);
     const contactStatus = hasSelectedContact
@@ -276,6 +283,12 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
       updatedAt: lead.updatedAt
     };
   });
+
+  if (filters.sort === "company_name_asc") {
+    return pipelineLeads.sort((left, right) => left.companyName.localeCompare(right.companyName));
+  }
+
+  return pipelineLeads;
 }
 
 export async function getLeadPipelineFilters(tenant: TenantContext) {
@@ -308,6 +321,10 @@ function buildLeadPipelineWhere(filters: LeadPipelineFilters) {
   const where: {
     stage?: LeadPipelineStage;
     ownerUserId?: string | null;
+    score?: {
+      gte?: number;
+      lte?: number;
+    };
   } = {};
 
   if (filters.stage && filters.stage !== "ALL") {
@@ -320,10 +337,25 @@ function buildLeadPipelineWhere(filters: LeadPipelineFilters) {
     where.ownerUserId = filters.ownerUserId;
   }
 
+  if (filters.minScore !== undefined || filters.maxScore !== undefined) {
+    where.score = {
+      ...(filters.minScore !== undefined ? { gte: filters.minScore } : {}),
+      ...(filters.maxScore !== undefined ? { lte: filters.maxScore } : {})
+    };
+  }
+
   return where;
 }
 
 function buildLeadPipelineOrder(sort: LeadPipelineSort) {
+  if (sort === "company_name_asc") {
+    return [
+      {
+        createdAt: "desc" as const
+      }
+    ];
+  }
+
   if (sort === "score_desc") {
     return [
       {
@@ -354,6 +386,18 @@ function buildLeadPipelineOrder(sort: LeadPipelineSort) {
       score: "desc" as const
     }
   ];
+}
+
+function isWithinScoreRange(score: number, minScore: number | undefined, maxScore: number | undefined) {
+  if (minScore !== undefined && score < minScore) {
+    return false;
+  }
+
+  if (maxScore !== undefined && score > maxScore) {
+    return false;
+  }
+
+  return true;
 }
 
 function getPipelineNextStep({
