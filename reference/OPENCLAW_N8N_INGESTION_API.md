@@ -4,6 +4,8 @@ This document defines the first server-side API contract for VM-based OpenClaw a
 
 OpenClaw currently remains on the Linux VM/server under the `openclaw` user. Do not move or rewrite OpenClaw as part of this milestone. Newl Apps owns configuration, ingestion records, candidate scoring, approvals, pipeline state, and audit history. OpenClaw and n8n should remain replaceable collectors/orchestrators that call Newl Apps APIs.
 
+When this integration is wired on the VM, OpenClaw should call the deployed Newl Apps base URL, for example `https://newl-apps.example.com`, instead of `localhost`. The localhost examples below are for local development only.
+
 ## Authentication
 
 All endpoints require one of these headers:
