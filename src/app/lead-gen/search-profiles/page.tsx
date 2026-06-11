@@ -26,14 +26,15 @@ export default async function SearchProfilesPage() {
       <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h2 className="text-base font-semibold text-foreground">Profile Admin Foundation</h2>
+            <h2 className="text-base font-semibold text-foreground">Read-only search profile foundation</h2>
             <p className="mt-1 max-w-3xl text-sm leading-6 text-mutedForeground">
-              Newl Apps is the source of truth for profile criteria, thresholds, schedules, and audit history.
-              This milestone is read-only; create/edit actions will be added before worker ingestion is enabled.
+              This page intentionally keeps TradeMining profile setup read-only for this milestone while Newl
+              Apps becomes the source of truth for profile criteria, thresholds, schedules, and audit history.
+              The next OpenClaw/n8n ingestion milestone will use these enabled profiles to drive worker pulls.
             </p>
           </div>
           <span className="rounded-full border border-accentBorder bg-accentSoft px-3 py-1 text-xs font-semibold text-primary">
-            TODO: create/edit forms
+            Create/edit coming next
           </span>
         </div>
       </section>
