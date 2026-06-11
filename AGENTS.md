@@ -30,6 +30,25 @@ Implementation expectations:
 - Use shared platform primitives for auth, tenants, roles, audit logs, jobs, integrations, files, and billing placeholders.
 - Add tests or review checks for tenant isolation on every shared data path.
 
+## Development Workflow
+
+- Work in small-to-medium PRs, not massive rewrites.
+- Before coding, summarize the intended implementation plan.
+- After coding, run lint, typecheck, build, and relevant Prisma checks.
+- Never push directly to main.
+- Always create a PR.
+- Include a PR summary with:
+  1. What changed
+  2. Why it changed
+  3. Files changed
+  4. How to test locally
+  5. Screens/pages affected
+  6. Tenant-safety considerations
+  7. Any known limitations
+- Do not ask the user for minor implementation decisions.
+- Make practical assumptions consistent with AGENTS.md.
+- Ask only when a decision affects product direction, security, data model, or external integrations.
+
 ## Security
 
 - Never commit secrets, API keys, service account JSON, private keys, refresh tokens, passwords, or webhook tokens.
