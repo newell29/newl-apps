@@ -14,7 +14,8 @@ export const dynamic = "force-dynamic";
 const sortOptions = [
   { label: "Newest approved", value: "approved_desc" },
   { label: "Highest score", value: "score_desc" },
-  { label: "Recently updated", value: "updated_desc" }
+  { label: "Recently updated", value: "updated_desc" },
+  { label: "Company name A-Z", value: "company_name_asc" }
 ] as const;
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -28,11 +29,15 @@ export default async function PipelinePage({
   const params = searchParams ? await searchParams : {};
   const stage = parseStageParam(readParam(params.stage));
   const ownerUserId = parseOwnerParam(readParam(params.rep));
+  const minScore = parseScoreParam(readParam(params.minScore));
+  const maxScore = parseScoreParam(readParam(params.maxScore));
   const sort = parseSortParam(readParam(params.sort));
   const [leads, filterOptions] = await Promise.all([
     getLeadPipeline(tenant, {
       stage,
       ownerUserId,
+      minScore,
+      maxScore,
       sort
     }),
     getLeadPipelineFilters(tenant)
@@ -43,71 +48,94 @@ export default async function PipelinePage({
       <PageHeader
         eyebrow="Lead Generation"
         title="Pipeline"
-        description="Approved accounts being worked by sales after Candidate Feed review."
+        description="Only approved companies appear here. Contact enrichment and sequence tracking will be added after Apollo sync."
       />
 
       <div className="rounded-lg border border-accentBorder bg-accentSoft px-4 py-3 text-sm text-foreground">
-        Only approved companies appear here. Approve companies from Found Companies / Candidate Feed to start building
-        the sales pipeline.
+        Only approved companies appear here. Contact enrichment and sequence tracking will be added after Apollo sync.
       </div>
 
-      <form className="grid gap-3 rounded-lg border border-border bg-card p-4 shadow-sm lg:grid-cols-6" action="/lead-gen/pipeline">
-        <label className="space-y-1 text-sm font-medium text-foreground">
-          <span>Stage</span>
-          <select
-            name="stage"
-            defaultValue={stage}
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
-          >
-            <option value="ALL">All stages</option>
-            {filterOptions.stages.map((stageOption) => (
-              <option key={stageOption} value={stageOption}>
-                {formatStage(stageOption)}
-              </option>
-            ))}
-          </select>
-        </label>
+      <form className="rounded-lg border border-border bg-card p-4 shadow-sm" action="/lead-gen/pipeline">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Stage</span>
+            <select
+              name="stage"
+              defaultValue={stage}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            >
+              <option value="ALL">All stages</option>
+              {filterOptions.stages.map((stageOption) => (
+                <option key={stageOption} value={stageOption}>
+                  {formatStage(stageOption)}
+                </option>
+              ))}
+            </select>
+          </label>
 
-        <label className="space-y-1 text-sm font-medium text-foreground">
-          <span>Assigned rep</span>
-          <select
-            name="rep"
-            defaultValue={ownerUserId}
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
-          >
-            <option value="ALL">All reps</option>
-            <option value="UNASSIGNED">Unassigned</option>
-            {filterOptions.owners.map((owner) => (
-              <option key={owner} value={owner}>
-                {owner}
-              </option>
-            ))}
-          </select>
-        </label>
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Assigned rep</span>
+            <select
+              name="rep"
+              defaultValue={ownerUserId}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            >
+              <option value="ALL">All reps</option>
+              <option value="UNASSIGNED">Unassigned</option>
+              {filterOptions.owners.map((owner) => (
+                <option key={owner} value={owner}>
+                  {owner}
+                </option>
+              ))}
+            </select>
+          </label>
 
-        <label className="space-y-1 text-sm font-medium text-foreground">
-          <span>Score</span>
-          <select
-            name="sort"
-            defaultValue={sort}
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
-          >
-            {sortOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Min score</span>
+            <input
+              name="minScore"
+              type="number"
+              min="0"
+              max="100"
+              defaultValue={minScore ?? ""}
+              placeholder="0"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            />
+          </label>
 
-        <PipelinePlaceholderFilter label="Contact status" value="All contacts" />
-        <PipelinePlaceholderFilter label="Apollo status" value="All Apollo states" />
-        <PipelinePlaceholderFilter label="Sequence status" value="All sequence states" />
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Max score</span>
+            <input
+              name="maxScore"
+              type="number"
+              min="0"
+              max="100"
+              defaultValue={maxScore ?? ""}
+              placeholder="100"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            />
+          </label>
 
-        <div className="lg:col-span-6">
-          <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
-            Apply filters
-          </button>
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Sort</span>
+            <select
+              name="sort"
+              defaultValue={sort}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            >
+              {sortOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="flex items-end">
+            <button className="w-full rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover xl:w-auto">
+              Apply filters
+            </button>
+          </div>
         </div>
       </form>
 
@@ -236,21 +264,6 @@ export default async function PipelinePage({
   );
 }
 
-function PipelinePlaceholderFilter({ label, value }: { label: string; value: string }) {
-  return (
-    <label className="space-y-1 text-sm font-medium text-foreground">
-      <span>{label}</span>
-      <select
-        disabled
-        className="w-full rounded-md border border-border bg-muted px-3 py-2 text-sm text-mutedForeground"
-        defaultValue={value}
-      >
-        <option>{value}</option>
-      </select>
-    </label>
-  );
-}
-
 function CandidateStatusBadge({ status }: { status: CandidateStatus }) {
   const className =
     status === CandidateStatus.APPROVED_FOR_PIPELINE
@@ -284,6 +297,19 @@ function parseOwnerParam(value: string | undefined) {
 
 function parseSortParam(value: string | undefined): LeadPipelineSort {
   return sortOptions.some((option) => option.value === value) ? (value as LeadPipelineSort) : "approved_desc";
+}
+
+function parseScoreParam(value: string | undefined) {
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+
+  return Math.min(100, Math.max(0, Math.round(parsed)));
 }
 
 function readParam(value: string | string[] | undefined) {
