@@ -85,12 +85,62 @@ Lead score should consider:
 - Do not replace OpenClaw immediately.
 - Do not move all business logic into n8n.
 
-## 11. Near-Term PR Roadmap
+## Near-Term PR Milestones
 
-- Branding/theme
-- PR workflow instructions
-- TradeMining search profile admin
-- OpenClaw/n8n ingestion API
-- Ranked Candidate Feed
-- Approval into pipeline
-- Basic reporting by search profile/port/lane/rep
+### PR 1 - Product context and workflow instructions
+
+- Add PRODUCT_OPERATING_BRIEF.md
+- Update AGENTS.md so Codex reads this brief before implementation
+- Document internal-first direction and current Sheets workflow remaining live
+
+### PR 2 - Newl branding and theme
+
+- Add Newl-inspired theme tokens
+- Style sidebar, dashboard, cards, tables, buttons, and active nav states
+- Keep tenant-level branding extensible for later
+
+### PR 3 - TradeMining search profile admin
+
+- Add models/UI for configurable search profiles
+- Support multiple destination markets/ports, including Houston and Charlotte
+- Support origin ports, ship-from ports, origin countries, product keywords, HS codes, lookback windows, volume thresholds, and schedule metadata
+
+### PR 4 - OpenClaw/n8n ingestion API
+
+- Add endpoint for OpenClaw/n8n to fetch active search profiles
+- Add endpoint for OpenClaw/n8n to post TradeMining batch results
+- Add tenant-scoped ingestion authentication
+- Add ingestion/job logs
+
+### PR 5 - Ranked Candidate Feed
+
+- Normalize company names
+- Deduplicate companies within tenant
+- Update shipment summaries
+- Score companies by volume, frequency, recency, lane fit, destination match, origin match, and product fit
+- Show ranked companies before pipeline
+
+### PR 6 - Approve into sales pipeline
+
+- Add approve/reject actions from Candidate Feed
+- Approved companies move into sales rep pipeline
+- Rejected/disqualified companies stay out of pipeline
+- Track audit history
+
+### PR 7 - Performance reporting
+
+- Track companies pulled, companies approved, connect rates, replies, meetings, and results by profile/port/lane/rep
+- Keep current Sheets workflow live while validating app workflow
+
+### PR 8 - Apollo enrichment dry run
+
+- Add Apollo mock/dry-run enrichment after company approval
+- Rank contacts by title/seniority/department
+- Classify contacts into tiers
+- Do not push live sequences yet
+
+### PR 9 - Sequence recommendation and approval
+
+- Recommend Apollo sequence based on contact tier
+- Require human approval before sequence enrollment
+- Add audit logs and safety checks
