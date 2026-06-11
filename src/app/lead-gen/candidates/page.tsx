@@ -42,12 +42,26 @@ export default async function CandidateFeedPage({
   const status = parseStatusParam(readParam(params.status));
   const sort = parseSortParam(readParam(params.sort));
   const searchProfileId = readParam(params.profile);
-  const hasFilters = Boolean(query || searchProfileId || status !== "ACTIVE" || sort !== "score_desc");
+  const minScore = parseScoreParam(readParam(params.minScore));
+  const maxScore = parseScoreParam(readParam(params.maxScore));
+  const minShipmentCount = parseShipmentCountParam(readParam(params.minShipmentCount));
+  const hasFilters = Boolean(
+    query ||
+      searchProfileId ||
+      minScore !== undefined ||
+      maxScore !== undefined ||
+      minShipmentCount !== undefined ||
+      status !== "ACTIVE" ||
+      sort !== "score_desc"
+  );
   const [companies, filterOptions] = await Promise.all([
     getCandidateFeed(tenant, {
       query,
       status,
       searchProfileId,
+      minScore,
+      maxScore,
+      minShipmentCount,
       sort
     }),
     getCandidateFeedFilters(tenant)
@@ -58,7 +72,7 @@ export default async function CandidateFeedPage({
       <PageHeader
         eyebrow="Lead Generation"
         title="Found Companies Review Queue"
-        description="Companies found by TradeMining appear here first. Review, filter, and approve the best-fit companies before moving them into Pipeline."
+        description="Companies found by TradeMining appear here first. Review and approve the best-fit companies into Pipeline."
       />
 
       <div className="rounded-lg border border-accentBorder bg-accentSoft px-4 py-3 text-sm text-foreground">
@@ -66,67 +80,107 @@ export default async function CandidateFeedPage({
         approved accounts move to Pipeline.
       </div>
 
-      <form className="grid gap-3 rounded-lg border border-border bg-card p-4 shadow-sm lg:grid-cols-5" action="/lead-gen/candidates">
-        <label className="space-y-1 text-sm font-medium text-foreground lg:col-span-2">
-          <span>Search companies</span>
-          <input
-            name="q"
-            defaultValue={query}
-            placeholder="Company, profile, destination, origin, product, HS code"
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
-          />
-        </label>
+      <form className="rounded-lg border border-border bg-card p-4 shadow-sm" action="/lead-gen/candidates">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
+          <label className="space-y-1 text-sm font-medium text-foreground xl:col-span-2">
+            <span>Search companies</span>
+            <input
+              name="q"
+              defaultValue={query}
+              placeholder="Company, profile, destination, origin, product, HS code"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            />
+          </label>
 
-        <label className="space-y-1 text-sm font-medium text-foreground">
-          <span>Status</span>
-          <select
-            name="status"
-            defaultValue={status}
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
-          >
-            {statusOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Status</span>
+            <select
+              name="status"
+              defaultValue={status}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            >
+              {statusOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
 
-        <label className="space-y-1 text-sm font-medium text-foreground">
-          <span>Search profile</span>
-          <select
-            name="profile"
-            defaultValue={searchProfileId ?? ""}
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
-          >
-            <option value="">All profiles</option>
-            {filterOptions.searchProfiles.map((profile) => (
-              <option key={profile.id} value={profile.id}>
-                {profile.name}
-              </option>
-            ))}
-          </select>
-        </label>
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Search profile</span>
+            <select
+              name="profile"
+              defaultValue={searchProfileId ?? ""}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            >
+              <option value="">All profiles</option>
+              {filterOptions.searchProfiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.name}
+                </option>
+              ))}
+            </select>
+          </label>
 
-        <label className="space-y-1 text-sm font-medium text-foreground">
-          <span>Sort</span>
-          <select
-            name="sort"
-            defaultValue={sort}
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
-          >
-            {sortOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Min score</span>
+            <input
+              name="minScore"
+              type="number"
+              min="0"
+              max="100"
+              defaultValue={minScore ?? ""}
+              placeholder="0"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            />
+          </label>
 
-        <div className="lg:col-span-5">
-          <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
-            Apply filters
-          </button>
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Max score</span>
+            <input
+              name="maxScore"
+              type="number"
+              min="0"
+              max="100"
+              defaultValue={maxScore ?? ""}
+              placeholder="100"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            />
+          </label>
+
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Min shipments</span>
+            <input
+              name="minShipmentCount"
+              type="number"
+              min="0"
+              defaultValue={minShipmentCount ?? ""}
+              placeholder="Any"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            />
+          </label>
+
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Sort</span>
+            <select
+              name="sort"
+              defaultValue={sort}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            >
+              {sortOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="flex items-end">
+            <button className="w-full rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover xl:w-auto">
+              Apply filters
+            </button>
+          </div>
         </div>
       </form>
 
@@ -321,6 +375,32 @@ function parseStatusParam(value: string | undefined) {
 
 function parseSortParam(value: string | undefined): CandidateFeedSort {
   return sortOptions.some((option) => option.value === value) ? (value as CandidateFeedSort) : "score_desc";
+}
+
+function parseScoreParam(value: string | undefined) {
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+
+  return Math.min(100, Math.max(0, Math.round(parsed)));
+}
+
+function parseShipmentCountParam(value: string | undefined) {
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+
+  return Math.max(0, Math.round(parsed));
 }
 
 function readParam(value: string | string[] | undefined) {
