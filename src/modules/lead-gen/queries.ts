@@ -36,6 +36,45 @@ export async function getCandidateFeed(tenant: TenantContext) {
   }));
 }
 
+export async function getTradeMiningSearchProfiles(tenant: TenantContext) {
+  const profiles = await prisma.tradeMiningSearchProfile.findMany({
+    where: tenantWhere(tenant),
+    orderBy: [
+      {
+        enabled: "desc"
+      },
+      {
+        priorityWeight: "desc"
+      },
+      {
+        name: "asc"
+      }
+    ]
+  });
+
+  return profiles.map((profile) => ({
+    id: profile.id,
+    name: profile.name,
+    description: profile.description,
+    enabled: profile.enabled,
+    destinationMarkets: asStringArray(profile.destinationMarkets),
+    destinationPorts: asStringArray(profile.destinationPorts),
+    originPorts: asStringArray(profile.originPorts),
+    shipFromPorts: asStringArray(profile.shipFromPorts),
+    originCountries: asStringArray(profile.originCountries),
+    productKeywords: asStringArray(profile.productKeywords),
+    hsCodes: asStringArray(profile.hsCodes),
+    lookbackWindowDays: profile.lookbackWindowDays,
+    minShipmentCount: profile.minShipmentCount,
+    minShipmentVolume: profile.minShipmentVolume?.toString() ?? null,
+    scheduleFrequency: profile.scheduleFrequency,
+    scheduleTimezone: profile.scheduleTimezone,
+    priorityWeight: profile.priorityWeight,
+    lastRunAt: profile.lastRunAt,
+    lastRunStatus: profile.lastRunStatus ?? "Not run yet"
+  }));
+}
+
 export async function getLeadPipeline(tenant: TenantContext) {
   const leads = await prisma.lead.findMany({
     where: tenantWhere(tenant),
@@ -62,4 +101,8 @@ export async function getLeadPipeline(tenant: TenantContext) {
     notes: lead.notes,
     updatedAt: lead.updatedAt
   }));
+}
+
+function asStringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
