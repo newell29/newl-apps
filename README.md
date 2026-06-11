@@ -120,6 +120,8 @@ The VM-based OpenClaw worker can later call these endpoints to fetch enabled sea
 
 Candidate Feed is the required review step between ingestion and pipeline. Ingested TradeMining records are preserved as raw records, normalized into tenant-scoped companies, ranked with deterministic scoring, and shown for human review. Companies are not moved into the sales pipeline by ingestion. Marking a candidate as approved creates the first tenant-scoped `Lead` record in the initial pipeline stage; rejecting or disqualifying keeps it out of the active sales workflow.
 
+The Pipeline page is for approved accounts being worked by sales. It intentionally shows only tenant-scoped `Lead` records created through approval, not unapproved Found Companies. Apollo contact enrichment, contact ranking, sequence recommendations, and sequence enrollment are visible as workflow placeholders and must remain explicit future milestones before any live outreach automation is added.
+
 Planned boundaries:
 
 - Apollo company/contact matching and sequence push.
