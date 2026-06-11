@@ -24,7 +24,7 @@ export default async function OperationsLogsPage() {
               <div key={job.id} className="py-3 text-sm">
                 <div className="flex items-center justify-between gap-3">
                   <span className="font-medium text-foreground">{job.jobType}</span>
-                  <span className="text-mutedForeground">{job.status}</span>
+                  <StatusBadge value={job.status} />
                 </div>
                 <p className="mt-1 text-mutedForeground">{job.startedAt.toLocaleString("en-US")}</p>
               </div>
@@ -40,7 +40,9 @@ export default async function OperationsLogsPage() {
               <div key={log.id} className="py-3 text-sm">
                 <div className="flex items-center justify-between gap-3">
                   <span className="font-medium text-foreground">{log.action}</span>
-                  <span className="text-mutedForeground">{log.entityType}</span>
+                  <span className="rounded-full border border-accent/25 bg-accent/10 px-2.5 py-1 text-xs font-semibold text-accent">
+                    {log.entityType}
+                  </span>
                 </div>
                 <p className="mt-1 text-mutedForeground">{log.createdAt.toLocaleString("en-US")}</p>
               </div>
@@ -51,4 +53,17 @@ export default async function OperationsLogsPage() {
       </section>
     </div>
   );
+}
+
+function StatusBadge({ value }: { value: string }) {
+  const toneClass =
+    value === "SUCCESS"
+      ? "border-success/25 bg-success/10 text-success"
+      : value === "ERROR" || value === "CANCELLED"
+        ? "border-danger/25 bg-danger/10 text-danger"
+        : value === "RUNNING" || value === "QUEUED"
+          ? "border-warning/25 bg-warning/10 text-warning"
+          : "border-border bg-muted text-mutedForeground";
+
+  return <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${toneClass}`}>{value}</span>;
 }
