@@ -11,9 +11,8 @@ export function NewlLogo({
     <div className="flex items-center gap-3">
       <div
         className={[
-          "flex shrink-0 items-center justify-center rounded-md font-semibold tracking-tight",
-          compact ? "h-9 w-9 text-sm" : "h-12 w-12 text-base",
-          inverse ? "bg-accent text-accentForeground" : "bg-primary text-primaryForeground"
+          "flex shrink-0 items-center justify-center rounded-md bg-primary font-semibold tracking-tight text-primaryForeground",
+          compact ? "h-9 w-9 text-sm" : "h-12 w-12 text-base"
         ].join(" ")}
         aria-hidden="true"
       >
