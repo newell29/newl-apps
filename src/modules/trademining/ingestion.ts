@@ -458,16 +458,20 @@ function validateJobStatusPayload(payload: unknown) {
   }
 
   const metadata = readOptionalJsonObject(body, "metadata", errors);
+  const recordsProcessed = readOptionalNumber(body, "recordsProcessed", errors);
+  const recordsCreated = readOptionalNumber(body, "recordsCreated", errors);
+  const recordsUpdated = readOptionalNumber(body, "recordsUpdated", errors);
+  const errorMessage = readOptionalString(body, "errorMessage", errors);
 
   throwIfErrors(errors);
 
   return {
     status,
     completedAt,
-    recordsProcessed: readOptionalNumber(body, "recordsProcessed", errors),
-    recordsCreated: readOptionalNumber(body, "recordsCreated", errors),
-    recordsUpdated: readOptionalNumber(body, "recordsUpdated", errors),
-    errorMessage: readOptionalString(body, "errorMessage", errors),
+    recordsProcessed,
+    recordsCreated,
+    recordsUpdated,
+    errorMessage,
     metadata
   };
 }
