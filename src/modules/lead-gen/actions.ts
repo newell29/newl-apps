@@ -13,6 +13,20 @@ const statusActions = {
   [CandidateStatus.DISQUALIFIED]: "leadgen.candidate.disqualified"
 } satisfies Record<CandidateStatus, string>;
 
+const pipelineStageActions = {
+  [LeadPipelineStage.NEW]: "leadgen.pipeline.stage.new",
+  [LeadPipelineStage.RESEARCHING]: "leadgen.pipeline.stage.researching",
+  [LeadPipelineStage.ENRICHED]: "leadgen.pipeline.stage.enriched",
+  [LeadPipelineStage.QUALIFIED]: "leadgen.pipeline.stage.qualified",
+  [LeadPipelineStage.CONTACTED]: "leadgen.pipeline.stage.contacted",
+  [LeadPipelineStage.REPLIED]: "leadgen.pipeline.stage.replied",
+  [LeadPipelineStage.MEETING_BOOKED]: "leadgen.pipeline.stage.meeting_booked",
+  [LeadPipelineStage.QUOTED]: "leadgen.pipeline.stage.quoted",
+  [LeadPipelineStage.WON]: "leadgen.pipeline.stage.won",
+  [LeadPipelineStage.LOST]: "leadgen.pipeline.stage.lost",
+  [LeadPipelineStage.DISQUALIFIED]: "leadgen.pipeline.stage.disqualified"
+} satisfies Record<LeadPipelineStage, string>;
+
 export async function updateCandidateStatusAction(formData: FormData) {
   const tenant = await getCurrentTenantContext();
   const companyId = readRequiredFormValue(formData, "companyId");
@@ -113,6 +127,75 @@ export async function updateCandidateStatusAction(formData: FormData) {
   revalidatePath("/lead-gen/pipeline");
 }
 
+export async function updateLeadStageAction(formData: FormData) {
+  const tenant = await getCurrentTenantContext();
+  const leadId = readRequiredFormValue(formData, "leadId");
+  const nextStage = parseLeadPipelineStage(readRequiredFormValue(formData, "stage"));
+  const now = new Date();
+
+  const lead = await prisma.lead.findFirst({
+    where: {
+      id: leadId,
+      tenantId: tenant.tenantId
+    },
+    include: {
+      company: true
+    }
+  });
+
+  if (!lead) {
+    throw new Error("Pipeline lead was not found for the current tenant.");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.lead.update({
+      where: {
+        id: lead.id
+      },
+      data: {
+        stage: nextStage
+      }
+    });
+
+    if (nextStage === LeadPipelineStage.DISQUALIFIED) {
+      await tx.company.update({
+        where: {
+          id: lead.companyId
+        },
+        data: {
+          candidateStatus: CandidateStatus.DISQUALIFIED,
+          candidateStatusUpdatedAt: now,
+          candidateStatusReason: "Disqualified from Pipeline.",
+          doNotProspect: true
+        }
+      });
+    }
+
+    await tx.auditLog.create({
+      data: {
+        tenantId: tenant.tenantId,
+        action: pipelineStageActions[nextStage],
+        entityType: "Lead",
+        entityId: lead.id,
+        before: {
+          stage: lead.stage,
+          companyId: lead.companyId,
+          companyCandidateStatus: lead.company.candidateStatus
+        },
+        after: {
+          stage: nextStage,
+          companyId: lead.companyId,
+          companyCandidateStatus:
+            nextStage === LeadPipelineStage.DISQUALIFIED ? CandidateStatus.DISQUALIFIED : lead.company.candidateStatus
+        }
+      }
+    });
+  });
+
+  revalidatePath("/lead-gen/pipeline");
+  revalidatePath("/lead-gen/candidates");
+}
+
 function readRequiredFormValue(formData: FormData, key: string) {
   const value = formData.get(key);
 
@@ -129,6 +212,14 @@ function parseCandidateStatus(value: string) {
   }
 
   return value as CandidateStatus;
+}
+
+function parseLeadPipelineStage(value: string) {
+  if (!Object.values(LeadPipelineStage).includes(value as LeadPipelineStage)) {
+    throw new Error("Pipeline stage is invalid.");
+  }
+
+  return value as LeadPipelineStage;
 }
 
 function getStatusReason(status: CandidateStatus) {

@@ -1,4 +1,4 @@
-import { CandidateStatus } from "@prisma/client";
+import { CandidateStatus, LeadPipelineStage } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { tenantWhere } from "@/server/tenant-query";
 import type { TenantContext } from "@/server/tenant-context";
@@ -15,6 +15,14 @@ export type CandidateFeedFilters = {
   status?: CandidateStatus | "ACTIVE";
   searchProfileId?: string;
   sort?: CandidateFeedSort;
+};
+
+export type LeadPipelineSort = "score_desc" | "updated_desc" | "approved_desc";
+
+export type LeadPipelineFilters = {
+  stage?: LeadPipelineStage | "ALL";
+  ownerUserId?: string | "ALL" | "UNASSIGNED";
+  sort?: LeadPipelineSort;
 };
 
 type JsonObject = Record<string, unknown>;
@@ -206,36 +214,177 @@ export async function getTradeMiningSearchProfiles(tenant: TenantContext) {
   }
 }
 
-export async function getLeadPipeline(tenant: TenantContext) {
+export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipelineFilters = {}) {
   const leads = await prisma.lead.findMany({
-    where: tenantWhere(tenant),
+    where: tenantWhere(tenant, buildLeadPipelineWhere(filters)),
     include: {
-      company: true,
+      company: {
+        include: {
+          contacts: {
+            where: tenantWhere(tenant),
+            take: 5
+          }
+        }
+      },
       contact: true
     },
-    orderBy: [
-      {
-        updatedAt: "desc"
-      },
-      {
-        score: "desc"
-      }
-    ]
+    orderBy: buildLeadPipelineOrder(filters.sort ?? "approved_desc")
   });
 
-  return leads.map((lead) => ({
-    id: lead.id,
-    companyName: lead.company.name,
-    contactName: lead.contact?.fullName,
-    stage: lead.stage,
-    score: lead.score,
-    notes: lead.notes,
-    updatedAt: lead.updatedAt
-  }));
+  return leads.map((lead) => {
+    const contactCount = lead.company.contacts.length;
+    const hasSelectedContact = Boolean(lead.contact);
+    const contactStatus = hasSelectedContact
+      ? "Primary contact selected"
+      : contactCount > 0
+        ? `${contactCount} contacts available`
+        : "No contacts yet";
+    const apolloStatus = contactCount > 0 ? "Contacts imported" : "Apollo not started";
+    const sequenceStatus = hasSelectedContact ? "Sequence not started" : "Contacts not ranked";
+    const nextStep = getPipelineNextStep({
+      stage: lead.stage,
+      contactCount,
+      hasSelectedContact,
+      apolloStatus
+    });
+
+    return {
+      id: lead.id,
+      companyId: lead.companyId,
+      companyName: lead.company.name,
+      normalizedName: lead.company.normalizedName,
+      contactName: lead.contact?.fullName,
+      stage: lead.stage,
+      candidateStatus: lead.company.candidateStatus,
+      score: lead.score,
+      companyScore: lead.company.priorityScore,
+      ownerUserId: lead.ownerUserId,
+      assignedRep: lead.ownerUserId ?? "Unassigned",
+      contactStatus,
+      apolloStatus,
+      sequenceStatus,
+      nextStep,
+      notes: lead.notes,
+      approvedAt: lead.createdAt,
+      updatedAt: lead.updatedAt
+    };
+  });
+}
+
+export async function getLeadPipelineFilters(tenant: TenantContext) {
+  const owners = await prisma.lead.findMany({
+    where: tenantWhere(tenant, {
+      ownerUserId: {
+        not: null
+      }
+    }),
+    distinct: ["ownerUserId"],
+    select: {
+      ownerUserId: true
+    },
+    orderBy: {
+      ownerUserId: "asc"
+    }
+  });
+
+  return {
+    stages: Object.values(LeadPipelineStage),
+    owners: owners.flatMap((owner) => (owner.ownerUserId ? [owner.ownerUserId] : []))
+  };
 }
 
 function asStringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function buildLeadPipelineWhere(filters: LeadPipelineFilters) {
+  const where: {
+    stage?: LeadPipelineStage;
+    ownerUserId?: string | null;
+  } = {};
+
+  if (filters.stage && filters.stage !== "ALL") {
+    where.stage = filters.stage;
+  }
+
+  if (filters.ownerUserId === "UNASSIGNED") {
+    where.ownerUserId = null;
+  } else if (filters.ownerUserId && filters.ownerUserId !== "ALL") {
+    where.ownerUserId = filters.ownerUserId;
+  }
+
+  return where;
+}
+
+function buildLeadPipelineOrder(sort: LeadPipelineSort) {
+  if (sort === "score_desc") {
+    return [
+      {
+        score: "desc" as const
+      },
+      {
+        updatedAt: "desc" as const
+      }
+    ];
+  }
+
+  if (sort === "updated_desc") {
+    return [
+      {
+        updatedAt: "desc" as const
+      },
+      {
+        score: "desc" as const
+      }
+    ];
+  }
+
+  return [
+    {
+      createdAt: "desc" as const
+    },
+    {
+      score: "desc" as const
+    }
+  ];
+}
+
+function getPipelineNextStep({
+  stage,
+  contactCount,
+  hasSelectedContact,
+  apolloStatus
+}: {
+  stage: LeadPipelineStage;
+  contactCount: number;
+  hasSelectedContact: boolean;
+  apolloStatus: string;
+}) {
+  if (stage === LeadPipelineStage.DISQUALIFIED || stage === LeadPipelineStage.LOST || stage === LeadPipelineStage.WON) {
+    return "No active next step";
+  }
+
+  if (stage === LeadPipelineStage.MEETING_BOOKED) {
+    return "Prepare discovery notes";
+  }
+
+  if (stage === LeadPipelineStage.QUALIFIED) {
+    return "Prepare quote or handoff";
+  }
+
+  if (stage === LeadPipelineStage.CONTACTED || stage === LeadPipelineStage.REPLIED) {
+    return "Review outreach response";
+  }
+
+  if (!hasSelectedContact && contactCount > 0) {
+    return "Rank and select contacts";
+  }
+
+  if (apolloStatus === "Apollo not started") {
+    return "Ready for Apollo enrichment";
+  }
+
+  return "Research account fit";
 }
 
 function buildCandidateWhere(filters: CandidateFeedFilters) {
