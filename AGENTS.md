@@ -24,11 +24,31 @@ Core architecture rules:
 
 Implementation expectations:
 
+- Read `reference/PRODUCT_OPERATING_BRIEF.md` before product or lead-gen implementation work.
 - Make `tenantId` part of service-layer inputs, database constraints, indexes, authorization checks, and test fixtures.
 - Prefer tenant-scoped integration configuration over global env-only credentials for production app behavior.
 - Keep lead generation, UPS tools, transit lookup, invoice verification, QuickBooks posting, and future tools as separate modules with explicit entitlements.
 - Use shared platform primitives for auth, tenants, roles, audit logs, jobs, integrations, files, and billing placeholders.
 - Add tests or review checks for tenant isolation on every shared data path.
+
+## Development Workflow
+
+- Work in small-to-medium PRs, not massive rewrites.
+- Before coding, summarize the intended implementation plan.
+- After coding, run lint, typecheck, build, and relevant Prisma checks.
+- Never push directly to main.
+- Always create a PR.
+- Include a PR summary with:
+  1. What changed
+  2. Why it changed
+  3. Files changed
+  4. How to test locally
+  5. Screens/pages affected
+  6. Tenant-safety considerations
+  7. Any known limitations
+- Do not ask the user for minor implementation decisions.
+- Make practical assumptions consistent with AGENTS.md.
+- Ask only when a decision affects product direction, security, data model, or external integrations.
 
 ## Security
 
@@ -38,5 +58,6 @@ Implementation expectations:
 
 ## Reference
 
+- Product operating brief and PR milestones: `reference/PRODUCT_OPERATING_BRIEF.md`
 - Lead generation rebuild source of truth: `reference/OPENCLAW_LEAD_GEN_SPEC.md`
 - Initial migration plan: `reference/MIGRATION_PLAN.md`
