@@ -14,14 +14,14 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-7">
       <section className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-        <div className="border-b border-border bg-muted/45 px-6 py-3 text-xs font-semibold uppercase tracking-wide text-mutedForeground lg:px-7">
+        <div className="border-b border-border bg-accentSoft px-6 py-3 text-xs font-semibold uppercase tracking-wide text-primary lg:px-7">
           Internal logistics control center
         </div>
         <div className="grid gap-6 p-6 lg:grid-cols-[1fr_320px] lg:p-7">
           <div className="space-y-5">
             <NewlLogo />
             <div>
-              <p className="text-sm font-semibold uppercase tracking-wide text-accent">{tenant.tenantName}</p>
+              <p className="text-sm font-semibold uppercase tracking-wide text-primary">{tenant.tenantName}</p>
               <h1 className="mt-2 text-3xl font-semibold tracking-tight text-foreground">
                 Logistics operating dashboard
               </h1>
@@ -62,7 +62,7 @@ export default async function DashboardPage() {
               <h2 className="text-base font-semibold text-foreground">Module Status</h2>
               <p className="mt-1 text-sm text-mutedForeground">Tenant-enabled products and internal tools.</p>
             </div>
-            <Link href="/settings" className="text-sm font-semibold text-primary hover:text-primary/80">
+            <Link href="/settings" className="text-sm font-semibold text-primary hover:text-primaryHover">
               Settings
             </Link>
           </div>
