@@ -2,6 +2,12 @@ import { prisma } from "@/server/db";
 import { tenantWhere } from "@/server/tenant-query";
 import type { TenantContext } from "@/server/tenant-context";
 
+type SearchProfileDelegate = typeof prisma.tradeMiningSearchProfile;
+
+type SearchProfileClient = typeof prisma & {
+  tradeMiningSearchProfile?: SearchProfileDelegate;
+};
+
 export async function getCandidateFeed(tenant: TenantContext) {
   const companies = await prisma.company.findMany({
     where: tenantWhere(tenant, {
@@ -37,42 +43,67 @@ export async function getCandidateFeed(tenant: TenantContext) {
 }
 
 export async function getTradeMiningSearchProfiles(tenant: TenantContext) {
-  const profiles = await prisma.tradeMiningSearchProfile.findMany({
-    where: tenantWhere(tenant),
-    orderBy: [
-      {
-        enabled: "desc"
-      },
-      {
-        priorityWeight: "desc"
-      },
-      {
-        name: "asc"
-      }
-    ]
-  });
+  const searchProfileClient = prisma as SearchProfileClient;
 
-  return profiles.map((profile) => ({
-    id: profile.id,
-    name: profile.name,
-    description: profile.description,
-    enabled: profile.enabled,
-    destinationMarkets: asStringArray(profile.destinationMarkets),
-    destinationPorts: asStringArray(profile.destinationPorts),
-    originPorts: asStringArray(profile.originPorts),
-    shipFromPorts: asStringArray(profile.shipFromPorts),
-    originCountries: asStringArray(profile.originCountries),
-    productKeywords: asStringArray(profile.productKeywords),
-    hsCodes: asStringArray(profile.hsCodes),
-    lookbackWindowDays: profile.lookbackWindowDays,
-    minShipmentCount: profile.minShipmentCount,
-    minShipmentVolume: profile.minShipmentVolume?.toString() ?? null,
-    scheduleFrequency: profile.scheduleFrequency,
-    scheduleTimezone: profile.scheduleTimezone,
-    priorityWeight: profile.priorityWeight,
-    lastRunAt: profile.lastRunAt,
-    lastRunStatus: profile.lastRunStatus ?? "Not run yet"
-  }));
+  if (!searchProfileClient.tradeMiningSearchProfile) {
+    return {
+      profiles: [],
+      setupWarning:
+        "TradeMining search profiles need the latest Prisma Client. Run `npm run prisma:generate`, restart the dev server, then run migrations and seed data."
+    };
+  }
+
+  try {
+    const profiles = await searchProfileClient.tradeMiningSearchProfile.findMany({
+      where: tenantWhere(tenant),
+      orderBy: [
+        {
+          enabled: "desc"
+        },
+        {
+          priorityWeight: "desc"
+        },
+        {
+          name: "asc"
+        }
+      ]
+    });
+
+    return {
+      profiles: profiles.map((profile) => ({
+        id: profile.id,
+        name: profile.name,
+        description: profile.description,
+        enabled: profile.enabled,
+        destinationMarkets: asStringArray(profile.destinationMarkets),
+        destinationPorts: asStringArray(profile.destinationPorts),
+        originPorts: asStringArray(profile.originPorts),
+        shipFromPorts: asStringArray(profile.shipFromPorts),
+        originCountries: asStringArray(profile.originCountries),
+        productKeywords: asStringArray(profile.productKeywords),
+        hsCodes: asStringArray(profile.hsCodes),
+        lookbackWindowDays: profile.lookbackWindowDays,
+        minShipmentCount: profile.minShipmentCount,
+        minShipmentVolume: profile.minShipmentVolume?.toString() ?? null,
+        scheduleFrequency: profile.scheduleFrequency,
+        scheduleTimezone: profile.scheduleTimezone,
+        priorityWeight: profile.priorityWeight,
+        lastRunAt: profile.lastRunAt,
+        lastRunStatus: profile.lastRunStatus ?? "Not run yet"
+      })),
+      setupWarning: null
+    };
+  } catch (error) {
+    if (isMissingSearchProfileTableError(error)) {
+      return {
+        profiles: [],
+        setupWarning:
+          "TradeMining search profile table is not available yet. Run `npm run prisma:migrate` and `npm run prisma:seed`, then refresh this page."
+      };
+    }
+
+    throw error;
+  }
 }
 
 export async function getLeadPipeline(tenant: TenantContext) {
@@ -105,4 +136,13 @@ export async function getLeadPipeline(tenant: TenantContext) {
 
 function asStringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function isMissingSearchProfileTableError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const code = "code" in error ? error.code : undefined;
+  return code === "P2021" || code === "P2022";
 }
