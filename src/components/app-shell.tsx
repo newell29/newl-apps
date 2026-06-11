@@ -32,8 +32,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 className={[
                   "block whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition-colors",
                   isActive
-                    ? "bg-primary text-primaryForeground shadow-sm hover:bg-primaryHover"
-                    : "text-sidebarMuted hover:bg-sidebarForeground/10 hover:text-sidebarForeground"
+                    ? "bg-sidebarActive text-primaryForeground shadow-sm hover:bg-primaryHover"
+                    : "text-sidebarMuted hover:bg-sidebarHover hover:text-sidebarForeground"
                 ].join(" ")}
               >
                 {item.label}
