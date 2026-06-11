@@ -31,7 +31,7 @@ The first module is the Apollo + TradeMining lead generation app. This scaffold 
 - Seed data for Newl Group as the first tenant.
 - Sample TradeMining search profiles for Houston Import Leads and Charlotte Warehouse Leads.
 - Tenant-scoped OpenClaw/n8n ingestion API contract for fetching enabled profiles, creating job runs, posting TradeMining batches, and updating job status.
-- Ranked Candidate Feed that reviews TradeMining-sourced companies before any sales pipeline handoff.
+- Found Companies review queue that reviews TradeMining-sourced companies before any sales pipeline handoff.
 - Minimal app shell with dashboard, search profiles, candidate feed, pipeline, settings, and job/audit log pages.
 - Tenant-safe query helpers that require a tenant context for business data access.
 
@@ -118,9 +118,9 @@ INGESTION_TENANT_SLUG=newl-group
 
 The VM-based OpenClaw worker can later call these endpoints to fetch enabled search profiles, create job runs, post TradeMining batches, and update job status. OpenClaw remains a replaceable worker/collector; Newl Apps remains the source of truth for configuration, ingestion persistence, scoring, approvals, pipeline, and audit history.
 
-Candidate Feed is the required review step between ingestion and pipeline. Ingested TradeMining records are preserved as raw records, normalized into tenant-scoped companies, ranked with deterministic scoring, and shown for human review. Companies are not moved into the sales pipeline by ingestion. Marking a candidate as approved creates the first tenant-scoped `Lead` record in the initial pipeline stage; rejecting or disqualifying keeps it out of the active sales workflow.
+Found Companies is the required review queue between ingestion and Pipeline. Ingested TradeMining records are preserved as raw records, normalized into tenant-scoped companies, ranked with deterministic scoring, and shown for human review. Companies are not moved into the sales pipeline by ingestion. Marking a found company as approved creates the first tenant-scoped `Lead` record in the initial pipeline stage; rejecting or disqualifying keeps it out of the active sales workflow.
 
-The Pipeline page is for approved accounts being worked by sales. It intentionally shows only tenant-scoped `Lead` records created through approval, not unapproved Found Companies. Apollo contact enrichment, contact ranking, sequence recommendations, and sequence enrollment are visible as workflow placeholders and must remain explicit future milestones before any live outreach automation is added.
+The Pipeline page is for approved accounts being worked by sales. It intentionally shows only tenant-scoped `Lead` records created through Found Companies approval, not unapproved TradeMining companies. Apollo contact enrichment, contact ranking, sequence recommendations, and sequence enrollment are visible as workflow placeholders and must remain explicit future milestones before any live outreach automation is added.
 
 Planned boundaries:
 
