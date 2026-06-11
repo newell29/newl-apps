@@ -1,4 +1,5 @@
 import { PrismaClient, ModuleKey, PlatformRole, LeadPipelineStage } from "@prisma/client";
+import { assertValidTradeMiningSearchProfile } from "@/modules/lead-gen/search-profile-validation";
 
 const prisma = new PrismaClient();
 
@@ -91,6 +92,109 @@ async function main() {
     }
   });
 
+  const searchProfiles = [
+    {
+      name: "Houston Import Leads",
+      description: "Sample profile for importers shipping into Houston-area demand signals.",
+      enabled: true,
+      destinationMarkets: ["Houston", "Gulf Coast"],
+      destinationPorts: ["Houston, Texas", "Freeport, Texas"],
+      originPorts: ["Shanghai", "Ningbo", "Yantian"],
+      shipFromPorts: ["Shanghai", "Ningbo-Zhoushan"],
+      originCountries: ["China", "Vietnam", "India"],
+      productKeywords: ["furniture", "fixtures", "home goods", "building materials"],
+      hsCodes: ["9403", "9405", "3926"],
+      lookbackWindowDays: 90,
+      minShipmentCount: 3,
+      minShipmentVolume: 25,
+      scheduleFrequency: "daily",
+      scheduleTimezone: "America/Toronto",
+      scheduleMetadata: {
+        preferredRunHourLocal: 7,
+        worker: "openclaw-or-n8n-placeholder"
+      },
+      priorityWeight: 85,
+      lastRunStatus: "Not run yet"
+    },
+    {
+      name: "Charlotte Warehouse Leads",
+      description: "Sample profile for companies likely to need Southeast warehouse capacity near Charlotte.",
+      enabled: true,
+      destinationMarkets: ["Charlotte", "North Carolina", "Southeast"],
+      destinationPorts: ["Charleston, South Carolina", "Wilmington, North Carolina", "Savannah, Georgia"],
+      originPorts: ["Ho Chi Minh City", "Laem Chabang", "Busan"],
+      shipFromPorts: ["Ho Chi Minh", "Busan", "Kaohsiung"],
+      originCountries: ["Vietnam", "Thailand", "South Korea", "Taiwan"],
+      productKeywords: ["consumer goods", "retail fixtures", "apparel", "outdoor"],
+      hsCodes: ["6109", "6204", "9506", "9403"],
+      lookbackWindowDays: 120,
+      minShipmentCount: 2,
+      minShipmentVolume: 10,
+      scheduleFrequency: "weekly",
+      scheduleTimezone: "America/Toronto",
+      scheduleMetadata: {
+        preferredWeekday: "monday",
+        preferredRunHourLocal: 8,
+        worker: "openclaw-or-n8n-placeholder"
+      },
+      priorityWeight: 75,
+      lastRunStatus: "Not run yet"
+    }
+  ];
+
+  for (const profile of searchProfiles) {
+    assertValidTradeMiningSearchProfile(profile);
+
+    await prisma.tradeMiningSearchProfile.upsert({
+      where: {
+        tenantId_name: {
+          tenantId: tenant.id,
+          name: profile.name
+        }
+      },
+      update: {
+        description: profile.description,
+        enabled: profile.enabled,
+        destinationMarkets: profile.destinationMarkets,
+        destinationPorts: profile.destinationPorts,
+        originPorts: profile.originPorts,
+        shipFromPorts: profile.shipFromPorts,
+        originCountries: profile.originCountries,
+        productKeywords: profile.productKeywords,
+        hsCodes: profile.hsCodes,
+        lookbackWindowDays: profile.lookbackWindowDays,
+        minShipmentCount: profile.minShipmentCount,
+        minShipmentVolume: profile.minShipmentVolume,
+        scheduleFrequency: profile.scheduleFrequency,
+        scheduleTimezone: profile.scheduleTimezone,
+        scheduleMetadata: profile.scheduleMetadata,
+        priorityWeight: profile.priorityWeight,
+        lastRunStatus: profile.lastRunStatus
+      },
+      create: {
+        tenantId: tenant.id,
+        name: profile.name,
+        description: profile.description,
+        enabled: profile.enabled,
+        destinationMarkets: profile.destinationMarkets,
+        destinationPorts: profile.destinationPorts,
+        originPorts: profile.originPorts,
+        shipFromPorts: profile.shipFromPorts,
+        originCountries: profile.originCountries,
+        productKeywords: profile.productKeywords,
+        hsCodes: profile.hsCodes,
+        lookbackWindowDays: profile.lookbackWindowDays,
+        minShipmentCount: profile.minShipmentCount,
+        minShipmentVolume: profile.minShipmentVolume,
+        scheduleFrequency: profile.scheduleFrequency,
+        scheduleTimezone: profile.scheduleTimezone,
+        scheduleMetadata: profile.scheduleMetadata,
+        priorityWeight: profile.priorityWeight,
+        lastRunStatus: profile.lastRunStatus
+      }
+    });
+  }
+
   const companies = [
     {
       name: "Atlantic Home Imports",
@@ -168,7 +272,7 @@ async function main() {
       entityType: "Tenant",
       entityId: tenant.id,
       after: {
-        message: "Seeded tenant foundation and sample lead-gen data."
+        message: "Seeded tenant foundation, TradeMining search profiles, and sample lead-gen data."
       }
     }
   });
