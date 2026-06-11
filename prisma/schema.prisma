@@ -76,6 +76,7 @@ model Tenant {
   jobRuns                AutomationJobRun[]
   companies              Company[]
   importRecords          TradeMiningImportRecord[]
+  searchProfiles         TradeMiningSearchProfile[]
   contacts               Contact[]
   leads                  Lead[]
 }
@@ -205,6 +206,39 @@ model Company {
   @@unique([tenantId, normalizedName])
   @@index([tenantId, priorityScore])
   @@index([tenantId, domain])
+}
+
+model TradeMiningSearchProfile {
+  id                 String   @id @default(cuid())
+  tenantId           String
+  name               String
+  description        String?
+  enabled            Boolean  @default(true)
+  destinationMarkets Json
+  destinationPorts   Json?
+  originPorts        Json?
+  shipFromPorts      Json?
+  originCountries    Json?
+  productKeywords    Json?
+  hsCodes            Json?
+  lookbackWindowDays Int      @default(90)
+  minShipmentCount   Int      @default(1)
+  minShipmentVolume  Decimal? @db.Decimal(12, 2)
+  scheduleFrequency  String   @default("daily")
+  scheduleTimezone   String   @default("America/Toronto")
+  scheduleMetadata   Json?
+  priorityWeight     Int      @default(50)
+  lastRunAt          DateTime?
+  lastRunStatus      String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, name])
+  @@index([tenantId, enabled])
+  @@index([tenantId, priorityWeight])
+  @@index([tenantId, scheduleFrequency])
 }
 
 model TradeMiningImportRecord {

@@ -6,6 +6,7 @@ import { NewlLogo } from "@/components/newl-logo";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/lead-gen/search-profiles", label: "Search Profiles" },
   { href: "/lead-gen/candidates", label: "Candidates" },
   { href: "/lead-gen/pipeline", label: "Pipeline" },
   { href: "/operations/logs", label: "Jobs & Audit" },
