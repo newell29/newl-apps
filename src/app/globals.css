@@ -7,42 +7,55 @@
 
   /*
    * Newl brand source tokens.
-   * TODO: Confirm exact Newl Group brand hex values before production use.
-   * These values are temporary approximations based on the provided Newl logo:
-   * a coral/pink mark with a dark blue-slate wordmark. To retheme the app,
-   * update this source token section first, then remap semantic tokens below.
+   * TODO: Confirm exact Newl Group brand hex values and production logo assets
+   * before production use. These values follow the current public Newl website
+   * direction: slate/navy structure, white/light gray surfaces, and red/pink
+   * action accents. To retheme the app, update this source token section first,
+   * then remap semantic tokens below only if needed.
    */
-  --brand-newl-coral: 238 62 98;
-  --brand-newl-coral-accessible: 199 35 73;
-  --brand-newl-slate: 55 68 94;
-  --brand-newl-ink: 31 42 63;
-  --brand-newl-surface: 245 247 251;
-  --brand-newl-line: 214 220 231;
+  --newl-primary: 201 63 95;        /* #C93F5F */
+  --newl-primary-hover: 184 53 84;  /* #B83554 */
+  --newl-sidebar: 59 70 89;         /* #3B4659 */
+  --newl-sidebar-strong: 47 57 74;  /* #2F394A */
+  --newl-text: 31 41 51;            /* #1F2933 */
+  --newl-text-secondary: 82 97 116; /* #526174 */
+  --newl-text-muted: 122 135 151;   /* #7A8797 */
+  --newl-background: 245 247 250;   /* #F5F7FA */
+  --newl-surface: 255 255 255;      /* #FFFFFF */
+  --newl-border: 221 227 234;       /* #DDE3EA */
+  --newl-accent-soft: 249 238 242;  /* #F9EEF2 */
+  --newl-success: 46 125 91;        /* #2E7D5B */
+  --newl-warning: 217 154 34;       /* #D99A22 */
+  --newl-danger: 184 53 84;         /* #B83554 */
 
   /*
    * Semantic app tokens. Components should use these tokens only, not raw
    * brand values, so future tenant-level branding can swap the theme without
    * rewriting component styles.
    */
-  --color-background: var(--brand-newl-surface);
-  --color-foreground: 17 24 39;
-  --color-card: 255 255 255;
-  --color-card-foreground: 17 24 39;
-  --color-primary: var(--brand-newl-coral-accessible);
+  --color-background: var(--newl-background);
+  --color-foreground: var(--newl-text);
+  --color-card: var(--newl-surface);
+  --color-card-foreground: var(--newl-text);
+  --color-primary: var(--newl-primary);
+  --color-primary-hover: var(--newl-primary-hover);
   --color-primary-foreground: 255 255 255;
-  --color-accent: var(--brand-newl-slate);
+  --color-accent: var(--newl-sidebar);
   --color-accent-foreground: 255 255 255;
-  --color-sidebar: var(--brand-newl-ink);
+  --color-accent-soft: var(--newl-accent-soft);
+  --color-sidebar: var(--newl-sidebar);
+  --color-sidebar-strong: var(--newl-sidebar-strong);
   --color-sidebar-foreground: 248 250 252;
-  --color-sidebar-muted: 185 195 212;
-  --color-border: var(--brand-newl-line);
-  --color-muted: 249 250 252;
-  --color-muted-foreground: 82 94 116;
-  --color-success: 22 122 85;
+  --color-sidebar-muted: 203 211 222;
+  --color-border: var(--newl-border);
+  --color-muted: 250 251 253;
+  --color-muted-foreground: var(--newl-text-secondary);
+  --color-subtle-foreground: var(--newl-text-muted);
+  --color-success: var(--newl-success);
   --color-success-foreground: 255 255 255;
-  --color-warning: 183 121 31;
-  --color-warning-foreground: 255 255 255;
-  --color-danger: 180 35 24;
+  --color-warning: var(--newl-warning);
+  --color-warning-foreground: 31 41 51;
+  --color-danger: var(--newl-danger);
   --color-danger-foreground: 255 255 255;
 }
 
