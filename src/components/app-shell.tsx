@@ -18,7 +18,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-background lg:flex">
       <aside className="border-b border-border bg-sidebar text-sidebarForeground lg:fixed lg:inset-y-0 lg:w-64 lg:border-b-0 lg:border-r">
-        <div className="flex h-16 items-center gap-3 border-b border-sidebarForeground/10 px-5">
+        <div className="flex h-16 items-center gap-3 border-b border-sidebarForeground/10 bg-sidebarStrong px-5">
           <NewlLogo compact inverse />
         </div>
         <nav className="flex gap-1 overflow-x-auto p-3 lg:block lg:space-y-1 lg:overflow-visible">
@@ -32,7 +32,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 className={[
                   "block whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition-colors",
                   isActive
-                    ? "bg-primary text-primaryForeground shadow-sm"
+                    ? "bg-primary text-primaryForeground shadow-sm hover:bg-primaryHover"
                     : "text-sidebarMuted hover:bg-sidebarForeground/10 hover:text-sidebarForeground"
                 ].join(" ")}
               >
