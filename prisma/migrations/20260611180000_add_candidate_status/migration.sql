@@ -15,3 +15,6 @@ ALTER TABLE "Company"
 
 CREATE INDEX "Company_tenantId_candidateStatus_idx" ON "Company"("tenantId", "candidateStatus");
 CREATE INDEX "Company_tenantId_candidateStatus_priorityScore_idx" ON "Company"("tenantId", "candidateStatus", "priorityScore");
+
+-- Candidate Feed approval is company-level for now; this prevents repeated approvals from creating duplicate pipeline leads.
+CREATE UNIQUE INDEX "Lead_tenantId_companyId_key" ON "Lead"("tenantId", "companyId");
