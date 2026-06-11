@@ -45,6 +45,18 @@ export async function updateCandidateStatusAction(formData: FormData) {
   }
 
   await prisma.$transaction(async (tx) => {
+    const existingLead = await tx.lead.findUnique({
+      where: {
+        tenantId_companyId: {
+          tenantId: tenant.tenantId,
+          companyId: company.id
+        }
+      },
+      select: {
+        id: true
+      }
+    });
+
     await tx.company.update({
       where: {
         id: company.id
@@ -57,9 +69,16 @@ export async function updateCandidateStatusAction(formData: FormData) {
       }
     });
 
-    if (nextStatus === CandidateStatus.APPROVED_FOR_PIPELINE && company.leads.length === 0) {
-      await tx.lead.create({
-        data: {
+    if (nextStatus === CandidateStatus.APPROVED_FOR_PIPELINE) {
+      await tx.lead.upsert({
+        where: {
+          tenantId_companyId: {
+            tenantId: tenant.tenantId,
+            companyId: company.id
+          }
+        },
+        update: {},
+        create: {
           tenantId: tenant.tenantId,
           companyId: company.id,
           stage: LeadPipelineStage.NEW,
@@ -78,12 +97,12 @@ export async function updateCandidateStatusAction(formData: FormData) {
         before: {
           candidateStatus: company.candidateStatus,
           doNotProspect: company.doNotProspect,
-          leadExists: company.leads.length > 0
+          leadExists: Boolean(existingLead)
         },
         after: {
           candidateStatus: nextStatus,
           doNotProspect: nextStatus === CandidateStatus.DISQUALIFIED ? true : company.doNotProspect,
-          leadCreated: nextStatus === CandidateStatus.APPROVED_FOR_PIPELINE && company.leads.length === 0,
+          leadCreated: nextStatus === CandidateStatus.APPROVED_FOR_PIPELINE && !existingLead,
           reason
         }
       }
