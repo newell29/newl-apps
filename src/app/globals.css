@@ -7,29 +7,24 @@
 
   /*
    * Newl brand source tokens.
-   * TODO: Confirm exact Newl Group brand hex values and production logo assets
-   * before production use. These values follow the current public Newl website
-   * direction: slate/navy structure, white/light gray surfaces, and a deeper
-   * corporate red for focused action accents. To retheme the app, update this
-   * source token section first, then remap semantic tokens below only if needed.
+   * TODO: Confirm production usage rules and logo assets before launch. These
+   * values come from the provided Newl color swatch: Mandy, Oxford Blue,
+   * Azalea, and Shuttle Gray. To retheme the app, update this source token
+   * section first, then remap semantic tokens below only if needed.
    */
-  --newl-primary: 185 58 86;        /* #B93A56 */
-  --newl-primary-hover: 159 47 73;  /* #9F2F49 */
-  --newl-primary-active: 135 40 62; /* #87283E */
-  --newl-accent-soft: 248 233 238;  /* #F8E9EE */
-  --newl-accent-border: 232 184 196;/* #E8B8C4 */
-  --newl-sidebar: 55 66 85;         /* #374255 */
-  --newl-sidebar-hover: 47 57 74;   /* #2F394A */
-  --newl-sidebar-active: 185 58 86; /* #B93A56 */
-  --newl-text: 31 41 51;            /* #1F2933 */
-  --newl-text-secondary: 75 91 112; /* #4B5B70 */
-  --newl-text-muted: 122 135 151;   /* #7A8797 */
-  --newl-background: 244 246 248;   /* #F4F6F8 */
-  --newl-surface: 255 255 255;      /* #FFFFFF */
-  --newl-border: 221 227 234;       /* #DDE3EA */
-  --newl-success: 46 125 91;        /* #2E7D5B */
-  --newl-warning: 217 154 34;       /* #D99A22 */
-  --newl-danger: 159 47 73;         /* #9F2F49 */
+  --newl-mandy: 235 68 100;        /* #EB4464 */
+  --newl-mandy-hover: 211 55 86;   /* darker action state derived from Mandy */
+  --newl-mandy-active: 185 46 74;  /* darker pressed state derived from Mandy */
+  --newl-oxford-blue: 60 68 91;    /* #3C445B */
+  --newl-azalea: 249 199 207;      /* #F9C7CF */
+  --newl-shuttle-gray: 84 92 108;  /* #545C6C */
+  --newl-text: 31 41 51;           /* #1F2933 */
+  --newl-background: 245 247 250;  /* #F5F7FA */
+  --newl-surface: 255 255 255;     /* #FFFFFF */
+  --newl-border: 221 227 234;      /* #DDE3EA */
+  --newl-success: 46 125 91;       /* #2E7D5B */
+  --newl-warning: 217 154 34;      /* #D99A22 */
+  --newl-danger: 185 46 74;        /* derived from Mandy */
 
   /*
    * Semantic app tokens. Components should use these tokens only, not raw
@@ -40,24 +35,24 @@
   --color-foreground: var(--newl-text);
   --color-card: var(--newl-surface);
   --color-card-foreground: var(--newl-text);
-  --color-primary: var(--newl-primary);
-  --color-primary-hover: var(--newl-primary-hover);
-  --color-primary-active: var(--newl-primary-active);
+  --color-primary: var(--newl-mandy);
+  --color-primary-hover: var(--newl-mandy-hover);
+  --color-primary-active: var(--newl-mandy-active);
   --color-primary-foreground: 255 255 255;
-  --color-accent: var(--newl-sidebar);
+  --color-accent: var(--newl-oxford-blue);
   --color-accent-foreground: 255 255 255;
-  --color-accent-soft: var(--newl-accent-soft);
-  --color-accent-border: var(--newl-accent-border);
-  --color-sidebar: var(--newl-sidebar);
-  --color-sidebar-hover: var(--newl-sidebar-hover);
-  --color-sidebar-active: var(--newl-sidebar-active);
-  --color-sidebar-strong: var(--newl-sidebar-hover);
+  --color-accent-soft: var(--newl-azalea);
+  --color-accent-border: var(--newl-azalea);
+  --color-sidebar: var(--newl-oxford-blue);
+  --color-sidebar-hover: 52 60 82;
+  --color-sidebar-active: var(--newl-mandy);
+  --color-sidebar-strong: 52 60 82;
   --color-sidebar-foreground: 248 250 252;
-  --color-sidebar-muted: 203 211 222;
+  --color-sidebar-muted: 210 216 226;
   --color-border: var(--newl-border);
   --color-muted: 250 251 253;
-  --color-muted-foreground: var(--newl-text-secondary);
-  --color-subtle-foreground: var(--newl-text-muted);
+  --color-muted-foreground: var(--newl-shuttle-gray);
+  --color-subtle-foreground: var(--newl-shuttle-gray);
   --color-success: var(--newl-success);
   --color-success-foreground: 255 255 255;
   --color-warning: var(--newl-warning);
@@ -86,7 +81,7 @@ body {
 }
 
 :focus-visible {
-  outline: 3px solid rgb(var(--color-primary) / 0.4);
+  outline: 3px solid rgb(var(--color-primary) / 0.38);
   outline-offset: 2px;
 }
 
