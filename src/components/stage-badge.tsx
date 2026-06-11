@@ -37,7 +37,7 @@ function getStageClass(stage: string) {
   }
 
   if (["RESEARCHING", "ENRICHED"].includes(stage)) {
-    return "border-primary/25 bg-accentSoft text-primary";
+    return "border-accentBorder bg-accentSoft text-primary";
   }
 
   return "border-border bg-muted text-mutedForeground";
