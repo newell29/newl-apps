@@ -122,14 +122,19 @@ Some future cross-cutting fields, such as `AuditLog.actorUserId` and `Lead.owner
 
 ## Branding And Theming
 
-Newl Apps uses centralized semantic theme tokens in `src/app/globals.css` and `tailwind.config.ts`, including `primary`, `accent`, `sidebar`, `border`, `muted`, `success`, `warning`, and `danger`.
-
-The current palette is a temporary Newl-inspired theme chosen for a clean logistics/SaaS interface. Exact Newl Group brand hex values should be confirmed later and then updated in the CSS variables without rewriting component styles.
+Newl Apps uses centralized semantic theme tokens in `src/app/globals.css` and `tailwind.config.ts`, including `primary`, `primaryHover`, `primaryActive`, `accent`, `accentSoft`, `accentBorder`, `sidebar`, `sidebarHover`, `sidebarActive`, `sidebarStrong`, `border`, `muted`, `success`, `warning`, and `danger`.
 
 The default text-based `Newl Apps` mark lives in `src/branding/tenant-branding.ts`. Future SaaS tenants should load branding from tenant-scoped settings instead of relying on the default internal Newl theme.
+
+## Branding Status
+
+Current theme uses the provided Newl color swatch as its source palette: Mandy `#EB4464`, Oxford Blue `#3C445B`, Azalea `#F9C7CF`, and Shuttle Gray `#545C6C`. Production logo assets and final usage rules should still be confirmed before production use.
+
+Raw brand source tokens are centralized in `src/app/globals.css`; components should continue using semantic tokens only so the theme can be swapped by editing one token section.
 
 ## Reference
 
 - Project instructions: `AGENTS.md`
+- Product operating brief and PR milestones: `reference/PRODUCT_OPERATING_BRIEF.md`
 - Lead generation rebuild source of truth: `reference/OPENCLAW_LEAD_GEN_SPEC.md`
 - Initial migration plan: `reference/MIGRATION_PLAN.md`

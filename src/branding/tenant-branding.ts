@@ -9,8 +9,8 @@ export type TenantBranding = {
 export const defaultTenantBranding: TenantBranding = {
   name: "Newl Apps",
   mark: "N",
-  wordmark: "NEWL",
-  tagline: "Logistics operations platform",
+  wordmark: "Newl Apps",
+  tagline: "Internal logistics platform",
   themeId: "newl-default"
 };
 

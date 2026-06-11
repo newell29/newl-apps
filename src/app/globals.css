@@ -6,30 +6,58 @@
   color-scheme: light;
 
   /*
-   * Temporary Newl-inspired palette.
-   * Exact Newl Group brand hex values should be confirmed before public launch.
-   * Keep these semantic so future tenant-level branding can swap values without
+   * Newl brand source tokens.
+   * TODO: Confirm production usage rules and logo assets before launch. These
+   * values come from the provided Newl color swatch: Mandy, Oxford Blue,
+   * Azalea, and Shuttle Gray. To retheme the app, update this source token
+   * section first, then remap semantic tokens below only if needed.
+   */
+  --newl-mandy: 235 68 100;        /* #EB4464 */
+  --newl-mandy-hover: 211 55 86;   /* darker action state derived from Mandy */
+  --newl-mandy-active: 185 46 74;  /* darker pressed state derived from Mandy */
+  --newl-oxford-blue: 60 68 91;    /* #3C445B */
+  --newl-azalea: 249 199 207;      /* #F9C7CF */
+  --newl-shuttle-gray: 84 92 108;  /* #545C6C */
+  --newl-text: 31 41 51;           /* #1F2933 */
+  --newl-background: 245 247 250;  /* #F5F7FA */
+  --newl-surface: 255 255 255;     /* #FFFFFF */
+  --newl-border: 221 227 234;      /* #DDE3EA */
+  --newl-success: 46 125 91;       /* #2E7D5B */
+  --newl-warning: 217 154 34;      /* #D99A22 */
+  --newl-danger: 185 46 74;        /* derived from Mandy */
+
+  /*
+   * Semantic app tokens. Components should use these tokens only, not raw
+   * brand values, so future tenant-level branding can swap the theme without
    * rewriting component styles.
    */
-  --color-background: 239 243 248;
-  --color-foreground: 17 24 39;
-  --color-card: 255 255 255;
-  --color-card-foreground: 17 24 39;
-  --color-primary: 18 62 103;
+  --color-background: var(--newl-background);
+  --color-foreground: var(--newl-text);
+  --color-card: var(--newl-surface);
+  --color-card-foreground: var(--newl-text);
+  --color-primary: var(--newl-mandy);
+  --color-primary-hover: var(--newl-mandy-hover);
+  --color-primary-active: var(--newl-mandy-active);
   --color-primary-foreground: 255 255 255;
-  --color-accent: 14 116 111;
+  --color-accent: var(--newl-oxford-blue);
   --color-accent-foreground: 255 255 255;
-  --color-sidebar: 10 31 51;
-  --color-sidebar-foreground: 241 246 250;
-  --color-sidebar-muted: 156 178 198;
-  --color-border: 212 222 233;
-  --color-muted: 244 247 251;
-  --color-muted-foreground: 82 99 118;
-  --color-success: 22 122 85;
+  --color-accent-soft: var(--newl-azalea);
+  --color-accent-border: var(--newl-azalea);
+  --color-sidebar: var(--newl-oxford-blue);
+  --color-sidebar-hover: 52 60 82;
+  --color-sidebar-active: var(--newl-mandy);
+  --color-sidebar-strong: 52 60 82;
+  --color-sidebar-foreground: 248 250 252;
+  --color-sidebar-muted: 210 216 226;
+  --color-border: var(--newl-border);
+  --color-muted: 250 251 253;
+  --color-muted-foreground: var(--newl-shuttle-gray);
+  --color-subtle-foreground: var(--newl-shuttle-gray);
+  --color-success: var(--newl-success);
   --color-success-foreground: 255 255 255;
-  --color-warning: 183 121 31;
-  --color-warning-foreground: 255 255 255;
-  --color-danger: 180 35 24;
+  --color-warning: var(--newl-warning);
+  --color-warning-foreground: 31 41 51;
+  --color-danger: var(--newl-danger);
   --color-danger-foreground: 255 255 255;
 }
 
@@ -46,6 +74,15 @@ body {
   margin: 0;
   background: rgb(var(--color-background));
   color: rgb(var(--color-foreground));
+}
+
+::selection {
+  background: rgb(var(--color-primary) / 0.16);
+}
+
+:focus-visible {
+  outline: 3px solid rgb(var(--color-primary) / 0.38);
+  outline-offset: 2px;
 }
 
 a {

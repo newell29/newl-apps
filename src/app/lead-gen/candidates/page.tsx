@@ -18,6 +18,12 @@ export default async function CandidateFeedPage() {
       />
 
       <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-accentSoft px-4 py-3">
+          <p className="text-sm font-semibold text-foreground">Ranked prospects</p>
+          <span className="rounded-full border border-accentBorder bg-card px-2.5 py-1 text-xs font-semibold text-primary">
+            {candidates.length.toLocaleString("en-US")} companies
+          </span>
+        </div>
         <table className="min-w-full divide-y divide-border text-sm">
           <thead className="bg-muted text-left text-xs font-semibold uppercase text-mutedForeground">
             <tr>
@@ -30,10 +36,14 @@ export default async function CandidateFeedPage() {
           </thead>
           <tbody className="divide-y divide-border">
             {candidates.map((candidate) => (
-              <tr key={candidate.id} className="hover:bg-muted/60">
+              <tr key={candidate.id} className="transition-colors hover:bg-muted/60">
                 <td className="px-4 py-3 font-medium text-foreground">{candidate.companyName}</td>
                 <td className="px-4 py-3 text-mutedForeground">{candidate.domain ?? "Unknown"}</td>
-                <td className="px-4 py-3 text-mutedForeground">{candidate.priorityScore}</td>
+                <td className="px-4 py-3">
+                  <span className="rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-xs font-semibold text-primary">
+                    {candidate.priorityScore}
+                  </span>
+                </td>
                 <td className="px-4 py-3">
                   <StageBadge stage={candidate.stage} />
                 </td>
