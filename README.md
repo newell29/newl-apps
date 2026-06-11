@@ -122,13 +122,13 @@ Some future cross-cutting fields, such as `AuditLog.actorUserId` and `Lead.owner
 
 ## Branding And Theming
 
-Newl Apps uses centralized semantic theme tokens in `src/app/globals.css` and `tailwind.config.ts`, including `primary`, `accent`, `sidebar`, `border`, `muted`, `success`, `warning`, and `danger`.
+Newl Apps uses centralized semantic theme tokens in `src/app/globals.css` and `tailwind.config.ts`, including `primary`, `primaryHover`, `accent`, `accentSoft`, `sidebar`, `sidebarStrong`, `border`, `muted`, `success`, `warning`, and `danger`.
 
 The default text-based `Newl Apps` mark lives in `src/branding/tenant-branding.ts`. Future SaaS tenants should load branding from tenant-scoped settings instead of relying on the default internal Newl theme.
 
 ## Branding Status
 
-Current theme is a temporary Newl-inspired placeholder based on the provided Newl logo direction: a coral/pink mark with a dark blue-slate wordmark. Exact Newl Group brand hex values and logo assets should be confirmed before production use.
+Current theme is a temporary Newl-inspired placeholder aligned to the public Newl website direction: slate/navy navigation, white/light gray surfaces, and red/pink CTA accents. Exact Newl Group brand hex values and logo assets should be confirmed before production use.
 
 Raw brand source tokens are centralized in `src/app/globals.css`; components should continue using semantic tokens only so the theme can be swapped by editing one token section.
 
