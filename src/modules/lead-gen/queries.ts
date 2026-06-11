@@ -1,4 +1,14 @@
-import { CandidateStatus, LeadPipelineStage } from "@prisma/client";
+import {
+  ApolloStatus,
+  CandidateStatus,
+  ContactSource,
+  ContactStatus,
+  ContactTier,
+  LeadPipelineStage,
+  Prisma,
+  ReplyStatus,
+  SequenceStatus
+} from "@prisma/client";
 import { prisma } from "@/server/db";
 import { tenantWhere } from "@/server/tenant-query";
 import type { TenantContext } from "@/server/tenant-context";
@@ -34,6 +44,21 @@ export type LeadPipelineFilters = {
   minScore?: number;
   maxScore?: number;
   sort?: LeadPipelineSort;
+};
+
+export type ContactDirectorySort = "score_desc" | "updated_desc" | "name_asc";
+
+export type ContactDirectoryFilters = {
+  query?: string;
+  companyId?: string;
+  contactStatus?: ContactStatus | "ALL";
+  apolloStatus?: ApolloStatus | "ALL";
+  sequenceStatus?: SequenceStatus | "ALL";
+  replyStatus?: ReplyStatus | "ALL";
+  source?: ContactSource | "ALL";
+  contactTier?: ContactTier | "ALL";
+  assignedRep?: string | "ALL" | "UNASSIGNED";
+  sort?: ContactDirectorySort;
 };
 
 type JsonObject = Record<string, unknown>;
@@ -246,15 +271,12 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
   });
 
   const pipelineLeads = leads.map((lead) => {
-    const contactCount = lead.company.contacts.length;
+    const contacts = lead.company.contacts;
+    const contactCount = contacts.length;
     const hasSelectedContact = Boolean(lead.contact);
-    const contactStatus = hasSelectedContact
-      ? "Primary contact selected"
-      : contactCount > 0
-        ? `${contactCount} contacts available`
-        : "No contacts yet";
-    const apolloStatus = contactCount > 0 ? "Contacts imported" : "Apollo not started";
-    const sequenceStatus = hasSelectedContact ? "Sequence not started" : "Contacts not ranked";
+    const contactStatus = summarizeContactStatus(contacts, hasSelectedContact);
+    const apolloStatus = summarizeApolloStatus(contacts);
+    const sequenceStatus = summarizeSequenceStatus(contacts);
     const nextStep = getPipelineNextStep({
       stage: lead.stage,
       contactCount,
@@ -313,8 +335,219 @@ export async function getLeadPipelineFilters(tenant: TenantContext) {
   };
 }
 
+export async function getContactDirectory(tenant: TenantContext, filters: ContactDirectoryFilters = {}) {
+  const contacts = await prisma.contact.findMany({
+    where: tenantWhere(tenant, buildContactDirectoryWhere(tenant, filters)),
+    include: {
+      company: {
+        select: {
+          id: true,
+          name: true,
+          normalizedName: true
+        }
+      }
+    },
+    orderBy: buildContactDirectoryOrder(filters.sort ?? "score_desc")
+  });
+
+  const mappedContacts = contacts.map((contact) => ({
+    id: contact.id,
+    companyId: contact.companyId,
+    companyName: contact.company.name,
+    companyNormalizedName: contact.company.normalizedName,
+    firstName: contact.firstName,
+    lastName: contact.lastName,
+    fullName: contact.fullName,
+    title: contact.title,
+    department: contact.department,
+    seniority: contact.seniority,
+    email: contact.email,
+    phone: contact.phone,
+    linkedinUrl: contact.linkedinUrl,
+    source: contact.source,
+    contactStatus: contact.contactStatus,
+    contactScore: contact.contactScore,
+    contactTier: contact.contactTier,
+    apolloStatus: contact.apolloStatus,
+    sequenceStatus: contact.sequenceStatus,
+    replyStatus: contact.replyStatus,
+    lastTouchAt: contact.lastTouchAt,
+    lastReplyAt: contact.lastReplyAt,
+    assignedRep: contact.assignedRep ?? "Unassigned",
+    updatedAt: contact.updatedAt
+  }));
+
+  if (filters.sort === "name_asc") {
+    return mappedContacts.sort((left, right) => left.fullName.localeCompare(right.fullName));
+  }
+
+  return mappedContacts;
+}
+
+export async function getContactDirectoryFilters(tenant: TenantContext) {
+  const [pipelineAccounts, owners, approvedAccountCount] = await Promise.all([
+    prisma.lead.findMany({
+      where: tenantWhere(tenant),
+      distinct: ["companyId"],
+      select: {
+        company: {
+          select: {
+            id: true,
+            name: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: "desc"
+      }
+    }),
+    prisma.contact.findMany({
+      where: tenantWhere(tenant, {
+        assignedRep: {
+          not: null
+        },
+        company: {
+          leads: {
+            some: tenantWhere(tenant)
+          }
+        }
+      }),
+      distinct: ["assignedRep"],
+      select: {
+        assignedRep: true
+      },
+      orderBy: {
+        assignedRep: "asc"
+      }
+    }),
+    prisma.lead.count({
+      where: tenantWhere(tenant)
+    })
+  ]);
+
+  return {
+    companies: pipelineAccounts.map((lead) => lead.company),
+    owners: owners.flatMap((owner) => (owner.assignedRep ? [owner.assignedRep] : [])),
+    approvedAccountCount,
+    contactStatuses: Object.values(ContactStatus),
+    apolloStatuses: Object.values(ApolloStatus),
+    sequenceStatuses: Object.values(SequenceStatus),
+    replyStatuses: Object.values(ReplyStatus),
+    sources: Object.values(ContactSource),
+    contactTiers: Object.values(ContactTier)
+  };
+}
+
 function asStringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function buildContactDirectoryWhere(tenant: TenantContext, filters: ContactDirectoryFilters) {
+  const where: Prisma.ContactWhereInput = {
+    company: {
+      leads: {
+        some: tenantWhere(tenant)
+      }
+    }
+  };
+
+  if (filters.query?.trim()) {
+    const query = filters.query.trim();
+    where.OR = [
+      {
+        fullName: {
+          contains: query,
+          mode: "insensitive"
+        }
+      },
+      {
+        title: {
+          contains: query,
+          mode: "insensitive"
+        }
+      },
+      {
+        email: {
+          contains: query,
+          mode: "insensitive"
+        }
+      },
+      {
+        company: {
+          name: {
+            contains: query,
+            mode: "insensitive"
+          }
+        }
+      }
+    ];
+  }
+
+  if (filters.companyId) {
+    where.companyId = filters.companyId;
+  }
+
+  if (filters.contactStatus && filters.contactStatus !== "ALL") {
+    where.contactStatus = filters.contactStatus;
+  }
+
+  if (filters.apolloStatus && filters.apolloStatus !== "ALL") {
+    where.apolloStatus = filters.apolloStatus;
+  }
+
+  if (filters.sequenceStatus && filters.sequenceStatus !== "ALL") {
+    where.sequenceStatus = filters.sequenceStatus;
+  }
+
+  if (filters.replyStatus && filters.replyStatus !== "ALL") {
+    where.replyStatus = filters.replyStatus;
+  }
+
+  if (filters.source && filters.source !== "ALL") {
+    where.source = filters.source;
+  }
+
+  if (filters.contactTier && filters.contactTier !== "ALL") {
+    where.contactTier = filters.contactTier;
+  }
+
+  if (filters.assignedRep === "UNASSIGNED") {
+    where.assignedRep = null;
+  } else if (filters.assignedRep && filters.assignedRep !== "ALL") {
+    where.assignedRep = filters.assignedRep;
+  }
+
+  return where;
+}
+
+function buildContactDirectoryOrder(sort: ContactDirectorySort) {
+  if (sort === "updated_desc") {
+    return [
+      {
+        updatedAt: "desc" as const
+      },
+      {
+        contactScore: "desc" as const
+      }
+    ];
+  }
+
+  if (sort === "name_asc") {
+    return [
+      {
+        updatedAt: "desc" as const
+      }
+    ];
+  }
+
+  return [
+    {
+      contactScore: "desc" as const
+    },
+    {
+      updatedAt: "desc" as const
+    }
+  ];
 }
 
 function buildLeadPipelineWhere(filters: LeadPipelineFilters) {
@@ -400,6 +633,72 @@ function isWithinScoreRange(score: number, minScore: number | undefined, maxScor
   return true;
 }
 
+function summarizeContactStatus(
+  contacts: Array<{ contactStatus: ContactStatus }>,
+  hasSelectedContact: boolean
+) {
+  if (contacts.length === 0) {
+    return "Not enriched";
+  }
+
+  if (hasSelectedContact) {
+    return "Primary contact selected";
+  }
+
+  const approvedCount = contacts.filter((contact) => contact.contactStatus === ContactStatus.APPROVED).length;
+  const reviewingCount = contacts.filter((contact) => contact.contactStatus === ContactStatus.REVIEWING).length;
+
+  if (approvedCount > 0) {
+    return `${approvedCount} approved contact${approvedCount === 1 ? "" : "s"}`;
+  }
+
+  if (reviewingCount > 0) {
+    return `${reviewingCount} in review`;
+  }
+
+  return `${contacts.length} contact${contacts.length === 1 ? "" : "s"} found`;
+}
+
+function summarizeApolloStatus(contacts: Array<{ apolloStatus: ApolloStatus }>) {
+  if (contacts.length === 0) {
+    return "Not started";
+  }
+
+  if (contacts.some((contact) => contact.apolloStatus === ApolloStatus.ERROR)) {
+    return "Needs review";
+  }
+
+  if (contacts.some((contact) => contact.apolloStatus === ApolloStatus.ENRICHED)) {
+    return "Enriched";
+  }
+
+  if (contacts.every((contact) => contact.apolloStatus === ApolloStatus.NOT_FOUND)) {
+    return "Not found";
+  }
+
+  return "Not started";
+}
+
+function summarizeSequenceStatus(contacts: Array<{ sequenceStatus: SequenceStatus }>) {
+  if (contacts.length === 0) {
+    return "Not started";
+  }
+
+  if (contacts.some((contact) => contact.sequenceStatus === SequenceStatus.ENROLLED)) {
+    return "Enrolled";
+  }
+
+  if (contacts.some((contact) => contact.sequenceStatus === SequenceStatus.READY)) {
+    return "Ready";
+  }
+
+  if (contacts.some((contact) => contact.sequenceStatus === SequenceStatus.REPLIED)) {
+    return "Replied";
+  }
+
+  return "Not started";
+}
+
 function getPipelineNextStep({
   stage,
   contactCount,
@@ -431,7 +730,7 @@ function getPipelineNextStep({
     return "Rank and select contacts";
   }
 
-  if (apolloStatus === "Apollo not started") {
+  if (apolloStatus === "Not started") {
     return "Ready for Apollo enrichment";
   }
 

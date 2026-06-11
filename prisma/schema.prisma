@@ -70,6 +70,54 @@ enum CandidateStatus {
   DISQUALIFIED
 }
 
+enum ContactSource {
+  MANUAL
+  APOLLO
+  IMPORT
+  UNKNOWN
+}
+
+enum ContactStatus {
+  NEW
+  REVIEWING
+  APPROVED
+  REJECTED
+  DO_NOT_CONTACT
+}
+
+enum ContactTier {
+  UNRANKED
+  TIER_1
+  TIER_2
+  TIER_3
+}
+
+enum ApolloStatus {
+  NOT_STARTED
+  ENRICHED
+  NOT_FOUND
+  ERROR
+}
+
+enum SequenceStatus {
+  NOT_STARTED
+  READY
+  ENROLLED
+  PAUSED
+  REPLIED
+  BOUNCED
+  FINISHED
+}
+
+enum ReplyStatus {
+  NO_REPLY
+  REPLIED
+  POSITIVE
+  NEGATIVE
+  MEETING_BOOKED
+  OUT_OF_OFFICE
+}
+
 model Tenant {
   id        String   @id @default(cuid())
   name      String
@@ -281,27 +329,54 @@ model TradeMiningImportRecord {
 }
 
 model Contact {
-  id             String   @id @default(cuid())
-  tenantId       String
-  companyId      String
-  firstName      String?
-  lastName       String?
-  fullName       String
-  title          String?
-  email          String?
-  linkedinUrl    String?
-  apolloPersonId String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id              String         @id @default(cuid())
+  tenantId        String
+  companyId       String
+  firstName       String?
+  lastName        String?
+  fullName        String
+  title           String?
+  department      String?
+  seniority       String?
+  email           String?
+  phone           String?
+  linkedinUrl     String?
+  source          ContactSource  @default(UNKNOWN)
+  contactStatus   ContactStatus  @default(NEW)
+  contactScore    Int            @default(0)
+  contactTier     ContactTier    @default(UNRANKED)
+  apolloContactId String?
+  apolloPersonId  String?
+  apolloStatus    ApolloStatus   @default(NOT_STARTED)
+  sequenceStatus  SequenceStatus @default(NOT_STARTED)
+  replyStatus     ReplyStatus    @default(NO_REPLY)
+  lastTouchAt     DateTime?
+  lastReplyAt     DateTime?
+  assignedRep     String?
+  rawJson         Json?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 
   tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   company Company @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
   leads   Lead[]
 
   @@unique([tenantId, id])
+  @@unique([tenantId, companyId, id])
   @@index([tenantId, email])
   @@index([tenantId, linkedinUrl])
+  @@index([tenantId, apolloContactId])
+  @@index([tenantId, apolloPersonId])
   @@index([tenantId, companyId])
+  @@index([tenantId, companyId, contactStatus])
+  @@index([tenantId, contactStatus])
+  @@index([tenantId, contactScore])
+  @@index([tenantId, contactTier])
+  @@index([tenantId, apolloStatus])
+  @@index([tenantId, sequenceStatus])
+  @@index([tenantId, replyStatus])
+  @@index([tenantId, source])
+  @@index([tenantId, assignedRep])
 }
 
 model Lead {
@@ -318,7 +393,7 @@ model Lead {
 
   tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   company Company  @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
-  contact Contact? @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: NoAction)
+  contact Contact? @relation(fields: [tenantId, companyId, contactId], references: [tenantId, companyId, id], onDelete: NoAction)
 
   @@unique([tenantId, companyId])
   @@index([tenantId, stage])

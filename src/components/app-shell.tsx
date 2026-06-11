@@ -9,6 +9,7 @@ const navItems = [
   { href: "/lead-gen/search-profiles", label: "Search Profiles" },
   { href: "/lead-gen/candidates", label: "Found Companies" },
   { href: "/lead-gen/pipeline", label: "Pipeline" },
+  { href: "/lead-gen/contacts", label: "Contacts" },
   { href: "/operations/logs", label: "Jobs & Audit" },
   { href: "/settings", label: "Settings" }
 ];

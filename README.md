@@ -32,7 +32,8 @@ The first module is the Apollo + TradeMining lead generation app. This scaffold 
 - Sample TradeMining search profiles for Houston Import Leads and Charlotte Warehouse Leads.
 - Tenant-scoped OpenClaw/n8n ingestion API contract for fetching enabled profiles, creating job runs, posting TradeMining batches, and updating job status.
 - Found Companies review queue that reviews TradeMining-sourced companies before any sales pipeline handoff.
-- Minimal app shell with dashboard, search profiles, candidate feed, pipeline, settings, and job/audit log pages.
+- Contacts foundation for person-level records under approved Pipeline accounts.
+- Minimal app shell with dashboard, search profiles, Found Companies, pipeline, contacts, settings, and job/audit log pages.
 - Tenant-safe query helpers that require a tenant context for business data access.
 
 ## Architecture Principles
@@ -121,6 +122,8 @@ The VM-based OpenClaw worker can later call these endpoints to fetch enabled sea
 Found Companies is the required review queue between ingestion and Pipeline. Ingested TradeMining records are preserved as raw records, normalized into tenant-scoped companies, ranked with deterministic scoring, and shown for human review. Companies are not moved into the sales pipeline by ingestion. Marking a found company as approved creates the first tenant-scoped `Lead` record in the initial pipeline stage; rejecting or disqualifying keeps it out of the active sales workflow.
 
 The Pipeline page is for approved accounts being worked by sales. It intentionally shows only tenant-scoped `Lead` records created through Found Companies approval, not unapproved TradeMining companies. Apollo contact enrichment, contact ranking, sequence recommendations, and sequence enrollment are visible as workflow placeholders and must remain explicit future milestones before any live outreach automation is added.
+
+Contacts are person-level records attached to approved Pipeline accounts. Apollo will populate and enrich contacts in a later milestone; Newl Apps will cache contact snapshots, review status, score, tier, reply/cadence summaries, and audit history. Apollo should remain the future execution system for outreach/cadences, while company and pipeline summaries roll up from contact-level status.
 
 Planned boundaries:
 
