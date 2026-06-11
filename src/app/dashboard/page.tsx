@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ButtonLink } from "@/components/button-link";
 import { MetricCard } from "@/components/metric-card";
 import { NewlLogo } from "@/components/newl-logo";
 import { getDashboardSummary } from "@/modules/dashboard/queries";
@@ -13,6 +14,9 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-7">
       <section className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+        <div className="border-b border-border bg-muted/45 px-6 py-3 text-xs font-semibold uppercase tracking-wide text-mutedForeground lg:px-7">
+          Internal logistics control center
+        </div>
         <div className="grid gap-6 p-6 lg:grid-cols-[1fr_320px] lg:p-7">
           <div className="space-y-5">
             <NewlLogo />
@@ -27,18 +31,10 @@ export default async function DashboardPage() {
               </p>
             </div>
             <div className="flex flex-wrap gap-3">
-              <Link
-                href="/lead-gen/candidates"
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primaryForeground shadow-sm transition-colors hover:bg-primary/90"
-              >
-                Review Candidates
-              </Link>
-              <Link
-                href="/lead-gen/pipeline"
-                className="rounded-md border border-border bg-card px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-muted"
-              >
+              <ButtonLink href="/lead-gen/candidates">Review Candidates</ButtonLink>
+              <ButtonLink href="/lead-gen/pipeline" variant="secondary">
                 Open Pipeline
-              </Link>
+              </ButtonLink>
             </div>
           </div>
           <div className="rounded-lg border border-border bg-muted p-5">
@@ -66,18 +62,18 @@ export default async function DashboardPage() {
               <h2 className="text-base font-semibold text-foreground">Module Status</h2>
               <p className="mt-1 text-sm text-mutedForeground">Tenant-enabled products and internal tools.</p>
             </div>
-            <Link href="/settings" className="text-sm font-medium text-primary hover:text-primary/80">
+            <Link href="/settings" className="text-sm font-semibold text-primary hover:text-primary/80">
               Settings
             </Link>
           </div>
           <div className="mt-4 divide-y divide-border">
             {summary.modules.map((module) => (
-              <div key={module.key} className="flex items-center justify-between py-3">
+              <div key={module.key} className="flex items-center justify-between gap-4 py-3">
                 <div>
                   <p className="font-medium text-foreground">{module.name}</p>
                   <p className="text-sm text-mutedForeground">{module.description}</p>
                 </div>
-                <span className="rounded-full border border-success/20 bg-success/10 px-2.5 py-1 text-xs font-medium text-success">
+                <span className="rounded-full border border-success/25 bg-success/10 px-2.5 py-1 text-xs font-semibold text-success">
                   {module.enabled ? "Enabled" : "Disabled"}
                 </span>
               </div>
@@ -109,15 +105,15 @@ function DashboardSignal({
 }) {
   const toneClass =
     tone === "success"
-      ? "bg-success/10 text-success"
+      ? "border-success/25 bg-success/10 text-success"
       : tone === "warning"
-        ? "bg-warning/10 text-warning"
-        : "bg-card text-mutedForeground";
+        ? "border-warning/25 bg-warning/10 text-warning"
+        : "border-border bg-card text-mutedForeground";
 
   return (
     <div className="flex items-center justify-between gap-3">
       <span className="text-sm text-mutedForeground">{label}</span>
-      <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${toneClass}`}>{value}</span>
+      <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${toneClass}`}>{value}</span>
     </div>
   );
 }
