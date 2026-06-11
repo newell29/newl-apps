@@ -1,0 +1,28 @@
+{
+  "jobRunId": "replace-with-job-run-id",
+  "searchProfileId": "replace-with-search-profile-id",
+  "source": "OPENCLAW",
+  "records": [
+    {
+      "importerName": "ABC IMPORTS INC",
+      "supplierName": "XYZ MANUFACTURING",
+      "bolNumber": "123456789",
+      "shipmentDate": "2026-06-10",
+      "originCountry": "China",
+      "originPort": "Shanghai",
+      "shipFromPort": "Shanghai",
+      "destinationPort": "Houston, Texas",
+      "destinationMarket": "Houston",
+      "destinationCity": "Houston",
+      "destinationState": "TX",
+      "productDescription": "furniture and fixtures",
+      "hsCode": "9403",
+      "containerCount": 2,
+      "weight": 18000,
+      "volume": null,
+      "rawData": {
+        "sourceSystem": "trademining-placeholder"
+      }
+    }
+  ]
+}
