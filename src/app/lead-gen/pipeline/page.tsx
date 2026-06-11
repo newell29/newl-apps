@@ -30,7 +30,7 @@ export default async function PipelinePage() {
                 <StageBadge stage={lead.stage} />
               </div>
               <div className="mt-4 flex items-center justify-between text-sm text-mutedForeground">
-                <span className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
+                <span className="rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-xs font-semibold text-primary">
                   Score {lead.score}
                 </span>
                 <span>{lead.updatedAt.toLocaleDateString("en-US")}</span>
