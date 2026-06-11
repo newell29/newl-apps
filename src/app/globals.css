@@ -6,25 +6,38 @@
   color-scheme: light;
 
   /*
-   * Temporary Newl-inspired palette.
-   * Exact Newl Group brand hex values should be confirmed before public launch.
-   * Keep these semantic so future tenant-level branding can swap values without
+   * Newl brand source tokens.
+   * TODO: Confirm exact Newl Group brand hex values before production use.
+   * These values are temporary approximations based on the provided Newl logo:
+   * a coral/pink mark with a dark blue-slate wordmark. To retheme the app,
+   * update this source token section first, then remap semantic tokens below.
+   */
+  --brand-newl-coral: 238 62 98;
+  --brand-newl-coral-accessible: 199 35 73;
+  --brand-newl-slate: 55 68 94;
+  --brand-newl-ink: 31 42 63;
+  --brand-newl-surface: 245 247 251;
+  --brand-newl-line: 214 220 231;
+
+  /*
+   * Semantic app tokens. Components should use these tokens only, not raw
+   * brand values, so future tenant-level branding can swap the theme without
    * rewriting component styles.
    */
-  --color-background: 239 243 248;
+  --color-background: var(--brand-newl-surface);
   --color-foreground: 17 24 39;
   --color-card: 255 255 255;
   --color-card-foreground: 17 24 39;
-  --color-primary: 18 62 103;
+  --color-primary: var(--brand-newl-coral-accessible);
   --color-primary-foreground: 255 255 255;
-  --color-accent: 14 116 111;
+  --color-accent: var(--brand-newl-slate);
   --color-accent-foreground: 255 255 255;
-  --color-sidebar: 10 31 51;
-  --color-sidebar-foreground: 241 246 250;
-  --color-sidebar-muted: 156 178 198;
-  --color-border: 212 222 233;
-  --color-muted: 244 247 251;
-  --color-muted-foreground: 82 99 118;
+  --color-sidebar: var(--brand-newl-ink);
+  --color-sidebar-foreground: 248 250 252;
+  --color-sidebar-muted: 185 195 212;
+  --color-border: var(--brand-newl-line);
+  --color-muted: 249 250 252;
+  --color-muted-foreground: 82 94 116;
   --color-success: 22 122 85;
   --color-success-foreground: 255 255 255;
   --color-warning: 183 121 31;
@@ -49,11 +62,11 @@ body {
 }
 
 ::selection {
-  background: rgb(var(--color-accent) / 0.18);
+  background: rgb(var(--color-primary) / 0.16);
 }
 
 :focus-visible {
-  outline: 3px solid rgb(var(--color-accent) / 0.45);
+  outline: 3px solid rgb(var(--color-primary) / 0.45);
   outline-offset: 2px;
 }
 
