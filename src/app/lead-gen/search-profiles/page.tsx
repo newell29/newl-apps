@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 export default async function SearchProfilesPage() {
   const tenant = await getCurrentTenantContext();
-  const profiles = await getTradeMiningSearchProfiles(tenant);
+  const { profiles, setupWarning } = await getTradeMiningSearchProfiles(tenant);
 
   return (
     <div className="space-y-6">
@@ -15,6 +15,13 @@ export default async function SearchProfilesPage() {
         title="TradeMining Search Profiles"
         description="Tenant-scoped configuration that future OpenClaw/n8n workers will fetch before running TradeMining pulls."
       />
+
+      {setupWarning ? (
+        <section className="rounded-lg border border-warning/25 bg-warning/10 p-5 text-sm leading-6 text-foreground shadow-sm">
+          <h2 className="font-semibold">Profile setup required</h2>
+          <p className="mt-1 text-mutedForeground">{setupWarning}</p>
+        </section>
+      ) : null}
 
       <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
