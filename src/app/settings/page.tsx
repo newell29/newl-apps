@@ -21,9 +21,11 @@ export default async function SettingsPage() {
           <h2 className="text-base font-semibold text-foreground">Enabled Modules</h2>
           <div className="mt-4 space-y-3">
             {settings.modules.map((module) => (
-              <div key={module.key} className="flex items-center justify-between rounded-md border border-border bg-muted/40 p-3">
+              <div key={module.key} className="flex items-center justify-between gap-4 rounded-md border border-border bg-muted/40 p-3">
                 <span className="font-medium text-foreground">{module.name}</span>
-                <span className="text-sm text-mutedForeground">{module.enabled ? "Enabled" : "Disabled"}</span>
+                <span className="rounded-full border border-success/25 bg-success/10 px-2.5 py-1 text-xs font-semibold text-success">
+                  {module.enabled ? "Enabled" : "Disabled"}
+                </span>
               </div>
             ))}
           </div>
@@ -34,10 +36,15 @@ export default async function SettingsPage() {
           <div className="mt-4 space-y-3 text-sm text-mutedForeground">
             {settings.integrationProviders.map((provider) => (
               <div key={provider} className="rounded-md border border-border bg-muted/40 p-3">
-                <p className="font-medium text-foreground">{provider}</p>
-                <p className="mt-1">
-                  Placeholder only. Store non-secret tenant config and encrypted secret references
-                  separately before enabling live API calls.
+                <div className="flex items-center justify-between gap-3">
+                  <p className="font-medium text-foreground">{provider}</p>
+                  <span className="rounded-full border border-warning/25 bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning">
+                    Placeholder
+                  </span>
+                </div>
+                <p className="mt-2">
+                  Store non-secret tenant config and encrypted secret references separately before
+                  enabling live API calls.
                 </p>
               </div>
             ))}
