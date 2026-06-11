@@ -24,6 +24,7 @@ Core architecture rules:
 
 Implementation expectations:
 
+- Read `reference/PRODUCT_OPERATING_BRIEF.md` before product or lead-gen implementation work.
 - Make `tenantId` part of service-layer inputs, database constraints, indexes, authorization checks, and test fixtures.
 - Prefer tenant-scoped integration configuration over global env-only credentials for production app behavior.
 - Keep lead generation, UPS tools, transit lookup, invoice verification, QuickBooks posting, and future tools as separate modules with explicit entitlements.
@@ -57,5 +58,6 @@ Implementation expectations:
 
 ## Reference
 
+- Product operating brief and PR milestones: `reference/PRODUCT_OPERATING_BRIEF.md`
 - Lead generation rebuild source of truth: `reference/OPENCLAW_LEAD_GEN_SPEC.md`
 - Initial migration plan: `reference/MIGRATION_PLAN.md`
