@@ -320,6 +320,7 @@ model Lead {
   company Company  @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
   contact Contact? @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: NoAction)
 
+  @@unique([tenantId, companyId])
   @@index([tenantId, stage])
   @@index([tenantId, ownerUserId])
   @@index([tenantId, score])
