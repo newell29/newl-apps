@@ -17,7 +17,7 @@ export function StageBadge({ stage }: { stage: string }) {
   const stageClass = getStageClass(stage);
 
   return (
-    <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${stageClass}`}>
+    <span className={`inline-flex whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ${stageClass}`}>
       {label}
     </span>
   );
@@ -25,15 +25,19 @@ export function StageBadge({ stage }: { stage: string }) {
 
 function getStageClass(stage: string) {
   if (["WON", "MEETING_BOOKED", "REPLIED", "QUALIFIED"].includes(stage)) {
-    return "border-success/20 bg-success/10 text-success";
+    return "border-success/25 bg-success/10 text-success";
   }
 
   if (["LOST", "DISQUALIFIED"].includes(stage)) {
-    return "border-danger/20 bg-danger/10 text-danger";
+    return "border-danger/25 bg-danger/10 text-danger";
   }
 
   if (["CONTACTED", "QUOTED"].includes(stage)) {
-    return "border-warning/20 bg-warning/10 text-warning";
+    return "border-warning/25 bg-warning/10 text-warning";
+  }
+
+  if (["RESEARCHING", "ENRICHED"].includes(stage)) {
+    return "border-accent/25 bg-accent/10 text-accent";
   }
 
   return "border-border bg-muted text-mutedForeground";
