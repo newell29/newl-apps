@@ -4,9 +4,9 @@ import type { ReactNode } from "react";
 type ButtonLinkVariant = "primary" | "secondary" | "ghost";
 
 const variantClasses: Record<ButtonLinkVariant, string> = {
-  primary: "bg-primary text-primaryForeground shadow-sm hover:bg-primary/90",
-  secondary: "border border-border bg-card text-primary shadow-sm hover:bg-muted",
-  ghost: "text-primary hover:bg-muted"
+  primary: "bg-primary text-primaryForeground shadow-sm hover:bg-primaryHover",
+  secondary: "border border-border bg-card text-primary shadow-sm hover:bg-accentSoft",
+  ghost: "text-primary hover:bg-accentSoft"
 };
 
 export function ButtonLink({
