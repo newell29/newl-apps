@@ -9,9 +9,15 @@ type SearchProfileClient = typeof prisma & {
   tradeMiningSearchProfile?: SearchProfileDelegate;
 };
 
-export type CandidateFeedSort = "score_desc" | "score_asc" | "updated_desc";
+export type CandidateFeedSort =
+  | "score_desc"
+  | "score_asc"
+  | "updated_desc"
+  | "shipment_count_desc"
+  | "latest_shipment_desc";
 
 export type CandidateFeedFilters = {
+  query?: string;
   status?: CandidateStatus | "ACTIVE";
   searchProfileId?: string;
   sort?: CandidateFeedSort;
@@ -115,7 +121,8 @@ export async function getCandidateFeed(tenant: TenantContext, filters: Candidate
         updatedAt: company.updatedAt
       };
     })
-    .filter((candidate) => !filters.searchProfileId || candidate.matchedSearchProfileId === filters.searchProfileId);
+    .filter((candidate) => !filters.searchProfileId || candidate.matchedSearchProfileId === filters.searchProfileId)
+    .filter((candidate) => matchesFoundCompanyQuery(candidate, filters.query));
 
   return sortCandidates(candidates, filters.sort ?? "score_desc");
 }
@@ -391,7 +398,7 @@ function buildCandidateWhere(filters: CandidateFeedFilters) {
   if (!filters.status || filters.status === "ACTIVE") {
     return {
       candidateStatus: {
-        in: [CandidateStatus.NEW, CandidateStatus.REVIEWING, CandidateStatus.APPROVED_FOR_PIPELINE]
+        in: [CandidateStatus.NEW, CandidateStatus.REVIEWING]
       }
     };
   }
@@ -517,10 +524,65 @@ function scoreCandidate({
   };
 }
 
-function sortCandidates<T extends { candidateScore: number; updatedAt: Date }>(candidates: T[], sort: CandidateFeedSort) {
+function matchesFoundCompanyQuery(
+  candidate: {
+    companyName: string;
+    normalizedName: string;
+    domain: string | null;
+    source: string | null;
+    matchedSearchProfileName: string;
+    destinationMarket: string | null;
+    destinationPort: string | null;
+    originCountry: string | null;
+    originPort: string | null;
+    shipFromPort: string | null;
+    productDescription: string | null;
+    hsCode: string | null;
+  },
+  query: string | undefined
+) {
+  const normalizedQuery = query?.trim().toLowerCase();
+
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  return [
+    candidate.companyName,
+    candidate.normalizedName,
+    candidate.domain,
+    candidate.source,
+    candidate.matchedSearchProfileName,
+    candidate.destinationMarket,
+    candidate.destinationPort,
+    candidate.originCountry,
+    candidate.originPort,
+    candidate.shipFromPort,
+    candidate.productDescription,
+    candidate.hsCode
+  ]
+    .filter((value): value is string => Boolean(value))
+    .some((value) => value.toLowerCase().includes(normalizedQuery));
+}
+
+function sortCandidates<T extends { candidateScore: number; updatedAt: Date; shipmentCount: number; latestShipmentDate: Date | null }>(
+  candidates: T[],
+  sort: CandidateFeedSort
+) {
   return candidates.sort((left, right) => {
     if (sort === "score_asc") {
       return left.candidateScore - right.candidateScore || right.updatedAt.getTime() - left.updatedAt.getTime();
+    }
+
+    if (sort === "shipment_count_desc") {
+      return right.shipmentCount - left.shipmentCount || right.candidateScore - left.candidateScore;
+    }
+
+    if (sort === "latest_shipment_desc") {
+      return (
+        (right.latestShipmentDate?.getTime() ?? 0) - (left.latestShipmentDate?.getTime() ?? 0) ||
+        right.candidateScore - left.candidateScore
+      );
     }
 
     if (sort === "updated_desc") {
