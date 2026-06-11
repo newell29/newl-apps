@@ -30,6 +30,7 @@ The first module is the Apollo + TradeMining lead generation app. This scaffold 
   - `Lead`
 - Seed data for Newl Group as the first tenant.
 - Sample TradeMining search profiles for Houston Import Leads and Charlotte Warehouse Leads.
+- Tenant-scoped OpenClaw/n8n ingestion API contract for fetching enabled profiles, creating job runs, posting TradeMining batches, and updating job status.
 - Minimal app shell with dashboard, search profiles, candidate feed, pipeline, settings, and job/audit log pages.
 - Tenant-safe query helpers that require a tenant context for business data access.
 
@@ -105,11 +106,19 @@ Live external calls are intentionally not wired yet. Future integration clients 
 
 Use `IntegrationCredential.publicConfig` only for non-secret settings such as API base URLs, dry-run flags, enabled ports, display names, or placeholder external IDs. API keys, OAuth tokens, passwords, service account JSON, private keys, webhook secrets, refresh tokens, and production sequence/custom-field IDs must stay out of source and be referenced through `secretRef`.
 
-TradeMining search profiles are now tenant-scoped configuration in Newl Apps. A future OpenClaw/n8n ingestion milestone should fetch active profiles from Newl Apps and post raw TradeMining batch results back; this profile admin milestone does not call TradeMining, OpenClaw, n8n, Apollo, or any external API.
+TradeMining search profiles are tenant-scoped configuration in Newl Apps. The OpenClaw/n8n ingestion API can fetch active profiles from Newl Apps and post raw TradeMining batch results back without making live external calls from the app itself.
+
+The first OpenClaw/n8n ingestion API boundary is documented in `reference/OPENCLAW_N8N_INGESTION_API.md`. It uses placeholder tenant-scoped token config for now:
+
+```bash
+INGESTION_API_TOKEN=replace-with-long-random-token
+INGESTION_TENANT_SLUG=newl-group
+```
+
+The VM-based OpenClaw worker can later call these endpoints to fetch enabled search profiles, create job runs, post TradeMining batches, and update job status. OpenClaw remains a replaceable worker/collector; Newl Apps remains the source of truth for configuration, ingestion persistence, scoring, approvals, pipeline, and audit history.
 
 Planned boundaries:
 
-- OpenClaw/n8n profile fetch and TradeMining ingestion API.
 - Apollo company/contact matching and sequence push.
 - TradeMining import and BOL normalization.
 - Google Sheets legacy import/export.
@@ -142,4 +151,5 @@ Raw brand source tokens are centralized in `src/app/globals.css`; components sho
 - Project instructions: `AGENTS.md`
 - Product operating brief and PR milestones: `reference/PRODUCT_OPERATING_BRIEF.md`
 - Lead generation rebuild source of truth: `reference/OPENCLAW_LEAD_GEN_SPEC.md`
+- OpenClaw/n8n ingestion API contract: `reference/OPENCLAW_N8N_INGESTION_API.md`
 - Initial migration plan: `reference/MIGRATION_PLAN.md`
