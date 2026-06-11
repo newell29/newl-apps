@@ -9,24 +9,27 @@
    * Newl brand source tokens.
    * TODO: Confirm exact Newl Group brand hex values and production logo assets
    * before production use. These values follow the current public Newl website
-   * direction: slate/navy structure, white/light gray surfaces, and red/pink
-   * action accents. To retheme the app, update this source token section first,
-   * then remap semantic tokens below only if needed.
+   * direction: slate/navy structure, white/light gray surfaces, and a deeper
+   * corporate red for focused action accents. To retheme the app, update this
+   * source token section first, then remap semantic tokens below only if needed.
    */
-  --newl-primary: 201 63 95;        /* #C93F5F */
-  --newl-primary-hover: 184 53 84;  /* #B83554 */
-  --newl-sidebar: 59 70 89;         /* #3B4659 */
-  --newl-sidebar-strong: 47 57 74;  /* #2F394A */
+  --newl-primary: 185 58 86;        /* #B93A56 */
+  --newl-primary-hover: 159 47 73;  /* #9F2F49 */
+  --newl-primary-active: 135 40 62; /* #87283E */
+  --newl-accent-soft: 248 233 238;  /* #F8E9EE */
+  --newl-accent-border: 232 184 196;/* #E8B8C4 */
+  --newl-sidebar: 55 66 85;         /* #374255 */
+  --newl-sidebar-hover: 47 57 74;   /* #2F394A */
+  --newl-sidebar-active: 185 58 86; /* #B93A56 */
   --newl-text: 31 41 51;            /* #1F2933 */
-  --newl-text-secondary: 82 97 116; /* #526174 */
+  --newl-text-secondary: 75 91 112; /* #4B5B70 */
   --newl-text-muted: 122 135 151;   /* #7A8797 */
-  --newl-background: 245 247 250;   /* #F5F7FA */
+  --newl-background: 244 246 248;   /* #F4F6F8 */
   --newl-surface: 255 255 255;      /* #FFFFFF */
   --newl-border: 221 227 234;       /* #DDE3EA */
-  --newl-accent-soft: 249 238 242;  /* #F9EEF2 */
   --newl-success: 46 125 91;        /* #2E7D5B */
   --newl-warning: 217 154 34;       /* #D99A22 */
-  --newl-danger: 184 53 84;         /* #B83554 */
+  --newl-danger: 159 47 73;         /* #9F2F49 */
 
   /*
    * Semantic app tokens. Components should use these tokens only, not raw
@@ -39,12 +42,16 @@
   --color-card-foreground: var(--newl-text);
   --color-primary: var(--newl-primary);
   --color-primary-hover: var(--newl-primary-hover);
+  --color-primary-active: var(--newl-primary-active);
   --color-primary-foreground: 255 255 255;
   --color-accent: var(--newl-sidebar);
   --color-accent-foreground: 255 255 255;
   --color-accent-soft: var(--newl-accent-soft);
+  --color-accent-border: var(--newl-accent-border);
   --color-sidebar: var(--newl-sidebar);
-  --color-sidebar-strong: var(--newl-sidebar-strong);
+  --color-sidebar-hover: var(--newl-sidebar-hover);
+  --color-sidebar-active: var(--newl-sidebar-active);
+  --color-sidebar-strong: var(--newl-sidebar-hover);
   --color-sidebar-foreground: 248 250 252;
   --color-sidebar-muted: 203 211 222;
   --color-border: var(--newl-border);
@@ -79,7 +86,7 @@ body {
 }
 
 :focus-visible {
-  outline: 3px solid rgb(var(--color-primary) / 0.45);
+  outline: 3px solid rgb(var(--color-primary) / 0.4);
   outline-offset: 2px;
 }
 
