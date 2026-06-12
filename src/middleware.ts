@@ -1,0 +1,48 @@
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+
+import { SECURE_SESSION_COOKIE_NAME, SESSION_COOKIE_NAME } from "@/server/auth/constants";
+
+/**
+ * Lightweight, edge-safe route protection. This only checks for the presence of
+ * a session cookie and redirects accordingly — it does NOT validate the session
+ * against the database (that requires the Node runtime and happens in the
+ * (authenticated) layout via getAuthenticatedContext). This keeps middleware
+ * fast and avoids importing Prisma/Auth.js into the edge runtime.
+ *
+ * Exemptions are handled by the matcher below (auth + ingestion APIs and static
+ * assets never reach this function).
+ */
+export function middleware(request: NextRequest) {
+  const { nextUrl } = request;
+  const hasSession = Boolean(
+    request.cookies.get(SESSION_COOKIE_NAME) ?? request.cookies.get(SECURE_SESSION_COOKIE_NAME)
+  );
+
+  if (nextUrl.pathname === "/login") {
+    if (hasSession) {
+      return NextResponse.redirect(new URL("/dashboard", request.url));
+    }
+    return NextResponse.next();
+  }
+
+  if (!hasSession) {
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("callbackUrl", `${nextUrl.pathname}${nextUrl.search}`);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  return NextResponse.next();
+}
+
+export const config = {
+  /**
+   * Run on everything except:
+   *  - /api/auth/*                       (Auth.js + dev login)
+   *  - /api/integrations/trademining/*   (machine-to-machine ingestion auth)
+   *  - Next.js internals and static files
+   */
+  matcher: [
+    "/((?!api/auth|api/integrations/trademining|_next/static|_next/image|favicon.ico|.*\\..*).*)"
+  ]
+};
