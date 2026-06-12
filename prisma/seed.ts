@@ -14,8 +14,15 @@ import {
 } from "@prisma/client";
 import { assertValidTradeMiningSearchProfile } from "@/modules/lead-gen/search-profile-validation";
 import { recommendSequenceForContact } from "@/modules/lead-gen/sequence-catalog";
+import { hashPassword } from "@/server/auth/password";
 
 const prisma = new PrismaClient();
+
+// Local-dev password for seeded users. Sourced from SEED_ADMIN_PASSWORD; falls
+// back to a non-secret default so `npm run prisma:seed` always works locally.
+// This is ONLY used by the dev-only credentials login path. Never commit or use
+// a real password here.
+const SEED_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "newl-dev-password";
 
 async function main() {
   const modules = [
@@ -63,28 +70,51 @@ async function main() {
     }
   });
 
-  const user = await prisma.user.upsert({
-    where: { email: "admin@example.com" },
-    update: { name: "Newl Apps Admin" },
-    create: {
-      email: "admin@example.com",
-      name: "Newl Apps Admin"
-    }
-  });
+  if (!process.env.SEED_ADMIN_PASSWORD) {
+    console.warn(
+      "[seed] SEED_ADMIN_PASSWORD not set; using default local-dev password 'newl-dev-password'. Set SEED_ADMIN_PASSWORD for a custom local password. Never use a real secret here."
+    );
+  }
 
-  await prisma.membership.upsert({
-    where: {
-      tenantId_userId: {
-        tenantId: tenant.id,
-        userId: user.id
+  const passwordHash = await hashPassword(SEED_PASSWORD);
+
+  // Admin plus optional sample users in the same tenant, used to exercise the
+  // role matrix locally (e.g. READ_ONLY should be blocked from mutations).
+  const seedUsers = [
+    { email: "admin@example.com", name: "Newl Apps Admin", role: PlatformRole.ADMIN },
+    { email: "sales@example.com", name: "Newl Apps Sales", role: PlatformRole.SALES },
+    { email: "readonly@example.com", name: "Newl Apps Read Only", role: PlatformRole.READ_ONLY }
+  ];
+
+  for (const seedUser of seedUsers) {
+    const user = await prisma.user.upsert({
+      where: { email: seedUser.email },
+      update: { name: seedUser.name, passwordHash },
+      create: {
+        email: seedUser.email,
+        name: seedUser.name,
+        passwordHash
       }
-    },
-    update: { role: PlatformRole.ADMIN },
-    create: {
-      tenantId: tenant.id,
-      userId: user.id,
-      role: PlatformRole.ADMIN
-    }
+    });
+
+    await prisma.membership.upsert({
+      where: {
+        tenantId_userId: {
+          tenantId: tenant.id,
+          userId: user.id
+        }
+      },
+      update: { role: seedUser.role },
+      create: {
+        tenantId: tenant.id,
+        userId: user.id,
+        role: seedUser.role
+      }
+    });
+  }
+
+  const adminUser = await prisma.user.findUniqueOrThrow({
+    where: { email: "admin@example.com" }
   });
 
   const leadGenModule = await prisma.module.findUniqueOrThrow({
@@ -451,6 +481,7 @@ async function main() {
   await prisma.auditLog.create({
     data: {
       tenantId: tenant.id,
+      actorUserId: adminUser.id,
       action: "seed.completed",
       entityType: "Tenant",
       entityId: tenant.id,
