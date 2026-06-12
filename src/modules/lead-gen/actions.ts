@@ -1,9 +1,10 @@
 "use server";
 
-import { CandidateStatus, LeadPipelineStage } from "@prisma/client";
+import { CandidateStatus, ContactOutreachDraftStatus, LeadPipelineStage } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db";
 import { getCurrentTenantContext } from "@/server/tenant-context";
+import { getSequenceById } from "@/modules/lead-gen/sequence-catalog";
 
 const statusActions = {
   [CandidateStatus.NEW]: "leadgen.candidate.new",
@@ -196,11 +197,172 @@ export async function updateLeadStageAction(formData: FormData) {
   revalidatePath("/lead-gen/candidates");
 }
 
+export async function updateContactSequenceAction(formData: FormData) {
+  const tenant = await getCurrentTenantContext();
+  const contactId = readRequiredFormValue(formData, "contactId");
+  const sequenceId = readRequiredFormValue(formData, "sequenceId");
+  const overrideReason = readOptionalFormValue(formData, "sequenceOverrideReason");
+  const sequence = getSequenceById(sequenceId);
+
+  if (!sequence) {
+    throw new Error("Selected sequence is invalid.");
+  }
+
+  const contact = await prisma.contact.findFirst({
+    where: {
+      id: contactId,
+      tenantId: tenant.tenantId,
+      company: {
+        leads: {
+          some: {
+            tenantId: tenant.tenantId
+          }
+        }
+      }
+    },
+    select: {
+      id: true,
+      companyId: true,
+      selectedSequenceId: true,
+      selectedSequenceName: true,
+      sequenceManuallyOverridden: true
+    }
+  });
+
+  if (!contact) {
+    throw new Error("Contact was not found for the current tenant.");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.contact.update({
+      where: {
+        tenantId_id: {
+          tenantId: tenant.tenantId,
+          id: contact.id
+        }
+      },
+      data: {
+        selectedSequenceId: sequence.id,
+        selectedSequenceName: sequence.name,
+        sequenceOverrideReason: overrideReason,
+        sequenceManuallyOverridden: true
+      }
+    });
+
+    await tx.auditLog.create({
+      data: {
+        tenantId: tenant.tenantId,
+        action: "leadgen.contact.sequence_changed",
+        entityType: "Contact",
+        entityId: contact.id,
+        before: {
+          selectedSequenceId: contact.selectedSequenceId,
+          selectedSequenceName: contact.selectedSequenceName,
+          sequenceManuallyOverridden: contact.sequenceManuallyOverridden
+        },
+        after: {
+          selectedSequenceId: sequence.id,
+          selectedSequenceName: sequence.name,
+          sequenceManuallyOverridden: true,
+          sequenceOverrideReason: overrideReason
+        }
+      }
+    });
+  });
+
+  revalidatePath("/lead-gen/contacts");
+  revalidatePath("/lead-gen/pipeline");
+}
+
+export async function saveContactDraftAction(formData: FormData) {
+  const tenant = await getCurrentTenantContext();
+  const draftId = readRequiredFormValue(formData, "draftId");
+  const subject = readRequiredFormValue(formData, "subject");
+  const body = readRequiredFormValue(formData, "body");
+
+  const draft = await prisma.contactOutreachDraft.findFirst({
+    where: {
+      id: draftId,
+      tenantId: tenant.tenantId,
+      contact: {
+        company: {
+          leads: {
+            some: {
+              tenantId: tenant.tenantId
+            }
+          }
+        }
+      }
+    },
+    select: {
+      id: true,
+      contactId: true,
+      companyId: true,
+      subject: true,
+      body: true,
+      status: true
+    }
+  });
+
+  if (!draft) {
+    throw new Error("Draft was not found for the current tenant.");
+  }
+
+  const now = new Date();
+
+  await prisma.$transaction(async (tx) => {
+    await tx.contactOutreachDraft.update({
+      where: {
+        id: draft.id
+      },
+      data: {
+        subject,
+        body,
+        status: ContactOutreachDraftStatus.EDITED,
+        editedAt: now
+      }
+    });
+
+    await tx.auditLog.create({
+      data: {
+        tenantId: tenant.tenantId,
+        action: "leadgen.contact_draft.saved",
+        entityType: "ContactOutreachDraft",
+        entityId: draft.id,
+        before: {
+          status: draft.status,
+          subjectLength: draft.subject.length,
+          bodyLength: draft.body.length
+        },
+        after: {
+          status: ContactOutreachDraftStatus.EDITED,
+          subjectChanged: draft.subject !== subject,
+          bodyChanged: draft.body !== body,
+          subjectLength: subject.length,
+          bodyLength: body.length
+        }
+      }
+    });
+  });
+
+  revalidatePath("/lead-gen/contacts");
+}
+
 function readRequiredFormValue(formData: FormData, key: string) {
   const value = formData.get(key);
 
   if (typeof value !== "string" || !value.trim()) {
     throw new Error(`${key} is required.`);
+  }
+
+  return value.trim();
+}
+
+function readOptionalFormValue(formData: FormData, key: string) {
+  const value = formData.get(key);
+
+  if (typeof value !== "string" || !value.trim()) {
+    return null;
   }
 
   return value.trim();

@@ -1,17 +1,21 @@
 import {
   ApolloStatus,
+  ContactOutreachDraftStatus,
   ContactSource,
   ContactStatus,
   ContactTier,
   ReplyStatus,
   SequenceStatus
 } from "@prisma/client";
+import { Fragment } from "react";
 import { PageHeader } from "@/components/page-header";
+import { saveContactDraftAction, updateContactSequenceAction } from "@/modules/lead-gen/actions";
 import {
   getContactDirectory,
   getContactDirectoryFilters,
   type ContactDirectorySort
 } from "@/modules/lead-gen/queries";
+import { sequenceCatalog } from "@/modules/lead-gen/sequence-catalog";
 import { getCurrentTenantContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
@@ -74,12 +78,12 @@ export default async function ContactsPage({
       <PageHeader
         eyebrow="Lead Generation"
         title="Contacts"
-        description="Contacts are people attached to approved Pipeline accounts. Apollo enrichment will populate this table in a future milestone."
+        description="Contacts are people attached to approved Pipeline accounts. Newl Apps recommends a cadence by default; reps can override it before future Apollo sync."
       />
 
       <div className="rounded-lg border border-accentBorder bg-accentSoft px-4 py-3 text-sm text-foreground">
-        Contact records sit after Pipeline approval. Newl Apps will store review state, scores, tiers, and Apollo
-        snapshots here while Apollo remains the future outreach and cadence execution system.
+        Tier 1 draft previews are optional and use local mock content only. No Apollo sequence enrollment, OpenAI calls, or
+        email sends happen from this page.
       </div>
 
       <form className="rounded-lg border border-border bg-card p-4 shadow-sm" action="/lead-gen/contacts">
@@ -170,9 +174,9 @@ export default async function ContactsPage({
       <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted px-4 py-3">
           <div>
-            <p className="text-sm font-semibold text-foreground">Contact review foundation</p>
+            <p className="text-sm font-semibold text-foreground">Contact cadence foundation</p>
             <p className="text-xs text-mutedForeground">
-              Person-level records for approved accounts. Apollo sync, contact approval, and sequence enrollment come later.
+              Review selected cadences, optional Tier 1 drafts, and future Apollo readiness before live sync exists.
             </p>
           </div>
           <span className="rounded-full border border-accentBorder bg-card px-2.5 py-1 text-xs font-semibold text-primary">
@@ -182,7 +186,7 @@ export default async function ContactsPage({
 
         {contacts.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="min-w-[1440px] divide-y divide-border text-sm">
+            <table className="min-w-[1720px] divide-y divide-border text-sm">
               <thead className="bg-muted text-left text-xs font-semibold uppercase text-mutedForeground">
                 <tr>
                   <th className="px-4 py-3">Contact name</th>
@@ -191,6 +195,9 @@ export default async function ContactsPage({
                   <th className="px-4 py-3">Email</th>
                   <th className="px-4 py-3">Contact status</th>
                   <th className="px-4 py-3">Score / tier</th>
+                  <th className="px-4 py-3">Selected sequence</th>
+                  <th className="px-4 py-3">Recommendation</th>
+                  <th className="px-4 py-3">Draft</th>
                   <th className="px-4 py-3">Apollo</th>
                   <th className="px-4 py-3">Sequence</th>
                   <th className="px-4 py-3">Reply</th>
@@ -204,63 +211,129 @@ export default async function ContactsPage({
               </thead>
               <tbody className="divide-y divide-border">
                 {contacts.map((contact) => (
-                  <tr key={contact.id} className="align-top transition-colors hover:bg-muted/60">
-                    <td className="max-w-[220px] px-4 py-4">
-                      <p className="font-semibold text-foreground">{contact.fullName}</p>
-                      <p className="mt-1 text-xs text-mutedForeground">
-                        {[contact.seniority, contact.department].filter(Boolean).join(" / ") || "Unclassified"}
-                      </p>
-                    </td>
-                    <td className="max-w-[220px] px-4 py-4 text-mutedForeground">{contact.title ?? "Unknown title"}</td>
-                    <td className="max-w-[220px] px-4 py-4">
-                      <p className="font-medium text-foreground">{contact.companyName}</p>
-                      <p className="mt-1 text-xs text-mutedForeground">{contact.companyNormalizedName}</p>
-                    </td>
-                    <td className="max-w-[220px] px-4 py-4 text-mutedForeground">{contact.email ?? "No email yet"}</td>
-                    <td className="px-4 py-4">
-                      <StatusBadge value={contact.contactStatus} tone={contactStatusTone(contact.contactStatus)} />
-                    </td>
-                    <td className="px-4 py-4">
-                      <span className="text-lg font-bold text-primary">{contact.contactScore}</span>
-                      <p className="mt-1 text-xs font-medium text-mutedForeground">{formatEnum(contact.contactTier)}</p>
-                    </td>
-                    <td className="px-4 py-4">
-                      <StatusBadge value={contact.apolloStatus} tone={apolloStatusTone(contact.apolloStatus)} />
-                    </td>
-                    <td className="px-4 py-4">
-                      <StatusBadge value={contact.sequenceStatus} tone={sequenceStatusTone(contact.sequenceStatus)} />
-                    </td>
-                    <td className="px-4 py-4">
-                      <StatusBadge value={contact.replyStatus} tone={replyStatusTone(contact.replyStatus)} />
-                    </td>
-                    <td className="px-4 py-4 text-mutedForeground">{contact.assignedRep}</td>
-                    <td className="px-4 py-4 text-mutedForeground">{formatDate(contact.lastTouchAt)}</td>
-                    <td className="px-4 py-4 text-mutedForeground">{formatDate(contact.lastReplyAt)}</td>
-                    <td className="px-4 py-4 text-mutedForeground">{formatEnum(contact.source)}</td>
-                    <td className="px-4 py-4 text-mutedForeground">{formatDate(contact.updatedAt)}</td>
-                    <td className="px-4 py-4">
-                      <div className="flex min-w-[220px] flex-wrap gap-2">
-                        <button
-                          disabled
-                          className="rounded-md border border-border bg-muted px-3 py-1.5 text-xs font-semibold text-mutedForeground"
-                        >
-                          View contact
-                        </button>
-                        <button
-                          disabled
-                          className="rounded-md border border-border bg-muted px-3 py-1.5 text-xs font-semibold text-mutedForeground"
-                        >
-                          Approve later
-                        </button>
-                        <button
-                          disabled
-                          className="rounded-md border border-border bg-muted px-3 py-1.5 text-xs font-semibold text-mutedForeground"
-                        >
-                          Enroll later
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                  <Fragment key={contact.id}>
+                    <tr className="align-top transition-colors hover:bg-muted/60">
+                      <td className="max-w-[220px] px-4 py-4">
+                        <p className="font-semibold text-foreground">{contact.fullName}</p>
+                        <p className="mt-1 text-xs text-mutedForeground">
+                          {[contact.seniority, contact.department].filter(Boolean).join(" / ") || "Unclassified"}
+                        </p>
+                      </td>
+                      <td className="max-w-[220px] px-4 py-4 text-mutedForeground">{contact.title ?? "Unknown title"}</td>
+                      <td className="max-w-[220px] px-4 py-4">
+                        <p className="font-medium text-foreground">{contact.companyName}</p>
+                        <p className="mt-1 text-xs text-mutedForeground">{contact.companyNormalizedName}</p>
+                      </td>
+                      <td className="max-w-[220px] px-4 py-4 text-mutedForeground">{contact.email ?? "No email yet"}</td>
+                      <td className="px-4 py-4">
+                        <StatusBadge value={contact.contactStatus} tone={contactStatusTone(contact.contactStatus)} />
+                      </td>
+                      <td className="px-4 py-4">
+                        <span className="text-lg font-bold text-primary">{contact.contactScore}</span>
+                        <p className="mt-1 text-xs font-medium text-mutedForeground">{formatEnum(contact.contactTier)}</p>
+                      </td>
+                      <td className="max-w-[220px] px-4 py-4">
+                        <p className="font-medium text-foreground">{contact.selectedSequenceName}</p>
+                        <p className="mt-1 text-xs text-mutedForeground">
+                          {contact.sequenceManuallyOverridden ? "Manual override" : "Auto-selected"}
+                        </p>
+                      </td>
+                      <td className="max-w-[260px] px-4 py-4 text-mutedForeground">
+                        <p className="font-medium text-foreground">{contact.recommendedSequenceName}</p>
+                        <p className="mt-1 text-xs leading-5">{contact.sequenceRecommendationReason}</p>
+                      </td>
+                      <td className="px-4 py-4">
+                        <StatusBadge value={contact.draftStatus} tone={draftStatusTone(contact.draftStatus)} />
+                      </td>
+                      <td className="px-4 py-4">
+                        <StatusBadge value={contact.apolloStatus} tone={apolloStatusTone(contact.apolloStatus)} />
+                      </td>
+                      <td className="px-4 py-4">
+                        <StatusBadge value={contact.sequenceStatus} tone={sequenceStatusTone(contact.sequenceStatus)} />
+                      </td>
+                      <td className="px-4 py-4">
+                        <StatusBadge value={contact.replyStatus} tone={replyStatusTone(contact.replyStatus)} />
+                      </td>
+                      <td className="px-4 py-4 text-mutedForeground">{contact.assignedRep}</td>
+                      <td className="px-4 py-4 text-mutedForeground">{formatDate(contact.lastTouchAt)}</td>
+                      <td className="px-4 py-4 text-mutedForeground">{formatDate(contact.lastReplyAt)}</td>
+                      <td className="px-4 py-4 text-mutedForeground">{formatEnum(contact.source)}</td>
+                      <td className="px-4 py-4 text-mutedForeground">{formatDate(contact.updatedAt)}</td>
+                      <td className="px-4 py-4">
+                        <div className="min-w-[320px] space-y-3">
+                          <form action={updateContactSequenceAction} className="grid gap-2">
+                            <input type="hidden" name="contactId" value={contact.id} />
+                            <select
+                              name="sequenceId"
+                              defaultValue={contact.selectedSequenceId}
+                              className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+                            >
+                              {sequenceCatalog.map((sequence) => (
+                                <option key={sequence.id} value={sequence.id}>
+                                  {sequence.name}
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              name="sequenceOverrideReason"
+                              defaultValue={contact.sequenceOverrideReason ?? ""}
+                              placeholder="Optional override reason"
+                              className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+                            />
+                            <button className="w-fit rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
+                              Change Sequence
+                            </button>
+                          </form>
+                          {contact.draft ? (
+                            <details className="rounded-md border border-border bg-background p-3">
+                              <summary className="cursor-pointer text-xs font-semibold text-primary">View Draft</summary>
+                              <form action={saveContactDraftAction} className="mt-3 space-y-3">
+                                <input type="hidden" name="draftId" value={contact.draft.id} />
+                                <DraftMeta label="Contact" value={`${contact.fullName} at ${contact.companyName}`} />
+                                <DraftMeta label="Title" value={contact.title ?? "Unknown title"} />
+                                <DraftMeta label="Tier" value={formatEnum(contact.contactTier)} />
+                                <DraftMeta label="Recommended sequence" value={contact.recommendedSequenceName} />
+                                <DraftMeta label="Selected sequence" value={contact.selectedSequenceName} />
+                                <label className="block space-y-1 text-xs font-semibold text-foreground">
+                                  <span>Subject line</span>
+                                  <input
+                                    name="subject"
+                                    defaultValue={contact.draft.subject}
+                                    className="w-full rounded-md border border-border bg-card px-2 py-1.5 text-xs text-foreground"
+                                  />
+                                </label>
+                                <label className="block space-y-1 text-xs font-semibold text-foreground">
+                                  <span>Email body</span>
+                                  <textarea
+                                    name="body"
+                                    defaultValue={contact.draft.body}
+                                    rows={7}
+                                    className="w-full rounded-md border border-border bg-card px-2 py-1.5 text-xs leading-5 text-foreground"
+                                  />
+                                </label>
+                                <DraftMeta
+                                  label="Personalization notes"
+                                  value={contact.draft.personalizationNotes ?? "No notes recorded"}
+                                />
+                                <p className="text-xs text-mutedForeground">
+                                  Optional review only. Saving does not send email, enroll a sequence, or call Apollo.
+                                </p>
+                                <button className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
+                                  Save Draft
+                                </button>
+                              </form>
+                            </details>
+                          ) : (
+                            <p className="text-xs text-mutedForeground">
+                              {contact.contactTier === ContactTier.TIER_1
+                                ? "No Newl draft available yet."
+                                : "Tier 2+ contacts use Apollo/template drafting later."}
+                            </p>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -325,6 +398,15 @@ function StatusBadge({ value, tone }: { value: string; tone: "neutral" | "succes
           : "border-accentBorder bg-accentSoft text-primary";
 
   return <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${className}`}>{formatEnum(value)}</span>;
+}
+
+function DraftMeta({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="text-xs">
+      <p className="font-semibold text-mutedForeground">{label}</p>
+      <p className="mt-0.5 text-foreground">{value}</p>
+    </div>
+  );
 }
 
 function parseContactStatusParam(value: string | undefined) {
@@ -445,6 +527,18 @@ function replyStatusTone(status: ReplyStatus) {
   }
 
   if (status === ReplyStatus.REPLIED || status === ReplyStatus.OUT_OF_OFFICE) {
+    return "warning";
+  }
+
+  return "neutral";
+}
+
+function draftStatusTone(status: string) {
+  if (status === ContactOutreachDraftStatus.APPROVED || status === ContactOutreachDraftStatus.EDITED) {
+    return "success";
+  }
+
+  if (status === ContactOutreachDraftStatus.AVAILABLE || status === ContactOutreachDraftStatus.DRAFT) {
     return "warning";
   }
 

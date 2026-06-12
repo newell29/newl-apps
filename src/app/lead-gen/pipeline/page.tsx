@@ -194,7 +194,10 @@ export default async function PipelinePage({
                       <p className="mt-1 text-xs">{lead.contactName ?? "No primary contact"}</p>
                     </td>
                     <td className="px-4 py-4 text-mutedForeground">{lead.apolloStatus}</td>
-                    <td className="px-4 py-4 text-mutedForeground">{lead.sequenceStatus}</td>
+                    <td className="max-w-[220px] px-4 py-4 text-mutedForeground">
+                      <p>{lead.sequenceStatus}</p>
+                      <p className="mt-1 text-xs">{lead.sequenceReadiness}</p>
+                    </td>
                     <td className="px-4 py-4 text-mutedForeground">
                       <p>{formatDate(lead.updatedAt)}</p>
                       <p className="mt-1 text-xs">Approved {formatDate(lead.approvedAt)}</p>

@@ -4,6 +4,7 @@ import {
   ContactSource,
   ContactStatus,
   ContactTier,
+  ContactOutreachDraftStatus,
   LeadPipelineStage,
   Prisma,
   ReplyStatus,
@@ -12,6 +13,7 @@ import {
 import { prisma } from "@/server/db";
 import { tenantWhere } from "@/server/tenant-query";
 import type { TenantContext } from "@/server/tenant-context";
+import { recommendSequenceForContact } from "@/modules/lead-gen/sequence-catalog";
 
 type SearchProfileDelegate = typeof prisma.tradeMiningSearchProfile;
 
@@ -261,6 +263,12 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
         include: {
           contacts: {
             where: tenantWhere(tenant),
+            include: {
+              outreachDrafts: {
+                where: tenantWhere(tenant),
+                take: 5
+              }
+            },
             take: 5
           }
         }
@@ -277,6 +285,7 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
     const contactStatus = summarizeContactStatus(contacts, hasSelectedContact);
     const apolloStatus = summarizeApolloStatus(contacts);
     const sequenceStatus = summarizeSequenceStatus(contacts);
+    const sequenceReadiness = summarizeSequenceReadiness(contacts);
     const nextStep = getPipelineNextStep({
       stage: lead.stage,
       contactCount,
@@ -299,6 +308,7 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
       contactStatus,
       apolloStatus,
       sequenceStatus,
+      sequenceReadiness,
       nextStep,
       notes: lead.notes,
       approvedAt: lead.createdAt,
@@ -345,37 +355,77 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
           name: true,
           normalizedName: true
         }
+      },
+      outreachDrafts: {
+        where: tenantWhere(tenant),
+        orderBy: {
+          updatedAt: "desc"
+        },
+        take: 1
       }
     },
     orderBy: buildContactDirectoryOrder(filters.sort ?? "score_desc")
   });
 
-  const mappedContacts = contacts.map((contact) => ({
-    id: contact.id,
-    companyId: contact.companyId,
-    companyName: contact.company.name,
-    companyNormalizedName: contact.company.normalizedName,
-    firstName: contact.firstName,
-    lastName: contact.lastName,
-    fullName: contact.fullName,
-    title: contact.title,
-    department: contact.department,
-    seniority: contact.seniority,
-    email: contact.email,
-    phone: contact.phone,
-    linkedinUrl: contact.linkedinUrl,
-    source: contact.source,
-    contactStatus: contact.contactStatus,
-    contactScore: contact.contactScore,
-    contactTier: contact.contactTier,
-    apolloStatus: contact.apolloStatus,
-    sequenceStatus: contact.sequenceStatus,
-    replyStatus: contact.replyStatus,
-    lastTouchAt: contact.lastTouchAt,
-    lastReplyAt: contact.lastReplyAt,
-    assignedRep: contact.assignedRep ?? "Unassigned",
-    updatedAt: contact.updatedAt
-  }));
+  const mappedContacts = contacts.map((contact) => {
+    const recommendation = recommendSequenceForContact({
+      contactTier: contact.contactTier,
+      title: contact.title,
+      department: contact.department,
+      companyName: contact.company.name
+    });
+    const draft = contact.outreachDrafts[0] ?? null;
+
+    return {
+      id: contact.id,
+      companyId: contact.companyId,
+      companyName: contact.company.name,
+      companyNormalizedName: contact.company.normalizedName,
+      firstName: contact.firstName,
+      lastName: contact.lastName,
+      fullName: contact.fullName,
+      title: contact.title,
+      department: contact.department,
+      seniority: contact.seniority,
+      email: contact.email,
+      phone: contact.phone,
+      linkedinUrl: contact.linkedinUrl,
+      source: contact.source,
+      contactStatus: contact.contactStatus,
+      contactScore: contact.contactScore,
+      contactTier: contact.contactTier,
+      apolloStatus: contact.apolloStatus,
+      sequenceStatus: contact.sequenceStatus,
+      replyStatus: contact.replyStatus,
+      recommendedSequenceId: contact.recommendedSequenceId ?? recommendation.id,
+      recommendedSequenceName: contact.recommendedSequenceName ?? recommendation.name,
+      selectedSequenceId: contact.selectedSequenceId ?? contact.recommendedSequenceId ?? recommendation.id,
+      selectedSequenceName: contact.selectedSequenceName ?? contact.recommendedSequenceName ?? recommendation.name,
+      sequenceRecommendationReason: contact.sequenceRecommendationReason ?? recommendation.reason,
+      sequenceOverrideReason: contact.sequenceOverrideReason,
+      sequenceManuallyOverridden: contact.sequenceManuallyOverridden,
+      draft: draft
+        ? {
+            id: draft.id,
+            sequenceName: draft.sequenceName,
+            sequenceId: draft.sequenceId,
+            subject: draft.subject,
+            body: draft.body,
+            status: draft.status,
+            source: draft.source,
+            aiGenerated: draft.aiGenerated,
+            personalizationNotes: draft.personalizationNotes,
+            editedAt: draft.editedAt,
+            updatedAt: draft.updatedAt
+          }
+        : null,
+      draftStatus: readDraftStatus(contact.contactTier, draft?.status ?? null),
+      lastTouchAt: contact.lastTouchAt,
+      lastReplyAt: contact.lastReplyAt,
+      assignedRep: contact.assignedRep ?? "Unassigned",
+      updatedAt: contact.updatedAt
+    };
+  });
 
   if (filters.sort === "name_asc") {
     return mappedContacts.sort((left, right) => left.fullName.localeCompare(right.fullName));
@@ -697,6 +747,46 @@ function summarizeSequenceStatus(contacts: Array<{ sequenceStatus: SequenceStatu
   }
 
   return "Not started";
+}
+
+function summarizeSequenceReadiness(
+  contacts: Array<{
+    selectedSequenceName: string | null;
+    recommendedSequenceName: string | null;
+    sequenceManuallyOverridden: boolean;
+    contactTier: ContactTier;
+    outreachDrafts: Array<{ status: ContactOutreachDraftStatus }>;
+  }>
+) {
+  if (contacts.length === 0) {
+    return "No contacts yet";
+  }
+
+  const selectedCount = contacts.filter((contact) => contact.selectedSequenceName || contact.recommendedSequenceName).length;
+  const draftCount = contacts.filter(
+    (contact) => contact.contactTier === ContactTier.TIER_1 && contact.outreachDrafts.length > 0
+  ).length;
+  const overriddenCount = contacts.filter((contact) => contact.sequenceManuallyOverridden).length;
+
+  return [
+    `${selectedCount} with selected cadence`,
+    `${draftCount} Tier 1 draft${draftCount === 1 ? "" : "s"}`,
+    overriddenCount > 0 ? `${overriddenCount} override${overriddenCount === 1 ? "" : "s"}` : null
+  ]
+    .filter(Boolean)
+    .join("; ");
+}
+
+function readDraftStatus(contactTier: ContactTier, status: ContactOutreachDraftStatus | null) {
+  if (status) {
+    return status;
+  }
+
+  if (contactTier === ContactTier.TIER_1) {
+    return "No Newl draft";
+  }
+
+  return "Apollo/template later";
 }
 
 function getPipelineNextStep({
