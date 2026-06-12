@@ -57,6 +57,8 @@ The first module is the Apollo + TradeMining lead generation app. This scaffold 
 npm install
 ```
 
+`postinstall` runs `prisma generate` so the Prisma client is present after install.
+
 2. Copy environment placeholders:
 
 ```bash

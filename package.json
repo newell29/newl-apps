@@ -8,6 +8,7 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate",
+    "postinstall": "npm run prisma:generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "tsx prisma/seed.ts",
     "test": "vitest run",
