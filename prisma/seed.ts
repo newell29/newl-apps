@@ -1,4 +1,15 @@
-import { PrismaClient, ModuleKey, PlatformRole, LeadPipelineStage } from "@prisma/client";
+import {
+  ApolloStatus,
+  ContactSource,
+  ContactStatus,
+  ContactTier,
+  PrismaClient,
+  ModuleKey,
+  PlatformRole,
+  ReplyStatus,
+  SequenceStatus,
+  LeadPipelineStage
+} from "@prisma/client";
 import { assertValidTradeMiningSearchProfile } from "@/modules/lead-gen/search-profile-validation";
 
 const prisma = new PrismaClient();
@@ -261,6 +272,100 @@ async function main() {
         stage: sample.leadStage,
         score: sample.priorityScore,
         notes: "Sample seed lead for local development only."
+      }
+    });
+
+    const demoContact =
+      sample.normalizedName === "atlantic-home-imports"
+        ? {
+            id: `${tenant.id}-${company.normalizedName}-jordan-demo-contact`,
+            firstName: "Jordan",
+            lastName: "Demo",
+            fullName: "Jordan Demo",
+            title: "Director of Supply Chain",
+            department: "Operations",
+            seniority: "Director",
+            email: "jordan.demo@example.com",
+            contactScore: 82,
+            contactTier: ContactTier.TIER_1
+          }
+        : sample.normalizedName === "carolina-outdoor-supply"
+          ? {
+              id: `${tenant.id}-${company.normalizedName}-taylor-sample-contact`,
+              firstName: "Taylor",
+              lastName: "Sample",
+              fullName: "Taylor Sample",
+              title: "Logistics Manager",
+              department: "Logistics",
+              seniority: "Manager",
+              email: "taylor.sample@example.com",
+              contactScore: 68,
+              contactTier: ContactTier.TIER_2
+            }
+          : {
+              id: `${tenant.id}-${company.normalizedName}-morgan-test-contact`,
+              firstName: "Morgan",
+              lastName: "Test",
+              fullName: "Morgan Test",
+              title: "Warehouse Operations Lead",
+              department: "Warehouse Operations",
+              seniority: "Lead",
+              email: "morgan.test@example.com",
+              contactScore: 54,
+              contactTier: ContactTier.TIER_3
+            };
+
+    await prisma.contact.upsert({
+      where: {
+        tenantId_id: {
+          tenantId: tenant.id,
+          id: demoContact.id
+        }
+      },
+      update: {
+        companyId: company.id,
+        firstName: demoContact.firstName,
+        lastName: demoContact.lastName,
+        fullName: demoContact.fullName,
+        title: demoContact.title,
+        department: demoContact.department,
+        seniority: demoContact.seniority,
+        email: demoContact.email,
+        source: ContactSource.MANUAL,
+        contactStatus: ContactStatus.REVIEWING,
+        contactScore: demoContact.contactScore,
+        contactTier: demoContact.contactTier,
+        apolloStatus: ApolloStatus.NOT_STARTED,
+        sequenceStatus: SequenceStatus.NOT_STARTED,
+        replyStatus: ReplyStatus.NO_REPLY,
+        assignedRep: null,
+        rawJson: {
+          demo: true,
+          note: "Local development sample contact. Not real customer data."
+        }
+      },
+      create: {
+        id: demoContact.id,
+        tenantId: tenant.id,
+        companyId: company.id,
+        firstName: demoContact.firstName,
+        lastName: demoContact.lastName,
+        fullName: demoContact.fullName,
+        title: demoContact.title,
+        department: demoContact.department,
+        seniority: demoContact.seniority,
+        email: demoContact.email,
+        source: ContactSource.MANUAL,
+        contactStatus: ContactStatus.REVIEWING,
+        contactScore: demoContact.contactScore,
+        contactTier: demoContact.contactTier,
+        apolloStatus: ApolloStatus.NOT_STARTED,
+        sequenceStatus: SequenceStatus.NOT_STARTED,
+        replyStatus: ReplyStatus.NO_REPLY,
+        rawJson: {
+          demo: true,
+          note: "Local development sample contact. Not real customer data."
+        }
       }
     });
   }
