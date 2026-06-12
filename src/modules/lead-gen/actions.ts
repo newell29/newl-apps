@@ -1,10 +1,21 @@
 "use server";
 
-import { CandidateStatus, ContactOutreachDraftStatus, LeadPipelineStage } from "@prisma/client";
+import { CandidateStatus, ContactOutreachDraftStatus, LeadPipelineStage, ModuleKey } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db";
-import { getCurrentTenantContext } from "@/server/tenant-context";
+import { getAuthenticatedContext } from "@/server/tenant-context";
+import { requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { getSequenceById } from "@/modules/lead-gen/sequence-catalog";
+
+// All lead-gen mutations require: a valid authenticated context, the LEAD_GEN
+// module enabled for the tenant + accessible to the role, and write permission
+// (READ_ONLY users are blocked). Audit writes record the acting user.
+async function authorizeLeadGenMutation() {
+  const ctx = await getAuthenticatedContext();
+  await requireModule(ctx, ModuleKey.LEAD_GEN);
+  requireMutationAccess(ctx);
+  return ctx;
+}
 
 const statusActions = {
   [CandidateStatus.NEW]: "leadgen.candidate.new",
@@ -29,7 +40,7 @@ const pipelineStageActions = {
 } satisfies Record<LeadPipelineStage, string>;
 
 export async function updateCandidateStatusAction(formData: FormData) {
-  const tenant = await getCurrentTenantContext();
+  const tenant = await authorizeLeadGenMutation();
   const companyId = readRequiredFormValue(formData, "companyId");
   const nextStatus = parseCandidateStatus(readRequiredFormValue(formData, "status"));
 
@@ -106,6 +117,7 @@ export async function updateCandidateStatusAction(formData: FormData) {
     await tx.auditLog.create({
       data: {
         tenantId: tenant.tenantId,
+        actorUserId: tenant.userId,
         action: statusActions[nextStatus],
         entityType: "Company",
         entityId: company.id,
@@ -129,7 +141,7 @@ export async function updateCandidateStatusAction(formData: FormData) {
 }
 
 export async function updateLeadStageAction(formData: FormData) {
-  const tenant = await getCurrentTenantContext();
+  const tenant = await authorizeLeadGenMutation();
   const leadId = readRequiredFormValue(formData, "leadId");
   const nextStage = parseLeadPipelineStage(readRequiredFormValue(formData, "stage"));
   const now = new Date();
@@ -175,6 +187,7 @@ export async function updateLeadStageAction(formData: FormData) {
     await tx.auditLog.create({
       data: {
         tenantId: tenant.tenantId,
+        actorUserId: tenant.userId,
         action: pipelineStageActions[nextStage],
         entityType: "Lead",
         entityId: lead.id,
@@ -198,7 +211,7 @@ export async function updateLeadStageAction(formData: FormData) {
 }
 
 export async function updateContactSequenceAction(formData: FormData) {
-  const tenant = await getCurrentTenantContext();
+  const tenant = await authorizeLeadGenMutation();
   const contactId = readRequiredFormValue(formData, "contactId");
   const sequenceId = readRequiredFormValue(formData, "sequenceId");
   const overrideReason = readOptionalFormValue(formData, "sequenceOverrideReason");
@@ -252,6 +265,7 @@ export async function updateContactSequenceAction(formData: FormData) {
     await tx.auditLog.create({
       data: {
         tenantId: tenant.tenantId,
+        actorUserId: tenant.userId,
         action: "leadgen.contact.sequence_changed",
         entityType: "Contact",
         entityId: contact.id,
@@ -275,7 +289,7 @@ export async function updateContactSequenceAction(formData: FormData) {
 }
 
 export async function saveContactDraftAction(formData: FormData) {
-  const tenant = await getCurrentTenantContext();
+  const tenant = await authorizeLeadGenMutation();
   const draftId = readRequiredFormValue(formData, "draftId");
   const subject = readRequiredFormValue(formData, "subject");
   const body = readRequiredFormValue(formData, "body");
@@ -326,6 +340,7 @@ export async function saveContactDraftAction(formData: FormData) {
     await tx.auditLog.create({
       data: {
         tenantId: tenant.tenantId,
+        actorUserId: tenant.userId,
         action: "leadgen.contact_draft.saved",
         entityType: "ContactOutreachDraft",
         entityId: draft.id,

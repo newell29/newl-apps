@@ -42,7 +42,7 @@ export default async function DashboardPage() {
             <div className="mt-4 space-y-4">
               <DashboardSignal label="Lead-gen module" value="Enabled" tone="success" />
               <DashboardSignal label="External writes" value="Dry run only" tone="warning" />
-              <DashboardSignal label="Tenant mode" value="Development resolver" tone="muted" />
+              <DashboardSignal label="Tenant mode" value="Authenticated session" tone="success" />
             </div>
           </div>
         </div>
