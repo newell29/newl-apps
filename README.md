@@ -33,6 +33,7 @@ The first module is the Apollo + TradeMining lead generation app. This scaffold 
 - Tenant-scoped OpenClaw/n8n ingestion API contract for fetching enabled profiles, creating job runs, posting TradeMining batches, and updating job status.
 - Found Companies review queue that reviews TradeMining-sourced companies before any sales pipeline handoff.
 - Contacts foundation for person-level records under approved Pipeline accounts.
+- Contact sequence override and optional Tier 1 draft preview foundation, using mock/local content only.
 - Minimal app shell with dashboard, search profiles, Found Companies, pipeline, contacts, settings, and job/audit log pages.
 - Tenant-safe query helpers that require a tenant context for business data access.
 
@@ -124,6 +125,8 @@ Found Companies is the required review queue between ingestion and Pipeline. Ing
 The Pipeline page is for approved accounts being worked by sales. It intentionally shows only tenant-scoped `Lead` records created through Found Companies approval, not unapproved TradeMining companies. Apollo contact enrichment, contact ranking, sequence recommendations, and sequence enrollment are visible as workflow placeholders and must remain explicit future milestones before any live outreach automation is added.
 
 Contacts are person-level records attached to approved Pipeline accounts. Apollo will populate and enrich contacts in a later milestone; Newl Apps will cache contact snapshots, review status, score, tier, reply/cadence summaries, and audit history. Apollo should remain the future execution system for outreach/cadences, while company and pipeline summaries roll up from contact-level status.
+
+Newl Apps recommends a default sequence/cadence for each contact based on contact tier and simple deterministic fit signals. Sales reps can override the selected sequence when needed, and sequence changes are audited tenant-safely. Tier 1 contacts can have optional Newl Apps draft previews for subject/body review and editing; reviewing those drafts is not mandatory before a future Apollo push. Tier 2 contacts generally rely on Apollo sequence/template drafting later. No Apollo calls, OpenAI/live AI calls, email sends, or sequence enrollments are made by the current Contacts foundation.
 
 Planned boundaries:
 
