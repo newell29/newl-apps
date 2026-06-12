@@ -36,6 +36,9 @@ The first module is the Apollo + TradeMining lead generation app. This scaffold 
 - Contact sequence override and optional Tier 1 draft preview foundation, using mock/local content only.
 - Minimal app shell with dashboard, search profiles, Found Companies, pipeline, contacts, settings, and job/audit log pages.
 - Tenant-safe query helpers that require a tenant context for business data access.
+- Authentication layer: Auth.js v5 with Microsoft Entra ID SSO (production) and optional dev bypass (local only).
+- Login page at `/login`, middleware session-cookie gate, and `(authenticated)` layout with database-backed membership validation.
+- Role enforcement via `ROLE_MATRIX` and authorization helpers (`requireModule`, `requireMutationAccess`, `requireRole`, `requireAdmin`).
 
 ## Architecture Principles
 
@@ -60,11 +63,20 @@ npm install
 cp .env.example .env
 ```
 
-3. Set `DATABASE_URL` in `.env` to a local PostgreSQL database:
+3. Set `DATABASE_URL` and auth placeholders in `.env`:
 
 ```bash
 DATABASE_URL=postgresql://USER:PASSWORD@localhost:5432/newl_apps
 DEFAULT_TENANT_SLUG=newl-group
+
+# Required for Auth.js sessions (generate with: npx auth secret)
+AUTH_SECRET=AUTH_SECRET_PLACEHOLDER
+AUTH_URL=http://localhost:3000
+AUTH_TRUST_HOST=true
+
+# Enable local email/password login (never use in production)
+AUTH_DEV_BYPASS=true
+SEED_ADMIN_PASSWORD=newl-dev-password
 ```
 
 4. Generate the Prisma client:
@@ -91,7 +103,25 @@ npm run prisma:seed
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000). Unauthenticated visitors are redirected to `/login`.
+
+### Authentication & Local Login
+
+Production login uses **Microsoft Entra ID SSO**. Users must be admin-provisioned (`User` + `Membership`) before they can sign in; there is no self-signup.
+
+For local development, set `AUTH_DEV_BYPASS=true` (with `NODE_ENV=development`) to show the dev login form on `/login`. After seeding, sign in with:
+
+| Email | Role |
+|-------|------|
+| `admin@example.com` | Admin |
+| `sales@example.com` | Sales |
+| `readonly@example.com` | Read Only |
+
+Password: the value of `SEED_ADMIN_PASSWORD` (defaults to `newl-dev-password` when unset).
+
+To test production-like SSO locally, configure Entra env vars from `.env.example` (`AUTH_MICROSOFT_ENTRA_ID_*` or `AZURE_AD_*` aliases) and set `AUTH_DEV_BYPASS=false`.
+
+See `reference/AUTH_AND_TENANT_CONTEXT.md` for Entra callback URLs, provisioning model, and authorization details.
 
 ## Scripts
 
@@ -102,6 +132,8 @@ Open [http://localhost:3000](http://localhost:3000).
 - `npm run prisma:generate` - generate the Prisma client.
 - `npm run prisma:migrate` - run Prisma migrations locally.
 - `npm run prisma:seed` - seed the first tenant and mock/sample data.
+- `npm test` - run Vitest unit tests (authorization, tenant context, dev bypass gate).
+- `npm run verify:auth` - live DB verification of seeded users, cross-tenant isolation, and role gating (requires a seeded database).
 
 ## Integration Boundaries
 
@@ -141,9 +173,9 @@ Planned boundaries:
 
 All tenant-owned business tables include `tenantId`. Relations between tenant-owned lead generation records use composite tenant-scoped foreign keys where Prisma can enforce them, such as lead/contact/company links.
 
-The temporary tenant resolver in `src/server/tenant-context.ts` is development-only and reads `DEFAULT_TENANT_SLUG`. Production must replace it with authenticated membership/session tenant resolution before serving real users.
+Tenant context is resolved from the authenticated session via `getAuthenticatedContext()` in `src/server/tenant-context.ts`: session → User → Membership → Tenant. Role and tenant are re-validated from the database on every request; they are not trusted from the session alone. `getCurrentTenantContext()` is a thin wrapper for callers that only need the tenant subset.
 
-Some future cross-cutting fields, such as `AuditLog.actorUserId` and `Lead.ownerUserId`, are currently stored as IDs without relations because user ownership and impersonation semantics need the auth layer first. Service code must validate those IDs through tenant membership before writing them.
+Some cross-cutting fields, such as `AuditLog.actorUserId` and `Lead.ownerUserId`, are stored as IDs without relations. Service code must validate those IDs through tenant membership before writing them.
 
 ## Branding And Theming
 
@@ -162,5 +194,6 @@ Raw brand source tokens are centralized in `src/app/globals.css`; components sho
 - Project instructions: `AGENTS.md`
 - Product operating brief and PR milestones: `reference/PRODUCT_OPERATING_BRIEF.md`
 - Lead generation rebuild source of truth: `reference/OPENCLAW_LEAD_GEN_SPEC.md`
+- Auth and tenant context (detailed): `reference/AUTH_AND_TENANT_CONTEXT.md`
 - OpenClaw/n8n ingestion API contract: `reference/OPENCLAW_N8N_INGESTION_API.md`
 - Initial migration plan: `reference/MIGRATION_PLAN.md`

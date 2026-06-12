@@ -56,8 +56,43 @@ Implementation expectations:
 - Use placeholders in committed examples, such as `APOLLO_API_KEY`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHEETS_ID`, and `OPENCLAW_TOKEN`.
 - Store production credentials in a managed secret store or tenant-scoped encrypted integration credential storage.
 
+## Authentication & Tenant Context
+
+Production authentication uses **Auth.js v5** with **Microsoft Entra ID SSO** and database-backed sessions. Users must be **admin-provisioned** (`User` + `Membership` rows) before they can sign in. There is **no self-signup**; the `signIn` callback rejects emails with no membership.
+
+For local development only, set `AUTH_DEV_BYPASS=true` (with `NODE_ENV` not `production`) to enable the dev email/password login form and seeded credentials. Never enable dev bypass in production; `isDevLoginEnabled()` enforces this.
+
+**Tenant resolution:** use `getAuthenticatedContext()` in user-facing server code (pages, server actions, route handlers that serve the app UI). `getCurrentTenantContext()` is a thin wrapper that returns only the tenant subset for existing tenant-scoped query helpers. Role and tenant are **always re-validated from the database** via `Membership` on every call — never trust tenant or role claims from the session alone.
+
+**Authorization helpers** live in `src/server/auth/authorization.ts`:
+
+- `requireModule(ctx, moduleKey)` — role may access the module **and** the tenant has it enabled
+- `requireMutationAccess(ctx)` — blocks `READ_ONLY` from writes
+- `requireRole(ctx, allowedRoles)` — role must be in the allowed list
+- `requireAdmin(ctx)` — shorthand for `ADMIN` only
+
+High-level **ROLE_MATRIX** (six roles):
+
+| Role | Module access | May mutate |
+|------|---------------|------------|
+| `ADMIN` | All modules | Yes |
+| `MANAGER` | All modules | Yes |
+| `SALES` | `LEAD_GEN` | Yes |
+| `OPERATIONS` | `LEAD_GEN`, `UPS_TOOLS`, `TRANSIT_LOOKUP` | Yes |
+| `FINANCE` | `INVOICE_VERIFICATION`, `QUICKBOOKS_POSTING` | Yes |
+| `READ_ONLY` | All modules (read) | No |
+
+**Route architecture:** `(public)` holds `/login`; `(authenticated)` holds all app pages. Middleware performs a lightweight session-cookie gate; the `(authenticated)` layout calls `getAuthenticatedContext()` for authoritative DB validation. Unauthenticated visitors are redirected to `/login`. Place new protected pages under `src/app/(authenticated)/`.
+
+**Testing:** run `npm test` (Vitest, hermetic unit tests) and `npm run verify:auth` (live DB checks against a seeded database).
+
+**Ingestion auth is separate:** machine-to-machine TradeMining ingestion uses `INGESTION_API_TOKEN` (Bearer or `x-newl-ingestion-key` header), not user sessions. See `src/server/ingestion-auth.ts` and `reference/OPENCLAW_N8N_INGESTION_API.md`.
+
+Full architecture, env vars, Entra setup, and file index: `reference/AUTH_AND_TENANT_CONTEXT.md`.
+
 ## Reference
 
 - Product operating brief and PR milestones: `reference/PRODUCT_OPERATING_BRIEF.md`
 - Lead generation rebuild source of truth: `reference/OPENCLAW_LEAD_GEN_SPEC.md`
+- Auth and tenant context (detailed): `reference/AUTH_AND_TENANT_CONTEXT.md`
 - Initial migration plan: `reference/MIGRATION_PLAN.md`
