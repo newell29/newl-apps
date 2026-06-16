@@ -64,8 +64,18 @@ describe("ROLE_MATRIX", () => {
   it("gives OPERATIONS lead-gen + operational modules", () => {
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.LEAD_GEN)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.UPS_TOOLS)).toBe(true);
+    expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.LTL_RATE_PORTAL)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.TRANSIT_LOOKUP)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.QUICKBOOKS_POSTING)).toBe(false);
+  });
+
+  it("accessibleModuleKeys returns the exact operational module set for OPERATIONS", () => {
+    expect(accessibleModuleKeys(PlatformRole.OPERATIONS)).toEqual([
+      ModuleKey.LEAD_GEN,
+      ModuleKey.UPS_TOOLS,
+      ModuleKey.LTL_RATE_PORTAL,
+      ModuleKey.TRANSIT_LOOKUP
+    ]);
   });
 
   it("lets READ_ONLY view all modules but never mutate", () => {
@@ -138,6 +148,89 @@ describe("requireModule", () => {
     expect(arg.where.tenantId).toBe("tenant-xyz");
     expect(arg.where.enabled).toBe(true);
     expect(arg.where.module).toEqual({ key: ModuleKey.LEAD_GEN });
+  });
+
+  it("allows OPERATIONS to access UPS_TOOLS when enabled for the tenant", async () => {
+    findFirst.mockResolvedValue({ id: "tma-ups" });
+    await expect(
+      requireModule(ctx(PlatformRole.OPERATIONS, "tenant-ops"), ModuleKey.UPS_TOOLS)
+    ).resolves.toBeUndefined();
+
+    expect(findFirst).toHaveBeenCalledTimes(1);
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        tenantId: "tenant-ops",
+        enabled: true,
+        module: {
+          key: ModuleKey.UPS_TOOLS
+        }
+      },
+      select: { id: true }
+    });
+  });
+
+  it("allows OPERATIONS to access TRANSIT_LOOKUP when enabled for the tenant", async () => {
+    findFirst.mockResolvedValue({ id: "tma-transit" });
+    await expect(
+      requireModule(ctx(PlatformRole.OPERATIONS, "tenant-ops"), ModuleKey.TRANSIT_LOOKUP)
+    ).resolves.toBeUndefined();
+
+    expect(findFirst).toHaveBeenCalledTimes(1);
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        tenantId: "tenant-ops",
+        enabled: true,
+        module: {
+          key: ModuleKey.TRANSIT_LOOKUP
+        }
+      },
+      select: { id: true }
+    });
+  });
+
+  it("allows OPERATIONS to access LTL_RATE_PORTAL when enabled for the tenant", async () => {
+    findFirst.mockResolvedValue({ id: "tma-ltl" });
+    await expect(
+      requireModule(ctx(PlatformRole.OPERATIONS, "tenant-ops"), ModuleKey.LTL_RATE_PORTAL)
+    ).resolves.toBeUndefined();
+
+    expect(findFirst).toHaveBeenCalledTimes(1);
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        tenantId: "tenant-ops",
+        enabled: true,
+        module: {
+          key: ModuleKey.LTL_RATE_PORTAL
+        }
+      },
+      select: { id: true }
+    });
+  });
+
+  it("lets READ_ONLY pass module access checks for UPS tools while writes stay separately blocked", async () => {
+    findFirst.mockResolvedValue({ id: "tma-readonly-ups" });
+    await expect(requireModule(ctx(PlatformRole.READ_ONLY), ModuleKey.UPS_TOOLS)).resolves.toBeUndefined();
+  });
+
+  it("rejects UPS_TOOLS before any DB lookup when the role lacks access", async () => {
+    await expect(
+      requireModule(ctx(PlatformRole.SALES), ModuleKey.UPS_TOOLS)
+    ).rejects.toBeInstanceOf(AuthorizationError);
+    expect(findFirst).not.toHaveBeenCalled();
+  });
+
+  it("rejects TRANSIT_LOOKUP before any DB lookup when the role lacks access", async () => {
+    await expect(
+      requireModule(ctx(PlatformRole.FINANCE), ModuleKey.TRANSIT_LOOKUP)
+    ).rejects.toBeInstanceOf(AuthorizationError);
+    expect(findFirst).not.toHaveBeenCalled();
+  });
+
+  it("rejects LTL_RATE_PORTAL before any DB lookup when the role lacks access", async () => {
+    await expect(
+      requireModule(ctx(PlatformRole.SALES), ModuleKey.LTL_RATE_PORTAL)
+    ).rejects.toBeInstanceOf(AuthorizationError);
+    expect(findFirst).not.toHaveBeenCalled();
   });
 
   it("throws when the module is not enabled for the tenant", async () => {

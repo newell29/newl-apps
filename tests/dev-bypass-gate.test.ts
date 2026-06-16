@@ -1,9 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { getSessionMaxAgeSeconds, isDevLoginEnabled } from "@/server/auth/constants";
+import {
+  getSessionMaxAgeSeconds,
+  isDevLoginEnabled,
+  isPasswordLoginEnabled,
+  isTemporaryPasswordLoginEnabled
+} from "@/server/auth/constants";
 
 const originalNodeEnv = process.env.NODE_ENV;
 const originalBypass = process.env.AUTH_DEV_BYPASS;
+const originalTemporaryPasswordLogin = process.env.AUTH_TEMP_PASSWORD_LOGIN;
 const originalMaxAge = process.env.SESSION_MAX_AGE_DAYS;
 
 function setNodeEnv(value: string | undefined) {
@@ -14,6 +20,7 @@ function setNodeEnv(value: string | undefined) {
 afterEach(() => {
   setNodeEnv(originalNodeEnv);
   process.env.AUTH_DEV_BYPASS = originalBypass;
+  process.env.AUTH_TEMP_PASSWORD_LOGIN = originalTemporaryPasswordLogin;
   process.env.SESSION_MAX_AGE_DAYS = originalMaxAge;
 });
 
@@ -55,6 +62,31 @@ describe("isDevLoginEnabled (dev-bypass production gate)", () => {
     for (const value of ["true", "false", "1", undefined]) {
       process.env.AUTH_DEV_BYPASS = value as string | undefined;
       expect(isDevLoginEnabled()).toBe(false);
+    }
+  });
+});
+
+describe("temporary password login gate", () => {
+  it("can be enabled in production only through its explicit temporary env var", () => {
+    setNodeEnv("production");
+    process.env.AUTH_DEV_BYPASS = "true";
+    process.env.AUTH_TEMP_PASSWORD_LOGIN = undefined;
+
+    expect(isDevLoginEnabled()).toBe(false);
+    expect(isTemporaryPasswordLoginEnabled()).toBe(false);
+    expect(isPasswordLoginEnabled()).toBe(false);
+
+    process.env.AUTH_TEMP_PASSWORD_LOGIN = "true";
+
+    expect(isDevLoginEnabled()).toBe(false);
+    expect(isTemporaryPasswordLoginEnabled()).toBe(true);
+    expect(isPasswordLoginEnabled()).toBe(true);
+  });
+
+  it("does not treat truthy-looking values as enabling temporary password login", () => {
+    for (const value of ["1", "TRUE", "yes", "false", undefined]) {
+      process.env.AUTH_TEMP_PASSWORD_LOGIN = value as string | undefined;
+      expect(isTemporaryPasswordLoginEnabled()).toBe(false);
     }
   });
 });

@@ -14,6 +14,8 @@ import {
 } from "@prisma/client";
 import { assertValidTradeMiningSearchProfile } from "@/modules/lead-gen/search-profile-validation";
 import { recommendSequenceForContact } from "@/modules/lead-gen/sequence-catalog";
+import { seedLtlTenantDefaults } from "@/modules/ltl-rate-portal/queries";
+import { seedUpsTenantDefaults } from "@/modules/ups-tools/queries";
 import { hashPassword } from "@/server/auth/password";
 
 const prisma = new PrismaClient();
@@ -35,6 +37,11 @@ async function main() {
       key: ModuleKey.UPS_TOOLS,
       name: "UPS Tools",
       description: "Future UPS calculators and account tools"
+    },
+    {
+      key: ModuleKey.LTL_RATE_PORTAL,
+      name: "LTL Rate Portal",
+      description: "Bulk LTL rate quoting and RFQ comparison workflows"
     },
     {
       key: ModuleKey.TRANSIT_LOOKUP,
@@ -135,6 +142,66 @@ async function main() {
       enabled: true
     }
   });
+
+  const upsModule = await prisma.module.findUniqueOrThrow({
+    where: { key: ModuleKey.UPS_TOOLS }
+  });
+
+  await prisma.tenantModuleAccess.upsert({
+    where: {
+      tenantId_moduleId: {
+        tenantId: tenant.id,
+        moduleId: upsModule.id
+      }
+    },
+    update: { enabled: true },
+    create: {
+      tenantId: tenant.id,
+      moduleId: upsModule.id,
+      enabled: true
+    }
+  });
+
+  const transitLookupModule = await prisma.module.findUniqueOrThrow({
+    where: { key: ModuleKey.TRANSIT_LOOKUP }
+  });
+
+  const ltlRatePortalModule = await prisma.module.findUniqueOrThrow({
+    where: { key: ModuleKey.LTL_RATE_PORTAL }
+  });
+
+  await prisma.tenantModuleAccess.upsert({
+    where: {
+      tenantId_moduleId: {
+        tenantId: tenant.id,
+        moduleId: ltlRatePortalModule.id
+      }
+    },
+    update: { enabled: true },
+    create: {
+      tenantId: tenant.id,
+      moduleId: ltlRatePortalModule.id,
+      enabled: true
+    }
+  });
+
+  await prisma.tenantModuleAccess.upsert({
+    where: {
+      tenantId_moduleId: {
+        tenantId: tenant.id,
+        moduleId: transitLookupModule.id
+      }
+    },
+    update: { enabled: true },
+    create: {
+      tenantId: tenant.id,
+      moduleId: transitLookupModule.id,
+      enabled: true
+    }
+  });
+
+  await seedUpsTenantDefaults(tenant.id);
+  await seedLtlTenantDefaults(tenant.id);
 
   const searchProfiles = [
     {

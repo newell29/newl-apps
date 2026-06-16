@@ -42,22 +42,38 @@ type SearchProfileSummary = {
 
 type TradeMiningRecordInput = {
   importerName?: string | null;
-  supplierName?: string | null;
   consigneeName?: string | null;
+  masterConsigneeName?: string | null;
+  notifyParty?: string | null;
+  shipperName?: string | null;
+  masterShipperName?: string | null;
   bolNumber?: string | null;
+  houseBolNumber?: string | null;
+  masterBolNumber?: string | null;
+  containerNumber?: string | null;
+  billType?: string | null;
   shipmentDate?: string | null;
   originCountry?: string | null;
   originPort?: string | null;
+  foreignPort?: string | null;
   shipFromPort?: string | null;
+  placeOfReceipt?: string | null;
+  arrivalPort?: string | null;
   destinationPort?: string | null;
   destinationMarket?: string | null;
   destinationCity?: string | null;
   destinationState?: string | null;
+  destinationZip?: string | null;
   productDescription?: string | null;
   hsCode?: string | null;
   containerCount?: number | null;
+  teu?: number | null;
   weight?: number | null;
+  quantity?: number | null;
   volume?: number | null;
+  carrier?: string | null;
+  vessel?: string | null;
+  voyage?: string | null;
   rawData?: Prisma.JsonValue | null;
 };
 
@@ -125,6 +141,18 @@ export async function createTradeMiningJobRun(tenant: TenantContext, payload: un
     }
   });
 
+  if (input.searchProfileId) {
+    await prisma.tradeMiningSearchProfile.update({
+      where: {
+        id: input.searchProfileId
+      },
+      data: {
+        lastRunAt: jobRun.startedAt,
+        lastRunStatus: "Running"
+      }
+    });
+  }
+
   await prisma.auditLog.create({
     data: {
       tenantId: tenant.tenantId,
@@ -161,7 +189,7 @@ export async function ingestTradeMiningBatch(tenant: TenantContext, payload: unk
   let companiesUpdated = 0;
 
   for (const [index, record] of batch.records.entries()) {
-    const companyName = getCompanyName(record);
+    const companyName = getCompanyIdentity(record).name;
     const normalizedName = normalizeCompanyName(companyName);
     const rawRecordKey = getRawRecordKey(batch, record, normalizedName, index);
     const priorityScore = calculateCandidateScore(record);
@@ -231,7 +259,7 @@ export async function ingestTradeMiningBatch(tenant: TenantContext, payload: unk
         arrivalDate: parseDate(record.shipmentDate),
         importerName: record.importerName ?? null,
         consigneeName: record.consigneeName ?? null,
-        shipperName: record.supplierName ?? null,
+        shipperName: record.shipperName ?? null,
         destinationCity: record.destinationCity ?? null,
         destinationState: record.destinationState ?? null,
         originCountry: record.originCountry ?? null,
@@ -246,7 +274,7 @@ export async function ingestTradeMiningBatch(tenant: TenantContext, payload: unk
         arrivalDate: parseDate(record.shipmentDate),
         importerName: record.importerName ?? null,
         consigneeName: record.consigneeName ?? null,
-        shipperName: record.supplierName ?? null,
+        shipperName: record.shipperName ?? null,
         destinationCity: record.destinationCity ?? null,
         destinationState: record.destinationState ?? null,
         originCountry: record.originCountry ?? null,
@@ -306,6 +334,16 @@ export async function updateTradeMiningJobRunStatus(tenant: TenantContext, jobRu
 
   const mappedStatus = mapExternalJobStatus(input.status);
   const isFinished = mappedStatus === JobStatus.SUCCESS || mappedStatus === JobStatus.ERROR || mappedStatus === JobStatus.CANCELLED;
+  const existingJobRun = await prisma.automationJobRun.findFirst({
+    where: {
+      id: jobRunId,
+      tenantId: tenant.tenantId
+    },
+    select: {
+      input: true
+    }
+  });
+  const searchProfileId = readSearchProfileIdFromJobInput(existingJobRun?.input);
 
   const jobRun = await prisma.automationJobRun.update({
     where: {
@@ -326,6 +364,18 @@ export async function updateTradeMiningJobRunStatus(tenant: TenantContext, jobRu
       }
     }
   });
+
+  if (searchProfileId) {
+    await prisma.tradeMiningSearchProfile.update({
+      where: {
+        id: searchProfileId
+      },
+      data: {
+        lastRunAt: jobRun.finishedAt ?? new Date(),
+        lastRunStatus: input.status
+      }
+    });
+  }
 
   await prisma.auditLog.create({
     data: {
@@ -348,6 +398,86 @@ export async function updateTradeMiningJobRunStatus(tenant: TenantContext, jobRu
     jobRunId: jobRun.id,
     status: mappedStatus,
     externalStatus: input.status
+  };
+}
+
+export async function getTradeMiningJobRunReadback(tenant: TenantContext, jobRunId: string) {
+  const jobRun = await prisma.automationJobRun.findFirst({
+    where: {
+      id: jobRunId,
+      tenantId: tenant.tenantId
+    },
+    select: {
+      id: true,
+      jobType: true,
+      status: true,
+      startedAt: true,
+      finishedAt: true,
+      input: true,
+      output: true,
+      errorMessage: true
+    }
+  });
+
+  if (!jobRun) {
+    throw new IngestionValidationError(["jobRunId was not found for the authenticated tenant."], 404);
+  }
+
+  const recentRecords = await prisma.tradeMiningImportRecord.findMany({
+    where: {
+      tenantId: tenant.tenantId
+    },
+    include: {
+      company: {
+        select: {
+          id: true,
+          name: true,
+          normalizedName: true
+        }
+      }
+    },
+    orderBy: [
+      { createdAt: "desc" },
+      { arrivalDate: "desc" }
+    ],
+    take: 200
+  });
+
+  const records = recentRecords
+    .filter((record) => readJsonString(record.rawJson, "jobRunId") === jobRunId)
+    .map((record) => ({
+      id: record.id,
+      rawRecordKey: record.rawRecordKey,
+      arrivalDate: record.arrivalDate?.toISOString() ?? null,
+      importerName: record.importerName,
+      consigneeName: record.consigneeName,
+      shipperName: record.shipperName,
+      destinationCity: record.destinationCity,
+      destinationState: record.destinationState,
+      originCountry: record.originCountry,
+      productDescription: record.productDescription,
+      company: record.company
+        ? {
+            id: record.company.id,
+            name: record.company.name,
+            normalizedName: record.company.normalizedName
+          }
+        : null,
+      rawPayload: record.rawJson
+    }));
+
+  return {
+    jobRun: {
+      id: jobRun.id,
+      jobType: jobRun.jobType,
+      status: jobRun.status,
+      startedAt: jobRun.startedAt.toISOString(),
+      finishedAt: jobRun.finishedAt?.toISOString() ?? null,
+      input: jobRun.input,
+      output: jobRun.output,
+      errorMessage: jobRun.errorMessage
+    },
+    records
   };
 }
 
@@ -407,13 +537,30 @@ function validateBatchPayload(payload: unknown): BatchPayload {
 
 function validateTradeMiningRecord(record: unknown, index: number, errors: string[]): TradeMiningRecordInput {
   const body = asObject(record, `records[${index}]`, errors);
-  const importerName = readOptionalString(body, "importerName", errors);
-  const supplierName = readOptionalString(body, "supplierName", errors);
-  const consigneeName = readOptionalString(body, "consigneeName", errors);
-  const shipmentDate = readOptionalString(body, "shipmentDate", errors);
+  const importerName = readOptionalAliasedString(body, ["importerName", "importer_name"], errors);
+  const consigneeName = readOptionalAliasedString(body, ["consigneeName", "consignee_name"], errors);
+  const masterConsigneeName = readOptionalAliasedString(
+    body,
+    ["masterConsigneeName", "master_consignee_name"],
+    errors
+  );
+  const notifyParty = readOptionalAliasedString(body, ["notifyParty", "notify_party"], errors);
+  const shipperName = readOptionalAliasedString(
+    body,
+    ["shipperName", "shipper_name", "supplierName", "supplier_name"],
+    errors
+  );
+  const masterShipperName = readOptionalAliasedString(body, ["masterShipperName", "master_shipper_name"], errors);
+  const shipmentDate = readOptionalAliasedString(
+    body,
+    ["shipmentDate", "shipment_date", "arrivalDate", "arrival_date"],
+    errors
+  );
 
-  if (!importerName && !consigneeName && !supplierName) {
-    errors.push(`records[${index}] must include importerName, consigneeName, or supplierName.`);
+  if (!importerName && !consigneeName && !masterConsigneeName && !notifyParty && !shipperName && !masterShipperName) {
+    errors.push(
+      `records[${index}] must include at least one company identity field such as importerName, consigneeName, notifyParty, or shipperName.`
+    );
   }
 
   if (shipmentDate && Number.isNaN(Date.parse(shipmentDate))) {
@@ -422,22 +569,38 @@ function validateTradeMiningRecord(record: unknown, index: number, errors: strin
 
   return {
     importerName,
-    supplierName,
     consigneeName,
-    bolNumber: readOptionalString(body, "bolNumber", errors),
+    masterConsigneeName,
+    notifyParty,
+    shipperName,
+    masterShipperName,
+    bolNumber: readOptionalAliasedString(body, ["bolNumber", "bol_number"], errors),
+    houseBolNumber: readOptionalAliasedString(body, ["houseBolNumber", "house_bol_number"], errors),
+    masterBolNumber: readOptionalAliasedString(body, ["masterBolNumber", "master_bol_number"], errors),
+    containerNumber: readOptionalAliasedString(body, ["containerNumber", "container_number"], errors),
+    billType: readOptionalAliasedString(body, ["billType", "bill_type"], errors),
     shipmentDate,
-    originCountry: readOptionalString(body, "originCountry", errors),
-    originPort: readOptionalString(body, "originPort", errors),
-    shipFromPort: readOptionalString(body, "shipFromPort", errors),
-    destinationPort: readOptionalString(body, "destinationPort", errors),
-    destinationMarket: readOptionalString(body, "destinationMarket", errors),
-    destinationCity: readOptionalString(body, "destinationCity", errors),
-    destinationState: readOptionalString(body, "destinationState", errors),
-    productDescription: readOptionalString(body, "productDescription", errors),
-    hsCode: readOptionalString(body, "hsCode", errors),
-    containerCount: readOptionalNumber(body, "containerCount", errors),
-    weight: readOptionalNumber(body, "weight", errors),
-    volume: readOptionalNumber(body, "volume", errors),
+    originCountry: readOptionalAliasedString(body, ["originCountry", "origin_country"], errors),
+    originPort: readOptionalAliasedString(body, ["originPort", "origin_port"], errors),
+    foreignPort: readOptionalAliasedString(body, ["foreignPort", "foreign_port"], errors),
+    shipFromPort: readOptionalAliasedString(body, ["shipFromPort", "ship_from_port"], errors),
+    placeOfReceipt: readOptionalAliasedString(body, ["placeOfReceipt", "place_of_receipt"], errors),
+    arrivalPort: readOptionalAliasedString(body, ["arrivalPort", "arrival_port"], errors),
+    destinationPort: readOptionalAliasedString(body, ["destinationPort", "destination_port"], errors),
+    destinationMarket: readOptionalAliasedString(body, ["destinationMarket", "destination_market"], errors),
+    destinationCity: readOptionalAliasedString(body, ["destinationCity", "destination_city"], errors),
+    destinationState: readOptionalAliasedString(body, ["destinationState", "destination_state"], errors),
+    destinationZip: readOptionalAliasedString(body, ["destinationZip", "destination_zip"], errors),
+    productDescription: readOptionalAliasedString(body, ["productDescription", "product_description"], errors),
+    hsCode: readOptionalAliasedString(body, ["hsCode", "hs_code"], errors),
+    containerCount: readOptionalAliasedNumber(body, ["containerCount", "container_count"], errors),
+    teu: readOptionalAliasedNumber(body, ["teu"], errors),
+    weight: readOptionalAliasedNumber(body, ["weight"], errors),
+    quantity: readOptionalAliasedNumber(body, ["quantity"], errors),
+    volume: readOptionalAliasedNumber(body, ["volume"], errors),
+    carrier: readOptionalAliasedString(body, ["carrier"], errors),
+    vessel: readOptionalAliasedString(body, ["vessel"], errors),
+    voyage: readOptionalAliasedString(body, ["voyage"], errors),
     rawData: isJsonLike(body.rawData) ? body.rawData : null
   };
 }
@@ -504,8 +667,29 @@ async function assertJobRunBelongsToTenant(tenant: TenantContext, jobRunId: stri
   }
 }
 
-function getCompanyName(record: TradeMiningRecordInput) {
-  return record.importerName ?? record.consigneeName ?? record.supplierName ?? "Unknown importer";
+function getCompanyIdentity(record: TradeMiningRecordInput) {
+  const candidates = [
+    ["importer_name", record.importerName],
+    ["consignee_name", record.consigneeName],
+    ["master_consignee_name", record.masterConsigneeName],
+    ["notify_party", record.notifyParty],
+    ["shipper_name", record.shipperName],
+    ["master_shipper_name", record.masterShipperName]
+  ] as const;
+
+  for (const [sourceRole, name] of candidates) {
+    if (name) {
+      return {
+        name,
+        sourceRole
+      };
+    }
+  }
+
+  return {
+    name: "Unknown importer",
+    sourceRole: "unknown"
+  };
 }
 
 function normalizeCompanyName(value: string) {
@@ -518,64 +702,130 @@ function normalizeCompanyName(value: string) {
 }
 
 function getRawRecordKey(batch: BatchPayload, record: TradeMiningRecordInput, normalizedName: string, index: number) {
-  if (record.bolNumber) {
-    return `bol:${record.bolNumber.trim().toLowerCase()}`;
+  const bolKey = record.houseBolNumber ?? record.masterBolNumber ?? record.bolNumber;
+  const containerKey = record.containerNumber;
+  const originKey = record.foreignPort ?? record.originPort ?? record.shipFromPort ?? record.placeOfReceipt;
+  const destinationKey = record.arrivalPort ?? record.destinationPort ?? record.destinationMarket;
+
+  if (bolKey) {
+    return [
+      "bol",
+      bolKey.trim().toLowerCase(),
+      containerKey?.trim().toLowerCase() ?? "no-container",
+      normalizedName
+    ].join(":");
   }
 
-  return [
+  const composite = [
     batch.source.toLowerCase(),
     batch.searchProfileId ?? "no-profile",
     record.shipmentDate ?? "no-date",
     normalizedName,
-    record.originPort ?? record.shipFromPort ?? "no-origin",
-    record.destinationPort ?? record.destinationMarket ?? "no-destination",
+    originKey ?? "no-origin",
+    destinationKey ?? "no-destination",
     record.hsCode ?? "no-hs",
-    index
-  ].join(":");
+    record.productDescription ?? "no-product",
+    containerKey ?? "no-container"
+  ]
+    .map((value) => value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""))
+    .join(":");
+
+  return composite.includes("no-date") && composite.includes("no-origin") && composite.includes("no-destination")
+    ? `${composite}:${index}`
+    : composite;
 }
 
 function calculateCandidateScore(record: TradeMiningRecordInput) {
   const containerScore = Math.min(25, Math.max(0, record.containerCount ?? 0) * 5);
-  const weightScore = Math.min(20, Math.floor(Math.max(0, record.weight ?? 0) / 5000));
+  const volumeScore = Math.min(
+    20,
+    Math.floor(Math.max(0, record.weight ?? 0) / 5000) + Math.floor(Math.max(0, record.teu ?? 0) * 4)
+  );
   const productScore = record.productDescription || record.hsCode ? 15 : 0;
-  const laneScore = record.destinationMarket || record.destinationPort ? 20 : 0;
+  const laneScore = record.destinationMarket || record.destinationPort || record.arrivalPort ? 20 : 0;
   const recencyScore = record.shipmentDate ? 10 : 0;
 
-  return Math.min(100, 20 + containerScore + weightScore + productScore + laneScore + recencyScore);
+  return Math.min(100, 20 + containerScore + volumeScore + productScore + laneScore + recencyScore);
 }
 
 function buildRawJson(batch: BatchPayload, record: TradeMiningRecordInput): Prisma.InputJsonObject {
+  const companyIdentity = getCompanyIdentity(record);
+
   return {
     source: batch.source,
     jobRunId: batch.jobRunId ?? null,
     searchProfileId: batch.searchProfileId ?? null,
+    sourceRole: companyIdentity.sourceRole,
+    companyMatchName: companyIdentity.name,
     record: {
       importerName: record.importerName ?? null,
-      supplierName: record.supplierName ?? null,
       consigneeName: record.consigneeName ?? null,
+      masterConsigneeName: record.masterConsigneeName ?? null,
+      notifyParty: record.notifyParty ?? null,
+      shipperName: record.shipperName ?? null,
+      masterShipperName: record.masterShipperName ?? null,
       bolNumber: record.bolNumber ?? null,
+      houseBolNumber: record.houseBolNumber ?? null,
+      masterBolNumber: record.masterBolNumber ?? null,
+      containerNumber: record.containerNumber ?? null,
+      billType: record.billType ?? null,
       shipmentDate: record.shipmentDate ?? null,
       originCountry: record.originCountry ?? null,
       originPort: record.originPort ?? null,
+      foreignPort: record.foreignPort ?? null,
       shipFromPort: record.shipFromPort ?? null,
+      placeOfReceipt: record.placeOfReceipt ?? null,
+      arrivalPort: record.arrivalPort ?? null,
       destinationPort: record.destinationPort ?? null,
       destinationMarket: record.destinationMarket ?? null,
       destinationCity: record.destinationCity ?? null,
       destinationState: record.destinationState ?? null,
+      destinationZip: record.destinationZip ?? null,
       productDescription: record.productDescription ?? null,
       hsCode: record.hsCode ?? null,
       containerCount: record.containerCount ?? null,
+      teu: record.teu ?? null,
       weight: record.weight ?? null,
-      volume: record.volume ?? null
+      quantity: record.quantity ?? null,
+      volume: record.volume ?? null,
+      carrier: record.carrier ?? null,
+      vessel: record.vessel ?? null,
+      voyage: record.voyage ?? null
     },
+    importerName: record.importerName ?? null,
+    consigneeName: record.consigneeName ?? null,
+    masterConsigneeName: record.masterConsigneeName ?? null,
+    notifyParty: record.notifyParty ?? null,
+    shipperName: record.shipperName ?? null,
+    masterShipperName: record.masterShipperName ?? null,
+    bolNumber: record.bolNumber ?? null,
+    houseBolNumber: record.houseBolNumber ?? null,
+    masterBolNumber: record.masterBolNumber ?? null,
+    containerNumber: record.containerNumber ?? null,
+    billType: record.billType ?? null,
+    shipmentDate: record.shipmentDate ?? null,
+    arrivalDate: record.shipmentDate ?? null,
+    arrivalPort: record.arrivalPort ?? record.destinationPort ?? null,
     destinationPort: record.destinationPort ?? null,
     destinationMarket: record.destinationMarket ?? null,
+    destinationCity: record.destinationCity ?? null,
+    destinationState: record.destinationState ?? null,
+    destinationZip: record.destinationZip ?? null,
     originPort: record.originPort ?? null,
+    foreignPort: record.foreignPort ?? null,
     shipFromPort: record.shipFromPort ?? null,
+    placeOfReceipt: record.placeOfReceipt ?? null,
+    originCountry: record.originCountry ?? null,
+    productDescription: record.productDescription ?? null,
     hsCode: record.hsCode ?? null,
     containerCount: record.containerCount ?? null,
+    teu: record.teu ?? null,
     weight: record.weight ?? null,
+    quantity: record.quantity ?? null,
     volume: record.volume ?? null,
+    carrier: record.carrier ?? null,
+    vessel: record.vessel ?? null,
+    voyage: record.voyage ?? null,
     scoreReasoning: buildScoreReasoning(record),
     rawData: record.rawData ?? {}
   };
@@ -585,9 +835,12 @@ function buildScoreReasoning(record: TradeMiningRecordInput): Prisma.InputJsonOb
   return {
     baseScore: 20,
     containerScore: Math.min(25, Math.max(0, record.containerCount ?? 0) * 5),
-    weightScore: Math.min(20, Math.floor(Math.max(0, record.weight ?? 0) / 5000)),
+    volumeScore: Math.min(
+      20,
+      Math.floor(Math.max(0, record.weight ?? 0) / 5000) + Math.floor(Math.max(0, record.teu ?? 0) * 4)
+    ),
     productScore: record.productDescription || record.hsCode ? 15 : 0,
-    laneScore: record.destinationMarket || record.destinationPort ? 20 : 0,
+    laneScore: record.destinationMarket || record.destinationPort || record.arrivalPort ? 20 : 0,
     recencyScore: record.shipmentDate ? 10 : 0,
     note: "Temporary deterministic score for Candidate Feed readiness until ranked scoring milestone."
   };
@@ -595,6 +848,24 @@ function buildScoreReasoning(record: TradeMiningRecordInput): Prisma.InputJsonOb
 
 function parseDate(value: string | null | undefined) {
   return value ? new Date(value) : null;
+}
+
+function readSearchProfileIdFromJobInput(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const field = (value as Record<string, unknown>).searchProfileId;
+  return typeof field === "string" && field.trim() ? field : null;
+}
+
+function readJsonString(value: unknown, key: string) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const field = (value as Record<string, unknown>)[key];
+  return typeof field === "string" && field.trim() ? field : null;
 }
 
 function mapExternalJobStatus(status: string) {
@@ -648,6 +919,17 @@ function readOptionalString(body: Record<string, unknown>, field: string, errors
   return value.trim() || undefined;
 }
 
+function readOptionalAliasedString(body: Record<string, unknown>, fields: string[], errors: string[]) {
+  for (const field of fields) {
+    const value = readOptionalString(body, field, errors);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
 function readOptionalNumber(body: Record<string, unknown>, field: string, errors: string[]) {
   const value = body[field];
 
@@ -661,6 +943,17 @@ function readOptionalNumber(body: Record<string, unknown>, field: string, errors
   }
 
   return value;
+}
+
+function readOptionalAliasedNumber(body: Record<string, unknown>, fields: string[], errors: string[]) {
+  for (const field of fields) {
+    const value = readOptionalNumber(body, field, errors);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+
+  return undefined;
 }
 
 function readOptionalJsonObject(body: Record<string, unknown>, field: string, errors: string[]) {

@@ -69,6 +69,13 @@ type SearchProfileSummary = {
   id: string;
   name: string;
   priorityWeight: number;
+  destinationMarkets: string[];
+  destinationPorts: string[];
+  originPorts: string[];
+  shipFromPorts: string[];
+  originCountries: string[];
+  productKeywords: string[];
+  hsCodes: string[];
 };
 
 export async function getCandidateFeed(tenant: TenantContext, filters: CandidateFeedFilters = {}) {
@@ -861,14 +868,37 @@ async function loadSearchProfileSummaries(tenant: TenantContext, searchProfileId
     select: {
       id: true,
       name: true,
-      priorityWeight: true
+      priorityWeight: true,
+      destinationMarkets: true,
+      destinationPorts: true,
+      originPorts: true,
+      shipFromPorts: true,
+      originCountries: true,
+      productKeywords: true,
+      hsCodes: true
     }
   });
 
-  return new Map(profiles.map((profile) => [profile.id, profile]));
+  return new Map(
+    profiles.map((profile) => [
+      profile.id,
+      {
+        id: profile.id,
+        name: profile.name,
+        priorityWeight: profile.priorityWeight,
+        destinationMarkets: asStringArray(profile.destinationMarkets),
+        destinationPorts: asStringArray(profile.destinationPorts),
+        originPorts: asStringArray(profile.originPorts),
+        shipFromPorts: asStringArray(profile.shipFromPorts),
+        originCountries: asStringArray(profile.originCountries),
+        productKeywords: asStringArray(profile.productKeywords),
+        hsCodes: asStringArray(profile.hsCodes)
+      }
+    ])
+  );
 }
 
-function summarizeTradeMiningEvidence(
+export function summarizeTradeMiningEvidence(
   importRecords: Array<{
     rawJson: unknown;
     arrivalDate: Date | null;
@@ -884,29 +914,76 @@ function summarizeTradeMiningEvidence(
   const latestRawJson = asObject(latestRecord?.rawJson);
   const searchProfileId = readString(latestRawJson, "searchProfileId");
 
-  const containerCount = sumNumericRawValues(importRecords, ["containerCount", "containers", "shipmentVolume"]);
+  const containerCount = sumNumericRawValues(importRecords, ["containerCount", "container_count", "containers", "shipmentVolume"]);
   const shipmentWeight = sumNumericRawValues(importRecords, ["weight", "weightKg", "shipmentWeight"]);
+  const totalTeu = sumNumericRawValues(importRecords, ["teu"]);
+  const totalQuantity = sumNumericRawValues(importRecords, ["quantity"]);
+  const destinationCity = latestRecord?.destinationCity ?? firstStringFromRecords(importRecords, "destinationCity");
+  const destinationState = latestRecord?.destinationState ?? firstStringFromRecords(importRecords, "destinationState");
+  const destinationZip = firstStringFromRecords(importRecords, "destinationZip");
+  const destinationPort = firstStringFromRecords(importRecords, "destinationPort") ?? firstStringFromRecords(importRecords, "arrivalPort");
+  const destinationMarket =
+    firstStringFromRecords(importRecords, "destinationMarket") ??
+    formatDestination(latestRawJson, destinationCity ?? null, destinationState ?? null);
+  const originCountry = latestRecord?.originCountry ?? firstStringFromRecords(importRecords, "originCountry");
+  const originPort = latestRecord?.sourcePort ?? firstStringFromRecords(importRecords, "originPort");
+  const foreignPort = firstStringFromRecords(importRecords, "foreignPort");
+  const shipFromPort = firstStringFromRecords(importRecords, "shipFromPort");
+  const placeOfReceipt = firstStringFromRecords(importRecords, "placeOfReceipt");
+  const productDescription = latestRecord?.productDescription ?? firstStringFromRecords(importRecords, "productDescription");
+  const hsCode = firstStringFromRecords(importRecords, "hsCode");
+  const sourceRole = firstStringFromRecords(importRecords, "sourceRole");
+  const companyMatchName = firstStringFromRecords(importRecords, "companyMatchName");
+  const carrier = firstStringFromRecords(importRecords, "carrier");
+  const vessel = firstStringFromRecords(importRecords, "vessel");
+  const voyage = firstStringFromRecords(importRecords, "voyage");
+  const searchProfile = searchProfileId ? searchProfiles.get(searchProfileId) ?? null : null;
+  const profileFit = scoreProfileFit({
+    destinationMarket,
+    destinationPort,
+    destinationCity,
+    destinationState,
+    originCountry,
+    originPort,
+    foreignPort,
+    shipFromPort,
+    placeOfReceipt,
+    productDescription,
+    hsCode,
+    searchProfile
+  });
 
   return {
     shipmentCount: importRecords.length,
     latestShipmentDate: latestRecord?.arrivalDate ?? null,
-    searchProfile: searchProfileId ? searchProfiles.get(searchProfileId) ?? null : null,
-    destinationMarket:
-      firstStringFromRecords(importRecords, "destinationMarket") ??
-      formatDestination(latestRawJson, latestRecord?.destinationCity ?? null, latestRecord?.destinationState ?? null),
-    destinationPort: firstStringFromRecords(importRecords, "destinationPort"),
-    originCountry: latestRecord?.originCountry ?? firstStringFromRecords(importRecords, "originCountry"),
-    originPort: latestRecord?.sourcePort ?? firstStringFromRecords(importRecords, "originPort"),
-    shipFromPort: firstStringFromRecords(importRecords, "shipFromPort"),
-    productDescription: latestRecord?.productDescription ?? firstStringFromRecords(importRecords, "productDescription"),
-    hsCode: firstStringFromRecords(importRecords, "hsCode"),
+    searchProfile,
+    destinationMarket,
+    destinationPort,
+    destinationCity,
+    destinationState,
+    destinationZip,
+    originCountry,
+    originPort,
+    foreignPort,
+    shipFromPort,
+    placeOfReceipt,
+    productDescription,
+    hsCode,
+    sourceRole,
+    companyMatchName,
+    carrier,
+    vessel,
+    voyage,
     containerCount,
+    totalTeu,
     shipmentWeight,
+    totalQuantity,
+    profileFit,
     importedScoreReasoning: readImportedScoreReasoning(latestRawJson)
   };
 }
 
-function scoreCandidate({
+export function scoreCandidate({
   companyPriorityScore,
   candidateStatus,
   alreadyInPipeline,
@@ -917,14 +994,18 @@ function scoreCandidate({
   alreadyInPipeline: boolean;
   evidence: ReturnType<typeof summarizeTradeMiningEvidence>;
 }) {
-  const frequencyScore = Math.min(30, evidence.shipmentCount * 8);
-  const volumeScore = Math.min(15, Math.floor(evidence.containerCount * 4 + evidence.shipmentWeight / 10000));
+  const frequencyScore = Math.min(24, evidence.shipmentCount * 6);
+  const volumeScore = Math.min(
+    16,
+    Math.floor(evidence.containerCount * 3 + evidence.totalTeu * 4 + evidence.shipmentWeight / 20000)
+  );
   const recencyScore = scoreRecency(evidence.latestShipmentDate);
-  const destinationScore = evidence.destinationMarket || evidence.destinationPort ? 10 : 0;
-  const originScore = evidence.originCountry || evidence.originPort || evidence.shipFromPort ? 8 : 0;
-  const productScore = evidence.productDescription || evidence.hsCode ? 10 : 0;
-  const profileScore = Math.min(12, Math.floor((evidence.searchProfile?.priorityWeight ?? 0) / 8));
-  const existingPriorityScore = Math.min(15, Math.floor(companyPriorityScore / 6));
+  const roleScore = scoreRole(evidence.sourceRole);
+  const destinationScore = evidence.profileFit.destination;
+  const originScore = evidence.profileFit.origin;
+  const productScore = evidence.profileFit.product;
+  const profileScore = Math.min(10, Math.floor((evidence.searchProfile?.priorityWeight ?? 0) / 10));
+  const existingPriorityScore = Math.min(10, Math.floor(companyPriorityScore / 10));
   const pipelinePenalty = alreadyInPipeline ? -18 : 0;
   const rejectedPenalty =
     candidateStatus === CandidateStatus.REJECTED || candidateStatus === CandidateStatus.DISQUALIFIED ? -100 : 0;
@@ -932,6 +1013,7 @@ function scoreCandidate({
     frequencyScore +
     volumeScore +
     recencyScore +
+    roleScore +
     destinationScore +
     originScore +
     productScore +
@@ -944,9 +1026,10 @@ function scoreCandidate({
   const reasoning = [
     `${evidence.shipmentCount} shipment${evidence.shipmentCount === 1 ? "" : "s"}`,
     evidence.latestShipmentDate ? `${scoreRecencyLabel(evidence.latestShipmentDate)} shipment recency` : "no shipment date",
-    evidence.destinationMarket || evidence.destinationPort ? "destination fit present" : "destination fit missing",
-    evidence.originCountry || evidence.originPort || evidence.shipFromPort ? "origin fit present" : "origin fit missing",
-    evidence.productDescription || evidence.hsCode ? "product/HS fit present" : "product/HS fit missing",
+    evidence.sourceRole ? `${formatSourceRole(evidence.sourceRole)} role` : "no source role",
+    evidence.profileFit.destination > 0 ? "destination fit matched profile" : "destination fit missing",
+    evidence.profileFit.origin > 0 ? "origin fit matched profile" : "origin fit missing",
+    evidence.profileFit.product > 0 ? "product/HS fit matched profile" : "product/HS fit missing",
     evidence.searchProfile ? `${evidence.searchProfile.name} profile priority` : "no matched search profile",
     alreadyInPipeline ? "already in pipeline; deprioritized" : "not yet in pipeline"
   ].join("; ");
@@ -1068,6 +1151,69 @@ function sumNumericRawValues(records: Array<{ rawJson: unknown }>, keys: string[
   }, 0);
 }
 
+function scoreProfileFit({
+  destinationMarket,
+  destinationPort,
+  destinationCity,
+  destinationState,
+  originCountry,
+  originPort,
+  foreignPort,
+  shipFromPort,
+  placeOfReceipt,
+  productDescription,
+  hsCode,
+  searchProfile
+}: {
+  destinationMarket: string | null;
+  destinationPort: string | null;
+  destinationCity: string | null;
+  destinationState: string | null;
+  originCountry: string | null;
+  originPort: string | null;
+  foreignPort: string | null;
+  shipFromPort: string | null;
+  placeOfReceipt: string | null;
+  productDescription: string | null;
+  hsCode: string | null;
+  searchProfile: SearchProfileSummary | null;
+}) {
+  if (!searchProfile) {
+    return {
+      destination: destinationMarket || destinationPort ? 4 : 0,
+      origin: originCountry || originPort || foreignPort || shipFromPort || placeOfReceipt ? 3 : 0,
+      product: productDescription || hsCode ? 3 : 0
+    };
+  }
+
+  const destinationSignals = [destinationMarket, destinationPort, destinationCity, destinationState].filter(
+    (value): value is string => Boolean(value)
+  );
+  const originSignals = [originCountry, originPort, foreignPort, shipFromPort, placeOfReceipt].filter(
+    (value): value is string => Boolean(value)
+  );
+  const destinationMatched = destinationSignals.some(
+    (signal) =>
+      matchesProfileValue(searchProfile.destinationMarkets, signal) ||
+      matchesProfileValue(searchProfile.destinationPorts, signal)
+  );
+  const originMatched = originSignals.some(
+    (signal) =>
+      matchesProfileValue(searchProfile.originCountries, signal) ||
+      matchesProfileValue(searchProfile.originPorts, signal) ||
+      matchesProfileValue(searchProfile.shipFromPorts, signal)
+  );
+  const productMatched =
+    (hsCode ? matchesHsCode(searchProfile.hsCodes, hsCode) : false) ||
+    (productDescription ? matchesKeyword(searchProfile.productKeywords, productDescription) : false);
+
+  return {
+    destination: destinationMatched ? 12 : destinationSignals.length > 0 ? 4 : 0,
+    origin: originMatched ? 8 : originSignals.length > 0 ? 3 : 0,
+    product: productMatched ? 10 : productDescription || hsCode ? 3 : 0
+  };
+}
+
 function readImportedScoreReasoning(rawJson: JsonObject) {
   const scoreReasoning = asObject(rawJson.scoreReasoning);
   const summary = readString(scoreReasoning, "summary") ?? readString(rawJson, "scoreReasoning");
@@ -1078,6 +1224,25 @@ function readImportedScoreReasoning(rawJson: JsonObject) {
 
   const reasons = scoreReasoning.reasons;
   return Array.isArray(reasons) ? reasons.filter((reason): reason is string => typeof reason === "string").join("; ") : null;
+}
+
+function scoreRole(sourceRole: string | null) {
+  switch (sourceRole) {
+    case "consignee_name":
+      return 14;
+    case "importer_name":
+      return 12;
+    case "notify_party":
+      return 11;
+    case "master_consignee_name":
+      return 9;
+    case "shipper_name":
+      return 4;
+    case "master_shipper_name":
+      return 2;
+    default:
+      return 0;
+  }
 }
 
 function scoreRecency(latestShipmentDate: Date | null) {
@@ -1129,6 +1294,32 @@ function formatDestination(rawJson: JsonObject, fallbackCity: string | null, fal
   }
 
   return city ?? state ?? null;
+}
+
+function formatSourceRole(sourceRole: string) {
+  return sourceRole.replace(/_/g, " ");
+}
+
+function matchesProfileValue(values: string[], candidate: string) {
+  const normalizedCandidate = normalizeComparableValue(candidate);
+  return values.some((value) => {
+    const normalizedValue = normalizeComparableValue(value);
+    return normalizedValue === normalizedCandidate || normalizedValue.includes(normalizedCandidate) || normalizedCandidate.includes(normalizedValue);
+  });
+}
+
+function matchesKeyword(values: string[], candidate: string) {
+  const normalizedCandidate = normalizeComparableValue(candidate);
+  return values.some((value) => normalizedCandidate.includes(normalizeComparableValue(value)));
+}
+
+function matchesHsCode(values: string[], candidate: string) {
+  const normalizedCandidate = candidate.replace(/[^0-9]/g, "");
+  return values.some((value) => value.replace(/[^0-9]/g, "") === normalizedCandidate);
+}
+
+function normalizeComparableValue(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function clamp(value: number, min: number, max: number) {

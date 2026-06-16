@@ -1,6 +1,6 @@
 import { NewlLogo } from "@/components/newl-logo";
 import { signInWithEntraAction } from "@/server/auth/actions";
-import { isDevLoginEnabled } from "@/server/auth/constants";
+import { isDevLoginEnabled, isTemporaryPasswordLoginEnabled } from "@/server/auth/constants";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +24,8 @@ export default async function LoginPage({
   const errorCode = readParam(params.error);
   const errorMessage = errorCode ? (errorMessages[errorCode] ?? errorMessages.default) : null;
   const devLoginEnabled = isDevLoginEnabled();
+  const temporaryPasswordLoginEnabled = isTemporaryPasswordLoginEnabled();
+  const passwordLoginEnabled = devLoginEnabled || temporaryPasswordLoginEnabled;
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-12">
@@ -56,21 +58,29 @@ export default async function LoginPage({
             </button>
           </form>
 
-          {devLoginEnabled ? (
+          {passwordLoginEnabled ? (
             <div className="mt-6 space-y-3">
               <div className="flex items-center gap-3">
                 <span className="h-px flex-1 bg-border" />
                 <span className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">
-                  Dev login
+                  Password login
                 </span>
                 <span className="h-px flex-1 bg-border" />
               </div>
 
-              <div className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-                Local development bypass is active (AUTH_DEV_BYPASS). This panel never appears in production.
-              </div>
+              {devLoginEnabled ? (
+                <div className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+                  Local development bypass is active (AUTH_DEV_BYPASS). This panel never appears in production.
+                </div>
+              ) : null}
 
-              <form action="/api/auth/dev-login" method="post" className="space-y-3">
+              {temporaryPasswordLoginEnabled ? (
+                <div className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+                  Temporary password login is active while Microsoft SSO is being configured.
+                </div>
+              ) : null}
+
+              <form action="/api/auth/password-login" method="post" className="space-y-3">
                 <input type="hidden" name="callbackUrl" value={callbackUrl} />
                 <label className="block space-y-1 text-sm font-medium text-foreground">
                   <span>Email</span>
@@ -78,7 +88,7 @@ export default async function LoginPage({
                     name="email"
                     type="email"
                     autoComplete="username"
-                    defaultValue="admin@example.com"
+                    defaultValue={devLoginEnabled ? "admin@example.com" : ""}
                     className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
                   />
                 </label>
@@ -96,7 +106,7 @@ export default async function LoginPage({
                   type="submit"
                   className="w-full rounded-md border border-border bg-card px-4 py-2.5 text-sm font-semibold text-foreground transition-colors hover:border-accentBorder hover:bg-accentSoft"
                 >
-                  Continue with dev login
+                  Continue with password
                 </button>
               </form>
             </div>

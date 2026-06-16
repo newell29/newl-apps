@@ -44,7 +44,7 @@ export const ROLE_MATRIX: Record<PlatformRole, RolePolicy> = {
   [PlatformRole.MANAGER]: { modules: "ALL", canMutate: true },
   [PlatformRole.SALES]: { modules: [ModuleKey.LEAD_GEN], canMutate: true },
   [PlatformRole.OPERATIONS]: {
-    modules: [ModuleKey.LEAD_GEN, ModuleKey.UPS_TOOLS, ModuleKey.TRANSIT_LOOKUP],
+    modules: [ModuleKey.LEAD_GEN, ModuleKey.UPS_TOOLS, ModuleKey.LTL_RATE_PORTAL, ModuleKey.TRANSIT_LOOKUP],
     canMutate: true
   },
   [PlatformRole.FINANCE]: {

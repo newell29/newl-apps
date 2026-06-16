@@ -20,9 +20,9 @@ export function middleware(request: NextRequest) {
   );
 
   if (nextUrl.pathname === "/login") {
-    if (hasSession) {
-      return NextResponse.redirect(new URL("/dashboard", request.url));
-    }
+    // Do not bounce /login based only on cookie presence. A stale or invalid
+    // session cookie must still allow the user to reach the login page,
+    // otherwise /login <-> /dashboard can loop forever.
     return NextResponse.next();
   }
 
