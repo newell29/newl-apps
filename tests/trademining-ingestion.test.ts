@@ -60,6 +60,7 @@ type JobRunRow = {
   tenantId: string;
   jobType: string;
   status: JobStatus;
+  startedAt?: Date;
   input?: Record<string, unknown>;
   output?: Record<string, unknown>;
   errorMessage?: string | null;
@@ -102,17 +103,28 @@ const mockDb = vi.hoisted(() => {
       findFirst: vi.fn(async ({ where }: { where: { id: string; tenantId: string } }) => {
         const profile = state.searchProfiles.get(where.id);
         return profile && profile.tenantId === where.tenantId ? { id: profile.id } : null;
+      }),
+      update: vi.fn(async ({ where, data }: { where: { id: string }; data: Partial<SearchProfileRow> }) => {
+        const profile = state.searchProfiles.get(where.id);
+
+        if (!profile) {
+          throw new Error("Search profile not found");
+        }
+
+        const updated = { ...profile, ...data };
+        state.searchProfiles.set(where.id, updated);
+        return updated;
       })
     },
     automationJobRun: {
       create: vi.fn(async ({ data }: { data: Omit<JobRunRow, "id"> }) => {
-        const jobRun = { id: `job-${state.nextJobRunId++}`, ...data };
+        const jobRun = { id: `job-${state.nextJobRunId++}`, startedAt: new Date("2026-06-16T12:00:00.000Z"), ...data };
         state.jobRuns.set(jobRun.id, jobRun);
         return jobRun;
       }),
       findFirst: vi.fn(async ({ where }: { where: { id: string; tenantId: string } }) => {
         const jobRun = state.jobRuns.get(where.id);
-        return jobRun && jobRun.tenantId === where.tenantId ? { id: jobRun.id } : null;
+        return jobRun && jobRun.tenantId === where.tenantId ? { ...jobRun } : null;
       }),
       update: vi.fn(async ({ where, data }: { where: { id: string; tenantId: string }; data: Partial<JobRunRow> }) => {
         const jobRun = state.jobRuns.get(where.id);
@@ -176,6 +188,26 @@ const mockDb = vi.hoisted(() => {
         const record = { ...create, id: create.id ?? `import-record-${state.nextImportRecordId++}` };
         state.importRecords.set(key, record);
         return record;
+      }),
+      findMany: vi.fn(async ({ where }: { where: { tenantId: string } }) => {
+        return [...state.importRecords.values()]
+          .filter((record) => record.tenantId === where.tenantId)
+          .map((record) => {
+            const company = [...state.companies.values()].find(
+              (candidate) => candidate.id === record.companyId && candidate.tenantId === record.tenantId
+            );
+
+            return {
+              ...record,
+              company: company
+                ? {
+                    id: company.id,
+                    name: company.name,
+                    normalizedName: company.normalizedName
+                  }
+                : null
+            };
+          });
       })
     },
     auditLog: {
@@ -196,6 +228,7 @@ vi.mock("@/server/db", () => ({
 import {
   IngestionValidationError,
   createTradeMiningJobRun,
+  getTradeMiningJobRunReadback,
   getActiveTradeMiningProfilesForWorker,
   ingestTradeMiningBatch,
   updateTradeMiningJobRunStatus
@@ -318,6 +351,74 @@ describe("TradeMining ingestion", () => {
     });
   });
 
+  it("accepts canonical snake_case TradeMining fields and preserves richer BOL details", async () => {
+    mockDb.state.searchProfiles.set("profile-a", searchProfile({ id: "profile-a", tenantId: "tenant-a" }));
+
+    await expect(
+      ingestTradeMiningBatch(tenant, {
+        source: "OPENCLAW",
+        searchProfileId: "profile-a",
+        records: [
+          {
+            consignee_name: "Southeast Retail Group LLC",
+            notify_party: "Southeast Retail Group LLC",
+            house_bol_number: "HBOL-22",
+            master_bol_number: "MBOL-99",
+            container_number: "MSCU1234567",
+            arrival_date: "2026-06-14",
+            arrival_port: "Houston, Texas",
+            foreign_port: "Yantian",
+            place_of_receipt: "Shenzhen",
+            destination_city: "Charlotte",
+            destination_state: "NC",
+            destination_zip: "28202",
+            origin_country: "China",
+            product_description: "outdoor furniture cushions",
+            hs_code: "9403.20",
+            container_count: 3,
+            teu: 4,
+            weight: 24500,
+            quantity: 1180,
+            carrier: "MSC",
+            vessel: "MSC Aurora",
+            voyage: "A12"
+          }
+        ]
+      })
+    ).resolves.toMatchObject({
+      recordsProcessed: 1,
+      recordsCreated: 1,
+      companiesCreated: 1
+    });
+
+    const company = [...mockDb.state.companies.values()][0];
+    const record = [...mockDb.state.importRecords.values()][0];
+
+    expect(company).toMatchObject({
+      normalizedName: "southeast-retail-group-llc"
+    });
+    expect(record).toMatchObject({
+      consigneeName: "Southeast Retail Group LLC",
+      shipperName: null,
+      destinationCity: "Charlotte",
+      destinationState: "NC",
+      originCountry: "China",
+      productDescription: "outdoor furniture cushions"
+    });
+    expect(record.rawJson).toMatchObject({
+      sourceRole: "consignee_name",
+      arrivalPort: "Houston, Texas",
+      foreignPort: "Yantian",
+      placeOfReceipt: "Shenzhen",
+      destinationZip: "28202",
+      hsCode: "9403.20",
+      teu: 4,
+      carrier: "MSC",
+      vessel: "MSC Aurora",
+      voyage: "A12"
+    });
+  });
+
   it("rejects profile and job run IDs that do not belong to the authenticated tenant", async () => {
     mockDb.state.searchProfiles.set("profile-b", searchProfile({ id: "profile-b", tenantId: "tenant-b" }));
     mockDb.state.jobRuns.set("job-b", {
@@ -380,6 +481,53 @@ describe("TradeMining ingestion", () => {
       action: "trademining.job.completed",
       entityType: "AutomationJobRun",
       entityId: started.jobRunId
+    });
+  });
+
+  it("returns a narrow readback of stored rows for one job run", async () => {
+    mockDb.state.searchProfiles.set("profile-a", searchProfile({ id: "profile-a", tenantId: "tenant-a" }));
+
+    const started = await createTradeMiningJobRun(tenant, {
+      source: "OPENCLAW",
+      searchProfileId: "profile-a"
+    });
+
+    await ingestTradeMiningBatch(tenant, {
+      source: "OPENCLAW",
+      jobRunId: started.jobRunId,
+      searchProfileId: "profile-a",
+      records: [
+        {
+          consignee_name: "Harbor Home Retail LLC",
+          arrival_date: "2026-06-14",
+          arrival_port: "Houston, Texas",
+          foreign_port: "Shanghai",
+          product_description: "furniture and fixtures",
+          hs_code: "9403"
+        }
+      ]
+    });
+
+    const result = await getTradeMiningJobRunReadback(tenant, started.jobRunId);
+
+    expect(result.jobRun).toMatchObject({
+      id: started.jobRunId,
+      jobType: "trademining.ingestion",
+      status: JobStatus.RUNNING
+    });
+    expect(result.records).toHaveLength(1);
+    expect(result.records[0]).toMatchObject({
+      consigneeName: "Harbor Home Retail LLC",
+      company: {
+        name: "Harbor Home Retail LLC"
+      },
+      rawPayload: {
+        jobRunId: started.jobRunId,
+        sourceRole: "consignee_name",
+        arrivalPort: "Houston, Texas",
+        foreignPort: "Shanghai",
+        hsCode: "9403"
+      }
     });
   });
 });

@@ -19,6 +19,7 @@ enum PlatformRole {
 enum ModuleKey {
   LEAD_GEN
   UPS_TOOLS
+  LTL_RATE_PORTAL
   TRANSIT_LOOKUP
   INVOICE_VERIFICATION
   QUICKBOOKS_POSTING
@@ -30,6 +31,7 @@ enum IntegrationProvider {
   GOOGLE_SHEETS
   QUICKBOOKS
   UPS
+  SEVEN_L
   OPENCLAW
   OPENAI
 }
@@ -151,6 +153,7 @@ model Tenant {
   contacts               Contact[]
   leads                  Lead[]
   contactOutreachDrafts  ContactOutreachDraft[]
+  ltlBatchQuoteLanes     LtlBatchQuoteLane[]
 }
 
 model User {
@@ -299,10 +302,33 @@ model AutomationJobRun {
   errorMessage String?
   createdAt    DateTime  @default(now())
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ltlBatchQuoteLanes LtlBatchQuoteLane[]
 
   @@index([tenantId, jobType, startedAt])
   @@index([tenantId, status])
+}
+
+model LtlBatchQuoteLane {
+  id               String    @id @default(cuid())
+  tenantId         String
+  jobRunId         String
+  laneIndex        Int
+  customerReference String
+  quoteCount       Int       @default(0)
+  errorCount       Int       @default(0)
+  requestJson      Json
+  quotesJson       Json?
+  errorsJson       Json?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  jobRun AutomationJobRun @relation(fields: [jobRunId], references: [id], onDelete: Cascade)
+
+  @@unique([jobRunId, laneIndex])
+  @@index([tenantId, jobRunId])
+  @@index([tenantId, createdAt])
 }
 
 model Company {

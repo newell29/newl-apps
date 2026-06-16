@@ -1,18 +1,39 @@
 "use client";
 
-import type { PlatformRole } from "@prisma/client";
+import type { ModuleKey, PlatformRole } from "@prisma/client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { NewlLogo } from "@/components/newl-logo";
 import { signOutAction } from "@/server/auth/actions";
 
-const navItems = [
+type NavLink = {
+  href: string;
+  label: string;
+  moduleKey?: ModuleKey;
+};
+
+type NavSection = {
+  label: string;
+  href?: string;
+  moduleKey?: ModuleKey;
+  items?: NavLink[];
+};
+
+const navSections: NavSection[] = [
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/lead-gen/search-profiles", label: "Search Profiles" },
-  { href: "/lead-gen/candidates", label: "Found Companies" },
-  { href: "/lead-gen/pipeline", label: "Pipeline" },
-  { href: "/lead-gen/contacts", label: "Contacts" },
-  { href: "/operations/logs", label: "Jobs & Audit" },
+  {
+    label: "TradeMining Leads",
+    moduleKey: "LEAD_GEN" as ModuleKey,
+    items: [
+      { href: "/lead-gen/search-profiles", label: "Search Profiles", moduleKey: "LEAD_GEN" as ModuleKey },
+      { href: "/lead-gen/candidates", label: "Found Companies", moduleKey: "LEAD_GEN" as ModuleKey },
+      { href: "/lead-gen/pipeline", label: "Pipeline", moduleKey: "LEAD_GEN" as ModuleKey },
+      { href: "/lead-gen/contacts", label: "Contacts", moduleKey: "LEAD_GEN" as ModuleKey },
+      { href: "/operations/logs", label: "Health & Logs", moduleKey: "LEAD_GEN" as ModuleKey }
+    ]
+  },
+  { href: "/ups-tools", label: "UPS Tools", moduleKey: "UPS_TOOLS" as ModuleKey },
+  { href: "/ltl-rate-portal", label: "LTL Rate Portal", moduleKey: "LTL_RATE_PORTAL" as ModuleKey },
   { href: "/settings", label: "Settings" }
 ];
 
@@ -29,16 +50,30 @@ export function AppShell({
   userName,
   userEmail,
   role,
-  tenantName
+  tenantName,
+  enabledModuleKeys
 }: {
   children: React.ReactNode;
   userName?: string | null;
   userEmail?: string;
   role?: PlatformRole;
   tenantName?: string;
+  enabledModuleKeys?: ModuleKey[];
 }) {
   const pathname = usePathname();
   const displayName = userName?.trim() || userEmail || "Signed in";
+  const visibleNavSections = navSections
+    .map((section) => ({
+      ...section,
+      items: section.items?.filter((item) => !item.moduleKey || enabledModuleKeys?.includes(item.moduleKey))
+    }))
+    .filter((section) => {
+      if (section.items) {
+        return section.items.length > 0;
+      }
+
+      return !section.moduleKey || enabledModuleKeys?.includes(section.moduleKey);
+    });
 
   return (
     <div className="min-h-screen bg-background lg:flex">
@@ -46,25 +81,64 @@ export function AppShell({
         <div className="flex h-16 items-center gap-3 border-b border-sidebarForeground/10 bg-sidebarStrong px-5">
           <NewlLogo compact inverse />
         </div>
-        <nav className="flex gap-1 overflow-x-auto p-3 lg:block lg:flex-1 lg:space-y-1 lg:overflow-visible">
-          {navItems.map((item) => {
-            const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+        <nav className="p-3 lg:flex-1">
+          <div className="space-y-3">
+            {visibleNavSections.map((section) => {
+              const sectionIsActive = section.href
+                ? pathname === section.href || pathname.startsWith(`${section.href}/`)
+                : section.items?.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
 
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={[
-                  "block whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                  isActive
-                    ? "bg-sidebarActive text-primaryForeground shadow-sm hover:bg-primaryHover"
-                    : "text-sidebarMuted hover:bg-sidebarHover hover:text-sidebarForeground"
-                ].join(" ")}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
+              if (section.items) {
+                return (
+                  <div key={section.label} className="space-y-1">
+                    <div
+                      className={[
+                        "rounded-md px-3 py-2 text-xs font-semibold uppercase tracking-wide",
+                        sectionIsActive ? "text-sidebarForeground" : "text-sidebarMuted"
+                      ].join(" ")}
+                    >
+                      {section.label}
+                    </div>
+                    <div className="space-y-1">
+                      {section.items.map((item) => {
+                        const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+
+                        return (
+                          <Link
+                            key={item.href}
+                            href={item.href}
+                            className={[
+                              "block rounded-md px-3 py-2 pl-6 text-sm font-medium transition-colors",
+                              isActive
+                                ? "bg-sidebarActive text-primaryForeground shadow-sm hover:bg-primaryHover"
+                                : "text-sidebarMuted hover:bg-sidebarHover hover:text-sidebarForeground"
+                            ].join(" ")}
+                          >
+                            {item.label}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <Link
+                  key={section.href}
+                  href={section.href!}
+                  className={[
+                    "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                    sectionIsActive
+                      ? "bg-sidebarActive text-primaryForeground shadow-sm hover:bg-primaryHover"
+                      : "text-sidebarMuted hover:bg-sidebarHover hover:text-sidebarForeground"
+                  ].join(" ")}
+                >
+                  {section.label}
+                </Link>
+              );
+            })}
+          </div>
         </nav>
         {tenantName || role || userEmail ? (
           <div className="border-t border-sidebarForeground/10 p-3 lg:mt-auto">

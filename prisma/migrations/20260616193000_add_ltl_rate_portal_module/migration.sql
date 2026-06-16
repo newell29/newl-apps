@@ -1,0 +1,3 @@
+ALTER TYPE "ModuleKey" ADD VALUE 'LTL_RATE_PORTAL';
+
+ALTER TYPE "IntegrationProvider" ADD VALUE 'SEVEN_L';

@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
+import { accessibleModuleKeys } from "@/server/auth/authorization";
+import { prisma } from "@/server/db";
 import { getAuthenticatedContext, type AuthenticatedContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
@@ -25,12 +27,32 @@ export default async function AuthenticatedLayout({
     redirect("/login");
   }
 
+  const tenantModuleAccess = await prisma.tenantModuleAccess.findMany({
+    where: {
+      tenantId: context.tenantId,
+      enabled: true
+    },
+    include: {
+      module: {
+        select: {
+          key: true
+        }
+      }
+    }
+  });
+
+  const allowedModuleKeys = new Set(accessibleModuleKeys(context.role));
+  const enabledModuleKeys = tenantModuleAccess
+    .map((access) => access.module.key)
+    .filter((key) => allowedModuleKeys.has(key));
+
   return (
     <AppShell
       userName={context.userName}
       userEmail={context.userEmail}
       role={context.role}
       tenantName={context.tenantName}
+      enabledModuleKeys={enabledModuleKeys}
     >
       {children}
     </AppShell>
