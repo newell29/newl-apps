@@ -33,3 +33,16 @@ export const SECURE_SESSION_COOKIE_NAME = "__Secure-authjs.session-token";
 export function isDevLoginEnabled(): boolean {
   return process.env.NODE_ENV !== "production" && process.env.AUTH_DEV_BYPASS === "true";
 }
+
+/**
+ * Temporary password login for deployed/internal testing while Microsoft Entra
+ * is being configured. This is intentionally separate from AUTH_DEV_BYPASS so
+ * production can never accidentally inherit the local-dev bypass.
+ */
+export function isTemporaryPasswordLoginEnabled(): boolean {
+  return process.env.AUTH_TEMP_PASSWORD_LOGIN === "true";
+}
+
+export function isPasswordLoginEnabled(): boolean {
+  return isDevLoginEnabled() || isTemporaryPasswordLoginEnabled();
+}
