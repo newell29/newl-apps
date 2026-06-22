@@ -105,7 +105,10 @@ export async function getLocalSevenLAccountNames(): Promise<Set<string>> {
     return new Set();
   }
 
-  const accounts = await loadLocalAccountsFile();
+  const accounts = await loadLocalAccountsFile().catch(() => null);
+  if (!accounts) {
+    return new Set();
+  }
   return new Set(accounts.map((account) => account.name));
 }
 
