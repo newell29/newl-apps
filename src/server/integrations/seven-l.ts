@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { Buffer } from "node:buffer";
-import { estimateLtlQuotes, serializeFreightInfo } from "@/modules/ltl-rate-portal/engine";
+import { serializeFreightInfo } from "@/modules/ltl-rate-portal/engine";
 import type {
   LtlCarrierErrorResult,
   LtlCountryCode,
@@ -125,24 +125,9 @@ export async function getLtlQuotes(
 
   const credential = await resolveRuntimeCredential(account);
   if (!credential) {
-    if (!account.dryRun) {
-      throw new Error(
-        `Live 7L credentials are not available for account ${account.name}. Reconnect the local 7L runtime before requesting live rates.`
-      );
-    }
-
-    return {
-      data: requests.flatMap((request) =>
-        estimateLtlQuotes(
-          {
-            ...account,
-            carriers: selectedCarriers
-          },
-          request
-        )
-      ),
-      errors: []
-    };
+    throw new Error(
+      `7L runtime credentials are not available for account ${account.name}. Reconnect the local 7L runtime before requesting rates.`
+    );
   }
 
   const accessToken = await getAccessToken(credential);
@@ -273,9 +258,13 @@ async function getCarrierQuote(
     cache: "no-store"
   });
 
-  const json = (await response.json().catch(() => null)) as SevenLRateResponse | null;
+  const { rawBody, json } = await readSevenLRateResponse(response);
   if (!response.ok) {
-    throw new Error(extractSevenLError(json) ?? `7L rate request failed with status ${response.status}.`);
+    throw new Error(
+      extractSevenLError(json) ??
+        extractSevenLError(rawBody) ??
+        `7L rate request failed with status ${response.status}.${rawBody ? ` ${truncateSevenLError(rawBody)}` : ""}`
+    );
   }
 
   const ratedResult = json?.data?.results?.[0];
@@ -308,6 +297,22 @@ async function getCarrierQuote(
     linehaulCharge,
     rateRemarks: ratedResult.RateRemarks ?? [],
     mode: "live"
+  };
+}
+
+async function readSevenLRateResponse(response: Response) {
+  if (typeof response.text === "function") {
+    const rawBody = await response.text().catch(() => "");
+    return {
+      rawBody,
+      json: parseSevenLJson(rawBody) as SevenLRateResponse | null
+    };
+  }
+
+  const json = (await response.json().catch(() => null)) as SevenLRateResponse | null;
+  return {
+    rawBody: json ? JSON.stringify(json) : "",
+    json
   };
 }
 
@@ -519,6 +524,11 @@ function roundCurrency(value: number) {
 }
 
 function extractSevenLError(payload: unknown) {
+  if (typeof payload === "string") {
+    const trimmed = payload.trim();
+    return trimmed.length > 0 ? truncateSevenLError(trimmed) : null;
+  }
+
   if (!payload || typeof payload !== "object") {
     return null;
   }
@@ -528,6 +538,23 @@ function extractSevenLError(payload: unknown) {
     (payload as { message?: unknown }).message;
 
   return typeof maybeMessage === "string" && maybeMessage.trim().length > 0 ? maybeMessage : null;
+}
+
+function parseSevenLJson(payload: string) {
+  if (!payload) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(payload) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function truncateSevenLError(message: string) {
+  const singleLine = message.replace(/\s+/g, " ").trim();
+  return singleLine.length > 220 ? `${singleLine.slice(0, 217)}...` : singleLine;
 }
 
 function normalizeCountry(value: string | undefined) {

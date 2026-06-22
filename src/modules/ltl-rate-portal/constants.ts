@@ -1,6 +1,6 @@
 import type { LtlFreightPiece } from "@/modules/ltl-rate-portal/types";
 
-export const LTL_INTERACTIVE_LANE_LIMIT = 100;
+export const LTL_INTERACTIVE_LANE_LIMIT = 1;
 
 export const LTL_TEMPLATE_HEADERS = [
   "customerReference",

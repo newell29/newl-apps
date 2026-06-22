@@ -86,19 +86,16 @@ describe("7L client integration", () => {
     delete process.env.SEVEN_L_DEV_ACCOUNTS_FILE;
   });
 
-  it("falls back to dry-run estimates only for dry-run accounts when runtime credentials are unavailable", async () => {
-    const response = await getLtlQuotes(dryRunAccount, [lane]);
-    const quotes = response.data;
-
+  it("fails loudly when a dry-run account does not have runtime credentials", async () => {
+    await expect(getLtlQuotes(dryRunAccount, [lane])).rejects.toThrow(
+      "7L runtime credentials are not available for account 7L Dry Run - Core LTL."
+    );
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(quotes).toHaveLength(1);
-    expect(new Set(quotes.map((quote) => quote.mode))).toEqual(new Set(["dry-run"]));
-    expect(response.errors).toEqual([]);
   });
 
   it("fails loudly when a live account does not have runtime credentials", async () => {
     await expect(getLtlQuotes(liveAccount, [lane])).rejects.toThrow(
-      "Live 7L credentials are not available for account 7L Live Preferred Carriers."
+      "7L runtime credentials are not available for account 7L Live Preferred Carriers."
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });

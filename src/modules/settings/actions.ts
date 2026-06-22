@@ -174,7 +174,7 @@ export async function syncSevenLCarriersAction(formData: FormData) {
         defaultUom: account.defaultUom,
         strictResult: account.strictResult,
         harmonizedCharges: account.harmonizedCharges,
-        dryRun: account.dryRun,
+        dryRun: false,
         carrierMode: account.carrierMode,
         carriers: importedCarriers.map((carrier) => ({
           ...carrier,

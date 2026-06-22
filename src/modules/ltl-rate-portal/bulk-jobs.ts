@@ -14,10 +14,11 @@ import { getLtlQuotes } from "@/server/integrations/seven-l";
 import type { TenantContext } from "@/server/tenant-context";
 
 export const LTL_BULK_JOB_TYPE = "ltl-rate-portal.bulk-quote";
-export const LTL_BULK_CHUNK_SIZE = 25;
-export const LTL_BULK_LANE_CONCURRENCY = 4;
+export const LTL_BULK_CHUNK_SIZE = 10;
+export const LTL_BULK_LANE_CONCURRENCY = 1;
 
 type LtlBulkQuoteJobInput = {
+  name?: string;
   accountId: string;
   accountName: string;
   carrierHashes: string[];
@@ -54,6 +55,7 @@ export async function createLtlBulkQuoteJob(
   payload: LtlBulkQuoteCreateRequestPayload
 ) {
   const input: LtlBulkQuoteJobInput = {
+    name: payload.name?.trim() ? payload.name.trim() : undefined,
     accountId: account.id,
     accountName: account.name,
     carrierHashes: payload.carrierHashes,
@@ -90,6 +92,7 @@ export async function createLtlBulkQuoteJob(
       after: {
         accountId: account.id,
         accountName: account.name,
+        name: input.name ?? null,
         totalLanes: payload.rows.length,
         selectedCarrierCount: payload.carrierHashes.length
       }
@@ -167,6 +170,8 @@ export async function runLtlBulkQuoteJob(
             errorsJson: errors
           }
         });
+
+        await sleep(250);
       });
 
       await prisma.automationJobRun.update({
@@ -234,7 +239,7 @@ export async function getRecentLtlBulkQuoteJobs(tenant: TenantContext) {
     orderBy: {
       startedAt: "desc"
     },
-    take: 5
+    take: 25
   });
 
   return jobs.map(mapBulkJobSummary);
@@ -272,7 +277,39 @@ export async function getLtlBulkQuoteJobSummaryForTenant(tenant: TenantContext, 
   return mapBulkJobSummary(jobRun);
 }
 
-async function getLtlBulkQuoteJobRun(tenant: TenantContext, jobRunId: string) {
+export async function deleteLtlBulkQuoteJob(tenant: BulkJobActorContext, jobRunId: string) {
+  const jobRun = await getLtlBulkQuoteJobRun(tenant, jobRunId);
+  if (!["SUCCESS", "ERROR", "CANCELLED"].includes(jobRun.status)) {
+    throw new Error("Only completed or failed LTL bulk quote jobs can be deleted.");
+  }
+
+  await prisma.automationJobRun.delete({
+    where: {
+      id: jobRun.id
+    }
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      tenantId: tenant.tenantId,
+      actorUserId: tenant.userId,
+      action: "ltl.bulk-job.deleted",
+      entityType: "AutomationJobRun",
+      entityId: jobRun.id,
+      after: {
+        jobId: jobRun.id,
+        status: jobRun.status,
+        jobName: readBulkInput(jobRun.input).name ?? null
+      }
+    }
+  });
+
+  return {
+    id: jobRun.id
+  };
+}
+
+async function getLtlBulkQuoteJobRun(tenant: { tenantId: string }, jobRunId: string) {
   const jobRun = await prisma.automationJobRun.findFirst({
     where: {
       id: jobRunId,
@@ -338,6 +375,7 @@ export function mapBulkJobSummary(jobRun: {
   return {
     id: jobRun.id,
     status: jobRun.status,
+    name: input.name ?? null,
     accountId: input.accountId,
     accountName: input.accountName,
     selectedCarrierCount: output.selectedCarrierCount,
@@ -375,6 +413,7 @@ function readBulkInput(value: Prisma.JsonValue | null): LtlBulkQuoteJobInput {
   return {
     accountId: typeof input.accountId === "string" ? input.accountId : "",
     accountName: typeof input.accountName === "string" ? input.accountName : "",
+    name: typeof input.name === "string" && input.name.trim().length > 0 ? input.name.trim() : undefined,
     carrierHashes: Array.isArray(input.carrierHashes)
       ? input.carrierHashes.filter((item): item is string => typeof item === "string")
       : [],
@@ -429,4 +468,8 @@ async function mapWithConcurrency<T>(
       }
     })
   );
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

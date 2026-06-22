@@ -4,6 +4,7 @@ import {
   LTL_BULK_LANE_CONCURRENCY,
   LTL_BULK_CHUNK_SIZE,
   createLtlBulkQuoteJob,
+  deleteLtlBulkQuoteJob,
   getLtlBulkQuoteJobSummaryForTenant,
   getLtlBulkQuoteJobDetail,
   runLtlBulkQuoteJob
@@ -24,6 +25,7 @@ export async function POST(request: Request) {
     const shell = await getLtlRatePortalShell(context);
     const body = (await request.json()) as Partial<LtlBulkQuoteCreateRequestPayload>;
     const accountId = typeof body.accountId === "string" ? body.accountId : "";
+    const name = typeof body.name === "string" && body.name.trim().length > 0 ? body.name.trim() : undefined;
     const carrierHashes = Array.isArray(body.carrierHashes)
       ? body.carrierHashes.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
       : [];
@@ -47,6 +49,7 @@ export async function POST(request: Request) {
     }
 
     const payload = {
+      name,
       accountId,
       carrierHashes,
       rows
@@ -113,6 +116,38 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Unexpected LTL bulk quote lookup error."
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const context = await getAuthenticatedContext();
+    await requireModule(context, ModuleKey.LTL_RATE_PORTAL);
+    requireMutationAccess(context);
+
+    const url = new URL(request.url);
+    const jobId = url.searchParams.get("jobId");
+    if (!jobId) {
+      return NextResponse.json({ error: "jobId is required." }, { status: 400 });
+    }
+
+    const deleted = await deleteLtlBulkQuoteJob(
+      {
+        tenantId: context.tenantId,
+        userId: context.userId
+      },
+      jobId
+    );
+
+    return NextResponse.json({ deleted }, { status: 200 });
+  } catch (error) {
+    console.error(error);
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : "Unexpected LTL bulk quote delete error."
       },
       { status: 500 }
     );
