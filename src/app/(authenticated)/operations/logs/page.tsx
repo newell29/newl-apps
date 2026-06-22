@@ -35,6 +35,91 @@ export default async function OperationsLogsPage() {
       <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
+            <h2 className="text-base font-semibold text-foreground">TradeMining Data Quality</h2>
+            <p className="mt-1 text-sm leading-6 text-mutedForeground">
+              This is the QA pass for the trial mirror. It shows whether the scoring-critical fields are actually
+              arriving in the stored records before we finalize ranking rules.
+            </p>
+          </div>
+          <span className="rounded-full border border-accentBorder bg-accentSoft px-3 py-1 text-xs font-semibold text-primary">
+            Trial QA
+          </span>
+        </div>
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          <MetricCard
+            label="Sampled Records"
+            value={logs.dataQuality.summary.sampleSize}
+            caption="Most recent TradeMining rows checked"
+          />
+          <MetricCard
+            label="Score-Ready Rows"
+            value={logs.dataQuality.summary.scoreReadyCount}
+            caption="Critical ranking inputs are present"
+          />
+          <MetricCard
+            label="Needs Attention"
+            value={logs.dataQuality.summary.attentionCount}
+            caption="Missing one or more critical inputs"
+            tone={logs.dataQuality.summary.attentionCount > 0 ? "danger" : "default"}
+          />
+        </div>
+
+        <div className="mt-5 overflow-x-auto">
+          <table className="min-w-[780px] divide-y divide-border text-sm">
+            <thead className="bg-muted text-left text-xs font-semibold uppercase text-mutedForeground">
+              <tr>
+                <th className="px-4 py-3">Field</th>
+                <th className="px-4 py-3">Coverage</th>
+                <th className="px-4 py-3">Missing</th>
+                <th className="px-4 py-3">Use in scoring</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {logs.dataQuality.coverage.map((item) => (
+                <tr key={item.key}>
+                  <td className="px-4 py-4">
+                    <p className="font-medium text-foreground">{item.label}</p>
+                    <p className="mt-1 text-xs text-mutedForeground">{item.description}</p>
+                  </td>
+                  <td className="px-4 py-4">
+                    <div className="flex items-center gap-3">
+                      <div className="h-2 w-32 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className={`h-full rounded-full ${item.coveragePercent >= 80 ? "bg-success" : item.coveragePercent >= 50 ? "bg-warning" : "bg-danger"}`}
+                          style={{ width: `${item.coveragePercent}%` }}
+                        />
+                      </div>
+                      <span className="font-medium text-foreground">{item.coveragePercent}%</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-4 text-mutedForeground">
+                    {item.missingCount.toLocaleString("en-US")} of {logs.dataQuality.summary.sampleSize.toLocaleString("en-US")}
+                  </td>
+                  <td className="px-4 py-4">
+                    <span
+                      className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${item.critical ? "border-primary/25 bg-primary/10 text-primary" : "border-border bg-muted text-mutedForeground"}`}
+                    >
+                      {item.critical ? "Critical" : "Supporting"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+              {logs.dataQuality.coverage.length === 0 ? (
+                <tr>
+                  <td className="px-4 py-4 text-sm text-mutedForeground" colSpan={4}>
+                    No TradeMining import rows are available yet.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
             <h2 className="text-base font-semibold text-foreground">Profile health</h2>
             <p className="mt-1 text-sm leading-6 text-mutedForeground">
               This is the quickest read on whether each TradeMining trial profile is enabled, when it last ran, and
@@ -81,6 +166,70 @@ export default async function OperationsLogsPage() {
                 <tr>
                   <td className="px-4 py-4 text-sm text-mutedForeground" colSpan={5}>
                     No TradeMining profiles are configured yet.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Recent Row Samples</h2>
+            <p className="mt-1 text-sm leading-6 text-mutedForeground">
+              Use this to spot whether the latest stored TradeMining rows are missing any of the inputs we want for
+              momentum, lane fit, and industry scoring.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 overflow-x-auto">
+          <table className="min-w-[860px] divide-y divide-border text-sm">
+            <thead className="bg-muted text-left text-xs font-semibold uppercase text-mutedForeground">
+              <tr>
+                <th className="px-4 py-3">Company</th>
+                <th className="px-4 py-3">Destination</th>
+                <th className="px-4 py-3">Arrival</th>
+                <th className="px-4 py-3">Missing critical fields</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {logs.dataQuality.samples.map((sample) => (
+                <tr key={sample.id}>
+                  <td className="px-4 py-4">
+                    <p className="font-medium text-foreground">{sample.companyName}</p>
+                    <p className="mt-1 text-xs text-mutedForeground">{sample.rawRecordKey}</p>
+                  </td>
+                  <td className="px-4 py-4 text-mutedForeground">{sample.destinationLabel}</td>
+                  <td className="px-4 py-4 text-mutedForeground">
+                    {sample.arrivalDate ? sample.arrivalDate.toLocaleString("en-US") : "Missing date"}
+                  </td>
+                  <td className="px-4 py-4">
+                    {sample.missingFields.length === 0 ? (
+                      <span className="rounded-full border border-success/25 bg-success/10 px-2.5 py-1 text-xs font-semibold text-success">
+                        Score-ready
+                      </span>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {sample.missingFields.map((field) => (
+                          <span
+                            key={field}
+                            className="rounded-full border border-danger/25 bg-danger/10 px-2.5 py-1 text-xs font-semibold text-danger"
+                          >
+                            {field}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {logs.dataQuality.samples.length === 0 ? (
+                <tr>
+                  <td className="px-4 py-4 text-sm text-mutedForeground" colSpan={4}>
+                    No recent TradeMining samples yet.
                   </td>
                 </tr>
               ) : null}

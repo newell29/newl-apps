@@ -972,6 +972,9 @@ export function summarizeTradeMiningEvidence(
   const hsCode = firstStringFromRecords(importRecords, "hsCode");
   const sourceRole = firstStringFromRecords(importRecords, "sourceRole");
   const companyMatchName = firstStringFromRecords(importRecords, "companyMatchName");
+  const notifyParty = firstStringFromRecords(importRecords, "notifyParty");
+  const masterConsigneeName = firstStringFromRecords(importRecords, "masterConsigneeName");
+  const masterShipperName = firstStringFromRecords(importRecords, "masterShipperName");
   const carrier = firstStringFromRecords(importRecords, "carrier");
   const vessel = firstStringFromRecords(importRecords, "vessel");
   const voyage = firstStringFromRecords(importRecords, "voyage");
@@ -1009,6 +1012,9 @@ export function summarizeTradeMiningEvidence(
     hsCode,
     sourceRole,
     companyMatchName,
+    notifyParty,
+    masterConsigneeName,
+    masterShipperName,
     carrier,
     vessel,
     voyage,
@@ -1435,13 +1441,24 @@ function scoreMomentum(evidence: ReturnType<typeof summarizeTradeMiningEvidence>
     : recent.shipmentCount > 0
       ? 1
       : 0;
-  const teuGrowthRatio = previous.totalTeu > 0
-    ? clamp((recent.totalTeu - previous.totalTeu) / previous.totalTeu, -1, 1)
-    : recent.totalTeu > 0
+  const recentVolumeSignal = scoreVolumeActivity(recent);
+  const previousVolumeSignal = scoreVolumeActivity(previous);
+  const volumeGrowthRatio = previousVolumeSignal > 0
+    ? clamp((recentVolumeSignal - previousVolumeSignal) / previousVolumeSignal, -1, 1)
+    : recentVolumeSignal > 0
       ? 1
       : 0;
   const recencyRatio = scoreRecency(evidence.latestShipmentDate) / 20;
-  const normalized = clamp(recentShipmentRatio * 0.45 + ((growthRatio + 1) / 2) * 0.3 + ((teuGrowthRatio + 1) / 2) * 0.15 + recencyRatio * 0.1, 0, 1);
+  const recentVolumeRatio = clamp(recentVolumeSignal / 8, 0, 1);
+  const normalized = clamp(
+    recentShipmentRatio * 0.35 +
+      ((growthRatio + 1) / 2) * 0.25 +
+      recentVolumeRatio * 0.2 +
+      ((volumeGrowthRatio + 1) / 2) * 0.1 +
+      recencyRatio * 0.1,
+    0,
+    1
+  );
 
   return Math.round(normalized * config.momentumWeight);
 }
@@ -1449,10 +1466,20 @@ function scoreMomentum(evidence: ReturnType<typeof summarizeTradeMiningEvidence>
 function scoreMarketFit(evidence: ReturnType<typeof summarizeTradeMiningEvidence>, config: CandidateScoringConfig) {
   const destinationRatio = evidence.profileFit.destination / 12;
   const originRatio = evidence.profileFit.origin / 8;
+  const laneDetailRatio = countPresent([
+    evidence.destinationPort,
+    evidence.destinationCity,
+    evidence.destinationState,
+    evidence.destinationZip
+  ]) / 4;
   const productRatio = evidence.profileFit.product / 10;
   const profilePriorityRatio = (evidence.searchProfile?.priorityWeight ?? 40) / 100;
   const normalized = clamp(
-    destinationRatio * 0.4 + originRatio * 0.25 + productRatio * 0.2 + profilePriorityRatio * 0.15,
+    destinationRatio * 0.35 +
+      originRatio * 0.25 +
+      laneDetailRatio * 0.2 +
+      productRatio * 0.1 +
+      profilePriorityRatio * 0.1,
     0,
     1
   );
@@ -1467,7 +1494,8 @@ function scoreIndustryFit(evidence: ReturnType<typeof summarizeTradeMiningEviden
   const penalizedKeywordMatch = config.penalizedIndustryKeywords.some((keyword) => productText.includes(normalizeComparableValue(keyword)));
   const preferredHsMatch = config.preferredHsCodePrefixes.some((prefix) => hsCode.startsWith(prefix.replace(/[^0-9]/g, "")));
   const penalizedHsMatch = config.penalizedHsCodePrefixes.some((prefix) => hsCode.startsWith(prefix.replace(/[^0-9]/g, "")));
-  const positive = (preferredKeywordMatch ? 0.6 : 0) + (preferredHsMatch ? 0.4 : 0);
+  const productSignalBonus = evidence.productDescription ? 0.2 : 0;
+  const positive = (preferredKeywordMatch ? 0.55 : 0) + (preferredHsMatch ? 0.25 : 0) + productSignalBonus;
   const negative = (penalizedKeywordMatch ? 0.7 : 0) + (penalizedHsMatch ? 0.3 : 0);
   const normalized = clamp(positive - negative, -1, 1);
 
@@ -1502,17 +1530,25 @@ function scoreCompanySize(evidence: ReturnType<typeof summarizeTradeMiningEviden
 }
 
 function scoreConfidence(evidence: ReturnType<typeof summarizeTradeMiningEvidence>, config: CandidateScoringConfig) {
-  const presentSignals = [
-    evidence.destinationMarket,
-    evidence.destinationPort,
-    evidence.originCountry,
-    evidence.originPort,
-    evidence.productDescription,
-    evidence.hsCode,
-    evidence.sourceRole,
-    evidence.companyMatchName
-  ].filter(Boolean).length;
-  const normalized = clamp(presentSignals / 8, 0, 1);
+  const coreSignalRatio =
+    countPresent([
+      evidence.latestShipmentDate,
+      evidence.destinationMarket ?? evidence.destinationPort ?? evidence.destinationCity,
+      evidence.originCountry ?? evidence.originPort ?? evidence.foreignPort ?? evidence.shipFromPort,
+      evidence.productDescription,
+      evidence.companyMatchName ?? evidence.sourceRole,
+      evidence.totalTeu > 0 || evidence.containerCount > 0 || evidence.shipmentWeight > 0 ? "volume" : null
+    ]) / 6;
+  const bonusSignalRatio =
+    countPresent([
+      evidence.hsCode,
+      evidence.destinationZip,
+      evidence.notifyParty,
+      evidence.masterConsigneeName,
+      evidence.masterShipperName,
+      evidence.vessel ?? evidence.voyage ?? evidence.carrier
+    ]) / 6;
+  const normalized = clamp(coreSignalRatio * 0.8 + bonusSignalRatio * 0.2, 0, 1);
 
   return Math.round(normalized * config.confidenceWeight);
 }
@@ -1556,7 +1592,8 @@ function summarizeWindowActivity(
   return {
     shipmentCount: activity.length,
     totalTeu: activity.reduce((sum, record) => sum + record.teu, 0),
-    totalContainers: activity.reduce((sum, record) => sum + record.containerCount, 0)
+    totalContainers: activity.reduce((sum, record) => sum + record.containerCount, 0),
+    totalWeight: activity.reduce((sum, record) => sum + record.shipmentWeight, 0)
   };
 }
 
@@ -1583,6 +1620,10 @@ function describeMomentum(evidence: ReturnType<typeof summarizeTradeMiningEviden
 
   if (recent.shipmentCount < previous.shipmentCount) {
     return `shipment activity softening (${recent.shipmentCount} recent vs ${previous.shipmentCount} prior)`;
+  }
+
+  if (scoreVolumeActivity(recent) > scoreVolumeActivity(previous)) {
+    return `volume into target lanes increasing (${formatVolumeSummary(recent)} recent vs ${formatVolumeSummary(previous)} prior)`;
   }
 
   return `${evidence.shipmentCount} shipment${evidence.shipmentCount === 1 ? "" : "s"} in lookback`;
@@ -1620,6 +1661,10 @@ function describeIndustryFit(evidence: ReturnType<typeof summarizeTradeMiningEvi
     return "industry signals hit a deprioritized category";
   }
 
+  if (evidence.productDescription) {
+    return evidence.hsCode ? "product description and HS data available" : "product description available; HS data optional";
+  }
+
   return "industry preference neutral";
 }
 
@@ -1647,6 +1692,48 @@ function describeCompanySize(evidence: ReturnType<typeof summarizeTradeMiningEvi
   }
 
   return "company size neutral";
+}
+
+function scoreVolumeActivity(window: {
+  totalTeu: number;
+  totalContainers: number;
+  totalWeight: number;
+}) {
+  return window.totalTeu + window.totalContainers * 0.75 + window.totalWeight / 20_000;
+}
+
+function formatVolumeSummary(window: {
+  totalTeu: number;
+  totalContainers: number;
+  totalWeight: number;
+}) {
+  if (window.totalTeu > 0) {
+    return `${window.totalTeu.toFixed(1)} TEU`;
+  }
+
+  if (window.totalContainers > 0) {
+    return `${window.totalContainers.toLocaleString("en-US")} containers`;
+  }
+
+  if (window.totalWeight > 0) {
+    return `${Math.round(window.totalWeight).toLocaleString("en-US")} weight`;
+  }
+
+  return "0 volume";
+}
+
+function countPresent(values: unknown[]) {
+  return values.filter((value) => {
+    if (value == null) {
+      return false;
+    }
+
+    if (typeof value === "string") {
+      return value.trim().length > 0;
+    }
+
+    return true;
+  }).length;
 }
 
 function formatDestination(rawJson: JsonObject, fallbackCity: string | null, fallbackState: string | null) {
