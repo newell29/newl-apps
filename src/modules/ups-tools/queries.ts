@@ -12,6 +12,7 @@ import {
   QUOTE_SOURCE_DIRECTORY_NAME
 } from "@/modules/settings/quote-sources";
 import type { QuoteToolTarget } from "@/modules/settings/types";
+import { getRecentUpsBulkQuoteJobs } from "@/modules/ups-tools/bulk-jobs";
 
 type UpsPublicConfig = {
   countryCode?: unknown;
@@ -28,7 +29,7 @@ type ManagedUpsAccount = UpsAccountConfig & {
 };
 
 export async function getUpsToolsShell(tenant: TenantContext, target?: QuoteToolTarget) {
-  const [moduleAccess, credentials, localAccounts] = await Promise.all([
+  const [moduleAccess, credentials, localAccounts, recentBulkJobs] = await Promise.all([
     prisma.tenantModuleAccess.findFirst({
       where: {
         tenantId: tenant.tenantId,
@@ -47,7 +48,8 @@ export async function getUpsToolsShell(tenant: TenantContext, target?: QuoteTool
       }),
       orderBy: [{ status: "asc" }, { name: "asc" }]
     }),
-    getLocalUpsAccountMetadata()
+    getLocalUpsAccountMetadata(),
+    getRecentUpsBulkQuoteJobs(tenant)
   ]);
 
   const accounts = mergeUpsAccounts(
@@ -68,7 +70,8 @@ export async function getUpsToolsShell(tenant: TenantContext, target?: QuoteTool
     moduleEnabled: Boolean(moduleAccess),
     accounts: target ? accounts.filter((account) => account.toolTargets.includes(target)) : accounts,
     hasActiveAccounts: accounts.some((account) => account.status === "ACTIVE"),
-    plannedSources
+    plannedSources,
+    recentBulkJobs
   };
 }
 

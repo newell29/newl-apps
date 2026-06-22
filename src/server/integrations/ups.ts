@@ -21,6 +21,11 @@ type RuntimeUpsCredential = {
   countryCode: "US" | "CA";
 };
 
+type CachedUpsAccessToken = {
+  accessToken: string;
+  expiresAt: number;
+};
+
 export type LocalUpsAccountMetadata = {
   name: string;
   shipperNumber: string;
@@ -31,6 +36,14 @@ export type LocalUpsAccountMetadata = {
 };
 
 let cachedAccountsFile: LocalUpsCredential[] | null = null;
+const cachedAccessTokens = new Map<string, CachedUpsAccessToken>();
+
+export class UpsRateLimitError extends Error {
+  constructor(message = "UPS rate limit reached. Please wait a moment and retry with a smaller batch.") {
+    super(message);
+    this.name = "UpsRateLimitError";
+  }
+}
 
 export async function getLocalUpsAccountMetadata(): Promise<LocalUpsAccountMetadata[]> {
   const path = process.env.UPS_DEV_ACCOUNTS_FILE;
@@ -100,7 +113,7 @@ export async function getUpsQuote(account: UpsAccountConfig, request: QuoteReque
           PackagingType: { Code: "02" },
           PackageWeight: {
             UnitOfMeasurement: { Code: "LBS" },
-            Weight: String(roundMoney(billableWeight))
+            Weight: String(roundMoney(request.weight))
           },
           ...(request.length > 0 && request.width > 0 && request.height > 0
             ? {
@@ -137,6 +150,10 @@ export async function getUpsQuote(account: UpsAccountConfig, request: QuoteReque
 
   const json = await response.json().catch(() => null);
   if (!response.ok) {
+    if (response.status === 429) {
+      throw new UpsRateLimitError();
+    }
+
     throw new Error(extractUpsError(json) ?? `UPS rating request failed with status ${response.status}.`);
   }
 
@@ -245,6 +262,13 @@ async function loadLocalAccountsFile() {
 }
 
 async function getAccessToken(clientId: string, clientSecret: string) {
+  const cacheKey = `${clientId}:${clientSecret}`;
+  const cached = cachedAccessTokens.get(cacheKey);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now) {
+    return cached.accessToken;
+  }
+
   const authHeader = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
   const response = await fetch(TOKEN_URL, {
     method: "POST",
@@ -260,6 +284,10 @@ async function getAccessToken(clientId: string, clientSecret: string) {
 
   const json = await response.json().catch(() => null);
   if (!response.ok) {
+    if (response.status === 429) {
+      throw new UpsRateLimitError("UPS temporarily rate-limited token requests. Please retry in a minute.");
+    }
+
     throw new Error(extractUpsError(json) ?? `UPS token request failed with status ${response.status}.`);
   }
 
@@ -267,6 +295,13 @@ async function getAccessToken(clientId: string, clientSecret: string) {
   if (!accessToken || typeof accessToken !== "string") {
     throw new Error("UPS token response did not include an access token.");
   }
+
+  const expiresInSeconds =
+    typeof json?.expires_in === "number" && Number.isFinite(json.expires_in) ? json.expires_in : 3600;
+  cachedAccessTokens.set(cacheKey, {
+    accessToken,
+    expiresAt: now + Math.max(60, expiresInSeconds - 60) * 1000
+  });
 
   return accessToken;
 }
