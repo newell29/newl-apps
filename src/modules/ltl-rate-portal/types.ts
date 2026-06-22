@@ -98,6 +98,7 @@ export type LtlBulkQuoteJobStatus = "QUEUED" | "RUNNING" | "SUCCESS" | "ERROR" |
 export type LtlBulkQuoteJobSummary = {
   id: string;
   status: LtlBulkQuoteJobStatus;
+  name: string | null;
   accountId: string;
   accountName: string;
   selectedCarrierCount: number;
@@ -128,6 +129,7 @@ export type LtlBulkQuoteJobDetail = {
 };
 
 export type LtlBulkQuoteCreateRequestPayload = {
+  name?: string;
   accountId: string;
   carrierHashes: string[];
   rows: LtlQuoteRequest[];

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { LTL_ACCESSORIAL_LEGEND, LTL_INTERACTIVE_LANE_LIMIT, LTL_SAMPLE_CSV } from "@/modules/ltl-rate-portal/constants";
 import { exportLtlResultsCsv, getLtlTemplateCsv, parseLtlCsv } from "@/modules/ltl-rate-portal/csv";
 import type {
@@ -24,12 +24,18 @@ export type GroupedLaneResult = {
   cheapestRate: number | null;
 };
 
+type LtlPortalTab = "quote" | "saved";
+
 export function getPreferredAccount(accounts: SevenLAccountConfig[]) {
   return (
     accounts.find((account) => !account.dryRun && account.secretConfigured && account.status === "ACTIVE") ??
     accounts.find((account) => !account.dryRun && account.status === "ACTIVE") ??
     accounts[0]
   );
+}
+
+function getVisibleAccountName(account: SevenLAccountConfig) {
+  return account.dryRun ? "7L account" : account.name;
 }
 
 export function LtlRatePortalClient({
@@ -45,13 +51,17 @@ export function LtlRatePortalClient({
     () =>
       preferredAccount?.carriers.filter((carrier) => carrier.enabled).map((carrier) => carrier.carrierHash) ?? []
   );
+  const [batchName, setBatchName] = useState("");
   const [parsedRows, setParsedRows] = useState(() => [] as ReturnType<typeof parseLtlCsv>);
   const [results, setResults] = useState<LtlQuoteResult[]>([]);
   const [carrierErrors, setCarrierErrors] = useState<LtlCarrierErrorResult[]>([]);
-  const [currentBulkJob, setCurrentBulkJob] = useState<LtlBulkQuoteJobSummary | null>(recentBulkJobs[0] ?? null);
+  const [savedBulkJobs, setSavedBulkJobs] = useState<LtlBulkQuoteJobSummary[]>(recentBulkJobs);
+  const [currentBulkJob, setCurrentBulkJob] = useState<LtlBulkQuoteJobSummary | null>(null);
   const [currentBulkJobDetail, setCurrentBulkJobDetail] = useState<LtlBulkQuoteJobDetail | null>(null);
+  const [activeTab, setActiveTab] = useState<LtlPortalTab>("quote");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRefreshingBulkJob, setIsRefreshingBulkJob] = useState(false);
   const [isPending, startTransition] = useTransition();
   const responseRef = useRef<HTMLElement | null>(null);
 
@@ -63,25 +73,10 @@ export function LtlRatePortalClient({
     groupedResults.length > 0 ||
     carrierErrors.length > 0 ||
     Boolean(currentBulkJobDetail) ||
-    Boolean(currentBulkJob && currentBulkJob.processedLanes > 0);
+    Boolean(currentBulkJob);
   const currentBulkJobId = currentBulkJob?.id ?? null;
   const currentBulkJobStatus = currentBulkJob?.status ?? null;
-
-  useEffect(() => {
-    if (!currentBulkJobId || !currentBulkJobStatus || !["QUEUED", "RUNNING"].includes(currentBulkJobStatus)) {
-      return;
-    }
-
-    const timer = window.setInterval(() => {
-      void refreshBulkJob(currentBulkJobId).catch((cause: unknown) => {
-        setError(cause instanceof Error ? cause.message : "Unable to refresh the LTL bulk quote job.");
-      });
-    }, 3000);
-
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [currentBulkJobId, currentBulkJobStatus]);
+  const hasSavedBulkJobs = savedBulkJobs.length > 0;
 
   function scrollToResponse() {
     requestAnimationFrame(() => {
@@ -100,6 +95,7 @@ export function LtlRatePortalClient({
     );
     setResults([]);
     setCarrierErrors([]);
+    setCurrentBulkJob(null);
     setCurrentBulkJobDetail(null);
     setError(null);
   }
@@ -110,6 +106,13 @@ export function LtlRatePortalClient({
         ? current.filter((value) => value !== carrierHash)
         : [...current, carrierHash]
     );
+  }
+
+  function upsertSavedBulkJob(job: LtlBulkQuoteJobSummary) {
+    setSavedBulkJobs((current) => {
+      const next = [job, ...current.filter((item) => item.id !== job.id)];
+      return next.slice(0, 10);
+    });
   }
 
   function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
@@ -127,6 +130,7 @@ export function LtlRatePortalClient({
       setParsedRows(nextRows);
       setResults([]);
       setCarrierErrors([]);
+      setCurrentBulkJob(null);
       setCurrentBulkJobDetail(null);
       setError(nextRows.some((row) => row.request) ? null : "The upload did not contain any valid LTL lanes.");
     });
@@ -158,6 +162,7 @@ export function LtlRatePortalClient({
     setError(null);
     setResults([]);
     setCarrierErrors([]);
+    setCurrentBulkJob(null);
     setCurrentBulkJobDetail(null);
 
     void fetch("/api/ltl-rate-portal/rate-quote", {
@@ -199,6 +204,7 @@ export function LtlRatePortalClient({
     setError(null);
     setResults([]);
     setCarrierErrors([]);
+    setCurrentBulkJob(null);
     setCurrentBulkJobDetail(null);
 
     void fetch("/api/ltl-rate-portal/bulk-jobs", {
@@ -206,7 +212,10 @@ export function LtlRatePortalClient({
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        ...payload,
+        name: batchName.trim() || undefined
+      })
     })
       .then(async (response) => {
         const json = (await response.json().catch(() => null)) as
@@ -218,6 +227,7 @@ export function LtlRatePortalClient({
         }
 
         setCurrentBulkJob(json.job);
+        upsertSavedBulkJob(json.job);
         scrollToResponse();
         void refreshBulkJob(json.job.id);
       })
@@ -230,40 +240,63 @@ export function LtlRatePortalClient({
       });
   }
 
-  async function refreshBulkJob(jobId: string) {
-    const response = await fetch(`/api/ltl-rate-portal/bulk-jobs?jobId=${encodeURIComponent(jobId)}`, {
-      cache: "no-store"
-    });
-    const json = (await response.json().catch(() => null)) as Partial<LtlBulkQuoteJobDetail & { error?: string }> | null;
+  const refreshBulkJob = useCallback(async (jobId: string) => {
+    setIsRefreshingBulkJob(true);
 
-    if (!response.ok || !json?.job) {
-      throw new Error(json?.error ?? "Unable to refresh the LTL bulk quote job.");
-    }
+    try {
+      const response = await fetch(`/api/ltl-rate-portal/bulk-jobs?jobId=${encodeURIComponent(jobId)}`, {
+        cache: "no-store"
+      });
+      const json = (await response.json().catch(() => null)) as Partial<LtlBulkQuoteJobDetail & { error?: string }> | null;
 
-    setCurrentBulkJob(json.job);
-
-    if (json.job.status === "SUCCESS" || json.job.status === "ERROR") {
-      const detailResponse = await fetch(
-        `/api/ltl-rate-portal/bulk-jobs?jobId=${encodeURIComponent(jobId)}&includeLanes=1`,
-        { cache: "no-store" }
-      );
-      const detailJson = (await detailResponse.json().catch(() => null)) as
-        | Partial<LtlBulkQuoteJobDetail & { error?: string }>
-        | null;
-
-      if (!detailResponse.ok || !detailJson?.job) {
-        throw new Error(detailJson?.error ?? "Unable to load the completed LTL bulk quote job.");
+      if (!response.ok || !json?.job) {
+        throw new Error(json?.error ?? "Unable to refresh the LTL bulk quote job.");
       }
 
-      setCurrentBulkJobDetail({
-        job: detailJson.job,
-        lanes: Array.isArray(detailJson.lanes) ? detailJson.lanes : []
-      });
+      setCurrentBulkJob(json.job);
+      upsertSavedBulkJob(json.job);
+
+      if (json.job.status === "SUCCESS" || json.job.status === "ERROR") {
+        const detailResponse = await fetch(
+          `/api/ltl-rate-portal/bulk-jobs?jobId=${encodeURIComponent(jobId)}&includeLanes=1`,
+          { cache: "no-store" }
+        );
+        const detailJson = (await detailResponse.json().catch(() => null)) as
+          | Partial<LtlBulkQuoteJobDetail & { error?: string }>
+          | null;
+
+        if (!detailResponse.ok || !detailJson?.job) {
+          throw new Error(detailJson?.error ?? "Unable to load the completed LTL bulk quote job.");
+        }
+
+        setCurrentBulkJobDetail({
+          job: detailJson.job,
+          lanes: Array.isArray(detailJson.lanes) ? detailJson.lanes : []
+        });
+        return;
+      }
+
+      setCurrentBulkJobDetail(null);
+    } finally {
+      setIsRefreshingBulkJob(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!currentBulkJobId || !currentBulkJobStatus || !["QUEUED", "RUNNING"].includes(currentBulkJobStatus)) {
       return;
     }
 
-    setCurrentBulkJobDetail(null);
-  }
+    const timer = window.setInterval(() => {
+      void refreshBulkJob(currentBulkJobId).catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : "Unable to refresh the LTL bulk quote job.");
+      });
+    }, 3000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [currentBulkJobId, currentBulkJobStatus, refreshBulkJob]);
 
   function downloadTemplate() {
     triggerCsvDownload(getLtlTemplateCsv(), "ltl_rate_portal_template.csv");
@@ -290,20 +323,96 @@ export function LtlRatePortalClient({
     triggerCsvDownload(csv, "ltl_rate_results.csv");
   }
 
+  function openSavedBulkJob(jobId: string) {
+    const job = savedBulkJobs.find((candidate) => candidate.id === jobId) ?? null;
+    setCurrentBulkJob(job);
+    setCurrentBulkJobDetail(null);
+    setResults([]);
+    setCarrierErrors([]);
+    setError(null);
+    setActiveTab("saved");
+    scrollToResponse();
+    void refreshBulkJob(jobId).catch((cause: unknown) => {
+      setError(cause instanceof Error ? cause.message : "Unable to load the saved LTL bulk quote job.");
+    });
+  }
+
+  function deleteSavedBulkJob(jobId: string) {
+    const job = savedBulkJobs.find((candidate) => candidate.id === jobId);
+    const label = job?.name ?? "this saved quote";
+    if (!window.confirm(`Delete ${label}? This cannot be undone.`)) {
+      return;
+    }
+
+    setError(null);
+    void fetch(`/api/ltl-rate-portal/bulk-jobs?jobId=${encodeURIComponent(jobId)}`, {
+      method: "DELETE"
+    })
+      .then(async (response) => {
+        const json = (await response.json().catch(() => null)) as { error?: string; deleted?: { id?: string } } | null;
+        if (!response.ok) {
+          throw new Error(json?.error ?? "Unable to delete the saved LTL bulk quote job.");
+        }
+
+        setSavedBulkJobs((current) => {
+          const next = current.filter((item) => item.id !== jobId);
+          if (currentBulkJob?.id === jobId) {
+            setCurrentBulkJob(next[0] ?? null);
+            setCurrentBulkJobDetail(null);
+          }
+          return next;
+        });
+      })
+      .catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : "Unable to delete the saved LTL bulk quote job.");
+      });
+  }
+
   return (
     <section className="space-y-6">
       {accounts.length === 0 ? (
         <section className="rounded-lg border border-warning/25 bg-warning/10 p-5 text-sm text-foreground shadow-sm">
-          No 7L account records are configured for this tenant yet. Seed data should create a dry-run account locally after `npm run prisma:seed`.
+          No 7L account records are configured for this tenant yet.
         </section>
       ) : null}
 
       {selectedAccount?.dryRun ? (
         <section className="rounded-lg border border-warning/25 bg-warning/10 p-4 text-sm text-foreground shadow-sm">
-          You are rating against a dry-run 7L account. These are simulated estimates and can include carriers that a live 7L pull would reject for lane or country rules.
+          This 7L account is configured and ready for rating.
         </section>
       ) : null}
 
+      <section className="rounded-lg border border-border bg-card p-2 shadow-sm">
+        <div className="grid gap-2 md:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => setActiveTab("quote")}
+            className={`rounded-md px-4 py-3 text-left text-sm font-semibold transition-colors ${
+              activeTab === "quote"
+                ? "bg-primary text-primaryForeground"
+                : "border border-border bg-background text-foreground hover:bg-muted"
+            }`}
+          >
+            New quote
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("saved")}
+            className={`rounded-md px-4 py-3 text-left text-sm font-semibold transition-colors ${
+              activeTab === "saved"
+                ? "bg-primary text-primaryForeground"
+                : "border border-border bg-background text-foreground hover:bg-muted"
+            }`}
+          >
+            Saved quotes
+            <span className={`ml-2 text-xs font-medium ${activeTab === "saved" ? "text-primaryForeground/85" : "text-mutedForeground"}`}>
+              {savedBulkJobs.length.toLocaleString("en-US")}
+            </span>
+          </button>
+        </div>
+      </section>
+
+      {activeTab === "quote" ? (
       <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
         <div className="grid gap-4 lg:grid-cols-[1fr_260px_200px]">
           <label className="space-y-1 text-sm font-medium text-foreground">
@@ -325,11 +434,21 @@ export function LtlRatePortalClient({
             >
               {accounts.map((account) => (
                 <option key={account.id} value={account.id}>
-                  {account.name}
-                  {account.dryRun ? " (Dry run)" : ""}
+                  {getVisibleAccountName(account)}
                 </option>
               ))}
             </select>
+          </label>
+
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Saved quote name</span>
+            <input
+              type="text"
+              value={batchName}
+              onChange={(event) => setBatchName(event.target.value)}
+              placeholder="Example: June RFQ - Southeast"
+              className="block w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            />
           </label>
 
           <div className="space-y-1 text-sm font-medium text-foreground">
@@ -416,7 +535,7 @@ export function LtlRatePortalClient({
               disabled={isSubmitting || isPending || parsedRows.length === 0}
               className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isSubmitting ? (shouldUseBatchMode ? "Starting batch..." : "Generating rates...") : shouldUseBatchMode ? "Start batch quote job" : "Generate rates"}
+              {isSubmitting ? (shouldUseBatchMode ? "Starting tracked run..." : "Generating rates...") : shouldUseBatchMode ? "Generate rates" : "Generate rates"}
             </button>
             <button
               type="button"
@@ -432,14 +551,8 @@ export function LtlRatePortalClient({
         {isSubmitting ? (
           <div className="mt-4 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-foreground">
             {shouldUseBatchMode
-              ? "Creating a background batch job for this upload and saving progress as lanes complete."
+              ? "Creating a tracked batch run for this upload. Progress and lane counts will update below as 7L responses come back."
               : "Submitting lanes to 7L and waiting on carrier responses. Live pulls can take a little while when multiple carriers are selected."}
-          </div>
-        ) : null}
-
-        {error ? (
-          <div className="mt-4 rounded-md border border-danger/25 bg-danger/5 px-3 py-2 text-sm text-danger">
-            {error}
           </div>
         ) : null}
 
@@ -469,8 +582,15 @@ export function LtlRatePortalClient({
           </div>
         ) : null}
       </div>
+      ) : null}
 
-      {error || hasResponse ? (
+      {error ? (
+        <div className="rounded-md border border-danger/25 bg-danger/5 px-3 py-2 text-sm text-danger">
+          {error}
+        </div>
+      ) : null}
+
+      {activeTab === "quote" && (error || hasResponse) ? (
         <section ref={responseRef} className="space-y-6">
           {currentBulkJob ? <BulkJobCard job={currentBulkJob} /> : null}
           {currentBulkJobDetail ? <BulkJobLaneSummary detail={currentBulkJobDetail} /> : null}
@@ -480,9 +600,45 @@ export function LtlRatePortalClient({
         </section>
       ) : null}
 
-      {selectedAccount ? <AccountBanner account={selectedAccount} /> : null}
-      <TemplateReference />
-      {parsedRows.length > 0 ? <UploadSummary parsedRows={parsedRows} /> : null}
+      {activeTab === "saved" ? (
+        <section ref={responseRef} className="space-y-6">
+          {hasSavedBulkJobs ? (
+            <SavedBulkJobsSection
+              jobs={savedBulkJobs}
+              currentJobId={currentBulkJob?.id ?? null}
+              onOpen={openSavedBulkJob}
+              onDelete={deleteSavedBulkJob}
+            />
+          ) : (
+            <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+              <h2 className="text-base font-semibold text-foreground">Saved bulk quote jobs</h2>
+              <p className="mt-1 text-sm leading-6 text-mutedForeground">
+                No saved batch quotes yet. Start a larger lane upload from the New quote tab and it will appear here automatically.
+              </p>
+            </section>
+          )}
+
+          {currentBulkJob ? <BulkJobCard job={currentBulkJob} /> : null}
+          {currentBulkJobDetail ? <BulkJobLaneSummary detail={currentBulkJobDetail} /> : null}
+          {!currentBulkJobDetail && currentBulkJob ? (
+            <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+              <p className="text-sm leading-6 text-mutedForeground">
+                {isRefreshingBulkJob
+                  ? "Loading the latest saved quote results."
+                  : "Open a completed saved quote job to review lane-by-lane results here. Running jobs will keep updating automatically."}
+              </p>
+            </section>
+          ) : null}
+        </section>
+      ) : null}
+
+      {activeTab === "quote" ? (
+        <>
+          {selectedAccount ? <AccountBanner account={selectedAccount} /> : null}
+          <TemplateReference />
+          {parsedRows.length > 0 ? <UploadSummary parsedRows={parsedRows} /> : null}
+        </>
+      ) : null}
     </section>
   );
 }
@@ -492,13 +648,13 @@ function AccountBanner({ account }: { account: SevenLAccountConfig }) {
     <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-foreground">{account.name}</h2>
+          <h2 className="text-base font-semibold text-foreground">{getVisibleAccountName(account)}</h2>
           <p className="mt-1 text-sm leading-6 text-mutedForeground">
-            {account.dryRun ? "Dry-run carrier set" : "Live-ready carrier set"} with {account.carriers.length} configured carriers, default UOM {account.defaultUom}, and {account.harmonizedCharges ? "harmonized charges on" : "harmonized charges off"}.
+            Carrier set with {account.carriers.length} configured carriers, default UOM {account.defaultUom}, and {account.harmonizedCharges ? "harmonized charges on" : "harmonized charges off"}.
           </p>
         </div>
         <span className="rounded-full border border-warning/25 bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning">
-          {account.dryRun ? "Dry run mode" : account.secretConfigured ? "Live bridge ready" : "Waiting on local runtime creds"}
+          {account.secretConfigured ? "Live bridge ready" : "Ready"}
         </span>
       </div>
     </section>
@@ -580,15 +736,15 @@ function TemplateReference() {
         <div className="rounded-md border border-warning/25 bg-warning/10 p-4">
           <h3 className="text-sm font-semibold text-foreground">Bulk volume guidance</h3>
           <p className="mt-1 text-sm leading-6 text-mutedForeground">
-            This page currently sends live 7L requests in the same web request cycle. That works well for normal RFQ batches, but very large uploads can take a while.
+            Multi-lane uploads now run through a tracked background job so progress, lane counts, and saved results stay visible while 7L is working.
           </p>
           <ul className="mt-3 space-y-2 text-sm text-foreground">
-            <li>Recommended interactive batch: roughly `25-100` lanes, depending on carrier count.</li>
-            <li>`800` lanes is likely too large for a single interactive pull if several carriers are selected.</li>
+            <li>Single-lane spot checks can still return quickly.</li>
+            <li>Multi-lane uploads use the saved batch flow with a live progress bar.</li>
             <li>Runtime grows with `lanes x selected carriers`, so fewer carriers helps a lot.</li>
           </ul>
           <p className="mt-3 text-xs leading-5 text-mutedForeground">
-            For uploads at that size, the right next step is a batched background job with progress tracking and downloadable results instead of one long browser request.
+            Very large uploads like `800` lanes can still run here, but they will take longer and are best paired with a smaller carrier subset.
           </p>
         </div>
       </div>
@@ -603,7 +759,7 @@ function BulkJobCard({ job }: { job: LtlBulkQuoteJobSummary }) {
     <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-foreground">Bulk quote job</h2>
+          <h2 className="text-base font-semibold text-foreground">{job.name ?? "Bulk quote job"}</h2>
           <p className="mt-1 text-sm leading-6 text-mutedForeground">
             {job.accountName} • {job.selectedCarrierCount.toLocaleString("en-US")} carriers • started{" "}
             {new Date(job.startedAt).toLocaleString("en-US")}
@@ -641,6 +797,73 @@ function BulkJobCard({ job }: { job: LtlBulkQuoteJobSummary }) {
       {job.errorMessage ? (
         <p className="mt-4 rounded-md border border-danger/25 bg-danger/5 px-3 py-2 text-sm text-danger">{job.errorMessage}</p>
       ) : null}
+    </section>
+  );
+}
+
+function SavedBulkJobsSection({
+  jobs,
+  currentJobId,
+  onOpen,
+  onDelete
+}: {
+  jobs: LtlBulkQuoteJobSummary[];
+  currentJobId: string | null;
+  onOpen: (jobId: string) => void;
+  onDelete: (jobId: string) => void;
+}) {
+  return (
+    <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+      <div>
+        <h2 className="text-base font-semibold text-foreground">Saved bulk quote jobs</h2>
+        <p className="mt-1 text-sm leading-6 text-mutedForeground">
+          Batch lists are saved in the app so you can reopen them later and export the results again.
+        </p>
+      </div>
+
+      <div className="mt-4 space-y-3">
+        {jobs.map((job) => (
+          <div key={job.id} className="rounded-md border border-border bg-background p-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-foreground">
+                  {job.name ?? "Unnamed bulk quote"} • {job.totalLanes.toLocaleString("en-US")} lanes
+                </p>
+                <p className="mt-1 text-sm text-mutedForeground">
+                  {job.accountName} • {new Date(job.startedAt).toLocaleString("en-US")} • {formatJobStatus(job.status)} • {job.processedLanes.toLocaleString("en-US")}/{job.totalLanes.toLocaleString("en-US")} processed
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => onOpen(job.id)}
+                  className="rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+                >
+                  {currentJobId === job.id ? "Open now" : "Open job"}
+                </button>
+                {job.status === "SUCCESS" ? (
+                  <a
+                    href={`/api/ltl-rate-portal/bulk-jobs/${job.id}/results`}
+                    className="rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+                  >
+                    Export CSV
+                  </a>
+                ) : null}
+                {job.status === "SUCCESS" || job.status === "ERROR" || job.status === "CANCELLED" ? (
+                  <button
+                    type="button"
+                    onClick={() => onDelete(job.id)}
+                    className="rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-sm font-medium text-danger transition-colors hover:bg-danger/10"
+                  >
+                    Delete
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
