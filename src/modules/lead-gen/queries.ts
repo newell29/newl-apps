@@ -5,6 +5,7 @@ import {
   ContactStatus,
   ContactTier,
   ContactOutreachDraftStatus,
+  IntegrationProvider,
   LeadPipelineStage,
   Prisma,
   ReplyStatus,
@@ -14,11 +15,50 @@ import { prisma } from "@/server/db";
 import { tenantWhere } from "@/server/tenant-query";
 import type { TenantContext } from "@/server/tenant-context";
 import { recommendSequenceForContact } from "@/modules/lead-gen/sequence-catalog";
+import {
+  DEFAULT_TRADEMINING_SCORING_SETTINGS,
+  type TradeMiningScoringSettings
+} from "@/modules/settings/types";
+import { mapApolloRepOptions, parseApolloRepMapping } from "@/modules/settings/apollo-rep-mapping";
 
 type SearchProfileDelegate = typeof prisma.tradeMiningSearchProfile;
 
 type SearchProfileClient = typeof prisma & {
   tradeMiningSearchProfile?: SearchProfileDelegate;
+};
+
+type LeadPipelineFilterRepOption = {
+  value: string;
+  label: string;
+};
+
+type TradeMiningScoringQueryClient = typeof prisma & {
+  tradeMiningScoringConfig?: {
+    findUnique(args: { where: { tenantId: string } }): Promise<{
+      recentWindowDays: number;
+      comparisonWindowDays: number;
+      lookbackWindowDays: number;
+      momentumWeight: number;
+      marketFitWeight: number;
+      industryFitWeight: number;
+      companySizeWeight: number;
+      roleWeight: number;
+      confidenceWeight: number;
+      workflowWeight: number;
+      preferredIndustryKeywords: unknown;
+      penalizedIndustryKeywords: unknown;
+      preferredHsCodePrefixes: unknown;
+      penalizedHsCodePrefixes: unknown;
+      oversizeTeuThreshold: { toString(): string } | string | null;
+      oversizeShipmentCount30dThreshold: number | null;
+      oversizePenalty: number;
+      midMarketTeuMin: { toString(): string } | string | null;
+      midMarketTeuMax: { toString(): string } | string | null;
+      midMarketBoost: number;
+      aiClassificationEnabled: boolean;
+      aiModel: string | null;
+    } | null>;
+  };
 };
 
 export type CandidateFeedSort =
@@ -78,6 +118,8 @@ type SearchProfileSummary = {
   hsCodes: string[];
 };
 
+type CandidateScoringConfig = TradeMiningScoringSettings;
+
 export async function getCandidateFeed(tenant: TenantContext, filters: CandidateFeedFilters = {}) {
   const companies = await prisma.company.findMany({
     where: tenantWhere(tenant, buildCandidateWhere(filters)),
@@ -119,6 +161,7 @@ export async function getCandidateFeed(tenant: TenantContext, filters: Candidate
   }
 
   const searchProfiles = await loadSearchProfileSummaries(tenant, [...searchProfileIds]);
+  const scoringConfig = await loadTradeMiningScoringConfig(tenant);
 
   const candidates = companies
     .map((company) => {
@@ -127,7 +170,8 @@ export async function getCandidateFeed(tenant: TenantContext, filters: Candidate
         companyPriorityScore: company.priorityScore,
         candidateStatus: company.candidateStatus,
         alreadyInPipeline: company.leads.length > 0,
-        evidence
+        evidence,
+        config: scoringConfig
       });
 
       return {
@@ -262,7 +306,97 @@ export async function getTradeMiningSearchProfiles(tenant: TenantContext) {
   }
 }
 
+export async function getTradeMiningSearchProfileSuggestions(tenant: TenantContext) {
+  try {
+    const [profiles, importRecords] = await Promise.all([
+      prisma.tradeMiningSearchProfile.findMany({
+        where: tenantWhere(tenant),
+        select: {
+          destinationMarkets: true,
+          destinationPorts: true,
+          originPorts: true,
+          shipFromPorts: true,
+          originCountries: true
+        }
+      }),
+      prisma.tradeMiningImportRecord.findMany({
+        where: tenantWhere(tenant),
+        select: {
+          sourcePort: true,
+          originCountry: true,
+          destinationCity: true,
+          destinationState: true,
+          rawJson: true
+        },
+        orderBy: {
+          createdAt: "desc"
+        },
+        take: 500
+      })
+    ]);
+
+    const destinationMarkets = new Set<string>();
+    const destinationPorts = new Set<string>();
+    const originPorts = new Set<string>();
+    const shipFromPorts = new Set<string>();
+    const originCountries = new Set<string>();
+
+    for (const profile of profiles) {
+      for (const value of asStringArray(profile.destinationMarkets)) destinationMarkets.add(value);
+      for (const value of asStringArray(profile.destinationPorts)) destinationPorts.add(value);
+      for (const value of asStringArray(profile.originPorts)) originPorts.add(value);
+      for (const value of asStringArray(profile.shipFromPorts)) shipFromPorts.add(value);
+      for (const value of asStringArray(profile.originCountries)) originCountries.add(value);
+    }
+
+    for (const record of importRecords) {
+      const rawJson = asObject(record.rawJson);
+      addSuggestion(
+        destinationMarkets,
+        readString(rawJson, "destinationMarket") ??
+          formatMarket(record.destinationCity, record.destinationState)
+      );
+      addSuggestion(
+        destinationPorts,
+        readString(rawJson, "destinationPort") ?? readString(rawJson, "arrivalPort")
+      );
+      addSuggestion(
+        originPorts,
+        record.sourcePort ??
+          readString(rawJson, "originPort") ??
+          readString(rawJson, "foreignPort")
+      );
+      addSuggestion(
+        shipFromPorts,
+        readString(rawJson, "shipFromPort") ?? readString(rawJson, "placeOfReceipt")
+      );
+      addSuggestion(originCountries, record.originCountry ?? readString(rawJson, "originCountry"));
+    }
+
+    return {
+      destinationMarkets: sortSuggestions(destinationMarkets),
+      destinationPorts: sortSuggestions(destinationPorts),
+      originPorts: sortSuggestions(originPorts),
+      shipFromPorts: sortSuggestions(shipFromPorts),
+      originCountries: sortSuggestions(originCountries)
+    };
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2021") {
+      return {
+        destinationMarkets: [],
+        destinationPorts: [],
+        originPorts: [],
+        shipFromPorts: [],
+        originCountries: []
+      };
+    }
+
+    throw error;
+  }
+}
+
 export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipelineFilters = {}) {
+  const repDirectory = await getLeadPipelineRepDirectory(tenant);
   const leads = await prisma.lead.findMany({
     where: tenantWhere(tenant, buildLeadPipelineWhere(filters)),
     include: {
@@ -311,7 +445,8 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
       score: lead.score,
       companyScore: lead.company.priorityScore,
       ownerUserId: lead.ownerUserId,
-      assignedRep: lead.ownerUserId ?? "Unassigned",
+      assignedRepValue: lead.ownerUserId,
+      assignedRep: lead.ownerUserId ? repDirectory.get(lead.ownerUserId) ?? lead.ownerUserId : "Unassigned",
       contactStatus,
       apolloStatus,
       sequenceStatus,
@@ -346,10 +481,75 @@ export async function getLeadPipelineFilters(tenant: TenantContext) {
     }
   });
 
+  const apolloMappings = await prisma.integrationCredential.findMany({
+    where: tenantWhere(tenant, {
+      provider: IntegrationProvider.APOLLO
+    }),
+    orderBy: {
+      name: "asc"
+    },
+    select: {
+      publicConfig: true
+    }
+  });
+
+  const mappedOwners = apolloMappings.flatMap((credential) => parseApolloRepOptions(credential.publicConfig));
+  const seen = new Set<string>();
+  const mergedOwners: LeadPipelineFilterRepOption[] = [];
+
+  for (const owner of mappedOwners) {
+    if (seen.has(owner.value)) {
+      continue;
+    }
+
+    seen.add(owner.value);
+    mergedOwners.push(owner);
+  }
+
+  for (const owner of owners.flatMap((item) => (item.ownerUserId ? [item.ownerUserId] : []))) {
+    if (seen.has(owner)) {
+      continue;
+    }
+
+    seen.add(owner);
+    mergedOwners.push({
+      value: owner,
+      label: owner
+    });
+  }
+
   return {
     stages: Object.values(LeadPipelineStage),
-    owners: owners.flatMap((owner) => (owner.ownerUserId ? [owner.ownerUserId] : []))
+    owners: mergedOwners
   };
+}
+
+async function getLeadPipelineRepDirectory(tenant: TenantContext) {
+  const mappings = await prisma.integrationCredential.findMany({
+    where: tenantWhere(tenant, {
+      provider: IntegrationProvider.APOLLO
+    }),
+    orderBy: {
+      name: "asc"
+    },
+    select: {
+      publicConfig: true
+    }
+  });
+
+  const directory = new Map<string, string>();
+
+  for (const mapping of mappings) {
+    for (const rep of parseApolloRepOptions(mapping.publicConfig)) {
+      directory.set(rep.value, rep.label);
+    }
+  }
+
+  return directory;
+}
+
+function parseApolloRepOptions(publicConfig: unknown): LeadPipelineFilterRepOption[] {
+  return mapApolloRepOptions(parseApolloRepMapping(publicConfig));
 }
 
 export async function getContactDirectory(tenant: TenantContext, filters: ContactDirectoryFilters = {}) {
@@ -497,6 +697,29 @@ export async function getContactDirectoryFilters(tenant: TenantContext) {
 
 function asStringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function addSuggestion(set: Set<string>, value: string | null | undefined) {
+  if (!value) {
+    return;
+  }
+
+  const normalized = value.trim();
+  if (normalized.length > 0) {
+    set.add(normalized);
+  }
+}
+
+function formatMarket(city: string | null, state: string | null) {
+  if (city && state) {
+    return `${city}, ${state}`;
+  }
+
+  return city ?? state ?? null;
+}
+
+function sortSuggestions(values: Set<string>) {
+  return [...values].sort((left, right) => left.localeCompare(right));
 }
 
 function buildContactDirectoryWhere(tenant: TenantContext, filters: ContactDirectoryFilters) {
@@ -978,6 +1201,17 @@ export function summarizeTradeMiningEvidence(
     totalTeu,
     shipmentWeight,
     totalQuantity,
+    activity: importRecords.map((record) => ({
+      arrivalDate: record.arrivalDate,
+      teu: readNumericRawValue(asObject(record.rawJson), ["teu"]),
+      containerCount: readNumericRawValue(asObject(record.rawJson), [
+        "containerCount",
+        "container_count",
+        "containers",
+        "shipmentVolume"
+      ]),
+      shipmentWeight: readNumericRawValue(asObject(record.rawJson), ["weight", "weightKg", "shipmentWeight"])
+    })),
     profileFit,
     importedScoreReasoning: readImportedScoreReasoning(latestRawJson)
   };
@@ -987,50 +1221,47 @@ export function scoreCandidate({
   companyPriorityScore,
   candidateStatus,
   alreadyInPipeline,
-  evidence
+  evidence,
+  config = DEFAULT_TRADEMINING_SCORING_SETTINGS
 }: {
   companyPriorityScore: number;
   candidateStatus: CandidateStatus;
   alreadyInPipeline: boolean;
   evidence: ReturnType<typeof summarizeTradeMiningEvidence>;
+  config?: CandidateScoringConfig;
 }) {
-  const frequencyScore = Math.min(24, evidence.shipmentCount * 6);
-  const volumeScore = Math.min(
-    16,
-    Math.floor(evidence.containerCount * 3 + evidence.totalTeu * 4 + evidence.shipmentWeight / 20000)
-  );
-  const recencyScore = scoreRecency(evidence.latestShipmentDate);
-  const roleScore = scoreRole(evidence.sourceRole);
-  const destinationScore = evidence.profileFit.destination;
-  const originScore = evidence.profileFit.origin;
-  const productScore = evidence.profileFit.product;
-  const profileScore = Math.min(10, Math.floor((evidence.searchProfile?.priorityWeight ?? 0) / 10));
-  const existingPriorityScore = Math.min(10, Math.floor(companyPriorityScore / 10));
-  const pipelinePenalty = alreadyInPipeline ? -18 : 0;
+  const normalizedConfig = normalizeScoringConfig(config);
+  const momentumScore = scoreMomentum(evidence, normalizedConfig);
+  const marketFitScore = scoreMarketFit(evidence, normalizedConfig);
+  const industryFitScore = scoreIndustryFit(evidence, normalizedConfig);
+  const companySizeScore = scoreCompanySize(evidence, normalizedConfig);
+  const roleScore = scaleScore(scoreRole(evidence.sourceRole), 14, normalizedConfig.roleWeight);
+  const confidenceScore = scoreConfidence(evidence, normalizedConfig);
+  const workflowScore = scoreWorkflow({
+    companyPriorityScore,
+    alreadyInPipeline,
+    weight: normalizedConfig.workflowWeight
+  });
   const rejectedPenalty =
     candidateStatus === CandidateStatus.REJECTED || candidateStatus === CandidateStatus.DISQUALIFIED ? -100 : 0;
   const rawScore =
-    frequencyScore +
-    volumeScore +
-    recencyScore +
+    momentumScore +
+    marketFitScore +
+    industryFitScore +
+    companySizeScore +
     roleScore +
-    destinationScore +
-    originScore +
-    productScore +
-    profileScore +
-    existingPriorityScore +
-    pipelinePenalty +
+    confidenceScore +
+    workflowScore +
     rejectedPenalty;
   const score = clamp(rawScore, 0, 100);
 
   const reasoning = [
-    `${evidence.shipmentCount} shipment${evidence.shipmentCount === 1 ? "" : "s"}`,
-    evidence.latestShipmentDate ? `${scoreRecencyLabel(evidence.latestShipmentDate)} shipment recency` : "no shipment date",
+    describeMomentum(evidence, normalizedConfig),
+    describeMarketFit(evidence, normalizedConfig),
+    describeIndustryFit(evidence, normalizedConfig),
+    describeCompanySize(evidence, normalizedConfig),
     evidence.sourceRole ? `${formatSourceRole(evidence.sourceRole)} role` : "no source role",
-    evidence.profileFit.destination > 0 ? "destination fit matched profile" : "destination fit missing",
-    evidence.profileFit.origin > 0 ? "origin fit matched profile" : "origin fit missing",
-    evidence.profileFit.product > 0 ? "product/HS fit matched profile" : "product/HS fit missing",
-    evidence.searchProfile ? `${evidence.searchProfile.name} profile priority` : "no matched search profile",
+    `${Math.round(confidenceScore)}/${normalizedConfig.confidenceWeight} data confidence`,
     alreadyInPipeline ? "already in pipeline; deprioritized" : "not yet in pipeline"
   ].join("; ");
 
@@ -1133,6 +1364,10 @@ function readNumber(value: JsonObject, key: string) {
   return 0;
 }
 
+function readNumericRawValue(value: JsonObject, keys: string[]) {
+  return keys.reduce((total, key) => total + readNumber(value, key), 0);
+}
+
 function firstStringFromRecords(records: Array<{ rawJson: unknown }>, key: string) {
   for (const record of records) {
     const value = readString(asObject(record.rawJson), key);
@@ -1147,7 +1382,7 @@ function firstStringFromRecords(records: Array<{ rawJson: unknown }>, key: strin
 function sumNumericRawValues(records: Array<{ rawJson: unknown }>, keys: string[]) {
   return records.reduce((total, record) => {
     const rawJson = asObject(record.rawJson);
-    return total + keys.reduce((recordTotal, key) => recordTotal + readNumber(rawJson, key), 0);
+    return total + readNumericRawValue(rawJson, keys);
   }, 0);
 }
 
@@ -1267,22 +1502,391 @@ function scoreRecency(latestShipmentDate: Date | null) {
   return 0;
 }
 
-function scoreRecencyLabel(latestShipmentDate: Date) {
-  const ageInDays = (Date.now() - latestShipmentDate.getTime()) / 86_400_000;
+async function loadTradeMiningScoringConfig(tenant: TenantContext) {
+  const tradeMiningScoringClient = prisma as TradeMiningScoringQueryClient;
 
-  if (ageInDays <= 30) {
-    return "recent";
+  try {
+    const config =
+      (await tradeMiningScoringClient.tradeMiningScoringConfig?.findUnique({
+        where: {
+          tenantId: tenant.tenantId
+        }
+      })) ?? null;
+
+    if (!config) {
+      return normalizeScoringConfig(DEFAULT_TRADEMINING_SCORING_SETTINGS);
+    }
+
+    return normalizeScoringConfig(config);
+  } catch (error) {
+    if (isMissingSearchProfileTableError(error)) {
+      return normalizeScoringConfig(DEFAULT_TRADEMINING_SCORING_SETTINGS);
+    }
+
+    throw error;
+  }
+}
+
+function normalizeScoringConfig(
+  config:
+    | CandidateScoringConfig
+    | {
+        recentWindowDays: number;
+        comparisonWindowDays: number;
+        lookbackWindowDays: number;
+        momentumWeight: number;
+        marketFitWeight: number;
+        industryFitWeight: number;
+        companySizeWeight: number;
+        roleWeight: number;
+        confidenceWeight: number;
+        workflowWeight: number;
+        preferredOriginCountries: unknown;
+        penalizedOriginCountries: unknown;
+        preferredOriginPorts: unknown;
+        penalizedOriginPorts: unknown;
+        preferredDestinationMarkets: unknown;
+        penalizedDestinationMarkets: unknown;
+        preferredIndustryKeywords: unknown;
+        penalizedIndustryKeywords: unknown;
+        preferredHsCodePrefixes: unknown;
+        penalizedHsCodePrefixes: unknown;
+        oversizeTeuThreshold: { toString(): string } | string | null;
+        oversizeShipmentCount30dThreshold: number | null;
+        oversizePenalty: number;
+        midMarketTeuMin: { toString(): string } | string | null;
+        midMarketTeuMax: { toString(): string } | string | null;
+        midMarketBoost: number;
+        aiClassificationEnabled: boolean;
+        aiModel: string | null;
+      }
+) {
+  return {
+    recentWindowDays: config.recentWindowDays,
+    comparisonWindowDays: config.comparisonWindowDays,
+    lookbackWindowDays: config.lookbackWindowDays,
+    momentumWeight: config.momentumWeight,
+    marketFitWeight: config.marketFitWeight,
+    industryFitWeight: config.industryFitWeight,
+    companySizeWeight: config.companySizeWeight,
+    roleWeight: config.roleWeight,
+    confidenceWeight: config.confidenceWeight,
+    workflowWeight: config.workflowWeight,
+    preferredOriginCountries: normalizeStringArray(config.preferredOriginCountries),
+    penalizedOriginCountries: normalizeStringArray(config.penalizedOriginCountries),
+    preferredOriginPorts: normalizeStringArray(config.preferredOriginPorts),
+    penalizedOriginPorts: normalizeStringArray(config.penalizedOriginPorts),
+    preferredDestinationMarkets: normalizeStringArray(config.preferredDestinationMarkets),
+    penalizedDestinationMarkets: normalizeStringArray(config.penalizedDestinationMarkets),
+    preferredIndustryKeywords: normalizeStringArray(config.preferredIndustryKeywords),
+    penalizedIndustryKeywords: normalizeStringArray(config.penalizedIndustryKeywords),
+    preferredHsCodePrefixes: normalizeStringArray(config.preferredHsCodePrefixes),
+    penalizedHsCodePrefixes: normalizeStringArray(config.penalizedHsCodePrefixes),
+    oversizeTeuThreshold: normalizeOptionalString(config.oversizeTeuThreshold),
+    oversizeShipmentCount30dThreshold: config.oversizeShipmentCount30dThreshold,
+    oversizePenalty: config.oversizePenalty,
+    midMarketTeuMin: normalizeOptionalString(config.midMarketTeuMin),
+    midMarketTeuMax: normalizeOptionalString(config.midMarketTeuMax),
+    midMarketBoost: config.midMarketBoost,
+    aiClassificationEnabled: config.aiClassificationEnabled,
+    aiModel: config.aiModel
+  } satisfies CandidateScoringConfig;
+}
+
+function normalizeStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean)
+    : [];
+}
+
+function normalizeOptionalString(value: { toString(): string } | string | null) {
+  if (value === null) {
+    return null;
   }
 
-  if (ageInDays <= 90) {
-    return "current";
+  const normalized = value.toString().trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function scoreMomentum(evidence: ReturnType<typeof summarizeTradeMiningEvidence>, config: CandidateScoringConfig) {
+  const recent = summarizeWindowActivity(evidence, 0, config.recentWindowDays);
+  const previous = summarizeWindowActivity(
+    evidence,
+    config.recentWindowDays,
+    config.recentWindowDays + config.comparisonWindowDays
+  );
+  const recentShipmentRatio = clamp(recent.shipmentCount / 6, 0, 1);
+  const growthRatio = previous.shipmentCount > 0
+    ? clamp((recent.shipmentCount - previous.shipmentCount) / previous.shipmentCount, -1, 1)
+    : recent.shipmentCount > 0
+      ? 1
+      : 0;
+  const teuGrowthRatio = previous.totalTeu > 0
+    ? clamp((recent.totalTeu - previous.totalTeu) / previous.totalTeu, -1, 1)
+    : recent.totalTeu > 0
+      ? 1
+      : 0;
+  const recencyRatio = scoreRecency(evidence.latestShipmentDate) / 20;
+  const normalized = clamp(recentShipmentRatio * 0.45 + ((growthRatio + 1) / 2) * 0.3 + ((teuGrowthRatio + 1) / 2) * 0.15 + recencyRatio * 0.1, 0, 1);
+
+  return Math.round(normalized * config.momentumWeight);
+}
+
+function scoreMarketFit(evidence: ReturnType<typeof summarizeTradeMiningEvidence>, config: CandidateScoringConfig) {
+  const destinationRatio = evidence.profileFit.destination / 12;
+  const originRatio = evidence.profileFit.origin / 8;
+  const productRatio = evidence.profileFit.product / 10;
+  const profilePriorityRatio = (evidence.searchProfile?.priorityWeight ?? 40) / 100;
+  const routePriorityRatio = scoreRoutePriority(evidence, config);
+  const normalized = clamp(
+    destinationRatio * 0.3 +
+      originRatio * 0.2 +
+      productRatio * 0.2 +
+      profilePriorityRatio * 0.15 +
+      routePriorityRatio * 0.15,
+    0,
+    1
+  );
+
+  return Math.round(normalized * config.marketFitWeight);
+}
+
+function scoreRoutePriority(evidence: ReturnType<typeof summarizeTradeMiningEvidence>, config: CandidateScoringConfig) {
+  const destinationMarket = normalizeComparableValue(evidence.destinationMarket ?? "");
+  const originCountry = normalizeComparableValue(evidence.originCountry ?? "");
+  const originPort = normalizeComparableValue(evidence.originPort ?? "");
+
+  const preferredMatches = [
+    matchesComparableList(config.preferredDestinationMarkets, destinationMarket),
+    matchesComparableList(config.preferredOriginCountries, originCountry),
+    matchesComparableList(config.preferredOriginPorts, originPort)
+  ].filter(Boolean).length;
+
+  const penalizedMatches = [
+    matchesComparableList(config.penalizedDestinationMarkets, destinationMarket),
+    matchesComparableList(config.penalizedOriginCountries, originCountry),
+    matchesComparableList(config.penalizedOriginPorts, originPort)
+  ].filter(Boolean).length;
+
+  return clamp(0.5 + preferredMatches * 0.2 - penalizedMatches * 0.25, 0, 1);
+}
+
+function matchesComparableList(values: string[], signal: string) {
+  if (!signal) {
+    return false;
   }
 
-  if (ageInDays <= 180) {
-    return "aging";
+  return values.some((value) => signal.includes(normalizeComparableValue(value)));
+}
+
+function scoreIndustryFit(evidence: ReturnType<typeof summarizeTradeMiningEvidence>, config: CandidateScoringConfig) {
+  const productText = normalizeComparableValue(evidence.productDescription ?? "");
+  const hsCode = (evidence.hsCode ?? "").replace(/[^0-9]/g, "");
+  const preferredKeywordMatch = config.preferredIndustryKeywords.some((keyword) => productText.includes(normalizeComparableValue(keyword)));
+  const penalizedKeywordMatch = config.penalizedIndustryKeywords.some((keyword) => productText.includes(normalizeComparableValue(keyword)));
+  const preferredHsMatch = config.preferredHsCodePrefixes.some((prefix) => hsCode.startsWith(prefix.replace(/[^0-9]/g, "")));
+  const penalizedHsMatch = config.penalizedHsCodePrefixes.some((prefix) => hsCode.startsWith(prefix.replace(/[^0-9]/g, "")));
+  const positive = (preferredKeywordMatch ? 0.6 : 0) + (preferredHsMatch ? 0.4 : 0);
+  const negative = (penalizedKeywordMatch ? 0.7 : 0) + (penalizedHsMatch ? 0.3 : 0);
+  const normalized = clamp(positive - negative, -1, 1);
+
+  return Math.round(normalized * config.industryFitWeight);
+}
+
+function scoreCompanySize(evidence: ReturnType<typeof summarizeTradeMiningEvidence>, config: CandidateScoringConfig) {
+  const recent = summarizeWindowActivity(evidence, 0, config.recentWindowDays);
+  const oversizeTeuThreshold = readOptionalNumericSetting(config.oversizeTeuThreshold);
+  const midMarketTeuMin = readOptionalNumericSetting(config.midMarketTeuMin);
+  const midMarketTeuMax = readOptionalNumericSetting(config.midMarketTeuMax);
+  let score = 0;
+
+  if (
+    midMarketTeuMin !== null &&
+    midMarketTeuMax !== null &&
+    recent.totalTeu >= midMarketTeuMin &&
+    recent.totalTeu <= midMarketTeuMax
+  ) {
+    score += Math.min(config.companySizeWeight, config.midMarketBoost);
   }
 
-  return "older";
+  if (
+    (oversizeTeuThreshold !== null && recent.totalTeu >= oversizeTeuThreshold) ||
+    (config.oversizeShipmentCount30dThreshold !== null &&
+      recent.shipmentCount >= config.oversizeShipmentCount30dThreshold)
+  ) {
+    score -= Math.min(config.companySizeWeight, config.oversizePenalty);
+  }
+
+  return clamp(score, -config.companySizeWeight, config.companySizeWeight);
+}
+
+function scoreConfidence(evidence: ReturnType<typeof summarizeTradeMiningEvidence>, config: CandidateScoringConfig) {
+  const presentSignals = [
+    evidence.destinationMarket,
+    evidence.destinationPort,
+    evidence.originCountry,
+    evidence.originPort,
+    evidence.productDescription,
+    evidence.hsCode,
+    evidence.sourceRole,
+    evidence.companyMatchName
+  ].filter(Boolean).length;
+  const normalized = clamp(presentSignals / 8, 0, 1);
+
+  return Math.round(normalized * config.confidenceWeight);
+}
+
+function scoreWorkflow({
+  companyPriorityScore,
+  alreadyInPipeline,
+  weight
+}: {
+  companyPriorityScore: number;
+  alreadyInPipeline: boolean;
+  weight: number;
+}) {
+  const baseScore = Math.round(clamp(companyPriorityScore / 100, 0, 1) * weight);
+  return alreadyInPipeline ? -weight : baseScore;
+}
+
+function scaleScore(value: number, maxValue: number, weight: number) {
+  if (maxValue <= 0 || weight <= 0) {
+    return 0;
+  }
+
+  return Math.round(clamp(value / maxValue, 0, 1) * weight);
+}
+
+function summarizeWindowActivity(
+  evidence: ReturnType<typeof summarizeTradeMiningEvidence>,
+  minAgeDays: number,
+  maxAgeDays: number
+) {
+  const now = Date.now();
+  const activity = evidence.activity.filter((record) => {
+    if (!record.arrivalDate) {
+      return false;
+    }
+
+    const ageInDays = (now - record.arrivalDate.getTime()) / 86_400_000;
+    return ageInDays >= minAgeDays && ageInDays < maxAgeDays;
+  });
+
+  return {
+    shipmentCount: activity.length,
+    totalTeu: activity.reduce((sum, record) => sum + record.teu, 0),
+    totalContainers: activity.reduce((sum, record) => sum + record.containerCount, 0)
+  };
+}
+
+function readOptionalNumericSetting(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function describeMomentum(evidence: ReturnType<typeof summarizeTradeMiningEvidence>, config: CandidateScoringConfig) {
+  const recent = summarizeWindowActivity(evidence, 0, config.recentWindowDays);
+  const previous = summarizeWindowActivity(
+    evidence,
+    config.recentWindowDays,
+    config.recentWindowDays + config.comparisonWindowDays
+  );
+
+  if (recent.shipmentCount > previous.shipmentCount) {
+    return `shipment activity rising (${recent.shipmentCount} recent vs ${previous.shipmentCount} prior)`;
+  }
+
+  if (recent.shipmentCount < previous.shipmentCount) {
+    return `shipment activity softening (${recent.shipmentCount} recent vs ${previous.shipmentCount} prior)`;
+  }
+
+  return `${evidence.shipmentCount} shipment${evidence.shipmentCount === 1 ? "" : "s"} in lookback`;
+}
+
+function describeMarketFit(
+  evidence: ReturnType<typeof summarizeTradeMiningEvidence>,
+  config: CandidateScoringConfig
+) {
+  const parts = [
+    evidence.profileFit.destination > 0 ? "destination fit matched profile" : "destination fit missing",
+    evidence.profileFit.origin > 0 ? "origin fit matched profile" : "origin fit missing",
+    evidence.profileFit.product > 0 ? "product/HS fit matched profile" : "product/HS fit missing"
+  ];
+
+  const routeBias: string[] = [];
+  if (matchesComparableList(config.preferredDestinationMarkets, normalizeComparableValue(evidence.destinationMarket ?? ""))) {
+    routeBias.push("preferred destination market");
+  }
+  if (matchesComparableList(config.preferredOriginCountries, normalizeComparableValue(evidence.originCountry ?? ""))) {
+    routeBias.push("preferred origin country");
+  }
+  if (matchesComparableList(config.preferredOriginPorts, normalizeComparableValue(evidence.originPort ?? ""))) {
+    routeBias.push("preferred origin port");
+  }
+  if (matchesComparableList(config.penalizedOriginCountries, normalizeComparableValue(evidence.originCountry ?? ""))) {
+    routeBias.push("deprioritized origin country");
+  }
+
+  if (evidence.searchProfile) {
+    parts.push(`${evidence.searchProfile.name} profile priority`);
+  }
+
+  if (routeBias.length > 0) {
+    parts.push(routeBias.join(", "));
+  }
+
+  return parts.join(", ");
+}
+
+function describeIndustryFit(evidence: ReturnType<typeof summarizeTradeMiningEvidence>, config: CandidateScoringConfig) {
+  const productText = evidence.productDescription ?? "";
+  const hsCode = evidence.hsCode ?? "";
+
+  if (
+    config.preferredIndustryKeywords.some((keyword) => matchesKeyword([keyword], productText)) ||
+    config.preferredHsCodePrefixes.some((prefix) => hsCode.replace(/[^0-9]/g, "").startsWith(prefix.replace(/[^0-9]/g, "")))
+  ) {
+    return "industry signals match preferred categories";
+  }
+
+  if (
+    config.penalizedIndustryKeywords.some((keyword) => matchesKeyword([keyword], productText)) ||
+    config.penalizedHsCodePrefixes.some((prefix) => hsCode.replace(/[^0-9]/g, "").startsWith(prefix.replace(/[^0-9]/g, "")))
+  ) {
+    return "industry signals hit a deprioritized category";
+  }
+
+  return "industry preference neutral";
+}
+
+function describeCompanySize(evidence: ReturnType<typeof summarizeTradeMiningEvidence>, config: CandidateScoringConfig) {
+  const recent = summarizeWindowActivity(evidence, 0, config.recentWindowDays);
+  const oversizeTeuThreshold = readOptionalNumericSetting(config.oversizeTeuThreshold);
+  const midMarketTeuMin = readOptionalNumericSetting(config.midMarketTeuMin);
+  const midMarketTeuMax = readOptionalNumericSetting(config.midMarketTeuMax);
+
+  if (
+    (oversizeTeuThreshold !== null && recent.totalTeu >= oversizeTeuThreshold) ||
+    (config.oversizeShipmentCount30dThreshold !== null &&
+      recent.shipmentCount >= config.oversizeShipmentCount30dThreshold)
+  ) {
+    return "large importer profile; score reduced";
+  }
+
+  if (
+    midMarketTeuMin !== null &&
+    midMarketTeuMax !== null &&
+    recent.totalTeu >= midMarketTeuMin &&
+    recent.totalTeu <= midMarketTeuMax
+  ) {
+    return "mid-market importer profile";
+  }
+
+  return "company size neutral";
 }
 
 function formatDestination(rawJson: JsonObject, fallbackCity: string | null, fallbackState: string | null) {

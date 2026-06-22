@@ -288,7 +288,18 @@ describe("TradeMining ingestion", () => {
   });
 
   it("returns enabled search profiles for the authenticated tenant only", async () => {
-    mockDb.state.searchProfiles.set("profile-a", searchProfile({ id: "profile-a", tenantId: "tenant-a", enabled: true, priorityWeight: 80 }));
+    mockDb.state.searchProfiles.set(
+      "profile-a",
+      searchProfile({
+        id: "profile-a",
+        tenantId: "tenant-a",
+        enabled: true,
+        priorityWeight: 80,
+        destinationMarkets: ["Houston, TX | United States"],
+        destinationPorts: ["Houston, TX | United States"],
+        originCountries: ["China (CN)"]
+      })
+    );
     mockDb.state.searchProfiles.set("profile-disabled", searchProfile({ id: "profile-disabled", tenantId: "tenant-a", enabled: false, priorityWeight: 100 }));
     mockDb.state.searchProfiles.set("profile-b", searchProfile({ id: "profile-b", tenantId: "tenant-b", enabled: true, priorityWeight: 90 }));
 
@@ -298,7 +309,9 @@ describe("TradeMining ingestion", () => {
     expect(result[0]).toMatchObject({
       id: "profile-a",
       name: "Houston Leads",
-      destinationMarkets: ["Houston"],
+      destinationMarkets: ["Houston, TX"],
+      destinationPorts: ["Houston, TX"],
+      originCountries: ["China"],
       priorityWeight: 80
     });
   });

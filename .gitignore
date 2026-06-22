@@ -65,3 +65,5 @@ tmp/
 temp/
 .cache/
 .vercel
+work/
+.next-corrupt-*/

@@ -1,4 +1,4 @@
-import { IntegrationProvider } from "@prisma/client";
+import { Prisma, IntegrationProvider } from "@prisma/client";
 import { prisma } from "@/server/db";
 import type { SevenLAccountConfig } from "@/modules/ltl-rate-portal/types";
 import { tenantWhere } from "@/server/tenant-query";
@@ -6,16 +6,71 @@ import type { TenantContext } from "@/server/tenant-context";
 import type { UpsAccountConfig } from "@/modules/ups-tools/types";
 import { getLocalUpsAccountMetadata } from "@/server/integrations/ups";
 import {
+  mapApolloRepOptions,
+  parseApolloRepMapping
+} from "@/modules/settings/apollo-rep-mapping";
+import {
   buildPlaceholderQuoteSource,
   mapProviderToCarrierName,
   parseQuoteSourceDirectory,
   parseQuoteToolTargets,
   QUOTE_SOURCE_DIRECTORY_NAME
 } from "@/modules/settings/quote-sources";
-import type { ManagedQuoteSource, QuoteToolTarget } from "@/modules/settings/types";
+import {
+  DEFAULT_TRADEMINING_SCORING_SETTINGS,
+  type ManagedQuoteSource,
+  type QuoteToolTarget,
+  type TradeMiningScoringSettings
+} from "@/modules/settings/types";
 
 type SettingsUpsAccount = UpsAccountConfig & {
   toolTargets: QuoteToolTarget[];
+};
+
+type IntegrationCredentialRecord = {
+  id: string;
+  provider: IntegrationProvider;
+  name: string;
+  status: "ACTIVE" | "DISABLED" | "ERROR";
+  publicConfig: unknown;
+  secretRef: string | null;
+};
+
+type TradeMiningScoringConfigRecord = {
+  recentWindowDays: number;
+  comparisonWindowDays: number;
+  lookbackWindowDays: number;
+  momentumWeight: number;
+  marketFitWeight: number;
+  industryFitWeight: number;
+  companySizeWeight: number;
+  roleWeight: number;
+  confidenceWeight: number;
+  workflowWeight: number;
+  preferredOriginCountries: unknown;
+  penalizedOriginCountries: unknown;
+  preferredOriginPorts: unknown;
+  penalizedOriginPorts: unknown;
+  preferredDestinationMarkets: unknown;
+  penalizedDestinationMarkets: unknown;
+  preferredIndustryKeywords: unknown;
+  penalizedIndustryKeywords: unknown;
+  preferredHsCodePrefixes: unknown;
+  penalizedHsCodePrefixes: unknown;
+  oversizeTeuThreshold: { toString(): string } | null;
+  oversizeShipmentCount30dThreshold: number | null;
+  oversizePenalty: number;
+  midMarketTeuMin: { toString(): string } | null;
+  midMarketTeuMax: { toString(): string } | null;
+  midMarketBoost: number;
+  aiClassificationEnabled: boolean;
+  aiModel: string | null;
+};
+
+type TradeMiningScoringClient = typeof prisma & {
+  tradeMiningScoringConfig?: {
+    findUnique(args: { where: { tenantId: string } }): Promise<TradeMiningScoringConfigRecord | null>;
+  };
 };
 
 function isSevenLCarrier(
@@ -25,6 +80,8 @@ function isSevenLCarrier(
 }
 
 export async function getSettingsShell(tenant: TenantContext) {
+  const tradeMiningScoringClient = prisma as TradeMiningScoringClient;
+  let tradeMiningScoringConfigWarning: string | null = null;
   const moduleAccess = await prisma.tenantModuleAccess.findMany({
     where: tenantWhere(tenant),
     include: {
@@ -37,24 +94,35 @@ export async function getSettingsShell(tenant: TenantContext) {
     }
   });
 
-  const [integrationCredentials, localUpsAccounts] = await Promise.all([
+  const [integrationCredentials, localUpsAccounts, tradeMiningScoringConfig] = await Promise.all([
     prisma.integrationCredential.findMany({
       where: tenantWhere(tenant, {
         provider: {
-          in: [IntegrationProvider.UPS, IntegrationProvider.SEVEN_L, IntegrationProvider.OPENCLAW]
+          in: [IntegrationProvider.UPS, IntegrationProvider.SEVEN_L, IntegrationProvider.OPENCLAW, IntegrationProvider.APOLLO]
         }
       }),
       orderBy: {
         name: "asc"
       }
     }),
-    getLocalUpsAccountMetadata()
+    getLocalUpsAccountMetadata(),
+    loadTradeMiningScoringConfig(tradeMiningScoringClient, tenant.tenantId).catch((error: unknown) => {
+      if (isMissingTradeMiningScoringTableError(error)) {
+        tradeMiningScoringConfigWarning =
+          "TradeMining scoring settings are using built-in defaults because the local database is missing the latest scoring table migration.";
+        return null;
+      }
+
+      throw error;
+    })
   ]);
-  const upsAccounts = integrationCredentials
+  const typedIntegrationCredentials = integrationCredentials as IntegrationCredentialRecord[];
+  const apolloCredential = typedIntegrationCredentials.find((credential) => credential.provider === IntegrationProvider.APOLLO);
+  const upsAccounts = typedIntegrationCredentials
     .filter((credential) => credential.provider === IntegrationProvider.UPS)
     .map((credential) => mapUpsAccount(credential))
     .filter(isUpsAccount);
-  const quoteSourceDirectory = integrationCredentials.find(
+  const quoteSourceDirectory = typedIntegrationCredentials.find(
     (credential) => credential.provider === IntegrationProvider.OPENCLAW && credential.name === QUOTE_SOURCE_DIRECTORY_NAME
   );
   const managedQuoteSources = [
@@ -73,11 +141,102 @@ export async function getSettingsShell(tenant: TenantContext) {
     integrationProviders: Object.values(IntegrationProvider),
     quoteSources: managedQuoteSources,
     upsAccounts: mergeUpsAccountsForSettings(upsAccounts, localUpsAccounts),
-    sevenLAccounts: integrationCredentials
+    tradeMiningScoring: mapTradeMiningScoringSettings(tradeMiningScoringConfig),
+    tradeMiningScoringConfigWarning,
+    apolloRepMapping: apolloCredential ? parseApolloRepMapping(apolloCredential.publicConfig) : [],
+    apolloRepOptions: apolloCredential ? mapApolloRepOptions(parseApolloRepMapping(apolloCredential.publicConfig)) : [],
+    sevenLAccounts: typedIntegrationCredentials
       .filter((credential) => credential.provider === IntegrationProvider.SEVEN_L)
       .map((credential) => mapSevenLAccount(credential))
       .filter(Boolean) as SevenLAccountConfig[]
   };
+}
+
+async function loadTradeMiningScoringConfig(
+  tradeMiningScoringClient: TradeMiningScoringClient,
+  tenantId: string
+) {
+  return (
+    tradeMiningScoringClient.tradeMiningScoringConfig?.findUnique({
+      where: {
+        tenantId
+      }
+    }) ?? Promise.resolve(null)
+  );
+}
+
+function isMissingTradeMiningScoringTableError(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2021";
+}
+
+function mapTradeMiningScoringSettings(config: {
+  recentWindowDays: number;
+  comparisonWindowDays: number;
+  lookbackWindowDays: number;
+  momentumWeight: number;
+  marketFitWeight: number;
+  industryFitWeight: number;
+  companySizeWeight: number;
+  roleWeight: number;
+  confidenceWeight: number;
+  workflowWeight: number;
+  preferredOriginCountries: unknown;
+  penalizedOriginCountries: unknown;
+  preferredOriginPorts: unknown;
+  penalizedOriginPorts: unknown;
+  preferredDestinationMarkets: unknown;
+  penalizedDestinationMarkets: unknown;
+  preferredIndustryKeywords: unknown;
+  penalizedIndustryKeywords: unknown;
+  preferredHsCodePrefixes: unknown;
+  penalizedHsCodePrefixes: unknown;
+  oversizeTeuThreshold: { toString(): string } | null;
+  oversizeShipmentCount30dThreshold: number | null;
+  oversizePenalty: number;
+  midMarketTeuMin: { toString(): string } | null;
+  midMarketTeuMax: { toString(): string } | null;
+  midMarketBoost: number;
+  aiClassificationEnabled: boolean;
+  aiModel: string | null;
+} | null): TradeMiningScoringSettings {
+  if (!config) {
+    return DEFAULT_TRADEMINING_SCORING_SETTINGS;
+  }
+
+  return {
+    recentWindowDays: config.recentWindowDays,
+    comparisonWindowDays: config.comparisonWindowDays,
+    lookbackWindowDays: config.lookbackWindowDays,
+    momentumWeight: config.momentumWeight,
+    marketFitWeight: config.marketFitWeight,
+    industryFitWeight: config.industryFitWeight,
+    companySizeWeight: config.companySizeWeight,
+    roleWeight: config.roleWeight,
+    confidenceWeight: config.confidenceWeight,
+    workflowWeight: config.workflowWeight,
+    preferredOriginCountries: parseStringArray(config.preferredOriginCountries),
+    penalizedOriginCountries: parseStringArray(config.penalizedOriginCountries),
+    preferredOriginPorts: parseStringArray(config.preferredOriginPorts),
+    penalizedOriginPorts: parseStringArray(config.penalizedOriginPorts),
+    preferredDestinationMarkets: parseStringArray(config.preferredDestinationMarkets),
+    penalizedDestinationMarkets: parseStringArray(config.penalizedDestinationMarkets),
+    preferredIndustryKeywords: parseStringArray(config.preferredIndustryKeywords),
+    penalizedIndustryKeywords: parseStringArray(config.penalizedIndustryKeywords),
+    preferredHsCodePrefixes: parseStringArray(config.preferredHsCodePrefixes),
+    penalizedHsCodePrefixes: parseStringArray(config.penalizedHsCodePrefixes),
+    oversizeTeuThreshold: config.oversizeTeuThreshold?.toString() ?? null,
+    oversizeShipmentCount30dThreshold: config.oversizeShipmentCount30dThreshold,
+    oversizePenalty: config.oversizePenalty,
+    midMarketTeuMin: config.midMarketTeuMin?.toString() ?? null,
+    midMarketTeuMax: config.midMarketTeuMax?.toString() ?? null,
+    midMarketBoost: config.midMarketBoost,
+    aiClassificationEnabled: config.aiClassificationEnabled,
+    aiModel: config.aiModel
+  };
+}
+
+function parseStringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
 function isUpsAccount(value: SettingsUpsAccount | null): value is SettingsUpsAccount {

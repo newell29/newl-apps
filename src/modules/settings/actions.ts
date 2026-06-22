@@ -1,6 +1,6 @@
 "use server";
 
-import { IntegrationProvider, IntegrationStatus } from "@prisma/client";
+import { IntegrationProvider, IntegrationStatus, Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db";
 import { requireAdmin } from "@/server/auth/authorization";
@@ -14,6 +14,17 @@ import {
 import type { QuoteToolTarget } from "@/modules/settings/types";
 import { fetchSevenLAvailableCarriers } from "@/server/integrations/seven-l";
 import { getLtlRatePortalShell } from "@/modules/ltl-rate-portal/queries";
+import { buildApolloRepMappingConfig } from "@/modules/settings/apollo-rep-mapping";
+
+type TradeMiningScoringConfigMutationClient = typeof prisma & {
+  tradeMiningScoringConfig?: {
+    upsert(args: {
+      where: { tenantId: string };
+      update: Record<string, unknown>;
+      create: Record<string, unknown>;
+    }): Promise<unknown>;
+  };
+};
 
 async function authorizeSettingsMutation() {
   const context = await getAuthenticatedContext();
@@ -227,6 +238,129 @@ export async function updateSevenLCarrierSelectionAction(formData: FormData) {
   revalidatePath("/ltl-rate-portal");
 }
 
+export async function saveTradeMiningScoringSettingsAction(formData: FormData) {
+  const context = await authorizeSettingsMutation();
+  const tradeMiningScoringClient = prisma as TradeMiningScoringConfigMutationClient;
+
+  if (!tradeMiningScoringClient.tradeMiningScoringConfig) {
+    throw new Error("TradeMining scoring config is unavailable until Prisma Client is regenerated.");
+  }
+
+  await tradeMiningScoringClient.tradeMiningScoringConfig.upsert({
+    where: {
+      tenantId: context.tenantId
+    },
+    update: {
+      recentWindowDays: readRequiredInteger(formData, "recentWindowDays", 7, 365),
+      comparisonWindowDays: readRequiredInteger(formData, "comparisonWindowDays", 7, 365),
+      lookbackWindowDays: readRequiredInteger(formData, "lookbackWindowDays", 30, 365),
+      momentumWeight: readRequiredInteger(formData, "momentumWeight", 0, 100),
+      marketFitWeight: readRequiredInteger(formData, "marketFitWeight", 0, 100),
+      industryFitWeight: readRequiredInteger(formData, "industryFitWeight", 0, 100),
+      companySizeWeight: readRequiredInteger(formData, "companySizeWeight", 0, 100),
+      roleWeight: readRequiredInteger(formData, "roleWeight", 0, 100),
+      confidenceWeight: readRequiredInteger(formData, "confidenceWeight", 0, 100),
+      workflowWeight: readRequiredInteger(formData, "workflowWeight", 0, 100),
+      preferredOriginCountries: readStringList(formData, "preferredOriginCountries"),
+      penalizedOriginCountries: readStringList(formData, "penalizedOriginCountries"),
+      preferredOriginPorts: readStringList(formData, "preferredOriginPorts"),
+      penalizedOriginPorts: readStringList(formData, "penalizedOriginPorts"),
+      preferredDestinationMarkets: readStringList(formData, "preferredDestinationMarkets"),
+      penalizedDestinationMarkets: readStringList(formData, "penalizedDestinationMarkets"),
+      preferredIndustryKeywords: readStringList(formData, "preferredIndustryKeywords"),
+      penalizedIndustryKeywords: readStringList(formData, "penalizedIndustryKeywords"),
+      preferredHsCodePrefixes: readStringList(formData, "preferredHsCodePrefixes"),
+      penalizedHsCodePrefixes: readStringList(formData, "penalizedHsCodePrefixes"),
+      oversizeTeuThreshold: readOptionalDecimal(formData, "oversizeTeuThreshold"),
+      oversizeShipmentCount30dThreshold: readOptionalInteger(formData, "oversizeShipmentCount30dThreshold", 1, 500),
+      oversizePenalty: readRequiredInteger(formData, "oversizePenalty", 0, 100),
+      midMarketTeuMin: readOptionalDecimal(formData, "midMarketTeuMin"),
+      midMarketTeuMax: readOptionalDecimal(formData, "midMarketTeuMax"),
+      midMarketBoost: readRequiredInteger(formData, "midMarketBoost", 0, 100),
+      aiClassificationEnabled: formData.get("aiClassificationEnabled") === "true",
+      aiModel: readOptional(formData, "aiModel") ?? null
+    },
+    create: {
+      tenantId: context.tenantId,
+      recentWindowDays: readRequiredInteger(formData, "recentWindowDays", 7, 365),
+      comparisonWindowDays: readRequiredInteger(formData, "comparisonWindowDays", 7, 365),
+      lookbackWindowDays: readRequiredInteger(formData, "lookbackWindowDays", 30, 365),
+      momentumWeight: readRequiredInteger(formData, "momentumWeight", 0, 100),
+      marketFitWeight: readRequiredInteger(formData, "marketFitWeight", 0, 100),
+      industryFitWeight: readRequiredInteger(formData, "industryFitWeight", 0, 100),
+      companySizeWeight: readRequiredInteger(formData, "companySizeWeight", 0, 100),
+      roleWeight: readRequiredInteger(formData, "roleWeight", 0, 100),
+      confidenceWeight: readRequiredInteger(formData, "confidenceWeight", 0, 100),
+      workflowWeight: readRequiredInteger(formData, "workflowWeight", 0, 100),
+      preferredOriginCountries: readStringList(formData, "preferredOriginCountries"),
+      penalizedOriginCountries: readStringList(formData, "penalizedOriginCountries"),
+      preferredOriginPorts: readStringList(formData, "preferredOriginPorts"),
+      penalizedOriginPorts: readStringList(formData, "penalizedOriginPorts"),
+      preferredDestinationMarkets: readStringList(formData, "preferredDestinationMarkets"),
+      penalizedDestinationMarkets: readStringList(formData, "penalizedDestinationMarkets"),
+      preferredIndustryKeywords: readStringList(formData, "preferredIndustryKeywords"),
+      penalizedIndustryKeywords: readStringList(formData, "penalizedIndustryKeywords"),
+      preferredHsCodePrefixes: readStringList(formData, "preferredHsCodePrefixes"),
+      penalizedHsCodePrefixes: readStringList(formData, "penalizedHsCodePrefixes"),
+      oversizeTeuThreshold: readOptionalDecimal(formData, "oversizeTeuThreshold"),
+      oversizeShipmentCount30dThreshold: readOptionalInteger(formData, "oversizeShipmentCount30dThreshold", 1, 500),
+      oversizePenalty: readRequiredInteger(formData, "oversizePenalty", 0, 100),
+      midMarketTeuMin: readOptionalDecimal(formData, "midMarketTeuMin"),
+      midMarketTeuMax: readOptionalDecimal(formData, "midMarketTeuMax"),
+      midMarketBoost: readRequiredInteger(formData, "midMarketBoost", 0, 100),
+      aiClassificationEnabled: formData.get("aiClassificationEnabled") === "true",
+      aiModel: readOptional(formData, "aiModel") ?? null
+    }
+  });
+
+  revalidateSettingsSurfaces();
+  revalidatePath("/lead-gen/candidates");
+  revalidatePath("/dashboard");
+}
+
+export async function saveApolloRepMappingAction(formData: FormData) {
+  const context = await authorizeSettingsMutation();
+  const entries = readApolloRepMappingEntries(formData);
+  const publicConfig = buildApolloRepMappingConfig(entries);
+
+  const existing = await prisma.integrationCredential.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      provider: IntegrationProvider.APOLLO
+    },
+    select: {
+      id: true
+    }
+  });
+
+  if (existing) {
+    await prisma.integrationCredential.update({
+      where: {
+        id: existing.id
+      },
+      data: {
+        name: "Apollo Rep Mapping",
+        status: entries.some((entry) => entry.active) ? IntegrationStatus.ACTIVE : IntegrationStatus.DISABLED,
+        publicConfig
+      }
+    });
+  } else {
+    await prisma.integrationCredential.create({
+      data: {
+        tenantId: context.tenantId,
+        provider: IntegrationProvider.APOLLO,
+        name: "Apollo Rep Mapping",
+        status: entries.some((entry) => entry.active) ? IntegrationStatus.ACTIVE : IntegrationStatus.DISABLED,
+        publicConfig
+      }
+    });
+  }
+
+  revalidateSettingsSurfaces();
+  revalidatePath("/lead-gen/pipeline");
+  revalidatePath("/lead-gen/contacts");
+}
+
 function revalidateSettingsSurfaces() {
   revalidatePath("/settings");
   revalidatePath("/ltl-rate-portal");
@@ -249,6 +383,62 @@ function readOptional(formData: FormData, field: string) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
+function readRequiredInteger(formData: FormData, field: string, min: number, max: number) {
+  const value = readRequired(formData, field);
+  const parsed = Number.parseInt(value, 10);
+
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+    throw new Error(`Invalid integer for ${field}. Expected a value between ${min} and ${max}.`);
+  }
+
+  return parsed;
+}
+
+function readOptionalInteger(formData: FormData, field: string, min: number, max: number) {
+  const value = readOptional(formData, field);
+
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+    throw new Error(`Invalid integer for ${field}. Expected a value between ${min} and ${max}.`);
+  }
+
+  return parsed;
+}
+
+function readOptionalDecimal(formData: FormData, field: string) {
+  const value = readOptional(formData, field);
+
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`Invalid decimal for ${field}.`);
+  }
+
+  return new Prisma.Decimal(value);
+}
+
+function readStringList(formData: FormData, field: string) {
+  const value = readOptional(formData, field);
+
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter((item, index, array) => item.length > 0 && array.indexOf(item) === index);
+}
+
 function readCountry(value: FormDataEntryValue | null) {
   return value === "CA" ? "CA" : "US";
 }
@@ -263,4 +453,35 @@ function readToolTargets(formData: FormData): QuoteToolTarget[] {
   }
 
   return targets;
+}
+
+function readApolloRepMappingEntries(formData: FormData) {
+  const names = formData
+    .getAll("apolloRepSequenceOwnerName")
+    .filter((value): value is string => typeof value === "string");
+  const userIds = formData
+    .getAll("apolloRepUserId")
+    .filter((value): value is string => typeof value === "string");
+  const emails = formData
+    .getAll("apolloRepSendFromEmail")
+    .filter((value): value is string => typeof value === "string");
+  const emailAccountIds = formData
+    .getAll("apolloRepSendFromEmailAccountId")
+    .filter((value): value is string => typeof value === "string");
+  const actives = new Set(
+    formData
+      .getAll("apolloRepActiveIndex")
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+  );
+
+  return names
+    .map((name, index) => ({
+      id: `apollo-rep-${index + 1}`,
+      sequenceOwnerName: name.trim(),
+      apolloUserId: userIds[index]?.trim() || null,
+      sendFromEmail: emails[index]?.trim() || null,
+      sendFromEmailAccountId: emailAccountIds[index]?.trim() || null,
+      active: actives.has(String(index))
+    }))
+    .filter((entry) => entry.sequenceOwnerName.length > 0);
 }

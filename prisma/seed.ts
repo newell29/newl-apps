@@ -15,10 +15,21 @@ import {
 import { assertValidTradeMiningSearchProfile } from "@/modules/lead-gen/search-profile-validation";
 import { recommendSequenceForContact } from "@/modules/lead-gen/sequence-catalog";
 import { seedLtlTenantDefaults } from "@/modules/ltl-rate-portal/queries";
+import { DEFAULT_TRADEMINING_SCORING_SETTINGS } from "@/modules/settings/types";
 import { seedUpsTenantDefaults } from "@/modules/ups-tools/queries";
 import { hashPassword } from "@/server/auth/password";
 
 const prisma = new PrismaClient();
+
+type TradeMiningScoringSeedClient = PrismaClient & {
+  tradeMiningScoringConfig?: {
+    upsert(args: {
+      where: { tenantId: string };
+      update: Record<string, unknown>;
+      create: Record<string, unknown>;
+    }): Promise<unknown>;
+  };
+};
 
 // Local-dev password for seeded users. Sourced from SEED_ADMIN_PASSWORD; falls
 // back to a non-secret default so `npm run prisma:seed` always works locally.
@@ -202,6 +213,78 @@ async function main() {
 
   await seedUpsTenantDefaults(tenant.id);
   await seedLtlTenantDefaults(tenant.id);
+  const tradeMiningScoringClient = prisma as TradeMiningScoringSeedClient;
+
+  if (tradeMiningScoringClient.tradeMiningScoringConfig) {
+    await tradeMiningScoringClient.tradeMiningScoringConfig.upsert({
+      where: {
+        tenantId: tenant.id
+      },
+      update: {
+        recentWindowDays: DEFAULT_TRADEMINING_SCORING_SETTINGS.recentWindowDays,
+        comparisonWindowDays: DEFAULT_TRADEMINING_SCORING_SETTINGS.comparisonWindowDays,
+        lookbackWindowDays: DEFAULT_TRADEMINING_SCORING_SETTINGS.lookbackWindowDays,
+        momentumWeight: DEFAULT_TRADEMINING_SCORING_SETTINGS.momentumWeight,
+        marketFitWeight: DEFAULT_TRADEMINING_SCORING_SETTINGS.marketFitWeight,
+        industryFitWeight: DEFAULT_TRADEMINING_SCORING_SETTINGS.industryFitWeight,
+        companySizeWeight: DEFAULT_TRADEMINING_SCORING_SETTINGS.companySizeWeight,
+        roleWeight: DEFAULT_TRADEMINING_SCORING_SETTINGS.roleWeight,
+        confidenceWeight: DEFAULT_TRADEMINING_SCORING_SETTINGS.confidenceWeight,
+        workflowWeight: DEFAULT_TRADEMINING_SCORING_SETTINGS.workflowWeight,
+        preferredOriginCountries: DEFAULT_TRADEMINING_SCORING_SETTINGS.preferredOriginCountries,
+        penalizedOriginCountries: DEFAULT_TRADEMINING_SCORING_SETTINGS.penalizedOriginCountries,
+        preferredOriginPorts: DEFAULT_TRADEMINING_SCORING_SETTINGS.preferredOriginPorts,
+        penalizedOriginPorts: DEFAULT_TRADEMINING_SCORING_SETTINGS.penalizedOriginPorts,
+        preferredDestinationMarkets: DEFAULT_TRADEMINING_SCORING_SETTINGS.preferredDestinationMarkets,
+        penalizedDestinationMarkets: DEFAULT_TRADEMINING_SCORING_SETTINGS.penalizedDestinationMarkets,
+        preferredIndustryKeywords: DEFAULT_TRADEMINING_SCORING_SETTINGS.preferredIndustryKeywords,
+        penalizedIndustryKeywords: DEFAULT_TRADEMINING_SCORING_SETTINGS.penalizedIndustryKeywords,
+        preferredHsCodePrefixes: DEFAULT_TRADEMINING_SCORING_SETTINGS.preferredHsCodePrefixes,
+        penalizedHsCodePrefixes: DEFAULT_TRADEMINING_SCORING_SETTINGS.penalizedHsCodePrefixes,
+        oversizeTeuThreshold: DEFAULT_TRADEMINING_SCORING_SETTINGS.oversizeTeuThreshold,
+        oversizeShipmentCount30dThreshold:
+          DEFAULT_TRADEMINING_SCORING_SETTINGS.oversizeShipmentCount30dThreshold,
+        oversizePenalty: DEFAULT_TRADEMINING_SCORING_SETTINGS.oversizePenalty,
+        midMarketTeuMin: DEFAULT_TRADEMINING_SCORING_SETTINGS.midMarketTeuMin,
+        midMarketTeuMax: DEFAULT_TRADEMINING_SCORING_SETTINGS.midMarketTeuMax,
+        midMarketBoost: DEFAULT_TRADEMINING_SCORING_SETTINGS.midMarketBoost,
+        aiClassificationEnabled: DEFAULT_TRADEMINING_SCORING_SETTINGS.aiClassificationEnabled,
+        aiModel: DEFAULT_TRADEMINING_SCORING_SETTINGS.aiModel
+      },
+      create: {
+        tenantId: tenant.id,
+        recentWindowDays: DEFAULT_TRADEMINING_SCORING_SETTINGS.recentWindowDays,
+        comparisonWindowDays: DEFAULT_TRADEMINING_SCORING_SETTINGS.comparisonWindowDays,
+        lookbackWindowDays: DEFAULT_TRADEMINING_SCORING_SETTINGS.lookbackWindowDays,
+        momentumWeight: DEFAULT_TRADEMINING_SCORING_SETTINGS.momentumWeight,
+        marketFitWeight: DEFAULT_TRADEMINING_SCORING_SETTINGS.marketFitWeight,
+        industryFitWeight: DEFAULT_TRADEMINING_SCORING_SETTINGS.industryFitWeight,
+        companySizeWeight: DEFAULT_TRADEMINING_SCORING_SETTINGS.companySizeWeight,
+        roleWeight: DEFAULT_TRADEMINING_SCORING_SETTINGS.roleWeight,
+        confidenceWeight: DEFAULT_TRADEMINING_SCORING_SETTINGS.confidenceWeight,
+        workflowWeight: DEFAULT_TRADEMINING_SCORING_SETTINGS.workflowWeight,
+        preferredOriginCountries: DEFAULT_TRADEMINING_SCORING_SETTINGS.preferredOriginCountries,
+        penalizedOriginCountries: DEFAULT_TRADEMINING_SCORING_SETTINGS.penalizedOriginCountries,
+        preferredOriginPorts: DEFAULT_TRADEMINING_SCORING_SETTINGS.preferredOriginPorts,
+        penalizedOriginPorts: DEFAULT_TRADEMINING_SCORING_SETTINGS.penalizedOriginPorts,
+        preferredDestinationMarkets: DEFAULT_TRADEMINING_SCORING_SETTINGS.preferredDestinationMarkets,
+        penalizedDestinationMarkets: DEFAULT_TRADEMINING_SCORING_SETTINGS.penalizedDestinationMarkets,
+        preferredIndustryKeywords: DEFAULT_TRADEMINING_SCORING_SETTINGS.preferredIndustryKeywords,
+        penalizedIndustryKeywords: DEFAULT_TRADEMINING_SCORING_SETTINGS.penalizedIndustryKeywords,
+        preferredHsCodePrefixes: DEFAULT_TRADEMINING_SCORING_SETTINGS.preferredHsCodePrefixes,
+        penalizedHsCodePrefixes: DEFAULT_TRADEMINING_SCORING_SETTINGS.penalizedHsCodePrefixes,
+        oversizeTeuThreshold: DEFAULT_TRADEMINING_SCORING_SETTINGS.oversizeTeuThreshold,
+        oversizeShipmentCount30dThreshold:
+          DEFAULT_TRADEMINING_SCORING_SETTINGS.oversizeShipmentCount30dThreshold,
+        oversizePenalty: DEFAULT_TRADEMINING_SCORING_SETTINGS.oversizePenalty,
+        midMarketTeuMin: DEFAULT_TRADEMINING_SCORING_SETTINGS.midMarketTeuMin,
+        midMarketTeuMax: DEFAULT_TRADEMINING_SCORING_SETTINGS.midMarketTeuMax,
+        midMarketBoost: DEFAULT_TRADEMINING_SCORING_SETTINGS.midMarketBoost,
+        aiClassificationEnabled: DEFAULT_TRADEMINING_SCORING_SETTINGS.aiClassificationEnabled,
+        aiModel: DEFAULT_TRADEMINING_SCORING_SETTINGS.aiModel
+      }
+    });
+  }
 
   const searchProfiles = [
     {

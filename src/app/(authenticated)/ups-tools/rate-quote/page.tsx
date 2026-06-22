@@ -24,6 +24,7 @@ export default async function ShipmentRateQuotePage() {
         accounts={shell.accounts}
         liveBridgeEnabled={Boolean(process.env.UPS_DEV_ACCOUNTS_FILE)}
         plannedSources={shell.plannedSources}
+        recentBulkJobs={shell.recentBulkJobs}
       />
     </div>
   );

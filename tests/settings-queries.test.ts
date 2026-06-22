@@ -1,9 +1,10 @@
-import { IntegrationProvider, IntegrationStatus } from "@prisma/client";
+import { IntegrationProvider, IntegrationStatus, Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TenantContext } from "@/server/tenant-context";
 
 const findModuleAccess = vi.fn();
 const findCredentials = vi.fn();
+const findTradeMiningScoringConfig = vi.fn();
 const getLocalUpsAccountMetadata = vi.fn();
 
 vi.mock("@/server/db", () => ({
@@ -13,6 +14,9 @@ vi.mock("@/server/db", () => ({
     },
     integrationCredential: {
       findMany: (...args: unknown[]) => findCredentials(...args)
+    },
+    tradeMiningScoringConfig: {
+      findUnique: (...args: unknown[]) => findTradeMiningScoringConfig(...args)
     }
   }
 }));
@@ -34,6 +38,7 @@ describe("getSettingsShell 7L contract", () => {
     vi.clearAllMocks();
     findModuleAccess.mockResolvedValue([]);
     getLocalUpsAccountMetadata.mockResolvedValue([]);
+    findTradeMiningScoringConfig.mockResolvedValue(null);
   });
 
   it("keeps imported 7L carriers tenant-scoped and preserves selection/default flags", async () => {
@@ -86,7 +91,12 @@ describe("getSettingsShell 7L contract", () => {
       where: {
         tenantId: "tenant-7l",
         provider: {
-          in: [IntegrationProvider.UPS, IntegrationProvider.SEVEN_L, IntegrationProvider.OPENCLAW]
+          in: [
+            IntegrationProvider.UPS,
+            IntegrationProvider.SEVEN_L,
+            IntegrationProvider.OPENCLAW,
+            IntegrationProvider.APOLLO
+          ]
         }
       },
       orderBy: {
@@ -119,6 +129,7 @@ describe("getSettingsShell 7L contract", () => {
         enabled: false
       }
     ]);
+    expect(settings.tradeMiningScoring.recentWindowDays).toBe(30);
   });
 
   it("does not require or expose raw 7L secrets in the settings client payload", async () => {
@@ -155,5 +166,22 @@ describe("getSettingsShell 7L contract", () => {
     expect(account).not.toHaveProperty("secretRef");
     expect(account).not.toHaveProperty("username");
     expect(account).not.toHaveProperty("password");
+  });
+
+  it("falls back to default scoring settings when the scoring table is missing locally", async () => {
+    const missingTableError = new Prisma.PrismaClientKnownRequestError(
+      "The table `public.TradeMiningScoringConfig` does not exist in the current database.",
+      {
+        code: "P2021",
+        clientVersion: "5.22.0"
+      }
+    );
+    findTradeMiningScoringConfig.mockRejectedValue(missingTableError);
+    findCredentials.mockResolvedValue([]);
+
+    const settings = await getSettingsShell(tenant);
+
+    expect(settings.tradeMiningScoring.recentWindowDays).toBe(30);
+    expect(settings.tradeMiningScoringConfigWarning).toContain("missing the latest scoring table migration");
   });
 });

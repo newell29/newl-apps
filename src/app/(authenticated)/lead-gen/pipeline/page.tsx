@@ -1,7 +1,14 @@
-import { CandidateStatus, LeadPipelineStage } from "@prisma/client";
+import { LeadPipelineStage } from "@prisma/client";
+import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
-import { StageBadge } from "@/components/stage-badge";
-import { updateLeadStageAction } from "@/modules/lead-gen/actions";
+import {
+  bulkAssignLeadOwnerAction,
+  bulkQueueApolloEnrichmentAction,
+  bulkUnassignLeadOwnerAction,
+  bulkUpdateLeadStageAction,
+  updateLeadStageAction
+} from "@/modules/lead-gen/actions";
+import { PipelineTableClient } from "@/modules/lead-gen/components/pipeline-table-client";
 import {
   getLeadPipeline,
   getLeadPipelineFilters,
@@ -32,6 +39,7 @@ export default async function PipelinePage({
   const minScore = parseScoreParam(readParam(params.minScore));
   const maxScore = parseScoreParam(readParam(params.maxScore));
   const sort = parseSortParam(readParam(params.sort));
+  const exportHref = buildPipelineExportHref(params);
   const [leads, filterOptions] = await Promise.all([
     getLeadPipeline(tenant, {
       stage,
@@ -81,10 +89,10 @@ export default async function PipelinePage({
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
             >
               <option value="ALL">All reps</option>
-              <option value="UNASSIGNED">Unassigned</option>
+              <option value="UNASSIGNED">Unassigned only</option>
               {filterOptions.owners.map((owner) => (
-                <option key={owner} value={owner}>
-                  {owner}
+                <option key={owner.value} value={owner.value}>
+                  {owner.label}
                 </option>
               ))}
             </select>
@@ -131,10 +139,24 @@ export default async function PipelinePage({
             </select>
           </label>
 
-          <div className="flex items-end">
-            <button className="w-full rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover xl:w-auto">
-              Apply filters
-            </button>
+          <div className="flex items-end md:col-span-2 xl:col-span-1">
+            <div className="grid w-full gap-2 sm:grid-cols-3 xl:grid-cols-1">
+              <button className="w-full rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
+                Apply filters
+              </button>
+              <Link
+                href="/lead-gen/pipeline"
+                className="inline-flex w-full items-center justify-center rounded-md border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-accentSoft"
+              >
+                Clear filters
+              </Link>
+              <Link
+                href={exportHref}
+                className="inline-flex w-full items-center justify-center rounded-md border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-accentSoft"
+              >
+                Export to Excel
+              </Link>
+            </div>
           </div>
         </div>
       </form>
@@ -153,107 +175,16 @@ export default async function PipelinePage({
         </div>
 
         {leads.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="min-w-[1280px] divide-y divide-border text-sm">
-              <thead className="bg-muted text-left text-xs font-semibold uppercase text-mutedForeground">
-                <tr>
-                  <th className="px-4 py-3">Company</th>
-                  <th className="px-4 py-3">Pipeline stage</th>
-                  <th className="px-4 py-3">Score</th>
-                  <th className="px-4 py-3">Candidate status</th>
-                  <th className="px-4 py-3">Assigned rep</th>
-                  <th className="px-4 py-3">Contact status</th>
-                  <th className="px-4 py-3">Apollo</th>
-                  <th className="px-4 py-3">Sequence</th>
-                  <th className="px-4 py-3">Last activity</th>
-                  <th className="px-4 py-3">Next step</th>
-                  <th className="px-4 py-3">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {leads.map((lead) => (
-                  <tr key={lead.id} className="align-top transition-colors hover:bg-muted/60">
-                    <td className="max-w-[240px] px-4 py-4">
-                      <p className="font-semibold text-foreground">{lead.companyName}</p>
-                      <p className="mt-1 text-xs text-mutedForeground">{lead.normalizedName}</p>
-                      {lead.notes ? <p className="mt-2 text-xs leading-5 text-mutedForeground">{lead.notes}</p> : null}
-                    </td>
-                    <td className="px-4 py-4">
-                      <StageBadge stage={lead.stage} />
-                    </td>
-                    <td className="px-4 py-4">
-                      <span className="text-lg font-bold text-primary">{lead.score}</span>
-                      <p className="mt-1 text-xs text-mutedForeground">Company {lead.companyScore}</p>
-                    </td>
-                    <td className="px-4 py-4">
-                      <CandidateStatusBadge status={lead.candidateStatus} />
-                    </td>
-                    <td className="px-4 py-4 text-mutedForeground">{lead.assignedRep}</td>
-                    <td className="max-w-[180px] px-4 py-4 text-mutedForeground">
-                      <p className="font-medium text-foreground">{lead.contactStatus}</p>
-                      <p className="mt-1 text-xs">{lead.contactName ?? "No primary contact"}</p>
-                    </td>
-                    <td className="px-4 py-4 text-mutedForeground">{lead.apolloStatus}</td>
-                    <td className="max-w-[220px] px-4 py-4 text-mutedForeground">
-                      <p>{lead.sequenceStatus}</p>
-                      <p className="mt-1 text-xs">{lead.sequenceReadiness}</p>
-                    </td>
-                    <td className="px-4 py-4 text-mutedForeground">
-                      <p>{formatDate(lead.updatedAt)}</p>
-                      <p className="mt-1 text-xs">Approved {formatDate(lead.approvedAt)}</p>
-                    </td>
-                    <td className="max-w-[200px] px-4 py-4 font-medium text-foreground">{lead.nextStep}</td>
-                    <td className="px-4 py-4">
-                      <div className="flex min-w-[260px] flex-wrap gap-2">
-                        <form action={updateLeadStageAction} className="flex gap-2">
-                          <input type="hidden" name="leadId" value={lead.id} />
-                          <select
-                            name="stage"
-                            defaultValue={lead.stage}
-                            className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
-                          >
-                            {filterOptions.stages.map((stageOption) => (
-                              <option key={stageOption} value={stageOption}>
-                                {formatStage(stageOption)}
-                              </option>
-                            ))}
-                          </select>
-                          <button className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
-                            Move
-                          </button>
-                        </form>
-                        <form action={updateLeadStageAction}>
-                          <input type="hidden" name="leadId" value={lead.id} />
-                          <input type="hidden" name="stage" value={LeadPipelineStage.DISQUALIFIED} />
-                          <button className="rounded-md border border-danger/30 bg-card px-3 py-1.5 text-xs font-semibold text-danger transition-colors hover:bg-danger/10">
-                            Disqualify
-                          </button>
-                        </form>
-                        <button
-                          disabled
-                          className="rounded-md border border-border bg-muted px-3 py-1.5 text-xs font-semibold text-mutedForeground"
-                        >
-                          View company
-                        </button>
-                        <button
-                          disabled
-                          className="rounded-md border border-border bg-muted px-3 py-1.5 text-xs font-semibold text-mutedForeground"
-                        >
-                          Enrich contacts
-                        </button>
-                        <button
-                          disabled
-                          className="rounded-md border border-border bg-muted px-3 py-1.5 text-xs font-semibold text-mutedForeground"
-                        >
-                          Assign rep
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <PipelineTableClient
+            leads={leads}
+            stageOptions={filterOptions.stages}
+        repOptions={filterOptions.owners}
+        bulkUpdateLeadStageAction={bulkUpdateLeadStageAction}
+        bulkQueueApolloEnrichmentAction={bulkQueueApolloEnrichmentAction}
+        bulkAssignLeadOwnerAction={bulkAssignLeadOwnerAction}
+        bulkUnassignLeadOwnerAction={bulkUnassignLeadOwnerAction}
+        updateLeadStageAction={updateLeadStageAction}
+      />
         ) : (
           <div className="px-4 py-12 text-center">
             <h2 className="text-base font-semibold text-foreground">No approved accounts yet</h2>
@@ -264,21 +195,6 @@ export default async function PipelinePage({
         )}
       </div>
     </div>
-  );
-}
-
-function CandidateStatusBadge({ status }: { status: CandidateStatus }) {
-  const className =
-    status === CandidateStatus.APPROVED_FOR_PIPELINE
-      ? "border-success/30 bg-success/10 text-success"
-      : status === CandidateStatus.DISQUALIFIED
-        ? "border-danger/30 bg-danger/10 text-danger"
-        : "border-accentBorder bg-accentSoft text-primary";
-
-  return (
-    <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${className}`}>
-      {status.replaceAll("_", " ").toLowerCase()}
-    </span>
   );
 }
 
@@ -331,10 +247,23 @@ function formatStage(stage: LeadPipelineStage) {
     .join(" ");
 }
 
-function formatDate(value: Date) {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric"
-  }).format(value);
+function buildPipelineExportHref(searchParams: SearchParams) {
+  const query = new URLSearchParams();
+
+  appendQueryParam(query, "stage", readParam(searchParams.stage));
+  appendQueryParam(query, "rep", readParam(searchParams.rep));
+  appendQueryParam(query, "minScore", readParam(searchParams.minScore));
+  appendQueryParam(query, "maxScore", readParam(searchParams.maxScore));
+  appendQueryParam(query, "sort", readParam(searchParams.sort));
+
+  const search = query.toString();
+  return search ? `/api/lead-gen/pipeline/export?${search}` : "/api/lead-gen/pipeline/export";
+}
+
+function appendQueryParam(query: URLSearchParams, key: string, value: string | undefined) {
+  if (!value || value.trim().length === 0) {
+    return;
+  }
+
+  query.set(key, value);
 }
