@@ -226,6 +226,7 @@ export default async function CandidateFeedPage({
                     <td className="px-4 py-4">
                       <span className="text-xl font-bold text-primary">{company.candidateScore}</span>
                       <p className="mt-2 max-w-[260px] text-xs leading-5 text-mutedForeground">{company.scoreReasoning}</p>
+                      <ScoreBreakdown breakdown={company.scoreBreakdown} />
                       {company.importedScoreReasoning ? (
                         <p className="mt-2 max-w-[260px] rounded-md border border-border bg-background px-2 py-1 text-xs text-mutedForeground">
                           Ingested note: {company.importedScoreReasoning}
@@ -362,6 +363,51 @@ function CandidateStatusBadge({ status }: { status: CandidateStatus }) {
     <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${className}`}>
       {status.replaceAll("_", " ").toLowerCase()}
     </span>
+  );
+}
+
+function ScoreBreakdown({
+  breakdown
+}: {
+  breakdown: {
+    momentum: number;
+    marketFit: number;
+    industryFit: number;
+    companySize: number;
+    role: number;
+    confidence: number;
+    workflow: number;
+    rejectedPenalty: number;
+  };
+}) {
+  const items = [
+    { label: "Momentum", value: breakdown.momentum },
+    { label: "Market", value: breakdown.marketFit },
+    { label: "Industry", value: breakdown.industryFit },
+    { label: "Size", value: breakdown.companySize },
+    { label: "Role", value: breakdown.role },
+    { label: "Confidence", value: breakdown.confidence },
+    { label: "Workflow", value: breakdown.workflow }
+  ];
+
+  if (breakdown.rejectedPenalty !== 0) {
+    items.push({ label: "Rejected", value: breakdown.rejectedPenalty });
+  }
+
+  return (
+    <div className="mt-3 rounded-md border border-border bg-background p-2.5">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-mutedForeground">Score Breakdown</p>
+      <div className="mt-2 space-y-1.5">
+        {items.map((item) => (
+          <div key={item.label} className="flex items-center justify-between gap-3 text-xs">
+            <span className="text-mutedForeground">{item.label}</span>
+            <span className={item.value < 0 ? "font-semibold text-danger" : "font-semibold text-foreground"}>
+              {item.value > 0 ? `+${item.value}` : item.value}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

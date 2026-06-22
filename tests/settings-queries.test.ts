@@ -4,6 +4,7 @@ import type { TenantContext } from "@/server/tenant-context";
 
 const findModuleAccess = vi.fn();
 const findCredentials = vi.fn();
+const findTradeMiningScoringConfig = vi.fn();
 const getLocalUpsAccountMetadata = vi.fn();
 
 vi.mock("@/server/db", () => ({
@@ -13,6 +14,9 @@ vi.mock("@/server/db", () => ({
     },
     integrationCredential: {
       findMany: (...args: unknown[]) => findCredentials(...args)
+    },
+    tradeMiningScoringConfig: {
+      findUnique: (...args: unknown[]) => findTradeMiningScoringConfig(...args)
     }
   }
 }));
@@ -34,6 +38,7 @@ describe("getSettingsShell 7L contract", () => {
     vi.clearAllMocks();
     findModuleAccess.mockResolvedValue([]);
     getLocalUpsAccountMetadata.mockResolvedValue([]);
+    findTradeMiningScoringConfig.mockResolvedValue(null);
   });
 
   it("keeps imported 7L carriers tenant-scoped and preserves selection/default flags", async () => {
@@ -119,6 +124,7 @@ describe("getSettingsShell 7L contract", () => {
         enabled: false
       }
     ]);
+    expect(settings.tradeMiningScoring.recentWindowDays).toBe(30);
   });
 
   it("does not require or expose raw 7L secrets in the settings client payload", async () => {
