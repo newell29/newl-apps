@@ -1,5 +1,6 @@
 import { JobStatus, type Prisma } from "@prisma/client";
 
+import { normalizeSearchProfileValueForWorker } from "@/modules/lead-gen/search-profile-suggestions";
 import { prisma } from "@/server/db";
 import type { TenantContext } from "@/server/tenant-context";
 
@@ -101,11 +102,14 @@ export async function getActiveTradeMiningProfilesForWorker(tenant: TenantContex
       id: profile.id,
       name: profile.name,
       description: profile.description,
-      destinationMarkets: asStringArray(profile.destinationMarkets),
-      destinationPorts: asStringArray(profile.destinationPorts),
-      originPorts: asStringArray(profile.originPorts),
-      shipFromPorts: asStringArray(profile.shipFromPorts),
-      originCountries: asStringArray(profile.originCountries),
+      destinationMarkets: normalizeSearchProfileListForWorker(
+        "destinationMarkets",
+        asStringArray(profile.destinationMarkets)
+      ),
+      destinationPorts: normalizeSearchProfileListForWorker("destinationPorts", asStringArray(profile.destinationPorts)),
+      originPorts: normalizeSearchProfileListForWorker("originPorts", asStringArray(profile.originPorts)),
+      shipFromPorts: normalizeSearchProfileListForWorker("shipFromPorts", asStringArray(profile.shipFromPorts)),
+      originCountries: normalizeSearchProfileListForWorker("originCountries", asStringArray(profile.originCountries)),
       productKeywords: asStringArray(profile.productKeywords),
       hsCodes: asStringArray(profile.hsCodes),
       lookbackDays: profile.lookbackWindowDays,
@@ -119,6 +123,15 @@ export async function getActiveTradeMiningProfilesForWorker(tenant: TenantContex
       priorityWeight: profile.priorityWeight
     })
   );
+}
+
+function normalizeSearchProfileListForWorker(
+  field: "destinationMarkets" | "destinationPorts" | "originPorts" | "shipFromPorts" | "originCountries",
+  values: string[]
+) {
+  return values
+    .map((value) => normalizeSearchProfileValueForWorker(field, value))
+    .filter((value, index, array) => value.length > 0 && array.indexOf(value) === index);
 }
 
 export async function createTradeMiningJobRun(tenant: TenantContext, payload: unknown) {

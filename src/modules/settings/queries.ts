@@ -1,10 +1,14 @@
-import { IntegrationProvider } from "@prisma/client";
+import { Prisma, IntegrationProvider } from "@prisma/client";
 import { prisma } from "@/server/db";
 import type { SevenLAccountConfig } from "@/modules/ltl-rate-portal/types";
 import { tenantWhere } from "@/server/tenant-query";
 import type { TenantContext } from "@/server/tenant-context";
 import type { UpsAccountConfig } from "@/modules/ups-tools/types";
 import { getLocalUpsAccountMetadata } from "@/server/integrations/ups";
+import {
+  mapApolloRepOptions,
+  parseApolloRepMapping
+} from "@/modules/settings/apollo-rep-mapping";
 import {
   buildPlaceholderQuoteSource,
   mapProviderToCarrierName,
@@ -43,6 +47,12 @@ type TradeMiningScoringConfigRecord = {
   roleWeight: number;
   confidenceWeight: number;
   workflowWeight: number;
+  preferredOriginCountries: unknown;
+  penalizedOriginCountries: unknown;
+  preferredOriginPorts: unknown;
+  penalizedOriginPorts: unknown;
+  preferredDestinationMarkets: unknown;
+  penalizedDestinationMarkets: unknown;
   preferredIndustryKeywords: unknown;
   penalizedIndustryKeywords: unknown;
   preferredHsCodePrefixes: unknown;
@@ -71,6 +81,7 @@ function isSevenLCarrier(
 
 export async function getSettingsShell(tenant: TenantContext) {
   const tradeMiningScoringClient = prisma as TradeMiningScoringClient;
+  let tradeMiningScoringConfigWarning: string | null = null;
   const moduleAccess = await prisma.tenantModuleAccess.findMany({
     where: tenantWhere(tenant),
     include: {
@@ -87,7 +98,7 @@ export async function getSettingsShell(tenant: TenantContext) {
     prisma.integrationCredential.findMany({
       where: tenantWhere(tenant, {
         provider: {
-          in: [IntegrationProvider.UPS, IntegrationProvider.SEVEN_L, IntegrationProvider.OPENCLAW]
+          in: [IntegrationProvider.UPS, IntegrationProvider.SEVEN_L, IntegrationProvider.OPENCLAW, IntegrationProvider.APOLLO]
         }
       }),
       orderBy: {
@@ -95,13 +106,18 @@ export async function getSettingsShell(tenant: TenantContext) {
       }
     }),
     getLocalUpsAccountMetadata(),
-    tradeMiningScoringClient.tradeMiningScoringConfig?.findUnique({
-      where: {
-        tenantId: tenant.tenantId
+    loadTradeMiningScoringConfig(tradeMiningScoringClient, tenant.tenantId).catch((error: unknown) => {
+      if (isMissingTradeMiningScoringTableError(error)) {
+        tradeMiningScoringConfigWarning =
+          "TradeMining scoring settings are using built-in defaults because the local database is missing the latest scoring table migration.";
+        return null;
       }
-    }) ?? Promise.resolve(null)
+
+      throw error;
+    })
   ]);
   const typedIntegrationCredentials = integrationCredentials as IntegrationCredentialRecord[];
+  const apolloCredential = typedIntegrationCredentials.find((credential) => credential.provider === IntegrationProvider.APOLLO);
   const upsAccounts = typedIntegrationCredentials
     .filter((credential) => credential.provider === IntegrationProvider.UPS)
     .map((credential) => mapUpsAccount(credential))
@@ -126,11 +142,31 @@ export async function getSettingsShell(tenant: TenantContext) {
     quoteSources: managedQuoteSources,
     upsAccounts: mergeUpsAccountsForSettings(upsAccounts, localUpsAccounts),
     tradeMiningScoring: mapTradeMiningScoringSettings(tradeMiningScoringConfig),
+    tradeMiningScoringConfigWarning,
+    apolloRepMapping: apolloCredential ? parseApolloRepMapping(apolloCredential.publicConfig) : [],
+    apolloRepOptions: apolloCredential ? mapApolloRepOptions(parseApolloRepMapping(apolloCredential.publicConfig)) : [],
     sevenLAccounts: typedIntegrationCredentials
       .filter((credential) => credential.provider === IntegrationProvider.SEVEN_L)
       .map((credential) => mapSevenLAccount(credential))
       .filter(Boolean) as SevenLAccountConfig[]
   };
+}
+
+async function loadTradeMiningScoringConfig(
+  tradeMiningScoringClient: TradeMiningScoringClient,
+  tenantId: string
+) {
+  return (
+    tradeMiningScoringClient.tradeMiningScoringConfig?.findUnique({
+      where: {
+        tenantId
+      }
+    }) ?? Promise.resolve(null)
+  );
+}
+
+function isMissingTradeMiningScoringTableError(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2021";
 }
 
 function mapTradeMiningScoringSettings(config: {
@@ -144,6 +180,12 @@ function mapTradeMiningScoringSettings(config: {
   roleWeight: number;
   confidenceWeight: number;
   workflowWeight: number;
+  preferredOriginCountries: unknown;
+  penalizedOriginCountries: unknown;
+  preferredOriginPorts: unknown;
+  penalizedOriginPorts: unknown;
+  preferredDestinationMarkets: unknown;
+  penalizedDestinationMarkets: unknown;
   preferredIndustryKeywords: unknown;
   penalizedIndustryKeywords: unknown;
   preferredHsCodePrefixes: unknown;
@@ -172,6 +214,12 @@ function mapTradeMiningScoringSettings(config: {
     roleWeight: config.roleWeight,
     confidenceWeight: config.confidenceWeight,
     workflowWeight: config.workflowWeight,
+    preferredOriginCountries: parseStringArray(config.preferredOriginCountries),
+    penalizedOriginCountries: parseStringArray(config.penalizedOriginCountries),
+    preferredOriginPorts: parseStringArray(config.preferredOriginPorts),
+    penalizedOriginPorts: parseStringArray(config.penalizedOriginPorts),
+    preferredDestinationMarkets: parseStringArray(config.preferredDestinationMarkets),
+    penalizedDestinationMarkets: parseStringArray(config.penalizedDestinationMarkets),
     preferredIndustryKeywords: parseStringArray(config.preferredIndustryKeywords),
     penalizedIndustryKeywords: parseStringArray(config.penalizedIndustryKeywords),
     preferredHsCodePrefixes: parseStringArray(config.preferredHsCodePrefixes),

@@ -408,6 +408,12 @@ model TradeMiningScoringConfig {
   roleWeight                       Int       @default(10)
   confidenceWeight                 Int       @default(5)
   workflowWeight                   Int       @default(5)
+  preferredOriginCountries         Json?
+  penalizedOriginCountries         Json?
+  preferredOriginPorts             Json?
+  penalizedOriginPorts             Json?
+  preferredDestinationMarkets      Json?
+  penalizedDestinationMarkets      Json?
   preferredIndustryKeywords        Json?
   penalizedIndustryKeywords        Json?
   preferredHsCodePrefixes          Json?

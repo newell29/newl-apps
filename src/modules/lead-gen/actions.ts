@@ -1,415 +1,605 @@
 "use server";
 
-import { CandidateStatus, ContactOutreachDraftStatus, LeadPipelineStage, ModuleKey } from "@prisma/client";
+import {
+  CandidateStatus,
+  ContactOutreachDraftStatus,
+  LeadPipelineStage,
+  Prisma,
+  SequenceStatus
+} from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { assertValidTradeMiningSearchProfile } from "@/modules/lead-gen/search-profile-validation";
+import { sequenceCatalog } from "@/modules/lead-gen/sequence-catalog";
+import { requireAdmin } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
 import { getAuthenticatedContext } from "@/server/tenant-context";
-import { requireModule, requireMutationAccess } from "@/server/auth/authorization";
-import { getSequenceById } from "@/modules/lead-gen/sequence-catalog";
 
-// All lead-gen mutations require: a valid authenticated context, the LEAD_GEN
-// module enabled for the tenant + accessible to the role, and write permission
-// (READ_ONLY users are blocked). Audit writes record the acting user.
-async function authorizeLeadGenMutation() {
-  const ctx = await getAuthenticatedContext();
-  await requireModule(ctx, ModuleKey.LEAD_GEN);
-  requireMutationAccess(ctx);
-  return ctx;
+type SearchProfileMutationClient = typeof prisma & {
+  tradeMiningSearchProfile?: {
+    create(args: { data: Record<string, unknown> }): Promise<unknown>;
+    update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<unknown>;
+    delete(args: { where: { id: string } }): Promise<unknown>;
+  };
+  company: {
+    findFirst(args: { where: Record<string, unknown>; select?: Record<string, boolean> }): Promise<{
+      id: string;
+    } | null>;
+    update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<unknown>;
+  };
+  lead: {
+    findFirst(args: { where: Record<string, unknown>; select?: Record<string, boolean> }): Promise<{
+      id: string;
+      companyId: string;
+      notes?: string | null;
+    } | null>;
+    upsert(args: {
+      where: { tenantId_companyId: { tenantId: string; companyId: string } };
+      update: Record<string, unknown>;
+      create: Record<string, unknown>;
+    }): Promise<unknown>;
+    update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<unknown>;
+  };
+  contact: {
+    findFirst(args: { where: Record<string, unknown>; select?: Record<string, boolean> }): Promise<{
+      id: string;
+      companyId: string;
+    } | null>;
+    update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<unknown>;
+    updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<unknown>;
+  };
+  contactOutreachDraft: {
+    findFirst(args: { where: Record<string, unknown>; select?: Record<string, boolean> }): Promise<{
+      id: string;
+    } | null>;
+    update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<unknown>;
+  };
+};
+
+async function authorizeLeadGenAdminMutation() {
+  const context = await getAuthenticatedContext();
+  requireAdmin(context);
+  return context;
 }
 
-const statusActions = {
-  [CandidateStatus.NEW]: "leadgen.candidate.new",
-  [CandidateStatus.REVIEWING]: "leadgen.candidate.reviewing",
-  [CandidateStatus.APPROVED_FOR_PIPELINE]: "leadgen.candidate.approved",
-  [CandidateStatus.REJECTED]: "leadgen.candidate.rejected",
-  [CandidateStatus.DISQUALIFIED]: "leadgen.candidate.disqualified"
-} satisfies Record<CandidateStatus, string>;
+export async function createTradeMiningSearchProfileAction(formData: FormData) {
+  const context = await authorizeLeadGenAdminMutation();
+  const client = prisma as SearchProfileMutationClient;
 
-const pipelineStageActions = {
-  [LeadPipelineStage.NEW]: "leadgen.pipeline.stage.new",
-  [LeadPipelineStage.RESEARCHING]: "leadgen.pipeline.stage.researching",
-  [LeadPipelineStage.ENRICHED]: "leadgen.pipeline.stage.enriched",
-  [LeadPipelineStage.QUALIFIED]: "leadgen.pipeline.stage.qualified",
-  [LeadPipelineStage.CONTACTED]: "leadgen.pipeline.stage.contacted",
-  [LeadPipelineStage.REPLIED]: "leadgen.pipeline.stage.replied",
-  [LeadPipelineStage.MEETING_BOOKED]: "leadgen.pipeline.stage.meeting_booked",
-  [LeadPipelineStage.QUOTED]: "leadgen.pipeline.stage.quoted",
-  [LeadPipelineStage.WON]: "leadgen.pipeline.stage.won",
-  [LeadPipelineStage.LOST]: "leadgen.pipeline.stage.lost",
-  [LeadPipelineStage.DISQUALIFIED]: "leadgen.pipeline.stage.disqualified"
-} satisfies Record<LeadPipelineStage, string>;
+  if (!client.tradeMiningSearchProfile) {
+    throw new Error("TradeMining search profile mutations are unavailable until Prisma Client is regenerated.");
+  }
+
+  const payload = readSearchProfilePayload(formData);
+
+  await client.tradeMiningSearchProfile.create({
+    data: {
+      tenantId: context.tenantId,
+      ...payload
+    }
+  });
+
+  revalidateTradeMiningProfileSurfaces();
+}
+
+export async function updateTradeMiningSearchProfileAction(formData: FormData) {
+  const context = await authorizeLeadGenAdminMutation();
+  const client = prisma as SearchProfileMutationClient;
+
+  if (!client.tradeMiningSearchProfile) {
+    throw new Error("TradeMining search profile mutations are unavailable until Prisma Client is regenerated.");
+  }
+
+  const profileId = readRequired(formData, "profileId");
+  const payload = readSearchProfilePayload(formData);
+
+  await client.tradeMiningSearchProfile.update({
+    where: {
+      id: profileId
+    },
+    data: {
+      tenantId: context.tenantId,
+      ...payload
+    }
+  });
+
+  revalidateTradeMiningProfileSurfaces();
+}
+
+export async function deleteTradeMiningSearchProfileAction(formData: FormData) {
+  await authorizeLeadGenAdminMutation();
+  const client = prisma as SearchProfileMutationClient;
+
+  if (!client.tradeMiningSearchProfile) {
+    throw new Error("TradeMining search profile mutations are unavailable until Prisma Client is regenerated.");
+  }
+
+  const profileId = readRequired(formData, "profileId");
+
+  await client.tradeMiningSearchProfile.delete({
+    where: {
+      id: profileId
+    }
+  });
+
+  revalidateTradeMiningProfileSurfaces();
+}
 
 export async function updateCandidateStatusAction(formData: FormData) {
-  const tenant = await authorizeLeadGenMutation();
-  const companyId = readRequiredFormValue(formData, "companyId");
-  const nextStatus = parseCandidateStatus(readRequiredFormValue(formData, "status"));
+  const context = await authorizeLeadGenAdminMutation();
+  const client = prisma as SearchProfileMutationClient;
+  const companyId = readRequired(formData, "companyId");
+  const status = readCandidateStatus(formData.get("status"));
+  await setCandidateStatusForCompany(client, context.tenantId, companyId, status);
 
-  if (nextStatus === CandidateStatus.NEW) {
-    throw new Error("Candidate status actions cannot reset companies to NEW yet.");
+  revalidateLeadGenSurfaces();
+}
+
+export async function bulkUpdateCandidateStatusAction(formData: FormData) {
+  const context = await authorizeLeadGenAdminMutation();
+  const client = prisma as SearchProfileMutationClient;
+  const status = readCandidateStatus(formData.get("status"));
+  const companyIds = formData
+    .getAll("companyId")
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+
+  if (companyIds.length === 0) {
+    throw new Error("Select at least one company.");
   }
 
-  const reason = getStatusReason(nextStatus);
-  const now = new Date();
-
-  const company = await prisma.company.findFirst({
-    where: {
-      id: companyId,
-      tenantId: tenant.tenantId
-    },
-    include: {
-      leads: {
-        where: {
-          tenantId: tenant.tenantId
-        },
-        take: 1
-      }
-    }
-  });
-
-  if (!company) {
-    throw new Error("Candidate was not found for the current tenant.");
+  for (const companyId of companyIds) {
+    await setCandidateStatusForCompany(client, context.tenantId, companyId, status);
   }
 
-  await prisma.$transaction(async (tx) => {
-    const existingLead = await tx.lead.findUnique({
-      where: {
-        tenantId_companyId: {
-          tenantId: tenant.tenantId,
-          companyId: company.id
-        }
-      },
-      select: {
-        id: true
-      }
-    });
-
-    await tx.company.update({
-      where: {
-        id: company.id
-      },
-      data: {
-        candidateStatus: nextStatus,
-        candidateStatusUpdatedAt: now,
-        candidateStatusReason: reason,
-        doNotProspect: nextStatus === CandidateStatus.DISQUALIFIED ? true : company.doNotProspect
-      }
-    });
-
-    if (nextStatus === CandidateStatus.APPROVED_FOR_PIPELINE) {
-      await tx.lead.upsert({
-        where: {
-          tenantId_companyId: {
-            tenantId: tenant.tenantId,
-            companyId: company.id
-          }
-        },
-        update: {},
-        create: {
-          tenantId: tenant.tenantId,
-          companyId: company.id,
-          stage: LeadPipelineStage.NEW,
-          score: company.priorityScore,
-          notes: "Created from Candidate Feed approval."
-        }
-      });
-    }
-
-    await tx.auditLog.create({
-      data: {
-        tenantId: tenant.tenantId,
-        actorUserId: tenant.userId,
-        action: statusActions[nextStatus],
-        entityType: "Company",
-        entityId: company.id,
-        before: {
-          candidateStatus: company.candidateStatus,
-          doNotProspect: company.doNotProspect,
-          leadExists: Boolean(existingLead)
-        },
-        after: {
-          candidateStatus: nextStatus,
-          doNotProspect: nextStatus === CandidateStatus.DISQUALIFIED ? true : company.doNotProspect,
-          leadCreated: nextStatus === CandidateStatus.APPROVED_FOR_PIPELINE && !existingLead,
-          reason
-        }
-      }
-    });
-  });
-
-  revalidatePath("/lead-gen/candidates");
-  revalidatePath("/lead-gen/pipeline");
+  revalidateLeadGenSurfaces();
 }
 
 export async function updateLeadStageAction(formData: FormData) {
-  const tenant = await authorizeLeadGenMutation();
-  const leadId = readRequiredFormValue(formData, "leadId");
-  const nextStage = parseLeadPipelineStage(readRequiredFormValue(formData, "stage"));
-  const now = new Date();
+  const context = await authorizeLeadGenAdminMutation();
+  const client = prisma as SearchProfileMutationClient;
+  const leadId = readRequired(formData, "leadId");
+  const stage = readLeadStage(formData.get("stage"));
+  await setLeadStageForTenant(client, context.tenantId, leadId, stage);
 
-  const lead = await prisma.lead.findFirst({
-    where: {
-      id: leadId,
-      tenantId: tenant.tenantId
-    },
-    include: {
-      company: true
-    }
-  });
+  revalidateLeadGenSurfaces();
+}
 
-  if (!lead) {
-    throw new Error("Pipeline lead was not found for the current tenant.");
+export async function bulkUpdateLeadStageAction(formData: FormData) {
+  const context = await authorizeLeadGenAdminMutation();
+  const client = prisma as SearchProfileMutationClient;
+  const stage = readLeadStage(formData.get("stage"));
+  const leadIds = readSelectedIds(formData, "leadId");
+
+  for (const leadId of leadIds) {
+    await setLeadStageForTenant(client, context.tenantId, leadId, stage);
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.lead.update({
+  revalidateLeadGenSurfaces();
+}
+
+export async function bulkQueueApolloEnrichmentAction(formData: FormData) {
+  const context = await authorizeLeadGenAdminMutation();
+  const client = prisma as SearchProfileMutationClient;
+  const leadIds = readSelectedIds(formData, "leadId");
+  const queuedAt = new Date().toISOString();
+
+  for (const leadId of leadIds) {
+    const lead = await client.lead.findFirst({
       where: {
-        id: lead.id
+        id: leadId,
+        tenantId: context.tenantId
       },
-      data: {
-        stage: nextStage
+      select: {
+        id: true,
+        notes: true
       }
     });
 
-    if (nextStage === LeadPipelineStage.DISQUALIFIED) {
-      await tx.company.update({
-        where: {
-          id: lead.companyId
-        },
-        data: {
-          candidateStatus: CandidateStatus.DISQUALIFIED,
-          candidateStatusUpdatedAt: now,
-          candidateStatusReason: "Disqualified from Pipeline.",
-          doNotProspect: true
-        }
-      });
+    if (!lead) {
+      throw new Error("Lead not found for this tenant.");
     }
 
-    await tx.auditLog.create({
+    await client.lead.update({
+      where: {
+        id: leadId
+      },
       data: {
-        tenantId: tenant.tenantId,
-        actorUserId: tenant.userId,
-        action: pipelineStageActions[nextStage],
-        entityType: "Lead",
-        entityId: lead.id,
-        before: {
-          stage: lead.stage,
-          companyId: lead.companyId,
-          companyCandidateStatus: lead.company.candidateStatus
-        },
-        after: {
-          stage: nextStage,
-          companyId: lead.companyId,
-          companyCandidateStatus:
-            nextStage === LeadPipelineStage.DISQUALIFIED ? CandidateStatus.DISQUALIFIED : lead.company.candidateStatus
-        }
+        notes: appendLeadNote(lead.notes ?? null, `Apollo enrichment requested on ${queuedAt}.`)
       }
     });
-  });
+  }
 
-  revalidatePath("/lead-gen/pipeline");
-  revalidatePath("/lead-gen/candidates");
+  revalidateLeadGenSurfaces();
+}
+
+export async function bulkAssignLeadOwnerAction(formData: FormData) {
+  const context = await authorizeLeadGenAdminMutation();
+  const leadIds = readSelectedIds(formData, "leadId");
+  const ownerUserId = readBulkOwnerValue(formData.get("ownerUserId"));
+
+  await updateLeadOwnersForTenant(context.tenantId, leadIds, ownerUserId);
+  revalidateLeadGenSurfaces();
+}
+
+export async function bulkUnassignLeadOwnerAction(formData: FormData) {
+  const context = await authorizeLeadGenAdminMutation();
+  const leadIds = readSelectedIds(formData, "leadId");
+
+  await updateLeadOwnersForTenant(context.tenantId, leadIds, null);
+  revalidateLeadGenSurfaces();
+}
+
+async function updateLeadOwnersForTenant(
+  tenantId: string,
+  leadIds: string[],
+  ownerUserId: string | null
+) {
+  const client = prisma as SearchProfileMutationClient;
+
+  for (const leadId of leadIds) {
+    const lead = await client.lead.findFirst({
+      where: {
+        id: leadId,
+        tenantId
+      },
+      select: {
+        id: true,
+        companyId: true
+      }
+    });
+
+    if (!lead) {
+      throw new Error("Lead not found for this tenant.");
+    }
+
+    await client.lead.update({
+      where: {
+        id: leadId
+      },
+      data: {
+        ownerUserId
+      }
+    });
+
+    await client.contact.updateMany({
+      where: {
+        tenantId,
+        companyId: lead.companyId
+      },
+      data: {
+        assignedRep: ownerUserId
+      }
+    });
+  }
 }
 
 export async function updateContactSequenceAction(formData: FormData) {
-  const tenant = await authorizeLeadGenMutation();
-  const contactId = readRequiredFormValue(formData, "contactId");
-  const sequenceId = readRequiredFormValue(formData, "sequenceId");
-  const overrideReason = readOptionalFormValue(formData, "sequenceOverrideReason");
-  const sequence = getSequenceById(sequenceId);
+  const context = await authorizeLeadGenAdminMutation();
+  const client = prisma as SearchProfileMutationClient;
+  const contactId = readRequired(formData, "contactId");
+  const sequenceId = readRequired(formData, "sequenceId");
+  const overrideReason = readOptional(formData, "sequenceOverrideReason") ?? null;
+  const sequence = sequenceCatalog.find((item) => item.id === sequenceId);
 
   if (!sequence) {
-    throw new Error("Selected sequence is invalid.");
+    throw new Error("Selected sequence is not recognized.");
   }
 
-  const contact = await prisma.contact.findFirst({
+  const contact = await client.contact.findFirst({
     where: {
       id: contactId,
-      tenantId: tenant.tenantId,
-      company: {
-        leads: {
-          some: {
-            tenantId: tenant.tenantId
-          }
-        }
-      }
+      tenantId: context.tenantId
     },
     select: {
       id: true,
-      companyId: true,
-      selectedSequenceId: true,
-      selectedSequenceName: true,
-      sequenceManuallyOverridden: true
+      companyId: true
     }
   });
 
   if (!contact) {
-    throw new Error("Contact was not found for the current tenant.");
+    throw new Error("Contact not found for this tenant.");
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.contact.update({
-      where: {
-        tenantId_id: {
-          tenantId: tenant.tenantId,
-          id: contact.id
-        }
-      },
-      data: {
-        selectedSequenceId: sequence.id,
-        selectedSequenceName: sequence.name,
-        sequenceOverrideReason: overrideReason,
-        sequenceManuallyOverridden: true
-      }
-    });
-
-    await tx.auditLog.create({
-      data: {
-        tenantId: tenant.tenantId,
-        actorUserId: tenant.userId,
-        action: "leadgen.contact.sequence_changed",
-        entityType: "Contact",
-        entityId: contact.id,
-        before: {
-          selectedSequenceId: contact.selectedSequenceId,
-          selectedSequenceName: contact.selectedSequenceName,
-          sequenceManuallyOverridden: contact.sequenceManuallyOverridden
-        },
-        after: {
-          selectedSequenceId: sequence.id,
-          selectedSequenceName: sequence.name,
-          sequenceManuallyOverridden: true,
-          sequenceOverrideReason: overrideReason
-        }
-      }
-    });
+  await client.contact.update({
+    where: {
+      id: contactId
+    },
+    data: {
+      selectedSequenceId: sequence.id,
+      selectedSequenceName: sequence.name,
+      sequenceOverrideReason: overrideReason,
+      sequenceManuallyOverridden: true,
+      sequenceStatus: SequenceStatus.READY
+    }
   });
 
-  revalidatePath("/lead-gen/contacts");
-  revalidatePath("/lead-gen/pipeline");
+  revalidateLeadGenSurfaces();
 }
 
 export async function saveContactDraftAction(formData: FormData) {
-  const tenant = await authorizeLeadGenMutation();
-  const draftId = readRequiredFormValue(formData, "draftId");
-  const subject = readRequiredFormValue(formData, "subject");
-  const body = readRequiredFormValue(formData, "body");
-
-  const draft = await prisma.contactOutreachDraft.findFirst({
+  const context = await authorizeLeadGenAdminMutation();
+  const client = prisma as SearchProfileMutationClient;
+  const draftId = readRequired(formData, "draftId");
+  const draft = await client.contactOutreachDraft.findFirst({
     where: {
       id: draftId,
-      tenantId: tenant.tenantId,
-      contact: {
-        company: {
-          leads: {
-            some: {
-              tenantId: tenant.tenantId
-            }
-          }
-        }
-      }
+      tenantId: context.tenantId
     },
     select: {
-      id: true,
-      contactId: true,
-      companyId: true,
-      subject: true,
-      body: true,
-      status: true
+      id: true
     }
   });
 
   if (!draft) {
-    throw new Error("Draft was not found for the current tenant.");
+    throw new Error("Draft not found for this tenant.");
   }
 
-  const now = new Date();
-
-  await prisma.$transaction(async (tx) => {
-    await tx.contactOutreachDraft.update({
-      where: {
-        id: draft.id
-      },
-      data: {
-        subject,
-        body,
-        status: ContactOutreachDraftStatus.EDITED,
-        editedAt: now
-      }
-    });
-
-    await tx.auditLog.create({
-      data: {
-        tenantId: tenant.tenantId,
-        actorUserId: tenant.userId,
-        action: "leadgen.contact_draft.saved",
-        entityType: "ContactOutreachDraft",
-        entityId: draft.id,
-        before: {
-          status: draft.status,
-          subjectLength: draft.subject.length,
-          bodyLength: draft.body.length
-        },
-        after: {
-          status: ContactOutreachDraftStatus.EDITED,
-          subjectChanged: draft.subject !== subject,
-          bodyChanged: draft.body !== body,
-          subjectLength: subject.length,
-          bodyLength: body.length
-        }
-      }
-    });
+  await client.contactOutreachDraft.update({
+    where: {
+      id: draftId
+    },
+    data: {
+      subject: readRequired(formData, "subject"),
+      body: readRequired(formData, "body"),
+      status: ContactOutreachDraftStatus.EDITED,
+      editedAt: new Date()
+    }
   });
 
-  revalidatePath("/lead-gen/contacts");
+  revalidateLeadGenSurfaces();
 }
 
-function readRequiredFormValue(formData: FormData, key: string) {
-  const value = formData.get(key);
+function revalidateTradeMiningProfileSurfaces() {
+  revalidatePath("/lead-gen/search-profiles");
+  revalidatePath("/lead-gen/candidates");
+  revalidatePath("/dashboard");
+}
 
-  if (typeof value !== "string" || !value.trim()) {
-    throw new Error(`${key} is required.`);
+function revalidateLeadGenSurfaces() {
+  revalidatePath("/lead-gen/candidates");
+  revalidatePath("/lead-gen/pipeline");
+  revalidatePath("/lead-gen/contacts");
+  revalidatePath("/dashboard");
+}
+
+async function setCandidateStatusForCompany(
+  client: SearchProfileMutationClient,
+  tenantId: string,
+  companyId: string,
+  status: CandidateStatus
+) {
+  const company = await client.company.findFirst({
+    where: {
+      id: companyId,
+      tenantId
+    },
+    select: {
+      id: true
+    }
+  });
+
+  if (!company) {
+    throw new Error("Company not found for this tenant.");
+  }
+
+  await client.company.update({
+    where: {
+      id: companyId
+    },
+    data: {
+      candidateStatus: status,
+      candidateStatusUpdatedAt: new Date(),
+      candidateStatusReason:
+        status === CandidateStatus.APPROVED_FOR_PIPELINE
+          ? "Approved from found company review queue."
+          : status === CandidateStatus.REVIEWING
+            ? "Moved into active review."
+            : status === CandidateStatus.REJECTED
+              ? "Rejected from review queue."
+              : status === CandidateStatus.DISQUALIFIED
+                ? "Disqualified from review queue."
+                : "Reset to new."
+    }
+  });
+
+  if (status === CandidateStatus.APPROVED_FOR_PIPELINE) {
+    await client.lead.upsert({
+      where: {
+        tenantId_companyId: {
+          tenantId,
+          companyId
+        }
+      },
+      update: {
+        stage: LeadPipelineStage.NEW
+      },
+      create: {
+        tenantId,
+        companyId,
+        stage: LeadPipelineStage.NEW
+      }
+    });
+  }
+}
+
+async function setLeadStageForTenant(
+  client: SearchProfileMutationClient,
+  tenantId: string,
+  leadId: string,
+  stage: LeadPipelineStage
+) {
+  const lead = await client.lead.findFirst({
+    where: {
+      id: leadId,
+      tenantId
+    },
+    select: {
+      id: true,
+      companyId: true
+    }
+  });
+
+  if (!lead) {
+    throw new Error("Lead not found for this tenant.");
+  }
+
+  await client.lead.update({
+    where: {
+      id: leadId
+    },
+    data: {
+      stage
+    }
+  });
+
+  if (stage === LeadPipelineStage.DISQUALIFIED) {
+    await client.company.update({
+      where: {
+        id: lead.companyId
+      },
+      data: {
+        candidateStatus: CandidateStatus.DISQUALIFIED,
+        candidateStatusUpdatedAt: new Date(),
+        candidateStatusReason: "Pipeline account was disqualified."
+      }
+    });
+  }
+}
+
+function appendLeadNote(existingNotes: string | null, nextNote: string) {
+  if (!existingNotes || existingNotes.trim().length === 0) {
+    return nextNote;
+  }
+
+  return `${existingNotes}\n\n${nextNote}`;
+}
+
+function readSearchProfilePayload(formData: FormData) {
+  const minShipmentVolumeNumber = readOptionalNumber(formData, "minShipmentVolume");
+  const payload = {
+    name: readRequired(formData, "name"),
+    destinationMarkets: readStringList(formData, "destinationMarkets"),
+    destinationPorts: readStringList(formData, "destinationPorts"),
+    originPorts: readStringList(formData, "originPorts"),
+    shipFromPorts: readStringList(formData, "shipFromPorts"),
+    originCountries: readStringList(formData, "originCountries"),
+    productKeywords: readStringList(formData, "productKeywords"),
+    hsCodes: readStringList(formData, "hsCodes"),
+    lookbackWindowDays: readRequiredInteger(formData, "lookbackWindowDays", 1, 365),
+    minShipmentCount: readRequiredInteger(formData, "minShipmentCount", 0, 100000),
+    minShipmentVolume: minShipmentVolumeNumber,
+    scheduleFrequency: readScheduleFrequency(formData.get("scheduleFrequency")),
+    priorityWeight: readRequiredInteger(formData, "priorityWeight", 0, 100)
+  };
+
+  assertValidTradeMiningSearchProfile(payload);
+
+  return {
+    ...payload,
+    minShipmentVolume:
+      minShipmentVolumeNumber === null ? null : new Prisma.Decimal(minShipmentVolumeNumber.toString()),
+    description: readOptional(formData, "description") ?? null,
+    enabled: formData.get("enabled") === "true",
+    scheduleTimezone: readOptional(formData, "scheduleTimezone") ?? "America/Toronto"
+  };
+}
+
+function readRequired(formData: FormData, field: string) {
+  const value = formData.get(field);
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`Missing required field: ${field}`);
   }
 
   return value.trim();
 }
 
-function readOptionalFormValue(formData: FormData, key: string) {
-  const value = formData.get(key);
+function readOptional(formData: FormData, field: string) {
+  const value = formData.get(field);
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
 
-  if (typeof value !== "string" || !value.trim()) {
+function readRequiredInteger(formData: FormData, field: string, min: number, max: number) {
+  const value = readRequired(formData, field);
+  const parsed = Number.parseInt(value, 10);
+
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+    throw new Error(`Invalid integer for ${field}. Expected a value between ${min} and ${max}.`);
+  }
+
+  return parsed;
+}
+
+function readOptionalNumber(formData: FormData, field: string) {
+  const value = readOptional(formData, field);
+  if (!value) {
     return null;
   }
 
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`Invalid number for ${field}.`);
+  }
+
+  return parsed;
+}
+
+function readStringList(formData: FormData, field: string) {
+  const value = readOptional(formData, field);
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter((item, index, array) => item.length > 0 && array.indexOf(item) === index);
+}
+
+function readSelectedIds(formData: FormData, field: string) {
+  const values = formData
+    .getAll(field)
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+
+  if (values.length === 0) {
+    throw new Error("Select at least one account.");
+  }
+
+  return values;
+}
+
+function readBulkOwnerValue(value: FormDataEntryValue | null) {
+  if (value === "UNASSIGNED") {
+    return null;
+  }
+
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error("Select a sales rep.");
+  }
+
   return value.trim();
 }
 
-function parseCandidateStatus(value: string) {
-  if (!Object.values(CandidateStatus).includes(value as CandidateStatus)) {
-    throw new Error("Candidate status is invalid.");
-  }
-
-  return value as CandidateStatus;
+function readScheduleFrequency(value: FormDataEntryValue | null) {
+  return value === "weekly" || value === "manual" ? value : "daily";
 }
 
-function parseLeadPipelineStage(value: string) {
-  if (!Object.values(LeadPipelineStage).includes(value as LeadPipelineStage)) {
-    throw new Error("Pipeline stage is invalid.");
+function readCandidateStatus(value: FormDataEntryValue | null) {
+  if (
+    value === CandidateStatus.NEW ||
+    value === CandidateStatus.REVIEWING ||
+    value === CandidateStatus.APPROVED_FOR_PIPELINE ||
+    value === CandidateStatus.REJECTED ||
+    value === CandidateStatus.DISQUALIFIED
+  ) {
+    return value;
   }
 
-  return value as LeadPipelineStage;
+  throw new Error("Invalid candidate status.");
 }
 
-function getStatusReason(status: CandidateStatus) {
-  switch (status) {
-    case CandidateStatus.REVIEWING:
-      return "Marked for manual review from Candidate Feed.";
-    case CandidateStatus.APPROVED_FOR_PIPELINE:
-      return "Approved from Candidate Feed for sales pipeline handoff.";
-    case CandidateStatus.REJECTED:
-      return "Rejected from Candidate Feed review.";
-    case CandidateStatus.DISQUALIFIED:
-      return "Disqualified from Candidate Feed review.";
-    case CandidateStatus.NEW:
-      return "New candidate.";
+function readLeadStage(value: FormDataEntryValue | null) {
+  if (typeof value === "string" && Object.values(LeadPipelineStage).includes(value as LeadPipelineStage)) {
+    return value as LeadPipelineStage;
   }
+
+  throw new Error("Invalid lead stage.");
 }

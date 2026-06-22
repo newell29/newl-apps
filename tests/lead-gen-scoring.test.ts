@@ -55,7 +55,12 @@ describe("lead-gen candidate scoring", () => {
       companyPriorityScore: 82,
       candidateStatus: CandidateStatus.NEW,
       alreadyInPipeline: false,
-      evidence
+      evidence,
+      config: {
+        ...DEFAULT_TRADEMINING_SCORING_SETTINGS,
+        preferredOriginCountries: ["china"],
+        penalizedOriginCountries: []
+      }
     });
 
     expect(evidence.profileFit).toEqual({
@@ -167,106 +172,55 @@ describe("lead-gen candidate scoring", () => {
     expect(scoring.reasoning).toContain("mid-market importer profile");
   });
 
-  it("does not require hs code or master fields for a strong score when core lane signals are present", () => {
-    const now = Date.now();
-    const day = 86_400_000;
-    const records = [
-      {
-        rawJson: {
-          sourceRole: "consignee_name",
-          destinationPort: "Houston",
-          arrivalPort: "Houston",
-          originCountry: "China",
-          productDescription: "stone countertops",
-          containerCount: 3,
-          weight: 24000
-        },
-        arrivalDate: new Date(now - 8 * day),
-        sourcePort: "Ningbo",
-        destinationCity: null,
-        destinationState: null,
-        originCountry: "China",
-        productDescription: "stone countertops"
-      }
-    ];
-
-    const evidence = summarizeTradeMiningEvidence(records, new Map());
-    const scoring = scoreCandidate({
-      companyPriorityScore: 55,
-      candidateStatus: CandidateStatus.NEW,
-      alreadyInPipeline: false,
-      evidence
-    });
-
-    expect(scoring.score).toBeGreaterThanOrEqual(45);
-    expect(scoring.reasoning).toContain("product description available; HS data optional");
-  });
-
-  it("rewards richer optional fields without making them mandatory", () => {
-    const now = Date.now();
-    const sparseEvidence = summarizeTradeMiningEvidence(
+  it("uses preferred and deprioritized origin settings as ranking bias rather than hard filtering", () => {
+    const evidence = summarizeTradeMiningEvidence(
       [
         {
           rawJson: {
             sourceRole: "consignee_name",
-            destinationMarket: "Charleston",
-            originCountry: "Vietnam",
-            productDescription: "lighting fixtures",
-            containerCount: 2
-          },
-          arrivalDate: new Date(now - 12 * 86_400_000),
-          sourcePort: "Hai Phong",
-          destinationCity: "Charleston",
-          destinationState: "SC",
-          originCountry: "Vietnam",
-          productDescription: "lighting fixtures"
-        }
-      ],
-      new Map()
-    );
-
-    const richEvidence = summarizeTradeMiningEvidence(
-      [
-        {
-          rawJson: {
-            sourceRole: "consignee_name",
-            destinationMarket: "Charleston",
-            destinationPort: "Charleston",
-            destinationCity: "Charleston",
-            destinationState: "SC",
-            destinationZip: "29401",
-            originCountry: "Vietnam",
-            productDescription: "lighting fixtures",
+            destinationMarket: "Houston",
+            originCountry: "Italy",
+            foreignPort: "Genoa",
+            productDescription: "lighting",
             hsCode: "9405",
-            containerCount: 2,
-            notifyParty: "Import Ops",
-            masterConsigneeName: "Bright Home Distribution",
-            vessel: "Ever Summit"
+            teu: 3
           },
-          arrivalDate: new Date(now - 12 * 86_400_000),
-          sourcePort: "Hai Phong",
-          destinationCity: "Charleston",
-          destinationState: "SC",
-          originCountry: "Vietnam",
-          productDescription: "lighting fixtures"
+          arrivalDate: new Date("2026-06-10T00:00:00.000Z"),
+          sourcePort: "Genoa",
+          destinationCity: "Houston",
+          destinationState: "TX",
+          originCountry: "Italy",
+          productDescription: "lighting"
         }
       ],
       new Map()
     );
 
-    const sparseScore = scoreCandidate({
+    const preferred = scoreCandidate({
       companyPriorityScore: 55,
       candidateStatus: CandidateStatus.NEW,
       alreadyInPipeline: false,
-      evidence: sparseEvidence
-    });
-    const richScore = scoreCandidate({
-      companyPriorityScore: 55,
-      candidateStatus: CandidateStatus.NEW,
-      alreadyInPipeline: false,
-      evidence: richEvidence
+      evidence,
+      config: {
+        ...DEFAULT_TRADEMINING_SCORING_SETTINGS,
+        preferredOriginCountries: ["italy"],
+        penalizedOriginCountries: []
+      }
     });
 
-    expect(richScore.score).toBeGreaterThan(sparseScore.score);
+    const penalized = scoreCandidate({
+      companyPriorityScore: 55,
+      candidateStatus: CandidateStatus.NEW,
+      alreadyInPipeline: false,
+      evidence,
+      config: {
+        ...DEFAULT_TRADEMINING_SCORING_SETTINGS,
+        preferredOriginCountries: [],
+        penalizedOriginCountries: ["italy"]
+      }
+    });
+
+    expect(preferred.score).toBeGreaterThan(penalized.score);
+    expect(preferred.reasoning).toContain("preferred origin country");
   });
 });

@@ -42,6 +42,12 @@ export type TradeMiningScoringSettings = {
   roleWeight: number;
   confidenceWeight: number;
   workflowWeight: number;
+  preferredOriginCountries: string[];
+  penalizedOriginCountries: string[];
+  preferredOriginPorts: string[];
+  penalizedOriginPorts: string[];
+  preferredDestinationMarkets: string[];
+  penalizedDestinationMarkets: string[];
   preferredIndustryKeywords: string[];
   penalizedIndustryKeywords: string[];
   preferredHsCodePrefixes: string[];
@@ -56,6 +62,15 @@ export type TradeMiningScoringSettings = {
   aiModel: string | null;
 };
 
+export type ApolloRepMappingEntry = {
+  id: string;
+  sequenceOwnerName: string;
+  apolloUserId: string | null;
+  sendFromEmail: string | null;
+  sendFromEmailAccountId: string | null;
+  active: boolean;
+};
+
 export const DEFAULT_TRADEMINING_SCORING_SETTINGS: TradeMiningScoringSettings = {
   recentWindowDays: 30,
   comparisonWindowDays: 30,
@@ -67,6 +82,12 @@ export const DEFAULT_TRADEMINING_SCORING_SETTINGS: TradeMiningScoringSettings = 
   roleWeight: 10,
   confidenceWeight: 5,
   workflowWeight: 5,
+  preferredOriginCountries: ["italy", "germany", "spain", "poland", "netherlands"],
+  penalizedOriginCountries: ["china"],
+  preferredOriginPorts: [],
+  penalizedOriginPorts: [],
+  preferredDestinationMarkets: [],
+  penalizedDestinationMarkets: [],
   preferredIndustryKeywords: ["furniture", "fixtures", "building materials"],
   penalizedIndustryKeywords: ["customs broker", "freight forwarder", "steamship", "carrier"],
   preferredHsCodePrefixes: ["9403", "9405", "3926"],

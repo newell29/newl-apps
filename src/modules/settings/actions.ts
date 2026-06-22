@@ -14,6 +14,7 @@ import {
 import type { QuoteToolTarget } from "@/modules/settings/types";
 import { fetchSevenLAvailableCarriers } from "@/server/integrations/seven-l";
 import { getLtlRatePortalShell } from "@/modules/ltl-rate-portal/queries";
+import { buildApolloRepMappingConfig } from "@/modules/settings/apollo-rep-mapping";
 
 type TradeMiningScoringConfigMutationClient = typeof prisma & {
   tradeMiningScoringConfig?: {
@@ -260,6 +261,12 @@ export async function saveTradeMiningScoringSettingsAction(formData: FormData) {
       roleWeight: readRequiredInteger(formData, "roleWeight", 0, 100),
       confidenceWeight: readRequiredInteger(formData, "confidenceWeight", 0, 100),
       workflowWeight: readRequiredInteger(formData, "workflowWeight", 0, 100),
+      preferredOriginCountries: readStringList(formData, "preferredOriginCountries"),
+      penalizedOriginCountries: readStringList(formData, "penalizedOriginCountries"),
+      preferredOriginPorts: readStringList(formData, "preferredOriginPorts"),
+      penalizedOriginPorts: readStringList(formData, "penalizedOriginPorts"),
+      preferredDestinationMarkets: readStringList(formData, "preferredDestinationMarkets"),
+      penalizedDestinationMarkets: readStringList(formData, "penalizedDestinationMarkets"),
       preferredIndustryKeywords: readStringList(formData, "preferredIndustryKeywords"),
       penalizedIndustryKeywords: readStringList(formData, "penalizedIndustryKeywords"),
       preferredHsCodePrefixes: readStringList(formData, "preferredHsCodePrefixes"),
@@ -285,6 +292,12 @@ export async function saveTradeMiningScoringSettingsAction(formData: FormData) {
       roleWeight: readRequiredInteger(formData, "roleWeight", 0, 100),
       confidenceWeight: readRequiredInteger(formData, "confidenceWeight", 0, 100),
       workflowWeight: readRequiredInteger(formData, "workflowWeight", 0, 100),
+      preferredOriginCountries: readStringList(formData, "preferredOriginCountries"),
+      penalizedOriginCountries: readStringList(formData, "penalizedOriginCountries"),
+      preferredOriginPorts: readStringList(formData, "preferredOriginPorts"),
+      penalizedOriginPorts: readStringList(formData, "penalizedOriginPorts"),
+      preferredDestinationMarkets: readStringList(formData, "preferredDestinationMarkets"),
+      penalizedDestinationMarkets: readStringList(formData, "penalizedDestinationMarkets"),
       preferredIndustryKeywords: readStringList(formData, "preferredIndustryKeywords"),
       penalizedIndustryKeywords: readStringList(formData, "penalizedIndustryKeywords"),
       preferredHsCodePrefixes: readStringList(formData, "preferredHsCodePrefixes"),
@@ -303,6 +316,49 @@ export async function saveTradeMiningScoringSettingsAction(formData: FormData) {
   revalidateSettingsSurfaces();
   revalidatePath("/lead-gen/candidates");
   revalidatePath("/dashboard");
+}
+
+export async function saveApolloRepMappingAction(formData: FormData) {
+  const context = await authorizeSettingsMutation();
+  const entries = readApolloRepMappingEntries(formData);
+  const publicConfig = buildApolloRepMappingConfig(entries);
+
+  const existing = await prisma.integrationCredential.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      provider: IntegrationProvider.APOLLO
+    },
+    select: {
+      id: true
+    }
+  });
+
+  if (existing) {
+    await prisma.integrationCredential.update({
+      where: {
+        id: existing.id
+      },
+      data: {
+        name: "Apollo Rep Mapping",
+        status: entries.some((entry) => entry.active) ? IntegrationStatus.ACTIVE : IntegrationStatus.DISABLED,
+        publicConfig
+      }
+    });
+  } else {
+    await prisma.integrationCredential.create({
+      data: {
+        tenantId: context.tenantId,
+        provider: IntegrationProvider.APOLLO,
+        name: "Apollo Rep Mapping",
+        status: entries.some((entry) => entry.active) ? IntegrationStatus.ACTIVE : IntegrationStatus.DISABLED,
+        publicConfig
+      }
+    });
+  }
+
+  revalidateSettingsSurfaces();
+  revalidatePath("/lead-gen/pipeline");
+  revalidatePath("/lead-gen/contacts");
 }
 
 function revalidateSettingsSurfaces() {
@@ -397,4 +453,35 @@ function readToolTargets(formData: FormData): QuoteToolTarget[] {
   }
 
   return targets;
+}
+
+function readApolloRepMappingEntries(formData: FormData) {
+  const names = formData
+    .getAll("apolloRepSequenceOwnerName")
+    .filter((value): value is string => typeof value === "string");
+  const userIds = formData
+    .getAll("apolloRepUserId")
+    .filter((value): value is string => typeof value === "string");
+  const emails = formData
+    .getAll("apolloRepSendFromEmail")
+    .filter((value): value is string => typeof value === "string");
+  const emailAccountIds = formData
+    .getAll("apolloRepSendFromEmailAccountId")
+    .filter((value): value is string => typeof value === "string");
+  const actives = new Set(
+    formData
+      .getAll("apolloRepActiveIndex")
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+  );
+
+  return names
+    .map((name, index) => ({
+      id: `apollo-rep-${index + 1}`,
+      sequenceOwnerName: name.trim(),
+      apolloUserId: userIds[index]?.trim() || null,
+      sendFromEmail: emails[index]?.trim() || null,
+      sendFromEmailAccountId: emailAccountIds[index]?.trim() || null,
+      active: actives.has(String(index))
+    }))
+    .filter((entry) => entry.sequenceOwnerName.length > 0);
 }

@@ -1,4 +1,4 @@
-import { IntegrationProvider, IntegrationStatus } from "@prisma/client";
+import { IntegrationProvider, IntegrationStatus, Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TenantContext } from "@/server/tenant-context";
 
@@ -91,7 +91,12 @@ describe("getSettingsShell 7L contract", () => {
       where: {
         tenantId: "tenant-7l",
         provider: {
-          in: [IntegrationProvider.UPS, IntegrationProvider.SEVEN_L, IntegrationProvider.OPENCLAW]
+          in: [
+            IntegrationProvider.UPS,
+            IntegrationProvider.SEVEN_L,
+            IntegrationProvider.OPENCLAW,
+            IntegrationProvider.APOLLO
+          ]
         }
       },
       orderBy: {
@@ -161,5 +166,22 @@ describe("getSettingsShell 7L contract", () => {
     expect(account).not.toHaveProperty("secretRef");
     expect(account).not.toHaveProperty("username");
     expect(account).not.toHaveProperty("password");
+  });
+
+  it("falls back to default scoring settings when the scoring table is missing locally", async () => {
+    const missingTableError = new Prisma.PrismaClientKnownRequestError(
+      "The table `public.TradeMiningScoringConfig` does not exist in the current database.",
+      {
+        code: "P2021",
+        clientVersion: "5.22.0"
+      }
+    );
+    findTradeMiningScoringConfig.mockRejectedValue(missingTableError);
+    findCredentials.mockResolvedValue([]);
+
+    const settings = await getSettingsShell(tenant);
+
+    expect(settings.tradeMiningScoring.recentWindowDays).toBe(30);
+    expect(settings.tradeMiningScoringConfigWarning).toContain("missing the latest scoring table migration");
   });
 });
