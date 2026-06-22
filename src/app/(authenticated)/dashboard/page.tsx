@@ -90,6 +90,97 @@ export default async function DashboardPage() {
           </div>
         </div>
       </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+        <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-foreground">TradeMining Trial Health</h2>
+              <p className="mt-1 text-sm text-mutedForeground">
+                Quick visibility into profile readiness and whether the latest ingestion runs are staying healthy.
+              </p>
+            </div>
+            <Link href="/operations/logs" className="text-sm font-semibold text-primary hover:text-primaryHover">
+              View full logs
+            </Link>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <DashboardStat
+              label="Enabled profiles"
+              value={summary.tradeMiningHealth.enabledProfileCount}
+              caption="Ready for worker pulls"
+            />
+            <DashboardStat
+              label="Healthy profiles"
+              value={summary.tradeMiningHealth.healthyProfileCount}
+              caption={
+                summary.tradeMiningHealth.lastSuccessfulRunAt
+                  ? `Last success ${summary.tradeMiningHealth.lastSuccessfulRunAt.toLocaleString("en-US")}`
+                  : "No successful run yet"
+              }
+            />
+            <DashboardStat
+              label="Needs attention"
+              value={summary.tradeMiningHealth.attentionProfileCount}
+              caption="Failed, stale, or never run"
+              tone={summary.tradeMiningHealth.attentionProfileCount > 0 ? "warning" : "default"}
+            />
+          </div>
+
+          <div className="mt-5 divide-y divide-border rounded-md border border-border">
+            {summary.tradeMiningHealth.profiles.slice(0, 4).map((profile) => (
+              <div key={profile.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
+                <div>
+                  <p className="font-medium text-foreground">{profile.name}</p>
+                  <p className="mt-1 text-sm text-mutedForeground">
+                    {profile.scheduleFrequency} schedule
+                    {profile.lastRunAt ? ` • ${formatLastRun(profile.lastRunAt, profile.lastRunStatus)}` : " • Not run yet"}
+                  </p>
+                </div>
+                <StatusPill value={profile.lastRunStatus} enabled={profile.enabled} />
+              </div>
+            ))}
+            {summary.tradeMiningHealth.profiles.length === 0 ? (
+              <div className="p-4 text-sm text-mutedForeground">No TradeMining profiles are configured yet.</div>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-foreground">Recent Ingestion Runs</h2>
+              <p className="mt-1 text-sm text-mutedForeground">Latest TradeMining jobs and record outcomes.</p>
+            </div>
+            <Link
+              href="/lead-gen/search-profiles"
+              className="text-sm font-semibold text-primary hover:text-primaryHover"
+            >
+              Profiles
+            </Link>
+          </div>
+
+          <div className="mt-4 divide-y divide-border">
+            {summary.tradeMiningHealth.recentJobs.map((job) => (
+              <div key={job.id} className="py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-medium text-foreground">{job.startedAt.toLocaleString("en-US")}</p>
+                  <StatusPill value={job.status} />
+                </div>
+                <p className="mt-1 text-sm text-mutedForeground">
+                  {formatJobCounts(job.output)}
+                  {job.finishedAt ? ` • Finished ${job.finishedAt.toLocaleString("en-US")}` : ""}
+                </p>
+                {job.errorMessage ? <p className="mt-1 text-xs text-danger">Error: {job.errorMessage}</p> : null}
+              </div>
+            ))}
+            {summary.tradeMiningHealth.recentJobs.length === 0 ? (
+              <p className="py-3 text-sm text-mutedForeground">No TradeMining ingestion runs yet.</p>
+            ) : null}
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
@@ -130,4 +221,90 @@ function FlowStep({ number, title, body }: { number: string; title: string; body
       </div>
     </div>
   );
+}
+
+function DashboardStat({
+  label,
+  value,
+  caption,
+  tone = "default"
+}: {
+  label: string;
+  value: number;
+  caption: string;
+  tone?: "default" | "warning";
+}) {
+  return (
+    <div className="rounded-md border border-border bg-muted/40 p-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</p>
+      <p className={`mt-2 text-2xl font-semibold ${tone === "warning" ? "text-warning" : "text-foreground"}`}>
+        {value.toLocaleString("en-US")}
+      </p>
+      <p className="mt-2 text-sm text-mutedForeground">{caption}</p>
+    </div>
+  );
+}
+
+function StatusPill({ value, enabled = true }: { value: string; enabled?: boolean }) {
+  const toneClass = !enabled
+    ? "border-border bg-muted text-mutedForeground"
+    : value === "SUCCESS" || value === "COMPLETED"
+      ? "border-success/25 bg-success/10 text-success"
+      : value === "ERROR" || value === "FAILED" || value === "CANCELLED"
+        ? "border-danger/25 bg-danger/10 text-danger"
+        : value === "RUNNING" || value === "QUEUED" || value === "PARTIAL"
+          ? "border-warning/25 bg-warning/10 text-warning"
+          : "border-border bg-muted text-mutedForeground";
+
+  return <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${toneClass}`}>{value}</span>;
+}
+
+function formatLastRun(lastRunAt: Date, status: string) {
+  return `${status} at ${lastRunAt.toLocaleString("en-US")}`;
+}
+
+function formatJobCounts(output: unknown) {
+  const record = asObject(output);
+  const processed = readNumber(record, "recordsProcessed");
+  const created = readNumber(record, "recordsCreated");
+  const updated = readNumber(record, "recordsUpdated");
+  const workerStatus = readString(record, "externalStatus");
+
+  if (processed == null && !workerStatus) {
+    return "Awaiting batch details";
+  }
+
+  if (processed == null) {
+    return `Worker status: ${workerStatus}`;
+  }
+
+  const parts = [`${processed.toLocaleString("en-US")} processed`];
+
+  if (created != null) {
+    parts.push(`${created.toLocaleString("en-US")} created`);
+  }
+
+  if (updated != null) {
+    parts.push(`${updated.toLocaleString("en-US")} updated`);
+  }
+
+  if (workerStatus) {
+    parts.push(workerStatus);
+  }
+
+  return parts.join(" • ");
+}
+
+function asObject(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function readString(value: Record<string, unknown>, key: string) {
+  const field = value[key];
+  return typeof field === "string" && field.trim() ? field : null;
+}
+
+function readNumber(value: Record<string, unknown>, key: string) {
+  const field = value[key];
+  return typeof field === "number" && Number.isFinite(field) ? field : null;
 }

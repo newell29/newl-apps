@@ -166,4 +166,107 @@ describe("lead-gen candidate scoring", () => {
     expect(scoring.reasoning).toContain("shipment activity rising");
     expect(scoring.reasoning).toContain("mid-market importer profile");
   });
+
+  it("does not require hs code or master fields for a strong score when core lane signals are present", () => {
+    const now = Date.now();
+    const day = 86_400_000;
+    const records = [
+      {
+        rawJson: {
+          sourceRole: "consignee_name",
+          destinationPort: "Houston",
+          arrivalPort: "Houston",
+          originCountry: "China",
+          productDescription: "stone countertops",
+          containerCount: 3,
+          weight: 24000
+        },
+        arrivalDate: new Date(now - 8 * day),
+        sourcePort: "Ningbo",
+        destinationCity: null,
+        destinationState: null,
+        originCountry: "China",
+        productDescription: "stone countertops"
+      }
+    ];
+
+    const evidence = summarizeTradeMiningEvidence(records, new Map());
+    const scoring = scoreCandidate({
+      companyPriorityScore: 55,
+      candidateStatus: CandidateStatus.NEW,
+      alreadyInPipeline: false,
+      evidence
+    });
+
+    expect(scoring.score).toBeGreaterThanOrEqual(45);
+    expect(scoring.reasoning).toContain("product description available; HS data optional");
+  });
+
+  it("rewards richer optional fields without making them mandatory", () => {
+    const now = Date.now();
+    const sparseEvidence = summarizeTradeMiningEvidence(
+      [
+        {
+          rawJson: {
+            sourceRole: "consignee_name",
+            destinationMarket: "Charleston",
+            originCountry: "Vietnam",
+            productDescription: "lighting fixtures",
+            containerCount: 2
+          },
+          arrivalDate: new Date(now - 12 * 86_400_000),
+          sourcePort: "Hai Phong",
+          destinationCity: "Charleston",
+          destinationState: "SC",
+          originCountry: "Vietnam",
+          productDescription: "lighting fixtures"
+        }
+      ],
+      new Map()
+    );
+
+    const richEvidence = summarizeTradeMiningEvidence(
+      [
+        {
+          rawJson: {
+            sourceRole: "consignee_name",
+            destinationMarket: "Charleston",
+            destinationPort: "Charleston",
+            destinationCity: "Charleston",
+            destinationState: "SC",
+            destinationZip: "29401",
+            originCountry: "Vietnam",
+            productDescription: "lighting fixtures",
+            hsCode: "9405",
+            containerCount: 2,
+            notifyParty: "Import Ops",
+            masterConsigneeName: "Bright Home Distribution",
+            vessel: "Ever Summit"
+          },
+          arrivalDate: new Date(now - 12 * 86_400_000),
+          sourcePort: "Hai Phong",
+          destinationCity: "Charleston",
+          destinationState: "SC",
+          originCountry: "Vietnam",
+          productDescription: "lighting fixtures"
+        }
+      ],
+      new Map()
+    );
+
+    const sparseScore = scoreCandidate({
+      companyPriorityScore: 55,
+      candidateStatus: CandidateStatus.NEW,
+      alreadyInPipeline: false,
+      evidence: sparseEvidence
+    });
+    const richScore = scoreCandidate({
+      companyPriorityScore: 55,
+      candidateStatus: CandidateStatus.NEW,
+      alreadyInPipeline: false,
+      evidence: richEvidence
+    });
+
+    expect(richScore.score).toBeGreaterThan(sparseScore.score);
+  });
 });
