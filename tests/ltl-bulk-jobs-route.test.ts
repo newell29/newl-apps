@@ -8,6 +8,7 @@ const requireModule = vi.fn();
 const requireMutationAccess = vi.fn();
 const getLtlRatePortalShell = vi.fn();
 const createLtlBulkQuoteJob = vi.fn();
+const deleteLtlBulkQuoteJob = vi.fn();
 const getLtlBulkQuoteJobSummaryForTenant = vi.fn();
 const getLtlBulkQuoteJobDetail = vi.fn();
 const runLtlBulkQuoteJob = vi.fn();
@@ -30,13 +31,14 @@ vi.mock("@/modules/ltl-rate-portal/bulk-jobs", () => ({
   LTL_BULK_CHUNK_SIZE: 25,
   LTL_BULK_LANE_CONCURRENCY: 4,
   createLtlBulkQuoteJob: (...args: unknown[]) => createLtlBulkQuoteJob(...args),
+  deleteLtlBulkQuoteJob: (...args: unknown[]) => deleteLtlBulkQuoteJob(...args),
   getLtlBulkQuoteJobSummaryForTenant: (...args: unknown[]) => getLtlBulkQuoteJobSummaryForTenant(...args),
   getLtlBulkQuoteJobDetail: (...args: unknown[]) => getLtlBulkQuoteJobDetail(...args),
   runLtlBulkQuoteJob: (...args: unknown[]) => runLtlBulkQuoteJob(...args),
   exportLtlBulkQuoteJobCsv: (...args: unknown[]) => exportLtlBulkQuoteJobCsv(...args)
 }));
 
-import { GET as getBulkJob, POST as postBulkJob } from "@/app/api/ltl-rate-portal/bulk-jobs/route";
+import { DELETE as deleteBulkJob, GET as getBulkJob, POST as postBulkJob } from "@/app/api/ltl-rate-portal/bulk-jobs/route";
 import { GET as exportBulkJobCsv } from "@/app/api/ltl-rate-portal/bulk-jobs/[jobId]/results/route";
 
 const context: AuthenticatedContext = {
@@ -75,6 +77,7 @@ const account: SevenLAccountConfig = {
 const job: LtlBulkQuoteJobSummary = {
   id: "job-1",
   status: "QUEUED",
+  name: "June RFQ - Southeast",
   accountId: account.id,
   accountName: account.name,
   selectedCarrierCount: 1,
@@ -147,6 +150,7 @@ describe("LTL bulk quote routes", () => {
       accounts: [account]
     });
     createLtlBulkQuoteJob.mockResolvedValue(job);
+    deleteLtlBulkQuoteJob.mockResolvedValue({ id: job.id });
     getLtlBulkQuoteJobSummaryForTenant.mockResolvedValue(job);
     getLtlBulkQuoteJobDetail.mockResolvedValue(jobDetail);
     exportLtlBulkQuoteJobCsv.mockResolvedValue("customerReference,cheapestCarrier\nRFQ-1,Estes");
@@ -174,6 +178,7 @@ describe("LTL bulk quote routes", () => {
     const request = new Request("https://newl.test/api/ltl-rate-portal/bulk-jobs", {
       method: "POST",
       body: JSON.stringify({
+        name: "  June RFQ - Southeast  ",
         accountId: account.id,
         carrierHashes: ["carrier-1", "", null],
         rows: [{ customerReference: "RFQ-1" }]
@@ -186,13 +191,13 @@ describe("LTL bulk quote routes", () => {
     expect(createLtlBulkQuoteJob).toHaveBeenCalledWith(
       context,
       account,
-      expect.objectContaining({ carrierHashes: ["carrier-1"] })
+      expect.objectContaining({ name: "June RFQ - Southeast", carrierHashes: ["carrier-1"] })
     );
     expect(runLtlBulkQuoteJob).toHaveBeenCalledWith(
       { tenantId: context.tenantId, userId: context.userId },
       job.id,
       account,
-      expect.objectContaining({ carrierHashes: ["carrier-1"] })
+      expect.objectContaining({ name: "June RFQ - Southeast", carrierHashes: ["carrier-1"] })
     );
     await expect(response.json()).resolves.toEqual({
       job,
@@ -220,6 +225,23 @@ describe("LTL bulk quote routes", () => {
     expect(response.status).toBe(200);
     expect(getLtlBulkQuoteJobDetail).toHaveBeenCalledWith(context, "job-1");
     await expect(response.json()).resolves.toEqual(jobDetail);
+  });
+
+  it("deletes a saved bulk quote job", async () => {
+    const response = await deleteBulkJob(
+      new Request("https://newl.test/api/ltl-rate-portal/bulk-jobs?jobId=job-1", {
+        method: "DELETE"
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(deleteLtlBulkQuoteJob).toHaveBeenCalledWith(
+      { tenantId: context.tenantId, userId: context.userId },
+      "job-1"
+    );
+    await expect(response.json()).resolves.toEqual({
+      deleted: { id: "job-1" }
+    });
   });
 
   it("returns CSV export with attachment headers", async () => {

@@ -17,7 +17,7 @@ export default async function LtlRatePortalPage() {
       <PageHeader
         eyebrow="LTL Rate Portal"
         title="Bulk LTL lane quoting"
-        description="Upload a lane template, compare seeded carrier outputs across tenant-scoped 7L account configs, and export bulk quote results for RFQs."
+        description="Upload a lane template, compare carrier results across tenant-scoped 7L account configs, and export bulk quote results for RFQs."
       />
 
       <LtlRatePortalClient accounts={shell.accounts} recentBulkJobs={shell.recentBulkJobs} />
