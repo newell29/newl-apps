@@ -2,6 +2,7 @@ import { PageHeader } from "@/components/page-header";
 import {
   createCarrierPlaceholderAction,
   createUpsQuoteSourceAction,
+  saveTradeMiningScoringSettingsAction,
   syncSevenLCarriersAction,
   updateSevenLCarrierSelectionAction
 } from "@/modules/settings/actions";
@@ -58,6 +59,156 @@ export default async function SettingsPage() {
             ))}
           </div>
         </div>
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">TradeMining Scoring</h2>
+            <p className="mt-1 text-sm leading-6 text-mutedForeground">
+              Tune lead ranking for the TradeMining trial without changing the existing Sheets workflow. These settings control growth, profile fit, industry preference, company size bias, and workflow penalties.
+            </p>
+          </div>
+          <span className="rounded-full border border-warning/25 bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning">
+            Deterministic scoring
+          </span>
+        </div>
+
+        <form action={saveTradeMiningScoringSettingsAction} className="mt-4 space-y-6">
+          <div className="grid gap-4 xl:grid-cols-3">
+            <div className="rounded-md border border-border bg-background p-4">
+              <h3 className="text-sm font-semibold text-foreground">Windows</h3>
+              <div className="mt-4 grid gap-3">
+                <NumberField
+                  label="Recent window (days)"
+                  name="recentWindowDays"
+                  defaultValue={settings.tradeMiningScoring.recentWindowDays}
+                  min={7}
+                  max={365}
+                />
+                <NumberField
+                  label="Comparison window (days)"
+                  name="comparisonWindowDays"
+                  defaultValue={settings.tradeMiningScoring.comparisonWindowDays}
+                  min={7}
+                  max={365}
+                />
+                <NumberField
+                  label="Scoring lookback (days)"
+                  name="lookbackWindowDays"
+                  defaultValue={settings.tradeMiningScoring.lookbackWindowDays}
+                  min={30}
+                  max={365}
+                />
+              </div>
+            </div>
+
+            <div className="rounded-md border border-border bg-background p-4">
+              <h3 className="text-sm font-semibold text-foreground">Weights</h3>
+              <div className="mt-4 grid gap-3">
+                <NumberField label="Momentum" name="momentumWeight" defaultValue={settings.tradeMiningScoring.momentumWeight} min={0} max={100} />
+                <NumberField label="Market fit" name="marketFitWeight" defaultValue={settings.tradeMiningScoring.marketFitWeight} min={0} max={100} />
+                <NumberField label="Industry fit" name="industryFitWeight" defaultValue={settings.tradeMiningScoring.industryFitWeight} min={0} max={100} />
+                <NumberField label="Company size" name="companySizeWeight" defaultValue={settings.tradeMiningScoring.companySizeWeight} min={0} max={100} />
+                <NumberField label="Role" name="roleWeight" defaultValue={settings.tradeMiningScoring.roleWeight} min={0} max={100} />
+                <NumberField label="Confidence" name="confidenceWeight" defaultValue={settings.tradeMiningScoring.confidenceWeight} min={0} max={100} />
+                <NumberField label="Workflow" name="workflowWeight" defaultValue={settings.tradeMiningScoring.workflowWeight} min={0} max={100} />
+              </div>
+            </div>
+
+            <div className="rounded-md border border-border bg-background p-4">
+              <h3 className="text-sm font-semibold text-foreground">Company size rules</h3>
+              <div className="mt-4 grid gap-3">
+                <DecimalField
+                  label="Mid-market TEU min"
+                  name="midMarketTeuMin"
+                  defaultValue={settings.tradeMiningScoring.midMarketTeuMin}
+                  placeholder="2"
+                />
+                <DecimalField
+                  label="Mid-market TEU max"
+                  name="midMarketTeuMax"
+                  defaultValue={settings.tradeMiningScoring.midMarketTeuMax}
+                  placeholder="15"
+                />
+                <NumberField label="Mid-market boost" name="midMarketBoost" defaultValue={settings.tradeMiningScoring.midMarketBoost} min={0} max={100} />
+                <DecimalField
+                  label="Oversize TEU threshold"
+                  name="oversizeTeuThreshold"
+                  defaultValue={settings.tradeMiningScoring.oversizeTeuThreshold}
+                  placeholder="30"
+                />
+                <NumberField
+                  label="Oversize shipments in recent window"
+                  name="oversizeShipmentCount30dThreshold"
+                  defaultValue={settings.tradeMiningScoring.oversizeShipmentCount30dThreshold ?? undefined}
+                  min={1}
+                  max={500}
+                />
+                <NumberField label="Oversize penalty" name="oversizePenalty" defaultValue={settings.tradeMiningScoring.oversizePenalty} min={0} max={100} />
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <TextAreaField
+              label="Preferred industry keywords"
+              name="preferredIndustryKeywords"
+              defaultValue={settings.tradeMiningScoring.preferredIndustryKeywords.join("\n")}
+              description="One per line or comma-separated."
+            />
+            <TextAreaField
+              label="Penalized industry keywords"
+              name="penalizedIndustryKeywords"
+              defaultValue={settings.tradeMiningScoring.penalizedIndustryKeywords.join("\n")}
+              description="Use this for brokers, carriers, or categories you do not want to prioritize."
+            />
+            <TextAreaField
+              label="Preferred HS code prefixes"
+              name="preferredHsCodePrefixes"
+              defaultValue={settings.tradeMiningScoring.preferredHsCodePrefixes.join("\n")}
+              description="Prefix matches are supported."
+            />
+            <TextAreaField
+              label="Penalized HS code prefixes"
+              name="penalizedHsCodePrefixes"
+              defaultValue={settings.tradeMiningScoring.penalizedHsCodePrefixes.join("\n")}
+              description="Leave blank if unused."
+            />
+          </div>
+
+          <div className="rounded-md border border-border bg-background p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">Future AI classification</h3>
+                <p className="mt-1 text-sm text-mutedForeground">
+                  This stays off for now. The deterministic score remains the source of truth until we are happy with the trial inputs and ranking behavior.
+                </p>
+              </div>
+              <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <input
+                  type="checkbox"
+                  name="aiClassificationEnabled"
+                  value="true"
+                  defaultChecked={settings.tradeMiningScoring.aiClassificationEnabled}
+                />
+                Enable AI classification
+              </label>
+            </div>
+            <div className="mt-4 max-w-sm">
+              <OptionalField
+                label="AI model"
+                name="aiModel"
+                defaultValue={settings.tradeMiningScoring.aiModel ?? ""}
+                placeholder="gpt-5-mini"
+              />
+            </div>
+          </div>
+
+          <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
+            Save scoring settings
+          </button>
+        </form>
       </section>
 
       <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
@@ -327,6 +478,111 @@ function Field({
         placeholder={placeholder}
         className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
       />
+    </label>
+  );
+}
+
+function OptionalField({
+  label,
+  name,
+  defaultValue,
+  placeholder
+}: {
+  label: string;
+  name: string;
+  defaultValue?: string;
+  placeholder?: string;
+}) {
+  return (
+    <label className="space-y-1 text-sm font-medium text-foreground">
+      <span>{label}</span>
+      <input
+        name={name}
+        defaultValue={defaultValue}
+        placeholder={placeholder}
+        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+      />
+    </label>
+  );
+}
+
+function NumberField({
+  label,
+  name,
+  defaultValue,
+  min,
+  max
+}: {
+  label: string;
+  name: string;
+  defaultValue?: number;
+  min?: number;
+  max?: number;
+}) {
+  return (
+    <label className="space-y-1 text-sm font-medium text-foreground">
+      <span>{label}</span>
+      <input
+        required
+        type="number"
+        name={name}
+        defaultValue={defaultValue}
+        min={min}
+        max={max}
+        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+      />
+    </label>
+  );
+}
+
+function DecimalField({
+  label,
+  name,
+  defaultValue,
+  placeholder
+}: {
+  label: string;
+  name: string;
+  defaultValue?: string | null;
+  placeholder?: string;
+}) {
+  return (
+    <label className="space-y-1 text-sm font-medium text-foreground">
+      <span>{label}</span>
+      <input
+        type="number"
+        step="0.01"
+        min={0}
+        name={name}
+        defaultValue={defaultValue ?? ""}
+        placeholder={placeholder}
+        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+      />
+    </label>
+  );
+}
+
+function TextAreaField({
+  label,
+  name,
+  defaultValue,
+  description
+}: {
+  label: string;
+  name: string;
+  defaultValue?: string;
+  description?: string;
+}) {
+  return (
+    <label className="space-y-1 text-sm font-medium text-foreground">
+      <span>{label}</span>
+      <textarea
+        name={name}
+        rows={5}
+        defaultValue={defaultValue}
+        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+      />
+      {description ? <span className="block text-xs font-normal text-mutedForeground">{description}</span> : null}
     </label>
   );
 }

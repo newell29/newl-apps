@@ -150,6 +150,7 @@ model Tenant {
   companies              Company[]
   importRecords          TradeMiningImportRecord[]
   searchProfiles         TradeMiningSearchProfile[]
+  tradeMiningScoringConfig TradeMiningScoringConfig?
   contacts               Contact[]
   leads                  Lead[]
   contactOutreachDrafts  ContactOutreachDraft[]
@@ -392,6 +393,39 @@ model TradeMiningSearchProfile {
   @@index([tenantId, enabled])
   @@index([tenantId, priorityWeight])
   @@index([tenantId, scheduleFrequency])
+}
+
+model TradeMiningScoringConfig {
+  id                               String    @id @default(cuid())
+  tenantId                         String    @unique
+  recentWindowDays                 Int       @default(30)
+  comparisonWindowDays             Int       @default(30)
+  lookbackWindowDays               Int       @default(90)
+  momentumWeight                   Int       @default(30)
+  marketFitWeight                  Int       @default(20)
+  industryFitWeight                Int       @default(15)
+  companySizeWeight                Int       @default(15)
+  roleWeight                       Int       @default(10)
+  confidenceWeight                 Int       @default(5)
+  workflowWeight                   Int       @default(5)
+  preferredIndustryKeywords        Json?
+  penalizedIndustryKeywords        Json?
+  preferredHsCodePrefixes          Json?
+  penalizedHsCodePrefixes          Json?
+  oversizeTeuThreshold             Decimal?  @db.Decimal(12, 2)
+  oversizeShipmentCount30dThreshold Int?
+  oversizePenalty                  Int       @default(10)
+  midMarketTeuMin                  Decimal?  @db.Decimal(12, 2)
+  midMarketTeuMax                  Decimal?  @db.Decimal(12, 2)
+  midMarketBoost                   Int       @default(6)
+  aiClassificationEnabled          Boolean   @default(false)
+  aiModel                          String?
+  createdAt                        DateTime  @default(now())
+  updatedAt                        DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
 }
 
 model TradeMiningImportRecord {
