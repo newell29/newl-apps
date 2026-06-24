@@ -10,6 +10,14 @@ import {
   parseApolloRepMapping
 } from "@/modules/settings/apollo-rep-mapping";
 import {
+  buildApolloSequenceMappingsWithDefaults,
+  mapApolloSequenceOptions,
+  parseApolloSequenceDirectory,
+  parseApolloSequenceMapping,
+  parseSearchProfileApolloSequenceMapping,
+  resolveApolloSequenceMappings
+} from "@/modules/settings/apollo-sequence-mapping";
+import {
   buildPlaceholderQuoteSource,
   mapProviderToCarrierName,
   parseQuoteSourceDirectory,
@@ -20,6 +28,7 @@ import {
   DEFAULT_TRADEMINING_SCORING_SETTINGS,
   type ManagedQuoteSource,
   type QuoteToolTarget,
+  type SearchProfileCadenceMappingEntry,
   type TradeMiningScoringSettings
 } from "@/modules/settings/types";
 
@@ -63,6 +72,24 @@ type TradeMiningScoringConfigRecord = {
   midMarketTeuMin: { toString(): string } | null;
   midMarketTeuMax: { toString(): string } | null;
   midMarketBoost: number;
+  contactDecisionMakerWeight: number;
+  contactManagerWeight: number;
+  contactLogisticsDepartmentWeight: number;
+  contactWeakFunctionPenalty: number;
+  contactCompanyContextWeight: number;
+  contactEmailWeight: number;
+  contactLinkedinWeight: number;
+  contactPhoneWeight: number;
+  contactPrimaryContactBoost: number;
+  contactApprovedStatusBoost: number;
+  contactReviewingStatusBoost: number;
+  contactTier1Threshold: number;
+  contactTier2Threshold: number;
+  contactTier3Threshold: number;
+  preferredContactTitleKeywords: unknown;
+  penalizedContactTitleKeywords: unknown;
+  preferredContactDepartments: unknown;
+  penalizedContactDepartments: unknown;
   aiClassificationEnabled: boolean;
   aiModel: string | null;
 };
@@ -131,6 +158,17 @@ export async function getSettingsShell(tenant: TenantContext) {
     ),
     ...parseQuoteSourceDirectory(quoteSourceDirectory?.publicConfig).map((entry) => buildPlaceholderQuoteSource(entry))
   ].sort((left, right) => left.displayName.localeCompare(right.displayName));
+  const apolloRepMapping = apolloCredential ? parseApolloRepMapping(apolloCredential.publicConfig) : [];
+  const apolloSequenceDirectory = apolloCredential ? parseApolloSequenceDirectory(apolloCredential.publicConfig) : [];
+  const apolloSequenceMapping = buildApolloSequenceMappingsWithDefaults({
+    existingMappings: apolloCredential ? parseApolloSequenceMapping(apolloCredential.publicConfig) : [],
+    directory: apolloSequenceDirectory
+  });
+  const searchProfileCadenceMappings = await loadSearchProfileCadenceMappings({
+    tenantId: tenant.tenantId,
+    directory: apolloSequenceDirectory,
+    defaultMappings: apolloSequenceMapping
+  });
 
   return {
     modules: moduleAccess.map((access) => ({
@@ -143,13 +181,71 @@ export async function getSettingsShell(tenant: TenantContext) {
     upsAccounts: mergeUpsAccountsForSettings(upsAccounts, localUpsAccounts),
     tradeMiningScoring: mapTradeMiningScoringSettings(tradeMiningScoringConfig),
     tradeMiningScoringConfigWarning,
-    apolloRepMapping: apolloCredential ? parseApolloRepMapping(apolloCredential.publicConfig) : [],
-    apolloRepOptions: apolloCredential ? mapApolloRepOptions(parseApolloRepMapping(apolloCredential.publicConfig)) : [],
+    apolloRepMapping,
+    apolloRepOptions: mapApolloRepOptions(apolloRepMapping),
+    apolloSequenceDirectory,
+    apolloSequenceMapping,
+    apolloSequenceOptions: mapApolloSequenceOptions(apolloSequenceDirectory),
+    searchProfileCadenceMappings,
     sevenLAccounts: typedIntegrationCredentials
       .filter((credential) => credential.provider === IntegrationProvider.SEVEN_L)
       .map((credential) => mapSevenLAccount(credential))
       .filter(Boolean) as SevenLAccountConfig[]
   };
+}
+
+async function loadSearchProfileCadenceMappings({
+  tenantId,
+  directory,
+  defaultMappings
+}: {
+  tenantId: string;
+  directory: ReturnType<typeof parseApolloSequenceDirectory>;
+  defaultMappings: ReturnType<typeof parseApolloSequenceMapping>;
+}): Promise<SearchProfileCadenceMappingEntry[]> {
+  const searchProfiles = await prisma.tradeMiningSearchProfile.findMany({
+    where: {
+      tenantId
+    },
+    orderBy: [
+      { enabled: "desc" },
+      { priorityWeight: "desc" },
+      { name: "asc" }
+    ],
+    select: {
+      id: true,
+      name: true,
+      enabled: true,
+      destinationMarkets: true,
+      contactCadenceConfig: true
+    }
+  });
+
+  return searchProfiles.map((profile) => {
+    const profileMappings = parseSearchProfileApolloSequenceMapping(profile.contactCadenceConfig);
+    const usesDefaultMapping = !hasStoredProfileCadenceMapping(profile.contactCadenceConfig);
+
+    return {
+      profileId: profile.id,
+      profileName: profile.name,
+      profileEnabled: profile.enabled,
+      destinationMarkets: parseStringArray(profile.destinationMarkets),
+      usesDefaultMapping,
+      sequenceMapping: resolveApolloSequenceMappings({
+        existingMappings: usesDefaultMapping ? defaultMappings : profileMappings,
+        directory
+      })
+    };
+  });
+}
+
+function hasStoredProfileCadenceMapping(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const config = value as Record<string, unknown>;
+  return Array.isArray(config.apolloSequenceMapping) || Array.isArray(config.apollo_sequence_mapping);
 }
 
 async function loadTradeMiningScoringConfig(
@@ -166,7 +262,7 @@ async function loadTradeMiningScoringConfig(
 }
 
 function isMissingTradeMiningScoringTableError(error: unknown) {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2021";
+  return error instanceof Prisma.PrismaClientKnownRequestError && (error.code === "P2021" || error.code === "P2022");
 }
 
 function mapTradeMiningScoringSettings(config: {
@@ -196,6 +292,24 @@ function mapTradeMiningScoringSettings(config: {
   midMarketTeuMin: { toString(): string } | null;
   midMarketTeuMax: { toString(): string } | null;
   midMarketBoost: number;
+  contactDecisionMakerWeight: number;
+  contactManagerWeight: number;
+  contactLogisticsDepartmentWeight: number;
+  contactWeakFunctionPenalty: number;
+  contactCompanyContextWeight: number;
+  contactEmailWeight: number;
+  contactLinkedinWeight: number;
+  contactPhoneWeight: number;
+  contactPrimaryContactBoost: number;
+  contactApprovedStatusBoost: number;
+  contactReviewingStatusBoost: number;
+  contactTier1Threshold: number;
+  contactTier2Threshold: number;
+  contactTier3Threshold: number;
+  preferredContactTitleKeywords: unknown;
+  penalizedContactTitleKeywords: unknown;
+  preferredContactDepartments: unknown;
+  penalizedContactDepartments: unknown;
   aiClassificationEnabled: boolean;
   aiModel: string | null;
 } | null): TradeMiningScoringSettings {
@@ -230,6 +344,24 @@ function mapTradeMiningScoringSettings(config: {
     midMarketTeuMin: config.midMarketTeuMin?.toString() ?? null,
     midMarketTeuMax: config.midMarketTeuMax?.toString() ?? null,
     midMarketBoost: config.midMarketBoost,
+    contactDecisionMakerWeight: config.contactDecisionMakerWeight,
+    contactManagerWeight: config.contactManagerWeight,
+    contactLogisticsDepartmentWeight: config.contactLogisticsDepartmentWeight,
+    contactWeakFunctionPenalty: config.contactWeakFunctionPenalty,
+    contactCompanyContextWeight: config.contactCompanyContextWeight,
+    contactEmailWeight: config.contactEmailWeight,
+    contactLinkedinWeight: config.contactLinkedinWeight,
+    contactPhoneWeight: config.contactPhoneWeight,
+    contactPrimaryContactBoost: config.contactPrimaryContactBoost,
+    contactApprovedStatusBoost: config.contactApprovedStatusBoost,
+    contactReviewingStatusBoost: config.contactReviewingStatusBoost,
+    contactTier1Threshold: config.contactTier1Threshold,
+    contactTier2Threshold: config.contactTier2Threshold,
+    contactTier3Threshold: config.contactTier3Threshold,
+    preferredContactTitleKeywords: parseStringArray(config.preferredContactTitleKeywords),
+    penalizedContactTitleKeywords: parseStringArray(config.penalizedContactTitleKeywords),
+    preferredContactDepartments: parseStringArray(config.preferredContactDepartments),
+    penalizedContactDepartments: parseStringArray(config.penalizedContactDepartments),
     aiClassificationEnabled: config.aiClassificationEnabled,
     aiModel: config.aiModel
   };

@@ -1,21 +1,29 @@
 import {
   ApolloStatus,
-  ContactOutreachDraftStatus,
   ContactSource,
   ContactStatus,
+  ContactOutreachDraftStatus,
   ContactTier,
   ReplyStatus,
   SequenceStatus
 } from "@prisma/client";
-import { Fragment } from "react";
 import { PageHeader } from "@/components/page-header";
-import { saveContactDraftAction, updateContactSequenceAction } from "@/modules/lead-gen/actions";
+import {
+  approveContactDraftAction,
+  bulkUpdateContactSequenceAction,
+  generateContactDraftAction,
+  saveContactDraftAction,
+  updateContactSequenceAction
+} from "@/modules/lead-gen/actions";
+import { ContactDirectoryTableClient } from "@/modules/lead-gen/components/contact-directory-table-client";
 import {
   getContactDirectory,
   getContactDirectoryFilters,
+  type ContactBooleanFilter,
+  type ContactDraftStatusFilter,
   type ContactDirectorySort
 } from "@/modules/lead-gen/queries";
-import { sequenceCatalog } from "@/modules/lead-gen/sequence-catalog";
+import { buildSequenceCatalogItems } from "@/modules/lead-gen/sequence-catalog";
 import { getCurrentTenantContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
@@ -37,53 +45,87 @@ export default async function ContactsPage({
   const params = searchParams ? await searchParams : {};
   const query = readParam(params.q) ?? "";
   const companyId = readParam(params.company);
+  const searchProfileId = readParam(params.searchProfile);
   const contactStatus = parseContactStatusParam(readParam(params.contactStatus));
   const apolloStatus = parseApolloStatusParam(readParam(params.apolloStatus));
   const sequenceStatus = parseSequenceStatusParam(readParam(params.sequenceStatus));
   const replyStatus = parseReplyStatusParam(readParam(params.replyStatus));
   const source = parseSourceParam(readParam(params.source));
   const contactTier = parseContactTierParam(readParam(params.tier));
+  const draftStatus = parseDraftStatusParam(readParam(params.draftStatus));
+  const requiresAiDraft = parseBooleanFilterParam(readParam(params.requiresAiDraft));
+  const approvedDraft = parseBooleanFilterParam(readParam(params.approvedDraft));
+  const hasSequenceSelected = parseBooleanFilterParam(readParam(params.hasSequenceSelected));
   const assignedRep = parseAssignedRepParam(readParam(params.rep));
   const sort = parseSortParam(readParam(params.sort));
   const hasFilters = Boolean(
-    query ||
+      query ||
       companyId ||
+      searchProfileId ||
       contactStatus !== "ALL" ||
       apolloStatus !== "ALL" ||
       sequenceStatus !== "ALL" ||
       replyStatus !== "ALL" ||
       source !== "ALL" ||
       contactTier !== "ALL" ||
+      draftStatus !== "ALL" ||
+      requiresAiDraft !== "ALL" ||
+      approvedDraft !== "ALL" ||
+      hasSequenceSelected !== "ALL" ||
       assignedRep !== "ALL" ||
       sort !== "score_desc"
   );
+  const exportFilteredHref = buildContactsExportHref({
+    q: query,
+    company: companyId ?? "",
+    searchProfile: searchProfileId ?? "",
+    contactStatus,
+    apolloStatus,
+    sequenceStatus,
+    replyStatus,
+    source,
+    tier: contactTier,
+    draftStatus,
+    requiresAiDraft,
+    approvedDraft,
+    hasSequenceSelected,
+    rep: assignedRep,
+    sort
+  });
+  const exportAllHref = "/api/lead-gen/contacts/export";
   const [contacts, filterOptions] = await Promise.all([
     getContactDirectory(tenant, {
       query,
       companyId,
+      searchProfileId,
       contactStatus,
       apolloStatus,
       sequenceStatus,
       replyStatus,
       source,
       contactTier,
+      draftStatus,
+      requiresAiDraft,
+      approvedDraft,
+      hasSequenceSelected,
       assignedRep,
       sort
     }),
     getContactDirectoryFilters(tenant)
   ]);
+  const sequenceOptions = buildSequenceCatalogItems([]);
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Lead Generation"
         title="Contacts"
-        description="Contacts are people attached to approved Pipeline accounts. Newl Apps recommends a cadence by default; reps can override it before future Apollo sync."
+        description="Contacts are people attached to approved Pipeline accounts. Apollo enrichment fills this directory, and Newl Apps recommends a cadence that reps can adjust before any future sequence push."
       />
 
       <div className="rounded-lg border border-accentBorder bg-accentSoft px-4 py-3 text-sm text-foreground">
-        Tier 1 draft previews are optional and use local mock content only. No Apollo sequence enrollment, OpenAI calls, or
-        email sends happen from this page.
+        This page can generate and review Newl Apps draft copy for tiers that require it, but it still does not enroll
+        sequences, send email, or make outreach changes on its own.
       </div>
 
       <form className="rounded-lg border border-border bg-card p-4 shadow-sm" action="/lead-gen/contacts">
@@ -114,6 +156,22 @@ export default async function ContactsPage({
             </select>
           </label>
 
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Search profile</span>
+            <select
+              name="searchProfile"
+              defaultValue={searchProfileId ?? ""}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            >
+              <option value="">All profiles</option>
+              {filterOptions.searchProfiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
           <EnumSelect
             label="Contact status"
             name="contactStatus"
@@ -130,6 +188,34 @@ export default async function ContactsPage({
           <EnumSelect label="Reply status" name="replyStatus" value={replyStatus} values={filterOptions.replyStatuses} />
           <EnumSelect label="Source" name="source" value={source} values={filterOptions.sources} />
           <EnumSelect label="Tier" name="tier" value={contactTier} values={filterOptions.contactTiers} />
+          <EnumSelect
+            label="Draft status"
+            name="draftStatus"
+            value={draftStatus}
+            values={filterOptions.draftStatuses}
+            formatValue={formatDraftStatusFilter}
+          />
+          <EnumSelect
+            label="Requires AI draft"
+            name="requiresAiDraft"
+            value={requiresAiDraft}
+            values={filterOptions.booleanFilterOptions}
+            formatValue={formatBooleanFilter}
+          />
+          <EnumSelect
+            label="Approved draft"
+            name="approvedDraft"
+            value={approvedDraft}
+            values={filterOptions.booleanFilterOptions}
+            formatValue={formatBooleanFilter}
+          />
+          <EnumSelect
+            label="Has cadence selected"
+            name="hasSequenceSelected"
+            value={hasSequenceSelected}
+            values={filterOptions.booleanFilterOptions}
+            formatValue={formatBooleanFilter}
+          />
 
           <label className="space-y-1 text-sm font-medium text-foreground">
             <span>Assigned rep</span>
@@ -139,7 +225,6 @@ export default async function ContactsPage({
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
             >
               <option value="ALL">All reps</option>
-              <option value="UNASSIGNED">Unassigned</option>
               {filterOptions.owners.map((owner) => (
                 <option key={owner} value={owner}>
                   {owner}
@@ -168,6 +253,30 @@ export default async function ContactsPage({
               Apply filters
             </button>
           </div>
+          <div className="flex items-end">
+            <a
+              href="/lead-gen/contacts"
+              className="w-full rounded-md border border-border bg-card px-4 py-2 text-center text-sm font-semibold text-foreground transition-colors hover:bg-accentSoft xl:w-auto"
+            >
+              Clear filters
+            </a>
+          </div>
+          <div className="flex items-end">
+            <a
+              href={exportFilteredHref}
+              className="w-full rounded-md border border-border bg-card px-4 py-2 text-center text-sm font-semibold text-foreground transition-colors hover:bg-accentSoft xl:w-auto"
+            >
+              Export current view
+            </a>
+          </div>
+          <div className="flex items-end">
+            <a
+              href={exportAllHref}
+              className="w-full rounded-md border border-border bg-card px-4 py-2 text-center text-sm font-semibold text-foreground transition-colors hover:bg-accentSoft xl:w-auto"
+            >
+              Export all contacts
+            </a>
+          </div>
         </div>
       </form>
 
@@ -176,7 +285,7 @@ export default async function ContactsPage({
           <div>
             <p className="text-sm font-semibold text-foreground">Contact cadence foundation</p>
             <p className="text-xs text-mutedForeground">
-              Review selected cadences, optional Tier 1 drafts, and future Apollo readiness before live sync exists.
+              Review selected cadences, shipment-aware draft copy, and future Apollo readiness before live sync exists.
             </p>
           </div>
           <span className="rounded-full border border-accentBorder bg-card px-2.5 py-1 text-xs font-semibold text-primary">
@@ -185,159 +294,15 @@ export default async function ContactsPage({
         </div>
 
         {contacts.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="min-w-[1720px] divide-y divide-border text-sm">
-              <thead className="bg-muted text-left text-xs font-semibold uppercase text-mutedForeground">
-                <tr>
-                  <th className="px-4 py-3">Contact name</th>
-                  <th className="px-4 py-3">Title</th>
-                  <th className="px-4 py-3">Company</th>
-                  <th className="px-4 py-3">Email</th>
-                  <th className="px-4 py-3">Contact status</th>
-                  <th className="px-4 py-3">Score / tier</th>
-                  <th className="px-4 py-3">Selected sequence</th>
-                  <th className="px-4 py-3">Recommendation</th>
-                  <th className="px-4 py-3">Draft</th>
-                  <th className="px-4 py-3">Apollo</th>
-                  <th className="px-4 py-3">Sequence</th>
-                  <th className="px-4 py-3">Reply</th>
-                  <th className="px-4 py-3">Assigned rep</th>
-                  <th className="px-4 py-3">Last touch</th>
-                  <th className="px-4 py-3">Last reply</th>
-                  <th className="px-4 py-3">Source</th>
-                  <th className="px-4 py-3">Updated</th>
-                  <th className="px-4 py-3">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {contacts.map((contact) => (
-                  <Fragment key={contact.id}>
-                    <tr className="align-top transition-colors hover:bg-muted/60">
-                      <td className="max-w-[220px] px-4 py-4">
-                        <p className="font-semibold text-foreground">{contact.fullName}</p>
-                        <p className="mt-1 text-xs text-mutedForeground">
-                          {[contact.seniority, contact.department].filter(Boolean).join(" / ") || "Unclassified"}
-                        </p>
-                      </td>
-                      <td className="max-w-[220px] px-4 py-4 text-mutedForeground">{contact.title ?? "Unknown title"}</td>
-                      <td className="max-w-[220px] px-4 py-4">
-                        <p className="font-medium text-foreground">{contact.companyName}</p>
-                        <p className="mt-1 text-xs text-mutedForeground">{contact.companyNormalizedName}</p>
-                      </td>
-                      <td className="max-w-[220px] px-4 py-4 text-mutedForeground">{contact.email ?? "No email yet"}</td>
-                      <td className="px-4 py-4">
-                        <StatusBadge value={contact.contactStatus} tone={contactStatusTone(contact.contactStatus)} />
-                      </td>
-                      <td className="px-4 py-4">
-                        <span className="text-lg font-bold text-primary">{contact.contactScore}</span>
-                        <p className="mt-1 text-xs font-medium text-mutedForeground">{formatEnum(contact.contactTier)}</p>
-                      </td>
-                      <td className="max-w-[220px] px-4 py-4">
-                        <p className="font-medium text-foreground">{contact.selectedSequenceName}</p>
-                        <p className="mt-1 text-xs text-mutedForeground">
-                          {contact.sequenceManuallyOverridden ? "Manual override" : "Auto-selected"}
-                        </p>
-                      </td>
-                      <td className="max-w-[260px] px-4 py-4 text-mutedForeground">
-                        <p className="font-medium text-foreground">{contact.recommendedSequenceName}</p>
-                        <p className="mt-1 text-xs leading-5">{contact.sequenceRecommendationReason}</p>
-                      </td>
-                      <td className="px-4 py-4">
-                        <StatusBadge value={contact.draftStatus} tone={draftStatusTone(contact.draftStatus)} />
-                      </td>
-                      <td className="px-4 py-4">
-                        <StatusBadge value={contact.apolloStatus} tone={apolloStatusTone(contact.apolloStatus)} />
-                      </td>
-                      <td className="px-4 py-4">
-                        <StatusBadge value={contact.sequenceStatus} tone={sequenceStatusTone(contact.sequenceStatus)} />
-                      </td>
-                      <td className="px-4 py-4">
-                        <StatusBadge value={contact.replyStatus} tone={replyStatusTone(contact.replyStatus)} />
-                      </td>
-                      <td className="px-4 py-4 text-mutedForeground">{contact.assignedRep}</td>
-                      <td className="px-4 py-4 text-mutedForeground">{formatDate(contact.lastTouchAt)}</td>
-                      <td className="px-4 py-4 text-mutedForeground">{formatDate(contact.lastReplyAt)}</td>
-                      <td className="px-4 py-4 text-mutedForeground">{formatEnum(contact.source)}</td>
-                      <td className="px-4 py-4 text-mutedForeground">{formatDate(contact.updatedAt)}</td>
-                      <td className="px-4 py-4">
-                        <div className="min-w-[320px] space-y-3">
-                          <form action={updateContactSequenceAction} className="grid gap-2">
-                            <input type="hidden" name="contactId" value={contact.id} />
-                            <select
-                              name="sequenceId"
-                              defaultValue={contact.selectedSequenceId}
-                              className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
-                            >
-                              {sequenceCatalog.map((sequence) => (
-                                <option key={sequence.id} value={sequence.id}>
-                                  {sequence.name}
-                                </option>
-                              ))}
-                            </select>
-                            <input
-                              name="sequenceOverrideReason"
-                              defaultValue={contact.sequenceOverrideReason ?? ""}
-                              placeholder="Optional override reason"
-                              className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
-                            />
-                            <button className="w-fit rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
-                              Change Sequence
-                            </button>
-                          </form>
-                          {contact.draft ? (
-                            <details className="rounded-md border border-border bg-background p-3">
-                              <summary className="cursor-pointer text-xs font-semibold text-primary">View Draft</summary>
-                              <form action={saveContactDraftAction} className="mt-3 space-y-3">
-                                <input type="hidden" name="draftId" value={contact.draft.id} />
-                                <DraftMeta label="Contact" value={`${contact.fullName} at ${contact.companyName}`} />
-                                <DraftMeta label="Title" value={contact.title ?? "Unknown title"} />
-                                <DraftMeta label="Tier" value={formatEnum(contact.contactTier)} />
-                                <DraftMeta label="Recommended sequence" value={contact.recommendedSequenceName} />
-                                <DraftMeta label="Selected sequence" value={contact.selectedSequenceName} />
-                                <label className="block space-y-1 text-xs font-semibold text-foreground">
-                                  <span>Subject line</span>
-                                  <input
-                                    name="subject"
-                                    defaultValue={contact.draft.subject}
-                                    className="w-full rounded-md border border-border bg-card px-2 py-1.5 text-xs text-foreground"
-                                  />
-                                </label>
-                                <label className="block space-y-1 text-xs font-semibold text-foreground">
-                                  <span>Email body</span>
-                                  <textarea
-                                    name="body"
-                                    defaultValue={contact.draft.body}
-                                    rows={7}
-                                    className="w-full rounded-md border border-border bg-card px-2 py-1.5 text-xs leading-5 text-foreground"
-                                  />
-                                </label>
-                                <DraftMeta
-                                  label="Personalization notes"
-                                  value={contact.draft.personalizationNotes ?? "No notes recorded"}
-                                />
-                                <p className="text-xs text-mutedForeground">
-                                  Optional review only. Saving does not send email, enroll a sequence, or call Apollo.
-                                </p>
-                                <button className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
-                                  Save Draft
-                                </button>
-                              </form>
-                            </details>
-                          ) : (
-                            <p className="text-xs text-mutedForeground">
-                              {contact.contactTier === ContactTier.TIER_1
-                                ? "No Newl draft available yet."
-                                : "Tier 2+ contacts use Apollo/template drafting later."}
-                            </p>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  </Fragment>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ContactDirectoryTableClient
+            contacts={contacts}
+            sequenceOptions={filterOptions.sequenceOptions.length > 0 ? filterOptions.sequenceOptions : sequenceOptions}
+            bulkUpdateContactSequenceAction={bulkUpdateContactSequenceAction}
+            updateContactSequenceAction={updateContactSequenceAction}
+            saveContactDraftAction={saveContactDraftAction}
+            approveContactDraftAction={approveContactDraftAction}
+            generateContactDraftAction={generateContactDraftAction}
+          />
         ) : (
           <div className="px-4 py-12 text-center">
             <h2 className="text-base font-semibold text-foreground">
@@ -347,8 +312,8 @@ export default async function ContactsPage({
               {hasFilters
                 ? "Adjust the company, status, source, tier, search, or sort controls to widen the contact view."
                 : filterOptions.approvedAccountCount > 0
-                  ? "Contacts will be populated by Apollo enrichment in a future milestone."
-                  : "No contacts yet. Approve companies into Pipeline first, then use future Apollo enrichment to find people at those accounts."}
+                  ? "No contacts yet for the current approved accounts. Run Apollo enrichment from Pipeline after assigning a rep."
+                  : "No contacts yet. Approve companies into Pipeline first, then run Apollo enrichment to find people at those accounts."}
             </p>
           </div>
         )}
@@ -361,12 +326,14 @@ function EnumSelect({
   label,
   name,
   value,
-  values
+  values,
+  formatValue
 }: {
   label: string;
   name: string;
   value: string;
   values: string[];
+  formatValue?: (value: string) => string;
 }) {
   return (
     <label className="space-y-1 text-sm font-medium text-foreground">
@@ -379,33 +346,11 @@ function EnumSelect({
         <option value="ALL">All</option>
         {values.map((option) => (
           <option key={option} value={option}>
-            {formatEnum(option)}
+            {formatValue ? formatValue(option) : formatEnum(option)}
           </option>
         ))}
       </select>
     </label>
-  );
-}
-
-function StatusBadge({ value, tone }: { value: string; tone: "neutral" | "success" | "warning" | "danger" }) {
-  const className =
-    tone === "success"
-      ? "border-success/30 bg-success/10 text-success"
-      : tone === "warning"
-        ? "border-warning/30 bg-warning/10 text-warning"
-        : tone === "danger"
-          ? "border-danger/30 bg-danger/10 text-danger"
-          : "border-accentBorder bg-accentSoft text-primary";
-
-  return <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${className}`}>{formatEnum(value)}</span>;
-}
-
-function DraftMeta({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="text-xs">
-      <p className="font-semibold text-mutedForeground">{label}</p>
-      <p className="mt-0.5 text-foreground">{value}</p>
-    </div>
   );
 }
 
@@ -457,6 +402,27 @@ function parseContactTierParam(value: string | undefined) {
   return Object.values(ContactTier).includes(value as ContactTier) ? (value as ContactTier) : "ALL";
 }
 
+function parseDraftStatusParam(value: string | undefined): ContactDraftStatusFilter {
+  if (!value || value === "ALL") {
+    return "ALL";
+  }
+
+  if (
+    value === "DRAFT_REQUIRED" ||
+    value === "NO_NEWL_DRAFT" ||
+    value === "APOLLO_TEMPLATE_LATER" ||
+    Object.values(ContactOutreachDraftStatus).includes(value as ContactOutreachDraftStatus)
+  ) {
+    return value as ContactDraftStatusFilter;
+  }
+
+  return "ALL";
+}
+
+function parseBooleanFilterParam(value: string | undefined): ContactBooleanFilter {
+  return value === "YES" || value === "NO" ? value : "ALL";
+}
+
 function parseAssignedRepParam(value: string | undefined) {
   if (!value || value === "ALL") {
     return "ALL";
@@ -469,88 +435,27 @@ function parseSortParam(value: string | undefined): ContactDirectorySort {
   return sortOptions.some((option) => option.value === value) ? (value as ContactDirectorySort) : "score_desc";
 }
 
-function contactStatusTone(status: ContactStatus) {
-  if (status === ContactStatus.APPROVED) {
-    return "success";
-  }
-
-  if (status === ContactStatus.REVIEWING) {
-    return "warning";
-  }
-
-  if (status === ContactStatus.REJECTED || status === ContactStatus.DO_NOT_CONTACT) {
-    return "danger";
-  }
-
-  return "neutral";
-}
-
-function apolloStatusTone(status: ApolloStatus) {
-  if (status === ApolloStatus.ENRICHED) {
-    return "success";
-  }
-
-  if (status === ApolloStatus.ERROR) {
-    return "danger";
-  }
-
-  if (status === ApolloStatus.NOT_FOUND) {
-    return "warning";
-  }
-
-  return "neutral";
-}
-
-function sequenceStatusTone(status: SequenceStatus) {
-  if (status === SequenceStatus.ENROLLED || status === SequenceStatus.FINISHED || status === SequenceStatus.REPLIED) {
-    return "success";
-  }
-
-  if (status === SequenceStatus.READY || status === SequenceStatus.PAUSED) {
-    return "warning";
-  }
-
-  if (status === SequenceStatus.BOUNCED) {
-    return "danger";
-  }
-
-  return "neutral";
-}
-
-function replyStatusTone(status: ReplyStatus) {
-  if (status === ReplyStatus.POSITIVE || status === ReplyStatus.MEETING_BOOKED) {
-    return "success";
-  }
-
-  if (status === ReplyStatus.NEGATIVE) {
-    return "danger";
-  }
-
-  if (status === ReplyStatus.REPLIED || status === ReplyStatus.OUT_OF_OFFICE) {
-    return "warning";
-  }
-
-  return "neutral";
-}
-
-function draftStatusTone(status: string) {
-  if (status === ContactOutreachDraftStatus.APPROVED || status === ContactOutreachDraftStatus.EDITED) {
-    return "success";
-  }
-
-  if (status === ContactOutreachDraftStatus.AVAILABLE || status === ContactOutreachDraftStatus.DRAFT) {
-    return "warning";
-  }
-
-  return "neutral";
-}
-
 function readParam(value: string | string[] | undefined) {
   if (Array.isArray(value)) {
     return value[0];
   }
 
   return value;
+}
+
+function buildContactsExportHref(params: Record<string, string>) {
+  const searchParams = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (!value || value === "ALL" || (key === "sort" && value === "score_desc")) {
+      continue;
+    }
+
+    searchParams.set(key, value);
+  }
+
+  const query = searchParams.toString();
+  return query.length > 0 ? `/api/lead-gen/contacts/export?${query}` : "/api/lead-gen/contacts/export";
 }
 
 function formatEnum(value: string) {
@@ -561,14 +466,22 @@ function formatEnum(value: string) {
     .join(" ");
 }
 
-function formatDate(value: Date | null) {
-  if (!value) {
-    return "Not recorded";
+function formatBooleanFilter(value: string) {
+  return value === "YES" ? "Yes" : value === "NO" ? "No" : value;
+}
+
+function formatDraftStatusFilter(value: string) {
+  if (value === "DRAFT_REQUIRED") {
+    return "Draft required";
   }
 
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric"
-  }).format(value);
+  if (value === "NO_NEWL_DRAFT") {
+    return "No Newl draft";
+  }
+
+  if (value === "APOLLO_TEMPLATE_LATER") {
+    return "Apollo/template later";
+  }
+
+  return formatEnum(value);
 }

@@ -25,6 +25,7 @@ node_modules/
 
 # Framework and build output
 .next/
+.next-dev/
 out/
 dist/
 build/

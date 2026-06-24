@@ -368,6 +368,7 @@ model TradeMiningSearchProfile {
   name               String
   description        String?
   enabled            Boolean   @default(true)
+  contactCadenceConfig Json?
   destinationMarkets Json
   destinationPorts   Json?
   originPorts        Json?
@@ -424,6 +425,24 @@ model TradeMiningScoringConfig {
   midMarketTeuMin                  Decimal?  @db.Decimal(12, 2)
   midMarketTeuMax                  Decimal?  @db.Decimal(12, 2)
   midMarketBoost                   Int       @default(6)
+  contactDecisionMakerWeight       Int       @default(20)
+  contactManagerWeight             Int       @default(12)
+  contactLogisticsDepartmentWeight Int       @default(15)
+  contactWeakFunctionPenalty       Int       @default(6)
+  contactCompanyContextWeight      Int       @default(15)
+  contactEmailWeight               Int       @default(6)
+  contactLinkedinWeight            Int       @default(4)
+  contactPhoneWeight               Int       @default(2)
+  contactPrimaryContactBoost       Int       @default(6)
+  contactApprovedStatusBoost       Int       @default(3)
+  contactReviewingStatusBoost      Int       @default(2)
+  contactTier1Threshold            Int       @default(78)
+  contactTier2Threshold            Int       @default(58)
+  contactTier3Threshold            Int       @default(36)
+  preferredContactTitleKeywords    Json?
+  penalizedContactTitleKeywords    Json?
+  preferredContactDepartments      Json?
+  penalizedContactDepartments      Json?
   aiClassificationEnabled          Boolean   @default(false)
   aiModel                          String?
   createdAt                        DateTime  @default(now())

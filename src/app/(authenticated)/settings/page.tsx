@@ -1,9 +1,13 @@
 import { PageHeader } from "@/components/page-header";
+import { SearchProfileCadenceManager } from "@/modules/settings/components/search-profile-cadence-manager";
 import {
   createCarrierPlaceholderAction,
   createUpsQuoteSourceAction,
   saveApolloRepMappingAction,
+  saveApolloSequenceMappingAction,
   saveTradeMiningScoringSettingsAction,
+  syncApolloRepMappingAction,
+  syncApolloSequenceMappingAction,
   syncSevenLCarriersAction,
   updateSevenLCarrierSelectionAction
 } from "@/modules/settings/actions";
@@ -25,6 +29,41 @@ export default async function SettingsPage() {
         title="Settings"
         description="Tenant-scoped configuration shell for modules, credentials, roles, and future billing."
       />
+
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Settings workspace</h2>
+            <p className="mt-1 text-sm leading-6 text-mutedForeground">
+              Keep platform controls, lead generation strategy, and quote tooling in separate lanes so this page stays manageable as the app grows.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { href: "#platform-controls", label: "Platform controls" },
+              { href: "#lead-generation-settings", label: "Lead generation" },
+              { href: "#quote-tools-settings", label: "Quote tools" }
+            ].map((link) => (
+              <a
+                key={link.href}
+                href={link.href}
+                className="rounded-full border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+              >
+                {link.label}
+              </a>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section id="platform-controls" className="space-y-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Platform Controls</h2>
+          <p className="mt-1 text-sm text-mutedForeground">
+            Tenant-wide module access and integration boundaries that affect the whole platform.
+          </p>
+        </div>
+      </section>
 
       <section className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
@@ -62,17 +101,120 @@ export default async function SettingsPage() {
         </div>
       </section>
 
+      <section id="lead-generation-settings" className="space-y-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Lead Generation</h2>
+          <p className="mt-1 text-sm text-mutedForeground">
+            Ownership mapping and ranking strategy for TradeMining companies and Apollo-ready contacts.
+          </p>
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Default Apollo Cadence Mapping</h2>
+            <p className="mt-1 text-sm leading-6 text-mutedForeground">
+              Set the tenant-wide fallback cadence structure first. Search profiles can then inherit this default or override it with their own Houston-, Charlotte-, or lane-specific strategy.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-xs font-semibold text-primary">
+              {settings.apolloSequenceOptions.length.toLocaleString("en-US")} active cadences
+            </span>
+            <form action={syncApolloSequenceMappingAction}>
+              <button className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
+                Sync Apollo cadences
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <form action={saveApolloSequenceMappingAction} className="mt-4 space-y-4">
+          <ApolloCadenceMappingTable
+            entries={settings.apolloSequenceMapping}
+            options={settings.apolloSequenceOptions}
+          />
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-mutedForeground">
+              This only changes recommendation logic and future Apollo readiness. It does not enroll anyone into a cadence on its own.
+            </p>
+            <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
+              Save cadence mapping
+            </button>
+          </div>
+        </form>
+
+        {settings.apolloSequenceDirectory.length > 0 ? (
+          <div className="mt-4 rounded-md border border-border bg-background p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">Synced cadence directory</h3>
+                <p className="mt-1 text-xs text-mutedForeground">
+                  Active Apollo cadences available for mapping right now.
+                </p>
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {settings.apolloSequenceDirectory
+                .filter((entry) => entry.active && !entry.archived)
+                .map((entry) => (
+                  <span
+                    key={entry.id}
+                    className="rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground"
+                  >
+                    {entry.name}
+                  </span>
+                ))}
+            </div>
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-mutedForeground">
+            No Apollo cadences are synced yet. Use <span className="font-medium text-foreground">Sync Apollo cadences</span> to import the current active sequences first.
+          </p>
+        )}
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Search Profile Cadence Strategies</h2>
+            <p className="mt-1 text-sm leading-6 text-mutedForeground">
+              Override the default cadence mapping when a specific TradeMining profile needs different outreach. You can also copy an existing profile&apos;s cadence setup to a new profile, then make only the small changes.
+            </p>
+          </div>
+          <span className="rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-xs font-semibold text-primary">
+            {settings.searchProfileCadenceMappings.length.toLocaleString("en-US")} profiles
+          </span>
+        </div>
+
+        <div className="mt-4 space-y-4">
+          <SearchProfileCadenceManager
+            profiles={settings.searchProfileCadenceMappings}
+            options={settings.apolloSequenceOptions}
+          />
+        </div>
+      </section>
+
       <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
           <div>
             <h2 className="text-base font-semibold text-foreground">Apollo Rep Mapping</h2>
             <p className="mt-1 text-sm leading-6 text-mutedForeground">
-              Configure the sales reps that Pipeline can assign accounts to. This replaces the old `apollo_user_mapping` sheet with a tenant-scoped in-app directory.
+              Sync Apollo teammates into a tenant-scoped ownership directory, then maintain send-from email routing here for Pipeline assignment and sequence prep.
             </p>
           </div>
-          <span className="rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-xs font-semibold text-primary">
-            Ownership directory
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-xs font-semibold text-primary">
+              {settings.apolloRepMapping.length.toLocaleString("en-US")} synced reps
+            </span>
+            <form action={syncApolloRepMappingAction}>
+              <button className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
+                Sync Apollo reps
+              </button>
+            </form>
+          </div>
         </div>
 
         <form action={saveApolloRepMappingAction} className="mt-4 space-y-4">
@@ -100,20 +242,16 @@ export default async function SettingsPage() {
                       />
                     </td>
                     <td className="px-3 py-3">
-                      <input
-                        name="apolloRepSequenceOwnerName"
-                        defaultValue={entry.sequenceOwnerName}
-                        placeholder="Zalan Riaz"
-                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
-                      />
+                      <input type="hidden" name="apolloRepSequenceOwnerName" defaultValue={entry.sequenceOwnerName} />
+                      <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-foreground">
+                        {entry.sequenceOwnerName}
+                      </div>
                     </td>
                     <td className="px-3 py-3">
-                      <input
-                        name="apolloRepUserId"
-                        defaultValue={entry.apolloUserId ?? ""}
-                        placeholder="apollo-user-123"
-                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
-                      />
+                      <input type="hidden" name="apolloRepUserId" defaultValue={entry.apolloUserId ?? ""} />
+                      <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-mutedForeground">
+                        {entry.apolloUserId ?? "Missing Apollo user ID"}
+                      </div>
                     </td>
                     <td className="px-3 py-3">
                       <input
@@ -139,13 +277,18 @@ export default async function SettingsPage() {
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-mutedForeground">
-              Only active reps appear in Pipeline assignment. Blank rows are ignored when you save.
+              Owner name and Apollo user ID are synced from Apollo. Only active reps appear in Pipeline assignment.
             </p>
             <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
               Save Apollo rep mapping
             </button>
           </div>
         </form>
+        {settings.apolloRepMapping.length === 0 ? (
+          <p className="mt-4 text-sm text-mutedForeground">
+            No Apollo reps are synced yet. Use <span className="font-medium text-foreground">Sync Apollo reps</span> to import teammate records from Apollo first.
+          </p>
+        ) : null}
       </section>
 
       <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
@@ -327,6 +470,186 @@ export default async function SettingsPage() {
           </div>
 
           <div className="rounded-md border border-border bg-background p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">Contact scoring</h3>
+                <p className="mt-1 text-sm text-mutedForeground">
+                  Controls how approved-company contacts are ranked into tiers before sequence selection. This is separate from company scoring, but it uses the same tenant strategy record so updates stay together.
+                </p>
+              </div>
+              <span className="rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-xs font-semibold text-primary">
+                Deterministic tiers
+              </span>
+            </div>
+
+            <div className="mt-4 grid gap-4 xl:grid-cols-3">
+              <div className="rounded-md border border-border bg-card p-4">
+                <h4 className="text-sm font-semibold text-foreground">Role weights</h4>
+                <div className="mt-4 grid gap-3">
+                  <NumberField
+                    label="Decision-maker title weight"
+                    name="contactDecisionMakerWeight"
+                    defaultValue={settings.tradeMiningScoring.contactDecisionMakerWeight}
+                    min={0}
+                    max={100}
+                    info="Applied when the title looks like a strong buying role such as owner, founder, VP, head, director, president, or chief."
+                  />
+                  <NumberField
+                    label="Manager title weight"
+                    name="contactManagerWeight"
+                    defaultValue={settings.tradeMiningScoring.contactManagerWeight}
+                    min={0}
+                    max={100}
+                    info="Applied when the contact is manager-, lead-, or supervisor-level but not clearly executive."
+                  />
+                  <NumberField
+                    label="Logistics department weight"
+                    name="contactLogisticsDepartmentWeight"
+                    defaultValue={settings.tradeMiningScoring.contactLogisticsDepartmentWeight}
+                    min={0}
+                    max={100}
+                    info="Boost for contacts whose title or department points to logistics, imports, transportation, procurement, warehouse, distribution, or operations."
+                  />
+                  <NumberField
+                    label="Weak-function penalty"
+                    name="contactWeakFunctionPenalty"
+                    defaultValue={settings.tradeMiningScoring.contactWeakFunctionPenalty}
+                    min={0}
+                    max={100}
+                    info="Penalty for roles that usually sit outside the buying motion, like HR, legal, marketing, finance, or IT."
+                  />
+                  <NumberField
+                    label="Account quality max boost"
+                    name="contactCompanyContextWeight"
+                    defaultValue={settings.tradeMiningScoring.contactCompanyContextWeight}
+                    min={0}
+                    max={50}
+                    info="Maximum contact-score boost that can come from the underlying company score. Example: with 15 here, a company scored 80 contributes about 12 points, a company scored 50 contributes about 8, and a company scored 20 contributes about 3."
+                  />
+                </div>
+                <div className="mt-4 rounded-md border border-dashed border-border bg-background px-3 py-3 text-xs leading-5 text-mutedForeground">
+                  This does not replace contact-level scoring. It only adds a scaled company-context boost on top of title, department, seniority, and data quality. Higher values make contacts at strong accounts rise faster, while lower values keep the contact role fit as the main driver.
+                </div>
+              </div>
+
+              <div className="rounded-md border border-border bg-card p-4">
+                <h4 className="text-sm font-semibold text-foreground">Data and workflow</h4>
+                <div className="mt-4 grid gap-3">
+                  <NumberField
+                    label="Email weight"
+                    name="contactEmailWeight"
+                    defaultValue={settings.tradeMiningScoring.contactEmailWeight}
+                    min={0}
+                    max={50}
+                    info="Boost for a direct email. Higher values make reachable contacts float upward faster."
+                  />
+                  <NumberField
+                    label="LinkedIn weight"
+                    name="contactLinkedinWeight"
+                    defaultValue={settings.tradeMiningScoring.contactLinkedinWeight}
+                    min={0}
+                    max={50}
+                    info="Boost for a LinkedIn profile that gives the rep more confidence on role and identity."
+                  />
+                  <NumberField
+                    label="Phone weight"
+                    name="contactPhoneWeight"
+                    defaultValue={settings.tradeMiningScoring.contactPhoneWeight}
+                    min={0}
+                    max={50}
+                    info="Boost for phone availability."
+                  />
+                  <NumberField
+                    label="Primary-contact boost"
+                    name="contactPrimaryContactBoost"
+                    defaultValue={settings.tradeMiningScoring.contactPrimaryContactBoost}
+                    min={0}
+                    max={50}
+                    info="Extra weight when a contact has already been selected as the current primary contact."
+                  />
+                  <NumberField
+                    label="Approved-status boost"
+                    name="contactApprovedStatusBoost"
+                    defaultValue={settings.tradeMiningScoring.contactApprovedStatusBoost}
+                    min={0}
+                    max={50}
+                    info="Extra points when the contact is already approved."
+                  />
+                  <NumberField
+                    label="Reviewing-status boost"
+                    name="contactReviewingStatusBoost"
+                    defaultValue={settings.tradeMiningScoring.contactReviewingStatusBoost}
+                    min={0}
+                    max={50}
+                    info="Smaller boost while the contact is still in active review."
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-md border border-border bg-card p-4">
+                <h4 className="text-sm font-semibold text-foreground">Tier thresholds</h4>
+                <div className="mt-4 grid gap-3">
+                  <NumberField
+                    label="Tier 1 threshold"
+                    name="contactTier1Threshold"
+                    defaultValue={settings.tradeMiningScoring.contactTier1Threshold}
+                    min={0}
+                    max={100}
+                    info="Minimum score to recommend the strongest sequence tier."
+                  />
+                  <NumberField
+                    label="Tier 2 threshold"
+                    name="contactTier2Threshold"
+                    defaultValue={settings.tradeMiningScoring.contactTier2Threshold}
+                    min={0}
+                    max={100}
+                    info="Minimum score for the middle tier."
+                  />
+                  <NumberField
+                    label="Tier 3 threshold"
+                    name="contactTier3Threshold"
+                    defaultValue={settings.tradeMiningScoring.contactTier3Threshold}
+                    min={0}
+                    max={100}
+                    info="Minimum score to stay ranked instead of dropping to unranked."
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-4 xl:grid-cols-2">
+              <TextAreaField
+                label="Preferred contact title keywords"
+                name="preferredContactTitleKeywords"
+                defaultValue={settings.tradeMiningScoring.preferredContactTitleKeywords.join("\n")}
+                description="Boosts titles containing any of these words or phrases."
+                info="Examples: owner, founder, president, director, vice president. These increase score; they do not act as a hard filter."
+              />
+              <TextAreaField
+                label="Penalized contact title keywords"
+                name="penalizedContactTitleKeywords"
+                defaultValue={settings.tradeMiningScoring.penalizedContactTitleKeywords.join("\n")}
+                description="Reduces role fit when the title contains these terms."
+                info="Useful for roles that tend to be junior, indirect, or not part of the buying motion."
+              />
+              <TextAreaField
+                label="Preferred contact departments"
+                name="preferredContactDepartments"
+                defaultValue={settings.tradeMiningScoring.preferredContactDepartments.join("\n")}
+                description="Boosts departments and functions you want to prioritize."
+                info="Examples: logistics, supply chain, operations, imports, procurement. Matches add score but do not exclude other contacts."
+              />
+              <TextAreaField
+                label="Penalized contact departments"
+                name="penalizedContactDepartments"
+                defaultValue={settings.tradeMiningScoring.penalizedContactDepartments.join("\n")}
+                description="Deprioritizes departments that are less likely to convert."
+                info="Useful for HR, finance, IT, legal, marketing, and similar functions that are usually weak outreach targets for this motion."
+              />
+            </div>
+          </div>
+
+          <div className="rounded-md border border-border bg-background p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-semibold text-foreground">Future AI classification</h3>
@@ -399,6 +722,10 @@ export default async function SettingsPage() {
               body={`Workflow contributes ${settings.tradeMiningScoring.workflowWeight} points and confidence contributes ${settings.tradeMiningScoring.confidenceWeight} points when the TradeMining row is complete and the company is not already deep in pipeline.`}
             />
             <SummaryCard
+              title="Contact ranking"
+              body={formatContactScoringSummary(settings.tradeMiningScoring)}
+            />
+            <SummaryCard
               title="AI status"
               body={
                 settings.tradeMiningScoring.aiClassificationEnabled
@@ -407,6 +734,15 @@ export default async function SettingsPage() {
               }
             />
           </div>
+        </div>
+      </section>
+
+      <section id="quote-tools-settings" className="space-y-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Quote Tools</h2>
+          <p className="mt-1 text-sm text-mutedForeground">
+            Sources and carrier-account configuration for UPS and LTL quoting workflows.
+          </p>
         </div>
       </section>
 
@@ -887,6 +1223,25 @@ function formatCompanySizeSummary(settings: {
   return `${midMarket}, and ${oversize}.`;
 }
 
+function formatContactScoringSummary(settings: {
+  contactDecisionMakerWeight: number;
+  contactManagerWeight: number;
+  contactLogisticsDepartmentWeight: number;
+  contactWeakFunctionPenalty: number;
+  contactCompanyContextWeight: number;
+  contactTier1Threshold: number;
+  contactTier2Threshold: number;
+  contactTier3Threshold: number;
+  preferredContactDepartments: string[];
+}) {
+  const departmentPreview =
+    settings.preferredContactDepartments.length > 0
+      ? settings.preferredContactDepartments.slice(0, 3).join(", ")
+      : "no preferred functions";
+
+  return `Decision-maker titles add ${settings.contactDecisionMakerWeight} points, manager titles add ${settings.contactManagerWeight}, preferred functions add ${settings.contactLogisticsDepartmentWeight}, and account quality can add up to ${settings.contactCompanyContextWeight} more based on the company score. Weak-function roles lose ${settings.contactWeakFunctionPenalty}. Tier thresholds are ${settings.contactTier1Threshold}/${settings.contactTier2Threshold}/${settings.contactTier3Threshold}, with current emphasis on ${departmentPreview}.`;
+}
+
 function summarizePreference(label: string, values: string[]) {
   if (values.length === 0) {
     return "";
@@ -895,6 +1250,122 @@ function summarizePreference(label: string, values: string[]) {
   const preview = values.slice(0, 4).join(", ");
   const overflow = values.length > 4 ? ` +${values.length - 4} more` : "";
   return `${label}: ${preview}${overflow}`;
+}
+
+function ApolloCadenceMappingTable({
+  entries,
+  options
+}: {
+  entries: Array<{
+    tier: string;
+    label: string;
+    apolloSequenceId: string | null;
+    automationMode: string;
+    requiresAiDraft: boolean;
+    requiresRepAssignment: boolean;
+    notes: string | null;
+  }>;
+  options: Array<{
+    id: string;
+    name: string;
+  }>;
+}) {
+  return (
+    <div className="overflow-x-auto rounded-md border border-border">
+      <table className="min-w-full divide-y divide-border text-sm">
+        <thead className="bg-muted text-left text-xs font-semibold uppercase text-mutedForeground">
+          <tr>
+            <th className="px-3 py-3">Tier</th>
+            <th className="px-3 py-3">Apollo cadence</th>
+            <th className="px-3 py-3">Automation mode</th>
+            <th className="px-3 py-3">Requirements</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border bg-background">
+          {entries.map((entry) => (
+            <tr key={entry.tier}>
+              <td className="px-3 py-3 align-top">
+                <input type="hidden" name="apolloSequenceTier" value={entry.tier} />
+                <input type="hidden" name="apolloSequenceLabel" value={entry.label} />
+                <div className="space-y-1">
+                  <p className="font-medium text-foreground">{entry.label}</p>
+                  <p className="text-xs text-mutedForeground">{formatTier(entry.tier)}</p>
+                </div>
+              </td>
+              <td className="px-3 py-3 align-top">
+                <select
+                  name="apolloSequenceId"
+                  defaultValue={entry.apolloSequenceId ?? ""}
+                  className="w-full min-w-72 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+                >
+                  <option value="">No cadence mapped</option>
+                  {options.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-2 text-xs text-mutedForeground">
+                  Contacts in this tier will recommend the mapped cadence by default.
+                </p>
+              </td>
+              <td className="px-3 py-3 align-top">
+                <div className="space-y-2">
+                  <span className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs font-semibold text-foreground">
+                    {formatAutomationMode(entry.automationMode)}
+                  </span>
+                  <p className="text-xs leading-5 text-mutedForeground">
+                    {entry.automationMode === "AI_CUSTOM"
+                      ? "Best for tiers where Newl Apps should prepare a custom outbound draft before the cadence is used."
+                      : entry.automationMode === "APOLLO_AI"
+                        ? "Best for tiers where Apollo AI personalization can carry most of the outreach."
+                        : "Best for lighter-touch email-only outreach without deeper personalization by default."}
+                  </p>
+                </div>
+              </td>
+              <td className="px-3 py-3 align-top">
+                <div className="space-y-2 text-xs leading-5 text-mutedForeground">
+                  <p>{entry.requiresRepAssignment ? "Requires a mapped Apollo rep assignment before queueing." : "Rep assignment optional."}</p>
+                  <label className="flex items-start gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs text-foreground">
+                    <input
+                      type="checkbox"
+                      name="apolloSequenceRequiresAiDraft"
+                      value={entry.tier}
+                      defaultChecked={entry.requiresAiDraft}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      <span className="block font-medium">Require AI subject + email draft</span>
+                      <span className="mt-1 block text-mutedForeground">
+                        Turn this on when this tier should wait for a Newl Apps draft before any future Apollo sequence push.
+                      </span>
+                    </span>
+                  </label>
+                  {entry.notes ? <p>{entry.notes}</p> : null}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function formatTier(value: string) {
+  return value.replaceAll("_", " ");
+}
+
+function formatAutomationMode(value: string) {
+  if (value === "AI_CUSTOM") {
+    return "AI custom draft";
+  }
+
+  if (value === "APOLLO_AI") {
+    return "Apollo AI";
+  }
+
+  return "Email only";
 }
 
 function buildApolloRepRows(
@@ -907,20 +1378,7 @@ function buildApolloRepRows(
     active: boolean;
   }>
 ) {
-  const rows = [...entries];
-
-  while (rows.length < Math.max(5, entries.length + 2)) {
-    rows.push({
-      id: `apollo-rep-empty-${rows.length + 1}`,
-      sequenceOwnerName: "",
-      apolloUserId: null,
-      sendFromEmail: null,
-      sendFromEmailAccountId: null,
-      active: rows.length === 0
-    });
-  }
-
-  return rows;
+  return entries;
 }
 
 function SelectField({

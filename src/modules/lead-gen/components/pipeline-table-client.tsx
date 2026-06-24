@@ -55,6 +55,11 @@ export function PipelineTableClient({
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const allVisibleSelected = leads.length > 0 && leads.every((lead) => selectedSet.has(lead.id));
+  const selectedLeads = useMemo(
+    () => leads.filter((lead) => selectedSet.has(lead.id)),
+    [leads, selectedSet]
+  );
+  const hasUnassignedSelection = selectedLeads.some((lead) => !lead.assignedRepValue);
 
   function toggleSelection(leadId: string) {
     setSelectedIds((current) => (current.includes(leadId) ? current.filter((id) => id !== leadId) : [...current, leadId]));
@@ -69,7 +74,8 @@ export function PipelineTableClient({
   }
 
   return (
-    <form action={bulkUpdateLeadStageAction}>
+    <div>
+      <form action={bulkUpdateLeadStageAction}>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-4 py-3">
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <button
@@ -117,8 +123,9 @@ export function PipelineTableClient({
           <button
             type="submit"
             formAction={bulkQueueApolloEnrichmentAction}
-            disabled={selectedIds.length === 0}
+            disabled={selectedIds.length === 0 || hasUnassignedSelection}
             className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-accentSoft disabled:cursor-not-allowed disabled:opacity-50"
+            title={hasUnassignedSelection ? "Assign a sales rep before queueing Apollo enrichment." : undefined}
           >
             Queue Apollo
           </button>
@@ -155,7 +162,7 @@ export function PipelineTableClient({
           </button>
         </div>
       </div>
-
+      </form>
       <div className="overflow-x-auto">
         <table className="min-w-[1320px] divide-y divide-border text-sm">
           <thead className="bg-muted text-left text-xs font-semibold uppercase text-mutedForeground">
@@ -266,7 +273,7 @@ export function PipelineTableClient({
           </tbody>
         </table>
       </div>
-    </form>
+    </div>
   );
 }
 

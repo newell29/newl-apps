@@ -14,12 +14,22 @@ import {
 import { prisma } from "@/server/db";
 import { tenantWhere } from "@/server/tenant-query";
 import type { TenantContext } from "@/server/tenant-context";
+import { scoreContact } from "@/modules/lead-gen/contact-scoring";
 import { recommendSequenceForContact } from "@/modules/lead-gen/sequence-catalog";
 import {
   DEFAULT_TRADEMINING_SCORING_SETTINGS,
   type TradeMiningScoringSettings
 } from "@/modules/settings/types";
 import { mapApolloRepOptions, parseApolloRepMapping } from "@/modules/settings/apollo-rep-mapping";
+import {
+  buildApolloSequenceMappingsWithDefaults,
+  mapApolloSequenceOptions,
+  parseApolloSequenceDirectory,
+  parseApolloSequenceMapping,
+  parseSearchProfileApolloSequenceMapping,
+  resolveApolloSequenceMappings
+} from "@/modules/settings/apollo-sequence-mapping";
+import { isOpenAiDraftGenerationConfigured } from "@/server/integrations/openai";
 
 type SearchProfileDelegate = typeof prisma.tradeMiningSearchProfile;
 
@@ -55,6 +65,24 @@ type TradeMiningScoringQueryClient = typeof prisma & {
       midMarketTeuMin: { toString(): string } | string | null;
       midMarketTeuMax: { toString(): string } | string | null;
       midMarketBoost: number;
+      contactDecisionMakerWeight: number;
+      contactManagerWeight: number;
+      contactLogisticsDepartmentWeight: number;
+      contactWeakFunctionPenalty: number;
+      contactCompanyContextWeight: number;
+      contactEmailWeight: number;
+      contactLinkedinWeight: number;
+      contactPhoneWeight: number;
+      contactPrimaryContactBoost: number;
+      contactApprovedStatusBoost: number;
+      contactReviewingStatusBoost: number;
+      contactTier1Threshold: number;
+      contactTier2Threshold: number;
+      contactTier3Threshold: number;
+      preferredContactTitleKeywords: unknown;
+      penalizedContactTitleKeywords: unknown;
+      preferredContactDepartments: unknown;
+      penalizedContactDepartments: unknown;
       aiClassificationEnabled: boolean;
       aiModel: string | null;
     } | null>;
@@ -93,15 +121,29 @@ export type ContactDirectorySort = "score_desc" | "updated_desc" | "name_asc";
 export type ContactDirectoryFilters = {
   query?: string;
   companyId?: string;
+  searchProfileId?: string;
   contactStatus?: ContactStatus | "ALL";
   apolloStatus?: ApolloStatus | "ALL";
   sequenceStatus?: SequenceStatus | "ALL";
   replyStatus?: ReplyStatus | "ALL";
   source?: ContactSource | "ALL";
   contactTier?: ContactTier | "ALL";
+  draftStatus?: ContactDraftStatusFilter;
+  requiresAiDraft?: ContactBooleanFilter;
+  approvedDraft?: ContactBooleanFilter;
+  hasSequenceSelected?: ContactBooleanFilter;
   assignedRep?: string | "ALL" | "UNASSIGNED";
   sort?: ContactDirectorySort;
 };
+
+export type ContactBooleanFilter = "ALL" | "YES" | "NO";
+
+export type ContactDraftStatusFilter =
+  | "ALL"
+  | ContactOutreachDraftStatus
+  | "DRAFT_REQUIRED"
+  | "NO_NEWL_DRAFT"
+  | "APOLLO_TEMPLATE_LATER";
 
 type JsonObject = Record<string, unknown>;
 
@@ -116,6 +158,7 @@ type SearchProfileSummary = {
   originCountries: string[];
   productKeywords: string[];
   hsCodes: string[];
+  contactCadenceConfig: unknown;
 };
 
 type CandidateScoringConfig = TradeMiningScoringSettings;
@@ -166,7 +209,7 @@ export async function getCandidateFeed(tenant: TenantContext, filters: Candidate
   const candidates = companies
     .map((company) => {
       const evidence = summarizeTradeMiningEvidence(company.importRecords, searchProfiles);
-      const scoring = scoreCandidate({
+      const scoring = scoreCompanyFromEvidence({
         companyPriorityScore: company.priorityScore,
         candidateStatus: company.candidateStatus,
         alreadyInPipeline: company.leads.length > 0,
@@ -210,6 +253,59 @@ export async function getCandidateFeed(tenant: TenantContext, filters: Candidate
     .filter((candidate) => matchesFoundCompanyQuery(candidate, filters.query));
 
   return sortCandidates(candidates, filters.sort ?? "score_desc");
+}
+
+export async function calculateLeadPipelineScoreForCompany(
+  tenant: Pick<TenantContext, "tenantId">,
+  companyId: string
+) {
+  const company = await prisma.company.findFirst({
+    where: {
+      tenantId: tenant.tenantId,
+      id: companyId
+    },
+    include: {
+      importRecords: {
+        where: {
+          tenantId: tenant.tenantId
+        },
+        orderBy: [
+          {
+            arrivalDate: "desc"
+          },
+          {
+            createdAt: "desc"
+          }
+        ],
+        take: 100
+      }
+    }
+  });
+
+  if (!company) {
+    return null;
+  }
+
+  const scoringConfig = await loadTradeMiningScoringConfig(tenant);
+  const searchProfileIds = new Set<string>();
+
+  for (const record of company.importRecords) {
+    const searchProfileId = readString(asObject(record.rawJson), "searchProfileId");
+    if (searchProfileId) {
+      searchProfileIds.add(searchProfileId);
+    }
+  }
+
+  const searchProfiles = await loadSearchProfileSummaries(tenant, [...searchProfileIds]);
+  const evidence = summarizeTradeMiningEvidence(company.importRecords, searchProfiles);
+
+  return scoreCompanyFromEvidence({
+    companyPriorityScore: company.priorityScore,
+    candidateStatus: company.candidateStatus,
+    alreadyInPipeline: false,
+    evidence,
+    config: scoringConfig
+  }).score;
 }
 
 export async function getCandidateFeedFilters(tenant: TenantContext) {
@@ -424,7 +520,7 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
     const contactCount = contacts.length;
     const hasSelectedContact = Boolean(lead.contact);
     const contactStatus = summarizeContactStatus(contacts, hasSelectedContact);
-    const apolloStatus = summarizeApolloStatus(contacts);
+    const apolloStatus = summarizeApolloStatus(contacts, lead.notes);
     const sequenceStatus = summarizeSequenceStatus(contacts);
     const sequenceReadiness = summarizeSequenceReadiness(contacts);
     const nextStep = getPipelineNextStep({
@@ -553,6 +649,24 @@ function parseApolloRepOptions(publicConfig: unknown): LeadPipelineFilterRepOpti
 }
 
 export async function getContactDirectory(tenant: TenantContext, filters: ContactDirectoryFilters = {}) {
+  const [scoringConfig, apolloCredentials] = await Promise.all([
+    loadTradeMiningScoringConfig(tenant),
+    prisma.integrationCredential.findMany({
+      where: tenantWhere(tenant, {
+        provider: IntegrationProvider.APOLLO
+      }),
+      select: {
+        publicConfig: true
+      },
+      take: 1
+    })
+  ]);
+  const apolloPublicConfig = apolloCredentials[0]?.publicConfig;
+  const apolloSequenceDirectory = parseApolloSequenceDirectory(apolloPublicConfig);
+  const apolloSequenceMapping = buildApolloSequenceMappingsWithDefaults({
+    existingMappings: parseApolloSequenceMapping(apolloPublicConfig),
+    directory: apolloSequenceDirectory
+  });
   const contacts = await prisma.contact.findMany({
     where: tenantWhere(tenant, buildContactDirectoryWhere(tenant, filters)),
     include: {
@@ -560,8 +674,44 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
         select: {
           id: true,
           name: true,
-          normalizedName: true
+          normalizedName: true,
+          priorityScore: true,
+          importRecords: {
+            where: tenantWhere(tenant),
+            orderBy: [
+              {
+                arrivalDate: "desc"
+              },
+              {
+                createdAt: "desc"
+              }
+            ],
+            take: 25,
+            select: {
+              rawJson: true,
+              arrivalDate: true,
+              sourcePort: true,
+              destinationCity: true,
+              destinationState: true,
+              originCountry: true,
+              productDescription: true
+            }
+          },
+          leads: {
+            where: tenantWhere(tenant),
+            select: {
+              score: true
+            },
+            take: 1
+          }
         }
+      },
+      leads: {
+        where: tenantWhere(tenant),
+        select: {
+          id: true
+        },
+        take: 1
       },
       outreachDrafts: {
         where: tenantWhere(tenant),
@@ -573,21 +723,60 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
     },
     orderBy: buildContactDirectoryOrder(filters.sort ?? "score_desc")
   });
+  const searchProfileIds = new Set<string>();
+
+  for (const contact of contacts) {
+    for (const record of contact.company.importRecords) {
+      const searchProfileId = readString(asObject(record.rawJson), "searchProfileId");
+      if (searchProfileId) {
+        searchProfileIds.add(searchProfileId);
+      }
+    }
+  }
+
+  const searchProfiles = await loadSearchProfileSummaries(tenant, [...searchProfileIds]);
 
   const mappedContacts = contacts.map((contact) => {
-    const recommendation = recommendSequenceForContact({
-      contactTier: contact.contactTier,
+    const evidence = summarizeTradeMiningEvidence(contact.company.importRecords, searchProfiles);
+    const scoring = scoreContact({
+      fullName: contact.fullName,
       title: contact.title,
       department: contact.department,
-      companyName: contact.company.name
+      seniority: contact.seniority,
+      email: contact.email,
+      phone: contact.phone,
+      linkedinUrl: contact.linkedinUrl,
+      contactStatus: contact.contactStatus,
+      replyStatus: contact.replyStatus,
+      companyPriorityScore: contact.company.priorityScore,
+      companyLeadScore: contact.company.leads[0]?.score ?? null,
+      isPrimaryContact: contact.leads.length > 0
+    }, scoringConfig);
+    const effectiveSequenceMappings = resolveApolloSequenceMappings({
+      existingMappings: evidence.searchProfile
+        ? parseSearchProfileApolloSequenceMapping(evidence.searchProfile.contactCadenceConfig)
+        : apolloSequenceMapping,
+      directory: apolloSequenceDirectory
+    });
+    const recommendation = recommendSequenceForContact({
+      contactTier: scoring.tier,
+      title: contact.title,
+      department: contact.department,
+      companyName: contact.company.name,
+      sequenceMappings: effectiveSequenceMappings,
+      sequenceDirectory: apolloSequenceDirectory
     });
     const draft = contact.outreachDrafts[0] ?? null;
+    const tierMapping = effectiveSequenceMappings.find((entry) => entry.tier === scoring.tier) ?? null;
+    const requiresAiDraft = tierMapping?.requiresAiDraft ?? false;
 
     return {
       id: contact.id,
       companyId: contact.companyId,
       companyName: contact.company.name,
       companyNormalizedName: contact.company.normalizedName,
+      matchedSearchProfileId: evidence.searchProfile?.id ?? null,
+      matchedSearchProfileName: evidence.searchProfile?.name ?? null,
       firstName: contact.firstName,
       lastName: contact.lastName,
       fullName: contact.fullName,
@@ -599,8 +788,9 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
       linkedinUrl: contact.linkedinUrl,
       source: contact.source,
       contactStatus: contact.contactStatus,
-      contactScore: contact.contactScore,
-      contactTier: contact.contactTier,
+      contactScore: scoring.score,
+      contactTier: scoring.tier,
+      contactScoreSummary: scoring.summary,
       apolloStatus: contact.apolloStatus,
       sequenceStatus: contact.sequenceStatus,
       replyStatus: contact.replyStatus,
@@ -611,6 +801,8 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
       sequenceRecommendationReason: contact.sequenceRecommendationReason ?? recommendation.reason,
       sequenceOverrideReason: contact.sequenceOverrideReason,
       sequenceManuallyOverridden: contact.sequenceManuallyOverridden,
+      requiresAiDraft,
+      draftGenerationConfigured: isOpenAiDraftGenerationConfigured(),
       draft: draft
         ? {
             id: draft.id,
@@ -626,7 +818,7 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
             updatedAt: draft.updatedAt
           }
         : null,
-      draftStatus: readDraftStatus(contact.contactTier, draft?.status ?? null),
+      draftStatus: readDraftStatus(scoring.tier, draft?.status ?? null, requiresAiDraft),
       lastTouchAt: contact.lastTouchAt,
       lastReplyAt: contact.lastReplyAt,
       assignedRep: contact.assignedRep ?? "Unassigned",
@@ -634,15 +826,51 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
     };
   });
 
+  const filteredContacts = mappedContacts.filter((contact) => {
+    if (filters.searchProfileId && contact.matchedSearchProfileId !== filters.searchProfileId) {
+      return false;
+    }
+
+    if (filters.contactTier !== "ALL" && filters.contactTier && contact.contactTier !== filters.contactTier) {
+      return false;
+    }
+
+    if (!matchesBooleanFilter(filters.requiresAiDraft, contact.requiresAiDraft)) {
+      return false;
+    }
+
+    if (!matchesBooleanFilter(filters.approvedDraft, contact.draft?.status === ContactOutreachDraftStatus.APPROVED)) {
+      return false;
+    }
+
+    if (!matchesBooleanFilter(filters.hasSequenceSelected, Boolean(contact.selectedSequenceId || contact.selectedSequenceName))) {
+      return false;
+    }
+
+    if (!matchesDraftStatusFilter(filters.draftStatus, contact.draftStatus)) {
+      return false;
+    }
+
+    return true;
+  });
+
   if (filters.sort === "name_asc") {
-    return mappedContacts.sort((left, right) => left.fullName.localeCompare(right.fullName));
+    return filteredContacts.sort((left, right) => left.fullName.localeCompare(right.fullName));
   }
 
-  return mappedContacts;
+  if (filters.sort === "updated_desc") {
+    return filteredContacts.sort(
+      (left, right) => right.updatedAt.getTime() - left.updatedAt.getTime() || right.contactScore - left.contactScore
+    );
+  }
+
+  return filteredContacts.sort(
+    (left, right) => right.contactScore - left.contactScore || right.updatedAt.getTime() - left.updatedAt.getTime()
+  );
 }
 
 export async function getContactDirectoryFilters(tenant: TenantContext) {
-  const [pipelineAccounts, owners, approvedAccountCount] = await Promise.all([
+  const [pipelineAccounts, owners, approvedAccountCount, apolloCredentials, searchProfiles] = await Promise.all([
     prisma.lead.findMany({
       where: tenantWhere(tenant),
       distinct: ["companyId"],
@@ -679,11 +907,34 @@ export async function getContactDirectoryFilters(tenant: TenantContext) {
     }),
     prisma.lead.count({
       where: tenantWhere(tenant)
+    }),
+    prisma.integrationCredential.findMany({
+      where: tenantWhere(tenant, {
+        provider: IntegrationProvider.APOLLO
+      }),
+      select: {
+        publicConfig: true
+      },
+      take: 1
+    }),
+    prisma.tradeMiningSearchProfile.findMany({
+      where: tenantWhere(tenant, {
+        enabled: true
+      }),
+      select: {
+        id: true,
+        name: true
+      },
+      orderBy: {
+        name: "asc"
+      }
     })
   ]);
+  const sequenceOptions = mapApolloSequenceOptions(parseApolloSequenceDirectory(apolloCredentials[0]?.publicConfig));
 
   return {
     companies: pipelineAccounts.map((lead) => lead.company),
+    searchProfiles,
     owners: owners.flatMap((owner) => (owner.assignedRep ? [owner.assignedRep] : [])),
     approvedAccountCount,
     contactStatuses: Object.values(ContactStatus),
@@ -691,7 +942,15 @@ export async function getContactDirectoryFilters(tenant: TenantContext) {
     sequenceStatuses: Object.values(SequenceStatus),
     replyStatuses: Object.values(ReplyStatus),
     sources: Object.values(ContactSource),
-    contactTiers: Object.values(ContactTier)
+    contactTiers: Object.values(ContactTier),
+    draftStatuses: [
+      "DRAFT_REQUIRED",
+      "NO_NEWL_DRAFT",
+      "APOLLO_TEMPLATE_LATER",
+      ...Object.values(ContactOutreachDraftStatus)
+    ] satisfies ContactDraftStatusFilter[],
+    booleanFilterOptions: ["YES", "NO"] satisfies Exclude<ContactBooleanFilter, "ALL">[],
+    sequenceOptions
   };
 }
 
@@ -724,6 +983,9 @@ function sortSuggestions(values: Set<string>) {
 
 function buildContactDirectoryWhere(tenant: TenantContext, filters: ContactDirectoryFilters) {
   const where: Prisma.ContactWhereInput = {
+    assignedRep: {
+      not: null
+    },
     company: {
       leads: {
         some: tenantWhere(tenant)
@@ -785,10 +1047,6 @@ function buildContactDirectoryWhere(tenant: TenantContext, filters: ContactDirec
 
   if (filters.source && filters.source !== "ALL") {
     where.source = filters.source;
-  }
-
-  if (filters.contactTier && filters.contactTier !== "ALL") {
-    where.contactTier = filters.contactTier;
   }
 
   if (filters.assignedRep === "UNASSIGNED") {
@@ -939,7 +1197,19 @@ function summarizeContactStatus(
   return `${contacts.length} contact${contacts.length === 1 ? "" : "s"} found`;
 }
 
-function summarizeApolloStatus(contacts: Array<{ apolloStatus: ApolloStatus }>) {
+function summarizeApolloStatus(contacts: Array<{ apolloStatus: ApolloStatus }>, notes?: string | null) {
+  if (notes?.includes("Apollo enrichment completed with no contacts")) {
+    return "Not found";
+  }
+
+  if (notes?.includes("Apollo enrichment completed on")) {
+    return "Enriched";
+  }
+
+  if (notes?.includes("Apollo enrichment requested on")) {
+    return "Queued";
+  }
+
   if (contacts.length === 0) {
     return "Not started";
   }
@@ -1007,9 +1277,17 @@ function summarizeSequenceReadiness(
     .join("; ");
 }
 
-function readDraftStatus(contactTier: ContactTier, status: ContactOutreachDraftStatus | null) {
+function readDraftStatus(
+  contactTier: ContactTier,
+  status: ContactOutreachDraftStatus | null,
+  requiresAiDraft: boolean
+) {
   if (status) {
     return status;
+  }
+
+  if (requiresAiDraft) {
+    return "Draft required";
   }
 
   if (contactTier === ContactTier.TIER_1) {
@@ -1017,6 +1295,38 @@ function readDraftStatus(contactTier: ContactTier, status: ContactOutreachDraftS
   }
 
   return "Apollo/template later";
+}
+
+function matchesBooleanFilter(filter: ContactBooleanFilter | undefined, value: boolean) {
+  if (!filter || filter === "ALL") {
+    return true;
+  }
+
+  return filter === "YES" ? value : !value;
+}
+
+function matchesDraftStatusFilter(filter: ContactDraftStatusFilter | undefined, draftStatus: string) {
+  if (!filter || filter === "ALL") {
+    return true;
+  }
+
+  return normalizeDraftStatusFilterValue(filter) === normalizeDraftStatusFilterValue(draftStatus);
+}
+
+function normalizeDraftStatusFilterValue(value: string) {
+  if (value === "Draft required") {
+    return "DRAFT_REQUIRED";
+  }
+
+  if (value === "No Newl draft") {
+    return "NO_NEWL_DRAFT";
+  }
+
+  if (value === "Apollo/template later") {
+    return "APOLLO_TEMPLATE_LATER";
+  }
+
+  return value;
 }
 
 function getPipelineNextStep({
@@ -1054,6 +1364,10 @@ function getPipelineNextStep({
     return "Ready for Apollo enrichment";
   }
 
+  if (apolloStatus === "Queued") {
+    return "Await Apollo enrichment results";
+  }
+
   return "Research account fit";
 }
 
@@ -1071,7 +1385,7 @@ function buildCandidateWhere(filters: CandidateFeedFilters) {
   };
 }
 
-async function loadSearchProfileSummaries(tenant: TenantContext, searchProfileIds: string[]) {
+async function loadSearchProfileSummaries(tenant: Pick<TenantContext, "tenantId">, searchProfileIds: string[]) {
   if (searchProfileIds.length === 0) {
     return new Map<string, SearchProfileSummary>();
   }
@@ -1083,11 +1397,12 @@ async function loadSearchProfileSummaries(tenant: TenantContext, searchProfileId
   }
 
   const profiles = await searchProfileClient.tradeMiningSearchProfile.findMany({
-    where: tenantWhere(tenant, {
+    where: {
+      tenantId: tenant.tenantId,
       id: {
         in: searchProfileIds
       }
-    }),
+    },
     select: {
       id: true,
       name: true,
@@ -1098,7 +1413,8 @@ async function loadSearchProfileSummaries(tenant: TenantContext, searchProfileId
       shipFromPorts: true,
       originCountries: true,
       productKeywords: true,
-      hsCodes: true
+      hsCodes: true,
+      contactCadenceConfig: true
     }
   });
 
@@ -1115,7 +1431,8 @@ async function loadSearchProfileSummaries(tenant: TenantContext, searchProfileId
         shipFromPorts: asStringArray(profile.shipFromPorts),
         originCountries: asStringArray(profile.originCountries),
         productKeywords: asStringArray(profile.productKeywords),
-        hsCodes: asStringArray(profile.hsCodes)
+        hsCodes: asStringArray(profile.hsCodes),
+        contactCadenceConfig: profile.contactCadenceConfig
       }
     ])
   );
@@ -1269,6 +1586,28 @@ export function scoreCandidate({
     score,
     reasoning
   };
+}
+
+function scoreCompanyFromEvidence({
+  companyPriorityScore,
+  candidateStatus,
+  alreadyInPipeline,
+  evidence,
+  config
+}: {
+  companyPriorityScore: number;
+  candidateStatus: CandidateStatus;
+  alreadyInPipeline: boolean;
+  evidence: ReturnType<typeof summarizeTradeMiningEvidence>;
+  config: CandidateScoringConfig;
+}) {
+  return scoreCandidate({
+    companyPriorityScore,
+    candidateStatus,
+    alreadyInPipeline,
+    evidence,
+    config
+  });
 }
 
 function matchesFoundCompanyQuery(
@@ -1502,7 +1841,7 @@ function scoreRecency(latestShipmentDate: Date | null) {
   return 0;
 }
 
-async function loadTradeMiningScoringConfig(tenant: TenantContext) {
+async function loadTradeMiningScoringConfig(tenant: Pick<TenantContext, "tenantId">) {
   const tradeMiningScoringClient = prisma as TradeMiningScoringQueryClient;
 
   try {
@@ -1557,6 +1896,24 @@ function normalizeScoringConfig(
         midMarketTeuMin: { toString(): string } | string | null;
         midMarketTeuMax: { toString(): string } | string | null;
         midMarketBoost: number;
+        contactDecisionMakerWeight: number;
+        contactManagerWeight: number;
+        contactLogisticsDepartmentWeight: number;
+        contactWeakFunctionPenalty: number;
+        contactCompanyContextWeight: number;
+        contactEmailWeight: number;
+        contactLinkedinWeight: number;
+        contactPhoneWeight: number;
+        contactPrimaryContactBoost: number;
+        contactApprovedStatusBoost: number;
+        contactReviewingStatusBoost: number;
+        contactTier1Threshold: number;
+        contactTier2Threshold: number;
+        contactTier3Threshold: number;
+        preferredContactTitleKeywords: unknown;
+        penalizedContactTitleKeywords: unknown;
+        preferredContactDepartments: unknown;
+        penalizedContactDepartments: unknown;
         aiClassificationEnabled: boolean;
         aiModel: string | null;
       }
@@ -1588,6 +1945,24 @@ function normalizeScoringConfig(
     midMarketTeuMin: normalizeOptionalString(config.midMarketTeuMin),
     midMarketTeuMax: normalizeOptionalString(config.midMarketTeuMax),
     midMarketBoost: config.midMarketBoost,
+    contactDecisionMakerWeight: config.contactDecisionMakerWeight,
+    contactManagerWeight: config.contactManagerWeight,
+    contactLogisticsDepartmentWeight: config.contactLogisticsDepartmentWeight,
+    contactWeakFunctionPenalty: config.contactWeakFunctionPenalty,
+    contactCompanyContextWeight: config.contactCompanyContextWeight,
+    contactEmailWeight: config.contactEmailWeight,
+    contactLinkedinWeight: config.contactLinkedinWeight,
+    contactPhoneWeight: config.contactPhoneWeight,
+    contactPrimaryContactBoost: config.contactPrimaryContactBoost,
+    contactApprovedStatusBoost: config.contactApprovedStatusBoost,
+    contactReviewingStatusBoost: config.contactReviewingStatusBoost,
+    contactTier1Threshold: config.contactTier1Threshold,
+    contactTier2Threshold: config.contactTier2Threshold,
+    contactTier3Threshold: config.contactTier3Threshold,
+    preferredContactTitleKeywords: normalizeStringArray(config.preferredContactTitleKeywords),
+    penalizedContactTitleKeywords: normalizeStringArray(config.penalizedContactTitleKeywords),
+    preferredContactDepartments: normalizeStringArray(config.preferredContactDepartments),
+    penalizedContactDepartments: normalizeStringArray(config.penalizedContactDepartments),
     aiClassificationEnabled: config.aiClassificationEnabled,
     aiModel: config.aiModel
   } satisfies CandidateScoringConfig;
@@ -1615,7 +1990,9 @@ function scoreMomentum(evidence: ReturnType<typeof summarizeTradeMiningEvidence>
     config.recentWindowDays,
     config.recentWindowDays + config.comparisonWindowDays
   );
-  const recentShipmentRatio = clamp(recent.shipmentCount / 6, 0, 1);
+  const recentShipmentRatio = clamp(recent.shipmentCount / 8, 0, 1);
+  const repeatActivityRatio = clamp((recent.shipmentCount - 1) / 3, 0, 1);
+  const growthEvidenceRatio = clamp((recent.shipmentCount + previous.shipmentCount) / 5, 0, 1);
   const growthRatio = previous.shipmentCount > 0
     ? clamp((recent.shipmentCount - previous.shipmentCount) / previous.shipmentCount, -1, 1)
     : recent.shipmentCount > 0
@@ -1627,7 +2004,17 @@ function scoreMomentum(evidence: ReturnType<typeof summarizeTradeMiningEvidence>
       ? 1
       : 0;
   const recencyRatio = scoreRecency(evidence.latestShipmentDate) / 20;
-  const normalized = clamp(recentShipmentRatio * 0.45 + ((growthRatio + 1) / 2) * 0.3 + ((teuGrowthRatio + 1) / 2) * 0.15 + recencyRatio * 0.1, 0, 1);
+  const shipmentGrowthSignal = ((growthRatio + 1) / 2) * (0.35 + growthEvidenceRatio * 0.65);
+  const teuGrowthSignal = ((teuGrowthRatio + 1) / 2) * (0.35 + growthEvidenceRatio * 0.65);
+  const normalized = clamp(
+    recentShipmentRatio * 0.25 +
+      repeatActivityRatio * 0.25 +
+      shipmentGrowthSignal * 0.25 +
+      teuGrowthSignal * 0.15 +
+      recencyRatio * 0.1,
+    0,
+    1
+  );
 
   return Math.round(normalized * config.momentumWeight);
 }

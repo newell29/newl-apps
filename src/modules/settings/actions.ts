@@ -11,10 +11,23 @@ import {
   parseQuoteSourceDirectory,
   QUOTE_SOURCE_DIRECTORY_NAME
 } from "@/modules/settings/quote-sources";
-import type { QuoteToolTarget } from "@/modules/settings/types";
+import type {
+  ApolloCadenceAutomationMode,
+  ApolloSequenceMappingEntry,
+  QuoteToolTarget
+} from "@/modules/settings/types";
 import { fetchSevenLAvailableCarriers } from "@/server/integrations/seven-l";
+import { fetchApolloRepDirectory, fetchApolloSequenceDirectory } from "@/server/integrations/apollo";
 import { getLtlRatePortalShell } from "@/modules/ltl-rate-portal/queries";
-import { buildApolloRepMappingConfig } from "@/modules/settings/apollo-rep-mapping";
+import { buildApolloRepMappingConfig, parseApolloRepMapping } from "@/modules/settings/apollo-rep-mapping";
+import {
+  buildApolloSequenceConfig,
+  buildSearchProfileApolloSequenceConfig,
+  buildApolloSequenceMappingsWithDefaults,
+  parseApolloSequenceDirectory,
+  parseApolloSequenceMapping,
+  parseSearchProfileApolloSequenceMapping
+} from "@/modules/settings/apollo-sequence-mapping";
 
 type TradeMiningScoringConfigMutationClient = typeof prisma & {
   tradeMiningScoringConfig?: {
@@ -246,72 +259,73 @@ export async function saveTradeMiningScoringSettingsAction(formData: FormData) {
     throw new Error("TradeMining scoring config is unavailable until Prisma Client is regenerated.");
   }
 
-  await tradeMiningScoringClient.tradeMiningScoringConfig.upsert({
-    where: {
-      tenantId: context.tenantId
-    },
-    update: {
-      recentWindowDays: readRequiredInteger(formData, "recentWindowDays", 7, 365),
-      comparisonWindowDays: readRequiredInteger(formData, "comparisonWindowDays", 7, 365),
-      lookbackWindowDays: readRequiredInteger(formData, "lookbackWindowDays", 30, 365),
-      momentumWeight: readRequiredInteger(formData, "momentumWeight", 0, 100),
-      marketFitWeight: readRequiredInteger(formData, "marketFitWeight", 0, 100),
-      industryFitWeight: readRequiredInteger(formData, "industryFitWeight", 0, 100),
-      companySizeWeight: readRequiredInteger(formData, "companySizeWeight", 0, 100),
-      roleWeight: readRequiredInteger(formData, "roleWeight", 0, 100),
-      confidenceWeight: readRequiredInteger(formData, "confidenceWeight", 0, 100),
-      workflowWeight: readRequiredInteger(formData, "workflowWeight", 0, 100),
-      preferredOriginCountries: readStringList(formData, "preferredOriginCountries"),
-      penalizedOriginCountries: readStringList(formData, "penalizedOriginCountries"),
-      preferredOriginPorts: readStringList(formData, "preferredOriginPorts"),
-      penalizedOriginPorts: readStringList(formData, "penalizedOriginPorts"),
-      preferredDestinationMarkets: readStringList(formData, "preferredDestinationMarkets"),
-      penalizedDestinationMarkets: readStringList(formData, "penalizedDestinationMarkets"),
-      preferredIndustryKeywords: readStringList(formData, "preferredIndustryKeywords"),
-      penalizedIndustryKeywords: readStringList(formData, "penalizedIndustryKeywords"),
-      preferredHsCodePrefixes: readStringList(formData, "preferredHsCodePrefixes"),
-      penalizedHsCodePrefixes: readStringList(formData, "penalizedHsCodePrefixes"),
-      oversizeTeuThreshold: readOptionalDecimal(formData, "oversizeTeuThreshold"),
-      oversizeShipmentCount30dThreshold: readOptionalInteger(formData, "oversizeShipmentCount30dThreshold", 1, 500),
-      oversizePenalty: readRequiredInteger(formData, "oversizePenalty", 0, 100),
-      midMarketTeuMin: readOptionalDecimal(formData, "midMarketTeuMin"),
-      midMarketTeuMax: readOptionalDecimal(formData, "midMarketTeuMax"),
-      midMarketBoost: readRequiredInteger(formData, "midMarketBoost", 0, 100),
-      aiClassificationEnabled: formData.get("aiClassificationEnabled") === "true",
-      aiModel: readOptional(formData, "aiModel") ?? null
-    },
-    create: {
-      tenantId: context.tenantId,
-      recentWindowDays: readRequiredInteger(formData, "recentWindowDays", 7, 365),
-      comparisonWindowDays: readRequiredInteger(formData, "comparisonWindowDays", 7, 365),
-      lookbackWindowDays: readRequiredInteger(formData, "lookbackWindowDays", 30, 365),
-      momentumWeight: readRequiredInteger(formData, "momentumWeight", 0, 100),
-      marketFitWeight: readRequiredInteger(formData, "marketFitWeight", 0, 100),
-      industryFitWeight: readRequiredInteger(formData, "industryFitWeight", 0, 100),
-      companySizeWeight: readRequiredInteger(formData, "companySizeWeight", 0, 100),
-      roleWeight: readRequiredInteger(formData, "roleWeight", 0, 100),
-      confidenceWeight: readRequiredInteger(formData, "confidenceWeight", 0, 100),
-      workflowWeight: readRequiredInteger(formData, "workflowWeight", 0, 100),
-      preferredOriginCountries: readStringList(formData, "preferredOriginCountries"),
-      penalizedOriginCountries: readStringList(formData, "penalizedOriginCountries"),
-      preferredOriginPorts: readStringList(formData, "preferredOriginPorts"),
-      penalizedOriginPorts: readStringList(formData, "penalizedOriginPorts"),
-      preferredDestinationMarkets: readStringList(formData, "preferredDestinationMarkets"),
-      penalizedDestinationMarkets: readStringList(formData, "penalizedDestinationMarkets"),
-      preferredIndustryKeywords: readStringList(formData, "preferredIndustryKeywords"),
-      penalizedIndustryKeywords: readStringList(formData, "penalizedIndustryKeywords"),
-      preferredHsCodePrefixes: readStringList(formData, "preferredHsCodePrefixes"),
-      penalizedHsCodePrefixes: readStringList(formData, "penalizedHsCodePrefixes"),
-      oversizeTeuThreshold: readOptionalDecimal(formData, "oversizeTeuThreshold"),
-      oversizeShipmentCount30dThreshold: readOptionalInteger(formData, "oversizeShipmentCount30dThreshold", 1, 500),
-      oversizePenalty: readRequiredInteger(formData, "oversizePenalty", 0, 100),
-      midMarketTeuMin: readOptionalDecimal(formData, "midMarketTeuMin"),
-      midMarketTeuMax: readOptionalDecimal(formData, "midMarketTeuMax"),
-      midMarketBoost: readRequiredInteger(formData, "midMarketBoost", 0, 100),
-      aiClassificationEnabled: formData.get("aiClassificationEnabled") === "true",
-      aiModel: readOptional(formData, "aiModel") ?? null
+  const scoringConfigData = {
+    recentWindowDays: readRequiredInteger(formData, "recentWindowDays", 7, 365),
+    comparisonWindowDays: readRequiredInteger(formData, "comparisonWindowDays", 7, 365),
+    lookbackWindowDays: readRequiredInteger(formData, "lookbackWindowDays", 30, 365),
+    momentumWeight: readRequiredInteger(formData, "momentumWeight", 0, 100),
+    marketFitWeight: readRequiredInteger(formData, "marketFitWeight", 0, 100),
+    industryFitWeight: readRequiredInteger(formData, "industryFitWeight", 0, 100),
+    companySizeWeight: readRequiredInteger(formData, "companySizeWeight", 0, 100),
+    roleWeight: readRequiredInteger(formData, "roleWeight", 0, 100),
+    confidenceWeight: readRequiredInteger(formData, "confidenceWeight", 0, 100),
+    workflowWeight: readRequiredInteger(formData, "workflowWeight", 0, 100),
+    preferredOriginCountries: readStringList(formData, "preferredOriginCountries"),
+    penalizedOriginCountries: readStringList(formData, "penalizedOriginCountries"),
+    preferredOriginPorts: readStringList(formData, "preferredOriginPorts"),
+    penalizedOriginPorts: readStringList(formData, "penalizedOriginPorts"),
+    preferredDestinationMarkets: readStringList(formData, "preferredDestinationMarkets"),
+    penalizedDestinationMarkets: readStringList(formData, "penalizedDestinationMarkets"),
+    preferredIndustryKeywords: readStringList(formData, "preferredIndustryKeywords"),
+    penalizedIndustryKeywords: readStringList(formData, "penalizedIndustryKeywords"),
+    preferredHsCodePrefixes: readStringList(formData, "preferredHsCodePrefixes"),
+    penalizedHsCodePrefixes: readStringList(formData, "penalizedHsCodePrefixes"),
+    oversizeTeuThreshold: readOptionalDecimal(formData, "oversizeTeuThreshold"),
+    oversizeShipmentCount30dThreshold: readOptionalInteger(formData, "oversizeShipmentCount30dThreshold", 1, 500),
+    oversizePenalty: readRequiredInteger(formData, "oversizePenalty", 0, 100),
+    midMarketTeuMin: readOptionalDecimal(formData, "midMarketTeuMin"),
+    midMarketTeuMax: readOptionalDecimal(formData, "midMarketTeuMax"),
+    midMarketBoost: readRequiredInteger(formData, "midMarketBoost", 0, 100),
+    contactDecisionMakerWeight: readRequiredInteger(formData, "contactDecisionMakerWeight", 0, 100),
+    contactManagerWeight: readRequiredInteger(formData, "contactManagerWeight", 0, 100),
+    contactLogisticsDepartmentWeight: readRequiredInteger(formData, "contactLogisticsDepartmentWeight", 0, 100),
+    contactWeakFunctionPenalty: readRequiredInteger(formData, "contactWeakFunctionPenalty", 0, 100),
+    contactCompanyContextWeight: readRequiredInteger(formData, "contactCompanyContextWeight", 0, 50),
+    contactEmailWeight: readRequiredInteger(formData, "contactEmailWeight", 0, 50),
+    contactLinkedinWeight: readRequiredInteger(formData, "contactLinkedinWeight", 0, 50),
+    contactPhoneWeight: readRequiredInteger(formData, "contactPhoneWeight", 0, 50),
+    contactPrimaryContactBoost: readRequiredInteger(formData, "contactPrimaryContactBoost", 0, 50),
+    contactApprovedStatusBoost: readRequiredInteger(formData, "contactApprovedStatusBoost", 0, 50),
+    contactReviewingStatusBoost: readRequiredInteger(formData, "contactReviewingStatusBoost", 0, 50),
+    contactTier1Threshold: readRequiredInteger(formData, "contactTier1Threshold", 0, 100),
+    contactTier2Threshold: readRequiredInteger(formData, "contactTier2Threshold", 0, 100),
+    contactTier3Threshold: readRequiredInteger(formData, "contactTier3Threshold", 0, 100),
+    preferredContactTitleKeywords: readStringList(formData, "preferredContactTitleKeywords"),
+    penalizedContactTitleKeywords: readStringList(formData, "penalizedContactTitleKeywords"),
+    preferredContactDepartments: readStringList(formData, "preferredContactDepartments"),
+    penalizedContactDepartments: readStringList(formData, "penalizedContactDepartments"),
+    aiClassificationEnabled: formData.get("aiClassificationEnabled") === "true",
+    aiModel: readOptional(formData, "aiModel") ?? null
+  };
+
+  try {
+    await tradeMiningScoringClient.tradeMiningScoringConfig.upsert({
+      where: {
+        tenantId: context.tenantId
+      },
+      update: scoringConfigData,
+      create: {
+        tenantId: context.tenantId,
+        ...scoringConfigData
+      }
+    });
+  } catch (error) {
+    if (isMissingTradeMiningScoringSchemaError(error)) {
+      throw new Error("The local database is missing the latest TradeMining scoring migration. Run the new Prisma migration, then save again.");
     }
-  });
+
+    throw error;
+  }
 
   revalidateSettingsSurfaces();
   revalidatePath("/lead-gen/candidates");
@@ -321,7 +335,6 @@ export async function saveTradeMiningScoringSettingsAction(formData: FormData) {
 export async function saveApolloRepMappingAction(formData: FormData) {
   const context = await authorizeSettingsMutation();
   const entries = readApolloRepMappingEntries(formData);
-  const publicConfig = buildApolloRepMappingConfig(entries);
 
   const existing = await prisma.integrationCredential.findFirst({
     where: {
@@ -329,9 +342,11 @@ export async function saveApolloRepMappingAction(formData: FormData) {
       provider: IntegrationProvider.APOLLO
     },
     select: {
-      id: true
+      id: true,
+      publicConfig: true
     }
   });
+  const publicConfig = mergeApolloPublicConfig(existing?.publicConfig, buildApolloRepMappingConfig(entries));
 
   if (existing) {
     await prisma.integrationCredential.update({
@@ -359,6 +374,336 @@ export async function saveApolloRepMappingAction(formData: FormData) {
   revalidateSettingsSurfaces();
   revalidatePath("/lead-gen/pipeline");
   revalidatePath("/lead-gen/contacts");
+}
+
+export async function syncApolloRepMappingAction() {
+  const context = await authorizeSettingsMutation();
+  const syncedUsers = await fetchApolloRepDirectory();
+
+  if (syncedUsers.length === 0) {
+    throw new Error("Apollo returned no teammates to sync. The existing rep mapping was left unchanged.");
+  }
+
+  const existing = await prisma.integrationCredential.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      provider: IntegrationProvider.APOLLO
+    },
+    select: {
+      id: true,
+      publicConfig: true
+    }
+  });
+
+  const existingEntries = parseApolloRepMapping(existing?.publicConfig);
+  const entries = syncedUsers.map((user) => {
+    const existingEntry = findExistingApolloRepEntry(existingEntries, user);
+
+    return {
+      id: existingEntry?.id ?? `apollo-rep-${user.apolloUserId}`,
+      sequenceOwnerName: user.sequenceOwnerName,
+      apolloUserId: user.apolloUserId,
+      sendFromEmail: existingEntry?.sendFromEmail ?? user.email,
+      sendFromEmailAccountId: existingEntry?.sendFromEmailAccountId ?? null,
+      active: existingEntry?.active ?? true
+    };
+  });
+
+  const publicConfig = mergeApolloPublicConfig(existing?.publicConfig, buildApolloRepMappingConfig(entries));
+
+  if (existing) {
+    await prisma.integrationCredential.update({
+      where: {
+        id: existing.id
+      },
+      data: {
+        name: "Apollo Rep Mapping",
+        status: entries.some((entry) => entry.active) ? IntegrationStatus.ACTIVE : IntegrationStatus.DISABLED,
+        publicConfig
+      }
+    });
+  } else {
+    await prisma.integrationCredential.create({
+      data: {
+        tenantId: context.tenantId,
+        provider: IntegrationProvider.APOLLO,
+        name: "Apollo Rep Mapping",
+        status: entries.some((entry) => entry.active) ? IntegrationStatus.ACTIVE : IntegrationStatus.DISABLED,
+        publicConfig
+      }
+    });
+  }
+
+  revalidateSettingsSurfaces();
+  revalidatePath("/lead-gen/pipeline");
+  revalidatePath("/lead-gen/contacts");
+}
+
+export async function saveApolloSequenceMappingAction(formData: FormData) {
+  const context = await authorizeSettingsMutation();
+  const existing = await prisma.integrationCredential.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      provider: IntegrationProvider.APOLLO
+    },
+    select: {
+      id: true,
+      publicConfig: true
+    }
+  });
+
+  const directory = parseApolloSequenceDirectory(existing?.publicConfig);
+  const mappings = readApolloSequenceMappingEntries(formData, directory);
+  const publicConfig = mergeApolloPublicConfig(
+    existing?.publicConfig,
+    buildApolloSequenceConfig({
+      directory,
+      mapping: mappings
+    })
+  );
+
+  if (existing) {
+    await prisma.integrationCredential.update({
+      where: {
+        id: existing.id
+      },
+      data: {
+        name: "Apollo Workspace Mapping",
+        status: IntegrationStatus.ACTIVE,
+        publicConfig
+      }
+    });
+  } else {
+    await prisma.integrationCredential.create({
+      data: {
+        tenantId: context.tenantId,
+        provider: IntegrationProvider.APOLLO,
+        name: "Apollo Workspace Mapping",
+        status: IntegrationStatus.ACTIVE,
+        publicConfig
+      }
+    });
+  }
+
+  revalidateSettingsSurfaces();
+  revalidatePath("/lead-gen/contacts");
+}
+
+export async function saveSearchProfileApolloSequenceMappingAction(formData: FormData) {
+  const context = await authorizeSettingsMutation();
+  const profileId = readRequired(formData, "profileId");
+  const profile = await prisma.tradeMiningSearchProfile.findFirst({
+    where: {
+      id: profileId,
+      tenantId: context.tenantId
+    },
+    select: {
+      id: true
+    }
+  });
+
+  if (!profile) {
+    throw new Error("The selected search profile is not available for this tenant.");
+  }
+
+  const existingApolloCredential = await prisma.integrationCredential.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      provider: IntegrationProvider.APOLLO
+    },
+    select: {
+      publicConfig: true
+    }
+  });
+
+  const directory = parseApolloSequenceDirectory(existingApolloCredential?.publicConfig);
+  const mappings = readApolloSequenceMappingEntries(formData, directory);
+
+  await prisma.tradeMiningSearchProfile.update({
+    where: {
+      id: profileId
+    },
+    data: {
+      contactCadenceConfig: buildSearchProfileApolloSequenceConfig(mappings)
+    }
+  });
+
+  revalidateSettingsSurfaces();
+  revalidatePath("/lead-gen/search-profiles");
+  revalidatePath("/lead-gen/contacts");
+}
+
+export async function copySearchProfileApolloSequenceMappingAction(formData: FormData) {
+  const context = await authorizeSettingsMutation();
+  const targetProfileId = readRequired(formData, "targetProfileId");
+  const sourceProfileId = readRequired(formData, "sourceProfileId");
+
+  if (targetProfileId === sourceProfileId) {
+    throw new Error("Choose a different source profile to copy from.");
+  }
+
+  const [sourceProfile, targetProfile, existingApolloCredential] = await Promise.all([
+    prisma.tradeMiningSearchProfile.findFirst({
+      where: {
+        id: sourceProfileId,
+        tenantId: context.tenantId
+      },
+      select: {
+        name: true,
+        contactCadenceConfig: true
+      }
+    }),
+    prisma.tradeMiningSearchProfile.findFirst({
+      where: {
+        id: targetProfileId,
+        tenantId: context.tenantId
+      },
+      select: {
+        id: true
+      }
+    }),
+    prisma.integrationCredential.findFirst({
+      where: {
+        tenantId: context.tenantId,
+        provider: IntegrationProvider.APOLLO
+      },
+      select: {
+        publicConfig: true
+      }
+    })
+  ]);
+
+  if (!sourceProfile || !targetProfile) {
+    throw new Error("The selected search profile is not available for this tenant.");
+  }
+
+  const directory = parseApolloSequenceDirectory(existingApolloCredential?.publicConfig);
+  const copiedMapping = buildApolloSequenceMappingsWithDefaults({
+    existingMappings: parseSearchProfileApolloSequenceMapping(sourceProfile.contactCadenceConfig),
+    directory
+  });
+
+  await prisma.tradeMiningSearchProfile.update({
+    where: {
+      id: targetProfileId
+    },
+    data: {
+      contactCadenceConfig: buildSearchProfileApolloSequenceConfig(copiedMapping)
+    }
+  });
+
+  revalidateSettingsSurfaces();
+  revalidatePath("/lead-gen/search-profiles");
+  revalidatePath("/lead-gen/contacts");
+}
+
+export async function clearSearchProfileApolloSequenceMappingAction(formData: FormData) {
+  const context = await authorizeSettingsMutation();
+  const profileId = readRequired(formData, "profileId");
+  const profile = await prisma.tradeMiningSearchProfile.findFirst({
+    where: {
+      id: profileId,
+      tenantId: context.tenantId
+    },
+    select: {
+      id: true
+    }
+  });
+
+  if (!profile) {
+    throw new Error("The selected search profile is not available for this tenant.");
+  }
+
+  await prisma.tradeMiningSearchProfile.update({
+    where: {
+      id: profileId
+    },
+    data: {
+      contactCadenceConfig: Prisma.JsonNull
+    }
+  });
+
+  revalidateSettingsSurfaces();
+  revalidatePath("/lead-gen/search-profiles");
+  revalidatePath("/lead-gen/contacts");
+}
+
+export async function syncApolloSequenceMappingAction() {
+  const context = await authorizeSettingsMutation();
+  const syncedSequences = await fetchApolloSequenceDirectory();
+
+  if (syncedSequences.length === 0) {
+    throw new Error("Apollo returned no cadences to sync. The existing cadence mapping was left unchanged.");
+  }
+
+  const existing = await prisma.integrationCredential.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      provider: IntegrationProvider.APOLLO
+    },
+    select: {
+      id: true,
+      publicConfig: true
+    }
+  });
+
+  const directory = syncedSequences.map((sequence) => ({
+    ...sequence,
+    automationMode: inferApolloSequenceAutomationMode(sequence.name)
+  }));
+  const mapping = buildApolloSequenceMappingsWithDefaults({
+    existingMappings: parseApolloSequenceMapping(existing?.publicConfig),
+    directory
+  });
+  const publicConfig = mergeApolloPublicConfig(
+    existing?.publicConfig,
+    buildApolloSequenceConfig({
+      directory,
+      mapping
+    })
+  );
+
+  if (existing) {
+    await prisma.integrationCredential.update({
+      where: {
+        id: existing.id
+      },
+      data: {
+        name: "Apollo Workspace Mapping",
+        status: IntegrationStatus.ACTIVE,
+        publicConfig
+      }
+    });
+  } else {
+    await prisma.integrationCredential.create({
+      data: {
+        tenantId: context.tenantId,
+        provider: IntegrationProvider.APOLLO,
+        name: "Apollo Workspace Mapping",
+        status: IntegrationStatus.ACTIVE,
+        publicConfig
+      }
+    });
+  }
+
+  revalidateSettingsSurfaces();
+  revalidatePath("/lead-gen/contacts");
+}
+
+function findExistingApolloRepEntry(
+  entries: ReturnType<typeof parseApolloRepMapping>,
+  user: { apolloUserId: string; sequenceOwnerName: string }
+) {
+  const idMatch = entries.find((entry) => entry.apolloUserId === user.apolloUserId);
+  if (idMatch) {
+    return idMatch;
+  }
+
+  const nameMatches = entries.filter(
+    (entry) => entry.sequenceOwnerName === user.sequenceOwnerName && !entry.apolloUserId
+  );
+
+  return nameMatches.length === 1 ? nameMatches[0] : null;
 }
 
 function revalidateSettingsSurfaces() {
@@ -455,6 +800,10 @@ function readToolTargets(formData: FormData): QuoteToolTarget[] {
   return targets;
 }
 
+function isMissingTradeMiningScoringSchemaError(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && (error.code === "P2021" || error.code === "P2022");
+}
+
 function readApolloRepMappingEntries(formData: FormData) {
   const names = formData
     .getAll("apolloRepSequenceOwnerName")
@@ -484,4 +833,77 @@ function readApolloRepMappingEntries(formData: FormData) {
       active: actives.has(String(index))
     }))
     .filter((entry) => entry.sequenceOwnerName.length > 0);
+}
+
+function readApolloSequenceMappingEntries(
+  formData: FormData,
+  directory: ReturnType<typeof parseApolloSequenceDirectory>
+): ApolloSequenceMappingEntry[] {
+  const tiers = formData
+    .getAll("apolloSequenceTier")
+    .filter((value): value is ApolloSequenceMappingEntry["tier"] => value === "TIER_1" || value === "TIER_2" || value === "TIER_3");
+  const labels = formData
+    .getAll("apolloSequenceLabel")
+    .filter((value): value is string => typeof value === "string");
+  const sequenceIds = formData
+    .getAll("apolloSequenceId")
+    .filter((value): value is string => typeof value === "string");
+  const requiresAiDraftTiers = new Set(
+    formData
+      .getAll("apolloSequenceRequiresAiDraft")
+      .filter(
+        (value): value is ApolloSequenceMappingEntry["tier"] =>
+          value === "TIER_1" || value === "TIER_2" || value === "TIER_3"
+      )
+  );
+
+  const defaults = buildApolloSequenceMappingsWithDefaults({
+    existingMappings: [],
+    directory
+  });
+  const directoryById = new Map(directory.map((entry) => [entry.id, entry]));
+
+  return tiers.map((tier, index) => {
+    const defaultEntry = defaults.find((entry) => entry.tier === tier);
+    const selectedSequenceId = sequenceIds[index]?.trim() || null;
+    const selectedSequence = selectedSequenceId ? directoryById.get(selectedSequenceId) ?? null : null;
+
+    if (!defaultEntry) {
+      throw new Error(`Missing default Apollo sequence metadata for ${tier}.`);
+    }
+
+    return {
+      ...defaultEntry,
+      label: labels[index]?.trim() || defaultEntry.label,
+      apolloSequenceId: selectedSequence?.id ?? null,
+      apolloSequenceName: selectedSequence?.name ?? null,
+      automationMode: selectedSequence?.automationMode ?? defaultEntry.automationMode,
+      requiresAiDraft: requiresAiDraftTiers.has(tier)
+    };
+  });
+}
+
+function mergeApolloPublicConfig(existingPublicConfig: unknown, patch: Record<string, unknown>): Prisma.InputJsonValue {
+  if (!existingPublicConfig || typeof existingPublicConfig !== "object") {
+    return patch as Prisma.InputJsonValue;
+  }
+
+  return {
+    ...(existingPublicConfig as Record<string, unknown>),
+    ...patch
+  } as Prisma.InputJsonValue;
+}
+
+function inferApolloSequenceAutomationMode(name: string): ApolloCadenceAutomationMode {
+  const normalized = name.toLowerCase();
+
+  if (normalized.includes("tier 1") || normalized.includes("custom")) {
+    return "AI_CUSTOM";
+  }
+
+  if (normalized.includes("tier 2") || normalized.includes("personalized")) {
+    return "APOLLO_AI";
+  }
+
+  return "EMAIL_ONLY";
 }
