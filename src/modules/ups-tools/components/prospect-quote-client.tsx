@@ -322,9 +322,14 @@ export function ProspectQuoteClient({
 
       {results.length > 0 ? (
         <section className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-          <div className="border-b border-border bg-muted px-4 py-3">
-            <p className="text-sm font-semibold text-foreground">Prospect quote results</p>
-            <p className="text-xs text-mutedForeground">{results.length.toLocaleString("en-US")} combinations generated</p>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted px-4 py-3">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Prospect quote results</p>
+              <p className="text-xs text-mutedForeground">{results.length.toLocaleString("en-US")} combinations generated</p>
+            </div>
+            <span className="rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-xs font-semibold text-primary">
+              {results.length.toLocaleString("en-US")} results
+            </span>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-[980px] divide-y divide-border text-sm">
@@ -342,7 +347,10 @@ export function ProspectQuoteClient({
               </thead>
               <tbody className="divide-y divide-border">
                 {results.map((result, index) => (
-                  <tr key={`${result.destinationPostalCode}-${result.service}-${index}`} className="hover:bg-muted/50">
+                  <tr
+                    key={`${result.destinationPostalCode}-${result.service}-${index}`}
+                    className="transition-colors hover:bg-muted/50"
+                  >
                     <td className="px-4 py-3 text-foreground">{result.destinationPostalCode}</td>
                     <td className="px-4 py-3 text-foreground">{result.service}</td>
                     <td className="px-4 py-3 text-mutedForeground">{result.billableWeight.toFixed(2)} lb</td>

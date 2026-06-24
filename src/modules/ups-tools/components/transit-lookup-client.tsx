@@ -204,9 +204,14 @@ export function TransitLookupClient({ accounts }: { accounts: UpsAccountConfig[]
 
       {results.length > 0 ? (
         <section className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-          <div className="border-b border-border bg-muted px-4 py-3">
-            <p className="text-sm font-semibold text-foreground">Transit results</p>
-            <p className="text-xs text-mutedForeground">{results.length.toLocaleString("en-US")} destinations analyzed</p>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted px-4 py-3">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Transit results</p>
+              <p className="text-xs text-mutedForeground">{results.length.toLocaleString("en-US")} destinations analyzed</p>
+            </div>
+            <span className="rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-xs font-semibold text-primary">
+              {results.length.toLocaleString("en-US")} lanes
+            </span>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-[760px] divide-y divide-border text-sm">
@@ -221,7 +226,7 @@ export function TransitLookupClient({ accounts }: { accounts: UpsAccountConfig[]
               </thead>
               <tbody className="divide-y divide-border">
                 {results.map((result) => (
-                  <tr key={result.lane} className="hover:bg-muted/50">
+                  <tr key={result.lane} className="transition-colors hover:bg-muted/50">
                     <td className="px-4 py-3 text-foreground">{result.lane}</td>
                     <td className="px-4 py-3 text-foreground">{result.destinationPostalCode}</td>
                     <td className="px-4 py-3 text-mutedForeground">{result.destinationCountryCode}</td>

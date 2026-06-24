@@ -756,11 +756,16 @@ function SavedBulkRunsPanel({
 function UpsIssuesPanel({ issues }: { issues: UpsQuoteIssue[] }) {
   return (
     <section className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-      <div className="border-b border-border bg-muted px-4 py-3">
-        <p className="text-sm font-semibold text-foreground">UPS issue log</p>
-        <p className="text-xs text-mutedForeground">
-          {issues.length.toLocaleString("en-US")} quote requests failed, but the rest of the bulk run continued.
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted px-4 py-3">
+        <div>
+          <p className="text-sm font-semibold text-foreground">UPS issue log</p>
+          <p className="text-xs text-mutedForeground">
+            {issues.length.toLocaleString("en-US")} quote requests failed, but the rest of the bulk run continued.
+          </p>
+        </div>
+        <span className="rounded-full border border-warning/25 bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning">
+          {issues.length.toLocaleString("en-US")} issues
+        </span>
       </div>
 
       <div className="overflow-x-auto">
@@ -779,7 +784,10 @@ function UpsIssuesPanel({ issues }: { issues: UpsQuoteIssue[] }) {
           </thead>
           <tbody className="divide-y divide-border">
             {issues.map((issue, index) => (
-              <tr key={`${issue.accountId}-${issue.shipmentReference}-${issue.destinationPostalCode}-${issue.service}-${index}`} className="align-top hover:bg-muted/40">
+              <tr
+                key={`${issue.accountId}-${issue.shipmentReference}-${issue.destinationPostalCode}-${issue.service}-${index}`}
+                className="align-top transition-colors hover:bg-muted/50"
+              >
                 <td className="px-4 py-3 text-foreground">{issue.shipmentReference || "—"}</td>
                 <td className="px-4 py-3 text-foreground">{issue.accountName}</td>
                 <td className="px-4 py-3 text-foreground">{issue.originPostalCode}</td>
@@ -947,7 +955,7 @@ function QuoteResultsTable({
           </thead>
           <tbody className="divide-y divide-border">
             {rows.map((row) => (
-              <tr key={row.key} className="hover:bg-muted/50">
+              <tr key={row.key} className="transition-colors hover:bg-muted/50">
                 <td className="px-4 py-3 text-foreground">{row.shipmentReference || "—"}</td>
                 <td className="px-4 py-3 text-foreground">{row.originPostalCode}</td>
                 <td className="px-4 py-3 text-foreground">{row.destinationPostalCode}</td>
