@@ -1,5 +1,6 @@
 import { JobStatus, type Prisma } from "@prisma/client";
 
+import { calculateLeadPipelineScoreForCompany } from "@/modules/lead-gen/queries";
 import { normalizeSearchProfileValueForWorker } from "@/modules/lead-gen/search-profile-suggestions";
 import { prisma } from "@/server/db";
 import type { TenantContext } from "@/server/tenant-context";
@@ -200,6 +201,7 @@ export async function ingestTradeMiningBatch(tenant: TenantContext, payload: unk
   let recordsUpdated = 0;
   let companiesCreated = 0;
   let companiesUpdated = 0;
+  const touchedCompanyIds = new Set<string>();
 
   for (const [index, record] of batch.records.entries()) {
     const companyName = getCompanyIdentity(record).name;
@@ -246,6 +248,7 @@ export async function ingestTradeMiningBatch(tenant: TenantContext, payload: unk
     } else {
       companiesCreated += 1;
     }
+    touchedCompanyIds.add(company.id);
 
     const existingRecord = await prisma.tradeMiningImportRecord.findUnique({
       where: {
@@ -301,6 +304,24 @@ export async function ingestTradeMiningBatch(tenant: TenantContext, payload: unk
     } else {
       recordsCreated += 1;
     }
+  }
+
+  for (const companyId of touchedCompanyIds) {
+    const score = await calculateLeadPipelineScoreForCompany(tenant, companyId);
+
+    if (score === null) {
+      continue;
+    }
+
+    await prisma.lead.updateMany({
+      where: {
+        tenantId: tenant.tenantId,
+        companyId
+      },
+      data: {
+        score
+      }
+    });
   }
 
   const summary = {

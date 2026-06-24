@@ -1,0 +1,18 @@
+ALTER TABLE "TradeMiningScoringConfig"
+ADD COLUMN "contactDecisionMakerWeight" INTEGER NOT NULL DEFAULT 20,
+ADD COLUMN "contactManagerWeight" INTEGER NOT NULL DEFAULT 12,
+ADD COLUMN "contactLogisticsDepartmentWeight" INTEGER NOT NULL DEFAULT 15,
+ADD COLUMN "contactWeakFunctionPenalty" INTEGER NOT NULL DEFAULT 6,
+ADD COLUMN "contactEmailWeight" INTEGER NOT NULL DEFAULT 6,
+ADD COLUMN "contactLinkedinWeight" INTEGER NOT NULL DEFAULT 4,
+ADD COLUMN "contactPhoneWeight" INTEGER NOT NULL DEFAULT 2,
+ADD COLUMN "contactPrimaryContactBoost" INTEGER NOT NULL DEFAULT 6,
+ADD COLUMN "contactApprovedStatusBoost" INTEGER NOT NULL DEFAULT 3,
+ADD COLUMN "contactReviewingStatusBoost" INTEGER NOT NULL DEFAULT 2,
+ADD COLUMN "contactTier1Threshold" INTEGER NOT NULL DEFAULT 78,
+ADD COLUMN "contactTier2Threshold" INTEGER NOT NULL DEFAULT 58,
+ADD COLUMN "contactTier3Threshold" INTEGER NOT NULL DEFAULT 36,
+ADD COLUMN "preferredContactTitleKeywords" JSONB,
+ADD COLUMN "penalizedContactTitleKeywords" JSONB,
+ADD COLUMN "preferredContactDepartments" JSONB,
+ADD COLUMN "penalizedContactDepartments" JSONB;

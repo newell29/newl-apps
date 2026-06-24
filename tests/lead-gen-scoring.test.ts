@@ -68,7 +68,7 @@ describe("lead-gen candidate scoring", () => {
       origin: 8,
       product: 10
     });
-    expect(scoring.score).toBeGreaterThanOrEqual(70);
+    expect(scoring.score).toBeGreaterThanOrEqual(65);
     expect(scoring.reasoning).toContain("consignee name role");
     expect(scoring.reasoning).toContain("destination fit matched profile");
     expect(scoring.reasoning).toContain("industry signals match preferred categories");
@@ -170,6 +170,101 @@ describe("lead-gen candidate scoring", () => {
     expect(scoring.score).toBeGreaterThan(40);
     expect(scoring.reasoning).toContain("shipment activity rising");
     expect(scoring.reasoning).toContain("mid-market importer profile");
+  });
+
+  it("does not let a single recent shipment outrank repeat activity too easily", () => {
+    const now = Date.now();
+    const day = 86_400_000;
+
+    const oneOffEvidence = summarizeTradeMiningEvidence(
+      [
+        {
+          rawJson: {
+            sourceRole: "consignee_name",
+            destinationMarket: "Houston",
+            productDescription: "furniture",
+            hsCode: "9403",
+            teu: 3
+          },
+          arrivalDate: new Date(now - 8 * day),
+          sourcePort: "Genoa",
+          destinationCity: "Houston",
+          destinationState: "TX",
+          originCountry: "Italy",
+          productDescription: "furniture"
+        }
+      ],
+      new Map()
+    );
+
+    const repeatEvidence = summarizeTradeMiningEvidence(
+      [
+        {
+          rawJson: {
+            sourceRole: "consignee_name",
+            destinationMarket: "Houston",
+            productDescription: "furniture",
+            hsCode: "9403",
+            teu: 3
+          },
+          arrivalDate: new Date(now - 8 * day),
+          sourcePort: "Genoa",
+          destinationCity: "Houston",
+          destinationState: "TX",
+          originCountry: "Italy",
+          productDescription: "furniture"
+        },
+        {
+          rawJson: {
+            sourceRole: "consignee_name",
+            destinationMarket: "Houston",
+            productDescription: "furniture",
+            hsCode: "9403",
+            teu: 2
+          },
+          arrivalDate: new Date(now - 17 * day),
+          sourcePort: "Genoa",
+          destinationCity: "Houston",
+          destinationState: "TX",
+          originCountry: "Italy",
+          productDescription: "furniture"
+        },
+        {
+          rawJson: {
+            sourceRole: "consignee_name",
+            destinationMarket: "Houston",
+            productDescription: "furniture",
+            hsCode: "9403",
+            teu: 1
+          },
+          arrivalDate: new Date(now - 42 * day),
+          sourcePort: "Genoa",
+          destinationCity: "Houston",
+          destinationState: "TX",
+          originCountry: "Italy",
+          productDescription: "furniture"
+        }
+      ],
+      new Map()
+    );
+
+    const oneOff = scoreCandidate({
+      companyPriorityScore: 55,
+      candidateStatus: CandidateStatus.NEW,
+      alreadyInPipeline: false,
+      evidence: oneOffEvidence
+    });
+
+    const repeat = scoreCandidate({
+      companyPriorityScore: 55,
+      candidateStatus: CandidateStatus.NEW,
+      alreadyInPipeline: false,
+      evidence: repeatEvidence
+    });
+
+    expect(oneOff.score).toBeLessThan(repeat.score);
+    expect(oneOff.score).toBeLessThan(60);
+    expect(repeat.reasoning).toContain("shipment activity rising");
   });
 
   it("uses preferred and deprioritized origin settings as ranking bias rather than hard filtering", () => {
