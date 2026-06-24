@@ -335,6 +335,7 @@ export async function bulkQueueApolloEnrichmentAction(formData: FormData) {
             id: true,
             name: true,
             domain: true,
+            linkedinUrl: true,
             apolloOrganizationId: true
           }
         }
@@ -416,7 +417,8 @@ export async function bulkQueueApolloEnrichmentAction(formData: FormData) {
       },
       data: {
         apolloOrganizationId: lookup.organizationId ?? lead.company.apolloOrganizationId,
-        domain: lookup.domain ?? lead.company.domain
+        domain: lookup.domain ?? lead.company.domain,
+        linkedinUrl: lookup.linkedinUrl ?? lead.company.linkedinUrl
       }
     });
 

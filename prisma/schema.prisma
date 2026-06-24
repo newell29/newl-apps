@@ -338,6 +338,7 @@ model Company {
   name                     String
   normalizedName           String
   domain                   String?
+  linkedinUrl              String?
   source                   String?
   primaryIndustry          String?
   secondaryIndustry        String?
@@ -364,6 +365,7 @@ model Company {
   @@index([tenantId, candidateStatus, priorityScore])
   @@index([tenantId, priorityScore])
   @@index([tenantId, domain])
+  @@index([tenantId, linkedinUrl])
   @@index([tenantId, primaryIndustry])
 }
 

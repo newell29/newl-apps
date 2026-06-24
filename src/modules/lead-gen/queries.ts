@@ -673,12 +673,21 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
       hasSelectedContact,
       apolloStatus
     });
+    const latestRecord = lead.company.importRecords[0];
+    const latestRawRecord = asObject(latestRecord?.rawJson);
+    const selectedOrFirstContact =
+      contacts.find((contact) => contact.id === lead.contactId) ??
+      contacts.find((contact) => Boolean(contact.linkedinUrl)) ??
+      contacts[0];
 
     return {
       id: lead.id,
       companyId: lead.companyId,
       companyName: lead.company.name,
       normalizedName: lead.company.normalizedName,
+      companyDomain: lead.company.domain,
+      companyWebsiteUrl: lead.company.domain ? buildCompanyWebsiteUrl(lead.company.domain) : null,
+      companyLinkedinUrl: lead.company.linkedinUrl ?? selectedOrFirstContact?.linkedinUrl ?? null,
       contactName: lead.contact?.fullName,
       stage: lead.stage,
       candidateStatus: lead.company.candidateStatus,
@@ -689,6 +698,22 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
       secondaryIndustry: industry.secondaryIndustry,
       industryConfidence: industry.confidence,
       industrySource: industry.source,
+      destinationPort:
+        readString(latestRawRecord, "destinationPort") ??
+        readString(latestRawRecord, "arrivalPort") ??
+        readString(latestRawRecord, "destination_port") ??
+        readString(latestRawRecord, "arrival_port"),
+      originPort:
+        latestRecord?.sourcePort ??
+        readString(latestRawRecord, "originPort") ??
+        readString(latestRawRecord, "foreignPort") ??
+        readString(latestRawRecord, "origin_port") ??
+        readString(latestRawRecord, "foreign_port"),
+      shipFromPort:
+        readString(latestRawRecord, "shipFromPort") ??
+        readString(latestRawRecord, "placeOfReceipt") ??
+        readString(latestRawRecord, "ship_from_port") ??
+        readString(latestRawRecord, "place_of_receipt"),
       shipmentCount30d,
       shipmentCount90d,
       ownerUserId: lead.ownerUserId,
@@ -1646,6 +1671,19 @@ function getPipelineNextStep({
   }
 
   return "Research account fit";
+}
+
+function buildCompanyWebsiteUrl(domain: string) {
+  const trimmed = domain.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return trimmed;
+  }
+
+  return `https://${trimmed}`;
 }
 
 function buildCandidateWhere(filters: CandidateFeedFilters) {
