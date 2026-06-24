@@ -13,6 +13,8 @@ type SearchProfileRow = {
   name: string;
   description: string | null;
   enabled: boolean;
+  allowedCompanyIdentityRoles: string[] | null;
+  excludedCompanyKeywords: string[] | null;
   destinationMarkets: string[];
   destinationPorts: string[];
   originPorts: string[];
@@ -36,6 +38,12 @@ type CompanyRow = {
   normalizedName: string;
   source: string;
   priorityScore: number;
+  candidateStatus?: string;
+  doNotProspect?: boolean;
+  primaryIndustry?: string | null;
+  secondaryIndustry?: string | null;
+  industryConfidence?: number | null;
+  industrySource?: string | null;
 };
 
 type ImportRecordRow = {
@@ -100,9 +108,22 @@ const mockDb = vi.hoisted(() => {
 
         return profiles;
       }),
-      findFirst: vi.fn(async ({ where }: { where: { id: string; tenantId: string } }) => {
+      findFirst: vi.fn(async ({ where, select }: { where: { id: string; tenantId: string }; select?: Record<string, boolean> }) => {
         const profile = state.searchProfiles.get(where.id);
-        return profile && profile.tenantId === where.tenantId ? { id: profile.id } : null;
+
+        if (!profile || profile.tenantId !== where.tenantId) {
+          return null;
+        }
+
+        if (!select) {
+          return profile;
+        }
+
+        return Object.fromEntries(
+          Object.entries(select)
+            .filter(([, include]) => include)
+            .map(([key]) => [key, profile[key as keyof SearchProfileRow]])
+        );
       }),
       update: vi.fn(async ({ where, data }: { where: { id: string }; data: Partial<SearchProfileRow> }) => {
         const profile = state.searchProfiles.get(where.id);
@@ -139,7 +160,7 @@ const mockDb = vi.hoisted(() => {
       })
     },
     company: {
-      findUnique: vi.fn(async ({ where, select }: { where: { tenantId_normalizedName: { tenantId: string; normalizedName: string } }; select?: { id?: boolean; priorityScore?: boolean } }) => {
+      findUnique: vi.fn(async ({ where, select }: { where: { tenantId_normalizedName: { tenantId: string; normalizedName: string } }; select?: { id?: boolean; priorityScore?: boolean; candidateStatus?: boolean; doNotProspect?: boolean } }) => {
         const company = state.companies.get(tenantScopedKey(where.tenantId_normalizedName.tenantId, where.tenantId_normalizedName.normalizedName));
 
         if (!company) {
@@ -149,12 +170,39 @@ const mockDb = vi.hoisted(() => {
         if (select) {
           return {
             ...(select.id ? { id: company.id } : {}),
-            ...(select.priorityScore ? { priorityScore: company.priorityScore } : {})
+            ...(select.priorityScore ? { priorityScore: company.priorityScore } : {}),
+            ...(select.candidateStatus ? { candidateStatus: company.candidateStatus ?? null } : {}),
+            ...(select.doNotProspect ? { doNotProspect: company.doNotProspect ?? false } : {})
           };
         }
 
         return company;
       }),
+      findFirst: vi.fn(
+        async ({
+          where
+        }: {
+          where: { tenantId: string; id: string };
+          include?: { importRecords?: unknown };
+        }) => {
+          const company = [...state.companies.values()].find(
+            (candidate) => candidate.id === where.id && candidate.tenantId === where.tenantId
+          );
+
+          if (!company) {
+            return null;
+          }
+
+          const importRecords = [...state.importRecords.values()].filter(
+            (record) => record.companyId === company.id && record.tenantId === company.tenantId
+          );
+
+          return {
+            ...company,
+            importRecords
+          };
+        }
+      ),
       upsert: vi.fn(async ({ where, update, create }: { where: { tenantId_normalizedName: { tenantId: string; normalizedName: string } }; update: Partial<CompanyRow>; create: CompanyRow }) => {
         const key = tenantScopedKey(where.tenantId_normalizedName.tenantId, where.tenantId_normalizedName.normalizedName);
         const existing = state.companies.get(key);
@@ -168,7 +216,22 @@ const mockDb = vi.hoisted(() => {
         const company = { ...create, id: create.id ?? `company-${state.nextCompanyId++}` };
         state.companies.set(key, company);
         return company;
+      }),
+      update: vi.fn(async ({ where, data }: { where: { id: string }; data: Partial<CompanyRow> }) => {
+        const existingEntry = [...state.companies.entries()].find(([, company]) => company.id === where.id);
+
+        if (!existingEntry) {
+          throw new Error("Company not found");
+        }
+
+        const [key, company] = existingEntry;
+        const updated = { ...company, ...data };
+        state.companies.set(key, updated);
+        return updated;
       })
+    },
+    lead: {
+      updateMany: vi.fn(async () => ({ count: 0 }))
     },
     tradeMiningImportRecord: {
       findUnique: vi.fn(async ({ where }: { where: { tenantId_rawRecordKey: { tenantId: string; rawRecordKey: string } } }) => {
@@ -189,9 +252,10 @@ const mockDb = vi.hoisted(() => {
         state.importRecords.set(key, record);
         return record;
       }),
-      findMany: vi.fn(async ({ where }: { where: { tenantId: string } }) => {
-        return [...state.importRecords.values()]
+      findMany: vi.fn(async ({ where, take }: { where: { tenantId: string; companyId?: string }; take?: number }) => {
+        const records = [...state.importRecords.values()]
           .filter((record) => record.tenantId === where.tenantId)
+          .filter((record) => (where.companyId ? record.companyId === where.companyId : true))
           .map((record) => {
             const company = [...state.companies.values()].find(
               (candidate) => candidate.id === record.companyId && candidate.tenantId === record.tenantId
@@ -208,6 +272,8 @@ const mockDb = vi.hoisted(() => {
                 : null
             };
           });
+
+        return typeof take === "number" ? records.slice(0, take) : records;
       })
     },
     auditLog: {
@@ -312,12 +378,108 @@ describe("TradeMining ingestion", () => {
       destinationMarkets: ["Houston, TX"],
       destinationPorts: ["Houston, TX"],
       originCountries: ["China"],
+      allowedCompanyIdentityRoles: ["consignee_name"],
+      excludedCompanyKeywords: ["maersk"],
       priorityWeight: 80
     });
   });
 
+  it("skips records when the profile excludes the matched company keyword or disallows the source role", async () => {
+    mockDb.state.searchProfiles.set(
+      "profile-a",
+      searchProfile({
+        id: "profile-a",
+        tenantId: "tenant-a",
+        allowedCompanyIdentityRoles: ["consignee_name"],
+        excludedCompanyKeywords: ["maersk"]
+      })
+    );
+
+    await expect(
+      ingestTradeMiningBatch(tenant, {
+        source: "OPENCLAW",
+        searchProfileId: "profile-a",
+        records: [
+          {
+            importerName: "Maersk Logistics",
+            consigneeName: "Harbor Home Retail LLC",
+            bolNumber: "BOL-allowed",
+            shipmentDate: "2026-06-10"
+          },
+          {
+            importerName: "Maersk Logistics",
+            bolNumber: "BOL-skipped",
+            shipmentDate: "2026-06-11"
+          }
+        ]
+      })
+    ).resolves.toMatchObject({
+      recordsProcessed: 2,
+      recordsCreated: 1,
+      recordsUpdated: 0,
+      recordsSkipped: 1,
+      companiesCreated: 1,
+      companiesUpdated: 0
+    });
+
+    const companies = [...mockDb.state.companies.values()];
+    expect(companies).toHaveLength(1);
+    expect(companies[0]?.name).toBe("Harbor Home Retail LLC");
+  });
+
+  it("skips future ingestion for a company already marked do-not-prospect", async () => {
+    mockDb.state.searchProfiles.set(
+      "profile-a",
+      searchProfile({
+        id: "profile-a",
+        tenantId: "tenant-a",
+        allowedCompanyIdentityRoles: ["importer_name"]
+      })
+    );
+    mockDb.state.companies.set("tenant-a:harbor-home-retail-llc", {
+      id: "company-locked",
+      tenantId: "tenant-a",
+      name: "Harbor Home Retail LLC",
+      normalizedName: "harbor-home-retail-llc",
+      source: "trademining",
+      priorityScore: 82,
+      candidateStatus: "DISQUALIFIED",
+      doNotProspect: true
+    });
+
+    await expect(
+      ingestTradeMiningBatch(tenant, {
+        source: "OPENCLAW",
+        searchProfileId: "profile-a",
+        records: [
+          {
+            importerName: "Harbor Home Retail LLC",
+            bolNumber: "BOL-locked",
+            shipmentDate: "2026-06-15"
+          }
+        ]
+      })
+    ).resolves.toMatchObject({
+      recordsProcessed: 1,
+      recordsCreated: 0,
+      recordsUpdated: 0,
+      recordsSkipped: 1,
+      companiesCreated: 0,
+      companiesUpdated: 0
+    });
+
+    expect(mockDb.state.importRecords.size).toBe(0);
+  });
+
   it("ingests batches idempotently by tenant and raw BOL key", async () => {
-    mockDb.state.searchProfiles.set("profile-a", searchProfile({ id: "profile-a", tenantId: "tenant-a" }));
+    mockDb.state.searchProfiles.set(
+      "profile-a",
+      searchProfile({
+        id: "profile-a",
+        tenantId: "tenant-a",
+        allowedCompanyIdentityRoles: ["importer_name", "consignee_name"]
+      })
+    );
 
     const payload = {
       source: "OPENCLAW",
@@ -360,7 +522,9 @@ describe("TradeMining ingestion", () => {
     expect([...mockDb.state.companies.values()][0]).toMatchObject({
       tenantId: "tenant-a",
       normalizedName: "abc-imports-inc",
-      priorityScore: 78
+      priorityScore: 78,
+      primaryIndustry: "Furniture & Home",
+      industrySource: "MIXED"
     });
   });
 
@@ -552,6 +716,8 @@ function searchProfile(overrides: Partial<SearchProfileRow> = {}): SearchProfile
     name: "Houston Leads",
     description: null,
     enabled: true,
+    allowedCompanyIdentityRoles: ["consignee_name"],
+    excludedCompanyKeywords: ["maersk"],
     destinationMarkets: ["Houston"],
     destinationPorts: ["Houston, Texas"],
     originPorts: ["Shanghai"],

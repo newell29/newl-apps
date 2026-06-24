@@ -12,7 +12,11 @@ import { PipelineTableClient } from "@/modules/lead-gen/components/pipeline-tabl
 import {
   getLeadPipeline,
   getLeadPipelineFilters,
-  type LeadPipelineSort
+  type LeadPipelineApolloStatusFilter,
+  type LeadPipelineCandidateStatusFilter,
+  type LeadPipelineContactStatusFilter,
+  type LeadPipelineSort,
+  type LeadPipelineSequenceStatusFilter
 } from "@/modules/lead-gen/queries";
 import { getCurrentTenantContext } from "@/server/tenant-context";
 
@@ -36,6 +40,15 @@ export default async function PipelinePage({
   const params = searchParams ? await searchParams : {};
   const stage = parseStageParam(readParam(params.stage));
   const ownerUserId = parseOwnerParam(readParam(params.rep));
+  const industry = readParam(params.industry) ?? "";
+  const candidateStatus = parseCandidateStatusParam(readParam(params.candidateStatus));
+  const contactStatus = parseContactStatusParam(readParam(params.contactStatus));
+  const apolloStatus = parseApolloStatusParam(readParam(params.apolloStatus));
+  const sequenceStatus = parseSequenceStatusParam(readParam(params.sequenceStatus));
+  const minShipments30d = parseShipmentCountParam(readParam(params.minShipments30d));
+  const maxShipments30d = parseShipmentCountParam(readParam(params.maxShipments30d));
+  const minShipments90d = parseShipmentCountParam(readParam(params.minShipments90d));
+  const maxShipments90d = parseShipmentCountParam(readParam(params.maxShipments90d));
   const minScore = parseScoreParam(readParam(params.minScore));
   const maxScore = parseScoreParam(readParam(params.maxScore));
   const sort = parseSortParam(readParam(params.sort));
@@ -44,6 +57,15 @@ export default async function PipelinePage({
     getLeadPipeline(tenant, {
       stage,
       ownerUserId,
+      industry: industry || undefined,
+      candidateStatus,
+      contactStatus,
+      apolloStatus,
+      sequenceStatus,
+      minShipments30d,
+      maxShipments30d,
+      minShipments90d,
+      maxShipments90d,
       minScore,
       maxScore,
       sort
@@ -64,7 +86,7 @@ export default async function PipelinePage({
       </div>
 
       <form className="rounded-lg border border-border bg-card p-4 shadow-sm" action="/lead-gen/pipeline">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-10">
           <label className="space-y-1 text-sm font-medium text-foreground">
             <span>Stage</span>
             <select
@@ -96,6 +118,134 @@ export default async function PipelinePage({
                 </option>
               ))}
             </select>
+          </label>
+
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Candidate status</span>
+            <select
+              name="candidateStatus"
+              defaultValue={candidateStatus}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            >
+              <option value="ALL">All candidate statuses</option>
+              {filterOptions.candidateStatuses.map((statusOption) => (
+                <option key={statusOption} value={statusOption}>
+                  {formatCandidateStatus(statusOption)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Industry</span>
+            <select
+              name="industry"
+              defaultValue={industry}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            >
+              <option value="">All industries</option>
+              {filterOptions.industries.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Contact status</span>
+            <select
+              name="contactStatus"
+              defaultValue={contactStatus}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            >
+              <option value="ALL">All contact statuses</option>
+              {filterOptions.contactStatuses.map((statusOption) => (
+                <option key={statusOption} value={statusOption}>
+                  {formatPipelineContactStatus(statusOption)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Apollo</span>
+            <select
+              name="apolloStatus"
+              defaultValue={apolloStatus}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            >
+              <option value="ALL">All Apollo statuses</option>
+              {filterOptions.apolloStatuses.map((statusOption) => (
+                <option key={statusOption} value={statusOption}>
+                  {formatPipelineState(statusOption)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Sequence</span>
+            <select
+              name="sequenceStatus"
+              defaultValue={sequenceStatus}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            >
+              <option value="ALL">All sequence statuses</option>
+              {filterOptions.sequenceStatuses.map((statusOption) => (
+                <option key={statusOption} value={statusOption}>
+                  {formatPipelineState(statusOption)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Min shipments (30d)</span>
+            <input
+              name="minShipments30d"
+              type="number"
+              min="0"
+              defaultValue={minShipments30d ?? ""}
+              placeholder="0"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            />
+          </label>
+
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Max shipments (30d)</span>
+            <input
+              name="maxShipments30d"
+              type="number"
+              min="0"
+              defaultValue={maxShipments30d ?? ""}
+              placeholder="Any"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            />
+          </label>
+
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Min shipments (90d)</span>
+            <input
+              name="minShipments90d"
+              type="number"
+              min="0"
+              defaultValue={minShipments90d ?? ""}
+              placeholder="0"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            />
+          </label>
+
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Max shipments (90d)</span>
+            <input
+              name="maxShipments90d"
+              type="number"
+              min="0"
+              defaultValue={maxShipments90d ?? ""}
+              placeholder="Any"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            />
           </label>
 
           <label className="space-y-1 text-sm font-medium text-foreground">
@@ -214,6 +364,45 @@ function parseOwnerParam(value: string | undefined) {
   return value === "UNASSIGNED" ? "UNASSIGNED" : value;
 }
 
+function parseCandidateStatusParam(value: string | undefined): LeadPipelineCandidateStatusFilter {
+  return value === "NEW" ||
+    value === "REVIEWING" ||
+    value === "APPROVED_FOR_PIPELINE" ||
+    value === "REJECTED" ||
+    value === "DISQUALIFIED"
+    ? value
+    : "ALL";
+}
+
+function parseContactStatusParam(value: string | undefined): LeadPipelineContactStatusFilter {
+  return value === "NOT_ENRICHED" ||
+    value === "PRIMARY_SELECTED" ||
+    value === "APPROVED" ||
+    value === "REVIEWING" ||
+    value === "FOUND"
+    ? value
+    : "ALL";
+}
+
+function parseApolloStatusParam(value: string | undefined): LeadPipelineApolloStatusFilter {
+  return value === "NOT_STARTED" ||
+    value === "QUEUED" ||
+    value === "ENRICHED" ||
+    value === "NOT_FOUND" ||
+    value === "NEEDS_REVIEW"
+    ? value
+    : "ALL";
+}
+
+function parseSequenceStatusParam(value: string | undefined): LeadPipelineSequenceStatusFilter {
+  return value === "NOT_STARTED" ||
+    value === "READY" ||
+    value === "ENROLLED" ||
+    value === "REPLIED"
+    ? value
+    : "ALL";
+}
+
 function parseSortParam(value: string | undefined): LeadPipelineSort {
   return sortOptions.some((option) => option.value === value) ? (value as LeadPipelineSort) : "approved_desc";
 }
@@ -229,6 +418,19 @@ function parseScoreParam(value: string | undefined) {
   }
 
   return Math.min(100, Math.max(0, Math.round(parsed)));
+}
+
+function parseShipmentCountParam(value: string | undefined) {
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+
+  return Math.max(0, Math.round(parsed));
 }
 
 function readParam(value: string | string[] | undefined) {
@@ -247,11 +449,45 @@ function formatStage(stage: LeadPipelineStage) {
     .join(" ");
 }
 
+function formatCandidateStatus(status: string) {
+  return status
+    .toLowerCase()
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function formatPipelineContactStatus(status: LeadPipelineContactStatusFilter) {
+  if (status === "NOT_ENRICHED") return "Not enriched";
+  if (status === "PRIMARY_SELECTED") return "Primary contact selected";
+  if (status === "APPROVED") return "Approved contact(s)";
+  if (status === "REVIEWING") return "In review";
+  if (status === "FOUND") return "Contact(s) found";
+  return "All contact statuses";
+}
+
+function formatPipelineState(status: string) {
+  return status
+    .toLowerCase()
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 function buildPipelineExportHref(searchParams: SearchParams) {
   const query = new URLSearchParams();
 
   appendQueryParam(query, "stage", readParam(searchParams.stage));
   appendQueryParam(query, "rep", readParam(searchParams.rep));
+  appendQueryParam(query, "industry", readParam(searchParams.industry));
+  appendQueryParam(query, "candidateStatus", readParam(searchParams.candidateStatus));
+  appendQueryParam(query, "contactStatus", readParam(searchParams.contactStatus));
+  appendQueryParam(query, "apolloStatus", readParam(searchParams.apolloStatus));
+  appendQueryParam(query, "sequenceStatus", readParam(searchParams.sequenceStatus));
+  appendQueryParam(query, "minShipments30d", readParam(searchParams.minShipments30d));
+  appendQueryParam(query, "maxShipments30d", readParam(searchParams.maxShipments30d));
+  appendQueryParam(query, "minShipments90d", readParam(searchParams.minShipments90d));
+  appendQueryParam(query, "maxShipments90d", readParam(searchParams.maxShipments90d));
   appendQueryParam(query, "minScore", readParam(searchParams.minScore));
   appendQueryParam(query, "maxScore", readParam(searchParams.maxScore));
   appendQueryParam(query, "sort", readParam(searchParams.sort));

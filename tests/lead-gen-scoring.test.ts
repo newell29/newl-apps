@@ -72,6 +72,8 @@ describe("lead-gen candidate scoring", () => {
     expect(scoring.reasoning).toContain("consignee name role");
     expect(scoring.reasoning).toContain("destination fit matched profile");
     expect(scoring.reasoning).toContain("industry signals match preferred categories");
+    expect(scoring.breakdown.components.map((component) => component.label)).toContain("Momentum");
+    expect(scoring.breakdown.matchedSearchProfileName).toBe("Houston Import Leads");
   });
 
   it("heavily deprioritizes rejected or disqualified companies", () => {

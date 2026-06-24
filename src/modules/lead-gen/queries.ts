@@ -6,6 +6,7 @@ import {
   ContactTier,
   ContactOutreachDraftStatus,
   IntegrationProvider,
+  JobStatus,
   LeadPipelineStage,
   Prisma,
   ReplyStatus,
@@ -15,6 +16,11 @@ import { prisma } from "@/server/db";
 import { tenantWhere } from "@/server/tenant-query";
 import type { TenantContext } from "@/server/tenant-context";
 import { scoreContact } from "@/modules/lead-gen/contact-scoring";
+import {
+  classifyTradeMiningIndustryFromRecords,
+  INDUSTRY_OPTIONS
+} from "@/modules/lead-gen/industry-classification";
+import { defaultTradeMiningCompanyIdentityRoles } from "@/modules/lead-gen/search-profile-validation";
 import { recommendSequenceForContact } from "@/modules/lead-gen/sequence-catalog";
 import {
   DEFAULT_TRADEMINING_SCORING_SETTINGS,
@@ -100,6 +106,7 @@ export type CandidateFeedFilters = {
   query?: string;
   status?: CandidateStatus | "ACTIVE";
   searchProfileId?: string;
+  industry?: string;
   minScore?: number;
   maxScore?: number;
   minShipmentCount?: number;
@@ -108,9 +115,43 @@ export type CandidateFeedFilters = {
 
 export type LeadPipelineSort = "score_desc" | "updated_desc" | "approved_desc" | "company_name_asc";
 
+export type LeadPipelineCandidateStatusFilter = CandidateStatus | "ALL";
+
+export type LeadPipelineContactStatusFilter =
+  | "ALL"
+  | "NOT_ENRICHED"
+  | "PRIMARY_SELECTED"
+  | "APPROVED"
+  | "REVIEWING"
+  | "FOUND";
+
+export type LeadPipelineApolloStatusFilter =
+  | "ALL"
+  | "NOT_STARTED"
+  | "QUEUED"
+  | "ENRICHED"
+  | "NOT_FOUND"
+  | "NEEDS_REVIEW";
+
+export type LeadPipelineSequenceStatusFilter =
+  | "ALL"
+  | "NOT_STARTED"
+  | "READY"
+  | "ENROLLED"
+  | "REPLIED";
+
 export type LeadPipelineFilters = {
   stage?: LeadPipelineStage | "ALL";
   ownerUserId?: string | "ALL" | "UNASSIGNED";
+  industry?: string;
+  candidateStatus?: LeadPipelineCandidateStatusFilter;
+  contactStatus?: LeadPipelineContactStatusFilter;
+  apolloStatus?: LeadPipelineApolloStatusFilter;
+  sequenceStatus?: LeadPipelineSequenceStatusFilter;
+  minShipments30d?: number;
+  maxShipments30d?: number;
+  minShipments90d?: number;
+  maxShipments90d?: number;
   minScore?: number;
   maxScore?: number;
   sort?: LeadPipelineSort;
@@ -216,6 +257,13 @@ export async function getCandidateFeed(tenant: TenantContext, filters: Candidate
         evidence,
         config: scoringConfig
       });
+      const industry = resolveCompanyIndustry({
+        primaryIndustry: company.primaryIndustry,
+        secondaryIndustry: company.secondaryIndustry,
+        industryConfidence: company.industryConfidence,
+        industrySource: company.industrySource,
+        importRecords: company.importRecords
+      });
 
       return {
         id: company.id,
@@ -240,6 +288,10 @@ export async function getCandidateFeed(tenant: TenantContext, filters: Candidate
         shipFromPort: evidence.shipFromPort,
         productDescription: evidence.productDescription,
         hsCode: evidence.hsCode,
+        primaryIndustry: industry.primaryIndustry,
+        secondaryIndustry: industry.secondaryIndustry,
+        industryConfidence: industry.confidence,
+        industrySource: industry.source,
         assignedRep: company.leads[0]?.ownerUserId ?? "Unassigned",
         currentPipelineStage: company.leads[0]?.stage ?? null,
         alreadyInPipeline: company.leads.length > 0,
@@ -248,6 +300,7 @@ export async function getCandidateFeed(tenant: TenantContext, filters: Candidate
       };
     })
     .filter((candidate) => !filters.searchProfileId || candidate.matchedSearchProfileId === filters.searchProfileId)
+    .filter((candidate) => matchesIndustryFilter(candidate.primaryIndustry, candidate.secondaryIndustry, filters.industry))
     .filter((candidate) => isWithinScoreRange(candidate.candidateScore, filters.minScore, filters.maxScore))
     .filter((candidate) => filters.minShipmentCount === undefined || candidate.shipmentCount >= filters.minShipmentCount)
     .filter((candidate) => matchesFoundCompanyQuery(candidate, filters.query));
@@ -313,7 +366,8 @@ export async function getCandidateFeedFilters(tenant: TenantContext) {
 
   if (!searchProfileClient.tradeMiningSearchProfile) {
     return {
-      searchProfiles: []
+      searchProfiles: [],
+      industries: INDUSTRY_OPTIONS
     };
   }
 
@@ -334,7 +388,8 @@ export async function getCandidateFeedFilters(tenant: TenantContext) {
   });
 
   return {
-    searchProfiles
+    searchProfiles,
+    industries: INDUSTRY_OPTIONS
   };
 }
 
@@ -350,23 +405,67 @@ export async function getTradeMiningSearchProfiles(tenant: TenantContext) {
   }
 
   try {
-    const profiles = await searchProfileClient.tradeMiningSearchProfile.findMany({
-      where: tenantWhere(tenant),
-      orderBy: [
-        {
-          enabled: "desc"
+    const [profiles, pendingRunRequests] = await Promise.all([
+      searchProfileClient.tradeMiningSearchProfile.findMany({
+        where: tenantWhere(tenant),
+        orderBy: [
+          {
+            enabled: "desc"
+          },
+          {
+            priorityWeight: "desc"
+          },
+          {
+            name: "asc"
+          }
+        ]
+      }),
+      prisma.automationJobRun.findMany({
+        where: tenantWhere(tenant, {
+          jobType: "trademining.run_request",
+          status: {
+            in: [JobStatus.QUEUED, JobStatus.RUNNING]
+          }
+        }),
+        orderBy: {
+          createdAt: "desc"
         },
-        {
-          priorityWeight: "desc"
-        },
-        {
-          name: "asc"
+        select: {
+          id: true,
+          status: true,
+          createdAt: true,
+          input: true
         }
-      ]
-    });
+      })
+    ]);
+
+    const pendingRequestByProfileId = new Map<
+      string,
+      {
+        id: string;
+        status: string;
+        createdAt: Date;
+      }
+    >();
+
+    for (const request of pendingRunRequests) {
+      const profileId = readSearchProfileIdFromJson(request.input);
+      if (!profileId || pendingRequestByProfileId.has(profileId)) {
+        continue;
+      }
+
+      pendingRequestByProfileId.set(profileId, {
+        id: request.id,
+        status: request.status,
+        createdAt: request.createdAt
+      });
+    }
 
     return {
       profiles: profiles.map((profile) => ({
+        pendingRunRequestId: pendingRequestByProfileId.get(profile.id)?.id ?? null,
+        pendingRunStatus: pendingRequestByProfileId.get(profile.id)?.status ?? null,
+        pendingRunRequestedAt: pendingRequestByProfileId.get(profile.id)?.createdAt ?? null,
         id: profile.id,
         name: profile.name,
         description: profile.description,
@@ -378,6 +477,8 @@ export async function getTradeMiningSearchProfiles(tenant: TenantContext) {
         originCountries: asStringArray(profile.originCountries),
         productKeywords: asStringArray(profile.productKeywords),
         hsCodes: asStringArray(profile.hsCodes),
+        allowedCompanyIdentityRoles: asStringArray(profile.allowedCompanyIdentityRoles ?? defaultTradeMiningCompanyIdentityRoles),
+        excludedCompanyKeywords: asStringArray(profile.excludedCompanyKeywords),
         lookbackWindowDays: profile.lookbackWindowDays,
         minShipmentCount: profile.minShipmentCount,
         minShipmentVolume: profile.minShipmentVolume?.toString() ?? null,
@@ -492,12 +593,27 @@ export async function getTradeMiningSearchProfileSuggestions(tenant: TenantConte
 }
 
 export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipelineFilters = {}) {
-  const repDirectory = await getLeadPipelineRepDirectory(tenant);
+  const [repDirectory, scoringConfig] = await Promise.all([
+    getLeadPipelineRepDirectory(tenant),
+    loadTradeMiningScoringConfig(tenant)
+  ]);
   const leads = await prisma.lead.findMany({
     where: tenantWhere(tenant, buildLeadPipelineWhere(filters)),
     include: {
       company: {
         include: {
+          importRecords: {
+            where: tenantWhere(tenant),
+            orderBy: [
+              {
+                arrivalDate: "desc"
+              },
+              {
+                createdAt: "desc"
+              }
+            ],
+            take: 100
+          },
           contacts: {
             where: tenantWhere(tenant),
             include: {
@@ -515,14 +631,42 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
     orderBy: buildLeadPipelineOrder(filters.sort ?? "approved_desc")
   });
 
+  const searchProfileIds = new Set<string>();
+  for (const lead of leads) {
+    for (const record of lead.company.importRecords) {
+      const searchProfileId = readString(asObject(record.rawJson), "searchProfileId");
+      if (searchProfileId) {
+        searchProfileIds.add(searchProfileId);
+      }
+    }
+  }
+  const searchProfiles = await loadSearchProfileSummaries(tenant, [...searchProfileIds]);
+
   const pipelineLeads = leads.map((lead) => {
     const contacts = lead.company.contacts;
+    const evidence = summarizeTradeMiningEvidence(lead.company.importRecords, searchProfiles);
+    const scoring = scoreCompanyFromEvidence({
+      companyPriorityScore: lead.company.priorityScore,
+      candidateStatus: lead.company.candidateStatus,
+      alreadyInPipeline: false,
+      evidence,
+      config: scoringConfig
+    });
+    const shipmentCount30d = countShipmentsSinceDays(lead.company.importRecords, 30);
+    const shipmentCount90d = countShipmentsSinceDays(lead.company.importRecords, 90);
     const contactCount = contacts.length;
     const hasSelectedContact = Boolean(lead.contact);
     const contactStatus = summarizeContactStatus(contacts, hasSelectedContact);
     const apolloStatus = summarizeApolloStatus(contacts, lead.notes);
     const sequenceStatus = summarizeSequenceStatus(contacts);
     const sequenceReadiness = summarizeSequenceReadiness(contacts);
+    const industry = resolveCompanyIndustry({
+      primaryIndustry: lead.company.primaryIndustry,
+      secondaryIndustry: lead.company.secondaryIndustry,
+      industryConfidence: lead.company.industryConfidence,
+      industrySource: lead.company.industrySource,
+      importRecords: lead.company.importRecords
+    });
     const nextStep = getPipelineNextStep({
       stage: lead.stage,
       contactCount,
@@ -538,8 +682,15 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
       contactName: lead.contact?.fullName,
       stage: lead.stage,
       candidateStatus: lead.company.candidateStatus,
-      score: lead.score,
+      score: scoring.score,
       companyScore: lead.company.priorityScore,
+      scoreBreakdown: scoring.breakdown,
+      primaryIndustry: industry.primaryIndustry,
+      secondaryIndustry: industry.secondaryIndustry,
+      industryConfidence: industry.confidence,
+      industrySource: industry.source,
+      shipmentCount30d,
+      shipmentCount90d,
       ownerUserId: lead.ownerUserId,
       assignedRepValue: lead.ownerUserId,
       assignedRep: lead.ownerUserId ? repDirectory.get(lead.ownerUserId) ?? lead.ownerUserId : "Unassigned",
@@ -554,11 +705,32 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
     };
   });
 
+  const filteredPipelineLeads = pipelineLeads
+    .filter((lead) => matchesLeadPipelineCandidateStatus(lead.candidateStatus, filters.candidateStatus))
+    .filter((lead) => matchesLeadPipelineContactStatus(lead.contactStatus, filters.contactStatus))
+    .filter((lead) => matchesLeadPipelineApolloStatus(lead.apolloStatus, filters.apolloStatus))
+    .filter((lead) => matchesLeadPipelineSequenceStatus(lead.sequenceStatus, filters.sequenceStatus))
+    .filter((lead) => matchesIndustryFilter(lead.primaryIndustry, lead.secondaryIndustry, filters.industry))
+    .filter((lead) => matchesNumericRange(lead.shipmentCount30d, filters.minShipments30d, filters.maxShipments30d))
+    .filter((lead) => matchesNumericRange(lead.shipmentCount90d, filters.minShipments90d, filters.maxShipments90d));
+
   if (filters.sort === "company_name_asc") {
-    return pipelineLeads.sort((left, right) => left.companyName.localeCompare(right.companyName));
+    return filteredPipelineLeads.sort((left, right) => left.companyName.localeCompare(right.companyName));
   }
 
-  return pipelineLeads;
+  if (filters.sort === "score_desc") {
+    return filteredPipelineLeads.sort((left, right) => right.score - left.score || right.updatedAt.getTime() - left.updatedAt.getTime());
+  }
+
+  if (filters.sort === "updated_desc") {
+    return filteredPipelineLeads.sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime() || right.score - left.score);
+  }
+
+  if (filters.sort === "approved_desc") {
+    return filteredPipelineLeads.sort((left, right) => right.approvedAt.getTime() - left.approvedAt.getTime() || right.score - left.score);
+  }
+
+  return filteredPipelineLeads;
 }
 
 export async function getLeadPipelineFilters(tenant: TenantContext) {
@@ -616,7 +788,12 @@ export async function getLeadPipelineFilters(tenant: TenantContext) {
 
   return {
     stages: Object.values(LeadPipelineStage),
-    owners: mergedOwners
+    owners: mergedOwners,
+    industries: INDUSTRY_OPTIONS,
+    candidateStatuses: Object.values(CandidateStatus),
+    contactStatuses: ["NOT_ENRICHED", "PRIMARY_SELECTED", "APPROVED", "REVIEWING", "FOUND"] satisfies LeadPipelineContactStatusFilter[],
+    apolloStatuses: ["NOT_STARTED", "QUEUED", "ENRICHED", "NOT_FOUND", "NEEDS_REVIEW"] satisfies LeadPipelineApolloStatusFilter[],
+    sequenceStatuses: ["NOT_STARTED", "READY", "ENROLLED", "REPLIED"] satisfies LeadPipelineSequenceStatusFilter[]
   };
 }
 
@@ -1277,6 +1454,106 @@ function summarizeSequenceReadiness(
     .join("; ");
 }
 
+function matchesLeadPipelineCandidateStatus(
+  candidateStatus: CandidateStatus,
+  filter: LeadPipelineCandidateStatusFilter | undefined
+) {
+  return !filter || filter === "ALL" ? true : candidateStatus === filter;
+}
+
+function matchesLeadPipelineContactStatus(
+  contactStatus: string,
+  filter: LeadPipelineContactStatusFilter | undefined
+) {
+  if (!filter || filter === "ALL") {
+    return true;
+  }
+
+  if (filter === "NOT_ENRICHED") {
+    return contactStatus === "Not enriched";
+  }
+
+  if (filter === "PRIMARY_SELECTED") {
+    return contactStatus === "Primary contact selected";
+  }
+
+  if (filter === "APPROVED") {
+    return contactStatus.includes("approved contact");
+  }
+
+  if (filter === "REVIEWING") {
+    return contactStatus.includes("in review");
+  }
+
+  if (filter === "FOUND") {
+    return contactStatus.includes("contact") && contactStatus.includes("found");
+  }
+
+  return true;
+}
+
+function matchesLeadPipelineApolloStatus(
+  apolloStatus: string,
+  filter: LeadPipelineApolloStatusFilter | undefined
+) {
+  if (!filter || filter === "ALL") {
+    return true;
+  }
+
+  return apolloStatus.toLowerCase() === filter.replaceAll("_", " ").toLowerCase();
+}
+
+function matchesLeadPipelineSequenceStatus(
+  sequenceStatus: string,
+  filter: LeadPipelineSequenceStatusFilter | undefined
+) {
+  if (!filter || filter === "ALL") {
+    return true;
+  }
+
+  return sequenceStatus.toLowerCase() === filter.replaceAll("_", " ").toLowerCase();
+}
+
+function matchesNumericRange(value: number, min: number | undefined, max: number | undefined) {
+  if (min !== undefined && value < min) {
+    return false;
+  }
+
+  if (max !== undefined && value > max) {
+    return false;
+  }
+
+  return true;
+}
+
+function matchesIndustryFilter(
+  primaryIndustry: string | null | undefined,
+  secondaryIndustry: string | null | undefined,
+  filter: string | undefined
+) {
+  if (!filter) {
+    return true;
+  }
+
+  return primaryIndustry === filter || secondaryIndustry === filter;
+}
+
+function countShipmentsSinceDays(
+  records: Array<{
+    arrivalDate: Date | null;
+    createdAt: Date;
+  }>,
+  days: number
+) {
+  const threshold = new Date();
+  threshold.setDate(threshold.getDate() - days);
+
+  return records.filter((record) => {
+    const basisDate = record.arrivalDate ?? record.createdAt;
+    return basisDate >= threshold;
+  }).length;
+}
+
 function readDraftStatus(
   contactTier: ContactTier,
   status: ContactOutreachDraftStatus | null,
@@ -1582,9 +1859,90 @@ export function scoreCandidate({
     alreadyInPipeline ? "already in pipeline; deprioritized" : "not yet in pipeline"
   ].join("; ");
 
+  const breakdown = {
+    total: score,
+    matchedSearchProfileName: evidence.searchProfile?.name ?? "No matched profile",
+    sourceRole: evidence.sourceRole ? formatSourceRole(evidence.sourceRole) : "No source role",
+    importedScoreReasoning: evidence.importedScoreReasoning,
+    components: [
+      {
+        key: "momentum",
+        label: "Momentum",
+        points: momentumScore,
+        maxPoints: normalizedConfig.momentumWeight,
+        detail: describeMomentum(evidence, normalizedConfig)
+      },
+      {
+        key: "market_fit",
+        label: "Market fit",
+        points: marketFitScore,
+        maxPoints: normalizedConfig.marketFitWeight,
+        detail: describeMarketFit(evidence, normalizedConfig)
+      },
+      {
+        key: "industry_fit",
+        label: "Industry fit",
+        points: industryFitScore,
+        maxPoints: normalizedConfig.industryFitWeight,
+        detail: describeIndustryFit(evidence, normalizedConfig)
+      },
+      {
+        key: "company_size",
+        label: "Company size",
+        points: companySizeScore,
+        maxPoints: normalizedConfig.companySizeWeight,
+        detail: describeCompanySize(evidence, normalizedConfig)
+      },
+      {
+        key: "role",
+        label: "Company identity role",
+        points: roleScore,
+        maxPoints: normalizedConfig.roleWeight,
+        detail: evidence.sourceRole ? `${formatSourceRole(evidence.sourceRole)} role matched` : "No company identity role matched"
+      },
+      {
+        key: "confidence",
+        label: "Data confidence",
+        points: confidenceScore,
+        maxPoints: normalizedConfig.confidenceWeight,
+        detail: `${[
+          evidence.destinationMarket,
+          evidence.destinationPort,
+          evidence.originCountry,
+          evidence.originPort,
+          evidence.productDescription,
+          evidence.hsCode,
+          evidence.sourceRole,
+          evidence.companyMatchName
+        ].filter(Boolean).length}/8 key signals present`
+      },
+      {
+        key: "workflow",
+        label: "Workflow signal",
+        points: workflowScore,
+        maxPoints: normalizedConfig.workflowWeight,
+        detail: alreadyInPipeline
+          ? "Already in pipeline, so workflow score is reduced"
+          : `Base company signal ${companyPriorityScore} contributes here`
+      }
+    ],
+    settingsSnapshot: {
+      recentWindowDays: normalizedConfig.recentWindowDays,
+      comparisonWindowDays: normalizedConfig.comparisonWindowDays,
+      momentumWeight: normalizedConfig.momentumWeight,
+      marketFitWeight: normalizedConfig.marketFitWeight,
+      industryFitWeight: normalizedConfig.industryFitWeight,
+      companySizeWeight: normalizedConfig.companySizeWeight,
+      roleWeight: normalizedConfig.roleWeight,
+      confidenceWeight: normalizedConfig.confidenceWeight,
+      workflowWeight: normalizedConfig.workflowWeight
+    }
+  };
+
   return {
     score,
-    reasoning
+    reasoning,
+    breakdown
   };
 }
 
@@ -1624,6 +1982,8 @@ function matchesFoundCompanyQuery(
     shipFromPort: string | null;
     productDescription: string | null;
     hsCode: string | null;
+    primaryIndustry: string | null;
+    secondaryIndustry: string | null;
   },
   query: string | undefined
 ) {
@@ -1645,10 +2005,55 @@ function matchesFoundCompanyQuery(
     candidate.originPort,
     candidate.shipFromPort,
     candidate.productDescription,
-    candidate.hsCode
+    candidate.hsCode,
+    candidate.primaryIndustry,
+    candidate.secondaryIndustry
   ]
     .filter((value): value is string => Boolean(value))
     .some((value) => value.toLowerCase().includes(normalizedQuery));
+}
+
+function resolveCompanyIndustry({
+  primaryIndustry,
+  secondaryIndustry,
+  industryConfidence,
+  industrySource,
+  importRecords
+}: {
+  primaryIndustry: string | null;
+  secondaryIndustry: string | null;
+  industryConfidence: number | null;
+  industrySource: string | null;
+  importRecords: Array<{
+    productDescription: string | null;
+    rawJson: unknown;
+  }>;
+}) {
+  if (primaryIndustry) {
+    return {
+      primaryIndustry,
+      secondaryIndustry,
+      confidence: industryConfidence ?? 0,
+      source: industrySource
+    };
+  }
+
+  const classified = classifyTradeMiningIndustryFromRecords(
+    importRecords.map((record) => {
+      const rawJson = asObject(record.rawJson);
+      return {
+        productDescription: record.productDescription ?? readString(rawJson, "productDescription"),
+        hsCode: readString(rawJson, "hsCode")
+      };
+    })
+  );
+
+  return {
+    primaryIndustry: classified.primaryIndustry,
+    secondaryIndustry: classified.secondaryIndustry,
+    confidence: classified.confidence,
+    source: classified.source === "UNKNOWN" ? null : classified.source
+  };
 }
 
 function sortCandidates<T extends { candidateScore: number; updatedAt: Date; shipmentCount: number; latestShipmentDate: Date | null }>(
@@ -1681,6 +2086,12 @@ function sortCandidates<T extends { candidateScore: number; updatedAt: Date; shi
 
 function asObject(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
+}
+
+function readSearchProfileIdFromJson(value: unknown) {
+  const object = asObject(value);
+  const field = object.searchProfileId;
+  return typeof field === "string" && field.trim().length > 0 ? field : null;
 }
 
 function readString(value: JsonObject, key: string) {

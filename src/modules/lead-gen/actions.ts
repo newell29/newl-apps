@@ -14,7 +14,11 @@ import {
 import { revalidatePath } from "next/cache";
 import { calculateLeadPipelineScoreForCompany } from "@/modules/lead-gen/queries";
 import { summarizeTradeMiningEvidence } from "@/modules/lead-gen/queries";
-import { assertValidTradeMiningSearchProfile } from "@/modules/lead-gen/search-profile-validation";
+import {
+  assertValidTradeMiningSearchProfile,
+  defaultTradeMiningCompanyIdentityRoles,
+  tradeMiningCompanyIdentityRoleOptions
+} from "@/modules/lead-gen/search-profile-validation";
 import { buildSequenceCatalogItems } from "@/modules/lead-gen/sequence-catalog";
 import {
   buildApolloSequenceMappingsWithDefaults,
@@ -42,6 +46,21 @@ type SearchProfileMutationClient = typeof prisma & {
     create(args: { data: Record<string, unknown> }): Promise<unknown>;
     update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<unknown>;
     delete(args: { where: { id: string } }): Promise<unknown>;
+    findFirst(args: { where: Record<string, unknown>; select?: Record<string, boolean> }): Promise<{
+      id: string;
+      name?: string;
+      enabled?: boolean;
+    } | null>;
+  };
+  automationJobRun: {
+    findFirst(args: { where: Record<string, unknown>; orderBy?: Record<string, "asc" | "desc">; select?: Record<string, boolean> }): Promise<{
+      id: string;
+      status?: string;
+    } | null>;
+    create(args: { data: Record<string, unknown> }): Promise<unknown>;
+  };
+  auditLog: {
+    create(args: { data: Record<string, unknown> }): Promise<unknown>;
   };
   company: {
     findFirst(args: { where: Record<string, unknown>; select?: Record<string, boolean> }): Promise<{
@@ -150,6 +169,96 @@ export async function deleteTradeMiningSearchProfileAction(formData: FormData) {
   });
 
   revalidateTradeMiningProfileSurfaces();
+}
+
+export async function requestTradeMiningSearchProfileRunAction(formData: FormData) {
+  const context = await authorizeLeadGenAdminMutation();
+  const client = prisma as SearchProfileMutationClient;
+
+  if (!client.tradeMiningSearchProfile) {
+    throw new Error("TradeMining search profile mutations are unavailable until Prisma Client is regenerated.");
+  }
+
+  const profileId = readRequired(formData, "profileId");
+  const profile = await client.tradeMiningSearchProfile.findFirst({
+    where: {
+      id: profileId,
+      tenantId: context.tenantId
+    },
+    select: {
+      id: true,
+      name: true,
+      enabled: true
+    }
+  });
+
+  if (!profile) {
+    throw new Error("Search profile not found for this tenant.");
+  }
+
+  if (!profile.enabled) {
+    throw new Error("Enable this search profile before requesting an immediate run.");
+  }
+
+  const existingRequest = await client.automationJobRun.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      jobType: "trademining.run_request",
+      status: {
+        in: ["QUEUED", "RUNNING"]
+      },
+      input: {
+        path: ["searchProfileId"],
+        equals: profileId
+      }
+    },
+    orderBy: {
+      createdAt: "desc"
+    },
+    select: {
+      id: true
+    }
+  });
+
+  if (existingRequest) {
+    revalidateTradeMiningProfileSurfaces();
+    revalidatePath("/operations/logs");
+    return;
+  }
+
+  await client.automationJobRun.create({
+    data: {
+      tenantId: context.tenantId,
+      jobType: "trademining.run_request",
+      status: "QUEUED",
+      input: {
+        source: "APP_UI",
+        searchProfileId: profile.id,
+        searchProfileName: profile.name ?? null,
+        requestedByUserId: context.userId,
+        requestedByName: context.userName ?? context.userEmail ?? "Unknown user",
+        requestedAt: new Date().toISOString()
+      }
+    }
+  });
+
+  await client.auditLog.create({
+    data: {
+      tenantId: context.tenantId,
+      action: "trademining.run.requested",
+      entityType: "TradeMiningSearchProfile",
+      entityId: profile.id,
+      after: {
+        searchProfileId: profile.id,
+        searchProfileName: profile.name ?? null,
+        requestedByUserId: context.userId,
+        requestedByName: context.userName ?? context.userEmail ?? "Unknown user"
+      }
+    }
+  });
+
+  revalidateTradeMiningProfileSurfaces();
+  revalidatePath("/operations/logs");
 }
 
 export async function updateCandidateStatusAction(formData: FormData) {
@@ -796,6 +905,7 @@ function revalidateTradeMiningProfileSurfaces() {
   revalidatePath("/lead-gen/search-profiles");
   revalidatePath("/lead-gen/candidates");
   revalidatePath("/dashboard");
+  revalidatePath("/operations/logs");
 }
 
 function revalidateLeadGenSurfaces() {
@@ -831,6 +941,7 @@ async function setCandidateStatusForCompany(
     },
     data: {
       candidateStatus: status,
+      doNotProspect: status === CandidateStatus.DISQUALIFIED ? true : status === CandidateStatus.REJECTED ? false : false,
       candidateStatusUpdatedAt: new Date(),
       candidateStatusReason:
         status === CandidateStatus.APPROVED_FOR_PIPELINE
@@ -906,6 +1017,7 @@ async function setLeadStageForTenant(
       },
       data: {
         candidateStatus: CandidateStatus.DISQUALIFIED,
+        doNotProspect: true,
         candidateStatusUpdatedAt: new Date(),
         candidateStatusReason: "Pipeline account was disqualified."
       }
@@ -1050,6 +1162,8 @@ function readSearchProfilePayload(formData: FormData) {
     originCountries: readStringList(formData, "originCountries"),
     productKeywords: readStringList(formData, "productKeywords"),
     hsCodes: readStringList(formData, "hsCodes"),
+    allowedCompanyIdentityRoles: readSelectedCompanyIdentityRoles(formData),
+    excludedCompanyKeywords: readStringList(formData, "excludedCompanyKeywords"),
     lookbackWindowDays: readRequiredInteger(formData, "lookbackWindowDays", 1, 365),
     minShipmentCount: readRequiredInteger(formData, "minShipmentCount", 0, 100000),
     minShipmentVolume: minShipmentVolumeNumber,
@@ -1067,6 +1181,23 @@ function readSearchProfilePayload(formData: FormData) {
     enabled: formData.get("enabled") === "true",
     scheduleTimezone: readOptional(formData, "scheduleTimezone") ?? "America/Toronto"
   };
+}
+
+function readSelectedCompanyIdentityRoles(formData: FormData) {
+  const values = formData
+    .getAll("allowedCompanyIdentityRole")
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+
+  if (values.length === 0) {
+    return defaultTradeMiningCompanyIdentityRoles;
+  }
+
+  const allowed = new Set(tradeMiningCompanyIdentityRoleOptions.map((option) => option.value));
+  return values.filter(
+    (value, index, array): value is (typeof tradeMiningCompanyIdentityRoleOptions)[number]["value"] =>
+      allowed.has(value as (typeof tradeMiningCompanyIdentityRoleOptions)[number]["value"]) &&
+      array.indexOf(value) === index
+  );
 }
 
 function readRequired(formData: FormData, field: string) {
