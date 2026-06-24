@@ -1,8 +1,19 @@
 "use client";
 
+import {
+  getFilteredRowModel,
+  flexRender,
+  getCoreRowModel,
+  getSortedRowModel,
+  useReactTable,
+  type ColumnDef
+} from "@tanstack/react-table";
 import { CandidateStatus } from "@prisma/client";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
+import { DataGridColumnMenu } from "@/components/data-grid-column-menu";
+import { IndustryBadge } from "@/components/industry-badge";
+import { usePersistedTableState } from "@/components/use-persisted-table-state";
 import { StageBadge } from "@/components/stage-badge";
 
 type Candidate = {
@@ -20,6 +31,9 @@ type Candidate = {
   latestShipmentDate: Date | null;
   matchedSearchProfileId: string | null;
   matchedSearchProfileName: string;
+  primaryIndustry: string | null;
+  secondaryIndustry: string | null;
+  industryConfidence: number | null;
   destinationMarket: string | null;
   destinationPort: string | null;
   originCountry: string | null;
@@ -41,12 +55,20 @@ export function CandidateReviewTableClient({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [expandedScoreIds, setExpandedScoreIds] = useState<string[]>([]);
   const [expandedProductIds, setExpandedProductIds] = useState<string[]>([]);
+  const {
+    sorting,
+    setSorting,
+    columnFilters,
+    setColumnFilters,
+    columnVisibility,
+    setColumnVisibility,
+    columnSizing,
+    setColumnSizing
+  } = usePersistedTableState("newl-apps:lead-gen:candidates-grid");
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const expandedScoreSet = useMemo(() => new Set(expandedScoreIds), [expandedScoreIds]);
   const expandedProductSet = useMemo(() => new Set(expandedProductIds), [expandedProductIds]);
-
-  const selectableIds = companies.filter((company) => !company.currentPipelineStage).map((company) => company.id);
 
   function toggleSelection(companyId: string) {
     setSelectedIds((current) =>
@@ -67,7 +89,13 @@ export function CandidateReviewTableClient({
   }
 
   function selectAllVisible() {
-    setSelectedIds(selectableIds);
+    setSelectedIds(
+      table
+        .getRowModel()
+        .rows.map((row) => row.original)
+        .filter((company) => !company.currentPipelineStage)
+        .map((company) => company.id)
+    );
   }
 
   function clearSelection() {
@@ -83,6 +111,261 @@ export function CandidateReviewTableClient({
       `Disqualify ${selectedIds.length} compan${selectedIds.length === 1 ? "y" : "ies"}? Disqualified companies will stay out of future TradeMining review pulls unless you manually change their status later.`
     );
   }
+
+  const columns = useMemo<ColumnDef<Candidate>[]>(
+    () => [
+      {
+        id: "select",
+        header: "",
+        enableSorting: false,
+        enableHiding: false,
+        cell: ({ row }) => {
+          const company = row.original;
+          const canSelect = !company.currentPipelineStage;
+
+          if (!canSelect) {
+            return <span className="text-xs text-mutedForeground">-</span>;
+          }
+
+          return (
+            <input
+              type="checkbox"
+              checked={selectedSet.has(company.id)}
+              onChange={() => toggleSelection(company.id)}
+              aria-label={`Select ${company.companyName}`}
+            />
+          );
+        }
+      },
+      {
+        accessorKey: "companyName",
+        header: "Company",
+        filterFn: "includesString",
+        size: 260,
+        cell: ({ row }) => {
+          const company = row.original;
+
+          return (
+            <div className="max-w-[240px]">
+              <p className="font-semibold text-foreground">{company.companyName}</p>
+              <p className="mt-1 text-xs text-mutedForeground">{company.normalizedName}</p>
+              <p className="mt-1 text-xs text-mutedForeground">{company.domain ?? company.source ?? "TradeMining"}</p>
+            </div>
+          );
+        }
+      },
+      {
+        id: "industry",
+        header: "Industry",
+        accessorFn: (company) => company.primaryIndustry ?? company.secondaryIndustry ?? "",
+        filterFn: "includesString",
+        size: 190,
+        cell: ({ row }) => (
+          <IndustryBadge
+            primaryIndustry={row.original.primaryIndustry}
+            secondaryIndustry={row.original.secondaryIndustry}
+            confidence={row.original.industryConfidence}
+          />
+        )
+      },
+      {
+        accessorKey: "candidateScore",
+        header: "Score",
+        filterFn: minimumNumberFilter,
+        size: 360,
+        cell: ({ row }) => {
+          const company = row.original;
+          const isScoreExpanded = expandedScoreSet.has(company.id);
+          const shortReason =
+            company.scoreReasoning.length > 88 ? `${company.scoreReasoning.slice(0, 88).trimEnd()}...` : company.scoreReasoning;
+
+          return (
+            <div className="w-[320px]">
+              <span className="text-xl font-bold text-primary">{company.candidateScore}</span>
+              <p className="mt-2 max-w-[320px] text-xs leading-5 text-mutedForeground">
+                {isScoreExpanded ? company.scoreReasoning : shortReason}
+              </p>
+              {company.scoreReasoning.length > 88 ? (
+                <button
+                  type="button"
+                  onClick={() => toggleScoreExpanded(company.id)}
+                  className="mt-2 text-xs font-semibold text-primary transition-colors hover:text-primaryHover"
+                >
+                  {isScoreExpanded ? "Show less" : "Show more"}
+                </button>
+              ) : null}
+              {company.importedScoreReasoning ? (
+                <p className="mt-2 max-w-[320px] rounded-md border border-border bg-background px-2 py-1 text-xs text-mutedForeground">
+                  Ingested note: {company.importedScoreReasoning}
+                </p>
+              ) : null}
+            </div>
+          );
+        }
+      },
+      {
+        accessorKey: "candidateStatus",
+        header: "Status",
+        filterFn: statusEqualsFilter,
+        size: 180,
+        cell: ({ row }) => {
+          const company = row.original;
+
+          return (
+            <div>
+              <CandidateStatusBadge status={company.candidateStatus} />
+              {company.candidateStatusReason ? (
+                <p className="mt-2 max-w-[170px] text-xs text-mutedForeground">{company.candidateStatusReason}</p>
+              ) : null}
+            </div>
+          );
+        }
+      },
+      {
+        accessorKey: "matchedSearchProfileName",
+        header: "Matched profile",
+        filterFn: "includesString",
+        size: 200,
+        cell: ({ row }) => {
+          const company = row.original;
+
+          return (
+            <div className="max-w-[180px] text-mutedForeground">
+              <p className="font-medium text-foreground">{company.matchedSearchProfileName}</p>
+              <p className="text-xs">{company.matchedSearchProfileId ?? "No profile id"}</p>
+            </div>
+          );
+        }
+      },
+      {
+        accessorKey: "shipmentCount",
+        header: "Shipments",
+        filterFn: minimumNumberFilter,
+        size: 140,
+        cell: ({ row }) => {
+          const company = row.original;
+
+          return (
+            <div className="text-mutedForeground">
+              <p className="font-semibold text-foreground">{company.shipmentCount}</p>
+              <p className="text-xs">Latest {formatDate(company.latestShipmentDate)}</p>
+            </div>
+          );
+        }
+      },
+      {
+        id: "destination",
+        header: "Destination",
+        accessorFn: (company) => company.destinationMarket ?? company.destinationPort ?? "",
+        filterFn: "includesString",
+        size: 180,
+        cell: ({ row }) => (
+          <div className="max-w-[170px] text-mutedForeground">
+            {row.original.destinationMarket ?? row.original.destinationPort ?? "Unknown"}
+          </div>
+        )
+      },
+      {
+        id: "origin",
+        header: "Origin",
+        accessorFn: (company) => [company.originCountry, company.originPort, company.shipFromPort].filter(Boolean).join(" / "),
+        filterFn: "includesString",
+        size: 210,
+        cell: ({ row }) => (
+          <div className="max-w-[190px] text-mutedForeground">
+            {[row.original.originCountry, row.original.originPort, row.original.shipFromPort].filter(Boolean).join(" / ") ||
+              "Unknown"}
+          </div>
+        )
+      },
+      {
+        id: "product",
+        header: "Product / HS",
+        accessorFn: (company) => `${company.productDescription ?? ""} ${company.hsCode ?? ""}`.trim(),
+        filterFn: "includesString",
+        size: 270,
+        cell: ({ row }) => {
+          const company = row.original;
+          const isProductExpanded = expandedProductSet.has(company.id);
+          const productSummary = company.productDescription ?? "Unknown product";
+          const hsSummary = company.hsCode ? `HS: ${company.hsCode}` : "HS: Unknown";
+          const combinedProductText = `${productSummary} ${hsSummary}`;
+          const showProductToggle = combinedProductText.length > 72;
+
+          return (
+            <div className="w-[250px] text-mutedForeground">
+              {isProductExpanded ? (
+                <>
+                  <p>{productSummary}</p>
+                  <p className="mt-1 break-all text-xs">{hsSummary}</p>
+                </>
+              ) : (
+                <>
+                  <p className="line-clamp-2">{productSummary}</p>
+                  <p className="mt-1 line-clamp-1 break-all text-xs">{hsSummary}</p>
+                </>
+              )}
+              {showProductToggle ? (
+                <button
+                  type="button"
+                  onClick={() => toggleProductExpanded(company.id)}
+                  className="mt-2 text-xs font-semibold text-primary transition-colors hover:text-primaryHover"
+                >
+                  {isProductExpanded ? "Show less" : "Show more"}
+                </button>
+              ) : null}
+            </div>
+          );
+        }
+      },
+      {
+        accessorKey: "assignedRep",
+        header: "Rep",
+        filterFn: "includesString",
+        size: 150
+      },
+      {
+        accessorKey: "currentPipelineStage",
+        header: "Pipeline",
+        filterFn: "includesString",
+        size: 150,
+        cell: ({ row }) => {
+          const company = row.original;
+
+          return company.currentPipelineStage ? (
+            <div className="space-y-2">
+              <StageBadge stage={company.currentPipelineStage} />
+              <Link className="block text-xs font-semibold text-primary hover:text-primaryHover" href="/lead-gen/pipeline">
+                In Pipeline
+              </Link>
+            </div>
+          ) : (
+            <span className="text-xs font-medium text-mutedForeground">Not approved</span>
+          );
+        }
+      }
+    ],
+    [expandedProductSet, expandedScoreSet, selectedSet]
+  );
+
+  const table = useReactTable({
+    data: companies,
+    columns,
+    state: {
+      sorting,
+      columnFilters,
+      columnVisibility,
+      columnSizing
+    },
+    onSortingChange: setSorting,
+    onColumnFiltersChange: setColumnFilters,
+    onColumnVisibilityChange: setColumnVisibility,
+    onColumnSizingChange: setColumnSizing,
+    getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    columnResizeMode: "onChange"
+  });
 
   return (
     <form action={bulkUpdateAction}>
@@ -105,7 +388,8 @@ export function CandidateReviewTableClient({
           <span className="text-xs text-mutedForeground">{selectedIds.length} selected</span>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <DataGridColumnMenu table={table} />
           <BulkStatusButton status={CandidateStatus.REVIEWING} disabled={selectedIds.length === 0}>
             Mark reviewing
           </BulkStatusButton>
@@ -130,132 +414,62 @@ export function CandidateReviewTableClient({
       ))}
 
       <div className="overflow-x-auto">
-        <table className="min-w-[1320px] divide-y divide-border text-sm">
+        <table className="min-w-[1500px] divide-y divide-border text-sm">
           <thead className="bg-muted text-left text-xs font-semibold uppercase text-mutedForeground">
+            {table.getHeaderGroups().map((headerGroup) => (
+              <tr key={headerGroup.id}>
+                {headerGroup.headers.map((header) => {
+                  const canSort = header.column.getCanSort();
+                  const sortDirection = header.column.getIsSorted();
+
+                  return (
+                    <th
+                      key={header.id}
+                      className="relative px-4 py-3"
+                      style={{ width: header.getSize() }}
+                    >
+                      {header.isPlaceholder ? null : canSort ? (
+                        <button
+                          type="button"
+                          onClick={header.column.getToggleSortingHandler()}
+                          className="inline-flex items-center gap-2 transition-colors hover:text-foreground"
+                        >
+                          <span>{flexRender(header.column.columnDef.header, header.getContext())}</span>
+                          <SortIndicator direction={sortDirection} />
+                        </button>
+                      ) : (
+                        flexRender(header.column.columnDef.header, header.getContext())
+                      )}
+                      {header.column.getCanResize() ? (
+                        <div
+                          onMouseDown={header.getResizeHandler()}
+                          onTouchStart={header.getResizeHandler()}
+                          className="absolute right-0 top-0 h-full w-2 cursor-col-resize select-none touch-none bg-transparent transition-colors hover:bg-primary/20"
+                        />
+                      ) : null}
+                    </th>
+                  );
+                })}
+              </tr>
+            ))}
             <tr>
-              <th className="w-12 px-4 py-3"></th>
-              <th className="px-4 py-3">Company</th>
-              <th className="px-4 py-3">Score</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Matched profile</th>
-              <th className="px-4 py-3">Shipments</th>
-              <th className="px-4 py-3">Destination</th>
-              <th className="px-4 py-3">Origin</th>
-              <th className="px-4 py-3">Product / HS</th>
-              <th className="px-4 py-3">Rep</th>
-              <th className="px-4 py-3">Pipeline</th>
+              {table.getVisibleLeafColumns().map((column) => (
+                <th key={`${column.id}-filter`} className="border-t border-border px-4 py-2 align-top normal-case">
+                  <ColumnFilterControl column={column} />
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {companies.map((company) => {
-              const isSelected = selectedSet.has(company.id);
-              const isScoreExpanded = expandedScoreSet.has(company.id);
-              const isProductExpanded = expandedProductSet.has(company.id);
-              const canSelect = !company.currentPipelineStage;
-              const shortReason =
-                company.scoreReasoning.length > 88 ? `${company.scoreReasoning.slice(0, 88).trimEnd()}...` : company.scoreReasoning;
-              const productSummary = company.productDescription ?? "Unknown product";
-              const hsSummary = company.hsCode ? `HS: ${company.hsCode}` : "HS: Unknown";
-              const combinedProductText = `${productSummary} ${hsSummary}`;
-              const showProductToggle = combinedProductText.length > 72;
-
-              return (
-                <tr key={company.id} className="align-top transition-colors hover:bg-muted/60">
-                  <td className="px-4 py-4">
-                    {canSelect ? (
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => toggleSelection(company.id)}
-                        aria-label={`Select ${company.companyName}`}
-                      />
-                    ) : (
-                      <span className="text-xs text-mutedForeground">-</span>
-                    )}
+            {table.getRowModel().rows.map((row) => (
+              <tr key={row.id} className="align-top transition-colors hover:bg-muted/60">
+                {row.getVisibleCells().map((cell) => (
+                  <td key={cell.id} className="px-4 py-4 align-top" style={{ width: cell.column.getSize() }}>
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </td>
-                  <td className="max-w-[240px] px-4 py-4">
-                    <p className="font-semibold text-foreground">{company.companyName}</p>
-                    <p className="mt-1 text-xs text-mutedForeground">{company.normalizedName}</p>
-                    <p className="mt-1 text-xs text-mutedForeground">{company.domain ?? company.source ?? "TradeMining"}</p>
-                  </td>
-                  <td className="w-[320px] px-4 py-4">
-                    <span className="text-xl font-bold text-primary">{company.candidateScore}</span>
-                    <p className="mt-2 max-w-[320px] text-xs leading-5 text-mutedForeground">
-                      {isScoreExpanded ? company.scoreReasoning : shortReason}
-                    </p>
-                    {company.scoreReasoning.length > 88 ? (
-                      <button
-                        type="button"
-                        onClick={() => toggleScoreExpanded(company.id)}
-                        className="mt-2 text-xs font-semibold text-primary transition-colors hover:text-primaryHover"
-                      >
-                        {isScoreExpanded ? "Show less" : "Show more"}
-                      </button>
-                    ) : null}
-                    {company.importedScoreReasoning ? (
-                      <p className="mt-2 max-w-[320px] rounded-md border border-border bg-background px-2 py-1 text-xs text-mutedForeground">
-                        Ingested note: {company.importedScoreReasoning}
-                      </p>
-                    ) : null}
-                  </td>
-                  <td className="px-4 py-4">
-                    <CandidateStatusBadge status={company.candidateStatus} />
-                    {company.candidateStatusReason ? (
-                      <p className="mt-2 max-w-[170px] text-xs text-mutedForeground">{company.candidateStatusReason}</p>
-                    ) : null}
-                  </td>
-                  <td className="max-w-[180px] px-4 py-4 text-mutedForeground">
-                    <p className="font-medium text-foreground">{company.matchedSearchProfileName}</p>
-                    <p className="text-xs">{company.matchedSearchProfileId ?? "No profile id"}</p>
-                  </td>
-                  <td className="px-4 py-4 text-mutedForeground">
-                    <p className="font-semibold text-foreground">{company.shipmentCount}</p>
-                    <p className="text-xs">Latest {formatDate(company.latestShipmentDate)}</p>
-                  </td>
-                  <td className="max-w-[170px] px-4 py-4 text-mutedForeground">
-                    {company.destinationMarket ?? company.destinationPort ?? "Unknown"}
-                  </td>
-                  <td className="max-w-[190px] px-4 py-4 text-mutedForeground">
-                    {[company.originCountry, company.originPort, company.shipFromPort].filter(Boolean).join(" / ") || "Unknown"}
-                  </td>
-                  <td className="w-[250px] px-4 py-4 text-mutedForeground">
-                    {isProductExpanded ? (
-                      <>
-                        <p>{productSummary}</p>
-                        <p className="mt-1 break-all text-xs">{hsSummary}</p>
-                      </>
-                    ) : (
-                      <>
-                        <p className="line-clamp-2">{productSummary}</p>
-                        <p className="mt-1 line-clamp-1 break-all text-xs">{hsSummary}</p>
-                      </>
-                    )}
-                    {showProductToggle ? (
-                      <button
-                        type="button"
-                        onClick={() => toggleProductExpanded(company.id)}
-                        className="mt-2 text-xs font-semibold text-primary transition-colors hover:text-primaryHover"
-                      >
-                        {isProductExpanded ? "Show less" : "Show more"}
-                      </button>
-                    ) : null}
-                  </td>
-                  <td className="px-4 py-4 text-mutedForeground">{company.assignedRep}</td>
-                  <td className="px-4 py-4">
-                    {company.currentPipelineStage ? (
-                      <div className="space-y-2">
-                        <StageBadge stage={company.currentPipelineStage} />
-                        <Link className="block text-xs font-semibold text-primary hover:text-primaryHover" href="/lead-gen/pipeline">
-                          In Pipeline
-                        </Link>
-                      </div>
-                    ) : (
-                      <span className="text-xs font-medium text-mutedForeground">Not approved</span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
+                ))}
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
@@ -273,7 +487,7 @@ function BulkStatusButton({
   status: CandidateStatus;
   disabled: boolean;
   primary?: boolean;
-  children: React.ReactNode;
+  children: ReactNode;
   onBeforeSubmit?: () => boolean;
 }) {
   return (
@@ -325,4 +539,90 @@ function formatDate(value: Date | null) {
     day: "numeric",
     year: "numeric"
   }).format(new Date(value));
+}
+
+function SortIndicator({ direction }: { direction: false | "asc" | "desc" }) {
+  if (!direction) {
+    return <span className="text-[10px] text-mutedForeground">-</span>;
+  }
+
+  return <span className="text-[10px] text-foreground">{direction === "asc" ? "▲" : "▼"}</span>;
+}
+
+function ColumnFilterControl({
+  column
+}: {
+  column: ReturnType<ReturnType<typeof useReactTable<Candidate>>["getVisibleLeafColumns"]>[number];
+}) {
+  const value = column.getFilterValue();
+
+  if (column.id === "select") {
+    return null;
+  }
+
+  if (column.id === "candidateStatus") {
+    return (
+      <select
+        value={typeof value === "string" ? value : ""}
+        onChange={(event) => column.setFilterValue(event.target.value || undefined)}
+        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+      >
+        <option value="">All</option>
+        <option value="new">New</option>
+        <option value="reviewing">Reviewing</option>
+        <option value="approved for pipeline">Approved</option>
+        <option value="rejected">Rejected</option>
+        <option value="disqualified">Disqualified</option>
+      </select>
+    );
+  }
+
+  if (column.id === "candidateScore" || column.id === "shipmentCount") {
+    return (
+      <input
+        type="number"
+        min="0"
+        value={typeof value === "number" || typeof value === "string" ? String(value) : ""}
+        onChange={(event) => column.setFilterValue(event.target.value)}
+        placeholder="Min"
+        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+      />
+    );
+  }
+
+  return (
+    <input
+      type="text"
+      value={typeof value === "string" ? value : ""}
+      onChange={(event) => column.setFilterValue(event.target.value)}
+      placeholder="Filter"
+      className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+    />
+  );
+}
+
+function minimumNumberFilter(row: { getValue: (columnId: string) => unknown }, columnId: string, filterValue: unknown) {
+  if (filterValue === undefined || filterValue === null || filterValue === "") {
+    return true;
+  }
+
+  const numericFilter = Number(filterValue);
+  if (Number.isNaN(numericFilter)) {
+    return true;
+  }
+
+  const value = Number(row.getValue(columnId));
+  return !Number.isNaN(value) && value >= numericFilter;
+}
+
+function statusEqualsFilter(row: { getValue: (columnId: string) => unknown }, columnId: string, filterValue: unknown) {
+  if (!filterValue || typeof filterValue !== "string") {
+    return true;
+  }
+
+  const value = String(row.getValue(columnId) ?? "")
+    .replaceAll("_", " ")
+    .toLowerCase();
+
+  return value.includes(filterValue.toLowerCase());
 }

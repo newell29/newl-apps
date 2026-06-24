@@ -55,6 +55,7 @@ export type ApolloContactLookupResult = {
   organizationId: string | null;
   companyName: string | null;
   domain: string | null;
+  linkedinUrl: string | null;
   contacts: ApolloContactRecord[];
 };
 
@@ -154,7 +155,8 @@ export async function fetchApolloContactsForCompany(
       ? {
           id: input.apolloOrganizationId.trim(),
           name: input.companyName,
-          domain: normalizeDomain(input.domain)
+          domain: normalizeDomain(input.domain),
+          linkedinUrl: null
         }
       : await findApolloOrganization(input, apiKey);
 
@@ -176,6 +178,7 @@ export async function fetchApolloContactsForCompany(
     organizationId: matchedOrganization?.id ?? null,
     companyName: matchedOrganization?.name ?? input.companyName,
     domain: matchedOrganization?.domain ?? normalizeDomain(input.domain),
+    linkedinUrl: matchedOrganization?.linkedinUrl ?? null,
     contacts: dedupeApolloContacts(contactsFromApollo)
   };
 }
@@ -384,7 +387,7 @@ function parseApolloOrganizations(payload: Record<string, unknown>) {
     ...readApolloArray(payload, ["data"])
   ];
 
-  const deduped = new Map<string, { id: string | null; name: string | null; domain: string | null }>();
+  const deduped = new Map<string, { id: string | null; name: string | null; domain: string | null; linkedinUrl: string | null }>();
 
   for (const candidate of candidates) {
     const record = asRecord(candidate);
@@ -397,14 +400,21 @@ function parseApolloOrganizations(payload: Record<string, unknown>) {
     const domain = normalizeDomain(
       readApolloString(record, ["primary_domain", "website_url", "domain", "apollo_domain"])
     );
+    const linkedinUrl = readApolloString(record, [
+      "linkedin_url",
+      "organization_linkedin_url",
+      "company_linkedin_url",
+      "linkedin",
+      "linkedin_profile_url"
+    ]);
 
-    if (!id && !name && !domain) {
+    if (!id && !name && !domain && !linkedinUrl) {
       continue;
     }
 
-    const key = [id, name?.toLowerCase() ?? "", domain ?? ""].join("|");
+    const key = [id, name?.toLowerCase() ?? "", domain ?? "", linkedinUrl ?? ""].join("|");
     if (!deduped.has(key)) {
-      deduped.set(key, { id, name, domain });
+      deduped.set(key, { id, name, domain, linkedinUrl });
     }
   }
 
