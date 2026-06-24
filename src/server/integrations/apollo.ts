@@ -59,6 +59,16 @@ export type ApolloContactLookupResult = {
   contacts: ApolloContactRecord[];
 };
 
+type ApolloOrganizationCandidate = {
+  id: string | null;
+  name: string | null;
+  domain: string | null;
+  linkedinUrl: string | null;
+  score: number;
+  nameMatchType: "EXACT" | "PARTIAL" | "NONE";
+  domainMatch: boolean;
+};
+
 type ApolloUsersResponse = {
   users?: unknown;
   data?: unknown;
@@ -150,35 +160,51 @@ export async function fetchApolloContactsForCompany(
   input: ApolloCompanyLookupInput
 ): Promise<ApolloContactLookupResult> {
   const apiKey = readApolloSearchApiKey();
-  const matchedOrganization =
+  const providedOrganizationId =
     input.apolloOrganizationId?.trim() && input.apolloOrganizationId !== "null"
-      ? {
-          id: input.apolloOrganizationId.trim(),
-          name: input.companyName,
-          domain: normalizeDomain(input.domain),
-          linkedinUrl: null
-        }
-      : await findApolloOrganization(input, apiKey);
+      ? input.apolloOrganizationId.trim()
+      : null;
+  const matchedOrganization = await findApolloOrganization(input, apiKey);
+  const trustedMatchedOrganization = isStrongApolloOrganizationCandidate(matchedOrganization) ? matchedOrganization : null;
+  const preferredOrganizationId = providedOrganizationId ?? trustedMatchedOrganization?.id ?? null;
 
-  const contactsFromApollo =
+  let contactsFromApollo =
     (await searchApolloContacts({
       apiKey,
       companyName: input.companyName,
       domain: input.domain,
-      organizationId: matchedOrganization?.id ?? null
+      organizationId: preferredOrganizationId
     })) ??
     (await searchApolloPeople({
       apiKey,
       companyName: input.companyName,
       domain: input.domain,
-      organizationId: matchedOrganization?.id ?? null
-    }));
+      organizationId: preferredOrganizationId
+    })) ??
+    [];
+
+  if (contactsFromApollo.length === 0 && preferredOrganizationId) {
+    contactsFromApollo =
+      (await searchApolloContacts({
+        apiKey,
+        companyName: input.companyName,
+        domain: input.domain,
+        organizationId: null
+      })) ??
+      (await searchApolloPeople({
+        apiKey,
+        companyName: input.companyName,
+        domain: input.domain,
+        organizationId: null
+      })) ??
+      [];
+  }
 
   return {
-    organizationId: matchedOrganization?.id ?? null,
-    companyName: matchedOrganization?.name ?? input.companyName,
-    domain: matchedOrganization?.domain ?? normalizeDomain(input.domain),
-    linkedinUrl: matchedOrganization?.linkedinUrl ?? null,
+    organizationId: trustedMatchedOrganization?.id ?? null,
+    companyName: trustedMatchedOrganization?.name ?? input.companyName,
+    domain: trustedMatchedOrganization?.domain ?? normalizeDomain(input.domain),
+    linkedinUrl: trustedMatchedOrganization?.linkedinUrl ?? null,
     contacts: dedupeApolloContacts(contactsFromApollo)
   };
 }
@@ -214,7 +240,7 @@ function buildApolloHeaders(apiKey: string) {
   };
 }
 
-async function findApolloOrganization(input: ApolloCompanyLookupInput, apiKey: string) {
+async function findApolloOrganization(input: ApolloCompanyLookupInput, apiKey: string): Promise<ApolloOrganizationCandidate | null> {
   const normalizedDomain = normalizeDomain(input.domain);
   const body = {
     page: 1,
@@ -232,12 +258,11 @@ async function findApolloOrganization(input: ApolloCompanyLookupInput, apiKey: s
     return null;
   }
 
-  return candidates
-    .map((candidate) => ({
-      ...candidate,
-      score: scoreApolloOrganizationCandidate(candidate, input.companyName, normalizedDomain)
-    }))
-    .sort((left, right) => right.score - left.score)[0] ?? null;
+  return (
+    candidates
+      .map((candidate) => scoreApolloOrganizationCandidate(candidate, input.companyName, normalizedDomain))
+      .sort((left, right) => right.score - left.score)[0] ?? null
+  );
 }
 
 async function searchApolloContacts({
@@ -554,34 +579,59 @@ function dedupeApolloSequences(entries: ApolloSequenceDirectoryEntry[]) {
 }
 
 function scoreApolloOrganizationCandidate(
-  candidate: { id: string | null; name: string | null; domain: string | null },
+  candidate: { id: string | null; name: string | null; domain: string | null; linkedinUrl: string | null },
   companyName: string,
   normalizedDomain: string | null
-) {
+): ApolloOrganizationCandidate {
   let score = 0;
+  let nameMatchType: ApolloOrganizationCandidate["nameMatchType"] = "NONE";
+  const normalizedInputName = normalizeCompanyName(companyName);
 
   if (candidate.id) {
     score += 4;
   }
 
-  if (normalizedDomain && candidate.domain === normalizedDomain) {
+  const domainMatch = Boolean(normalizedDomain && candidate.domain === normalizedDomain);
+  if (domainMatch) {
     score += 10;
   }
 
   if (candidate.name) {
     const normalizedCandidateName = normalizeCompanyName(candidate.name);
-    const normalizedInputName = normalizeCompanyName(companyName);
     if (normalizedCandidateName === normalizedInputName) {
+      nameMatchType = "EXACT";
       score += 8;
     } else if (
       normalizedCandidateName.includes(normalizedInputName) ||
       normalizedInputName.includes(normalizedCandidateName)
     ) {
+      nameMatchType = "PARTIAL";
       score += 4;
     }
   }
 
-  return score;
+  return {
+    ...candidate,
+    score,
+    nameMatchType,
+    domainMatch
+  };
+}
+
+function isStrongApolloOrganizationCandidate(candidate: ApolloOrganizationCandidate | null) {
+  if (!candidate?.id) {
+    return false;
+  }
+
+  if (candidate.domainMatch) {
+    return true;
+  }
+
+  if (candidate.nameMatchType === "EXACT") {
+    return true;
+  }
+
+  return candidate.nameMatchType === "PARTIAL" && candidate.score >= 8;
 }
 
 function scoreApolloContactEntry(entry: ApolloContactRecord) {

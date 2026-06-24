@@ -47,7 +47,23 @@ const INDUSTRY_RULES = [
   {
     label: "Logistics / Carrier / Forwarder",
     hsPrefixes: [],
-    keywords: ["steamship", "carrier", "shipping line", "freight forwarder", "customs broker", "logistics services"]
+    keywords: [
+      "steamship",
+      "carrier",
+      "shipping line",
+      "freight forwarder",
+      "customs broker",
+      "logistics services",
+      "logistics",
+      "distribution",
+      "warehouse",
+      "warehousing",
+      "fulfillment",
+      "transport",
+      "trucking",
+      "drayage",
+      "3pl"
+    ]
   }
 ] as const;
 
@@ -63,6 +79,8 @@ export type IndustryClassification = {
 export function classifyTradeMiningIndustry(input: {
   productDescription?: string | null;
   hsCode?: string | null;
+  companyName?: string | null;
+  domain?: string | null;
 }): IndustryClassification {
   return classifyTradeMiningIndustryFromRecords([input]);
 }
@@ -71,6 +89,8 @@ export function classifyTradeMiningIndustryFromRecords(
   records: Array<{
     productDescription?: string | null;
     hsCode?: string | null;
+    companyName?: string | null;
+    domain?: string | null;
   }>
 ): IndustryClassification {
   const industryScores = new Map<string, number>();
@@ -79,6 +99,7 @@ export function classifyTradeMiningIndustryFromRecords(
   for (const record of records) {
     const hsCode = normalizeHsCode(record.hsCode);
     const productText = normalizeText(record.productDescription);
+    const companyText = normalizeText([record.companyName, record.domain].filter(Boolean).join(" "));
 
     for (const rule of INDUSTRY_RULES) {
       let score = 0;
@@ -91,6 +112,12 @@ export function classifyTradeMiningIndustryFromRecords(
       const keywordMatches = rule.keywords.filter((keyword) => productText.includes(keyword)).length;
       if (keywordMatches > 0) {
         score += keywordMatches * 3;
+        signalSources.add("KEYWORD");
+      }
+
+      const companyKeywordMatches = rule.keywords.filter((keyword) => companyText.includes(keyword)).length;
+      if (companyKeywordMatches > 0) {
+        score += companyKeywordMatches * 2;
         signalSources.add("KEYWORD");
       }
 

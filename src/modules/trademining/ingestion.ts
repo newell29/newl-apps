@@ -449,25 +449,36 @@ export async function ingestTradeMiningBatch(tenant: TenantContext, payload: unk
 }
 
 async function refreshCompanyIndustry(tenantId: string, companyId: string) {
-  const records = await prisma.tradeMiningImportRecord.findMany({
-    where: {
-      tenantId,
-      companyId
-    },
-    orderBy: [
-      {
-        arrivalDate: "desc"
+  const [company, records] = await Promise.all([
+    prisma.company.findUnique({
+      where: {
+        id: companyId
       },
-      {
-        createdAt: "desc"
+      select: {
+        name: true,
+        domain: true
       }
-    ],
-    take: 100,
-    select: {
-      productDescription: true,
-      rawJson: true
-    }
-  });
+    }),
+    prisma.tradeMiningImportRecord.findMany({
+      where: {
+        tenantId,
+        companyId
+      },
+      orderBy: [
+        {
+          arrivalDate: "desc"
+        },
+        {
+          createdAt: "desc"
+        }
+      ],
+      take: 100,
+      select: {
+        productDescription: true,
+        rawJson: true
+      }
+    })
+  ]);
 
   const industry = classifyTradeMiningIndustryFromRecords(
     records.map((record) => {
@@ -480,7 +491,9 @@ async function refreshCompanyIndustry(tenantId: string, companyId: string) {
       const rawHsCode = typeof rawJson.hsCode === "string" ? rawJson.hsCode : null;
       return {
         productDescription: record.productDescription ?? rawProductDescription,
-        hsCode: rawHsCode
+        hsCode: rawHsCode,
+        companyName: company?.name ?? null,
+        domain: company?.domain ?? null
       };
     })
   );

@@ -317,6 +317,7 @@ export async function bulkQueueApolloEnrichmentAction(formData: FormData) {
   const context = await authorizeLeadGenAdminMutation();
   const leadIds = readSelectedIds(formData, "leadId");
   const queuedAt = new Date().toISOString();
+  const requestNote = `Apollo enrichment requested on ${queuedAt}.`;
 
   for (const leadId of leadIds) {
     const lead = await prisma.lead.findFirst({
@@ -387,12 +388,14 @@ export async function bulkQueueApolloEnrichmentAction(formData: FormData) {
       }
     });
 
+    const queuedNotes = appendLeadNote(lead.notes ?? null, requestNote);
+
     await prisma.lead.update({
       where: {
         id: leadId
       },
       data: {
-        notes: appendLeadNote(lead.notes ?? null, `Apollo enrichment requested on ${queuedAt}.`)
+        notes: queuedNotes
       }
     });
 
@@ -446,10 +449,7 @@ export async function bulkQueueApolloEnrichmentAction(formData: FormData) {
         id: leadId
       },
       data: {
-        notes: appendLeadNote(
-          appendLeadNote(lead.notes ?? null, `Apollo enrichment requested on ${queuedAt}.`),
-          completionNote
-        )
+        notes: appendLeadNote(queuedNotes, completionNote)
       }
     });
   }

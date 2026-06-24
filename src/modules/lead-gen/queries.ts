@@ -258,6 +258,8 @@ export async function getCandidateFeed(tenant: TenantContext, filters: Candidate
         config: scoringConfig
       });
       const industry = resolveCompanyIndustry({
+        companyName: company.name,
+        domain: company.domain,
         primaryIndustry: company.primaryIndustry,
         secondaryIndustry: company.secondaryIndustry,
         industryConfidence: company.industryConfidence,
@@ -661,6 +663,8 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
     const sequenceStatus = summarizeSequenceStatus(contacts);
     const sequenceReadiness = summarizeSequenceReadiness(contacts);
     const industry = resolveCompanyIndustry({
+      companyName: lead.company.name,
+      domain: lead.company.domain,
       primaryIndustry: lead.company.primaryIndustry,
       secondaryIndustry: lead.company.secondaryIndustry,
       industryConfidence: lead.company.industryConfidence,
@@ -2052,12 +2056,16 @@ function matchesFoundCompanyQuery(
 }
 
 function resolveCompanyIndustry({
+  companyName,
+  domain,
   primaryIndustry,
   secondaryIndustry,
   industryConfidence,
   industrySource,
   importRecords
 }: {
+  companyName: string;
+  domain: string | null;
   primaryIndustry: string | null;
   secondaryIndustry: string | null;
   industryConfidence: number | null;
@@ -2081,7 +2089,9 @@ function resolveCompanyIndustry({
       const rawJson = asObject(record.rawJson);
       return {
         productDescription: record.productDescription ?? readString(rawJson, "productDescription"),
-        hsCode: readString(rawJson, "hsCode")
+        hsCode: readString(rawJson, "hsCode"),
+        companyName,
+        domain
       };
     })
   );
