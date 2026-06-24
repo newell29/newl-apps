@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/page-header";
 import { ShipmentRateQuoteClient } from "@/modules/ups-tools/components/shipment-rate-quote-client";
 import { getUpsToolsShell } from "@/modules/ups-tools/queries";
 import { requireModule } from "@/server/auth/authorization";
+import { isUpsRuntimeConfigured } from "@/server/integrations/ups";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +23,7 @@ export default async function ShipmentRateQuotePage() {
 
       <ShipmentRateQuoteClient
         accounts={shell.accounts}
-        liveBridgeEnabled={Boolean(process.env.UPS_DEV_ACCOUNTS_FILE)}
+        liveBridgeEnabled={isUpsRuntimeConfigured()}
         plannedSources={shell.plannedSources}
         recentBulkJobs={shell.recentBulkJobs}
       />
