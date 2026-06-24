@@ -1,4 +1,5 @@
 import { PageHeader } from "@/components/page-header";
+import { InfoHint } from "@/components/info-hint";
 import { SearchProfileCadenceManager } from "@/modules/settings/components/search-profile-cadence-manager";
 import {
   createCarrierPlaceholderAction,
@@ -1135,23 +1136,6 @@ function FieldLabel({ label, info }: { label: string; info?: string }) {
     <span className="flex items-center gap-2">
       <span>{label}</span>
       {info ? <InfoHint text={info} /> : null}
-    </span>
-  );
-}
-
-function InfoHint({ text }: { text: string }) {
-  return (
-    <span className="group relative inline-flex">
-      <span
-        className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-border bg-muted text-[10px] font-semibold text-mutedForeground"
-        aria-label={text}
-        title={text}
-      >
-        i
-      </span>
-      <span className="pointer-events-none absolute left-1/2 top-6 z-20 hidden w-64 -translate-x-1/2 rounded-md border border-border bg-card px-3 py-2 text-xs font-normal leading-5 text-foreground shadow-lg group-hover:block">
-        {text}
-      </span>
     </span>
   );
 }

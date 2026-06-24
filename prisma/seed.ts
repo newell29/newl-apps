@@ -12,7 +12,10 @@ import {
   SequenceStatus,
   LeadPipelineStage
 } from "@prisma/client";
-import { assertValidTradeMiningSearchProfile } from "@/modules/lead-gen/search-profile-validation";
+import {
+  assertValidTradeMiningSearchProfile,
+  defaultTradeMiningCompanyIdentityRoles
+} from "@/modules/lead-gen/search-profile-validation";
 import { recommendSequenceForContact } from "@/modules/lead-gen/sequence-catalog";
 import { seedLtlTenantDefaults } from "@/modules/ltl-rate-portal/queries";
 import { DEFAULT_TRADEMINING_SCORING_SETTINGS } from "@/modules/settings/types";
@@ -334,6 +337,8 @@ async function main() {
       originCountries: ["China", "Vietnam", "India"],
       productKeywords: ["furniture", "fixtures", "home goods", "building materials"],
       hsCodes: ["9403", "9405", "3926"],
+      allowedCompanyIdentityRoles: defaultTradeMiningCompanyIdentityRoles,
+      excludedCompanyKeywords: ["maersk", "msc", "hapag", "cma cgm", "cosco", "evergreen", "one", "zim"],
       lookbackWindowDays: 90,
       minShipmentCount: 3,
       minShipmentVolume: 25,
@@ -357,6 +362,8 @@ async function main() {
       originCountries: ["Vietnam", "Thailand", "South Korea", "Taiwan"],
       productKeywords: ["consumer goods", "retail fixtures", "apparel", "outdoor"],
       hsCodes: ["6109", "6204", "9506", "9403"],
+      allowedCompanyIdentityRoles: defaultTradeMiningCompanyIdentityRoles,
+      excludedCompanyKeywords: ["maersk", "msc", "hapag", "cma cgm", "cosco", "evergreen", "one", "zim"],
       lookbackWindowDays: 120,
       minShipmentCount: 2,
       minShipmentVolume: 10,
@@ -392,6 +399,8 @@ async function main() {
         originCountries: profile.originCountries,
         productKeywords: profile.productKeywords,
         hsCodes: profile.hsCodes,
+        allowedCompanyIdentityRoles: profile.allowedCompanyIdentityRoles,
+        excludedCompanyKeywords: profile.excludedCompanyKeywords,
         lookbackWindowDays: profile.lookbackWindowDays,
         minShipmentCount: profile.minShipmentCount,
         minShipmentVolume: profile.minShipmentVolume,
@@ -413,6 +422,8 @@ async function main() {
         originCountries: profile.originCountries,
         productKeywords: profile.productKeywords,
         hsCodes: profile.hsCodes,
+        allowedCompanyIdentityRoles: profile.allowedCompanyIdentityRoles,
+        excludedCompanyKeywords: profile.excludedCompanyKeywords,
         lookbackWindowDays: profile.lookbackWindowDays,
         minShipmentCount: profile.minShipmentCount,
         minShipmentVolume: profile.minShipmentVolume,

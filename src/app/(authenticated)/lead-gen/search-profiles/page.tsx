@@ -2,9 +2,14 @@ import { PageHeader } from "@/components/page-header";
 import {
   createTradeMiningSearchProfileAction,
   deleteTradeMiningSearchProfileAction,
+  requestTradeMiningSearchProfileRunAction,
   updateTradeMiningSearchProfileAction
 } from "@/modules/lead-gen/actions";
 import { MultiValueSuggestField } from "@/modules/lead-gen/components/multi-value-suggest-field";
+import {
+  defaultTradeMiningCompanyIdentityRoles,
+  tradeMiningCompanyIdentityRoleOptions
+} from "@/modules/lead-gen/search-profile-validation";
 import { getTradeMiningSearchProfiles } from "@/modules/lead-gen/queries";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -75,10 +80,16 @@ export default async function SearchProfilesPage() {
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="text-lg font-semibold text-foreground">{profile.name}</h3>
                     <StatusBadge enabled={profile.enabled} />
+                    {profile.pendingRunStatus ? <PendingRunBadge status={profile.pendingRunStatus} /> : null}
                   </div>
                   <p className="mt-2 text-sm leading-6 text-mutedForeground">
                     Last run: {formatLastRun(profile.lastRunAt, profile.lastRunStatus)}
                   </p>
+                  {profile.pendingRunRequestedAt ? (
+                    <p className="mt-1 text-xs text-primary">
+                      Immediate run requested {profile.pendingRunRequestedAt.toLocaleString("en-US")}
+                    </p>
+                  ) : null}
                 </div>
                 <span className="rounded-full border border-accentBorder bg-accentSoft px-3 py-1 text-xs font-semibold text-primary">
                   Weight {profile.priorityWeight}
@@ -100,6 +111,8 @@ export default async function SearchProfilesPage() {
                       originCountries: profile.originCountries.join("\n"),
                       productKeywords: profile.productKeywords.join("\n"),
                       hsCodes: profile.hsCodes.join("\n"),
+                      allowedCompanyIdentityRoles: profile.allowedCompanyIdentityRoles,
+                      excludedCompanyKeywords: profile.excludedCompanyKeywords.join("\n"),
                       lookbackWindowDays: profile.lookbackWindowDays,
                       minShipmentCount: profile.minShipmentCount,
                       minShipmentVolume: profile.minShipmentVolume ?? "",
@@ -113,6 +126,20 @@ export default async function SearchProfilesPage() {
                       Save profile
                     </button>
                   </div>
+                </form>
+
+                <form action={requestTradeMiningSearchProfileRunAction} className="mt-3">
+                  <input type="hidden" name="profileId" value={profile.id} />
+                  <button
+                    disabled={Boolean(profile.pendingRunStatus) || !profile.enabled}
+                    className="rounded-md border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-accentSoft disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {profile.pendingRunStatus
+                      ? profile.pendingRunStatus === "RUNNING"
+                        ? "Run in progress"
+                        : "Run requested"
+                      : "Run now"}
+                  </button>
                 </form>
 
                 <form action={deleteTradeMiningSearchProfileAction} className="mt-3">
@@ -150,6 +177,8 @@ function SearchProfileForm({
     originCountries: string;
     productKeywords: string;
     hsCodes: string;
+    allowedCompanyIdentityRoles: string[];
+    excludedCompanyKeywords: string;
     lookbackWindowDays: number;
     minShipmentCount: number;
     minShipmentVolume: string;
@@ -206,6 +235,36 @@ function SearchProfileForm({
         <h3 className="text-sm font-semibold text-foreground">Product + thresholds</h3>
         <TextAreaField label="Product keywords" name="productKeywords" rows={4} defaultValue={defaults?.productKeywords} />
         <TextAreaField label="HS codes" name="hsCodes" rows={4} defaultValue={defaults?.hsCodes} />
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-foreground">Allowed company identity roles</p>
+          <p className="text-xs font-normal text-mutedForeground">
+            Only these TradeMining roles can create companies in Newl Apps for this profile.
+          </p>
+          <div className="grid gap-2">
+            {tradeMiningCompanyIdentityRoleOptions.map((option) => {
+              const selectedRoles = defaults?.allowedCompanyIdentityRoles ?? defaultTradeMiningCompanyIdentityRoles;
+              return (
+                <label key={option.value} className="flex items-start gap-2 text-sm font-medium text-foreground">
+                  <input
+                    type="checkbox"
+                    name="allowedCompanyIdentityRole"
+                    value={option.value}
+                    defaultChecked={selectedRoles.includes(option.value)}
+                    className="mt-1"
+                  />
+                  <span>{option.label}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+        <TextAreaField
+          label="Excluded company keywords"
+          name="excludedCompanyKeywords"
+          rows={4}
+          defaultValue={defaults?.excludedCompanyKeywords}
+          description="One per line or comma-separated. Matching company identities are skipped during ingestion."
+        />
         <NumberField label="Lookback window days" name="lookbackWindowDays" defaultValue={defaults?.lookbackWindowDays ?? 90} min={1} max={365} />
         <NumberField label="Minimum shipment count" name="minShipmentCount" defaultValue={defaults?.minShipmentCount ?? 1} min={0} max={100000} />
         <DecimalField label="Minimum shipment volume" name="minShipmentVolume" defaultValue={defaults?.minShipmentVolume} />
@@ -234,6 +293,16 @@ function StatusBadge({ enabled }: { enabled: boolean }) {
   return (
     <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${classes}`}>
       {enabled ? "Enabled" : "Disabled"}
+    </span>
+  );
+}
+
+function PendingRunBadge({ status }: { status: string }) {
+  const label = status === "RUNNING" ? "Immediate run in progress" : "Immediate run queued";
+
+  return (
+    <span className="rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
+      {label}
     </span>
   );
 }

@@ -3,6 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const createSearchProfile = vi.fn();
 const updateSearchProfile = vi.fn();
 const deleteSearchProfile = vi.fn();
+const findSearchProfile = vi.fn();
+const findAutomationJobRun = vi.fn();
+const createAutomationJobRun = vi.fn();
+const createAuditLog = vi.fn();
 const revalidatePath = vi.fn();
 const getAuthenticatedContext = vi.fn();
 const requireAdmin = vi.fn();
@@ -12,7 +16,15 @@ vi.mock("@/server/db", () => ({
     tradeMiningSearchProfile: {
       create: (...args: unknown[]) => createSearchProfile(...args),
       update: (...args: unknown[]) => updateSearchProfile(...args),
-      delete: (...args: unknown[]) => deleteSearchProfile(...args)
+      delete: (...args: unknown[]) => deleteSearchProfile(...args),
+      findFirst: (...args: unknown[]) => findSearchProfile(...args)
+    },
+    automationJobRun: {
+      findFirst: (...args: unknown[]) => findAutomationJobRun(...args),
+      create: (...args: unknown[]) => createAutomationJobRun(...args)
+    },
+    auditLog: {
+      create: (...args: unknown[]) => createAuditLog(...args)
     }
   }
 }));
@@ -32,6 +44,7 @@ vi.mock("@/server/auth/authorization", () => ({
 import {
   createTradeMiningSearchProfileAction,
   deleteTradeMiningSearchProfileAction,
+  requestTradeMiningSearchProfileRunAction,
   updateTradeMiningSearchProfileAction
 } from "@/modules/lead-gen/actions";
 
@@ -41,11 +54,18 @@ describe("trade mining search profile actions", () => {
     getAuthenticatedContext.mockResolvedValue({
       tenantId: "tenant-1",
       tenantSlug: "newl-group",
-      tenantName: "Newl Group"
+      tenantName: "Newl Group",
+      userId: "user-1",
+      userEmail: "alex@newl.ca",
+      userName: "Alex Newell"
     });
     createSearchProfile.mockResolvedValue({});
     updateSearchProfile.mockResolvedValue({});
     deleteSearchProfile.mockResolvedValue({});
+    findSearchProfile.mockResolvedValue({ id: "profile-123", name: "Houston Import Leads", enabled: true });
+    findAutomationJobRun.mockResolvedValue(null);
+    createAutomationJobRun.mockResolvedValue({});
+    createAuditLog.mockResolvedValue({});
   });
 
   it("creates a tenant-scoped search profile from form input", async () => {
@@ -58,6 +78,8 @@ describe("trade mining search profile actions", () => {
     expect(args.data.tenantId).toBe("tenant-1");
     expect(args.data.destinationMarkets).toEqual(["Houston", "Dallas"]);
     expect(args.data.originCountries).toEqual(["Italy", "Germany"]);
+    expect(args.data.allowedCompanyIdentityRoles).toEqual(["consignee_name", "importer_name"]);
+    expect(args.data.excludedCompanyKeywords).toEqual(["maersk", "msc"]);
     expect(args.data.enabled).toBe(true);
     expect(revalidatePath).toHaveBeenCalledWith("/lead-gen/search-profiles");
   });
@@ -86,6 +108,21 @@ describe("trade mining search profile actions", () => {
       }
     });
   });
+
+  it("queues an immediate run request for an enabled profile", async () => {
+    const formData = new FormData();
+    formData.set("profileId", "profile-123");
+
+    await requestTradeMiningSearchProfileRunAction(formData);
+
+    expect(createAutomationJobRun).toHaveBeenCalledTimes(1);
+    const args = createAutomationJobRun.mock.calls[0][0];
+    expect(args.data.tenantId).toBe("tenant-1");
+    expect(args.data.jobType).toBe("trademining.run_request");
+    expect(args.data.status).toBe("QUEUED");
+    expect(args.data.input.searchProfileId).toBe("profile-123");
+    expect(createAuditLog).toHaveBeenCalledTimes(1);
+  });
 });
 
 function buildValidFormData() {
@@ -100,6 +137,9 @@ function buildValidFormData() {
   formData.set("originCountries", "Italy\nGermany");
   formData.set("productKeywords", "furniture");
   formData.set("hsCodes", "9403");
+  formData.append("allowedCompanyIdentityRole", "consignee_name");
+  formData.append("allowedCompanyIdentityRole", "importer_name");
+  formData.set("excludedCompanyKeywords", "maersk\nmsc");
   formData.set("lookbackWindowDays", "90");
   formData.set("minShipmentCount", "1");
   formData.set("minShipmentVolume", "10");

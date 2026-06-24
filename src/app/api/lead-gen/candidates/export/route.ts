@@ -13,6 +13,7 @@ export async function GET(request: Request) {
     const status = parseStatusParam(url.searchParams.get("status"));
     const sort = parseSortParam(url.searchParams.get("sort"));
     const searchProfileId = readNullable(url.searchParams.get("profile"));
+    const industry = readNullable(url.searchParams.get("industry"));
     const minScore = parseScoreParam(url.searchParams.get("minScore"));
     const maxScore = parseScoreParam(url.searchParams.get("maxScore"));
     const minShipmentCount = parseShipmentCountParam(url.searchParams.get("minShipmentCount"));
@@ -22,6 +23,7 @@ export async function GET(request: Request) {
       query,
       status,
       searchProfileId: searchProfileId ?? undefined,
+      industry: industry ?? undefined,
       minScore,
       maxScore,
       minShipmentCount,
@@ -36,6 +38,7 @@ export async function GET(request: Request) {
         "Status",
         "Score",
         "Matched Profile",
+        "Industry",
         "Shipment Count",
         "Latest Shipment",
         "Destination",
@@ -53,6 +56,7 @@ export async function GET(request: Request) {
         company.candidateStatus,
         String(company.candidateScore),
         company.matchedSearchProfileName,
+        company.primaryIndustry ?? "",
         String(company.shipmentCount),
         company.latestShipmentDate ? company.latestShipmentDate.toISOString() : "",
         company.destinationMarket ?? company.destinationPort ?? "",

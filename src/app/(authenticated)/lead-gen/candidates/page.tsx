@@ -42,12 +42,14 @@ export default async function CandidateFeedPage({
   const status = parseStatusParam(readParam(params.status));
   const sort = parseSortParam(readParam(params.sort));
   const searchProfileId = readParam(params.profile);
+  const industry = readParam(params.industry) ?? "";
   const minScore = parseScoreParam(readParam(params.minScore));
   const maxScore = parseScoreParam(readParam(params.maxScore));
   const minShipmentCount = parseShipmentCountParam(readParam(params.minShipmentCount));
   const hasFilters = Boolean(
     query ||
       searchProfileId ||
+      industry ||
       minScore !== undefined ||
       maxScore !== undefined ||
       minShipmentCount !== undefined ||
@@ -59,6 +61,7 @@ export default async function CandidateFeedPage({
       query,
       status,
       searchProfileId,
+      industry: industry || undefined,
       minScore,
       maxScore,
       minShipmentCount,
@@ -70,6 +73,7 @@ export default async function CandidateFeedPage({
     query,
     status,
     searchProfileId,
+    industry: industry || undefined,
     minScore,
     maxScore,
     minShipmentCount,
@@ -143,6 +147,22 @@ export default async function CandidateFeedPage({
               placeholder="0"
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
             />
+          </label>
+
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            <span>Industry</span>
+            <select
+              name="industry"
+              defaultValue={industry}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            >
+              <option value="">All industries</option>
+              {filterOptions.industries.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
           </label>
 
           <label className="space-y-1 text-sm font-medium text-foreground">
@@ -289,6 +309,7 @@ function buildExportHref({
   query,
   status,
   searchProfileId,
+  industry,
   minScore,
   maxScore,
   minShipmentCount,
@@ -297,6 +318,7 @@ function buildExportHref({
   query: string;
   status: CandidateStatus | "ACTIVE";
   searchProfileId?: string;
+  industry?: string;
   minScore?: number;
   maxScore?: number;
   minShipmentCount?: number;
@@ -306,6 +328,7 @@ function buildExportHref({
   if (query) params.set("q", query);
   if (status) params.set("status", status);
   if (searchProfileId) params.set("profile", searchProfileId);
+  if (industry) params.set("industry", industry);
   if (minScore !== undefined) params.set("minScore", String(minScore));
   if (maxScore !== undefined) params.set("maxScore", String(maxScore));
   if (minShipmentCount !== undefined) params.set("minShipmentCount", String(minShipmentCount));

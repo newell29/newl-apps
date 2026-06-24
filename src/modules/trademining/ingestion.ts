@@ -1,12 +1,18 @@
 import { JobStatus, type Prisma } from "@prisma/client";
 
+import { classifyTradeMiningIndustryFromRecords } from "@/modules/lead-gen/industry-classification";
 import { calculateLeadPipelineScoreForCompany } from "@/modules/lead-gen/queries";
 import { normalizeSearchProfileValueForWorker } from "@/modules/lead-gen/search-profile-suggestions";
+import {
+  defaultTradeMiningCompanyIdentityRoles,
+  type TradeMiningCompanyIdentityRole
+} from "@/modules/lead-gen/search-profile-validation";
 import { prisma } from "@/server/db";
 import type { TenantContext } from "@/server/tenant-context";
 
 const ingestionSources = new Set(["OPENCLAW", "N8N", "DIRECT_CONNECTOR"]);
 const completionStatuses = new Set(["COMPLETED", "FAILED", "PARTIAL", "RUNNING", "CANCELLED"]);
+const manualRequestStatuses = new Set(["QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"]);
 
 export class IngestionValidationError extends Error {
   status: number;
@@ -31,6 +37,8 @@ type SearchProfileSummary = {
   originCountries: string[];
   productKeywords: string[];
   hsCodes: string[];
+  allowedCompanyIdentityRoles: TradeMiningCompanyIdentityRole[];
+  excludedCompanyKeywords: string[];
   lookbackDays: number;
   minShipmentCount: number;
   minShipmentVolume: string | null;
@@ -113,6 +121,8 @@ export async function getActiveTradeMiningProfilesForWorker(tenant: TenantContex
       originCountries: normalizeSearchProfileListForWorker("originCountries", asStringArray(profile.originCountries)),
       productKeywords: asStringArray(profile.productKeywords),
       hsCodes: asStringArray(profile.hsCodes),
+      allowedCompanyIdentityRoles: normalizeAllowedCompanyIdentityRoles(profile.allowedCompanyIdentityRoles),
+      excludedCompanyKeywords: asStringArray(profile.excludedCompanyKeywords),
       lookbackDays: profile.lookbackWindowDays,
       minShipmentCount: profile.minShipmentCount,
       minShipmentVolume: profile.minShipmentVolume?.toString() ?? null,
@@ -186,6 +196,46 @@ export async function createTradeMiningJobRun(tenant: TenantContext, payload: un
   };
 }
 
+export async function getTradeMiningRunRequestsForWorker(tenant: TenantContext) {
+  const requests = await prisma.automationJobRun.findMany({
+    where: {
+      tenantId: tenant.tenantId,
+      jobType: "trademining.run_request",
+      status: {
+        in: [JobStatus.QUEUED, JobStatus.RUNNING]
+      }
+    },
+    orderBy: [
+      {
+        createdAt: "asc"
+      }
+    ]
+  });
+
+  const profiles = await getActiveTradeMiningProfilesForWorker(tenant);
+  const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
+
+  return requests
+    .map((request) => {
+      const searchProfileId = readSearchProfileIdFromJobInput(request.input);
+      const profile = searchProfileId ? profileMap.get(searchProfileId) ?? null : null;
+
+      if (!searchProfileId || !profile) {
+        return null;
+      }
+
+      return {
+        requestId: request.id,
+        status: request.status,
+        requestedAt: request.createdAt.toISOString(),
+        requestedByName: readJsonString(request.input, "requestedByName"),
+        searchProfileId,
+        profile
+      };
+    })
+    .filter((request): request is NonNullable<typeof request> => Boolean(request));
+}
+
 export async function ingestTradeMiningBatch(tenant: TenantContext, payload: unknown) {
   const batch = validateBatchPayload(payload);
 
@@ -199,12 +249,41 @@ export async function ingestTradeMiningBatch(tenant: TenantContext, payload: unk
 
   let recordsCreated = 0;
   let recordsUpdated = 0;
+  let recordsSkipped = 0;
   let companiesCreated = 0;
   let companiesUpdated = 0;
   const touchedCompanyIds = new Set<string>();
+  const profileRules = batch.searchProfileId
+    ? await prisma.tradeMiningSearchProfile.findFirst({
+        where: {
+          id: batch.searchProfileId,
+          tenantId: tenant.tenantId
+        },
+        select: {
+          allowedCompanyIdentityRoles: true,
+          excludedCompanyKeywords: true
+        }
+      })
+    : null;
+  const allowedCompanyIdentityRoles = normalizeAllowedCompanyIdentityRoles(profileRules?.allowedCompanyIdentityRoles);
+  const excludedCompanyKeywords = asStringArray(profileRules?.excludedCompanyKeywords).map((value) =>
+    value.trim().toLowerCase()
+  );
 
   for (const [index, record] of batch.records.entries()) {
-    const companyName = getCompanyIdentity(record).name;
+    const companyIdentity = getCompanyIdentity(record, allowedCompanyIdentityRoles);
+
+    if (!companyIdentity) {
+      recordsSkipped += 1;
+      continue;
+    }
+
+    if (matchesExcludedCompanyKeyword(companyIdentity.name, excludedCompanyKeywords)) {
+      recordsSkipped += 1;
+      continue;
+    }
+
+    const companyName = companyIdentity.name;
     const normalizedName = normalizeCompanyName(companyName);
     const rawRecordKey = getRawRecordKey(batch, record, normalizedName, index);
     const priorityScore = calculateCandidateScore(record);
@@ -218,9 +297,16 @@ export async function ingestTradeMiningBatch(tenant: TenantContext, payload: unk
       },
       select: {
         id: true,
-        priorityScore: true
+        priorityScore: true,
+        candidateStatus: true,
+        doNotProspect: true
       }
     });
+
+    if (existingCompany?.doNotProspect || existingCompany?.candidateStatus === "DISQUALIFIED") {
+      recordsSkipped += 1;
+      continue;
+    }
 
     const company = await prisma.company.upsert({
       where: {
@@ -307,21 +393,20 @@ export async function ingestTradeMiningBatch(tenant: TenantContext, payload: unk
   }
 
   for (const companyId of touchedCompanyIds) {
+    await refreshCompanyIndustry(tenant.tenantId, companyId);
     const score = await calculateLeadPipelineScoreForCompany(tenant, companyId);
 
-    if (score === null) {
-      continue;
+    if (score !== null) {
+      await prisma.lead.updateMany({
+        where: {
+          tenantId: tenant.tenantId,
+          companyId
+        },
+        data: {
+          score
+        }
+      });
     }
-
-    await prisma.lead.updateMany({
-      where: {
-        tenantId: tenant.tenantId,
-        companyId
-      },
-      data: {
-        score
-      }
-    });
   }
 
   const summary = {
@@ -331,6 +416,7 @@ export async function ingestTradeMiningBatch(tenant: TenantContext, payload: unk
     recordsProcessed: batch.records.length,
     recordsCreated,
     recordsUpdated,
+    recordsSkipped,
     companiesCreated,
     companiesUpdated
   };
@@ -360,6 +446,58 @@ export async function ingestTradeMiningBatch(tenant: TenantContext, payload: unk
   });
 
   return summary;
+}
+
+async function refreshCompanyIndustry(tenantId: string, companyId: string) {
+  const records = await prisma.tradeMiningImportRecord.findMany({
+    where: {
+      tenantId,
+      companyId
+    },
+    orderBy: [
+      {
+        arrivalDate: "desc"
+      },
+      {
+        createdAt: "desc"
+      }
+    ],
+    take: 100,
+    select: {
+      productDescription: true,
+      rawJson: true
+    }
+  });
+
+  const industry = classifyTradeMiningIndustryFromRecords(
+    records.map((record) => {
+      const rawJson =
+        record.rawJson && typeof record.rawJson === "object" && !Array.isArray(record.rawJson)
+          ? (record.rawJson as Record<string, unknown>)
+          : {};
+      const rawProductDescription =
+        typeof rawJson.productDescription === "string" ? rawJson.productDescription : null;
+      const rawHsCode = typeof rawJson.hsCode === "string" ? rawJson.hsCode : null;
+      return {
+        productDescription: record.productDescription ?? rawProductDescription,
+        hsCode: rawHsCode
+      };
+    })
+  );
+
+  await prisma.company.update({
+    where: {
+      id: companyId
+    },
+    data: {
+      primaryIndustry: industry.primaryIndustry,
+      secondaryIndustry: industry.secondaryIndustry,
+      industryConfidence: industry.confidence || null,
+      industrySource: industry.source === "UNKNOWN" ? null : industry.source
+    }
+  });
+
+  return industry;
 }
 
 export async function updateTradeMiningJobRunStatus(tenant: TenantContext, jobRunId: string, payload: unknown) {
@@ -430,6 +568,67 @@ export async function updateTradeMiningJobRunStatus(tenant: TenantContext, jobRu
 
   return {
     jobRunId: jobRun.id,
+    status: mappedStatus,
+    externalStatus: input.status
+  };
+}
+
+export async function updateTradeMiningRunRequestStatus(tenant: TenantContext, requestId: string, payload: unknown) {
+  const input = validateManualRunRequestStatusPayload(payload);
+  const request = await prisma.automationJobRun.findFirst({
+    where: {
+      id: requestId,
+      tenantId: tenant.tenantId,
+      jobType: "trademining.run_request"
+    },
+    select: {
+      id: true,
+      input: true
+    }
+  });
+
+  if (!request) {
+    throw new IngestionValidationError(["requestId was not found for the authenticated tenant."], 404);
+  }
+
+  const mappedStatus = mapExternalJobStatus(input.status);
+  const isFinished = mappedStatus === JobStatus.SUCCESS || mappedStatus === JobStatus.ERROR || mappedStatus === JobStatus.CANCELLED;
+  const searchProfileId = readSearchProfileIdFromJobInput(request.input);
+
+  const updated = await prisma.automationJobRun.update({
+    where: {
+      id: requestId,
+      tenantId: tenant.tenantId
+    },
+    data: {
+      status: mappedStatus,
+      finishedAt: isFinished ? new Date() : undefined,
+      errorMessage: input.errorMessage ?? null,
+      output: {
+        externalStatus: input.status,
+        metadata: input.metadata ?? {},
+        updatedAt: new Date().toISOString()
+      }
+    }
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      tenantId: tenant.tenantId,
+      action: "trademining.run_request.updated",
+      entityType: "AutomationJobRun",
+      entityId: updated.id,
+      after: {
+        status: input.status,
+        mappedStatus,
+        searchProfileId,
+        errorMessage: input.errorMessage ?? null
+      }
+    }
+  });
+
+  return {
+    requestId: updated.id,
     status: mappedStatus,
     externalStatus: input.status
   };
@@ -673,6 +872,27 @@ function validateJobStatusPayload(payload: unknown) {
   };
 }
 
+function validateManualRunRequestStatusPayload(payload: unknown) {
+  const errors: string[] = [];
+  const body = asObject(payload, "Request body", errors);
+  const status = readString(body, "status", errors);
+
+  if (status && !manualRequestStatuses.has(status)) {
+    errors.push("status must be QUEUED, RUNNING, COMPLETED, FAILED, or CANCELLED.");
+  }
+
+  const metadata = readOptionalJsonObject(body, "metadata", errors);
+  const errorMessage = readOptionalString(body, "errorMessage", errors);
+
+  throwIfErrors(errors);
+
+  return {
+    status,
+    metadata,
+    errorMessage
+  };
+}
+
 async function assertSearchProfileBelongsToTenant(tenant: TenantContext, searchProfileId: string) {
   const profile = await prisma.tradeMiningSearchProfile.findFirst({
     where: {
@@ -701,7 +921,10 @@ async function assertJobRunBelongsToTenant(tenant: TenantContext, jobRunId: stri
   }
 }
 
-function getCompanyIdentity(record: TradeMiningRecordInput) {
+function getCompanyIdentity(
+  record: TradeMiningRecordInput,
+  allowedRoles: TradeMiningCompanyIdentityRole[] = defaultTradeMiningCompanyIdentityRoles
+) {
   const candidates = [
     ["importer_name", record.importerName],
     ["consignee_name", record.consigneeName],
@@ -712,7 +935,7 @@ function getCompanyIdentity(record: TradeMiningRecordInput) {
   ] as const;
 
   for (const [sourceRole, name] of candidates) {
-    if (name) {
+    if (name && allowedRoles.includes(sourceRole)) {
       return {
         name,
         sourceRole
@@ -720,10 +943,28 @@ function getCompanyIdentity(record: TradeMiningRecordInput) {
     }
   }
 
-  return {
-    name: "Unknown importer",
-    sourceRole: "unknown"
-  };
+  return null;
+}
+
+function normalizeAllowedCompanyIdentityRoles(value: unknown): TradeMiningCompanyIdentityRole[] {
+  const allowedValues = new Set<TradeMiningCompanyIdentityRole>([
+    "importer_name",
+    "consignee_name",
+    "master_consignee_name",
+    "notify_party",
+    "shipper_name",
+    "master_shipper_name"
+  ]);
+  const configured = asStringArray(value).filter((candidate): candidate is TradeMiningCompanyIdentityRole =>
+    allowedValues.has(candidate as TradeMiningCompanyIdentityRole)
+  );
+
+  return configured.length > 0 ? configured : defaultTradeMiningCompanyIdentityRoles;
+}
+
+function matchesExcludedCompanyKeyword(companyName: string, excludedKeywords: string[]) {
+  const normalizedName = companyName.trim().toLowerCase();
+  return excludedKeywords.some((keyword) => keyword.length > 0 && normalizedName.includes(keyword));
 }
 
 function normalizeCompanyName(value: string) {
@@ -782,15 +1023,19 @@ function calculateCandidateScore(record: TradeMiningRecordInput) {
   return Math.min(100, 20 + containerScore + volumeScore + productScore + laneScore + recencyScore);
 }
 
-function buildRawJson(batch: BatchPayload, record: TradeMiningRecordInput): Prisma.InputJsonObject {
-  const companyIdentity = getCompanyIdentity(record);
+function buildRawJson(
+  batch: BatchPayload,
+  record: TradeMiningRecordInput,
+  companyIdentity?: { name: string; sourceRole: string } | null
+): Prisma.InputJsonObject {
+  const resolvedCompanyIdentity = companyIdentity ?? getCompanyIdentity(record);
 
   return {
     source: batch.source,
     jobRunId: batch.jobRunId ?? null,
     searchProfileId: batch.searchProfileId ?? null,
-    sourceRole: companyIdentity.sourceRole,
-    companyMatchName: companyIdentity.name,
+    sourceRole: resolvedCompanyIdentity?.sourceRole ?? null,
+    companyMatchName: resolvedCompanyIdentity?.name ?? null,
     record: {
       importerName: record.importerName ?? null,
       consigneeName: record.consigneeName ?? null,
@@ -903,6 +1148,10 @@ function readJsonString(value: unknown, key: string) {
 }
 
 function mapExternalJobStatus(status: string) {
+  if (status === "QUEUED") {
+    return JobStatus.QUEUED;
+  }
+
   if (status === "FAILED") {
     return JobStatus.ERROR;
   }

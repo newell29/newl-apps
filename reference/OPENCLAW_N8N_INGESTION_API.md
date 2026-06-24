@@ -79,6 +79,68 @@ Response shape:
 }
 ```
 
+## GET Manual Run Requests
+
+`GET /api/integrations/trademining/run-requests`
+
+Returns any tenant-scoped immediate-run requests created from the Newl Apps UI. This is the path OpenClaw should poll during the day so newly added or updated profiles can be tested right away instead of waiting for the next morning sweep.
+
+Example:
+
+```bash
+curl -sS \
+  -H "Authorization: Bearer ${INGESTION_API_TOKEN}" \
+  "http://localhost:3000/api/integrations/trademining/run-requests"
+```
+
+Response shape:
+
+```json
+{
+  "data": {
+    "tenant": {
+      "slug": "newl-group",
+      "name": "Newl Group"
+    },
+    "requests": [
+      {
+        "requestId": "manual-request-id",
+        "status": "QUEUED",
+        "requestedAt": "2026-06-24T15:00:00.000Z",
+        "requestedByName": "Alex Newell",
+        "searchProfileId": "profile-id",
+        "profile": {
+          "id": "profile-id",
+          "name": "Houston Import Leads"
+        }
+      }
+    ]
+  }
+}
+```
+
+## PATCH Manual Run Request Status
+
+`PATCH /api/integrations/trademining/run-requests/:id`
+
+Lets OpenClaw mark a UI-triggered request as `RUNNING`, `COMPLETED`, `FAILED`, or `CANCELLED`.
+
+Example:
+
+```bash
+curl -sS \
+  -X PATCH \
+  -H "Authorization: Bearer ${INGESTION_API_TOKEN}" \
+  -H "Content-Type: application/json" \
+  "http://localhost:3000/api/integrations/trademining/run-requests/MANUAL_REQUEST_ID" \
+  -d '{
+    "status": "RUNNING",
+    "metadata": {
+      "openclawRunId": "run-placeholder"
+    }
+  }'
+```
+
 ## POST Job Started
 
 `POST /api/integrations/trademining/job-runs`

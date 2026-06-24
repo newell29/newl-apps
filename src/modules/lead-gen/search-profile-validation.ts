@@ -1,5 +1,22 @@
 const allowedScheduleFrequencies = new Set(["daily", "weekly", "manual"]);
 
+export const tradeMiningCompanyIdentityRoleOptions = [
+  { value: "importer_name", label: "Importer" },
+  { value: "consignee_name", label: "Consignee" },
+  { value: "master_consignee_name", label: "Master consignee" },
+  { value: "notify_party", label: "Notify party" },
+  { value: "shipper_name", label: "Shipper" },
+  { value: "master_shipper_name", label: "Master shipper" }
+] as const;
+
+export type TradeMiningCompanyIdentityRole = (typeof tradeMiningCompanyIdentityRoleOptions)[number]["value"];
+
+export const defaultTradeMiningCompanyIdentityRoles: TradeMiningCompanyIdentityRole[] = [
+  "importer_name",
+  "consignee_name",
+  "master_consignee_name"
+];
+
 export type TradeMiningSearchProfileInput = {
   name: string;
   destinationMarkets: string[];
@@ -9,6 +26,8 @@ export type TradeMiningSearchProfileInput = {
   originCountries?: string[];
   productKeywords?: string[];
   hsCodes?: string[];
+  allowedCompanyIdentityRoles?: TradeMiningCompanyIdentityRole[];
+  excludedCompanyKeywords?: string[];
   lookbackWindowDays: number;
   minShipmentCount: number;
   minShipmentVolume?: number | null;
@@ -54,6 +73,17 @@ export function validateTradeMiningSearchProfile(input: TradeMiningSearchProfile
   validateStringList("Origin countries", input.originCountries, errors);
   validateStringList("Product keywords", input.productKeywords, errors);
   validateStringList("HS codes", input.hsCodes, errors);
+  validateStringList("Excluded company keywords", input.excludedCompanyKeywords, errors);
+
+  if (!Array.isArray(input.allowedCompanyIdentityRoles) || input.allowedCompanyIdentityRoles.length === 0) {
+    errors.push("Select at least one company identity role.");
+  } else if (
+    input.allowedCompanyIdentityRoles.some(
+      (value) => !tradeMiningCompanyIdentityRoleOptions.some((option) => option.value === value)
+    )
+  ) {
+    errors.push("One or more company identity roles are invalid.");
+  }
 
   return errors;
 }

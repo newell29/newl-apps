@@ -3,6 +3,7 @@
 import { CandidateStatus, LeadPipelineStage } from "@prisma/client";
 import Link from "next/link";
 import { useMemo, useState, type ReactNode } from "react";
+import { InfoHint } from "@/components/info-hint";
 import { StageBadge } from "@/components/stage-badge";
 
 type PipelineLead = {
@@ -15,6 +16,32 @@ type PipelineLead = {
   candidateStatus: CandidateStatus;
   score: number;
   companyScore: number;
+  scoreBreakdown: {
+    total: number;
+    matchedSearchProfileName: string;
+    sourceRole: string;
+    importedScoreReasoning: string | null;
+    components: Array<{
+      key: string;
+      label: string;
+      points: number;
+      maxPoints: number;
+      detail: string;
+    }>;
+    settingsSnapshot: {
+      recentWindowDays: number;
+      comparisonWindowDays: number;
+      momentumWeight: number;
+      marketFitWeight: number;
+      industryFitWeight: number;
+      companySizeWeight: number;
+      roleWeight: number;
+      confidenceWeight: number;
+      workflowWeight: number;
+    };
+  };
+  shipmentCount30d: number;
+  shipmentCount90d: number;
   assignedRepValue?: string | null;
   assignedRep: string;
   contactStatus: string;
@@ -73,6 +100,22 @@ export function PipelineTableClient({
     setSelectedIds([]);
   }
 
+  function confirmBulkDisqualify() {
+    if (selectedIds.length === 0) {
+      return true;
+    }
+
+    return window.confirm(
+      `Disqualify ${selectedIds.length} account${selectedIds.length === 1 ? "" : "s"}? Disqualified companies will stay out of future TradeMining review pulls unless you manually change their status later.`
+    );
+  }
+
+  function confirmSingleDisqualify(companyName: string) {
+    return window.confirm(
+      `Disqualify ${companyName}? This company will stay out of future TradeMining review pulls unless you manually change its status later.`
+    );
+  }
+
   return (
     <div>
       <form action={bulkUpdateLeadStageAction}>
@@ -115,6 +158,11 @@ export function PipelineTableClient({
             type="submit"
             name="stage"
             value={LeadPipelineStage.DISQUALIFIED}
+            onClick={(event) => {
+              if (!confirmBulkDisqualify()) {
+                event.preventDefault();
+              }
+            }}
             disabled={selectedIds.length === 0}
             className="rounded-md border border-danger/30 bg-card px-3 py-1.5 text-xs font-semibold text-danger transition-colors hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -164,7 +212,7 @@ export function PipelineTableClient({
       </div>
       </form>
       <div className="overflow-x-auto">
-        <table className="min-w-[1320px] divide-y divide-border text-sm">
+        <table className="min-w-[1480px] divide-y divide-border text-sm">
           <thead className="bg-muted text-left text-xs font-semibold uppercase text-mutedForeground">
             <tr>
               <th className="w-12 px-4 py-3">
@@ -177,8 +225,18 @@ export function PipelineTableClient({
               </th>
               <th className="px-4 py-3">Company</th>
               <th className="px-4 py-3">Pipeline stage</th>
-              <th className="px-4 py-3">Score</th>
+              <th className="px-4 py-3">
+                <span className="flex items-center gap-2">
+                  <span>Score</span>
+                  <InfoHint
+                    text="The large score is the live pipeline account score used to rank approved companies. It recalculates from current shipment evidence, fit rules, and workflow scoring. The smaller company score below it is the stored base company signal from TradeMining ingestion that helps feed the live account score."
+                    widthClassName="w-80"
+                  />
+                </span>
+              </th>
               <th className="px-4 py-3">Candidate status</th>
+              <th className="px-4 py-3">Shipments (30d)</th>
+              <th className="px-4 py-3">Shipments (90d)</th>
               <th className="px-4 py-3">Assigned rep</th>
               <th className="px-4 py-3">Contact status</th>
               <th className="px-4 py-3">Apollo</th>
@@ -209,10 +267,51 @@ export function PipelineTableClient({
                 </td>
                 <td className="px-4 py-4">
                   <span className="text-lg font-bold text-primary">{lead.score}</span>
-                  <p className="mt-1 text-xs text-mutedForeground">Company {lead.companyScore}</p>
+                  <p className="mt-1 text-xs text-mutedForeground">Base company signal {lead.companyScore}</p>
+                  <details className="mt-2 w-[320px] rounded-md border border-border bg-background p-2 text-xs text-mutedForeground">
+                    <summary className="cursor-pointer list-none font-semibold text-foreground">
+                      Show calculation
+                    </summary>
+                    <div className="mt-2 space-y-2">
+                      <div className="rounded-md bg-muted/60 p-2">
+                        <p className="font-medium text-foreground">{lead.scoreBreakdown.matchedSearchProfileName}</p>
+                        <p className="mt-1">{lead.scoreBreakdown.sourceRole}</p>
+                        {lead.scoreBreakdown.importedScoreReasoning ? (
+                          <p className="mt-1">{lead.scoreBreakdown.importedScoreReasoning}</p>
+                        ) : null}
+                      </div>
+                      <div className="space-y-2">
+                        {lead.scoreBreakdown.components.map((component) => (
+                          <div key={component.key} className="rounded-md border border-border p-2">
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="font-medium text-foreground">{component.label}</span>
+                              <span className="font-semibold text-foreground">
+                                {component.points >= 0 ? "+" : ""}
+                                {component.points} / {component.maxPoints}
+                              </span>
+                            </div>
+                            <p className="mt-1 leading-5">{component.detail}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <p>
+                        Windows: {lead.scoreBreakdown.settingsSnapshot.recentWindowDays}d recent vs{" "}
+                        {lead.scoreBreakdown.settingsSnapshot.comparisonWindowDays}d prior. Weights update from current
+                        settings automatically.
+                      </p>
+                    </div>
+                  </details>
                 </td>
                 <td className="px-4 py-4">
                   <CandidateStatusBadge status={lead.candidateStatus} />
+                </td>
+                <td className="px-4 py-4 text-mutedForeground">
+                  <p className="font-semibold text-foreground">{lead.shipmentCount30d}</p>
+                  <p className="mt-1 text-xs">Recent 30 days</p>
+                </td>
+                <td className="px-4 py-4 text-mutedForeground">
+                  <p className="font-semibold text-foreground">{lead.shipmentCount90d}</p>
+                  <p className="mt-1 text-xs">Recent 90 days</p>
                 </td>
                 <td className="px-4 py-4 text-mutedForeground">
                   <p className="font-medium text-foreground">{lead.assignedRep}</p>
@@ -256,7 +355,14 @@ export function PipelineTableClient({
                     <form action={updateLeadStageAction}>
                       <input type="hidden" name="leadId" value={lead.id} />
                       <input type="hidden" name="stage" value={LeadPipelineStage.DISQUALIFIED} />
-                      <button className="rounded-md border border-danger/30 bg-card px-3 py-1.5 text-xs font-semibold text-danger transition-colors hover:bg-danger/10">
+                      <button
+                        onClick={(event) => {
+                          if (!confirmSingleDisqualify(lead.companyName)) {
+                            event.preventDefault();
+                          }
+                        }}
+                        className="rounded-md border border-danger/30 bg-card px-3 py-1.5 text-xs font-semibold text-danger transition-colors hover:bg-danger/10"
+                      >
                         Disqualify
                       </button>
                     </form>

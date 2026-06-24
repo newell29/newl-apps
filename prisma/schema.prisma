@@ -339,6 +339,10 @@ model Company {
   normalizedName           String
   domain                   String?
   source                   String?
+  primaryIndustry          String?
+  secondaryIndustry        String?
+  industryConfidence       Int?
+  industrySource           String?
   priorityScore            Int             @default(0)
   candidateStatus          CandidateStatus @default(NEW)
   candidateStatusUpdatedAt DateTime?
@@ -360,6 +364,7 @@ model Company {
   @@index([tenantId, candidateStatus, priorityScore])
   @@index([tenantId, priorityScore])
   @@index([tenantId, domain])
+  @@index([tenantId, primaryIndustry])
 }
 
 model TradeMiningSearchProfile {
@@ -376,6 +381,8 @@ model TradeMiningSearchProfile {
   originCountries    Json?
   productKeywords    Json?
   hsCodes            Json?
+  allowedCompanyIdentityRoles Json?
+  excludedCompanyKeywords Json?
   lookbackWindowDays Int       @default(90)
   minShipmentCount   Int       @default(1)
   minShipmentVolume  Decimal?  @db.Decimal(12, 2)

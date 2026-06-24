@@ -164,6 +164,7 @@ describe("pipeline bulk actions", () => {
 
     expect(companyUpdate).toHaveBeenCalledTimes(2);
     expect(companyUpdate.mock.calls[0][0].data.candidateStatus).toBe(CandidateStatus.DISQUALIFIED);
+    expect(companyUpdate.mock.calls[0][0].data.doNotProspect).toBe(true);
     expect(companyUpdate.mock.calls[1][0].where).toEqual({ id: "company-for-lead-2" });
   });
 

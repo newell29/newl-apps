@@ -39,10 +39,12 @@ export function CandidateReviewTableClient({
   bulkUpdateAction: (formData: FormData) => Promise<void>;
 }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [expandedIds, setExpandedIds] = useState<string[]>([]);
+  const [expandedScoreIds, setExpandedScoreIds] = useState<string[]>([]);
+  const [expandedProductIds, setExpandedProductIds] = useState<string[]>([]);
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
-  const expandedSet = useMemo(() => new Set(expandedIds), [expandedIds]);
+  const expandedScoreSet = useMemo(() => new Set(expandedScoreIds), [expandedScoreIds]);
+  const expandedProductSet = useMemo(() => new Set(expandedProductIds), [expandedProductIds]);
 
   const selectableIds = companies.filter((company) => !company.currentPipelineStage).map((company) => company.id);
 
@@ -52,8 +54,14 @@ export function CandidateReviewTableClient({
     );
   }
 
-  function toggleExpanded(companyId: string) {
-    setExpandedIds((current) =>
+  function toggleScoreExpanded(companyId: string) {
+    setExpandedScoreIds((current) =>
+      current.includes(companyId) ? current.filter((id) => id !== companyId) : [...current, companyId]
+    );
+  }
+
+  function toggleProductExpanded(companyId: string) {
+    setExpandedProductIds((current) =>
       current.includes(companyId) ? current.filter((id) => id !== companyId) : [...current, companyId]
     );
   }
@@ -64,6 +72,16 @@ export function CandidateReviewTableClient({
 
   function clearSelection() {
     setSelectedIds([]);
+  }
+
+  function confirmBulkDisqualify() {
+    if (selectedIds.length === 0) {
+      return true;
+    }
+
+    return window.confirm(
+      `Disqualify ${selectedIds.length} compan${selectedIds.length === 1 ? "y" : "ies"}? Disqualified companies will stay out of future TradeMining review pulls unless you manually change their status later.`
+    );
   }
 
   return (
@@ -97,7 +115,11 @@ export function CandidateReviewTableClient({
           <BulkStatusButton status={CandidateStatus.REJECTED} disabled={selectedIds.length === 0}>
             Reject selected
           </BulkStatusButton>
-          <BulkStatusButton status={CandidateStatus.DISQUALIFIED} disabled={selectedIds.length === 0}>
+          <BulkStatusButton
+            status={CandidateStatus.DISQUALIFIED}
+            disabled={selectedIds.length === 0}
+            onBeforeSubmit={confirmBulkDisqualify}
+          >
             Disqualify selected
           </BulkStatusButton>
         </div>
@@ -127,10 +149,15 @@ export function CandidateReviewTableClient({
           <tbody className="divide-y divide-border">
             {companies.map((company) => {
               const isSelected = selectedSet.has(company.id);
-              const isExpanded = expandedSet.has(company.id);
+              const isScoreExpanded = expandedScoreSet.has(company.id);
+              const isProductExpanded = expandedProductSet.has(company.id);
               const canSelect = !company.currentPipelineStage;
               const shortReason =
-                company.scoreReasoning.length > 120 ? `${company.scoreReasoning.slice(0, 120).trimEnd()}...` : company.scoreReasoning;
+                company.scoreReasoning.length > 88 ? `${company.scoreReasoning.slice(0, 88).trimEnd()}...` : company.scoreReasoning;
+              const productSummary = company.productDescription ?? "Unknown product";
+              const hsSummary = company.hsCode ? `HS: ${company.hsCode}` : "HS: Unknown";
+              const combinedProductText = `${productSummary} ${hsSummary}`;
+              const showProductToggle = combinedProductText.length > 72;
 
               return (
                 <tr key={company.id} className="align-top transition-colors hover:bg-muted/60">
@@ -151,22 +178,22 @@ export function CandidateReviewTableClient({
                     <p className="mt-1 text-xs text-mutedForeground">{company.normalizedName}</p>
                     <p className="mt-1 text-xs text-mutedForeground">{company.domain ?? company.source ?? "TradeMining"}</p>
                   </td>
-                  <td className="px-4 py-4">
+                  <td className="w-[320px] px-4 py-4">
                     <span className="text-xl font-bold text-primary">{company.candidateScore}</span>
-                    <p className="mt-2 max-w-[260px] text-xs leading-5 text-mutedForeground">
-                      {isExpanded ? company.scoreReasoning : shortReason}
+                    <p className="mt-2 max-w-[320px] text-xs leading-5 text-mutedForeground">
+                      {isScoreExpanded ? company.scoreReasoning : shortReason}
                     </p>
-                    {company.scoreReasoning.length > 120 ? (
+                    {company.scoreReasoning.length > 88 ? (
                       <button
                         type="button"
-                        onClick={() => toggleExpanded(company.id)}
+                        onClick={() => toggleScoreExpanded(company.id)}
                         className="mt-2 text-xs font-semibold text-primary transition-colors hover:text-primaryHover"
                       >
-                        {isExpanded ? "Show less" : "Show more"}
+                        {isScoreExpanded ? "Show less" : "Show more"}
                       </button>
                     ) : null}
                     {company.importedScoreReasoning ? (
-                      <p className="mt-2 max-w-[260px] rounded-md border border-border bg-background px-2 py-1 text-xs text-mutedForeground">
+                      <p className="mt-2 max-w-[320px] rounded-md border border-border bg-background px-2 py-1 text-xs text-mutedForeground">
                         Ingested note: {company.importedScoreReasoning}
                       </p>
                     ) : null}
@@ -191,9 +218,27 @@ export function CandidateReviewTableClient({
                   <td className="max-w-[190px] px-4 py-4 text-mutedForeground">
                     {[company.originCountry, company.originPort, company.shipFromPort].filter(Boolean).join(" / ") || "Unknown"}
                   </td>
-                  <td className="max-w-[220px] px-4 py-4 text-mutedForeground">
-                    <p>{company.productDescription ?? "Unknown product"}</p>
-                    <p className="mt-1 text-xs">HS: {company.hsCode ?? "Unknown"}</p>
+                  <td className="w-[250px] px-4 py-4 text-mutedForeground">
+                    {isProductExpanded ? (
+                      <>
+                        <p>{productSummary}</p>
+                        <p className="mt-1 break-all text-xs">{hsSummary}</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="line-clamp-2">{productSummary}</p>
+                        <p className="mt-1 line-clamp-1 break-all text-xs">{hsSummary}</p>
+                      </>
+                    )}
+                    {showProductToggle ? (
+                      <button
+                        type="button"
+                        onClick={() => toggleProductExpanded(company.id)}
+                        className="mt-2 text-xs font-semibold text-primary transition-colors hover:text-primaryHover"
+                      >
+                        {isProductExpanded ? "Show less" : "Show more"}
+                      </button>
+                    ) : null}
                   </td>
                   <td className="px-4 py-4 text-mutedForeground">{company.assignedRep}</td>
                   <td className="px-4 py-4">
@@ -222,18 +267,25 @@ function BulkStatusButton({
   status,
   disabled,
   primary,
-  children
+  children,
+  onBeforeSubmit
 }: {
   status: CandidateStatus;
   disabled: boolean;
   primary?: boolean;
   children: React.ReactNode;
+  onBeforeSubmit?: () => boolean;
 }) {
   return (
     <button
       type="submit"
       name="status"
       value={status}
+      onClick={(event) => {
+        if (onBeforeSubmit && !onBeforeSubmit()) {
+          event.preventDefault();
+        }
+      }}
       disabled={disabled}
       className={
         primary
