@@ -10,6 +10,8 @@ import type {
 } from "@/modules/ltl-rate-portal/types";
 
 const DEFAULT_BASE_URL = "https://restapi.my7l.com";
+const SEVEN_L_RUNTIME_ACCOUNTS_JSON = "SEVEN_L_RUNTIME_ACCOUNTS_JSON";
+const SEVEN_L_RUNTIME_ACCOUNTS_BASE64 = "SEVEN_L_RUNTIME_ACCOUNTS_BASE64";
 
 type LocalSevenLCredential = {
   name: string;
@@ -97,15 +99,17 @@ type TokenCacheEntry = {
 };
 
 let cachedAccountsFile: LocalSevenLCredential[] | null = null;
+let cachedEnvAccounts: LocalSevenLCredential[] | null = null;
 const tokenCache = new Map<string, TokenCacheEntry>();
 
-export async function getLocalSevenLAccountNames(): Promise<Set<string>> {
-  const path = process.env.SEVEN_L_DEV_ACCOUNTS_FILE;
-  if (!path) {
-    return new Set();
-  }
+export function resetSevenLRuntimeCacheForTests() {
+  cachedAccountsFile = null;
+  cachedEnvAccounts = null;
+  tokenCache.clear();
+}
 
-  const accounts = await loadLocalAccountsFile().catch(() => null);
+export async function getLocalSevenLAccountNames(): Promise<Set<string>> {
+  const accounts = await loadRuntimeAccounts().catch(() => null);
   if (!accounts) {
     return new Set();
   }
@@ -129,7 +133,7 @@ export async function getLtlQuotes(
   const credential = await resolveRuntimeCredential(account);
   if (!credential) {
     throw new Error(
-      `7L runtime credentials are not available for account ${account.name}. Reconnect the local 7L runtime before requesting rates.`
+      `7L runtime credentials are not available for account ${account.name}. Configure a matching 7L runtime account in Vercel env vars or the local runtime file before requesting rates.`
     );
   }
 
@@ -175,7 +179,7 @@ export async function getLtlQuotes(
 export async function fetchSevenLAvailableCarriers(account: SevenLAccountConfig) {
   const credential = await resolveRuntimeCredential(account);
   if (!credential) {
-    throw new Error(`No local 7L runtime credentials were found for account ${account.name}.`);
+    throw new Error(`No 7L runtime credentials were found for account ${account.name}.`);
   }
 
   const accessToken = await getAccessToken(credential);
@@ -415,7 +419,7 @@ async function resolveZipLocation(
 }
 
 async function resolveRuntimeCredential(account: SevenLAccountConfig): Promise<RuntimeSevenLCredential | null> {
-  const accounts = await loadLocalAccountsFile().catch(() => null);
+  const accounts = await loadRuntimeAccounts().catch(() => null);
   if (!accounts) {
     return null;
   }
@@ -432,6 +436,73 @@ async function resolveRuntimeCredential(account: SevenLAccountConfig): Promise<R
   };
 }
 
+async function loadRuntimeAccounts() {
+  const [envAccounts, fileAccounts] = await Promise.all([
+    loadEnvAccounts(),
+    loadLocalAccountsFile().catch(() => [])
+  ]);
+
+  const merged = new Map<string, LocalSevenLCredential>();
+  for (const account of fileAccounts) {
+    merged.set(account.name, account);
+  }
+  for (const account of envAccounts) {
+    merged.set(account.name, account);
+  }
+
+  return [...merged.values()];
+}
+
+async function loadEnvAccounts() {
+  if (cachedEnvAccounts) {
+    return cachedEnvAccounts;
+  }
+
+  const jsonValue = process.env[SEVEN_L_RUNTIME_ACCOUNTS_JSON]?.trim();
+  const base64Value = process.env[SEVEN_L_RUNTIME_ACCOUNTS_BASE64]?.trim();
+
+  if (!jsonValue && !base64Value) {
+    cachedEnvAccounts = [];
+    return cachedEnvAccounts;
+  }
+
+  const raw = jsonValue || Buffer.from(base64Value!, "base64").toString("utf8");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(
+      `${jsonValue ? SEVEN_L_RUNTIME_ACCOUNTS_JSON : SEVEN_L_RUNTIME_ACCOUNTS_BASE64} contains invalid JSON.`
+    );
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error(
+      `${jsonValue ? SEVEN_L_RUNTIME_ACCOUNTS_JSON : SEVEN_L_RUNTIME_ACCOUNTS_BASE64} must be a JSON array of 7L runtime accounts.`
+    );
+  }
+
+  cachedEnvAccounts = parsed.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return [];
+    }
+
+    const record = entry as Record<string, unknown>;
+    const name = typeof record.name === "string" ? record.name.trim() : "";
+    const username = typeof record.username === "string" ? record.username.trim() : "";
+    const password = typeof record.password === "string" ? record.password.trim() : "";
+    const baseUrl = typeof record.baseUrl === "string" && record.baseUrl.trim().length > 0 ? record.baseUrl.trim() : undefined;
+
+    if (!name || !username || !password) {
+      return [];
+    }
+
+    return [{ name, username, password, baseUrl }];
+  });
+
+  return cachedEnvAccounts;
+}
+
 async function loadLocalAccountsFile() {
   if (cachedAccountsFile) {
     return cachedAccountsFile;
@@ -439,7 +510,7 @@ async function loadLocalAccountsFile() {
 
   const path = process.env.SEVEN_L_DEV_ACCOUNTS_FILE;
   if (!path) {
-    throw new Error("SEVEN_L_DEV_ACCOUNTS_FILE is not configured in the local environment.");
+    return [];
   }
 
   const file = await readFile(path, "utf8");

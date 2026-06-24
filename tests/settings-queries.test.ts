@@ -5,7 +5,9 @@ import type { TenantContext } from "@/server/tenant-context";
 const findModuleAccess = vi.fn();
 const findCredentials = vi.fn();
 const findTradeMiningScoringConfig = vi.fn();
+const findTradeMiningSearchProfiles = vi.fn();
 const getLocalUpsAccountMetadata = vi.fn();
+const getLocalSevenLAccountNames = vi.fn();
 
 vi.mock("@/server/db", () => ({
   prisma: {
@@ -15,6 +17,9 @@ vi.mock("@/server/db", () => ({
     integrationCredential: {
       findMany: (...args: unknown[]) => findCredentials(...args)
     },
+    tradeMiningSearchProfile: {
+      findMany: (...args: unknown[]) => findTradeMiningSearchProfiles(...args)
+    },
     tradeMiningScoringConfig: {
       findUnique: (...args: unknown[]) => findTradeMiningScoringConfig(...args)
     }
@@ -23,6 +28,10 @@ vi.mock("@/server/db", () => ({
 
 vi.mock("@/server/integrations/ups", () => ({
   getLocalUpsAccountMetadata: (...args: unknown[]) => getLocalUpsAccountMetadata(...args)
+}));
+
+vi.mock("@/server/integrations/seven-l", () => ({
+  getLocalSevenLAccountNames: (...args: unknown[]) => getLocalSevenLAccountNames(...args)
 }));
 
 import { getSettingsShell } from "@/modules/settings/queries";
@@ -38,7 +47,9 @@ describe("getSettingsShell 7L contract", () => {
     vi.clearAllMocks();
     findModuleAccess.mockResolvedValue([]);
     getLocalUpsAccountMetadata.mockResolvedValue([]);
+    getLocalSevenLAccountNames.mockResolvedValue(new Set());
     findTradeMiningScoringConfig.mockResolvedValue(null);
+    findTradeMiningSearchProfiles.mockResolvedValue([]);
   });
 
   it("keeps imported 7L carriers tenant-scoped and preserves selection/default flags", async () => {
@@ -166,6 +177,35 @@ describe("getSettingsShell 7L contract", () => {
     expect(account).not.toHaveProperty("secretRef");
     expect(account).not.toHaveProperty("username");
     expect(account).not.toHaveProperty("password");
+  });
+
+  it("marks 7L accounts as runtime ready when a matching env-backed account exists", async () => {
+    getLocalSevenLAccountNames.mockResolvedValue(new Set(["Dry Run Imports"]));
+    findCredentials.mockResolvedValue([
+      {
+        id: "cred-7l",
+        provider: IntegrationProvider.SEVEN_L,
+        name: "Dry Run Imports",
+        status: IntegrationStatus.ACTIVE,
+        secretRef: null,
+        publicConfig: {
+          baseUrl: "https://restapi.my7l.com",
+          dryRun: false,
+          carriers: [
+            {
+              carrierHash: "carrier-a",
+              name: "Southeastern Freight",
+              code: "SEFL",
+              scac: "SEFL"
+            }
+          ]
+        }
+      }
+    ]);
+
+    const settings = await getSettingsShell(tenant);
+
+    expect(settings.sevenLAccounts[0]?.secretConfigured).toBe(true);
   });
 
   it("falls back to default scoring settings when the scoring table is missing locally", async () => {

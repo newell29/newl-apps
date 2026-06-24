@@ -5,6 +5,7 @@ import { tenantWhere } from "@/server/tenant-query";
 import type { TenantContext } from "@/server/tenant-context";
 import type { UpsAccountConfig } from "@/modules/ups-tools/types";
 import { getLocalUpsAccountMetadata } from "@/server/integrations/ups";
+import { getLocalSevenLAccountNames } from "@/server/integrations/seven-l";
 import {
   mapApolloRepOptions,
   parseApolloRepMapping
@@ -121,7 +122,7 @@ export async function getSettingsShell(tenant: TenantContext) {
     }
   });
 
-  const [integrationCredentials, localUpsAccounts, tradeMiningScoringConfig] = await Promise.all([
+  const [integrationCredentials, localUpsAccounts, localSevenLAccountNames, tradeMiningScoringConfig] = await Promise.all([
     prisma.integrationCredential.findMany({
       where: tenantWhere(tenant, {
         provider: {
@@ -133,6 +134,7 @@ export async function getSettingsShell(tenant: TenantContext) {
       }
     }),
     getLocalUpsAccountMetadata(),
+    getLocalSevenLAccountNames(),
     loadTradeMiningScoringConfig(tradeMiningScoringClient, tenant.tenantId).catch((error: unknown) => {
       if (isMissingTradeMiningScoringTableError(error)) {
         tradeMiningScoringConfigWarning =
@@ -189,7 +191,7 @@ export async function getSettingsShell(tenant: TenantContext) {
     searchProfileCadenceMappings,
     sevenLAccounts: typedIntegrationCredentials
       .filter((credential) => credential.provider === IntegrationProvider.SEVEN_L)
-      .map((credential) => mapSevenLAccount(credential))
+      .map((credential) => mapSevenLAccount(credential, localSevenLAccountNames))
       .filter(Boolean) as SevenLAccountConfig[]
   };
 }
@@ -419,7 +421,7 @@ function mapSevenLAccount(credential: {
   status: "ACTIVE" | "DISABLED" | "ERROR";
   publicConfig: unknown;
   secretRef: string | null;
-}): SevenLAccountConfig | null {
+}, localAccountNames: Set<string>): SevenLAccountConfig | null {
   if (!credential.publicConfig || typeof credential.publicConfig !== "object") {
     return null;
   }
@@ -463,7 +465,7 @@ function mapSevenLAccount(credential: {
         };
       })
       .filter(isSevenLCarrier),
-    secretConfigured: Boolean(credential.secretRef)
+    secretConfigured: Boolean(credential.secretRef) || localAccountNames.has(credential.name)
   };
 }
 
