@@ -200,7 +200,7 @@ export function PipelineTableClient({
                   </a>
                 ) : null}
               </div>
-              {lead.notes ? <p className="mt-2 text-xs leading-5 text-mutedForeground">{lead.notes}</p> : null}
+              {lead.notes ? <PipelineActivityNotes notes={lead.notes} /> : null}
             </div>
           );
         }
@@ -641,6 +641,40 @@ export function PipelineTableClient({
         </table>
       </div>
     </div>
+  );
+}
+
+function PipelineActivityNotes({ notes }: { notes: string }) {
+  const items = notes
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  const latestItem = items[items.length - 1];
+
+  return (
+    <details className="mt-2 rounded-md border border-border bg-background px-2 py-1.5 text-xs text-mutedForeground">
+      <summary className="cursor-pointer list-none font-medium text-foreground">
+        Apollo activity
+        <span className="ml-2 text-mutedForeground">
+          {items.length} update{items.length === 1 ? "" : "s"}
+        </span>
+      </summary>
+      <p className="mt-1 leading-5">{latestItem}</p>
+      {items.length > 1 ? (
+        <div className="mt-2 space-y-1 border-t border-border pt-2">
+          {items.map((item, index) => (
+            <p key={`${index}-${item}`} className="leading-5">
+              {item}
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </details>
   );
 }
 
