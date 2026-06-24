@@ -46,8 +46,7 @@ export class UpsRateLimitError extends Error {
 }
 
 export async function getLocalUpsAccountMetadata(): Promise<LocalUpsAccountMetadata[]> {
-  const path = process.env.UPS_DEV_ACCOUNTS_FILE;
-  if (!path) {
+  if (!isUpsRuntimeConfigured()) {
     return [];
   }
 
@@ -67,10 +66,20 @@ export async function getLocalUpsAccountMetadata(): Promise<LocalUpsAccountMetad
   });
 }
 
+export function isUpsRuntimeConfigured() {
+  return Boolean(
+    process.env.UPS_RUNTIME_ACCOUNTS_JSON?.trim() ||
+      process.env.UPS_DEV_ACCOUNTS_FILE?.trim() ||
+      (process.env.UPS_CLIENT_ID?.trim() &&
+        process.env.UPS_CLIENT_SECRET?.trim() &&
+        process.env.UPS_ACCOUNT_NUMBER?.trim())
+  );
+}
+
 export async function getUpsQuote(account: UpsAccountConfig, request: QuoteRequest): Promise<QuoteResult> {
   const credential = await resolveRuntimeCredential(account);
   if (!credential) {
-    throw new Error(`No local UPS credentials were found for shipper number ${account.shipperNumber}.`);
+    throw new Error(`No UPS runtime credentials were found for shipper number ${account.shipperNumber}.`);
   }
 
   const accessToken = await getAccessToken(credential.clientId, credential.clientSecret);
@@ -250,15 +259,81 @@ async function loadLocalAccountsFile() {
     return cachedAccountsFile;
   }
 
-  const path = process.env.UPS_DEV_ACCOUNTS_FILE;
+  const runtimeAccountsJson = process.env.UPS_RUNTIME_ACCOUNTS_JSON?.trim();
+  if (runtimeAccountsJson) {
+    cachedAccountsFile = parseUpsRuntimeAccountsJson(runtimeAccountsJson);
+    return cachedAccountsFile;
+  }
+
+  const singleAccountCredential = readSingleAccountCredentialFromEnv();
+  if (singleAccountCredential) {
+    cachedAccountsFile = [singleAccountCredential];
+    return cachedAccountsFile;
+  }
+
+  const path = process.env.UPS_DEV_ACCOUNTS_FILE?.trim();
   if (!path) {
-    throw new Error("UPS_DEV_ACCOUNTS_FILE is not configured in the local environment.");
+    throw new Error(
+      "UPS runtime credentials are not configured. Set UPS_RUNTIME_ACCOUNTS_JSON, or UPS_CLIENT_ID / UPS_CLIENT_SECRET / UPS_ACCOUNT_NUMBER, or UPS_DEV_ACCOUNTS_FILE for local development."
+    );
   }
 
   const file = await readFile(path, "utf8");
-  const parsed = JSON.parse(file) as LocalUpsCredential[];
+  const parsed = parseUpsRuntimeAccountsJson(file);
   cachedAccountsFile = parsed;
   return parsed;
+}
+
+function parseUpsRuntimeAccountsJson(value: string) {
+  const parsed = JSON.parse(value) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new Error("UPS_RUNTIME_ACCOUNTS_JSON must be a JSON array of UPS account credentials.");
+  }
+
+  return parsed.map((item, index) => normalizeUpsCredentialRecord(item, index));
+}
+
+function readSingleAccountCredentialFromEnv(): LocalUpsCredential | null {
+  const clientId = process.env.UPS_CLIENT_ID?.trim();
+  const clientSecret = process.env.UPS_CLIENT_SECRET?.trim();
+  const shipperNumber = process.env.UPS_ACCOUNT_NUMBER?.trim();
+  if (!clientId || !clientSecret || !shipperNumber) {
+    return null;
+  }
+
+  const countryCode = process.env.UPS_ACCOUNT_COUNTRY_CODE?.trim().toUpperCase() === "CA" ? "CA" : "US";
+
+  return normalizeUpsCredentialRecord(
+    {
+      name: process.env.UPS_ACCOUNT_NAME?.trim() || `UPS Account ${shipperNumber}`,
+      client_id: clientId,
+      client_secret: clientSecret,
+      shipper_number: shipperNumber,
+      country_code: countryCode
+    },
+    0
+  );
+}
+
+function normalizeUpsCredentialRecord(value: unknown, index: number): LocalUpsCredential {
+  const record = (value ?? {}) as Partial<LocalUpsCredential>;
+  const name = typeof record.name === "string" ? record.name.trim() : "";
+  const clientId = typeof record.client_id === "string" ? record.client_id.trim() : "";
+  const clientSecret = typeof record.client_secret === "string" ? record.client_secret.trim() : "";
+  const shipperNumber = typeof record.shipper_number === "string" ? record.shipper_number.trim() : "";
+  const countryCode = record.country_code === "CA" ? "CA" : "US";
+
+  if (!name || !clientId || !clientSecret || !shipperNumber) {
+    throw new Error(`UPS runtime credential at index ${index} is missing name, client_id, client_secret, or shipper_number.`);
+  }
+
+  return {
+    name,
+    client_id: clientId,
+    client_secret: clientSecret,
+    shipper_number: shipperNumber,
+    country_code: countryCode
+  };
 }
 
 async function getAccessToken(clientId: string, clientSecret: string) {
