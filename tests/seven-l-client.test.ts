@@ -10,7 +10,7 @@ vi.mock("node:fs/promises", () => ({
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
 
-import { getLtlQuotes } from "@/server/integrations/seven-l";
+import { getLtlQuotes, resetSevenLRuntimeCacheForTests } from "@/server/integrations/seven-l";
 
 const liveAccount: SevenLAccountConfig = {
   id: "account-live",
@@ -84,20 +84,82 @@ describe("7L client integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     delete process.env.SEVEN_L_DEV_ACCOUNTS_FILE;
+    delete process.env.SEVEN_L_RUNTIME_ACCOUNTS_JSON;
+    delete process.env.SEVEN_L_RUNTIME_ACCOUNTS_BASE64;
+    resetSevenLRuntimeCacheForTests();
   });
 
   it("fails loudly when a dry-run account does not have runtime credentials", async () => {
     await expect(getLtlQuotes(dryRunAccount, [lane])).rejects.toThrow(
-      "7L runtime credentials are not available for account 7L Dry Run - Core LTL."
+      "7L runtime credentials are not available for account 7L Dry Run - Core LTL. Configure a matching 7L runtime account in Vercel env vars or the local runtime file before requesting rates."
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("fails loudly when a live account does not have runtime credentials", async () => {
     await expect(getLtlQuotes(liveAccount, [lane])).rejects.toThrow(
-      "7L runtime credentials are not available for account 7L Live Preferred Carriers."
+      "7L runtime credentials are not available for account 7L Live Preferred Carriers. Configure a matching 7L runtime account in Vercel env vars or the local runtime file before requesting rates."
     );
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("uses Vercel-style env runtime accounts without requiring the local credentials file", async () => {
+    process.env.SEVEN_L_RUNTIME_ACCOUNTS_JSON = JSON.stringify([
+      {
+        name: "7L Live Preferred Carriers",
+        username: "env-demo",
+        password: "env-secret",
+        baseUrl: "https://restapi.my7l.com"
+      }
+    ]);
+
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            accessToken: "token-123",
+            exp: Math.floor(Date.now() / 1000) + 3600
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            results: [
+              {
+                Name: "Southeastern Freight",
+                Code: "SEFL",
+                SCAC: "SEFL",
+                ServiceLevel: "Less than Truckload",
+                TransitDays: 2,
+                QuoteNumber: "SEFL-123",
+                RateBreakdown: [{ MINIMUM: "250.00" }, { "FUEL SURCHARGE": "50.00" }],
+                RateRemarks: ["Direct service"],
+                Total: "320.00"
+              }
+            ]
+          }
+        })
+      );
+
+    const response = await getLtlQuotes(
+      liveAccount,
+      [
+        {
+          ...lane,
+          originCity: "CHARLOTTE",
+          originState: "NC",
+          destinationCity: "HOUSTON",
+          destinationState: "TX"
+        }
+      ],
+      ["carrier-hash-1"]
+    );
+
+    expect(readFile).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(response.data).toHaveLength(1);
+    expect(response.errors).toEqual([]);
   });
 
   it("logs in, resolves zipcodes, and rates only the configured preferred carriers", async () => {
