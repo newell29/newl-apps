@@ -75,80 +75,97 @@ export default async function SearchProfilesPage() {
         <div className="grid gap-4">
           {profiles.map((profile) => (
             <article key={profile.id} className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border bg-muted px-5 py-4">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-lg font-semibold text-foreground">{profile.name}</h3>
-                    <StatusBadge enabled={profile.enabled} />
-                    {profile.pendingRunStatus ? <PendingRunBadge status={profile.pendingRunStatus} /> : null}
+              <details className="group" open={Boolean(profile.pendingRunStatus)}>
+                <summary className="cursor-pointer list-none bg-muted px-5 py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-lg font-semibold text-foreground">{profile.name}</h3>
+                        <StatusBadge enabled={profile.enabled} />
+                        {profile.pendingRunStatus ? <PendingRunBadge status={profile.pendingRunStatus} /> : null}
+                        <span className="rounded-full border border-accentBorder bg-accentSoft px-3 py-1 text-xs font-semibold text-primary">
+                          Weight {profile.priorityWeight}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-sm leading-6 text-mutedForeground">
+                        {summarizeProfileFocus(profile)}
+                      </p>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-mutedForeground">
+                        <span>Last run: {formatLastRun(profile.lastRunAt, profile.lastRunStatus)}</span>
+                        <span>
+                          {profile.lookbackWindowDays}d lookback | min {profile.minShipmentCount} shipment
+                          {profile.minShipmentCount === 1 ? "" : "s"}
+                        </span>
+                        <span>{profile.scheduleFrequency} schedule</span>
+                      </div>
+                      {profile.pendingRunRequestedAt ? (
+                        <p className="mt-1 text-xs text-primary">
+                          Immediate run requested {profile.pendingRunRequestedAt.toLocaleString("en-US")}
+                        </p>
+                      ) : null}
+                    </div>
+                    <span className="mt-1 text-xs font-semibold text-mutedForeground transition-transform group-open:rotate-180">
+                      v
+                    </span>
                   </div>
-                  <p className="mt-2 text-sm leading-6 text-mutedForeground">
-                    Last run: {formatLastRun(profile.lastRunAt, profile.lastRunStatus)}
-                  </p>
-                  {profile.pendingRunRequestedAt ? (
-                    <p className="mt-1 text-xs text-primary">
-                      Immediate run requested {profile.pendingRunRequestedAt.toLocaleString("en-US")}
-                    </p>
-                  ) : null}
+                </summary>
+
+                <div className="border-t border-border p-5">
+                  <form action={updateTradeMiningSearchProfileAction}>
+                    <input type="hidden" name="profileId" value={profile.id} />
+                    <SearchProfileForm
+                      defaults={{
+                        name: profile.name,
+                        description: profile.description ?? "",
+                        enabled: profile.enabled,
+                        destinationMarkets: profile.destinationMarkets.join("\n"),
+                        destinationPorts: profile.destinationPorts.join("\n"),
+                        originPorts: profile.originPorts.join("\n"),
+                        shipFromPorts: profile.shipFromPorts.join("\n"),
+                        originCountries: profile.originCountries.join("\n"),
+                        productKeywords: profile.productKeywords.join("\n"),
+                        hsCodes: profile.hsCodes.join("\n"),
+                        allowedCompanyIdentityRoles: profile.allowedCompanyIdentityRoles,
+                        excludedCompanyKeywords: profile.excludedCompanyKeywords.join("\n"),
+                        lookbackWindowDays: profile.lookbackWindowDays,
+                        minShipmentCount: profile.minShipmentCount,
+                        minShipmentVolume: profile.minShipmentVolume ?? "",
+                        scheduleFrequency: profile.scheduleFrequency,
+                        scheduleTimezone: profile.scheduleTimezone,
+                        priorityWeight: profile.priorityWeight
+                      }}
+                    />
+                    <div className="mt-4 flex flex-wrap gap-3">
+                      <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
+                        Save profile
+                      </button>
+                    </div>
+                  </form>
+
+                  <div className="mt-3 flex flex-wrap gap-3">
+                    <form action={requestTradeMiningSearchProfileRunAction}>
+                      <input type="hidden" name="profileId" value={profile.id} />
+                      <button
+                        disabled={Boolean(profile.pendingRunStatus) || !profile.enabled}
+                        className="rounded-md border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-accentSoft disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {profile.pendingRunStatus
+                          ? profile.pendingRunStatus === "RUNNING"
+                            ? "Run in progress"
+                            : "Run requested"
+                          : "Run now"}
+                      </button>
+                    </form>
+
+                    <form action={deleteTradeMiningSearchProfileAction}>
+                      <input type="hidden" name="profileId" value={profile.id} />
+                      <button className="rounded-md border border-danger/30 bg-danger/5 px-4 py-2 text-sm font-semibold text-danger transition-colors hover:bg-danger/10">
+                        Delete profile
+                      </button>
+                    </form>
+                  </div>
                 </div>
-                <span className="rounded-full border border-accentBorder bg-accentSoft px-3 py-1 text-xs font-semibold text-primary">
-                  Weight {profile.priorityWeight}
-                </span>
-              </div>
-
-              <div className="p-5">
-                <form action={updateTradeMiningSearchProfileAction}>
-                  <input type="hidden" name="profileId" value={profile.id} />
-                  <SearchProfileForm
-                    defaults={{
-                      name: profile.name,
-                      description: profile.description ?? "",
-                      enabled: profile.enabled,
-                      destinationMarkets: profile.destinationMarkets.join("\n"),
-                      destinationPorts: profile.destinationPorts.join("\n"),
-                      originPorts: profile.originPorts.join("\n"),
-                      shipFromPorts: profile.shipFromPorts.join("\n"),
-                      originCountries: profile.originCountries.join("\n"),
-                      productKeywords: profile.productKeywords.join("\n"),
-                      hsCodes: profile.hsCodes.join("\n"),
-                      allowedCompanyIdentityRoles: profile.allowedCompanyIdentityRoles,
-                      excludedCompanyKeywords: profile.excludedCompanyKeywords.join("\n"),
-                      lookbackWindowDays: profile.lookbackWindowDays,
-                      minShipmentCount: profile.minShipmentCount,
-                      minShipmentVolume: profile.minShipmentVolume ?? "",
-                      scheduleFrequency: profile.scheduleFrequency,
-                      scheduleTimezone: profile.scheduleTimezone,
-                      priorityWeight: profile.priorityWeight
-                    }}
-                  />
-                  <div className="mt-4 flex flex-wrap gap-3">
-                    <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
-                      Save profile
-                    </button>
-                  </div>
-                </form>
-
-                <form action={requestTradeMiningSearchProfileRunAction} className="mt-3">
-                  <input type="hidden" name="profileId" value={profile.id} />
-                  <button
-                    disabled={Boolean(profile.pendingRunStatus) || !profile.enabled}
-                    className="rounded-md border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-accentSoft disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {profile.pendingRunStatus
-                      ? profile.pendingRunStatus === "RUNNING"
-                        ? "Run in progress"
-                        : "Run requested"
-                      : "Run now"}
-                  </button>
-                </form>
-
-                <form action={deleteTradeMiningSearchProfileAction} className="mt-3">
-                  <input type="hidden" name="profileId" value={profile.id} />
-                  <button className="rounded-md border border-danger/30 bg-danger/5 px-4 py-2 text-sm font-semibold text-danger transition-colors hover:bg-danger/10">
-                    Delete profile
-                  </button>
-                </form>
-              </div>
+              </details>
             </article>
           ))}
 
@@ -161,6 +178,36 @@ export default async function SearchProfilesPage() {
       </section>
     </div>
   );
+}
+
+function summarizeProfileFocus(profile: {
+  destinationMarkets: string[];
+  destinationPorts: string[];
+  originCountries: string[];
+  productKeywords: string[];
+  hsCodes: string[];
+}) {
+  const summaryParts: string[] = [];
+
+  if (profile.destinationMarkets.length > 0) {
+    summaryParts.push(`Destinations: ${profile.destinationMarkets.slice(0, 3).join(", ")}`);
+  }
+
+  if (profile.destinationPorts.length > 0) {
+    summaryParts.push(`Ports: ${profile.destinationPorts.slice(0, 2).join(", ")}`);
+  }
+
+  if (profile.originCountries.length > 0) {
+    summaryParts.push(`Origins: ${profile.originCountries.slice(0, 2).join(", ")}`);
+  }
+
+  if (profile.productKeywords.length > 0) {
+    summaryParts.push(`Products: ${profile.productKeywords.slice(0, 2).join(", ")}`);
+  } else if (profile.hsCodes.length > 0) {
+    summaryParts.push(`HS: ${profile.hsCodes.slice(0, 3).join(", ")}`);
+  }
+
+  return summaryParts.length > 0 ? summaryParts.join(" | ") : "No lane focus configured yet.";
 }
 
 function SearchProfileForm({

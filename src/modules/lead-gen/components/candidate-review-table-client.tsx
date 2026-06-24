@@ -562,42 +562,107 @@ function ColumnFilterControl({
 
   if (column.id === "candidateStatus") {
     return (
-      <select
+      <HeaderFilterSelect
         value={typeof value === "string" ? value : ""}
-        onChange={(event) => column.setFilterValue(event.target.value || undefined)}
-        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
-      >
-        <option value="">All</option>
-        <option value="new">New</option>
-        <option value="reviewing">Reviewing</option>
-        <option value="approved for pipeline">Approved</option>
-        <option value="rejected">Rejected</option>
-        <option value="disqualified">Disqualified</option>
-      </select>
+        onChange={(nextValue) => column.setFilterValue(nextValue || undefined)}
+        options={[
+          { value: "", label: "Any status" },
+          { value: "new", label: "New" },
+          { value: "reviewing", label: "Reviewing" },
+          { value: "approved for pipeline", label: "Approved" },
+          { value: "rejected", label: "Rejected" },
+          { value: "disqualified", label: "Disqualified" }
+        ]}
+      />
     );
   }
 
   if (column.id === "candidateScore" || column.id === "shipmentCount") {
     return (
-      <input
-        type="number"
-        min="0"
+      <HeaderFilterNumber
         value={typeof value === "number" || typeof value === "string" ? String(value) : ""}
-        onChange={(event) => column.setFilterValue(event.target.value)}
-        placeholder="Min"
-        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+        onChange={(nextValue) => column.setFilterValue(nextValue)}
+        placeholder={column.id === "candidateScore" ? "Min score" : "Min shipments"}
       />
     );
   }
 
+  const textPlaceholders: Record<string, string> = {
+    companyName: "Search company",
+    industry: "Filter industry",
+    matchedSearchProfileName: "Filter profile",
+    destination: "Filter destination",
+    origin: "Filter origin",
+    product: "Filter product / HS",
+    assignedRep: "Filter rep",
+    currentPipelineStage: "Filter pipeline"
+  };
+
+  return <HeaderFilterText value={typeof value === "string" ? value : ""} onChange={(nextValue) => column.setFilterValue(nextValue)} placeholder={textPlaceholders[column.id] ?? "Filter"} />;
+}
+
+function HeaderFilterText({
+  value,
+  onChange,
+  placeholder
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
   return (
     <input
       type="text"
-      value={typeof value === "string" ? value : ""}
-      onChange={(event) => column.setFilterValue(event.target.value)}
-      placeholder="Filter"
-      className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+      className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground placeholder:text-mutedForeground"
     />
+  );
+}
+
+function HeaderFilterNumber({
+  value,
+  onChange,
+  placeholder
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <input
+      type="number"
+      min="0"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+      className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground placeholder:text-mutedForeground"
+    />
+  );
+}
+
+function HeaderFilterSelect({
+  value,
+  onChange,
+  options
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground"
+    >
+      {options.map((option) => (
+        <option key={`${option.value}-${option.label}`} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
   );
 }
 

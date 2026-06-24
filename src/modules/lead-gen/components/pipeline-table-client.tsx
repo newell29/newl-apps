@@ -708,25 +708,182 @@ function PipelineColumnFilterControl({
 
   if (["score", "shipmentCount30d", "shipmentCount90d"].includes(column.id)) {
     return (
-      <input
-        type="number"
-        min="0"
+      <HeaderFilterNumber
         value={typeof value === "number" || typeof value === "string" ? String(value) : ""}
-        onChange={(event) => column.setFilterValue(event.target.value)}
-        placeholder="Min"
-        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+        onChange={(nextValue) => column.setFilterValue(nextValue)}
+        placeholder={
+          column.id === "score"
+            ? "Min score"
+            : column.id === "shipmentCount30d"
+              ? "30d min"
+              : "90d min"
+        }
       />
     );
   }
 
+  if (column.id === "stage") {
+    return (
+      <HeaderFilterSelect
+        value={typeof value === "string" ? value : ""}
+        onChange={(nextValue) => column.setFilterValue(nextValue)}
+        options={[
+          { value: "", label: "Any stage" },
+          { value: LeadPipelineStage.NEW, label: "New" },
+          { value: LeadPipelineStage.RESEARCHING, label: "Researching" },
+          { value: LeadPipelineStage.ENRICHED, label: "Enriched" },
+          { value: LeadPipelineStage.QUALIFIED, label: "Qualified" },
+          { value: LeadPipelineStage.CONTACTED, label: "Contacted" },
+          { value: LeadPipelineStage.REPLIED, label: "Replied" },
+          { value: LeadPipelineStage.MEETING_BOOKED, label: "Meeting booked" },
+          { value: LeadPipelineStage.QUOTED, label: "Quoted" },
+          { value: LeadPipelineStage.WON, label: "Won" },
+          { value: LeadPipelineStage.LOST, label: "Lost" },
+          { value: LeadPipelineStage.DISQUALIFIED, label: "Disqualified" }
+        ]}
+      />
+    );
+  }
+
+  if (column.id === "candidateStatus") {
+    return (
+      <HeaderFilterSelect
+        value={typeof value === "string" ? value : ""}
+        onChange={(nextValue) => column.setFilterValue(nextValue)}
+        options={[
+          { value: "", label: "Any candidate" },
+          { value: "NEW", label: "New" },
+          { value: "REVIEWING", label: "Reviewing" },
+          { value: "APPROVED_FOR_PIPELINE", label: "Approved" },
+          { value: "REJECTED", label: "Rejected" },
+          { value: "DISQUALIFIED", label: "Disqualified" }
+        ]}
+      />
+    );
+  }
+
+  if (column.id === "contactStatus") {
+    return (
+      <HeaderFilterSelect
+        value={typeof value === "string" ? value : ""}
+        onChange={(nextValue) => column.setFilterValue(nextValue)}
+        options={[
+          { value: "", label: "Any contact status" },
+          { value: "Not enriched", label: "Not enriched" },
+          { value: "Approved", label: "Approved" },
+          { value: "Reviewing", label: "Reviewing" }
+        ]}
+      />
+    );
+  }
+
+  if (column.id === "apolloStatus") {
+    return (
+      <HeaderFilterSelect
+        value={typeof value === "string" ? value : ""}
+        onChange={(nextValue) => column.setFilterValue(nextValue)}
+        options={[
+          { value: "", label: "Any Apollo state" },
+          { value: "NOT_STARTED", label: "Not started" },
+          { value: "QUEUED", label: "Queued" },
+          { value: "ENRICHED", label: "Enriched" },
+          { value: "NOT_FOUND", label: "Not found" },
+          { value: "NEEDS_REVIEW", label: "Needs review" }
+        ]}
+      />
+    );
+  }
+
+  if (column.id === "sequenceStatus") {
+    return (
+      <HeaderFilterSelect
+        value={typeof value === "string" ? value : ""}
+        onChange={(nextValue) => column.setFilterValue(nextValue)}
+        options={[
+          { value: "", label: "Any sequence state" },
+          { value: "NOT_STARTED", label: "Not started" },
+          { value: "READY", label: "Ready" },
+          { value: "ENROLLED", label: "Enrolled" },
+          { value: "REPLIED", label: "Replied" }
+        ]}
+      />
+    );
+  }
+
+  const textPlaceholders: Record<string, string> = {
+    companyName: "Search company",
+    industry: "Filter industry",
+    destinationPort: "Filter destination port",
+    originPorts: "Filter origin / ship-from",
+    assignedRep: "Filter rep",
+    nextStep: "Filter next step"
+  };
+
+  return <HeaderFilterText value={typeof value === "string" ? value : ""} onChange={(nextValue) => column.setFilterValue(nextValue)} placeholder={textPlaceholders[column.id] ?? "Filter"} />;
+}
+
+function HeaderFilterText({
+  value,
+  onChange,
+  placeholder
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
   return (
     <input
       type="text"
-      value={typeof value === "string" ? value : ""}
-      onChange={(event) => column.setFilterValue(event.target.value)}
-      placeholder="Filter"
-      className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+      className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground placeholder:text-mutedForeground"
     />
+  );
+}
+
+function HeaderFilterNumber({
+  value,
+  onChange,
+  placeholder
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <input
+      type="number"
+      min="0"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+      className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground placeholder:text-mutedForeground"
+    />
+  );
+}
+
+function HeaderFilterSelect({
+  value,
+  onChange,
+  options
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground"
+    >
+      {options.map((option) => (
+        <option key={`${option.value}-${option.label}`} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
   );
 }
 

@@ -2,6 +2,7 @@
 
 import {
   ApolloStatus,
+  ContactSource,
   ContactOutreachDraftStatus,
   ContactStatus,
   ContactTier,
@@ -703,25 +704,176 @@ function ContactColumnFilterControl({
 
   if (column.id === "contactScore") {
     return (
-      <input
-        type="number"
-        min="0"
+      <HeaderFilterNumber
         value={typeof value === "number" || typeof value === "string" ? String(value) : ""}
-        onChange={(event) => column.setFilterValue(event.target.value)}
-        placeholder="Min"
-        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+        onChange={(nextValue) => column.setFilterValue(nextValue)}
+        placeholder="Min score"
       />
     );
   }
 
+  if (column.id === "contactStatus") {
+    return (
+      <HeaderFilterSelect
+        value={typeof value === "string" ? value : ""}
+        onChange={(nextValue) => column.setFilterValue(nextValue)}
+        options={[
+          { value: "", label: "Any contact status" },
+          { value: ContactStatus.NEW, label: "New" },
+          { value: ContactStatus.REVIEWING, label: "Reviewing" },
+          { value: ContactStatus.APPROVED, label: "Approved" },
+          { value: ContactStatus.REJECTED, label: "Rejected" },
+          { value: ContactStatus.DO_NOT_CONTACT, label: "Do not contact" }
+        ]}
+      />
+    );
+  }
+
+  if (column.id === "apolloStatus") {
+    return (
+      <HeaderFilterSelect
+        value={typeof value === "string" ? value : ""}
+        onChange={(nextValue) => column.setFilterValue(nextValue)}
+        options={[
+          { value: "", label: "Any Apollo state" },
+          { value: ApolloStatus.NOT_STARTED, label: "Not started" },
+          { value: ApolloStatus.ENRICHED, label: "Enriched" },
+          { value: ApolloStatus.NOT_FOUND, label: "Not found" },
+          { value: ApolloStatus.ERROR, label: "Error" }
+        ]}
+      />
+    );
+  }
+
+  if (column.id === "sequenceStatus") {
+    return (
+      <HeaderFilterSelect
+        value={typeof value === "string" ? value : ""}
+        onChange={(nextValue) => column.setFilterValue(nextValue)}
+        options={[
+          { value: "", label: "Any sequence state" },
+          { value: SequenceStatus.NOT_STARTED, label: "Not started" },
+          { value: SequenceStatus.READY, label: "Ready" },
+          { value: SequenceStatus.ENROLLED, label: "Enrolled" },
+          { value: SequenceStatus.PAUSED, label: "Paused" },
+          { value: SequenceStatus.REPLIED, label: "Replied" },
+          { value: SequenceStatus.BOUNCED, label: "Bounced" },
+          { value: SequenceStatus.FINISHED, label: "Finished" }
+        ]}
+      />
+    );
+  }
+
+  if (column.id === "replyStatus") {
+    return (
+      <HeaderFilterSelect
+        value={typeof value === "string" ? value : ""}
+        onChange={(nextValue) => column.setFilterValue(nextValue)}
+        options={[
+          { value: "", label: "Any reply state" },
+          { value: ReplyStatus.NO_REPLY, label: "No reply" },
+          { value: ReplyStatus.REPLIED, label: "Replied" },
+          { value: ReplyStatus.POSITIVE, label: "Positive" },
+          { value: ReplyStatus.NEGATIVE, label: "Negative" },
+          { value: ReplyStatus.MEETING_BOOKED, label: "Meeting booked" },
+          { value: ReplyStatus.OUT_OF_OFFICE, label: "Out of office" }
+        ]}
+      />
+    );
+  }
+
+  if (column.id === "source") {
+    return (
+      <HeaderFilterSelect
+        value={typeof value === "string" ? value : ""}
+        onChange={(nextValue) => column.setFilterValue(nextValue)}
+        options={[
+          { value: "", label: "Any source" },
+          { value: ContactSource.MANUAL, label: "Manual" },
+          { value: ContactSource.APOLLO, label: "Apollo" },
+          { value: ContactSource.IMPORT, label: "Import" },
+          { value: ContactSource.UNKNOWN, label: "Unknown" }
+        ]}
+      />
+    );
+  }
+
+  const textPlaceholders: Record<string, string> = {
+    fullName: "Search contact",
+    title: "Filter title",
+    companyName: "Filter company",
+    email: "Filter email",
+    selectedSequenceName: "Filter selected cadence",
+    recommendedSequenceName: "Filter recommendation",
+    draftStatus: "Filter draft state",
+    assignedRep: "Filter rep"
+  };
+
+  return <HeaderFilterText value={typeof value === "string" ? value : ""} onChange={(nextValue) => column.setFilterValue(nextValue)} placeholder={textPlaceholders[column.id] ?? "Filter"} />;
+}
+
+function HeaderFilterText({
+  value,
+  onChange,
+  placeholder
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
   return (
     <input
       type="text"
-      value={typeof value === "string" ? value : ""}
-      onChange={(event) => column.setFilterValue(event.target.value)}
-      placeholder="Filter"
-      className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+      className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground placeholder:text-mutedForeground"
     />
+  );
+}
+
+function HeaderFilterNumber({
+  value,
+  onChange,
+  placeholder
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <input
+      type="number"
+      min="0"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+      className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground placeholder:text-mutedForeground"
+    />
+  );
+}
+
+function HeaderFilterSelect({
+  value,
+  onChange,
+  options
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground"
+    >
+      {options.map((option) => (
+        <option key={`${option.value}-${option.label}`} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
   );
 }
 

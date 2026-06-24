@@ -959,11 +959,16 @@ function ResultsTable({ results }: { results: GroupedLaneResult[] }) {
 
   return (
     <section className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-      <div className="border-b border-border bg-muted px-4 py-3">
-        <p className="text-sm font-semibold text-foreground">Carrier comparisons</p>
-        <p className="text-xs text-mutedForeground">
-          {results.length.toLocaleString("en-US")} lanes with carrier comparison columns
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted px-4 py-3">
+        <div>
+          <p className="text-sm font-semibold text-foreground">Carrier comparisons</p>
+          <p className="text-xs text-mutedForeground">
+            {results.length.toLocaleString("en-US")} lanes with carrier comparison columns
+          </p>
+        </div>
+        <span className="rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-xs font-semibold text-primary">
+          {carrierColumns.length.toLocaleString("en-US")} carriers
+        </span>
       </div>
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-border text-sm">
@@ -984,7 +989,10 @@ function ResultsTable({ results }: { results: GroupedLaneResult[] }) {
           </thead>
           <tbody className="divide-y divide-border">
             {results.map((result) => (
-              <tr key={`${result.customerReference}-${result.originLabel}-${result.destinationLabel}`} className="align-top">
+              <tr
+                key={`${result.customerReference}-${result.originLabel}-${result.destinationLabel}`}
+                className="align-top transition-colors hover:bg-muted/50"
+              >
                 <td className="px-4 py-3 text-foreground">{result.customerReference}</td>
                 <td className="px-4 py-3 text-mutedForeground">{result.originLabel}</td>
                 <td className="px-4 py-3 text-mutedForeground">{result.destinationLabel}</td>
@@ -1015,15 +1023,20 @@ function ResultsTable({ results }: { results: GroupedLaneResult[] }) {
 
 function CarrierIssuesPanel({ carrierErrors }: { carrierErrors: LtlCarrierErrorResult[] }) {
   return (
-    <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
-      <div>
-        <h2 className="text-base font-semibold text-foreground">Carrier issues</h2>
-        <p className="mt-1 text-sm leading-6 text-mutedForeground">
-          These carriers responded with lane-specific errors. They did not block the rest of the pull.
-        </p>
+    <section className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted px-4 py-3">
+        <div>
+          <h2 className="text-sm font-semibold text-foreground">Carrier issues</h2>
+          <p className="mt-1 text-xs leading-5 text-mutedForeground">
+            These carriers responded with lane-specific errors. They did not block the rest of the pull.
+          </p>
+        </div>
+        <span className="rounded-full border border-warning/25 bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning">
+          {carrierErrors.length.toLocaleString("en-US")} issues
+        </span>
       </div>
 
-      <div className="mt-4 space-y-3">
+      <div className="space-y-3 p-4">
         {carrierErrors.map((error, index) => (
           <div
             key={`${error.customerReference}-${error.carrierHash}-${index}`}
