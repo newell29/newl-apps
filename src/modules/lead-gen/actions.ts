@@ -14,6 +14,7 @@ import {
   SequenceStatus
 } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { EMPTY_APOLLO_QUEUE_SUMMARY, type ApolloQueueSummary } from "@/modules/lead-gen/apollo-queue-summary";
 import { calculateLeadPipelineScoreForCompany } from "@/modules/lead-gen/queries";
 import { summarizeTradeMiningEvidence } from "@/modules/lead-gen/queries";
 import {
@@ -117,32 +118,6 @@ async function authorizeLeadGenMutation() {
   await requireMutationAccess(context);
   return context;
 }
-
-export type ApolloQueueSummary = {
-  status: "idle" | "success" | "error";
-  message: string | null;
-  requestedCompanies: number;
-  processedCompanies: number;
-  matchedCompanies: number;
-  reviewNeededCompanies: number;
-  companiesWithContacts: number;
-  companiesWithoutContacts: number;
-  contactsImported: number;
-  completedAt: string | null;
-};
-
-export const EMPTY_APOLLO_QUEUE_SUMMARY: ApolloQueueSummary = {
-  status: "idle",
-  message: null,
-  requestedCompanies: 0,
-  processedCompanies: 0,
-  matchedCompanies: 0,
-  reviewNeededCompanies: 0,
-  companiesWithContacts: 0,
-  companiesWithoutContacts: 0,
-  contactsImported: 0,
-  completedAt: null
-};
 
 export async function createTradeMiningSearchProfileAction(formData: FormData) {
   const context = await authorizeLeadGenAdminMutation();
