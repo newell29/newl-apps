@@ -338,7 +338,6 @@ export function buildMicrosoftGraphMemoriesFromDocuments(
   for (const document of documents) {
     const metadata = document.metadata ?? {};
     const content = document.content;
-    const emails = extractEmails(content);
     const phones = extractPhones(content);
     const websites = extractWebsites(content);
     const services = detectServices(content);
@@ -934,10 +933,6 @@ function normalizeBodyContent(value: string | null) {
   }
 
   return truncateText(normalized, 4000);
-}
-
-function extractEmails(value: string) {
-  return Array.from(new Set(value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? []));
 }
 
 function extractPhones(value: string) {

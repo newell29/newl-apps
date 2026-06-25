@@ -84,9 +84,9 @@ export function parseAssistantProviderSettings(
       : {};
   const liveResponsesEnabled =
     readBoolean(config.liveResponsesEnabled) ?? (credential?.status === IntegrationStatus.ACTIVE);
-  const defaultModel = normalizeAssistantModelId(
-    readString(config.defaultModel) ?? DEFAULT_ASSISTANT_PROVIDER_SETTINGS.defaultModel
-  );
+  const defaultModel =
+    normalizeAssistantModelId(readString(config.defaultModel)) ??
+    DEFAULT_ASSISTANT_PROVIDER_SETTINGS.defaultModel;
   const fallbackModel = normalizeAssistantModelId(readString(config.fallbackModel));
   const temperature = readNumber(config.temperature) ?? DEFAULT_ASSISTANT_PROVIDER_SETTINGS.temperature;
   const maxTokens = readInteger(config.maxTokens) ?? DEFAULT_ASSISTANT_PROVIDER_SETTINGS.maxTokens;
