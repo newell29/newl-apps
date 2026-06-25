@@ -2,6 +2,7 @@ import { PageHeader } from "@/components/page-header";
 import { InfoHint } from "@/components/info-hint";
 import { PlatformRole } from "@prisma/client";
 import { connectMicrosoftGraphAction } from "@/server/auth/actions";
+import { syncAssistantKnowledgeAction } from "@/modules/assistant/actions";
 import { SearchProfileCadenceManager } from "@/modules/settings/components/search-profile-cadence-manager";
 import { formatPlatformRole } from "@/modules/settings/access-control";
 import {
@@ -373,56 +374,63 @@ export default async function SettingsPage() {
             </div>
           </div>
 
-          <div className="rounded-md border border-border bg-background p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium text-foreground">Current user delegated connection</p>
-                <p className="mt-1 text-sm leading-6 text-mutedForeground">
-                  {settings.microsoftGraphUserConnection.runtimeNotes}
-                </p>
-              </div>
-              <span
-                className={[
-                  "rounded-full px-2.5 py-1 text-xs font-semibold",
-                  settings.microsoftGraphUserConnection.connected
-                    ? "border border-success/25 bg-success/10 text-success"
-                    : "border border-border bg-background text-mutedForeground"
-                ].join(" ")}
-              >
-                {settings.microsoftGraphUserConnection.connected ? "Connected" : "Not connected"}
-              </span>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {settings.microsoftGraphUserConnection.scopes.length > 0 ? (
-                settings.microsoftGraphUserConnection.scopes.map((scope: string) => (
-                  <span
-                    key={scope}
-                    className="rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground"
-                  >
-                    {scope}
-                  </span>
-                ))
-              ) : (
-                <span className="text-xs text-mutedForeground">No delegated Graph scopes recorded for this user yet.</span>
-              )}
-            </div>
-            {settings.microsoftGraphUserConnection.expiresAt ? (
-              <p className="mt-3 text-xs text-mutedForeground">
-                Token expiry: {new Date(settings.microsoftGraphUserConnection.expiresAt).toLocaleString("en-US")}
+          <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
+            Save Microsoft 365 settings
+          </button>
+        </form>
+
+        <div className="mt-4 rounded-md border border-border bg-background p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-foreground">Current user delegated connection</p>
+              <p className="mt-1 text-sm leading-6 text-mutedForeground">
+                {settings.microsoftGraphUserConnection.runtimeNotes}
               </p>
-            ) : null}
-            <form action={connectMicrosoftGraphAction} className="mt-4">
+            </div>
+            <span
+              className={[
+                "rounded-full px-2.5 py-1 text-xs font-semibold",
+                settings.microsoftGraphUserConnection.connected
+                  ? "border border-success/25 bg-success/10 text-success"
+                  : "border border-border bg-background text-mutedForeground"
+              ].join(" ")}
+            >
+              {settings.microsoftGraphUserConnection.connected ? "Connected" : "Not connected"}
+            </span>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {settings.microsoftGraphUserConnection.scopes.length > 0 ? (
+              settings.microsoftGraphUserConnection.scopes.map((scope: string) => (
+                <span
+                  key={scope}
+                  className="rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground"
+                >
+                  {scope}
+                </span>
+              ))
+            ) : (
+              <span className="text-xs text-mutedForeground">No delegated Graph scopes recorded for this user yet.</span>
+            )}
+          </div>
+          {settings.microsoftGraphUserConnection.expiresAt ? (
+            <p className="mt-3 text-xs text-mutedForeground">
+              Token expiry: {new Date(settings.microsoftGraphUserConnection.expiresAt).toLocaleString("en-US")}
+            </p>
+          ) : null}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <form action={connectMicrosoftGraphAction}>
               <input type="hidden" name="callbackUrl" value="/settings#microsoft-365" />
               <button className="rounded-md border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
                 {settings.microsoftGraphUserConnection.connected ? "Refresh Microsoft consent" : "Connect Microsoft 365"}
               </button>
             </form>
+            <form action={syncAssistantKnowledgeAction}>
+              <button className="rounded-md border border-border bg-background px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted/40">
+                Sync Microsoft 365 knowledge
+              </button>
+            </form>
           </div>
-
-          <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
-            Save Microsoft 365 settings
-          </button>
-        </form>
+        </div>
       </section>
 
       <section id="user-access" className="space-y-3">
