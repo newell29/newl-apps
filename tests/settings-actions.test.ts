@@ -190,8 +190,8 @@ describe("saveTradeMiningScoringSettingsAction", () => {
     expect(args.data.status).toBe("ACTIVE");
     expect(args.data.publicConfig).toMatchObject({
       liveResponsesEnabled: true,
-      defaultModel: "gpt-5.4-mini",
-      fallbackModel: "gpt-5.4-nano",
+      defaultModel: "gpt-5-mini",
+      fallbackModel: "gpt-5-nano",
       temperature: 0.2,
       maxTokens: 900,
       endpointUrl: null
@@ -201,9 +201,6 @@ describe("saveTradeMiningScoringSettingsAction", () => {
 
   it("saves tenant-scoped Microsoft Graph integration settings", async () => {
     const formData = new FormData();
-    formData.set("microsoftClientId", "client-id-1");
-    formData.set("microsoftTenantId", "tenant-id-1");
-    formData.set("microsoftRedirectUri", "https://newl-apps.vercel.app/api/auth/callback/microsoft-entra-id");
     formData.set("microsoftMailboxAccessMode", "ADMIN_SELECTED_MAILBOXES");
     formData.set("microsoftAdminMailboxTargets", "shared@newl.ca\nops@newl.ca");
     formData.set("microsoftMailSyncEnabled", "true");
@@ -217,9 +214,6 @@ describe("saveTradeMiningScoringSettingsAction", () => {
     expect(args.data.provider).toBe("MICROSOFT_GRAPH");
     expect(args.data.name).toBe("Microsoft 365 Assistant");
     expect(args.data.publicConfig).toMatchObject({
-      clientId: "client-id-1",
-      tenantId: "tenant-id-1",
-      redirectUri: "https://newl-apps.vercel.app/api/auth/callback/microsoft-entra-id",
       adminMailboxTargets: ["shared@newl.ca", "ops@newl.ca"],
       mailboxAccessMode: "ADMIN_SELECTED_MAILBOXES",
       mailSyncEnabled: true,

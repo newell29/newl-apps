@@ -89,6 +89,19 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
                     </div>
                   ))}
                 </div>
+                {workspace.activeThread.recentRuns[0]?.providerFallback ? (
+                  <div className="rounded-md border border-warning/25 bg-warning/10 p-3 text-sm">
+                    <p className="font-medium text-foreground">Live assistant reply failed</p>
+                    <p className="mt-1 text-mutedForeground">
+                      This answer used the built-in fallback instead of the configured live model.
+                    </p>
+                    {workspace.activeThread.recentRuns[0].liveReplyError ? (
+                      <p className="mt-2 text-xs text-mutedForeground">
+                        Provider error: {workspace.activeThread.recentRuns[0].liveReplyError}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             ) : (
               <div className="flex min-h-full flex-col justify-end">

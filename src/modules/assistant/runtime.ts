@@ -35,6 +35,9 @@ export async function runAssistantPrompt(
       tenantId: context.tenantId,
       name: ASSISTANT_PROVIDER_CREDENTIAL_NAME
     },
+    orderBy: {
+      updatedAt: "desc"
+    },
     select: {
       provider: true,
       status: true,
