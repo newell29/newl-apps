@@ -43,20 +43,83 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
   return (
     <div className="space-y-6">
       <section className="grid gap-4 xl:grid-cols-[1.55fr_0.8fr]">
-        <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="flex min-h-[720px] flex-col rounded-lg border border-border bg-card shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
+            <div className="p-5">
               <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Company Assistant</p>
               <h1 className="mt-1 text-xl font-semibold text-foreground">Ask Newl</h1>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-mutedForeground">
                 Customer context, sales signals, rate support, and drafting in one assistant surface.
               </p>
             </div>
-            <span className="rounded-full border border-accentBorder bg-accentSoft px-3 py-1 text-xs font-semibold text-primary">
-              {formatIntent(workspace.intent)}
-            </span>
+            <div className="p-5">
+              <span className="rounded-full border border-accentBorder bg-accentSoft px-3 py-1 text-xs font-semibold text-primary">
+                {formatIntent(workspace.intent)}
+              </span>
+            </div>
           </div>
-          <form className="mt-5" action={askAssistantAction}>
+
+          <div className="flex-1 overflow-y-auto border-y border-border bg-muted/20 px-5 py-4">
+            {workspace.activeThread ? (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Active thread</p>
+                    <h2 className="mt-1 text-base font-semibold text-foreground">{workspace.activeThread.title}</h2>
+                  </div>
+                  <Link href="/assistant" className="text-sm font-semibold text-primary hover:text-primaryHover">
+                    New thread
+                  </Link>
+                </div>
+                <div className="space-y-3">
+                  {workspace.activeThread.messages.map((message: (typeof workspace.activeThread.messages)[number]) => (
+                    <div
+                      key={message.id}
+                      className={[
+                        "max-w-[85%] rounded-lg border p-3",
+                        message.role === "USER"
+                          ? "ml-auto border-primary/25 bg-background"
+                          : "mr-auto border-border bg-card"
+                      ].join(" ")}
+                    >
+                      <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+                        {formatAssistantRole(message.role)}
+                      </p>
+                      <div className="mt-2 whitespace-pre-line text-sm leading-6 text-foreground">{message.content}</div>
+                    </div>
+                  ))}
+                </div>
+                {workspace.activeThread.recentRuns[0]?.retrievedSources.length ? (
+                  <div className="rounded-md border border-border bg-background p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Latest retrieved sources</p>
+                    <div className="mt-3 space-y-2">
+                      {workspace.activeThread.recentRuns[0].retrievedSources.map(
+                        (source: (typeof workspace.activeThread.recentRuns)[number]["retrievedSources"][number]) => (
+                          <div key={source.id} className="text-sm leading-6">
+                            <p className="font-medium text-foreground">{source.title}</p>
+                            <p className="text-mutedForeground">{source.excerpt}</p>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="flex min-h-full flex-col justify-end">
+                <div className="rounded-md border border-border bg-background p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Assistant response preview</p>
+                  <div className="mt-3 space-y-2 text-sm leading-6 text-foreground">
+                    {workspace.answer.map((line: string) => (
+                      <p key={line}>{line}</p>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <form className="border-t border-border bg-card p-5" action={askAssistantAction}>
             {workspace.activeThread ? <input type="hidden" name="threadId" value={workspace.activeThread.id} /> : null}
             <div className="rounded-lg border-2 border-primary/20 bg-background p-3">
               <textarea
@@ -87,60 +150,6 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
               </div>
             </div>
           </form>
-
-          {workspace.activeThread ? (
-            <div className="mt-5 rounded-md border border-border bg-muted/30 p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Active thread</p>
-                  <h2 className="mt-1 text-base font-semibold text-foreground">{workspace.activeThread.title}</h2>
-                </div>
-                <Link href="/assistant" className="text-sm font-semibold text-primary hover:text-primaryHover">
-                  New thread
-                </Link>
-              </div>
-              <div className="mt-4 space-y-3">
-                {workspace.activeThread.messages.map((message: (typeof workspace.activeThread.messages)[number]) => (
-                  <div
-                    key={message.id}
-                    className={[
-                      "rounded-md border p-3",
-                      message.role === "USER" ? "border-primary/25 bg-background" : "border-border bg-card"
-                    ].join(" ")}
-                  >
-                    <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">
-                      {formatAssistantRole(message.role)}
-                    </p>
-                    <div className="mt-2 whitespace-pre-line text-sm leading-6 text-foreground">{message.content}</div>
-                  </div>
-                ))}
-              </div>
-              {workspace.activeThread.recentRuns[0]?.retrievedSources.length ? (
-                <div className="mt-4 rounded-md border border-border bg-background p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Latest retrieved sources</p>
-                  <div className="mt-3 space-y-2">
-                    {workspace.activeThread.recentRuns[0].retrievedSources.map(
-                      (source: (typeof workspace.activeThread.recentRuns)[number]["retrievedSources"][number]) => (
-                      <div key={source.id} className="text-sm leading-6">
-                        <p className="font-medium text-foreground">{source.title}</p>
-                        <p className="text-mutedForeground">{source.excerpt}</p>
-                      </div>
-                      )
-                    )}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <div className="mt-5 rounded-md border border-border bg-muted/30 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Assistant response preview</p>
-              <div className="mt-3 space-y-2 text-sm leading-6 text-foreground">
-                {workspace.answer.map((line: string) => (
-                  <p key={line}>{line}</p>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         <aside className="space-y-4">

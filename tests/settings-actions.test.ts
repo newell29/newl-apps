@@ -190,8 +190,8 @@ describe("saveTradeMiningScoringSettingsAction", () => {
     expect(args.data.status).toBe("ACTIVE");
     expect(args.data.publicConfig).toMatchObject({
       liveResponsesEnabled: true,
-      defaultModel: "gpt-5-mini",
-      fallbackModel: "gpt-5-nano",
+      defaultModel: "gpt-5.4-mini",
+      fallbackModel: "gpt-5.4-nano",
       temperature: 0.2,
       maxTokens: 900,
       endpointUrl: null

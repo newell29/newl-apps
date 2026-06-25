@@ -157,13 +157,13 @@ export default async function SettingsPage() {
               label="Default model"
               name="assistantDefaultModel"
               defaultValue={settings.assistantProvider.defaultModel}
-              placeholder="gpt-5-mini"
+              placeholder="gpt-5.4-mini"
             />
             <OptionalField
               label="Fallback model"
               name="assistantFallbackModel"
               defaultValue={settings.assistantProvider.fallbackModel ?? ""}
-              placeholder="gpt-5-nano"
+              placeholder="gpt-5.4-nano"
               info="Used when the default model request fails."
             />
             <div className="space-y-2">

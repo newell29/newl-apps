@@ -60,8 +60,8 @@ export const DEFAULT_ASSISTANT_PROVIDER_SETTINGS: Omit<
 > = {
   provider: IntegrationProvider.OPENAI,
   liveResponsesEnabled: false,
-  defaultModel: "gpt-5-mini",
-  fallbackModel: "gpt-5-nano",
+  defaultModel: "gpt-5.4-mini",
+  fallbackModel: "gpt-5.4-nano",
   temperature: 0.2,
   maxTokens: 900,
   endpointUrl: null
@@ -84,8 +84,10 @@ export function parseAssistantProviderSettings(
       : {};
   const liveResponsesEnabled =
     readBoolean(config.liveResponsesEnabled) ?? (credential?.status === IntegrationStatus.ACTIVE);
-  const defaultModel = readString(config.defaultModel) ?? DEFAULT_ASSISTANT_PROVIDER_SETTINGS.defaultModel;
-  const fallbackModel = readString(config.fallbackModel);
+  const defaultModel = normalizeAssistantModelId(
+    readString(config.defaultModel) ?? DEFAULT_ASSISTANT_PROVIDER_SETTINGS.defaultModel
+  );
+  const fallbackModel = normalizeAssistantModelId(readString(config.fallbackModel));
   const temperature = readNumber(config.temperature) ?? DEFAULT_ASSISTANT_PROVIDER_SETTINGS.temperature;
   const maxTokens = readInteger(config.maxTokens) ?? DEFAULT_ASSISTANT_PROVIDER_SETTINGS.maxTokens;
   const endpointUrl = readString(config.endpointUrl);
@@ -118,12 +120,28 @@ export function parseAssistantProviderSettings(
 export function buildAssistantProviderConfig(input: AssistantProviderConfigInput) {
   return {
     liveResponsesEnabled: input.liveResponsesEnabled,
-    defaultModel: input.defaultModel,
-    fallbackModel: input.fallbackModel,
+    defaultModel: normalizeAssistantModelId(input.defaultModel) ?? DEFAULT_ASSISTANT_PROVIDER_SETTINGS.defaultModel,
+    fallbackModel: normalizeAssistantModelId(input.fallbackModel),
     temperature: input.temperature,
     maxTokens: input.maxTokens,
     endpointUrl: input.endpointUrl
   };
+}
+
+function normalizeAssistantModelId(model: string | null) {
+  if (!model) {
+    return null;
+  }
+
+  const trimmed = model.trim();
+  if (trimmed === "gpt-5-mini") {
+    return "gpt-5.4-mini";
+  }
+  if (trimmed === "gpt-5-nano") {
+    return "gpt-5.4-nano";
+  }
+
+  return trimmed;
 }
 
 export async function generateAssistantReply(request: AssistantReplyRequest): Promise<AssistantReplyResult> {
