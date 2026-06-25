@@ -1,3 +1,4 @@
+import { ModuleKey } from "@prisma/client";
 import { PageHeader } from "@/components/page-header";
 import {
   createTradeMiningSearchProfileAction,
@@ -18,7 +19,7 @@ export const dynamic = "force-dynamic";
 
 export default async function SearchProfilesPage() {
   const context = await getAuthenticatedContext();
-  requireModule(context, "LEAD_GEN");
+  await requireModule(context, ModuleKey.LEAD_GEN);
   const { profiles, setupWarning } = await getTradeMiningSearchProfiles(context);
 
   return (

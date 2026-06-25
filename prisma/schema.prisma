@@ -144,6 +144,8 @@ model Tenant {
 
   memberships            Membership[]
   moduleAccess           TenantModuleAccess[]
+  rolePolicies           TenantRolePolicy[]
+  roleModuleAccess       TenantRoleModuleAccess[]
   integrationCredentials IntegrationCredential[]
   auditLogs              AuditLog[]
   jobRuns                AutomationJobRun[]
@@ -239,7 +241,8 @@ model Module {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  tenantAccess TenantModuleAccess[]
+  tenantAccess     TenantModuleAccess[]
+  tenantRoleAccess TenantRoleModuleAccess[]
 }
 
 model TenantModuleAccess {
@@ -255,6 +258,37 @@ model TenantModuleAccess {
 
   @@unique([tenantId, moduleId])
   @@index([tenantId, enabled])
+}
+
+model TenantRolePolicy {
+  id        String       @id @default(cuid())
+  tenantId  String
+  role      PlatformRole
+  canMutate Boolean
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, role])
+  @@index([tenantId, canMutate])
+}
+
+model TenantRoleModuleAccess {
+  id        String       @id @default(cuid())
+  tenantId  String
+  role      PlatformRole
+  moduleId  String
+  enabled   Boolean      @default(true)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  module Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, role, moduleId])
+  @@index([tenantId, role, enabled])
+  @@index([tenantId, moduleId])
 }
 
 model IntegrationCredential {

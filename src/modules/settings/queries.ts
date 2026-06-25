@@ -1,4 +1,4 @@
-import { Prisma, IntegrationProvider } from "@prisma/client";
+import { Prisma, IntegrationProvider, PlatformRole } from "@prisma/client";
 import { prisma } from "@/server/db";
 import type { SevenLAccountConfig } from "@/modules/ltl-rate-portal/types";
 import { tenantWhere } from "@/server/tenant-query";
@@ -29,9 +29,11 @@ import {
   DEFAULT_TRADEMINING_SCORING_SETTINGS,
   type ManagedQuoteSource,
   type QuoteToolTarget,
+  type TenantUserAccessEntry,
   type SearchProfileCadenceMappingEntry,
   type TradeMiningScoringSettings
 } from "@/modules/settings/types";
+import { buildRoleAccessMatrix } from "@/modules/settings/access-control";
 
 type SettingsUpsAccount = UpsAccountConfig & {
   toolTargets: QuoteToolTarget[];
@@ -99,6 +101,18 @@ type TradeMiningScoringClient = typeof prisma & {
   tradeMiningScoringConfig?: {
     findUnique(args: { where: { tenantId: string } }): Promise<TradeMiningScoringConfigRecord | null>;
   };
+  tenantRoleModuleAccess: {
+    findMany(args: {
+      where: { tenantId: string };
+      select: { role: true; moduleId: true; enabled: true };
+    }): Promise<Array<{ role: PlatformRole; moduleId: string; enabled: boolean }>>;
+  };
+  tenantRolePolicy: {
+    findMany(args: {
+      where: { tenantId: string };
+      select: { role: true; canMutate: true };
+    }): Promise<Array<{ role: PlatformRole; canMutate: boolean }>>;
+  };
 };
 
 function isSevenLCarrier(
@@ -121,8 +135,21 @@ export async function getSettingsShell(tenant: TenantContext) {
       }
     }
   });
+  const tenantModules = moduleAccess.map((access) => ({
+    id: access.module.id,
+    key: access.module.key,
+    name: access.module.name
+  }));
 
-  const [integrationCredentials, localUpsAccounts, localSevenLAccountNames, tradeMiningScoringConfig] = await Promise.all([
+  const [
+    integrationCredentials,
+    localUpsAccounts,
+    localSevenLAccountNames,
+    tenantUsers,
+    roleModuleOverrides,
+    rolePolicies,
+    tradeMiningScoringConfig
+  ] = await Promise.all([
     prisma.integrationCredential.findMany({
       where: tenantWhere(tenant, {
         provider: {
@@ -135,6 +162,54 @@ export async function getSettingsShell(tenant: TenantContext) {
     }),
     getLocalUpsAccountMetadata(),
     getLocalSevenLAccountNames(),
+    prisma.membership.findMany({
+      where: {
+        tenantId: tenant.tenantId
+      },
+      orderBy: [
+        {
+          user: {
+            name: "asc"
+          }
+        },
+        {
+          user: {
+            email: "asc"
+          }
+        }
+      ],
+      select: {
+        id: true,
+        userId: true,
+        role: true,
+        createdAt: true,
+        user: {
+          select: {
+            email: true,
+            name: true
+          }
+        }
+      }
+    }),
+    tradeMiningScoringClient.tenantRoleModuleAccess.findMany({
+      where: {
+        tenantId: tenant.tenantId
+      },
+      select: {
+        role: true,
+        moduleId: true,
+        enabled: true
+      }
+    }),
+    tradeMiningScoringClient.tenantRolePolicy.findMany({
+      where: {
+        tenantId: tenant.tenantId
+      },
+      select: {
+        role: true,
+        canMutate: true
+      }
+    }),
     loadTradeMiningScoringConfig(tradeMiningScoringClient, tenant.tenantId).catch((error: unknown) => {
       if (isMissingTradeMiningScoringTableError(error)) {
         tradeMiningScoringConfigWarning =
@@ -178,6 +253,25 @@ export async function getSettingsShell(tenant: TenantContext) {
       name: access.module.name,
       enabled: access.enabled
     })),
+    tenantUsers: tenantUsers.map<TenantUserAccessEntry>((membership: {
+      id: string;
+      userId: string;
+      role: PlatformRole;
+      createdAt: Date;
+      user: { email: string; name: string | null };
+    }) => ({
+      membershipId: membership.id,
+      userId: membership.userId,
+      email: membership.user.email,
+      name: membership.user.name,
+      role: membership.role,
+      createdAt: membership.createdAt.toISOString()
+    })),
+    roleAccessMatrix: buildRoleAccessMatrix({
+      tenantModules,
+      rolePolicies,
+      overrides: roleModuleOverrides
+    }),
     integrationProviders: Object.values(IntegrationProvider),
     quoteSources: managedQuoteSources,
     upsAccounts: mergeUpsAccountsForSettings(upsAccounts, localUpsAccounts),

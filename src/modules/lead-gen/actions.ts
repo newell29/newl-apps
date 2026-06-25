@@ -7,6 +7,7 @@ import {
   ContactOutreachDraftStatus,
   ContactTier,
   LeadPipelineStage,
+  ModuleKey,
   Prisma,
   ReplyStatus,
   SequenceStatus
@@ -28,7 +29,7 @@ import {
   resolveApolloSequenceMappings
 } from "@/modules/settings/apollo-sequence-mapping";
 import { DEFAULT_TRADEMINING_SCORING_SETTINGS } from "@/modules/settings/types";
-import { requireAdmin } from "@/server/auth/authorization";
+import { requireAdmin, requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
 import {
   fetchApolloContactsForCompany,
@@ -105,6 +106,13 @@ type SearchProfileMutationClient = typeof prisma & {
 async function authorizeLeadGenAdminMutation() {
   const context = await getAuthenticatedContext();
   requireAdmin(context);
+  return context;
+}
+
+async function authorizeLeadGenMutation() {
+  const context = await getAuthenticatedContext();
+  await requireModule(context, ModuleKey.LEAD_GEN);
+  await requireMutationAccess(context);
   return context;
 }
 
@@ -262,7 +270,7 @@ export async function requestTradeMiningSearchProfileRunAction(formData: FormDat
 }
 
 export async function updateCandidateStatusAction(formData: FormData) {
-  const context = await authorizeLeadGenAdminMutation();
+  const context = await authorizeLeadGenMutation();
   const client = prisma as SearchProfileMutationClient;
   const companyId = readRequired(formData, "companyId");
   const status = readCandidateStatus(formData.get("status"));
@@ -272,7 +280,7 @@ export async function updateCandidateStatusAction(formData: FormData) {
 }
 
 export async function bulkUpdateCandidateStatusAction(formData: FormData) {
-  const context = await authorizeLeadGenAdminMutation();
+  const context = await authorizeLeadGenMutation();
   const client = prisma as SearchProfileMutationClient;
   const status = readCandidateStatus(formData.get("status"));
   const companyIds = formData
@@ -291,7 +299,7 @@ export async function bulkUpdateCandidateStatusAction(formData: FormData) {
 }
 
 export async function updateLeadStageAction(formData: FormData) {
-  const context = await authorizeLeadGenAdminMutation();
+  const context = await authorizeLeadGenMutation();
   const client = prisma as SearchProfileMutationClient;
   const leadId = readRequired(formData, "leadId");
   const stage = readLeadStage(formData.get("stage"));
@@ -301,7 +309,7 @@ export async function updateLeadStageAction(formData: FormData) {
 }
 
 export async function bulkUpdateLeadStageAction(formData: FormData) {
-  const context = await authorizeLeadGenAdminMutation();
+  const context = await authorizeLeadGenMutation();
   const client = prisma as SearchProfileMutationClient;
   const stage = readLeadStage(formData.get("stage"));
   const leadIds = readSelectedIds(formData, "leadId");
@@ -314,7 +322,7 @@ export async function bulkUpdateLeadStageAction(formData: FormData) {
 }
 
 export async function bulkQueueApolloEnrichmentAction(formData: FormData) {
-  const context = await authorizeLeadGenAdminMutation();
+  const context = await authorizeLeadGenMutation();
   const leadIds = readSelectedIds(formData, "leadId");
   const queuedAt = new Date().toISOString();
   const requestNote = `Apollo enrichment requested on ${queuedAt}.`;
@@ -458,7 +466,7 @@ export async function bulkQueueApolloEnrichmentAction(formData: FormData) {
 }
 
 export async function bulkAssignLeadOwnerAction(formData: FormData) {
-  const context = await authorizeLeadGenAdminMutation();
+  const context = await authorizeLeadGenMutation();
   const leadIds = readSelectedIds(formData, "leadId");
   const ownerUserId = readBulkOwnerValue(formData.get("ownerUserId"));
 
@@ -467,7 +475,7 @@ export async function bulkAssignLeadOwnerAction(formData: FormData) {
 }
 
 export async function bulkUnassignLeadOwnerAction(formData: FormData) {
-  const context = await authorizeLeadGenAdminMutation();
+  const context = await authorizeLeadGenMutation();
   const leadIds = readSelectedIds(formData, "leadId");
 
   await updateLeadOwnersForTenant(context.tenantId, leadIds, null);
@@ -519,7 +527,7 @@ async function updateLeadOwnersForTenant(
 }
 
 export async function updateContactSequenceAction(formData: FormData) {
-  const context = await authorizeLeadGenAdminMutation();
+  const context = await authorizeLeadGenMutation();
   const contactId = readRequired(formData, "contactId");
   const sequenceId = readRequired(formData, "sequenceId");
   const overrideReason = readOptional(formData, "sequenceOverrideReason") ?? null;
@@ -550,7 +558,7 @@ export async function updateContactSequenceAction(formData: FormData) {
 }
 
 export async function bulkUpdateContactSequenceAction(formData: FormData) {
-  const context = await authorizeLeadGenAdminMutation();
+  const context = await authorizeLeadGenMutation();
   const contactIds = readSelectedIds(formData, "contactId");
   const sequenceId = readRequired(formData, "sequenceId");
   const overrideReason = readOptional(formData, "sequenceOverrideReason") ?? null;
@@ -568,7 +576,7 @@ export async function bulkUpdateContactSequenceAction(formData: FormData) {
 }
 
 export async function saveContactDraftAction(formData: FormData) {
-  const context = await authorizeLeadGenAdminMutation();
+  const context = await authorizeLeadGenMutation();
   const client = prisma as SearchProfileMutationClient;
   const draftId = readRequired(formData, "draftId");
   const draft = await client.contactOutreachDraft.findFirst({
@@ -601,7 +609,7 @@ export async function saveContactDraftAction(formData: FormData) {
 }
 
 export async function approveContactDraftAction(formData: FormData) {
-  const context = await authorizeLeadGenAdminMutation();
+  const context = await authorizeLeadGenMutation();
   const client = prisma as SearchProfileMutationClient;
   const draftId = readRequired(formData, "draftId");
   const draft = await client.contactOutreachDraft.findFirst({
@@ -635,7 +643,7 @@ export async function approveContactDraftAction(formData: FormData) {
 }
 
 export async function generateContactDraftAction(formData: FormData) {
-  const context = await authorizeLeadGenAdminMutation();
+  const context = await authorizeLeadGenMutation();
 
   if (!isOpenAiDraftGenerationConfigured()) {
     throw new Error("OPENAI_API_KEY is not configured. Add it to enable live Tier 1 draft generation.");

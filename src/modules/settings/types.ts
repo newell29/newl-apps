@@ -123,6 +123,29 @@ export type SearchProfileCadenceMappingEntry = {
   sequenceMapping: ApolloSequenceMappingEntry[];
 };
 
+export type TenantUserAccessEntry = {
+  membershipId: string;
+  userId: string;
+  email: string;
+  name: string | null;
+  role: string;
+  createdAt: string;
+};
+
+export type RoleAccessMatrixEntry = {
+  role: string;
+  label: string;
+  description: string;
+  visibilitySummary: string;
+  canMutate: boolean;
+  canMutateLocked: boolean;
+  modules: Array<{
+    key: string;
+    name: string;
+    enabled: boolean;
+  }>;
+};
+
 export const DEFAULT_TRADEMINING_SCORING_SETTINGS: TradeMiningScoringSettings = {
   recentWindowDays: 30,
   comparisonWindowDays: 30,

@@ -1,4 +1,4 @@
-import { CandidateStatus } from "@prisma/client";
+import { CandidateStatus, ModuleKey } from "@prisma/client";
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { bulkUpdateCandidateStatusAction } from "@/modules/lead-gen/actions";
@@ -8,7 +8,8 @@ import {
   getCandidateFeedFilters,
   type CandidateFeedSort
 } from "@/modules/lead-gen/queries";
-import { getCurrentTenantContext } from "@/server/tenant-context";
+import { requireModule } from "@/server/auth/authorization";
+import { getAuthenticatedContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +37,9 @@ export default async function CandidateFeedPage({
 }: {
   searchParams?: Promise<SearchParams>;
 }) {
-  const tenant = await getCurrentTenantContext();
+  const context = await getAuthenticatedContext();
+  await requireModule(context, ModuleKey.LEAD_GEN);
+  const tenant = context;
   const params = searchParams ? await searchParams : {};
   const query = readParam(params.q) ?? "";
   const status = parseStatusParam(readParam(params.status));

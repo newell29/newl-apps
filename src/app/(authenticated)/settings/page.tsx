@@ -1,11 +1,16 @@
 import { PageHeader } from "@/components/page-header";
 import { InfoHint } from "@/components/info-hint";
+import { PlatformRole } from "@prisma/client";
 import { SearchProfileCadenceManager } from "@/modules/settings/components/search-profile-cadence-manager";
+import { formatPlatformRole } from "@/modules/settings/access-control";
 import {
   createCarrierPlaceholderAction,
   createUpsQuoteSourceAction,
+  removeTenantUserAccessAction,
   saveApolloRepMappingAction,
   saveApolloSequenceMappingAction,
+  saveRoleModuleAccessAction,
+  saveTenantUserAccessAction,
   saveTradeMiningScoringSettingsAction,
   syncApolloRepMappingAction,
   syncApolloSequenceMappingAction,
@@ -22,6 +27,7 @@ export default async function SettingsPage() {
   const context = await getAuthenticatedContext();
   requireAdmin(context);
   const settings = await getSettingsShell(context);
+  const loginUrl = `${process.env.AUTH_URL ?? "https://newl-apps.vercel.app"}/login`;
 
   return (
     <div className="space-y-6">
@@ -42,6 +48,7 @@ export default async function SettingsPage() {
           <div className="flex flex-wrap gap-2">
             {[
               { href: "#platform-controls", label: "Platform controls" },
+              { href: "#user-access", label: "User access" },
               { href: "#lead-generation-settings", label: "Lead generation" },
               { href: "#quote-tools-settings", label: "Quote tools" }
             ].map((link) => (
@@ -100,6 +107,222 @@ export default async function SettingsPage() {
             ))}
           </div>
         </div>
+      </section>
+
+      <section id="user-access" className="space-y-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">User Access</h2>
+          <p className="mt-1 text-sm text-mutedForeground">
+            Provision Microsoft sign-in users, assign their role, and decide which enabled modules each role can access inside this tenant.
+          </p>
+        </div>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[0.9fr,1.1fr]">
+        <form action={saveTenantUserAccessAction} className="rounded-lg border border-border bg-card p-5 shadow-sm">
+          <h2 className="text-base font-semibold text-foreground">Add or Update User</h2>
+          <p className="mt-1 text-sm leading-6 text-mutedForeground">
+            Add someone by email before they sign in with Microsoft. If they already exist, this updates their role for this tenant.
+          </p>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <Field label="Email" name="email" placeholder="alex.newell@newl.ca" />
+            <OptionalField label="Name" name="name" placeholder="Alex Newell" />
+            <SelectField
+              label="Role"
+              name="role"
+              options={Object.values(PlatformRole).map((role) => ({
+                value: role,
+                label: formatPlatformRole(role)
+              }))}
+            />
+          </div>
+          <button className="mt-4 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
+            Save user access
+          </button>
+          <p className="mt-3 text-xs leading-5 text-mutedForeground">
+            After saving access, use the invite link in Current Tenant Users to send them the Microsoft sign-in URL.
+          </p>
+        </form>
+
+        <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
+          <h2 className="text-base font-semibold text-foreground">Role Basics</h2>
+          <p className="mt-1 text-sm leading-6 text-mutedForeground">
+            Role type still controls mutation safety globally. Module settings below change what each role can see and enter, but <span className="font-medium text-foreground">Read Only</span> can never write and <span className="font-medium text-foreground">Settings</span> stays admin-only.
+          </p>
+          <div className="mt-4 space-y-3">
+            {settings.roleAccessMatrix.map((entry) => (
+              <div key={entry.role} className="rounded-md border border-border bg-muted/40 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="font-medium text-foreground">{entry.label}</p>
+                  <span
+                    className={[
+                      "rounded-full px-2.5 py-1 text-xs font-semibold",
+                      entry.canMutate
+                        ? "border border-success/25 bg-success/10 text-success"
+                        : "border border-border bg-background text-mutedForeground"
+                    ].join(" ")}
+                  >
+                    {entry.canMutate ? "Can mutate" : "Read only"}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm text-mutedForeground">{entry.description}</p>
+                <p className="mt-2 text-xs leading-5 text-mutedForeground">{entry.visibilitySummary}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Current Tenant Users</h2>
+            <p className="mt-1 text-sm leading-6 text-mutedForeground">
+              These people are provisioned to sign in to this tenant through Microsoft Entra.
+            </p>
+          </div>
+          <span className="rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-xs font-semibold text-primary">
+            {settings.tenantUsers.length.toLocaleString("en-US")} users
+          </span>
+        </div>
+
+        <div className="mt-4 overflow-x-auto rounded-md border border-border">
+          <table className="min-w-full divide-y divide-border text-sm">
+            <thead className="bg-muted text-left text-xs font-semibold uppercase text-mutedForeground">
+              <tr>
+                <th className="px-3 py-3">Name</th>
+                <th className="px-3 py-3">Email</th>
+                <th className="px-3 py-3">Role</th>
+                <th className="px-3 py-3">Access added</th>
+                <th className="px-3 py-3">Invite</th>
+                <th className="px-3 py-3">Remove</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border bg-background">
+              {settings.tenantUsers.map((user: {
+                membershipId: string;
+                email: string;
+                name: string | null;
+                role: string;
+                createdAt: string;
+              }) => (
+                <tr key={user.membershipId}>
+                  <td className="px-3 py-3 text-foreground">{user.name ?? "No name set"}</td>
+                  <td className="px-3 py-3 text-mutedForeground">{user.email}</td>
+                  <td className="px-3 py-3">
+                    <span className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs font-semibold text-foreground">
+                      {formatPlatformRole(user.role as PlatformRole)}
+                    </span>
+                  </td>
+                  <td className="px-3 py-3 text-mutedForeground">
+                    {new Date(user.createdAt).toLocaleDateString("en-US", {
+                      year: "numeric",
+                      month: "short",
+                      day: "numeric"
+                    })}
+                  </td>
+                  <td className="px-3 py-3">
+                    <a
+                      href={buildInviteMailto({
+                        email: user.email,
+                        role: formatPlatformRole(user.role as PlatformRole),
+                        loginUrl
+                      })}
+                      className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted"
+                    >
+                      Invite email
+                    </a>
+                  </td>
+                  <td className="px-3 py-3">
+                    <form action={removeTenantUserAccessAction}>
+                      <input type="hidden" name="membershipId" value={user.membershipId} />
+                      <button className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted">
+                        Remove access
+                      </button>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Role Module Visibility</h2>
+            <p className="mt-1 text-sm leading-6 text-mutedForeground">
+              Choose which tenant-enabled modules each role can access. This affects both navigation and authorization for app modules.
+            </p>
+          </div>
+          <span className="rounded-full border border-warning/25 bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning">
+            Settings remains admin-only
+          </span>
+        </div>
+
+        <form action={saveRoleModuleAccessAction} className="mt-4 space-y-4">
+          <div className="overflow-x-auto rounded-md border border-border">
+            <table className="min-w-full divide-y divide-border text-sm">
+              <thead className="bg-muted text-left text-xs font-semibold uppercase text-mutedForeground">
+                <tr>
+                  <th className="px-3 py-3">Role</th>
+                  <th className="px-3 py-3">Can edit</th>
+                  {settings.modules.map((module) => (
+                    <th key={module.key} className="px-3 py-3">
+                      {module.name}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border bg-background">
+                {settings.roleAccessMatrix.map((entry) => (
+                  <tr key={entry.role}>
+                    <td className="px-3 py-3 align-top">
+                      <p className="font-medium text-foreground">{entry.label}</p>
+                      <p className="mt-1 text-xs leading-5 text-mutedForeground">
+                        {entry.canMutate ? "Can edit inside allowed modules." : "Can only view allowed modules."}
+                      </p>
+                    </td>
+                    <td className="px-3 py-3 align-top">
+                      <label className="flex items-center gap-2 text-sm text-foreground">
+                        <input
+                          type="checkbox"
+                          name="roleCanMutate"
+                          value={entry.role}
+                          defaultChecked={entry.canMutate}
+                          disabled={entry.canMutateLocked}
+                        />
+                        <span>{entry.canMutateLocked ? "Locked" : "Editable"}</span>
+                      </label>
+                    </td>
+                    {settings.modules.map((module) => {
+                      const moduleAccess = entry.modules.find((item) => item.key === module.key);
+                      return (
+                        <td key={`${entry.role}-${module.key}`} className="px-3 py-3 align-top">
+                          <label className="flex items-center gap-2 text-sm text-foreground">
+                            <input
+                              type="checkbox"
+                              name="roleModuleAccess"
+                              value={`${entry.role}::${module.key}`}
+                              defaultChecked={moduleAccess?.enabled}
+                              disabled={!module.enabled}
+                            />
+                            <span>{module.enabled ? "Visible" : "Tenant disabled"}</span>
+                          </label>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
+            Save role module access
+          </button>
+        </form>
       </section>
 
       <section id="lead-generation-settings" className="space-y-3">
@@ -1016,6 +1239,28 @@ function Field({
       />
     </label>
   );
+}
+
+function buildInviteMailto({
+  email,
+  role,
+  loginUrl
+}: {
+  email: string;
+  role: string;
+  loginUrl: string;
+}) {
+  const subject = "Newl Apps access";
+  const body = [
+    "You have been given access to Newl Apps.",
+    "",
+    `Role: ${role}`,
+    `Sign in: ${loginUrl}`,
+    "",
+    "Use your Newl Microsoft account when prompted."
+  ].join("\n");
+
+  return `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
 function OptionalField({

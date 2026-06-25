@@ -1,7 +1,23 @@
 import { ModuleKey, PlatformRole } from "@prisma/client";
 
 import { prisma } from "@/server/db";
+import { ALL_MODULES, DEFAULT_ROLE_MATRIX } from "@/server/auth/role-policy";
 import type { AuthenticatedContext } from "@/server/tenant-context";
+
+type TenantRoleModuleAccessClient = typeof prisma & {
+  tenantRolePolicy: {
+    findUnique(args: {
+      where: { tenantId_role: { tenantId: string; role: PlatformRole } };
+      select: { canMutate: true };
+    }): Promise<{ canMutate: boolean } | null>;
+  };
+  tenantRoleModuleAccess: {
+    findMany(args: {
+      where: { tenantId: string; role: PlatformRole };
+      select: { enabled: true; module: { select: { key: true } } };
+    }): Promise<Array<{ enabled: boolean; module: { key: ModuleKey } }>>;
+  };
+};
 
 /**
  * Thrown when an authenticated user lacks permission for an action. The status
@@ -17,15 +33,6 @@ export class AuthorizationError extends Error {
   }
 }
 
-type RolePolicy = {
-  /** Module keys this role may access (read). */
-  modules: ModuleKey[] | "ALL";
-  /** Whether the role may perform any write/mutation at all. */
-  canMutate: boolean;
-};
-
-const ALL_MODULES: ModuleKey[] = Object.values(ModuleKey);
-
 /**
  * Accepted role matrix (per the approved auth plan, Section 5).
  *
@@ -39,20 +46,7 @@ const ALL_MODULES: ModuleKey[] = Object.values(ModuleKey);
  * Effective write access to a module requires BOTH module access AND canMutate,
  * AND that the tenant has the module enabled (see requireModule).
  */
-export const ROLE_MATRIX: Record<PlatformRole, RolePolicy> = {
-  [PlatformRole.ADMIN]: { modules: "ALL", canMutate: true },
-  [PlatformRole.MANAGER]: { modules: "ALL", canMutate: true },
-  [PlatformRole.SALES]: { modules: [ModuleKey.LEAD_GEN], canMutate: true },
-  [PlatformRole.OPERATIONS]: {
-    modules: [ModuleKey.LEAD_GEN, ModuleKey.UPS_TOOLS, ModuleKey.LTL_RATE_PORTAL, ModuleKey.TRANSIT_LOOKUP],
-    canMutate: true
-  },
-  [PlatformRole.FINANCE]: {
-    modules: [ModuleKey.INVOICE_VERIFICATION, ModuleKey.QUICKBOOKS_POSTING],
-    canMutate: true
-  },
-  [PlatformRole.READ_ONLY]: { modules: "ALL", canMutate: false }
-};
+export const ROLE_MATRIX = DEFAULT_ROLE_MATRIX;
 
 export function roleHasModuleAccess(role: PlatformRole, moduleKey: ModuleKey): boolean {
   const policy = ROLE_MATRIX[role];
@@ -63,10 +57,71 @@ export function roleCanMutate(role: PlatformRole): boolean {
   return ROLE_MATRIX[role].canMutate;
 }
 
+export async function resolveRoleCanMutate(tenantId: string, role: PlatformRole): Promise<boolean> {
+  if (role === PlatformRole.ADMIN) {
+    return true;
+  }
+
+  if (role === PlatformRole.READ_ONLY) {
+    return false;
+  }
+
+  const roleAccessClient = prisma as TenantRoleModuleAccessClient;
+  const override = await roleAccessClient.tenantRolePolicy.findUnique({
+    where: {
+      tenantId_role: {
+        tenantId,
+        role
+      }
+    },
+    select: {
+      canMutate: true
+    }
+  });
+
+  return override?.canMutate ?? roleCanMutate(role);
+}
+
 /** Module keys the role can access, resolved to a concrete list. */
 export function accessibleModuleKeys(role: PlatformRole): ModuleKey[] {
   const policy = ROLE_MATRIX[role];
   return policy.modules === "ALL" ? [...ALL_MODULES] : [...policy.modules];
+}
+
+export async function resolveAccessibleModuleKeys(
+  tenantId: string,
+  role: PlatformRole
+): Promise<ModuleKey[]> {
+  const roleAccessClient = prisma as TenantRoleModuleAccessClient;
+  const defaults = new Set(accessibleModuleKeys(role));
+  const overrides = await roleAccessClient.tenantRoleModuleAccess.findMany({
+    where: {
+      tenantId,
+      role
+    },
+    select: {
+      enabled: true,
+      module: {
+        select: {
+          key: true
+        }
+      }
+    }
+  });
+
+  if (overrides.length === 0) {
+    return [...defaults];
+  }
+
+  for (const override of overrides) {
+    if (override.enabled) {
+      defaults.add(override.module.key);
+    } else {
+      defaults.delete(override.module.key);
+    }
+  }
+
+  return [...defaults];
 }
 
 /** Require the context's role to be one of the allowed roles. */
@@ -84,8 +139,8 @@ export function requireAdmin(ctx: AuthenticatedContext): void {
 }
 
 /** Require the role to be allowed to mutate (i.e. not READ_ONLY). */
-export function requireMutationAccess(ctx: AuthenticatedContext): void {
-  if (!roleCanMutate(ctx.role)) {
+export async function requireMutationAccess(ctx: AuthenticatedContext): Promise<void> {
+  if (!(await resolveRoleCanMutate(ctx.tenantId, ctx.role))) {
     throw new AuthorizationError("Read-only users cannot perform this action.");
   }
 }
@@ -95,7 +150,9 @@ export function requireMutationAccess(ctx: AuthenticatedContext): void {
  * This is tenant-safe: the entitlement check is scoped by tenantId.
  */
 export async function requireModule(ctx: AuthenticatedContext, moduleKey: ModuleKey): Promise<void> {
-  if (!roleHasModuleAccess(ctx.role, moduleKey)) {
+  const roleModules = await resolveAccessibleModuleKeys(ctx.tenantId, ctx.role);
+
+  if (!roleModules.includes(moduleKey)) {
     throw new AuthorizationError(`Role ${ctx.role} does not have access to the ${moduleKey} module.`);
   }
 
