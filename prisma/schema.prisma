@@ -105,6 +105,13 @@ enum ApolloStatus {
   ERROR
 }
 
+enum ApolloCompanyMatchClassification {
+  DIRECT_COMPANY
+  MATCH_QUALITY_REVIEW
+  LOGISTICS_PROVIDER
+  NO_MATCH
+}
+
 enum SequenceStatus {
   NOT_STARTED
   READY
@@ -192,6 +199,7 @@ model Tenant {
   contacts               Contact[]
   leads                  Lead[]
   contactOutreachDrafts  ContactOutreachDraft[]
+  apolloCompanyMatches   ApolloCompanyMatch[]
   ltlBatchQuoteLanes     LtlBatchQuoteLane[]
   assistantThreads       AssistantChatThread[]
   assistantMessages      AssistantChatMessage[]
@@ -437,6 +445,7 @@ model Company {
   contacts              Contact[]
   leads                 Lead[]
   contactOutreachDrafts ContactOutreachDraft[]
+  apolloCompanyMatches  ApolloCompanyMatch[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, normalizedName])
@@ -446,6 +455,36 @@ model Company {
   @@index([tenantId, domain])
   @@index([tenantId, linkedinUrl])
   @@index([tenantId, primaryIndustry])
+}
+
+model ApolloCompanyMatch {
+  id                     String                           @id @default(cuid())
+  tenantId               String
+  companyId              String
+  apolloOrganizationId   String?
+  apolloCompanyName      String?
+  apolloDomain           String?
+  apolloLinkedinUrl      String?
+  score                  Int                              @default(0)
+  classification         ApolloCompanyMatchClassification
+  nameMatchType          String?
+  domainMatch            Boolean                          @default(false)
+  logisticsProviderMatch Boolean                          @default(false)
+  branchLocationMatch    Boolean                          @default(false)
+  matchReason            String?
+  queryJson              Json?
+  rawJson                Json?
+  reviewedAt             DateTime?
+  reviewedByUserId       String?
+  createdAt              DateTime                         @default(now())
+  updatedAt              DateTime                         @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+
+  @@index([tenantId, companyId, createdAt])
+  @@index([tenantId, classification])
+  @@index([tenantId, apolloOrganizationId])
 }
 
 model TradeMiningSearchProfile {

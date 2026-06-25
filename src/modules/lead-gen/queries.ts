@@ -1404,6 +1404,10 @@ function summarizeContactStatus(
 }
 
 function summarizeApolloStatus(contacts: Array<{ apolloStatus: ApolloStatus }>, notes?: string | null) {
+  if (notes?.includes("Apollo company match needs review")) {
+    return "Needs review";
+  }
+
   if (notes?.includes("Apollo enrichment completed with no contacts")) {
     return "Not found";
   }
