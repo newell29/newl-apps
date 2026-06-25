@@ -102,6 +102,15 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
                     ) : null}
                   </div>
                 ) : null}
+                {workspace.activeThread.recentRuns[0]?.liveReplySkipped ? (
+                  <div className="rounded-md border border-border bg-background p-3 text-sm">
+                    <p className="font-medium text-foreground">Live assistant reply was not attempted</p>
+                    <p className="mt-1 text-mutedForeground">
+                      {workspace.activeThread.recentRuns[0].liveReplySkipReason ??
+                        "The assistant stayed on deterministic mode before provider execution."}
+                    </p>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <div className="flex min-h-full flex-col justify-end">
