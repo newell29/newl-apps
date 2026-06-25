@@ -410,6 +410,9 @@ export async function saveAssistantProviderSettingsAction(formData: FormData) {
       tenantId: context.tenantId,
       name: ASSISTANT_PROVIDER_CREDENTIAL_NAME
     },
+    orderBy: {
+      updatedAt: "desc"
+    },
     select: {
       id: true
     }
