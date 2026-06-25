@@ -3,6 +3,48 @@ import { ApolloCompanyMatchClassification, ReplyStatus, SequenceStatus } from "@
 const DEFAULT_BASE_URL = "https://api.apollo.io";
 const DEFAULT_PAGE_SIZE = 100;
 const APOLLO_CONTACT_PAGE_SIZE = 25;
+const APOLLO_PRIMARY_ROLE_KEYWORDS = [
+  "logistics",
+  "supply chain",
+  "operations",
+  "warehouse",
+  "fulfillment",
+  "transportation",
+  "distribution",
+  "import",
+  "procurement",
+  "purchasing",
+  "sourcing",
+  "materials",
+  "inventory",
+  "demand planning"
+] as const;
+const APOLLO_FALLBACK_ROLE_KEYWORDS = [
+  "ceo",
+  "chief executive officer",
+  "president",
+  "owner",
+  "founder",
+  "coo",
+  "chief operating officer",
+  "vp operations",
+  "vice president operations",
+  "director operations",
+  "head of operations",
+  "general manager"
+] as const;
+const APOLLO_EXCLUDED_ROLE_KEYWORDS = [
+  "accounting",
+  "customer service",
+  "finance",
+  "human resources",
+  "hr",
+  "information technology",
+  "legal",
+  "marketing",
+  "sales",
+  "software"
+] as const;
 
 export type ApolloRepDirectoryEntry = {
   apolloUserId: string;
@@ -191,37 +233,22 @@ export async function fetchApolloContactsForCompany(
       : null;
   const matchedOrganization = await findApolloOrganization(input, apiKey);
   const trustedMatchedOrganization = isDirectApolloCompanyMatch(matchedOrganization) ? matchedOrganization : null;
-  const preferredOrganizationId =
-    trustedMatchedOrganization?.id && (!providedOrganizationId || providedOrganizationId === trustedMatchedOrganization.id)
-      ? trustedMatchedOrganization.id
-      : null;
+  const organizationIdForSearch = trustedMatchedOrganization?.id ?? providedOrganizationId ?? null;
 
   let contactsFromApollo =
-    trustedMatchedOrganization
-      ? ((await searchApolloContacts({
+    organizationIdForSearch || input.domain
+      ? ((await searchApolloRelevantPeople({
           apiKey,
           companyName: input.companyName,
           domain: input.domain,
-          organizationId: preferredOrganizationId
-        })) ??
-        (await searchApolloPeople({
-          apiKey,
-          companyName: input.companyName,
-          domain: input.domain,
-          organizationId: preferredOrganizationId
+          organizationId: organizationIdForSearch
         })) ??
         [])
       : [];
 
-  if (contactsFromApollo.length === 0 && preferredOrganizationId) {
+  if (contactsFromApollo.length === 0 && (organizationIdForSearch || input.domain)) {
     contactsFromApollo =
-      (await searchApolloContacts({
-        apiKey,
-        companyName: input.companyName,
-        domain: input.domain,
-        organizationId: null
-      })) ??
-      (await searchApolloPeople({
+      (await searchApolloRelevantPeople({
         apiKey,
         companyName: input.companyName,
         domain: input.domain,
@@ -310,12 +337,14 @@ async function searchApolloContacts({
   apiKey,
   companyName,
   domain,
-  organizationId
+  organizationId,
+  queryKeywords
 }: {
   apiKey: string;
   companyName: string;
   domain?: string | null;
   organizationId: string | null;
+  queryKeywords?: string | null;
 }) {
   const normalizedDomain = normalizeDomain(domain);
   const body = {
@@ -323,7 +352,7 @@ async function searchApolloContacts({
     per_page: APOLLO_CONTACT_PAGE_SIZE,
     organization_ids: organizationId ? [organizationId] : undefined,
     q_organization_domains: normalizedDomain ? [normalizedDomain] : undefined,
-    q_keywords: companyName
+    q_keywords: buildApolloPeopleSearchKeywords(companyName, queryKeywords, Boolean(organizationId || normalizedDomain))
   };
 
   const json = await postApolloJson("/api/v1/contacts/search", apiKey, body);
@@ -335,12 +364,14 @@ async function searchApolloPeople({
   apiKey,
   companyName,
   domain,
-  organizationId
+  organizationId,
+  queryKeywords
 }: {
   apiKey: string;
   companyName: string;
   domain?: string | null;
   organizationId: string | null;
+  queryKeywords?: string | null;
 }) {
   const normalizedDomain = normalizeDomain(domain);
   const body = {
@@ -348,11 +379,68 @@ async function searchApolloPeople({
     per_page: APOLLO_CONTACT_PAGE_SIZE,
     organization_ids: organizationId ? [organizationId] : undefined,
     q_organization_domains: normalizedDomain ? [normalizedDomain] : undefined,
-    q_keywords: companyName
+    q_keywords: buildApolloPeopleSearchKeywords(companyName, queryKeywords, Boolean(organizationId || normalizedDomain))
   };
 
   const json = await postApolloJson("/api/v1/mixed_people/api_search", apiKey, body);
   return parseApolloContacts(json);
+}
+
+async function searchApolloRelevantPeople({
+  apiKey,
+  companyName,
+  domain,
+  organizationId
+}: {
+  apiKey: string;
+  companyName: string;
+  domain?: string | null;
+  organizationId: string | null;
+}) {
+  const collected: ApolloContactRecord[] = [];
+
+  const contactsWithoutKeyword =
+    (await searchApolloContacts({
+      apiKey,
+      companyName,
+      domain,
+      organizationId,
+      queryKeywords: null
+    })) ?? [];
+  collected.push(...contactsWithoutKeyword);
+
+  const relevantContactsWithoutKeyword = rankApolloRelevantContacts(collected);
+  if (relevantContactsWithoutKeyword.length > 0) {
+    return relevantContactsWithoutKeyword;
+  }
+
+  const peopleWithoutKeyword = await searchApolloPeople({
+    apiKey,
+    companyName,
+    domain,
+    organizationId,
+    queryKeywords: null
+  });
+  collected.push(...peopleWithoutKeyword);
+
+  const relevantPeopleWithoutKeyword = rankApolloRelevantContacts(collected);
+  if (relevantPeopleWithoutKeyword.length > 0) {
+    return relevantPeopleWithoutKeyword;
+  }
+
+  for (const keyword of [...APOLLO_PRIMARY_ROLE_KEYWORDS, ...APOLLO_FALLBACK_ROLE_KEYWORDS]) {
+    const people = await searchApolloPeople({
+      apiKey,
+      companyName,
+      domain,
+      organizationId,
+      queryKeywords: keyword
+    });
+    collected.push(...people);
+  }
+
+  const ranked = rankApolloRelevantContacts(collected);
+  return ranked.length > 0 ? ranked : dedupeApolloContacts(collected);
 }
 
 async function postApolloJson(path: string, apiKey: string, body: Record<string, unknown>) {
@@ -870,11 +958,101 @@ function buildApolloMatchReason({
 
 function scoreApolloContactEntry(entry: ApolloContactRecord) {
   let score = 0;
+  const roleFit = scoreApolloRoleFit(entry);
+  score += roleFit.score;
   if (entry.email) score += 4;
   if (entry.title) score += 2;
   if (entry.linkedinUrl) score += 2;
   if (entry.sequenceStatus !== SequenceStatus.NOT_STARTED) score += 1;
   return score;
+}
+
+function buildApolloPeopleSearchKeywords(companyName: string, queryKeywords: string | null | undefined, constrainedToOrganization: boolean) {
+  const trimmedKeyword = queryKeywords?.trim() ?? "";
+
+  if (!trimmedKeyword) {
+    return constrainedToOrganization ? undefined : companyName;
+  }
+
+  return constrainedToOrganization ? trimmedKeyword : `${companyName} ${trimmedKeyword}`.trim();
+}
+
+function rankApolloRelevantContacts(entries: ApolloContactRecord[]) {
+  const deduped = dedupeApolloContacts(entries);
+  const relevant = deduped
+    .map((entry) => ({
+      entry,
+      roleFit: scoreApolloRoleFit(entry)
+    }))
+    .filter(({ roleFit }) => roleFit.accepted)
+    .sort((left, right) => {
+      if (left.roleFit.score !== right.roleFit.score) {
+        return right.roleFit.score - left.roleFit.score;
+      }
+
+      return scoreApolloContactEntry(right.entry) - scoreApolloContactEntry(left.entry);
+    })
+    .map(({ entry }) => entry);
+
+  return relevant;
+}
+
+function scoreApolloRoleFit(entry: ApolloContactRecord) {
+  const roleText = [entry.title, entry.department, entry.seniority].filter(Boolean).join(" ").toLowerCase();
+
+  if (!roleText) {
+    return {
+      accepted: false,
+      score: 0
+    };
+  }
+
+  const hasSalesOpsException = /sales and operations|operations and sales/.test(roleText);
+  const isExcluded = APOLLO_EXCLUDED_ROLE_KEYWORDS.some((keyword) => roleText.includes(keyword));
+  if (isExcluded && !hasSalesOpsException) {
+    return {
+      accepted: false,
+      score: 0
+    };
+  }
+
+  const primaryHit = APOLLO_PRIMARY_ROLE_KEYWORDS.some((keyword) => roleText.includes(keyword));
+  const fallbackHit = APOLLO_FALLBACK_ROLE_KEYWORDS.some((keyword) => roleText.includes(keyword));
+
+  if (!primaryHit && !fallbackHit) {
+    return {
+      accepted: false,
+      score: 0
+    };
+  }
+
+  let score = 0;
+  if (primaryHit) {
+    score += 38;
+  } else if (fallbackHit) {
+    score += 30;
+  }
+
+  if (/(chief|ceo|coo|owner|founder|president)/.test(roleText)) {
+    score += 20;
+  } else if (/(vp|vice president)/.test(roleText)) {
+    score += 18;
+  } else if (/(director|head)/.test(roleText)) {
+    score += 16;
+  } else if (/manager/.test(roleText)) {
+    score += 11;
+  }
+
+  if (/(operations|supply chain|logistics|procurement|purchasing|distribution)/.test(roleText)) {
+    score += 15;
+  } else if (fallbackHit) {
+    score += 8;
+  }
+
+  return {
+    accepted: true,
+    score
+  };
 }
 
 function extractApolloError(payload: Record<string, unknown> | ApolloUsersResponse | null) {
