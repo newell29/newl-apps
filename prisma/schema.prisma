@@ -38,6 +38,7 @@ enum IntegrationProvider {
   WMS
   OPENCLAW
   OPENAI
+  LOCAL_LLM
 }
 
 enum IntegrationStatus {

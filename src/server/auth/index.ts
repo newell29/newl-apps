@@ -20,21 +20,31 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
      * tenant. This prevents self-signup: unknown emails are rejected before any
      * session is established.
      */
-    async signIn({ user }) {
-      const email = user?.email;
+    async signIn({ user, profile }) {
+      const email = normalizeAuthEmail(user?.email ?? readProfileEmail(profile));
       if (!email) {
         return false;
       }
 
-      const membershipCount = await prisma.membership.count({
+      const provisionedUser = await prisma.user.findFirst({
         where: {
-          user: {
-            email
+          email: {
+            equals: email,
+            mode: "insensitive"
+          }
+        },
+        select: {
+          id: true,
+          memberships: {
+            select: {
+              id: true
+            },
+            take: 1
           }
         }
       });
 
-      if (membershipCount === 0) {
+      if (!provisionedUser || provisionedUser.memberships.length === 0) {
         console.warn(`[auth] Rejected sign-in for ${email}: no tenant membership provisioned.`);
         return false;
       }
@@ -54,3 +64,27 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }
   }
 });
+
+function normalizeAuthEmail(value: string | null | undefined) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function readProfileEmail(profile: unknown) {
+  if (!profile || typeof profile !== "object") {
+    return null;
+  }
+
+  const candidate = profile as Record<string, unknown>;
+  const directEmail = candidate.email;
+  if (typeof directEmail === "string") {
+    return directEmail;
+  }
+
+  const preferredUsername = candidate.preferred_username;
+  return typeof preferredUsername === "string" ? preferredUsername : null;
+}

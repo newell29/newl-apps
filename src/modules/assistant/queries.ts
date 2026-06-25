@@ -18,6 +18,7 @@ const CLOSED_LEAD_STAGES = [
 ];
 
 const ASSISTANT_INTEGRATION_PROVIDERS = [
+  IntegrationProvider.LOCAL_LLM,
   IntegrationProvider.OPENAI,
   IntegrationProvider.MICROSOFT_GRAPH,
   IntegrationProvider.UPS,
@@ -224,6 +225,7 @@ export async function getAssistantWorkspace(tenant: TenantContext, query?: strin
       topCompanyName: topCompanies[0]?.name ?? null,
       topCompanyScore: topCompanies[0]?.priorityScore ?? null,
       hasOpenAi: integrations.some((integration) => integration.provider === IntegrationProvider.OPENAI),
+      hasLocalLlm: integrations.some((integration) => integration.provider === IntegrationProvider.LOCAL_LLM),
       rateJobCount: recentRateJobs.length
     }),
     stats: {
@@ -321,6 +323,7 @@ export function buildAssistantAnswerForPrompt(
     topCompanyName: string | null;
     topCompanyScore: number | null;
     hasOpenAi: boolean;
+    hasLocalLlm: boolean;
     rateJobCount: number;
   }
 ) {
@@ -432,6 +435,7 @@ function buildDeterministicAnswer(
     topCompanyName: string | null;
     topCompanyScore: number | null;
     hasOpenAi: boolean;
+    hasLocalLlm: boolean;
     rateJobCount: number;
   }
 ) {
@@ -466,9 +470,11 @@ function buildDeterministicAnswer(
     default:
       return [
         `The assistant workspace has ${context.knowledgeDocumentCount} indexed knowledge document(s) and ${context.memoryCount} active memory item(s).`,
-        context.hasOpenAi
+        context.hasLocalLlm
+          ? "A local LLM provider exists for this tenant. This should become the preferred long-term assistant runtime once quality and latency are proven."
+          : context.hasOpenAi
           ? "An OpenAI credential exists for this tenant and can be wired behind a provider adapter."
-          : "No tenant OpenAI credential is active yet; this page is using deterministic app data."
+          : "No tenant model provider is active yet; this page is using deterministic app data. The interim target is a cost-effective OpenAI model, with a local server-hosted model as the long-term goal."
       ];
   }
 }

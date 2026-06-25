@@ -11,10 +11,16 @@ import { redirect } from "next/navigation";
 
 import {
   buildAssistantSources,
+  buildAssistantAnswerForPrompt,
   getAssistantWorkspace
 } from "@/modules/assistant/queries";
 import { requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
+import {
+  generateAssistantReply,
+  parseAssistantProviderSettings,
+  ASSISTANT_PROVIDER_CREDENTIAL_NAME
+} from "@/server/integrations/assistant-provider";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
 const MAX_PROMPT_LENGTH = 4000;
@@ -27,8 +33,88 @@ export async function askAssistantAction(formData: FormData) {
   const prompt = readPrompt(formData);
   const existingThreadId = readOptional(formData, "threadId");
   const workspace = await getAssistantWorkspace(context, prompt, existingThreadId);
-  const answer = workspace.answer.join("\n\n");
   const sources = buildAssistantSources(workspace);
+  const providerCredential = await prisma.integrationCredential.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      name: ASSISTANT_PROVIDER_CREDENTIAL_NAME
+    },
+    select: {
+      provider: true,
+      status: true,
+      publicConfig: true
+    }
+  });
+  const providerSettings = parseAssistantProviderSettings(providerCredential);
+  const deterministic = buildAssistantAnswerForPrompt(prompt, {
+    companyCount: workspace.stats.companyCount,
+    contactCount: workspace.stats.contactCount,
+    openLeadCount: workspace.stats.openLeadCount,
+    importRecordCount: workspace.stats.importRecordCount,
+    knowledgeDocumentCount: workspace.stats.knowledgeDocumentCount,
+    memoryCount: workspace.stats.memoryCount,
+    topCompanyName: workspace.topCompanies[0]?.name ?? null,
+    topCompanyScore: workspace.topCompanies[0]?.priorityScore ?? null,
+    hasOpenAi: workspace.integrations.some((integration) => integration.provider === "OPENAI" && integration.activeCount > 0),
+    hasLocalLlm: workspace.integrations.some((integration) => integration.provider === "LOCAL_LLM" && integration.activeCount > 0),
+    rateJobCount: workspace.recentRateJobs.length
+  });
+  let answer = deterministic.answer.join("\n\n");
+  let provider = "NEWL_DETERMINISTIC";
+  let model = "assistant-foundation-v1";
+  let messageMetadata: Record<string, unknown> = {
+    deterministic: true,
+    intent: deterministic.intent
+  };
+  let runMetadata: Record<string, unknown> = {
+    deterministic: true,
+    intent: deterministic.intent,
+    providerSettings
+  };
+
+  if (providerSettings.liveResponsesEnabled && providerSettings.runtimeReady) {
+    try {
+      const liveReply = await generateAssistantReply({
+        tenantName: context.tenantName,
+        prompt,
+        intent: deterministic.intent,
+        sources: sources.map((source) => ({
+          title: source.title,
+          excerpt: source.excerpt
+        })),
+        settings: providerSettings
+      });
+
+      answer = liveReply.content;
+      provider = liveReply.provider;
+      model = liveReply.model;
+      messageMetadata = {
+        deterministic: false,
+        intent: deterministic.intent,
+        provider,
+        model,
+        usedFallbackModel: liveReply.usedFallbackModel
+      };
+      runMetadata = {
+        deterministic: false,
+        intent: deterministic.intent,
+        usedFallbackModel: liveReply.usedFallbackModel,
+        rawResponse: liveReply.rawResponse
+      };
+    } catch (error) {
+      messageMetadata = {
+        deterministic: true,
+        intent: deterministic.intent,
+        providerFallback: true
+      };
+      runMetadata = {
+        deterministic: true,
+        intent: deterministic.intent,
+        providerSettings,
+        liveReplyError: error instanceof Error ? error.message : "Unknown provider error"
+      };
+    }
+  }
   const now = new Date();
 
   const thread = await prisma.$transaction(async (tx) => {
@@ -81,10 +167,7 @@ export async function askAssistantAction(formData: FormData) {
         threadId: threadRecord.id,
         role: AssistantMessageRole.ASSISTANT,
         content: answer,
-        metadata: {
-          deterministic: true,
-          intent: workspace.intent
-        }
+        metadata: messageMetadata as Prisma.InputJsonValue
       },
       select: {
         id: true
@@ -97,16 +180,17 @@ export async function askAssistantAction(formData: FormData) {
         threadId: threadRecord.id,
         messageId: assistantMessage.id,
         userId: context.userId,
-        provider: "NEWL_DETERMINISTIC",
-        model: "assistant-foundation-v1",
+        provider,
+        model,
         status: JobStatus.SUCCESS,
-        intent: workspace.intent,
+        intent: deterministic.intent,
         startedAt: now,
         finishedAt: now,
         metadata: {
           userMessageId: userMessage.id,
           sourceCount: sources.length,
-          promptLength: prompt.length
+          promptLength: prompt.length,
+          ...runMetadata
         }
       },
       select: {
@@ -146,11 +230,13 @@ export async function askAssistantAction(formData: FormData) {
         entityId: threadRecord.id,
         after: {
           prompt,
-          intent: workspace.intent,
+          intent: deterministic.intent,
           runId: run.id,
           assistantMessageId: assistantMessage.id,
-          sourceCount: sources.length
-        }
+          sourceCount: sources.length,
+          provider,
+          model
+        } as Prisma.InputJsonValue
       }
     });
 
