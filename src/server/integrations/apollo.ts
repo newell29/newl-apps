@@ -3,6 +3,48 @@ import { ApolloCompanyMatchClassification, ReplyStatus, SequenceStatus } from "@
 const DEFAULT_BASE_URL = "https://api.apollo.io";
 const DEFAULT_PAGE_SIZE = 100;
 const APOLLO_CONTACT_PAGE_SIZE = 25;
+const APOLLO_PRIMARY_ROLE_KEYWORDS = [
+  "logistics",
+  "supply chain",
+  "operations",
+  "warehouse",
+  "fulfillment",
+  "transportation",
+  "distribution",
+  "import",
+  "procurement",
+  "purchasing",
+  "sourcing",
+  "materials",
+  "inventory",
+  "demand planning"
+] as const;
+const APOLLO_FALLBACK_ROLE_KEYWORDS = [
+  "ceo",
+  "chief executive officer",
+  "president",
+  "owner",
+  "founder",
+  "coo",
+  "chief operating officer",
+  "vp operations",
+  "vice president operations",
+  "director operations",
+  "head of operations",
+  "general manager"
+] as const;
+const APOLLO_EXCLUDED_ROLE_KEYWORDS = [
+  "accounting",
+  "customer service",
+  "finance",
+  "human resources",
+  "hr",
+  "information technology",
+  "legal",
+  "marketing",
+  "sales",
+  "software"
+] as const;
 
 export type ApolloRepDirectoryEntry = {
   apolloUserId: string;
@@ -70,6 +112,7 @@ type ApolloOrganizationCandidate = {
   domainMatch: boolean;
   logisticsProviderMatch: boolean;
   branchLocationMatch: boolean;
+  strongBaseNameMatch: boolean;
   classification: ApolloCompanyMatchClassification;
   matchReason: string;
   query: Record<string, unknown>;
@@ -87,6 +130,7 @@ export type ApolloCompanyLookupMatch = {
   domainMatch: boolean;
   logisticsProviderMatch: boolean;
   branchLocationMatch: boolean;
+  strongBaseNameMatch: boolean;
   matchReason: string;
   query: Record<string, unknown>;
   rawPayload: Record<string, unknown> | null;
@@ -188,38 +232,24 @@ export async function fetchApolloContactsForCompany(
       ? input.apolloOrganizationId.trim()
       : null;
   const matchedOrganization = await findApolloOrganization(input, apiKey);
-  const trustedMatchedOrganization = isDirectApolloCompanyMatch(matchedOrganization) ? matchedOrganization : null;
-  const preferredOrganizationId =
-    trustedMatchedOrganization?.id && (!providedOrganizationId || providedOrganizationId === trustedMatchedOrganization.id)
-      ? trustedMatchedOrganization.id
-      : null;
+  let effectiveMatchOrganization = matchedOrganization;
+  let trustedMatchedOrganization = isDirectApolloCompanyMatch(matchedOrganization) ? matchedOrganization : null;
+  const organizationIdForSearch = trustedMatchedOrganization?.id ?? providedOrganizationId ?? null;
 
   let contactsFromApollo =
-    trustedMatchedOrganization
-      ? ((await searchApolloContacts({
+    organizationIdForSearch || input.domain
+      ? ((await searchApolloRelevantPeople({
           apiKey,
           companyName: input.companyName,
           domain: input.domain,
-          organizationId: preferredOrganizationId
-        })) ??
-        (await searchApolloPeople({
-          apiKey,
-          companyName: input.companyName,
-          domain: input.domain,
-          organizationId: preferredOrganizationId
+          organizationId: organizationIdForSearch
         })) ??
         [])
       : [];
 
-  if (contactsFromApollo.length === 0 && preferredOrganizationId) {
+  if (contactsFromApollo.length === 0) {
     contactsFromApollo =
-      (await searchApolloContacts({
-        apiKey,
-        companyName: input.companyName,
-        domain: input.domain,
-        organizationId: null
-      })) ??
-      (await searchApolloPeople({
+      (await searchApolloRelevantPeople({
         apiKey,
         companyName: input.companyName,
         domain: input.domain,
@@ -228,12 +258,21 @@ export async function fetchApolloContactsForCompany(
       [];
   }
 
+  if (!trustedMatchedOrganization && contactsFromApollo.length > 0) {
+    const inferredOrganization = inferApolloOrganizationFromContacts(contactsFromApollo, input.companyName, normalizeDomain(input.domain));
+    if (isDirectApolloCompanyMatch(inferredOrganization)) {
+      trustedMatchedOrganization = inferredOrganization;
+      effectiveMatchOrganization = inferredOrganization;
+      contactsFromApollo = filterApolloContactsByOrganizationMatch(contactsFromApollo, input.companyName, inferredOrganization!);
+    }
+  }
+
   return {
     organizationId: trustedMatchedOrganization?.id ?? null,
     companyName: trustedMatchedOrganization?.name ?? input.companyName,
     domain: trustedMatchedOrganization?.domain ?? normalizeDomain(input.domain),
     linkedinUrl: trustedMatchedOrganization?.linkedinUrl ?? null,
-    match: toApolloCompanyLookupMatch(matchedOrganization, input.companyName, normalizeDomain(input.domain)),
+    match: toApolloCompanyLookupMatch(effectiveMatchOrganization, input.companyName, normalizeDomain(input.domain)),
     contacts: dedupeApolloContacts(contactsFromApollo)
   };
 }
@@ -271,39 +310,51 @@ function buildApolloHeaders(apiKey: string) {
 
 async function findApolloOrganization(input: ApolloCompanyLookupInput, apiKey: string): Promise<ApolloOrganizationCandidate | null> {
   const normalizedDomain = normalizeDomain(input.domain);
-  const body = {
-    page: 1,
-    per_page: 10,
-    q_organization_domains: normalizedDomain ? [normalizedDomain] : undefined,
-    best_company_name: input.companyName,
-    company_match_name: input.companyName,
-    company_identity_key: buildCompanyIdentityKey(input.companyName, normalizedDomain)
-  };
+  const searchQueries = buildApolloOrganizationSearchQueries(input.companyName);
+  const scoredCandidates: ApolloOrganizationCandidate[] = [];
 
-  const json = await postApolloJson("/api/v1/mixed_companies/search", apiKey, body);
-  const candidates = parseApolloOrganizations(json);
+  for (const searchCompanyName of searchQueries) {
+    const body = {
+      page: 1,
+      per_page: 10,
+      q_organization_domains: normalizedDomain ? [normalizedDomain] : undefined,
+      best_company_name: searchCompanyName,
+      company_match_name: searchCompanyName,
+      company_identity_key: buildCompanyIdentityKey(searchCompanyName, normalizedDomain),
+      original_company_name: input.companyName
+    };
 
-  if (candidates.length === 0) {
+    const json = await postApolloJson("/api/v1/mixed_companies/search", apiKey, body);
+    const candidates = parseApolloOrganizations(json);
+
+    scoredCandidates.push(
+      ...candidates.map((candidate) => scoreApolloOrganizationCandidate(candidate, input.companyName, normalizedDomain, body))
+    );
+
+    if (scoredCandidates.some((candidate) => candidate.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY)) {
+      break;
+    }
+  }
+
+  if (scoredCandidates.length === 0) {
     return null;
   }
 
-  return (
-    candidates
-      .map((candidate) => scoreApolloOrganizationCandidate(candidate, input.companyName, normalizedDomain, body))
-      .sort((left, right) => right.score - left.score)[0] ?? null
-  );
+  return scoredCandidates.sort((left, right) => right.score - left.score)[0] ?? null;
 }
 
 async function searchApolloContacts({
   apiKey,
   companyName,
   domain,
-  organizationId
+  organizationId,
+  queryKeywords
 }: {
   apiKey: string;
   companyName: string;
   domain?: string | null;
   organizationId: string | null;
+  queryKeywords?: string | null;
 }) {
   const normalizedDomain = normalizeDomain(domain);
   const body = {
@@ -311,7 +362,7 @@ async function searchApolloContacts({
     per_page: APOLLO_CONTACT_PAGE_SIZE,
     organization_ids: organizationId ? [organizationId] : undefined,
     q_organization_domains: normalizedDomain ? [normalizedDomain] : undefined,
-    q_keywords: companyName
+    q_keywords: buildApolloPeopleSearchKeywords(companyName, queryKeywords, Boolean(organizationId || normalizedDomain))
   };
 
   const json = await postApolloJson("/api/v1/contacts/search", apiKey, body);
@@ -323,12 +374,14 @@ async function searchApolloPeople({
   apiKey,
   companyName,
   domain,
-  organizationId
+  organizationId,
+  queryKeywords
 }: {
   apiKey: string;
   companyName: string;
   domain?: string | null;
   organizationId: string | null;
+  queryKeywords?: string | null;
 }) {
   const normalizedDomain = normalizeDomain(domain);
   const body = {
@@ -336,11 +389,68 @@ async function searchApolloPeople({
     per_page: APOLLO_CONTACT_PAGE_SIZE,
     organization_ids: organizationId ? [organizationId] : undefined,
     q_organization_domains: normalizedDomain ? [normalizedDomain] : undefined,
-    q_keywords: companyName
+    q_keywords: buildApolloPeopleSearchKeywords(companyName, queryKeywords, Boolean(organizationId || normalizedDomain))
   };
 
   const json = await postApolloJson("/api/v1/mixed_people/api_search", apiKey, body);
   return parseApolloContacts(json);
+}
+
+async function searchApolloRelevantPeople({
+  apiKey,
+  companyName,
+  domain,
+  organizationId
+}: {
+  apiKey: string;
+  companyName: string;
+  domain?: string | null;
+  organizationId: string | null;
+}) {
+  const collected: ApolloContactRecord[] = [];
+
+  const contactsWithoutKeyword =
+    (await searchApolloContacts({
+      apiKey,
+      companyName,
+      domain,
+      organizationId,
+      queryKeywords: null
+    })) ?? [];
+  collected.push(...contactsWithoutKeyword);
+
+  const relevantContactsWithoutKeyword = rankApolloRelevantContacts(collected);
+  if (relevantContactsWithoutKeyword.length > 0) {
+    return relevantContactsWithoutKeyword;
+  }
+
+  const peopleWithoutKeyword = await searchApolloPeople({
+    apiKey,
+    companyName,
+    domain,
+    organizationId,
+    queryKeywords: null
+  });
+  collected.push(...peopleWithoutKeyword);
+
+  const relevantPeopleWithoutKeyword = rankApolloRelevantContacts(collected);
+  if (relevantPeopleWithoutKeyword.length > 0) {
+    return relevantPeopleWithoutKeyword;
+  }
+
+  for (const keyword of [...APOLLO_PRIMARY_ROLE_KEYWORDS, ...APOLLO_FALLBACK_ROLE_KEYWORDS]) {
+    const people = await searchApolloPeople({
+      apiKey,
+      companyName,
+      domain,
+      organizationId,
+      queryKeywords: keyword
+    });
+    collected.push(...people);
+  }
+
+  const ranked = rankApolloRelevantContacts(collected);
+  return ranked.length > 0 ? ranked : dedupeApolloContacts(collected);
 }
 
 async function postApolloJson(path: string, apiKey: string, body: Record<string, unknown>) {
@@ -561,6 +671,136 @@ function parseApolloContacts(payload: Record<string, unknown>): ApolloContactRec
   });
 }
 
+function inferApolloOrganizationFromContacts(
+  contacts: ApolloContactRecord[],
+  companyName: string,
+  normalizedDomain: string | null
+) {
+  const inputAliases = buildCompanyNameAliases(companyName);
+  const candidates = new Map<
+    string,
+    {
+      id: string | null;
+      name: string | null;
+      domain: string | null;
+      linkedinUrl: string | null;
+      rawPayload: Record<string, unknown>;
+      appearances: number;
+    }
+  >();
+
+  for (const contact of contacts) {
+    const organization = readApolloOrganizationFromContact(contact);
+    if (!organization?.name && !organization?.id && !organization?.domain) {
+      continue;
+    }
+
+    const key = [organization.id ?? "", organization.name?.toLowerCase() ?? "", organization.domain ?? ""].join("|");
+    const existing = candidates.get(key);
+    if (existing) {
+      existing.appearances += 1;
+      continue;
+    }
+
+    candidates.set(key, {
+      ...organization,
+      appearances: 1
+    });
+  }
+
+  const scored = [...candidates.values()].map((candidate) => {
+    const base = scoreApolloOrganizationCandidate(candidate, companyName, normalizedDomain, {
+      source: "people-search-fallback"
+    });
+    return {
+      ...base,
+      score: base.score + Math.min(candidate.appearances * 2, 8),
+      matchReason: `${base.matchReason}; people evidence x${candidate.appearances}`
+    };
+  });
+
+  const best = scored.sort((left, right) => right.score - left.score)[0] ?? null;
+  if (!best) {
+    return null;
+  }
+
+  const bestAliases = buildCompanyNameAliases(best.name ?? "");
+  const exactPeopleBackedNameMatch = hasExactAliasMatch(inputAliases, bestAliases);
+  const strongPeopleBackedNameMatch = hasStrongBaseNameMatch(inputAliases, bestAliases);
+  const peopleEvidenceCount = candidates.get(
+    [best.id ?? "", best.name?.toLowerCase() ?? "", best.domain ?? ""].join("|")
+  )?.appearances ?? 0;
+
+  const promotedClassification =
+    (exactPeopleBackedNameMatch || strongPeopleBackedNameMatch) && peopleEvidenceCount >= 1
+      ? ApolloCompanyMatchClassification.DIRECT_COMPANY
+      : classifyApolloOrganizationCandidate({
+          id: best.id,
+          score: best.score,
+          nameMatchType: best.nameMatchType,
+          domainMatch: best.domainMatch,
+          logisticsProviderMatch: best.logisticsProviderMatch,
+          branchLocationMatch: best.branchLocationMatch,
+          strongBaseNameMatch: best.strongBaseNameMatch,
+          tokenSimilarity: calculateBestTokenSimilarity(inputAliases, bestAliases)
+        });
+
+  return {
+    ...best,
+    classification: promotedClassification,
+    matchReason:
+      promotedClassification === ApolloCompanyMatchClassification.DIRECT_COMPANY &&
+      (exactPeopleBackedNameMatch || strongPeopleBackedNameMatch)
+        ? `${best.matchReason}; promoted from matching people-search organization evidence`
+        : best.matchReason
+  };
+}
+
+function readApolloOrganizationFromContact(contact: ApolloContactRecord) {
+  const raw = asRecord(contact.rawPayload);
+  const organization = asRecord(raw?.organization) ?? asRecord(raw?.account) ?? asRecord(raw?.company);
+  if (!organization) {
+    return null;
+  }
+
+  return {
+    id: readApolloString(organization, ["id", "organization_id", "apollo_organization_id"]),
+    name: readApolloString(organization, ["name", "company_name", "organization_name"]),
+    domain: normalizeDomain(readApolloString(organization, ["primary_domain", "website_url", "domain"])),
+    linkedinUrl: readApolloString(organization, [
+      "linkedin_url",
+      "organization_linkedin_url",
+      "company_linkedin_url",
+      "linkedin_profile_url"
+    ]),
+    rawPayload: organization
+  };
+}
+
+function filterApolloContactsByOrganizationMatch(
+  contacts: ApolloContactRecord[],
+  companyName: string,
+  organization: ApolloOrganizationCandidate
+) {
+  const inputAliases = buildCompanyNameAliases(companyName);
+  const organizationAliases = buildCompanyNameAliases(organization.name ?? "");
+
+  return contacts.filter((contact) => {
+    const candidateOrganization = readApolloOrganizationFromContact(contact);
+    if (!candidateOrganization?.name) {
+      return false;
+    }
+
+    const contactAliases = buildCompanyNameAliases(candidateOrganization.name);
+    return (
+      hasExactAliasMatch(inputAliases, contactAliases) ||
+      hasStrongBaseNameMatch(inputAliases, contactAliases) ||
+      hasExactAliasMatch(organizationAliases, contactAliases) ||
+      calculateBestTokenSimilarity(organizationAliases, contactAliases) >= 0.85
+    );
+  });
+}
+
 function dedupeApolloUsers(entries: ApolloRepDirectoryEntry[]) {
   const deduped = new Map<string, ApolloRepDirectoryEntry>();
 
@@ -626,8 +866,6 @@ function scoreApolloOrganizationCandidate(
   let nameMatchType: ApolloOrganizationCandidate["nameMatchType"] = "NONE";
   const inputAliases = buildCompanyNameAliases(companyName);
   const candidateAliases = buildCompanyNameAliases(candidate.name ?? "");
-  const normalizedInputName = inputAliases[0] ?? "";
-  const normalizedCandidateName = candidateAliases[0] ?? "";
   const tokenSimilarity = calculateBestTokenSimilarity(inputAliases, candidateAliases);
   const logisticsProviderMatch = isLogisticsProviderName(candidate.name ?? "") || isLogisticsProviderName(companyName);
   const strongBaseNameMatch = hasStrongBaseNameMatch(inputAliases, candidateAliases);
@@ -661,6 +899,10 @@ function scoreApolloOrganizationCandidate(
     score += 1;
   }
 
+  if (strongBaseNameMatch) {
+    score += 4;
+  }
+
   if (logisticsProviderMatch) {
     score -= 8;
   }
@@ -676,6 +918,7 @@ function scoreApolloOrganizationCandidate(
     domainMatch,
     logisticsProviderMatch,
     branchLocationMatch,
+    strongBaseNameMatch,
     tokenSimilarity
   });
 
@@ -686,6 +929,7 @@ function scoreApolloOrganizationCandidate(
     domainMatch,
     logisticsProviderMatch,
     branchLocationMatch,
+    strongBaseNameMatch,
     classification,
     matchReason: buildApolloMatchReason({
       classification,
@@ -694,6 +938,7 @@ function scoreApolloOrganizationCandidate(
       domainMatch,
       logisticsProviderMatch,
       branchLocationMatch,
+      strongBaseNameMatch,
       tokenSimilarity
     }),
     query
@@ -725,6 +970,7 @@ function toApolloCompanyLookupMatch(
       domainMatch: false,
       logisticsProviderMatch: false,
       branchLocationMatch: false,
+      strongBaseNameMatch: false,
       matchReason: "No Apollo organization candidates were returned for this company.",
       query: {
         companyName,
@@ -745,6 +991,7 @@ function toApolloCompanyLookupMatch(
     domainMatch: candidate.domainMatch,
     logisticsProviderMatch: candidate.logisticsProviderMatch,
     branchLocationMatch: candidate.branchLocationMatch,
+    strongBaseNameMatch: candidate.strongBaseNameMatch,
     matchReason: candidate.matchReason,
     query: candidate.query,
     rawPayload: candidate.rawPayload
@@ -758,6 +1005,7 @@ function classifyApolloOrganizationCandidate({
   domainMatch,
   logisticsProviderMatch,
   branchLocationMatch,
+  strongBaseNameMatch,
   tokenSimilarity
 }: {
   id: string | null;
@@ -766,6 +1014,7 @@ function classifyApolloOrganizationCandidate({
   domainMatch: boolean;
   logisticsProviderMatch: boolean;
   branchLocationMatch: boolean;
+  strongBaseNameMatch: boolean;
   tokenSimilarity: number;
 }) {
   if (!id) {
@@ -792,6 +1041,10 @@ function classifyApolloOrganizationCandidate({
     return ApolloCompanyMatchClassification.DIRECT_COMPANY;
   }
 
+  if (strongBaseNameMatch && score >= 8) {
+    return ApolloCompanyMatchClassification.DIRECT_COMPANY;
+  }
+
   return score > 0 ? ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW : ApolloCompanyMatchClassification.NO_MATCH;
 }
 
@@ -802,6 +1055,7 @@ function buildApolloMatchReason({
   domainMatch,
   logisticsProviderMatch,
   branchLocationMatch,
+  strongBaseNameMatch,
   tokenSimilarity
 }: {
   classification: ApolloCompanyMatchClassification;
@@ -810,6 +1064,7 @@ function buildApolloMatchReason({
   domainMatch: boolean;
   logisticsProviderMatch: boolean;
   branchLocationMatch: boolean;
+  strongBaseNameMatch: boolean;
   tokenSimilarity: number;
 }) {
   const parts = [`${classification.toLowerCase().replaceAll("_", " ")}; score ${score}`];
@@ -834,16 +1089,110 @@ function buildApolloMatchReason({
     parts.push("branch or location wording detected");
   }
 
+  if (strongBaseNameMatch) {
+    parts.push("strong base-name match");
+  }
+
   return parts.join("; ");
 }
 
 function scoreApolloContactEntry(entry: ApolloContactRecord) {
   let score = 0;
+  const roleFit = scoreApolloRoleFit(entry);
+  score += roleFit.score;
   if (entry.email) score += 4;
   if (entry.title) score += 2;
   if (entry.linkedinUrl) score += 2;
   if (entry.sequenceStatus !== SequenceStatus.NOT_STARTED) score += 1;
   return score;
+}
+
+function buildApolloPeopleSearchKeywords(companyName: string, queryKeywords: string | null | undefined, constrainedToOrganization: boolean) {
+  const trimmedKeyword = queryKeywords?.trim() ?? "";
+
+  if (!trimmedKeyword) {
+    return constrainedToOrganization ? undefined : companyName;
+  }
+
+  return constrainedToOrganization ? trimmedKeyword : `${companyName} ${trimmedKeyword}`.trim();
+}
+
+function rankApolloRelevantContacts(entries: ApolloContactRecord[]) {
+  const deduped = dedupeApolloContacts(entries);
+  const relevant = deduped
+    .map((entry) => ({
+      entry,
+      roleFit: scoreApolloRoleFit(entry)
+    }))
+    .filter(({ roleFit }) => roleFit.accepted)
+    .sort((left, right) => {
+      if (left.roleFit.score !== right.roleFit.score) {
+        return right.roleFit.score - left.roleFit.score;
+      }
+
+      return scoreApolloContactEntry(right.entry) - scoreApolloContactEntry(left.entry);
+    })
+    .map(({ entry }) => entry);
+
+  return relevant;
+}
+
+function scoreApolloRoleFit(entry: ApolloContactRecord) {
+  const roleText = [entry.title, entry.department, entry.seniority].filter(Boolean).join(" ").toLowerCase();
+
+  if (!roleText) {
+    return {
+      accepted: false,
+      score: 0
+    };
+  }
+
+  const hasSalesOpsException = /sales and operations|operations and sales/.test(roleText);
+  const isExcluded = APOLLO_EXCLUDED_ROLE_KEYWORDS.some((keyword) => roleText.includes(keyword));
+  if (isExcluded && !hasSalesOpsException) {
+    return {
+      accepted: false,
+      score: 0
+    };
+  }
+
+  const primaryHit = APOLLO_PRIMARY_ROLE_KEYWORDS.some((keyword) => roleText.includes(keyword));
+  const fallbackHit = APOLLO_FALLBACK_ROLE_KEYWORDS.some((keyword) => roleText.includes(keyword));
+
+  if (!primaryHit && !fallbackHit) {
+    return {
+      accepted: false,
+      score: 0
+    };
+  }
+
+  let score = 0;
+  if (primaryHit) {
+    score += 38;
+  } else if (fallbackHit) {
+    score += 30;
+  }
+
+  if (/(chief|ceo|coo|owner|founder|president)/.test(roleText)) {
+    score += 20;
+  } else if (/(vp|vice president)/.test(roleText)) {
+    score += 18;
+  } else if (/(director|head)/.test(roleText)) {
+    score += 16;
+  } else if (/manager/.test(roleText)) {
+    score += 11;
+  }
+
+  if (/(operations|supply chain|logistics|procurement|purchasing|distribution)/.test(roleText)) {
+    score += 15;
+  } else if (fallbackHit) {
+    score += 8;
+  }
+
+  return {
+    accepted: true,
+    score
+  };
 }
 
 function extractApolloError(payload: Record<string, unknown> | ApolloUsersResponse | null) {
@@ -968,6 +1317,14 @@ function buildCompanyNameAliases(value: string) {
   return [...aliases];
 }
 
+function buildApolloOrganizationSearchQueries(value: string) {
+  const queries = [value.trim(), simplifyCompanySearchName(value), normalizeCompanyName(value)]
+    .filter((query): query is string => Boolean(query && query.trim().length > 0))
+    .filter((query, index, array) => array.indexOf(query) === index);
+
+  return queries;
+}
+
 function hasExactAliasMatch(leftAliases: string[], rightAliases: string[]) {
   return leftAliases.some((left) => rightAliases.some((right) => left.length > 0 && left === right));
 }
@@ -985,7 +1342,11 @@ function hasPartialAliasMatch(leftAliases: string[], rightAliases: string[]) {
 }
 
 function hasStrongBaseNameMatch(leftAliases: string[], rightAliases: string[]) {
-  return hasExactAliasMatch(leftAliases, rightAliases) || calculateBestTokenSimilarity(leftAliases, rightAliases) >= 0.85;
+  return (
+    hasExactAliasMatch(leftAliases, rightAliases) ||
+    hasContainedLeadingTokenMatch(leftAliases, rightAliases) ||
+    calculateBestTokenSimilarity(leftAliases, rightAliases) >= 0.85
+  );
 }
 
 function tokenizeCompanyName(value: string) {
@@ -1016,6 +1377,23 @@ function calculateTokenSimilarity(left: string[], right: string[]) {
   const shared = [...leftSet].filter((token) => rightSet.has(token)).length;
   const denominator = Math.max(leftSet.size, rightSet.size);
   return shared / denominator;
+}
+
+function hasContainedLeadingTokenMatch(leftAliases: string[], rightAliases: string[]) {
+  return leftAliases.some((leftAlias) =>
+    rightAliases.some((rightAlias) => isLeadingTokenBaseMatch(leftAlias, rightAlias))
+  );
+}
+
+function isLeadingTokenBaseMatch(leftAlias: string, rightAlias: string) {
+  const leftTokens = tokenizeCompanyName(leftAlias);
+  const rightTokens = tokenizeCompanyName(rightAlias);
+
+  if (leftTokens.length < 2 || rightTokens.length <= leftTokens.length) {
+    return false;
+  }
+
+  return leftTokens.every((token, index) => rightTokens[index] === token);
 }
 
 const COMPANY_STOP_WORDS = new Set(["the", "and", "of", "for", "usa", "us", "intl", "international", "group"]);
