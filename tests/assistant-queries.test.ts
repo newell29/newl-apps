@@ -37,6 +37,23 @@ describe("classifyAssistantIntent", () => {
 describe("buildAssistantSources", () => {
   it("turns workspace companies, leads, and rate jobs into auditable source records", () => {
     const sources = buildAssistantSources({
+      recentMemories: [
+        {
+          id: "memory-1",
+          kind: "CUSTOMER_PROFILE",
+          subjectType: "Company",
+          subjectId: "company-1",
+          title: "Acme Imports",
+          summary: "Industry Furniture, priority 87, status NEW.",
+          confidence: 70,
+          lastObservedAt: new Date("2026-06-25T10:00:00Z"),
+          sourceDocument: {
+            sourceKind: "COMPANY",
+            sourceId: "company-1",
+            title: "Acme Imports"
+          }
+        }
+      ],
       topCompanies: [
         {
           id: "company-1",
@@ -84,6 +101,12 @@ describe("buildAssistantSources", () => {
     } as Parameters<typeof buildAssistantSources>[0]);
 
     expect(sources).toMatchObject([
+      {
+        sourceKind: "COMPANY",
+        sourceId: "company-1",
+        title: "Acme Imports",
+        excerpt: "Industry Furniture, priority 87, status NEW."
+      },
       {
         sourceKind: "COMPANY",
         sourceId: "company-1",

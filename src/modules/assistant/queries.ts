@@ -5,6 +5,7 @@ import {
   LeadPipelineStage
 } from "@prisma/client";
 
+import { summarizeAssistantAutomationSchedule } from "@/modules/assistant/automations";
 import { prisma } from "@/server/db";
 import type { TenantContext } from "@/server/tenant-context";
 import { tenantWhere } from "@/server/tenant-query";
@@ -35,7 +36,12 @@ export type AssistantIntent =
   | "EMAIL_DRAFT"
   | "GENERAL_INSIGHT";
 
-export async function getAssistantWorkspace(tenant: TenantContext, query?: string, threadId?: string) {
+export async function getAssistantWorkspace(
+  tenant: TenantContext,
+  query?: string,
+  threadId?: string,
+  userId?: string
+) {
   const [
     companyCount,
     contactCount,
@@ -43,6 +49,9 @@ export async function getAssistantWorkspace(tenant: TenantContext, query?: strin
     importRecordCount,
     knowledgeDocumentCount,
     memoryCount,
+    knowledgeCoverage,
+    recentMemories,
+    personalAutomations,
     integrations,
     topCompanies,
     openLeads,
@@ -62,6 +71,70 @@ export async function getAssistantWorkspace(tenant: TenantContext, query?: strin
     prisma.tradeMiningImportRecord.count({ where: tenantWhere(tenant) }),
     prisma.assistantKnowledgeDocument.count({ where: tenantWhere(tenant) }),
     prisma.assistantMemory.count({ where: tenantWhere(tenant, { status: "ACTIVE" }) }),
+    prisma.assistantKnowledgeDocument.groupBy({
+      by: ["sourceKind"],
+      where: tenantWhere(tenant),
+      _count: {
+        _all: true
+      }
+    }),
+    prisma.assistantMemory.findMany({
+      where: tenantWhere(tenant, { status: "ACTIVE" }),
+      orderBy: [{ confidence: "desc" }, { updatedAt: "desc" }],
+      take: 8,
+      select: {
+        id: true,
+        kind: true,
+        subjectType: true,
+        subjectId: true,
+        title: true,
+        summary: true,
+        confidence: true,
+        lastObservedAt: true,
+        sourceDocument: {
+          select: {
+            sourceKind: true,
+            externalId: true,
+            title: true
+          }
+        }
+      }
+    }),
+    userId
+      ? prisma.assistantAutomation.findMany({
+          where: tenantWhere(tenant, {
+            userId
+          }),
+          orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+          take: 8,
+          select: {
+            id: true,
+            name: true,
+            prompt: true,
+            scheduleType: true,
+            scheduleTime: true,
+            scheduleTimezone: true,
+            status: true,
+            lastRunAt: true,
+            nextRunAt: true,
+            lastResultSummary: true,
+            runs: {
+              orderBy: {
+                startedAt: "desc"
+              },
+              take: 3,
+              select: {
+                id: true,
+                status: true,
+                responseText: true,
+                sourceCount: true,
+                startedAt: true,
+                finishedAt: true
+              }
+            }
+          }
+        })
+      : Promise.resolve([]),
     prisma.integrationCredential.findMany({
       where: tenantWhere(tenant, {
         provider: {
@@ -143,7 +216,8 @@ export async function getAssistantWorkspace(tenant: TenantContext, query?: strin
     }),
     prisma.assistantChatThread.findMany({
       where: tenantWhere(tenant, {
-        status: "ACTIVE"
+        status: "ACTIVE",
+        ...(userId ? { userId } : {})
       }),
       orderBy: [{ lastMessageAt: "desc" }, { updatedAt: "desc" }],
       take: 8,
@@ -162,7 +236,8 @@ export async function getAssistantWorkspace(tenant: TenantContext, query?: strin
     threadId
       ? prisma.assistantChatThread.findFirst({
           where: tenantWhere(tenant, {
-            id: threadId
+            id: threadId,
+            ...(userId ? { userId } : {})
           }),
           select: {
             id: true,
@@ -236,6 +311,52 @@ export async function getAssistantWorkspace(tenant: TenantContext, query?: strin
       knowledgeDocumentCount,
       memoryCount
     },
+    knowledgeCoverage: knowledgeCoverage.map((entry) => ({
+      sourceKind: entry.sourceKind,
+      count: entry._count._all
+    })),
+    recentMemories: recentMemories.map((memory) => ({
+      id: memory.id,
+      kind: memory.kind,
+      subjectType: memory.subjectType,
+      subjectId: memory.subjectId,
+      title: memory.title,
+      summary: memory.summary,
+      confidence: memory.confidence,
+      lastObservedAt: memory.lastObservedAt,
+      sourceDocument: memory.sourceDocument
+        ? {
+            sourceKind: memory.sourceDocument.sourceKind,
+            sourceId: memory.sourceDocument.externalId,
+            title: memory.sourceDocument.title
+          }
+        : null
+    })),
+    personalAutomations: personalAutomations.map((automation) => ({
+      id: automation.id,
+      name: automation.name,
+      prompt: automation.prompt,
+      scheduleType: automation.scheduleType,
+      scheduleTime: automation.scheduleTime,
+      scheduleTimezone: automation.scheduleTimezone,
+      scheduleSummary: summarizeAssistantAutomationSchedule(
+        automation.scheduleType as "DAILY" | "WEEKDAYS" | "MONDAYS",
+        automation.scheduleTime,
+        automation.scheduleTimezone
+      ),
+      status: automation.status,
+      lastRunAt: automation.lastRunAt,
+      nextRunAt: automation.nextRunAt,
+      lastResultSummary: automation.lastResultSummary,
+      recentRuns: automation.runs.map((run) => ({
+        id: run.id,
+        status: run.status,
+        responseText: run.responseText,
+        sourceCount: run.sourceCount,
+        startedAt: run.startedAt,
+        finishedAt: run.finishedAt
+      }))
+    })),
     integrations: ASSISTANT_INTEGRATION_PROVIDERS.map((provider) => {
       const matching = integrations.filter((integration) => integration.provider === provider);
 
@@ -343,6 +464,20 @@ export function buildAssistantSources(workspace: Awaited<ReturnType<typeof getAs
     excerpt: string;
     metadata?: Record<string, unknown>;
   }> = [];
+
+  for (const memory of workspace.recentMemories.slice(0, 3)) {
+    sources.push({
+      sourceKind: memory.sourceDocument?.sourceKind ?? AssistantSourceKind.OTHER,
+      sourceId: memory.sourceDocument?.sourceId ?? memory.subjectId ?? null,
+      title: memory.title,
+      excerpt: memory.summary,
+      metadata: {
+        memoryKind: memory.kind,
+        confidence: memory.confidence,
+        subjectType: memory.subjectType
+      }
+    });
+  }
 
   for (const company of workspace.topCompanies.slice(0, 3)) {
     sources.push({
