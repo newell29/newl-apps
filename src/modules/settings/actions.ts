@@ -1,7 +1,8 @@
 "use server";
 
-import { IntegrationProvider, IntegrationStatus, Prisma } from "@prisma/client";
+import { IntegrationProvider, IntegrationStatus, PlatformRole, Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { PLATFORM_ROLES } from "@/modules/settings/access-control";
 import { prisma } from "@/server/db";
 import { requireAdmin } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -37,12 +38,54 @@ type TradeMiningScoringConfigMutationClient = typeof prisma & {
       create: Record<string, unknown>;
     }): Promise<unknown>;
   };
+  tenantRoleModuleAccess: {
+    upsert(args: {
+      where: {
+        tenantId_role_moduleId: {
+          tenantId: string;
+          role: PlatformRole;
+          moduleId: string;
+        };
+      };
+      update: { enabled: boolean };
+      create: {
+        tenantId: string;
+        role: PlatformRole;
+        moduleId: string;
+        enabled: boolean;
+      };
+    }): Promise<unknown>;
+  };
+  tenantRolePolicy: {
+    upsert(args: {
+      where: {
+        tenantId_role: {
+          tenantId: string;
+          role: PlatformRole;
+        };
+      };
+      update: { canMutate: boolean };
+      create: {
+        tenantId: string;
+        role: PlatformRole;
+        canMutate: boolean;
+      };
+    }): Promise<unknown>;
+  };
 };
 
 async function authorizeSettingsMutation() {
   const context = await getAuthenticatedContext();
   requireAdmin(context);
   return context;
+}
+
+function parsePlatformRole(value: FormDataEntryValue | null): PlatformRole {
+  if (typeof value !== "string" || !PLATFORM_ROLES.includes(value as PlatformRole)) {
+    throw new Error("Select a valid platform role.");
+  }
+
+  return value as PlatformRole;
 }
 
 export async function createUpsQuoteSourceAction(formData: FormData) {
@@ -330,6 +373,128 @@ export async function saveTradeMiningScoringSettingsAction(formData: FormData) {
   revalidateSettingsSurfaces();
   revalidatePath("/lead-gen/candidates");
   revalidatePath("/dashboard");
+}
+
+export async function saveTenantUserAccessAction(formData: FormData) {
+  const context = await authorizeSettingsMutation();
+  const email = readRequired(formData, "email").toLowerCase();
+  const name = readOptional(formData, "name");
+  const role = parsePlatformRole(formData.get("role"));
+
+  const user = await prisma.user.upsert({
+    where: { email },
+    update: {
+      name: name ?? undefined
+    },
+    create: {
+      email,
+      name: name ?? null
+    }
+  });
+
+  await prisma.membership.upsert({
+    where: {
+      tenantId_userId: {
+        tenantId: context.tenantId,
+        userId: user.id
+      }
+    },
+    update: {
+      role
+    },
+    create: {
+      tenantId: context.tenantId,
+      userId: user.id,
+      role
+    }
+  });
+
+  revalidateSettingsSurfaces();
+}
+
+export async function removeTenantUserAccessAction(formData: FormData) {
+  const context = await authorizeSettingsMutation();
+  const membershipId = readRequired(formData, "membershipId");
+
+  await prisma.membership.deleteMany({
+    where: {
+      id: membershipId,
+      tenantId: context.tenantId
+    }
+  });
+
+  revalidateSettingsSurfaces();
+}
+
+export async function saveRoleModuleAccessAction(formData: FormData) {
+  const context = await authorizeSettingsMutation();
+  const roleAccessClient = prisma as TradeMiningScoringConfigMutationClient;
+  const rawValues = formData
+    .getAll("roleModuleAccess")
+    .filter((value): value is string => typeof value === "string" && value.includes("::"));
+  const selectedKeys = new Set(rawValues);
+  const mutableRoles = new Set(
+    formData
+      .getAll("roleCanMutate")
+      .filter((value): value is string => typeof value === "string")
+  );
+  const modules = await prisma.module.findMany({
+    orderBy: {
+      name: "asc"
+    },
+    select: {
+      id: true,
+      key: true
+    }
+  });
+
+  for (const role of PLATFORM_ROLES) {
+    const canMutate =
+      role === PlatformRole.ADMIN ? true : role === PlatformRole.READ_ONLY ? false : mutableRoles.has(role);
+
+    await roleAccessClient.tenantRolePolicy.upsert({
+      where: {
+        tenantId_role: {
+          tenantId: context.tenantId,
+          role
+        }
+      },
+      update: {
+        canMutate
+      },
+      create: {
+        tenantId: context.tenantId,
+        role,
+        canMutate
+      }
+    });
+
+    for (const moduleRecord of modules) {
+      const composite = `${role}::${moduleRecord.key}`;
+      const enabled = selectedKeys.has(composite);
+
+      await roleAccessClient.tenantRoleModuleAccess.upsert({
+        where: {
+          tenantId_role_moduleId: {
+            tenantId: context.tenantId,
+            role,
+            moduleId: moduleRecord.id
+          }
+        },
+        update: {
+          enabled
+        },
+        create: {
+          tenantId: context.tenantId,
+          role,
+          moduleId: moduleRecord.id,
+          enabled
+        }
+      });
+    }
+  }
+
+  revalidateSettingsSurfaces();
 }
 
 export async function saveApolloRepMappingAction(formData: FormData) {

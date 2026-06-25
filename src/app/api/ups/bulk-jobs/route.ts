@@ -22,7 +22,7 @@ export async function POST(request: Request) {
   try {
     const context = await getAuthenticatedContext();
     await requireModule(context, ModuleKey.UPS_TOOLS);
-    requireMutationAccess(context);
+    await requireMutationAccess(context);
 
     const shell = await getUpsToolsShell(context);
     const body = (await request.json()) as {
@@ -156,7 +156,7 @@ export async function DELETE(request: Request) {
   try {
     const context = await getAuthenticatedContext();
     await requireModule(context, ModuleKey.UPS_TOOLS);
-    requireMutationAccess(context);
+    await requireMutationAccess(context);
 
     const { searchParams } = new URL(request.url);
     const jobId = searchParams.get("jobId");

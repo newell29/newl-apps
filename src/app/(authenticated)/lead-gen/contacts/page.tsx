@@ -4,6 +4,7 @@ import {
   ContactStatus,
   ContactOutreachDraftStatus,
   ContactTier,
+  ModuleKey,
   ReplyStatus,
   SequenceStatus
 } from "@prisma/client";
@@ -25,7 +26,8 @@ import {
   type ContactDirectorySort
 } from "@/modules/lead-gen/queries";
 import { buildSequenceCatalogItems } from "@/modules/lead-gen/sequence-catalog";
-import { getCurrentTenantContext } from "@/server/tenant-context";
+import { requireModule } from "@/server/auth/authorization";
+import { getAuthenticatedContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +44,9 @@ export default async function ContactsPage({
 }: {
   searchParams?: Promise<SearchParams>;
 }) {
-  const tenant = await getCurrentTenantContext();
+  const context = await getAuthenticatedContext();
+  await requireModule(context, ModuleKey.LEAD_GEN);
+  const tenant = context;
   const params = searchParams ? await searchParams : {};
   const query = readParam(params.q) ?? "";
   const companyId = readParam(params.company);

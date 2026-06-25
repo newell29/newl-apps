@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
-import { accessibleModuleKeys } from "@/server/auth/authorization";
+import { resolveAccessibleModuleKeys } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
 import { getAuthenticatedContext, type AuthenticatedContext } from "@/server/tenant-context";
 
@@ -41,7 +41,7 @@ export default async function AuthenticatedLayout({
     }
   });
 
-  const allowedModuleKeys = new Set(accessibleModuleKeys(context.role));
+  const allowedModuleKeys = new Set(await resolveAccessibleModuleKeys(context.tenantId, context.role));
   const enabledModuleKeys = tenantModuleAccess
     .map((access) => access.module.key)
     .filter((key) => allowedModuleKeys.has(key));

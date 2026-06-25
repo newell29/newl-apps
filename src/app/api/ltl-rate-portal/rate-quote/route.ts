@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   try {
     const context = await getAuthenticatedContext();
     await requireModule(context, ModuleKey.LTL_RATE_PORTAL);
-    requireMutationAccess(context);
+    await requireMutationAccess(context);
 
     const shell = await getLtlRatePortalShell(context);
     const body = (await request.json()) as Partial<LtlRateQuoteRequestPayload>;
