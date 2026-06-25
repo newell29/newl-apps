@@ -175,9 +175,7 @@ export async function getSettingsShell(tenant: TenantContext & { userId?: string
           ]
         }
       }),
-      orderBy: {
-        name: "asc"
-      }
+      orderBy: [{ name: "asc" }, { updatedAt: "desc" }]
     }),
     getLocalUpsAccountMetadata(),
     getLocalSevenLAccountNames(),

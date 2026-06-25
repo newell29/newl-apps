@@ -162,9 +162,6 @@ export type AssistantProviderSettings = {
 export type MicrosoftGraphMailboxAccessMode = "SIGNED_IN_USER" | "ADMIN_SELECTED_MAILBOXES";
 
 export type MicrosoftGraphSettings = {
-  clientId: string | null;
-  tenantId: string | null;
-  redirectUri: string | null;
   scopes: string[];
   adminMailboxTargets: string[];
   mailboxAccessMode: MicrosoftGraphMailboxAccessMode;
