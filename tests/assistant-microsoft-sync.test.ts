@@ -97,11 +97,14 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
     const createMany = vi.fn().mockResolvedValue({});
     const deleteMemories = vi.fn().mockResolvedValue({});
     const createMemories = vi.fn().mockResolvedValue({});
+    const findCompanies = vi.fn().mockResolvedValue([]);
+    const findContacts = vi.fn().mockResolvedValue([]);
     transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
       callback({
+        company: { findMany: findCompanies },
+        contact: { findMany: findContacts },
         assistantKnowledgeDocument: { upsert },
-        assistantKnowledgeChunk: { deleteMany, createMany }
-        ,
+        assistantKnowledgeChunk: { deleteMany, createMany },
         assistantMemory: { deleteMany: deleteMemories, createMany: createMemories }
       })
     );
@@ -214,8 +217,12 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
     const createMany = vi.fn().mockResolvedValue({});
     const deleteMemories = vi.fn().mockResolvedValue({});
     const createMemories = vi.fn().mockResolvedValue({});
+    const findCompanies = vi.fn().mockResolvedValue([]);
+    const findContacts = vi.fn().mockResolvedValue([]);
     transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
       callback({
+        company: { findMany: findCompanies },
+        contact: { findMany: findContacts },
         assistantKnowledgeDocument: { upsert },
         assistantKnowledgeChunk: { deleteMany, createMany },
         assistantMemory: { deleteMany: deleteMemories, createMany: createMemories }
@@ -299,12 +306,83 @@ describe("buildMicrosoftGraphMemoriesFromDocuments", () => {
             "Microsoft 365 email message. From: Acme Imports <shipping@acme.com>. Call me at 555-222-3333. Need a quote for LTL and warehousing. We also had a delay issue. Website https://acme.com."
         }
       ],
-      new Map([["MICROSOFT_GRAPH_MAIL:mail-1", "doc-1"]])
+      new Map([["MICROSOFT_GRAPH_MAIL:mail-1", "doc-1"]]),
+      {
+        companiesByDomain: new Map(),
+        companiesByNormalizedName: new Map(),
+        contactsByEmail: new Map()
+      }
     );
 
     expect(memories.some((memory) => memory.kind === "CUSTOMER_PROFILE" && memory.summary.includes("shipping@acme.com"))).toBe(true);
     expect(memories.some((memory) => memory.kind === "SERVICE_CAPABILITY" && memory.summary.toLowerCase().includes("ltl"))).toBe(true);
     expect(memories.some((memory) => memory.kind === "OPERATIONAL_RISK")).toBe(true);
     expect(memories.some((memory) => memory.kind === "SALES_OPPORTUNITY")).toBe(true);
+  });
+
+  it("reconciles repeated email memories onto existing company and contact records", () => {
+    const memories = buildMicrosoftGraphMemoriesFromDocuments(
+      [
+        {
+          sourceKind: AssistantSourceKind.EMAIL,
+          sourceSystem: "MICROSOFT_GRAPH_MAIL",
+          externalId: "mail-1",
+          title: "Lane request",
+          sourceUpdatedAt: new Date("2026-06-25T10:00:00.000Z"),
+          metadata: {
+            fromName: "Acme Imports",
+            fromAddress: "shipping@acme.com"
+          },
+          content: "From: Acme Imports <shipping@acme.com>. LTL request. Call 555-222-3333."
+        },
+        {
+          sourceKind: AssistantSourceKind.EMAIL,
+          sourceSystem: "MICROSOFT_GRAPH_MAIL",
+          externalId: "mail-2",
+          title: "Warehouse follow up",
+          sourceUpdatedAt: new Date("2026-06-25T11:00:00.000Z"),
+          metadata: {
+            fromName: "Acme Imports",
+            fromAddress: "shipping@acme.com"
+          },
+          content: "From: Acme Imports <shipping@acme.com>. Need warehousing support. https://acme.com"
+        }
+      ],
+      new Map([
+        ["MICROSOFT_GRAPH_MAIL:mail-1", "doc-1"],
+        ["MICROSOFT_GRAPH_MAIL:mail-2", "doc-2"]
+      ]),
+      {
+        companiesByDomain: new Map([
+          ["acme.com", { id: "company-1", name: "Acme Imports", domain: "acme.com" }]
+        ]),
+        companiesByNormalizedName: new Map([
+          ["acme imports", { id: "company-1", name: "Acme Imports", domain: "acme.com" }]
+        ]),
+        contactsByEmail: new Map([
+          [
+            "shipping@acme.com",
+            {
+              id: "contact-1",
+              fullName: "Shipping Desk",
+              email: "shipping@acme.com",
+              companyId: "company-1",
+              companyName: "Acme Imports"
+            }
+          ]
+        ])
+      }
+    );
+
+    expect(memories.some((memory) => memory.subjectType === "Contact" && memory.subjectId === "contact-1")).toBe(true);
+    expect(memories.some((memory) => memory.subjectType === "Company" && memory.subjectId === "company-1")).toBe(true);
+    expect(
+      memories.some(
+        (memory) =>
+          memory.kind === "SERVICE_CAPABILITY" &&
+          memory.summary.toLowerCase().includes("ltl") &&
+          memory.summary.toLowerCase().includes("warehousing")
+      )
+    ).toBe(true);
   });
 });

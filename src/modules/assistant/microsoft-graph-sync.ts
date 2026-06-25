@@ -174,16 +174,23 @@ type PersistedMicrosoftDocument = {
   title: string;
 };
 
+type MicrosoftEntityDirectory = {
+  companiesByDomain: Map<string, { id: string; name: string; domain: string | null }>;
+  companiesByNormalizedName: Map<string, { id: string; name: string; domain: string | null }>;
+  contactsByEmail: Map<string, { id: string; fullName: string; email: string | null; companyId: string; companyName: string }>;
+};
+
 async function replaceMicrosoftGraphMemories(
   tx: Prisma.TransactionClient,
   context: AuthenticatedContext,
   documents: AssistantKnowledgeDocumentInput[],
   persistedDocuments: PersistedMicrosoftDocument[]
 ) {
+  const entityDirectory = await loadMicrosoftEntityDirectory(tx, context.tenantId);
   const documentIdByKey = new Map(
     persistedDocuments.map((document) => [`${document.sourceSystem}:${document.externalId}`, document.id])
   );
-  const extractedMemories = buildMicrosoftGraphMemoriesFromDocuments(documents, documentIdByKey);
+  const extractedMemories = buildMicrosoftGraphMemoriesFromDocuments(documents, documentIdByKey, entityDirectory);
 
   await tx.assistantMemory.deleteMany({
     where: {
@@ -217,7 +224,12 @@ async function replaceMicrosoftGraphMemories(
 
 export function buildMicrosoftGraphMemoriesFromDocuments(
   documents: AssistantKnowledgeDocumentInput[],
-  documentIdByKey: Map<string, string>
+  documentIdByKey: Map<string, string>,
+  entityDirectory: MicrosoftEntityDirectory = {
+    companiesByDomain: new Map(),
+    companiesByNormalizedName: new Map(),
+    contactsByEmail: new Map()
+  }
 ) {
   const memories: Array<{
     kind: AssistantMemoryKind;
@@ -229,6 +241,47 @@ export function buildMicrosoftGraphMemoriesFromDocuments(
     sourceDocumentId: string | null;
     lastObservedAt: Date | null;
   }> = [];
+  const contactFacts = new Map<
+    string,
+    {
+      subjectType: string;
+      subjectId: string | null;
+      title: string;
+      contactNames: Set<string>;
+      emails: Set<string>;
+      phones: Set<string>;
+      websites: Set<string>;
+      services: Set<string>;
+      sourceDocumentId: string | null;
+      lastObservedAt: Date | null;
+    }
+  >();
+  const companyFacts = new Map<
+    string,
+    {
+      subjectType: string;
+      subjectId: string | null;
+      title: string;
+      companyNames: Set<string>;
+      domains: Set<string>;
+      websites: Set<string>;
+      services: Set<string>;
+      sourceDocumentId: string | null;
+      lastObservedAt: Date | null;
+    }
+  >();
+  const serviceFacts = new Map<
+    string,
+    {
+      subjectType: string;
+      subjectId: string | null;
+      title: string;
+      services: Set<string>;
+      websites: Set<string>;
+      sourceDocumentId: string | null;
+      lastObservedAt: Date | null;
+    }
+  >();
 
   for (const document of documents) {
     const metadata = document.metadata ?? {};
@@ -244,58 +297,91 @@ export function buildMicrosoftGraphMemoriesFromDocuments(
     if (document.sourceKind === AssistantSourceKind.EMAIL) {
       const fromName = readString(metadata.fromName);
       const fromAddress = readString(metadata.fromAddress);
-      const domain = fromAddress?.split("@")[1] ?? null;
-      const companyName = inferCompanyName(fromName, domain);
+      const domain = normalizeDomain(fromAddress?.split("@")[1] ?? null);
+      const contactMatch = fromAddress ? entityDirectory.contactsByEmail.get(fromAddress.toLowerCase()) ?? null : null;
+      const companyMatch =
+        (contactMatch ? findCompanyById(entityDirectory, contactMatch.companyId) : null) ??
+        (domain ? entityDirectory.companiesByDomain.get(domain) ?? null : null) ??
+        (() => {
+          const inferred = inferCompanyName(fromName, domain);
+          return inferred
+            ? entityDirectory.companiesByNormalizedName.get(normalizeCompanyName(inferred)) ?? null
+            : null;
+        })();
+      const companyName = companyMatch?.name ?? inferCompanyName(fromName, domain);
       const website = domain && !websites.includes(`https://${domain}`) ? `https://${domain}` : null;
 
       if (fromAddress || companyName || phones.length > 0 || websites.length > 0 || services.length > 0) {
-        memories.push({
-          kind: AssistantMemoryKind.CUSTOMER_PROFILE,
-          subjectType: "MicrosoftGraphContact",
-          subjectId: fromAddress ?? document.externalId,
-          title: companyName ? `${companyName} contact memory` : `${document.title} contact memory`,
-          summary: joinParts([
-            fromName ? `Contact name ${fromName}` : null,
-            fromAddress ? `email ${fromAddress}` : null,
-            phones.length > 0 ? `phones ${phones.join(", ")}` : null,
-            website ? `website ${website}` : null,
-            websites.length > 0 ? `links ${websites.join(", ")}` : null,
-            services.length > 0 ? `services discussed ${services.join(", ")}` : null
-          ]),
-          confidence: 72,
+        const subjectType = contactMatch ? "Contact" : "MicrosoftGraphContact";
+        const subjectId = contactMatch?.id ?? fromAddress ?? document.externalId;
+        const title = contactMatch
+          ? `${contactMatch.fullName} contact memory`
+          : companyName
+            ? `${companyName} contact memory`
+            : `${document.title} contact memory`;
+        const key = `${subjectType}:${subjectId ?? title}`;
+        const fact = getOrCreateContactFact(contactFacts, key, {
+          subjectType,
+          subjectId,
+          title,
           sourceDocumentId,
           lastObservedAt
         });
+        if (fromName) fact.contactNames.add(fromName);
+        if (contactMatch?.fullName) fact.contactNames.add(contactMatch.fullName);
+        if (fromAddress) fact.emails.add(fromAddress);
+        phones.forEach((phone) => fact.phones.add(phone));
+        if (website) fact.websites.add(website);
+        websites.forEach((link) => fact.websites.add(link));
+        services.forEach((service) => fact.services.add(service));
+        updateLastObserved(fact, lastObservedAt, sourceDocumentId);
       }
 
       if (companyName || domain || services.length > 0) {
-        memories.push({
-          kind: AssistantMemoryKind.CUSTOMER_PROFILE,
-          subjectType: "MicrosoftGraphCompany",
-          subjectId: domain ?? companyName ?? document.externalId,
-          title: companyName ? `${companyName} company memory` : `${document.title} company memory`,
-          summary: joinParts([
-            companyName ? `Company ${companyName}` : null,
-            domain ? `domain ${domain}` : null,
-            services.length > 0 ? `service context ${services.join(", ")}` : null
-          ]),
-          confidence: 64,
+        const subjectType = companyMatch ? "Company" : "MicrosoftGraphCompany";
+        const subjectId = companyMatch?.id ?? domain ?? companyName ?? document.externalId;
+        const title = companyMatch
+          ? `${companyMatch.name} company memory`
+          : companyName
+            ? `${companyName} company memory`
+            : `${document.title} company memory`;
+        const key = `${subjectType}:${subjectId ?? title}`;
+        const fact = getOrCreateCompanyFact(companyFacts, key, {
+          subjectType,
+          subjectId,
+          title,
           sourceDocumentId,
           lastObservedAt
         });
+        if (companyName) fact.companyNames.add(companyName);
+        if (companyMatch?.name) fact.companyNames.add(companyMatch.name);
+        if (domain) fact.domains.add(domain);
+        if (companyMatch?.domain) fact.domains.add(companyMatch.domain);
+        if (website) fact.websites.add(website);
+        websites.forEach((link) => fact.websites.add(link));
+        services.forEach((service) => fact.services.add(service));
+        updateLastObserved(fact, lastObservedAt, sourceDocumentId);
       }
 
       if (services.length > 0) {
-        memories.push({
-          kind: AssistantMemoryKind.SERVICE_CAPABILITY,
-          subjectType: "MicrosoftGraphService",
-          subjectId: `${document.externalId}:services`,
-          title: `${document.title} service context`,
-          summary: `Services referenced in email: ${services.join(", ")}.`,
-          confidence: 68,
+        const baseSubjectId = companyMatch?.id ?? contactMatch?.companyId ?? companyName ?? document.externalId;
+        const key = `service:${baseSubjectId}`;
+        const title = companyMatch?.name
+          ? `${companyMatch.name} service context`
+          : companyName
+            ? `${companyName} service context`
+            : `${document.title} service context`;
+        const fact = getOrCreateServiceFact(serviceFacts, key, {
+          subjectType: companyMatch ? "CompanyService" : "MicrosoftGraphService",
+          subjectId: baseSubjectId,
+          title,
           sourceDocumentId,
           lastObservedAt
         });
+        services.forEach((service) => fact.services.add(service));
+        if (website) fact.websites.add(website);
+        websites.forEach((link) => fact.websites.add(link));
+        updateLastObserved(fact, lastObservedAt, sourceDocumentId);
       }
 
       if (containsOperationalRisk(lower)) {
@@ -327,24 +413,138 @@ export function buildMicrosoftGraphMemoriesFromDocuments(
 
     if (document.sourceKind === AssistantSourceKind.ONEDRIVE_FILE) {
       if (services.length > 0 || websites.length > 0) {
-        memories.push({
-          kind: AssistantMemoryKind.SERVICE_CAPABILITY,
+        const key = `service:file:${document.externalId}`;
+        const fact = getOrCreateServiceFact(serviceFacts, key, {
           subjectType: "MicrosoftGraphService",
           subjectId: `${document.externalId}:file`,
           title: `${document.title} file context`,
-          summary: joinParts([
-            services.length > 0 ? `Services referenced ${services.join(", ")}` : null,
-            websites.length > 0 ? `related links ${websites.join(", ")}` : null
-          ]),
-          confidence: 60,
           sourceDocumentId,
           lastObservedAt
         });
+        services.forEach((service) => fact.services.add(service));
+        websites.forEach((link) => fact.websites.add(link));
+        updateLastObserved(fact, lastObservedAt, sourceDocumentId);
       }
     }
   }
 
+  for (const fact of contactFacts.values()) {
+    memories.push({
+      kind: AssistantMemoryKind.CUSTOMER_PROFILE,
+      subjectType: fact.subjectType,
+      subjectId: fact.subjectId,
+      title: fact.title,
+      summary: joinParts([
+        fact.contactNames.size > 0 ? `contact ${Array.from(fact.contactNames).join(", ")}` : null,
+        fact.emails.size > 0 ? `emails ${Array.from(fact.emails).join(", ")}` : null,
+        fact.phones.size > 0 ? `phones ${Array.from(fact.phones).join(", ")}` : null,
+        fact.websites.size > 0 ? `websites ${Array.from(fact.websites).join(", ")}` : null,
+        fact.services.size > 0 ? `services ${Array.from(fact.services).join(", ")}` : null
+      ]),
+      confidence: fact.subjectType === "Contact" ? 84 : 72,
+      sourceDocumentId: fact.sourceDocumentId,
+      lastObservedAt: fact.lastObservedAt
+    });
+  }
+
+  for (const fact of companyFacts.values()) {
+    memories.push({
+      kind: AssistantMemoryKind.CUSTOMER_PROFILE,
+      subjectType: fact.subjectType,
+      subjectId: fact.subjectId,
+      title: fact.title,
+      summary: joinParts([
+        fact.companyNames.size > 0 ? `company ${Array.from(fact.companyNames).join(", ")}` : null,
+        fact.domains.size > 0 ? `domains ${Array.from(fact.domains).join(", ")}` : null,
+        fact.websites.size > 0 ? `websites ${Array.from(fact.websites).join(", ")}` : null,
+        fact.services.size > 0 ? `services ${Array.from(fact.services).join(", ")}` : null
+      ]),
+      confidence: fact.subjectType === "Company" ? 82 : 64,
+      sourceDocumentId: fact.sourceDocumentId,
+      lastObservedAt: fact.lastObservedAt
+    });
+  }
+
+  for (const fact of serviceFacts.values()) {
+    memories.push({
+      kind: AssistantMemoryKind.SERVICE_CAPABILITY,
+      subjectType: fact.subjectType,
+      subjectId: fact.subjectId,
+      title: fact.title,
+      summary: joinParts([
+        fact.services.size > 0 ? `services ${Array.from(fact.services).join(", ")}` : null,
+        fact.websites.size > 0 ? `links ${Array.from(fact.websites).join(", ")}` : null
+      ]),
+      confidence: fact.subjectType === "CompanyService" ? 78 : 64,
+      sourceDocumentId: fact.sourceDocumentId,
+      lastObservedAt: fact.lastObservedAt
+    });
+  }
+
   return dedupeMemories(memories);
+}
+
+async function loadMicrosoftEntityDirectory(tx: Prisma.TransactionClient, tenantId: string): Promise<MicrosoftEntityDirectory> {
+  const [companies, contacts] = await Promise.all([
+    tx.company.findMany({
+      where: { tenantId },
+      select: {
+        id: true,
+        name: true,
+        normalizedName: true,
+        domain: true
+      }
+    }),
+    tx.contact.findMany({
+      where: { tenantId },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        companyId: true,
+        company: {
+          select: {
+            name: true
+          }
+        }
+      }
+    })
+  ]);
+
+  const companiesByDomain = new Map<string, { id: string; name: string; domain: string | null }>();
+  const companiesByNormalizedName = new Map<string, { id: string; name: string; domain: string | null }>();
+  const contactsByEmail = new Map<string, { id: string; fullName: string; email: string | null; companyId: string; companyName: string }>();
+
+  for (const company of companies) {
+    const record = {
+      id: company.id,
+      name: company.name,
+      domain: company.domain
+    };
+    if (company.domain) {
+      companiesByDomain.set(normalizeDomain(company.domain), record);
+    }
+    companiesByNormalizedName.set(normalizeCompanyName(company.normalizedName || company.name), record);
+  }
+
+  for (const contact of contacts) {
+    if (!contact.email) {
+      continue;
+    }
+    contactsByEmail.set(contact.email.toLowerCase(), {
+      id: contact.id,
+      fullName: contact.fullName,
+      email: contact.email,
+      companyId: contact.companyId,
+      companyName: contact.company.name
+    });
+  }
+
+  return {
+    companiesByDomain,
+    companiesByNormalizedName,
+    contactsByEmail
+  };
 }
 
 async function fetchRecentMail(accessToken: string) {
@@ -548,6 +748,35 @@ function readString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+function normalizeDomain(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase().replace(/^www\./, "");
+}
+
+function normalizeCompanyName(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function findCompanyById(directory: MicrosoftEntityDirectory, companyId: string) {
+  for (const company of directory.companiesByDomain.values()) {
+    if (company.id === companyId) {
+      return company;
+    }
+  }
+
+  for (const company of directory.companiesByNormalizedName.values()) {
+    if (company.id === companyId) {
+      return company;
+    }
+  }
+
+  return null;
+}
+
 function joinParts(parts: Array<string | null>) {
   return parts.filter((part): part is string => Boolean(part)).join(", ");
 }
@@ -568,4 +797,136 @@ function dedupeMemories<T extends { kind: AssistantMemoryKind; subjectType: stri
     seen.add(key);
     return true;
   });
+}
+
+function getOrCreateContactFact(
+  facts: Map<
+    string,
+    {
+      subjectType: string;
+      subjectId: string | null;
+      title: string;
+      contactNames: Set<string>;
+      emails: Set<string>;
+      phones: Set<string>;
+      websites: Set<string>;
+      services: Set<string>;
+      sourceDocumentId: string | null;
+      lastObservedAt: Date | null;
+    }
+  >,
+  key: string,
+  seed: {
+    subjectType: string;
+    subjectId: string | null;
+    title: string;
+    sourceDocumentId: string | null;
+    lastObservedAt: Date | null;
+  }
+) {
+  const existing = facts.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const created = {
+    ...seed,
+    contactNames: new Set<string>(),
+    emails: new Set<string>(),
+    phones: new Set<string>(),
+    websites: new Set<string>(),
+    services: new Set<string>()
+  };
+  facts.set(key, created);
+  return created;
+}
+
+function getOrCreateCompanyFact(
+  facts: Map<
+    string,
+    {
+      subjectType: string;
+      subjectId: string | null;
+      title: string;
+      companyNames: Set<string>;
+      domains: Set<string>;
+      websites: Set<string>;
+      services: Set<string>;
+      sourceDocumentId: string | null;
+      lastObservedAt: Date | null;
+    }
+  >,
+  key: string,
+  seed: {
+    subjectType: string;
+    subjectId: string | null;
+    title: string;
+    sourceDocumentId: string | null;
+    lastObservedAt: Date | null;
+  }
+) {
+  const existing = facts.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const created = {
+    ...seed,
+    companyNames: new Set<string>(),
+    domains: new Set<string>(),
+    websites: new Set<string>(),
+    services: new Set<string>()
+  };
+  facts.set(key, created);
+  return created;
+}
+
+function getOrCreateServiceFact(
+  facts: Map<
+    string,
+    {
+      subjectType: string;
+      subjectId: string | null;
+      title: string;
+      services: Set<string>;
+      websites: Set<string>;
+      sourceDocumentId: string | null;
+      lastObservedAt: Date | null;
+    }
+  >,
+  key: string,
+  seed: {
+    subjectType: string;
+    subjectId: string | null;
+    title: string;
+    sourceDocumentId: string | null;
+    lastObservedAt: Date | null;
+  }
+) {
+  const existing = facts.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const created = {
+    ...seed,
+    services: new Set<string>(),
+    websites: new Set<string>()
+  };
+  facts.set(key, created);
+  return created;
+}
+
+function updateLastObserved(
+  fact: {
+    sourceDocumentId: string | null;
+    lastObservedAt: Date | null;
+  },
+  candidateDate: Date | null,
+  candidateDocumentId: string | null
+) {
+  if (!fact.lastObservedAt || (candidateDate && candidateDate > fact.lastObservedAt)) {
+    fact.lastObservedAt = candidateDate;
+    fact.sourceDocumentId = candidateDocumentId;
+  }
 }
