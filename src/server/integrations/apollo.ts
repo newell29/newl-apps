@@ -102,6 +102,21 @@ export type ApolloContactLookupResult = {
   contacts: ApolloContactRecord[];
 };
 
+export type ApolloSequencePushInput = {
+  sequenceId: string;
+  apolloContactIds: string[];
+  sequenceOwnerUserId: string;
+  sendFromEmailAccountId: string;
+  initialStatus?: "active" | "paused";
+};
+
+export type ApolloSequencePushResult = {
+  sequenceId: string;
+  acceptedContactIds: string[];
+  message: string | null;
+  rawPayload: Record<string, unknown>;
+};
+
 type ApolloOrganizationCandidate = {
   id: string | null;
   name: string | null;
@@ -274,6 +289,54 @@ export async function fetchApolloContactsForCompany(
     linkedinUrl: trustedMatchedOrganization?.linkedinUrl ?? null,
     match: toApolloCompanyLookupMatch(effectiveMatchOrganization, input.companyName, normalizeDomain(input.domain)),
     contacts: dedupeApolloContacts(contactsFromApollo)
+  };
+}
+
+export async function pushApolloContactsToSequence(
+  input: ApolloSequencePushInput
+): Promise<ApolloSequencePushResult> {
+  const apiKey = readApolloMasterApiKey();
+  const acceptedContactIds = [...new Set(input.apolloContactIds.map((value) => value.trim()).filter(Boolean))];
+
+  if (acceptedContactIds.length === 0) {
+    throw new Error("Apollo sequence push requires at least one Apollo contact ID.");
+  }
+
+  const sequenceId = input.sequenceId.trim();
+  const sequenceOwnerUserId = input.sequenceOwnerUserId.trim();
+  const sendFromEmailAccountId = input.sendFromEmailAccountId.trim();
+
+  if (!sequenceId) {
+    throw new Error("Apollo sequence push requires a sequence ID.");
+  }
+
+  if (!sequenceOwnerUserId) {
+    throw new Error("Apollo sequence push requires a mapped Apollo owner user ID.");
+  }
+
+  if (!sendFromEmailAccountId) {
+    throw new Error("Apollo sequence push requires a mapped Apollo send-from email account ID.");
+  }
+
+  const initialStatus = input.initialStatus ?? "active";
+  const payload = {
+    contact_ids: acceptedContactIds,
+    sequence_owner_user_id: sequenceOwnerUserId,
+    sequence_send_from_email_account_id: sendFromEmailAccountId,
+    sequence_push_initial_status: initialStatus,
+    allow_no_email: false,
+    allow_unverified_email: false,
+    allow_contacts_with_same_company: true,
+    allow_contacts_owned_by_other_users: true
+  } satisfies Record<string, unknown>;
+
+  const rawPayload = await postApolloJson(`/api/v1/emailer_campaigns/${sequenceId}/add_contact_ids`, apiKey, payload);
+
+  return {
+    sequenceId,
+    acceptedContactIds,
+    message: extractApolloError(rawPayload) ?? null,
+    rawPayload
   };
 }
 

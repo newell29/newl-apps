@@ -12,6 +12,9 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import {
   approveContactDraftAction,
+  bulkPushContactsToApolloAction,
+  bulkRemoveContactsAction,
+  syncSelectedApolloStatusesAction,
   bulkUpdateContactSequenceAction,
   generateContactDraftAction,
   saveContactDraftAction,
@@ -156,12 +159,12 @@ export default async function ContactsPage({
       <PageHeader
         eyebrow="Lead Generation"
         title="Contacts"
-        description="Contacts are people attached to approved Pipeline accounts. Apollo enrichment fills this directory, and Newl Apps recommends a cadence that reps can adjust before any future sequence push."
+        description="Contacts are people attached to approved Pipeline accounts. Apollo enrichment fills this directory, Newl Apps recommends the right cadence, and reps can now push approved contacts into Apollo from here."
       />
 
       <div className="rounded-lg border border-accentBorder bg-accentSoft px-4 py-3 text-sm text-foreground">
-        This page can generate and review Newl Apps draft copy for tiers that require it, but it still does not enroll
-        sequences, send email, or make outreach changes on its own.
+        This page now supports live Apollo sequence push for eligible contacts. Assigned rep mapping, selected cadence,
+        and Tier 1 draft approval still gate the push so outreach stays deliberate.
       </div>
 
       <form className="overflow-hidden rounded-lg border border-border bg-card shadow-sm" action="/lead-gen/contacts">
@@ -357,7 +360,7 @@ export default async function ContactsPage({
           <div>
             <p className="text-sm font-semibold text-foreground">Contact cadence foundation</p>
             <p className="text-xs text-mutedForeground">
-              Review selected cadences, shipment-aware draft copy, and future Apollo readiness before live sync exists.
+              Review selected cadences, shipment-aware draft copy, Apollo push readiness, and synced sequence status in one place.
             </p>
           </div>
           <span className="rounded-full border border-accentBorder bg-card px-2.5 py-1 text-xs font-semibold text-primary">
@@ -370,6 +373,9 @@ export default async function ContactsPage({
             contacts={contacts}
             sequenceOptions={filterOptions.sequenceOptions.length > 0 ? filterOptions.sequenceOptions : sequenceOptions}
             bulkUpdateContactSequenceAction={bulkUpdateContactSequenceAction}
+            bulkRemoveContactsAction={bulkRemoveContactsAction}
+            bulkPushContactsToApolloAction={bulkPushContactsToApolloAction}
+            syncSelectedApolloStatusesAction={syncSelectedApolloStatusesAction}
             updateContactSequenceAction={updateContactSequenceAction}
             saveContactDraftAction={saveContactDraftAction}
             approveContactDraftAction={approveContactDraftAction}

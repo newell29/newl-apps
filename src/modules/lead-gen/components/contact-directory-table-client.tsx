@@ -17,9 +17,14 @@ import {
   useReactTable,
   type ColumnDef
 } from "@tanstack/react-table";
-import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useActionState, useEffect, useMemo, useState } from "react";
 import { DataGridColumnMenu } from "@/components/data-grid-column-menu";
 import { usePersistedTableState } from "@/components/use-persisted-table-state";
+import {
+  EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+  type ContactBulkActionSummary
+} from "@/modules/lead-gen/contact-bulk-action-summary";
 import type { SequenceCatalogItem } from "@/modules/lead-gen/sequence-catalog";
 
 type ContactDirectoryRow = {
@@ -68,6 +73,9 @@ export function ContactDirectoryTableClient({
   contacts,
   sequenceOptions,
   bulkUpdateContactSequenceAction,
+  bulkRemoveContactsAction,
+  bulkPushContactsToApolloAction,
+  syncSelectedApolloStatusesAction,
   updateContactSequenceAction,
   saveContactDraftAction,
   approveContactDraftAction,
@@ -75,13 +83,44 @@ export function ContactDirectoryTableClient({
 }: {
   contacts: ContactDirectoryRow[];
   sequenceOptions: readonly SequenceCatalogItem[];
-  bulkUpdateContactSequenceAction: (formData: FormData) => Promise<void>;
+  bulkUpdateContactSequenceAction: (
+    previousState: ContactBulkActionSummary,
+    formData: FormData
+  ) => Promise<ContactBulkActionSummary>;
+  bulkRemoveContactsAction: (
+    previousState: ContactBulkActionSummary,
+    formData: FormData
+  ) => Promise<ContactBulkActionSummary>;
+  bulkPushContactsToApolloAction: (
+    previousState: ContactBulkActionSummary,
+    formData: FormData
+  ) => Promise<ContactBulkActionSummary>;
+  syncSelectedApolloStatusesAction: (
+    previousState: ContactBulkActionSummary,
+    formData: FormData
+  ) => Promise<ContactBulkActionSummary>;
   updateContactSequenceAction: (formData: FormData) => Promise<void>;
   saveContactDraftAction: (formData: FormData) => Promise<void>;
   approveContactDraftAction: (formData: FormData) => Promise<void>;
   generateContactDraftAction: (formData: FormData) => Promise<void>;
 }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkActionState, runBulkSequenceAction, isBulkSequencePending] = useActionState(
+    bulkUpdateContactSequenceAction,
+    EMPTY_CONTACT_BULK_ACTION_SUMMARY
+  );
+  const [removeActionState, runBulkRemoveAction, isBulkRemovePending] = useActionState(
+    bulkRemoveContactsAction,
+    EMPTY_CONTACT_BULK_ACTION_SUMMARY
+  );
+  const [apolloPushState, runApolloPushAction, isApolloPushPending] = useActionState(
+    bulkPushContactsToApolloAction,
+    EMPTY_CONTACT_BULK_ACTION_SUMMARY
+  );
+  const [apolloSyncState, runApolloSyncAction, isApolloSyncPending] = useActionState(
+    syncSelectedApolloStatusesAction,
+    EMPTY_CONTACT_BULK_ACTION_SUMMARY
+  );
   const {
     sorting,
     setSorting,
@@ -156,7 +195,13 @@ export function ContactDirectoryTableClient({
           const contact = row.original;
           return (
             <div className="max-w-[220px]">
-              <p className="font-medium text-foreground">{contact.companyName}</p>
+              <Link
+                href={`/lead-gen/pipeline?company=${contact.companyId}&companyName=${encodeURIComponent(contact.companyName)}`}
+                className="font-medium text-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
+                title={`Open ${contact.companyName} in Pipeline`}
+              >
+                {contact.companyName}
+              </Link>
               <p className="mt-1 text-xs text-mutedForeground">{contact.companyNormalizedName}</p>
               {contact.matchedSearchProfileName ? (
                 <div className="mt-2 inline-flex max-w-full items-center rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-[11px] font-semibold text-primary">
@@ -353,7 +398,7 @@ export function ContactDirectoryTableClient({
                         className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-accentSoft disabled:cursor-not-allowed disabled:opacity-50"
                         disabled={!contact.draftGenerationConfigured}
                       >
-                        {contact.draftGenerationConfigured ? "Regenerate AI Draft" : "OpenAI key required"}
+                        {contact.draftGenerationConfigured ? "Regenerate AI Draft" : "AI runtime required"}
                       </button>
                     </form>
                   ) : null}
@@ -387,7 +432,8 @@ export function ContactDirectoryTableClient({
                       value={contact.draft.personalizationNotes ?? "No notes recorded"}
                     />
                     <p className="text-xs text-mutedForeground">
-                      Saving keeps the draft in Newl Apps only. Approving marks it ready for a future Apollo push, but still does not enroll a sequence or send email on its own.
+                      Saving keeps the draft in Newl Apps only. Approving marks it ready for Apollo push, but the actual
+                      enrollment still happens only when you use Push to Apollo.
                     </p>
                     <p className="text-xs text-mutedForeground">
                       Approve after you are happy with the subject and body. If you make edits first, save them before approving so the approved version matches your review.
@@ -409,7 +455,7 @@ export function ContactDirectoryTableClient({
                 <div className="space-y-2">
                   <p className="text-xs text-mutedForeground">
                     {contact.requiresAiDraft
-                      ? "This tier requires a Newl Apps draft before future Apollo push."
+                      ? "This tier requires a Newl Apps draft before Apollo push."
                       : contact.contactTier === ContactTier.TIER_1
                         ? "No Newl draft available yet."
                         : "Tier 2+ contacts use Apollo/template drafting later."}
@@ -421,7 +467,7 @@ export function ContactDirectoryTableClient({
                         className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-50"
                         disabled={!contact.draftGenerationConfigured}
                       >
-                        {contact.draftGenerationConfigured ? "Generate AI Draft" : "OpenAI key required"}
+                        {contact.draftGenerationConfigured ? "Generate AI Draft" : "AI runtime required"}
                       </button>
                     </form>
                   ) : null}
@@ -472,6 +518,24 @@ export function ContactDirectoryTableClient({
     requiresSequenceOverrideConfirmation(contact.sequenceStatus)
   );
 
+  useEffect(() => {
+    if (bulkActionState.status === "success" && bulkActionState.completedAt) {
+      setSelectedIds([]);
+    }
+  }, [bulkActionState.completedAt, bulkActionState.status]);
+
+  useEffect(() => {
+    if (removeActionState.status === "success" && removeActionState.completedAt) {
+      setSelectedIds([]);
+    }
+  }, [removeActionState.completedAt, removeActionState.status]);
+
+  useEffect(() => {
+    if (apolloPushState.status === "success" && apolloPushState.completedAt) {
+      setSelectedIds([]);
+    }
+  }, [apolloPushState.completedAt, apolloPushState.status]);
+
   function toggleAllVisible() {
     const visibleIds = table.getRowModel().rows.map((row) => row.original.id);
     const allVisibleCurrentlySelected =
@@ -481,7 +545,35 @@ export function ContactDirectoryTableClient({
 
   return (
     <>
-      <form action={bulkUpdateContactSequenceAction}>
+      {isBulkSequencePending || isBulkRemovePending || isApolloPushPending || isApolloSyncPending ? (
+        <div className="border-b border-border bg-primary/5 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-foreground">
+                {isBulkRemovePending
+                  ? "Removing contacts"
+                  : isApolloPushPending
+                    ? "Pushing selected contacts to Apollo"
+                    : isApolloSyncPending
+                      ? "Syncing Apollo contact statuses"
+                      : "Updating contact cadence"}
+              </p>
+              <p className="text-xs text-mutedForeground">
+                Working through {selectedIds.length} selected contact{selectedIds.length === 1 ? "" : "s"} now.
+              </p>
+            </div>
+            <span className="text-xs font-medium text-primary">Running</span>
+          </div>
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-border">
+            <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
+          </div>
+        </div>
+      ) : null}
+      {bulkActionState.status !== "idle" ? <ContactBulkActionSummaryBanner summary={bulkActionState} /> : null}
+      {removeActionState.status !== "idle" ? <ContactBulkActionSummaryBanner summary={removeActionState} /> : null}
+      {apolloPushState.status !== "idle" ? <ContactBulkActionSummaryBanner summary={apolloPushState} /> : null}
+      {apolloSyncState.status !== "idle" ? <ContactBulkActionSummaryBanner summary={apolloSyncState} /> : null}
+      <form action={runBulkSequenceAction}>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-4 py-3">
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <button
@@ -533,18 +625,75 @@ export function ContactDirectoryTableClient({
             ) : null}
             <button
               type="submit"
-              disabled={selectedIds.length === 0}
+              disabled={
+                selectedIds.length === 0 ||
+                isBulkSequencePending ||
+                isBulkRemovePending ||
+                isApolloPushPending ||
+                isApolloSyncPending
+              }
               className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Apply selected cadence
+              {isBulkSequencePending ? "Applying..." : "Apply selected cadence"}
+            </button>
+            <button
+              type="submit"
+              formAction={runApolloPushAction}
+              disabled={
+                selectedIds.length === 0 ||
+                isBulkSequencePending ||
+                isBulkRemovePending ||
+                isApolloPushPending ||
+                isApolloSyncPending
+              }
+              className="rounded-md border border-success/30 bg-success/10 px-3 py-1.5 text-xs font-semibold text-success transition-colors hover:bg-success/15 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isApolloPushPending ? "Pushing..." : "Push to Apollo"}
+            </button>
+            <button
+              type="submit"
+              formAction={runApolloSyncAction}
+              disabled={
+                selectedIds.length === 0 ||
+                isBulkSequencePending ||
+                isBulkRemovePending ||
+                isApolloPushPending ||
+                isApolloSyncPending
+              }
+              className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-accentSoft disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isApolloSyncPending ? "Syncing..." : "Sync Apollo status"}
+            </button>
+            <button
+              type="submit"
+              formAction={runBulkRemoveAction}
+              disabled={
+                selectedIds.length === 0 ||
+                isBulkSequencePending ||
+                isBulkRemovePending ||
+                isApolloPushPending ||
+                isApolloSyncPending
+              }
+              onClick={(event) => {
+                if (
+                  !window.confirm(
+                    `Remove ${selectedIds.length} contact${selectedIds.length === 1 ? "" : "s"} from the Newl Apps contact directory? This will also remove any saved drafts for those contacts.`
+                  )
+                ) {
+                  event.preventDefault();
+                }
+              }}
+              className="rounded-md border border-danger/30 bg-card px-3 py-1.5 text-xs font-semibold text-danger transition-colors hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isBulkRemovePending ? "Removing..." : "Remove selected"}
             </button>
           </div>
         </div>
 
         <div className="border-b border-border bg-card px-4 py-2 text-xs text-mutedForeground">
           Contacts already enrolled, paused, replied, bounced, or finished can still be assigned a new selected cadence, but
-          the user must explicitly confirm that override first. Their current Apollo sequence status stays intact until a
-          future push is approved.
+          the user must explicitly confirm that override first. Live Apollo push still blocks contacts that already show
+          Apollo sequence history, so re-enrollment stays deliberate.
         </div>
       </form>
       <div className="overflow-x-auto">
@@ -619,6 +768,79 @@ function StatusBadge({ value, tone }: { value: string; tone: "neutral" | "succes
   return <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${className}`}>{formatEnum(value)}</span>;
 }
 
+function ContactBulkActionSummaryBanner({ summary }: { summary: ContactBulkActionSummary }) {
+  const isError = summary.status === "error";
+  const title = isError
+    ? summary.operation === "remove"
+      ? "Contact removal failed"
+      : summary.operation === "apollo_push"
+        ? "Apollo push failed"
+        : summary.operation === "apollo_sync"
+          ? "Apollo sync failed"
+          : "Cadence update failed"
+    : summary.operation === "remove"
+      ? "Contact removal summary"
+      : summary.operation === "apollo_push"
+        ? "Apollo push summary"
+        : summary.operation === "apollo_sync"
+          ? "Apollo sync summary"
+          : "Cadence update summary";
+
+  return (
+    <div className={`border-b px-4 py-3 ${isError ? "border-danger/20 bg-danger/5" : "border-success/20 bg-success/5"}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-foreground">{title}</p>
+          <p className="text-xs text-mutedForeground">{summary.message}</p>
+        </div>
+        {summary.completedAt ? <span className="text-xs text-mutedForeground">{formatDateTime(summary.completedAt)}</span> : null}
+      </div>
+      {!isError ? (
+        <div className="mt-3 grid gap-3 md:grid-cols-4">
+          {summary.operation === "remove" ? (
+            <>
+              <ContactBulkMetric label="Selected" value={summary.selectedContacts} />
+              <ContactBulkMetric label="Removed contacts" value={summary.removedContacts} />
+              <ContactBulkMetric label="Removed drafts" value={summary.removedDrafts} />
+              <ContactBulkMetric label="Apollo deletions" value={summary.pushedToApollo ? 1 : 0} />
+            </>
+          ) : summary.operation === "apollo_push" ? (
+            <>
+              <ContactBulkMetric label="Selected" value={summary.selectedContacts} />
+              <ContactBulkMetric label="Enrolled" value={summary.enrolledContacts} />
+              <ContactBulkMetric label="Skipped" value={summary.skippedContacts} />
+              <ContactBulkMetric label="Failed" value={summary.failedContacts} />
+            </>
+          ) : summary.operation === "apollo_sync" ? (
+            <>
+              <ContactBulkMetric label="Selected" value={summary.selectedContacts} />
+              <ContactBulkMetric label="Synced" value={summary.syncedContacts} />
+              <ContactBulkMetric label="Skipped" value={summary.skippedContacts} />
+              <ContactBulkMetric label="Companies" value={summary.companiesTouched} />
+            </>
+          ) : (
+            <>
+              <ContactBulkMetric label="Selected" value={summary.selectedContacts} />
+              <ContactBulkMetric label="Updated cadence" value={summary.updatedContacts} />
+              <ContactBulkMetric label="Marked ready" value={summary.readyContacts} />
+              <ContactBulkMetric label="Needs manual caution" value={summary.protectedContacts} />
+            </>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ContactBulkMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-md border border-border/70 bg-card px-3 py-2">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-mutedForeground">{label}</p>
+      <p className="mt-1 text-lg font-semibold text-foreground">{value.toLocaleString("en-US")}</p>
+    </div>
+  );
+}
+
 function DraftMeta({ label, value }: { label: string; value: string }) {
   return (
     <div className="text-xs">
@@ -646,6 +868,22 @@ function formatDate(value: Date | null) {
     day: "numeric",
     year: "numeric"
   }).format(value);
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(date);
 }
 
 function contactStatusTone(status: ContactStatus) {

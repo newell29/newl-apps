@@ -42,6 +42,8 @@ export default async function PipelinePage({
   await requireModule(context, ModuleKey.LEAD_GEN);
   const tenant = context;
   const params = searchParams ? await searchParams : {};
+  const companyId = readParam(params.company);
+  const companyName = readParam(params.companyName) ?? "";
   const stage = parseStageParam(readParam(params.stage));
   const ownerUserId = parseOwnerParam(readParam(params.rep));
   const industry = readParam(params.industry) ?? "";
@@ -69,7 +71,8 @@ export default async function PipelinePage({
       maxScore !== undefined
   );
   const hasFilters = Boolean(
-    stage !== "ALL" ||
+    companyId ||
+      stage !== "ALL" ||
       ownerUserId !== "ALL" ||
       industry ||
       candidateStatus !== "ALL" ||
@@ -87,6 +90,7 @@ export default async function PipelinePage({
   const exportHref = buildPipelineExportHref(params);
   const [leads, filterOptions] = await Promise.all([
     getLeadPipeline(tenant, {
+      companyId: companyId ?? undefined,
       stage,
       ownerUserId,
       industry: industry || undefined,
@@ -105,6 +109,8 @@ export default async function PipelinePage({
     getLeadPipelineFilters(tenant)
   ]);
   const filterChips = buildPipelineFilterChips({
+    companyId,
+    companyName,
     stage,
     ownerUserId,
     industry,
@@ -175,6 +181,9 @@ export default async function PipelinePage({
             ))}
           </div>
         ) : null}
+
+        {companyId ? <input type="hidden" name="company" value={companyId} /> : null}
+        {companyName ? <input type="hidden" name="companyName" value={companyName} /> : null}
 
         <div className="grid gap-6 p-4 xl:grid-cols-4">
           <div className="space-y-3 xl:col-span-2">
@@ -439,6 +448,8 @@ export default async function PipelinePage({
 }
 
 function buildPipelineFilterChips({
+  companyId,
+  companyName,
   stage,
   ownerUserId,
   industry,
@@ -455,6 +466,8 @@ function buildPipelineFilterChips({
   sort,
   owners
 }: {
+  companyId: string | undefined;
+  companyName: string;
   stage: LeadPipelineStage | "ALL";
   ownerUserId: string;
   industry: string;
@@ -474,93 +487,115 @@ function buildPipelineFilterChips({
   const chips: Array<{ label: string; href: string }> = [];
   const matchedOwner = owners.find((owner) => owner.value === ownerUserId);
 
+  if (companyId) {
+    chips.push({
+      label: `Company: ${companyName || "Selected account"}`,
+      href: buildPipelinePageHref({
+        stage,
+        rep: ownerUserId,
+        industry,
+        candidateStatus,
+        contactStatus,
+        apolloStatus,
+        sequenceStatus,
+        minShipments30d,
+        maxShipments30d,
+        minShipments90d,
+        maxShipments90d,
+        minScore,
+        maxScore,
+        sort
+      })
+    });
+  }
+
   if (stage !== "ALL") {
     chips.push({
       label: `Stage: ${formatStage(stage)}`,
-      href: buildPipelinePageHref({ rep: ownerUserId, industry, candidateStatus, contactStatus, apolloStatus, sequenceStatus, minShipments30d, maxShipments30d, minShipments90d, maxShipments90d, minScore, maxScore, sort })
+      href: buildPipelinePageHref({ company: companyId, companyName, rep: ownerUserId, industry, candidateStatus, contactStatus, apolloStatus, sequenceStatus, minShipments30d, maxShipments30d, minShipments90d, maxShipments90d, minScore, maxScore, sort })
     });
   }
   if (ownerUserId === "UNASSIGNED") {
     chips.push({
       label: "Rep: Unassigned only",
-      href: buildPipelinePageHref({ stage, industry, candidateStatus, contactStatus, apolloStatus, sequenceStatus, minShipments30d, maxShipments30d, minShipments90d, maxShipments90d, minScore, maxScore, sort })
+      href: buildPipelinePageHref({ company: companyId, companyName, stage, industry, candidateStatus, contactStatus, apolloStatus, sequenceStatus, minShipments30d, maxShipments30d, minShipments90d, maxShipments90d, minScore, maxScore, sort })
     });
   } else if (matchedOwner) {
     chips.push({
       label: `Rep: ${matchedOwner.label}`,
-      href: buildPipelinePageHref({ stage, industry, candidateStatus, contactStatus, apolloStatus, sequenceStatus, minShipments30d, maxShipments30d, minShipments90d, maxShipments90d, minScore, maxScore, sort })
+      href: buildPipelinePageHref({ company: companyId, companyName, stage, industry, candidateStatus, contactStatus, apolloStatus, sequenceStatus, minShipments30d, maxShipments30d, minShipments90d, maxShipments90d, minScore, maxScore, sort })
     });
   }
   if (industry) {
     chips.push({
       label: `Industry: ${industry}`,
-      href: buildPipelinePageHref({ stage, rep: ownerUserId, candidateStatus, contactStatus, apolloStatus, sequenceStatus, minShipments30d, maxShipments30d, minShipments90d, maxShipments90d, minScore, maxScore, sort })
+      href: buildPipelinePageHref({ company: companyId, companyName, stage, rep: ownerUserId, candidateStatus, contactStatus, apolloStatus, sequenceStatus, minShipments30d, maxShipments30d, minShipments90d, maxShipments90d, minScore, maxScore, sort })
     });
   }
   if (candidateStatus !== "ALL") {
     chips.push({
       label: `Candidate: ${formatCandidateStatus(candidateStatus)}`,
-      href: buildPipelinePageHref({ stage, rep: ownerUserId, industry, contactStatus, apolloStatus, sequenceStatus, minShipments30d, maxShipments30d, minShipments90d, maxShipments90d, minScore, maxScore, sort })
+      href: buildPipelinePageHref({ company: companyId, companyName, stage, rep: ownerUserId, industry, contactStatus, apolloStatus, sequenceStatus, minShipments30d, maxShipments30d, minShipments90d, maxShipments90d, minScore, maxScore, sort })
     });
   }
   if (contactStatus !== "ALL") {
     chips.push({
       label: `Contact: ${formatPipelineContactStatus(contactStatus)}`,
-      href: buildPipelinePageHref({ stage, rep: ownerUserId, industry, candidateStatus, apolloStatus, sequenceStatus, minShipments30d, maxShipments30d, minShipments90d, maxShipments90d, minScore, maxScore, sort })
+      href: buildPipelinePageHref({ company: companyId, companyName, stage, rep: ownerUserId, industry, candidateStatus, apolloStatus, sequenceStatus, minShipments30d, maxShipments30d, minShipments90d, maxShipments90d, minScore, maxScore, sort })
     });
   }
   if (apolloStatus !== "ALL") {
     chips.push({
       label: `Apollo: ${formatPipelineState(apolloStatus)}`,
-      href: buildPipelinePageHref({ stage, rep: ownerUserId, industry, candidateStatus, contactStatus, sequenceStatus, minShipments30d, maxShipments30d, minShipments90d, maxShipments90d, minScore, maxScore, sort })
+      href: buildPipelinePageHref({ company: companyId, companyName, stage, rep: ownerUserId, industry, candidateStatus, contactStatus, sequenceStatus, minShipments30d, maxShipments30d, minShipments90d, maxShipments90d, minScore, maxScore, sort })
     });
   }
   if (sequenceStatus !== "ALL") {
     chips.push({
       label: `Sequence: ${formatPipelineState(sequenceStatus)}`,
-      href: buildPipelinePageHref({ stage, rep: ownerUserId, industry, candidateStatus, contactStatus, apolloStatus, minShipments30d, maxShipments30d, minShipments90d, maxShipments90d, minScore, maxScore, sort })
+      href: buildPipelinePageHref({ company: companyId, companyName, stage, rep: ownerUserId, industry, candidateStatus, contactStatus, apolloStatus, minShipments30d, maxShipments30d, minShipments90d, maxShipments90d, minScore, maxScore, sort })
     });
   }
   if (minShipments30d !== undefined) {
     chips.push({
       label: `30d min: ${minShipments30d}`,
-      href: buildPipelinePageHref({ stage, rep: ownerUserId, industry, candidateStatus, contactStatus, apolloStatus, sequenceStatus, maxShipments30d, minShipments90d, maxShipments90d, minScore, maxScore, sort })
+      href: buildPipelinePageHref({ company: companyId, companyName, stage, rep: ownerUserId, industry, candidateStatus, contactStatus, apolloStatus, sequenceStatus, maxShipments30d, minShipments90d, maxShipments90d, minScore, maxScore, sort })
     });
   }
   if (maxShipments30d !== undefined) {
     chips.push({
       label: `30d max: ${maxShipments30d}`,
-      href: buildPipelinePageHref({ stage, rep: ownerUserId, industry, candidateStatus, contactStatus, apolloStatus, sequenceStatus, minShipments30d, minShipments90d, maxShipments90d, minScore, maxScore, sort })
+      href: buildPipelinePageHref({ company: companyId, companyName, stage, rep: ownerUserId, industry, candidateStatus, contactStatus, apolloStatus, sequenceStatus, minShipments30d, minShipments90d, maxShipments90d, minScore, maxScore, sort })
     });
   }
   if (minShipments90d !== undefined) {
     chips.push({
       label: `90d min: ${minShipments90d}`,
-      href: buildPipelinePageHref({ stage, rep: ownerUserId, industry, candidateStatus, contactStatus, apolloStatus, sequenceStatus, minShipments30d, maxShipments30d, maxShipments90d, minScore, maxScore, sort })
+      href: buildPipelinePageHref({ company: companyId, companyName, stage, rep: ownerUserId, industry, candidateStatus, contactStatus, apolloStatus, sequenceStatus, minShipments30d, maxShipments30d, maxShipments90d, minScore, maxScore, sort })
     });
   }
   if (maxShipments90d !== undefined) {
     chips.push({
       label: `90d max: ${maxShipments90d}`,
-      href: buildPipelinePageHref({ stage, rep: ownerUserId, industry, candidateStatus, contactStatus, apolloStatus, sequenceStatus, minShipments30d, maxShipments30d, minShipments90d, minScore, maxScore, sort })
+      href: buildPipelinePageHref({ company: companyId, companyName, stage, rep: ownerUserId, industry, candidateStatus, contactStatus, apolloStatus, sequenceStatus, minShipments30d, maxShipments30d, minShipments90d, minScore, maxScore, sort })
     });
   }
   if (minScore !== undefined) {
     chips.push({
       label: `Min score: ${minScore}`,
-      href: buildPipelinePageHref({ stage, rep: ownerUserId, industry, candidateStatus, contactStatus, apolloStatus, sequenceStatus, minShipments30d, maxShipments30d, minShipments90d, maxShipments90d, maxScore, sort })
+      href: buildPipelinePageHref({ company: companyId, companyName, stage, rep: ownerUserId, industry, candidateStatus, contactStatus, apolloStatus, sequenceStatus, minShipments30d, maxShipments30d, minShipments90d, maxShipments90d, maxScore, sort })
     });
   }
   if (maxScore !== undefined) {
     chips.push({
       label: `Max score: ${maxScore}`,
-      href: buildPipelinePageHref({ stage, rep: ownerUserId, industry, candidateStatus, contactStatus, apolloStatus, sequenceStatus, minShipments30d, maxShipments30d, minShipments90d, maxShipments90d, minScore, sort })
+      href: buildPipelinePageHref({ company: companyId, companyName, stage, rep: ownerUserId, industry, candidateStatus, contactStatus, apolloStatus, sequenceStatus, minShipments30d, maxShipments30d, minShipments90d, maxShipments90d, minScore, sort })
     });
   }
   if (sort !== "approved_desc") {
     chips.push({
       label: `Sort: ${sortOptions.find((option) => option.value === sort)?.label ?? sort}`,
-      href: buildPipelinePageHref({ stage, rep: ownerUserId, industry, candidateStatus, contactStatus, apolloStatus, sequenceStatus, minShipments30d, maxShipments30d, minShipments90d, maxShipments90d, minScore, maxScore })
+      href: buildPipelinePageHref({ company: companyId, companyName, stage, rep: ownerUserId, industry, candidateStatus, contactStatus, apolloStatus, sequenceStatus, minShipments30d, maxShipments30d, minShipments90d, maxShipments90d, minScore, maxScore })
     });
   }
 
@@ -568,6 +603,8 @@ function buildPipelineFilterChips({
 }
 
 function buildPipelinePageHref(params: {
+  company?: string;
+  companyName?: string;
   stage?: LeadPipelineStage | "ALL";
   rep?: string;
   industry?: string;
@@ -584,6 +621,8 @@ function buildPipelinePageHref(params: {
   sort?: LeadPipelineSort;
 }) {
   const search = new URLSearchParams();
+  if (params.company) search.set("company", params.company);
+  if (params.companyName) search.set("companyName", params.companyName);
   if (params.stage && params.stage !== "ALL") search.set("stage", params.stage);
   if (params.rep && params.rep !== "ALL") search.set("rep", params.rep);
   if (params.industry) search.set("industry", params.industry);

@@ -44,6 +44,7 @@ import {
   parseMicrosoftGraphSettings
 } from "@/server/integrations/microsoft-graph";
 import { parseMicrosoftGraphDelegatedConnection } from "@/server/integrations/microsoft-graph-account";
+import { getOpenAiDraftRuntimeNotes, isOpenAiDraftGenerationConfigured } from "@/server/integrations/openai";
 
 type SettingsUpsAccount = UpsAccountConfig & {
   toolTargets: QuoteToolTarget[];
@@ -321,6 +322,8 @@ export async function getSettingsShell(tenant: TenantContext & { userId?: string
     upsAccounts: mergeUpsAccountsForSettings(upsAccounts, localUpsAccounts),
     tradeMiningScoring: mapTradeMiningScoringSettings(tradeMiningScoringConfig),
     tradeMiningScoringConfigWarning,
+    leadGenAiRuntimeReady: isOpenAiDraftGenerationConfigured(),
+    leadGenAiRuntimeNotes: getOpenAiDraftRuntimeNotes(),
     apolloRepMapping,
     apolloRepOptions: mapApolloRepOptions(apolloRepMapping),
     apolloSequenceDirectory,
