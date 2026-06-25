@@ -40,6 +40,7 @@ export type AssistantKnowledgeDocumentInput = {
 };
 
 export async function syncAssistantKnowledge(tenant: TenantContext) {
+  const now = new Date();
   const [companies, contacts, leads, tradeMiningRecords, rateJobs] = await Promise.all([
     prisma.company.findMany({
       where: tenantWhere(tenant),
