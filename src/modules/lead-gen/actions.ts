@@ -1,6 +1,7 @@
 "use server";
 
 import {
+  ApolloCompanyMatchClassification,
   ContactOutreachDraftSource,
   CandidateStatus,
   ContactStatus,
@@ -412,6 +413,25 @@ export async function bulkQueueApolloEnrichmentAction(formData: FormData) {
       domain: lead.company.domain,
       apolloOrganizationId: lead.company.apolloOrganizationId
     });
+
+    await recordApolloCompanyMatch({
+      tenantId: context.tenantId,
+      companyId: lead.companyId,
+      lookup
+    });
+
+    if (lookup.match.classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY) {
+      await prisma.lead.update({
+        where: {
+          id: leadId
+        },
+        data: {
+          notes: appendLeadNote(queuedNotes, `Apollo company match needs review: ${lookup.match.matchReason}`)
+        }
+      });
+
+      continue;
+    }
 
     const syncedContacts = await syncApolloContactsForLead({
       tenantId: context.tenantId,
@@ -1399,6 +1419,36 @@ async function syncApolloContactsForLead({
   }
 
   return syncedContacts;
+}
+
+async function recordApolloCompanyMatch({
+  tenantId,
+  companyId,
+  lookup
+}: {
+  tenantId: string;
+  companyId: string;
+  lookup: ApolloContactLookupResult;
+}) {
+  await prisma.apolloCompanyMatch.create({
+    data: {
+      tenantId,
+      companyId,
+      apolloOrganizationId: lookup.match.organizationId,
+      apolloCompanyName: lookup.match.companyName,
+      apolloDomain: lookup.match.domain,
+      apolloLinkedinUrl: lookup.match.linkedinUrl,
+      score: lookup.match.score,
+      classification: lookup.match.classification,
+      nameMatchType: lookup.match.nameMatchType,
+      domainMatch: lookup.match.domainMatch,
+      logisticsProviderMatch: lookup.match.logisticsProviderMatch,
+      branchLocationMatch: lookup.match.branchLocationMatch,
+      matchReason: lookup.match.matchReason,
+      queryJson: toInputJsonValue(lookup.match.query),
+      rawJson: lookup.match.rawPayload ? toInputJsonValue(lookup.match.rawPayload) : Prisma.JsonNull
+    }
+  });
 }
 
 function matchExistingApolloContact(

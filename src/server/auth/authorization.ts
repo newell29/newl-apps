@@ -38,9 +38,9 @@ export class AuthorizationError extends Error {
  *
  * - ADMIN: full platform access including tenant administration.
  * - MANAGER: all modules, may mutate.
- * - SALES: lead generation module, may mutate within it.
- * - OPERATIONS: lead generation + operational tooling modules, may mutate.
- * - FINANCE: finance modules (invoice verification, QuickBooks), may mutate.
+ * - SALES: assistant + lead generation modules, may mutate within them.
+ * - OPERATIONS: assistant + lead generation + operational tooling modules, may mutate.
+ * - FINANCE: assistant + finance modules (invoice verification, QuickBooks), may mutate.
  * - READ_ONLY: may view all tenant data but may never mutate.
  *
  * Effective write access to a module requires BOTH module access AND canMutate,

@@ -10,13 +10,19 @@ export const ALL_MODULES: ModuleKey[] = Object.values(ModuleKey);
 export const DEFAULT_ROLE_MATRIX: Record<PlatformRole, RolePolicy> = {
   [PlatformRole.ADMIN]: { modules: "ALL", canMutate: true },
   [PlatformRole.MANAGER]: { modules: "ALL", canMutate: true },
-  [PlatformRole.SALES]: { modules: [ModuleKey.LEAD_GEN], canMutate: true },
+  [PlatformRole.SALES]: { modules: [ModuleKey.ASSISTANT, ModuleKey.LEAD_GEN], canMutate: true },
   [PlatformRole.OPERATIONS]: {
-    modules: [ModuleKey.LEAD_GEN, ModuleKey.UPS_TOOLS, ModuleKey.LTL_RATE_PORTAL, ModuleKey.TRANSIT_LOOKUP],
+    modules: [
+      ModuleKey.ASSISTANT,
+      ModuleKey.LEAD_GEN,
+      ModuleKey.UPS_TOOLS,
+      ModuleKey.LTL_RATE_PORTAL,
+      ModuleKey.TRANSIT_LOOKUP
+    ],
     canMutate: true
   },
   [PlatformRole.FINANCE]: {
-    modules: [ModuleKey.INVOICE_VERIFICATION, ModuleKey.QUICKBOOKS_POSTING],
+    modules: [ModuleKey.ASSISTANT, ModuleKey.INVOICE_VERIFICATION, ModuleKey.QUICKBOOKS_POSTING],
     canMutate: true
   },
   [PlatformRole.READ_ONLY]: { modules: "ALL", canMutate: false }
@@ -39,17 +45,17 @@ export const ROLE_DESCRIPTIONS: Record<
   [PlatformRole.SALES]: {
     label: "Sales",
     description: "Focused on lead generation, company review, pipeline progression, and contact workflows.",
-    visibilitySummary: "Starts with Lead Generation only unless you expand it below."
+    visibilitySummary: "Starts with Assistant and Lead Generation unless you expand it below."
   },
   [PlatformRole.OPERATIONS]: {
     label: "Operations",
     description: "Supports lead-gen operations plus shipment, quoting, and transit workflows.",
-    visibilitySummary: "Starts with Lead Generation, UPS Tools, LTL Rate Portal, and Transit Lookup."
+    visibilitySummary: "Starts with Assistant, Lead Generation, UPS Tools, LTL Rate Portal, and Transit Lookup."
   },
   [PlatformRole.FINANCE]: {
     label: "Finance",
     description: "Reserved for invoice verification and accounting-connected workflows.",
-    visibilitySummary: "Starts with Invoice Verification and QuickBooks Posting."
+    visibilitySummary: "Starts with Assistant, Invoice Verification, and QuickBooks Posting."
   },
   [PlatformRole.READ_ONLY]: {
     label: "Read Only",

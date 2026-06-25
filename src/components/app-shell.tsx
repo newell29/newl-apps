@@ -21,6 +21,7 @@ type NavSection = {
 
 const navSections: NavSection[] = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/assistant", label: "Company Assistant", moduleKey: "ASSISTANT" as ModuleKey },
   {
     label: "TradeMining Leads",
     moduleKey: "LEAD_GEN" as ModuleKey,

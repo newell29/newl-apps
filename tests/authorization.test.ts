@@ -5,8 +5,16 @@ import type { AuthenticatedContext } from "@/server/tenant-context";
 
 // requireModule reads tenant entitlements from the DB, so mock the client.
 const findFirst = vi.fn();
+const rolePolicyFindUnique = vi.fn();
+const roleModuleFindMany = vi.fn();
 vi.mock("@/server/db", () => ({
   prisma: {
+    tenantRolePolicy: {
+      findUnique: (...args: unknown[]) => rolePolicyFindUnique(...args)
+    },
+    tenantRoleModuleAccess: {
+      findMany: (...args: unknown[]) => roleModuleFindMany(...args)
+    },
     tenantModuleAccess: {
       findFirst: (...args: unknown[]) => findFirst(...args)
     }
@@ -49,19 +57,22 @@ describe("ROLE_MATRIX", () => {
     expect(ROLE_MATRIX[PlatformRole.MANAGER]).toEqual({ modules: "ALL", canMutate: true });
   });
 
-  it("limits SALES to LEAD_GEN with mutation", () => {
+  it("lets SALES access assistant and lead-gen with mutation", () => {
+    expect(roleHasModuleAccess(PlatformRole.SALES, ModuleKey.ASSISTANT)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.SALES, ModuleKey.LEAD_GEN)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.SALES, ModuleKey.INVOICE_VERIFICATION)).toBe(false);
     expect(roleCanMutate(PlatformRole.SALES)).toBe(true);
   });
 
-  it("limits FINANCE to finance modules only (no LEAD_GEN)", () => {
+  it("lets FINANCE access assistant and finance modules only (no LEAD_GEN)", () => {
+    expect(roleHasModuleAccess(PlatformRole.FINANCE, ModuleKey.ASSISTANT)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.FINANCE, ModuleKey.INVOICE_VERIFICATION)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.FINANCE, ModuleKey.QUICKBOOKS_POSTING)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.FINANCE, ModuleKey.LEAD_GEN)).toBe(false);
   });
 
-  it("gives OPERATIONS lead-gen + operational modules", () => {
+  it("gives OPERATIONS assistant + lead-gen + operational modules", () => {
+    expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.ASSISTANT)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.LEAD_GEN)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.UPS_TOOLS)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.LTL_RATE_PORTAL)).toBe(true);
@@ -71,6 +82,7 @@ describe("ROLE_MATRIX", () => {
 
   it("accessibleModuleKeys returns the exact operational module set for OPERATIONS", () => {
     expect(accessibleModuleKeys(PlatformRole.OPERATIONS)).toEqual([
+      ModuleKey.ASSISTANT,
       ModuleKey.LEAD_GEN,
       ModuleKey.UPS_TOOLS,
       ModuleKey.LTL_RATE_PORTAL,
@@ -79,6 +91,7 @@ describe("ROLE_MATRIX", () => {
   });
 
   it("lets READ_ONLY view all modules but never mutate", () => {
+    expect(roleHasModuleAccess(PlatformRole.READ_ONLY, ModuleKey.ASSISTANT)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.READ_ONLY, ModuleKey.LEAD_GEN)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.READ_ONLY, ModuleKey.QUICKBOOKS_POSTING)).toBe(true);
     expect(roleCanMutate(PlatformRole.READ_ONLY)).toBe(false);
@@ -115,14 +128,20 @@ describe("requireRole / requireAdmin", () => {
 });
 
 describe("requireMutationAccess", () => {
-  it("blocks READ_ONLY", () => {
-    expect(() => requireMutationAccess(ctx(PlatformRole.READ_ONLY))).toThrow(AuthorizationError);
+  beforeEach(() => {
+    rolePolicyFindUnique.mockReset();
   });
 
-  it("allows every non-READ_ONLY role", () => {
+  it("blocks READ_ONLY", async () => {
+    await expect(requireMutationAccess(ctx(PlatformRole.READ_ONLY))).rejects.toBeInstanceOf(AuthorizationError);
+  });
+
+  it("allows every non-READ_ONLY role by default", async () => {
+    rolePolicyFindUnique.mockResolvedValue(null);
+
     for (const role of Object.values(PlatformRole)) {
       if (role === PlatformRole.READ_ONLY) continue;
-      expect(() => requireMutationAccess(ctx(role))).not.toThrow();
+      await expect(requireMutationAccess(ctx(role))).resolves.toBeUndefined();
     }
   });
 });
@@ -130,6 +149,8 @@ describe("requireMutationAccess", () => {
 describe("requireModule", () => {
   beforeEach(() => {
     findFirst.mockReset();
+    roleModuleFindMany.mockReset();
+    roleModuleFindMany.mockResolvedValue([]);
   });
 
   it("rejects before any DB lookup when the role lacks module access", async () => {
@@ -210,6 +231,23 @@ describe("requireModule", () => {
   it("lets READ_ONLY pass module access checks for UPS tools while writes stay separately blocked", async () => {
     findFirst.mockResolvedValue({ id: "tma-readonly-ups" });
     await expect(requireModule(ctx(PlatformRole.READ_ONLY), ModuleKey.UPS_TOOLS)).resolves.toBeUndefined();
+  });
+
+  it("allows SALES to access ASSISTANT when enabled for the tenant", async () => {
+    findFirst.mockResolvedValue({ id: "tma-assistant" });
+    await expect(requireModule(ctx(PlatformRole.SALES, "tenant-sales"), ModuleKey.ASSISTANT)).resolves.toBeUndefined();
+
+    expect(findFirst).toHaveBeenCalledTimes(1);
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        tenantId: "tenant-sales",
+        enabled: true,
+        module: {
+          key: ModuleKey.ASSISTANT
+        }
+      },
+      select: { id: true }
+    });
   });
 
   it("rejects UPS_TOOLS before any DB lookup when the role lacks access", async () => {

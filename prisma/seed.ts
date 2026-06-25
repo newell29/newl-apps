@@ -43,6 +43,11 @@ const SEED_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "newl-dev-password";
 async function main() {
   const modules = [
     {
+      key: ModuleKey.ASSISTANT,
+      name: "Company Assistant",
+      description: "Tenant-scoped AI assistant, knowledge memory, and business insight workspace"
+    },
+    {
       key: ModuleKey.LEAD_GEN,
       name: "Lead Generation",
       description: "Apollo and TradeMining lead generation workflow"
@@ -140,6 +145,25 @@ async function main() {
 
   const leadGenModule = await prisma.module.findUniqueOrThrow({
     where: { key: ModuleKey.LEAD_GEN }
+  });
+
+  const assistantModule = await prisma.module.findUniqueOrThrow({
+    where: { key: ModuleKey.ASSISTANT }
+  });
+
+  await prisma.tenantModuleAccess.upsert({
+    where: {
+      tenantId_moduleId: {
+        tenantId: tenant.id,
+        moduleId: assistantModule.id
+      }
+    },
+    update: { enabled: true },
+    create: {
+      tenantId: tenant.id,
+      moduleId: assistantModule.id,
+      enabled: true
+    }
   });
 
   await prisma.tenantModuleAccess.upsert({
