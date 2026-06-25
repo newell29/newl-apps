@@ -10,12 +10,13 @@ import {
 } from "@tanstack/react-table";
 import { CandidateStatus, LeadPipelineStage } from "@prisma/client";
 import Link from "next/link";
-import { useMemo, useState, type ReactNode } from "react";
+import { useActionState, useEffect, useMemo, useState, type ReactNode } from "react";
 import { DataGridColumnMenu } from "@/components/data-grid-column-menu";
 import { IndustryBadge } from "@/components/industry-badge";
 import { InfoHint } from "@/components/info-hint";
 import { usePersistedTableState } from "@/components/use-persisted-table-state";
 import { StageBadge } from "@/components/stage-badge";
+import { EMPTY_APOLLO_QUEUE_SUMMARY, type ApolloQueueSummary } from "@/modules/lead-gen/actions";
 
 type PipelineLead = {
   id: string;
@@ -85,6 +86,7 @@ export function PipelineTableClient({
   repOptions,
   bulkUpdateLeadStageAction,
   bulkQueueApolloEnrichmentAction,
+  retryApolloCompanyReviewAction,
   bulkAssignLeadOwnerAction,
   bulkUnassignLeadOwnerAction,
   updateLeadStageAction
@@ -93,12 +95,20 @@ export function PipelineTableClient({
   stageOptions: LeadPipelineStage[];
   repOptions: RepOption[];
   bulkUpdateLeadStageAction: (formData: FormData) => Promise<void>;
-  bulkQueueApolloEnrichmentAction: (formData: FormData) => Promise<void>;
+  bulkQueueApolloEnrichmentAction: (
+    previousState: ApolloQueueSummary,
+    formData: FormData
+  ) => Promise<ApolloQueueSummary>;
+  retryApolloCompanyReviewAction: (formData: FormData) => Promise<void>;
   bulkAssignLeadOwnerAction: (formData: FormData) => Promise<void>;
   bulkUnassignLeadOwnerAction: (formData: FormData) => Promise<void>;
   updateLeadStageAction: (formData: FormData) => Promise<void>;
 }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [apolloQueueState, queueApolloAction, isQueuePending] = useActionState(
+    bulkQueueApolloEnrichmentAction,
+    EMPTY_APOLLO_QUEUE_SUMMARY
+  );
   const {
     sorting,
     setSorting,
@@ -116,6 +126,12 @@ export function PipelineTableClient({
     [leads, selectedSet]
   );
   const hasUnassignedSelection = selectedLeads.some((lead) => !lead.assignedRepValue);
+
+  useEffect(() => {
+    if (apolloQueueState.status === "success" && apolloQueueState.completedAt) {
+      setSelectedIds([]);
+    }
+  }, [apolloQueueState.completedAt, apolloQueueState.status]);
 
   function toggleSelection(leadId: string) {
     setSelectedIds((current) => (current.includes(leadId) ? current.filter((id) => id !== leadId) : [...current, leadId]));
@@ -243,7 +259,7 @@ export function PipelineTableClient({
       {
         accessorKey: "stage",
         header: "Pipeline stage",
-        filterFn: "includesString",
+        filterFn: normalizedEqualsFilter,
         size: 160,
         cell: ({ row }) => <StageBadge stage={row.original.stage} />
       },
@@ -305,7 +321,7 @@ export function PipelineTableClient({
       {
         accessorKey: "candidateStatus",
         header: "Candidate status",
-        filterFn: "includesString",
+        filterFn: normalizedEqualsFilter,
         size: 170,
         cell: ({ row }) => <CandidateStatusBadge status={row.original.candidateStatus} />
       },
@@ -352,7 +368,7 @@ export function PipelineTableClient({
       {
         accessorKey: "contactStatus",
         header: "Contact status",
-        filterFn: "includesString",
+        filterFn: pipelineContactStatusFilter,
         size: 180,
         cell: ({ row }) => {
           const lead = row.original;
@@ -368,13 +384,13 @@ export function PipelineTableClient({
       {
         accessorKey: "apolloStatus",
         header: "Apollo",
-        filterFn: "includesString",
+        filterFn: pipelineApolloStatusFilter,
         size: 140
       },
       {
         accessorKey: "sequenceStatus",
         header: "Sequence",
-        filterFn: "includesString",
+        filterFn: normalizedEqualsFilter,
         size: 220,
         cell: ({ row }) => {
           const lead = row.original;
@@ -451,6 +467,14 @@ export function PipelineTableClient({
                   Disqualify
                 </button>
               </form>
+              {lead.apolloStatus === "Company review needed" ? (
+                <form action={retryApolloCompanyReviewAction}>
+                  <input type="hidden" name="leadId" value={lead.id} />
+                  <button className="rounded-md border border-warning/30 bg-warning/10 px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-warning/20">
+                    Retry Apollo match
+                  </button>
+                </form>
+              ) : null}
               <Link
                 href="/lead-gen/contacts"
                 className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-accentSoft"
@@ -462,7 +486,7 @@ export function PipelineTableClient({
         }
       }
     ],
-    [selectedSet, stageOptions, updateLeadStageAction]
+    [retryApolloCompanyReviewAction, selectedSet, stageOptions, updateLeadStageAction]
   );
 
   const table = useReactTable({
@@ -490,6 +514,52 @@ export function PipelineTableClient({
 
   return (
     <div>
+      {isQueuePending ? (
+        <div className="border-b border-border bg-primary/5 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Queueing Apollo enrichment</p>
+              <p className="text-xs text-mutedForeground">
+                Working through {selectedIds.length} selected compan{selectedIds.length === 1 ? "y" : "ies"} now.
+              </p>
+            </div>
+            <span className="text-xs font-medium text-primary">Running</span>
+          </div>
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-border">
+            <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
+          </div>
+        </div>
+      ) : null}
+      {apolloQueueState.status !== "idle" ? (
+        <div
+          className={`border-b px-4 py-3 ${
+            apolloQueueState.status === "error"
+              ? "border-danger/20 bg-danger/5"
+              : "border-success/20 bg-success/5"
+          }`}
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-foreground">
+                {apolloQueueState.status === "error" ? "Apollo queue failed" : "Apollo queue summary"}
+              </p>
+              <p className="text-xs text-mutedForeground">{apolloQueueState.message}</p>
+            </div>
+            {apolloQueueState.completedAt ? (
+              <span className="text-xs text-mutedForeground">{formatDateTime(apolloQueueState.completedAt)}</span>
+            ) : null}
+          </div>
+          {apolloQueueState.status === "success" ? (
+            <div className="mt-3 grid gap-3 md:grid-cols-5">
+              <ApolloQueueMetric label="Companies matched" value={apolloQueueState.matchedCompanies} />
+              <ApolloQueueMetric label="Review needed" value={apolloQueueState.reviewNeededCompanies} />
+              <ApolloQueueMetric label="Companies with contacts" value={apolloQueueState.companiesWithContacts} />
+              <ApolloQueueMetric label="No contacts found" value={apolloQueueState.companiesWithoutContacts} />
+              <ApolloQueueMetric label="Contacts imported" value={apolloQueueState.contactsImported} />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       <form action={bulkUpdateLeadStageAction}>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-4 py-3">
           <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -543,12 +613,12 @@ export function PipelineTableClient({
             </button>
             <button
               type="submit"
-              formAction={bulkQueueApolloEnrichmentAction}
-              disabled={selectedIds.length === 0 || hasUnassignedSelection}
+              formAction={queueApolloAction}
+              disabled={selectedIds.length === 0 || hasUnassignedSelection || isQueuePending}
               className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-accentSoft disabled:cursor-not-allowed disabled:opacity-50"
               title={hasUnassignedSelection ? "Assign a sales rep before queueing Apollo enrichment." : undefined}
             >
-              Queue Apollo
+              {isQueuePending ? "Queueing..." : "Queue Apollo"}
             </button>
             <select
               name="ownerUserId"
@@ -690,6 +760,15 @@ function BulkActionButton({ disabled, children }: { disabled: boolean; children:
   );
 }
 
+function ApolloQueueMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-md border border-border bg-card px-3 py-2">
+      <p className="text-xs font-medium uppercase tracking-wide text-mutedForeground">{label}</p>
+      <p className="mt-1 text-lg font-semibold text-foreground">{value}</p>
+    </div>
+  );
+}
+
 function CandidateStatusBadge({ status }: { status: CandidateStatus }) {
   const className =
     status === CandidateStatus.APPROVED_FOR_PIPELINE
@@ -718,6 +797,16 @@ function formatDate(value: Date) {
     month: "short",
     day: "numeric",
     year: "numeric"
+  }).format(new Date(value));
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
   }).format(new Date(value));
 }
 
@@ -822,6 +911,7 @@ function PipelineColumnFilterControl({
           { value: "QUEUED", label: "Queued" },
           { value: "ENRICHED", label: "Enriched" },
           { value: "NOT_FOUND", label: "Not found" },
+          { value: "COMPANY_REVIEW_NEEDED", label: "Company review needed" },
           { value: "NEEDS_REVIEW", label: "Needs review" }
         ]}
       />
@@ -933,4 +1023,73 @@ function minimumNumberFilter(row: { getValue: (columnId: string) => unknown }, c
 
   const value = Number(row.getValue(columnId));
   return !Number.isNaN(value) && value >= numericFilter;
+}
+
+function normalizeFilterToken(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .replaceAll("_", " ")
+    .replaceAll("-", " ")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function normalizedEqualsFilter(row: { getValue: (columnId: string) => unknown }, columnId: string, filterValue: unknown) {
+  const normalizedFilter = normalizeFilterToken(filterValue);
+  if (!normalizedFilter) {
+    return true;
+  }
+
+  const normalizedValue = normalizeFilterToken(row.getValue(columnId));
+  return normalizedValue === normalizedFilter;
+}
+
+function pipelineApolloStatusFilter(
+  row: { getValue: (columnId: string) => unknown },
+  columnId: string,
+  filterValue: unknown
+) {
+  const normalizedFilter = normalizeFilterToken(filterValue);
+  if (!normalizedFilter) {
+    return true;
+  }
+
+  const normalizedValue = normalizeFilterToken(row.getValue(columnId));
+
+  if (normalizedFilter === "needs review") {
+    return normalizedValue === "needs review" || normalizedValue === "company review needed";
+  }
+
+  if (normalizedFilter === "company review needed") {
+    return normalizedValue === "company review needed";
+  }
+
+  return normalizedValue === normalizedFilter;
+}
+
+function pipelineContactStatusFilter(
+  row: { getValue: (columnId: string) => unknown },
+  columnId: string,
+  filterValue: unknown
+) {
+  const normalizedFilter = normalizeFilterToken(filterValue);
+  if (!normalizedFilter) {
+    return true;
+  }
+
+  const normalizedValue = normalizeFilterToken(row.getValue(columnId));
+
+  if (normalizedFilter === "approved") {
+    return normalizedValue.includes("approved");
+  }
+
+  if (normalizedFilter === "reviewing") {
+    return normalizedValue.includes("review");
+  }
+
+  if (normalizedFilter === "not enriched") {
+    return normalizedValue.includes("not enriched");
+  }
+
+  return normalizedValue.includes(normalizedFilter);
 }

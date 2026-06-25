@@ -1,3 +1,5 @@
+import { normalizeCompanyName } from "@/server/integrations/apollo";
+
 type Tier1DraftContext = {
   model: string;
   companyName: string;
@@ -39,6 +41,26 @@ type Tier1DraftResult = {
   body: string;
   personalizationNotes: string;
   rawResponse: Record<string, unknown>;
+};
+
+export type ApolloCompanySuggestionContext = {
+  model: string;
+  companyName: string;
+  companyDomain: string | null;
+  latestMatchClassification: string | null;
+  latestMatchReason: string | null;
+  recurringOrigins: string[];
+  recurringDestinationPorts: string[];
+  recurringProducts: string[];
+  recentShipmentHighlights: string[];
+};
+
+export type ApolloCompanySuggestionResult = {
+  suggestedCompanyName: string;
+  confidence: "LOW" | "MEDIUM" | "HIGH";
+  rationale: string;
+  source: "ai" | "heuristic";
+  rawResponse: Record<string, unknown> | null;
 };
 
 const OPENAI_API_BASE_URL = "https://api.openai.com/v1";
@@ -97,6 +119,62 @@ export async function generateTier1SequenceDraft(context: Tier1DraftContext): Pr
   };
 }
 
+export async function generateApolloCompanyNameSuggestion(
+  context: ApolloCompanySuggestionContext
+): Promise<ApolloCompanySuggestionResult> {
+  if (!isOpenAiDraftGenerationConfigured()) {
+    return buildHeuristicApolloCompanySuggestion(context);
+  }
+
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+
+  if (!apiKey || apiKey === "OPENAI_API_KEY_PLACEHOLDER") {
+    return buildHeuristicApolloCompanySuggestion(context);
+  }
+
+  const response = await fetch(`${OPENAI_API_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: context.model,
+      temperature: 0.2,
+      response_format: {
+        type: "json_object"
+      },
+      messages: [
+        {
+          role: "system",
+          content:
+            "You normalize company names for Apollo company matching in a B2B logistics workflow. Return JSON only with keys suggestedCompanyName, confidence, rationale. Suggest the most likely operating company name to search in Apollo, not a branch label, port note, shipment descriptor, or legal suffix-heavy variant. Keep the suggestion concise and do not invent parent companies unless clearly implied."
+        },
+        {
+          role: "user",
+          content: buildApolloCompanySuggestionPrompt(context)
+        }
+      ]
+    }),
+    cache: "no-store"
+  });
+
+  const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+
+  if (!response.ok || !json) {
+    return buildHeuristicApolloCompanySuggestion(context);
+  }
+
+  const content = readAssistantContent(json);
+  const parsed = parseApolloCompanySuggestionPayload(content);
+
+  return {
+    ...parsed,
+    source: "ai",
+    rawResponse: json
+  };
+}
+
 function buildTier1DraftPrompt(context: Tier1DraftContext) {
   return JSON.stringify(
     {
@@ -123,6 +201,24 @@ function buildTier1DraftPrompt(context: Tier1DraftContext) {
           "generic statements that could fit any importer"
         ]
       },
+      context
+    },
+    null,
+    2
+  );
+}
+
+function buildApolloCompanySuggestionPrompt(context: ApolloCompanySuggestionContext) {
+  return JSON.stringify(
+    {
+      objective: "Suggest the best Apollo company-search name for a company that failed or produced a low-confidence Apollo match.",
+      rules: [
+        "Prefer the likely operating company name someone would use on LinkedIn or Apollo.",
+        "Remove legal suffix noise when it does not help the search.",
+        "Do not output a branch/location label unless the branch label appears central to the company identity.",
+        "Do not suggest a freight forwarder, carrier, warehouse operator, or other logistics intermediary unless the evidence strongly indicates that is the actual target company.",
+        "Use shipment evidence only as context for plausibility, not as text to copy into the company name."
+      ],
       context
     },
     null,
@@ -166,6 +262,30 @@ function parseDraftPayload(content: string) {
   };
 }
 
+function parseApolloCompanySuggestionPayload(content: string) {
+  let parsed: Record<string, unknown>;
+
+  try {
+    parsed = JSON.parse(content) as Record<string, unknown>;
+  } catch {
+    throw new Error("OpenAI returned a company suggestion response that was not valid JSON.");
+  }
+
+  const suggestedCompanyName = readNonEmptyString(parsed.suggestedCompanyName);
+  const confidence = readConfidenceValue(parsed.confidence);
+  const rationale = readNonEmptyString(parsed.rationale);
+
+  if (!suggestedCompanyName || !confidence || !rationale) {
+    throw new Error("OpenAI returned an incomplete company suggestion payload.");
+  }
+
+  return {
+    suggestedCompanyName,
+    confidence,
+    rationale
+  };
+}
+
 function extractOpenAiError(payload: Record<string, unknown> | null) {
   if (!payload || typeof payload !== "object") {
     return null;
@@ -184,4 +304,35 @@ function extractOpenAiError(payload: Record<string, unknown> | null) {
 
 function readNonEmptyString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readConfidenceValue(value: unknown): ApolloCompanySuggestionResult["confidence"] | null {
+  return value === "LOW" || value === "MEDIUM" || value === "HIGH" ? value : null;
+}
+
+function buildHeuristicApolloCompanySuggestion(
+  context: ApolloCompanySuggestionContext
+): ApolloCompanySuggestionResult {
+  const normalized = normalizeCompanyName(context.companyName);
+  const suggestedCompanyName = toDisplayCompanyName(normalized || context.companyName);
+  const rationaleParts = [
+    "Used fallback normalization to remove legal suffixes and punctuation.",
+    context.latestMatchReason ? `Latest Apollo match reason: ${context.latestMatchReason}` : null
+  ].filter((value): value is string => Boolean(value));
+
+  return {
+    suggestedCompanyName,
+    confidence: "LOW",
+    rationale: rationaleParts.join(" "),
+    source: "heuristic",
+    rawResponse: null
+  };
+}
+
+function toDisplayCompanyName(value: string) {
+  return value
+    .split(/\s+/)
+    .filter((token) => token.length > 0)
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(" ");
 }

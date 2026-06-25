@@ -5,6 +5,7 @@ import {
   bulkAssignLeadOwnerAction,
   bulkQueueApolloEnrichmentAction,
   bulkUnassignLeadOwnerAction,
+  retryApolloCompanyReviewAction,
   bulkUpdateLeadStageAction,
   updateLeadStageAction
 } from "@/modules/lead-gen/actions";
@@ -416,12 +417,13 @@ export default async function PipelinePage({
           <PipelineTableClient
             leads={leads}
             stageOptions={filterOptions.stages}
-            repOptions={filterOptions.owners}
-            bulkUpdateLeadStageAction={bulkUpdateLeadStageAction}
-            bulkQueueApolloEnrichmentAction={bulkQueueApolloEnrichmentAction}
-            bulkAssignLeadOwnerAction={bulkAssignLeadOwnerAction}
-            bulkUnassignLeadOwnerAction={bulkUnassignLeadOwnerAction}
-            updateLeadStageAction={updateLeadStageAction}
+        repOptions={filterOptions.owners}
+        bulkUpdateLeadStageAction={bulkUpdateLeadStageAction}
+        bulkQueueApolloEnrichmentAction={bulkQueueApolloEnrichmentAction}
+        retryApolloCompanyReviewAction={retryApolloCompanyReviewAction}
+        bulkAssignLeadOwnerAction={bulkAssignLeadOwnerAction}
+        bulkUnassignLeadOwnerAction={bulkUnassignLeadOwnerAction}
+        updateLeadStageAction={updateLeadStageAction}
           />
         ) : (
           <div className="px-4 py-12 text-center">
@@ -641,6 +643,7 @@ function parseApolloStatusParam(value: string | undefined): LeadPipelineApolloSt
     value === "QUEUED" ||
     value === "ENRICHED" ||
     value === "NOT_FOUND" ||
+    value === "COMPANY_REVIEW_NEEDED" ||
     value === "NEEDS_REVIEW"
     ? value
     : "ALL";

@@ -215,6 +215,106 @@ describe("fetchApolloContactsForCompany", () => {
       })
     ]);
   });
+
+  it("accepts strong base-name matches even when Apollo organization names include branch wording", async () => {
+    vi.spyOn(global, "fetch")
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          organizations: [
+            {
+              id: "apollo-org-siemens",
+              name: "Siemens Energy - Houston Service Center",
+              primary_domain: "siemens-energy.com"
+            }
+          ]
+        })
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          contacts: [
+            {
+              id: "apollo-contact-siemens-1",
+              first_name: "Casey",
+              last_name: "Buyer",
+              title: "Procurement Manager",
+              email: "casey.buyer@siemens-energy.com",
+              reply_status: "no_reply"
+            }
+          ]
+        })
+      } as unknown as Response);
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "Siemens Energy",
+      domain: "siemens-energy.com"
+    });
+
+    expect(result.match.classification).toBe("DIRECT_COMPANY");
+    expect(result.organizationId).toBe("apollo-org-siemens");
+    expect(result.contacts).toEqual([
+      expect.objectContaining({
+        fullName: "Casey Buyer",
+        email: "casey.buyer@siemens-energy.com"
+      })
+    ]);
+  });
+
+  it("strips noisy company-name suffixes before matching Apollo organizations", async () => {
+    vi.spyOn(global, "fetch")
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          organizations: [
+            {
+              id: "apollo-org-siemens-2",
+              name: "Siemens Energy, Inc.",
+              primary_domain: "siemens-energy.com"
+            }
+          ]
+        })
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          contacts: []
+        })
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          people: [
+            {
+              id: "apollo-person-siemens-2",
+              first_name: "Morgan",
+              last_name: "Energy",
+              title: "Director of Logistics",
+              email: "morgan.energy@siemens-energy.com",
+              reply_status: "no_reply"
+            }
+          ]
+        })
+      } as unknown as Response);
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "SIEMENS ENERGY, INC. C/O PROCUREMENT TEAM",
+      domain: "siemens-energy.com"
+    });
+
+    expect(result.match.classification).toBe("DIRECT_COMPANY");
+    expect(result.organizationId).toBe("apollo-org-siemens-2");
+    expect(result.contacts).toEqual([
+      expect.objectContaining({
+        fullName: "Morgan Energy"
+      })
+    ]);
+  });
 });
 
 describe("fetchApolloSequenceDirectory", () => {

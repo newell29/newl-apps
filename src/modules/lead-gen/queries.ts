@@ -131,6 +131,7 @@ export type LeadPipelineApolloStatusFilter =
   | "QUEUED"
   | "ENRICHED"
   | "NOT_FOUND"
+  | "COMPANY_REVIEW_NEEDED"
   | "NEEDS_REVIEW";
 
 export type LeadPipelineSequenceStatusFilter =
@@ -821,7 +822,14 @@ export async function getLeadPipelineFilters(tenant: TenantContext) {
     industries: INDUSTRY_OPTIONS,
     candidateStatuses: Object.values(CandidateStatus),
     contactStatuses: ["NOT_ENRICHED", "PRIMARY_SELECTED", "APPROVED", "REVIEWING", "FOUND"] satisfies LeadPipelineContactStatusFilter[],
-    apolloStatuses: ["NOT_STARTED", "QUEUED", "ENRICHED", "NOT_FOUND", "NEEDS_REVIEW"] satisfies LeadPipelineApolloStatusFilter[],
+    apolloStatuses: [
+      "NOT_STARTED",
+      "QUEUED",
+      "ENRICHED",
+      "NOT_FOUND",
+      "COMPANY_REVIEW_NEEDED",
+      "NEEDS_REVIEW"
+    ] satisfies LeadPipelineApolloStatusFilter[],
     sequenceStatuses: ["NOT_STARTED", "READY", "ENROLLED", "REPLIED"] satisfies LeadPipelineSequenceStatusFilter[]
   };
 }
@@ -1404,19 +1412,21 @@ function summarizeContactStatus(
 }
 
 function summarizeApolloStatus(contacts: Array<{ apolloStatus: ApolloStatus }>, notes?: string | null) {
-  if (notes?.includes("Apollo company match needs review")) {
-    return "Needs review";
+  const latestNote = readLatestLeadNote(notes);
+
+  if (latestNote?.includes("Apollo company review needed") || latestNote?.includes("Apollo company match needs review")) {
+    return "Company review needed";
   }
 
-  if (notes?.includes("Apollo enrichment completed with no contacts")) {
+  if (latestNote?.includes("Apollo enrichment completed with no contacts")) {
     return "Not found";
   }
 
-  if (notes?.includes("Apollo enrichment completed on")) {
+  if (latestNote?.includes("Apollo enrichment completed on")) {
     return "Enriched";
   }
 
-  if (notes?.includes("Apollo enrichment requested on")) {
+  if (latestNote?.includes("Apollo enrichment requested on")) {
     return "Queued";
   }
 
@@ -1437,6 +1447,14 @@ function summarizeApolloStatus(contacts: Array<{ apolloStatus: ApolloStatus }>, 
   }
 
   return "Not started";
+}
+
+function readLatestLeadNote(notes?: string | null) {
+  return notes
+    ?.split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .at(-1) ?? null;
 }
 
 function summarizeSequenceStatus(contacts: Array<{ sequenceStatus: SequenceStatus }>) {
@@ -1676,6 +1694,10 @@ function getPipelineNextStep({
 
   if (apolloStatus === "Queued") {
     return "Await Apollo enrichment results";
+  }
+
+  if (apolloStatus === "Company review needed") {
+    return "Review company match and retry Apollo";
   }
 
   return "Research account fit";

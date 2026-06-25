@@ -180,6 +180,7 @@ function parseApolloStatusParam(value: string | null): LeadPipelineApolloStatusF
     value === "QUEUED" ||
     value === "ENRICHED" ||
     value === "NOT_FOUND" ||
+    value === "COMPANY_REVIEW_NEEDED" ||
     value === "NEEDS_REVIEW"
     ? value
     : "ALL";
