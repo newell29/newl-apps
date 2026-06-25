@@ -439,6 +439,12 @@ export async function persistAssistantKnowledgeDocuments(
   documents: AssistantKnowledgeDocumentInput[]
 ) {
   const now = new Date();
+  const persistedRecords: Array<{
+    id: string;
+    sourceSystem: string;
+    externalId: string;
+    title: string;
+  }> = [];
 
   for (const document of documents) {
     const record = await tx.assistantKnowledgeDocument.upsert({
@@ -496,7 +502,16 @@ export async function persistAssistantKnowledgeDocuments(
         }))
       });
     }
+
+    persistedRecords.push({
+      id: record.id,
+      sourceSystem: document.sourceSystem,
+      externalId: document.externalId,
+      title: document.title
+    });
   }
+
+  return persistedRecords;
 }
 
 export async function searchAssistantKnowledge(

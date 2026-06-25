@@ -1,4 +1,4 @@
-import { AssistantSourceKind, IntegrationProvider } from "@prisma/client";
+import { AssistantMemoryKind, AssistantSourceKind, IntegrationProvider, type Prisma } from "@prisma/client";
 
 import {
   type AssistantKnowledgeDocumentInput,
@@ -154,7 +154,8 @@ export async function syncMicrosoftGraphAssistantKnowledge(context: Authenticate
   }
 
   await prisma.$transaction(async (tx) => {
-    await persistAssistantKnowledgeDocuments(tx, context, documents);
+    const persistedDocuments = await persistAssistantKnowledgeDocuments(tx, context, documents);
+    await replaceMicrosoftGraphMemories(tx, context, documents, persistedDocuments);
   });
 
   return {
@@ -164,6 +165,186 @@ export async function syncMicrosoftGraphAssistantKnowledge(context: Authenticate
     skipped: false,
     reason: null
   };
+}
+
+type PersistedMicrosoftDocument = {
+  id: string;
+  sourceSystem: string;
+  externalId: string;
+  title: string;
+};
+
+async function replaceMicrosoftGraphMemories(
+  tx: Prisma.TransactionClient,
+  context: AuthenticatedContext,
+  documents: AssistantKnowledgeDocumentInput[],
+  persistedDocuments: PersistedMicrosoftDocument[]
+) {
+  const documentIdByKey = new Map(
+    persistedDocuments.map((document) => [`${document.sourceSystem}:${document.externalId}`, document.id])
+  );
+  const extractedMemories = buildMicrosoftGraphMemoriesFromDocuments(documents, documentIdByKey);
+
+  await tx.assistantMemory.deleteMany({
+    where: {
+      tenantId: context.tenantId,
+      sourceRunId: null,
+      subjectType: {
+        in: ["MicrosoftGraphContact", "MicrosoftGraphCompany", "MicrosoftGraphService", "MicrosoftGraphIssue", "MicrosoftGraphOpportunity"]
+      }
+    }
+  });
+
+  if (extractedMemories.length === 0) {
+    return;
+  }
+
+  await tx.assistantMemory.createMany({
+    data: extractedMemories.map((memory) => ({
+      tenantId: context.tenantId,
+      kind: memory.kind,
+      subjectType: memory.subjectType,
+      subjectId: memory.subjectId,
+      title: memory.title,
+      summary: memory.summary,
+      confidence: memory.confidence,
+      status: "ACTIVE",
+      sourceDocumentId: memory.sourceDocumentId,
+      lastObservedAt: memory.lastObservedAt
+    }))
+  });
+}
+
+export function buildMicrosoftGraphMemoriesFromDocuments(
+  documents: AssistantKnowledgeDocumentInput[],
+  documentIdByKey: Map<string, string>
+) {
+  const memories: Array<{
+    kind: AssistantMemoryKind;
+    subjectType: string;
+    subjectId: string | null;
+    title: string;
+    summary: string;
+    confidence: number;
+    sourceDocumentId: string | null;
+    lastObservedAt: Date | null;
+  }> = [];
+
+  for (const document of documents) {
+    const metadata = document.metadata ?? {};
+    const content = document.content;
+    const emails = extractEmails(content);
+    const phones = extractPhones(content);
+    const websites = extractWebsites(content);
+    const services = detectServices(content);
+    const lower = content.toLowerCase();
+    const sourceDocumentId = documentIdByKey.get(`${document.sourceSystem}:${document.externalId}`) ?? null;
+    const lastObservedAt = document.sourceUpdatedAt ?? null;
+
+    if (document.sourceKind === AssistantSourceKind.EMAIL) {
+      const fromName = readString(metadata.fromName);
+      const fromAddress = readString(metadata.fromAddress);
+      const domain = fromAddress?.split("@")[1] ?? null;
+      const companyName = inferCompanyName(fromName, domain);
+      const website = domain && !websites.includes(`https://${domain}`) ? `https://${domain}` : null;
+
+      if (fromAddress || companyName || phones.length > 0 || websites.length > 0 || services.length > 0) {
+        memories.push({
+          kind: AssistantMemoryKind.CUSTOMER_PROFILE,
+          subjectType: "MicrosoftGraphContact",
+          subjectId: fromAddress ?? document.externalId,
+          title: companyName ? `${companyName} contact memory` : `${document.title} contact memory`,
+          summary: joinParts([
+            fromName ? `Contact name ${fromName}` : null,
+            fromAddress ? `email ${fromAddress}` : null,
+            phones.length > 0 ? `phones ${phones.join(", ")}` : null,
+            website ? `website ${website}` : null,
+            websites.length > 0 ? `links ${websites.join(", ")}` : null,
+            services.length > 0 ? `services discussed ${services.join(", ")}` : null
+          ]),
+          confidence: 72,
+          sourceDocumentId,
+          lastObservedAt
+        });
+      }
+
+      if (companyName || domain || services.length > 0) {
+        memories.push({
+          kind: AssistantMemoryKind.CUSTOMER_PROFILE,
+          subjectType: "MicrosoftGraphCompany",
+          subjectId: domain ?? companyName ?? document.externalId,
+          title: companyName ? `${companyName} company memory` : `${document.title} company memory`,
+          summary: joinParts([
+            companyName ? `Company ${companyName}` : null,
+            domain ? `domain ${domain}` : null,
+            services.length > 0 ? `service context ${services.join(", ")}` : null
+          ]),
+          confidence: 64,
+          sourceDocumentId,
+          lastObservedAt
+        });
+      }
+
+      if (services.length > 0) {
+        memories.push({
+          kind: AssistantMemoryKind.SERVICE_CAPABILITY,
+          subjectType: "MicrosoftGraphService",
+          subjectId: `${document.externalId}:services`,
+          title: `${document.title} service context`,
+          summary: `Services referenced in email: ${services.join(", ")}.`,
+          confidence: 68,
+          sourceDocumentId,
+          lastObservedAt
+        });
+      }
+
+      if (containsOperationalRisk(lower)) {
+        memories.push({
+          kind: AssistantMemoryKind.OPERATIONAL_RISK,
+          subjectType: "MicrosoftGraphIssue",
+          subjectId: `${document.externalId}:risk`,
+          title: `${document.title} issue signal`,
+          summary: summarizeRiskContent(content),
+          confidence: 74,
+          sourceDocumentId,
+          lastObservedAt
+        });
+      }
+
+      if (containsSalesOpportunity(lower)) {
+        memories.push({
+          kind: AssistantMemoryKind.SALES_OPPORTUNITY,
+          subjectType: "MicrosoftGraphOpportunity",
+          subjectId: `${document.externalId}:opportunity`,
+          title: `${document.title} opportunity signal`,
+          summary: summarizeOpportunityContent(content, services),
+          confidence: 74,
+          sourceDocumentId,
+          lastObservedAt
+        });
+      }
+    }
+
+    if (document.sourceKind === AssistantSourceKind.ONEDRIVE_FILE) {
+      if (services.length > 0 || websites.length > 0) {
+        memories.push({
+          kind: AssistantMemoryKind.SERVICE_CAPABILITY,
+          subjectType: "MicrosoftGraphService",
+          subjectId: `${document.externalId}:file`,
+          title: `${document.title} file context`,
+          summary: joinParts([
+            services.length > 0 ? `Services referenced ${services.join(", ")}` : null,
+            websites.length > 0 ? `related links ${websites.join(", ")}` : null
+          ]),
+          confidence: 60,
+          sourceDocumentId,
+          lastObservedAt
+        });
+      }
+    }
+  }
+
+  return dedupeMemories(memories);
 }
 
 async function fetchRecentMail(accessToken: string) {
@@ -273,4 +454,118 @@ function parseDate(value: string | null | undefined) {
 
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function extractEmails(value: string) {
+  return Array.from(new Set(value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? []));
+}
+
+function extractPhones(value: string) {
+  return Array.from(
+    new Set(
+      (value.match(/(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}/g) ?? []).map((phone) => phone.trim())
+    )
+  );
+}
+
+function extractWebsites(value: string) {
+  return Array.from(new Set(value.match(/https?:\/\/[^\s)]+/gi) ?? []));
+}
+
+function detectServices(value: string) {
+  const normalized = value.toLowerCase();
+  const catalog = [
+    "ltl",
+    "ftl",
+    "truckload",
+    "parcel",
+    "ups",
+    "warehousing",
+    "warehouse",
+    "storage",
+    "distribution",
+    "drayage",
+    "intermodal",
+    "expedited",
+    "air freight",
+    "ocean freight",
+    "customs",
+    "transload"
+  ];
+
+  return catalog.filter((service) => normalized.includes(service));
+}
+
+function containsOperationalRisk(value: string) {
+  return ["delay", "late", "issue", "problem", "complaint", "claim", "damaged", "urgent", "escalat", "missed"].some(
+    (term) => value.includes(term)
+  );
+}
+
+function containsSalesOpportunity(value: string) {
+  return ["quote", "pricing", "rate", "lane", "opportunity", "new shipment", "tender", "rfq", "bid"].some((term) =>
+    value.includes(term)
+  );
+}
+
+function summarizeRiskContent(content: string) {
+  return truncateText(`Operational issue signal from Microsoft email: ${content}`, 220);
+}
+
+function summarizeOpportunityContent(content: string, services: string[]) {
+  return truncateText(
+    joinParts([
+      "Sales opportunity signal from Microsoft email.",
+      services.length > 0 ? `Services referenced ${services.join(", ")}.` : null,
+      content
+    ]),
+    220
+  );
+}
+
+function inferCompanyName(fromName: string | null, domain: string | null) {
+  if (fromName && !fromName.includes("@")) {
+    return fromName.replace(/\b(inc|llc|ltd|corp|corporation)\b/gi, (match) => match.toUpperCase()).trim();
+  }
+
+  if (!domain) {
+    return null;
+  }
+
+  const root = domain.split(".")[0] ?? "";
+  if (!root) {
+    return null;
+  }
+
+  return root
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function joinParts(parts: Array<string | null>) {
+  return parts.filter((part): part is string => Boolean(part)).join(", ");
+}
+
+function truncateText(value: string, maxLength: number) {
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
+function dedupeMemories<T extends { kind: AssistantMemoryKind; subjectType: string; subjectId: string | null; title: string }>(
+  memories: T[]
+) {
+  const seen = new Set<string>();
+  return memories.filter((memory) => {
+    const key = `${memory.kind}:${memory.subjectType}:${memory.subjectId ?? memory.title}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
