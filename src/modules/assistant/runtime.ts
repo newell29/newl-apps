@@ -88,12 +88,14 @@ export async function runAssistantPrompt(
   let model = "assistant-foundation-v1";
   let messageMetadata: Record<string, unknown> = {
     deterministic: true,
-    intent: deterministic.intent
+    intent: deterministic.intent,
+    liveReplyAttempted: false
   };
   let runMetadata: Record<string, unknown> = {
     deterministic: true,
     intent: deterministic.intent,
-    providerSettings
+    providerSettings,
+    liveReplyAttempted: false
   };
 
   if (providerSettings.liveResponsesEnabled && providerSettings.runtimeReady) {
@@ -117,27 +119,52 @@ export async function runAssistantPrompt(
         intent: deterministic.intent,
         provider,
         model,
-        usedFallbackModel: liveReply.usedFallbackModel
+        usedFallbackModel: liveReply.usedFallbackModel,
+        liveReplyAttempted: true
       };
       runMetadata = {
         deterministic: false,
         intent: deterministic.intent,
         usedFallbackModel: liveReply.usedFallbackModel,
-        rawResponse: liveReply.rawResponse
+        rawResponse: liveReply.rawResponse,
+        liveReplyAttempted: true
       };
     } catch (error) {
       messageMetadata = {
         deterministic: true,
         intent: deterministic.intent,
-        providerFallback: true
+        providerFallback: true,
+        liveReplyAttempted: true
       };
       runMetadata = {
         deterministic: true,
         intent: deterministic.intent,
         providerSettings,
+        liveReplyAttempted: true,
         liveReplyError: error instanceof Error ? error.message : "Unknown provider error"
       };
     }
+  } else {
+    const skipReason = !providerSettings.liveResponsesEnabled
+      ? "Live assistant replies are disabled in Settings."
+      : !providerSettings.runtimeReady
+        ? "Live assistant runtime is not ready. OPENAI_API_KEY is likely missing in the running server environment."
+        : "Live assistant reply was skipped before provider execution.";
+
+    messageMetadata = {
+      deterministic: true,
+      intent: deterministic.intent,
+      liveReplyAttempted: false,
+      liveReplySkipped: true
+    };
+    runMetadata = {
+      deterministic: true,
+      intent: deterministic.intent,
+      providerSettings,
+      liveReplyAttempted: false,
+      liveReplySkipped: true,
+      liveReplySkipReason: skipReason
+    };
   }
 
   return {

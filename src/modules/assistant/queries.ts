@@ -512,6 +512,9 @@ export async function getAssistantWorkspace(
             model: run.model,
             startedAt: run.startedAt,
             deterministic: readRunMetadataBoolean(run.metadata, "deterministic"),
+            liveReplyAttempted: readRunMetadataBoolean(run.metadata, "liveReplyAttempted"),
+            liveReplySkipped: readRunMetadataBoolean(run.metadata, "liveReplySkipped"),
+            liveReplySkipReason: readRunMetadataString(run.metadata, "liveReplySkipReason"),
             providerFallback: readRunMetadataBoolean(run.metadata, "providerFallback"),
             liveReplyError: readRunMetadataString(run.metadata, "liveReplyError"),
             retrievedSources: run.retrievedSources.map((source) => ({
