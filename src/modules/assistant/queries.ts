@@ -5,6 +5,7 @@ import {
   LeadPipelineStage
 } from "@prisma/client";
 
+import { summarizeAssistantAutomationSchedule } from "@/modules/assistant/automations";
 import { prisma } from "@/server/db";
 import type { TenantContext } from "@/server/tenant-context";
 import { tenantWhere } from "@/server/tenant-query";
@@ -35,7 +36,12 @@ export type AssistantIntent =
   | "EMAIL_DRAFT"
   | "GENERAL_INSIGHT";
 
-export async function getAssistantWorkspace(tenant: TenantContext, query?: string, threadId?: string) {
+export async function getAssistantWorkspace(
+  tenant: TenantContext,
+  query?: string,
+  threadId?: string,
+  userId?: string
+) {
   const [
     companyCount,
     contactCount,
@@ -45,6 +51,7 @@ export async function getAssistantWorkspace(tenant: TenantContext, query?: strin
     memoryCount,
     knowledgeCoverage,
     recentMemories,
+    personalAutomations,
     integrations,
     topCompanies,
     openLeads,
@@ -93,6 +100,41 @@ export async function getAssistantWorkspace(tenant: TenantContext, query?: strin
         }
       }
     }),
+    userId
+      ? prisma.assistantAutomation.findMany({
+          where: tenantWhere(tenant, {
+            userId
+          }),
+          orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+          take: 8,
+          select: {
+            id: true,
+            name: true,
+            prompt: true,
+            scheduleType: true,
+            scheduleTime: true,
+            scheduleTimezone: true,
+            status: true,
+            lastRunAt: true,
+            nextRunAt: true,
+            lastResultSummary: true,
+            runs: {
+              orderBy: {
+                startedAt: "desc"
+              },
+              take: 3,
+              select: {
+                id: true,
+                status: true,
+                responseText: true,
+                sourceCount: true,
+                startedAt: true,
+                finishedAt: true
+              }
+            }
+          }
+        })
+      : Promise.resolve([]),
     prisma.integrationCredential.findMany({
       where: tenantWhere(tenant, {
         provider: {
@@ -174,7 +216,8 @@ export async function getAssistantWorkspace(tenant: TenantContext, query?: strin
     }),
     prisma.assistantChatThread.findMany({
       where: tenantWhere(tenant, {
-        status: "ACTIVE"
+        status: "ACTIVE",
+        ...(userId ? { userId } : {})
       }),
       orderBy: [{ lastMessageAt: "desc" }, { updatedAt: "desc" }],
       take: 8,
@@ -193,7 +236,8 @@ export async function getAssistantWorkspace(tenant: TenantContext, query?: strin
     threadId
       ? prisma.assistantChatThread.findFirst({
           where: tenantWhere(tenant, {
-            id: threadId
+            id: threadId,
+            ...(userId ? { userId } : {})
           }),
           select: {
             id: true,
@@ -287,6 +331,31 @@ export async function getAssistantWorkspace(tenant: TenantContext, query?: strin
             title: memory.sourceDocument.title
           }
         : null
+    })),
+    personalAutomations: personalAutomations.map((automation) => ({
+      id: automation.id,
+      name: automation.name,
+      prompt: automation.prompt,
+      scheduleType: automation.scheduleType,
+      scheduleTime: automation.scheduleTime,
+      scheduleTimezone: automation.scheduleTimezone,
+      scheduleSummary: summarizeAssistantAutomationSchedule(
+        automation.scheduleType as "DAILY" | "WEEKDAYS" | "MONDAYS",
+        automation.scheduleTime,
+        automation.scheduleTimezone
+      ),
+      status: automation.status,
+      lastRunAt: automation.lastRunAt,
+      nextRunAt: automation.nextRunAt,
+      lastResultSummary: automation.lastResultSummary,
+      recentRuns: automation.runs.map((run) => ({
+        id: run.id,
+        status: run.status,
+        responseText: run.responseText,
+        sourceCount: run.sourceCount,
+        startedAt: run.startedAt,
+        finishedAt: run.finishedAt
+      }))
     })),
     integrations: ASSISTANT_INTEGRATION_PROVIDERS.map((provider) => {
       const matching = integrations.filter((integration) => integration.provider === provider);

@@ -209,6 +209,8 @@ model Tenant {
   assistantKnowledgeDocuments AssistantKnowledgeDocument[]
   assistantKnowledgeChunks AssistantKnowledgeChunk[]
   assistantMemories      AssistantMemory[]
+  assistantAutomations   AssistantAutomation[]
+  assistantAutomationRuns AssistantAutomationRun[]
 }
 
 model User {
@@ -228,6 +230,8 @@ model User {
   sessions    Session[]
   assistantThreads AssistantChatThread[]
   assistantRuns    AssistantRun[]
+  assistantAutomations AssistantAutomation[]
+  assistantAutomationRuns AssistantAutomationRun[]
 }
 
 // Auth.js (NextAuth) adapter models. Account links an external identity
@@ -883,4 +887,50 @@ model AssistantMemory {
   @@index([tenantId, kind])
   @@index([tenantId, subjectType, subjectId])
   @@index([tenantId, status, updatedAt])
+}
+
+model AssistantAutomation {
+  id                String   @id @default(cuid())
+  tenantId          String
+  userId            String
+  name              String
+  prompt            String
+  scheduleType      String
+  scheduleTime      String
+  scheduleTimezone  String
+  status            String   @default("ACTIVE")
+  lastRunAt         DateTime?
+  nextRunAt         DateTime?
+  lastResultSummary String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  runs   AssistantAutomationRun[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, userId, status, updatedAt])
+}
+
+model AssistantAutomationRun {
+  id             String    @id @default(cuid())
+  tenantId       String
+  automationId   String
+  userId         String
+  status         JobStatus
+  promptSnapshot String
+  responseText   String
+  sourceCount    Int       @default(0)
+  metadata       Json?
+  startedAt      DateTime  @default(now())
+  finishedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  tenant     Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  automation AssistantAutomation @relation(fields: [tenantId, automationId], references: [tenantId, id], onDelete: Cascade)
+  user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, automationId, startedAt])
+  @@index([tenantId, userId, startedAt])
 }
