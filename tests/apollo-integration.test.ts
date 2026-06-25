@@ -330,8 +330,8 @@ describe("fetchApolloContactsForCompany", () => {
     });
 
     const result = await fetchApolloContactsForCompany({
-      companyName: "Dormeo North America",
-      domain: "dormeo.com"
+      companyName: "Carolina Outdoor Supply",
+      domain: "carolina-outdoor.com"
     });
 
     expect(fetchMock).toHaveBeenCalled();
@@ -339,6 +339,108 @@ describe("fetchApolloContactsForCompany", () => {
       expect.objectContaining({
         fullName: "Jamie Imports",
         title: "Logistics Manager"
+      })
+    ]);
+  });
+
+  it("promotes a direct company match from people-search evidence when company search returns unrelated orgs", async () => {
+    vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            organizations: [
+              {
+                id: "apollo-org-amazon",
+                name: "Amazon",
+                primary_domain: "amazon.com"
+              }
+            ]
+          })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            contacts: []
+          })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+        if (body.q_keywords === "DORMEO NORTH AMERICA logistics") {
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({
+              people: [
+                {
+                  id: "apollo-person-dormeo-fallback-1",
+                  first_name: "Guillermo",
+                  last_name: "Dormeo",
+                  title: "Director of Logistics",
+                  organization: {
+                    id: "apollo-org-dormeo-fallback",
+                    name: "Dormeo North America",
+                    primary_domain: null
+                  }
+                }
+              ]
+            })
+          } as unknown as Response;
+        }
+
+        if (body.q_keywords === "DORMEO NORTH AMERICA") {
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({
+              people: [
+                {
+                  id: "apollo-person-dormeo-fallback-2",
+                  first_name: "Marco",
+                  last_name: "Dormeo",
+                  title: "Operations Inventory Manager",
+                  organization: {
+                    id: "apollo-org-dormeo-fallback",
+                    name: "Dormeo North America",
+                    primary_domain: null
+                  }
+                }
+              ]
+            })
+          } as unknown as Response;
+        }
+
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            people: []
+          })
+        } as unknown as Response;
+      }
+
+      throw new Error(`Unexpected Apollo URL in test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "DORMEO NORTH AMERICA"
+    });
+
+    expect(result.match.classification).toBe("DIRECT_COMPANY");
+    expect(result.organizationId).toBe("apollo-org-dormeo-fallback");
+    expect(result.companyName).toBe("Dormeo North America");
+    expect(result.contacts).toEqual([
+      expect.objectContaining({
+        fullName: "Marco Dormeo"
       })
     ]);
   });
