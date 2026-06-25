@@ -43,6 +43,8 @@ export async function getAssistantWorkspace(tenant: TenantContext, query?: strin
     importRecordCount,
     knowledgeDocumentCount,
     memoryCount,
+    knowledgeCoverage,
+    recentMemories,
     integrations,
     topCompanies,
     openLeads,
@@ -62,6 +64,35 @@ export async function getAssistantWorkspace(tenant: TenantContext, query?: strin
     prisma.tradeMiningImportRecord.count({ where: tenantWhere(tenant) }),
     prisma.assistantKnowledgeDocument.count({ where: tenantWhere(tenant) }),
     prisma.assistantMemory.count({ where: tenantWhere(tenant, { status: "ACTIVE" }) }),
+    prisma.assistantKnowledgeDocument.groupBy({
+      by: ["sourceKind"],
+      where: tenantWhere(tenant),
+      _count: {
+        _all: true
+      }
+    }),
+    prisma.assistantMemory.findMany({
+      where: tenantWhere(tenant, { status: "ACTIVE" }),
+      orderBy: [{ confidence: "desc" }, { updatedAt: "desc" }],
+      take: 8,
+      select: {
+        id: true,
+        kind: true,
+        subjectType: true,
+        subjectId: true,
+        title: true,
+        summary: true,
+        confidence: true,
+        lastObservedAt: true,
+        sourceDocument: {
+          select: {
+            sourceKind: true,
+            externalId: true,
+            title: true
+          }
+        }
+      }
+    }),
     prisma.integrationCredential.findMany({
       where: tenantWhere(tenant, {
         provider: {
@@ -236,6 +267,27 @@ export async function getAssistantWorkspace(tenant: TenantContext, query?: strin
       knowledgeDocumentCount,
       memoryCount
     },
+    knowledgeCoverage: knowledgeCoverage.map((entry) => ({
+      sourceKind: entry.sourceKind,
+      count: entry._count._all
+    })),
+    recentMemories: recentMemories.map((memory) => ({
+      id: memory.id,
+      kind: memory.kind,
+      subjectType: memory.subjectType,
+      subjectId: memory.subjectId,
+      title: memory.title,
+      summary: memory.summary,
+      confidence: memory.confidence,
+      lastObservedAt: memory.lastObservedAt,
+      sourceDocument: memory.sourceDocument
+        ? {
+            sourceKind: memory.sourceDocument.sourceKind,
+            sourceId: memory.sourceDocument.externalId,
+            title: memory.sourceDocument.title
+          }
+        : null
+    })),
     integrations: ASSISTANT_INTEGRATION_PROVIDERS.map((provider) => {
       const matching = integrations.filter((integration) => integration.provider === provider);
 
@@ -343,6 +395,20 @@ export function buildAssistantSources(workspace: Awaited<ReturnType<typeof getAs
     excerpt: string;
     metadata?: Record<string, unknown>;
   }> = [];
+
+  for (const memory of workspace.recentMemories.slice(0, 3)) {
+    sources.push({
+      sourceKind: memory.sourceDocument?.sourceKind ?? AssistantSourceKind.OTHER,
+      sourceId: memory.sourceDocument?.sourceId ?? memory.subjectId ?? null,
+      title: memory.title,
+      excerpt: memory.summary,
+      metadata: {
+        memoryKind: memory.kind,
+        confidence: memory.confidence,
+        subjectType: memory.subjectType
+      }
+    });
+  }
 
   for (const company of workspace.topCompanies.slice(0, 3)) {
     sources.push({

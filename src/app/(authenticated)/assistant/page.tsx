@@ -185,6 +185,77 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
         <Metric label="Memory Items" value={workspace.stats.memoryCount} />
       </section>
 
+      <section className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+        <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-base font-semibold text-foreground">Knowledge coverage</h2>
+              <p className="mt-1 text-sm leading-6 text-mutedForeground">
+                Indexed source counts by business record type for this tenant.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {workspace.knowledgeCoverage.map((entry) => (
+              <div
+                key={entry.sourceKind}
+                className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-2"
+              >
+                <p className="text-sm font-medium text-foreground">{formatEnum(entry.sourceKind)}</p>
+                <span className="text-sm font-semibold text-foreground">{entry.count.toLocaleString("en-US")}</span>
+              </div>
+            ))}
+            {workspace.knowledgeCoverage.length === 0 ? (
+              <p className="text-sm text-mutedForeground">
+                No assistant knowledge documents have been indexed yet. Run a knowledge sync first.
+              </p>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-base font-semibold text-foreground">Active memory</h2>
+              <p className="mt-1 text-sm leading-6 text-mutedForeground">
+                High-confidence customer and opportunity summaries currently available for retrieval.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3">
+            {workspace.recentMemories.map((memory) => (
+              <div key={memory.id} className="rounded-md border border-border bg-muted/30 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium text-foreground">{memory.title}</p>
+                    <p className="mt-1 text-xs text-mutedForeground">
+                      {formatEnum(memory.kind)} | {memory.subjectType}
+                      {memory.lastObservedAt ? ` | ${formatDate(memory.lastObservedAt)}` : ""}
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-xs font-semibold text-primary">
+                    {memory.confidence}
+                  </span>
+                </div>
+                <p className="mt-3 text-sm leading-6 text-foreground">{memory.summary}</p>
+                {memory.sourceDocument ? (
+                  <p className="mt-2 text-xs text-mutedForeground">
+                    Source: {memory.sourceDocument.title} ({formatEnum(memory.sourceDocument.sourceKind)})
+                  </p>
+                ) : null}
+              </div>
+            ))}
+            {workspace.recentMemories.length === 0 ? (
+              <p className="text-sm text-mutedForeground">
+                No assistant memories are active yet. After sync, customer profiles and opportunity summaries will appear here.
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </section>
+
       <section className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
         <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
           <div className="flex items-start justify-between gap-4">
