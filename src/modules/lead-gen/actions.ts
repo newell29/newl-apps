@@ -38,6 +38,7 @@ import {
   type ApolloContactLookupResult
 } from "@/server/integrations/apollo";
 import {
+  generateApolloCompanyNameSuggestion,
   generateTier1SequenceDraft,
   isOpenAiDraftGenerationConfigured
 } from "@/server/integrations/openai";
@@ -116,6 +117,32 @@ async function authorizeLeadGenMutation() {
   await requireMutationAccess(context);
   return context;
 }
+
+export type ApolloQueueSummary = {
+  status: "idle" | "success" | "error";
+  message: string | null;
+  requestedCompanies: number;
+  processedCompanies: number;
+  matchedCompanies: number;
+  reviewNeededCompanies: number;
+  companiesWithContacts: number;
+  companiesWithoutContacts: number;
+  contactsImported: number;
+  completedAt: string | null;
+};
+
+export const EMPTY_APOLLO_QUEUE_SUMMARY: ApolloQueueSummary = {
+  status: "idle",
+  message: null,
+  requestedCompanies: 0,
+  processedCompanies: 0,
+  matchedCompanies: 0,
+  reviewNeededCompanies: 0,
+  companiesWithContacts: 0,
+  companiesWithoutContacts: 0,
+  contactsImported: 0,
+  completedAt: null
+};
 
 export async function createTradeMiningSearchProfileAction(formData: FormData) {
   const context = await authorizeLeadGenAdminMutation();
@@ -322,165 +349,373 @@ export async function bulkUpdateLeadStageAction(formData: FormData) {
   revalidateLeadGenSurfaces();
 }
 
-export async function bulkQueueApolloEnrichmentAction(formData: FormData) {
-  const context = await authorizeLeadGenMutation();
-  const leadIds = readSelectedIds(formData, "leadId");
-  const queuedAt = new Date().toISOString();
-  const requestNote = `Apollo enrichment requested on ${queuedAt}.`;
+export async function bulkQueueApolloEnrichmentAction(formData: FormData): Promise<ApolloQueueSummary>;
+export async function bulkQueueApolloEnrichmentAction(
+  previousState: ApolloQueueSummary,
+  formData: FormData
+): Promise<ApolloQueueSummary>;
+export async function bulkQueueApolloEnrichmentAction(
+  firstArg: ApolloQueueSummary | FormData,
+  secondArg?: FormData
+): Promise<ApolloQueueSummary> {
+  const formData = firstArg instanceof FormData ? firstArg : secondArg;
 
-  for (const leadId of leadIds) {
-    const lead = await prisma.lead.findFirst({
-      where: {
-        id: leadId,
-        tenantId: context.tenantId
-      },
-      select: {
-        id: true,
-        companyId: true,
-        contactId: true,
-        ownerUserId: true,
-        notes: true,
-        company: {
-          select: {
-            id: true,
-            name: true,
-            domain: true,
-            linkedinUrl: true,
-            apolloOrganizationId: true
+  if (!formData) {
+    return {
+      ...EMPTY_APOLLO_QUEUE_SUMMARY,
+      status: "error",
+      message: "Apollo enrichment request did not include form data.",
+      completedAt: new Date().toISOString()
+    };
+  }
+
+  try {
+    const context = await authorizeLeadGenMutation();
+    const leadIds = readSelectedIds(formData, "leadId");
+    const queuedAt = new Date().toISOString();
+    const requestNote = `Apollo enrichment requested on ${queuedAt}.`;
+    const summary: ApolloQueueSummary = {
+      status: "success",
+      message: null,
+      requestedCompanies: leadIds.length,
+      processedCompanies: 0,
+      matchedCompanies: 0,
+      reviewNeededCompanies: 0,
+      companiesWithContacts: 0,
+      companiesWithoutContacts: 0,
+      contactsImported: 0,
+      completedAt: null
+    };
+
+    for (const leadId of leadIds) {
+      const lead = await prisma.lead.findFirst({
+        where: {
+          id: leadId,
+          tenantId: context.tenantId
+        },
+        select: {
+          id: true,
+          companyId: true,
+          contactId: true,
+          ownerUserId: true,
+          notes: true,
+          company: {
+            select: {
+              id: true,
+              name: true,
+              domain: true,
+              linkedinUrl: true,
+              apolloOrganizationId: true
+            }
           }
         }
+      });
+
+      if (!lead) {
+        throw new Error("Lead not found for this tenant.");
       }
-    });
 
-    if (!lead) {
-      throw new Error("Lead not found for this tenant.");
-    }
-
-    if (!lead.ownerUserId) {
-      throw new Error("Assign a sales rep before queueing Apollo enrichment.");
-    }
-
-    const existingContacts = await prisma.contact.findMany({
-      where: {
-        tenantId: context.tenantId,
-        companyId: lead.companyId
-      },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        fullName: true,
-        title: true,
-        department: true,
-        seniority: true,
-        email: true,
-        phone: true,
-        linkedinUrl: true,
-        source: true,
-        contactStatus: true,
-        apolloContactId: true,
-        apolloPersonId: true,
-        apolloStatus: true,
-        sequenceStatus: true,
-        replyStatus: true,
-        recommendedSequenceName: true,
-        recommendedSequenceId: true,
-        selectedSequenceName: true,
-        selectedSequenceId: true,
-        sequenceRecommendationReason: true,
-        sequenceOverrideReason: true,
-        sequenceManuallyOverridden: true,
-        lastTouchAt: true,
-        lastReplyAt: true,
-        assignedRep: true,
-        rawJson: true
+      if (!lead.ownerUserId) {
+        throw new Error("Assign a sales rep before queueing Apollo enrichment.");
       }
-    });
 
-    const queuedNotes = appendLeadNote(lead.notes ?? null, requestNote);
+      const assignedOwnerUserId = lead.ownerUserId;
 
-    await prisma.lead.update({
-      where: {
-        id: leadId
-      },
-      data: {
-        notes: queuedNotes
-      }
-    });
+      const existingContacts = await prisma.contact.findMany({
+        where: {
+          tenantId: context.tenantId,
+          companyId: lead.companyId
+        },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          fullName: true,
+          title: true,
+          department: true,
+          seniority: true,
+          email: true,
+          phone: true,
+          linkedinUrl: true,
+          source: true,
+          contactStatus: true,
+          apolloContactId: true,
+          apolloPersonId: true,
+          apolloStatus: true,
+          sequenceStatus: true,
+          replyStatus: true,
+          recommendedSequenceName: true,
+          recommendedSequenceId: true,
+          selectedSequenceName: true,
+          selectedSequenceId: true,
+          sequenceRecommendationReason: true,
+          sequenceOverrideReason: true,
+          sequenceManuallyOverridden: true,
+          lastTouchAt: true,
+          lastReplyAt: true,
+          assignedRep: true,
+          rawJson: true
+        }
+      });
 
-    const lookup = await fetchApolloContactsForCompany({
-      companyName: lead.company.name,
-      domain: lead.company.domain,
-      apolloOrganizationId: lead.company.apolloOrganizationId
-    });
+      const queuedNotes = appendLeadNote(lead.notes ?? null, requestNote);
 
-    await recordApolloCompanyMatch({
-      tenantId: context.tenantId,
-      companyId: lead.companyId,
-      lookup
-    });
-
-    if (lookup.match.classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY) {
       await prisma.lead.update({
         where: {
           id: leadId
         },
         data: {
-          notes: appendLeadNote(queuedNotes, `Apollo company match needs review: ${lookup.match.matchReason}`)
+          notes: queuedNotes
         }
       });
 
-      continue;
-    }
+      const lookup = await fetchApolloContactsForCompany({
+        companyName: lead.company.name,
+        domain: lead.company.domain,
+        apolloOrganizationId: lead.company.apolloOrganizationId
+      });
 
-    const syncedContacts = await syncApolloContactsForLead({
-      tenantId: context.tenantId,
-      leadId: lead.id,
-      companyId: lead.companyId,
-      assignedRep: lead.ownerUserId,
-      existingContacts,
-      lookup
-    });
+      await recordApolloCompanyMatch({
+        tenantId: context.tenantId,
+        companyId: lead.companyId,
+        lookup
+      });
 
-    await prisma.company.update({
-      where: {
-        id: lead.company.id
-      },
-      data: {
-        apolloOrganizationId: lookup.organizationId ?? lead.company.apolloOrganizationId,
-        domain: lookup.domain ?? lead.company.domain,
-        linkedinUrl: lookup.linkedinUrl ?? lead.company.linkedinUrl
-      }
-    });
+      summary.processedCompanies += 1;
 
-    if (!lead.contactId) {
-      const primaryContactId = pickPrimaryApolloContactId(syncedContacts);
-      if (primaryContactId) {
+      if (lookup.match.classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY) {
+        summary.reviewNeededCompanies += 1;
+
         await prisma.lead.update({
           where: {
             id: leadId
           },
           data: {
-            contactId: primaryContactId
+            notes: appendLeadNote(
+              queuedNotes,
+              `Apollo company review needed on ${new Date().toISOString()}. ${lookup.match.matchReason}`
+            )
           }
         });
+
+        continue;
+      }
+
+      summary.matchedCompanies += 1;
+
+      const importedContacts = await finalizeApolloEnrichmentForLead({
+        tenantId: context.tenantId,
+        lead: {
+          ...lead,
+          ownerUserId: assignedOwnerUserId
+        },
+        existingContacts,
+        lookup,
+        baseNotes: queuedNotes
+      });
+
+      if (importedContacts > 0) {
+        summary.companiesWithContacts += 1;
+        summary.contactsImported += importedContacts;
+      } else {
+        summary.companiesWithoutContacts += 1;
       }
     }
 
-    const completionNote =
-      syncedContacts.length > 0
-        ? `Apollo enrichment completed on ${new Date().toISOString()}. Imported ${syncedContacts.length} contacts.`
-        : `Apollo enrichment completed with no contacts on ${new Date().toISOString()}.`;
+    revalidateLeadGenSurfaces();
 
+    return {
+      ...summary,
+      message: `Apollo enrichment finished for ${summary.processedCompanies} compan${summary.processedCompanies === 1 ? "y" : "ies"}.`,
+      completedAt: new Date().toISOString()
+    };
+  } catch (error) {
+    return {
+      ...EMPTY_APOLLO_QUEUE_SUMMARY,
+      status: "error",
+      message: error instanceof Error ? error.message : "Apollo enrichment failed.",
+      completedAt: new Date().toISOString()
+    };
+  }
+}
+
+export async function retryApolloCompanyReviewAction(formData: FormData) {
+  const context = await authorizeLeadGenMutation();
+  const leadId = readRequired(formData, "leadId");
+  const lead = await prisma.lead.findFirst({
+    where: {
+      id: leadId,
+      tenantId: context.tenantId
+    },
+    select: {
+      id: true,
+      companyId: true,
+      contactId: true,
+      ownerUserId: true,
+      notes: true,
+      company: {
+        select: {
+          id: true,
+          name: true,
+          normalizedName: true,
+          domain: true,
+          linkedinUrl: true,
+          apolloOrganizationId: true,
+          importRecords: {
+            orderBy: [
+              {
+                arrivalDate: "desc"
+              },
+              {
+                createdAt: "desc"
+              }
+            ],
+            take: 25,
+            select: {
+              rawJson: true,
+              arrivalDate: true,
+              sourcePort: true,
+              destinationCity: true,
+              destinationState: true,
+              originCountry: true,
+              productDescription: true
+            }
+          },
+          apolloCompanyMatches: {
+            orderBy: {
+              createdAt: "desc"
+            },
+            take: 1,
+            select: {
+              classification: true,
+              matchReason: true
+            }
+          }
+        }
+      }
+    }
+  });
+
+  if (!lead) {
+    throw new Error("Lead not found for this tenant.");
+  }
+
+  if (!lead.ownerUserId) {
+    throw new Error("Assign a sales rep before retrying the Apollo company match.");
+  }
+
+  const assignedOwnerUserId = lead.ownerUserId;
+
+  const latestMatch = lead.company.apolloCompanyMatches[0] ?? null;
+  const shipmentContext = buildShipmentDraftContext(lead.company.importRecords);
+  const suggestion = await generateApolloCompanyNameSuggestion({
+    model: await loadTier1DraftModel(context.tenantId),
+    companyName: lead.company.name,
+    companyDomain: lead.company.domain ?? null,
+    latestMatchClassification: latestMatch?.classification ?? null,
+    latestMatchReason: latestMatch?.matchReason ?? null,
+    recurringOrigins: shipmentContext.recurringOrigins,
+    recurringDestinationPorts: shipmentContext.recurringDestinationPorts,
+    recurringProducts: shipmentContext.recurringProducts,
+    recentShipmentHighlights: shipmentContext.recentShipmentHighlights
+  });
+
+  const suggestionTimestamp = new Date().toISOString();
+  const suggestionNotes = appendLeadNote(
+    lead.notes ?? null,
+    `Apollo company suggestion on ${suggestionTimestamp}. Suggested "${suggestion.suggestedCompanyName}" (${suggestion.source}, ${suggestion.confidence.toLowerCase()} confidence). ${suggestion.rationale}`
+  );
+
+  await prisma.lead.update({
+    where: {
+      id: lead.id
+    },
+    data: {
+      notes: suggestionNotes
+    }
+  });
+
+  const existingContacts = await prisma.contact.findMany({
+    where: {
+      tenantId: context.tenantId,
+      companyId: lead.companyId
+    },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      fullName: true,
+      title: true,
+      department: true,
+      seniority: true,
+      email: true,
+      phone: true,
+      linkedinUrl: true,
+      source: true,
+      contactStatus: true,
+      apolloContactId: true,
+      apolloPersonId: true,
+      apolloStatus: true,
+      sequenceStatus: true,
+      replyStatus: true,
+      recommendedSequenceName: true,
+      recommendedSequenceId: true,
+      selectedSequenceName: true,
+      selectedSequenceId: true,
+      sequenceRecommendationReason: true,
+      sequenceOverrideReason: true,
+      sequenceManuallyOverridden: true,
+      lastTouchAt: true,
+      lastReplyAt: true,
+      assignedRep: true,
+      rawJson: true
+    }
+  });
+
+  const lookup = await fetchApolloContactsForCompany({
+    companyName: suggestion.suggestedCompanyName,
+    domain: lead.company.domain,
+    apolloOrganizationId: null
+  });
+
+  await recordApolloCompanyMatch({
+    tenantId: context.tenantId,
+    companyId: lead.companyId,
+    lookup
+  });
+
+  if (lookup.match.classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY) {
     await prisma.lead.update({
       where: {
-        id: leadId
+        id: lead.id
       },
       data: {
-        notes: appendLeadNote(queuedNotes, completionNote)
+        notes: appendLeadNote(
+          suggestionNotes,
+          `Apollo company review needed on ${new Date().toISOString()}. Tried "${suggestion.suggestedCompanyName}". ${lookup.match.matchReason}`
+        )
       }
     });
+
+    revalidateLeadGenSurfaces();
+    return;
   }
+
+  const resolvedNotes = appendLeadNote(
+    suggestionNotes,
+    `Apollo company review resolved on ${new Date().toISOString()}. Retried with "${suggestion.suggestedCompanyName}".`
+  );
+
+  await finalizeApolloEnrichmentForLead({
+    tenantId: context.tenantId,
+    lead: {
+      ...lead,
+      ownerUserId: assignedOwnerUserId
+    },
+    existingContacts,
+    lookup,
+    baseNotes: resolvedNotes
+  });
 
   revalidateLeadGenSurfaces();
 }
@@ -1419,6 +1654,110 @@ async function syncApolloContactsForLead({
   }
 
   return syncedContacts;
+}
+
+async function finalizeApolloEnrichmentForLead({
+  tenantId,
+  lead,
+  existingContacts,
+  lookup,
+  baseNotes
+}: {
+  tenantId: string;
+  lead: {
+    id: string;
+    companyId: string;
+    contactId: string | null;
+    ownerUserId: string;
+    company: {
+      id: string;
+      domain: string | null;
+      linkedinUrl: string | null;
+      apolloOrganizationId: string | null;
+    };
+  };
+  existingContacts: Array<{
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+    fullName: string;
+    title: string | null;
+    department: string | null;
+    seniority: string | null;
+    email: string | null;
+    phone: string | null;
+    linkedinUrl: string | null;
+    source: unknown;
+    contactStatus: ContactStatus;
+    apolloContactId: string | null;
+    apolloPersonId: string | null;
+    apolloStatus: unknown;
+    sequenceStatus: SequenceStatus;
+    replyStatus: ReplyStatus;
+    recommendedSequenceName: string | null;
+    recommendedSequenceId: string | null;
+    selectedSequenceName: string | null;
+    selectedSequenceId: string | null;
+    sequenceRecommendationReason: string | null;
+    sequenceOverrideReason: string | null;
+    sequenceManuallyOverridden: boolean;
+    lastTouchAt: Date | null;
+    lastReplyAt: Date | null;
+    assignedRep: string | null;
+    rawJson: Prisma.JsonValue | null;
+  }>;
+  lookup: ApolloContactLookupResult;
+  baseNotes: string;
+}) {
+  const syncedContacts = await syncApolloContactsForLead({
+    tenantId,
+    leadId: lead.id,
+    companyId: lead.companyId,
+    assignedRep: lead.ownerUserId,
+    existingContacts,
+    lookup
+  });
+
+  await prisma.company.update({
+    where: {
+      id: lead.company.id
+    },
+    data: {
+      apolloOrganizationId: lookup.organizationId ?? lead.company.apolloOrganizationId,
+      domain: lookup.domain ?? lead.company.domain,
+      linkedinUrl: lookup.linkedinUrl ?? lead.company.linkedinUrl
+    }
+  });
+
+  if (!lead.contactId) {
+    const primaryContactId = pickPrimaryApolloContactId(syncedContacts);
+    if (primaryContactId) {
+      await prisma.lead.update({
+        where: {
+          id: lead.id
+        },
+        data: {
+          contactId: primaryContactId
+        }
+      });
+    }
+  }
+
+  const completionNote =
+    syncedContacts.length > 0
+      ? `Apollo enrichment completed on ${new Date().toISOString()}. Imported ${syncedContacts.length} contacts.`
+      : `Apollo enrichment completed with no contacts on ${new Date().toISOString()}.`;
+
+  await prisma.lead.update({
+    where: {
+      id: lead.id
+    },
+    data: {
+      notes: appendLeadNote(baseNotes, completionNote)
+    }
+  });
+
+  return syncedContacts.length;
 }
 
 async function recordApolloCompanyMatch({

@@ -20,9 +20,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
      * tenant. This prevents self-signup: unknown emails are rejected before any
      * session is established.
      */
-    async signIn({ user, profile }) {
+    async signIn({ user, profile, account }) {
       const email = normalizeAuthEmail(user?.email ?? readProfileEmail(profile));
+      logAuthIdentity({
+        email,
+        user,
+        profile,
+        provider: account?.provider ?? null,
+        providerAccountId: account?.providerAccountId ?? null
+      });
+
       if (!email) {
+        console.warn("[auth] Rejected sign-in: no usable email/UPN claim was returned by the identity provider.");
         return false;
       }
 
@@ -86,5 +95,52 @@ function readProfileEmail(profile: unknown) {
   }
 
   const preferredUsername = candidate.preferred_username;
-  return typeof preferredUsername === "string" ? preferredUsername : null;
+  if (typeof preferredUsername === "string") {
+    return preferredUsername;
+  }
+
+  const upn = candidate.upn;
+  if (typeof upn === "string") {
+    return upn;
+  }
+
+  const uniqueName = candidate.unique_name;
+  return typeof uniqueName === "string" ? uniqueName : null;
+}
+
+function logAuthIdentity({
+  email,
+  user,
+  profile,
+  provider,
+  providerAccountId
+}: {
+  email: string | null;
+  user: { email?: string | null; name?: string | null } | undefined;
+  profile: unknown;
+  provider: string | null;
+  providerAccountId: string | null;
+}) {
+  const profileRecord = profile && typeof profile === "object" ? (profile as Record<string, unknown>) : null;
+  const sampledClaims = profileRecord
+    ? {
+        email: typeof profileRecord.email === "string" ? profileRecord.email : null,
+        preferred_username:
+          typeof profileRecord.preferred_username === "string" ? profileRecord.preferred_username : null,
+        upn: typeof profileRecord.upn === "string" ? profileRecord.upn : null,
+        unique_name: typeof profileRecord.unique_name === "string" ? profileRecord.unique_name : null,
+        tid: typeof profileRecord.tid === "string" ? profileRecord.tid : null
+      }
+    : null;
+
+  console.warn(
+    `[auth] Microsoft sign-in attempt: ${JSON.stringify({
+      resolvedEmail: email,
+      userEmail: user?.email ?? null,
+      userName: user?.name ?? null,
+      provider,
+      providerAccountId,
+      sampledClaims
+    })}`
+  );
 }

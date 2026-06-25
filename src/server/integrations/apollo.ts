@@ -624,12 +624,14 @@ function scoreApolloOrganizationCandidate(
 ): ApolloOrganizationCandidate {
   let score = 0;
   let nameMatchType: ApolloOrganizationCandidate["nameMatchType"] = "NONE";
-  const normalizedInputName = normalizeCompanyName(companyName);
-  const inputTokens = tokenizeCompanyName(companyName);
-  const candidateTokens = tokenizeCompanyName(candidate.name ?? "");
-  const tokenSimilarity = calculateTokenSimilarity(inputTokens, candidateTokens);
+  const inputAliases = buildCompanyNameAliases(companyName);
+  const candidateAliases = buildCompanyNameAliases(candidate.name ?? "");
+  const normalizedInputName = inputAliases[0] ?? "";
+  const normalizedCandidateName = candidateAliases[0] ?? "";
+  const tokenSimilarity = calculateBestTokenSimilarity(inputAliases, candidateAliases);
   const logisticsProviderMatch = isLogisticsProviderName(candidate.name ?? "") || isLogisticsProviderName(companyName);
-  const branchLocationMatch = isBranchLocationMatch(candidate.name ?? "", companyName);
+  const strongBaseNameMatch = hasStrongBaseNameMatch(inputAliases, candidateAliases);
+  const branchLocationMatch = isBranchLocationMatch(candidate.name ?? "", companyName) && !strongBaseNameMatch;
 
   if (candidate.id) {
     score += 4;
@@ -641,14 +643,10 @@ function scoreApolloOrganizationCandidate(
   }
 
   if (candidate.name) {
-    const normalizedCandidateName = normalizeCompanyName(candidate.name);
-    if (normalizedCandidateName === normalizedInputName) {
+    if (hasExactAliasMatch(inputAliases, candidateAliases)) {
       nameMatchType = "EXACT";
       score += 8;
-    } else if (
-      normalizedCandidateName.includes(normalizedInputName) ||
-      normalizedInputName.includes(normalizedCandidateName)
-    ) {
+    } else if (hasPartialAliasMatch(inputAliases, candidateAliases)) {
       nameMatchType = "PARTIAL";
       score += 4;
     } else if (tokenSimilarity >= 0.75) {
@@ -921,10 +919,10 @@ function normalizeDomain(value: string | null | undefined) {
 }
 
 function buildCompanyIdentityKey(companyName: string, domain: string | null) {
-  return [normalizeCompanyName(companyName), domain ?? ""].filter(Boolean).join("|");
+  return [buildApolloSearchCompanyName(companyName), domain ?? ""].filter(Boolean).join("|");
 }
 
-function normalizeCompanyName(value: string) {
+export function normalizeCompanyName(value: string) {
   return value
     .toLowerCase()
     .replace(/\b(incorporated|inc|llc|ltd|limited|corp|corporation|co|company|sa|s\.a|plc|gmbh)\b/g, " ")
@@ -932,10 +930,80 @@ function normalizeCompanyName(value: string) {
     .trim();
 }
 
+function buildApolloSearchCompanyName(value: string) {
+  return simplifyCompanySearchName(value) || normalizeCompanyName(value);
+}
+
+function simplifyCompanySearchName(value: string) {
+  return normalizeCompanyName(
+    value
+      .replace(/\bc\/o\b/gi, " ")
+      .replace(/\bcare of\b/gi, " ")
+      .replace(/\battn\b.*$/i, " ")
+      .replace(/\bdba\b.*$/i, " ")
+      .replace(/\bdivision of\b.*$/i, " ")
+      .replace(/\bdept\b.*$/i, " ")
+      .replace(/\bdepartment\b.*$/i, " ")
+      .replace(/\bprocurement\b.*$/i, " ")
+      .replace(/\bimport(?:s)?\b.*$/i, " ")
+      .replace(/\s+-\s+.*$/i, " ")
+      .replace(/\s+\|\s+.*$/i, " ")
+      .replace(/\s+\/\s+.*$/i, " ")
+  );
+}
+
+function buildCompanyNameAliases(value: string) {
+  const aliases = new Set<string>();
+  const normalized = normalizeCompanyName(value);
+  const simplified = simplifyCompanySearchName(value);
+
+  if (normalized) {
+    aliases.add(normalized);
+  }
+
+  if (simplified) {
+    aliases.add(simplified);
+  }
+
+  return [...aliases];
+}
+
+function hasExactAliasMatch(leftAliases: string[], rightAliases: string[]) {
+  return leftAliases.some((left) => rightAliases.some((right) => left.length > 0 && left === right));
+}
+
+function hasPartialAliasMatch(leftAliases: string[], rightAliases: string[]) {
+  return leftAliases.some((left) =>
+    rightAliases.some(
+      (right) =>
+        left.length > 0 &&
+        right.length > 0 &&
+        left !== right &&
+        (left.includes(right) || right.includes(left))
+    )
+  );
+}
+
+function hasStrongBaseNameMatch(leftAliases: string[], rightAliases: string[]) {
+  return hasExactAliasMatch(leftAliases, rightAliases) || calculateBestTokenSimilarity(leftAliases, rightAliases) >= 0.85;
+}
+
 function tokenizeCompanyName(value: string) {
   return normalizeCompanyName(value)
     .split(/\s+/)
     .filter((token) => token.length > 1 && !COMPANY_STOP_WORDS.has(token));
+}
+
+function calculateBestTokenSimilarity(leftAliases: string[], rightAliases: string[]) {
+  let best = 0;
+
+  for (const left of leftAliases) {
+    for (const right of rightAliases) {
+      best = Math.max(best, calculateTokenSimilarity(tokenizeCompanyName(left), tokenizeCompanyName(right)));
+    }
+  }
+
+  return best;
 }
 
 function calculateTokenSimilarity(left: string[], right: string[]) {

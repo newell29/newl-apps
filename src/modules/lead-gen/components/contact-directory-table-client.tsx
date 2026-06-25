@@ -177,7 +177,7 @@ export function ContactDirectoryTableClient({
       {
         accessorKey: "contactStatus",
         header: "Contact status",
-        filterFn: "includesString",
+        filterFn: normalizedEqualsFilter,
         size: 150,
         cell: ({ row }) => <StatusBadge value={row.original.contactStatus} tone={contactStatusTone(row.original.contactStatus)} />
       },
@@ -232,7 +232,7 @@ export function ContactDirectoryTableClient({
       {
         accessorKey: "draftStatus",
         header: "Draft",
-        filterFn: "includesString",
+        filterFn: normalizedIncludesFilter,
         size: 300,
         cell: ({ row }) => {
           const contact = row.original;
@@ -254,21 +254,21 @@ export function ContactDirectoryTableClient({
       {
         accessorKey: "apolloStatus",
         header: "Apollo",
-        filterFn: "includesString",
+        filterFn: normalizedEqualsFilter,
         size: 120,
         cell: ({ row }) => <StatusBadge value={row.original.apolloStatus} tone={apolloStatusTone(row.original.apolloStatus)} />
       },
       {
         accessorKey: "sequenceStatus",
         header: "Sequence",
-        filterFn: "includesString",
+        filterFn: normalizedEqualsFilter,
         size: 120,
         cell: ({ row }) => <StatusBadge value={row.original.sequenceStatus} tone={sequenceStatusTone(row.original.sequenceStatus)} />
       },
       {
         accessorKey: "replyStatus",
         header: "Reply",
-        filterFn: "includesString",
+        filterFn: normalizedEqualsFilter,
         size: 120,
         cell: ({ row }) => <StatusBadge value={row.original.replyStatus} tone={replyStatusTone(row.original.replyStatus)} />
       },
@@ -293,7 +293,7 @@ export function ContactDirectoryTableClient({
       {
         accessorKey: "source",
         header: "Source",
-        filterFn: "includesString",
+        filterFn: normalizedEqualsFilter,
         size: 120,
         cell: ({ row }) => <div className="text-mutedForeground">{formatEnum(row.original.source)}</div>
       },
@@ -883,4 +883,37 @@ function minimumNumberFilter(row: { getValue: (columnId: string) => unknown }, c
   if (Number.isNaN(numericFilter)) return true;
   const value = Number(row.getValue(columnId));
   return !Number.isNaN(value) && value >= numericFilter;
+}
+
+function normalizeFilterToken(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .replaceAll("_", " ")
+    .replaceAll("-", " ")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function normalizedEqualsFilter(row: { getValue: (columnId: string) => unknown }, columnId: string, filterValue: unknown) {
+  const normalizedFilter = normalizeFilterToken(filterValue);
+  if (!normalizedFilter) {
+    return true;
+  }
+
+  const normalizedValue = normalizeFilterToken(row.getValue(columnId));
+  return normalizedValue === normalizedFilter;
+}
+
+function normalizedIncludesFilter(
+  row: { getValue: (columnId: string) => unknown },
+  columnId: string,
+  filterValue: unknown
+) {
+  const normalizedFilter = normalizeFilterToken(filterValue);
+  if (!normalizedFilter) {
+    return true;
+  }
+
+  const normalizedValue = normalizeFilterToken(row.getValue(columnId));
+  return normalizedValue.includes(normalizedFilter);
 }
