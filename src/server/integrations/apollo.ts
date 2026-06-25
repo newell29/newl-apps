@@ -70,6 +70,7 @@ type ApolloOrganizationCandidate = {
   domainMatch: boolean;
   logisticsProviderMatch: boolean;
   branchLocationMatch: boolean;
+  strongBaseNameMatch: boolean;
   classification: ApolloCompanyMatchClassification;
   matchReason: string;
   query: Record<string, unknown>;
@@ -87,6 +88,7 @@ export type ApolloCompanyLookupMatch = {
   domainMatch: boolean;
   logisticsProviderMatch: boolean;
   branchLocationMatch: boolean;
+  strongBaseNameMatch: boolean;
   matchReason: string;
   query: Record<string, unknown>;
   rawPayload: Record<string, unknown> | null;
@@ -271,27 +273,37 @@ function buildApolloHeaders(apiKey: string) {
 
 async function findApolloOrganization(input: ApolloCompanyLookupInput, apiKey: string): Promise<ApolloOrganizationCandidate | null> {
   const normalizedDomain = normalizeDomain(input.domain);
-  const body = {
-    page: 1,
-    per_page: 10,
-    q_organization_domains: normalizedDomain ? [normalizedDomain] : undefined,
-    best_company_name: input.companyName,
-    company_match_name: input.companyName,
-    company_identity_key: buildCompanyIdentityKey(input.companyName, normalizedDomain)
-  };
+  const searchQueries = buildApolloOrganizationSearchQueries(input.companyName);
+  const scoredCandidates: ApolloOrganizationCandidate[] = [];
 
-  const json = await postApolloJson("/api/v1/mixed_companies/search", apiKey, body);
-  const candidates = parseApolloOrganizations(json);
+  for (const searchCompanyName of searchQueries) {
+    const body = {
+      page: 1,
+      per_page: 10,
+      q_organization_domains: normalizedDomain ? [normalizedDomain] : undefined,
+      best_company_name: searchCompanyName,
+      company_match_name: searchCompanyName,
+      company_identity_key: buildCompanyIdentityKey(searchCompanyName, normalizedDomain),
+      original_company_name: input.companyName
+    };
 
-  if (candidates.length === 0) {
+    const json = await postApolloJson("/api/v1/mixed_companies/search", apiKey, body);
+    const candidates = parseApolloOrganizations(json);
+
+    scoredCandidates.push(
+      ...candidates.map((candidate) => scoreApolloOrganizationCandidate(candidate, input.companyName, normalizedDomain, body))
+    );
+
+    if (scoredCandidates.some((candidate) => candidate.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY)) {
+      break;
+    }
+  }
+
+  if (scoredCandidates.length === 0) {
     return null;
   }
 
-  return (
-    candidates
-      .map((candidate) => scoreApolloOrganizationCandidate(candidate, input.companyName, normalizedDomain, body))
-      .sort((left, right) => right.score - left.score)[0] ?? null
-  );
+  return scoredCandidates.sort((left, right) => right.score - left.score)[0] ?? null;
 }
 
 async function searchApolloContacts({
@@ -659,6 +671,10 @@ function scoreApolloOrganizationCandidate(
     score += 1;
   }
 
+  if (strongBaseNameMatch) {
+    score += 4;
+  }
+
   if (logisticsProviderMatch) {
     score -= 8;
   }
@@ -674,6 +690,7 @@ function scoreApolloOrganizationCandidate(
     domainMatch,
     logisticsProviderMatch,
     branchLocationMatch,
+    strongBaseNameMatch,
     tokenSimilarity
   });
 
@@ -684,6 +701,7 @@ function scoreApolloOrganizationCandidate(
     domainMatch,
     logisticsProviderMatch,
     branchLocationMatch,
+    strongBaseNameMatch,
     classification,
     matchReason: buildApolloMatchReason({
       classification,
@@ -692,6 +710,7 @@ function scoreApolloOrganizationCandidate(
       domainMatch,
       logisticsProviderMatch,
       branchLocationMatch,
+      strongBaseNameMatch,
       tokenSimilarity
     }),
     query
@@ -723,6 +742,7 @@ function toApolloCompanyLookupMatch(
       domainMatch: false,
       logisticsProviderMatch: false,
       branchLocationMatch: false,
+      strongBaseNameMatch: false,
       matchReason: "No Apollo organization candidates were returned for this company.",
       query: {
         companyName,
@@ -743,6 +763,7 @@ function toApolloCompanyLookupMatch(
     domainMatch: candidate.domainMatch,
     logisticsProviderMatch: candidate.logisticsProviderMatch,
     branchLocationMatch: candidate.branchLocationMatch,
+    strongBaseNameMatch: candidate.strongBaseNameMatch,
     matchReason: candidate.matchReason,
     query: candidate.query,
     rawPayload: candidate.rawPayload
@@ -756,6 +777,7 @@ function classifyApolloOrganizationCandidate({
   domainMatch,
   logisticsProviderMatch,
   branchLocationMatch,
+  strongBaseNameMatch,
   tokenSimilarity
 }: {
   id: string | null;
@@ -764,6 +786,7 @@ function classifyApolloOrganizationCandidate({
   domainMatch: boolean;
   logisticsProviderMatch: boolean;
   branchLocationMatch: boolean;
+  strongBaseNameMatch: boolean;
   tokenSimilarity: number;
 }) {
   if (!id) {
@@ -790,6 +813,10 @@ function classifyApolloOrganizationCandidate({
     return ApolloCompanyMatchClassification.DIRECT_COMPANY;
   }
 
+  if (strongBaseNameMatch && score >= 8) {
+    return ApolloCompanyMatchClassification.DIRECT_COMPANY;
+  }
+
   return score > 0 ? ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW : ApolloCompanyMatchClassification.NO_MATCH;
 }
 
@@ -800,6 +827,7 @@ function buildApolloMatchReason({
   domainMatch,
   logisticsProviderMatch,
   branchLocationMatch,
+  strongBaseNameMatch,
   tokenSimilarity
 }: {
   classification: ApolloCompanyMatchClassification;
@@ -808,6 +836,7 @@ function buildApolloMatchReason({
   domainMatch: boolean;
   logisticsProviderMatch: boolean;
   branchLocationMatch: boolean;
+  strongBaseNameMatch: boolean;
   tokenSimilarity: number;
 }) {
   const parts = [`${classification.toLowerCase().replaceAll("_", " ")}; score ${score}`];
@@ -830,6 +859,10 @@ function buildApolloMatchReason({
 
   if (branchLocationMatch) {
     parts.push("branch or location wording detected");
+  }
+
+  if (strongBaseNameMatch) {
+    parts.push("strong base-name match");
   }
 
   return parts.join("; ");
@@ -966,6 +999,14 @@ function buildCompanyNameAliases(value: string) {
   return [...aliases];
 }
 
+function buildApolloOrganizationSearchQueries(value: string) {
+  const queries = [value.trim(), simplifyCompanySearchName(value), normalizeCompanyName(value)]
+    .filter((query): query is string => Boolean(query && query.trim().length > 0))
+    .filter((query, index, array) => array.indexOf(query) === index);
+
+  return queries;
+}
+
 function hasExactAliasMatch(leftAliases: string[], rightAliases: string[]) {
   return leftAliases.some((left) => rightAliases.some((right) => left.length > 0 && left === right));
 }
@@ -983,7 +1024,11 @@ function hasPartialAliasMatch(leftAliases: string[], rightAliases: string[]) {
 }
 
 function hasStrongBaseNameMatch(leftAliases: string[], rightAliases: string[]) {
-  return hasExactAliasMatch(leftAliases, rightAliases) || calculateBestTokenSimilarity(leftAliases, rightAliases) >= 0.85;
+  return (
+    hasExactAliasMatch(leftAliases, rightAliases) ||
+    hasContainedLeadingTokenMatch(leftAliases, rightAliases) ||
+    calculateBestTokenSimilarity(leftAliases, rightAliases) >= 0.85
+  );
 }
 
 function tokenizeCompanyName(value: string) {
@@ -1014,6 +1059,23 @@ function calculateTokenSimilarity(left: string[], right: string[]) {
   const shared = [...leftSet].filter((token) => rightSet.has(token)).length;
   const denominator = Math.max(leftSet.size, rightSet.size);
   return shared / denominator;
+}
+
+function hasContainedLeadingTokenMatch(leftAliases: string[], rightAliases: string[]) {
+  return leftAliases.some((leftAlias) =>
+    rightAliases.some((rightAlias) => isLeadingTokenBaseMatch(leftAlias, rightAlias))
+  );
+}
+
+function isLeadingTokenBaseMatch(leftAlias: string, rightAlias: string) {
+  const leftTokens = tokenizeCompanyName(leftAlias);
+  const rightTokens = tokenizeCompanyName(rightAlias);
+
+  if (leftTokens.length < 2 || rightTokens.length <= leftTokens.length) {
+    return false;
+  }
+
+  return leftTokens.every((token, index) => rightTokens[index] === token);
 }
 
 const COMPANY_STOP_WORDS = new Set(["the", "and", "of", "for", "usa", "us", "intl", "international", "group"]);
