@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildAssistantSources, classifyAssistantIntent } from "@/modules/assistant/queries";
+import { buildAssistantManagerSummary, buildAssistantSources, classifyAssistantIntent } from "@/modules/assistant/queries";
 
 describe("classifyAssistantIntent", () => {
   it("routes rate and quote questions to the rate request flow", () => {
@@ -123,5 +123,60 @@ describe("buildAssistantSources", () => {
         title: "ups-tools.bulk-rate-quote"
       }
     ]);
+  });
+});
+
+describe("buildAssistantManagerSummary", () => {
+  it("groups recent memories into compact manager-facing signal buckets", () => {
+    const summary = buildAssistantManagerSummary(
+      [
+        {
+          id: "risk-1",
+          kind: "OPERATIONAL_RISK",
+          subjectType: "MicrosoftGraphIssue",
+          subjectId: "issue-1",
+          title: "Dallas service issue",
+          summary: "Customer reported a delay on a Dallas shipment.",
+          confidence: 74,
+          lastObservedAt: new Date("2026-06-25T10:00:00Z")
+        },
+        {
+          id: "opp-1",
+          kind: "SALES_OPPORTUNITY",
+          subjectType: "MicrosoftGraphOpportunity",
+          subjectId: "opportunity-1",
+          title: "Acme quote request",
+          summary: "Customer asked for new LTL pricing.",
+          confidence: 76,
+          lastObservedAt: new Date("2026-06-25T11:00:00Z")
+        },
+        {
+          id: "customer-1",
+          kind: "CUSTOMER_PROFILE",
+          subjectType: "Company",
+          subjectId: "company-1",
+          title: "Acme company memory",
+          summary: "company Acme, domains acme.com, services ltl, warehousing",
+          confidence: 82,
+          lastObservedAt: new Date("2026-06-25T09:00:00Z")
+        }
+      ],
+      [
+        { kind: "OPERATIONAL_RISK", _count: { _all: 3 } },
+        { kind: "SALES_OPPORTUNITY", _count: { _all: 2 } },
+        { kind: "CUSTOMER_PROFILE", _count: { _all: 5 } },
+        { kind: "SERVICE_CAPABILITY", _count: { _all: 1 } }
+      ]
+    );
+
+    expect(summary.counts).toMatchObject({
+      risks: 3,
+      opportunities: 2,
+      customers: 5,
+      services: 1
+    });
+    expect(summary.topRisks[0]?.title).toBe("Dallas service issue");
+    expect(summary.topOpportunities[0]?.title).toBe("Acme quote request");
+    expect(summary.topCustomers[0]?.title).toBe("Acme company memory");
   });
 });

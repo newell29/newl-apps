@@ -48,6 +48,7 @@ vi.mock("@/server/integrations/apollo", () => ({
 
 import {
   saveAssistantProviderSettingsAction,
+  saveMicrosoftGraphSettingsAction,
   saveApolloRepMappingAction,
   saveApolloSequenceMappingAction,
   saveSearchProfileApolloSequenceMappingAction,
@@ -189,12 +190,43 @@ describe("saveTradeMiningScoringSettingsAction", () => {
     expect(args.data.status).toBe("ACTIVE");
     expect(args.data.publicConfig).toMatchObject({
       liveResponsesEnabled: true,
-      defaultModel: "gpt-5-mini",
-      fallbackModel: "gpt-5-nano",
+      defaultModel: "gpt-5.4-mini",
+      fallbackModel: "gpt-5.4-nano",
       temperature: 0.2,
       maxTokens: 900,
       endpointUrl: null
     });
+    expect(revalidatePath).toHaveBeenCalledWith("/assistant");
+  });
+
+  it("saves tenant-scoped Microsoft Graph integration settings", async () => {
+    const formData = new FormData();
+    formData.set("microsoftClientId", "client-id-1");
+    formData.set("microsoftTenantId", "tenant-id-1");
+    formData.set("microsoftRedirectUri", "https://newl-apps.vercel.app/api/auth/callback/microsoft-entra-id");
+    formData.set("microsoftMailboxAccessMode", "ADMIN_SELECTED_MAILBOXES");
+    formData.set("microsoftAdminMailboxTargets", "shared@newl.ca\nops@newl.ca");
+    formData.set("microsoftMailSyncEnabled", "true");
+    formData.set("microsoftFileSyncEnabled", "true");
+
+    await saveMicrosoftGraphSettingsAction(formData);
+
+    expect(createIntegrationCredential).toHaveBeenCalledTimes(1);
+    const args = createIntegrationCredential.mock.calls[0][0];
+    expect(args.data.tenantId).toBe("tenant-1");
+    expect(args.data.provider).toBe("MICROSOFT_GRAPH");
+    expect(args.data.name).toBe("Microsoft 365 Assistant");
+    expect(args.data.publicConfig).toMatchObject({
+      clientId: "client-id-1",
+      tenantId: "tenant-id-1",
+      redirectUri: "https://newl-apps.vercel.app/api/auth/callback/microsoft-entra-id",
+      adminMailboxTargets: ["shared@newl.ca", "ops@newl.ca"],
+      mailboxAccessMode: "ADMIN_SELECTED_MAILBOXES",
+      mailSyncEnabled: true,
+      fileSyncEnabled: true,
+      draftingEnabled: false
+    });
+    expect(args.data.publicConfig.scopes).toContain("Mail.Read");
     expect(revalidatePath).toHaveBeenCalledWith("/assistant");
   });
 

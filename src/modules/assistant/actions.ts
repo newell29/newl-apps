@@ -15,6 +15,7 @@ import {
   parseAssistantAutomationSchedule
 } from "@/modules/assistant/automations";
 import { syncAssistantKnowledge } from "@/modules/assistant/knowledge";
+import { syncMicrosoftGraphAssistantKnowledge } from "@/modules/assistant/microsoft-graph-sync";
 import {
   executeAssistantAutomation,
   runAssistantPrompt
@@ -171,7 +172,10 @@ export async function syncAssistantKnowledgeAction() {
   await requireModule(context, ModuleKey.ASSISTANT);
   await requireMutationAccess(context);
 
-  await syncAssistantKnowledge(context);
+  const [localKnowledgeResult, microsoftKnowledgeResult] = await Promise.all([
+    syncAssistantKnowledge(context),
+    syncMicrosoftGraphAssistantKnowledge(context)
+  ]);
 
   await prisma.auditLog.create({
     data: {
@@ -181,7 +185,11 @@ export async function syncAssistantKnowledgeAction() {
       entityType: "Tenant",
       entityId: context.tenantId,
       after: {
-        scope: "assistant-knowledge"
+        scope: "assistant-knowledge",
+        localDocumentCount: localKnowledgeResult.documentCount,
+        microsoftDocumentCount: microsoftKnowledgeResult.documentCount,
+        microsoftSkipped: microsoftKnowledgeResult.skipped,
+        microsoftReason: microsoftKnowledgeResult.reason
       } as Prisma.InputJsonValue
     }
   });

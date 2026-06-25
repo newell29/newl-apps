@@ -1,4 +1,5 @@
 import {
+  AssistantMemoryKind,
   AssistantMessageRole,
   AssistantSourceKind,
   IntegrationProvider,
@@ -28,6 +29,13 @@ const ASSISTANT_INTEGRATION_PROVIDERS = [
   IntegrationProvider.WMS
 ];
 
+const MANAGER_SIGNAL_KINDS = [
+  AssistantMemoryKind.OPERATIONAL_RISK,
+  AssistantMemoryKind.SALES_OPPORTUNITY,
+  AssistantMemoryKind.CUSTOMER_PROFILE,
+  AssistantMemoryKind.SERVICE_CAPABILITY
+];
+
 export type AssistantIntent =
   | "RATE_REQUEST"
   | "CUSTOMER_CONTEXT"
@@ -51,6 +59,8 @@ export async function getAssistantWorkspace(
     memoryCount,
     knowledgeCoverage,
     recentMemories,
+    managerSignalCounts,
+    managerSignalMemories,
     personalAutomations,
     automationInbox,
     integrations,
@@ -99,6 +109,38 @@ export async function getAssistantWorkspace(
             title: true
           }
         }
+      }
+    }),
+    prisma.assistantMemory.groupBy({
+      by: ["kind"],
+      where: tenantWhere(tenant, {
+        status: "ACTIVE",
+        kind: {
+          in: MANAGER_SIGNAL_KINDS
+        }
+      }),
+      _count: {
+        _all: true
+      }
+    }),
+    prisma.assistantMemory.findMany({
+      where: tenantWhere(tenant, {
+        status: "ACTIVE",
+        kind: {
+          in: MANAGER_SIGNAL_KINDS
+        }
+      }),
+      orderBy: [{ lastObservedAt: "desc" }, { confidence: "desc" }, { updatedAt: "desc" }],
+      take: 16,
+      select: {
+        id: true,
+        kind: true,
+        subjectType: true,
+        subjectId: true,
+        title: true,
+        summary: true,
+        confidence: true,
+        lastObservedAt: true
       }
     }),
     userId
@@ -339,6 +381,19 @@ export async function getAssistantWorkspace(
       sourceKind: entry.sourceKind,
       count: entry._count._all
     })),
+    managerSummary: buildAssistantManagerSummary(
+      managerSignalMemories.map((memory) => ({
+        id: memory.id,
+        kind: memory.kind,
+        subjectType: memory.subjectType,
+        subjectId: memory.subjectId,
+        title: memory.title,
+        summary: memory.summary,
+        confidence: memory.confidence,
+        lastObservedAt: memory.lastObservedAt
+      })),
+      managerSignalCounts
+    ),
     recentMemories: recentMemories.map((memory) => ({
       id: memory.id,
       kind: memory.kind,
@@ -557,6 +612,80 @@ export function buildAssistantSources(workspace: Awaited<ReturnType<typeof getAs
   return sources;
 }
 
+export function buildAssistantManagerSummary(
+  memories: Array<{
+    id: string;
+    kind: AssistantMemoryKind;
+    subjectType: string;
+    subjectId: string | null;
+    title: string;
+    summary: string;
+    confidence: number;
+    lastObservedAt: Date | null;
+  }>,
+  counts: Array<{
+    kind: AssistantMemoryKind;
+    _count: {
+      _all: number;
+    };
+  }>
+) {
+  const countsByKind = new Map(counts.map((entry) => [entry.kind, entry._count._all]));
+  const topRisks = selectTopManagerSignals(memories, AssistantMemoryKind.OPERATIONAL_RISK, 3);
+  const topOpportunities = selectTopManagerSignals(memories, AssistantMemoryKind.SALES_OPPORTUNITY, 3);
+  const topCustomers = selectTopManagerSignals(memories, AssistantMemoryKind.CUSTOMER_PROFILE, 3);
+  const topServices = selectTopManagerSignals(memories, AssistantMemoryKind.SERVICE_CAPABILITY, 3);
+
+  return {
+    counts: {
+      risks: countsByKind.get(AssistantMemoryKind.OPERATIONAL_RISK) ?? 0,
+      opportunities: countsByKind.get(AssistantMemoryKind.SALES_OPPORTUNITY) ?? 0,
+      customers: countsByKind.get(AssistantMemoryKind.CUSTOMER_PROFILE) ?? 0,
+      services: countsByKind.get(AssistantMemoryKind.SERVICE_CAPABILITY) ?? 0
+    },
+    topRisks,
+    topOpportunities,
+    topCustomers,
+    topServices
+  };
+}
+
+function selectTopManagerSignals(
+  memories: Array<{
+    id: string;
+    kind: AssistantMemoryKind;
+    subjectType: string;
+    subjectId: string | null;
+    title: string;
+    summary: string;
+    confidence: number;
+    lastObservedAt: Date | null;
+  }>,
+  kind: AssistantMemoryKind,
+  take: number
+) {
+  return memories
+    .filter((memory) => memory.kind === kind)
+    .sort((left, right) => {
+      const leftTime = left.lastObservedAt?.getTime() ?? 0;
+      const rightTime = right.lastObservedAt?.getTime() ?? 0;
+      if (rightTime !== leftTime) {
+        return rightTime - leftTime;
+      }
+      return right.confidence - left.confidence;
+    })
+    .slice(0, take)
+    .map((memory) => ({
+      id: memory.id,
+      title: memory.title,
+      summary: memory.summary,
+      confidence: memory.confidence,
+      subjectType: memory.subjectType,
+      subjectId: memory.subjectId,
+      lastObservedAt: memory.lastObservedAt
+    }));
+}
+
 export function formatAssistantRole(role: AssistantMessageRole) {
   if (role === AssistantMessageRole.USER) return "You";
   if (role === AssistantMessageRole.ASSISTANT) return "Assistant";
@@ -613,8 +742,8 @@ function buildDeterministicAnswer(
   switch (intent) {
     case "RATE_REQUEST":
       return [
-        "Rate requests should be routed through the assistant as a structured collection flow: origin, destination, package or pallet details, service level, accessorials, and account/customer context.",
-        `Today it can see ${context.rateJobCount} recent UPS/LTL quote job(s) and should hand off to UPS Tools or the LTL Rate Portal until live tool-calling is added.`
+        "Rate requests should be routed through the assistant as a structured collection flow: origin, destination, ZIP or postal codes, package or pallet details, service level, accessorials, and account context.",
+        `Today it can see ${context.rateJobCount} recent UPS/LTL quote job(s). Complete LTL shipment details can now be handed to the tenant's 7L configuration for live quoting.`
       ];
     case "CUSTOMER_CONTEXT":
       return [

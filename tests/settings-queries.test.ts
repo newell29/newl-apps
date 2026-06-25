@@ -6,6 +6,10 @@ const findModuleAccess = vi.fn();
 const findCredentials = vi.fn();
 const findTradeMiningScoringConfig = vi.fn();
 const findTradeMiningSearchProfiles = vi.fn();
+const findMicrosoftAccount = vi.fn();
+const findMemberships = vi.fn();
+const findRoleModuleAccess = vi.fn();
+const findRolePolicies = vi.fn();
 const getLocalUpsAccountMetadata = vi.fn();
 const getLocalSevenLAccountNames = vi.fn();
 
@@ -16,6 +20,18 @@ vi.mock("@/server/db", () => ({
     },
     integrationCredential: {
       findMany: (...args: unknown[]) => findCredentials(...args)
+    },
+    account: {
+      findFirst: (...args: unknown[]) => findMicrosoftAccount(...args)
+    },
+    membership: {
+      findMany: (...args: unknown[]) => findMemberships(...args)
+    },
+    tenantRoleModuleAccess: {
+      findMany: (...args: unknown[]) => findRoleModuleAccess(...args)
+    },
+    tenantRolePolicy: {
+      findMany: (...args: unknown[]) => findRolePolicies(...args)
     },
     tradeMiningSearchProfile: {
       findMany: (...args: unknown[]) => findTradeMiningSearchProfiles(...args)
@@ -42,6 +58,11 @@ const tenant: TenantContext = {
   tenantName: "Tenant 7L"
 };
 
+const tenantWithUser = {
+  ...tenant,
+  userId: "user-1"
+};
+
 describe("getSettingsShell 7L contract", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -50,6 +71,10 @@ describe("getSettingsShell 7L contract", () => {
     getLocalSevenLAccountNames.mockResolvedValue(new Set());
     findTradeMiningScoringConfig.mockResolvedValue(null);
     findTradeMiningSearchProfiles.mockResolvedValue([]);
+    findMicrosoftAccount.mockResolvedValue(null);
+    findMemberships.mockResolvedValue([]);
+    findRoleModuleAccess.mockResolvedValue([]);
+    findRolePolicies.mockResolvedValue([]);
   });
 
   it("keeps imported 7L carriers tenant-scoped and preserves selection/default flags", async () => {
@@ -106,7 +131,10 @@ describe("getSettingsShell 7L contract", () => {
             IntegrationProvider.UPS,
             IntegrationProvider.SEVEN_L,
             IntegrationProvider.OPENCLAW,
-            IntegrationProvider.APOLLO
+            IntegrationProvider.APOLLO,
+            IntegrationProvider.MICROSOFT_GRAPH,
+            IntegrationProvider.OPENAI,
+            IntegrationProvider.LOCAL_LLM
           ]
         }
       },
@@ -141,6 +169,55 @@ describe("getSettingsShell 7L contract", () => {
       }
     ]);
     expect(settings.tradeMiningScoring.recentWindowDays).toBe(30);
+  });
+
+  it("maps tenant-scoped Microsoft Graph settings for delegated assistant access", async () => {
+    findCredentials.mockResolvedValue([
+      {
+        id: "cred-graph",
+        provider: IntegrationProvider.MICROSOFT_GRAPH,
+        name: "Microsoft 365 Assistant",
+        status: IntegrationStatus.ACTIVE,
+        secretRef: null,
+        publicConfig: {
+          clientId: "client-id-1",
+          tenantId: "tenant-id-1",
+          redirectUri: "https://newl-apps.vercel.app/api/auth/callback/microsoft-entra-id",
+          scopes: ["User.Read", "offline_access", "Mail.Read", "Files.Read.All", "Sites.Read.All"],
+          adminMailboxTargets: ["shared@newl.ca", "ops@newl.ca"],
+          mailboxAccessMode: "SIGNED_IN_USER",
+          mailSyncEnabled: true,
+          fileSyncEnabled: true,
+          draftingEnabled: false
+        }
+      }
+    ]);
+    findMicrosoftAccount.mockResolvedValue({
+      access_token: "access-token",
+      refresh_token: "refresh-token",
+      expires_at: 1_786_090_000,
+      scope: "openid profile email offline_access User.Read Mail.Read Files.Read.All Sites.Read.All"
+    });
+
+    const settings = await getSettingsShell(tenantWithUser);
+
+    expect(settings.microsoftGraph).toMatchObject({
+      clientId: "client-id-1",
+      tenantId: "tenant-id-1",
+      redirectUri: "https://newl-apps.vercel.app/api/auth/callback/microsoft-entra-id",
+      adminMailboxTargets: ["shared@newl.ca", "ops@newl.ca"],
+      mailboxAccessMode: "SIGNED_IN_USER",
+      mailSyncEnabled: true,
+      fileSyncEnabled: true,
+      draftingEnabled: false,
+      consentConfigured: true,
+      runtimeReady: true
+    });
+    expect(settings.microsoftGraph.scopes).toContain("Mail.Read");
+    expect(settings.microsoftGraphUserConnection).toMatchObject({
+      connected: true,
+      hasRefreshToken: true
+    });
   });
 
   it("does not require or expose raw 7L secrets in the settings client payload", async () => {

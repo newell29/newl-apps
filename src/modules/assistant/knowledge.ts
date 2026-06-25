@@ -28,6 +28,17 @@ type AssistantRetrievedKnowledgeSource = {
   metadata?: Record<string, unknown>;
 };
 
+export type AssistantKnowledgeDocumentInput = {
+  sourceKind: AssistantSourceKind;
+  sourceSystem: string;
+  externalId: string;
+  title: string;
+  canonicalUrl?: string | null;
+  sourceUpdatedAt?: Date | null;
+  metadata?: Record<string, unknown>;
+  content: string;
+};
+
 export async function syncAssistantKnowledge(tenant: TenantContext) {
   const [companies, contacts, leads, tradeMiningRecords, rateJobs] = await Promise.all([
     prisma.company.findMany({
@@ -306,64 +317,8 @@ export async function syncAssistantKnowledge(tenant: TenantContext) {
     })
   ];
 
-  const now = new Date();
-
   await prisma.$transaction(async (tx) => {
-    for (const document of documents) {
-      const record = await tx.assistantKnowledgeDocument.upsert({
-        where: {
-          tenantId_sourceSystem_externalId: {
-            tenantId: tenant.tenantId,
-            sourceSystem: document.sourceSystem,
-            externalId: document.externalId
-          }
-        },
-        create: {
-          tenantId: tenant.tenantId,
-          sourceKind: document.sourceKind,
-          sourceSystem: document.sourceSystem,
-          externalId: document.externalId,
-          title: document.title,
-          contentHash: hashContent(document.content),
-          sourceUpdatedAt: document.sourceUpdatedAt,
-          indexedAt: now,
-          metadata: document.metadata as Prisma.InputJsonValue
-        },
-        update: {
-          sourceKind: document.sourceKind,
-          title: document.title,
-          contentHash: hashContent(document.content),
-          sourceUpdatedAt: document.sourceUpdatedAt,
-          indexedAt: now,
-          metadata: document.metadata as Prisma.InputJsonValue
-        },
-        select: {
-          id: true
-        }
-      });
-
-      await tx.assistantKnowledgeChunk.deleteMany({
-        where: {
-          tenantId: tenant.tenantId,
-          documentId: record.id
-        }
-      });
-
-      const chunks = createKnowledgeChunks(document.content);
-      if (chunks.length > 0) {
-        await tx.assistantKnowledgeChunk.createMany({
-          data: chunks.map((chunk, index) => ({
-            tenantId: tenant.tenantId,
-            documentId: record.id,
-            chunkIndex: index,
-            contentText: chunk,
-            contentSummary: summarizeChunk(chunk),
-            tokenCount: estimateTokenCount(chunk),
-            metadata: document.metadata as Prisma.InputJsonValue
-          }))
-        });
-      }
-    }
+    await persistAssistantKnowledgeDocuments(tx, tenant, documents);
 
     await tx.assistantMemory.deleteMany({
       where: {
@@ -476,6 +431,87 @@ export async function syncAssistantKnowledge(tenant: TenantContext) {
   return {
     documentCount: documents.length
   };
+}
+
+export async function persistAssistantKnowledgeDocuments(
+  tx: Prisma.TransactionClient,
+  tenant: TenantContext,
+  documents: AssistantKnowledgeDocumentInput[]
+) {
+  const now = new Date();
+  const persistedRecords: Array<{
+    id: string;
+    sourceSystem: string;
+    externalId: string;
+    title: string;
+  }> = [];
+
+  for (const document of documents) {
+    const record = await tx.assistantKnowledgeDocument.upsert({
+      where: {
+        tenantId_sourceSystem_externalId: {
+          tenantId: tenant.tenantId,
+          sourceSystem: document.sourceSystem,
+          externalId: document.externalId
+        }
+      },
+      create: {
+        tenantId: tenant.tenantId,
+        sourceKind: document.sourceKind,
+        sourceSystem: document.sourceSystem,
+        externalId: document.externalId,
+        title: document.title,
+        canonicalUrl: document.canonicalUrl ?? null,
+        contentHash: hashContent(document.content),
+        sourceUpdatedAt: document.sourceUpdatedAt ?? null,
+        indexedAt: now,
+        metadata: (document.metadata ?? null) as Prisma.InputJsonValue
+      },
+      update: {
+        sourceKind: document.sourceKind,
+        title: document.title,
+        canonicalUrl: document.canonicalUrl ?? null,
+        contentHash: hashContent(document.content),
+        sourceUpdatedAt: document.sourceUpdatedAt ?? null,
+        indexedAt: now,
+        metadata: (document.metadata ?? null) as Prisma.InputJsonValue
+      },
+      select: {
+        id: true
+      }
+    });
+
+    await tx.assistantKnowledgeChunk.deleteMany({
+      where: {
+        tenantId: tenant.tenantId,
+        documentId: record.id
+      }
+    });
+
+    const chunks = createKnowledgeChunks(document.content);
+    if (chunks.length > 0) {
+      await tx.assistantKnowledgeChunk.createMany({
+        data: chunks.map((chunk, index) => ({
+          tenantId: tenant.tenantId,
+          documentId: record.id,
+          chunkIndex: index,
+          contentText: chunk,
+          contentSummary: summarizeChunk(chunk),
+          tokenCount: estimateTokenCount(chunk),
+          metadata: (document.metadata ?? null) as Prisma.InputJsonValue
+        }))
+      });
+    }
+
+    persistedRecords.push({
+      id: record.id,
+      sourceSystem: document.sourceSystem,
+      externalId: document.externalId,
+      title: document.title
+    });
+  }
+
+  return persistedRecords;
 }
 
 export async function searchAssistantKnowledge(
