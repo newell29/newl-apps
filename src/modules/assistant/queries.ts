@@ -52,6 +52,7 @@ export async function getAssistantWorkspace(
     knowledgeCoverage,
     recentMemories,
     personalAutomations,
+    automationInbox,
     integrations,
     topCompanies,
     openLeads,
@@ -130,6 +131,29 @@ export async function getAssistantWorkspace(
                 sourceCount: true,
                 startedAt: true,
                 finishedAt: true
+              }
+            }
+          }
+        })
+      : Promise.resolve([]),
+    userId
+      ? prisma.assistantAutomationRun.findMany({
+          where: tenantWhere(tenant, {
+            userId
+          }),
+          orderBy: [{ startedAt: "desc" }, { createdAt: "desc" }],
+          take: 8,
+          select: {
+            id: true,
+            status: true,
+            responseText: true,
+            sourceCount: true,
+            startedAt: true,
+            finishedAt: true,
+            automation: {
+              select: {
+                id: true,
+                name: true
               }
             }
           }
@@ -356,6 +380,18 @@ export async function getAssistantWorkspace(
         startedAt: run.startedAt,
         finishedAt: run.finishedAt
       }))
+    })),
+    automationInbox: automationInbox.map((run) => ({
+      id: run.id,
+      status: run.status,
+      responseText: run.responseText,
+      sourceCount: run.sourceCount,
+      startedAt: run.startedAt,
+      finishedAt: run.finishedAt,
+      automation: {
+        id: run.automation.id,
+        name: run.automation.name
+      }
     })),
     integrations: ASSISTANT_INTEGRATION_PROVIDERS.map((provider) => {
       const matching = integrations.filter((integration) => integration.provider === provider);

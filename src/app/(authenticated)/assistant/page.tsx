@@ -199,6 +199,36 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
           ) : null}
 
           <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+            <div>
+              <h2 className="text-base font-semibold text-foreground">Automation inbox</h2>
+              <p className="mt-1 text-sm leading-6 text-mutedForeground">
+                Latest results from your personal saved agents.
+              </p>
+            </div>
+            <div className="mt-4 space-y-3">
+              {workspace.automationInbox.slice(0, 5).map((run: AssistantWorkspace["automationInbox"][number]) => (
+                <div key={run.id} className="rounded-md border border-border bg-muted/20 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">{run.automation.name}</p>
+                      <p className="mt-1 text-xs text-mutedForeground">
+                        {formatEnum(run.status)}{run.startedAt ? ` | ${formatDate(run.startedAt)}` : ""}
+                      </p>
+                    </div>
+                    <span className="text-xs text-mutedForeground">{run.sourceCount} sources</span>
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-foreground">{truncate(run.responseText, 160)}</p>
+                </div>
+              ))}
+              {workspace.automationInbox.length === 0 ? (
+                <p className="rounded-md border border-border bg-muted/20 p-4 text-sm text-mutedForeground">
+                  No personal agent runs yet. Run one manually or wait for the first scheduled summary.
+                </p>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
             <h2 className="text-base font-semibold text-foreground">Quick view</h2>
             <div className="mt-4 grid grid-cols-2 gap-3">
               <Metric label="Companies" value={workspace.stats.companyCount} compact />
