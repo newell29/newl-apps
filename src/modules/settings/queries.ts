@@ -39,6 +39,10 @@ import {
   isAssistantProvider,
   parseAssistantProviderSettings
 } from "@/server/integrations/assistant-provider";
+import {
+  MICROSOFT_GRAPH_CREDENTIAL_NAME,
+  parseMicrosoftGraphSettings
+} from "@/server/integrations/microsoft-graph";
 
 type SettingsUpsAccount = UpsAccountConfig & {
   toolTargets: QuoteToolTarget[];
@@ -163,6 +167,7 @@ export async function getSettingsShell(tenant: TenantContext) {
             IntegrationProvider.SEVEN_L,
             IntegrationProvider.OPENCLAW,
             IntegrationProvider.APOLLO,
+            IntegrationProvider.MICROSOFT_GRAPH,
             IntegrationProvider.OPENAI,
             IntegrationProvider.LOCAL_LLM
           ]
@@ -239,6 +244,11 @@ export async function getSettingsShell(tenant: TenantContext) {
       isAssistantProvider(credential.provider)
   );
   const apolloCredential = typedIntegrationCredentials.find((credential) => credential.provider === IntegrationProvider.APOLLO);
+  const microsoftGraphCredential = typedIntegrationCredentials.find(
+    (credential) =>
+      credential.provider === IntegrationProvider.MICROSOFT_GRAPH &&
+      credential.name === MICROSOFT_GRAPH_CREDENTIAL_NAME
+  );
   const upsAccounts = typedIntegrationCredentials
     .filter((credential) => credential.provider === IntegrationProvider.UPS)
     .map((credential) => mapUpsAccount(credential))
@@ -290,6 +300,7 @@ export async function getSettingsShell(tenant: TenantContext) {
       overrides: roleModuleOverrides
     }),
     assistantProvider: parseAssistantProviderSettings(assistantCredential as IntegrationCredentialRecord | null),
+    microsoftGraph: parseMicrosoftGraphSettings(microsoftGraphCredential as IntegrationCredentialRecord | null),
     integrationProviders: Object.values(IntegrationProvider),
     quoteSources: managedQuoteSources,
     upsAccounts: mergeUpsAccountsForSettings(upsAccounts, localUpsAccounts),

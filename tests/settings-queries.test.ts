@@ -6,6 +6,9 @@ const findModuleAccess = vi.fn();
 const findCredentials = vi.fn();
 const findTradeMiningScoringConfig = vi.fn();
 const findTradeMiningSearchProfiles = vi.fn();
+const findMemberships = vi.fn();
+const findRoleModuleAccess = vi.fn();
+const findRolePolicies = vi.fn();
 const getLocalUpsAccountMetadata = vi.fn();
 const getLocalSevenLAccountNames = vi.fn();
 
@@ -16,6 +19,15 @@ vi.mock("@/server/db", () => ({
     },
     integrationCredential: {
       findMany: (...args: unknown[]) => findCredentials(...args)
+    },
+    membership: {
+      findMany: (...args: unknown[]) => findMemberships(...args)
+    },
+    tenantRoleModuleAccess: {
+      findMany: (...args: unknown[]) => findRoleModuleAccess(...args)
+    },
+    tenantRolePolicy: {
+      findMany: (...args: unknown[]) => findRolePolicies(...args)
     },
     tradeMiningSearchProfile: {
       findMany: (...args: unknown[]) => findTradeMiningSearchProfiles(...args)
@@ -50,6 +62,9 @@ describe("getSettingsShell 7L contract", () => {
     getLocalSevenLAccountNames.mockResolvedValue(new Set());
     findTradeMiningScoringConfig.mockResolvedValue(null);
     findTradeMiningSearchProfiles.mockResolvedValue([]);
+    findMemberships.mockResolvedValue([]);
+    findRoleModuleAccess.mockResolvedValue([]);
+    findRolePolicies.mockResolvedValue([]);
   });
 
   it("keeps imported 7L carriers tenant-scoped and preserves selection/default flags", async () => {
@@ -106,7 +121,10 @@ describe("getSettingsShell 7L contract", () => {
             IntegrationProvider.UPS,
             IntegrationProvider.SEVEN_L,
             IntegrationProvider.OPENCLAW,
-            IntegrationProvider.APOLLO
+            IntegrationProvider.APOLLO,
+            IntegrationProvider.MICROSOFT_GRAPH,
+            IntegrationProvider.OPENAI,
+            IntegrationProvider.LOCAL_LLM
           ]
         }
       },
@@ -141,6 +159,43 @@ describe("getSettingsShell 7L contract", () => {
       }
     ]);
     expect(settings.tradeMiningScoring.recentWindowDays).toBe(30);
+  });
+
+  it("maps tenant-scoped Microsoft Graph settings for delegated assistant access", async () => {
+    findCredentials.mockResolvedValue([
+      {
+        id: "cred-graph",
+        provider: IntegrationProvider.MICROSOFT_GRAPH,
+        name: "Microsoft 365 Assistant",
+        status: IntegrationStatus.ACTIVE,
+        secretRef: null,
+        publicConfig: {
+          clientId: "client-id-1",
+          tenantId: "tenant-id-1",
+          redirectUri: "https://newl-apps.vercel.app/api/auth/callback/microsoft-entra-id",
+          scopes: ["User.Read", "offline_access", "Mail.Read", "Files.Read.All", "Sites.Read.All"],
+          mailboxAccessMode: "SIGNED_IN_USER",
+          mailSyncEnabled: true,
+          fileSyncEnabled: true,
+          draftingEnabled: false
+        }
+      }
+    ]);
+
+    const settings = await getSettingsShell(tenant);
+
+    expect(settings.microsoftGraph).toMatchObject({
+      clientId: "client-id-1",
+      tenantId: "tenant-id-1",
+      redirectUri: "https://newl-apps.vercel.app/api/auth/callback/microsoft-entra-id",
+      mailboxAccessMode: "SIGNED_IN_USER",
+      mailSyncEnabled: true,
+      fileSyncEnabled: true,
+      draftingEnabled: false,
+      consentConfigured: true,
+      runtimeReady: true
+    });
+    expect(settings.microsoftGraph.scopes).toContain("Mail.Read");
   });
 
   it("does not require or expose raw 7L secrets in the settings client payload", async () => {

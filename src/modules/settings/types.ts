@@ -159,6 +159,24 @@ export type AssistantProviderSettings = {
   runtimeNotes: string;
 };
 
+export type MicrosoftGraphMailboxAccessMode = "SIGNED_IN_USER" | "ADMIN_SELECTED_MAILBOXES";
+
+export type MicrosoftGraphSettings = {
+  clientId: string | null;
+  tenantId: string | null;
+  redirectUri: string | null;
+  scopes: string[];
+  mailboxAccessMode: MicrosoftGraphMailboxAccessMode;
+  mailSyncEnabled: boolean;
+  fileSyncEnabled: boolean;
+  draftingEnabled: boolean;
+  status: IntegrationStatus;
+  runtimeReady: boolean;
+  runtimeNotes: string;
+  consentConfigured: boolean;
+  crossMailboxReady: boolean;
+};
+
 export const DEFAULT_TRADEMINING_SCORING_SETTINGS: TradeMiningScoringSettings = {
   recentWindowDays: 30,
   comparisonWindowDays: 30,

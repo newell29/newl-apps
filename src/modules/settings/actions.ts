@@ -34,6 +34,11 @@ import {
   buildAssistantProviderConfig,
   isAssistantProvider
 } from "@/server/integrations/assistant-provider";
+import {
+  buildMicrosoftGraphConfig,
+  DEFAULT_MICROSOFT_GRAPH_SCOPES,
+  MICROSOFT_GRAPH_CREDENTIAL_NAME
+} from "@/server/integrations/microsoft-graph";
 
 type TradeMiningScoringConfigMutationClient = typeof prisma & {
   tradeMiningScoringConfig?: {
@@ -422,6 +427,65 @@ export async function saveAssistantProviderSettingsAction(formData: FormData) {
       temperature,
       maxTokens,
       endpointUrl
+    })
+  };
+
+  if (existing) {
+    await prisma.integrationCredential.update({
+      where: {
+        id: existing.id
+      },
+      data
+    });
+  } else {
+    await prisma.integrationCredential.create({
+      data
+    });
+  }
+
+  revalidateSettingsSurfaces();
+  revalidatePath("/assistant");
+}
+
+export async function saveMicrosoftGraphSettingsAction(formData: FormData) {
+  const context = await authorizeSettingsMutation();
+  const clientId = readOptional(formData, "microsoftClientId") ?? null;
+  const tenantId = readOptional(formData, "microsoftTenantId") ?? null;
+  const redirectUri = readOptional(formData, "microsoftRedirectUri") ?? null;
+  const mailboxAccessMode = readMicrosoftMailboxAccessMode(formData.get("microsoftMailboxAccessMode"));
+  const mailSyncEnabled = formData.get("microsoftMailSyncEnabled") === "true";
+  const fileSyncEnabled = formData.get("microsoftFileSyncEnabled") === "true";
+  const draftingEnabled = formData.get("microsoftDraftingEnabled") === "true";
+
+  if (!mailSyncEnabled && !fileSyncEnabled) {
+    throw new Error("Enable at least one Microsoft 365 sync source.");
+  }
+
+  const existing = await prisma.integrationCredential.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      provider: IntegrationProvider.MICROSOFT_GRAPH,
+      name: MICROSOFT_GRAPH_CREDENTIAL_NAME
+    },
+    select: {
+      id: true
+    }
+  });
+
+  const data = {
+    tenantId: context.tenantId,
+    provider: IntegrationProvider.MICROSOFT_GRAPH,
+    name: MICROSOFT_GRAPH_CREDENTIAL_NAME,
+    status: mailSyncEnabled || fileSyncEnabled ? IntegrationStatus.ACTIVE : IntegrationStatus.DISABLED,
+    publicConfig: buildMicrosoftGraphConfig({
+      clientId,
+      tenantId,
+      redirectUri,
+      scopes: DEFAULT_MICROSOFT_GRAPH_SCOPES,
+      mailboxAccessMode,
+      mailSyncEnabled,
+      fileSyncEnabled,
+      draftingEnabled
     })
   };
 
@@ -1041,6 +1105,14 @@ function readToolTargets(formData: FormData): QuoteToolTarget[] {
   }
 
   return targets;
+}
+
+function readMicrosoftMailboxAccessMode(value: FormDataEntryValue | null) {
+  if (value === "ADMIN_SELECTED_MAILBOXES") {
+    return "ADMIN_SELECTED_MAILBOXES" as const;
+  }
+
+  return "SIGNED_IN_USER" as const;
 }
 
 function isMissingTradeMiningScoringSchemaError(error: unknown) {
