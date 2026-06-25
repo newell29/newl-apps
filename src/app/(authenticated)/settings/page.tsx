@@ -7,6 +7,7 @@ import {
   createCarrierPlaceholderAction,
   createUpsQuoteSourceAction,
   removeTenantUserAccessAction,
+  saveAssistantProviderSettingsAction,
   saveApolloRepMappingAction,
   saveApolloSequenceMappingAction,
   saveRoleModuleAccessAction,
@@ -48,6 +49,7 @@ export default async function SettingsPage() {
           <div className="flex flex-wrap gap-2">
             {[
               { href: "#platform-controls", label: "Platform controls" },
+              { href: "#assistant-ai", label: "Assistant AI" },
               { href: "#user-access", label: "User access" },
               { href: "#lead-generation-settings", label: "Lead generation" },
               { href: "#quote-tools-settings", label: "Quote tools" }
@@ -107,6 +109,119 @@ export default async function SettingsPage() {
             ))}
           </div>
         </div>
+      </section>
+
+      <section id="assistant-ai" className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Assistant AI</h2>
+            <p className="mt-1 text-sm leading-6 text-mutedForeground">
+              Configure the tenant-scoped assistant provider path. OpenAI is the interim low-cost option. A Newl-hosted local model is the long-term target.
+            </p>
+          </div>
+          <span
+            className={[
+              "rounded-full px-2.5 py-1 text-xs font-semibold",
+              settings.assistantProvider.liveResponsesEnabled
+                ? "border border-success/25 bg-success/10 text-success"
+                : "border border-border bg-background text-mutedForeground"
+            ].join(" ")}
+          >
+            {settings.assistantProvider.liveResponsesEnabled ? "Live replies enabled" : "Deterministic fallback"}
+          </span>
+        </div>
+
+        <form action={saveAssistantProviderSettingsAction} className="mt-4 space-y-4">
+          <div className="grid gap-4 xl:grid-cols-2">
+            <SelectField
+              label="Assistant provider"
+              name="assistantProvider"
+              defaultValue={settings.assistantProvider.provider}
+              options={[
+                { value: "OPENAI", label: "OpenAI" },
+                { value: "LOCAL_LLM", label: "Local LLM" }
+              ]}
+            />
+            <OptionalField
+              label="Local endpoint URL"
+              name="assistantEndpointUrl"
+              defaultValue={settings.assistantProvider.endpointUrl ?? ""}
+              placeholder="http://assistant-internal:8000/v1"
+              info="Used for the long-term local model path. Leave blank when OpenAI is active."
+            />
+            <Field
+              label="Default model"
+              name="assistantDefaultModel"
+              defaultValue={settings.assistantProvider.defaultModel}
+              placeholder="gpt-5-mini"
+            />
+            <OptionalField
+              label="Fallback model"
+              name="assistantFallbackModel"
+              defaultValue={settings.assistantProvider.fallbackModel ?? ""}
+              placeholder="gpt-5-nano"
+              info="Used when the default model request fails."
+            />
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground" htmlFor="assistantTemperature">
+                Temperature
+              </label>
+              <input
+                id="assistantTemperature"
+                name="assistantTemperature"
+                type="number"
+                step="0.1"
+                min="0"
+                max="2"
+                defaultValue={settings.assistantProvider.temperature}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+              />
+              <p className="text-xs leading-5 text-mutedForeground">
+                Lower values keep answers more controlled. Start conservative for an internal operations assistant.
+              </p>
+            </div>
+            <NumberField
+              label="Max tokens"
+              name="assistantMaxTokens"
+              defaultValue={settings.assistantProvider.maxTokens}
+              min={100}
+              max={4000}
+              info="Caps reply size and cost."
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-4 rounded-md border border-border bg-background p-4">
+            <div>
+              <p className="text-sm font-medium text-foreground">Live assistant replies</p>
+              <p className="mt-1 text-xs leading-5 text-mutedForeground">
+                When off, the assistant stays on deterministic app-data fallback even if a provider is configured.
+              </p>
+            </div>
+            <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+              <input
+                type="checkbox"
+                name="assistantLiveResponsesEnabled"
+                value="true"
+                defaultChecked={settings.assistantProvider.liveResponsesEnabled}
+              />
+              <span>Enable live replies</span>
+            </label>
+          </div>
+
+          <div className="rounded-md border border-border bg-muted/30 p-4">
+            <p className="text-sm font-medium text-foreground">Runtime status</p>
+            <p className="mt-2 text-sm text-mutedForeground">{settings.assistantProvider.runtimeNotes}</p>
+            <p className="mt-2 text-xs text-mutedForeground">
+              {settings.assistantProvider.runtimeReady
+                ? "Runtime prerequisites look present for the selected provider."
+                : "Runtime prerequisites are incomplete for the selected provider."}
+            </p>
+          </div>
+
+          <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
+            Save assistant settings
+          </button>
+        </form>
       </section>
 
       <section id="user-access" className="space-y-3">
@@ -1222,10 +1337,12 @@ export default async function SettingsPage() {
 function Field({
   label,
   name,
+  defaultValue,
   placeholder
 }: {
   label: string;
   name: string;
+  defaultValue?: string;
   placeholder?: string;
 }) {
   return (
@@ -1234,6 +1351,7 @@ function Field({
       <input
         required
         name={name}
+        defaultValue={defaultValue}
         placeholder={placeholder}
         className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
       />
@@ -1613,10 +1731,12 @@ function buildApolloRepRows(
 function SelectField({
   label,
   name,
+  defaultValue,
   options
 }: {
   label: string;
   name: string;
+  defaultValue?: string;
   options: Array<{ value: string; label: string }>;
 }) {
   return (
@@ -1625,6 +1745,7 @@ function SelectField({
       <select
         required
         name={name}
+        defaultValue={defaultValue}
         className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
       >
         {options.map((option) => (

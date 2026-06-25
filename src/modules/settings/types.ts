@@ -146,6 +146,19 @@ export type RoleAccessMatrixEntry = {
   }>;
 };
 
+export type AssistantProviderSettings = {
+  provider: "OPENAI" | "LOCAL_LLM";
+  liveResponsesEnabled: boolean;
+  defaultModel: string;
+  fallbackModel: string | null;
+  temperature: number;
+  maxTokens: number;
+  endpointUrl: string | null;
+  status: IntegrationStatus;
+  runtimeReady: boolean;
+  runtimeNotes: string;
+};
+
 export const DEFAULT_TRADEMINING_SCORING_SETTINGS: TradeMiningScoringSettings = {
   recentWindowDays: 30,
   comparisonWindowDays: 30,

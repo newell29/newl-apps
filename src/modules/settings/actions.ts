@@ -29,6 +29,11 @@ import {
   parseApolloSequenceMapping,
   parseSearchProfileApolloSequenceMapping
 } from "@/modules/settings/apollo-sequence-mapping";
+import {
+  ASSISTANT_PROVIDER_CREDENTIAL_NAME,
+  buildAssistantProviderConfig,
+  isAssistantProvider
+} from "@/server/integrations/assistant-provider";
 
 type TradeMiningScoringConfigMutationClient = typeof prisma & {
   tradeMiningScoringConfig?: {
@@ -373,6 +378,68 @@ export async function saveTradeMiningScoringSettingsAction(formData: FormData) {
   revalidateSettingsSurfaces();
   revalidatePath("/lead-gen/candidates");
   revalidatePath("/dashboard");
+}
+
+export async function saveAssistantProviderSettingsAction(formData: FormData) {
+  const context = await authorizeSettingsMutation();
+  const rawProvider = readRequired(formData, "assistantProvider");
+
+  if (!isAssistantProvider(rawProvider as IntegrationProvider)) {
+    throw new Error("Select a valid assistant provider.");
+  }
+
+  const provider = rawProvider as "OPENAI" | "LOCAL_LLM";
+  const liveResponsesEnabled = formData.get("assistantLiveResponsesEnabled") === "true";
+  const defaultModel = readRequired(formData, "assistantDefaultModel");
+  const fallbackModel = readOptional(formData, "assistantFallbackModel") ?? null;
+  const temperature = readRequiredFloat(formData, "assistantTemperature", 0, 2);
+  const maxTokens = readRequiredInteger(formData, "assistantMaxTokens", 100, 4000);
+  const endpointUrl = readOptional(formData, "assistantEndpointUrl") ?? null;
+
+  if (provider === IntegrationProvider.LOCAL_LLM && !endpointUrl) {
+    throw new Error("Local LLM provider settings require an endpoint URL.");
+  }
+
+  const existing = await prisma.integrationCredential.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      name: ASSISTANT_PROVIDER_CREDENTIAL_NAME
+    },
+    select: {
+      id: true
+    }
+  });
+
+  const data = {
+    tenantId: context.tenantId,
+    provider,
+    name: ASSISTANT_PROVIDER_CREDENTIAL_NAME,
+    status: liveResponsesEnabled ? IntegrationStatus.ACTIVE : IntegrationStatus.DISABLED,
+    publicConfig: buildAssistantProviderConfig({
+      liveResponsesEnabled,
+      defaultModel,
+      fallbackModel,
+      temperature,
+      maxTokens,
+      endpointUrl
+    })
+  };
+
+  if (existing) {
+    await prisma.integrationCredential.update({
+      where: {
+        id: existing.id
+      },
+      data
+    });
+  } else {
+    await prisma.integrationCredential.create({
+      data
+    });
+  }
+
+  revalidateSettingsSurfaces();
+  revalidatePath("/assistant");
 }
 
 export async function saveTenantUserAccessAction(formData: FormData) {
@@ -899,6 +966,17 @@ function readRequiredInteger(formData: FormData, field: string, min: number, max
 
   if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
     throw new Error(`Invalid integer for ${field}. Expected a value between ${min} and ${max}.`);
+  }
+
+  return parsed;
+}
+
+function readRequiredFloat(formData: FormData, field: string, min: number, max: number) {
+  const value = readRequired(formData, field);
+  const parsed = Number.parseFloat(value);
+
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+    throw new Error(`Invalid number for ${field}. Expected a value between ${min} and ${max}.`);
   }
 
   return parsed;

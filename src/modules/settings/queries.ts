@@ -34,6 +34,11 @@ import {
   type TradeMiningScoringSettings
 } from "@/modules/settings/types";
 import { buildRoleAccessMatrix } from "@/modules/settings/access-control";
+import {
+  ASSISTANT_PROVIDER_CREDENTIAL_NAME,
+  isAssistantProvider,
+  parseAssistantProviderSettings
+} from "@/server/integrations/assistant-provider";
 
 type SettingsUpsAccount = UpsAccountConfig & {
   toolTargets: QuoteToolTarget[];
@@ -153,7 +158,14 @@ export async function getSettingsShell(tenant: TenantContext) {
     prisma.integrationCredential.findMany({
       where: tenantWhere(tenant, {
         provider: {
-          in: [IntegrationProvider.UPS, IntegrationProvider.SEVEN_L, IntegrationProvider.OPENCLAW, IntegrationProvider.APOLLO]
+          in: [
+            IntegrationProvider.UPS,
+            IntegrationProvider.SEVEN_L,
+            IntegrationProvider.OPENCLAW,
+            IntegrationProvider.APOLLO,
+            IntegrationProvider.OPENAI,
+            IntegrationProvider.LOCAL_LLM
+          ]
         }
       }),
       orderBy: {
@@ -221,6 +233,11 @@ export async function getSettingsShell(tenant: TenantContext) {
     })
   ]);
   const typedIntegrationCredentials = integrationCredentials as IntegrationCredentialRecord[];
+  const assistantCredential = typedIntegrationCredentials.find(
+    (credential) =>
+      credential.name === ASSISTANT_PROVIDER_CREDENTIAL_NAME &&
+      isAssistantProvider(credential.provider)
+  );
   const apolloCredential = typedIntegrationCredentials.find((credential) => credential.provider === IntegrationProvider.APOLLO);
   const upsAccounts = typedIntegrationCredentials
     .filter((credential) => credential.provider === IntegrationProvider.UPS)
@@ -272,6 +289,7 @@ export async function getSettingsShell(tenant: TenantContext) {
       rolePolicies,
       overrides: roleModuleOverrides
     }),
+    assistantProvider: parseAssistantProviderSettings(assistantCredential as IntegrationCredentialRecord | null),
     integrationProviders: Object.values(IntegrationProvider),
     quoteSources: managedQuoteSources,
     upsAccounts: mergeUpsAccountsForSettings(upsAccounts, localUpsAccounts),

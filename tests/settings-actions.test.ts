@@ -47,6 +47,7 @@ vi.mock("@/server/integrations/apollo", () => ({
 }));
 
 import {
+  saveAssistantProviderSettingsAction,
   saveApolloRepMappingAction,
   saveApolloSequenceMappingAction,
   saveSearchProfileApolloSequenceMappingAction,
@@ -167,6 +168,34 @@ describe("saveTradeMiningScoringSettingsAction", () => {
       }
     ]);
     expect(revalidatePath).toHaveBeenCalledWith("/lead-gen/pipeline");
+  });
+
+  it("saves tenant-scoped assistant provider settings", async () => {
+    const formData = new FormData();
+    formData.set("assistantProvider", "OPENAI");
+    formData.set("assistantDefaultModel", "gpt-5-mini");
+    formData.set("assistantFallbackModel", "gpt-5-nano");
+    formData.set("assistantTemperature", "0.2");
+    formData.set("assistantMaxTokens", "900");
+    formData.set("assistantLiveResponsesEnabled", "true");
+
+    await saveAssistantProviderSettingsAction(formData);
+
+    expect(createIntegrationCredential).toHaveBeenCalledTimes(1);
+    const args = createIntegrationCredential.mock.calls[0][0];
+    expect(args.data.tenantId).toBe("tenant-1");
+    expect(args.data.provider).toBe("OPENAI");
+    expect(args.data.name).toBe("Company Assistant Provider");
+    expect(args.data.status).toBe("ACTIVE");
+    expect(args.data.publicConfig).toMatchObject({
+      liveResponsesEnabled: true,
+      defaultModel: "gpt-5-mini",
+      fallbackModel: "gpt-5-nano",
+      temperature: 0.2,
+      maxTokens: 900,
+      endpointUrl: null
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/assistant");
   });
 
   it("syncs Apollo reps and preserves manual email routing fields", async () => {
