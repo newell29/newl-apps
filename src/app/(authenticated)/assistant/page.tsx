@@ -173,21 +173,26 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
 
           {workspace.recentThreads.length > 0 ? (
             <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
-              <div>
-                <h2 className="text-base font-semibold text-foreground">Recent threads</h2>
-                <p className="mt-1 text-sm leading-6 text-mutedForeground">Jump back into recent conversations.</p>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-foreground">Recent threads</h2>
+                  <p className="mt-1 text-sm leading-6 text-mutedForeground">Jump back into recent conversations.</p>
+                </div>
+                <span className="rounded-full border border-border bg-muted/30 px-2.5 py-1 text-xs font-semibold text-mutedForeground">
+                  {workspace.recentThreads.length}
+                </span>
               </div>
-              <div className="mt-4 grid gap-3">
-                {workspace.recentThreads.slice(0, 5).map((thread: AssistantWorkspace["recentThreads"][number]) => (
+              <div className="mt-4 max-h-72 space-y-2 overflow-y-auto pr-1">
+                {workspace.recentThreads.map((thread: AssistantWorkspace["recentThreads"][number]) => (
                   <Link
                     key={thread.id}
                     href={`/assistant?thread=${encodeURIComponent(thread.id)}`}
                     className={[
-                      "rounded-md border p-3 transition-colors hover:bg-muted/40",
+                      "block rounded-md border px-3 py-2 transition-colors hover:bg-muted/40",
                       workspace.activeThread?.id === thread.id ? "border-primary/50 bg-accentSoft/40" : "border-border bg-muted/20"
                     ].join(" ")}
                   >
-                    <p className="font-medium text-foreground">{thread.title}</p>
+                    <p className="truncate text-sm font-medium text-foreground">{thread.title}</p>
                     <p className="mt-1 text-xs text-mutedForeground">
                       {thread.messageCount} messages
                       {thread.lastMessageAt ? `, ${formatDate(thread.lastMessageAt)}` : ""}
