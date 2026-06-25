@@ -38,7 +38,7 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
       <PageHeader
         eyebrow="Company Assistant"
         title="Newl Business Intelligence"
-        description="Tenant-scoped assistant foundation for customer memory, source-grounded insight, email drafting, and future tool-calling across rating, TMS, WMS, email, and OneDrive data."
+        description="Tenant-scoped assistant foundation for customer memory, source-grounded insight, email drafting, and future tool-calling across rating, TMS, WMS, email, and OneDrive data. The interim model path is cost-effective OpenAI; the long-term target is a local model hosted on Newl-controlled server infrastructure."
       />
 
       <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
@@ -46,7 +46,7 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
           <div>
             <h2 className="text-base font-semibold text-foreground">Ask Newl</h2>
             <p className="mt-1 max-w-3xl text-sm leading-6 text-mutedForeground">
-              This first version answers from tenant-scoped app data and prepares the retrieval/memory boundary. Live LLM calls, Microsoft Graph sync, and rate tool-calling can be added behind this surface.
+              This first version answers from tenant-scoped app data and prepares the retrieval/memory boundary. Live LLM calls should sit behind a provider adapter so OpenAI can be used now and a local Newl-hosted model can take over later.
             </p>
           </div>
           <span className="rounded-full border border-accentBorder bg-accentSoft px-3 py-1 text-xs font-semibold text-primary">

@@ -75,6 +75,9 @@ Lead score should consider:
 - AI can help with ambiguous company normalization, product/category classification, ICP fit explanations, contact role classification, and sequence tier recommendations.
 - AI logic should live server-side in Newl Apps where possible, not hidden in n8n.
 - AI output should be auditable and reviewable.
+- For the Company Assistant, the long-term model strategy is to run the AI bot on a local model hosted on Newl-controlled server/network infrastructure.
+- Until the local model is proven and reliable, use a cost-effective OpenAI model behind a provider abstraction so model providers can be swapped without rewriting assistant workflows.
+- Assistant prompts, retrieved sources, memory updates, and tool calls must stay tenant-scoped and auditable regardless of whether the active model provider is OpenAI or a local server-hosted model.
 
 ## 10. What Not To Build Yet
 
