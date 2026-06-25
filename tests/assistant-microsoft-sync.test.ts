@@ -119,15 +119,28 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
                 id: "mail-1",
                 subject: "Customer issue in Dallas",
                 bodyPreview: "Shipment delayed at destination.",
+                body: {
+                  contentType: "text",
+                  content: "Customer issue in Dallas. Please call 555-111-2222 and review https://customer.example.com."
+                },
                 webLink: "https://outlook.office.com/mail/mail-1",
                 internetMessageId: "<mail-1@test>",
+                conversationId: "conversation-1",
                 receivedDateTime: "2026-06-25T10:00:00.000Z",
                 from: {
                   emailAddress: {
                     name: "Customer Ops",
                     address: "ops@example.com"
                   }
-                }
+                },
+                toRecipients: [
+                  {
+                    emailAddress: {
+                      name: "Alex Newell",
+                      address: "alex@newl.ca"
+                    }
+                  }
+                ]
               }
             ]
           }),
@@ -181,6 +194,7 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
     expect(createMemories).toHaveBeenCalledTimes(1);
     expect(upsert.mock.calls[0][0].create.sourceKind).toBe(AssistantSourceKind.EMAIL);
     expect(upsert.mock.calls[1][0].create.sourceKind).toBe(AssistantSourceKind.ONEDRIVE_FILE);
+    expect(upsert.mock.calls[0][0].create.metadata.toRecipients).toContain("Alex Newell <alex@newl.ca>");
 
     fetchMock.mockRestore();
   });
@@ -251,6 +265,10 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
                 id: "mail-1",
                 subject: "New opportunity",
                 bodyPreview: "Customer requested new lane pricing.",
+                body: {
+                  contentType: "text",
+                  content: "Customer requested new lane pricing for LTL freight."
+                },
                 receivedDateTime: "2026-06-25T14:00:00.000Z"
               }
             ]

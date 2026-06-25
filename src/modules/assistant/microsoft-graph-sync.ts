@@ -20,9 +20,26 @@ type MicrosoftGraphMailMessage = {
   id: string;
   subject?: string | null;
   bodyPreview?: string | null;
+  body?: {
+    contentType?: string | null;
+    content?: string | null;
+  } | null;
   webLink?: string | null;
   internetMessageId?: string | null;
+  conversationId?: string | null;
   receivedDateTime?: string | null;
+  toRecipients?: Array<{
+    emailAddress?: {
+      name?: string | null;
+      address?: string | null;
+    } | null;
+  }> | null;
+  ccRecipients?: Array<{
+    emailAddress?: {
+      name?: string | null;
+      address?: string | null;
+    } | null;
+  }> | null;
   from?: {
     emailAddress?: {
       name?: string | null;
@@ -549,10 +566,11 @@ async function loadMicrosoftEntityDirectory(tx: Prisma.TransactionClient, tenant
 
 async function fetchRecentMail(accessToken: string) {
   const response = await fetch(
-    "https://graph.microsoft.com/v1.0/me/messages?$top=10&$select=id,subject,bodyPreview,webLink,internetMessageId,receivedDateTime,from&$orderby=receivedDateTime%20desc",
+    "https://graph.microsoft.com/v1.0/me/messages?$top=10&$select=id,subject,bodyPreview,body,webLink,internetMessageId,conversationId,receivedDateTime,from,toRecipients,ccRecipients&$orderby=receivedDateTime%20desc",
     {
       headers: {
-        Authorization: `Bearer ${accessToken}`
+        Authorization: `Bearer ${accessToken}`,
+        Prefer: 'outlook.body-content-type="text"'
       },
       cache: "no-store"
     }
@@ -585,14 +603,20 @@ async function fetchRecentFiles(accessToken: string) {
 function mapMessageToKnowledgeDocument(message: MicrosoftGraphMailMessage): AssistantKnowledgeDocumentInput {
   const fromName = message.from?.emailAddress?.name ?? null;
   const fromAddress = message.from?.emailAddress?.address ?? null;
+  const toRecipients = flattenRecipients(message.toRecipients);
+  const ccRecipients = flattenRecipients(message.ccRecipients);
   const receivedAt = parseDate(message.receivedDateTime);
   const subject = message.subject?.trim() || "Untitled email";
   const fromLine = fromName && fromAddress ? `${fromName} <${fromAddress}>` : fromName ?? fromAddress;
+  const bodyContent = normalizeBodyContent(message.body?.content ?? null);
   const content = [
     `Microsoft 365 email message.`,
     fromLine ? `From: ${fromLine}.` : null,
+    toRecipients.length > 0 ? `To: ${toRecipients.join("; ")}.` : null,
+    ccRecipients.length > 0 ? `Cc: ${ccRecipients.join("; ")}.` : null,
     receivedAt ? `Received at: ${receivedAt.toISOString()}.` : null,
-    message.bodyPreview ? `Preview: ${message.bodyPreview}.` : null
+    message.bodyPreview ? `Preview: ${message.bodyPreview}.` : null,
+    bodyContent ? `Body: ${bodyContent}.` : null
   ]
     .filter((value): value is string => Boolean(value))
     .join(" ");
@@ -608,7 +632,10 @@ function mapMessageToKnowledgeDocument(message: MicrosoftGraphMailMessage): Assi
       fromName,
       fromAddress,
       receivedDateTime: message.receivedDateTime ?? null,
-      internetMessageId: message.internetMessageId ?? null
+      internetMessageId: message.internetMessageId ?? null,
+      conversationId: message.conversationId ?? null,
+      toRecipients,
+      ccRecipients
     },
     content
   };
@@ -654,6 +681,42 @@ function parseDate(value: string | null | undefined) {
 
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function flattenRecipients(
+  recipients:
+    | Array<{
+        emailAddress?: {
+          name?: string | null;
+          address?: string | null;
+        } | null;
+      }>
+    | null
+    | undefined
+) {
+  return (recipients ?? [])
+    .map((recipient) => {
+      const name = recipient.emailAddress?.name?.trim();
+      const address = recipient.emailAddress?.address?.trim();
+      if (name && address) {
+        return `${name} <${address}>`;
+      }
+      return name ?? address ?? null;
+    })
+    .filter((value): value is string => Boolean(value));
+}
+
+function normalizeBodyContent(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return null;
+  }
+
+  return truncateText(normalized, 4000);
 }
 
 function extractEmails(value: string) {
