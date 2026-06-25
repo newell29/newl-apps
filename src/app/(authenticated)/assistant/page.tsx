@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ModuleKey } from "@prisma/client";
 
 import { PageHeader } from "@/components/page-header";
-import { askAssistantAction } from "@/modules/assistant/actions";
+import { askAssistantAction, syncAssistantKnowledgeAction } from "@/modules/assistant/actions";
 import { formatAssistantRole, getAssistantWorkspace } from "@/modules/assistant/queries";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -49,9 +49,19 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
               This first version answers from tenant-scoped app data and prepares the retrieval/memory boundary. Live LLM calls should sit behind a provider adapter so OpenAI can be used now and a local Newl-hosted model can take over later.
             </p>
           </div>
-          <span className="rounded-full border border-accentBorder bg-accentSoft px-3 py-1 text-xs font-semibold text-primary">
-            {formatIntent(workspace.intent)}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="rounded-full border border-accentBorder bg-accentSoft px-3 py-1 text-xs font-semibold text-primary">
+              {formatIntent(workspace.intent)}
+            </span>
+            <form action={syncAssistantKnowledgeAction}>
+              <button
+                type="submit"
+                className="rounded-md border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted/40"
+              >
+                Sync knowledge
+              </button>
+            </form>
+          </div>
         </div>
 
         <form className="mt-5 flex flex-col gap-3 sm:flex-row" action={askAssistantAction}>
@@ -181,7 +191,7 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
             <div>
               <h2 className="text-base font-semibold text-foreground">Current business context</h2>
               <p className="mt-1 text-sm leading-6 text-mutedForeground">
-                Early retrieval sources from Newl Apps. These are tenant-scoped database reads.
+                Retrieved sources are pulled from the tenant knowledge index first, with app-data fallback while the index is still sparse.
               </p>
             </div>
             <Link href="/lead-gen/candidates" className="text-sm font-semibold text-primary hover:text-primaryHover">

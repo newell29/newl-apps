@@ -14,6 +14,7 @@ import {
   buildAssistantAnswerForPrompt,
   getAssistantWorkspace
 } from "@/modules/assistant/queries";
+import { searchAssistantKnowledge, syncAssistantKnowledge } from "@/modules/assistant/knowledge";
 import { requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
 import {
@@ -33,7 +34,8 @@ export async function askAssistantAction(formData: FormData) {
   const prompt = readPrompt(formData);
   const existingThreadId = readOptional(formData, "threadId");
   const workspace = await getAssistantWorkspace(context, prompt, existingThreadId);
-  const sources = buildAssistantSources(workspace);
+  const indexedSources = await searchAssistantKnowledge(context, prompt);
+  const sources = indexedSources.length > 0 ? indexedSources : buildAssistantSources(workspace);
   const providerCredential = await prisma.integrationCredential.findFirst({
     where: {
       tenantId: context.tenantId,
@@ -245,6 +247,29 @@ export async function askAssistantAction(formData: FormData) {
 
   revalidatePath("/assistant");
   redirect(`/assistant?thread=${encodeURIComponent(thread.id)}`);
+}
+
+export async function syncAssistantKnowledgeAction() {
+  const context = await getAuthenticatedContext();
+  await requireModule(context, ModuleKey.ASSISTANT);
+  await requireMutationAccess(context);
+
+  await syncAssistantKnowledge(context);
+
+  await prisma.auditLog.create({
+    data: {
+      tenantId: context.tenantId,
+      actorUserId: context.userId,
+      action: "assistant.knowledge.sync",
+      entityType: "Tenant",
+      entityId: context.tenantId,
+      after: {
+        scope: "assistant-knowledge"
+      } as Prisma.InputJsonValue
+    }
+  });
+
+  revalidatePath("/assistant");
 }
 
 function readPrompt(formData: FormData) {
