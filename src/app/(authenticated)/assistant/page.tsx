@@ -89,21 +89,6 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
                     </div>
                   ))}
                 </div>
-                {workspace.activeThread.recentRuns[0]?.retrievedSources.length ? (
-                  <div className="rounded-md border border-border bg-background p-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Latest retrieved sources</p>
-                    <div className="mt-3 space-y-2">
-                      {workspace.activeThread.recentRuns[0].retrievedSources.map(
-                        (source: (typeof workspace.activeThread.recentRuns)[number]["retrievedSources"][number]) => (
-                          <div key={source.id} className="text-sm leading-6">
-                            <p className="font-medium text-foreground">{source.title}</p>
-                            <p className="text-mutedForeground">{source.excerpt}</p>
-                          </div>
-                        )
-                      )}
-                    </div>
-                  </div>
-                ) : null}
               </div>
             ) : (
               <div className="flex min-h-full flex-col justify-end">
