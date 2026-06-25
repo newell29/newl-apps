@@ -626,8 +626,6 @@ function scoreApolloOrganizationCandidate(
   let nameMatchType: ApolloOrganizationCandidate["nameMatchType"] = "NONE";
   const inputAliases = buildCompanyNameAliases(companyName);
   const candidateAliases = buildCompanyNameAliases(candidate.name ?? "");
-  const normalizedInputName = inputAliases[0] ?? "";
-  const normalizedCandidateName = candidateAliases[0] ?? "";
   const tokenSimilarity = calculateBestTokenSimilarity(inputAliases, candidateAliases);
   const logisticsProviderMatch = isLogisticsProviderName(candidate.name ?? "") || isLogisticsProviderName(companyName);
   const strongBaseNameMatch = hasStrongBaseNameMatch(inputAliases, candidateAliases);

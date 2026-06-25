@@ -14,9 +14,9 @@ import { useActionState, useEffect, useMemo, useState, type ReactNode } from "re
 import { DataGridColumnMenu } from "@/components/data-grid-column-menu";
 import { IndustryBadge } from "@/components/industry-badge";
 import { InfoHint } from "@/components/info-hint";
+import { EMPTY_APOLLO_QUEUE_SUMMARY, type ApolloQueueSummary } from "@/modules/lead-gen/apollo-queue-summary";
 import { usePersistedTableState } from "@/components/use-persisted-table-state";
 import { StageBadge } from "@/components/stage-badge";
-import { EMPTY_APOLLO_QUEUE_SUMMARY, type ApolloQueueSummary } from "@/modules/lead-gen/actions";
 
 type PipelineLead = {
   id: string;
