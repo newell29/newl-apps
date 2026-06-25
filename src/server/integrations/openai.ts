@@ -70,6 +70,12 @@ export function isOpenAiDraftGenerationConfigured() {
   return Boolean(apiKey && apiKey !== "OPENAI_API_KEY_PLACEHOLDER");
 }
 
+export function getOpenAiDraftRuntimeNotes() {
+  return isOpenAiDraftGenerationConfigured()
+    ? "OpenAI runtime is configured through the server environment."
+    : "OpenAI runtime is not configured yet. Add OPENAI_API_KEY in the server environment to enable live draft generation.";
+}
+
 export async function generateTier1SequenceDraft(context: Tier1DraftContext): Promise<Tier1DraftResult> {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
 

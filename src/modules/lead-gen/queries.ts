@@ -142,6 +142,7 @@ export type LeadPipelineSequenceStatusFilter =
   | "REPLIED";
 
 export type LeadPipelineFilters = {
+  companyId?: string;
   stage?: LeadPipelineStage | "ALL";
   ownerUserId?: string | "ALL" | "UNASSIGNED";
   industry?: string;
@@ -1016,7 +1017,7 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
       sequenceOverrideReason: contact.sequenceOverrideReason,
       sequenceManuallyOverridden: contact.sequenceManuallyOverridden,
       requiresAiDraft,
-      draftGenerationConfigured: isOpenAiDraftGenerationConfigured(),
+      draftGenerationConfigured: isOpenAiDraftGenerationConfigured() && scoringConfig.aiClassificationEnabled,
       draft: draft
         ? {
             id: draft.id,
@@ -1304,6 +1305,7 @@ function buildContactDirectoryOrder(sort: ContactDirectorySort) {
 
 function buildLeadPipelineWhere(filters: LeadPipelineFilters) {
   const where: {
+    companyId?: string;
     stage?: LeadPipelineStage;
     ownerUserId?: string | null;
     score?: {
@@ -1314,6 +1316,10 @@ function buildLeadPipelineWhere(filters: LeadPipelineFilters) {
 
   if (filters.stage && filters.stage !== "ALL") {
     where.stage = filters.stage;
+  }
+
+  if (filters.companyId) {
+    where.companyId = filters.companyId;
   }
 
   if (filters.ownerUserId === "UNASSIGNED") {

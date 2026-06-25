@@ -27,6 +27,13 @@ import { getAuthenticatedContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
 
+const leadGenAiModelOptions = [
+  { value: "gpt-5.4-mini", label: "GPT-5.4 mini (Recommended)" },
+  { value: "gpt-5.4-nano", label: "GPT-5.4 nano" },
+  { value: "gpt-5.4", label: "GPT-5.4" },
+  { value: "gpt-5.5", label: "GPT-5.5" }
+] as const;
+
 export default async function SettingsPage() {
   const context = await getAuthenticatedContext();
   requireAdmin(context);
@@ -1203,9 +1210,9 @@ export default async function SettingsPage() {
           <div className="rounded-md border border-border bg-background p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h3 className="text-sm font-semibold text-foreground">Future AI classification</h3>
+                <h3 className="text-sm font-semibold text-foreground">Lead-gen AI runtime</h3>
                 <p className="mt-1 text-sm text-mutedForeground">
-                  This stays off for now. The deterministic score remains the source of truth until we are happy with the trial inputs and ranking behavior.
+                  Deterministic scoring still drives ranking. This model now powers Tier 1 draft writing and AI-assisted Apollo company review when matching needs help.
                 </p>
               </div>
               <label className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -1215,17 +1222,38 @@ export default async function SettingsPage() {
                   value="true"
                   defaultChecked={settings.tradeMiningScoring.aiClassificationEnabled}
                 />
-                Enable AI classification
+                Enable lead-gen AI
               </label>
             </div>
-            <div className="mt-4 max-w-sm">
-              <OptionalField
-                label="AI model"
+            <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,22rem),1fr]">
+              <SelectField
+                label="OpenAI model"
                 name="aiModel"
-                defaultValue={settings.tradeMiningScoring.aiModel ?? ""}
-                placeholder="gpt-5-mini"
-                info="Reserved for a later pass where AI helps classify fit or summarize accounts. It is not needed for the current deterministic scoring flow."
+                defaultValue={settings.tradeMiningScoring.aiModel ?? "gpt-5.4-mini"}
+                options={leadGenAiModelOptions.map((option) => ({
+                  value: option.value,
+                  label: option.label
+                }))}
               />
+              <div className="rounded-md border border-border bg-muted/30 p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={[
+                      "rounded-full px-2.5 py-1 text-xs font-semibold",
+                      settings.leadGenAiRuntimeReady
+                        ? "border border-success/25 bg-success/10 text-success"
+                        : "border border-warning/25 bg-warning/10 text-warning"
+                    ].join(" ")}
+                  >
+                    {settings.leadGenAiRuntimeReady ? "OpenAI key detected" : "OpenAI key missing"}
+                  </span>
+                  <InfoHint text="For now, the lead-generation OpenAI key comes from the server environment as OPENAI_API_KEY rather than being stored inside tenant settings." />
+                </div>
+                <p className="mt-3 text-sm leading-6 text-mutedForeground">{settings.leadGenAiRuntimeNotes}</p>
+                <p className="mt-2 text-xs leading-5 text-mutedForeground">
+                  OpenAI&apos;s current model guide recommends smaller variants when optimizing for latency and cost. We default to <span className="font-medium text-foreground">gpt-5.4-mini</span> so drafts stay affordable while still being strong enough for outbound personalization.
+                </p>
+              </div>
             </div>
           </div>
 
@@ -1280,8 +1308,8 @@ export default async function SettingsPage() {
               title="AI status"
               body={
                 settings.tradeMiningScoring.aiClassificationEnabled
-                  ? `AI classification is enabled with ${settings.tradeMiningScoring.aiModel ?? "the configured model"}.`
-                  : "AI classification is currently off; deterministic scoring is still the source of truth."
+                  ? `Lead-gen AI is enabled with ${settings.tradeMiningScoring.aiModel ?? "the configured model"}. Deterministic scoring still ranks companies and contacts, while the model handles draft writing and company-review assistance.`
+                  : "Lead-gen AI is currently off; deterministic scoring is still the source of truth and automatic Tier 1 draft generation stays disabled."
               }
             />
           </div>
