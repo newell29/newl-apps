@@ -279,6 +279,20 @@ export default async function SettingsPage() {
             />
           </div>
 
+          <label className="grid gap-1.5">
+            <span className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Admin mailbox targets</span>
+            <textarea
+              name="microsoftAdminMailboxTargets"
+              rows={4}
+              defaultValue={settings.microsoftGraph.adminMailboxTargets.join("\n")}
+              placeholder={"shared@newl.ca\nsales@newl.ca\nops@newl.ca"}
+              className="rounded-md border border-border bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none transition-colors placeholder:text-mutedForeground focus:border-primary"
+            />
+            <span className="text-xs leading-5 text-mutedForeground">
+              One mailbox email or user principal name per line. Used only when mailbox access mode is set to admin-selected mailboxes.
+            </span>
+          </label>
+
           <div className="grid gap-4 xl:grid-cols-3">
             <label className="rounded-md border border-border bg-background p-4 text-sm text-foreground">
               <div className="flex items-center justify-between gap-3">

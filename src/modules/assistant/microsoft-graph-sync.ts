@@ -14,6 +14,7 @@ import {
   ensureFreshMicrosoftGraphAccessToken,
   parseMicrosoftGraphDelegatedConnection
 } from "@/server/integrations/microsoft-graph-account";
+import { getMicrosoftGraphApplicationAccessToken } from "@/server/integrations/microsoft-graph-application";
 import type { AuthenticatedContext, TenantContext } from "@/server/tenant-context";
 
 const MICROSOFT_GRAPH_SOURCE_SYSTEMS = ["MICROSOFT_GRAPH_MAIL", "MICROSOFT_GRAPH_FILE"] as const;
@@ -43,6 +44,7 @@ export type TenantMicrosoftGraphKnowledgeSyncResult = MicrosoftGraphKnowledgeSyn
 
 type MicrosoftGraphMailMessage = {
   id: string;
+  mailboxAddress?: string | null;
   subject?: string | null;
   bodyPreview?: string | null;
   body?: {
@@ -93,37 +95,19 @@ type MicrosoftGraphDriveItem = {
 export async function syncMicrosoftGraphAssistantKnowledge(
   context: AuthenticatedContext
 ): Promise<MicrosoftGraphKnowledgeSyncResult> {
-  const [integrationCredential, account] = await Promise.all([
-    prisma.integrationCredential.findFirst({
-      where: {
-        tenantId: context.tenantId,
-        provider: IntegrationProvider.MICROSOFT_GRAPH,
-        name: MICROSOFT_GRAPH_CREDENTIAL_NAME
-      },
-      select: {
-        provider: true,
-        status: true,
-        publicConfig: true
-      }
-    }),
-    prisma.account.findFirst({
-      where: {
-        userId: context.userId,
-        provider: MICROSOFT_ENTRA_PROVIDER_ID
-      },
-      select: {
-        id: true,
-        access_token: true,
-        refresh_token: true,
-        expires_at: true,
-        scope: true,
-        token_type: true
-      }
-    })
-  ]);
-
+  const integrationCredential = await prisma.integrationCredential.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      provider: IntegrationProvider.MICROSOFT_GRAPH,
+      name: MICROSOFT_GRAPH_CREDENTIAL_NAME
+    },
+    select: {
+      provider: true,
+      status: true,
+      publicConfig: true
+    }
+  });
   const settings = parseMicrosoftGraphSettings(integrationCredential);
-  const delegatedConnection = parseMicrosoftGraphDelegatedConnection(account);
 
   if (!settings.mailSyncEnabled && !settings.fileSyncEnabled) {
     return {
@@ -134,6 +118,26 @@ export async function syncMicrosoftGraphAssistantKnowledge(
       reason: "Microsoft 365 sync is disabled for this tenant."
     };
   }
+
+  if (settings.mailboxAccessMode === "ADMIN_SELECTED_MAILBOXES") {
+    return syncMicrosoftGraphApplicationMailboxKnowledge(context, settings);
+  }
+
+  const account = await prisma.account.findFirst({
+    where: {
+      userId: context.userId,
+      provider: MICROSOFT_ENTRA_PROVIDER_ID
+    },
+    select: {
+      id: true,
+      access_token: true,
+      refresh_token: true,
+      expires_at: true,
+      scope: true,
+      token_type: true
+    }
+  });
+  const delegatedConnection = parseMicrosoftGraphDelegatedConnection(account);
 
   if (!delegatedConnection.connected || !account?.access_token) {
     if (!account?.refresh_token) {
@@ -226,7 +230,7 @@ type MicrosoftEntityDirectory = {
 
 async function replaceMicrosoftGraphMemories(
   tx: Prisma.TransactionClient,
-  context: AuthenticatedContext,
+  context: TenantContext,
   documents: AssistantKnowledgeDocumentInput[],
   persistedDocuments: PersistedMicrosoftDocument[]
 ) {
@@ -532,9 +536,88 @@ export function buildMicrosoftGraphMemoriesFromDocuments(
   return dedupeMemories(memories);
 }
 
+async function syncMicrosoftGraphApplicationMailboxKnowledge(
+  context: TenantContext,
+  settings: ReturnType<typeof parseMicrosoftGraphSettings>
+): Promise<MicrosoftGraphKnowledgeSyncResult> {
+  if (!settings.crossMailboxReady) {
+    return {
+      documentCount: 0,
+      mailCount: 0,
+      fileCount: 0,
+      skipped: true,
+      reason: settings.runtimeNotes
+    };
+  }
+
+  const accessToken = await getMicrosoftGraphApplicationAccessToken();
+  const messages = settings.mailSyncEnabled
+    ? await fetchSelectedMailboxMessages(accessToken, settings.adminMailboxTargets)
+    : [];
+  const files: MicrosoftGraphDriveItem[] = [];
+  const documents = messages.map(mapMessageToKnowledgeDocument);
+
+  if (documents.length === 0) {
+    return {
+      documentCount: 0,
+      mailCount: messages.length,
+      fileCount: files.length,
+      skipped: true,
+      reason: "Microsoft Graph returned no recent items for the selected admin mailboxes."
+    };
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const persistedDocuments = await persistAssistantKnowledgeDocuments(tx, context, documents);
+    await replaceMicrosoftGraphMemories(tx, context, documents, persistedDocuments);
+  });
+
+  return {
+    documentCount: documents.length,
+    mailCount: messages.length,
+    fileCount: files.length,
+    skipped: false,
+    reason: null
+  };
+}
+
 export async function syncTenantMicrosoftGraphAssistantKnowledge(
   tenant: TenantContext
 ): Promise<TenantMicrosoftGraphKnowledgeSyncResult> {
+  const integrationCredential = await prisma.integrationCredential.findFirst({
+    where: {
+      tenantId: tenant.tenantId,
+      provider: IntegrationProvider.MICROSOFT_GRAPH,
+      name: MICROSOFT_GRAPH_CREDENTIAL_NAME
+    },
+    select: {
+      provider: true,
+      status: true,
+      publicConfig: true
+    }
+  });
+  const settings = parseMicrosoftGraphSettings(integrationCredential);
+
+  if (settings.mailboxAccessMode === "ADMIN_SELECTED_MAILBOXES") {
+    const result = await syncMicrosoftGraphApplicationMailboxKnowledge(tenant, settings);
+
+    return {
+      ...result,
+      connectedUserCount: settings.adminMailboxTargets.length,
+      syncedUserCount: result.skipped ? 0 : settings.adminMailboxTargets.length,
+      skippedUserCount: result.skipped ? settings.adminMailboxTargets.length : 0,
+      userResults: settings.adminMailboxTargets.map((mailbox) => ({
+        userId: mailbox,
+        userEmail: mailbox,
+        skipped: result.skipped,
+        reason: result.reason,
+        documentCount: result.documentCount,
+        mailCount: result.mailCount,
+        fileCount: result.fileCount
+      }))
+    };
+  }
+
   const memberships = await prisma.membership.findMany({
     where: {
       tenantId: tenant.tenantId
@@ -673,8 +756,26 @@ async function loadMicrosoftEntityDirectory(tx: Prisma.TransactionClient, tenant
 }
 
 async function fetchRecentMail(accessToken: string) {
+  return fetchMailboxMessages(accessToken, "me");
+}
+
+async function fetchSelectedMailboxMessages(accessToken: string, mailboxes: string[]) {
+  const results = await Promise.all(mailboxes.map((mailbox) => fetchMailboxMessages(accessToken, mailbox)));
+
+  return results
+    .flat()
+    .sort((left, right) => {
+      const leftTime = parseDate(left.receivedDateTime)?.getTime() ?? 0;
+      const rightTime = parseDate(right.receivedDateTime)?.getTime() ?? 0;
+      return rightTime - leftTime;
+    })
+    .slice(0, 25);
+}
+
+async function fetchMailboxMessages(accessToken: string, mailbox: string) {
+  const path = mailbox === "me" ? "me/messages" : `users/${encodeURIComponent(mailbox)}/messages`;
   const response = await fetch(
-    "https://graph.microsoft.com/v1.0/me/messages?$top=10&$select=id,subject,bodyPreview,body,webLink,internetMessageId,conversationId,receivedDateTime,from,toRecipients,ccRecipients&$orderby=receivedDateTime%20desc",
+    `https://graph.microsoft.com/v1.0/${path}?$top=10&$select=id,subject,bodyPreview,body,webLink,internetMessageId,conversationId,receivedDateTime,from,toRecipients,ccRecipients&$orderby=receivedDateTime%20desc`,
     {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -685,11 +786,16 @@ async function fetchRecentMail(accessToken: string) {
   );
 
   if (!response.ok) {
-    throw new Error(`Microsoft Graph mail sync failed with status ${response.status}.`);
+    throw new Error(`Microsoft Graph mail sync failed for ${mailbox} with status ${response.status}.`);
   }
 
   const json = (await response.json()) as { value?: MicrosoftGraphMailMessage[] };
-  return Array.isArray(json.value) ? json.value : [];
+  return Array.isArray(json.value)
+    ? json.value.map((message) => ({
+        ...message,
+        mailboxAddress: mailbox === "me" ? null : mailbox
+      }))
+    : [];
 }
 
 async function fetchRecentFiles(accessToken: string) {
@@ -711,6 +817,7 @@ async function fetchRecentFiles(accessToken: string) {
 function mapMessageToKnowledgeDocument(message: MicrosoftGraphMailMessage): AssistantKnowledgeDocumentInput {
   const fromName = message.from?.emailAddress?.name ?? null;
   const fromAddress = message.from?.emailAddress?.address ?? null;
+  const mailboxAddress = message.mailboxAddress ?? null;
   const toRecipients = flattenRecipients(message.toRecipients);
   const ccRecipients = flattenRecipients(message.ccRecipients);
   const receivedAt = parseDate(message.receivedDateTime);
@@ -719,6 +826,7 @@ function mapMessageToKnowledgeDocument(message: MicrosoftGraphMailMessage): Assi
   const bodyContent = normalizeBodyContent(message.body?.content ?? null);
   const content = [
     `Microsoft 365 email message.`,
+    mailboxAddress ? `Mailbox: ${mailboxAddress}.` : null,
     fromLine ? `From: ${fromLine}.` : null,
     toRecipients.length > 0 ? `To: ${toRecipients.join("; ")}.` : null,
     ccRecipients.length > 0 ? `Cc: ${ccRecipients.join("; ")}.` : null,
@@ -732,11 +840,12 @@ function mapMessageToKnowledgeDocument(message: MicrosoftGraphMailMessage): Assi
   return {
     sourceKind: AssistantSourceKind.EMAIL,
     sourceSystem: "MICROSOFT_GRAPH_MAIL",
-    externalId: message.id,
+    externalId: mailboxAddress ? `${mailboxAddress}:${message.id}` : message.id,
     title: subject,
     canonicalUrl: message.webLink ?? null,
     sourceUpdatedAt: receivedAt,
     metadata: {
+      mailboxAddress,
       fromName,
       fromAddress,
       receivedDateTime: message.receivedDateTime ?? null,

@@ -452,6 +452,7 @@ export async function saveMicrosoftGraphSettingsAction(formData: FormData) {
   const clientId = readOptional(formData, "microsoftClientId") ?? null;
   const tenantId = readOptional(formData, "microsoftTenantId") ?? null;
   const redirectUri = readOptional(formData, "microsoftRedirectUri") ?? null;
+  const adminMailboxTargets = readTextareaList(formData.get("microsoftAdminMailboxTargets"));
   const mailboxAccessMode = readMicrosoftMailboxAccessMode(formData.get("microsoftMailboxAccessMode"));
   const mailSyncEnabled = formData.get("microsoftMailSyncEnabled") === "true";
   const fileSyncEnabled = formData.get("microsoftFileSyncEnabled") === "true";
@@ -482,6 +483,7 @@ export async function saveMicrosoftGraphSettingsAction(formData: FormData) {
       tenantId,
       redirectUri,
       scopes: DEFAULT_MICROSOFT_GRAPH_SCOPES,
+      adminMailboxTargets,
       mailboxAccessMode,
       mailSyncEnabled,
       fileSyncEnabled,
@@ -504,6 +506,17 @@ export async function saveMicrosoftGraphSettingsAction(formData: FormData) {
 
   revalidateSettingsSurfaces();
   revalidatePath("/assistant");
+}
+
+function readTextareaList(value: FormDataEntryValue | null) {
+  if (typeof value !== "string") {
+    return [];
+  }
+
+  return value
+    .split(/[\n,]/)
+    .map((entry) => entry.trim())
+    .filter((entry, index, array) => entry.length > 0 && array.indexOf(entry) === index);
 }
 
 export async function saveTenantUserAccessAction(formData: FormData) {

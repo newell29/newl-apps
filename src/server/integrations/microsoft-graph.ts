@@ -9,6 +9,7 @@ export type MicrosoftGraphSettings = {
   tenantId: string | null;
   redirectUri: string | null;
   scopes: string[];
+  adminMailboxTargets: string[];
   mailboxAccessMode: MicrosoftGraphMailboxAccessMode;
   mailSyncEnabled: boolean;
   fileSyncEnabled: boolean;
@@ -31,6 +32,7 @@ type MicrosoftGraphConfigInput = {
   tenantId: string | null;
   redirectUri: string | null;
   scopes: string[];
+  adminMailboxTargets: string[];
   mailboxAccessMode: MicrosoftGraphMailboxAccessMode;
   mailSyncEnabled: boolean;
   fileSyncEnabled: boolean;
@@ -57,6 +59,7 @@ export function parseMicrosoftGraphSettings(
   const tenantId = readString(config.tenantId);
   const redirectUri = readString(config.redirectUri);
   const scopes = readStringArray(config.scopes, DEFAULT_MICROSOFT_GRAPH_SCOPES);
+  const adminMailboxTargets = readStringArray(config.adminMailboxTargets, []);
   const mailboxAccessMode = readMailboxAccessMode(config.mailboxAccessMode);
   const mailSyncEnabled = readBoolean(config.mailSyncEnabled) ?? true;
   const fileSyncEnabled = readBoolean(config.fileSyncEnabled) ?? true;
@@ -65,13 +68,16 @@ export function parseMicrosoftGraphSettings(
   const runtimeReady = Boolean(clientId && tenantId && redirectUri);
   const consentConfigured = scopes.length > 0;
   const crossMailboxReady =
-    mailboxAccessMode === "ADMIN_SELECTED_MAILBOXES" && hasApplicationMailboxRuntimeConfigured();
+    mailboxAccessMode === "ADMIN_SELECTED_MAILBOXES" &&
+    adminMailboxTargets.length > 0 &&
+    hasApplicationMailboxRuntimeConfigured();
 
   return {
     clientId,
     tenantId,
     redirectUri,
     scopes,
+    adminMailboxTargets,
     mailboxAccessMode,
     mailSyncEnabled,
     fileSyncEnabled,
@@ -81,7 +87,8 @@ export function parseMicrosoftGraphSettings(
     runtimeNotes: buildRuntimeNotes({
       runtimeReady,
       mailboxAccessMode,
-      draftingEnabled
+      draftingEnabled,
+      adminMailboxTargets
     }),
     consentConfigured,
     crossMailboxReady
@@ -94,6 +101,7 @@ export function buildMicrosoftGraphConfig(input: MicrosoftGraphConfigInput) {
     tenantId: input.tenantId,
     redirectUri: input.redirectUri,
     scopes: Array.from(new Set(input.scopes.filter((scope) => scope.trim().length > 0))),
+    adminMailboxTargets: Array.from(new Set(input.adminMailboxTargets.filter((target) => target.trim().length > 0))),
     mailboxAccessMode: input.mailboxAccessMode,
     mailSyncEnabled: input.mailSyncEnabled,
     fileSyncEnabled: input.fileSyncEnabled,
@@ -104,17 +112,23 @@ export function buildMicrosoftGraphConfig(input: MicrosoftGraphConfigInput) {
 function buildRuntimeNotes({
   runtimeReady,
   mailboxAccessMode,
-  draftingEnabled
+  draftingEnabled,
+  adminMailboxTargets
 }: {
   runtimeReady: boolean;
   mailboxAccessMode: MicrosoftGraphMailboxAccessMode;
   draftingEnabled: boolean;
+  adminMailboxTargets: string[];
 }) {
   if (!runtimeReady) {
     return "Set the Microsoft app registration values for this tenant before enabling live sync.";
   }
 
   if (mailboxAccessMode === "ADMIN_SELECTED_MAILBOXES") {
+    if (adminMailboxTargets.length === 0) {
+      return "Admin mailbox insight mode selected. Add one or more mailbox addresses to enable cross-mailbox Microsoft Graph sync.";
+    }
+
     return draftingEnabled
       ? "Admin mailbox insight mode selected. Live cross-mailbox sync and sending still require Microsoft Graph application permissions plus an Exchange mailbox access policy."
       : "Admin mailbox insight mode selected. Live cross-mailbox sync requires Microsoft Graph application permissions plus an Exchange mailbox access policy that limits which mailboxes the app can read.";

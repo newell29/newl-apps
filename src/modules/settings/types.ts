@@ -166,6 +166,7 @@ export type MicrosoftGraphSettings = {
   tenantId: string | null;
   redirectUri: string | null;
   scopes: string[];
+  adminMailboxTargets: string[];
   mailboxAccessMode: MicrosoftGraphMailboxAccessMode;
   mailSyncEnabled: boolean;
   fileSyncEnabled: boolean;

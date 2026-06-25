@@ -742,8 +742,8 @@ function buildDeterministicAnswer(
   switch (intent) {
     case "RATE_REQUEST":
       return [
-        "Rate requests should be routed through the assistant as a structured collection flow: origin, destination, package or pallet details, service level, accessorials, and account/customer context.",
-        `Today it can see ${context.rateJobCount} recent UPS/LTL quote job(s) and should hand off to UPS Tools or the LTL Rate Portal until live tool-calling is added.`
+        "Rate requests should be routed through the assistant as a structured collection flow: origin, destination, ZIP or postal codes, package or pallet details, service level, accessorials, and account context.",
+        `Today it can see ${context.rateJobCount} recent UPS/LTL quote job(s). Complete LTL shipment details can now be handed to the tenant's 7L configuration for live quoting.`
       ];
     case "CUSTOMER_CONTEXT":
       return [

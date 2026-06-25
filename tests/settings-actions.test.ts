@@ -205,6 +205,7 @@ describe("saveTradeMiningScoringSettingsAction", () => {
     formData.set("microsoftTenantId", "tenant-id-1");
     formData.set("microsoftRedirectUri", "https://newl-apps.vercel.app/api/auth/callback/microsoft-entra-id");
     formData.set("microsoftMailboxAccessMode", "ADMIN_SELECTED_MAILBOXES");
+    formData.set("microsoftAdminMailboxTargets", "shared@newl.ca\nops@newl.ca");
     formData.set("microsoftMailSyncEnabled", "true");
     formData.set("microsoftFileSyncEnabled", "true");
 
@@ -219,6 +220,7 @@ describe("saveTradeMiningScoringSettingsAction", () => {
       clientId: "client-id-1",
       tenantId: "tenant-id-1",
       redirectUri: "https://newl-apps.vercel.app/api/auth/callback/microsoft-entra-id",
+      adminMailboxTargets: ["shared@newl.ca", "ops@newl.ca"],
       mailboxAccessMode: "ADMIN_SELECTED_MAILBOXES",
       mailSyncEnabled: true,
       fileSyncEnabled: true,

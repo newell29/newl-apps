@@ -1,6 +1,7 @@
-import { JobStatus, type Prisma } from "@prisma/client";
+import { JobStatus, PlatformRole, type Prisma } from "@prisma/client";
 
 import { searchAssistantKnowledge } from "@/modules/assistant/knowledge";
+import { maybeRunAssistantRateRequest } from "@/modules/assistant/rate-workflow";
 import {
   computeNextAssistantAutomationRunAt,
   summarizeAutomationResult,
@@ -17,11 +18,9 @@ import {
   generateAssistantReply,
   parseAssistantProviderSettings
 } from "@/server/integrations/assistant-provider";
-import type { TenantContext } from "@/server/tenant-context";
+import type { AuthenticatedContext, TenantContext } from "@/server/tenant-context";
 
-export type AssistantRuntimeContext = TenantContext & {
-  userId: string;
-};
+export type AssistantRuntimeContext = AuthenticatedContext;
 
 export async function runAssistantPrompt(
   context: AssistantRuntimeContext,
@@ -56,6 +55,30 @@ export async function runAssistantPrompt(
     hasLocalLlm: workspace.integrations.some((integration) => integration.provider === "LOCAL_LLM" && integration.activeCount > 0),
     rateJobCount: workspace.recentRateJobs.length
   });
+
+  if (deterministic.intent === "RATE_REQUEST") {
+    const rateResponse = await maybeRunAssistantRateRequest(context, prompt);
+
+    if (rateResponse) {
+      return {
+        answer: rateResponse.answer,
+        intent: deterministic.intent,
+        provider: "NEWL_RATE_WORKFLOW",
+        model: "assistant-rate-workflow-v1",
+        messageMetadata: {
+          deterministic: true,
+          intent: deterministic.intent,
+          ...rateResponse.metadata
+        },
+        runMetadata: {
+          deterministic: true,
+          intent: deterministic.intent,
+          ...rateResponse.metadata
+        },
+        sources: rateResponse.sources
+      };
+    }
+  }
 
   let answer = deterministic.answer.join("\n\n");
   let provider = "NEWL_DETERMINISTIC";
@@ -271,7 +294,22 @@ export async function runDueAssistantAutomationsForTenant(tenant: TenantContext,
     take: 25,
     select: {
       id: true,
-      userId: true
+      userId: true,
+      user: {
+        select: {
+          email: true,
+          name: true,
+          memberships: {
+            where: {
+              tenantId: tenant.tenantId
+            },
+            select: {
+              role: true
+            },
+            take: 1
+          }
+        }
+      }
     }
   });
 
@@ -283,7 +321,10 @@ export async function runDueAssistantAutomationsForTenant(tenant: TenantContext,
         tenantId: tenant.tenantId,
         tenantSlug: tenant.tenantSlug,
         tenantName: tenant.tenantName,
-        userId: automation.userId
+        userId: automation.userId,
+        userEmail: automation.user.email,
+        userName: automation.user.name,
+        role: automation.user.memberships[0]?.role ?? PlatformRole.READ_ONLY
       },
       automation.id,
       "scheduled"

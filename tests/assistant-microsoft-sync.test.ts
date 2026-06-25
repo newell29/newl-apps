@@ -458,6 +458,113 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
 
     fetchMock.mockRestore();
   });
+
+  it("uses Microsoft Graph application permissions for admin-selected mailboxes", async () => {
+    process.env.MICROSOFT_GRAPH_APP_CLIENT_ID = "graph-app-client";
+    process.env.MICROSOFT_GRAPH_APP_CLIENT_SECRET = "graph-app-secret";
+    process.env.MICROSOFT_GRAPH_APP_TENANT_ID = "graph-app-tenant";
+
+    findIntegrationCredential.mockResolvedValue({
+      provider: IntegrationProvider.MICROSOFT_GRAPH,
+      status: IntegrationStatus.ACTIVE,
+      publicConfig: {
+        clientId: "client-id-1",
+        tenantId: "tenant-id-1",
+        redirectUri: "https://newl-apps.vercel.app/api/auth/callback/microsoft-entra-id",
+        scopes: ["User.Read", "offline_access", "Mail.Read", "Files.Read.All", "Sites.Read.All"],
+        adminMailboxTargets: ["shared@newl.ca", "ops@newl.ca"],
+        mailboxAccessMode: "ADMIN_SELECTED_MAILBOXES",
+        mailSyncEnabled: true,
+        fileSyncEnabled: false,
+        draftingEnabled: false
+      }
+    });
+
+    const upsert = vi.fn().mockResolvedValue({ id: "doc-1" });
+    const deleteMany = vi.fn().mockResolvedValue({});
+    const createMany = vi.fn().mockResolvedValue({});
+    const deleteMemories = vi.fn().mockResolvedValue({});
+    const createMemories = vi.fn().mockResolvedValue({});
+    const findCompanies = vi.fn().mockResolvedValue([]);
+    const findContacts = vi.fn().mockResolvedValue([]);
+    transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback({
+        company: { findMany: findCompanies },
+        contact: { findMany: findContacts },
+        assistantKnowledgeDocument: { upsert },
+        assistantKnowledgeChunk: { deleteMany, createMany },
+        assistantMemory: { deleteMany: deleteMemories, createMany: createMemories }
+      })
+    );
+
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            access_token: "application-token"
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            value: [
+              {
+                id: "mail-1",
+                subject: "Shared mailbox issue",
+                bodyPreview: "Customer complaint.",
+                body: { contentType: "text", content: "Delay issue for shipment 123." },
+                receivedDateTime: "2026-06-25T10:00:00.000Z"
+              }
+            ]
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            value: [
+              {
+                id: "mail-2",
+                subject: "Sales mailbox opportunity",
+                bodyPreview: "Need pricing.",
+                body: { contentType: "text", content: "Need a quote for LTL freight." },
+                receivedDateTime: "2026-06-25T11:00:00.000Z"
+              }
+            ]
+          }),
+          { status: 200 }
+        )
+      );
+
+    const result = await syncTenantMicrosoftGraphAssistantKnowledge({
+      tenantId: "tenant-1",
+      tenantSlug: "tenant-1",
+      tenantName: "Tenant 1"
+    });
+
+    expect(result).toMatchObject({
+      connectedUserCount: 2,
+      syncedUserCount: 2,
+      skippedUserCount: 0,
+      documentCount: 2,
+      mailCount: 2,
+      fileCount: 0,
+      skipped: false
+    });
+    expect(findMemberships).not.toHaveBeenCalled();
+    expect(findAccount).not.toHaveBeenCalled();
+    expect(upsert.mock.calls[0][0].create.externalId).toBe("ops@newl.ca:mail-2");
+    expect(upsert.mock.calls[1][0].create.externalId).toBe("shared@newl.ca:mail-1");
+
+    fetchMock.mockRestore();
+    delete process.env.MICROSOFT_GRAPH_APP_CLIENT_ID;
+    delete process.env.MICROSOFT_GRAPH_APP_CLIENT_SECRET;
+    delete process.env.MICROSOFT_GRAPH_APP_TENANT_ID;
+  });
 });
 
 describe("buildMicrosoftGraphMemoriesFromDocuments", () => {

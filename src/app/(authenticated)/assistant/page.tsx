@@ -27,7 +27,7 @@ const suggestedPrompts = [
   "Which customers or prospects need attention today?",
   "What sales opportunities are visible from current lead data?",
   "Draft a customer follow-up email using what we know.",
-  "I need a rate from Toronto to Dallas for 2 pallets.",
+  "I need a rate from Charlotte NC 28273 to Dallas TX 75201 for 1 pallet 40x48x50 at 500 lbs.",
   "What problems should managers be watching for?"
 ];
 
