@@ -249,25 +249,14 @@ export default async function SettingsPage() {
         </div>
 
         <form action={saveMicrosoftGraphSettingsAction} className="mt-4 space-y-4">
-          <div className="grid gap-4 xl:grid-cols-3">
-            <OptionalField
-              label="Application (client) ID"
-              name="microsoftClientId"
-              defaultValue={settings.microsoftGraph.clientId ?? ""}
-              placeholder="c562e2bf-32fe-4563-b74a-3be5dc030257"
-            />
-            <OptionalField
-              label="Directory (tenant) ID"
-              name="microsoftTenantId"
-              defaultValue={settings.microsoftGraph.tenantId ?? ""}
-              placeholder="4b4f3f6f-7e08-4dd2-875a-6ee27ca7ba4d"
-            />
-            <OptionalField
-              label="Redirect URI"
-              name="microsoftRedirectUri"
-              defaultValue={settings.microsoftGraph.redirectUri ?? ""}
-              placeholder="https://newl-apps.vercel.app/api/auth/callback/microsoft-entra-id"
-            />
+          <div className="rounded-md border border-border bg-background p-4">
+            <p className="text-sm font-medium text-foreground">App registration source</p>
+            <p className="mt-2 text-sm leading-6 text-mutedForeground">
+              Microsoft Entra application ID, tenant ID, and redirect URI are read from the server environment used by Auth.js. This tenant form only controls mailbox scope and sync behavior.
+            </p>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
             <SelectField
               label="Mailbox access mode"
               name="microsoftMailboxAccessMode"

@@ -449,9 +449,6 @@ export async function saveAssistantProviderSettingsAction(formData: FormData) {
 
 export async function saveMicrosoftGraphSettingsAction(formData: FormData) {
   const context = await authorizeSettingsMutation();
-  const clientId = readOptional(formData, "microsoftClientId") ?? null;
-  const tenantId = readOptional(formData, "microsoftTenantId") ?? null;
-  const redirectUri = readOptional(formData, "microsoftRedirectUri") ?? null;
   const adminMailboxTargets = readTextareaList(formData.get("microsoftAdminMailboxTargets"));
   const mailboxAccessMode = readMicrosoftMailboxAccessMode(formData.get("microsoftMailboxAccessMode"));
   const mailSyncEnabled = formData.get("microsoftMailSyncEnabled") === "true";
@@ -468,6 +465,9 @@ export async function saveMicrosoftGraphSettingsAction(formData: FormData) {
       provider: IntegrationProvider.MICROSOFT_GRAPH,
       name: MICROSOFT_GRAPH_CREDENTIAL_NAME
     },
+    orderBy: {
+      updatedAt: "desc"
+    },
     select: {
       id: true
     }
@@ -479,9 +479,6 @@ export async function saveMicrosoftGraphSettingsAction(formData: FormData) {
     name: MICROSOFT_GRAPH_CREDENTIAL_NAME,
     status: mailSyncEnabled || fileSyncEnabled ? IntegrationStatus.ACTIVE : IntegrationStatus.DISABLED,
     publicConfig: buildMicrosoftGraphConfig({
-      clientId,
-      tenantId,
-      redirectUri,
       scopes: DEFAULT_MICROSOFT_GRAPH_SCOPES,
       adminMailboxTargets,
       mailboxAccessMode,

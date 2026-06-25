@@ -5,9 +5,6 @@ export const MICROSOFT_GRAPH_CREDENTIAL_NAME = "Microsoft 365 Assistant";
 export type MicrosoftGraphMailboxAccessMode = "SIGNED_IN_USER" | "ADMIN_SELECTED_MAILBOXES";
 
 export type MicrosoftGraphSettings = {
-  clientId: string | null;
-  tenantId: string | null;
-  redirectUri: string | null;
   scopes: string[];
   adminMailboxTargets: string[];
   mailboxAccessMode: MicrosoftGraphMailboxAccessMode;
@@ -28,9 +25,6 @@ type MicrosoftGraphCredentialRecord = {
 };
 
 type MicrosoftGraphConfigInput = {
-  clientId: string | null;
-  tenantId: string | null;
-  redirectUri: string | null;
   scopes: string[];
   adminMailboxTargets: string[];
   mailboxAccessMode: MicrosoftGraphMailboxAccessMode;
@@ -55,9 +49,6 @@ export function parseMicrosoftGraphSettings(
       ? (credential.publicConfig as Record<string, unknown>)
       : {};
 
-  const clientId = readString(config.clientId);
-  const tenantId = readString(config.tenantId);
-  const redirectUri = readString(config.redirectUri);
   const scopes = readStringArray(config.scopes, DEFAULT_MICROSOFT_GRAPH_SCOPES);
   const adminMailboxTargets = readStringArray(config.adminMailboxTargets, []);
   const mailboxAccessMode = readMailboxAccessMode(config.mailboxAccessMode);
@@ -65,7 +56,7 @@ export function parseMicrosoftGraphSettings(
   const fileSyncEnabled = readBoolean(config.fileSyncEnabled) ?? true;
   const draftingEnabled = readBoolean(config.draftingEnabled) ?? false;
   const status = credential?.status ?? IntegrationStatus.DISABLED;
-  const runtimeReady = Boolean(clientId && tenantId && redirectUri);
+  const runtimeReady = hasDelegatedGraphRuntimeConfigured();
   const consentConfigured = scopes.length > 0;
   const crossMailboxReady =
     mailboxAccessMode === "ADMIN_SELECTED_MAILBOXES" &&
@@ -73,9 +64,6 @@ export function parseMicrosoftGraphSettings(
     hasApplicationMailboxRuntimeConfigured();
 
   return {
-    clientId,
-    tenantId,
-    redirectUri,
     scopes,
     adminMailboxTargets,
     mailboxAccessMode,
@@ -97,9 +85,6 @@ export function parseMicrosoftGraphSettings(
 
 export function buildMicrosoftGraphConfig(input: MicrosoftGraphConfigInput) {
   return {
-    clientId: input.clientId,
-    tenantId: input.tenantId,
-    redirectUri: input.redirectUri,
     scopes: Array.from(new Set(input.scopes.filter((scope) => scope.trim().length > 0))),
     adminMailboxTargets: Array.from(new Set(input.adminMailboxTargets.filter((target) => target.trim().length > 0))),
     mailboxAccessMode: input.mailboxAccessMode,
@@ -121,7 +106,7 @@ function buildRuntimeNotes({
   adminMailboxTargets: string[];
 }) {
   if (!runtimeReady) {
-    return "Set the Microsoft app registration values for this tenant before enabling live sync.";
+    return "Microsoft delegated auth is not fully configured in the server environment yet. Set the Entra app env values in Vercel before enabling live sync.";
   }
 
   if (mailboxAccessMode === "ADMIN_SELECTED_MAILBOXES") {
@@ -139,6 +124,15 @@ function buildRuntimeNotes({
     : "Configured for signed-in user delegated access using the current Microsoft Graph consent set.";
 }
 
+function hasDelegatedGraphRuntimeConfigured() {
+  const clientId = process.env.AUTH_MICROSOFT_ENTRA_ID_ID?.trim() || process.env.AZURE_AD_CLIENT_ID?.trim();
+  const tenantId = process.env.AZURE_AD_TENANT_ID?.trim();
+  const issuer = process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER?.trim();
+  const authUrl = process.env.AUTH_URL?.trim() || process.env.NEXTAUTH_URL?.trim();
+
+  return Boolean(clientId && authUrl && (tenantId || issuer));
+}
+
 function hasApplicationMailboxRuntimeConfigured() {
   return Boolean(
     process.env.MICROSOFT_GRAPH_APP_CLIENT_ID &&
@@ -153,10 +147,6 @@ function readMailboxAccessMode(value: unknown): MicrosoftGraphMailboxAccessMode 
 
 function readBoolean(value: unknown) {
   return typeof value === "boolean" ? value : undefined;
-}
-
-function readString(value: unknown) {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 function readStringArray(value: unknown, fallback: string[]) {
