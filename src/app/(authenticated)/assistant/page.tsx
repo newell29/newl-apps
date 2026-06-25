@@ -2,7 +2,8 @@ import Link from "next/link";
 import { ModuleKey } from "@prisma/client";
 
 import { PageHeader } from "@/components/page-header";
-import { getAssistantWorkspace } from "@/modules/assistant/queries";
+import { askAssistantAction } from "@/modules/assistant/actions";
+import { formatAssistantRole, getAssistantWorkspace } from "@/modules/assistant/queries";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
@@ -11,6 +12,7 @@ export const dynamic = "force-dynamic";
 type AssistantPageProps = {
   searchParams?: Promise<{
     q?: string;
+    thread?: string;
   }>;
 };
 
@@ -28,7 +30,8 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
 
   const params = await searchParams;
   const query = params?.q?.trim() ?? "";
-  const workspace = await getAssistantWorkspace(context, query);
+  const threadId = params?.thread?.trim() || undefined;
+  const workspace = await getAssistantWorkspace(context, query, threadId);
 
   return (
     <div className="space-y-6">
@@ -51,9 +54,10 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
           </span>
         </div>
 
-        <form className="mt-5 flex flex-col gap-3 sm:flex-row" action="/assistant">
+        <form className="mt-5 flex flex-col gap-3 sm:flex-row" action={askAssistantAction}>
+          {workspace.activeThread ? <input type="hidden" name="threadId" value={workspace.activeThread.id} /> : null}
           <input
-            name="q"
+            name="prompt"
             defaultValue={query}
             placeholder="Ask about customers, sales opportunities, rates, risks, or email drafts"
             className="min-h-11 flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-mutedForeground focus:border-primary"
@@ -78,15 +82,89 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
           ))}
         </div>
 
-        <div className="mt-5 rounded-md border border-border bg-muted/30 p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Assistant response preview</p>
-          <div className="mt-3 space-y-2 text-sm leading-6 text-foreground">
-            {workspace.answer.map((line) => (
-              <p key={line}>{line}</p>
+        {workspace.activeThread ? (
+          <div className="mt-5 rounded-md border border-border bg-muted/30 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Active thread</p>
+                <h2 className="mt-1 text-base font-semibold text-foreground">{workspace.activeThread.title}</h2>
+              </div>
+              <Link href="/assistant" className="text-sm font-semibold text-primary hover:text-primaryHover">
+                New thread
+              </Link>
+            </div>
+            <div className="mt-4 space-y-3">
+              {workspace.activeThread.messages.map((message) => (
+                <div
+                  key={message.id}
+                  className={[
+                    "rounded-md border p-3",
+                    message.role === "USER" ? "border-primary/25 bg-background" : "border-border bg-card"
+                  ].join(" ")}
+                >
+                  <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+                    {formatAssistantRole(message.role)}
+                  </p>
+                  <div className="mt-2 whitespace-pre-line text-sm leading-6 text-foreground">{message.content}</div>
+                </div>
+              ))}
+            </div>
+            {workspace.activeThread.recentRuns[0]?.retrievedSources.length ? (
+              <div className="mt-4 rounded-md border border-border bg-background p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Latest retrieved sources</p>
+                <div className="mt-3 space-y-2">
+                  {workspace.activeThread.recentRuns[0].retrievedSources.map((source) => (
+                    <div key={source.id} className="text-sm leading-6">
+                      <p className="font-medium text-foreground">{source.title}</p>
+                      <p className="text-mutedForeground">{source.excerpt}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="mt-5 rounded-md border border-border bg-muted/30 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Assistant response preview</p>
+            <div className="mt-3 space-y-2 text-sm leading-6 text-foreground">
+              {workspace.answer.map((line) => (
+                <p key={line}>{line}</p>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {workspace.recentThreads.length > 0 ? (
+        <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 className="text-base font-semibold text-foreground">Recent assistant threads</h2>
+              <p className="mt-1 text-sm leading-6 text-mutedForeground">
+                Stored conversations are tenant-scoped and auditable.
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            {workspace.recentThreads.map((thread) => (
+              <Link
+                key={thread.id}
+                href={`/assistant?thread=${encodeURIComponent(thread.id)}`}
+                className={[
+                  "rounded-md border p-4 transition-colors hover:bg-muted/40",
+                  workspace.activeThread?.id === thread.id ? "border-primary/50 bg-accentSoft/40" : "border-border bg-muted/20"
+                ].join(" ")}
+              >
+                <p className="font-semibold text-foreground">{thread.title}</p>
+                <p className="mt-1 text-xs text-mutedForeground">
+                  {thread.messageCount} messages
+                  {thread.lastMessageAt ? `, last used ${formatDate(thread.lastMessageAt)}` : ""}
+                </p>
+              </Link>
             ))}
           </div>
-        </div>
-      </section>
+        </section>
+      ) : null}
 
       <section className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
         <Metric label="Companies" value={workspace.stats.companyCount} />
@@ -250,4 +328,13 @@ function formatEnum(value: string) {
     .split("_")
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ");
+}
+
+function formatDate(value: Date) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(value);
 }

@@ -1,4 +1,9 @@
-import { IntegrationProvider, LeadPipelineStage } from "@prisma/client";
+import {
+  AssistantMessageRole,
+  AssistantSourceKind,
+  IntegrationProvider,
+  LeadPipelineStage
+} from "@prisma/client";
 
 import { prisma } from "@/server/db";
 import type { TenantContext } from "@/server/tenant-context";
@@ -29,7 +34,7 @@ export type AssistantIntent =
   | "EMAIL_DRAFT"
   | "GENERAL_INSIGHT";
 
-export async function getAssistantWorkspace(tenant: TenantContext, query?: string) {
+export async function getAssistantWorkspace(tenant: TenantContext, query?: string, threadId?: string) {
   const [
     companyCount,
     contactCount,
@@ -40,7 +45,9 @@ export async function getAssistantWorkspace(tenant: TenantContext, query?: strin
     integrations,
     topCompanies,
     openLeads,
-    recentRateJobs
+    recentRateJobs,
+    recentThreads,
+    activeThread
   ] = await Promise.all([
     prisma.company.count({ where: tenantWhere(tenant) }),
     prisma.contact.count({ where: tenantWhere(tenant) }),
@@ -132,7 +139,75 @@ export async function getAssistantWorkspace(tenant: TenantContext, query?: strin
         finishedAt: true,
         errorMessage: true
       }
-    })
+    }),
+    prisma.assistantChatThread.findMany({
+      where: tenantWhere(tenant, {
+        status: "ACTIVE"
+      }),
+      orderBy: [{ lastMessageAt: "desc" }, { updatedAt: "desc" }],
+      take: 8,
+      select: {
+        id: true,
+        title: true,
+        updatedAt: true,
+        lastMessageAt: true,
+        _count: {
+          select: {
+            messages: true
+          }
+        }
+      }
+    }),
+    threadId
+      ? prisma.assistantChatThread.findFirst({
+          where: tenantWhere(tenant, {
+            id: threadId
+          }),
+          select: {
+            id: true,
+            title: true,
+            updatedAt: true,
+            lastMessageAt: true,
+            messages: {
+              orderBy: {
+                createdAt: "asc"
+              },
+              select: {
+                id: true,
+                role: true,
+                content: true,
+                createdAt: true
+              }
+            },
+            runs: {
+              orderBy: {
+                startedAt: "desc"
+              },
+              take: 3,
+              select: {
+                id: true,
+                intent: true,
+                status: true,
+                provider: true,
+                model: true,
+                startedAt: true,
+                retrievedSources: {
+                  orderBy: {
+                    createdAt: "asc"
+                  },
+                  select: {
+                    id: true,
+                    sourceKind: true,
+                    sourceId: true,
+                    title: true,
+                    excerpt: true
+                  }
+                }
+              }
+            }
+          }
+        })
+      : Promise.resolve(null)
   ]);
 
   const intent = classifyAssistantIntent(query);
@@ -194,8 +269,125 @@ export async function getAssistantWorkspace(tenant: TenantContext, query?: strin
       company: lead.company,
       contact: lead.contact
     })),
-    recentRateJobs
+    recentRateJobs,
+    recentThreads: recentThreads.map((thread) => ({
+      id: thread.id,
+      title: thread.title,
+      updatedAt: thread.updatedAt,
+      lastMessageAt: thread.lastMessageAt,
+      messageCount: thread._count.messages
+    })),
+    activeThread: activeThread
+      ? {
+          id: activeThread.id,
+          title: activeThread.title,
+          updatedAt: activeThread.updatedAt,
+          lastMessageAt: activeThread.lastMessageAt,
+          messages: activeThread.messages.map((message) => ({
+            id: message.id,
+            role: message.role,
+            content: message.content,
+            createdAt: message.createdAt
+          })),
+          recentRuns: activeThread.runs.map((run) => ({
+            id: run.id,
+            intent: run.intent,
+            status: run.status,
+            provider: run.provider,
+            model: run.model,
+            startedAt: run.startedAt,
+            retrievedSources: run.retrievedSources.map((source) => ({
+              id: source.id,
+              sourceKind: source.sourceKind,
+              sourceId: source.sourceId,
+              title: source.title,
+              excerpt: source.excerpt
+            }))
+          }))
+        }
+      : null
   };
+}
+
+export function buildAssistantAnswerForPrompt(
+  prompt: string,
+  context: {
+    companyCount: number;
+    contactCount: number;
+    openLeadCount: number;
+    importRecordCount: number;
+    knowledgeDocumentCount: number;
+    memoryCount: number;
+    topCompanyName: string | null;
+    topCompanyScore: number | null;
+    hasOpenAi: boolean;
+    rateJobCount: number;
+  }
+) {
+  const intent = classifyAssistantIntent(prompt);
+
+  return {
+    intent,
+    answer: buildDeterministicAnswer(intent, context)
+  };
+}
+
+export function buildAssistantSources(workspace: Awaited<ReturnType<typeof getAssistantWorkspace>>) {
+  const sources: Array<{
+    sourceKind: AssistantSourceKind;
+    sourceId: string | null;
+    title: string;
+    excerpt: string;
+    metadata?: Record<string, unknown>;
+  }> = [];
+
+  for (const company of workspace.topCompanies.slice(0, 3)) {
+    sources.push({
+      sourceKind: AssistantSourceKind.COMPANY,
+      sourceId: company.id,
+      title: company.name,
+      excerpt: `${company.importRecordCount} imports, ${company.contactCount} contacts, priority score ${company.priorityScore}.`,
+      metadata: {
+        candidateStatus: company.candidateStatus,
+        primaryIndustry: company.primaryIndustry
+      }
+    });
+  }
+
+  for (const lead of workspace.openLeads.slice(0, 3)) {
+    sources.push({
+      sourceKind: AssistantSourceKind.LEAD,
+      sourceId: lead.id,
+      title: `${lead.company.name} lead`,
+      excerpt: `Stage ${lead.stage}, score ${lead.score}${lead.contact ? `, contact ${lead.contact.fullName}` : ""}.`,
+      metadata: {
+        companyId: lead.company.id,
+        stage: lead.stage
+      }
+    });
+  }
+
+  for (const job of workspace.recentRateJobs.slice(0, 2)) {
+    sources.push({
+      sourceKind: AssistantSourceKind.RATE_TOOL,
+      sourceId: job.id,
+      title: job.jobType,
+      excerpt: `Rate job ${job.status} at ${job.startedAt.toISOString()}.`,
+      metadata: {
+        status: job.status,
+        finishedAt: job.finishedAt?.toISOString() ?? null
+      }
+    });
+  }
+
+  return sources;
+}
+
+export function formatAssistantRole(role: AssistantMessageRole) {
+  if (role === AssistantMessageRole.USER) return "You";
+  if (role === AssistantMessageRole.ASSISTANT) return "Assistant";
+  if (role === AssistantMessageRole.TOOL) return "Tool";
+  return "System";
 }
 
 export function classifyAssistantIntent(query?: string): AssistantIntent {

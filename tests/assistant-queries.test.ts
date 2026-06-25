@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyAssistantIntent } from "@/modules/assistant/queries";
+import { buildAssistantSources, classifyAssistantIntent } from "@/modules/assistant/queries";
 
 describe("classifyAssistantIntent", () => {
   it("routes rate and quote questions to the rate request flow", () => {
@@ -31,5 +31,74 @@ describe("classifyAssistantIntent", () => {
   it("uses general insight as the default", () => {
     expect(classifyAssistantIntent()).toBe("GENERAL_INSIGHT");
     expect(classifyAssistantIntent("What should I look at?")).toBe("GENERAL_INSIGHT");
+  });
+});
+
+describe("buildAssistantSources", () => {
+  it("turns workspace companies, leads, and rate jobs into auditable source records", () => {
+    const sources = buildAssistantSources({
+      topCompanies: [
+        {
+          id: "company-1",
+          name: "Acme Imports",
+          normalizedName: "acme imports",
+          primaryIndustry: "Furniture",
+          priorityScore: 87,
+          candidateStatus: "NEW",
+          contactCount: 2,
+          leadCount: 1,
+          importRecordCount: 14,
+          updatedAt: new Date("2026-06-25T10:00:00Z")
+        }
+      ],
+      openLeads: [
+        {
+          id: "lead-1",
+          stage: "QUALIFIED",
+          score: 92,
+          notes: null,
+          updatedAt: new Date("2026-06-25T10:00:00Z"),
+          company: {
+            id: "company-1",
+            name: "Acme Imports",
+            primaryIndustry: "Furniture",
+            priorityScore: 87
+          },
+          contact: {
+            fullName: "Taylor Smith",
+            title: "Logistics Manager",
+            email: "taylor@example.com"
+          }
+        }
+      ],
+      recentRateJobs: [
+        {
+          id: "job-1",
+          jobType: "ups-tools.bulk-rate-quote",
+          status: "SUCCESS",
+          startedAt: new Date("2026-06-25T10:00:00Z"),
+          finishedAt: new Date("2026-06-25T10:01:00Z"),
+          errorMessage: null
+        }
+      ]
+    } as Parameters<typeof buildAssistantSources>[0]);
+
+    expect(sources).toMatchObject([
+      {
+        sourceKind: "COMPANY",
+        sourceId: "company-1",
+        title: "Acme Imports"
+      },
+      {
+        sourceKind: "LEAD",
+        sourceId: "lead-1",
+        title: "Acme Imports lead"
+      },
+      {
+        sourceKind: "RATE_TOOL",
+        sourceId: "job-1",
+        title: "ups-tools.bulk-rate-quote"
+      }
+    ]);
   });
 });
