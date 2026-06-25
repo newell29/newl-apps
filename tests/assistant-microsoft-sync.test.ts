@@ -5,6 +5,7 @@ const findIntegrationCredential = vi.fn();
 const findAccount = vi.fn();
 const updateAccount = vi.fn();
 const transaction = vi.fn();
+const findMemberships = vi.fn();
 
 vi.mock("@/server/db", () => ({
   prisma: {
@@ -15,13 +16,17 @@ vi.mock("@/server/db", () => ({
       findFirst: (...args: unknown[]) => findAccount(...args),
       update: (...args: unknown[]) => updateAccount(...args)
     },
+    membership: {
+      findMany: (...args: unknown[]) => findMemberships(...args)
+    },
     $transaction: (...args: unknown[]) => transaction(...args)
   }
 }));
 
 import {
   buildMicrosoftGraphMemoriesFromDocuments,
-  syncMicrosoftGraphAssistantKnowledge
+  syncMicrosoftGraphAssistantKnowledge,
+  syncTenantMicrosoftGraphAssistantKnowledge
 } from "@/modules/assistant/microsoft-graph-sync";
 
 describe("syncMicrosoftGraphAssistantKnowledge", () => {
@@ -29,6 +34,7 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
     vi.clearAllMocks();
     transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) => callback({}));
     updateAccount.mockResolvedValue({});
+    findMemberships.mockResolvedValue([]);
     process.env.AUTH_MICROSOFT_ENTRA_ID_ID = "client-id-1";
     process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET = "client-secret-1";
     process.env.AZURE_AD_TENANT_ID = "tenant-id-1";
@@ -192,6 +198,19 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
     expect(upsert).toHaveBeenCalledTimes(2);
     expect(updateAccount).not.toHaveBeenCalled();
     expect(createMemories).toHaveBeenCalledTimes(1);
+    expect(deleteMemories).toHaveBeenCalledWith({
+      where: {
+        tenantId: "tenant-1",
+        sourceRunId: null,
+        sourceDocument: {
+          is: {
+            sourceSystem: {
+              in: ["MICROSOFT_GRAPH_MAIL", "MICROSOFT_GRAPH_FILE"]
+            }
+          }
+        }
+      }
+    });
     expect(upsert.mock.calls[0][0].create.sourceKind).toBe(AssistantSourceKind.EMAIL);
     expect(upsert.mock.calls[1][0].create.sourceKind).toBe(AssistantSourceKind.ONEDRIVE_FILE);
     expect(upsert.mock.calls[0][0].create.metadata.toRecipients).toContain("Alex Newell <alex@newl.ca>");
@@ -303,6 +322,141 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
 
     fetchMock.mockRestore();
     vi.useRealTimers();
+  });
+
+  it("syncs every connected tenant user through the machine-triggerable tenant sync path", async () => {
+    findMemberships.mockResolvedValue([
+      {
+        role: "ADMIN",
+        user: {
+          id: "user-1",
+          email: "alex@newl.ca",
+          name: "Alex",
+          accounts: [{ id: "account-1" }]
+        }
+      },
+      {
+        role: "MANAGER",
+        user: {
+          id: "user-2",
+          email: "ops@newl.ca",
+          name: "Ops",
+          accounts: [{ id: "account-2" }]
+        }
+      },
+      {
+        role: "SALES",
+        user: {
+          id: "user-3",
+          email: "sales@newl.ca",
+          name: "Sales",
+          accounts: []
+        }
+      }
+    ]);
+
+    findIntegrationCredential.mockResolvedValue({
+      provider: IntegrationProvider.MICROSOFT_GRAPH,
+      status: IntegrationStatus.ACTIVE,
+      publicConfig: {
+        clientId: "client-id-1",
+        tenantId: "tenant-id-1",
+        redirectUri: "https://newl-apps.vercel.app/api/auth/callback/microsoft-entra-id",
+        scopes: ["User.Read", "offline_access", "Mail.Read", "Files.Read.All", "Sites.Read.All"],
+        mailboxAccessMode: "SIGNED_IN_USER",
+        mailSyncEnabled: true,
+        fileSyncEnabled: false,
+        draftingEnabled: false
+      }
+    });
+    findAccount
+      .mockResolvedValueOnce({
+        id: "account-1",
+        access_token: "access-token-1",
+        refresh_token: "refresh-token-1",
+        expires_at: 1_786_090_000,
+        scope: "openid profile email offline_access User.Read Mail.Read Files.Read.All Sites.Read.All",
+        token_type: "Bearer"
+      })
+      .mockResolvedValueOnce({
+        id: "account-2",
+        access_token: "access-token-2",
+        refresh_token: "refresh-token-2",
+        expires_at: 1_786_090_000,
+        scope: "openid profile email offline_access User.Read Mail.Read Files.Read.All Sites.Read.All",
+        token_type: "Bearer"
+      });
+
+    const upsert = vi.fn().mockResolvedValue({ id: "doc-1" });
+    const deleteMany = vi.fn().mockResolvedValue({});
+    const createMany = vi.fn().mockResolvedValue({});
+    const deleteMemories = vi.fn().mockResolvedValue({});
+    const createMemories = vi.fn().mockResolvedValue({});
+    const findCompanies = vi.fn().mockResolvedValue([]);
+    const findContacts = vi.fn().mockResolvedValue([]);
+    transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback({
+        company: { findMany: findCompanies },
+        contact: { findMany: findContacts },
+        assistantKnowledgeDocument: { upsert },
+        assistantKnowledgeChunk: { deleteMany, createMany },
+        assistantMemory: { deleteMany: deleteMemories, createMany: createMemories }
+      })
+    );
+
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            value: [
+              {
+                id: "mail-1",
+                subject: "Issue",
+                bodyPreview: "Customer issue.",
+                body: { contentType: "text", content: "Delay issue in Dallas." },
+                receivedDateTime: "2026-06-25T10:00:00.000Z"
+              }
+            ]
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            value: [
+              {
+                id: "mail-2",
+                subject: "Opportunity",
+                bodyPreview: "New quote request.",
+                body: { contentType: "text", content: "Need a quote for LTL freight." },
+                receivedDateTime: "2026-06-25T11:00:00.000Z"
+              }
+            ]
+          }),
+          { status: 200 }
+        )
+      );
+
+    const result = await syncTenantMicrosoftGraphAssistantKnowledge({
+      tenantId: "tenant-1",
+      tenantSlug: "tenant-1",
+      tenantName: "Tenant 1"
+    });
+
+    expect(result).toMatchObject({
+      connectedUserCount: 2,
+      syncedUserCount: 2,
+      skippedUserCount: 0,
+      documentCount: 2,
+      mailCount: 2,
+      fileCount: 0,
+      skipped: false
+    });
+    expect(result.userResults.map((entry) => entry.userEmail)).toEqual(["alex@newl.ca", "ops@newl.ca"]);
+
+    fetchMock.mockRestore();
   });
 });
 

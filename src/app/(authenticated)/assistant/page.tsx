@@ -145,6 +145,46 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
 
         <aside className="space-y-4">
           <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+            <div>
+              <h2 className="text-base font-semibold text-foreground">Signals</h2>
+              <p className="mt-1 text-sm leading-6 text-mutedForeground">
+                Recent manager-facing risks, opportunities, and customer memory.
+              </p>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <Metric label="Risks" value={workspace.managerSummary.counts.risks} compact />
+              <Metric label="Opportunities" value={workspace.managerSummary.counts.opportunities} compact />
+              <Metric label="Customers" value={workspace.managerSummary.counts.customers} compact />
+              <Metric label="Services" value={workspace.managerSummary.counts.services} compact />
+            </div>
+            <div className="mt-4 space-y-3">
+              {workspace.managerSummary.topRisks.slice(0, 2).map((signal) => (
+                <SignalItem
+                  key={signal.id}
+                  label="Risk"
+                  title={signal.title}
+                  summary={signal.summary}
+                  timestamp={signal.lastObservedAt}
+                />
+              ))}
+              {workspace.managerSummary.topOpportunities.slice(0, 2).map((signal) => (
+                <SignalItem
+                  key={signal.id}
+                  label="Opportunity"
+                  title={signal.title}
+                  summary={signal.summary}
+                  timestamp={signal.lastObservedAt}
+                />
+              ))}
+              {workspace.managerSummary.topRisks.length === 0 && workspace.managerSummary.topOpportunities.length === 0 ? (
+                <p className="rounded-md border border-border bg-muted/20 p-4 text-sm text-mutedForeground">
+                  No Microsoft or assistant signals are indexed yet.
+                </p>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-base font-semibold text-foreground">Workspace</h2>
@@ -177,7 +217,7 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
                 <h2 className="text-base font-semibold text-foreground">Recent threads</h2>
                 <p className="mt-1 text-sm leading-6 text-mutedForeground">Jump back into recent conversations.</p>
               </div>
-              <div className="mt-4 grid gap-3">
+              <div className="mt-4 grid max-h-80 gap-3 overflow-y-auto pr-1">
                 {workspace.recentThreads.slice(0, 5).map((thread: AssistantWorkspace["recentThreads"][number]) => (
                   <Link
                     key={thread.id}
@@ -619,6 +659,29 @@ function Metric({ label, value, compact = false }: { label: string; value: numbe
       <p className={compact ? "mt-2 text-lg font-semibold text-foreground" : "mt-2 text-2xl font-semibold text-foreground"}>
         {value.toLocaleString("en-US")}
       </p>
+    </div>
+  );
+}
+
+function SignalItem({
+  label,
+  title,
+  summary,
+  timestamp
+}: {
+  label: string;
+  title: string;
+  summary: string;
+  timestamp: Date | null;
+}) {
+  return (
+    <div className="rounded-md border border-border bg-muted/20 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</p>
+        <span className="text-xs text-mutedForeground">{timestamp ? formatDate(timestamp) : "Recent"}</span>
+      </div>
+      <p className="mt-1 text-sm font-semibold text-foreground">{title}</p>
+      <p className="mt-2 text-sm leading-6 text-foreground">{truncate(summary, 140)}</p>
     </div>
   );
 }

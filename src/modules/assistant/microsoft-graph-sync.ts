@@ -14,7 +14,32 @@ import {
   ensureFreshMicrosoftGraphAccessToken,
   parseMicrosoftGraphDelegatedConnection
 } from "@/server/integrations/microsoft-graph-account";
-import type { AuthenticatedContext } from "@/server/tenant-context";
+import type { AuthenticatedContext, TenantContext } from "@/server/tenant-context";
+
+const MICROSOFT_GRAPH_SOURCE_SYSTEMS = ["MICROSOFT_GRAPH_MAIL", "MICROSOFT_GRAPH_FILE"] as const;
+
+export type MicrosoftGraphKnowledgeSyncResult = {
+  documentCount: number;
+  mailCount: number;
+  fileCount: number;
+  skipped: boolean;
+  reason: string | null;
+};
+
+export type TenantMicrosoftGraphKnowledgeSyncResult = MicrosoftGraphKnowledgeSyncResult & {
+  connectedUserCount: number;
+  syncedUserCount: number;
+  skippedUserCount: number;
+  userResults: Array<{
+    userId: string;
+    userEmail: string;
+    skipped: boolean;
+    reason: string | null;
+    documentCount: number;
+    mailCount: number;
+    fileCount: number;
+  }>;
+};
 
 type MicrosoftGraphMailMessage = {
   id: string;
@@ -65,7 +90,9 @@ type MicrosoftGraphDriveItem = {
   } | null;
 };
 
-export async function syncMicrosoftGraphAssistantKnowledge(context: AuthenticatedContext) {
+export async function syncMicrosoftGraphAssistantKnowledge(
+  context: AuthenticatedContext
+): Promise<MicrosoftGraphKnowledgeSyncResult> {
   const [integrationCredential, account] = await Promise.all([
     prisma.integrationCredential.findFirst({
       where: {
@@ -213,8 +240,12 @@ async function replaceMicrosoftGraphMemories(
     where: {
       tenantId: context.tenantId,
       sourceRunId: null,
-      subjectType: {
-        in: ["MicrosoftGraphContact", "MicrosoftGraphCompany", "MicrosoftGraphService", "MicrosoftGraphIssue", "MicrosoftGraphOpportunity"]
+      sourceDocument: {
+        is: {
+          sourceSystem: {
+            in: [...MICROSOFT_GRAPH_SOURCE_SYSTEMS]
+          }
+        }
       }
     }
   });
@@ -499,6 +530,83 @@ export function buildMicrosoftGraphMemoriesFromDocuments(
   }
 
   return dedupeMemories(memories);
+}
+
+export async function syncTenantMicrosoftGraphAssistantKnowledge(
+  tenant: TenantContext
+): Promise<TenantMicrosoftGraphKnowledgeSyncResult> {
+  const memberships = await prisma.membership.findMany({
+    where: {
+      tenantId: tenant.tenantId
+    },
+    select: {
+      role: true,
+      user: {
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          accounts: {
+            where: {
+              provider: MICROSOFT_ENTRA_PROVIDER_ID
+            },
+            select: {
+              id: true
+            },
+            take: 1
+          }
+        }
+      }
+    },
+    orderBy: {
+      createdAt: "asc"
+    }
+  });
+
+  const connectedUsers = memberships.filter((membership) => membership.user.accounts.length > 0);
+  const userResults: TenantMicrosoftGraphKnowledgeSyncResult["userResults"] = [];
+
+  for (const membership of connectedUsers) {
+    const result = await syncMicrosoftGraphAssistantKnowledge({
+      tenantId: tenant.tenantId,
+      tenantSlug: tenant.tenantSlug,
+      tenantName: tenant.tenantName,
+      userId: membership.user.id,
+      userEmail: membership.user.email,
+      userName: membership.user.name,
+      role: membership.role
+    });
+
+    userResults.push({
+      userId: membership.user.id,
+      userEmail: membership.user.email,
+      skipped: result.skipped,
+      reason: result.reason,
+      documentCount: result.documentCount,
+      mailCount: result.mailCount,
+      fileCount: result.fileCount
+    });
+  }
+
+  const skippedUserCount = userResults.filter((result) => result.skipped).length;
+  const syncedUserCount = userResults.length - skippedUserCount;
+
+  return {
+    documentCount: userResults.reduce((sum, result) => sum + result.documentCount, 0),
+    mailCount: userResults.reduce((sum, result) => sum + result.mailCount, 0),
+    fileCount: userResults.reduce((sum, result) => sum + result.fileCount, 0),
+    skipped: syncedUserCount === 0,
+    reason:
+      connectedUsers.length === 0
+        ? "No tenant users have connected Microsoft 365 delegated access yet."
+        : syncedUserCount === 0
+          ? "All connected Microsoft 365 users were skipped."
+          : null,
+    connectedUserCount: connectedUsers.length,
+    syncedUserCount,
+    skippedUserCount,
+    userResults
+  };
 }
 
 async function loadMicrosoftEntityDirectory(tx: Prisma.TransactionClient, tenantId: string): Promise<MicrosoftEntityDirectory> {
