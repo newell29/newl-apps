@@ -11,6 +11,7 @@ import {
 } from "@/server/integrations/microsoft-graph";
 import {
   MICROSOFT_ENTRA_PROVIDER_ID,
+  ensureFreshMicrosoftGraphAccessToken,
   parseMicrosoftGraphDelegatedConnection
 } from "@/server/integrations/microsoft-graph-account";
 import type { AuthenticatedContext } from "@/server/tenant-context";
@@ -67,10 +68,12 @@ export async function syncMicrosoftGraphAssistantKnowledge(context: Authenticate
         provider: MICROSOFT_ENTRA_PROVIDER_ID
       },
       select: {
+        id: true,
         access_token: true,
         refresh_token: true,
         expires_at: true,
-        scope: true
+        scope: true,
+        token_type: true
       }
     })
   ]);
@@ -89,6 +92,20 @@ export async function syncMicrosoftGraphAssistantKnowledge(context: Authenticate
   }
 
   if (!delegatedConnection.connected || !account?.access_token) {
+    if (!account?.refresh_token) {
+      return {
+        documentCount: 0,
+        mailCount: 0,
+        fileCount: 0,
+        skipped: true,
+        reason: delegatedConnection.runtimeNotes
+      };
+    }
+  }
+
+  let accessToken = account?.access_token ?? null;
+
+  if (!account) {
     return {
       documentCount: 0,
       mailCount: 0,
@@ -98,9 +115,27 @@ export async function syncMicrosoftGraphAssistantKnowledge(context: Authenticate
     };
   }
 
+  const ensured = await ensureFreshMicrosoftGraphAccessToken(account);
+  accessToken = ensured.accessToken;
+
+  if (ensured.refreshed && account.id) {
+    await prisma.account.update({
+      where: {
+        id: account.id
+      },
+      data: {
+        access_token: ensured.accessToken,
+        refresh_token: ensured.nextRefreshToken,
+        expires_at: ensured.expiresAt,
+        scope: ensured.scope,
+        token_type: ensured.tokenType
+      }
+    });
+  }
+
   const [messages, files] = await Promise.all([
-    settings.mailSyncEnabled ? fetchRecentMail(account.access_token) : Promise.resolve([]),
-    settings.fileSyncEnabled ? fetchRecentFiles(account.access_token) : Promise.resolve([])
+    settings.mailSyncEnabled ? fetchRecentMail(accessToken) : Promise.resolve([]),
+    settings.fileSyncEnabled ? fetchRecentFiles(accessToken) : Promise.resolve([])
   ]);
 
   const documents = [

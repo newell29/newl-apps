@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const findIntegrationCredential = vi.fn();
 const findAccount = vi.fn();
+const updateAccount = vi.fn();
 const transaction = vi.fn();
 
 vi.mock("@/server/db", () => ({
@@ -11,7 +12,8 @@ vi.mock("@/server/db", () => ({
       findFirst: (...args: unknown[]) => findIntegrationCredential(...args)
     },
     account: {
-      findFirst: (...args: unknown[]) => findAccount(...args)
+      findFirst: (...args: unknown[]) => findAccount(...args),
+      update: (...args: unknown[]) => updateAccount(...args)
     },
     $transaction: (...args: unknown[]) => transaction(...args)
   }
@@ -23,6 +25,10 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) => callback({}));
+    updateAccount.mockResolvedValue({});
+    process.env.AUTH_MICROSOFT_ENTRA_ID_ID = "client-id-1";
+    process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET = "client-secret-1";
+    process.env.AZURE_AD_TENANT_ID = "tenant-id-1";
   });
 
   it("skips sync when the current user has not connected Microsoft 365 delegated access", async () => {
@@ -75,10 +81,12 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
       }
     });
     findAccount.mockResolvedValue({
+      id: "account-1",
       access_token: "access-token",
       refresh_token: "refresh-token",
       expires_at: 1_786_090_000,
-      scope: "openid profile email offline_access User.Read Mail.Read Files.Read.All Sites.Read.All"
+      scope: "openid profile email offline_access User.Read Mail.Read Files.Read.All Sites.Read.All",
+      token_type: "Bearer"
     });
 
     const upsert = vi.fn().mockResolvedValue({ id: "doc-1" });
@@ -159,9 +167,105 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(upsert).toHaveBeenCalledTimes(2);
+    expect(updateAccount).not.toHaveBeenCalled();
     expect(upsert.mock.calls[0][0].create.sourceKind).toBe(AssistantSourceKind.EMAIL);
     expect(upsert.mock.calls[1][0].create.sourceKind).toBe(AssistantSourceKind.ONEDRIVE_FILE);
 
     fetchMock.mockRestore();
+  });
+
+  it("refreshes an expired delegated token before syncing", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-25T14:30:00.000Z"));
+
+    findIntegrationCredential.mockResolvedValue({
+      provider: IntegrationProvider.MICROSOFT_GRAPH,
+      status: IntegrationStatus.ACTIVE,
+      publicConfig: {
+        clientId: "client-id-1",
+        tenantId: "tenant-id-1",
+        redirectUri: "https://newl-apps.vercel.app/api/auth/callback/microsoft-entra-id",
+        scopes: ["User.Read", "offline_access", "Mail.Read", "Files.Read.All", "Sites.Read.All"],
+        mailboxAccessMode: "SIGNED_IN_USER",
+        mailSyncEnabled: true,
+        fileSyncEnabled: false,
+        draftingEnabled: false
+      }
+    });
+    findAccount.mockResolvedValue({
+      id: "account-1",
+      access_token: "stale-access-token",
+      refresh_token: "refresh-token",
+      expires_at: Math.floor(new Date("2026-06-25T14:31:00.000Z").getTime() / 1000),
+      scope: "openid profile email offline_access User.Read Mail.Read Files.Read.All Sites.Read.All",
+      token_type: "Bearer"
+    });
+
+    const upsert = vi.fn().mockResolvedValue({ id: "doc-1" });
+    const deleteMany = vi.fn().mockResolvedValue({});
+    const createMany = vi.fn().mockResolvedValue({});
+    transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback({
+        assistantKnowledgeDocument: { upsert },
+        assistantKnowledgeChunk: { deleteMany, createMany }
+      })
+    );
+
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            access_token: "fresh-access-token",
+            refresh_token: "fresh-refresh-token",
+            expires_in: 3600,
+            scope: "openid profile email offline_access User.Read Mail.Read Files.Read.All Sites.Read.All",
+            token_type: "Bearer"
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            value: [
+              {
+                id: "mail-1",
+                subject: "New opportunity",
+                bodyPreview: "Customer requested new lane pricing.",
+                receivedDateTime: "2026-06-25T14:00:00.000Z"
+              }
+            ]
+          }),
+          { status: 200 }
+        )
+      );
+
+    const result = await syncMicrosoftGraphAssistantKnowledge({
+      tenantId: "tenant-1",
+      tenantSlug: "tenant-1",
+      tenantName: "Tenant 1",
+      userId: "user-1",
+      userEmail: "user@tenant.test",
+      userName: "User One",
+      role: "ADMIN"
+    });
+
+    expect(result).toMatchObject({
+      documentCount: 1,
+      mailCount: 1,
+      fileCount: 0,
+      skipped: false
+    });
+    expect(updateAccount).toHaveBeenCalledWith({
+      where: { id: "account-1" },
+      data: expect.objectContaining({
+        access_token: "fresh-access-token",
+        refresh_token: "fresh-refresh-token"
+      })
+    });
+
+    fetchMock.mockRestore();
+    vi.useRealTimers();
   });
 });
