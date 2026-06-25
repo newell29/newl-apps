@@ -60,8 +60,8 @@ export const DEFAULT_ASSISTANT_PROVIDER_SETTINGS: Omit<
 > = {
   provider: IntegrationProvider.OPENAI,
   liveResponsesEnabled: false,
-  defaultModel: "gpt-5.4-mini",
-  fallbackModel: "gpt-5.4-nano",
+  defaultModel: "gpt-5-mini",
+  fallbackModel: "gpt-5-nano",
   temperature: 0.2,
   maxTokens: 900,
   endpointUrl: null
@@ -134,11 +134,14 @@ function normalizeAssistantModelId(model: string | null) {
   }
 
   const trimmed = model.trim();
-  if (trimmed === "gpt-5-mini") {
-    return "gpt-5.4-mini";
+  if (trimmed === "gpt-5.4") {
+    return "gpt-5";
   }
-  if (trimmed === "gpt-5-nano") {
-    return "gpt-5.4-nano";
+  if (trimmed === "gpt-5.4-mini") {
+    return "gpt-5-mini";
+  }
+  if (trimmed === "gpt-5.4-nano") {
+    return "gpt-5-nano";
   }
 
   return trimmed;
