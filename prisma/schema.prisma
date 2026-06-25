@@ -17,6 +17,7 @@ enum PlatformRole {
 }
 
 enum ModuleKey {
+  ASSISTANT
   LEAD_GEN
   UPS_TOOLS
   LTL_RATE_PORTAL
@@ -29,9 +30,12 @@ enum IntegrationProvider {
   APOLLO
   TRADEMINING
   GOOGLE_SHEETS
+  MICROSOFT_GRAPH
   QUICKBOOKS
   UPS
   SEVEN_L
+  TMS
+  WMS
   OPENCLAW
   OPENAI
 }
@@ -135,6 +139,38 @@ enum ContactOutreachDraftSource {
   UNKNOWN
 }
 
+enum AssistantMessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+  TOOL
+}
+
+enum AssistantSourceKind {
+  COMPANY
+  CONTACT
+  LEAD
+  TRADEMINING_RECORD
+  RATE_TOOL
+  EMAIL
+  ONEDRIVE_FILE
+  TMS_RECORD
+  WMS_RECORD
+  INTEGRATION
+  MANUAL
+  OTHER
+}
+
+enum AssistantMemoryKind {
+  CUSTOMER_PROFILE
+  SERVICE_CAPABILITY
+  SALES_OPPORTUNITY
+  OPERATIONAL_RISK
+  RATE_CONTEXT
+  USER_PREFERENCE
+  TENANT_FACT
+}
+
 model Tenant {
   id        String   @id @default(cuid())
   name      String
@@ -157,6 +193,13 @@ model Tenant {
   leads                  Lead[]
   contactOutreachDrafts  ContactOutreachDraft[]
   ltlBatchQuoteLanes     LtlBatchQuoteLane[]
+  assistantThreads       AssistantChatThread[]
+  assistantMessages      AssistantChatMessage[]
+  assistantRuns          AssistantRun[]
+  assistantRetrievedSources AssistantRetrievedSource[]
+  assistantKnowledgeDocuments AssistantKnowledgeDocument[]
+  assistantKnowledgeChunks AssistantKnowledgeChunk[]
+  assistantMemories      AssistantMemory[]
 }
 
 model User {
@@ -174,6 +217,8 @@ model User {
   memberships Membership[]
   accounts    Account[]
   sessions    Session[]
+  assistantThreads AssistantChatThread[]
+  assistantRuns    AssistantRun[]
 }
 
 // Auth.js (NextAuth) adapter models. Account links an external identity
@@ -639,4 +684,163 @@ model Lead {
   @@index([tenantId, stage])
   @@index([tenantId, ownerUserId])
   @@index([tenantId, score])
+}
+
+model AssistantChatThread {
+  id            String   @id @default(cuid())
+  tenantId      String
+  userId        String?
+  title         String
+  status        String   @default("ACTIVE")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  lastMessageAt DateTime?
+
+  tenant   Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user     User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  messages AssistantChatMessage[]
+  runs     AssistantRun[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, userId, updatedAt])
+  @@index([tenantId, status, updatedAt])
+}
+
+model AssistantChatMessage {
+  id        String               @id @default(cuid())
+  tenantId  String
+  threadId  String
+  role      AssistantMessageRole
+  content   String
+  metadata  Json?
+  createdAt DateTime             @default(now())
+
+  tenant Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  thread AssistantChatThread @relation(fields: [tenantId, threadId], references: [tenantId, id], onDelete: Cascade)
+  runs   AssistantRun[]
+
+  @@index([tenantId, threadId, createdAt])
+  @@index([tenantId, role])
+}
+
+model AssistantRun {
+  id             String    @id @default(cuid())
+  tenantId       String
+  threadId       String?
+  messageId      String?
+  userId         String?
+  provider       String
+  model          String?
+  status         JobStatus
+  intent         String?
+  inputTokens    Int?
+  outputTokens   Int?
+  estimatedCost  Decimal?  @db.Decimal(12, 6)
+  metadata       Json?
+  errorMessage   String?
+  startedAt      DateTime  @default(now())
+  finishedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  tenant           Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  thread           AssistantChatThread?       @relation(fields: [tenantId, threadId], references: [tenantId, id], onDelete: Cascade)
+  message          AssistantChatMessage?      @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  user             User?                      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  retrievedSources AssistantRetrievedSource[]
+  memories         AssistantMemory[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, status, startedAt])
+  @@index([tenantId, userId, startedAt])
+  @@index([tenantId, threadId, startedAt])
+}
+
+model AssistantRetrievedSource {
+  id         String              @id @default(cuid())
+  tenantId   String
+  runId      String
+  sourceKind AssistantSourceKind
+  sourceId   String?
+  title      String
+  excerpt    String?
+  score      Decimal?            @db.Decimal(8, 4)
+  metadata   Json?
+  createdAt  DateTime            @default(now())
+
+  tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  run    AssistantRun @relation(fields: [tenantId, runId], references: [tenantId, id], onDelete: Cascade)
+
+  @@index([tenantId, runId])
+  @@index([tenantId, sourceKind, sourceId])
+}
+
+model AssistantKnowledgeDocument {
+  id              String              @id @default(cuid())
+  tenantId        String
+  sourceKind      AssistantSourceKind
+  sourceSystem    String
+  externalId      String?
+  title           String
+  canonicalUrl    String?
+  contentHash     String?
+  sourceUpdatedAt DateTime?
+  indexedAt       DateTime?
+  metadata        Json?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  tenant   Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  chunks   AssistantKnowledgeChunk[]
+  memories AssistantMemory[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, sourceSystem, externalId])
+  @@index([tenantId, sourceKind])
+  @@index([tenantId, sourceSystem])
+  @@index([tenantId, indexedAt])
+}
+
+model AssistantKnowledgeChunk {
+  id             String   @id @default(cuid())
+  tenantId       String
+  documentId     String
+  chunkIndex     Int
+  contentText    String
+  contentSummary String?
+  embeddingRef   String?
+  tokenCount     Int?
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  tenant   Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  document AssistantKnowledgeDocument @relation(fields: [tenantId, documentId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, documentId, chunkIndex])
+  @@index([tenantId, documentId])
+  @@index([tenantId, embeddingRef])
+}
+
+model AssistantMemory {
+  id               String              @id @default(cuid())
+  tenantId         String
+  kind             AssistantMemoryKind
+  subjectType      String
+  subjectId        String?
+  title            String
+  summary          String
+  confidence       Int                 @default(50)
+  status           String              @default("ACTIVE")
+  sourceDocumentId String?
+  sourceRunId      String?
+  lastObservedAt   DateTime?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  tenant         Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sourceDocument AssistantKnowledgeDocument? @relation(fields: [tenantId, sourceDocumentId], references: [tenantId, id], onDelete: NoAction)
+  sourceRun      AssistantRun?               @relation(fields: [tenantId, sourceRunId], references: [tenantId, id], onDelete: NoAction)
+
+  @@index([tenantId, kind])
+  @@index([tenantId, subjectType, subjectId])
+  @@index([tenantId, status, updatedAt])
 }
