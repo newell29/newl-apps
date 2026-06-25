@@ -43,6 +43,7 @@ import {
   MICROSOFT_GRAPH_CREDENTIAL_NAME,
   parseMicrosoftGraphSettings
 } from "@/server/integrations/microsoft-graph";
+import { parseMicrosoftGraphDelegatedConnection } from "@/server/integrations/microsoft-graph-account";
 
 type SettingsUpsAccount = UpsAccountConfig & {
   toolTargets: QuoteToolTarget[];
@@ -130,7 +131,7 @@ function isSevenLCarrier(
   return value !== null;
 }
 
-export async function getSettingsShell(tenant: TenantContext) {
+export async function getSettingsShell(tenant: TenantContext & { userId?: string }) {
   const tradeMiningScoringClient = prisma as TradeMiningScoringClient;
   let tradeMiningScoringConfigWarning: string | null = null;
   const moduleAccess = await prisma.tenantModuleAccess.findMany({
@@ -154,6 +155,7 @@ export async function getSettingsShell(tenant: TenantContext) {
     integrationCredentials,
     localUpsAccounts,
     localSevenLAccountNames,
+    microsoftAccount,
     tenantUsers,
     roleModuleOverrides,
     rolePolicies,
@@ -179,6 +181,20 @@ export async function getSettingsShell(tenant: TenantContext) {
     }),
     getLocalUpsAccountMetadata(),
     getLocalSevenLAccountNames(),
+    tenant.userId
+      ? prisma.account.findFirst({
+          where: {
+            userId: tenant.userId,
+            provider: "microsoft-entra-id"
+          },
+          select: {
+            access_token: true,
+            refresh_token: true,
+            expires_at: true,
+            scope: true
+          }
+        })
+      : Promise.resolve(null),
     prisma.membership.findMany({
       where: {
         tenantId: tenant.tenantId
@@ -301,6 +317,7 @@ export async function getSettingsShell(tenant: TenantContext) {
     }),
     assistantProvider: parseAssistantProviderSettings(assistantCredential as IntegrationCredentialRecord | null),
     microsoftGraph: parseMicrosoftGraphSettings(microsoftGraphCredential as IntegrationCredentialRecord | null),
+    microsoftGraphUserConnection: parseMicrosoftGraphDelegatedConnection(microsoftAccount),
     integrationProviders: Object.values(IntegrationProvider),
     quoteSources: managedQuoteSources,
     upsAccounts: mergeUpsAccountsForSettings(upsAccounts, localUpsAccounts),

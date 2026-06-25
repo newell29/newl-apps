@@ -6,6 +6,7 @@ const findModuleAccess = vi.fn();
 const findCredentials = vi.fn();
 const findTradeMiningScoringConfig = vi.fn();
 const findTradeMiningSearchProfiles = vi.fn();
+const findMicrosoftAccount = vi.fn();
 const findMemberships = vi.fn();
 const findRoleModuleAccess = vi.fn();
 const findRolePolicies = vi.fn();
@@ -19,6 +20,9 @@ vi.mock("@/server/db", () => ({
     },
     integrationCredential: {
       findMany: (...args: unknown[]) => findCredentials(...args)
+    },
+    account: {
+      findFirst: (...args: unknown[]) => findMicrosoftAccount(...args)
     },
     membership: {
       findMany: (...args: unknown[]) => findMemberships(...args)
@@ -54,6 +58,11 @@ const tenant: TenantContext = {
   tenantName: "Tenant 7L"
 };
 
+const tenantWithUser = {
+  ...tenant,
+  userId: "user-1"
+};
+
 describe("getSettingsShell 7L contract", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -62,6 +71,7 @@ describe("getSettingsShell 7L contract", () => {
     getLocalSevenLAccountNames.mockResolvedValue(new Set());
     findTradeMiningScoringConfig.mockResolvedValue(null);
     findTradeMiningSearchProfiles.mockResolvedValue([]);
+    findMicrosoftAccount.mockResolvedValue(null);
     findMemberships.mockResolvedValue([]);
     findRoleModuleAccess.mockResolvedValue([]);
     findRolePolicies.mockResolvedValue([]);
@@ -181,8 +191,14 @@ describe("getSettingsShell 7L contract", () => {
         }
       }
     ]);
+    findMicrosoftAccount.mockResolvedValue({
+      access_token: "access-token",
+      refresh_token: "refresh-token",
+      expires_at: 1_786_090_000,
+      scope: "openid profile email offline_access User.Read Mail.Read Files.Read.All Sites.Read.All"
+    });
 
-    const settings = await getSettingsShell(tenant);
+    const settings = await getSettingsShell(tenantWithUser);
 
     expect(settings.microsoftGraph).toMatchObject({
       clientId: "client-id-1",
@@ -196,6 +212,10 @@ describe("getSettingsShell 7L contract", () => {
       runtimeReady: true
     });
     expect(settings.microsoftGraph.scopes).toContain("Mail.Read");
+    expect(settings.microsoftGraphUserConnection).toMatchObject({
+      connected: true,
+      hasRefreshToken: true
+    });
   });
 
   it("does not require or expose raw 7L secrets in the settings client payload", async () => {

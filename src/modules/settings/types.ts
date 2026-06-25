@@ -177,6 +177,15 @@ export type MicrosoftGraphSettings = {
   crossMailboxReady: boolean;
 };
 
+export type MicrosoftGraphDelegatedConnection = {
+  connected: boolean;
+  hasRefreshToken: boolean;
+  scopes: string[];
+  missingScopes: string[];
+  expiresAt: string | null;
+  runtimeNotes: string;
+};
+
 export const DEFAULT_TRADEMINING_SCORING_SETTINGS: TradeMiningScoringSettings = {
   recentWindowDays: 30,
   comparisonWindowDays: 30,
