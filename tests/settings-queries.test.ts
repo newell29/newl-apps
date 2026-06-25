@@ -138,9 +138,7 @@ describe("getSettingsShell 7L contract", () => {
           ]
         }
       },
-      orderBy: {
-        name: "asc"
-      }
+      orderBy: [{ name: "asc" }, { updatedAt: "desc" }]
     });
 
     expect(settings.sevenLAccounts).toHaveLength(1);
@@ -180,9 +178,6 @@ describe("getSettingsShell 7L contract", () => {
         status: IntegrationStatus.ACTIVE,
         secretRef: null,
         publicConfig: {
-          clientId: "client-id-1",
-          tenantId: "tenant-id-1",
-          redirectUri: "https://newl-apps.vercel.app/api/auth/callback/microsoft-entra-id",
           scopes: ["User.Read", "offline_access", "Mail.Read", "Files.Read.All", "Sites.Read.All"],
           adminMailboxTargets: ["shared@newl.ca", "ops@newl.ca"],
           mailboxAccessMode: "SIGNED_IN_USER",
@@ -202,16 +197,13 @@ describe("getSettingsShell 7L contract", () => {
     const settings = await getSettingsShell(tenantWithUser);
 
     expect(settings.microsoftGraph).toMatchObject({
-      clientId: "client-id-1",
-      tenantId: "tenant-id-1",
-      redirectUri: "https://newl-apps.vercel.app/api/auth/callback/microsoft-entra-id",
       adminMailboxTargets: ["shared@newl.ca", "ops@newl.ca"],
       mailboxAccessMode: "SIGNED_IN_USER",
       mailSyncEnabled: true,
       fileSyncEnabled: true,
       draftingEnabled: false,
       consentConfigured: true,
-      runtimeReady: true
+      runtimeReady: false
     });
     expect(settings.microsoftGraph.scopes).toContain("Mail.Read");
     expect(settings.microsoftGraphUserConnection).toMatchObject({

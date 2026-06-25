@@ -333,6 +333,7 @@ export async function getAssistantWorkspace(
                 provider: true,
                 model: true,
                 startedAt: true,
+                metadata: true,
                 retrievedSources: {
                   orderBy: {
                     createdAt: "asc"
@@ -510,6 +511,9 @@ export async function getAssistantWorkspace(
             provider: run.provider,
             model: run.model,
             startedAt: run.startedAt,
+            deterministic: readRunMetadataBoolean(run.metadata, "deterministic"),
+            providerFallback: readRunMetadataBoolean(run.metadata, "providerFallback"),
+            liveReplyError: readRunMetadataString(run.metadata, "liveReplyError"),
             retrievedSources: run.retrievedSources.map((source) => ({
               id: source.id,
               sourceKind: source.sourceKind,
@@ -781,4 +785,21 @@ function buildDeterministicAnswer(
 
 function matchesAny(value: string, needles: string[]) {
   return needles.some((needle) => value.includes(needle));
+}
+
+function readRunMetadataString(metadata: unknown, key: string) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const value = (metadata as Record<string, unknown>)[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function readRunMetadataBoolean(metadata: unknown, key: string) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return false;
+  }
+
+  return (metadata as Record<string, unknown>)[key] === true;
 }
