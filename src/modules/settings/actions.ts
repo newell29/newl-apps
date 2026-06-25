@@ -405,11 +405,12 @@ export async function saveAssistantProviderSettingsAction(formData: FormData) {
     throw new Error("Local LLM provider settings require an endpoint URL.");
   }
 
-  const existing = await prisma.integrationCredential.findFirst({
+  const existing = await prisma.integrationCredential.findMany({
     where: {
       tenantId: context.tenantId,
       name: ASSISTANT_PROVIDER_CREDENTIAL_NAME
     },
+    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
     select: {
       id: true
     }
@@ -430,13 +431,26 @@ export async function saveAssistantProviderSettingsAction(formData: FormData) {
     })
   };
 
-  if (existing) {
+  const primaryExisting = existing[0];
+  const duplicateIds = existing.slice(1).map((credential) => credential.id);
+
+  if (primaryExisting) {
     await prisma.integrationCredential.update({
       where: {
-        id: existing.id
+        id: primaryExisting.id
       },
       data
     });
+
+    if (duplicateIds.length > 0) {
+      await prisma.integrationCredential.deleteMany({
+        where: {
+          id: {
+            in: duplicateIds
+          }
+        }
+      });
+    }
   } else {
     await prisma.integrationCredential.create({
       data
