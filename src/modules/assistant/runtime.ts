@@ -1,6 +1,7 @@
 import { JobStatus, type Prisma } from "@prisma/client";
 
 import { searchAssistantKnowledge } from "@/modules/assistant/knowledge";
+import { maybeRunAssistantRateRequest } from "@/modules/assistant/rate-tools";
 import {
   computeNextAssistantAutomationRunAt,
   summarizeAutomationResult,
@@ -28,6 +29,11 @@ export async function runAssistantPrompt(
   prompt: string,
   existingThreadId?: string
 ) {
+  const toolRateReply = await maybeRunAssistantRateRequest(context, prompt);
+  if (toolRateReply) {
+    return toolRateReply;
+  }
+
   const workspace = await getAssistantWorkspace(context, prompt, existingThreadId, context.userId);
   const indexedSources = await searchAssistantKnowledge(context, prompt);
   const sources = indexedSources.length > 0 ? indexedSources : buildAssistantSources(workspace);
