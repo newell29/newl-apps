@@ -18,6 +18,12 @@ type AssistantPageProps = {
   searchParams?: Promise<{
     q?: string;
     thread?: string;
+    sync?: string;
+    localDocs?: string;
+    microsoftDocs?: string;
+    microsoftMail?: string;
+    microsoftFiles?: string;
+    microsoftReason?: string;
   }>;
 };
 
@@ -38,6 +44,7 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
   const params = await searchParams;
   const query = params?.q?.trim() ?? "";
   const threadId = params?.thread?.trim() || undefined;
+  const syncStatus = buildSyncStatus(params);
   const workspace = await getAssistantWorkspace(context, query, threadId, context.userId);
 
   return (
@@ -225,6 +232,20 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
                 New thread
               </Link>
             </div>
+            {syncStatus ? (
+              <div
+                className={[
+                  "mt-4 rounded-md border p-3 text-sm",
+                  syncStatus.status === "success"
+                    ? "border-success/25 bg-success/10"
+                    : "border-warning/25 bg-warning/10"
+                ].join(" ")}
+              >
+                <p className="font-medium text-foreground">{syncStatus.title}</p>
+                <p className="mt-1 text-mutedForeground">{syncStatus.summary}</p>
+                {syncStatus.reason ? <p className="mt-2 text-xs text-mutedForeground">{syncStatus.reason}</p> : null}
+              </div>
+            ) : null}
           </section>
 
           {workspace.recentThreads.length > 0 ? (
@@ -714,6 +735,35 @@ function ToolLink({ href, title, detail }: { href: string; title: string; detail
       <p className="mt-1 text-xs text-mutedForeground">{detail}</p>
     </Link>
   );
+}
+
+function buildSyncStatus(params: Awaited<AssistantPageProps["searchParams"]>) {
+  const status = params?.sync;
+  if (status !== "success" && status !== "partial") {
+    return null;
+  }
+
+  const localDocs = readCountParam(params?.localDocs);
+  const microsoftDocs = readCountParam(params?.microsoftDocs);
+  const microsoftMail = readCountParam(params?.microsoftMail);
+  const microsoftFiles = readCountParam(params?.microsoftFiles);
+  const reason = params?.microsoftReason?.trim() ?? null;
+
+  return {
+    status,
+    title: status === "success" ? "Knowledge sync complete" : "Knowledge sync partially complete",
+    summary:
+      `Indexed ${localDocs.toLocaleString("en-US")} app document(s), ` +
+      `${microsoftDocs.toLocaleString("en-US")} Microsoft document(s), ` +
+      `${microsoftMail.toLocaleString("en-US")} email(s), and ` +
+      `${microsoftFiles.toLocaleString("en-US")} file(s).`,
+    reason
+  };
+}
+
+function readCountParam(value: string | undefined) {
+  const parsed = Number.parseInt(value ?? "0", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
 function formatIntent(intent: string) {

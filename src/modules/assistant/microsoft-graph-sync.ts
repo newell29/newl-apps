@@ -95,12 +95,23 @@ type MicrosoftGraphDriveItem = {
 export async function syncMicrosoftGraphAssistantKnowledge(
   context: AuthenticatedContext
 ): Promise<MicrosoftGraphKnowledgeSyncResult> {
+  try {
+    return await syncMicrosoftGraphAssistantKnowledgeUnsafe(context);
+  } catch (error) {
+    return buildMicrosoftGraphSkippedResult(error);
+  }
+}
+
+async function syncMicrosoftGraphAssistantKnowledgeUnsafe(
+  context: AuthenticatedContext
+): Promise<MicrosoftGraphKnowledgeSyncResult> {
   const integrationCredential = await prisma.integrationCredential.findFirst({
     where: {
       tenantId: context.tenantId,
       provider: IntegrationProvider.MICROSOFT_GRAPH,
       name: MICROSOFT_GRAPH_CREDENTIAL_NAME
     },
+    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
     select: {
       provider: true,
       status: true,
@@ -583,12 +594,31 @@ async function syncMicrosoftGraphApplicationMailboxKnowledge(
 export async function syncTenantMicrosoftGraphAssistantKnowledge(
   tenant: TenantContext
 ): Promise<TenantMicrosoftGraphKnowledgeSyncResult> {
+  try {
+    return await syncTenantMicrosoftGraphAssistantKnowledgeUnsafe(tenant);
+  } catch (error) {
+    const result = buildMicrosoftGraphSkippedResult(error);
+
+    return {
+      ...result,
+      connectedUserCount: 0,
+      syncedUserCount: 0,
+      skippedUserCount: 0,
+      userResults: []
+    };
+  }
+}
+
+async function syncTenantMicrosoftGraphAssistantKnowledgeUnsafe(
+  tenant: TenantContext
+): Promise<TenantMicrosoftGraphKnowledgeSyncResult> {
   const integrationCredential = await prisma.integrationCredential.findFirst({
     where: {
       tenantId: tenant.tenantId,
       provider: IntegrationProvider.MICROSOFT_GRAPH,
       name: MICROSOFT_GRAPH_CREDENTIAL_NAME
     },
+    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
     select: {
       provider: true,
       status: true,
@@ -785,7 +815,10 @@ async function fetchMailboxMessages(accessToken: string, mailbox: string) {
   );
 
   if (!response.ok) {
-    throw new Error(`Microsoft Graph mail sync failed for ${mailbox} with status ${response.status}.`);
+    throw new Error(
+      (await extractMicrosoftGraphResponseError(response)) ??
+        `Microsoft Graph mail sync failed for ${mailbox} with status ${response.status}.`
+    );
   }
 
   const json = (await response.json()) as { value?: MicrosoftGraphMailMessage[] };
@@ -806,7 +839,10 @@ async function fetchRecentFiles(accessToken: string) {
   });
 
   if (!response.ok) {
-    throw new Error(`Microsoft Graph file sync failed with status ${response.status}.`);
+    throw new Error(
+      (await extractMicrosoftGraphResponseError(response)) ??
+        `Microsoft Graph file sync failed with status ${response.status}.`
+    );
   }
 
   const json = (await response.json()) as { value?: MicrosoftGraphDriveItem[] };
@@ -1072,6 +1108,42 @@ function dedupeMemories<T extends { kind: AssistantMemoryKind; subjectType: stri
     seen.add(key);
     return true;
   });
+}
+
+function buildMicrosoftGraphSkippedResult(error: unknown): MicrosoftGraphKnowledgeSyncResult {
+  return {
+    documentCount: 0,
+    mailCount: 0,
+    fileCount: 0,
+    skipped: true,
+    reason: formatMicrosoftGraphError(error)
+  };
+}
+
+function formatMicrosoftGraphError(error: unknown) {
+  const message = error instanceof Error ? error.message : "Microsoft 365 sync failed for an unknown reason.";
+  return message.startsWith("Microsoft")
+    ? message
+    : `Microsoft 365 sync failed: ${message}`;
+}
+
+async function extractMicrosoftGraphResponseError(response: Response) {
+  const json = (await response.json().catch(() => null)) as
+    | {
+        error?: {
+          code?: string;
+          message?: string;
+        };
+      }
+    | null;
+  const code = json?.error?.code;
+  const message = json?.error?.message;
+
+  if (!code && !message) {
+    return null;
+  }
+
+  return `Microsoft Graph request failed with status ${response.status}${code ? ` (${code})` : ""}${message ? `: ${message}` : ""}.`;
 }
 
 function getOrCreateContactFact(

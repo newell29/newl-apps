@@ -218,6 +218,61 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
     fetchMock.mockRestore();
   });
 
+  it("returns a structured skip reason when delegated Graph mail access fails", async () => {
+    findIntegrationCredential.mockResolvedValue({
+      provider: IntegrationProvider.MICROSOFT_GRAPH,
+      status: IntegrationStatus.ACTIVE,
+      publicConfig: {
+        scopes: ["User.Read", "offline_access", "Mail.Read", "Files.Read.All", "Sites.Read.All"],
+        mailboxAccessMode: "SIGNED_IN_USER",
+        mailSyncEnabled: true,
+        fileSyncEnabled: false,
+        draftingEnabled: false
+      }
+    });
+    findAccount.mockResolvedValue({
+      id: "account-1",
+      access_token: "access-token",
+      refresh_token: "refresh-token",
+      expires_at: 1_786_090_000,
+      scope: "openid profile email offline_access User.Read Mail.Read Files.Read.All Sites.Read.All",
+      token_type: "Bearer"
+    });
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "ErrorAccessDenied",
+            message: "Access is denied. Check credentials and try again."
+          }
+        }),
+        { status: 403 }
+      )
+    );
+
+    const result = await syncMicrosoftGraphAssistantKnowledge({
+      tenantId: "tenant-1",
+      tenantSlug: "tenant-1",
+      tenantName: "Tenant 1",
+      userId: "user-1",
+      userEmail: "user@tenant.test",
+      userName: "User One",
+      role: "ADMIN"
+    });
+
+    expect(result).toMatchObject({
+      documentCount: 0,
+      mailCount: 0,
+      fileCount: 0,
+      skipped: true
+    });
+    expect(result.reason).toContain("ErrorAccessDenied");
+    expect(transaction).not.toHaveBeenCalled();
+
+    fetchMock.mockRestore();
+  });
+
   it("refreshes an expired delegated token before syncing", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-25T14:30:00.000Z"));
@@ -559,6 +614,56 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
     expect(findAccount).not.toHaveBeenCalled();
     expect(upsert.mock.calls[0][0].create.externalId).toBe("ops@newl.ca:mail-2");
     expect(upsert.mock.calls[1][0].create.externalId).toBe("shared@newl.ca:mail-1");
+
+    fetchMock.mockRestore();
+    delete process.env.MICROSOFT_GRAPH_APP_CLIENT_ID;
+    delete process.env.MICROSOFT_GRAPH_APP_CLIENT_SECRET;
+    delete process.env.MICROSOFT_GRAPH_APP_TENANT_ID;
+  });
+
+  it("returns a structured skip reason when application mailbox token retrieval fails", async () => {
+    process.env.MICROSOFT_GRAPH_APP_CLIENT_ID = "graph-app-client";
+    process.env.MICROSOFT_GRAPH_APP_CLIENT_SECRET = "graph-app-secret";
+    process.env.MICROSOFT_GRAPH_APP_TENANT_ID = "graph-app-tenant";
+
+    findIntegrationCredential.mockResolvedValue({
+      provider: IntegrationProvider.MICROSOFT_GRAPH,
+      status: IntegrationStatus.ACTIVE,
+      publicConfig: {
+        adminMailboxTargets: ["ops@newl.ca"],
+        mailboxAccessMode: "ADMIN_SELECTED_MAILBOXES",
+        mailSyncEnabled: true,
+        fileSyncEnabled: false,
+        draftingEnabled: false
+      }
+    });
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: "invalid_client",
+          error_description: "Client authentication failed."
+        }),
+        { status: 401 }
+      )
+    );
+
+    const result = await syncTenantMicrosoftGraphAssistantKnowledge({
+      tenantId: "tenant-1",
+      tenantSlug: "tenant-1",
+      tenantName: "Tenant 1"
+    });
+
+    expect(result).toMatchObject({
+      documentCount: 0,
+      mailCount: 0,
+      fileCount: 0,
+      skipped: true,
+      connectedUserCount: 0,
+      syncedUserCount: 0
+    });
+    expect(result.reason).toContain("Client authentication failed");
+    expect(findMemberships).not.toHaveBeenCalled();
 
     fetchMock.mockRestore();
     delete process.env.MICROSOFT_GRAPH_APP_CLIENT_ID;

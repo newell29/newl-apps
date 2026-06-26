@@ -195,6 +195,16 @@ export async function syncAssistantKnowledgeAction() {
   });
 
   revalidatePath("/assistant");
+  redirect(
+    `/assistant?sync=${microsoftKnowledgeResult.skipped ? "partial" : "success"}` +
+      `&localDocs=${localKnowledgeResult.documentCount}` +
+      `&microsoftDocs=${microsoftKnowledgeResult.documentCount}` +
+      `&microsoftMail=${microsoftKnowledgeResult.mailCount}` +
+      `&microsoftFiles=${microsoftKnowledgeResult.fileCount}` +
+      (microsoftKnowledgeResult.reason
+        ? `&microsoftReason=${encodeURIComponent(microsoftKnowledgeResult.reason)}`
+        : "")
+  );
 }
 
 export async function saveAssistantAutomationAction(formData: FormData) {
