@@ -39,11 +39,6 @@ import {
   isAssistantProvider,
   parseAssistantProviderSettings
 } from "@/server/integrations/assistant-provider";
-import {
-  MICROSOFT_GRAPH_CREDENTIAL_NAME,
-  parseMicrosoftGraphSettings
-} from "@/server/integrations/microsoft-graph";
-import { parseMicrosoftGraphDelegatedConnection } from "@/server/integrations/microsoft-graph-account";
 import { getOpenAiDraftRuntimeNotes, isOpenAiDraftGenerationConfigured } from "@/server/integrations/openai";
 
 type SettingsUpsAccount = UpsAccountConfig & {
@@ -132,7 +127,7 @@ function isSevenLCarrier(
   return value !== null;
 }
 
-export async function getSettingsShell(tenant: TenantContext & { userId?: string }) {
+export async function getSettingsShell(tenant: TenantContext) {
   const tradeMiningScoringClient = prisma as TradeMiningScoringClient;
   let tradeMiningScoringConfigWarning: string | null = null;
   const moduleAccess = await prisma.tenantModuleAccess.findMany({
@@ -156,7 +151,6 @@ export async function getSettingsShell(tenant: TenantContext & { userId?: string
     integrationCredentials,
     localUpsAccounts,
     localSevenLAccountNames,
-    microsoftAccount,
     tenantUsers,
     roleModuleOverrides,
     rolePolicies,
@@ -170,31 +164,18 @@ export async function getSettingsShell(tenant: TenantContext & { userId?: string
             IntegrationProvider.SEVEN_L,
             IntegrationProvider.OPENCLAW,
             IntegrationProvider.APOLLO,
-            IntegrationProvider.MICROSOFT_GRAPH,
             IntegrationProvider.QUICKBOOKS,
             IntegrationProvider.OPENAI,
             IntegrationProvider.LOCAL_LLM
           ]
         }
       }),
-      orderBy: [{ name: "asc" }, { updatedAt: "desc" }]
+      orderBy: {
+        name: "asc"
+      }
     }),
     getLocalUpsAccountMetadata(),
     getLocalSevenLAccountNames(),
-    tenant.userId
-      ? prisma.account.findFirst({
-          where: {
-            userId: tenant.userId,
-            provider: "microsoft-entra-id"
-          },
-          select: {
-            access_token: true,
-            refresh_token: true,
-            expires_at: true,
-            scope: true
-          }
-        })
-      : Promise.resolve(null),
     prisma.membership.findMany({
       where: {
         tenantId: tenant.tenantId
@@ -260,11 +241,6 @@ export async function getSettingsShell(tenant: TenantContext & { userId?: string
       isAssistantProvider(credential.provider)
   );
   const apolloCredential = typedIntegrationCredentials.find((credential) => credential.provider === IntegrationProvider.APOLLO);
-  const microsoftGraphCredential = typedIntegrationCredentials.find(
-    (credential) =>
-      credential.provider === IntegrationProvider.MICROSOFT_GRAPH &&
-      credential.name === MICROSOFT_GRAPH_CREDENTIAL_NAME
-  );
   const quickbooksConnections = typedIntegrationCredentials
     .filter((credential) => credential.provider === IntegrationProvider.QUICKBOOKS)
     .map((credential) => mapQuickBooksConnection(credential));
@@ -319,8 +295,6 @@ export async function getSettingsShell(tenant: TenantContext & { userId?: string
       overrides: roleModuleOverrides
     }),
     assistantProvider: parseAssistantProviderSettings(assistantCredential as IntegrationCredentialRecord | null),
-    microsoftGraph: parseMicrosoftGraphSettings(microsoftGraphCredential as IntegrationCredentialRecord | null),
-    microsoftGraphUserConnection: parseMicrosoftGraphDelegatedConnection(microsoftAccount),
     integrationProviders: Object.values(IntegrationProvider),
     quoteSources: managedQuoteSources,
     upsAccounts: mergeUpsAccountsForSettings(upsAccounts, localUpsAccounts),

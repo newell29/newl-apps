@@ -1317,8 +1317,9 @@ export async function saveContactDraftAction(formData: FormData) {
     data: {
       subject: readRequired(formData, "subject"),
       body: readRequired(formData, "body"),
-      status: ContactOutreachDraftStatus.EDITED,
-      editedAt: new Date()
+      status: ContactOutreachDraftStatus.APPROVED,
+      editedAt: new Date(),
+      approvedAt: new Date()
     }
   });
 
@@ -1719,6 +1720,68 @@ async function loadApolloRepMappings(tenantId: string) {
   return parseApolloRepMapping(credential?.publicConfig);
 }
 
+async function resolveAssignedRepUser({
+  tenantId,
+  assignedRep
+}: {
+  tenantId: string;
+  assignedRep: string;
+}) {
+  const normalizedAssignedRep = assignedRep.trim();
+
+  if (!normalizedAssignedRep) {
+    return null;
+  }
+
+  const byId = await prisma.user.findUnique({
+    where: {
+      id: normalizedAssignedRep
+    },
+    select: {
+      id: true,
+      email: true,
+      name: true
+    }
+  });
+
+  if (byId) {
+    return byId;
+  }
+
+  const membershipMatch = await prisma.membership.findFirst({
+    where: {
+      tenantId,
+      user: {
+        OR: [
+          {
+            email: {
+              equals: normalizedAssignedRep,
+              mode: "insensitive"
+            }
+          },
+          {
+            name: {
+              equals: normalizedAssignedRep,
+              mode: "insensitive"
+            }
+          }
+        ]
+      }
+    },
+    select: {
+      user: {
+        select: {
+          id: true,
+          email: true,
+          name: true
+        }
+      }
+    }
+  });
+
+  return membershipMatch?.user ?? null;
+}
+
 async function validateApolloPushCandidate({
   tenantId,
   contact,
@@ -1754,19 +1817,24 @@ async function validateApolloPushCandidate({
     return { ok: false, reason: "Assign a sales rep before pushing this contact to Apollo." };
   }
 
-  const localOwner = await prisma.user.findUnique({
-    where: {
-      id: contact.assignedRep
-    },
-    select: {
-      id: true,
-      email: true,
-      name: true
-    }
+  const localOwner = await resolveAssignedRepUser({
+    tenantId,
+    assignedRep: contact.assignedRep
   });
 
   if (!localOwner) {
     return { ok: false, reason: "Assigned rep no longer exists in Newl Apps." };
+  }
+
+  if (contact.assignedRep !== localOwner.id) {
+    await prisma.contact.update({
+      where: {
+        id: contact.id
+      },
+      data: {
+        assignedRep: localOwner.id
+      }
+    });
   }
 
   const repMapping = repMappings.find(
@@ -2778,10 +2846,11 @@ async function generateAiDraftForContact({
       sequenceId: draftContext.selectedSequenceId,
       subject: generatedDraft.subject,
       body: generatedDraft.body,
-      status: ContactOutreachDraftStatus.AVAILABLE,
+      status: ContactOutreachDraftStatus.APPROVED,
       source: ContactOutreachDraftSource.MOCK_AI,
       aiGenerated: true,
       personalizationNotes: generatedDraft.personalizationNotes,
+      approvedAt: new Date(),
       rawInputs: toInputJsonValue(rawInputs),
       rawJson: toInputJsonValue({
         provider: "openai",
@@ -2797,10 +2866,11 @@ async function generateAiDraftForContact({
       sequenceId: draftContext.selectedSequenceId,
       subject: generatedDraft.subject,
       body: generatedDraft.body,
-      status: ContactOutreachDraftStatus.AVAILABLE,
+      status: ContactOutreachDraftStatus.APPROVED,
       source: ContactOutreachDraftSource.MOCK_AI,
       aiGenerated: true,
       personalizationNotes: generatedDraft.personalizationNotes,
+      approvedAt: new Date(),
       rawInputs: toInputJsonValue(rawInputs),
       rawJson: toInputJsonValue({
         provider: "openai",

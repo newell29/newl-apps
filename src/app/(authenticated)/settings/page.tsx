@@ -1,8 +1,6 @@
 import { PageHeader } from "@/components/page-header";
 import { InfoHint } from "@/components/info-hint";
 import { PlatformRole } from "@prisma/client";
-import { connectMicrosoftGraphAction } from "@/server/auth/actions";
-import { syncAssistantKnowledgeAction } from "@/modules/assistant/actions";
 import { SearchProfileCadenceManager } from "@/modules/settings/components/search-profile-cadence-manager";
 import { formatPlatformRole } from "@/modules/settings/access-control";
 import {
@@ -10,7 +8,6 @@ import {
   createUpsQuoteSourceAction,
   removeTenantUserAccessAction,
   saveAssistantProviderSettingsAction,
-  saveMicrosoftGraphSettingsAction,
   saveApolloRepMappingAction,
   saveApolloSequenceMappingAction,
   saveRoleModuleAccessAction,
@@ -61,7 +58,6 @@ export default async function SettingsPage() {
               { href: "#platform-controls", label: "Platform controls" },
               { href: "#quickbooks", label: "QuickBooks" },
               { href: "#assistant-ai", label: "Assistant AI" },
-              { href: "#microsoft-365", label: "Microsoft 365" },
               { href: "#user-access", label: "User access" },
               { href: "#lead-generation-settings", label: "Lead generation" },
               { href: "#quote-tools-settings", label: "Quote tools" }
@@ -224,13 +220,13 @@ export default async function SettingsPage() {
               label="Default model"
               name="assistantDefaultModel"
               defaultValue={settings.assistantProvider.defaultModel}
-              placeholder="gpt-5.4-mini"
+              placeholder="gpt-5-mini"
             />
             <OptionalField
               label="Fallback model"
               name="assistantFallbackModel"
               defaultValue={settings.assistantProvider.fallbackModel ?? ""}
-              placeholder="gpt-5.4-nano"
+              placeholder="gpt-5-nano"
               info="Used when the default model request fails."
             />
             <div className="space-y-2">
@@ -293,214 +289,6 @@ export default async function SettingsPage() {
             Save assistant settings
           </button>
         </form>
-      </section>
-
-      <section id="microsoft-365" className="rounded-lg border border-border bg-card p-5 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
-          <div>
-            <h2 className="text-base font-semibold text-foreground">Microsoft 365</h2>
-            <p className="mt-1 text-sm leading-6 text-mutedForeground">
-              Define how this tenant uses Microsoft Graph for email and document retrieval before OAuth token connection and sync jobs are added.
-            </p>
-          </div>
-          <span
-            className={[
-              "rounded-full px-2.5 py-1 text-xs font-semibold",
-              settings.microsoftGraph.runtimeReady
-                ? "border border-success/25 bg-success/10 text-success"
-                : "border border-border bg-background text-mutedForeground"
-            ].join(" ")}
-          >
-            {settings.microsoftGraph.runtimeReady ? "App registration captured" : "Configuration incomplete"}
-          </span>
-        </div>
-
-        <form action={saveMicrosoftGraphSettingsAction} className="mt-4 space-y-4">
-          <div className="rounded-md border border-border bg-background p-4">
-            <p className="text-sm font-medium text-foreground">App registration source</p>
-            <p className="mt-2 text-sm leading-6 text-mutedForeground">
-              Microsoft Entra application ID, tenant ID, and redirect URI are read from the server environment used by Auth.js. This tenant form only controls mailbox scope and sync behavior.
-            </p>
-          </div>
-
-          <div className="grid gap-4 xl:grid-cols-2">
-            <SelectField
-              label="Mailbox access mode"
-              name="microsoftMailboxAccessMode"
-              defaultValue={settings.microsoftGraph.mailboxAccessMode}
-              options={[
-                { value: "SIGNED_IN_USER", label: "Signed-in user only" },
-                { value: "ADMIN_SELECTED_MAILBOXES", label: "Admin-selected mailboxes" }
-              ]}
-            />
-          </div>
-
-          <label className="grid gap-1.5">
-            <span className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Admin mailbox targets</span>
-            <textarea
-              name="microsoftAdminMailboxTargets"
-              rows={4}
-              defaultValue={settings.microsoftGraph.adminMailboxTargets.join("\n")}
-              placeholder={"shared@newl.ca\nsales@newl.ca\nops@newl.ca"}
-              className="rounded-md border border-border bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none transition-colors placeholder:text-mutedForeground focus:border-primary"
-            />
-            <span className="text-xs leading-5 text-mutedForeground">
-              One mailbox email or user principal name per line. Used only when mailbox access mode is set to admin-selected mailboxes.
-            </span>
-          </label>
-
-          <div className="grid gap-4 xl:grid-cols-3">
-            <label className="rounded-md border border-border bg-background p-4 text-sm text-foreground">
-              <div className="flex items-center justify-between gap-3">
-                <span className="font-medium">Mail sync</span>
-                <input
-                  type="checkbox"
-                  name="microsoftMailSyncEnabled"
-                  value="true"
-                  defaultChecked={settings.microsoftGraph.mailSyncEnabled}
-                />
-              </div>
-              <p className="mt-2 text-xs leading-5 text-mutedForeground">
-                Pull Outlook mail into assistant knowledge and memory extraction.
-              </p>
-            </label>
-
-            <label className="rounded-md border border-border bg-background p-4 text-sm text-foreground">
-              <div className="flex items-center justify-between gap-3">
-                <span className="font-medium">File sync</span>
-                <input
-                  type="checkbox"
-                  name="microsoftFileSyncEnabled"
-                  value="true"
-                  defaultChecked={settings.microsoftGraph.fileSyncEnabled}
-                />
-              </div>
-              <p className="mt-2 text-xs leading-5 text-mutedForeground">
-                Pull SharePoint and OneDrive documents into assistant knowledge retrieval.
-              </p>
-            </label>
-
-            <label className="rounded-md border border-border bg-background p-4 text-sm text-foreground">
-              <div className="flex items-center justify-between gap-3">
-                <span className="font-medium">Email drafting target</span>
-                <input
-                  type="checkbox"
-                  name="microsoftDraftingEnabled"
-                  value="true"
-                  defaultChecked={settings.microsoftGraph.draftingEnabled}
-                />
-              </div>
-              <p className="mt-2 text-xs leading-5 text-mutedForeground">
-                Stores intent to enable reviewed Outlook drafting later. Live send still requires `Mail.Send`.
-              </p>
-            </label>
-          </div>
-
-          <div className="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
-            <div className="rounded-md border border-border bg-muted/30 p-4">
-              <p className="text-sm font-medium text-foreground">Runtime status</p>
-              <p className="mt-2 text-sm leading-6 text-mutedForeground">{settings.microsoftGraph.runtimeNotes}</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <span
-                  className={[
-                    "rounded-full px-2.5 py-1 text-xs font-semibold",
-                    settings.microsoftGraph.consentConfigured
-                      ? "border border-success/25 bg-success/10 text-success"
-                      : "border border-border bg-background text-mutedForeground"
-                  ].join(" ")}
-                >
-                  {settings.microsoftGraph.consentConfigured ? "Delegated Graph consent configured" : "Consent not recorded"}
-                </span>
-                <span
-                  className={[
-                    "rounded-full px-2.5 py-1 text-xs font-semibold",
-                    settings.microsoftGraph.crossMailboxReady
-                      ? "border border-success/25 bg-success/10 text-success"
-                      : "border border-warning/25 bg-warning/10 text-warning"
-                  ].join(" ")}
-                >
-                  {settings.microsoftGraph.crossMailboxReady
-                    ? "Cross-mailbox runtime configured"
-                    : "Cross-mailbox still needs app permissions"}
-                </span>
-              </div>
-            </div>
-
-            <div className="rounded-md border border-border bg-background p-4">
-              <p className="text-sm font-medium text-foreground">Recorded delegated scopes</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {settings.microsoftGraph.scopes.map((scope: string) => (
-                  <span
-                    key={scope}
-                    className="rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground"
-                  >
-                    {scope}
-                  </span>
-                ))}
-              </div>
-              <p className="mt-3 text-xs leading-5 text-mutedForeground">
-                Admin-wide mailbox insight is achievable, but it requires a separate Graph application-permission path and an Exchange mailbox access policy to keep the scope controlled.
-              </p>
-            </div>
-          </div>
-
-          <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
-            Save Microsoft 365 settings
-          </button>
-        </form>
-
-        <div className="mt-4 rounded-md border border-border bg-background p-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium text-foreground">Current user delegated connection</p>
-              <p className="mt-1 text-sm leading-6 text-mutedForeground">
-                {settings.microsoftGraphUserConnection.runtimeNotes}
-              </p>
-            </div>
-            <span
-              className={[
-                "rounded-full px-2.5 py-1 text-xs font-semibold",
-                settings.microsoftGraphUserConnection.connected
-                  ? "border border-success/25 bg-success/10 text-success"
-                  : "border border-border bg-background text-mutedForeground"
-              ].join(" ")}
-            >
-              {settings.microsoftGraphUserConnection.connected ? "Connected" : "Not connected"}
-            </span>
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {settings.microsoftGraphUserConnection.scopes.length > 0 ? (
-              settings.microsoftGraphUserConnection.scopes.map((scope: string) => (
-                <span
-                  key={scope}
-                  className="rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground"
-                >
-                  {scope}
-                </span>
-              ))
-            ) : (
-              <span className="text-xs text-mutedForeground">No delegated Graph scopes recorded for this user yet.</span>
-            )}
-          </div>
-          {settings.microsoftGraphUserConnection.expiresAt ? (
-            <p className="mt-3 text-xs text-mutedForeground">
-              Token expiry: {new Date(settings.microsoftGraphUserConnection.expiresAt).toLocaleString("en-US")}
-            </p>
-          ) : null}
-          <div className="mt-4 flex flex-wrap gap-2">
-            <form action={connectMicrosoftGraphAction}>
-              <input type="hidden" name="callbackUrl" value="/settings#microsoft-365" />
-              <button className="rounded-md border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
-                {settings.microsoftGraphUserConnection.connected ? "Refresh Microsoft consent" : "Connect Microsoft 365"}
-              </button>
-            </form>
-            <form action={syncAssistantKnowledgeAction}>
-              <button className="rounded-md border border-border bg-background px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted/40">
-                Sync Microsoft 365 knowledge
-              </button>
-            </form>
-          </div>
-        </div>
       </section>
 
       <section id="user-access" className="space-y-3">

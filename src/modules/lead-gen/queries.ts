@@ -181,6 +181,8 @@ export type ContactDirectoryFilters = {
 
 export type ContactBooleanFilter = "ALL" | "YES" | "NO";
 
+export type ContactDraftGenerationDisabledReason = "OPENAI_KEY_MISSING" | "LEAD_GEN_AI_DISABLED";
+
 export type ContactDraftStatusFilter =
   | "ALL"
   | ContactOutreachDraftStatus
@@ -984,6 +986,13 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
     const draft = contact.outreachDrafts[0] ?? null;
     const tierMapping = effectiveSequenceMappings.find((entry) => entry.tier === scoring.tier) ?? null;
     const requiresAiDraft = tierMapping?.requiresAiDraft ?? false;
+    const openAiRuntimeReady = isOpenAiDraftGenerationConfigured();
+    const draftGenerationConfigured = openAiRuntimeReady && scoringConfig.aiClassificationEnabled;
+    const draftGenerationDisabledReason = draftGenerationConfigured
+      ? null
+      : !openAiRuntimeReady
+        ? ("OPENAI_KEY_MISSING" satisfies ContactDraftGenerationDisabledReason)
+        : ("LEAD_GEN_AI_DISABLED" satisfies ContactDraftGenerationDisabledReason);
 
     return {
       id: contact.id,
@@ -1017,7 +1026,8 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
       sequenceOverrideReason: contact.sequenceOverrideReason,
       sequenceManuallyOverridden: contact.sequenceManuallyOverridden,
       requiresAiDraft,
-      draftGenerationConfigured: isOpenAiDraftGenerationConfigured() && scoringConfig.aiClassificationEnabled,
+      draftGenerationConfigured,
+      draftGenerationDisabledReason,
       draft: draft
         ? {
             id: draft.id,

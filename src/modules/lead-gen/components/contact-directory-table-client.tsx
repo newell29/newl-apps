@@ -55,6 +55,7 @@ type ContactDirectoryRow = {
   sequenceManuallyOverridden: boolean;
   requiresAiDraft: boolean;
   draftGenerationConfigured: boolean;
+  draftGenerationDisabledReason: string | null;
   draft: {
     id: string;
     subject: string;
@@ -78,7 +79,6 @@ export function ContactDirectoryTableClient({
   syncSelectedApolloStatusesAction,
   updateContactSequenceAction,
   saveContactDraftAction,
-  approveContactDraftAction,
   generateContactDraftAction
 }: {
   contacts: ContactDirectoryRow[];
@@ -101,7 +101,6 @@ export function ContactDirectoryTableClient({
   ) => Promise<ContactBulkActionSummary>;
   updateContactSequenceAction: (formData: FormData) => Promise<void>;
   saveContactDraftAction: (formData: FormData) => Promise<void>;
-  approveContactDraftAction: (formData: FormData) => Promise<void>;
   generateContactDraftAction: (formData: FormData) => Promise<void>;
 }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -142,6 +141,42 @@ export function ContactDirectoryTableClient({
 
   function clearSelection() {
     setSelectedIds([]);
+  }
+
+  function getDraftButtonLabel(contact: ContactDirectoryRow, hasDraft: boolean) {
+    if (contact.draftGenerationConfigured) {
+      return hasDraft ? "Regenerate AI Draft" : "Generate AI Draft";
+    }
+
+    if (contact.draftGenerationDisabledReason === "LEAD_GEN_AI_DISABLED") {
+      return "Enable lead-gen AI in Settings";
+    }
+
+    return "OpenAI key required";
+  }
+
+  function getDraftDisabledHelp(contact: ContactDirectoryRow) {
+    if (contact.draftGenerationConfigured) {
+      return null;
+    }
+
+    if (contact.draftGenerationDisabledReason === "LEAD_GEN_AI_DISABLED") {
+      return (
+        <p className="text-xs text-mutedForeground">
+          Lead-gen AI is currently turned off. Enable it in{" "}
+          <Link href="/settings#lead-generation-settings" className="font-medium text-primary hover:underline">
+            Settings
+          </Link>{" "}
+          before generating Tier 1 drafts.
+        </p>
+      );
+    }
+
+    return (
+      <p className="text-xs text-mutedForeground">
+        OpenAI draft generation is not configured for this runtime yet. Add `OPENAI_API_KEY` to enable Tier 1 drafts.
+      </p>
+    );
   }
 
   const columns = useMemo<ColumnDef<ContactDirectoryRow>[]>(
@@ -392,15 +427,18 @@ export function ContactDirectoryTableClient({
                 <details className="rounded-md border border-border bg-background p-3">
                   <summary className="cursor-pointer text-xs font-semibold text-primary">View Draft</summary>
                   {contact.requiresAiDraft ? (
-                    <form action={generateContactDraftAction} className="mt-3">
-                      <input type="hidden" name="contactId" value={contact.id} />
-                      <button
-                        className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-accentSoft disabled:cursor-not-allowed disabled:opacity-50"
-                        disabled={!contact.draftGenerationConfigured}
-                      >
-                        {contact.draftGenerationConfigured ? "Regenerate AI Draft" : "AI runtime required"}
-                      </button>
-                    </form>
+                    <>
+                      <form action={generateContactDraftAction} className="mt-3">
+                        <input type="hidden" name="contactId" value={contact.id} />
+                        <button
+                          className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-accentSoft disabled:cursor-not-allowed disabled:opacity-50"
+                          disabled={!contact.draftGenerationConfigured}
+                        >
+                          {getDraftButtonLabel(contact, true)}
+                        </button>
+                      </form>
+                      {getDraftDisabledHelp(contact)}
+                    </>
                   ) : null}
                   <form action={saveContactDraftAction} className="mt-3 space-y-3">
                     <input type="hidden" name="draftId" value={contact.draft.id} />
@@ -432,21 +470,16 @@ export function ContactDirectoryTableClient({
                       value={contact.draft.personalizationNotes ?? "No notes recorded"}
                     />
                     <p className="text-xs text-mutedForeground">
-                      Saving keeps the draft in Newl Apps only. Approving marks it ready for Apollo push, but the actual
-                      enrollment still happens only when you use Push to Apollo.
+                      Saving keeps the draft ready for Apollo push. The actual enrollment still happens only when you use
+                      Push to Apollo.
                     </p>
                     <p className="text-xs text-mutedForeground">
-                      Approve after you are happy with the subject and body. If you make edits first, save them before approving so the approved version matches your review.
+                      If you want a different angle, use Regenerate AI Draft and Newl Apps will write a fresh version
+                      from the shipment context.
                     </p>
                     <div className="flex flex-wrap gap-2">
                       <button className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
                         Save Draft
-                      </button>
-                      <button
-                        formAction={approveContactDraftAction}
-                        className="rounded-md border border-success/30 bg-success/10 px-3 py-1.5 text-xs font-semibold text-success transition-colors hover:bg-success/15"
-                      >
-                        Approve Draft
                       </button>
                     </div>
                   </form>
@@ -461,15 +494,18 @@ export function ContactDirectoryTableClient({
                         : "Tier 2+ contacts use Apollo/template drafting later."}
                   </p>
                   {contact.requiresAiDraft ? (
-                    <form action={generateContactDraftAction}>
-                      <input type="hidden" name="contactId" value={contact.id} />
-                      <button
-                        className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-50"
-                        disabled={!contact.draftGenerationConfigured}
-                      >
-                        {contact.draftGenerationConfigured ? "Generate AI Draft" : "AI runtime required"}
-                      </button>
-                    </form>
+                    <div className="space-y-2">
+                      <form action={generateContactDraftAction}>
+                        <input type="hidden" name="contactId" value={contact.id} />
+                        <button
+                          className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-50"
+                          disabled={!contact.draftGenerationConfigured}
+                        >
+                          {getDraftButtonLabel(contact, false)}
+                        </button>
+                      </form>
+                      {getDraftDisabledHelp(contact)}
+                    </div>
                   ) : null}
                 </div>
               )}
@@ -483,7 +519,6 @@ export function ContactDirectoryTableClient({
       sequenceOptions,
       updateContactSequenceAction,
       saveContactDraftAction,
-      approveContactDraftAction,
       generateContactDraftAction
     ]
   );
