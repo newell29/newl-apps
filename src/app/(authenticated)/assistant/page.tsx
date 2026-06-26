@@ -8,6 +8,10 @@ import {
   syncAssistantKnowledgeAction,
   toggleAssistantAutomationStatusAction
 } from "@/modules/assistant/actions";
+import {
+  AssistantAskPendingBar,
+  AssistantAskSubmitButton
+} from "@/modules/assistant/components/assistant-ask-controls";
 import { formatAssistantRole, getAssistantWorkspace } from "@/modules/assistant/queries";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -144,6 +148,7 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
                 rows={4}
                 className="w-full resize-none border-0 bg-transparent px-0 py-0 text-sm leading-6 text-foreground outline-none placeholder:text-mutedForeground"
               />
+              <AssistantAskPendingBar />
               <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
                 <div className="flex flex-wrap gap-2">
                   {suggestedPrompts.slice(0, 3).map((prompt: string) => (
@@ -156,12 +161,7 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
                     </Link>
                   ))}
                 </div>
-                <button
-                  type="submit"
-                  className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover"
-                >
-                  Ask
-                </button>
+                <AssistantAskSubmitButton />
               </div>
             </div>
           </form>
