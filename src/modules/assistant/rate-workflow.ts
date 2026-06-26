@@ -1,7 +1,7 @@
 import { AssistantSourceKind, ModuleKey } from "@prisma/client";
 
 import { getLtlRatePortalShell } from "@/modules/ltl-rate-portal/queries";
-import type { LtlFreightPiece, LtlQuoteRequest, SevenLAccountConfig } from "@/modules/ltl-rate-portal/types";
+import type { LtlCountryCode, LtlFreightPiece, LtlQuoteRequest, SevenLAccountConfig } from "@/modules/ltl-rate-portal/types";
 import { AuthorizationError, requireModule } from "@/server/auth/authorization";
 import { getLtlQuotes } from "@/server/integrations/seven-l";
 import type { AuthenticatedContext } from "@/server/tenant-context";
@@ -26,6 +26,88 @@ export type AssistantRateResponse = {
   }>;
   metadata: Record<string, unknown>;
 };
+
+type ResolvedAssistantRateLocation = {
+  label: string | null;
+  city: string;
+  state: string;
+  zipcode: string;
+  country: LtlCountryCode;
+  resolution: "POSTAL_CODE" | "CITY_LOOKUP";
+};
+
+const STATE_NAME_TO_ABBR: Record<string, string> = {
+  alabama: "AL",
+  alaska: "AK",
+  arizona: "AZ",
+  arkansas: "AR",
+  california: "CA",
+  colorado: "CO",
+  connecticut: "CT",
+  delaware: "DE",
+  florida: "FL",
+  georgia: "GA",
+  illinois: "IL",
+  indiana: "IN",
+  iowa: "IA",
+  kansas: "KS",
+  kentucky: "KY",
+  louisiana: "LA",
+  maryland: "MD",
+  massachusetts: "MA",
+  michigan: "MI",
+  minnesota: "MN",
+  mississippi: "MS",
+  missouri: "MO",
+  nevada: "NV",
+  "new jersey": "NJ",
+  "new york": "NY",
+  "north carolina": "NC",
+  ohio: "OH",
+  oklahoma: "OK",
+  oregon: "OR",
+  pennsylvania: "PA",
+  tennessee: "TN",
+  texas: "TX",
+  utah: "UT",
+  virginia: "VA",
+  washington: "WA",
+  wisconsin: "WI",
+  ontario: "ON",
+  quebec: "QC",
+  alberta: "AB",
+  "british columbia": "BC",
+  manitoba: "MB"
+};
+
+const CITY_POSTAL_DEFAULTS: Array<{
+  city: string;
+  state: string;
+  zipcode: string;
+  country: LtlCountryCode;
+  aliases?: string[];
+}> = [
+  { city: "Charlotte", state: "NC", zipcode: "28273", country: "US" },
+  { city: "Dallas", state: "TX", zipcode: "75201", country: "US" },
+  { city: "Houston", state: "TX", zipcode: "77001", country: "US" },
+  { city: "Atlanta", state: "GA", zipcode: "30301", country: "US" },
+  { city: "Chicago", state: "IL", zipcode: "60601", country: "US" },
+  { city: "Los Angeles", state: "CA", zipcode: "90001", country: "US", aliases: ["LA"] },
+  { city: "Beverly Hills", state: "CA", zipcode: "90210", country: "US" },
+  { city: "New York", state: "NY", zipcode: "10001", country: "US", aliases: ["NYC"] },
+  { city: "Miami", state: "FL", zipcode: "33101", country: "US" },
+  { city: "Detroit", state: "MI", zipcode: "48201", country: "US" },
+  { city: "Columbus", state: "OH", zipcode: "43215", country: "US" },
+  { city: "Indianapolis", state: "IN", zipcode: "46204", country: "US" },
+  { city: "Nashville", state: "TN", zipcode: "37201", country: "US" },
+  { city: "Memphis", state: "TN", zipcode: "38103", country: "US" },
+  { city: "Toronto", state: "ON", zipcode: "M5H 2N2", country: "CA" },
+  { city: "Mississauga", state: "ON", zipcode: "L5B 3C1", country: "CA" },
+  { city: "Brampton", state: "ON", zipcode: "L6T 4A8", country: "CA" },
+  { city: "Montreal", state: "QC", zipcode: "H3B 1A7", country: "CA" },
+  { city: "Vancouver", state: "BC", zipcode: "V6B 1A1", country: "CA" },
+  { city: "Calgary", state: "AB", zipcode: "T2P 1J9", country: "CA" }
+];
 
 export async function maybeRunAssistantRateRequest(
   context: AuthenticatedContext,
@@ -222,29 +304,31 @@ export function parseAssistantRatePrompt(prompt: string): ParsedAssistantRateReq
   const postalCodes = parsePostalCodes(prompt);
   const originLabel = parseLocationLabel(prompt, "from", ["to"]);
   const destinationLabel = parseLocationLabel(prompt, "to", [" at ", " weighing", " weight", " class ", " pallet", " skid", " piece"]);
+  const originLocation = resolveAssistantRateLocation(originLabel, postalCodes[0] ?? null);
+  const destinationLocation = resolveAssistantRateLocation(destinationLabel, postalCodes[1] ?? null);
   const pieces = dimensions && weight
     ? [buildFreightPiece({ dimensions, weight, quantity, freightClass })]
     : null;
 
   const missingFields = [
-    postalCodes[0] ? null : "origin ZIP/postal code",
-    postalCodes[1] ? null : "destination ZIP/postal code",
+    originLocation ? null : "origin ZIP/postal code or city",
+    destinationLocation ? null : "destination ZIP/postal code or city",
     dimensions ? null : "dimensions",
     weight ? null : "weight"
   ].filter((value): value is string => Boolean(value));
 
   const request =
-    missingFields.length === 0 && pieces
+    missingFields.length === 0 && pieces && originLocation && destinationLocation
       ? ({
           customerReference: "ASSIST",
-          originCity: "",
-          originState: "",
-          originZipcode: postalCodes[0],
-          originCountry: inferCountry(postalCodes[0]),
-          destinationCity: "",
-          destinationState: "",
-          destinationZipcode: postalCodes[1],
-          destinationCountry: inferCountry(postalCodes[1]),
+          originCity: originLocation.city,
+          originState: originLocation.state,
+          originZipcode: originLocation.zipcode,
+          originCountry: originLocation.country,
+          destinationCity: destinationLocation.city,
+          destinationState: destinationLocation.state,
+          destinationZipcode: destinationLocation.zipcode,
+          destinationCountry: destinationLocation.country,
           pickupDate: "Not scheduled",
           uom: "US",
           accessorialCodes: [],
@@ -261,7 +345,8 @@ export function parseAssistantRatePrompt(prompt: string): ParsedAssistantRateReq
     summary: buildParsedSummary({
       originLabel,
       destinationLabel,
-      postalCodes,
+      originLocation,
+      destinationLocation,
       dimensions,
       weight,
       quantity
@@ -350,9 +435,126 @@ function parseLocationLabel(prompt: string, keyword: string, stopTokens: string[
     .map((token) => lowerRemainder.indexOf(token))
     .filter((index) => index >= 0);
   const stop = stopIndexes.length > 0 ? Math.min(...stopIndexes) : remainder.length;
-  const label = remainder.slice(0, stop).replace(/\b(?:\d{5}(?:-\d{4})?|[A-Z]\d[A-Z][ -]?\d[A-Z]\d)\b/gi, "").trim();
+  const label = cleanupLocationLabel(remainder.slice(0, stop));
 
   return label.length > 0 ? label.replace(/[.,;:]$/g, "").trim() : null;
+}
+
+function cleanupLocationLabel(value: string) {
+  return value
+    .replace(/\b(?:\d{5}(?:-\d{4})?|[A-Z]\d[A-Z][ -]?\d[A-Z]\d)\b/gi, "")
+    .replace(/\b\d{1,3}(?:\.\d+)?\s*[xX]\s*\d{1,3}(?:\.\d+)?\s*[xX]\s*\d{1,3}(?:\.\d+)?.*$/i, "")
+    .replace(/\b(?:rate|quote|ltl|freight|pallets?|skids?|pieces?|lbs?|pounds?)\b.*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function resolveAssistantRateLocation(
+  label: string | null,
+  postalCode: string | null
+): ResolvedAssistantRateLocation | null {
+  const parsedLabel = parseCityStateLabel(label);
+
+  if (postalCode) {
+    return {
+      label,
+      city: parsedLabel?.city.toUpperCase() ?? "",
+      state: parsedLabel?.state ?? "",
+      zipcode: postalCode,
+      country: inferCountry(postalCode),
+      resolution: "POSTAL_CODE"
+    };
+  }
+
+  if (!label) {
+    return null;
+  }
+
+  const cityMatch = lookupCityPostalDefault(label);
+  if (!cityMatch) {
+    return null;
+  }
+
+  return {
+    label,
+    city: cityMatch.city.toUpperCase(),
+    state: cityMatch.state,
+    zipcode: cityMatch.zipcode,
+    country: cityMatch.country,
+    resolution: "CITY_LOOKUP"
+  };
+}
+
+function lookupCityPostalDefault(label: string) {
+  const parsed = parseCityStateLabel(label);
+  if (!parsed) {
+    return null;
+  }
+
+  const cityKey = normalizeLocationToken(parsed.city);
+  const matches = CITY_POSTAL_DEFAULTS.filter((entry) => {
+    const cityMatches =
+      normalizeLocationToken(entry.city) === cityKey ||
+      (entry.aliases ?? []).some((alias) => normalizeLocationToken(alias) === cityKey);
+    const stateMatches = parsed.state ? entry.state === parsed.state : true;
+    return cityMatches && stateMatches;
+  });
+
+  return matches[0] ?? null;
+}
+
+function parseCityStateLabel(label: string | null) {
+  if (!label) {
+    return null;
+  }
+
+  const normalized = label.replace(/[.,;:]+$/g, "").replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const commaParts = normalized.split(",").map((part) => part.trim()).filter(Boolean);
+  if (commaParts.length >= 2) {
+    const state = normalizeState(commaParts.at(-1) ?? "");
+    return {
+      city: commaParts.slice(0, -1).join(" "),
+      state
+    };
+  }
+
+  const parts = normalized.split(" ");
+  for (let stateTokenLength = Math.min(2, parts.length - 1); stateTokenLength >= 1; stateTokenLength -= 1) {
+    const stateCandidate = parts.slice(-stateTokenLength).join(" ");
+    const state = normalizeState(stateCandidate);
+    if (state) {
+      return {
+        city: parts.slice(0, -stateTokenLength).join(" "),
+        state
+      };
+    }
+  }
+
+  return {
+    city: normalized,
+    state: null
+  };
+}
+
+function normalizeState(value: string) {
+  const cleaned = value.trim().toLowerCase().replace(/\./g, "");
+  if (!cleaned) {
+    return null;
+  }
+
+  if (/^[a-z]{2}$/i.test(cleaned)) {
+    return cleaned.toUpperCase();
+  }
+
+  return STATE_NAME_TO_ABBR[cleaned] ?? null;
+}
+
+function normalizeLocationToken(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function inferCountry(postalCode: string) {
@@ -362,26 +564,37 @@ function inferCountry(postalCode: string) {
 function buildParsedSummary({
   originLabel,
   destinationLabel,
-  postalCodes,
+  originLocation,
+  destinationLocation,
   dimensions,
   weight,
   quantity
 }: {
   originLabel: string | null;
   destinationLabel: string | null;
-  postalCodes: string[];
+  originLocation: ResolvedAssistantRateLocation | null;
+  destinationLocation: ResolvedAssistantRateLocation | null;
   dimensions: { length: number; width: number; height: number } | null;
   weight: number | null;
   quantity: number;
 }) {
-  const origin = [originLabel, postalCodes[0]].filter(Boolean).join(" ").trim() || "origin pending";
-  const destination = [destinationLabel, postalCodes[1]].filter(Boolean).join(" ").trim() || "destination pending";
+  const origin = formatResolvedLocationSummary(originLabel, originLocation) || "origin pending";
+  const destination = formatResolvedLocationSummary(destinationLabel, destinationLocation) || "destination pending";
   const pieceSummary = dimensions
     ? `${quantity} pallet(s) ${dimensions.length}x${dimensions.width}x${dimensions.height}`
     : `${quantity} pallet(s)`;
   const weightSummary = weight ? `${weight} lbs each` : "weight pending";
 
   return `${origin} to ${destination}, ${pieceSummary}, ${weightSummary}`;
+}
+
+function formatResolvedLocationSummary(label: string | null, location: ResolvedAssistantRateLocation | null) {
+  if (!location) {
+    return label ?? "";
+  }
+
+  const cityState = [location.city || label, location.state].filter(Boolean).join(", ");
+  return [cityState, location.zipcode].filter(Boolean).join(" ").trim();
 }
 
 function formatCurrency(value: number) {

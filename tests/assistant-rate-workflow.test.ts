@@ -41,13 +41,29 @@ describe("parseAssistantRatePrompt", () => {
     });
   });
 
-  it("asks for missing postal codes when only city names are provided", () => {
+  it("resolves known city names to default postal codes", () => {
     const parsed = parseAssistantRatePrompt(
       "Need a rate from Charlotte to Dallas 40x48x50 at 500 lbs."
     );
 
+    expect(parsed?.missingFields).toEqual([]);
+    expect(parsed?.request).toMatchObject({
+      originCity: "CHARLOTTE",
+      originState: "NC",
+      originZipcode: "28273",
+      destinationCity: "DALLAS",
+      destinationState: "TX",
+      destinationZipcode: "75201"
+    });
+  });
+
+  it("asks for a postal code when the city is not in the assistant lookup", () => {
+    const parsed = parseAssistantRatePrompt(
+      "Need a rate from Madeupville to Dallas 40x48x50 at 500 lbs."
+    );
+
     expect(parsed?.request).toBeNull();
-    expect(parsed?.missingFields).toEqual(["origin ZIP/postal code", "destination ZIP/postal code"]);
+    expect(parsed?.missingFields).toEqual(["origin ZIP/postal code or city"]);
   });
 });
 
@@ -67,10 +83,10 @@ describe("maybeRunAssistantRateRequest", () => {
         userName: "Alex",
         role: "ADMIN"
       },
-      "Need a rate from Charlotte to Dallas 40x48x50 at 500 lbs."
+      "Need a rate from Charlotte to Dallas 40x48x50."
     );
 
-    expect(result?.answer).toContain("Still needed: origin ZIP/postal code, destination ZIP/postal code.");
+    expect(result?.answer).toContain("Still needed: weight.");
     expect(requireModule).not.toHaveBeenCalled();
   });
 
@@ -150,6 +166,88 @@ describe("maybeRunAssistantRateRequest", () => {
       sourceKind: "RATE_TOOL",
       title: "AAA Cooper 7L quote"
     });
+  });
+
+  it("routes city-only rate requests to 7L using resolved default ZIP codes", async () => {
+    requireModule.mockResolvedValue(undefined);
+    getLtlRatePortalShell.mockResolvedValue({
+      accounts: [
+        {
+          id: "account-1",
+          name: "7L Live Preferred Carriers",
+          status: "ACTIVE",
+          dryRun: false,
+          secretConfigured: true,
+          carriers: [
+            {
+              carrierHash: "carrier-a",
+              name: "AAA Cooper",
+              code: "AAA",
+              scac: "AACT",
+              enabled: true
+            }
+          ]
+        }
+      ]
+    });
+    getLtlQuotes.mockResolvedValue({
+      data: [
+        {
+          customerReference: "ASSIST",
+          originCity: "CHARLOTTE",
+          originState: "NC",
+          originZipcode: "28273",
+          originCountry: "US",
+          destinationCity: "DALLAS",
+          destinationState: "TX",
+          destinationZipcode: "75201",
+          destinationCountry: "US",
+          pickupDate: "Not scheduled",
+          uom: "US",
+          accessorialCodes: [],
+          pieces: [],
+          carrierHash: "carrier-a",
+          carrierName: "AAA Cooper",
+          carrierCode: "AAA",
+          scac: "AACT",
+          serviceLevel: "Less than Truckload",
+          transitDays: 3,
+          quoteNumber: "AAA-ASSIST-2",
+          total: 398.19,
+          fuelCharge: 50,
+          accessorialCharge: 0,
+          linehaulCharge: 348.19,
+          rateRemarks: [],
+          mode: "live"
+        }
+      ],
+      errors: []
+    });
+
+    const result = await maybeRunAssistantRateRequest(
+      {
+        tenantId: "tenant-1",
+        tenantSlug: "tenant-1",
+        tenantName: "Tenant 1",
+        userId: "user-1",
+        userEmail: "alex@newl.ca",
+        userName: "Alex",
+        role: "ADMIN"
+      },
+      "Need a rate from Charlotte to Dallas 40x48x50 at 500 lbs."
+    );
+
+    expect(getLtlQuotes).toHaveBeenCalledWith(
+      expect.anything(),
+      [
+        expect.objectContaining({
+          originZipcode: "28273",
+          destinationZipcode: "75201"
+        })
+      ],
+      ["carrier-a"]
+    );
+    expect(result?.answer).toContain("Lowest rate: AAA Cooper at $398.19");
   });
 
   it("summarizes all attempted carrier errors when 7L returns no rates", async () => {
