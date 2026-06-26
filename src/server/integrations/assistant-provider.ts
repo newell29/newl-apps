@@ -240,28 +240,18 @@ async function requestChatCompletion({
   model: string;
   request: AssistantReplyRequest;
 }) {
+  const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
   const response = await fetch(`${normalizeBaseUrl(baseUrl)}/chat/completions`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {})
     },
-    body: JSON.stringify({
+    body: JSON.stringify(buildChatCompletionPayload({
       model,
-      temperature: request.settings.temperature,
-      max_tokens: request.settings.maxTokens,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are Newl's company assistant. Answer using only the provided tenant-scoped source excerpts. Be concise, operationally useful, and explicit when required facts are missing. If the user asks for a rate, collect missing shipment details instead of inventing a quote. Do not fabricate customer history, service capabilities, pricing, or tool outputs."
-        },
-        {
-          role: "user",
-          content: buildAssistantPrompt(request)
-        }
-      ]
-    }),
+      request,
+      useOpenAiReasoningParameters: shouldUseOpenAiReasoningParameters(normalizedBaseUrl, model)
+    })),
     cache: "no-store"
   });
 
@@ -286,6 +276,46 @@ async function requestChatCompletion({
       error: error instanceof Error ? error.message : "Assistant provider returned an unreadable response."
     };
   }
+}
+
+function buildChatCompletionPayload({
+  model,
+  request,
+  useOpenAiReasoningParameters
+}: {
+  model: string;
+  request: AssistantReplyRequest;
+  useOpenAiReasoningParameters: boolean;
+}) {
+  return {
+    model,
+    ...(useOpenAiReasoningParameters
+      ? { max_completion_tokens: request.settings.maxTokens }
+      : {
+          temperature: request.settings.temperature,
+          max_tokens: request.settings.maxTokens
+        }),
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are Newl's company assistant. Answer using only the provided tenant-scoped source excerpts. Be concise, operationally useful, and explicit when required facts are missing. If the user asks for a rate, collect missing shipment details instead of inventing a quote. Do not fabricate customer history, service capabilities, pricing, or tool outputs."
+      },
+      {
+        role: "user",
+        content: buildAssistantPrompt(request)
+      }
+    ]
+  };
+}
+
+function shouldUseOpenAiReasoningParameters(baseUrl: string, model: string) {
+  if (baseUrl !== OPENAI_API_BASE_URL) {
+    return false;
+  }
+
+  const normalizedModel = model.toLowerCase();
+  return normalizedModel.startsWith("gpt-5") || normalizedModel.startsWith("o1") || normalizedModel.startsWith("o3");
 }
 
 function buildAssistantPrompt(request: AssistantReplyRequest) {
