@@ -7,6 +7,7 @@ const getAssistantWorkspace = vi.fn();
 const buildAssistantSources = vi.fn();
 const buildAssistantAnswerForPrompt = vi.fn();
 const maybeRunAssistantRateRequest = vi.fn();
+const maybeRunAssistantApolloActivityRequest = vi.fn();
 const generateAssistantReply = vi.fn();
 
 vi.mock("@/server/db", () => ({
@@ -23,6 +24,10 @@ vi.mock("@/modules/assistant/knowledge", () => ({
 
 vi.mock("@/modules/assistant/rate-workflow", () => ({
   maybeRunAssistantRateRequest: (...args: unknown[]) => maybeRunAssistantRateRequest(...args)
+}));
+
+vi.mock("@/modules/assistant/apollo-workflow", () => ({
+  maybeRunAssistantApolloActivityRequest: (...args: unknown[]) => maybeRunAssistantApolloActivityRequest(...args)
 }));
 
 vi.mock("@/modules/assistant/queries", () => ({
@@ -47,6 +52,8 @@ const context = {
   tenantSlug: "newl-group",
   tenantName: "Newl Group",
   userId: "user-1",
+  userEmail: "admin@newl.ca",
+  userName: "Admin User",
   role: PlatformRole.ADMIN,
   memberships: []
 };
@@ -102,6 +109,7 @@ describe("runAssistantPrompt", () => {
       ]
     });
     maybeRunAssistantRateRequest.mockResolvedValue(null);
+    maybeRunAssistantApolloActivityRequest.mockResolvedValue(null);
   });
 
   it("loads the newest assistant provider row deterministically", async () => {

@@ -1,5 +1,6 @@
 import { JobStatus, PlatformRole, type Prisma } from "@prisma/client";
 
+import { maybeRunAssistantApolloActivityRequest } from "@/modules/assistant/apollo-workflow";
 import { searchAssistantKnowledge } from "@/modules/assistant/knowledge";
 import { maybeRunAssistantRateRequest } from "@/modules/assistant/rate-workflow";
 import {
@@ -79,6 +80,28 @@ export async function runAssistantPrompt(
         sources: rateResponse.sources
       };
     }
+  }
+
+  const apolloActivityResponse = await maybeRunAssistantApolloActivityRequest(context, prompt);
+
+  if (apolloActivityResponse) {
+    return {
+      answer: apolloActivityResponse.answer,
+      intent: deterministic.intent,
+      provider: "NEWL_APOLLO_WORKFLOW",
+      model: "assistant-apollo-workflow-v1",
+      messageMetadata: {
+        deterministic: true,
+        intent: deterministic.intent,
+        ...apolloActivityResponse.metadata
+      },
+      runMetadata: {
+        deterministic: true,
+        intent: deterministic.intent,
+        ...apolloActivityResponse.metadata
+      },
+      sources: apolloActivityResponse.sources
+    };
   }
 
   let answer = deterministic.answer.join("\n\n");

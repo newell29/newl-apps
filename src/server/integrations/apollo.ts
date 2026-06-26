@@ -117,6 +117,35 @@ export type ApolloSequencePushResult = {
   rawPayload: Record<string, unknown>;
 };
 
+export type ApolloCallActivityRecord = {
+  id: string | null;
+  type: string | null;
+  status: string | null;
+  outcome: string | null;
+  durationSeconds: number | null;
+  occurredAt: string | null;
+  rawPayload: Record<string, unknown>;
+};
+
+export type ApolloCallActivitySummaryInput = {
+  apolloUserId: string;
+  userName: string;
+  date: Date;
+  timezone: string;
+};
+
+export type ApolloCallActivitySummary = {
+  userName: string;
+  apolloUserId: string;
+  dateLabel: string;
+  timezone: string;
+  callCount: number;
+  connectedCount: number;
+  durationSeconds: number;
+  activities: ApolloCallActivityRecord[];
+  rawPayload: Record<string, unknown>;
+};
+
 type ApolloOrganizationCandidate = {
   id: string | null;
   name: string | null;
@@ -336,6 +365,43 @@ export async function pushApolloContactsToSequence(
     sequenceId,
     acceptedContactIds,
     message: extractApolloError(rawPayload) ?? null,
+    rawPayload
+  };
+}
+
+export async function fetchApolloCallActivitySummary(
+  input: ApolloCallActivitySummaryInput
+): Promise<ApolloCallActivitySummary> {
+  const apiKey = readApolloMasterApiKey();
+  const dateLabel = formatDateInTimezone(input.date, input.timezone);
+  const path = process.env.APOLLO_ACTIVITY_SEARCH_PATH?.trim() || "/api/v1/activities/search";
+  const payload = {
+    page: 1,
+    per_page: DEFAULT_PAGE_SIZE,
+    user_ids: [input.apolloUserId],
+    owner_ids: [input.apolloUserId],
+    activity_types: ["call"],
+    types: ["call"],
+    date_range: {
+      start: dateLabel,
+      end: dateLabel
+    },
+    start_date: dateLabel,
+    end_date: dateLabel
+  } satisfies Record<string, unknown>;
+
+  const rawPayload = await postApolloJson(path, apiKey, payload);
+  const activities = parseApolloCallActivities(rawPayload, input.apolloUserId);
+
+  return {
+    userName: input.userName,
+    apolloUserId: input.apolloUserId,
+    dateLabel,
+    timezone: input.timezone,
+    callCount: activities.length,
+    connectedCount: activities.filter((activity) => isConnectedCall(activity)).length,
+    durationSeconds: activities.reduce((total, activity) => total + (activity.durationSeconds ?? 0), 0),
+    activities,
     rawPayload
   };
 }
@@ -601,6 +667,34 @@ function parseApolloSequencesResponse(payload: ApolloSequencesResponse | null): 
         archived: readApolloBoolean(record, ["archived"], false),
         description: readApolloString(record, ["description"]),
         lastUsedAt: readApolloString(record, ["last_used_at", "updated_at", "created_at"])
+      }
+    ];
+  });
+}
+
+function parseApolloCallActivities(payload: Record<string, unknown>, apolloUserId: string): ApolloCallActivityRecord[] {
+  const candidates = [
+    ...readApolloArray(payload, ["activities"]),
+    ...readApolloArray(payload, ["activity_logs"]),
+    ...readApolloArray(payload, ["calls"]),
+    ...readApolloArray(payload, ["data"])
+  ];
+
+  return candidates.flatMap((entry) => {
+    const record = asRecord(entry);
+    if (!record || !isApolloCallActivity(record) || !matchesApolloUser(record, apolloUserId)) {
+      return [];
+    }
+
+    return [
+      {
+        id: readApolloString(record, ["id", "activity_id", "call_id"]),
+        type: readApolloString(record, ["type", "activity_type", "kind", "category"]),
+        status: readApolloString(record, ["status", "call_status"]),
+        outcome: readApolloString(record, ["outcome", "disposition", "call_disposition"]),
+        durationSeconds: readApolloNumber(record, ["duration_seconds", "call_duration_seconds", "duration"]),
+        occurredAt: readApolloString(record, ["occurred_at", "created_at", "completed_at", "updated_at"]),
+        rawPayload: record
       }
     ];
   });
@@ -1310,6 +1404,84 @@ function readApolloBoolean(record: Record<string, unknown>, keys: string[], fall
   }
 
   return fallback;
+}
+
+function readApolloNumber(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (typeof value === "string" && value.trim().length > 0) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+
+  return null;
+}
+
+function isApolloCallActivity(record: Record<string, unknown>) {
+  const descriptor = [
+    readApolloString(record, ["type", "activity_type", "kind", "category"]),
+    readApolloString(record, ["event_type", "task_type"])
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (!descriptor) {
+    return true;
+  }
+
+  return /\b(call|phone|dial)\b/.test(descriptor);
+}
+
+function matchesApolloUser(record: Record<string, unknown>, apolloUserId: string) {
+  const directUserId = readApolloString(record, [
+    "user_id",
+    "owner_id",
+    "created_by_id",
+    "performed_by_user_id",
+    "assignee_id"
+  ]);
+
+  if (directUserId) {
+    return directUserId === apolloUserId;
+  }
+
+  const nestedUserIds = [record.user, record.owner, record.created_by, record.performed_by, record.assignee]
+    .map(asRecord)
+    .flatMap((nestedRecord) => (nestedRecord ? [readApolloString(nestedRecord, ["id", "user_id"])] : []))
+    .filter(Boolean);
+
+  return nestedUserIds.length === 0 || nestedUserIds.includes(apolloUserId);
+}
+
+function isConnectedCall(activity: ApolloCallActivityRecord) {
+  const value = `${activity.status ?? ""} ${activity.outcome ?? ""}`.toLowerCase();
+  return /\b(answered|connected|completed|talked|spoke|success)\b/.test(value);
+}
+
+function formatDateInTimezone(date: Date, timezone: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+
+  if (!year || !month || !day) {
+    return date.toISOString().slice(0, 10);
+  }
+
+  return `${year}-${month}-${day}`;
 }
 
 function buildName(firstName: string | null, lastName: string | null) {
