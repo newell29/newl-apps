@@ -35,9 +35,7 @@ export async function runAssistantPrompt(
       tenantId: context.tenantId,
       name: ASSISTANT_PROVIDER_CREDENTIAL_NAME
     },
-    orderBy: {
-      updatedAt: "desc"
-    },
+    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
     select: {
       provider: true,
       status: true,
@@ -139,6 +137,7 @@ export async function runAssistantPrompt(
       runMetadata = {
         deterministic: true,
         intent: deterministic.intent,
+        providerFallback: true,
         providerSettings,
         liveReplyAttempted: true,
         liveReplyError: error instanceof Error ? error.message : "Unknown provider error"
