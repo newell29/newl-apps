@@ -4,6 +4,7 @@ const upsertTradeMiningScoringConfig = vi.fn();
 const findIntegrationCredential = vi.fn();
 const createIntegrationCredential = vi.fn();
 const updateIntegrationCredential = vi.fn();
+const deleteManyIntegrationCredential = vi.fn();
 const findTradeMiningSearchProfile = vi.fn();
 const updateTradeMiningSearchProfile = vi.fn();
 const revalidatePath = vi.fn();
@@ -16,8 +17,10 @@ vi.mock("@/server/db", () => ({
   prisma: {
     integrationCredential: {
       findFirst: (...args: unknown[]) => findIntegrationCredential(...args),
+      findMany: (...args: unknown[]) => findIntegrationCredential(...args),
       create: (...args: unknown[]) => createIntegrationCredential(...args),
-      update: (...args: unknown[]) => updateIntegrationCredential(...args)
+      update: (...args: unknown[]) => updateIntegrationCredential(...args),
+      deleteMany: (...args: unknown[]) => deleteManyIntegrationCredential(...args)
     },
     tradeMiningSearchProfile: {
       findFirst: (...args: unknown[]) => findTradeMiningSearchProfile(...args),
@@ -69,6 +72,7 @@ describe("saveTradeMiningScoringSettingsAction", () => {
     findIntegrationCredential.mockResolvedValue(null);
     createIntegrationCredential.mockResolvedValue({});
     updateIntegrationCredential.mockResolvedValue({});
+    deleteManyIntegrationCredential.mockResolvedValue({ count: 0 });
     findTradeMiningSearchProfile.mockResolvedValue({
       id: "profile-1"
     });
@@ -141,6 +145,7 @@ describe("saveTradeMiningScoringSettingsAction", () => {
   });
 
   it("saves tenant-scoped Apollo rep mapping entries", async () => {
+    findIntegrationCredential.mockResolvedValueOnce(null);
     const formData = new FormData();
     formData.append("apolloRepActiveIndex", "0");
     formData.append("apolloRepSequenceOwnerName", "Zalan Riaz");
@@ -172,6 +177,7 @@ describe("saveTradeMiningScoringSettingsAction", () => {
   });
 
   it("saves tenant-scoped assistant provider settings", async () => {
+    findIntegrationCredential.mockResolvedValueOnce([]);
     const formData = new FormData();
     formData.set("assistantProvider", "OPENAI");
     formData.set("assistantDefaultModel", "gpt-5-mini");
@@ -199,7 +205,35 @@ describe("saveTradeMiningScoringSettingsAction", () => {
     expect(revalidatePath).toHaveBeenCalledWith("/assistant");
   });
 
+  it("deduplicates older assistant provider rows when saving settings", async () => {
+    findIntegrationCredential.mockResolvedValue([{ id: "assistant-new" }, { id: "assistant-old" }]);
+
+    const formData = new FormData();
+    formData.set("assistantProvider", "OPENAI");
+    formData.set("assistantDefaultModel", "gpt-5-mini");
+    formData.set("assistantFallbackModel", "gpt-5-nano");
+    formData.set("assistantTemperature", "0.2");
+    formData.set("assistantMaxTokens", "900");
+    formData.set("assistantLiveResponsesEnabled", "true");
+
+    await saveAssistantProviderSettingsAction(formData);
+
+    expect(updateIntegrationCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "assistant-new" }
+      })
+    );
+    expect(deleteManyIntegrationCredential).toHaveBeenCalledWith({
+      where: {
+        id: {
+          in: ["assistant-old"]
+        }
+      }
+    });
+  });
+
   it("saves tenant-scoped Microsoft Graph integration settings", async () => {
+    findIntegrationCredential.mockResolvedValueOnce(null);
     const formData = new FormData();
     formData.set("microsoftMailboxAccessMode", "ADMIN_SELECTED_MAILBOXES");
     formData.set("microsoftAdminMailboxTargets", "shared@newl.ca\nops@newl.ca");
@@ -225,7 +259,7 @@ describe("saveTradeMiningScoringSettingsAction", () => {
   });
 
   it("syncs Apollo reps and preserves manual email routing fields", async () => {
-    findIntegrationCredential.mockResolvedValue({
+    findIntegrationCredential.mockResolvedValueOnce({
       id: "credential-1",
       publicConfig: {
         apolloUserMapping: [
@@ -279,7 +313,7 @@ describe("saveTradeMiningScoringSettingsAction", () => {
   });
 
   it("saves profile-specific cadence overrides without changing tenant defaults", async () => {
-    findIntegrationCredential.mockResolvedValue({
+    findIntegrationCredential.mockResolvedValueOnce({
       id: "credential-1",
       publicConfig: {
         apolloSequenceDirectory: [
@@ -339,7 +373,7 @@ describe("saveTradeMiningScoringSettingsAction", () => {
   });
 
   it("saves Apollo tier-to-cadence mappings without dropping rep routing config", async () => {
-    findIntegrationCredential.mockResolvedValue({
+    findIntegrationCredential.mockResolvedValueOnce({
       id: "credential-1",
       publicConfig: {
         apolloUserMapping: [
@@ -441,7 +475,7 @@ describe("saveTradeMiningScoringSettingsAction", () => {
   });
 
   it("only reuses name-based routing metadata for legacy rows without an Apollo user ID", async () => {
-    findIntegrationCredential.mockResolvedValue({
+    findIntegrationCredential.mockResolvedValueOnce({
       id: "credential-1",
       publicConfig: {
         apolloUserMapping: [
