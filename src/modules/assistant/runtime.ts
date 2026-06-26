@@ -2,7 +2,7 @@ import { JobStatus, PlatformRole, type Prisma } from "@prisma/client";
 
 import { maybeRunAssistantApolloActivityRequest } from "@/modules/assistant/apollo-workflow";
 import { searchAssistantKnowledge } from "@/modules/assistant/knowledge";
-import { maybeRunAssistantRateRequest } from "@/modules/assistant/rate-workflow";
+import { maybeRunAssistantRateRequest } from "@/modules/assistant/rate-tools";
 import {
   computeNextAssistantAutomationRunAt,
   summarizeAutomationResult,
@@ -28,6 +28,11 @@ export async function runAssistantPrompt(
   prompt: string,
   existingThreadId?: string
 ) {
+  const toolRateReply = await maybeRunAssistantRateRequest(context, prompt);
+  if (toolRateReply) {
+    return toolRateReply;
+  }
+
   const workspace = await getAssistantWorkspace(context, prompt, existingThreadId, context.userId);
   const indexedSources = await searchAssistantKnowledge(context, prompt);
   const sources = indexedSources.length > 0 ? indexedSources : buildAssistantSources(workspace);
@@ -57,30 +62,6 @@ export async function runAssistantPrompt(
     hasLocalLlm: workspace.integrations.some((integration) => integration.provider === "LOCAL_LLM" && integration.activeCount > 0),
     rateJobCount: workspace.recentRateJobs.length
   });
-
-  if (deterministic.intent === "RATE_REQUEST") {
-    const rateResponse = await maybeRunAssistantRateRequest(context, prompt);
-
-    if (rateResponse) {
-      return {
-        answer: rateResponse.answer,
-        intent: deterministic.intent,
-        provider: "NEWL_RATE_WORKFLOW",
-        model: "assistant-rate-workflow-v1",
-        messageMetadata: {
-          deterministic: true,
-          intent: deterministic.intent,
-          ...rateResponse.metadata
-        },
-        runMetadata: {
-          deterministic: true,
-          intent: deterministic.intent,
-          ...rateResponse.metadata
-        },
-        sources: rateResponse.sources
-      };
-    }
-  }
 
   const apolloActivityResponse = await maybeRunAssistantApolloActivityRequest(context, prompt);
 
