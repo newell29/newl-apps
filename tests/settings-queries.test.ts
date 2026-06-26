@@ -6,6 +6,9 @@ const findModuleAccess = vi.fn();
 const findCredentials = vi.fn();
 const findTradeMiningScoringConfig = vi.fn();
 const findTradeMiningSearchProfiles = vi.fn();
+const findMemberships = vi.fn();
+const findTenantRoleModuleAccess = vi.fn();
+const findTenantRolePolicies = vi.fn();
 const getLocalUpsAccountMetadata = vi.fn();
 const getLocalSevenLAccountNames = vi.fn();
 
@@ -19,6 +22,15 @@ vi.mock("@/server/db", () => ({
     },
     tradeMiningSearchProfile: {
       findMany: (...args: unknown[]) => findTradeMiningSearchProfiles(...args)
+    },
+    membership: {
+      findMany: (...args: unknown[]) => findMemberships(...args)
+    },
+    tenantRoleModuleAccess: {
+      findMany: (...args: unknown[]) => findTenantRoleModuleAccess(...args)
+    },
+    tenantRolePolicy: {
+      findMany: (...args: unknown[]) => findTenantRolePolicies(...args)
     },
     tradeMiningScoringConfig: {
       findUnique: (...args: unknown[]) => findTradeMiningScoringConfig(...args)
@@ -50,6 +62,9 @@ describe("getSettingsShell 7L contract", () => {
     getLocalSevenLAccountNames.mockResolvedValue(new Set());
     findTradeMiningScoringConfig.mockResolvedValue(null);
     findTradeMiningSearchProfiles.mockResolvedValue([]);
+    findMemberships.mockResolvedValue([]);
+    findTenantRoleModuleAccess.mockResolvedValue([]);
+    findTenantRolePolicies.mockResolvedValue([]);
   });
 
   it("keeps imported 7L carriers tenant-scoped and preserves selection/default flags", async () => {
@@ -106,7 +121,9 @@ describe("getSettingsShell 7L contract", () => {
             IntegrationProvider.UPS,
             IntegrationProvider.SEVEN_L,
             IntegrationProvider.OPENCLAW,
-            IntegrationProvider.APOLLO
+            IntegrationProvider.APOLLO,
+            IntegrationProvider.OPENAI,
+            IntegrationProvider.LOCAL_LLM
           ]
         }
       },
