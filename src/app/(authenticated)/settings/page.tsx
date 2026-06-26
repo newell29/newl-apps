@@ -49,6 +49,7 @@ export default async function SettingsPage() {
           <div className="flex flex-wrap gap-2">
             {[
               { href: "#platform-controls", label: "Platform controls" },
+              { href: "#quickbooks", label: "QuickBooks" },
               { href: "#assistant-ai", label: "Assistant AI" },
               { href: "#user-access", label: "User access" },
               { href: "#lead-generation-settings", label: "Lead generation" },
@@ -108,6 +109,65 @@ export default async function SettingsPage() {
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      <section id="quickbooks" className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border pb-4">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">QuickBooks Connections</h2>
+            <p className="mt-1 text-sm leading-6 text-mutedForeground">
+              Connect each legal entity separately so finance imports can distinguish Newl Worldwide from Newl USA while reusing shared canonical customer identity.
+            </p>
+          </div>
+          <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+            OAuth app creds come from `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET`, and `QUICKBOOKS_REDIRECT_URI`.
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          {[
+            { entity: "NEWL_WORLDWIDE", title: "Newl Worldwide", description: "Canada transport and third-party warehouse activity." },
+            { entity: "NEWL_USA", title: "Newl USA", description: "US customers plus Charlotte warehousing operations." }
+          ].map((target) => {
+            const connection = settings.quickbooksConnections.find((item) => item.legalEntity === target.entity);
+
+            return (
+              <div key={target.entity} className="rounded-md border border-border bg-muted/40 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-foreground">{target.title}</h3>
+                    <p className="mt-1 text-sm text-mutedForeground">{target.description}</p>
+                  </div>
+                  <span
+                    className={[
+                      "rounded-full px-2.5 py-1 text-xs font-semibold",
+                      connection?.secretConfigured
+                        ? "border border-success/25 bg-success/10 text-success"
+                        : "border border-warning/25 bg-warning/10 text-warning"
+                    ].join(" ")}
+                  >
+                    {connection?.secretConfigured ? "Connected" : "Not connected"}
+                  </span>
+                </div>
+
+                <div className="mt-4 space-y-2 text-sm text-mutedForeground">
+                  <p>Realm ID: {connection?.realmId ?? "Not connected yet"}</p>
+                  <p>Company: {connection?.companyName ?? "Pending QuickBooks callback"}</p>
+                  <p>Environment: {connection?.environment ?? "production"}</p>
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <a
+                    href={`/api/integrations/quickbooks/connect?entity=${target.entity}`}
+                    className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover"
+                  >
+                    {connection ? "Reconnect QuickBooks" : "Connect QuickBooks"}
+                  </a>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </section>
 

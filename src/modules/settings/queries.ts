@@ -163,6 +163,7 @@ export async function getSettingsShell(tenant: TenantContext) {
             IntegrationProvider.SEVEN_L,
             IntegrationProvider.OPENCLAW,
             IntegrationProvider.APOLLO,
+            IntegrationProvider.QUICKBOOKS,
             IntegrationProvider.OPENAI,
             IntegrationProvider.LOCAL_LLM
           ]
@@ -239,6 +240,9 @@ export async function getSettingsShell(tenant: TenantContext) {
       isAssistantProvider(credential.provider)
   );
   const apolloCredential = typedIntegrationCredentials.find((credential) => credential.provider === IntegrationProvider.APOLLO);
+  const quickbooksConnections = typedIntegrationCredentials
+    .filter((credential) => credential.provider === IntegrationProvider.QUICKBOOKS)
+    .map((credential) => mapQuickBooksConnection(credential));
   const upsAccounts = typedIntegrationCredentials
     .filter((credential) => credential.provider === IntegrationProvider.UPS)
     .map((credential) => mapUpsAccount(credential))
@@ -301,10 +305,32 @@ export async function getSettingsShell(tenant: TenantContext) {
     apolloSequenceMapping,
     apolloSequenceOptions: mapApolloSequenceOptions(apolloSequenceDirectory),
     searchProfileCadenceMappings,
+    quickbooksConnections,
     sevenLAccounts: typedIntegrationCredentials
       .filter((credential) => credential.provider === IntegrationProvider.SEVEN_L)
       .map((credential) => mapSevenLAccount(credential, localSevenLAccountNames))
       .filter(Boolean) as SevenLAccountConfig[]
+  };
+}
+
+function mapQuickBooksConnection(credential: IntegrationCredentialRecord) {
+  const config =
+    credential.publicConfig && typeof credential.publicConfig === "object"
+      ? (credential.publicConfig as Record<string, unknown>)
+      : {};
+
+  return {
+    id: credential.id,
+    name: credential.name,
+    status: credential.status,
+    legalEntity: typeof config.legalEntity === "string" ? config.legalEntity : null,
+    realmId: typeof config.realmId === "string" ? config.realmId : null,
+    environment: typeof config.environment === "string" ? config.environment : null,
+    companyName: typeof config.companyName === "string" ? config.companyName : null,
+    accessTokenExpiresAt: typeof config.accessTokenExpiresAt === "string" ? config.accessTokenExpiresAt : null,
+    refreshTokenExpiresAt: typeof config.refreshTokenExpiresAt === "string" ? config.refreshTokenExpiresAt : null,
+    connectedAt: typeof config.connectedAt === "string" ? config.connectedAt : null,
+    secretConfigured: Boolean(credential.secretRef)
   };
 }
 
