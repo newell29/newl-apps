@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReplyStatus, SequenceStatus } from "@prisma/client";
 import {
+  fetchApolloActivitySummary,
   fetchApolloContactsForCompany,
   fetchApolloRepDirectory,
   fetchApolloSequenceDirectory
@@ -643,6 +644,60 @@ describe("fetchApolloContactsForCompany", () => {
         fullName: "Avery Buyer"
       })
     ]);
+  });
+});
+
+describe("fetchApolloActivitySummary", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.stubEnv("APOLLO_MASTER_API", "master-api-key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("pages through activity results and uses aggregate metrics when present", async () => {
+    vi.spyOn(global, "fetch")
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          activities: Array.from({ length: 100 }, (_, index) => ({
+            id: `activity-${index}`,
+            call_id: `call-${index}`,
+            duration_seconds: 60
+          })),
+          metrics: [{ metric_name: "# Calls logged", value: 61 }]
+        })
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          activities: [
+            {
+              id: "activity-100",
+              call_id: "call-100",
+              duration_seconds: 45
+            }
+          ]
+        })
+      } as unknown as Response);
+
+    const result = await fetchApolloActivitySummary({
+      apolloUserId: "apollo-user-1",
+      userName: "Zalan Riaz",
+      startDate: new Date("2026-06-25T04:00:00.000Z"),
+      endDate: new Date("2026-06-26T03:59:59.999Z"),
+      timezone: "America/Toronto",
+      kinds: ["CALL", "CONNECTED_CALL"]
+    });
+
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(result.callCount).toBe(61);
+    expect(result.activities).toHaveLength(101);
+    expect(result.durationSeconds).toBe(6045);
   });
 });
 

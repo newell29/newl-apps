@@ -551,45 +551,51 @@ function parseActivityDateRange(prompt: string) {
   const now = new Date();
   const lower = prompt.toLowerCase();
   const daysMatch = lower.match(/\blast\s+(\d{1,3})\s+days?\b/);
+  const todayLabel = formatDateLabel(now, timezone);
 
   if (daysMatch) {
     const days = Math.max(1, Number.parseInt(daysMatch[1], 10));
-    const startDate = startOfDay(addDays(now, -(days - 1)));
-    const endDate = endOfDay(now);
+    const endDateLabel = todayLabel;
+    const startDateLabel = shiftDateLabel(endDateLabel, -(days - 1));
+    const startDate = zonedStartOfDay(startDateLabel, timezone);
+    const endDate = zonedEndOfDay(endDateLabel, timezone);
 
     return {
       startDate,
       endDate,
-      startDateLabel: formatDateLabel(startDate, timezone),
-      endDateLabel: formatDateLabel(endDate, timezone),
+      startDateLabel,
+      endDateLabel,
       timezone,
       label: `in the last ${days} days`
     };
   }
 
   if (/\byesterday\b/.test(lower)) {
-    const date = addDays(now, -1);
-    const startDate = startOfDay(date);
-    const endDate = endOfDay(date);
+    const startDateLabel = shiftDateLabel(todayLabel, -1);
+    const endDateLabel = startDateLabel;
+    const startDate = zonedStartOfDay(startDateLabel, timezone);
+    const endDate = zonedEndOfDay(endDateLabel, timezone);
 
     return {
       startDate,
       endDate,
-      startDateLabel: formatDateLabel(startDate, timezone),
-      endDateLabel: formatDateLabel(endDate, timezone),
+      startDateLabel,
+      endDateLabel,
       timezone,
       label: "yesterday"
     };
   }
 
-  const startDate = startOfDay(now);
-  const endDate = endOfDay(now);
+  const startDateLabel = todayLabel;
+  const endDateLabel = todayLabel;
+  const startDate = zonedStartOfDay(startDateLabel, timezone);
+  const endDate = zonedEndOfDay(endDateLabel, timezone);
 
   return {
     startDate,
     endDate,
-    startDateLabel: formatDateLabel(startDate, timezone),
-    endDateLabel: formatDateLabel(endDate, timezone),
+    startDateLabel,
+    endDateLabel,
     timezone,
     label: "today"
   };
@@ -603,24 +609,6 @@ function formatDateRange(request: ApolloInsightRequest) {
   return `${request.label} (${request.startDateLabel} to ${request.endDateLabel}, ${request.timezone})`;
 }
 
-function addDays(date: Date, days: number) {
-  const copy = new Date(date);
-  copy.setDate(copy.getDate() + days);
-  return copy;
-}
-
-function startOfDay(date: Date) {
-  const copy = new Date(date);
-  copy.setHours(0, 0, 0, 0);
-  return copy;
-}
-
-function endOfDay(date: Date) {
-  const copy = new Date(date);
-  copy.setHours(23, 59, 59, 999);
-  return copy;
-}
-
 function formatDateLabel(date: Date, timezone: string) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
@@ -632,6 +620,45 @@ function formatDateLabel(date: Date, timezone: string) {
   const month = parts.find((part) => part.type === "month")?.value;
   const day = parts.find((part) => part.type === "day")?.value;
   return year && month && day ? `${year}-${month}-${day}` : date.toISOString().slice(0, 10);
+}
+
+function shiftDateLabel(label: string, days: number) {
+  const [year, month, day] = label.split("-").map((value) => Number.parseInt(value, 10));
+  const shifted = new Date(Date.UTC(year, month - 1, day + days, 12, 0, 0, 0));
+  return shifted.toISOString().slice(0, 10);
+}
+
+function zonedStartOfDay(label: string, timezone: string) {
+  return zonedDateFromLabel(label, timezone, "start");
+}
+
+function zonedEndOfDay(label: string, timezone: string) {
+  return new Date(zonedDateFromLabel(shiftDateLabel(label, 1), timezone, "start").getTime() - 1);
+}
+
+function zonedDateFromLabel(label: string, timezone: string, boundary: "start") {
+  const [year, month, day] = label.split("-").map((value) => Number.parseInt(value, 10));
+  const baseUtc = Date.UTC(year, month - 1, day, boundary === "start" ? 0 : 23, boundary === "start" ? 0 : 59, boundary === "start" ? 0 : 59, boundary === "start" ? 0 : 999);
+  let instant = new Date(baseUtc - getTimeZoneOffsetMinutes(new Date(baseUtc), timezone) * 60_000);
+  instant = new Date(baseUtc - getTimeZoneOffsetMinutes(instant, timezone) * 60_000);
+  return instant;
+}
+
+function getTimeZoneOffsetMinutes(date: Date, timezone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    timeZoneName: "shortOffset"
+  }).formatToParts(date);
+  const value = parts.find((part) => part.type === "timeZoneName")?.value ?? "GMT";
+  const match = value.match(/GMT([+-])(\d{1,2})(?::?(\d{2}))?/i);
+  if (!match) {
+    return 0;
+  }
+
+  const sign = match[1] === "-" ? -1 : 1;
+  const hours = Number.parseInt(match[2], 10);
+  const minutes = Number.parseInt(match[3] ?? "0", 10);
+  return sign * (hours * 60 + minutes);
 }
 
 function scoreReplyLead(contact: {

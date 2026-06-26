@@ -147,6 +147,19 @@ describe("maybeRunAssistantApolloActivityRequest", () => {
     });
   });
 
+  it("uses a single Toronto-local date for yesterday prompts", async () => {
+    const result = await maybeRunAssistantApolloActivityRequest(context, "how many calls did Zalan make yesterday?");
+
+    expect(fetchApolloActivitySummary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        startDate: expect.any(Date),
+        endDate: expect.any(Date)
+      })
+    );
+    expect(result?.answer).toContain("Apollo activity for Zalan Riaz yesterday (2026-06-25, America/Toronto)");
+    expect(result?.sources[0]?.sourceId).toBe("apollo:apollo-user-1:2026-06-25:2026-06-25");
+  });
+
   it("answers tenant-wide activity questions when no rep name is present", async () => {
     const result = await maybeRunAssistantApolloActivityRequest(context, "how many calls were made today?");
 

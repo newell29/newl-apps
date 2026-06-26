@@ -415,8 +415,7 @@ export async function fetchApolloActivitySummary(
   const startDateLabel = formatDateInTimezone(input.startDate, input.timezone);
   const endDateLabel = formatDateInTimezone(input.endDate, input.timezone);
   const path = process.env.APOLLO_ACTIVITY_SEARCH_PATH?.trim() || "/api/v1/activities/search";
-  const payload = {
-    page: 1,
+  const basePayload = {
     per_page: DEFAULT_PAGE_SIZE,
     user_ids: input.apolloUserId ? [input.apolloUserId] : undefined,
     owner_ids: input.apolloUserId ? [input.apolloUserId] : undefined,
@@ -430,9 +429,10 @@ export async function fetchApolloActivitySummary(
     end_date: endDateLabel
   } satisfies Record<string, unknown>;
 
-  const rawPayload = await postApolloJson(path, apiKey, payload);
-  const activities = parseApolloActivities(rawPayload, input.apolloUserId ?? null, input.kinds);
+  const rawPayload = await fetchApolloActivityPages(path, apiKey, basePayload);
+  const activities = dedupeApolloActivities(parseApolloActivities(rawPayload, input.apolloUserId ?? null, input.kinds));
   const counts = countApolloActivities(activities);
+  const aggregateMetrics = extractApolloAggregateMetrics(rawPayload);
 
   return {
     userName: input.userName ?? null,
@@ -441,15 +441,40 @@ export async function fetchApolloActivitySummary(
     endDateLabel,
     timezone: input.timezone,
     counts,
-    callCount: counts.CALL + counts.CONNECTED_CALL,
-    connectedCount: counts.CONNECTED_CALL,
-    emailSentCount: counts.EMAIL_SENT,
-    replyCount: counts.REPLY,
-    leadCreatedCount: counts.LEAD_CREATED,
+    callCount: aggregateMetrics.callCount ?? counts.CALL + counts.CONNECTED_CALL,
+    connectedCount: aggregateMetrics.connectedCount ?? counts.CONNECTED_CALL,
+    emailSentCount: aggregateMetrics.emailSentCount ?? counts.EMAIL_SENT,
+    replyCount: aggregateMetrics.replyCount ?? counts.REPLY,
+    leadCreatedCount: aggregateMetrics.leadCreatedCount ?? counts.LEAD_CREATED,
     durationSeconds: activities.reduce((total, activity) => total + (activity.durationSeconds ?? 0), 0),
     activities,
     rawPayload
   };
+}
+
+async function fetchApolloActivityPages(path: string, apiKey: string, basePayload: Record<string, unknown>) {
+  const combined: Record<string, unknown> = {};
+  const buckets = new Map<string, unknown[]>();
+
+  for (let page = 1; page <= 10; page += 1) {
+    const payload = {
+      ...basePayload,
+      page
+    };
+    const pagePayload = await postApolloJson(path, apiKey, payload);
+    mergeApolloPayload(combined, buckets, pagePayload);
+
+    const pageEntries = readApolloActivityEntries(pagePayload);
+    if (pageEntries.length < DEFAULT_PAGE_SIZE) {
+      break;
+    }
+  }
+
+  for (const [key, value] of buckets.entries()) {
+    combined[key] = value;
+  }
+
+  return combined;
 }
 
 function readApolloMasterApiKey() {
@@ -723,16 +748,7 @@ function parseApolloActivities(
   apolloUserId: string | null,
   requestedKinds: ApolloActivityKind[]
 ): ApolloActivityRecord[] {
-  const candidates = [
-    ...readApolloArray(payload, ["activities"]),
-    ...readApolloArray(payload, ["activity_logs"]),
-    ...readApolloArray(payload, ["calls"]),
-    ...readApolloArray(payload, ["emails"]),
-    ...readApolloArray(payload, ["replies"]),
-    ...readApolloArray(payload, ["contacts"]),
-    ...readApolloArray(payload, ["people"]),
-    ...readApolloArray(payload, ["data"])
-  ];
+  const candidates = readApolloActivityEntries(payload);
 
   return candidates.flatMap((entry) => {
     const record = asRecord(entry);
@@ -1515,6 +1531,15 @@ function classifyApolloActivity(record: Record<string, unknown>): ApolloActivity
     return isConnectedCallDescriptor(descriptor) ? "CONNECTED_CALL" : "CALL";
   }
 
+  if (
+    readApolloString(record, ["call_id", "phone_number", "to_phone_number", "from_phone_number"]) ||
+    readApolloNumber(record, ["duration_seconds", "call_duration_seconds", "duration"])
+  ) {
+    return isConnectedCallDescriptor(descriptor) || readApolloNumber(record, ["duration_seconds", "call_duration_seconds", "duration"])
+      ? "CONNECTED_CALL"
+      : "CALL";
+  }
+
   if (readApolloString(record, ["email", "recipient_email", "from_email"]) && readApolloString(record, ["subject", "email_subject"])) {
     return "EMAIL_SENT";
   }
@@ -1548,6 +1573,10 @@ function isConnectedCallDescriptor(value: string) {
 }
 
 function buildApolloActivityTypeFilters(kinds: ApolloActivityKind[]) {
+  if (kinds.includes("CALL") || kinds.includes("CONNECTED_CALL")) {
+    return undefined;
+  }
+
   const values = new Set<string>();
 
   for (const kind of kinds) {
@@ -1586,6 +1615,131 @@ function countApolloActivities(activities: ApolloActivityRecord[]) {
   }
 
   return counts;
+}
+
+function dedupeApolloActivities(activities: ApolloActivityRecord[]) {
+  const seen = new Set<string>();
+
+  return activities.filter((activity) => {
+    const key = activity.id ?? `${activity.kind}:${activity.occurredAt ?? ""}:${activity.subject ?? ""}:${activity.email ?? ""}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function readApolloActivityEntries(payload: Record<string, unknown>) {
+  return [
+    ...readApolloArray(payload, ["activities"]),
+    ...readApolloArray(payload, ["activity_logs"]),
+    ...readApolloArray(payload, ["calls"]),
+    ...readApolloArray(payload, ["emails"]),
+    ...readApolloArray(payload, ["replies"]),
+    ...readApolloArray(payload, ["contacts"]),
+    ...readApolloArray(payload, ["people"]),
+    ...readApolloArray(payload, ["data"])
+  ];
+}
+
+function mergeApolloPayload(target: Record<string, unknown>, buckets: Map<string, unknown[]>, pagePayload: Record<string, unknown>) {
+  for (const [key, value] of Object.entries(pagePayload)) {
+    if (Array.isArray(value)) {
+      const existing = buckets.get(key) ?? [];
+      existing.push(...value);
+      buckets.set(key, existing);
+      continue;
+    }
+
+    if (!(key in target)) {
+      target[key] = value;
+    }
+  }
+}
+
+function extractApolloAggregateMetrics(payload: Record<string, unknown>) {
+  const metrics = {
+    callCount: readApolloAggregateMetric(payload, [
+      "calls logged",
+      "call count",
+      "calls",
+      "total calls",
+      "# calls logged"
+    ]),
+    connectedCount: readApolloAggregateMetric(payload, [
+      "connected calls",
+      "answered calls",
+      "completed calls",
+      "calls connected"
+    ]),
+    emailSentCount: readApolloAggregateMetric(payload, ["emails sent", "email sent", "sent emails"]),
+    replyCount: readApolloAggregateMetric(payload, ["replies", "reply count", "responses"]),
+    leadCreatedCount: readApolloAggregateMetric(payload, ["new leads", "leads added", "new contacts", "contacts added"])
+  };
+
+  return metrics;
+}
+
+function readApolloAggregateMetric(payload: Record<string, unknown>, labels: string[]) {
+  let best: number | null = null;
+  const normalizedLabels = labels.map((label) => normalizeApolloMetricLabel(label));
+  const queue: unknown[] = [payload];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    const record = asRecord(current);
+
+    if (Array.isArray(current)) {
+      queue.push(...current);
+      continue;
+    }
+
+    if (!record) {
+      continue;
+    }
+
+    const directEntries: Array<[string[], number | null]> = [
+      [["calls_logged", "call_count", "total_calls"], readApolloNumber(record, ["calls_logged", "call_count", "total_calls"])],
+      [
+        ["connected_calls", "answered_calls", "completed_calls"],
+        readApolloNumber(record, ["connected_calls", "answered_calls", "completed_calls"])
+      ],
+      [["emails_sent", "email_sent_count"], readApolloNumber(record, ["emails_sent", "email_sent_count"])],
+      [["reply_count", "replies_count", "responses_count"], readApolloNumber(record, ["reply_count", "replies_count", "responses_count"])],
+      [["new_leads", "leads_added", "new_contacts"], readApolloNumber(record, ["new_leads", "leads_added", "new_contacts"])]
+    ];
+
+    for (const [keys, value] of directEntries) {
+      if (value === null) {
+        continue;
+      }
+      if (keys.some((key) => normalizedLabels.includes(normalizeApolloMetricLabel(key)))) {
+        best = best === null ? value : Math.max(best, value);
+      }
+    }
+
+    const name = readApolloString(record, ["name", "label", "metric", "metric_name", "title"]);
+    const value = readApolloNumber(record, ["value", "count", "total"]);
+    if (name && value !== null) {
+      const normalizedName = normalizeApolloMetricLabel(name);
+      if (normalizedLabels.some((label) => normalizedName.includes(label))) {
+        best = best === null ? value : Math.max(best, value);
+      }
+    }
+
+    for (const value of Object.values(record)) {
+      if (value && typeof value === "object") {
+        queue.push(value);
+      }
+    }
+  }
+
+  return best;
+}
+
+function normalizeApolloMetricLabel(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function formatDateInTimezone(date: Date, timezone: string) {
