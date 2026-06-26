@@ -318,9 +318,9 @@ export async function syncAssistantKnowledge(tenant: TenantContext) {
     })
   ];
 
-  await prisma.$transaction(async (tx) => {
-    await persistAssistantKnowledgeDocuments(tx, tenant, documents);
+  await persistAssistantKnowledgeDocuments(prisma, tenant, documents);
 
+  await prisma.$transaction(async (tx) => {
     await tx.assistantMemory.deleteMany({
       where: {
         tenantId: tenant.tenantId,
@@ -435,7 +435,7 @@ export async function syncAssistantKnowledge(tenant: TenantContext) {
 }
 
 export async function persistAssistantKnowledgeDocuments(
-  tx: Prisma.TransactionClient,
+  tx: AssistantKnowledgePersistenceClient,
   tenant: TenantContext,
   documents: AssistantKnowledgeDocumentInput[]
 ) {
@@ -514,6 +514,11 @@ export async function persistAssistantKnowledgeDocuments(
 
   return persistedRecords;
 }
+
+type AssistantKnowledgePersistenceClient = Pick<
+  Prisma.TransactionClient,
+  "assistantKnowledgeDocument" | "assistantKnowledgeChunk"
+>;
 
 export async function searchAssistantKnowledge(
   tenant: TenantContext,

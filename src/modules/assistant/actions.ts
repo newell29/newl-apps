@@ -173,7 +173,7 @@ export async function syncAssistantKnowledgeAction() {
   await requireMutationAccess(context);
 
   const [localKnowledgeResult, microsoftKnowledgeResult] = await Promise.all([
-    syncAssistantKnowledge(context),
+    syncAssistantKnowledgeSafely(context),
     syncMicrosoftGraphAssistantKnowledge(context)
   ]);
 
@@ -187,6 +187,8 @@ export async function syncAssistantKnowledgeAction() {
       after: {
         scope: "assistant-knowledge",
         localDocumentCount: localKnowledgeResult.documentCount,
+        localSkipped: localKnowledgeResult.skipped,
+        localReason: localKnowledgeResult.reason,
         microsoftDocumentCount: microsoftKnowledgeResult.documentCount,
         microsoftSkipped: microsoftKnowledgeResult.skipped,
         microsoftReason: microsoftKnowledgeResult.reason
@@ -195,16 +197,37 @@ export async function syncAssistantKnowledgeAction() {
   });
 
   revalidatePath("/assistant");
+  const syncStatus = localKnowledgeResult.skipped || microsoftKnowledgeResult.skipped ? "partial" : "success";
   redirect(
-    `/assistant?sync=${microsoftKnowledgeResult.skipped ? "partial" : "success"}` +
+    `/assistant?sync=${syncStatus}` +
       `&localDocs=${localKnowledgeResult.documentCount}` +
       `&microsoftDocs=${microsoftKnowledgeResult.documentCount}` +
       `&microsoftMail=${microsoftKnowledgeResult.mailCount}` +
       `&microsoftFiles=${microsoftKnowledgeResult.fileCount}` +
+      (localKnowledgeResult.reason
+        ? `&localReason=${encodeURIComponent(localKnowledgeResult.reason)}`
+        : "") +
       (microsoftKnowledgeResult.reason
         ? `&microsoftReason=${encodeURIComponent(microsoftKnowledgeResult.reason)}`
         : "")
   );
+}
+
+async function syncAssistantKnowledgeSafely(context: Awaited<ReturnType<typeof getAuthenticatedContext>>) {
+  try {
+    const result = await syncAssistantKnowledge(context);
+    return {
+      documentCount: result.documentCount,
+      skipped: false,
+      reason: null
+    };
+  } catch (error) {
+    return {
+      documentCount: 0,
+      skipped: true,
+      reason: error instanceof Error ? error.message : "Local assistant knowledge sync failed for an unknown reason."
+    };
+  }
 }
 
 export async function saveAssistantAutomationAction(formData: FormData) {

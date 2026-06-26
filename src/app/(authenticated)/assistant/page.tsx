@@ -23,6 +23,7 @@ type AssistantPageProps = {
     microsoftDocs?: string;
     microsoftMail?: string;
     microsoftFiles?: string;
+    localReason?: string;
     microsoftReason?: string;
   }>;
 };
@@ -243,7 +244,13 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
               >
                 <p className="font-medium text-foreground">{syncStatus.title}</p>
                 <p className="mt-1 text-mutedForeground">{syncStatus.summary}</p>
-                {syncStatus.reason ? <p className="mt-2 text-xs text-mutedForeground">{syncStatus.reason}</p> : null}
+                {syncStatus.reasons.length > 0 ? (
+                  <div className="mt-2 space-y-1 text-xs text-mutedForeground">
+                    {syncStatus.reasons.map((reason) => (
+                      <p key={reason}>{reason}</p>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </section>
@@ -747,7 +754,10 @@ function buildSyncStatus(params: Awaited<AssistantPageProps["searchParams"]>) {
   const microsoftDocs = readCountParam(params?.microsoftDocs);
   const microsoftMail = readCountParam(params?.microsoftMail);
   const microsoftFiles = readCountParam(params?.microsoftFiles);
-  const reason = params?.microsoftReason?.trim() ?? null;
+  const reasons = [
+    params?.localReason ? `Local knowledge: ${params.localReason.trim()}` : null,
+    params?.microsoftReason ? `Microsoft 365: ${params.microsoftReason.trim()}` : null
+  ].filter((reason): reason is string => Boolean(reason));
 
   return {
     status,
@@ -757,7 +767,7 @@ function buildSyncStatus(params: Awaited<AssistantPageProps["searchParams"]>) {
       `${microsoftDocs.toLocaleString("en-US")} Microsoft document(s), ` +
       `${microsoftMail.toLocaleString("en-US")} email(s), and ` +
       `${microsoftFiles.toLocaleString("en-US")} file(s).`,
-    reason
+    reasons
   };
 }
 
