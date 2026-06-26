@@ -59,6 +59,8 @@ CREATE TABLE "CashflowCustomer" (
   "requiresApprovalOverLimit" BOOLEAN NOT NULL DEFAULT false,
   "assignedSalesRep" TEXT,
   "assignedCollectionsOwner" TEXT,
+  "assignedSalesContactId" TEXT,
+  "assignedCollectionsContactId" TEXT,
   "active" BOOLEAN NOT NULL DEFAULT true,
   "notes" TEXT,
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
