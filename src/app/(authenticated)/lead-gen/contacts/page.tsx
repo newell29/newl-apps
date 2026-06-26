@@ -11,7 +11,6 @@ import {
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import {
-  approveContactDraftAction,
   bulkPushContactsToApolloAction,
   bulkRemoveContactsAction,
   syncSelectedApolloStatusesAction,
@@ -164,7 +163,7 @@ export default async function ContactsPage({
 
       <div className="rounded-lg border border-accentBorder bg-accentSoft px-4 py-3 text-sm text-foreground">
         This page now supports live Apollo sequence push for eligible contacts. Assigned rep mapping, selected cadence,
-        and Tier 1 draft approval still gate the push so outreach stays deliberate.
+        and Tier 1 AI draft generation still gate the push so outreach stays deliberate.
       </div>
 
       <form className="overflow-hidden rounded-lg border border-border bg-card shadow-sm" action="/lead-gen/contacts">
@@ -378,7 +377,6 @@ export default async function ContactsPage({
             syncSelectedApolloStatusesAction={syncSelectedApolloStatusesAction}
             updateContactSequenceAction={updateContactSequenceAction}
             saveContactDraftAction={saveContactDraftAction}
-            approveContactDraftAction={approveContactDraftAction}
             generateContactDraftAction={generateContactDraftAction}
           />
         ) : (
