@@ -2,11 +2,11 @@
 
 import {
   ApolloCompanyMatchClassification,
+  ApolloStatus,
   ContactOutreachDraftSource,
   CandidateStatus,
   ContactStatus,
   ContactOutreachDraftStatus,
-  ContactTier,
   LeadPipelineStage,
   ModuleKey,
   Prisma,
@@ -15,6 +15,10 @@ import {
 } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { EMPTY_APOLLO_QUEUE_SUMMARY, type ApolloQueueSummary } from "@/modules/lead-gen/apollo-queue-summary";
+import {
+  EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+  type ContactBulkActionSummary
+} from "@/modules/lead-gen/contact-bulk-action-summary";
 import { calculateLeadPipelineScoreForCompany } from "@/modules/lead-gen/queries";
 import { summarizeTradeMiningEvidence } from "@/modules/lead-gen/queries";
 import {
@@ -22,7 +26,8 @@ import {
   defaultTradeMiningCompanyIdentityRoles,
   tradeMiningCompanyIdentityRoleOptions
 } from "@/modules/lead-gen/search-profile-validation";
-import { buildSequenceCatalogItems } from "@/modules/lead-gen/sequence-catalog";
+import { scoreContact } from "@/modules/lead-gen/contact-scoring";
+import { buildSequenceCatalogItems, recommendSequenceForContact } from "@/modules/lead-gen/sequence-catalog";
 import {
   buildApolloSequenceMappingsWithDefaults,
   parseApolloSequenceDirectory,
@@ -30,12 +35,14 @@ import {
   parseSearchProfileApolloSequenceMapping,
   resolveApolloSequenceMappings
 } from "@/modules/settings/apollo-sequence-mapping";
+import { parseApolloRepMapping } from "@/modules/settings/apollo-rep-mapping";
 import { DEFAULT_TRADEMINING_SCORING_SETTINGS } from "@/modules/settings/types";
 import { requireAdmin, requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
 import {
   fetchApolloContactsForCompany,
   type ApolloContactRecord,
+  pushApolloContactsToSequence,
   type ApolloContactLookupResult
 } from "@/server/integrations/apollo";
 import {
@@ -787,22 +794,502 @@ export async function updateContactSequenceAction(formData: FormData) {
   revalidateLeadGenSurfaces();
 }
 
-export async function bulkUpdateContactSequenceAction(formData: FormData) {
+export async function bulkUpdateContactSequenceAction(formData: FormData): Promise<ContactBulkActionSummary>;
+export async function bulkUpdateContactSequenceAction(
+  previousState: ContactBulkActionSummary,
+  formData: FormData
+): Promise<ContactBulkActionSummary>;
+export async function bulkUpdateContactSequenceAction(
+  firstArg: ContactBulkActionSummary | FormData,
+  secondArg?: FormData
+): Promise<ContactBulkActionSummary> {
   const context = await authorizeLeadGenMutation();
-  const contactIds = readSelectedIds(formData, "contactId");
-  const sequenceId = readRequired(formData, "sequenceId");
-  const overrideReason = readOptional(formData, "sequenceOverrideReason") ?? null;
-  const confirmExistingSequenceOverride = readConfirmationBoolean(formData, "confirmExistingSequenceOverride");
+  const formData = firstArg instanceof FormData ? firstArg : secondArg;
 
-  await applySequenceSelectionToContacts({
-    tenantId: context.tenantId,
-    contactIds,
-    sequenceId,
-    overrideReason,
-    confirmExistingSequenceOverride
-  });
+  if (!formData) {
+    return {
+      ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+      status: "error",
+      operation: "sequence",
+      message: "No cadence update payload was provided.",
+      completedAt: new Date().toISOString()
+    };
+  }
 
-  revalidateLeadGenSurfaces();
+  try {
+    const contactIds = readSelectedIds(formData, "contactId");
+    const sequenceId = readRequired(formData, "sequenceId");
+    const overrideReason = readOptional(formData, "sequenceOverrideReason") ?? null;
+    const confirmExistingSequenceOverride = readConfirmationBoolean(formData, "confirmExistingSequenceOverride");
+
+    const result = await applySequenceSelectionToContacts({
+      tenantId: context.tenantId,
+      contactIds,
+      sequenceId,
+      overrideReason,
+      confirmExistingSequenceOverride
+    });
+
+    revalidateLeadGenSurfaces();
+
+    return {
+      ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+      status: "success",
+      operation: "sequence",
+      message:
+        `Updated cadence selection for ${result.updatedContacts} contact${result.updatedContacts === 1 ? "" : "s"}. ` +
+        "This updated Newl Apps only; no Apollo sequence enrollment was sent from the Contacts screen yet.",
+      completedAt: new Date().toISOString(),
+      selectedContacts: contactIds.length,
+      updatedContacts: result.updatedContacts,
+      readyContacts: result.readyContacts,
+      protectedContacts: result.protectedContacts,
+      pushedToApollo: false
+    };
+  } catch (error) {
+    return {
+      ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+      status: "error",
+      operation: "sequence",
+      message: error instanceof Error ? error.message : "Cadence update failed.",
+      completedAt: new Date().toISOString()
+    };
+  }
+}
+
+export async function bulkRemoveContactsAction(formData: FormData): Promise<ContactBulkActionSummary>;
+export async function bulkRemoveContactsAction(
+  previousState: ContactBulkActionSummary,
+  formData: FormData
+): Promise<ContactBulkActionSummary>;
+export async function bulkRemoveContactsAction(
+  firstArg: ContactBulkActionSummary | FormData,
+  secondArg?: FormData
+): Promise<ContactBulkActionSummary> {
+  const context = await authorizeLeadGenMutation();
+  const formData = firstArg instanceof FormData ? firstArg : secondArg;
+
+  if (!formData) {
+    return {
+      ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+      status: "error",
+      operation: "remove",
+      message: "No contact removal payload was provided.",
+      completedAt: new Date().toISOString()
+    };
+  }
+
+  try {
+    const contactIds = readSelectedIds(formData, "contactId");
+    const contacts = await prisma.contact.findMany({
+      where: {
+        tenantId: context.tenantId,
+        id: {
+          in: contactIds
+        }
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (contacts.length !== contactIds.length) {
+      throw new Error("One or more contacts were not found for this tenant.");
+    }
+
+    const drafts = await prisma.contactOutreachDraft.findMany({
+      where: {
+        tenantId: context.tenantId,
+        contactId: {
+          in: contactIds
+        }
+      },
+      select: {
+        id: true
+      }
+    });
+
+    await prisma.lead.updateMany({
+      where: {
+        tenantId: context.tenantId,
+        contactId: {
+          in: contactIds
+        }
+      },
+      data: {
+        contactId: null
+      }
+    });
+
+    await prisma.contactOutreachDraft.deleteMany({
+      where: {
+        tenantId: context.tenantId,
+        contactId: {
+          in: contactIds
+        }
+      }
+    });
+
+    await prisma.contact.deleteMany({
+      where: {
+        tenantId: context.tenantId,
+        id: {
+          in: contactIds
+        }
+      }
+    });
+
+    revalidateLeadGenSurfaces();
+
+    return {
+      ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+      status: "success",
+      operation: "remove",
+      message:
+        `Removed ${contacts.length} contact${contacts.length === 1 ? "" : "s"} from the Newl Apps contact directory. ` +
+        "This does not delete anything from Apollo.",
+      completedAt: new Date().toISOString(),
+      selectedContacts: contactIds.length,
+      removedContacts: contacts.length,
+      removedDrafts: drafts.length,
+      pushedToApollo: false
+    };
+  } catch (error) {
+    return {
+      ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+      status: "error",
+      operation: "remove",
+      message: error instanceof Error ? error.message : "Contact removal failed.",
+      completedAt: new Date().toISOString()
+    };
+  }
+}
+
+export async function bulkPushContactsToApolloAction(formData: FormData): Promise<ContactBulkActionSummary>;
+export async function bulkPushContactsToApolloAction(
+  previousState: ContactBulkActionSummary,
+  formData: FormData
+): Promise<ContactBulkActionSummary>;
+export async function bulkPushContactsToApolloAction(
+  firstArg: ContactBulkActionSummary | FormData,
+  secondArg?: FormData
+): Promise<ContactBulkActionSummary> {
+  const context = await authorizeLeadGenMutation();
+  const formData = firstArg instanceof FormData ? firstArg : secondArg;
+
+  if (!formData) {
+    return {
+      ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+      status: "error",
+      operation: "apollo_push",
+      message: "No Apollo push payload was provided.",
+      completedAt: new Date().toISOString()
+    };
+  }
+
+  try {
+    const contactIds = readSelectedIds(formData, "contactId");
+    const contacts = await prisma.contact.findMany({
+      where: {
+        tenantId: context.tenantId,
+        id: {
+          in: contactIds
+        }
+      },
+      include: {
+        company: {
+          select: {
+            id: true,
+            name: true,
+            domain: true,
+            linkedinUrl: true,
+            apolloOrganizationId: true
+          }
+        },
+        outreachDrafts: {
+          where: {
+            tenantId: context.tenantId
+          },
+          orderBy: {
+            updatedAt: "desc"
+          },
+          take: 1
+        }
+      }
+    });
+
+    if (contacts.length !== contactIds.length) {
+      throw new Error("One or more selected contacts were not found for this tenant.");
+    }
+
+    const repMappings = await loadApolloRepMappings(context.tenantId);
+    const groups = new Map<string, ApolloPushGroup>();
+    let skippedContacts = 0;
+    let failedContacts = 0;
+    let enrolledContacts = 0;
+    const failureReasons = new Set<string>();
+
+    for (const contact of contacts) {
+      const validation = await validateApolloPushCandidate({
+        tenantId: context.tenantId,
+        contact,
+        repMappings
+      });
+
+      if (!validation.ok) {
+        skippedContacts += 1;
+        failureReasons.add(validation.reason);
+        await appendApolloContactActivity({
+          tenantId: context.tenantId,
+          contactId: contact.id,
+          note: `Apollo sequence push skipped on ${new Date().toISOString()}. ${validation.reason}`
+        });
+        continue;
+      }
+
+      const key = [
+        validation.sequenceId,
+        validation.apolloOwnerUserId,
+        validation.sendFromEmailAccountId,
+        validation.companyId
+      ].join("|");
+      const existingGroup = groups.get(key);
+      if (existingGroup) {
+        existingGroup.contacts.push(validation);
+      } else {
+        groups.set(key, {
+          companyId: validation.companyId,
+          companyName: validation.companyName,
+          sequenceId: validation.sequenceId,
+          sequenceName: validation.sequenceName,
+          apolloOwnerUserId: validation.apolloOwnerUserId,
+          sendFromEmailAccountId: validation.sendFromEmailAccountId,
+          contacts: [validation]
+        });
+      }
+    }
+
+    for (const group of groups.values()) {
+      try {
+        await pushApolloContactsToSequence({
+          sequenceId: group.sequenceId,
+          apolloContactIds: group.contacts.map((contact) => contact.apolloContactId),
+          sequenceOwnerUserId: group.apolloOwnerUserId,
+          sendFromEmailAccountId: group.sendFromEmailAccountId,
+          initialStatus: "active"
+        });
+
+        const pushedAt = new Date();
+        const pushedAtIso = pushedAt.toISOString();
+        await prisma.contact.updateMany({
+          where: {
+            tenantId: context.tenantId,
+            id: {
+              in: group.contacts.map((contact) => contact.contactId)
+            }
+          },
+          data: {
+            apolloStatus: ApolloStatus.ENRICHED,
+            sequenceStatus: SequenceStatus.ENROLLED,
+            lastTouchAt: pushedAt
+          }
+        });
+
+        for (const contact of group.contacts) {
+          await appendApolloContactActivity({
+            tenantId: context.tenantId,
+            contactId: contact.contactId,
+            note: `Apollo sequence push completed on ${pushedAtIso}. Enrolled in "${group.sequenceName}" as ${contact.fullName}.`
+          });
+
+          if (contact.draftId && contact.requiresAiDraft) {
+            await prisma.contactOutreachDraft.update({
+              where: {
+                id: contact.draftId
+              },
+              data: {
+                status: ContactOutreachDraftStatus.PUSHED_TO_APOLLO
+              }
+            });
+          }
+        }
+
+        enrolledContacts += group.contacts.length;
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "Apollo sequence push failed.";
+        failureReasons.add(reason);
+        failedContacts += group.contacts.length;
+
+        for (const contact of group.contacts) {
+          await appendApolloContactActivity({
+            tenantId: context.tenantId,
+            contactId: contact.contactId,
+            note: `Apollo sequence push failed on ${new Date().toISOString()}. ${reason}`
+          });
+        }
+      }
+    }
+
+    revalidateLeadGenSurfaces();
+
+    return {
+      ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+      status: failedContacts > 0 && enrolledContacts === 0 ? "error" : "success",
+      operation: "apollo_push",
+      message:
+        enrolledContacts > 0
+          ? `Apollo push processed ${contacts.length} contact${contacts.length === 1 ? "" : "s"}: ${enrolledContacts} enrolled, ${skippedContacts} skipped, ${failedContacts} failed.`
+          : [...failureReasons][0] ?? "No selected contacts were eligible for Apollo sequence push.",
+      completedAt: new Date().toISOString(),
+      selectedContacts: contactIds.length,
+      updatedContacts: enrolledContacts,
+      pushedToApollo: enrolledContacts > 0,
+      enrolledContacts,
+      skippedContacts,
+      failedContacts,
+      companiesTouched: new Set(contacts.map((contact) => contact.companyId)).size
+    };
+  } catch (error) {
+    return {
+      ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+      status: "error",
+      operation: "apollo_push",
+      message: error instanceof Error ? error.message : "Apollo push failed.",
+      completedAt: new Date().toISOString()
+    };
+  }
+}
+
+export async function syncSelectedApolloStatusesAction(formData: FormData): Promise<ContactBulkActionSummary>;
+export async function syncSelectedApolloStatusesAction(
+  previousState: ContactBulkActionSummary,
+  formData: FormData
+): Promise<ContactBulkActionSummary>;
+export async function syncSelectedApolloStatusesAction(
+  firstArg: ContactBulkActionSummary | FormData,
+  secondArg?: FormData
+): Promise<ContactBulkActionSummary> {
+  const context = await authorizeLeadGenMutation();
+  const formData = firstArg instanceof FormData ? firstArg : secondArg;
+
+  if (!formData) {
+    return {
+      ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+      status: "error",
+      operation: "apollo_sync",
+      message: "No Apollo sync payload was provided.",
+      completedAt: new Date().toISOString()
+    };
+  }
+
+  try {
+    const contactIds = readSelectedIds(formData, "contactId");
+    const contacts = await prisma.contact.findMany({
+      where: {
+        tenantId: context.tenantId,
+        id: {
+          in: contactIds
+        }
+      },
+      include: {
+        company: {
+          select: {
+            id: true,
+            name: true,
+            domain: true,
+            linkedinUrl: true,
+            apolloOrganizationId: true
+          }
+        }
+      }
+    });
+
+    if (contacts.length !== contactIds.length) {
+      throw new Error("One or more selected contacts were not found for this tenant.");
+    }
+
+    const companies = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        domain: string | null;
+        linkedinUrl: string | null;
+        apolloOrganizationId: string | null;
+        contacts: typeof contacts;
+      }
+    >();
+
+    for (const contact of contacts) {
+      const existing = companies.get(contact.companyId);
+      if (existing) {
+        existing.contacts.push(contact);
+      } else {
+        companies.set(contact.companyId, {
+          id: contact.company.id,
+          name: contact.company.name,
+          domain: contact.company.domain,
+          linkedinUrl: contact.company.linkedinUrl,
+          apolloOrganizationId: contact.company.apolloOrganizationId,
+          contacts: [contact]
+        });
+      }
+    }
+
+    let syncedContacts = 0;
+    let failedContacts = 0;
+    let skippedContacts = 0;
+    const failureReasons = new Set<string>();
+
+    for (const company of companies.values()) {
+      try {
+        const lookup = await fetchApolloContactsForCompany({
+          companyName: company.name,
+          domain: company.domain,
+          apolloOrganizationId: company.apolloOrganizationId
+        });
+
+        const updatedCount = await syncExistingApolloContactsForCompany({
+          tenantId: context.tenantId,
+          companyId: company.id,
+          existingContacts: company.contacts,
+          lookup
+        });
+
+        syncedContacts += updatedCount;
+        skippedContacts += Math.max(0, company.contacts.length - updatedCount);
+      } catch (error) {
+        failedContacts += company.contacts.length;
+        failureReasons.add(error instanceof Error ? error.message : "Apollo status sync failed.");
+      }
+    }
+
+    revalidateLeadGenSurfaces();
+
+    return {
+      ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+      status: failedContacts > 0 && syncedContacts === 0 ? "error" : "success",
+      operation: "apollo_sync",
+      message:
+        syncedContacts > 0
+          ? `Apollo status sync updated ${syncedContacts} contact${syncedContacts === 1 ? "" : "s"} across ${companies.size} compan${companies.size === 1 ? "y" : "ies"}.`
+          : [...failureReasons][0] ?? "Apollo status sync did not find any matching contacts to refresh.",
+      completedAt: new Date().toISOString(),
+      selectedContacts: contactIds.length,
+      syncedContacts,
+      skippedContacts,
+      failedContacts,
+      companiesTouched: companies.size
+    };
+  } catch (error) {
+    return {
+      ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+      status: "error",
+      operation: "apollo_sync",
+      message: error instanceof Error ? error.message : "Apollo status sync failed.",
+      completedAt: new Date().toISOString()
+    };
+  }
 }
 
 export async function saveContactDraftAction(formData: FormData) {
@@ -830,8 +1317,9 @@ export async function saveContactDraftAction(formData: FormData) {
     data: {
       subject: readRequired(formData, "subject"),
       body: readRequired(formData, "body"),
-      status: ContactOutreachDraftStatus.EDITED,
-      editedAt: new Date()
+      status: ContactOutreachDraftStatus.APPROVED,
+      editedAt: new Date(),
+      approvedAt: new Date()
     }
   });
 
@@ -879,263 +1367,15 @@ export async function generateContactDraftAction(formData: FormData) {
     throw new Error("OPENAI_API_KEY is not configured. Add it to enable live Tier 1 draft generation.");
   }
 
+  if (!(await isLeadGenAiEnabled(context.tenantId))) {
+    throw new Error("Lead-generation AI is disabled in Settings. Enable it before generating drafts.");
+  }
+
   const contactId = readRequired(formData, "contactId");
-  const contact = await prisma.contact.findFirst({
-    where: {
-      id: contactId,
-      tenantId: context.tenantId
-    },
-    include: {
-      company: {
-        select: {
-          id: true,
-          name: true,
-          priorityScore: true,
-          importRecords: {
-            orderBy: {
-              arrivalDate: "desc"
-            },
-            take: 25,
-            select: {
-              rawJson: true,
-              arrivalDate: true,
-              sourcePort: true,
-              destinationCity: true,
-              destinationState: true,
-              originCountry: true,
-              productDescription: true
-            }
-          },
-          leads: {
-            where: {
-              tenantId: context.tenantId
-            },
-            orderBy: {
-              updatedAt: "desc"
-            },
-            take: 1,
-            select: {
-              id: true,
-              score: true
-            }
-          }
-        }
-      }
-    }
-  });
-
-  if (!contact) {
-    throw new Error("Contact not found for this tenant.");
-  }
-
-  if (contact.contactTier === ContactTier.UNRANKED) {
-    throw new Error("This contact is not ranked into a cadence tier yet.");
-  }
-
-  const apolloCredential = await prisma.integrationCredential.findFirst({
-    where: {
-      tenantId: context.tenantId,
-      provider: "APOLLO"
-    },
-    select: {
-      publicConfig: true
-    }
-  });
-  const searchProfileIds = [
-    ...new Set(
-      contact.company.importRecords
-        .map((record) => readString(asObject(record.rawJson), "searchProfileId"))
-        .filter((value): value is string => Boolean(value))
-    )
-  ];
-  const searchProfiles = searchProfileIds.length
-    ? new Map(
-        (
-          await prisma.tradeMiningSearchProfile.findMany({
-            where: {
-              tenantId: context.tenantId,
-              id: {
-                in: searchProfileIds
-              }
-            },
-            select: {
-              id: true,
-              name: true,
-              priorityWeight: true,
-              destinationMarkets: true,
-              destinationPorts: true,
-              originPorts: true,
-              shipFromPorts: true,
-              originCountries: true,
-              productKeywords: true,
-              hsCodes: true,
-              contactCadenceConfig: true
-            }
-          })
-        ).map((profile) => [
-          profile.id,
-          {
-            id: profile.id,
-            name: profile.name,
-            priorityWeight: profile.priorityWeight,
-            destinationMarkets: asStringArray(profile.destinationMarkets),
-            destinationPorts: asStringArray(profile.destinationPorts),
-            originPorts: asStringArray(profile.originPorts),
-            shipFromPorts: asStringArray(profile.shipFromPorts),
-            originCountries: asStringArray(profile.originCountries),
-            productKeywords: asStringArray(profile.productKeywords),
-            hsCodes: asStringArray(profile.hsCodes),
-            contactCadenceConfig: profile.contactCadenceConfig
-          }
-        ])
-      )
-    : new Map();
-
-  const defaultSequenceMapping = buildApolloSequenceMappingsWithDefaults({
-    existingMappings: parseApolloSequenceMapping(apolloCredential?.publicConfig),
-    directory: parseApolloSequenceDirectory(apolloCredential?.publicConfig)
-  });
-  const evidence = summarizeTradeMiningEvidence(contact.company.importRecords, searchProfiles);
-  const sequenceMapping = resolveApolloSequenceMappings({
-    existingMappings: evidence.searchProfile
-      ? parseSearchProfileApolloSequenceMapping(evidence.searchProfile.contactCadenceConfig)
-      : defaultSequenceMapping,
-    directory: parseApolloSequenceDirectory(apolloCredential?.publicConfig)
-  });
-  const tierMapping = sequenceMapping.find((entry) => entry.tier === contact.contactTier);
-
-  if (!tierMapping?.requiresAiDraft) {
-    throw new Error("This tier does not currently require a Newl Apps AI draft.");
-  }
-
-  if (!contact.selectedSequenceName) {
-    throw new Error("Select a cadence for this contact before generating the AI draft.");
-  }
-
-  if (contact.company.importRecords.length === 0) {
-    throw new Error("No TradeMining shipment history is available for this company yet.");
-  }
-
-  const model = await loadTier1DraftModel(context.tenantId);
-  const shipmentDraftContext = buildShipmentDraftContext(contact.company.importRecords);
-  const generatedDraft = await generateTier1SequenceDraft({
-    model,
-    companyName: contact.company.name,
-    contactFirstName: contact.firstName,
-    contactFullName: contact.fullName,
-    contactTitle: contact.title,
-    contactDepartment: contact.department,
-    contactSeniority: contact.seniority,
-    selectedSequenceName: contact.selectedSequenceName,
-    shipmentCount: evidence.shipmentCount,
-    latestShipmentDate: evidence.latestShipmentDate?.toISOString() ?? null,
-    arrivalPort: evidence.destinationPort,
-    destinationCity: evidence.destinationCity,
-    destinationState: evidence.destinationState,
-    destinationMarket: evidence.destinationMarket,
-    originCountry: evidence.originCountry,
-    originPort: evidence.originPort,
-    foreignPort: evidence.foreignPort,
-    shipFromPort: evidence.shipFromPort,
-    placeOfReceipt: evidence.placeOfReceipt,
-    productDescription: evidence.productDescription,
-    hsCode: evidence.hsCode,
-    totalTeu: evidence.totalTeu,
-    carrier: evidence.carrier,
-    vessel: evidence.vessel,
-    voyage: evidence.voyage,
-    searchProfileName: evidence.searchProfile?.name ?? null,
-    profileDestinationMarkets: evidence.searchProfile?.destinationMarkets ?? [],
-    profileProductKeywords: evidence.searchProfile?.productKeywords ?? [],
-    recurringOrigins: shipmentDraftContext.recurringOrigins,
-    recurringDestinationPorts: shipmentDraftContext.recurringDestinationPorts,
-    recurringCarriers: shipmentDraftContext.recurringCarriers,
-    recurringProducts: shipmentDraftContext.recurringProducts,
-    recentShipmentHighlights: shipmentDraftContext.recentShipmentHighlights
-  });
-
-  const leadId = contact.company.leads[0]?.id ?? null;
-  const leadScore = contact.company.leads[0]?.score ?? null;
-  const rawInputs = {
-    model,
-    generatedAt: new Date().toISOString(),
-    companyName: contact.company.name,
-    companyPriorityScore: contact.company.priorityScore,
-    leadScore,
-    contactTier: contact.contactTier,
-    selectedSequenceName: contact.selectedSequenceName,
-    selectedSequenceId: contact.selectedSequenceId,
-    evidence: {
-      shipmentCount: evidence.shipmentCount,
-      latestShipmentDate: evidence.latestShipmentDate?.toISOString() ?? null,
-      arrivalPort: evidence.destinationPort,
-      destinationCity: evidence.destinationCity,
-      destinationState: evidence.destinationState,
-      destinationMarket: evidence.destinationMarket,
-      originCountry: evidence.originCountry,
-      originPort: evidence.originPort,
-      foreignPort: evidence.foreignPort,
-      shipFromPort: evidence.shipFromPort,
-      placeOfReceipt: evidence.placeOfReceipt,
-      productDescription: evidence.productDescription,
-      hsCode: evidence.hsCode,
-      totalTeu: evidence.totalTeu,
-      sourceRole: evidence.sourceRole,
-      carrier: evidence.carrier,
-      vessel: evidence.vessel,
-      voyage: evidence.voyage,
-      searchProfileName: evidence.searchProfile?.name ?? null,
-      recurringOrigins: shipmentDraftContext.recurringOrigins,
-      recurringDestinationPorts: shipmentDraftContext.recurringDestinationPorts,
-      recurringCarriers: shipmentDraftContext.recurringCarriers,
-      recurringProducts: shipmentDraftContext.recurringProducts,
-      recentShipmentHighlights: shipmentDraftContext.recentShipmentHighlights
-    }
-  };
-
-  await prisma.contactOutreachDraft.upsert({
-    where: {
-      tenantId_contactId_sequenceName: {
-        tenantId: context.tenantId,
-        contactId: contact.id,
-        sequenceName: contact.selectedSequenceName
-      }
-    },
-    update: {
-      companyId: contact.companyId,
-      leadId,
-      sequenceId: contact.selectedSequenceId,
-      subject: generatedDraft.subject,
-      body: generatedDraft.body,
-      status: ContactOutreachDraftStatus.AVAILABLE,
-      source: ContactOutreachDraftSource.MOCK_AI,
-      aiGenerated: true,
-      personalizationNotes: generatedDraft.personalizationNotes,
-      rawInputs: toInputJsonValue(rawInputs),
-      rawJson: toInputJsonValue({
-        provider: "openai",
-        response: generatedDraft.rawResponse
-      })
-    },
-    create: {
-      tenantId: context.tenantId,
-      contactId: contact.id,
-      companyId: contact.companyId,
-      leadId,
-      sequenceName: contact.selectedSequenceName,
-      sequenceId: contact.selectedSequenceId,
-      subject: generatedDraft.subject,
-      body: generatedDraft.body,
-      status: ContactOutreachDraftStatus.AVAILABLE,
-      source: ContactOutreachDraftSource.MOCK_AI,
-      aiGenerated: true,
-      personalizationNotes: generatedDraft.personalizationNotes,
-      rawInputs: toInputJsonValue(rawInputs),
-      rawJson: toInputJsonValue({
-        provider: "openai",
-        response: generatedDraft.rawResponse
-      })
-    }
+  await generateAiDraftForContact({
+    tenantId: context.tenantId,
+    contactId,
+    forceRegenerate: true
   });
 
   revalidateLeadGenSurfaces();
@@ -1357,6 +1597,12 @@ async function applySequenceSelectionToContacts({
       }
     });
   }
+
+  return {
+    updatedContacts: contactIds.length,
+    readyContacts: eligibleContactIds.length,
+    protectedContacts: protectedContactIds.length
+  };
 }
 
 async function resolveTenantSequenceOption(tenantId: string, sequenceId: string) {
@@ -1373,6 +1619,463 @@ async function resolveTenantSequenceOption(tenantId: string, sequenceId: string)
   return buildSequenceCatalogItems(parseApolloSequenceDirectory(apolloCredential?.publicConfig)).find(
     (item) => item.id === sequenceId
   ) ?? null;
+}
+
+type ApolloPushGroup = {
+  companyId: string;
+  companyName: string;
+  sequenceId: string;
+  sequenceName: string;
+  apolloOwnerUserId: string;
+  sendFromEmailAccountId: string;
+  contacts: ApolloPushReadyContact[];
+};
+
+type ApolloPushContactRecord = {
+  id: string;
+  tenantId: string;
+  companyId: string;
+  fullName: string;
+  email: string | null;
+  assignedRep: string | null;
+  selectedSequenceId: string | null;
+  selectedSequenceName: string | null;
+  apolloContactId: string | null;
+  sequenceStatus: SequenceStatus;
+  company: {
+    id: string;
+    name: string;
+    domain: string | null;
+    linkedinUrl: string | null;
+    apolloOrganizationId: string | null;
+  };
+  outreachDrafts: Array<{
+    id: string;
+    status: ContactOutreachDraftStatus;
+  }>;
+};
+
+type ApolloSyncContactRecord = {
+  id: string;
+  companyId: string;
+  firstName: string | null;
+  lastName: string | null;
+  fullName: string;
+  title: string | null;
+  department: string | null;
+  seniority: string | null;
+  email: string | null;
+  phone: string | null;
+  linkedinUrl: string | null;
+  contactStatus: ContactStatus;
+  apolloContactId: string | null;
+  apolloPersonId: string | null;
+  sequenceStatus: SequenceStatus;
+  replyStatus: ReplyStatus;
+  recommendedSequenceName: string | null;
+  recommendedSequenceId: string | null;
+  selectedSequenceName: string | null;
+  selectedSequenceId: string | null;
+  sequenceRecommendationReason: string | null;
+  sequenceOverrideReason: string | null;
+  sequenceManuallyOverridden: boolean;
+  lastTouchAt: Date | null;
+  lastReplyAt: Date | null;
+  assignedRep: string | null;
+  rawJson: Prisma.JsonValue | null;
+  company: {
+    id: string;
+    name: string;
+    domain: string | null;
+    linkedinUrl: string | null;
+    apolloOrganizationId: string | null;
+  };
+};
+
+type ApolloPushReadyContact = {
+  contactId: string;
+  companyId: string;
+  companyName: string;
+  fullName: string;
+  apolloContactId: string;
+  sequenceId: string;
+  sequenceName: string;
+  apolloOwnerUserId: string;
+  sendFromEmailAccountId: string;
+  requiresAiDraft: boolean;
+  draftId: string | null;
+};
+
+async function loadApolloRepMappings(tenantId: string) {
+  const credential = await prisma.integrationCredential.findFirst({
+    where: {
+      tenantId,
+      provider: "APOLLO"
+    },
+    select: {
+      publicConfig: true
+    }
+  });
+
+  return parseApolloRepMapping(credential?.publicConfig);
+}
+
+async function resolveAssignedRepUser({
+  tenantId,
+  assignedRep
+}: {
+  tenantId: string;
+  assignedRep: string;
+}) {
+  const normalizedAssignedRep = assignedRep.trim();
+
+  if (!normalizedAssignedRep) {
+    return null;
+  }
+
+  const byId = await prisma.user.findUnique({
+    where: {
+      id: normalizedAssignedRep
+    },
+    select: {
+      id: true,
+      email: true,
+      name: true
+    }
+  });
+
+  if (byId) {
+    return byId;
+  }
+
+  const membershipMatch = await prisma.membership.findFirst({
+    where: {
+      tenantId,
+      user: {
+        OR: [
+          {
+            email: {
+              equals: normalizedAssignedRep,
+              mode: "insensitive"
+            }
+          },
+          {
+            name: {
+              equals: normalizedAssignedRep,
+              mode: "insensitive"
+            }
+          }
+        ]
+      }
+    },
+    select: {
+      user: {
+        select: {
+          id: true,
+          email: true,
+          name: true
+        }
+      }
+    }
+  });
+
+  return membershipMatch?.user ?? null;
+}
+
+async function validateApolloPushCandidate({
+  tenantId,
+  contact,
+  repMappings
+}: {
+  tenantId: string;
+  contact: ApolloPushContactRecord;
+  repMappings: ReturnType<typeof parseApolloRepMapping>;
+}): Promise<{ ok: true } & ApolloPushReadyContact | { ok: false; reason: string }> {
+  if (!contact.apolloContactId) {
+    return { ok: false, reason: "Apollo contact ID is missing. Enrich the company again before pushing." };
+  }
+
+  if (!contact.email) {
+    return { ok: false, reason: "Contact email is missing, so this contact stays out of sequence push." };
+  }
+
+  if (!contact.selectedSequenceId || !contact.selectedSequenceName) {
+    return { ok: false, reason: "No Apollo cadence is selected for this contact yet." };
+  }
+
+  if (
+    contact.sequenceStatus !== SequenceStatus.NOT_STARTED &&
+    contact.sequenceStatus !== SequenceStatus.READY
+  ) {
+    return {
+      ok: false,
+      reason: "This contact already shows Apollo sequence history. Review it before pushing again."
+    };
+  }
+
+  if (!contact.assignedRep) {
+    return { ok: false, reason: "Assign a sales rep before pushing this contact to Apollo." };
+  }
+
+  const localOwner = await resolveAssignedRepUser({
+    tenantId,
+    assignedRep: contact.assignedRep
+  });
+
+  if (!localOwner) {
+    return { ok: false, reason: "Assigned rep no longer exists in Newl Apps." };
+  }
+
+  if (contact.assignedRep !== localOwner.id) {
+    await prisma.contact.update({
+      where: {
+        id: contact.id
+      },
+      data: {
+        assignedRep: localOwner.id
+      }
+    });
+  }
+
+  const repMapping = repMappings.find(
+    (entry) =>
+      entry.active &&
+      ((entry.sendFromEmail && localOwner.email && entry.sendFromEmail.toLowerCase() === localOwner.email.toLowerCase()) ||
+        (entry.sequenceOwnerName && localOwner.name && entry.sequenceOwnerName.toLowerCase() === localOwner.name.toLowerCase()))
+  );
+
+  if (!repMapping?.apolloUserId) {
+    return {
+      ok: false,
+      reason: `Apollo rep mapping is missing for ${localOwner.name ?? localOwner.email ?? "the assigned rep"}.`
+    };
+  }
+
+  if (!repMapping.sendFromEmailAccountId) {
+    return {
+      ok: false,
+      reason: `Apollo send-from email account is missing for ${localOwner.name ?? localOwner.email ?? "the assigned rep"}.`
+    };
+  }
+
+  const latestDraft = contact.outreachDrafts[0] ?? null;
+  const requiresAiDraft = await contactRequiresApprovedDraft(tenantId, contact.id);
+
+  if (requiresAiDraft && latestDraft?.status !== ContactOutreachDraftStatus.APPROVED) {
+    return {
+      ok: false,
+      reason: "This cadence requires an approved AI draft before Apollo push."
+    };
+  }
+
+  return {
+    ok: true,
+    contactId: contact.id,
+    companyId: contact.companyId,
+    companyName: contact.company.name,
+    fullName: contact.fullName,
+    apolloContactId: contact.apolloContactId,
+    sequenceId: contact.selectedSequenceId,
+    sequenceName: contact.selectedSequenceName,
+    apolloOwnerUserId: repMapping.apolloUserId,
+    sendFromEmailAccountId: repMapping.sendFromEmailAccountId,
+    requiresAiDraft,
+    draftId: latestDraft?.id ?? null
+  };
+}
+
+async function contactRequiresApprovedDraft(tenantId: string, contactId: string) {
+  const contactContext = await loadAiDraftContactContext({
+    tenantId,
+    contactId
+  });
+
+  return contactContext?.requiresAiDraft ?? false;
+}
+
+async function syncExistingApolloContactsForCompany({
+  tenantId,
+  companyId,
+  existingContacts,
+  lookup
+}: {
+  tenantId: string;
+  companyId: string;
+  existingContacts: ApolloSyncContactRecord[];
+  lookup: ApolloContactLookupResult;
+}) {
+  const lead = await prisma.lead.findFirst({
+    where: {
+      tenantId,
+      companyId
+    },
+    select: {
+      id: true
+    }
+  });
+  let updatedCount = 0;
+
+  for (const existing of existingContacts) {
+    const incoming = matchIncomingApolloContact(
+      lookup.contacts,
+      {
+        id: existing.id,
+        firstName: existing.firstName,
+        lastName: existing.lastName,
+        fullName: existing.fullName,
+        title: existing.title,
+        department: existing.department,
+        seniority: existing.seniority,
+        email: existing.email,
+        phone: existing.phone,
+        linkedinUrl: existing.linkedinUrl,
+        contactStatus: existing.contactStatus,
+        apolloContactId: existing.apolloContactId,
+        apolloPersonId: existing.apolloPersonId,
+        sequenceStatus: existing.sequenceStatus,
+        replyStatus: existing.replyStatus,
+        recommendedSequenceName: existing.recommendedSequenceName,
+        recommendedSequenceId: existing.recommendedSequenceId,
+        selectedSequenceName: existing.selectedSequenceName,
+        selectedSequenceId: existing.selectedSequenceId,
+        sequenceRecommendationReason: existing.sequenceRecommendationReason,
+        sequenceOverrideReason: existing.sequenceOverrideReason,
+        sequenceManuallyOverridden: existing.sequenceManuallyOverridden,
+        lastTouchAt: existing.lastTouchAt,
+        lastReplyAt: existing.lastReplyAt,
+        assignedRep: existing.assignedRep,
+        rawJson: existing.rawJson
+      }
+    );
+
+    if (!incoming) {
+      continue;
+    }
+
+    const merged = buildApolloContactMutation({
+      tenantId,
+      companyId,
+      leadId: lead?.id ?? existing.id,
+      assignedRep: existing.assignedRep ?? "",
+      existing: {
+        id: existing.id,
+        firstName: existing.firstName,
+        lastName: existing.lastName,
+        fullName: existing.fullName,
+        title: existing.title,
+        department: existing.department,
+        seniority: existing.seniority,
+        email: existing.email,
+        phone: existing.phone,
+        linkedinUrl: existing.linkedinUrl,
+        contactStatus: existing.contactStatus,
+        apolloContactId: existing.apolloContactId,
+        apolloPersonId: existing.apolloPersonId,
+        sequenceStatus: existing.sequenceStatus,
+        replyStatus: existing.replyStatus,
+        recommendedSequenceName: existing.recommendedSequenceName,
+        recommendedSequenceId: existing.recommendedSequenceId,
+        selectedSequenceName: existing.selectedSequenceName,
+        selectedSequenceId: existing.selectedSequenceId,
+        sequenceRecommendationReason: existing.sequenceRecommendationReason,
+        sequenceOverrideReason: existing.sequenceOverrideReason,
+        sequenceManuallyOverridden: existing.sequenceManuallyOverridden,
+        lastTouchAt: existing.lastTouchAt,
+        lastReplyAt: existing.lastReplyAt,
+        assignedRep: existing.assignedRep,
+        rawJson: existing.rawJson
+      },
+      incoming
+    });
+
+    await prisma.contact.update({
+      where: {
+        id: existing.id
+      },
+      data: merged
+    });
+
+    updatedCount += 1;
+    await appendApolloContactActivity({
+      tenantId,
+      contactId: existing.id,
+      note: `Apollo status sync refreshed on ${new Date().toISOString()}. Sequence ${incoming.sequenceName ?? "status"} now reads ${incoming.sequenceStatus.toLowerCase()}.`
+    });
+  }
+
+  return updatedCount;
+}
+
+function matchIncomingApolloContact(
+  incomingContacts: ApolloContactRecord[],
+  existingContact: Parameters<typeof matchExistingApolloContact>[0][number]
+) {
+  const normalizedEmail = existingContact.email?.trim().toLowerCase() ?? null;
+  const normalizedLinkedin = existingContact.linkedinUrl?.trim().toLowerCase() ?? null;
+  const normalizedFullName = existingContact.fullName.trim().toLowerCase();
+  const normalizedTitle = existingContact.title?.trim().toLowerCase() ?? null;
+
+  return (
+    incomingContacts.find(
+      (incoming) =>
+        (existingContact.apolloContactId && incoming.apolloContactId === existingContact.apolloContactId) ||
+        (existingContact.apolloPersonId && incoming.apolloPersonId === existingContact.apolloPersonId)
+    ) ??
+    incomingContacts.find((incoming) => normalizedEmail && incoming.email?.trim().toLowerCase() === normalizedEmail) ??
+    incomingContacts.find(
+      (incoming) => normalizedLinkedin && incoming.linkedinUrl?.trim().toLowerCase() === normalizedLinkedin
+    ) ??
+    incomingContacts.find(
+      (incoming) =>
+        incoming.fullName.trim().toLowerCase() === normalizedFullName &&
+        (incoming.title?.trim().toLowerCase() ?? null) === normalizedTitle
+    ) ??
+    null
+  );
+}
+
+async function appendApolloContactActivity({
+  tenantId,
+  contactId,
+  note
+}: {
+  tenantId: string;
+  contactId: string;
+  note: string;
+}) {
+  const contact = await prisma.contact.findFirst({
+    where: {
+      id: contactId,
+      tenantId
+    },
+    select: {
+      id: true,
+      rawJson: true
+    }
+  });
+
+  if (!contact) {
+    return;
+  }
+
+  const currentRawJson = isJsonObject(contact.rawJson) ? contact.rawJson : {};
+  const apolloData = isJsonObject(currentRawJson.apollo) ? currentRawJson.apollo : {};
+  const activity = Array.isArray(apolloData.activity) ? apolloData.activity.filter((entry) => typeof entry === "string") : [];
+
+  await prisma.contact.update({
+    where: {
+      id: contactId
+    },
+    data: {
+      rawJson: toInputJsonValue({
+        ...currentRawJson,
+        apollo: {
+          ...apolloData,
+          activity: [note, ...activity].slice(0, 25)
+        }
+      })
+    }
+  });
 }
 
 function canBulkUpdateContactSequence(sequenceStatus: SequenceStatus) {
@@ -1718,6 +2421,11 @@ async function finalizeApolloEnrichmentForLead({
     }
   }
 
+  await autoGenerateAiDraftsForContacts({
+    tenantId,
+    contactIds: syncedContacts.map((contact) => contact.id)
+  });
+
   const completionNote =
     syncedContacts.length > 0
       ? `Apollo enrichment completed on ${new Date().toISOString()}. Imported ${syncedContacts.length} contacts.`
@@ -1986,6 +2694,389 @@ function rankPrimaryApolloContact(contact: ApolloContactRecord) {
   return score;
 }
 
+async function autoGenerateAiDraftsForContacts({
+  tenantId,
+  contactIds
+}: {
+  tenantId: string;
+  contactIds: string[];
+}) {
+  if (!isOpenAiDraftGenerationConfigured() || contactIds.length === 0 || !(await isLeadGenAiEnabled(tenantId))) {
+    return;
+  }
+
+  for (const contactId of [...new Set(contactIds)]) {
+    try {
+      await generateAiDraftForContact({
+        tenantId,
+        contactId,
+        forceRegenerate: false
+      });
+    } catch {
+      // Keep Apollo enrichment resilient; contacts can still be reviewed and
+      // drafts can be regenerated manually if OpenAI drafting fails.
+    }
+  }
+}
+
+async function generateAiDraftForContact({
+  tenantId,
+  contactId,
+  forceRegenerate
+}: {
+  tenantId: string;
+  contactId: string;
+  forceRegenerate: boolean;
+}) {
+  const draftContext = await loadAiDraftContactContext({ tenantId, contactId });
+
+  if (!draftContext) {
+    throw new Error("Contact not found for this tenant.");
+  }
+
+  if (!draftContext.requiresAiDraft) {
+    if (forceRegenerate) {
+      throw new Error("This tier does not currently require a Newl Apps AI draft.");
+    }
+    return;
+  }
+
+  if (!draftContext.selectedSequenceName) {
+    if (forceRegenerate) {
+      throw new Error("Select a cadence for this contact before generating the AI draft.");
+    }
+    return;
+  }
+
+  if (draftContext.contact.company.importRecords.length === 0) {
+    if (forceRegenerate) {
+      throw new Error("No TradeMining shipment history is available for this company yet.");
+    }
+    return;
+  }
+
+  if (draftContext.existingDraft && !forceRegenerate) {
+    return;
+  }
+
+  const generatedDraft = await generateTier1SequenceDraft({
+    model: draftContext.model,
+    companyName: draftContext.contact.company.name,
+    contactFirstName: draftContext.contact.firstName,
+    contactFullName: draftContext.contact.fullName,
+    contactTitle: draftContext.contact.title,
+    contactDepartment: draftContext.contact.department,
+    contactSeniority: draftContext.contact.seniority,
+    selectedSequenceName: draftContext.selectedSequenceName,
+    shipmentCount: draftContext.evidence.shipmentCount,
+    latestShipmentDate: draftContext.evidence.latestShipmentDate?.toISOString() ?? null,
+    arrivalPort: draftContext.evidence.destinationPort,
+    destinationCity: draftContext.evidence.destinationCity,
+    destinationState: draftContext.evidence.destinationState,
+    destinationMarket: draftContext.evidence.destinationMarket,
+    originCountry: draftContext.evidence.originCountry,
+    originPort: draftContext.evidence.originPort,
+    foreignPort: draftContext.evidence.foreignPort,
+    shipFromPort: draftContext.evidence.shipFromPort,
+    placeOfReceipt: draftContext.evidence.placeOfReceipt,
+    productDescription: draftContext.evidence.productDescription,
+    hsCode: draftContext.evidence.hsCode,
+    totalTeu: draftContext.evidence.totalTeu,
+    carrier: draftContext.evidence.carrier,
+    vessel: draftContext.evidence.vessel,
+    voyage: draftContext.evidence.voyage,
+    searchProfileName: draftContext.evidence.searchProfile?.name ?? null,
+    profileDestinationMarkets: draftContext.evidence.searchProfile?.destinationMarkets ?? [],
+    profileProductKeywords: draftContext.evidence.searchProfile?.productKeywords ?? [],
+    recurringOrigins: draftContext.shipmentDraftContext.recurringOrigins,
+    recurringDestinationPorts: draftContext.shipmentDraftContext.recurringDestinationPorts,
+    recurringCarriers: draftContext.shipmentDraftContext.recurringCarriers,
+    recurringProducts: draftContext.shipmentDraftContext.recurringProducts,
+    recentShipmentHighlights: draftContext.shipmentDraftContext.recentShipmentHighlights
+  });
+
+  const rawInputs = {
+    model: draftContext.model,
+    generatedAt: new Date().toISOString(),
+    companyName: draftContext.contact.company.name,
+    companyPriorityScore: draftContext.contact.company.priorityScore,
+    leadScore: draftContext.leadScore,
+    contactTier: draftContext.contactTier,
+    selectedSequenceName: draftContext.selectedSequenceName,
+    selectedSequenceId: draftContext.selectedSequenceId,
+    evidence: {
+      shipmentCount: draftContext.evidence.shipmentCount,
+      latestShipmentDate: draftContext.evidence.latestShipmentDate?.toISOString() ?? null,
+      arrivalPort: draftContext.evidence.destinationPort,
+      destinationCity: draftContext.evidence.destinationCity,
+      destinationState: draftContext.evidence.destinationState,
+      destinationMarket: draftContext.evidence.destinationMarket,
+      originCountry: draftContext.evidence.originCountry,
+      originPort: draftContext.evidence.originPort,
+      foreignPort: draftContext.evidence.foreignPort,
+      shipFromPort: draftContext.evidence.shipFromPort,
+      placeOfReceipt: draftContext.evidence.placeOfReceipt,
+      productDescription: draftContext.evidence.productDescription,
+      hsCode: draftContext.evidence.hsCode,
+      totalTeu: draftContext.evidence.totalTeu,
+      sourceRole: draftContext.evidence.sourceRole,
+      carrier: draftContext.evidence.carrier,
+      vessel: draftContext.evidence.vessel,
+      voyage: draftContext.evidence.voyage,
+      searchProfileName: draftContext.evidence.searchProfile?.name ?? null,
+      recurringOrigins: draftContext.shipmentDraftContext.recurringOrigins,
+      recurringDestinationPorts: draftContext.shipmentDraftContext.recurringDestinationPorts,
+      recurringCarriers: draftContext.shipmentDraftContext.recurringCarriers,
+      recurringProducts: draftContext.shipmentDraftContext.recurringProducts,
+      recentShipmentHighlights: draftContext.shipmentDraftContext.recentShipmentHighlights
+    }
+  };
+
+  await prisma.contactOutreachDraft.upsert({
+    where: {
+      tenantId_contactId_sequenceName: {
+        tenantId,
+        contactId: draftContext.contact.id,
+        sequenceName: draftContext.selectedSequenceName
+      }
+    },
+    update: {
+      companyId: draftContext.contact.companyId,
+      leadId: draftContext.leadId,
+      sequenceId: draftContext.selectedSequenceId,
+      subject: generatedDraft.subject,
+      body: generatedDraft.body,
+      status: ContactOutreachDraftStatus.APPROVED,
+      source: ContactOutreachDraftSource.MOCK_AI,
+      aiGenerated: true,
+      personalizationNotes: generatedDraft.personalizationNotes,
+      approvedAt: new Date(),
+      rawInputs: toInputJsonValue(rawInputs),
+      rawJson: toInputJsonValue({
+        provider: "openai",
+        response: generatedDraft.rawResponse
+      })
+    },
+    create: {
+      tenantId,
+      contactId: draftContext.contact.id,
+      companyId: draftContext.contact.companyId,
+      leadId: draftContext.leadId,
+      sequenceName: draftContext.selectedSequenceName,
+      sequenceId: draftContext.selectedSequenceId,
+      subject: generatedDraft.subject,
+      body: generatedDraft.body,
+      status: ContactOutreachDraftStatus.APPROVED,
+      source: ContactOutreachDraftSource.MOCK_AI,
+      aiGenerated: true,
+      personalizationNotes: generatedDraft.personalizationNotes,
+      approvedAt: new Date(),
+      rawInputs: toInputJsonValue(rawInputs),
+      rawJson: toInputJsonValue({
+        provider: "openai",
+        response: generatedDraft.rawResponse
+      })
+    }
+  });
+}
+
+async function loadAiDraftContactContext({
+  tenantId,
+  contactId
+}: {
+  tenantId: string;
+  contactId: string;
+}) {
+  const [contact, apolloCredential, scoringConfigRecord, model] = await Promise.all([
+    prisma.contact.findFirst({
+      where: {
+        id: contactId,
+        tenantId
+      },
+      include: {
+        leads: {
+          where: {
+            tenantId
+          },
+          select: {
+            id: true
+          },
+          take: 1
+        },
+        company: {
+          select: {
+            id: true,
+            name: true,
+            priorityScore: true,
+            importRecords: {
+              orderBy: {
+                arrivalDate: "desc"
+              },
+              take: 25,
+              select: {
+                rawJson: true,
+                arrivalDate: true,
+                sourcePort: true,
+                destinationCity: true,
+                destinationState: true,
+                originCountry: true,
+                productDescription: true
+              }
+            },
+            leads: {
+              where: {
+                tenantId
+              },
+              orderBy: {
+                updatedAt: "desc"
+              },
+              take: 1,
+              select: {
+                id: true,
+                score: true
+              }
+            }
+          }
+        },
+        outreachDrafts: {
+          where: {
+            tenantId
+          },
+          orderBy: {
+            updatedAt: "desc"
+          },
+          take: 1
+        }
+      }
+    }),
+    prisma.integrationCredential.findFirst({
+      where: {
+        tenantId,
+        provider: "APOLLO"
+      },
+      select: {
+        publicConfig: true
+      }
+    }),
+    prisma.tradeMiningScoringConfig.findUnique({
+      where: {
+        tenantId
+      }
+    }),
+    loadTier1DraftModel(tenantId)
+  ]);
+
+  if (!contact) {
+    return null;
+  }
+
+  const scoringConfig = normalizeLeadGenAiScoringConfig(scoringConfigRecord);
+  const companyLeadScore = contact.company.leads[0]?.score ?? null;
+  const scoring = scoreContact(
+    {
+      fullName: contact.fullName,
+      title: contact.title,
+      department: contact.department,
+      seniority: contact.seniority,
+      email: contact.email,
+      phone: contact.phone,
+      linkedinUrl: contact.linkedinUrl,
+      contactStatus: contact.contactStatus,
+      replyStatus: contact.replyStatus,
+      companyPriorityScore: contact.company.priorityScore,
+      companyLeadScore,
+      isPrimaryContact: contact.leads.length > 0
+    },
+    scoringConfig
+  );
+
+  const searchProfileIds = [
+    ...new Set(
+      contact.company.importRecords
+        .map((record) => readString(asObject(record.rawJson), "searchProfileId"))
+        .filter((value): value is string => Boolean(value))
+    )
+  ];
+  const searchProfiles = searchProfileIds.length
+    ? new Map(
+        (
+          await prisma.tradeMiningSearchProfile.findMany({
+            where: {
+              tenantId,
+              id: {
+                in: searchProfileIds
+              }
+            },
+            select: {
+              id: true,
+              name: true,
+              priorityWeight: true,
+              destinationMarkets: true,
+              destinationPorts: true,
+              originPorts: true,
+              shipFromPorts: true,
+              originCountries: true,
+              productKeywords: true,
+              hsCodes: true,
+              contactCadenceConfig: true
+            }
+          })
+        ).map((profile) => [
+          profile.id,
+          {
+            id: profile.id,
+            name: profile.name,
+            priorityWeight: profile.priorityWeight,
+            destinationMarkets: asStringArray(profile.destinationMarkets),
+            destinationPorts: asStringArray(profile.destinationPorts),
+            originPorts: asStringArray(profile.originPorts),
+            shipFromPorts: asStringArray(profile.shipFromPorts),
+            originCountries: asStringArray(profile.originCountries),
+            productKeywords: asStringArray(profile.productKeywords),
+            hsCodes: asStringArray(profile.hsCodes),
+            contactCadenceConfig: profile.contactCadenceConfig
+          }
+        ])
+      )
+    : new Map();
+
+  const evidence = summarizeTradeMiningEvidence(contact.company.importRecords, searchProfiles);
+  const apolloSequenceDirectory = parseApolloSequenceDirectory(apolloCredential?.publicConfig);
+  const defaultSequenceMapping = buildApolloSequenceMappingsWithDefaults({
+    existingMappings: parseApolloSequenceMapping(apolloCredential?.publicConfig),
+    directory: apolloSequenceDirectory
+  });
+  const effectiveSequenceMappings = resolveApolloSequenceMappings({
+    existingMappings: evidence.searchProfile
+      ? parseSearchProfileApolloSequenceMapping(evidence.searchProfile.contactCadenceConfig)
+      : defaultSequenceMapping,
+    directory: apolloSequenceDirectory
+  });
+  const recommendation = recommendSequenceForContact({
+    contactTier: scoring.tier,
+    title: contact.title,
+    department: contact.department,
+    companyName: contact.company.name,
+    sequenceMappings: effectiveSequenceMappings,
+    sequenceDirectory: apolloSequenceDirectory
+  });
+  const tierMapping = effectiveSequenceMappings.find((entry) => entry.tier === scoring.tier) ?? null;
+
+  return {
+    model,
+    contact,
+    contactTier: scoring.tier,
+    evidence,
+    shipmentDraftContext: buildShipmentDraftContext(contact.company.importRecords),
+    selectedSequenceName: contact.selectedSequenceName ?? contact.recommendedSequenceName ?? recommendation.name ?? null,
+    selectedSequenceId: contact.selectedSequenceId ?? contact.recommendedSequenceId ?? recommendation.id ?? null,
+    requiresAiDraft: tierMapping?.requiresAiDraft ?? false,
+    existingDraft: contact.outreachDrafts[0] ?? null,
+    leadId: contact.company.leads[0]?.id ?? null,
+    leadScore: companyLeadScore
+  };
+}
+
 async function loadTier1DraftModel(tenantId: string) {
   const config = await prisma.tradeMiningScoringConfig.findUnique({
     where: {
@@ -1996,7 +3087,50 @@ async function loadTier1DraftModel(tenantId: string) {
     }
   });
 
-  return config?.aiModel?.trim() || DEFAULT_TRADEMINING_SCORING_SETTINGS.aiModel || "gpt-5-mini";
+  return config?.aiModel?.trim() || DEFAULT_TRADEMINING_SCORING_SETTINGS.aiModel || "gpt-5.4-mini";
+}
+
+async function isLeadGenAiEnabled(tenantId: string) {
+  const config = await prisma.tradeMiningScoringConfig.findUnique({
+    where: {
+      tenantId
+    },
+    select: {
+      aiClassificationEnabled: true
+    }
+  });
+
+  return config?.aiClassificationEnabled ?? DEFAULT_TRADEMINING_SCORING_SETTINGS.aiClassificationEnabled;
+}
+
+function normalizeLeadGenAiScoringConfig(
+  config: Awaited<ReturnType<typeof prisma.tradeMiningScoringConfig.findUnique>>
+) {
+  return {
+    ...DEFAULT_TRADEMINING_SCORING_SETTINGS,
+    ...(config
+      ? {
+          contactDecisionMakerWeight: config.contactDecisionMakerWeight,
+          contactManagerWeight: config.contactManagerWeight,
+          contactLogisticsDepartmentWeight: config.contactLogisticsDepartmentWeight,
+          contactWeakFunctionPenalty: config.contactWeakFunctionPenalty,
+          contactCompanyContextWeight: config.contactCompanyContextWeight,
+          contactEmailWeight: config.contactEmailWeight,
+          contactLinkedinWeight: config.contactLinkedinWeight,
+          contactPhoneWeight: config.contactPhoneWeight,
+          contactPrimaryContactBoost: config.contactPrimaryContactBoost,
+          contactApprovedStatusBoost: config.contactApprovedStatusBoost,
+          contactReviewingStatusBoost: config.contactReviewingStatusBoost,
+          contactTier1Threshold: config.contactTier1Threshold,
+          contactTier2Threshold: config.contactTier2Threshold,
+          contactTier3Threshold: config.contactTier3Threshold,
+          preferredContactTitleKeywords: asStringArray(config.preferredContactTitleKeywords),
+          penalizedContactTitleKeywords: asStringArray(config.penalizedContactTitleKeywords),
+          preferredContactDepartments: asStringArray(config.preferredContactDepartments),
+          penalizedContactDepartments: asStringArray(config.penalizedContactDepartments)
+        }
+      : {})
+  };
 }
 
 function buildShipmentDraftContext(

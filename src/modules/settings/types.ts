@@ -226,5 +226,5 @@ export const DEFAULT_TRADEMINING_SCORING_SETTINGS: TradeMiningScoringSettings = 
   ],
   penalizedContactDepartments: ["hr", "human resources", "legal", "finance", "accounting", "marketing", "communications", "it"],
   aiClassificationEnabled: false,
-  aiModel: "gpt-5-mini"
+  aiModel: "gpt-5.4-mini"
 };
