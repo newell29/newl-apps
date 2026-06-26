@@ -151,4 +151,124 @@ describe("maybeRunAssistantRateRequest", () => {
       title: "AAA Cooper 7L quote"
     });
   });
+
+  it("summarizes all attempted carrier errors when 7L returns no rates", async () => {
+    requireModule.mockResolvedValue(undefined);
+    getLtlRatePortalShell.mockResolvedValue({
+      accounts: [
+        {
+          id: "account-1",
+          name: "7L Live Preferred Carriers",
+          status: "ACTIVE",
+          dryRun: false,
+          secretConfigured: true,
+          carriers: [
+            {
+              carrierHash: "carrier-a",
+              name: "AAA Cooper",
+              code: "AAA",
+              scac: "AACT",
+              enabled: true
+            },
+            {
+              carrierHash: "carrier-b",
+              name: "Estes Express",
+              code: "EST",
+              scac: "EXLA",
+              enabled: true
+            }
+          ]
+        }
+      ]
+    });
+    getLtlQuotes.mockResolvedValue({
+      data: [],
+      errors: [
+        {
+          carrierHash: "carrier-a",
+          carrierName: "AAA Cooper",
+          carrierCode: "AAA",
+          scac: "AACT",
+          errorMessage: "7L returned no rate results for carrier AAA Cooper.",
+          mode: "live"
+        },
+        {
+          carrierHash: "carrier-b",
+          carrierName: "Estes Express",
+          carrierCode: "EST",
+          scac: "EXLA",
+          errorMessage: "Lane not serviced.",
+          mode: "live"
+        }
+      ]
+    });
+
+    const result = await maybeRunAssistantRateRequest(
+      {
+        tenantId: "tenant-1",
+        tenantSlug: "tenant-1",
+        tenantName: "Tenant 1",
+        userId: "user-1",
+        userEmail: "alex@newl.ca",
+        userName: "Alex",
+        role: "ADMIN"
+      },
+      "need a rate 28273 to 90210 48x48x48 500 lbs 1 pallet"
+    );
+
+    expect(result?.answer).toContain("7L returned no rate results");
+    expect(result?.answer).toContain("Enabled carrier(s) checked: AAA Cooper, Estes Express.");
+    expect(result?.answer).toContain("AAA Cooper: 7L returned no rate results for carrier AAA Cooper.");
+    expect(result?.answer).toContain("Estes Express: Lane not serviced.");
+    expect(result?.metadata).toMatchObject({
+      quoted: false,
+      enabledCarrierCount: 2,
+      errorCount: 2
+    });
+  });
+
+  it("returns a useful message when the 7L quote call fails before carrier results", async () => {
+    requireModule.mockResolvedValue(undefined);
+    getLtlRatePortalShell.mockResolvedValue({
+      accounts: [
+        {
+          id: "account-1",
+          name: "7L Live Preferred Carriers",
+          status: "ACTIVE",
+          dryRun: false,
+          secretConfigured: true,
+          carriers: [
+            {
+              carrierHash: "carrier-a",
+              name: "AAA Cooper",
+              code: "AAA",
+              scac: "AACT",
+              enabled: true
+            }
+          ]
+        }
+      ]
+    });
+    getLtlQuotes.mockRejectedValue(new Error("7L zipcode lookup did not return city/state for 90210."));
+
+    const result = await maybeRunAssistantRateRequest(
+      {
+        tenantId: "tenant-1",
+        tenantSlug: "tenant-1",
+        tenantName: "Tenant 1",
+        userId: "user-1",
+        userEmail: "alex@newl.ca",
+        userName: "Alex",
+        role: "ADMIN"
+      },
+      "need a rate 28273 to 90210 48x48x48 500 lbs 1 pallet"
+    );
+
+    expect(result?.answer).toContain("I could not complete the 7L quote");
+    expect(result?.answer).toContain("7L zipcode lookup did not return city/state for 90210.");
+    expect(result?.metadata).toMatchObject({
+      quoted: false,
+      quoteBlocked: "7l-error"
+    });
+  });
 });

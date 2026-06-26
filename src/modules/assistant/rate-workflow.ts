@@ -108,15 +108,58 @@ export async function maybeRunAssistantRateRequest(
     };
   }
 
-  const response = await getLtlQuotes(account, [parsed.request], carrierHashes);
+  let response: Awaited<ReturnType<typeof getLtlQuotes>>;
+  try {
+    response = await getLtlQuotes(account, [parsed.request], carrierHashes);
+  } catch (error) {
+    return {
+      answer: [
+        `I could not complete the 7L quote for ${parsed.summary}.`,
+        error instanceof Error ? error.message : "7L returned an unknown error.",
+        "Check the 7L account credentials, origin/destination ZIP lookup, and enabled carrier setup before trying again."
+      ].join("\n\n"),
+      sources: [
+        {
+          sourceKind: AssistantSourceKind.RATE_TOOL,
+          sourceId: account.id,
+          title: `${account.name} 7L quote failure`,
+          excerpt: error instanceof Error ? error.message : "Unknown 7L quote error.",
+          metadata: {
+            accountId: account.id,
+            enabledCarrierCount: carrierHashes.length
+          }
+        }
+      ],
+      metadata: {
+        rateRequestHandled: true,
+        complete: true,
+        quoted: false,
+        quoteBlocked: "7l-error",
+        accountId: account.id,
+        enabledCarrierCount: carrierHashes.length
+      }
+    };
+  }
   const sortedQuotes = [...response.data].sort((left, right) => left.total - right.total).slice(0, 3);
 
   if (sortedQuotes.length === 0) {
+    const attemptedCarrierNames = account.carriers
+      .filter((carrier) => carrierHashes.includes(carrier.carrierHash))
+      .map((carrier) => carrier.name);
+    const visibleErrors = response.errors.slice(0, 5);
+
     return {
-      answer:
-        response.errors[0]?.errorMessage ??
-        "7L did not return a quote for the requested shipment.",
-      sources: response.errors.slice(0, 3).map((error) => ({
+      answer: [
+        `7L returned no rate results for ${parsed.summary}.`,
+        attemptedCarrierNames.length > 0
+          ? `Enabled carrier(s) checked: ${attemptedCarrierNames.join(", ")}.`
+          : "No enabled carriers were available to check.",
+        visibleErrors.length > 0
+          ? `Carrier response(s): ${visibleErrors.map((error) => `${error.carrierName}: ${error.errorMessage}`).join(" | ")}.`
+          : "7L did not include carrier-level error details.",
+        "Next checks: confirm more 7L carriers are enabled for this account, verify the lane is serviceable, and add an explicit freight class or pickup date if the customer provided one."
+      ].join("\n\n"),
+      sources: visibleErrors.map((error) => ({
         sourceKind: AssistantSourceKind.RATE_TOOL,
         sourceId: error.carrierHash,
         title: `${error.carrierName} rate error`,
@@ -128,7 +171,10 @@ export async function maybeRunAssistantRateRequest(
       metadata: {
         rateRequestHandled: true,
         complete: true,
-        quoted: false
+        quoted: false,
+        accountId: account.id,
+        enabledCarrierCount: carrierHashes.length,
+        errorCount: response.errors.length
       }
     };
   }
