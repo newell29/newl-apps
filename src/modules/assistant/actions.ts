@@ -14,8 +14,7 @@ import {
   normalizeAssistantAutomationTime,
   parseAssistantAutomationSchedule
 } from "@/modules/assistant/automations";
-import { syncAssistantKnowledge } from "@/modules/assistant/knowledge";
-import { syncMicrosoftGraphAssistantKnowledge } from "@/modules/assistant/microsoft-graph-sync";
+import { runAssistantKnowledgeSync } from "@/modules/assistant/knowledge-sync";
 import {
   executeAssistantAutomation,
   runAssistantPrompt
@@ -169,65 +168,22 @@ export async function askAssistantAction(formData: FormData) {
 
 export async function syncAssistantKnowledgeAction() {
   const context = await getAuthenticatedContext();
-  await requireModule(context, ModuleKey.ASSISTANT);
-  await requireMutationAccess(context);
-
-  const [localKnowledgeResult, microsoftKnowledgeResult] = await Promise.all([
-    syncAssistantKnowledgeSafely(context),
-    syncMicrosoftGraphAssistantKnowledge(context)
-  ]);
-
-  await prisma.auditLog.create({
-    data: {
-      tenantId: context.tenantId,
-      actorUserId: context.userId,
-      action: "assistant.knowledge.sync",
-      entityType: "Tenant",
-      entityId: context.tenantId,
-      after: {
-        scope: "assistant-knowledge",
-        localDocumentCount: localKnowledgeResult.documentCount,
-        localSkipped: localKnowledgeResult.skipped,
-        localReason: localKnowledgeResult.reason,
-        microsoftDocumentCount: microsoftKnowledgeResult.documentCount,
-        microsoftSkipped: microsoftKnowledgeResult.skipped,
-        microsoftReason: microsoftKnowledgeResult.reason
-      } as Prisma.InputJsonValue
-    }
-  });
+  const result = await runAssistantKnowledgeSync(context);
 
   revalidatePath("/assistant");
-  const syncStatus = localKnowledgeResult.skipped || microsoftKnowledgeResult.skipped ? "partial" : "success";
   redirect(
-    `/assistant?sync=${syncStatus}` +
-      `&localDocs=${localKnowledgeResult.documentCount}` +
-      `&microsoftDocs=${microsoftKnowledgeResult.documentCount}` +
-      `&microsoftMail=${microsoftKnowledgeResult.mailCount}` +
-      `&microsoftFiles=${microsoftKnowledgeResult.fileCount}` +
-      (localKnowledgeResult.reason
-        ? `&localReason=${encodeURIComponent(localKnowledgeResult.reason)}`
+    `/assistant?sync=${result.status}` +
+      `&localDocs=${result.localDocumentCount}` +
+      `&microsoftDocs=${result.microsoftDocumentCount}` +
+      `&microsoftMail=${result.microsoftMailCount}` +
+      `&microsoftFiles=${result.microsoftFileCount}` +
+      (result.localReason
+        ? `&localReason=${encodeURIComponent(result.localReason)}`
         : "") +
-      (microsoftKnowledgeResult.reason
-        ? `&microsoftReason=${encodeURIComponent(microsoftKnowledgeResult.reason)}`
+      (result.microsoftReason
+        ? `&microsoftReason=${encodeURIComponent(result.microsoftReason)}`
         : "")
   );
-}
-
-async function syncAssistantKnowledgeSafely(context: Awaited<ReturnType<typeof getAuthenticatedContext>>) {
-  try {
-    const result = await syncAssistantKnowledge(context);
-    return {
-      documentCount: result.documentCount,
-      skipped: false,
-      reason: null
-    };
-  } catch (error) {
-    return {
-      documentCount: 0,
-      skipped: true,
-      reason: error instanceof Error ? error.message : "Local assistant knowledge sync failed for an unknown reason."
-    };
-  }
 }
 
 export async function saveAssistantAutomationAction(formData: FormData) {

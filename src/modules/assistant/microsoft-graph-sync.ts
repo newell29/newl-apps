@@ -18,6 +18,7 @@ import { getMicrosoftGraphApplicationAccessToken } from "@/server/integrations/m
 import type { AuthenticatedContext, TenantContext } from "@/server/tenant-context";
 
 const MICROSOFT_GRAPH_SOURCE_SYSTEMS = ["MICROSOFT_GRAPH_MAIL", "MICROSOFT_GRAPH_FILE"] as const;
+const MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS = 20_000;
 
 export type MicrosoftGraphKnowledgeSyncResult = {
   documentCount: number;
@@ -561,11 +562,18 @@ async function syncMicrosoftGraphApplicationMailboxKnowledge(
   }
 
   const accessToken = await getMicrosoftGraphApplicationAccessToken();
-  const messages = settings.mailSyncEnabled
+  const mailboxResult = settings.mailSyncEnabled
     ? await fetchSelectedMailboxMessages(accessToken, settings.adminMailboxTargets)
-    : [];
+    : { messages: [], failures: [] };
+  const messages = mailboxResult.messages;
   const files: MicrosoftGraphDriveItem[] = [];
   const documents = messages.map(mapMessageToKnowledgeDocument);
+  const mailboxFailureReason =
+    mailboxResult.failures.length > 0
+      ? `Mailbox sync issue(s): ${mailboxResult.failures
+          .map((failure) => `${failure.mailbox}: ${failure.reason}`)
+          .join(" | ")}`
+      : null;
 
   if (documents.length === 0) {
     return {
@@ -573,7 +581,7 @@ async function syncMicrosoftGraphApplicationMailboxKnowledge(
       mailCount: messages.length,
       fileCount: files.length,
       skipped: true,
-      reason: "Microsoft Graph returned no recent items for the selected admin mailboxes."
+      reason: mailboxFailureReason ?? "Microsoft Graph returned no recent items for the selected admin mailboxes."
     };
   }
 
@@ -586,8 +594,8 @@ async function syncMicrosoftGraphApplicationMailboxKnowledge(
     documentCount: documents.length,
     mailCount: messages.length,
     fileCount: files.length,
-    skipped: false,
-    reason: null
+    skipped: mailboxResult.failures.length > 0,
+    reason: mailboxFailureReason
   };
 }
 
@@ -789,16 +797,44 @@ async function fetchRecentMail(accessToken: string) {
 }
 
 async function fetchSelectedMailboxMessages(accessToken: string, mailboxes: string[]) {
-  const results = await Promise.all(mailboxes.map((mailbox) => fetchMailboxMessages(accessToken, mailbox)));
+  const results = await Promise.all(
+    mailboxes.map(async (mailbox) => {
+      try {
+        return {
+          mailbox,
+          messages: await fetchMailboxMessages(accessToken, mailbox),
+          reason: null
+        };
+      } catch (error) {
+        return {
+          mailbox,
+          messages: [] as MicrosoftGraphMailMessage[],
+          reason: error instanceof Error ? error.message : "Unknown Microsoft Graph mailbox error."
+        };
+      }
+    })
+  );
 
-  return results
-    .flat()
+  return {
+    messages: results
+      .flatMap((result) => result.messages)
     .sort((left, right) => {
       const leftTime = parseDate(left.receivedDateTime)?.getTime() ?? 0;
       const rightTime = parseDate(right.receivedDateTime)?.getTime() ?? 0;
       return rightTime - leftTime;
     })
-    .slice(0, 25);
+      .slice(0, 25),
+    failures: results.flatMap((result) =>
+      result.reason
+        ? [
+            {
+              mailbox: result.mailbox,
+              reason: result.reason
+            }
+          ]
+        : []
+    )
+  };
 }
 
 async function fetchMailboxMessages(accessToken: string, mailbox: string) {
@@ -810,7 +846,8 @@ async function fetchMailboxMessages(accessToken: string, mailbox: string) {
         Authorization: `Bearer ${accessToken}`,
         Prefer: 'outlook.body-content-type="text"'
       },
-      cache: "no-store"
+      cache: "no-store",
+      signal: AbortSignal.timeout(MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS)
     }
   );
 
@@ -835,7 +872,8 @@ async function fetchRecentFiles(accessToken: string) {
     headers: {
       Authorization: `Bearer ${accessToken}`
     },
-    cache: "no-store"
+    cache: "no-store",
+    signal: AbortSignal.timeout(MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS)
   });
 
   if (!response.ok) {

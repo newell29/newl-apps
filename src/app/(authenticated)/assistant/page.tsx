@@ -5,13 +5,13 @@ import {
   askAssistantAction,
   runAssistantAutomationAction,
   saveAssistantAutomationAction,
-  syncAssistantKnowledgeAction,
   toggleAssistantAutomationStatusAction
 } from "@/modules/assistant/actions";
 import {
   AssistantAskPendingBar,
   AssistantAskSubmitButton
 } from "@/modules/assistant/components/assistant-ask-controls";
+import { AssistantKnowledgeSyncButton } from "@/modules/assistant/components/assistant-sync-controls";
 import { formatAssistantRole, getAssistantWorkspace } from "@/modules/assistant/queries";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -218,14 +218,7 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
               </div>
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
-              <form action={syncAssistantKnowledgeAction}>
-                <button
-                  type="submit"
-                  className="rounded-md border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted/40"
-                >
-                  Sync knowledge
-                </button>
-              </form>
+              <AssistantKnowledgeSyncButton />
               <Link
                 href="/assistant"
                 className="rounded-md border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted/40"
