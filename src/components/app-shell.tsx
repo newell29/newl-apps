@@ -35,6 +35,15 @@ const navSections: NavSection[] = [
   },
   { href: "/ups-tools", label: "UPS Tools", moduleKey: "UPS_TOOLS" as ModuleKey },
   { href: "/ltl-rate-portal", label: "LTL Rate Portal", moduleKey: "LTL_RATE_PORTAL" as ModuleKey },
+  {
+    label: "Finance",
+    moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey,
+    items: [
+      { href: "/finance/customer-cashflow", label: "Customer Cashflow", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey },
+      { href: "/finance/customer-cashflow/collections", label: "Collections Queue", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey },
+      { href: "/finance/customer-cashflow/settings", label: "Credit Settings", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey }
+    ]
+  },
   { href: "/settings", label: "Settings" }
 ];
 
