@@ -88,13 +88,6 @@ export async function seedLtlTenantDefaults(tenantId: string) {
     });
 
     if (existing) {
-      await prisma.integrationCredential.update({
-        where: { id: existing.id },
-        data: {
-          status: record.status,
-          publicConfig: record.publicConfig
-        }
-      });
       continue;
     }
 
