@@ -117,15 +117,51 @@ export type ApolloSequencePushResult = {
   rawPayload: Record<string, unknown>;
 };
 
-export type ApolloCallActivityRecord = {
+export type ApolloActivityKind = "CALL" | "CONNECTED_CALL" | "EMAIL_SENT" | "REPLY" | "LEAD_CREATED" | "OTHER";
+
+export type ApolloActivityRecord = {
   id: string | null;
+  kind: ApolloActivityKind;
   type: string | null;
   status: string | null;
   outcome: string | null;
   durationSeconds: number | null;
   occurredAt: string | null;
+  contactName: string | null;
+  companyName: string | null;
+  email: string | null;
+  subject: string | null;
+  bodyPreview: string | null;
   rawPayload: Record<string, unknown>;
 };
+
+export type ApolloActivitySummaryInput = {
+  apolloUserId?: string | null;
+  userName?: string | null;
+  startDate: Date;
+  endDate: Date;
+  timezone: string;
+  kinds: ApolloActivityKind[];
+};
+
+export type ApolloActivitySummary = {
+  userName: string | null;
+  apolloUserId: string | null;
+  startDateLabel: string;
+  endDateLabel: string;
+  timezone: string;
+  counts: Record<ApolloActivityKind, number>;
+  callCount: number;
+  connectedCount: number;
+  emailSentCount: number;
+  replyCount: number;
+  leadCreatedCount: number;
+  durationSeconds: number;
+  activities: ApolloActivityRecord[];
+  rawPayload: Record<string, unknown>;
+};
+
+export type ApolloCallActivityRecord = ApolloActivityRecord;
 
 export type ApolloCallActivitySummaryInput = {
   apolloUserId: string;
@@ -134,17 +170,7 @@ export type ApolloCallActivitySummaryInput = {
   timezone: string;
 };
 
-export type ApolloCallActivitySummary = {
-  userName: string;
-  apolloUserId: string;
-  dateLabel: string;
-  timezone: string;
-  callCount: number;
-  connectedCount: number;
-  durationSeconds: number;
-  activities: ApolloCallActivityRecord[];
-  rawPayload: Record<string, unknown>;
-};
+export type ApolloCallActivitySummary = ApolloActivitySummary;
 
 type ApolloOrganizationCandidate = {
   id: string | null;
@@ -371,35 +397,55 @@ export async function pushApolloContactsToSequence(
 
 export async function fetchApolloCallActivitySummary(
   input: ApolloCallActivitySummaryInput
-): Promise<ApolloCallActivitySummary> {
+): Promise<ApolloActivitySummary> {
+  return fetchApolloActivitySummary({
+    apolloUserId: input.apolloUserId,
+    userName: input.userName,
+    startDate: input.date,
+    endDate: input.date,
+    timezone: input.timezone,
+    kinds: ["CALL", "CONNECTED_CALL"]
+  });
+}
+
+export async function fetchApolloActivitySummary(
+  input: ApolloActivitySummaryInput
+): Promise<ApolloActivitySummary> {
   const apiKey = readApolloMasterApiKey();
-  const dateLabel = formatDateInTimezone(input.date, input.timezone);
+  const startDateLabel = formatDateInTimezone(input.startDate, input.timezone);
+  const endDateLabel = formatDateInTimezone(input.endDate, input.timezone);
   const path = process.env.APOLLO_ACTIVITY_SEARCH_PATH?.trim() || "/api/v1/activities/search";
   const payload = {
     page: 1,
     per_page: DEFAULT_PAGE_SIZE,
-    user_ids: [input.apolloUserId],
-    owner_ids: [input.apolloUserId],
-    activity_types: ["call"],
-    types: ["call"],
+    user_ids: input.apolloUserId ? [input.apolloUserId] : undefined,
+    owner_ids: input.apolloUserId ? [input.apolloUserId] : undefined,
+    activity_types: buildApolloActivityTypeFilters(input.kinds),
+    types: buildApolloActivityTypeFilters(input.kinds),
     date_range: {
-      start: dateLabel,
-      end: dateLabel
+      start: startDateLabel,
+      end: endDateLabel
     },
-    start_date: dateLabel,
-    end_date: dateLabel
+    start_date: startDateLabel,
+    end_date: endDateLabel
   } satisfies Record<string, unknown>;
 
   const rawPayload = await postApolloJson(path, apiKey, payload);
-  const activities = parseApolloCallActivities(rawPayload, input.apolloUserId);
+  const activities = parseApolloActivities(rawPayload, input.apolloUserId ?? null, input.kinds);
+  const counts = countApolloActivities(activities);
 
   return {
-    userName: input.userName,
-    apolloUserId: input.apolloUserId,
-    dateLabel,
+    userName: input.userName ?? null,
+    apolloUserId: input.apolloUserId ?? null,
+    startDateLabel,
+    endDateLabel,
     timezone: input.timezone,
-    callCount: activities.length,
-    connectedCount: activities.filter((activity) => isConnectedCall(activity)).length,
+    counts,
+    callCount: counts.CALL + counts.CONNECTED_CALL,
+    connectedCount: counts.CONNECTED_CALL,
+    emailSentCount: counts.EMAIL_SENT,
+    replyCount: counts.REPLY,
+    leadCreatedCount: counts.LEAD_CREATED,
     durationSeconds: activities.reduce((total, activity) => total + (activity.durationSeconds ?? 0), 0),
     activities,
     rawPayload
@@ -672,28 +718,46 @@ function parseApolloSequencesResponse(payload: ApolloSequencesResponse | null): 
   });
 }
 
-function parseApolloCallActivities(payload: Record<string, unknown>, apolloUserId: string): ApolloCallActivityRecord[] {
+function parseApolloActivities(
+  payload: Record<string, unknown>,
+  apolloUserId: string | null,
+  requestedKinds: ApolloActivityKind[]
+): ApolloActivityRecord[] {
   const candidates = [
     ...readApolloArray(payload, ["activities"]),
     ...readApolloArray(payload, ["activity_logs"]),
     ...readApolloArray(payload, ["calls"]),
+    ...readApolloArray(payload, ["emails"]),
+    ...readApolloArray(payload, ["replies"]),
+    ...readApolloArray(payload, ["contacts"]),
+    ...readApolloArray(payload, ["people"]),
     ...readApolloArray(payload, ["data"])
   ];
 
   return candidates.flatMap((entry) => {
     const record = asRecord(entry);
-    if (!record || !isApolloCallActivity(record) || !matchesApolloUser(record, apolloUserId)) {
+    if (!record || (apolloUserId && !matchesApolloUser(record, apolloUserId))) {
+      return [];
+    }
+    const kind = classifyApolloActivity(record);
+    if (!requestedKinds.includes(kind) && !(kind === "CONNECTED_CALL" && requestedKinds.includes("CALL"))) {
       return [];
     }
 
     return [
       {
         id: readApolloString(record, ["id", "activity_id", "call_id"]),
+        kind,
         type: readApolloString(record, ["type", "activity_type", "kind", "category"]),
         status: readApolloString(record, ["status", "call_status"]),
         outcome: readApolloString(record, ["outcome", "disposition", "call_disposition"]),
         durationSeconds: readApolloNumber(record, ["duration_seconds", "call_duration_seconds", "duration"]),
         occurredAt: readApolloString(record, ["occurred_at", "created_at", "completed_at", "updated_at"]),
+        contactName: readApolloString(record, ["contact_name", "person_name", "name", "recipient_name"]),
+        companyName: readApolloString(record, ["company_name", "organization_name", "account_name"]),
+        email: readApolloString(record, ["email", "recipient_email", "from_email"]),
+        subject: readApolloString(record, ["subject", "email_subject"]),
+        bodyPreview: readApolloString(record, ["body_preview", "preview", "snippet", "body_text"]),
         rawPayload: record
       }
     ];
@@ -1424,20 +1488,38 @@ function readApolloNumber(record: Record<string, unknown>, keys: string[]) {
   return null;
 }
 
-function isApolloCallActivity(record: Record<string, unknown>) {
+function classifyApolloActivity(record: Record<string, unknown>): ApolloActivityKind {
   const descriptor = [
     readApolloString(record, ["type", "activity_type", "kind", "category"]),
-    readApolloString(record, ["event_type", "task_type"])
+    readApolloString(record, ["event_type", "task_type"]),
+    readApolloString(record, ["status", "call_status"]),
+    readApolloString(record, ["outcome", "disposition", "call_disposition"])
   ]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
 
-  if (!descriptor) {
-    return true;
+  if (/\b(reply|replied|response|responded|inbound email)\b/.test(descriptor)) {
+    return "REPLY";
   }
 
-  return /\b(call|phone|dial)\b/.test(descriptor);
+  if (/\b(email sent|sent email|outbound email|message sent|mail sent)\b/.test(descriptor)) {
+    return "EMAIL_SENT";
+  }
+
+  if (/\b(contact created|person created|lead created|new lead|new contact)\b/.test(descriptor)) {
+    return "LEAD_CREATED";
+  }
+
+  if (/\b(call|phone|dial)\b/.test(descriptor)) {
+    return isConnectedCallDescriptor(descriptor) ? "CONNECTED_CALL" : "CALL";
+  }
+
+  if (readApolloString(record, ["email", "recipient_email", "from_email"]) && readApolloString(record, ["subject", "email_subject"])) {
+    return "EMAIL_SENT";
+  }
+
+  return "OTHER";
 }
 
 function matchesApolloUser(record: Record<string, unknown>, apolloUserId: string) {
@@ -1461,9 +1543,49 @@ function matchesApolloUser(record: Record<string, unknown>, apolloUserId: string
   return nestedUserIds.length === 0 || nestedUserIds.includes(apolloUserId);
 }
 
-function isConnectedCall(activity: ApolloCallActivityRecord) {
-  const value = `${activity.status ?? ""} ${activity.outcome ?? ""}`.toLowerCase();
+function isConnectedCallDescriptor(value: string) {
   return /\b(answered|connected|completed|talked|spoke|success)\b/.test(value);
+}
+
+function buildApolloActivityTypeFilters(kinds: ApolloActivityKind[]) {
+  const values = new Set<string>();
+
+  for (const kind of kinds) {
+    if (kind === "CALL" || kind === "CONNECTED_CALL") {
+      values.add("call");
+    }
+    if (kind === "EMAIL_SENT") {
+      values.add("email");
+      values.add("email_sent");
+    }
+    if (kind === "REPLY") {
+      values.add("reply");
+      values.add("email_reply");
+    }
+    if (kind === "LEAD_CREATED") {
+      values.add("contact");
+      values.add("lead");
+    }
+  }
+
+  return [...values];
+}
+
+function countApolloActivities(activities: ApolloActivityRecord[]) {
+  const counts: Record<ApolloActivityKind, number> = {
+    CALL: 0,
+    CONNECTED_CALL: 0,
+    EMAIL_SENT: 0,
+    REPLY: 0,
+    LEAD_CREATED: 0,
+    OTHER: 0
+  };
+
+  for (const activity of activities) {
+    counts[activity.kind] += 1;
+  }
+
+  return counts;
 }
 
 function formatDateInTimezone(date: Date, timezone: string) {

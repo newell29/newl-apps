@@ -1,10 +1,18 @@
-import { AssistantSourceKind, IntegrationProvider, IntegrationStatus, ModuleKey } from "@prisma/client";
+import {
+  AssistantSourceKind,
+  ContactSource,
+  IntegrationProvider,
+  IntegrationStatus,
+  ModuleKey,
+  ReplyStatus,
+  SequenceStatus
+} from "@prisma/client";
 
 import { parseApolloRepMapping } from "@/modules/settings/apollo-rep-mapping";
 import type { ApolloRepMappingEntry } from "@/modules/settings/types";
 import { AuthorizationError, requireModule } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
-import { fetchApolloCallActivitySummary } from "@/server/integrations/apollo";
+import { fetchApolloActivitySummary, type ApolloActivityKind } from "@/server/integrations/apollo";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 
 const DEFAULT_BUSINESS_TIMEZONE = "America/Toronto";
@@ -25,7 +33,8 @@ export async function maybeRunAssistantApolloActivityRequest(
   context: AuthenticatedContext,
   prompt: string
 ): Promise<AssistantApolloActivityResponse | null> {
-  if (!isApolloActivityPrompt(prompt)) {
+  const request = parseApolloInsightRequest(prompt);
+  if (!request) {
     return null;
   }
 
@@ -48,11 +57,12 @@ export async function maybeRunAssistantApolloActivityRequest(
   }
 
   const reps = await getActiveApolloRepMappings(context.tenantId);
+  const repMatch = request.requiresRep ? matchApolloRep(prompt, reps) : matchOptionalApolloRep(prompt, reps);
 
-  if (reps.length === 0) {
+  if (request.requiresRep && reps.length === 0) {
     return {
       answer:
-        "I can answer Apollo call and activity questions once Apollo rep mapping is synced in Settings. Sync Apollo reps, make the rep active, then ask again.",
+        "I can answer rep-specific Apollo activity questions once Apollo rep mapping is synced in Settings. Sync Apollo reps, make the rep active, then ask again.",
       sources: [],
       metadata: {
         apolloActivityHandled: true,
@@ -61,8 +71,6 @@ export async function maybeRunAssistantApolloActivityRequest(
       }
     };
   }
-
-  const repMatch = matchApolloRep(prompt, reps);
 
   if (repMatch.status === "missing") {
     return {
@@ -90,7 +98,7 @@ export async function maybeRunAssistantApolloActivityRequest(
 
   const rep = repMatch.rep;
 
-  if (!rep.apolloUserId) {
+  if (rep && !rep.apolloUserId) {
     return {
       answer: `${rep.sequenceOwnerName} is mapped in Apollo settings but does not have an Apollo user ID saved. Sync Apollo reps again or edit the rep mapping before I can count activity.`,
       sources: [],
@@ -103,70 +111,98 @@ export async function maybeRunAssistantApolloActivityRequest(
     };
   }
 
-  const dateContext = parseActivityDate(prompt);
+  if (request.mode === "FOLLOW_UP_REPLIES") {
+    return buildApolloReplyFollowUpAnswer(context, request, rep);
+  }
 
   try {
-    const summary = await fetchApolloCallActivitySummary({
-      apolloUserId: rep.apolloUserId,
-      userName: rep.sequenceOwnerName,
-      date: dateContext.date,
-      timezone: dateContext.timezone
-    });
-    const durationText = formatDuration(summary.durationSeconds);
-    const answer = [
-      `${rep.sequenceOwnerName} made ${summary.callCount} Apollo call(s) ${dateContext.label} (${summary.dateLabel}, ${summary.timezone}).`,
-      summary.connectedCount > 0 || summary.durationSeconds > 0
-        ? `Connected/completed calls: ${summary.connectedCount}. Total recorded talk time: ${durationText}.`
-        : "Apollo did not return connected-call or talk-time detail for the matched calls."
-    ].join("\n\n");
+    const [activitySummary, localSummary] = await Promise.all([
+      request.kinds.length > 0
+        ? fetchApolloActivitySummary({
+            apolloUserId: rep?.apolloUserId ?? null,
+            userName: rep?.sequenceOwnerName ?? null,
+            startDate: request.startDate,
+            endDate: request.endDate,
+            timezone: request.timezone,
+            kinds: request.kinds
+          })
+        : Promise.resolve(null),
+      buildLocalApolloMetricSummary(context, request, rep)
+    ]);
+    const scope = rep ? rep.sequenceOwnerName : "All mapped Apollo reps";
+    const dateText = formatDateRange(request);
+    const lines = [`Apollo activity for ${scope} ${dateText}:`];
+
+    if (request.metrics.includes("CALLS")) {
+      lines.push(`Calls: ${activitySummary?.callCount ?? 0}.`);
+    }
+    if (request.metrics.includes("CONNECTED_CALLS")) {
+      lines.push(`Connected calls: ${activitySummary?.connectedCount ?? 0}.`);
+    }
+    if (request.metrics.includes("EMAILS_SENT")) {
+      lines.push(`Emails sent: ${activitySummary?.emailSentCount ?? 0}.`);
+    }
+    if (request.metrics.includes("REPLIES")) {
+      const liveReplies = activitySummary?.replyCount ?? 0;
+      lines.push(`Replies: ${Math.max(liveReplies, localSummary.replyCount)}.`);
+    }
+    if (request.metrics.includes("NEW_LEADS")) {
+      lines.push(`New Apollo leads/contacts added in Newl: ${localSummary.newLeadCount}.`);
+    }
+    if (activitySummary && activitySummary.durationSeconds > 0) {
+      lines.push(`Recorded call time: ${formatDuration(activitySummary.durationSeconds)}.`);
+    }
+    if (request.metrics.includes("NEW_LEADS") && localSummary.topNewLeads.length > 0) {
+      lines.push(`Newest leads: ${localSummary.topNewLeads.map((lead) => `${lead.fullName} at ${lead.companyName}`).join("; ")}.`);
+    }
 
     return {
-      answer,
+      answer: lines.join("\n"),
       sources: [
         {
           sourceKind: AssistantSourceKind.INTEGRATION,
-          sourceId: `apollo:${rep.apolloUserId}:${summary.dateLabel}`,
-          title: `Apollo call activity for ${rep.sequenceOwnerName}`,
-          excerpt: `${summary.callCount} call(s), ${summary.connectedCount} connected/completed, ${durationText} recorded talk time.`,
+          sourceId: `apollo:${rep?.apolloUserId ?? "tenant"}:${request.startDateLabel}:${request.endDateLabel}`,
+          title: `Apollo activity for ${scope}`,
+          excerpt: lines.slice(1).join(" "),
           metadata: {
             provider: IntegrationProvider.APOLLO,
-            apolloUserId: rep.apolloUserId,
-            dateLabel: summary.dateLabel,
-            timezone: summary.timezone,
-            callCount: summary.callCount,
-            connectedCount: summary.connectedCount,
-            durationSeconds: summary.durationSeconds
+            apolloUserId: rep?.apolloUserId ?? null,
+            repName: rep?.sequenceOwnerName ?? null,
+            startDateLabel: request.startDateLabel,
+            endDateLabel: request.endDateLabel,
+            metrics: request.metrics,
+            activityCounts: activitySummary?.counts ?? null,
+            localReplyCount: localSummary.replyCount,
+            localNewLeadCount: localSummary.newLeadCount
           }
         }
       ],
       metadata: {
         apolloActivityHandled: true,
         complete: true,
-        repName: rep.sequenceOwnerName,
-        apolloUserId: rep.apolloUserId,
-        dateLabel: summary.dateLabel,
-        timezone: summary.timezone,
-        callCount: summary.callCount,
-        connectedCount: summary.connectedCount,
-        durationSeconds: summary.durationSeconds
+        repName: rep?.sequenceOwnerName ?? null,
+        apolloUserId: rep?.apolloUserId ?? null,
+        startDateLabel: request.startDateLabel,
+        endDateLabel: request.endDateLabel,
+        metrics: request.metrics
       }
     };
   } catch (error) {
     return {
       answer: [
-        `I found the Apollo rep mapping for ${rep.sequenceOwnerName}, but Apollo activity lookup failed.`,
+        `I found the Apollo setup${rep ? ` for ${rep.sequenceOwnerName}` : ""}, but Apollo activity lookup failed.`,
         error instanceof Error ? error.message : "Apollo returned an unknown error.",
-        "Check that APOLLO_MASTER_API has activity access and that Apollo activity lookup is enabled for this workspace."
+        "Check that APOLLO_MASTER_API has access to activity/email/reply data and that Apollo activity lookup is enabled for this workspace."
       ].join("\n\n"),
       sources: [
         {
           sourceKind: AssistantSourceKind.INTEGRATION,
-          sourceId: rep.apolloUserId,
-          title: `Apollo activity lookup failed for ${rep.sequenceOwnerName}`,
+          sourceId: rep?.apolloUserId ?? null,
+          title: `Apollo activity lookup failed${rep ? ` for ${rep.sequenceOwnerName}` : ""}`,
           excerpt: error instanceof Error ? error.message : "Unknown Apollo activity lookup error.",
           metadata: {
             provider: IntegrationProvider.APOLLO,
-            apolloUserId: rep.apolloUserId
+            apolloUserId: rep?.apolloUserId ?? null
           }
         }
       ],
@@ -174,15 +210,266 @@ export async function maybeRunAssistantApolloActivityRequest(
         apolloActivityHandled: true,
         complete: true,
         apolloActivityError: error instanceof Error ? error.message : "Unknown Apollo activity lookup error.",
-        repName: rep.sequenceOwnerName,
-        apolloUserId: rep.apolloUserId
+        repName: rep?.sequenceOwnerName ?? null,
+        apolloUserId: rep?.apolloUserId ?? null
       }
     };
   }
 }
 
+type ApolloMetric = "CALLS" | "CONNECTED_CALLS" | "EMAILS_SENT" | "REPLIES" | "NEW_LEADS";
+
+type ApolloInsightRequest = {
+  mode: "METRICS" | "FOLLOW_UP_REPLIES";
+  metrics: ApolloMetric[];
+  kinds: ApolloActivityKind[];
+  requiresRep: boolean;
+  startDate: Date;
+  endDate: Date;
+  startDateLabel: string;
+  endDateLabel: string;
+  timezone: string;
+  label: string;
+};
+
+function parseApolloInsightRequest(prompt: string): ApolloInsightRequest | null {
+  if (!isApolloActivityPrompt(prompt)) {
+    return null;
+  }
+
+  const lower = prompt.toLowerCase();
+  const dateRange = parseActivityDateRange(prompt);
+
+  if (/\b(summarize|summary|list|show|review|analy[sz]e|follow up|follow-up|good leads|hot leads)\b/.test(lower) && /\brepl/.test(lower)) {
+    return {
+      mode: "FOLLOW_UP_REPLIES",
+      metrics: ["REPLIES"],
+      kinds: ["REPLY"],
+      requiresRep: false,
+      ...dateRange
+    };
+  }
+
+  const metrics = new Set<ApolloMetric>();
+  const kinds = new Set<ApolloActivityKind>();
+
+  if (/\b(connected calls?|answered calls?|completed calls?|spoke|talked)\b/.test(lower)) {
+    metrics.add("CONNECTED_CALLS");
+    kinds.add("CONNECTED_CALL");
+  } else if (/\bcalls?|dials?|dialed|cold calls?\b/.test(lower)) {
+    metrics.add("CALLS");
+    kinds.add("CALL");
+    kinds.add("CONNECTED_CALL");
+  }
+
+  if (/\b(emails? sent|sent emails?|outbound emails?|mail sent)\b/.test(lower)) {
+    metrics.add("EMAILS_SENT");
+    kinds.add("EMAIL_SENT");
+  }
+
+  if (/\b(replies|reply|responses|responded|positive replies|email replies)\b/.test(lower)) {
+    metrics.add("REPLIES");
+    kinds.add("REPLY");
+  }
+
+  if (/\b(new leads?|leads? added|new contacts?|contacts? added|added today)\b/.test(lower)) {
+    metrics.add("NEW_LEADS");
+    kinds.add("LEAD_CREATED");
+  }
+
+  if (metrics.size === 0 && /\bapollo\b/.test(lower)) {
+    metrics.add("CALLS");
+    metrics.add("CONNECTED_CALLS");
+    metrics.add("EMAILS_SENT");
+    metrics.add("REPLIES");
+    metrics.add("NEW_LEADS");
+    kinds.add("CALL");
+    kinds.add("CONNECTED_CALL");
+    kinds.add("EMAIL_SENT");
+    kinds.add("REPLY");
+    kinds.add("LEAD_CREATED");
+  }
+
+  if (metrics.size === 0) {
+    return null;
+  }
+
+  return {
+    mode: "METRICS",
+    metrics: [...metrics],
+    kinds: [...kinds],
+    requiresRep: /\b(rep|salesperson|user)\b/i.test(prompt) && !metrics.has("NEW_LEADS"),
+    ...dateRange
+  };
+}
+
+async function buildApolloReplyFollowUpAnswer(
+  context: AuthenticatedContext,
+  request: ApolloInsightRequest,
+  rep: ApolloRepMappingEntry | null
+): Promise<AssistantApolloActivityResponse> {
+  const contacts = await prisma.contact.findMany({
+    where: {
+      tenantId: context.tenantId,
+      source: ContactSource.APOLLO,
+      assignedRep: rep ? rep.sequenceOwnerName : undefined,
+      lastReplyAt: {
+        gte: request.startDate,
+        lte: request.endDate
+      },
+      replyStatus: {
+        in: [ReplyStatus.REPLIED, ReplyStatus.POSITIVE, ReplyStatus.MEETING_BOOKED]
+      }
+    },
+    orderBy: [{ replyStatus: "desc" }, { contactScore: "desc" }, { lastReplyAt: "desc" }],
+    take: 12,
+    select: {
+      id: true,
+      fullName: true,
+      title: true,
+      email: true,
+      contactScore: true,
+      contactTier: true,
+      replyStatus: true,
+      sequenceStatus: true,
+      lastReplyAt: true,
+      selectedSequenceName: true,
+      assignedRep: true,
+      company: {
+        select: {
+          id: true,
+          name: true,
+          priorityScore: true,
+          domain: true
+        }
+      }
+    }
+  });
+
+  const scope = rep ? rep.sequenceOwnerName : "all Apollo reps";
+  if (contacts.length === 0) {
+    return {
+      answer: `I found no Apollo replies for ${scope} ${formatDateRange(request)} in Newl's synced contact data.`,
+      sources: [],
+      metadata: {
+        apolloActivityHandled: true,
+        complete: true,
+        replyFollowUpCount: 0
+      }
+    };
+  }
+
+  const strongest = [...contacts].sort((left, right) => scoreReplyLead(right) - scoreReplyLead(left)).slice(0, 6);
+  const answer = [
+    `Apollo replies for ${scope} ${formatDateRange(request)}: ${contacts.length} synced replied contact(s).`,
+    "Best follow-up leads:",
+    ...strongest.map(
+      (contact, index) =>
+        `${index + 1}. ${contact.company.name} - ${contact.fullName}${contact.title ? `, ${contact.title}` : ""} (${formatEnum(contact.replyStatus)}, score ${scoreReplyLead(contact)}). ${buildFollowUpReason(contact)}`
+    )
+  ].join("\n");
+
+  return {
+    answer,
+    sources: strongest.map((contact) => ({
+      sourceKind: AssistantSourceKind.CONTACT,
+      sourceId: contact.id,
+      title: `${contact.fullName} at ${contact.company.name}`,
+      excerpt: `${formatEnum(contact.replyStatus)} reply${contact.lastReplyAt ? ` on ${contact.lastReplyAt.toISOString().slice(0, 10)}` : ""}. ${buildFollowUpReason(contact)}`,
+      metadata: {
+        provider: IntegrationProvider.APOLLO,
+        companyId: contact.company.id,
+        companyName: contact.company.name,
+        replyStatus: contact.replyStatus,
+        contactScore: contact.contactScore,
+        companyPriorityScore: contact.company.priorityScore,
+        assignedRep: contact.assignedRep
+      }
+    })),
+    metadata: {
+      apolloActivityHandled: true,
+      complete: true,
+      replyFollowUpCount: contacts.length,
+      startDateLabel: request.startDateLabel,
+      endDateLabel: request.endDateLabel
+    }
+  };
+}
+
+async function buildLocalApolloMetricSummary(
+  context: AuthenticatedContext,
+  request: ApolloInsightRequest,
+  rep: ApolloRepMappingEntry | null
+) {
+  const [newLeadCount, replyCount, topNewLeads] = await Promise.all([
+    request.metrics.includes("NEW_LEADS")
+      ? prisma.contact.count({
+          where: {
+            tenantId: context.tenantId,
+            source: ContactSource.APOLLO,
+            assignedRep: rep ? rep.sequenceOwnerName : undefined,
+            createdAt: {
+              gte: request.startDate,
+              lte: request.endDate
+            }
+          }
+        })
+      : Promise.resolve(0),
+    request.metrics.includes("REPLIES")
+      ? prisma.contact.count({
+          where: {
+            tenantId: context.tenantId,
+            source: ContactSource.APOLLO,
+            assignedRep: rep ? rep.sequenceOwnerName : undefined,
+            lastReplyAt: {
+              gte: request.startDate,
+              lte: request.endDate
+            },
+            replyStatus: {
+              not: ReplyStatus.NO_REPLY
+            }
+          }
+        })
+      : Promise.resolve(0),
+    request.metrics.includes("NEW_LEADS")
+      ? prisma.contact.findMany({
+          where: {
+            tenantId: context.tenantId,
+            source: ContactSource.APOLLO,
+            assignedRep: rep ? rep.sequenceOwnerName : undefined,
+            createdAt: {
+              gte: request.startDate,
+              lte: request.endDate
+            }
+          },
+          orderBy: {
+            createdAt: "desc"
+          },
+          take: 5,
+          select: {
+            fullName: true,
+            company: {
+              select: {
+                name: true
+              }
+            }
+          }
+        })
+      : Promise.resolve([])
+  ]);
+
+  return {
+    newLeadCount,
+    replyCount,
+    topNewLeads: topNewLeads.map((lead) => ({
+      fullName: lead.fullName,
+      companyName: lead.company.name
+    }))
+  };
+}
+
 function isApolloActivityPrompt(prompt: string) {
-  return /\b(apollo|call|calls|called|dial|dials|dialed|cold call|activity|activities)\b/i.test(prompt);
+  return /\b(apollo|call|calls|called|dial|dials|dialed|cold call|activity|activities|replies|reply|emails? sent|new leads?|leads? added|follow up|follow-up)\b/i.test(prompt);
 }
 
 async function getActiveApolloRepMappings(tenantId: string) {
@@ -254,25 +541,142 @@ function matchApolloRep(prompt: string, reps: ApolloRepMappingEntry[]): RepMatch
   };
 }
 
-function parseActivityDate(prompt: string) {
+function matchOptionalApolloRep(prompt: string, reps: ApolloRepMappingEntry[]): RepMatch | { status: "matched"; rep: null } {
+  const match = matchApolloRep(prompt, reps);
+  return match.status === "missing" ? { status: "matched", rep: null } : match;
+}
+
+function parseActivityDateRange(prompt: string) {
   const timezone = DEFAULT_BUSINESS_TIMEZONE;
-  const date = new Date();
+  const now = new Date();
   const lower = prompt.toLowerCase();
+  const daysMatch = lower.match(/\blast\s+(\d{1,3})\s+days?\b/);
+
+  if (daysMatch) {
+    const days = Math.max(1, Number.parseInt(daysMatch[1], 10));
+    const startDate = startOfDay(addDays(now, -(days - 1)));
+    const endDate = endOfDay(now);
+
+    return {
+      startDate,
+      endDate,
+      startDateLabel: formatDateLabel(startDate, timezone),
+      endDateLabel: formatDateLabel(endDate, timezone),
+      timezone,
+      label: `in the last ${days} days`
+    };
+  }
 
   if (/\byesterday\b/.test(lower)) {
-    date.setDate(date.getDate() - 1);
+    const date = addDays(now, -1);
+    const startDate = startOfDay(date);
+    const endDate = endOfDay(date);
+
     return {
-      date,
+      startDate,
+      endDate,
+      startDateLabel: formatDateLabel(startDate, timezone),
+      endDateLabel: formatDateLabel(endDate, timezone),
       timezone,
       label: "yesterday"
     };
   }
 
+  const startDate = startOfDay(now);
+  const endDate = endOfDay(now);
+
   return {
-    date,
+    startDate,
+    endDate,
+    startDateLabel: formatDateLabel(startDate, timezone),
+    endDateLabel: formatDateLabel(endDate, timezone),
     timezone,
     label: "today"
   };
+}
+
+function formatDateRange(request: ApolloInsightRequest) {
+  if (request.startDateLabel === request.endDateLabel) {
+    return `${request.label} (${request.startDateLabel}, ${request.timezone})`;
+  }
+
+  return `${request.label} (${request.startDateLabel} to ${request.endDateLabel}, ${request.timezone})`;
+}
+
+function addDays(date: Date, days: number) {
+  const copy = new Date(date);
+  copy.setDate(copy.getDate() + days);
+  return copy;
+}
+
+function startOfDay(date: Date) {
+  const copy = new Date(date);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+}
+
+function endOfDay(date: Date) {
+  const copy = new Date(date);
+  copy.setHours(23, 59, 59, 999);
+  return copy;
+}
+
+function formatDateLabel(date: Date, timezone: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  return year && month && day ? `${year}-${month}-${day}` : date.toISOString().slice(0, 10);
+}
+
+function scoreReplyLead(contact: {
+  contactScore: number;
+  replyStatus: ReplyStatus;
+  sequenceStatus: SequenceStatus;
+  company: { priorityScore: number };
+}) {
+  let score = contact.contactScore + contact.company.priorityScore;
+
+  if (contact.replyStatus === ReplyStatus.MEETING_BOOKED) score += 60;
+  if (contact.replyStatus === ReplyStatus.POSITIVE) score += 45;
+  if (contact.replyStatus === ReplyStatus.REPLIED) score += 20;
+  if (contact.sequenceStatus === SequenceStatus.REPLIED) score += 10;
+
+  return score;
+}
+
+function buildFollowUpReason(contact: {
+  contactScore: number;
+  contactTier: string;
+  replyStatus: ReplyStatus;
+  sequenceStatus: SequenceStatus;
+  selectedSequenceName: string | null;
+  company: { priorityScore: number };
+}) {
+  const reasons = [
+    contact.replyStatus === ReplyStatus.MEETING_BOOKED ? "meeting booked" : null,
+    contact.replyStatus === ReplyStatus.POSITIVE ? "positive reply" : null,
+    contact.replyStatus === ReplyStatus.REPLIED ? "replied" : null,
+    contact.company.priorityScore >= 70 ? `high-priority company ${contact.company.priorityScore}` : null,
+    contact.contactScore >= 70 ? `strong contact score ${contact.contactScore}` : null,
+    contact.contactTier !== "UNRANKED" ? formatEnum(contact.contactTier) : null,
+    contact.selectedSequenceName ? `sequence ${contact.selectedSequenceName}` : null
+  ].filter((reason): reason is string => Boolean(reason));
+
+  return reasons.length > 0 ? reasons.join("; ") : "Reply is synced from Apollo and should be reviewed.";
+}
+
+function formatEnum(value: string) {
+  return value
+    .toLowerCase()
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
 }
 
 function formatDuration(totalSeconds: number) {
