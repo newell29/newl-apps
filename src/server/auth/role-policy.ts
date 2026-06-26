@@ -10,19 +10,28 @@ export const ALL_MODULES: ModuleKey[] = Object.values(ModuleKey);
 export const DEFAULT_ROLE_MATRIX: Record<PlatformRole, RolePolicy> = {
   [PlatformRole.ADMIN]: { modules: "ALL", canMutate: true },
   [PlatformRole.MANAGER]: { modules: "ALL", canMutate: true },
-  [PlatformRole.SALES]: { modules: [ModuleKey.ASSISTANT, ModuleKey.LEAD_GEN], canMutate: true },
+  [PlatformRole.SALES]: {
+    modules: [ModuleKey.ASSISTANT, ModuleKey.LEAD_GEN, ModuleKey.CUSTOMER_CASHFLOW],
+    canMutate: true
+  },
   [PlatformRole.OPERATIONS]: {
     modules: [
       ModuleKey.ASSISTANT,
       ModuleKey.LEAD_GEN,
       ModuleKey.UPS_TOOLS,
       ModuleKey.LTL_RATE_PORTAL,
-      ModuleKey.TRANSIT_LOOKUP
+      ModuleKey.TRANSIT_LOOKUP,
+      ModuleKey.CUSTOMER_CASHFLOW
     ],
     canMutate: true
   },
   [PlatformRole.FINANCE]: {
-    modules: [ModuleKey.ASSISTANT, ModuleKey.INVOICE_VERIFICATION, ModuleKey.QUICKBOOKS_POSTING],
+    modules: [
+      ModuleKey.ASSISTANT,
+      ModuleKey.INVOICE_VERIFICATION,
+      ModuleKey.QUICKBOOKS_POSTING,
+      ModuleKey.CUSTOMER_CASHFLOW
+    ],
     canMutate: true
   },
   [PlatformRole.READ_ONLY]: { modules: "ALL", canMutate: false }

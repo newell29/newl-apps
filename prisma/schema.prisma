@@ -24,6 +24,7 @@ enum ModuleKey {
   TRANSIT_LOOKUP
   INVOICE_VERIFICATION
   QUICKBOOKS_POSTING
+  CUSTOMER_CASHFLOW
 }
 
 enum IntegrationProvider {
@@ -179,6 +180,119 @@ enum AssistantMemoryKind {
   TENANT_FACT
 }
 
+enum CashflowCustomerTier {
+  A
+  B
+  C
+  D
+  REVIEW
+}
+
+enum CashflowFileStatus {
+  NO_VENDOR_COST_NO_REVENUE
+  VENDOR_COST_RECEIVED_NOT_CUSTOMER_BILLED
+  CUSTOMER_BILLED_NOT_COLLECTED
+  VENDOR_PAID_CUSTOMER_NOT_COLLECTED
+  CUSTOMER_COLLECTED_VENDOR_UNPAID
+  FILE_CLOSED
+  MARGIN_EXCEPTION
+  BILLING_BLOCKED
+  NEEDS_ACCOUNTING_REVIEW
+}
+
+enum CashflowInvoiceStatus {
+  DRAFT
+  OPEN
+  PARTIAL
+  PAID
+  OVERDUE
+  DISPUTED
+  VOID
+}
+
+enum CashflowVendorBillStatus {
+  RECEIVED
+  APPROVED
+  PAID
+  PARTIAL
+  DISPUTED
+  VOID
+}
+
+enum CashflowRiskTier {
+  A
+  B
+  C
+  D
+  REVIEW
+}
+
+enum CashflowPriority {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum CashflowBillingTrigger {
+  PORT_ARRIVAL
+  CONTAINER_AVAILABILITY
+  DELIVERY
+  WEEKLY_BILLING
+  MONTH_END_BILLING
+  MANUAL
+  CUSTOMER_SPECIFIC_RULE
+}
+
+enum CashflowFollowUpStatus {
+  OPEN
+  CONTACTED
+  DISPUTED
+  PROMISED_PAYMENT
+  ESCALATED
+  CLOSED
+}
+
+enum CashflowAlertStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+enum CashflowAlertType {
+  VENDOR_COST_NOT_BILLED
+  DELIVERED_NOT_BILLED
+  CREDIT_LIMIT_WARNING
+  CREDIT_LIMIT_BREACH
+  INVOICE_OVERDUE_15
+  INVOICE_OVERDUE_30
+  INVOICE_OVERDUE_45
+  LOW_MARGIN_FILE
+  NEGATIVE_MARGIN_FILE
+  SLOW_COLLECTIONS
+  MISSING_MAPPING
+  EXPOSURE_INCREASE
+}
+
+enum CashflowAccountingLineKind {
+  CUSTOMER_REVENUE
+  VENDOR_COST
+  OTHER
+}
+
+enum CashflowLegalEntity {
+  NEWL_WORLDWIDE
+  NEWL_USA
+}
+
+enum CashflowBusinessLine {
+  OCEAN
+  AIR
+  TRUCKING
+  WAREHOUSING
+  OTHER
+}
+
 model Tenant {
   id        String   @id @default(cuid())
   name      String
@@ -186,31 +300,41 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships            Membership[]
-  moduleAccess           TenantModuleAccess[]
-  rolePolicies           TenantRolePolicy[]
-  roleModuleAccess       TenantRoleModuleAccess[]
-  integrationCredentials IntegrationCredential[]
-  auditLogs              AuditLog[]
-  jobRuns                AutomationJobRun[]
-  companies              Company[]
-  importRecords          TradeMiningImportRecord[]
-  searchProfiles         TradeMiningSearchProfile[]
-  tradeMiningScoringConfig TradeMiningScoringConfig?
-  contacts               Contact[]
-  leads                  Lead[]
-  contactOutreachDrafts  ContactOutreachDraft[]
-  apolloCompanyMatches   ApolloCompanyMatch[]
-  ltlBatchQuoteLanes     LtlBatchQuoteLane[]
-  assistantThreads       AssistantChatThread[]
-  assistantMessages      AssistantChatMessage[]
-  assistantRuns          AssistantRun[]
-  assistantRetrievedSources AssistantRetrievedSource[]
+  memberships                 Membership[]
+  moduleAccess                TenantModuleAccess[]
+  rolePolicies                TenantRolePolicy[]
+  roleModuleAccess            TenantRoleModuleAccess[]
+  integrationCredentials      IntegrationCredential[]
+  auditLogs                   AuditLog[]
+  jobRuns                     AutomationJobRun[]
+  companies                   Company[]
+  importRecords               TradeMiningImportRecord[]
+  searchProfiles              TradeMiningSearchProfile[]
+  tradeMiningScoringConfig    TradeMiningScoringConfig?
+  contacts                    Contact[]
+  leads                       Lead[]
+  contactOutreachDrafts       ContactOutreachDraft[]
+  apolloCompanyMatches        ApolloCompanyMatch[]
+  ltlBatchQuoteLanes          LtlBatchQuoteLane[]
+  assistantThreads            AssistantChatThread[]
+  assistantMessages           AssistantChatMessage[]
+  assistantRuns               AssistantRun[]
+  assistantRetrievedSources   AssistantRetrievedSource[]
   assistantKnowledgeDocuments AssistantKnowledgeDocument[]
-  assistantKnowledgeChunks AssistantKnowledgeChunk[]
-  assistantMemories      AssistantMemory[]
-  assistantAutomations   AssistantAutomation[]
-  assistantAutomationRuns AssistantAutomationRun[]
+  assistantKnowledgeChunks    AssistantKnowledgeChunk[]
+  assistantMemories           AssistantMemory[]
+  assistantAutomations        AssistantAutomation[]
+  assistantAutomationRuns     AssistantAutomationRun[]
+  cashflowCustomers           CashflowCustomer[]
+  cashflowCustomerAliases     CashflowCustomerAlias[]
+  cashflowFiles               CashflowFile[]
+  cashflowCustomerInvoices    CashflowCustomerInvoice[]
+  cashflowVendorBills         CashflowVendorBill[]
+  cashflowSnapshots           CashflowCustomerSnapshot[]
+  cashflowAlerts              CashflowAlert[]
+  cashflowFollowUps           CashflowFollowUp[]
+  cashflowAccountingLines     CashflowAccountingLine[]
+  cashflowSettings            CashflowSettings?
 }
 
 model User {
@@ -225,12 +349,12 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  memberships Membership[]
-  accounts    Account[]
-  sessions    Session[]
-  assistantThreads AssistantChatThread[]
-  assistantRuns    AssistantRun[]
-  assistantAutomations AssistantAutomation[]
+  memberships             Membership[]
+  accounts                Account[]
+  sessions                Session[]
+  assistantThreads        AssistantChatThread[]
+  assistantRuns           AssistantRun[]
+  assistantAutomations    AssistantAutomation[]
   assistantAutomationRuns AssistantAutomationRun[]
 }
 
@@ -403,20 +527,20 @@ model AutomationJobRun {
 }
 
 model LtlBatchQuoteLane {
-  id               String    @id @default(cuid())
-  tenantId         String
-  jobRunId         String
-  laneIndex        Int
+  id                String   @id @default(cuid())
+  tenantId          String
+  jobRunId          String
+  laneIndex         Int
   customerReference String
-  quoteCount       Int       @default(0)
-  errorCount       Int       @default(0)
-  requestJson      Json
-  quotesJson       Json?
-  errorsJson       Json?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  quoteCount        Int      @default(0)
+  errorCount        Int      @default(0)
+  requestJson       Json
+  quotesJson        Json?
+  errorsJson        Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   jobRun AutomationJobRun @relation(fields: [jobRunId], references: [id], onDelete: Cascade)
 
   @@unique([jobRunId, laneIndex])
@@ -445,12 +569,14 @@ model Company {
   createdAt                DateTime        @default(now())
   updatedAt                DateTime        @updatedAt
 
-  tenant                Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  importRecords         TradeMiningImportRecord[]
-  contacts              Contact[]
-  leads                 Lead[]
-  contactOutreachDrafts ContactOutreachDraft[]
-  apolloCompanyMatches  ApolloCompanyMatch[]
+  tenant                  Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  importRecords           TradeMiningImportRecord[]
+  contacts                Contact[]
+  leads                   Lead[]
+  contactOutreachDrafts   ContactOutreachDraft[]
+  apolloCompanyMatches    ApolloCompanyMatch[]
+  cashflowCustomers       CashflowCustomer[]
+  cashflowCustomerAliases CashflowCustomerAlias[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, normalizedName])
@@ -493,32 +619,32 @@ model ApolloCompanyMatch {
 }
 
 model TradeMiningSearchProfile {
-  id                 String    @id @default(cuid())
-  tenantId           String
-  name               String
-  description        String?
-  enabled            Boolean   @default(true)
-  contactCadenceConfig Json?
-  destinationMarkets Json
-  destinationPorts   Json?
-  originPorts        Json?
-  shipFromPorts      Json?
-  originCountries    Json?
-  productKeywords    Json?
-  hsCodes            Json?
+  id                          String    @id @default(cuid())
+  tenantId                    String
+  name                        String
+  description                 String?
+  enabled                     Boolean   @default(true)
+  contactCadenceConfig        Json?
+  destinationMarkets          Json
+  destinationPorts            Json?
+  originPorts                 Json?
+  shipFromPorts               Json?
+  originCountries             Json?
+  productKeywords             Json?
+  hsCodes                     Json?
   allowedCompanyIdentityRoles Json?
-  excludedCompanyKeywords Json?
-  lookbackWindowDays Int       @default(90)
-  minShipmentCount   Int       @default(1)
-  minShipmentVolume  Decimal?  @db.Decimal(12, 2)
-  scheduleFrequency  String    @default("daily")
-  scheduleTimezone   String    @default("America/Toronto")
-  scheduleMetadata   Json?
-  priorityWeight     Int       @default(50)
-  lastRunAt          DateTime?
-  lastRunStatus      String?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  excludedCompanyKeywords     Json?
+  lookbackWindowDays          Int       @default(90)
+  minShipmentCount            Int       @default(1)
+  minShipmentVolume           Decimal?  @db.Decimal(12, 2)
+  scheduleFrequency           String    @default("daily")
+  scheduleTimezone            String    @default("America/Toronto")
+  scheduleMetadata            Json?
+  priorityWeight              Int       @default(50)
+  lastRunAt                   DateTime?
+  lastRunStatus               String?
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -529,56 +655,56 @@ model TradeMiningSearchProfile {
 }
 
 model TradeMiningScoringConfig {
-  id                               String    @id @default(cuid())
-  tenantId                         String    @unique
-  recentWindowDays                 Int       @default(30)
-  comparisonWindowDays             Int       @default(30)
-  lookbackWindowDays               Int       @default(90)
-  momentumWeight                   Int       @default(30)
-  marketFitWeight                  Int       @default(20)
-  industryFitWeight                Int       @default(15)
-  companySizeWeight                Int       @default(15)
-  roleWeight                       Int       @default(10)
-  confidenceWeight                 Int       @default(5)
-  workflowWeight                   Int       @default(5)
-  preferredOriginCountries         Json?
-  penalizedOriginCountries         Json?
-  preferredOriginPorts             Json?
-  penalizedOriginPorts             Json?
-  preferredDestinationMarkets      Json?
-  penalizedDestinationMarkets      Json?
-  preferredIndustryKeywords        Json?
-  penalizedIndustryKeywords        Json?
-  preferredHsCodePrefixes          Json?
-  penalizedHsCodePrefixes          Json?
-  oversizeTeuThreshold             Decimal?  @db.Decimal(12, 2)
+  id                                String   @id @default(cuid())
+  tenantId                          String   @unique
+  recentWindowDays                  Int      @default(30)
+  comparisonWindowDays              Int      @default(30)
+  lookbackWindowDays                Int      @default(90)
+  momentumWeight                    Int      @default(30)
+  marketFitWeight                   Int      @default(20)
+  industryFitWeight                 Int      @default(15)
+  companySizeWeight                 Int      @default(15)
+  roleWeight                        Int      @default(10)
+  confidenceWeight                  Int      @default(5)
+  workflowWeight                    Int      @default(5)
+  preferredOriginCountries          Json?
+  penalizedOriginCountries          Json?
+  preferredOriginPorts              Json?
+  penalizedOriginPorts              Json?
+  preferredDestinationMarkets       Json?
+  penalizedDestinationMarkets       Json?
+  preferredIndustryKeywords         Json?
+  penalizedIndustryKeywords         Json?
+  preferredHsCodePrefixes           Json?
+  penalizedHsCodePrefixes           Json?
+  oversizeTeuThreshold              Decimal? @db.Decimal(12, 2)
   oversizeShipmentCount30dThreshold Int?
-  oversizePenalty                  Int       @default(10)
-  midMarketTeuMin                  Decimal?  @db.Decimal(12, 2)
-  midMarketTeuMax                  Decimal?  @db.Decimal(12, 2)
-  midMarketBoost                   Int       @default(6)
-  contactDecisionMakerWeight       Int       @default(20)
-  contactManagerWeight             Int       @default(12)
-  contactLogisticsDepartmentWeight Int       @default(15)
-  contactWeakFunctionPenalty       Int       @default(6)
-  contactCompanyContextWeight      Int       @default(15)
-  contactEmailWeight               Int       @default(6)
-  contactLinkedinWeight            Int       @default(4)
-  contactPhoneWeight               Int       @default(2)
-  contactPrimaryContactBoost       Int       @default(6)
-  contactApprovedStatusBoost       Int       @default(3)
-  contactReviewingStatusBoost      Int       @default(2)
-  contactTier1Threshold            Int       @default(78)
-  contactTier2Threshold            Int       @default(58)
-  contactTier3Threshold            Int       @default(36)
-  preferredContactTitleKeywords    Json?
-  penalizedContactTitleKeywords    Json?
-  preferredContactDepartments      Json?
-  penalizedContactDepartments      Json?
-  aiClassificationEnabled          Boolean   @default(false)
-  aiModel                          String?
-  createdAt                        DateTime  @default(now())
-  updatedAt                        DateTime  @updatedAt
+  oversizePenalty                   Int      @default(10)
+  midMarketTeuMin                   Decimal? @db.Decimal(12, 2)
+  midMarketTeuMax                   Decimal? @db.Decimal(12, 2)
+  midMarketBoost                    Int      @default(6)
+  contactDecisionMakerWeight        Int      @default(20)
+  contactManagerWeight              Int      @default(12)
+  contactLogisticsDepartmentWeight  Int      @default(15)
+  contactWeakFunctionPenalty        Int      @default(6)
+  contactCompanyContextWeight       Int      @default(15)
+  contactEmailWeight                Int      @default(6)
+  contactLinkedinWeight             Int      @default(4)
+  contactPhoneWeight                Int      @default(2)
+  contactPrimaryContactBoost        Int      @default(6)
+  contactApprovedStatusBoost        Int      @default(3)
+  contactReviewingStatusBoost       Int      @default(2)
+  contactTier1Threshold             Int      @default(78)
+  contactTier2Threshold             Int      @default(58)
+  contactTier3Threshold             Int      @default(36)
+  preferredContactTitleKeywords     Json?
+  penalizedContactTitleKeywords     Json?
+  preferredContactDepartments       Json?
+  penalizedContactDepartments       Json?
+  aiClassificationEnabled           Boolean  @default(false)
+  aiModel                           String?
+  createdAt                         DateTime @default(now())
+  updatedAt                         DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -647,10 +773,12 @@ model Contact {
   createdAt                    DateTime       @default(now())
   updatedAt                    DateTime       @updatedAt
 
-  tenant         Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  company        Company                @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
-  leads          Lead[]
-  outreachDrafts ContactOutreachDraft[]
+  tenant                       Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company                      Company                @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  leads                        Lead[]
+  outreachDrafts               ContactOutreachDraft[]
+  salesCashflowCustomers       CashflowCustomer[]     @relation("CashflowSalesContact")
+  collectionsCashflowCustomers CashflowCustomer[]     @relation("CashflowCollectionsContact")
 
   @@unique([tenantId, id])
   @@unique([tenantId, companyId, id])
@@ -730,14 +858,365 @@ model Lead {
   @@index([tenantId, score])
 }
 
+model CashflowCustomer {
+  id                           String                 @id @default(cuid())
+  tenantId                     String
+  companyId                    String
+  legalEntity                  CashflowLegalEntity    @default(NEWL_WORLDWIDE)
+  businessLine                 CashflowBusinessLine   @default(OCEAN)
+  customerCode                 String?
+  customerName                 String
+  accountingNameVariants       Json?
+  customerTermsDays            Int                    @default(30)
+  creditLimit                  Decimal                @default(0) @db.Decimal(14, 2)
+  customerTier                 CashflowCustomerTier   @default(REVIEW)
+  alertThresholdPercent        Decimal                @default(80) @db.Decimal(8, 4)
+  billingTrigger               CashflowBillingTrigger @default(DELIVERY)
+  vendorPaymentTrigger         CashflowBillingTrigger @default(PORT_ARRIVAL)
+  requiresApprovalOverLimit    Boolean                @default(false)
+  assignedSalesRep             String?
+  assignedCollectionsOwner     String?
+  assignedSalesContactId       String?
+  assignedCollectionsContactId String?
+  active                       Boolean                @default(true)
+  notes                        String?
+  createdAt                    DateTime               @default(now())
+  updatedAt                    DateTime               @updatedAt
+
+  tenant                     Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company                    Company                    @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  assignedSalesContact       Contact?                   @relation("CashflowSalesContact", fields: [tenantId, companyId, assignedSalesContactId], references: [tenantId, companyId, id], onDelete: NoAction)
+  assignedCollectionsContact Contact?                   @relation("CashflowCollectionsContact", fields: [tenantId, companyId, assignedCollectionsContactId], references: [tenantId, companyId, id], onDelete: NoAction)
+  aliases                    CashflowCustomerAlias[]
+  files                      CashflowFile[]
+  invoices                   CashflowCustomerInvoice[]
+  vendorBills                CashflowVendorBill[]
+  snapshots                  CashflowCustomerSnapshot[]
+  alerts                     CashflowAlert[]
+  followUps                  CashflowFollowUp[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, companyId, legalEntity, businessLine])
+  @@index([tenantId, companyId])
+  @@index([tenantId, customerCode])
+  @@index([tenantId, legalEntity])
+  @@index([tenantId, businessLine])
+  @@index([tenantId, customerTier])
+  @@index([tenantId, active])
+  @@index([tenantId, assignedSalesRep])
+  @@index([tenantId, assignedCollectionsOwner])
+  @@index([tenantId, assignedSalesContactId])
+  @@index([tenantId, assignedCollectionsContactId])
+}
+
+model CashflowCustomerAlias {
+  id                   String              @id @default(cuid())
+  tenantId             String
+  customerId           String
+  companyId            String
+  legalEntity          CashflowLegalEntity @default(NEWL_WORLDWIDE)
+  sourceSystem         String              @default("QUICKBOOKS")
+  sourceCustomerId     String?
+  sourceCustomerName   String
+  normalizedSourceName String
+  sourceCurrency       String?
+  sourceAccountName    String?
+  sourceLabel          String?
+  rawJson              Json?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer CashflowCustomer @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  company  Company          @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, sourceSystem, legalEntity, normalizedSourceName, sourceCurrency])
+  @@index([tenantId, customerId])
+  @@index([tenantId, companyId])
+  @@index([tenantId, sourceSystem])
+  @@index([tenantId, sourceCustomerId])
+  @@index([tenantId, normalizedSourceName])
+}
+
+model CashflowFile {
+  id                  String               @id @default(cuid())
+  tenantId            String
+  legalEntity         CashflowLegalEntity  @default(NEWL_WORLDWIDE)
+  businessLine        CashflowBusinessLine @default(OCEAN)
+  fileNumber          String
+  customerId          String
+  shipmentType        String
+  fileStatus          CashflowFileStatus   @default(NO_VENDOR_COST_NO_REVENUE)
+  operationalStatus   String?
+  portArrivalDate     DateTime?
+  deliveryDate        DateTime?
+  customerInvoiceDate DateTime?
+  customerPaymentDate DateTime?
+  vendorInvoiceDate   DateTime?
+  vendorPaymentDate   DateTime?
+  estimatedRevenue    Decimal              @default(0) @db.Decimal(14, 2)
+  actualRevenue       Decimal              @default(0) @db.Decimal(14, 2)
+  vendorCost          Decimal              @default(0) @db.Decimal(14, 2)
+  grossProfit         Decimal              @default(0) @db.Decimal(14, 2)
+  grossMarginPercent  Decimal              @default(0) @db.Decimal(8, 4)
+  cashGapDays         Int?
+  exposureAmount      Decimal              @default(0) @db.Decimal(14, 2)
+  billingBlockReason  String?
+  assignedOwner       String?
+  notes               String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  tenant          Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer        CashflowCustomer          @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  invoices        CashflowCustomerInvoice[]
+  vendorBills     CashflowVendorBill[]
+  alerts          CashflowAlert[]
+  followUps       CashflowFollowUp[]
+  accountingLines CashflowAccountingLine[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, fileNumber])
+  @@index([tenantId, customerId])
+  @@index([tenantId, legalEntity])
+  @@index([tenantId, businessLine])
+  @@index([tenantId, fileStatus])
+  @@index([tenantId, shipmentType])
+  @@index([tenantId, portArrivalDate])
+  @@index([tenantId, deliveryDate])
+  @@index([tenantId, customerInvoiceDate])
+  @@index([tenantId, vendorInvoiceDate])
+  @@index([tenantId, assignedOwner])
+}
+
+model CashflowAccountingLine {
+  id                  String                     @id @default(cuid())
+  tenantId            String
+  legalEntity         CashflowLegalEntity        @default(NEWL_WORLDWIDE)
+  businessLine        CashflowBusinessLine       @default(OCEAN)
+  fileId              String?
+  fileNumber          String?
+  shipmentType        String?
+  lineKind            CashflowAccountingLineKind
+  qbTransactionId     String?
+  qbTransactionNumber String?
+  qbTransactionType   String?
+  transactionDate     DateTime?
+  name                String?
+  classFullName       String?
+  description         String?
+  accountName         String?
+  splitAccountName    String?
+  amount              Decimal                    @default(0) @db.Decimal(14, 2)
+  rawJson             Json?
+  importedAt          DateTime                   @default(now())
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  file   CashflowFile? @relation(fields: [tenantId, fileId], references: [tenantId, id], onDelete: NoAction)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, qbTransactionId, fileNumber, lineKind])
+  @@index([tenantId, fileNumber])
+  @@index([tenantId, legalEntity])
+  @@index([tenantId, businessLine])
+  @@index([tenantId, shipmentType])
+  @@index([tenantId, lineKind])
+  @@index([tenantId, qbTransactionType])
+  @@index([tenantId, transactionDate])
+  @@index([tenantId, fileId])
+}
+
+model CashflowCustomerInvoice {
+  id            String                @id @default(cuid())
+  tenantId      String
+  invoiceNumber String
+  customerId    String
+  fileId        String?
+  invoiceDate   DateTime
+  dueDate       DateTime?
+  invoiceAmount Decimal               @default(0) @db.Decimal(14, 2)
+  amountPaid    Decimal               @default(0) @db.Decimal(14, 2)
+  amountOpen    Decimal               @default(0) @db.Decimal(14, 2)
+  paymentDate   DateTime?
+  daysToCollect Int?
+  daysPastDue   Int?
+  invoiceStatus CashflowInvoiceStatus @default(OPEN)
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  tenant    Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer  CashflowCustomer   @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  file      CashflowFile?      @relation(fields: [tenantId, fileId], references: [tenantId, id], onDelete: NoAction)
+  alerts    CashflowAlert[]
+  followUps CashflowFollowUp[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, invoiceNumber])
+  @@index([tenantId, customerId])
+  @@index([tenantId, fileId])
+  @@index([tenantId, invoiceDate])
+  @@index([tenantId, dueDate])
+  @@index([tenantId, invoiceStatus])
+  @@index([tenantId, daysPastDue])
+}
+
+model CashflowVendorBill {
+  id               String                   @id @default(cuid())
+  tenantId         String
+  vendorName       String
+  customerId       String?
+  fileId           String?
+  fileNumber       String?
+  billDate         DateTime
+  dueDate          DateTime?
+  billAmount       Decimal                  @default(0) @db.Decimal(14, 2)
+  amountPaid       Decimal                  @default(0) @db.Decimal(14, 2)
+  paymentDate      DateTime?
+  vendorBillStatus CashflowVendorBillStatus @default(RECEIVED)
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  tenant   Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer CashflowCustomer? @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: NoAction)
+  file     CashflowFile?     @relation(fields: [tenantId, fileId], references: [tenantId, id], onDelete: NoAction)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, vendorName])
+  @@index([tenantId, customerId])
+  @@index([tenantId, fileId])
+  @@index([tenantId, fileNumber])
+  @@index([tenantId, billDate])
+  @@index([tenantId, vendorBillStatus])
+}
+
+model CashflowCustomerSnapshot {
+  id                          String           @id @default(cuid())
+  tenantId                    String
+  customerId                  String
+  periodStart                 DateTime
+  periodEnd                   DateTime
+  revenue                     Decimal          @default(0) @db.Decimal(14, 2)
+  vendorCost                  Decimal          @default(0) @db.Decimal(14, 2)
+  grossProfit                 Decimal          @default(0) @db.Decimal(14, 2)
+  grossMarginPercent          Decimal          @default(0) @db.Decimal(8, 4)
+  openAr                      Decimal          @default(0) @db.Decimal(14, 2)
+  overdueAr                   Decimal          @default(0) @db.Decimal(14, 2)
+  unbilledRevenue             Decimal          @default(0) @db.Decimal(14, 2)
+  vendorCostsNotBilled        Decimal          @default(0) @db.Decimal(14, 2)
+  vendorCostsPaidNotCollected Decimal          @default(0) @db.Decimal(14, 2)
+  activeShipmentExposure      Decimal          @default(0) @db.Decimal(14, 2)
+  totalCreditExposure         Decimal          @default(0) @db.Decimal(14, 2)
+  creditLimit                 Decimal          @default(0) @db.Decimal(14, 2)
+  availableCredit             Decimal          @default(0) @db.Decimal(14, 2)
+  percentCreditUsed           Decimal          @default(0) @db.Decimal(8, 4)
+  averageDaysToInvoice        Decimal?         @db.Decimal(8, 2)
+  averageDaysToCollect        Decimal?         @db.Decimal(8, 2)
+  averageCashGapDays          Decimal?         @db.Decimal(8, 2)
+  riskScore                   Int              @default(0)
+  riskTier                    CashflowRiskTier @default(REVIEW)
+  createdAt                   DateTime         @default(now())
+  updatedAt                   DateTime         @updatedAt
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer CashflowCustomer @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, customerId, periodStart, periodEnd])
+  @@index([tenantId, periodEnd])
+  @@index([tenantId, customerId])
+  @@index([tenantId, riskTier])
+  @@index([tenantId, totalCreditExposure])
+}
+
+model CashflowFollowUp {
+  id                  String                 @id @default(cuid())
+  tenantId            String
+  customerId          String
+  invoiceId           String?
+  fileId              String?
+  status              CashflowFollowUpStatus @default(OPEN)
+  note                String
+  nextFollowUpDate    DateTime?
+  promisedPaymentDate DateTime?
+  escalatedTo         String?
+  createdByUserId     String?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  tenant   Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer CashflowCustomer         @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  invoice  CashflowCustomerInvoice? @relation(fields: [tenantId, invoiceId], references: [tenantId, id], onDelete: NoAction)
+  file     CashflowFile?            @relation(fields: [tenantId, fileId], references: [tenantId, id], onDelete: NoAction)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, customerId, createdAt])
+  @@index([tenantId, invoiceId])
+  @@index([tenantId, fileId])
+  @@index([tenantId, status])
+  @@index([tenantId, nextFollowUpDate])
+}
+
+model CashflowAlert {
+  id         String              @id @default(cuid())
+  tenantId   String
+  customerId String?
+  fileId     String?
+  invoiceId  String?
+  alertType  CashflowAlertType
+  priority   CashflowPriority
+  status     CashflowAlertStatus @default(OPEN)
+  title      String
+  message    String
+  dueDate    DateTime?
+  resolvedAt DateTime?
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  tenant   Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer CashflowCustomer?        @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  file     CashflowFile?            @relation(fields: [tenantId, fileId], references: [tenantId, id], onDelete: Cascade)
+  invoice  CashflowCustomerInvoice? @relation(fields: [tenantId, invoiceId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, alertType])
+  @@index([tenantId, priority])
+  @@index([tenantId, status])
+  @@index([tenantId, customerId])
+  @@index([tenantId, fileId])
+  @@index([tenantId, invoiceId])
+  @@index([tenantId, dueDate])
+}
+
+model CashflowSettings {
+  id                               String                 @id @default(cuid())
+  tenantId                         String                 @unique
+  goodGrossMarginPercent           Decimal                @default(15) @db.Decimal(8, 4)
+  lowMarginWarningPercent          Decimal                @default(10) @db.Decimal(8, 4)
+  negativeMarginCriticalPercent    Decimal                @default(0) @db.Decimal(8, 4)
+  collectionWarningDaysBeyondTerms Int                    @default(10)
+  highExposureWarningPercent       Decimal                @default(80) @db.Decimal(8, 4)
+  creditBreachPercent              Decimal                @default(100) @db.Decimal(8, 4)
+  costNotBilledBusinessDays        Int                    @default(2)
+  deliveredNotBilledBusinessDays   Int                    @default(1)
+  defaultBillingTrigger            CashflowBillingTrigger @default(DELIVERY)
+  notes                            String?
+  createdAt                        DateTime               @default(now())
+  updatedAt                        DateTime               @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+}
+
 model AssistantChatThread {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   tenantId      String
   userId        String?
   title         String
-  status        String   @default("ACTIVE")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  status        String    @default("ACTIVE")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
   lastMessageAt DateTime?
 
   tenant   Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -768,23 +1247,23 @@ model AssistantChatMessage {
 }
 
 model AssistantRun {
-  id             String    @id @default(cuid())
-  tenantId       String
-  threadId       String?
-  messageId      String?
-  userId         String?
-  provider       String
-  model          String?
-  status         JobStatus
-  intent         String?
-  inputTokens    Int?
-  outputTokens   Int?
-  estimatedCost  Decimal?  @db.Decimal(12, 6)
-  metadata       Json?
-  errorMessage   String?
-  startedAt      DateTime  @default(now())
-  finishedAt     DateTime?
-  createdAt      DateTime  @default(now())
+  id            String    @id @default(cuid())
+  tenantId      String
+  threadId      String?
+  messageId     String?
+  userId        String?
+  provider      String
+  model         String?
+  status        JobStatus
+  intent        String?
+  inputTokens   Int?
+  outputTokens  Int?
+  estimatedCost Decimal?  @db.Decimal(12, 6)
+  metadata      Json?
+  errorMessage  String?
+  startedAt     DateTime  @default(now())
+  finishedAt    DateTime?
+  createdAt     DateTime  @default(now())
 
   tenant           Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   thread           AssistantChatThread?       @relation(fields: [tenantId, threadId], references: [tenantId, id], onDelete: Cascade)
@@ -890,7 +1369,7 @@ model AssistantMemory {
 }
 
 model AssistantAutomation {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
   tenantId          String
   userId            String
   name              String
@@ -898,15 +1377,15 @@ model AssistantAutomation {
   scheduleType      String
   scheduleTime      String
   scheduleTimezone  String
-  status            String   @default("ACTIVE")
+  status            String    @default("ACTIVE")
   lastRunAt         DateTime?
   nextRunAt         DateTime?
   lastResultSummary String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
   runs   AssistantAutomationRun[]
 
   @@unique([tenantId, id])

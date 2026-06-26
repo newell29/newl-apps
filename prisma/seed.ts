@@ -1,5 +1,14 @@
 import {
   ApolloStatus,
+  CashflowAlertType,
+  CashflowBillingTrigger,
+  CashflowCustomerTier,
+  CashflowFileStatus,
+  CashflowFollowUpStatus,
+  CashflowInvoiceStatus,
+  CashflowPriority,
+  CashflowVendorBillStatus,
+  CandidateStatus,
   ContactOutreachDraftSource,
   ContactOutreachDraftStatus,
   ContactSource,
@@ -40,6 +49,439 @@ type TradeMiningScoringSeedClient = PrismaClient & {
 // a real password here.
 const SEED_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "newl-dev-password";
 
+function normalizeCashflowSourceName(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/\b(usd|cad|cdn)\b/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+async function seedCashflowDemoData(tenantId: string, adminUserId: string) {
+  await prisma.cashflowSettings.upsert({
+    where: { tenantId },
+    update: {},
+    create: { tenantId }
+  });
+
+  const customers = [
+    {
+      id: `${tenantId}-cashflow-detroit-axle`,
+      canonicalCompanyName: "Detroit Axle",
+      normalizedCompanyName: "detroit-axle",
+      businessLine: "OCEAN" as const,
+      customerName: "Detroit Axle",
+      accountingNameVariants: ["Detroit Axle", "Detroit Axle LLC", "Detroit Axle Warehouse"],
+      aliases: ["Detroit Axle", "Detroit Axle LLC", "Detroit Axle - USD"],
+      customerTermsDays: 45,
+      creditLimit: 750000,
+      customerTier: CashflowCustomerTier.B,
+      alertThresholdPercent: 80,
+      billingTrigger: CashflowBillingTrigger.DELIVERY,
+      vendorPaymentTrigger: CashflowBillingTrigger.PORT_ARRIVAL,
+      requiresApprovalOverLimit: true,
+      assignedSalesRep: "Alex Newell",
+      assignedCollectionsOwner: "Finance Desk",
+      notes: "High-volume account: profitable but consumes working capital because freight is paid at port arrival while customer billing waits for delivery."
+    },
+    {
+      id: `${tenantId}-cashflow-atlantic-home`,
+      canonicalCompanyName: "Atlantic Home Imports",
+      normalizedCompanyName: "atlantic-home-imports",
+      businessLine: "TRUCKING" as const,
+      customerName: "Atlantic Home Imports",
+      accountingNameVariants: ["Atlantic Home Imports"],
+      aliases: ["Atlantic Home Imports", "Atlantic Home Imports USD"],
+      customerTermsDays: 30,
+      creditLimit: 250000,
+      customerTier: CashflowCustomerTier.A,
+      alertThresholdPercent: 80,
+      billingTrigger: CashflowBillingTrigger.DELIVERY,
+      vendorPaymentTrigger: CashflowBillingTrigger.DELIVERY,
+      requiresApprovalOverLimit: false,
+      assignedSalesRep: "Sales Desk",
+      assignedCollectionsOwner: "Finance Desk",
+      notes: "Healthy payment pattern in local sample data."
+    },
+    {
+      id: `${tenantId}-cashflow-mapping-review`,
+      canonicalCompanyName: "Unmatched Customer Review",
+      normalizedCompanyName: "unmatched-customer-review",
+      businessLine: "AIR" as const,
+      customerName: "Unmatched Customer Review",
+      accountingNameVariants: ["UNKNOWN CUSTOMER", "MISMATCHED QB NAME"],
+      aliases: ["UNKNOWN CUSTOMER", "MISMATCHED QB NAME"],
+      customerTermsDays: 30,
+      creditLimit: 100000,
+      customerTier: CashflowCustomerTier.REVIEW,
+      alertThresholdPercent: 80,
+      billingTrigger: CashflowBillingTrigger.MANUAL,
+      vendorPaymentTrigger: CashflowBillingTrigger.PORT_ARRIVAL,
+      requiresApprovalOverLimit: true,
+      assignedSalesRep: null,
+      assignedCollectionsOwner: "Finance Desk",
+      notes: "Sample data-cleanup bucket for unmatched accounting names or file numbers."
+    }
+  ];
+
+  for (const customer of customers) {
+    const company = await prisma.company.upsert({
+      where: {
+        tenantId_normalizedName: {
+          tenantId,
+          normalizedName: customer.normalizedCompanyName
+        }
+      },
+      update: {
+        name: customer.canonicalCompanyName,
+        source: "CASHFLOW_SEED"
+      },
+      create: {
+        tenantId,
+        name: customer.canonicalCompanyName,
+        normalizedName: customer.normalizedCompanyName,
+        source: "CASHFLOW_SEED",
+        candidateStatus: CandidateStatus.NEW
+      }
+    });
+    const cashflowCustomer = {
+      id: customer.id,
+      businessLine: customer.businessLine,
+      customerName: customer.customerName,
+      accountingNameVariants: customer.accountingNameVariants,
+      customerTermsDays: customer.customerTermsDays,
+      creditLimit: customer.creditLimit,
+      customerTier: customer.customerTier,
+      alertThresholdPercent: customer.alertThresholdPercent,
+      billingTrigger: customer.billingTrigger,
+      vendorPaymentTrigger: customer.vendorPaymentTrigger,
+      requiresApprovalOverLimit: customer.requiresApprovalOverLimit,
+      assignedSalesRep: customer.assignedSalesRep,
+      assignedCollectionsOwner: customer.assignedCollectionsOwner,
+      notes: customer.notes
+    };
+
+    await prisma.cashflowCustomer.upsert({
+      where: {
+        tenantId_id: {
+          tenantId,
+          id: customer.id
+        }
+      },
+      update: {
+        ...cashflowCustomer,
+        companyId: company.id
+      },
+      create: {
+        ...cashflowCustomer,
+        tenantId,
+        companyId: company.id
+      }
+    });
+
+    for (const alias of customer.aliases) {
+      await prisma.cashflowCustomerAlias.upsert({
+        where: {
+          tenantId_sourceSystem_legalEntity_normalizedSourceName_sourceCurrency: {
+            tenantId,
+            sourceSystem: "QUICKBOOKS",
+            legalEntity: "NEWL_WORLDWIDE",
+            normalizedSourceName: normalizeCashflowSourceName(alias),
+            sourceCurrency: alias.toUpperCase().includes("USD") ? "USD" : "CAD"
+          }
+        },
+        update: {
+          customerId: customer.id,
+          companyId: company.id,
+          sourceCustomerName: alias,
+          sourceLabel: alias
+        },
+        create: {
+          tenantId,
+          customerId: customer.id,
+          companyId: company.id,
+          legalEntity: "NEWL_WORLDWIDE",
+          sourceSystem: "QUICKBOOKS",
+          sourceCustomerName: alias,
+          normalizedSourceName: normalizeCashflowSourceName(alias),
+          sourceCurrency: alias.toUpperCase().includes("USD") ? "USD" : "CAD",
+          sourceLabel: alias
+        }
+      });
+    }
+  }
+
+  const files = [
+    {
+      id: `${tenantId}-cashflow-file-da-1001`,
+      customerId: `${tenantId}-cashflow-detroit-axle`,
+      businessLine: "OCEAN" as const,
+      fileNumber: "DA-1001",
+      shipmentType: "OI",
+      fileStatus: CashflowFileStatus.VENDOR_PAID_CUSTOMER_NOT_COLLECTED,
+      operationalStatus: "Delivered",
+      portArrivalDate: new Date("2026-05-03"),
+      deliveryDate: new Date("2026-05-11"),
+      customerInvoiceDate: new Date("2026-05-12"),
+      customerPaymentDate: null,
+      vendorInvoiceDate: new Date("2026-05-04"),
+      vendorPaymentDate: new Date("2026-05-05"),
+      estimatedRevenue: 62000,
+      actualRevenue: 64000,
+      vendorCost: 50500,
+      grossProfit: 13500,
+      grossMarginPercent: 21.09,
+      cashGapDays: null,
+      exposureAmount: 64000,
+      assignedOwner: "Finance Desk",
+      notes: "Vendor paid at port; customer invoice is open under 45-day terms."
+    },
+    {
+      id: `${tenantId}-cashflow-file-da-1002`,
+      customerId: `${tenantId}-cashflow-detroit-axle`,
+      businessLine: "OCEAN" as const,
+      fileNumber: "DA-1002",
+      shipmentType: "OI",
+      fileStatus: CashflowFileStatus.VENDOR_COST_RECEIVED_NOT_CUSTOMER_BILLED,
+      operationalStatus: "At port",
+      portArrivalDate: new Date("2026-06-17"),
+      deliveryDate: null,
+      customerInvoiceDate: null,
+      customerPaymentDate: null,
+      vendorInvoiceDate: new Date("2026-06-18"),
+      vendorPaymentDate: new Date("2026-06-19"),
+      estimatedRevenue: 78000,
+      actualRevenue: 0,
+      vendorCost: 61000,
+      grossProfit: 0,
+      grossMarginPercent: 0,
+      cashGapDays: null,
+      exposureAmount: 78000,
+      assignedOwner: "Operations Desk",
+      notes: "Cost received and paid before delivery billing trigger."
+    },
+    {
+      id: `${tenantId}-cashflow-file-ahi-2001`,
+      customerId: `${tenantId}-cashflow-atlantic-home`,
+      businessLine: "TRUCKING" as const,
+      fileNumber: "AHI-2001",
+      shipmentType: "TR",
+      fileStatus: CashflowFileStatus.FILE_CLOSED,
+      operationalStatus: "Closed",
+      portArrivalDate: new Date("2026-04-01"),
+      deliveryDate: new Date("2026-04-03"),
+      customerInvoiceDate: new Date("2026-04-04"),
+      customerPaymentDate: new Date("2026-04-29"),
+      vendorInvoiceDate: new Date("2026-04-03"),
+      vendorPaymentDate: new Date("2026-04-15"),
+      estimatedRevenue: 12500,
+      actualRevenue: 12500,
+      vendorCost: 9700,
+      grossProfit: 2800,
+      grossMarginPercent: 22.4,
+      cashGapDays: 14,
+      exposureAmount: 0,
+      assignedOwner: "Finance Desk",
+      notes: "Closed sample file."
+    },
+    {
+      id: `${tenantId}-cashflow-file-review-3001`,
+      customerId: `${tenantId}-cashflow-mapping-review`,
+      businessLine: "AIR" as const,
+      fileNumber: "PENDING-MAP-3001",
+      shipmentType: "AI",
+      fileStatus: CashflowFileStatus.NEEDS_ACCOUNTING_REVIEW,
+      operationalStatus: "Mapping review",
+      portArrivalDate: new Date("2026-06-10"),
+      deliveryDate: new Date("2026-06-12"),
+      customerInvoiceDate: null,
+      customerPaymentDate: null,
+      vendorInvoiceDate: new Date("2026-06-11"),
+      vendorPaymentDate: null,
+      estimatedRevenue: 14000,
+      actualRevenue: 0,
+      vendorCost: 11200,
+      grossProfit: 0,
+      grossMarginPercent: 0,
+      cashGapDays: null,
+      exposureAmount: 14000,
+      billingBlockReason: "Customer name/file number mismatch from accounting import.",
+      assignedOwner: "Finance Desk",
+      notes: "Intentional sample mapping exception."
+    }
+  ];
+
+  for (const file of files) {
+    await prisma.cashflowFile.upsert({
+      where: {
+        tenantId_id: {
+          tenantId,
+          id: file.id
+        }
+      },
+      update: file,
+      create: {
+        ...file,
+        tenantId
+      }
+    });
+  }
+
+  const invoices = [
+    {
+      id: `${tenantId}-cashflow-invoice-da-9001`,
+      customerId: `${tenantId}-cashflow-detroit-axle`,
+      fileId: `${tenantId}-cashflow-file-da-1001`,
+      invoiceNumber: "INV-DA-9001",
+      invoiceDate: new Date("2026-05-12"),
+      dueDate: new Date("2026-06-26"),
+      invoiceAmount: 64000,
+      amountPaid: 0,
+      amountOpen: 64000,
+      paymentDate: null,
+      daysToCollect: null,
+      daysPastDue: 0,
+      invoiceStatus: CashflowInvoiceStatus.OPEN
+    },
+    {
+      id: `${tenantId}-cashflow-invoice-da-9002`,
+      customerId: `${tenantId}-cashflow-detroit-axle`,
+      fileId: null,
+      invoiceNumber: "INV-DA-9002",
+      invoiceDate: new Date("2026-04-15"),
+      dueDate: new Date("2026-05-30"),
+      invoiceAmount: 115000,
+      amountPaid: 25000,
+      amountOpen: 90000,
+      paymentDate: null,
+      daysToCollect: null,
+      daysPastDue: 19,
+      invoiceStatus: CashflowInvoiceStatus.OVERDUE
+    },
+    {
+      id: `${tenantId}-cashflow-invoice-ahi-8001`,
+      customerId: `${tenantId}-cashflow-atlantic-home`,
+      fileId: `${tenantId}-cashflow-file-ahi-2001`,
+      invoiceNumber: "INV-AHI-8001",
+      invoiceDate: new Date("2026-04-04"),
+      dueDate: new Date("2026-05-04"),
+      invoiceAmount: 12500,
+      amountPaid: 12500,
+      amountOpen: 0,
+      paymentDate: new Date("2026-04-29"),
+      daysToCollect: 25,
+      daysPastDue: 0,
+      invoiceStatus: CashflowInvoiceStatus.PAID
+    }
+  ];
+
+  for (const invoice of invoices) {
+    await prisma.cashflowCustomerInvoice.upsert({
+      where: {
+        tenantId_id: {
+          tenantId,
+          id: invoice.id
+        }
+      },
+      update: invoice,
+      create: {
+        ...invoice,
+        tenantId
+      }
+    });
+  }
+
+  const vendorBills = [
+    {
+      id: `${tenantId}-cashflow-vendor-da-5001`,
+      vendorName: "Port Dray Carrier",
+      customerId: `${tenantId}-cashflow-detroit-axle`,
+      fileId: `${tenantId}-cashflow-file-da-1002`,
+      fileNumber: "DA-1002",
+      billDate: new Date("2026-06-18"),
+      dueDate: new Date("2026-06-19"),
+      billAmount: 61000,
+      amountPaid: 61000,
+      paymentDate: new Date("2026-06-19"),
+      vendorBillStatus: CashflowVendorBillStatus.PAID
+    },
+    {
+      id: `${tenantId}-cashflow-vendor-review-5002`,
+      vendorName: "Air Freight Vendor",
+      customerId: `${tenantId}-cashflow-mapping-review`,
+      fileId: `${tenantId}-cashflow-file-review-3001`,
+      fileNumber: "PENDING-MAP-3001",
+      billDate: new Date("2026-06-11"),
+      dueDate: new Date("2026-06-20"),
+      billAmount: 11200,
+      amountPaid: 0,
+      paymentDate: null,
+      vendorBillStatus: CashflowVendorBillStatus.RECEIVED
+    }
+  ];
+
+  for (const bill of vendorBills) {
+    await prisma.cashflowVendorBill.upsert({
+      where: {
+        tenantId_id: {
+          tenantId,
+          id: bill.id
+        }
+      },
+      update: bill,
+      create: {
+        ...bill,
+        tenantId
+      }
+    });
+  }
+
+  await prisma.cashflowAlert.upsert({
+    where: {
+      tenantId_id: {
+        tenantId,
+        id: `${tenantId}-cashflow-alert-da-cost-not-billed`
+      }
+    },
+    update: {
+      status: "OPEN"
+    },
+    create: {
+      id: `${tenantId}-cashflow-alert-da-cost-not-billed`,
+      tenantId,
+      customerId: `${tenantId}-cashflow-detroit-axle`,
+      fileId: `${tenantId}-cashflow-file-da-1002`,
+      alertType: CashflowAlertType.VENDOR_COST_NOT_BILLED,
+      priority: CashflowPriority.CRITICAL,
+      title: "Vendor cost paid before customer invoice",
+      message: "Detroit Axle file DA-1002 has vendor cost paid at port arrival and no customer invoice yet.",
+      status: "OPEN"
+    }
+  });
+
+  await prisma.cashflowFollowUp.upsert({
+    where: {
+      tenantId_id: {
+        tenantId,
+        id: `${tenantId}-cashflow-followup-da-9002`
+      }
+    },
+    update: {
+      note: "Sample follow-up: accounting should confirm payment timing and flag active shipment exposure."
+    },
+    create: {
+      id: `${tenantId}-cashflow-followup-da-9002`,
+      tenantId,
+      customerId: `${tenantId}-cashflow-detroit-axle`,
+      invoiceId: `${tenantId}-cashflow-invoice-da-9002`,
+      status: CashflowFollowUpStatus.CONTACTED,
+      note: "Sample follow-up: accounting should confirm payment timing and flag active shipment exposure.",
+      nextFollowUpDate: new Date("2026-06-29"),
+      createdByUserId: adminUserId
+    }
+  });
+}
+
 async function main() {
   const modules = [
     {
@@ -76,6 +518,11 @@ async function main() {
       key: ModuleKey.QUICKBOOKS_POSTING,
       name: "QuickBooks Posting",
       description: "Future QuickBooks posting workflow"
+    },
+    {
+      key: ModuleKey.CUSTOMER_CASHFLOW,
+      name: "Customer Cashflow",
+      description: "Customer cashflow, credit exposure, AR, and file billing work queues"
     }
   ];
 
@@ -166,6 +613,25 @@ async function main() {
     }
   });
 
+  const customerCashflowModule = await prisma.module.findUniqueOrThrow({
+    where: { key: ModuleKey.CUSTOMER_CASHFLOW }
+  });
+
+  await prisma.tenantModuleAccess.upsert({
+    where: {
+      tenantId_moduleId: {
+        tenantId: tenant.id,
+        moduleId: customerCashflowModule.id
+      }
+    },
+    update: { enabled: true },
+    create: {
+      tenantId: tenant.id,
+      moduleId: customerCashflowModule.id,
+      enabled: true
+    }
+  });
+
   await prisma.tenantModuleAccess.upsert({
     where: {
       tenantId_moduleId: {
@@ -240,6 +706,7 @@ async function main() {
 
   await seedUpsTenantDefaults(tenant.id);
   await seedLtlTenantDefaults(tenant.id);
+  await seedCashflowDemoData(tenant.id, adminUser.id);
   const tradeMiningScoringClient = prisma as TradeMiningScoringSeedClient;
 
   if (tradeMiningScoringClient.tradeMiningScoringConfig) {
