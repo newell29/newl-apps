@@ -206,52 +206,12 @@ describe("7L server integration account loading", () => {
     expect(updateCredential).not.toHaveBeenCalled();
   });
 
-  it("refreshes an existing seeded fallback instead of creating a duplicate account", async () => {
+  it("does not overwrite an existing seeded fallback account", async () => {
     findExistingCredential.mockResolvedValue({ id: "cred-existing" });
 
     await seedLtlTenantDefaults("tenant-seeded");
 
-    expect(updateCredential).toHaveBeenCalledTimes(1);
-    expect(updateCredential).toHaveBeenCalledWith({
-      where: { id: "cred-existing" },
-      data: {
-        status: IntegrationStatus.ACTIVE,
-        publicConfig: {
-          baseUrl: "https://restapi.my7l.com",
-          defaultUom: "US",
-          strictResult: false,
-          harmonizedCharges: true,
-          dryRun: true,
-          carrierMode: "TENANT_SELECTED",
-          carriers: [
-            {
-              carrierHash: "aaa-cooper-hash",
-              name: "AAA Cooper",
-              code: "AAA",
-              scac: "AACT",
-              defaulted: true,
-              enabled: true
-            },
-            {
-              carrierHash: "estes-hash",
-              name: "Estes Express",
-              code: "EST",
-              scac: "EXLA",
-              defaulted: true,
-              enabled: true
-            },
-            {
-              carrierHash: "dayton-hash",
-              name: "Dayton Freight",
-              code: "DAY",
-              scac: "DYLT",
-              defaulted: true,
-              enabled: true
-            }
-          ]
-        }
-      }
-    });
+    expect(updateCredential).not.toHaveBeenCalled();
     expect(createCredential).not.toHaveBeenCalled();
   });
 });
