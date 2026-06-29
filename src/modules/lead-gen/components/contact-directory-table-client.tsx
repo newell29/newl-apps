@@ -806,6 +806,7 @@ function StatusBadge({ value, tone }: { value: string; tone: "neutral" | "succes
 
 function ContactBulkActionSummaryBanner({ summary }: { summary: ContactBulkActionSummary }) {
   const isError = summary.status === "error";
+  const apolloBlockerSummary = summarizeApolloBlockers(summary);
   const title = isError
     ? summary.operation === "remove"
       ? "Contact removal failed"
@@ -831,6 +832,21 @@ function ContactBulkActionSummaryBanner({ summary }: { summary: ContactBulkActio
         </div>
         {summary.completedAt ? <span className="text-xs text-mutedForeground">{formatDateTime(summary.completedAt)}</span> : null}
       </div>
+      {summary.operation === "apollo_push" && apolloBlockerSummary.length > 0 ? (
+        <div className="mt-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-foreground">Apollo blockers</p>
+          <div className="mt-2 space-y-2">
+            {apolloBlockerSummary.map((blocker) => (
+              <div key={blocker.reason} className="flex flex-wrap items-start justify-between gap-2 text-sm text-foreground">
+                <p className="max-w-3xl">{blocker.reason}</p>
+                <span className="rounded-full border border-warning/30 bg-background px-2 py-0.5 text-[11px] font-semibold text-warning">
+                  {blocker.count} contact{blocker.count === 1 ? "" : "s"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
       {!isError ? (
         <>
           <div className="mt-3 grid gap-3 md:grid-cols-4">
@@ -906,6 +922,28 @@ function ApolloPushDetails({ details }: { details: ContactBulkActionDetail[] }) 
       </div>
     </div>
   );
+}
+
+function summarizeApolloBlockers(summary: ContactBulkActionSummary) {
+  if (summary.operation !== "apollo_push" || summary.details.length === 0) {
+    return [];
+  }
+
+  const reasonCounts = new Map<string, number>();
+
+  for (const detail of summary.details) {
+    if (detail.outcome === "enrolled") {
+      continue;
+    }
+
+    const reason = detail.reason?.trim() || "No reason returned.";
+    reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
+  }
+
+  return Array.from(reasonCounts.entries())
+    .map(([reason, count]) => ({ reason, count }))
+    .sort((left, right) => right.count - left.count || left.reason.localeCompare(right.reason))
+    .slice(0, 3);
 }
 
 function ContactBulkMetric({ label, value }: { label: string; value: number }) {
