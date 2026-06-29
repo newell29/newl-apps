@@ -1028,6 +1028,7 @@ export async function bulkPushContactsToApolloAction(
     let failedContacts = 0;
     let enrolledContacts = 0;
     const failureReasons = new Set<string>();
+    const details: ContactBulkActionSummary["details"] = [];
 
     for (const contact of contacts) {
       const validation = await validateApolloPushCandidate({
@@ -1039,6 +1040,13 @@ export async function bulkPushContactsToApolloAction(
       if (!validation.ok) {
         skippedContacts += 1;
         failureReasons.add(validation.reason);
+        details.push({
+          contactId: contact.id,
+          contactName: contact.fullName,
+          companyName: contact.company.name,
+          outcome: "skipped",
+          reason: validation.reason
+        });
         await appendApolloContactActivity({
           tenantId: context.tenantId,
           contactId: contact.id,
@@ -1096,6 +1104,13 @@ export async function bulkPushContactsToApolloAction(
         });
 
         for (const contact of group.contacts) {
+          details.push({
+            contactId: contact.contactId,
+            contactName: contact.fullName,
+            companyName: group.companyName,
+            outcome: "enrolled",
+            reason: `Enrolled in "${group.sequenceName}".`
+          });
           await appendApolloContactActivity({
             tenantId: context.tenantId,
             contactId: contact.contactId,
@@ -1121,6 +1136,13 @@ export async function bulkPushContactsToApolloAction(
         failedContacts += group.contacts.length;
 
         for (const contact of group.contacts) {
+          details.push({
+            contactId: contact.contactId,
+            contactName: contact.fullName,
+            companyName: group.companyName,
+            outcome: "failed",
+            reason
+          });
           await appendApolloContactActivity({
             tenantId: context.tenantId,
             contactId: contact.contactId,
@@ -1147,7 +1169,8 @@ export async function bulkPushContactsToApolloAction(
       enrolledContacts,
       skippedContacts,
       failedContacts,
-      companiesTouched: new Set(contacts.map((contact) => contact.companyId)).size
+      companiesTouched: new Set(contacts.map((contact) => contact.companyId)).size,
+      details
     };
   } catch (error) {
     return {

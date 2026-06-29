@@ -1,3 +1,11 @@
+export type ContactBulkActionDetail = {
+  contactId: string;
+  contactName: string;
+  companyName: string;
+  outcome: "enrolled" | "skipped" | "failed";
+  reason: string | null;
+};
+
 export type ContactBulkActionSummary = {
   status: "idle" | "success" | "error";
   operation: "sequence" | "remove" | "apollo_push" | "apollo_sync" | null;
@@ -15,6 +23,7 @@ export type ContactBulkActionSummary = {
   skippedContacts: number;
   failedContacts: number;
   companiesTouched: number;
+  details: ContactBulkActionDetail[];
 };
 
 export const EMPTY_CONTACT_BULK_ACTION_SUMMARY: ContactBulkActionSummary = {
@@ -33,5 +42,6 @@ export const EMPTY_CONTACT_BULK_ACTION_SUMMARY: ContactBulkActionSummary = {
   enrolledContacts: 0,
   skippedContacts: 0,
   failedContacts: 0,
-  companiesTouched: 0
+  companiesTouched: 0,
+  details: []
 };
