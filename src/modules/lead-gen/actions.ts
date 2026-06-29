@@ -1989,7 +1989,6 @@ function resolveApolloSendFromEmailAccountId({
   const exact = emailAccounts.find(
     (entry) =>
       entry.active &&
-      !entry.revokedAt &&
       entry.email?.toLowerCase() === normalizedEmail &&
       (!repMapping.apolloUserId || !entry.userId || entry.userId === repMapping.apolloUserId)
   );
@@ -1999,7 +1998,7 @@ function resolveApolloSendFromEmailAccountId({
   }
 
   const fallback = emailAccounts.find(
-    (entry) => entry.active && !entry.revokedAt && entry.email?.toLowerCase() === normalizedEmail
+    (entry) => entry.active && entry.email?.toLowerCase() === normalizedEmail
   );
 
   return fallback?.id ?? null;
