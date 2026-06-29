@@ -52,6 +52,16 @@ export type ApolloRepDirectoryEntry = {
   email: string | null;
 };
 
+export type ApolloEmailAccountDirectoryEntry = {
+  id: string;
+  userId: string | null;
+  email: string | null;
+  active: boolean;
+  isDefault: boolean;
+  revokedAt: string | null;
+  inactiveReason: string | null;
+};
+
 export type ApolloSequenceDirectoryEntry = {
   id: string;
   name: string;
@@ -217,6 +227,11 @@ type ApolloSequencesResponse = {
   data?: unknown;
 };
 
+type ApolloEmailAccountsResponse = {
+  email_accounts?: unknown;
+  data?: unknown;
+};
+
 export async function fetchApolloRepDirectory(): Promise<ApolloRepDirectoryEntry[]> {
   const apiKey = readApolloMasterApiKey();
   const users: ApolloRepDirectoryEntry[] = [];
@@ -291,6 +306,26 @@ export async function fetchApolloSequenceDirectory(): Promise<ApolloSequenceDire
   }
 
   return dedupeApolloSequences(sequences);
+}
+
+export async function fetchApolloEmailAccountDirectory(): Promise<ApolloEmailAccountDirectoryEntry[]> {
+  const apiKey = readApolloMasterApiKey();
+  const response = await fetch(`${DEFAULT_BASE_URL}/api/v1/email_accounts`, {
+    method: "GET",
+    headers: buildApolloHeaders(apiKey),
+    cache: "no-store"
+  });
+  const json = (await response.json().catch(() => null)) as ApolloEmailAccountsResponse | null;
+
+  if (!response.ok) {
+    throw new Error(extractApolloError(json) ?? `Apollo email account sync failed with status ${response.status}.`);
+  }
+
+  if (!json) {
+    throw new Error("Apollo email account sync returned an unreadable response body.");
+  }
+
+  return parseApolloEmailAccountsResponse(json);
 }
 
 export async function fetchApolloContactsForCompany(
@@ -871,6 +906,38 @@ function parseApolloSequencesResponse(payload: ApolloSequencesResponse | null): 
         archived: readApolloBoolean(record, ["archived"], false),
         description: readApolloString(record, ["description"]),
         lastUsedAt: readApolloString(record, ["last_used_at", "updated_at", "created_at"])
+      }
+    ];
+  });
+}
+
+function parseApolloEmailAccountsResponse(payload: ApolloEmailAccountsResponse | null): ApolloEmailAccountDirectoryEntry[] {
+  const candidates = Array.isArray(payload?.email_accounts)
+    ? payload?.email_accounts
+    : Array.isArray(payload?.data)
+      ? payload?.data
+      : [];
+
+  return candidates.flatMap((entry) => {
+    const record = asRecord(entry);
+    if (!record) {
+      return [];
+    }
+
+    const id = readApolloString(record, ["id", "email_account_id"]);
+    if (!id) {
+      return [];
+    }
+
+    return [
+      {
+        id,
+        userId: readApolloString(record, ["user_id", "owner_user_id"]),
+        email: readApolloString(record, ["email", "address"]),
+        active: readApolloBoolean(record, ["active"], false),
+        isDefault: readApolloBoolean(record, ["default"], false),
+        revokedAt: readApolloString(record, ["revoked_at"]),
+        inactiveReason: readApolloString(record, ["inactive_reason"])
       }
     ];
   });

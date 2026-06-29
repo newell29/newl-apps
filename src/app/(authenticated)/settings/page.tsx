@@ -632,7 +632,7 @@ export default async function SettingsPage() {
                   <th className="px-3 py-3">Owner name</th>
                   <th className="px-3 py-3">Apollo user ID</th>
                   <th className="px-3 py-3">Send-from email</th>
-                  <th className="px-3 py-3">Email account ID</th>
+                  <th className="px-3 py-3">Apollo email account ID</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border bg-background">
@@ -671,7 +671,7 @@ export default async function SettingsPage() {
                       <input
                         name="apolloRepSendFromEmailAccountId"
                         defaultValue={entry.sendFromEmailAccountId ?? ""}
-                        placeholder="email-account-id"
+                        placeholder="Auto-filled from Apollo sync"
                         className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
                       />
                     </td>
@@ -683,7 +683,7 @@ export default async function SettingsPage() {
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-mutedForeground">
-              Owner name and Apollo user ID are synced from Apollo. Only active reps appear in Pipeline assignment.
+              Owner name and Apollo user ID are synced from Apollo. The Apollo email account ID should resolve from the send-from mailbox during sync and is not usually the plain email address itself. Only active reps appear in Pipeline assignment.
             </p>
             <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
               Save Apollo rep mapping

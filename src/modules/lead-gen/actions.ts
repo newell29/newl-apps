@@ -40,7 +40,9 @@ import { DEFAULT_TRADEMINING_SCORING_SETTINGS } from "@/modules/settings/types";
 import { requireAdmin, requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
 import {
+  fetchApolloEmailAccountDirectory,
   fetchApolloContactsForCompany,
+  type ApolloEmailAccountDirectoryEntry,
   type ApolloContactRecord,
   pushApolloContactsToSequence,
   type ApolloContactLookupResult
@@ -1022,7 +1024,10 @@ export async function bulkPushContactsToApolloAction(
       throw new Error("One or more selected contacts were not found for this tenant.");
     }
 
-    const repMappings = await loadApolloRepMappings(context.tenantId);
+    const [repMappings, emailAccounts] = await Promise.all([
+      loadApolloRepMappings(context.tenantId),
+      fetchApolloEmailAccountDirectory().catch(() => [])
+    ]);
     const groups = new Map<string, ApolloPushGroup>();
     let skippedContacts = 0;
     let failedContacts = 0;
@@ -1034,7 +1039,8 @@ export async function bulkPushContactsToApolloAction(
       const validation = await validateApolloPushCandidate({
         tenantId: context.tenantId,
         contact,
-        repMappings
+        repMappings,
+        emailAccounts
       });
 
       if (!validation.ok) {
@@ -1818,11 +1824,13 @@ async function resolveAssignedRepUser({
 async function validateApolloPushCandidate({
   tenantId,
   contact,
-  repMappings
+  repMappings,
+  emailAccounts
 }: {
   tenantId: string;
   contact: ApolloPushContactRecord;
   repMappings: ReturnType<typeof parseApolloRepMapping>;
+  emailAccounts: ApolloEmailAccountDirectoryEntry[];
 }): Promise<{ ok: true } & ApolloPushReadyContact | { ok: false; reason: string }> {
   let effectiveSequence = resolveEffectiveApolloSequence(contact);
 
@@ -1901,7 +1909,13 @@ async function validateApolloPushCandidate({
     };
   }
 
-  if (!repMapping.sendFromEmailAccountId) {
+  const resolvedSendFromEmailAccountId = resolveApolloSendFromEmailAccountId({
+    repMapping,
+    localOwner,
+    emailAccounts
+  });
+
+  if (!resolvedSendFromEmailAccountId) {
     return {
       ok: false,
       reason: `Apollo send-from email account is missing for ${localOwner.name ?? localOwner.email ?? "the assigned rep"}.`
@@ -1930,6 +1944,14 @@ async function validateApolloPushCandidate({
     });
   }
 
+  if (repMapping.sendFromEmailAccountId !== resolvedSendFromEmailAccountId) {
+    await persistApolloRepEmailAccountId({
+      tenantId,
+      repEntryId: repMapping.id,
+      sendFromEmailAccountId: resolvedSendFromEmailAccountId
+    });
+  }
+
   return {
     ok: true,
     contactId: contact.id,
@@ -1940,10 +1962,102 @@ async function validateApolloPushCandidate({
     sequenceId: effectiveSequence.id,
     sequenceName: effectiveSequence.name,
     apolloOwnerUserId: repMapping.apolloUserId,
-    sendFromEmailAccountId: repMapping.sendFromEmailAccountId,
+    sendFromEmailAccountId: resolvedSendFromEmailAccountId,
     requiresAiDraft,
     draftId: latestDraft?.id ?? null
   };
+}
+
+function resolveApolloSendFromEmailAccountId({
+  repMapping,
+  localOwner,
+  emailAccounts
+}: {
+  repMapping: ReturnType<typeof parseApolloRepMapping>[number];
+  localOwner: { id: string; email: string | null; name: string | null };
+  emailAccounts: ApolloEmailAccountDirectoryEntry[];
+}) {
+  if (repMapping.sendFromEmailAccountId && !repMapping.sendFromEmailAccountId.includes("@")) {
+    return repMapping.sendFromEmailAccountId;
+  }
+
+  const normalizedEmail = (repMapping.sendFromEmail ?? localOwner.email)?.trim().toLowerCase() ?? null;
+  if (!normalizedEmail) {
+    return null;
+  }
+
+  const exact = emailAccounts.find(
+    (entry) =>
+      entry.active &&
+      !entry.revokedAt &&
+      entry.email?.toLowerCase() === normalizedEmail &&
+      (!repMapping.apolloUserId || !entry.userId || entry.userId === repMapping.apolloUserId)
+  );
+
+  if (exact) {
+    return exact.id;
+  }
+
+  const fallback = emailAccounts.find(
+    (entry) => entry.active && !entry.revokedAt && entry.email?.toLowerCase() === normalizedEmail
+  );
+
+  return fallback?.id ?? null;
+}
+
+async function persistApolloRepEmailAccountId({
+  tenantId,
+  repEntryId,
+  sendFromEmailAccountId
+}: {
+  tenantId: string;
+  repEntryId: string;
+  sendFromEmailAccountId: string;
+}) {
+  const credential = await prisma.integrationCredential.findFirst({
+    where: {
+      tenantId,
+      provider: "APOLLO"
+    },
+    select: {
+      id: true,
+      publicConfig: true
+    }
+  });
+
+  if (!credential) {
+    return;
+  }
+
+  const entries = parseApolloRepMapping(credential.publicConfig);
+  const updatedEntries = entries.map((entry) =>
+    entry.id === repEntryId ? { ...entry, sendFromEmailAccountId } : entry
+  );
+
+  if (!updatedEntries.some((entry) => entry.id === repEntryId)) {
+    return;
+  }
+
+  await prisma.integrationCredential.update({
+    where: {
+      id: credential.id
+    },
+    data: {
+      publicConfig: {
+        ...(credential.publicConfig && typeof credential.publicConfig === "object"
+          ? (credential.publicConfig as Record<string, unknown>)
+          : {}),
+        apolloUserMapping: updatedEntries.map((entry) => ({
+          id: entry.id,
+          sequence_owner_name: entry.sequenceOwnerName,
+          active: entry.active,
+          apollo_user_id: entry.apolloUserId,
+          send_from_email: entry.sendFromEmail,
+          send_from_email_account_id: entry.sendFromEmailAccountId
+        }))
+      }
+    }
+  });
 }
 
 async function contactRequiresApprovedDraft(tenantId: string, contactId: string) {
