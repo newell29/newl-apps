@@ -1661,6 +1661,8 @@ type ApolloPushContactRecord = {
   fullName: string;
   email: string | null;
   assignedRep: string | null;
+  recommendedSequenceId: string | null;
+  recommendedSequenceName: string | null;
   selectedSequenceId: string | null;
   selectedSequenceName: string | null;
   apolloContactId: string | null;
@@ -1728,6 +1730,14 @@ type ApolloPushReadyContact = {
   requiresAiDraft: boolean;
   draftId: string | null;
 };
+
+function resolveEffectiveApolloSequence(contact: ApolloPushContactRecord) {
+  return {
+    id: contact.selectedSequenceId ?? contact.recommendedSequenceId ?? null,
+    name: contact.selectedSequenceName ?? contact.recommendedSequenceName ?? null,
+    usedRecommendationFallback: !contact.selectedSequenceId || !contact.selectedSequenceName
+  };
+}
 
 async function loadApolloRepMappings(tenantId: string) {
   const credential = await prisma.integrationCredential.findFirst({
@@ -1814,6 +1824,8 @@ async function validateApolloPushCandidate({
   contact: ApolloPushContactRecord;
   repMappings: ReturnType<typeof parseApolloRepMapping>;
 }): Promise<{ ok: true } & ApolloPushReadyContact | { ok: false; reason: string }> {
+  const effectiveSequence = resolveEffectiveApolloSequence(contact);
+
   if (!contact.apolloContactId) {
     return { ok: false, reason: "Apollo contact ID is missing. Enrich the company again before pushing." };
   }
@@ -1822,7 +1834,7 @@ async function validateApolloPushCandidate({
     return { ok: false, reason: "Contact email is missing, so this contact stays out of sequence push." };
   }
 
-  if (!contact.selectedSequenceId || !contact.selectedSequenceName) {
+  if (!effectiveSequence.id || !effectiveSequence.name) {
     return { ok: false, reason: "No Apollo cadence is selected for this contact yet." };
   }
 
@@ -1891,6 +1903,18 @@ async function validateApolloPushCandidate({
     };
   }
 
+  if (effectiveSequence.usedRecommendationFallback) {
+    await prisma.contact.update({
+      where: {
+        id: contact.id
+      },
+      data: {
+        selectedSequenceId: effectiveSequence.id,
+        selectedSequenceName: effectiveSequence.name
+      }
+    });
+  }
+
   return {
     ok: true,
     contactId: contact.id,
@@ -1898,8 +1922,8 @@ async function validateApolloPushCandidate({
     companyName: contact.company.name,
     fullName: contact.fullName,
     apolloContactId: contact.apolloContactId,
-    sequenceId: contact.selectedSequenceId,
-    sequenceName: contact.selectedSequenceName,
+    sequenceId: effectiveSequence.id,
+    sequenceName: effectiveSequence.name,
     apolloOwnerUserId: repMapping.apolloUserId,
     sendFromEmailAccountId: repMapping.sendFromEmailAccountId,
     requiresAiDraft,
