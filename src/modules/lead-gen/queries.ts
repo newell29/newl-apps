@@ -1733,8 +1733,15 @@ function buildCompanyWebsiteUrl(domain: string) {
 }
 
 function buildCandidateWhere(filters: CandidateFeedFilters) {
+  const baseWhere = {
+    importRecords: {
+      some: {}
+    }
+  };
+
   if (!filters.status || filters.status === "ACTIVE") {
     return {
+      ...baseWhere,
       candidateStatus: {
         in: [CandidateStatus.NEW, CandidateStatus.REVIEWING]
       }
@@ -1742,6 +1749,7 @@ function buildCandidateWhere(filters: CandidateFeedFilters) {
   }
 
   return {
+    ...baseWhere,
     candidateStatus: filters.status
   };
 }
