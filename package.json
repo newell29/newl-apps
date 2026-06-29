@@ -7,7 +7,7 @@
     "build": "next build",
     "build:canonical-trademining-reference": "tsx scripts/build-canonical-trademining-reference.ts",
     "smoke:trademining": "tsx scripts/smoke-test-trademining.ts",
-    "vercel-build": "prisma generate && prisma migrate deploy && npm run prisma:seed && next build",
+    "vercel-build": "prisma generate && prisma migrate deploy && next build",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate",
