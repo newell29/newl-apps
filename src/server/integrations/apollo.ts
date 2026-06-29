@@ -410,6 +410,8 @@ export async function pushApolloContactsToSequence(
 
   const initialStatus = input.initialStatus ?? "active";
   const payload = {
+    emailer_campaign_id: sequenceId,
+    apollo_sequence_id: sequenceId,
     contact_ids: acceptedContactIds,
     sequence_owner_user_id: sequenceOwnerUserId,
     send_email_from_email_account_id: sendFromEmailAccountId,
