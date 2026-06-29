@@ -412,6 +412,7 @@ export async function pushApolloContactsToSequence(
   const payload = {
     contact_ids: acceptedContactIds,
     sequence_owner_user_id: sequenceOwnerUserId,
+    send_email_from_email_account_id: sendFromEmailAccountId,
     sequence_send_from_email_account_id: sendFromEmailAccountId,
     sequence_push_initial_status: initialStatus,
     allow_no_email: false,
