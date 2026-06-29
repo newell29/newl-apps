@@ -23,6 +23,7 @@ import { DataGridColumnMenu } from "@/components/data-grid-column-menu";
 import { usePersistedTableState } from "@/components/use-persisted-table-state";
 import {
   EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+  type ContactBulkActionDetail,
   type ContactBulkActionSummary
 } from "@/modules/lead-gen/contact-bulk-action-summary";
 import type { SequenceCatalogItem } from "@/modules/lead-gen/sequence-catalog";
@@ -831,38 +832,78 @@ function ContactBulkActionSummaryBanner({ summary }: { summary: ContactBulkActio
         {summary.completedAt ? <span className="text-xs text-mutedForeground">{formatDateTime(summary.completedAt)}</span> : null}
       </div>
       {!isError ? (
-        <div className="mt-3 grid gap-3 md:grid-cols-4">
-          {summary.operation === "remove" ? (
-            <>
-              <ContactBulkMetric label="Selected" value={summary.selectedContacts} />
-              <ContactBulkMetric label="Removed contacts" value={summary.removedContacts} />
-              <ContactBulkMetric label="Removed drafts" value={summary.removedDrafts} />
-              <ContactBulkMetric label="Apollo deletions" value={summary.pushedToApollo ? 1 : 0} />
-            </>
-          ) : summary.operation === "apollo_push" ? (
-            <>
-              <ContactBulkMetric label="Selected" value={summary.selectedContacts} />
-              <ContactBulkMetric label="Enrolled" value={summary.enrolledContacts} />
-              <ContactBulkMetric label="Skipped" value={summary.skippedContacts} />
-              <ContactBulkMetric label="Failed" value={summary.failedContacts} />
-            </>
-          ) : summary.operation === "apollo_sync" ? (
-            <>
-              <ContactBulkMetric label="Selected" value={summary.selectedContacts} />
-              <ContactBulkMetric label="Synced" value={summary.syncedContacts} />
-              <ContactBulkMetric label="Skipped" value={summary.skippedContacts} />
-              <ContactBulkMetric label="Companies" value={summary.companiesTouched} />
-            </>
-          ) : (
-            <>
-              <ContactBulkMetric label="Selected" value={summary.selectedContacts} />
-              <ContactBulkMetric label="Updated cadence" value={summary.updatedContacts} />
-              <ContactBulkMetric label="Marked ready" value={summary.readyContacts} />
-              <ContactBulkMetric label="Needs manual caution" value={summary.protectedContacts} />
-            </>
-          )}
-        </div>
+        <>
+          <div className="mt-3 grid gap-3 md:grid-cols-4">
+            {summary.operation === "remove" ? (
+              <>
+                <ContactBulkMetric label="Selected" value={summary.selectedContacts} />
+                <ContactBulkMetric label="Removed contacts" value={summary.removedContacts} />
+                <ContactBulkMetric label="Removed drafts" value={summary.removedDrafts} />
+                <ContactBulkMetric label="Apollo deletions" value={summary.pushedToApollo ? 1 : 0} />
+              </>
+            ) : summary.operation === "apollo_push" ? (
+              <>
+                <ContactBulkMetric label="Selected" value={summary.selectedContacts} />
+                <ContactBulkMetric label="Enrolled" value={summary.enrolledContacts} />
+                <ContactBulkMetric label="Skipped" value={summary.skippedContacts} />
+                <ContactBulkMetric label="Failed" value={summary.failedContacts} />
+              </>
+            ) : summary.operation === "apollo_sync" ? (
+              <>
+                <ContactBulkMetric label="Selected" value={summary.selectedContacts} />
+                <ContactBulkMetric label="Synced" value={summary.syncedContacts} />
+                <ContactBulkMetric label="Skipped" value={summary.skippedContacts} />
+                <ContactBulkMetric label="Companies" value={summary.companiesTouched} />
+              </>
+            ) : (
+              <>
+                <ContactBulkMetric label="Selected" value={summary.selectedContacts} />
+                <ContactBulkMetric label="Updated cadence" value={summary.updatedContacts} />
+                <ContactBulkMetric label="Marked ready" value={summary.readyContacts} />
+                <ContactBulkMetric label="Needs manual caution" value={summary.protectedContacts} />
+              </>
+            )}
+          </div>
+          {summary.operation === "apollo_push" && summary.details.length > 0 ? (
+            <ApolloPushDetails details={summary.details} />
+          ) : null}
+        </>
       ) : null}
+    </div>
+  );
+}
+
+function ApolloPushDetails({ details }: { details: ContactBulkActionDetail[] }) {
+  const skippedOrFailed = details.filter((detail) => detail.outcome !== "enrolled");
+
+  if (skippedOrFailed.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 rounded-md border border-border/70 bg-card px-3 py-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Contact results</p>
+      <div className="mt-2 space-y-2">
+        {skippedOrFailed.map((detail) => (
+          <div key={`${detail.contactId}-${detail.outcome}`} className="rounded-md border border-border/60 px-3 py-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-foreground">
+                {detail.contactName} <span className="font-normal text-mutedForeground">({detail.companyName})</span>
+              </p>
+              <span
+                className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                  detail.outcome === "failed"
+                    ? "border-danger/30 bg-danger/10 text-danger"
+                    : "border-warning/30 bg-warning/10 text-warning"
+                }`}
+              >
+                {detail.outcome === "failed" ? "Failed" : "Skipped"}
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-mutedForeground">{detail.reason ?? "No reason returned."}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
