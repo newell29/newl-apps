@@ -1824,7 +1824,7 @@ async function validateApolloPushCandidate({
   contact: ApolloPushContactRecord;
   repMappings: ReturnType<typeof parseApolloRepMapping>;
 }): Promise<{ ok: true } & ApolloPushReadyContact | { ok: false; reason: string }> {
-  const effectiveSequence = resolveEffectiveApolloSequence(contact);
+  let effectiveSequence = resolveEffectiveApolloSequence(contact);
 
   if (!contact.apolloContactId) {
     return { ok: false, reason: "Apollo contact ID is missing. Enrich the company again before pushing." };
@@ -1832,6 +1832,21 @@ async function validateApolloPushCandidate({
 
   if (!contact.email) {
     return { ok: false, reason: "Contact email is missing, so this contact stays out of sequence push." };
+  }
+
+  if (!effectiveSequence.id || !effectiveSequence.name) {
+    const draftContext = await loadAiDraftContactContext({
+      tenantId,
+      contactId: contact.id
+    });
+
+    if (draftContext?.selectedSequenceId && draftContext.selectedSequenceName) {
+      effectiveSequence = {
+        id: draftContext.selectedSequenceId,
+        name: draftContext.selectedSequenceName,
+        usedRecommendationFallback: true
+      };
+    }
   }
 
   if (!effectiveSequence.id || !effectiveSequence.name) {
