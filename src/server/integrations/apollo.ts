@@ -102,6 +102,56 @@ export type ApolloContactLookupResult = {
   contacts: ApolloContactRecord[];
 };
 
+export type ApolloTaskType = "call";
+
+export type ApolloTaskRecord = {
+  id: string;
+  userId: string | null;
+  createdAt: Date | null;
+  completedAt: Date | null;
+  type: string | null;
+  status: string | null;
+  answered: boolean | null;
+  rawPayload: Record<string, unknown>;
+};
+
+export type ApolloPhoneCallRecord = {
+  id: string;
+  userId: string | null;
+  startTime: Date | null;
+  endTime: Date | null;
+  status: string | null;
+  logged: boolean | null;
+  voicemailDropped: boolean | null;
+  rawPayload: Record<string, unknown>;
+};
+
+export type ApolloConversationRecord = {
+  id: string;
+  hostId: string | null;
+  hostName: string | null;
+  startTime: Date | null;
+  durationSeconds: number | null;
+  state: string | null;
+  conversationType: string | null;
+  rawPayload: Record<string, unknown>;
+};
+
+export type ApolloEmailMessageRecord = {
+  id: string;
+  userId: string | null;
+  createdAt: Date | null;
+  completedAt: Date | null;
+  status: string | null;
+  type: string | null;
+  replied: boolean | null;
+  replyClass: string | null;
+  fromEmail: string | null;
+  toEmail: string | null;
+  subject: string | null;
+  rawPayload: Record<string, unknown>;
+};
+
 type ApolloOrganizationCandidate = {
   id: string | null;
   name: string | null;
@@ -275,6 +325,113 @@ export async function fetchApolloContactsForCompany(
     match: toApolloCompanyLookupMatch(effectiveMatchOrganization, input.companyName, normalizeDomain(input.domain)),
     contacts: dedupeApolloContacts(contactsFromApollo)
   };
+}
+
+export async function fetchApolloTasksForUser(input: {
+  apolloUserId: string;
+  type: ApolloTaskType;
+}): Promise<ApolloTaskRecord[]> {
+  const apiKey = readApolloMasterApiKey();
+  const tasks: ApolloTaskRecord[] = [];
+  let page = 1;
+
+  while (true) {
+    const json = await postApolloJson("/api/v1/tasks/search", apiKey, {
+      page,
+      per_page: DEFAULT_PAGE_SIZE,
+      user_ids: [input.apolloUserId],
+      type: input.type
+    });
+
+    const pageTasks = parseApolloTasks(json);
+    tasks.push(...pageTasks);
+
+    if (pageTasks.length < DEFAULT_PAGE_SIZE) {
+      break;
+    }
+
+    page += 1;
+  }
+
+  return tasks;
+}
+
+export async function fetchApolloPhoneCallsForUser(apolloUserId: string): Promise<ApolloPhoneCallRecord[]> {
+  const apiKey = readApolloMasterApiKey();
+  const rows: ApolloPhoneCallRecord[] = [];
+  let page = 1;
+
+  while (true) {
+    const json = await postApolloJson("/api/v1/phone_calls/search", apiKey, {
+      page,
+      per_page: DEFAULT_PAGE_SIZE,
+      user_ids: [apolloUserId]
+    });
+
+    const batch = parseApolloPhoneCalls(json);
+    rows.push(...batch);
+
+    if (batch.length < DEFAULT_PAGE_SIZE) {
+      break;
+    }
+
+    page += 1;
+  }
+
+  return rows;
+}
+
+export async function fetchApolloConversationsForUser(apolloUserId: string): Promise<ApolloConversationRecord[]> {
+  const apiKey = readApolloMasterApiKey();
+  const rows: ApolloConversationRecord[] = [];
+  let page = 1;
+
+  while (true) {
+    const json = await postApolloJson("/api/v1/conversations/search", apiKey, {
+      page,
+      per_page: DEFAULT_PAGE_SIZE,
+      user_ids: [apolloUserId]
+    });
+
+    const batch = parseApolloConversations(json);
+    rows.push(...batch);
+
+    if (batch.length < DEFAULT_PAGE_SIZE) {
+      break;
+    }
+
+    page += 1;
+  }
+
+  return rows;
+}
+
+export async function fetchApolloEmailerMessagesForUser(apolloUserId: string): Promise<ApolloEmailMessageRecord[]> {
+  const apiKey = readApolloMasterApiKey();
+  const rows: ApolloEmailMessageRecord[] = [];
+  let page = 1;
+
+  while (true) {
+    const json = await postApolloJson("/api/v1/emailer_messages/search", apiKey, {
+      page,
+      per_page: DEFAULT_PAGE_SIZE,
+      user_ids: [apolloUserId]
+    });
+
+    const batch = parseApolloEmailerMessages(json);
+    rows.push(...batch);
+
+    if (batch.length < DEFAULT_PAGE_SIZE) {
+      break;
+    }
+
+    page += 1;
+    if (page > 50) {
+      break;
+    }
+  }
+
+  return rows;
 }
 
 function readApolloMasterApiKey() {
@@ -666,6 +823,114 @@ function parseApolloContacts(payload: Record<string, unknown>): ApolloContactRec
           organization,
           sequence: sequenceDetails
         }
+      }
+    ];
+  });
+}
+
+function parseApolloTasks(payload: Record<string, unknown>): ApolloTaskRecord[] {
+  const candidates = readApolloArray(payload, ["tasks"]);
+
+  return candidates.flatMap((candidate) => {
+    const record = asRecord(candidate);
+    const id = readApolloString(record, ["id"]);
+
+    if (!record || !id) {
+      return [];
+    }
+
+    return [
+      {
+        id,
+        userId: readApolloString(record, ["user_id"]),
+        createdAt: parseApolloDate(readApolloString(record, ["created_at"])),
+        completedAt: parseApolloDate(readApolloString(record, ["completed_at"])),
+        type: readApolloString(record, ["type"]),
+        status: readApolloString(record, ["status"]),
+        answered: readApolloBoolean(record, ["answered"], null),
+        rawPayload: record
+      }
+    ];
+  });
+}
+
+function parseApolloPhoneCalls(payload: Record<string, unknown>): ApolloPhoneCallRecord[] {
+  const candidates = readApolloArray(payload, ["phone_calls"]);
+
+  return candidates.flatMap((candidate) => {
+    const record = asRecord(candidate);
+    const id = readApolloString(record, ["id"]);
+
+    if (!record || !id) {
+      return [];
+    }
+
+    return [
+      {
+        id,
+        userId: readApolloString(record, ["user_id"]),
+        startTime: parseApolloDate(readApolloString(record, ["start_time"])),
+        endTime: parseApolloDate(readApolloString(record, ["end_time"])),
+        status: readApolloString(record, ["status"]),
+        logged: readApolloNullableBoolean(record, ["logged"]),
+        voicemailDropped: readApolloNullableBoolean(record, ["voicemail_dropped"]),
+        rawPayload: record
+      }
+    ];
+  });
+}
+
+function parseApolloConversations(payload: Record<string, unknown>): ApolloConversationRecord[] {
+  const candidates = readApolloArray(payload, ["conversations"]);
+
+  return candidates.flatMap((candidate) => {
+    const record = asRecord(candidate);
+    const id = readApolloString(record, ["id"]);
+
+    if (!record || !id) {
+      return [];
+    }
+
+    return [
+      {
+        id,
+        hostId: readApolloString(record, ["host_id"]),
+        hostName: readApolloString(record, ["host"]),
+        startTime: parseApolloDate(readApolloString(record, ["start_time"])),
+        durationSeconds: typeof record.duration === "number" ? record.duration : null,
+        state: readApolloString(record, ["state"]),
+        conversationType: readApolloString(record, ["conversation_type"]),
+        rawPayload: record
+      }
+    ];
+  });
+}
+
+function parseApolloEmailerMessages(payload: Record<string, unknown>): ApolloEmailMessageRecord[] {
+  const candidates = readApolloArray(payload, ["emailer_messages"]);
+
+  return candidates.flatMap((candidate) => {
+    const record = asRecord(candidate);
+    const id = readApolloString(record, ["id"]);
+
+    if (!record || !id) {
+      return [];
+    }
+
+    return [
+      {
+        id,
+        userId: readApolloString(record, ["user_id"]),
+        createdAt: parseApolloDate(readApolloString(record, ["created_at"])),
+        completedAt: parseApolloDate(readApolloString(record, ["completed_at"])),
+        status: readApolloString(record, ["status"]),
+        type: readApolloString(record, ["type"]),
+        replied: readApolloNullableBoolean(record, ["replied"]),
+        replyClass: readApolloString(record, ["reply_class"]),
+        fromEmail: readApolloString(record, ["from_email"]),
+        toEmail: readApolloString(record, ["to_email"]),
+        subject: readApolloString(record, ["subject"]),
+        rawPayload: record
       }
     ];
   });
@@ -1247,6 +1512,17 @@ function readApolloBoolean(record: Record<string, unknown>, keys: string[], fall
   }
 
   return fallback;
+}
+
+function readApolloNullableBoolean(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "boolean") {
+      return value;
+    }
+  }
+
+  return null;
 }
 
 function buildName(firstName: string | null, lastName: string | null) {
