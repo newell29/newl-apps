@@ -1257,7 +1257,6 @@ function resolveApolloEmailAccountId({
   const exact = syncedEmailAccounts.find(
     (entry) =>
       entry.active &&
-      !entry.revokedAt &&
       entry.email?.toLowerCase() === normalizedEmail &&
       (!apolloUserId || !entry.userId || entry.userId === apolloUserId)
   );
@@ -1269,7 +1268,6 @@ function resolveApolloEmailAccountId({
   const fallback = syncedEmailAccounts.find(
     (entry) =>
       entry.active &&
-      !entry.revokedAt &&
       entry.email?.toLowerCase() === normalizedEmail
   );
 
