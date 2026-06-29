@@ -657,33 +657,92 @@ describe("fetchApolloActivitySummary", () => {
     vi.unstubAllEnvs();
   });
 
-  it("pages through activity results and uses aggregate metrics when present", async () => {
-    vi.spyOn(global, "fetch")
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: vi.fn().mockResolvedValue({
-          activities: Array.from({ length: 100 }, (_, index) => ({
-            id: `activity-${index}`,
-            call_id: `call-${index}`,
-            duration_seconds: 60
-          })),
-          metrics: [{ metric_name: "# Calls logged", value: 61 }]
-        })
-      } as unknown as Response)
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: vi.fn().mockResolvedValue({
-          activities: [
-            {
-              id: "activity-100",
-              call_id: "call-100",
-              duration_seconds: 45
-            }
-          ]
-        })
-      } as unknown as Response);
+  it("uses Apollo phone calls, conversations, and emailer messages for assistant activity counts", async () => {
+    vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+
+      if (url.endsWith("/api/v1/phone_calls/search")) {
+        if (body.page === 1) {
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({
+              phone_calls: Array.from({ length: 100 }, (_, index) => ({
+                id: `call-${index}`,
+                user_id: "apollo-user-1",
+                duration_seconds: 60,
+                started_at: "2026-06-25T12:00:00.000Z"
+              }))
+            })
+          } as unknown as Response;
+        }
+
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            phone_calls: [
+              {
+                id: "call-100",
+                user_id: "apollo-user-1",
+                duration_seconds: 45
+              }
+            ]
+          })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/conversations/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            conversations: [
+              {
+                id: "conversation-1",
+                user_id: "apollo-user-1",
+                duration_seconds: 180
+              },
+              {
+                id: "conversation-2",
+                user_id: "apollo-user-1",
+                duration_seconds: 120
+              }
+            ]
+          })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/emailer_messages/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            emailer_messages: [
+              {
+                id: "email-1",
+                user_id: "apollo-user-1",
+                status: "completed",
+                replied: false,
+                created_at: "2026-06-25T15:00:00.000Z",
+                completed_at: "2026-06-25T15:05:00.000Z"
+              },
+              {
+                id: "email-2",
+                user_id: "apollo-user-1",
+                status: "completed",
+                replied: true,
+                created_at: "2026-06-25T16:00:00.000Z",
+                completed_at: "2026-06-25T16:05:00.000Z"
+              }
+            ]
+          })
+        } as unknown as Response;
+      }
+
+      throw new Error(`Unexpected Apollo URL in test: ${url}`);
+    });
 
     const result = await fetchApolloActivitySummary({
       apolloUserId: "apollo-user-1",
@@ -691,13 +750,39 @@ describe("fetchApolloActivitySummary", () => {
       startDate: new Date("2026-06-25T04:00:00.000Z"),
       endDate: new Date("2026-06-26T03:59:59.999Z"),
       timezone: "America/Toronto",
-      kinds: ["CALL", "CONNECTED_CALL"]
+      kinds: ["CALL", "CONNECTED_CALL", "EMAIL_SENT", "REPLY"]
     });
 
-    expect(global.fetch).toHaveBeenCalledTimes(2);
-    expect(result.callCount).toBe(61);
-    expect(result.activities).toHaveLength(101);
-    expect(result.durationSeconds).toBe(6045);
+    expect(global.fetch).toHaveBeenCalledTimes(4);
+    expect(result.callCount).toBe(101);
+    expect(result.connectedCount).toBe(2);
+    expect(result.emailSentCount).toBe(2);
+    expect(result.replyCount).toBe(1);
+    expect(result.activities).toHaveLength(106);
+    expect(result.durationSeconds).toBe(6345);
+  });
+
+  it("uses the Apollo user_ids filter instead of q_user_ids when requesting rep activity", async () => {
+    const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        phone_calls: []
+      })
+    } as unknown as Response);
+
+    await fetchApolloActivitySummary({
+      apolloUserId: "apollo-user-1",
+      userName: "Zalan Riaz",
+      startDate: new Date("2026-06-25T04:00:00.000Z"),
+      endDate: new Date("2026-06-26T03:59:59.999Z"),
+      timezone: "America/Toronto",
+      kinds: ["CALL"]
+    });
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}")) as Record<string, unknown>;
+    expect(requestBody.user_ids).toEqual(["apollo-user-1"]);
+    expect(requestBody.q_user_ids).toBeUndefined();
   });
 });
 

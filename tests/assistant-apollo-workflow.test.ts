@@ -160,6 +160,19 @@ describe("maybeRunAssistantApolloActivityRequest", () => {
     expect(result?.sources[0]?.sourceId).toBe("apollo:apollo-user-1:2026-06-25:2026-06-25");
   });
 
+  it("resolves last Friday to the prior Friday instead of falling back to today", async () => {
+    const result = await maybeRunAssistantApolloActivityRequest(context, "How many calls did Zalan make last Friday?");
+
+    expect(fetchApolloActivitySummary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        startDate: expect.any(Date),
+        endDate: expect.any(Date)
+      })
+    );
+    expect(result?.answer).toContain("Apollo activity for Zalan Riaz last friday (2026-06-19, America/Toronto)");
+    expect(result?.sources[0]?.sourceId).toBe("apollo:apollo-user-1:2026-06-19:2026-06-19");
+  });
+
   it("answers tenant-wide activity questions when no rep name is present", async () => {
     const result = await maybeRunAssistantApolloActivityRequest(context, "how many calls were made today?");
 

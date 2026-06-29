@@ -414,13 +414,67 @@ export async function fetchApolloActivitySummary(
   const apiKey = readApolloMasterApiKey();
   const startDateLabel = formatDateInTimezone(input.startDate, input.timezone);
   const endDateLabel = formatDateInTimezone(input.endDate, input.timezone);
+  const [callSummary, connectedSummary, emailSummary, activitySummary] = await Promise.all([
+    input.kinds.some((kind) => kind === "CALL" || kind === "CONNECTED_CALL")
+      ? fetchApolloPhoneCallSummary(apiKey, input.apolloUserId ?? null, startDateLabel, endDateLabel)
+      : Promise.resolve(null),
+    input.kinds.includes("CONNECTED_CALL")
+      ? fetchApolloConversationSummary(apiKey, input.apolloUserId ?? null, startDateLabel, endDateLabel)
+      : Promise.resolve(null),
+    input.kinds.some((kind) => kind === "EMAIL_SENT" || kind === "REPLY")
+      ? fetchApolloEmailMessageSummary(apiKey, input.apolloUserId ?? null, startDateLabel, endDateLabel)
+      : Promise.resolve(null),
+    input.kinds.includes("LEAD_CREATED") || input.kinds.includes("OTHER")
+      ? fetchApolloGenericActivitySummary(apiKey, input.apolloUserId ?? null, startDateLabel, endDateLabel, input.kinds)
+      : Promise.resolve(null)
+  ]);
+
+  const activities = dedupeApolloActivities([
+    ...(callSummary?.activities ?? []),
+    ...(connectedSummary?.activities ?? []),
+    ...(emailSummary?.activities ?? []),
+    ...(activitySummary?.activities ?? [])
+  ]);
+  const counts = countApolloActivities(activities);
+  const rawPayload = {
+    phoneCalls: callSummary?.rawPayload ?? null,
+    conversations: connectedSummary?.rawPayload ?? null,
+    emailMessages: emailSummary?.rawPayload ?? null,
+    activities: activitySummary?.rawPayload ?? null
+  } satisfies Record<string, unknown>;
+
+  return {
+    userName: input.userName ?? null,
+    apolloUserId: input.apolloUserId ?? null,
+    startDateLabel,
+    endDateLabel,
+    timezone: input.timezone,
+    counts,
+    callCount: callSummary?.callCount ?? counts.CALL + counts.CONNECTED_CALL,
+    connectedCount: connectedSummary?.connectedCount ?? counts.CONNECTED_CALL,
+    emailSentCount: emailSummary?.emailSentCount ?? counts.EMAIL_SENT,
+    replyCount: emailSummary?.replyCount ?? counts.REPLY,
+    leadCreatedCount: activitySummary?.leadCreatedCount ?? counts.LEAD_CREATED,
+    durationSeconds: activities.reduce((total, activity) => total + (activity.durationSeconds ?? 0), 0),
+    activities,
+    rawPayload
+  };
+}
+
+async function fetchApolloGenericActivitySummary(
+  apiKey: string,
+  apolloUserId: string | null,
+  startDateLabel: string,
+  endDateLabel: string,
+  kinds: ApolloActivityKind[]
+) {
   const path = process.env.APOLLO_ACTIVITY_SEARCH_PATH?.trim() || "/api/v1/activities/search";
   const basePayload = {
     per_page: DEFAULT_PAGE_SIZE,
-    user_ids: input.apolloUserId ? [input.apolloUserId] : undefined,
-    owner_ids: input.apolloUserId ? [input.apolloUserId] : undefined,
-    activity_types: buildApolloActivityTypeFilters(input.kinds),
-    types: buildApolloActivityTypeFilters(input.kinds),
+    user_ids: apolloUserId ? [apolloUserId] : undefined,
+    owner_ids: apolloUserId ? [apolloUserId] : undefined,
+    activity_types: buildApolloActivityTypeFilters(kinds),
+    types: buildApolloActivityTypeFilters(kinds),
     date_range: {
       start: startDateLabel,
       end: endDateLabel
@@ -430,24 +484,99 @@ export async function fetchApolloActivitySummary(
   } satisfies Record<string, unknown>;
 
   const rawPayload = await fetchApolloActivityPages(path, apiKey, basePayload);
-  const activities = dedupeApolloActivities(parseApolloActivities(rawPayload, input.apolloUserId ?? null, input.kinds));
+  const activities = dedupeApolloActivities(parseApolloActivities(rawPayload, apolloUserId, kinds));
   const counts = countApolloActivities(activities);
   const aggregateMetrics = extractApolloAggregateMetrics(rawPayload);
 
   return {
-    userName: input.userName ?? null,
-    apolloUserId: input.apolloUserId ?? null,
-    startDateLabel,
-    endDateLabel,
-    timezone: input.timezone,
-    counts,
-    callCount: aggregateMetrics.callCount ?? counts.CALL + counts.CONNECTED_CALL,
-    connectedCount: aggregateMetrics.connectedCount ?? counts.CONNECTED_CALL,
-    emailSentCount: aggregateMetrics.emailSentCount ?? counts.EMAIL_SENT,
-    replyCount: aggregateMetrics.replyCount ?? counts.REPLY,
-    leadCreatedCount: aggregateMetrics.leadCreatedCount ?? counts.LEAD_CREATED,
-    durationSeconds: activities.reduce((total, activity) => total + (activity.durationSeconds ?? 0), 0),
     activities,
+    leadCreatedCount: aggregateMetrics.leadCreatedCount ?? counts.LEAD_CREATED,
+    rawPayload
+  };
+}
+
+async function fetchApolloPhoneCallSummary(
+  apiKey: string,
+  apolloUserId: string | null,
+  startDateLabel: string,
+  endDateLabel: string
+) {
+  const rawPayload = await fetchApolloPagedCollection("/api/v1/phone_calls/search", apiKey, {
+    per_page: DEFAULT_PAGE_SIZE,
+    user_id: apolloUserId ?? undefined,
+    user_ids: apolloUserId ? [apolloUserId] : undefined,
+    start_date: startDateLabel,
+    end_date: endDateLabel
+  });
+
+  const entries = readApolloActivityEntries(rawPayload).map(asRecord).filter(Boolean) as Record<string, unknown>[];
+  const activities = dedupeApolloActivities(
+    entries
+      .filter((entry) => !apolloUserId || matchesApolloUser(entry, apolloUserId))
+      .map((entry) => toApolloPhoneCallActivity(entry))
+      .filter((activity) => activity !== null)
+  );
+
+  return {
+    callCount: activities.length,
+    activities,
+    rawPayload
+  };
+}
+
+async function fetchApolloConversationSummary(
+  apiKey: string,
+  apolloUserId: string | null,
+  startDateLabel: string,
+  endDateLabel: string
+) {
+  const rawPayload = await fetchApolloPagedCollection("/api/v1/conversations/search", apiKey, {
+    per_page: DEFAULT_PAGE_SIZE,
+    user_ids: apolloUserId ? [apolloUserId] : undefined,
+    start_date: startDateLabel,
+    end_date: endDateLabel
+  });
+
+  const entries = readApolloActivityEntries(rawPayload).map(asRecord).filter(Boolean) as Record<string, unknown>[];
+  const activities = dedupeApolloActivities(
+    entries
+      .filter((entry) => !apolloUserId || matchesApolloUser(entry, apolloUserId))
+      .map((entry) => toApolloConversationActivity(entry))
+      .filter((activity) => activity !== null)
+  );
+
+  return {
+    connectedCount: activities.length,
+    activities,
+    rawPayload
+  };
+}
+
+async function fetchApolloEmailMessageSummary(
+  apiKey: string,
+  apolloUserId: string | null,
+  startDateLabel: string,
+  endDateLabel: string
+) {
+  const rawPayload = await fetchApolloPagedCollection("/api/v1/emailer_messages/search", apiKey, {
+    per_page: DEFAULT_PAGE_SIZE,
+    user_ids: apolloUserId ? [apolloUserId] : undefined,
+    start_date: startDateLabel,
+    end_date: endDateLabel
+  });
+
+  const entries = readApolloActivityEntries(rawPayload).map(asRecord).filter(Boolean) as Record<string, unknown>[];
+  const emailActivities = dedupeApolloActivities(
+    entries
+      .filter((entry) => !apolloUserId || matchesApolloUser(entry, apolloUserId))
+      .map((entry) => toApolloEmailActivities(entry))
+      .flat()
+  );
+
+  return {
+    emailSentCount: emailActivities.filter((activity) => activity.kind === "EMAIL_SENT").length,
+    replyCount: emailActivities.filter((activity) => activity.kind === "REPLY").length,
+    activities: emailActivities,
     rawPayload
   };
 }
@@ -475,6 +604,10 @@ async function fetchApolloActivityPages(path: string, apiKey: string, basePayloa
   }
 
   return combined;
+}
+
+async function fetchApolloPagedCollection(path: string, apiKey: string, basePayload: Record<string, unknown>) {
+  return fetchApolloActivityPages(path, apiKey, basePayload);
 }
 
 function readApolloMasterApiKey() {
@@ -1635,12 +1768,112 @@ function readApolloActivityEntries(payload: Record<string, unknown>) {
     ...readApolloArray(payload, ["activities"]),
     ...readApolloArray(payload, ["activity_logs"]),
     ...readApolloArray(payload, ["calls"]),
+    ...readApolloArray(payload, ["phone_calls"]),
+    ...readApolloArray(payload, ["conversations"]),
     ...readApolloArray(payload, ["emails"]),
+    ...readApolloArray(payload, ["emailer_messages"]),
     ...readApolloArray(payload, ["replies"]),
     ...readApolloArray(payload, ["contacts"]),
     ...readApolloArray(payload, ["people"]),
     ...readApolloArray(payload, ["data"])
   ];
+}
+
+function toApolloPhoneCallActivity(record: Record<string, unknown>): ApolloActivityRecord | null {
+  const id = readApolloString(record, ["id", "phone_call_id", "call_id"]);
+  const occurredAt = readApolloString(record, ["started_at", "created_at", "completed_at", "updated_at"]);
+
+  if (!id && !occurredAt) {
+    return null;
+  }
+
+  return {
+    id,
+    kind: "CALL",
+    type: readApolloString(record, ["type", "call_type"]),
+    status: readApolloString(record, ["status", "disposition", "call_disposition"]),
+    outcome: readApolloString(record, ["outcome", "result", "disposition"]),
+    durationSeconds: readApolloNumber(record, ["duration", "duration_seconds", "call_duration_seconds"]),
+    occurredAt,
+    contactName: readApolloString(record, ["contact_name", "prospect_name", "name"]),
+    companyName: readApolloString(record, ["organization_name", "company_name", "account_name"]),
+    email: readApolloString(record, ["email", "contact_email"]),
+    subject: readApolloString(record, ["subject", "title"]),
+    bodyPreview: null,
+    rawPayload: record
+  };
+}
+
+function toApolloConversationActivity(record: Record<string, unknown>): ApolloActivityRecord | null {
+  const id = readApolloString(record, ["id", "conversation_id"]);
+  const occurredAt = readApolloString(record, ["started_at", "created_at", "occurred_at", "updated_at"]);
+
+  if (!id && !occurredAt) {
+    return null;
+  }
+
+  return {
+    id,
+    kind: "CONNECTED_CALL",
+    type: readApolloString(record, ["type", "conversation_type"]),
+    status: readApolloString(record, ["status"]),
+    outcome: readApolloString(record, ["outcome", "result"]),
+    durationSeconds: readApolloNumber(record, ["duration", "duration_seconds", "call_duration_seconds"]),
+    occurredAt,
+    contactName: readApolloString(record, ["contact_name", "prospect_name", "name"]),
+    companyName: readApolloString(record, ["organization_name", "company_name", "account_name"]),
+    email: readApolloString(record, ["email", "contact_email"]),
+    subject: readApolloString(record, ["subject", "title"]),
+    bodyPreview: null,
+    rawPayload: record
+  };
+}
+
+function toApolloEmailActivities(record: Record<string, unknown>): ApolloActivityRecord[] {
+  const id = readApolloString(record, ["id", "message_id", "emailer_message_id"]);
+  const status = readApolloString(record, ["status"]);
+  const replyClass = readApolloString(record, ["reply_class"]);
+  const replied = readApolloBoolean(record, ["replied"], false);
+  const createdAt = readApolloString(record, ["created_at"]);
+  const completedAt = readApolloString(record, ["completed_at", "sent_at", "updated_at"]);
+  const occurredAt = completedAt ?? createdAt;
+  const email = readApolloString(record, ["to_email", "recipient_email", "email"]);
+  const subject = readApolloString(record, ["subject", "email_subject"]);
+  const companyName = readApolloString(record, ["organization_name", "company_name", "account_name"]);
+  const base = {
+    id,
+    type: readApolloString(record, ["type", "message_type"]),
+    status,
+    outcome: replyClass,
+    durationSeconds: null,
+    occurredAt,
+    contactName: readApolloString(record, ["contact_name", "prospect_name", "name"]),
+    companyName,
+    email,
+    subject,
+    bodyPreview: readApolloString(record, ["snippet", "body_preview", "preview_text"]),
+    rawPayload: record
+  } satisfies Omit<ApolloActivityRecord, "kind">;
+
+  const activities: ApolloActivityRecord[] = [];
+
+  if (status === "completed") {
+    activities.push({
+      ...base,
+      kind: "EMAIL_SENT"
+    });
+  }
+
+  if (replied || replyClass) {
+    activities.push({
+      ...base,
+      id: id ? `${id}:reply` : null,
+      kind: "REPLY",
+      occurredAt: readApolloString(record, ["replied_at", "last_reply_at", "updated_at"]) ?? occurredAt
+    });
+  }
+
+  return activities;
 }
 
 function mergeApolloPayload(target: Record<string, unknown>, buckets: Map<string, unknown[]>, pagePayload: Record<string, unknown>) {

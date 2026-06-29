@@ -551,6 +551,7 @@ function parseActivityDateRange(prompt: string) {
   const now = new Date();
   const lower = prompt.toLowerCase();
   const daysMatch = lower.match(/\blast\s+(\d{1,3})\s+days?\b/);
+  const lastWeekdayMatch = lower.match(/\blast\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/);
   const todayLabel = formatDateLabel(now, timezone);
 
   if (daysMatch) {
@@ -583,6 +584,21 @@ function parseActivityDateRange(prompt: string) {
       endDateLabel,
       timezone,
       label: "yesterday"
+    };
+  }
+
+  if (lastWeekdayMatch) {
+    const weekdayLabel = resolveLastWeekdayLabel(todayLabel, lastWeekdayMatch[1], timezone);
+    const startDate = zonedStartOfDay(weekdayLabel, timezone);
+    const endDate = zonedEndOfDay(weekdayLabel, timezone);
+
+    return {
+      startDate,
+      endDate,
+      startDateLabel: weekdayLabel,
+      endDateLabel: weekdayLabel,
+      timezone,
+      label: `last ${lastWeekdayMatch[1]}`
     };
   }
 
@@ -620,6 +636,39 @@ function formatDateLabel(date: Date, timezone: string) {
   const month = parts.find((part) => part.type === "month")?.value;
   const day = parts.find((part) => part.type === "day")?.value;
   return year && month && day ? `${year}-${month}-${day}` : date.toISOString().slice(0, 10);
+}
+
+function resolveLastWeekdayLabel(todayLabel: string, weekdayName: string, timezone: string) {
+  const weekdayIndex = weekdayNameToIndex(weekdayName);
+  const todayDate = zonedStartOfDay(todayLabel, timezone);
+  const todayWeekday = todayDate.getUTCDay();
+  let delta = (todayWeekday - weekdayIndex + 7) % 7;
+  if (delta === 0) {
+    delta = 7;
+  }
+
+  return shiftDateLabel(todayLabel, -delta);
+}
+
+function weekdayNameToIndex(weekdayName: string) {
+  switch (weekdayName) {
+    case "sunday":
+      return 0;
+    case "monday":
+      return 1;
+    case "tuesday":
+      return 2;
+    case "wednesday":
+      return 3;
+    case "thursday":
+      return 4;
+    case "friday":
+      return 5;
+    case "saturday":
+      return 6;
+    default:
+      return 0;
+  }
 }
 
 function shiftDateLabel(label: string, days: number) {
