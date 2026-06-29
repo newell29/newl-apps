@@ -18,7 +18,7 @@ import type {
   QuoteToolTarget
 } from "@/modules/settings/types";
 import { fetchSevenLAvailableCarriers } from "@/server/integrations/seven-l";
-import { fetchApolloRepDirectory, fetchApolloSequenceDirectory } from "@/server/integrations/apollo";
+import { fetchApolloEmailAccountDirectory, fetchApolloRepDirectory, fetchApolloSequenceDirectory } from "@/server/integrations/apollo";
 import { getLtlRatePortalShell } from "@/modules/ltl-rate-portal/queries";
 import { buildApolloRepMappingConfig, parseApolloRepMapping } from "@/modules/settings/apollo-rep-mapping";
 import {
@@ -698,7 +698,10 @@ export async function saveApolloRepMappingAction(formData: FormData) {
 
 export async function syncApolloRepMappingAction() {
   const context = await authorizeSettingsMutation();
-  const syncedUsers = await fetchApolloRepDirectory();
+  const [syncedUsers, syncedEmailAccounts] = await Promise.all([
+    fetchApolloRepDirectory(),
+    fetchApolloEmailAccountDirectory()
+  ]);
 
   if (syncedUsers.length === 0) {
     throw new Error("Apollo returned no teammates to sync. The existing rep mapping was left unchanged.");
@@ -718,13 +721,21 @@ export async function syncApolloRepMappingAction() {
   const existingEntries = parseApolloRepMapping(existing?.publicConfig);
   const entries = syncedUsers.map((user) => {
     const existingEntry = findExistingApolloRepEntry(existingEntries, user);
+    const resolvedEmailAccountId = resolveApolloEmailAccountId({
+      apolloUserId: user.apolloUserId,
+      sendFromEmail: existingEntry?.sendFromEmail ?? user.email,
+      syncedEmailAccounts
+    });
 
     return {
       id: existingEntry?.id ?? `apollo-rep-${user.apolloUserId}`,
       sequenceOwnerName: user.sequenceOwnerName,
       apolloUserId: user.apolloUserId,
       sendFromEmail: existingEntry?.sendFromEmail ?? user.email,
-      sendFromEmailAccountId: existingEntry?.sendFromEmailAccountId ?? null,
+      sendFromEmailAccountId:
+        isLikelyApolloEmailAccountId(existingEntry?.sendFromEmailAccountId)
+          ? existingEntry?.sendFromEmailAccountId ?? null
+          : resolvedEmailAccountId,
       active: existingEntry?.active ?? true
     };
   });
@@ -1220,6 +1231,53 @@ function readApolloSequenceMappingEntries(
       requiresAiDraft: requiresAiDraftTiers.has(tier)
     };
   });
+}
+
+function resolveApolloEmailAccountId({
+  apolloUserId,
+  sendFromEmail,
+  syncedEmailAccounts
+}: {
+  apolloUserId: string | null;
+  sendFromEmail: string | null;
+  syncedEmailAccounts: Array<{
+    id: string;
+    userId: string | null;
+    email: string | null;
+    active: boolean;
+    isDefault: boolean;
+    revokedAt: string | null;
+  }>;
+}) {
+  const normalizedEmail = sendFromEmail?.trim().toLowerCase() ?? null;
+  if (!normalizedEmail) {
+    return null;
+  }
+
+  const exact = syncedEmailAccounts.find(
+    (entry) =>
+      entry.active &&
+      !entry.revokedAt &&
+      entry.email?.toLowerCase() === normalizedEmail &&
+      (!apolloUserId || !entry.userId || entry.userId === apolloUserId)
+  );
+
+  if (exact) {
+    return exact.id;
+  }
+
+  const fallback = syncedEmailAccounts.find(
+    (entry) =>
+      entry.active &&
+      !entry.revokedAt &&
+      entry.email?.toLowerCase() === normalizedEmail
+  );
+
+  return fallback?.id ?? null;
+}
+
+function isLikelyApolloEmailAccountId(value: string | null | undefined) {
+  return Boolean(value && !value.includes("@"));
 }
 
 function mergeApolloPublicConfig(existingPublicConfig: unknown, patch: Record<string, unknown>): Prisma.InputJsonValue {
