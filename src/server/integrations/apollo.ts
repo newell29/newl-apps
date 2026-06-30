@@ -1903,7 +1903,7 @@ function readApolloActivityEntries(payload: Record<string, unknown>) {
 
 function toApolloPhoneCallActivity(record: Record<string, unknown>): ApolloActivityRecord | null {
   const id = readApolloString(record, ["id", "phone_call_id", "call_id"]);
-  const occurredAt = readApolloString(record, ["started_at", "created_at", "completed_at", "updated_at"]);
+  const occurredAt = readApolloString(record, ["start_time", "started_at", "end_time", "created_at", "completed_at", "updated_at"]);
 
   if (!id && !occurredAt) {
     return null;
@@ -1928,7 +1928,7 @@ function toApolloPhoneCallActivity(record: Record<string, unknown>): ApolloActiv
 
 function toApolloConversationActivity(record: Record<string, unknown>): ApolloActivityRecord | null {
   const id = readApolloString(record, ["id", "conversation_id"]);
-  const occurredAt = readApolloString(record, ["started_at", "created_at", "occurred_at", "updated_at"]);
+  const occurredAt = readApolloString(record, ["start_time", "started_at", "created_at", "occurred_at", "updated_at"]);
 
   if (!id && !occurredAt) {
     return null;

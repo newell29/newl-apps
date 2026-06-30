@@ -672,7 +672,7 @@ describe("fetchApolloActivitySummary", () => {
                 id: `call-${index}`,
                 user_id: "apollo-user-1",
                 duration_seconds: 60,
-                started_at: "2026-06-25T12:00:00.000Z"
+                start_time: "2026-06-25T12:00:00.000Z"
               }))
             })
           } as unknown as Response;
@@ -776,13 +776,13 @@ describe("fetchApolloActivitySummary", () => {
                 id: "call-in-range",
                 user_id: "apollo-user-1",
                 duration_seconds: 60,
-                started_at: "2026-06-25T12:00:00.000Z"
+                start_time: "2026-06-25T12:00:00.000Z"
               },
               {
                 id: "call-out-of-range",
                 user_id: "apollo-user-1",
                 duration_seconds: 45,
-                started_at: "2026-06-27T12:00:00.000Z"
+                start_time: "2026-06-27T12:00:00.000Z"
               }
             ]
           })
@@ -839,7 +839,7 @@ describe("fetchApolloActivitySummary", () => {
               id: `repeat-call-${index}`,
               user_id: "apollo-user-1",
               duration_seconds: 30,
-              started_at: "2026-06-25T12:00:00.000Z"
+              start_time: "2026-06-25T12:00:00.000Z"
             }))
           })
         } as unknown as Response;
