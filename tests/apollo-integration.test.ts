@@ -762,6 +762,105 @@ describe("fetchApolloActivitySummary", () => {
     expect(result.durationSeconds).toBe(6345);
   });
 
+  it("filters out records that fall outside the requested local date window", async () => {
+    vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/v1/phone_calls/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            phone_calls: [
+              {
+                id: "call-in-range",
+                user_id: "apollo-user-1",
+                duration_seconds: 60,
+                started_at: "2026-06-25T12:00:00.000Z"
+              },
+              {
+                id: "call-out-of-range",
+                user_id: "apollo-user-1",
+                duration_seconds: 45,
+                started_at: "2026-06-27T12:00:00.000Z"
+              }
+            ]
+          })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/conversations/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            conversations: []
+          })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/emailer_messages/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            emailer_messages: []
+          })
+        } as unknown as Response;
+      }
+
+      throw new Error(`Unexpected Apollo URL in test: ${url}`);
+    });
+
+    const result = await fetchApolloActivitySummary({
+      apolloUserId: "apollo-user-1",
+      userName: "Zalan Riaz",
+      startDate: new Date("2026-06-25T04:00:00.000Z"),
+      endDate: new Date("2026-06-26T03:59:59.999Z"),
+      timezone: "America/Toronto",
+      kinds: ["CALL"]
+    });
+
+    expect(result.callCount).toBe(1);
+    expect(result.activities).toHaveLength(1);
+    expect(result.activities[0]?.id).toBe("call-in-range");
+  });
+
+  it("stops paginating when Apollo repeats the same full page response", async () => {
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/v1/phone_calls/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            phone_calls: Array.from({ length: 100 }, (_, index) => ({
+              id: `repeat-call-${index}`,
+              user_id: "apollo-user-1",
+              duration_seconds: 30,
+              started_at: "2026-06-25T12:00:00.000Z"
+            }))
+          })
+        } as unknown as Response;
+      }
+
+      throw new Error(`Unexpected Apollo URL in test: ${url}`);
+    });
+
+    const result = await fetchApolloActivitySummary({
+      apolloUserId: "apollo-user-1",
+      userName: "Zalan Riaz",
+      startDate: new Date("2026-06-25T04:00:00.000Z"),
+      endDate: new Date("2026-06-26T03:59:59.999Z"),
+      timezone: "America/Toronto",
+      kinds: ["CALL"]
+    });
+
+    expect(result.callCount).toBe(100);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("uses the Apollo user_ids filter instead of q_user_ids when requesting rep activity", async () => {
     const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue({
       ok: true,

@@ -454,13 +454,13 @@ export async function fetchApolloActivitySummary(
   const endDateLabel = formatDateInTimezone(input.endDate, input.timezone);
   const [callSummary, connectedSummary, emailSummary, activitySummary] = await Promise.all([
     input.kinds.some((kind) => kind === "CALL" || kind === "CONNECTED_CALL")
-      ? fetchApolloPhoneCallSummary(apiKey, input.apolloUserId ?? null, startDateLabel, endDateLabel)
+      ? fetchApolloPhoneCallSummary(apiKey, input.apolloUserId ?? null, input.startDate, input.endDate, startDateLabel, endDateLabel)
       : Promise.resolve(null),
     input.kinds.includes("CONNECTED_CALL")
-      ? fetchApolloConversationSummary(apiKey, input.apolloUserId ?? null, startDateLabel, endDateLabel)
+      ? fetchApolloConversationSummary(apiKey, input.apolloUserId ?? null, input.startDate, input.endDate, startDateLabel, endDateLabel)
       : Promise.resolve(null),
     input.kinds.some((kind) => kind === "EMAIL_SENT" || kind === "REPLY")
-      ? fetchApolloEmailMessageSummary(apiKey, input.apolloUserId ?? null, startDateLabel, endDateLabel)
+      ? fetchApolloEmailMessageSummary(apiKey, input.apolloUserId ?? null, input.startDate, input.endDate, startDateLabel, endDateLabel)
       : Promise.resolve(null),
     input.kinds.includes("LEAD_CREATED") || input.kinds.includes("OTHER")
       ? fetchApolloGenericActivitySummary(apiKey, input.apolloUserId ?? null, startDateLabel, endDateLabel, input.kinds)
@@ -536,6 +536,8 @@ async function fetchApolloGenericActivitySummary(
 async function fetchApolloPhoneCallSummary(
   apiKey: string,
   apolloUserId: string | null,
+  startDate: Date,
+  endDate: Date,
   startDateLabel: string,
   endDateLabel: string
 ) {
@@ -553,6 +555,7 @@ async function fetchApolloPhoneCallSummary(
       .filter((entry) => !apolloUserId || matchesApolloUser(entry, apolloUserId))
       .map((entry) => toApolloPhoneCallActivity(entry))
       .filter((activity) => activity !== null)
+      .filter((activity) => isApolloActivityWithinDateRange(activity, startDate, endDate))
   );
 
   return {
@@ -565,6 +568,8 @@ async function fetchApolloPhoneCallSummary(
 async function fetchApolloConversationSummary(
   apiKey: string,
   apolloUserId: string | null,
+  startDate: Date,
+  endDate: Date,
   startDateLabel: string,
   endDateLabel: string
 ) {
@@ -581,6 +586,7 @@ async function fetchApolloConversationSummary(
       .filter((entry) => !apolloUserId || matchesApolloUser(entry, apolloUserId))
       .map((entry) => toApolloConversationActivity(entry))
       .filter((activity) => activity !== null)
+      .filter((activity) => isApolloActivityWithinDateRange(activity, startDate, endDate))
   );
 
   return {
@@ -593,6 +599,8 @@ async function fetchApolloConversationSummary(
 async function fetchApolloEmailMessageSummary(
   apiKey: string,
   apolloUserId: string | null,
+  startDate: Date,
+  endDate: Date,
   startDateLabel: string,
   endDateLabel: string
 ) {
@@ -609,6 +617,7 @@ async function fetchApolloEmailMessageSummary(
       .filter((entry) => !apolloUserId || matchesApolloUser(entry, apolloUserId))
       .map((entry) => toApolloEmailActivities(entry))
       .flat()
+      .filter((activity) => isApolloActivityWithinDateRange(activity, startDate, endDate))
   );
 
   return {
@@ -622,6 +631,7 @@ async function fetchApolloEmailMessageSummary(
 async function fetchApolloActivityPages(path: string, apiKey: string, basePayload: Record<string, unknown>) {
   const combined: Record<string, unknown> = {};
   const buckets = new Map<string, unknown[]>();
+  let previousPageSignature: string | null = null;
 
   for (let page = 1; page <= 10; page += 1) {
     const payload = {
@@ -632,6 +642,12 @@ async function fetchApolloActivityPages(path: string, apiKey: string, basePayloa
     mergeApolloPayload(combined, buckets, pagePayload);
 
     const pageEntries = readApolloActivityEntries(pagePayload);
+    const pageSignature = buildApolloPageSignature(pageEntries);
+    if (previousPageSignature && pageSignature === previousPageSignature) {
+      break;
+    }
+    previousPageSignature = pageSignature;
+
     if (pageEntries.length < DEFAULT_PAGE_SIZE) {
       break;
     }
@@ -1831,6 +1847,42 @@ function dedupeApolloActivities(activities: ApolloActivityRecord[]) {
     seen.add(key);
     return true;
   });
+}
+
+function isApolloActivityWithinDateRange(activity: ApolloActivityRecord, startDate: Date, endDate: Date) {
+  if (!activity.occurredAt) {
+    return true;
+  }
+
+  const occurredAt = new Date(activity.occurredAt);
+  if (Number.isNaN(occurredAt.getTime())) {
+    return true;
+  }
+
+  return occurredAt >= startDate && occurredAt <= endDate;
+}
+
+function buildApolloPageSignature(entries: unknown[]) {
+  return JSON.stringify(
+    entries.map((entry, index) => {
+      const record = asRecord(entry);
+      if (!record) {
+        return `unknown:${index}`;
+      }
+
+      const identifier =
+        readApolloString(record, ["id", "phone_call_id", "call_id", "conversation_id", "message_id", "emailer_message_id"]) ??
+        [
+          readApolloString(record, ["created_at", "started_at", "completed_at", "updated_at"]),
+          readApolloString(record, ["email", "to_email", "recipient_email"]),
+          readApolloString(record, ["subject", "title"])
+        ]
+          .filter(Boolean)
+          .join(":");
+
+      return identifier || `unknown:${index}`;
+    })
+  );
 }
 
 function readApolloActivityEntries(payload: Record<string, unknown>) {
