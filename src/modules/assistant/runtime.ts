@@ -1,4 +1,4 @@
-import { JobStatus, PlatformRole, type Prisma } from "@prisma/client";
+import { AssistantSourceKind, JobStatus, PlatformRole, type Prisma } from "@prisma/client";
 
 import { maybeRunAssistantApolloActivityRequest } from "@/modules/assistant/apollo-workflow";
 import { searchAssistantKnowledge } from "@/modules/assistant/knowledge";
@@ -17,7 +17,8 @@ import { prisma } from "@/server/db";
 import {
   ASSISTANT_PROVIDER_CREDENTIAL_NAME,
   generateAssistantReply,
-  parseAssistantProviderSettings
+  parseAssistantProviderSettings,
+  type AssistantConversationTurn
 } from "@/server/integrations/assistant-provider";
 import type { AuthenticatedContext, TenantContext } from "@/server/tenant-context";
 
@@ -37,7 +38,7 @@ export async function runAssistantPrompt(
         .map((message) => message.content)
         .join("\n")
     : null;
-  const conversationHistory = workspace.activeThread
+  const conversationHistory: AssistantConversationTurn[] = workspace.activeThread
     ? workspace.activeThread.messages
         .filter(
           (message) =>
@@ -357,7 +358,7 @@ function finalizeAssistantResponse(
     messageMetadata: Record<string, unknown>;
     runMetadata: Record<string, unknown>;
     sources: Array<{
-      sourceKind: string;
+      sourceKind: AssistantSourceKind;
       sourceId: string | null;
       title: string;
       excerpt: string;

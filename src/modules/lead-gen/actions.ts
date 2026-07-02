@@ -1028,6 +1028,7 @@ export async function bulkPushContactsToApolloAction(
       loadApolloRepMappings(context.tenantId),
       fetchApolloEmailAccountDirectory().catch(() => [])
     ]);
+    const contactsById = new Map(contacts.map((contact) => [contact.id, contact]));
     const groups = new Map<string, ApolloPushGroup>();
     let skippedContacts = 0;
     let failedContacts = 0;
@@ -1110,6 +1111,8 @@ export async function bulkPushContactsToApolloAction(
         groups.set(key, {
           companyId: validation.companyId,
           companyName: validation.companyName,
+          companyDomain: validation.companyDomain,
+          apolloOrganizationId: validation.apolloOrganizationId,
           sequenceId: validation.sequenceId,
           sequenceName: validation.sequenceName,
           apolloOwnerUserId: validation.apolloOwnerUserId,
@@ -1129,23 +1132,118 @@ export async function bulkPushContactsToApolloAction(
           initialStatus: "active"
         });
 
-        const pushedAt = new Date();
-        const pushedAtIso = pushedAt.toISOString();
-        await prisma.contact.updateMany({
-          where: {
-            tenantId: context.tenantId,
-            id: {
-              in: group.contacts.map((contact) => contact.contactId)
+        const verificationLookup = await verifyApolloSequencePush({
+          companyName: group.companyName,
+          companyDomain: group.companyDomain,
+          apolloOrganizationId: group.apolloOrganizationId
+        });
+        const verificationContacts: ApolloSyncContactRecord[] = group.contacts
+          .map((contact) => contactsById.get(contact.contactId))
+          .filter(
+            (
+              contact
+            ): contact is (typeof contacts)[number] =>
+              Boolean(contact)
+          )
+          .map((contact) => ({
+            id: contact.id,
+            companyId: contact.companyId,
+            firstName: contact.firstName,
+            lastName: contact.lastName,
+            fullName: contact.fullName,
+            title: contact.title,
+            department: contact.department,
+            seniority: contact.seniority,
+            email: contact.email,
+            phone: contact.phone,
+            linkedinUrl: contact.linkedinUrl,
+            contactStatus: contact.contactStatus,
+            apolloContactId: contact.apolloContactId,
+            apolloPersonId: contact.apolloPersonId,
+            sequenceStatus: contact.sequenceStatus,
+            replyStatus: contact.replyStatus,
+            recommendedSequenceName: contact.recommendedSequenceName,
+            recommendedSequenceId: contact.recommendedSequenceId,
+            selectedSequenceName: contact.selectedSequenceName,
+            selectedSequenceId: contact.selectedSequenceId,
+            sequenceRecommendationReason: contact.sequenceRecommendationReason,
+            sequenceOverrideReason: contact.sequenceOverrideReason,
+            sequenceManuallyOverridden: contact.sequenceManuallyOverridden,
+            lastTouchAt: contact.lastTouchAt,
+            lastReplyAt: contact.lastReplyAt,
+            assignedRep: contact.assignedRep,
+            rawJson: contact.rawJson,
+            company: {
+              id: contact.company.id,
+              name: contact.company.name,
+              domain: contact.company.domain,
+              linkedinUrl: contact.company.linkedinUrl,
+              apolloOrganizationId: contact.company.apolloOrganizationId
             }
-          },
-          data: {
-            apolloStatus: ApolloStatus.ENRICHED,
-            sequenceStatus: SequenceStatus.ENROLLED,
-            lastTouchAt: pushedAt
-          }
+          }));
+
+        await syncExistingApolloContactsForCompany({
+          tenantId: context.tenantId,
+          companyId: group.companyId,
+          existingContacts: verificationContacts,
+          lookup: verificationLookup
         });
 
+        const pushedAt = new Date();
+        const pushedAtIso = pushedAt.toISOString();
+        const verifiedResults = new Map<string, boolean>();
         for (const contact of group.contacts) {
+          const existingContact = contactsById.get(contact.contactId);
+          const incoming = existingContact
+            ? matchIncomingApolloContact(verificationLookup.contacts, existingContact)
+            : null;
+          verifiedResults.set(contact.contactId, isApolloContactEnrolledInSequence(incoming, group.sequenceId));
+        }
+
+        const enrolledIds = group.contacts
+          .filter((contact) => verifiedResults.get(contact.contactId))
+          .map((contact) => contact.contactId);
+
+        if (enrolledIds.length > 0) {
+          await prisma.contact.updateMany({
+            where: {
+              tenantId: context.tenantId,
+              id: {
+                in: enrolledIds
+              }
+            },
+            data: {
+              apolloStatus: ApolloStatus.ENRICHED,
+              sequenceStatus: SequenceStatus.ENROLLED,
+              lastTouchAt: pushedAt
+            }
+          });
+        }
+
+        for (const contact of group.contacts) {
+          const verified = verifiedResults.get(contact.contactId) ?? false;
+          if (!verified) {
+            skippedContacts += 1;
+            const reason =
+              "Apollo accepted the push, but the contact was not yet visible in the cadence when Newl Apps verified it.";
+            failureReasons.add(reason);
+            details.push({
+              contactId: contact.contactId,
+              contactName: contact.fullName,
+              companyName: group.companyName,
+              outcome: "skipped",
+              reason
+            });
+            await appendApolloContactActivity({
+              tenantId: context.tenantId,
+              contactId: contact.contactId,
+              note:
+                `Apollo accepted the sequence push on ${pushedAtIso}, but the contact was not yet visible in ` +
+                `"${group.sequenceName}" when Newl Apps verified the cadence immediately afterward.`
+            });
+            continue;
+          }
+
           details.push({
             contactId: contact.contactId,
             contactName: contact.fullName,
@@ -1171,7 +1269,7 @@ export async function bulkPushContactsToApolloAction(
           }
         }
 
-        enrolledContacts += group.contacts.length;
+        enrolledContacts += enrolledIds.length;
       } catch (error) {
         const reason = error instanceof Error ? error.message : "Apollo sequence push failed.";
         failureReasons.add(reason);
@@ -1689,6 +1787,8 @@ async function resolveTenantSequenceOption(tenantId: string, sequenceId: string)
 type ApolloPushGroup = {
   companyId: string;
   companyName: string;
+  companyDomain: string | null;
+  apolloOrganizationId: string | null;
   sequenceId: string;
   sequenceName: string;
   apolloOwnerUserId: string;
@@ -1763,6 +1863,8 @@ type ApolloPushReadyContact = {
   contactId: string;
   companyId: string;
   companyName: string;
+  companyDomain: string | null;
+  apolloOrganizationId: string | null;
   fullName: string;
   apolloContactId: string;
   sequenceId: string;
@@ -1993,6 +2095,8 @@ async function validateApolloPushCandidate({
     contactId: contact.id,
     companyId: contact.companyId,
     companyName: contact.company.name,
+    companyDomain: contact.company.domain,
+    apolloOrganizationId: contact.company.apolloOrganizationId,
     fullName: contact.fullName,
     apolloContactId: contact.apolloContactId,
     sequenceId: effectiveSequence.id,
@@ -2243,6 +2347,49 @@ function matchIncomingApolloContact(
     ) ??
     null
   );
+}
+
+function isApolloContactEnrolledInSequence(
+  incoming: ApolloContactRecord | null,
+  sequenceId: string
+) {
+  if (!incoming) {
+    return false;
+  }
+
+  return incoming.sequenceId === sequenceId && incoming.sequenceStatus !== SequenceStatus.NOT_STARTED;
+}
+
+async function verifyApolloSequencePush({
+  companyName,
+  companyDomain,
+  apolloOrganizationId
+}: {
+  companyName: string;
+  companyDomain: string | null;
+  apolloOrganizationId: string | null;
+}) {
+  const firstPass = await fetchApolloContactsForCompany({
+    companyName,
+    domain: companyDomain,
+    apolloOrganizationId
+  });
+
+  if (firstPass.contacts.some((contact) => contact.sequenceStatus !== SequenceStatus.NOT_STARTED)) {
+    return firstPass;
+  }
+
+  await sleep(1500);
+
+  return fetchApolloContactsForCompany({
+    companyName,
+    domain: companyDomain,
+    apolloOrganizationId
+  });
+}
+
+async function sleep(ms: number) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function appendApolloContactActivity({
