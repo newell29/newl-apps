@@ -1124,7 +1124,7 @@ export async function bulkPushContactsToApolloAction(
 
     for (const group of groups.values()) {
       try {
-        await pushApolloContactsToSequence({
+        const pushResult = await pushApolloContactsToSequence({
           sequenceId: group.sequenceId,
           apolloContactIds: group.contacts.map((contact) => contact.apolloContactId),
           sequenceOwnerUserId: group.apolloOwnerUserId,
@@ -1241,7 +1241,15 @@ export async function bulkPushContactsToApolloAction(
               contactId: contact.contactId,
               note:
                 `Apollo accepted the sequence push on ${pushedAtIso}, but the cadence enrollment was still ` +
-                `propagating and was not yet visible in "${group.sequenceName}" during Newl Apps verification.`
+                `propagating and was not yet visible in "${group.sequenceName}" during Newl Apps verification. ` +
+                `${summarizeApolloSequencePushResponse(pushResult.rawPayload)}`
+            });
+            await storeApolloSequencePushSnapshot({
+              tenantId: context.tenantId,
+              contactId: contact.contactId,
+              sequenceId: group.sequenceId,
+              sequenceName: group.sequenceName,
+              payload: pushResult.rawPayload
             });
             continue;
           }
@@ -1256,7 +1264,16 @@ export async function bulkPushContactsToApolloAction(
           await appendApolloContactActivity({
             tenantId: context.tenantId,
             contactId: contact.contactId,
-            note: `Apollo sequence push completed on ${pushedAtIso}. Enrolled in "${group.sequenceName}" as ${contact.fullName}.`
+            note:
+              `Apollo sequence push completed on ${pushedAtIso}. Enrolled in "${group.sequenceName}" as ${contact.fullName}. ` +
+              `${summarizeApolloSequencePushResponse(pushResult.rawPayload)}`
+          });
+          await storeApolloSequencePushSnapshot({
+            tenantId: context.tenantId,
+            contactId: contact.contactId,
+            sequenceId: group.sequenceId,
+            sequenceName: group.sequenceName,
+            payload: pushResult.rawPayload
           });
 
           if (contact.draftId && contact.requiresAiDraft) {
@@ -2432,6 +2449,91 @@ function matchIncomingApolloPushTarget(
     incomingContacts.find((incoming) => incoming.fullName.trim().toLowerCase() === normalizedFullName) ??
     null
   );
+}
+
+async function storeApolloSequencePushSnapshot({
+  tenantId,
+  contactId,
+  sequenceId,
+  sequenceName,
+  payload
+}: {
+  tenantId: string;
+  contactId: string;
+  sequenceId: string;
+  sequenceName: string;
+  payload: Record<string, unknown>;
+}) {
+  const contact = await prisma.contact.findFirst({
+    where: {
+      id: contactId,
+      tenantId
+    },
+    select: {
+      id: true,
+      rawJson: true
+    }
+  });
+
+  if (!contact) {
+    return;
+  }
+
+  const currentRawJson = isJsonObject(contact.rawJson) ? contact.rawJson : {};
+  const apolloData = isJsonObject(currentRawJson.apollo) ? currentRawJson.apollo : {};
+
+  await prisma.contact.update({
+    where: {
+      id: contactId
+    },
+    data: {
+      rawJson: toInputJsonValue({
+        ...currentRawJson,
+        apollo: {
+          ...apolloData,
+          lastSequencePush: {
+            capturedAt: new Date().toISOString(),
+            sequenceId,
+            sequenceName,
+            responseSummary: summarizeApolloSequencePushResponse(payload),
+            response: payload
+          }
+        }
+      })
+    }
+  });
+}
+
+function summarizeApolloSequencePushResponse(payload: Record<string, unknown>) {
+  const directMessage = extractApolloPushSummaryMessage(payload);
+  const keys = Object.keys(payload).slice(0, 8);
+  const summaryParts = [directMessage, keys.length > 0 ? `Apollo response keys: ${keys.join(", ")}` : null].filter(Boolean);
+  return summaryParts.length > 0 ? summaryParts.join(". ") : "Apollo returned a response, but it did not include a readable summary message.";
+}
+
+function extractApolloPushSummaryMessage(payload: Record<string, unknown>) {
+  const direct = readStringFromUnknown(payload["message"]) ?? readStringFromUnknown(payload["error"]) ?? readStringFromUnknown(payload["detail"]);
+  if (direct) {
+    return `Apollo response: ${direct}`;
+  }
+
+  const errors = payload["errors"];
+  if (errors && typeof errors === "object") {
+    const nested = errors as Record<string, unknown>;
+    const nestedMessage =
+      readStringFromUnknown(nested["message"]) ??
+      readStringFromUnknown(nested["base"]) ??
+      readStringFromUnknown(nested["detail"]);
+    if (nestedMessage) {
+      return `Apollo response: ${nestedMessage}`;
+    }
+  }
+
+  return null;
+}
+
+function readStringFromUnknown(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 async function appendApolloContactActivity({
