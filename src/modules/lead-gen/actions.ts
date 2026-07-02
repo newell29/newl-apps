@@ -19,8 +19,7 @@ import {
   EMPTY_CONTACT_BULK_ACTION_SUMMARY,
   type ContactBulkActionSummary
 } from "@/modules/lead-gen/contact-bulk-action-summary";
-import { calculateLeadPipelineScoreForCompany } from "@/modules/lead-gen/queries";
-import { summarizeTradeMiningEvidence } from "@/modules/lead-gen/queries";
+import { calculateLeadPipelineScoreForCompany, scoreCandidate, summarizeTradeMiningEvidence } from "@/modules/lead-gen/queries";
 import {
   assertValidTradeMiningSearchProfile,
   defaultTradeMiningCompanyIdentityRoles,
@@ -42,6 +41,7 @@ import { prisma } from "@/server/db";
 import {
   fetchApolloEmailAccountDirectory,
   fetchApolloContactsForCompany,
+  syncApolloContactTypedCustomFields,
   type ApolloEmailAccountDirectoryEntry,
   type ApolloContactRecord,
   pushApolloContactsToSequence,
@@ -1057,6 +1057,42 @@ export async function bulkPushContactsToApolloAction(
           tenantId: context.tenantId,
           contactId: contact.id,
           note: `Apollo sequence push skipped on ${new Date().toISOString()}. ${validation.reason}`
+        });
+        continue;
+      }
+
+      try {
+        const customFieldSync = await syncApolloCustomFieldsForContactPush({
+          tenantId: context.tenantId,
+          contactId: contact.id,
+          apolloContactId: validation.apolloContactId
+        });
+
+        if (customFieldSync.missingFields.length > 0) {
+          await appendApolloContactActivity({
+            tenantId: context.tenantId,
+            contactId: contact.id,
+            note:
+              `Apollo custom field sync completed on ${new Date().toISOString()} with partial coverage. ` +
+              `Missing Apollo field definitions: ${customFieldSync.missingFields.join(", ")}.`
+          });
+        }
+      } catch (error) {
+        const reason =
+          error instanceof Error ? error.message : "Apollo custom field sync failed before sequence push.";
+        skippedContacts += 1;
+        failureReasons.add(reason);
+        details.push({
+          contactId: contact.id,
+          contactName: contact.fullName,
+          companyName: contact.company.name,
+          outcome: "skipped",
+          reason
+        });
+        await appendApolloContactActivity({
+          tenantId: context.tenantId,
+          contactId: contact.id,
+          note: `Apollo custom field sync failed on ${new Date().toISOString()}. ${reason}`
         });
         continue;
       }
@@ -3083,11 +3119,14 @@ async function loadAiDraftContactContext({
             id: true,
             name: true,
             priorityScore: true,
+            candidateStatus: true,
+            domain: true,
+            apolloOrganizationId: true,
             importRecords: {
               orderBy: {
                 arrivalDate: "desc"
               },
-              take: 25,
+              take: 250,
               select: {
                 rawJson: true,
                 arrivalDate: true,
@@ -3240,16 +3279,93 @@ async function loadAiDraftContactContext({
   return {
     model,
     contact,
+    contactScore: scoring.score,
+    contactScoreSummary: scoring.summary,
     contactTier: scoring.tier,
+    scoringConfig,
     evidence,
     shipmentDraftContext: buildShipmentDraftContext(contact.company.importRecords),
     selectedSequenceName: contact.selectedSequenceName ?? contact.recommendedSequenceName ?? recommendation.name ?? null,
     selectedSequenceId: contact.selectedSequenceId ?? contact.recommendedSequenceId ?? recommendation.id ?? null,
+    selectedSequenceReason: contact.sequenceRecommendationReason ?? recommendation.reason,
     requiresAiDraft: tierMapping?.requiresAiDraft ?? false,
     existingDraft: contact.outreachDrafts[0] ?? null,
     leadId: contact.company.leads[0]?.id ?? null,
     leadScore: companyLeadScore
   };
+}
+
+async function syncApolloCustomFieldsForContactPush({
+  tenantId,
+  contactId,
+  apolloContactId
+}: {
+  tenantId: string;
+  contactId: string;
+  apolloContactId: string;
+}) {
+  const draftContext = await loadAiDraftContactContext({
+    tenantId,
+    contactId
+  });
+
+  if (!draftContext) {
+    throw new Error("Contact context is unavailable for Apollo custom field sync.");
+  }
+
+  const customFieldValues = buildApolloCustomFieldValues(draftContext);
+  return syncApolloContactTypedCustomFields({
+    apolloContactId,
+    fieldValues: customFieldValues
+  });
+}
+
+function buildApolloCustomFieldValues(
+  draftContext: NonNullable<Awaited<ReturnType<typeof loadAiDraftContactContext>>>
+) {
+  const companyScoring = scoreCandidate({
+    companyPriorityScore: draftContext.contact.company.priorityScore,
+    candidateStatus: draftContext.contact.company.candidateStatus,
+    alreadyInPipeline: true,
+    evidence: draftContext.evidence,
+    config: draftContext.scoringConfig
+  });
+  const shipmentCount30d = countShipmentsWithinDays(draftContext.contact.company.importRecords, 30);
+  const shipmentCount90d = countShipmentsWithinDays(draftContext.contact.company.importRecords, 90);
+  const teu30d = sumTeuWithinDays(draftContext.contact.company.importRecords, 30);
+  const originCountries = collectTopValues(
+    draftContext.contact.company.importRecords,
+    (record) => record.originCountry ?? readString(asObject(record.rawJson), "originCountry"),
+    5
+  );
+
+  const values: Record<string, string> = {
+    "NEWL Company Opportunity Score": String(Math.round(draftContext.leadScore ?? companyScoring.score)),
+    "NEWL Contact Relevance Score": String(Math.round(draftContext.contactScore)),
+    "NEWL Sequence Tier": formatContactTierLabel(draftContext.contactTier),
+    "NEWL Cadence Recommendation": draftContext.selectedSequenceName ?? "No cadence selected",
+    "NEWL Sequence Reason": draftContext.selectedSequenceReason ?? "No sequence recommendation reason available",
+    "NEWL TradeMining Score Reason": companyScoring.reasoning || "No TradeMining score explanation available",
+    "NEWL Shipment Count 30d": String(shipmentCount30d),
+    "NEWL Shipment Count 90d": String(shipmentCount90d),
+    "NEWL TEU 30d": formatDecimalValue(teu30d),
+    "NEWL Arrival Port": draftContext.evidence.destinationPort ?? "Unknown",
+    "NEWL Destination City": draftContext.evidence.destinationCity ?? "Unknown",
+    "NEWL Destination State": draftContext.evidence.destinationState ?? "Unknown",
+    "NEWL Origin Countries": originCountries.length > 0 ? originCountries.join(", ") : "Unknown",
+    "NEWL Apollo Match Confidence": draftContext.contact.company.apolloOrganizationId ? "direct_company" : "not_recorded",
+    "NEWL Apollo Domain": draftContext.contact.company.domain ?? "Unknown"
+  };
+
+  if (draftContext.existingDraft?.subject) {
+    values["NEWL Email Subject Draft"] = draftContext.existingDraft.subject;
+  }
+
+  if (draftContext.existingDraft?.body) {
+    values["NEWL Email Body Draft"] = draftContext.existingDraft.body;
+  }
+
+  return values;
 }
 
 async function loadTier1DraftModel(tenantId: string) {
@@ -3276,6 +3392,48 @@ async function isLeadGenAiEnabled(tenantId: string) {
   });
 
   return config?.aiClassificationEnabled ?? DEFAULT_TRADEMINING_SCORING_SETTINGS.aiClassificationEnabled;
+}
+
+function countShipmentsWithinDays(
+  importRecords: Array<{
+    arrivalDate: Date | null;
+  }>,
+  days: number
+) {
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  return importRecords.filter((record) => record.arrivalDate && record.arrivalDate.getTime() >= cutoff).length;
+}
+
+function sumTeuWithinDays(
+  importRecords: Array<{
+    rawJson: unknown;
+    arrivalDate: Date | null;
+  }>,
+  days: number
+) {
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+
+  return importRecords.reduce((total, record) => {
+    if (!record.arrivalDate || record.arrivalDate.getTime() < cutoff) {
+      return total;
+    }
+
+    return total + readNumericValue(asObject(record.rawJson), ["teu"]);
+  }, 0);
+}
+
+function formatContactTierLabel(value: string) {
+  return value
+    .toLowerCase()
+    .split("_")
+    .filter(Boolean)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ");
+}
+
+function formatDecimalValue(value: number) {
+  const rounded = Math.round(value * 100) / 100;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2);
 }
 
 function normalizeLeadGenAiScoringConfig(
@@ -3365,6 +3523,24 @@ function asObject(value: unknown) {
 function readString(record: Prisma.JsonObject, key: string) {
   const value = record[key];
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readNumericValue(record: Prisma.JsonObject, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (typeof value === "string") {
+      const parsed = Number(value.trim());
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+
+  return 0;
 }
 
 function asStringArray(value: Prisma.JsonValue | null | undefined) {
