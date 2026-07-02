@@ -19,13 +19,15 @@ import {
   saveContactDraftAction,
   updateContactSequenceAction
 } from "@/modules/lead-gen/actions";
+import { getRecentApolloPushJobs } from "@/modules/lead-gen/apollo-push-jobs";
 import { ContactDirectoryTableClient } from "@/modules/lead-gen/components/contact-directory-table-client";
 import {
   getContactDirectory,
   getContactDirectoryFilters,
   type ContactBooleanFilter,
   type ContactDraftStatusFilter,
-  type ContactDirectorySort
+  type ContactDirectorySort,
+  type ContactSequenceStatusFilter
 } from "@/modules/lead-gen/queries";
 import { buildSequenceCatalogItems } from "@/modules/lead-gen/sequence-catalog";
 import { requireModule } from "@/server/auth/authorization";
@@ -112,7 +114,7 @@ export default async function ContactsPage({
     sort
   });
   const exportAllHref = "/api/lead-gen/contacts/export";
-  const [contacts, filterOptions] = await Promise.all([
+  const [contacts, filterOptions, apolloPushJobs] = await Promise.all([
     getContactDirectory(tenant, {
       query,
       companyId,
@@ -130,7 +132,8 @@ export default async function ContactsPage({
       assignedRep,
       sort
     }),
-    getContactDirectoryFilters(tenant)
+    getContactDirectoryFilters(tenant),
+    getRecentApolloPushJobs(tenant)
   ]);
   const filterChips = buildContactFilterChips({
     query,
@@ -370,6 +373,7 @@ export default async function ContactsPage({
         {contacts.length > 0 ? (
           <ContactDirectoryTableClient
             contacts={contacts}
+            initialApolloPushJobs={apolloPushJobs}
             sequenceOptions={filterOptions.sequenceOptions.length > 0 ? filterOptions.sequenceOptions : sequenceOptions}
             bulkUpdateContactSequenceAction={bulkUpdateContactSequenceAction}
             bulkRemoveContactsAction={bulkRemoveContactsAction}
@@ -596,9 +600,13 @@ function parseApolloStatusParam(value: string | undefined) {
   return Object.values(ApolloStatus).includes(value as ApolloStatus) ? (value as ApolloStatus) : "ALL";
 }
 
-function parseSequenceStatusParam(value: string | undefined) {
+function parseSequenceStatusParam(value: string | undefined): ContactSequenceStatusFilter {
   if (!value || value === "ALL") {
     return "ALL";
+  }
+
+  if (value === "PUSH_BLOCKED") {
+    return value;
   }
 
   return Object.values(SequenceStatus).includes(value as SequenceStatus) ? (value as SequenceStatus) : "ALL";

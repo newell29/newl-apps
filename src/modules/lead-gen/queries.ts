@@ -161,13 +161,15 @@ export type LeadPipelineFilters = {
 
 export type ContactDirectorySort = "score_desc" | "updated_desc" | "name_asc";
 
+export type ContactSequenceStatusFilter = SequenceStatus | "ALL" | "PUSH_BLOCKED";
+
 export type ContactDirectoryFilters = {
   query?: string;
   companyId?: string;
   searchProfileId?: string;
   contactStatus?: ContactStatus | "ALL";
   apolloStatus?: ApolloStatus | "ALL";
-  sequenceStatus?: SequenceStatus | "ALL";
+  sequenceStatus?: ContactSequenceStatusFilter;
   replyStatus?: ReplyStatus | "ALL";
   source?: ContactSource | "ALL";
   contactTier?: ContactTier | "ALL";
@@ -993,6 +995,13 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
       : !openAiRuntimeReady
         ? ("OPENAI_KEY_MISSING" satisfies ContactDraftGenerationDisabledReason)
         : ("LEAD_GEN_AI_DISABLED" satisfies ContactDraftGenerationDisabledReason);
+    const rawJson = asObject(contact.rawJson);
+    const apolloJson = asObject(rawJson.apollo);
+    const pushBlocker = asObject(apolloJson.pushBlocker);
+    const effectiveSequenceStatus: ContactSequenceStatusFilter =
+      readString(pushBlocker, "reason") && contact.sequenceStatus !== SequenceStatus.ENROLLED
+        ? "PUSH_BLOCKED"
+        : contact.sequenceStatus;
 
     return {
       id: contact.id,
@@ -1017,6 +1026,9 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
       contactScoreSummary: scoring.summary,
       apolloStatus: contact.apolloStatus,
       sequenceStatus: contact.sequenceStatus,
+      apolloPushBlockedReason: readString(pushBlocker, "reason"),
+      apolloPushBlockedAt: readString(pushBlocker, "blockedAt"),
+      effectiveSequenceStatus,
       replyStatus: contact.replyStatus,
       recommendedSequenceId: contact.recommendedSequenceId ?? recommendation.id,
       recommendedSequenceName: contact.recommendedSequenceName ?? recommendation.name,
@@ -1069,6 +1081,14 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
     }
 
     if (!matchesBooleanFilter(filters.hasSequenceSelected, Boolean(contact.selectedSequenceId || contact.selectedSequenceName))) {
+      return false;
+    }
+
+    if (
+      filters.sequenceStatus &&
+      filters.sequenceStatus !== "ALL" &&
+      contact.effectiveSequenceStatus !== filters.sequenceStatus
+    ) {
       return false;
     }
 
@@ -1164,7 +1184,7 @@ export async function getContactDirectoryFilters(tenant: TenantContext) {
     approvedAccountCount,
     contactStatuses: Object.values(ContactStatus),
     apolloStatuses: Object.values(ApolloStatus),
-    sequenceStatuses: Object.values(SequenceStatus),
+    sequenceStatuses: ["PUSH_BLOCKED", ...Object.values(SequenceStatus)] satisfies ContactSequenceStatusFilter[],
     replyStatuses: Object.values(ReplyStatus),
     sources: Object.values(ContactSource),
     contactTiers: Object.values(ContactTier),
@@ -1262,7 +1282,7 @@ function buildContactDirectoryWhere(tenant: TenantContext, filters: ContactDirec
     where.apolloStatus = filters.apolloStatus;
   }
 
-  if (filters.sequenceStatus && filters.sequenceStatus !== "ALL") {
+  if (filters.sequenceStatus && filters.sequenceStatus !== "ALL" && filters.sequenceStatus !== "PUSH_BLOCKED") {
     where.sequenceStatus = filters.sequenceStatus;
   }
 

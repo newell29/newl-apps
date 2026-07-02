@@ -14,7 +14,8 @@ import {
   type ContactBooleanFilter,
   type ContactDraftStatusFilter,
   type ContactDirectoryFilters,
-  type ContactDirectorySort
+  type ContactDirectorySort,
+  type ContactSequenceStatusFilter
 } from "@/modules/lead-gen/queries";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -150,9 +151,13 @@ function parseApolloStatusParam(value: string | null) {
   return Object.values(ApolloStatus).includes(value as ApolloStatus) ? (value as ApolloStatus) : "ALL";
 }
 
-function parseSequenceStatusParam(value: string | null) {
+function parseSequenceStatusParam(value: string | null): ContactSequenceStatusFilter {
   if (!value || value === "ALL") {
     return "ALL";
+  }
+
+  if (value === "PUSH_BLOCKED") {
+    return value;
   }
 
   return Object.values(SequenceStatus).includes(value as SequenceStatus) ? (value as SequenceStatus) : "ALL";

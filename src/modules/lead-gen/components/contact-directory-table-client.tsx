@@ -21,6 +21,8 @@ import Link from "next/link";
 import { useActionState, useEffect, useMemo, useState } from "react";
 import { DataGridColumnMenu } from "@/components/data-grid-column-menu";
 import { usePersistedTableState } from "@/components/use-persisted-table-state";
+import type { ApolloPushJobSummary } from "@/modules/lead-gen/apollo-push-jobs";
+import type { ContactSequenceStatusFilter } from "@/modules/lead-gen/queries";
 import {
   EMPTY_CONTACT_BULK_ACTION_SUMMARY,
   type ContactBulkActionDetail,
@@ -47,6 +49,9 @@ type ContactDirectoryRow = {
   contactScoreSummary: string;
   apolloStatus: ApolloStatus;
   sequenceStatus: SequenceStatus;
+  apolloPushBlockedReason: string | null;
+  apolloPushBlockedAt: string | null;
+  effectiveSequenceStatus: ContactSequenceStatusFilter;
   replyStatus: ReplyStatus;
   recommendedSequenceName: string;
   selectedSequenceId: string;
@@ -73,6 +78,7 @@ type ContactDirectoryRow = {
 
 export function ContactDirectoryTableClient({
   contacts,
+  initialApolloPushJobs,
   sequenceOptions,
   bulkUpdateContactSequenceAction,
   bulkRemoveContactsAction,
@@ -83,6 +89,7 @@ export function ContactDirectoryTableClient({
   generateContactDraftAction
 }: {
   contacts: ContactDirectoryRow[];
+  initialApolloPushJobs: ApolloPushJobSummary[];
   sequenceOptions: readonly SequenceCatalogItem[];
   bulkUpdateContactSequenceAction: (
     previousState: ContactBulkActionSummary,
@@ -120,6 +127,10 @@ export function ContactDirectoryTableClient({
   const [apolloSyncState, runApolloSyncAction, isApolloSyncPending] = useActionState(
     syncSelectedApolloStatusesAction,
     EMPTY_CONTACT_BULK_ACTION_SUMMARY
+  );
+  const [apolloPushJobs, setApolloPushJobs] = useState(initialApolloPushJobs);
+  const [activeApolloPushJobId, setActiveApolloPushJobId] = useState<string | null>(
+    initialApolloPushJobs.find((job) => job.status === "QUEUED" || job.status === "RUNNING")?.id ?? null
   );
   const {
     sorting,
@@ -291,6 +302,12 @@ export function ContactDirectoryTableClient({
               <p className="mt-1 text-xs text-mutedForeground">
                 {contact.sequenceManuallyOverridden ? "Manual override" : "Auto-selected"}
               </p>
+              {contact.apolloPushBlockedReason ? (
+                <div className="mt-2 rounded-md border border-danger/20 bg-danger/5 px-2.5 py-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-danger">Push blocked</p>
+                  <p className="mt-1 text-xs leading-5 text-foreground">{contact.apolloPushBlockedReason}</p>
+                </div>
+              ) : null}
             </div>
           );
         }
@@ -340,11 +357,19 @@ export function ContactDirectoryTableClient({
         cell: ({ row }) => <StatusBadge value={row.original.apolloStatus} tone={apolloStatusTone(row.original.apolloStatus)} />
       },
       {
-        accessorKey: "sequenceStatus",
+        accessorFn: (row) => row.effectiveSequenceStatus,
+        id: "sequenceStatus",
         header: "Sequence",
         filterFn: normalizedEqualsFilter,
         size: 120,
-        cell: ({ row }) => <StatusBadge value={row.original.sequenceStatus} tone={sequenceStatusTone(row.original.sequenceStatus)} />
+        cell: ({ row }) => {
+          const contact = row.original;
+          if (contact.apolloPushBlockedReason && contact.sequenceStatus !== SequenceStatus.ENROLLED) {
+            return <StatusBadge value="PUSH_BLOCKED" tone="danger" />;
+          }
+
+          return <StatusBadge value={contact.sequenceStatus} tone={sequenceStatusTone(contact.sequenceStatus)} />;
+        }
       },
       {
         accessorKey: "replyStatus",
@@ -572,6 +597,53 @@ export function ContactDirectoryTableClient({
     }
   }, [apolloPushState.completedAt, apolloPushState.status]);
 
+  useEffect(() => {
+    if (apolloPushState.jobRunId) {
+      setActiveApolloPushJobId(apolloPushState.jobRunId);
+    }
+  }, [apolloPushState.jobRunId]);
+
+  useEffect(() => {
+    if (!activeApolloPushJobId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function pollJob() {
+      const response = await fetch(`/api/lead-gen/apollo-push-jobs?jobId=${activeApolloPushJobId}`, {
+        cache: "no-store"
+      });
+      if (!response.ok) {
+        return;
+      }
+
+      const payload = (await response.json()) as { job?: ApolloPushJobSummary };
+      if (!payload.job || cancelled) {
+        return;
+      }
+
+      setApolloPushJobs((current) => {
+        const next = [payload.job!, ...current.filter((job) => job.id !== payload.job!.id)];
+        return next.slice(0, 10);
+      });
+
+      if (payload.job.status !== "QUEUED" && payload.job.status !== "RUNNING") {
+        setActiveApolloPushJobId(null);
+      }
+    }
+
+    void pollJob();
+    const interval = window.setInterval(() => {
+      void pollJob();
+    }, 1500);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [activeApolloPushJobId]);
+
   function toggleAllVisible() {
     const visibleIds = table.getRowModel().rows.map((row) => row.original.id);
     const allVisibleCurrentlySelected =
@@ -581,6 +653,7 @@ export function ContactDirectoryTableClient({
 
   return (
     <>
+      <ApolloPushJobHistoryPanel jobs={apolloPushJobs} />
       {isBulkSequencePending || isBulkRemovePending || isApolloPushPending || isApolloSyncPending ? (
         <div className="border-b border-border bg-primary/5 px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -804,6 +877,88 @@ function StatusBadge({ value, tone }: { value: string; tone: "neutral" | "succes
   return <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${className}`}>{formatEnum(value)}</span>;
 }
 
+function ApolloPushJobHistoryPanel({ jobs }: { jobs: ApolloPushJobSummary[] }) {
+  if (jobs.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="border-b border-border bg-muted/40 px-4 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-foreground">Apollo push jobs</p>
+          <p className="text-xs text-mutedForeground">
+            Track recent bulk pushes, current progress, and any contacts Apollo skipped or rejected.
+          </p>
+        </div>
+        <span className="rounded-full border border-accentBorder bg-card px-2.5 py-1 text-xs font-semibold text-primary">
+          {jobs.length} recent job{jobs.length === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div className="mt-3 space-y-3">
+        {jobs.map((job) => {
+          const progressPercent =
+            job.selectedContacts > 0 ? Math.round((job.processedContacts / job.selectedContacts) * 100) : 0;
+          const blockers = summarizeApolloJobBlockers(job.details);
+
+          return (
+            <details key={job.id} className="rounded-md border border-border bg-card px-3 py-3" open={job.status === "RUNNING"}>
+              <summary className="cursor-pointer list-none">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-semibold text-foreground">Apollo bulk push</p>
+                      <StatusBadge value={job.status} tone={apolloJobTone(job.status)} />
+                    </div>
+                    <p className="mt-1 text-xs text-mutedForeground">
+                      Started {formatDateTime(job.startedAt)}
+                      {job.finishedAt ? ` • Finished ${formatDateTime(job.finishedAt)}` : ""}
+                    </p>
+                  </div>
+                  <div className="grid min-w-[340px] gap-2 text-right sm:grid-cols-4 sm:text-left">
+                    <ContactBulkMetric label="Selected" value={job.selectedContacts} />
+                    <ContactBulkMetric label="Enrolled" value={job.enrolledContacts} />
+                    <ContactBulkMetric label="Skipped" value={job.skippedContacts} />
+                    <ContactBulkMetric label="Failed" value={job.failedContacts} />
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <div className="flex items-center justify-between text-xs text-mutedForeground">
+                    <span>
+                      {job.processedContacts} of {job.selectedContacts} contacts processed
+                    </span>
+                    <span>{progressPercent}%</span>
+                  </div>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-border">
+                    <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${progressPercent}%` }} />
+                  </div>
+                </div>
+              </summary>
+              {job.errorMessage ? <p className="mt-3 text-xs text-danger">{job.errorMessage}</p> : null}
+              {blockers.length > 0 ? (
+                <div className="mt-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-foreground">Issues identified</p>
+                  <div className="mt-2 space-y-2">
+                    {blockers.map((blocker) => (
+                      <div key={blocker.reason} className="flex flex-wrap items-center justify-between gap-2 text-sm text-foreground">
+                        <span>{blocker.reason}</span>
+                        <span className="rounded-full border border-warning/30 bg-background px-2 py-0.5 text-[11px] font-semibold text-warning">
+                          {blocker.count}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {job.details.length > 0 ? <ApolloPushDetails details={job.details} /> : null}
+            </details>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function ContactBulkActionSummaryBanner({ summary }: { summary: ContactBulkActionSummary }) {
   const isError = summary.status === "error";
   const apolloBlockerSummary = summarizeApolloBlockers(summary);
@@ -944,6 +1099,36 @@ function summarizeApolloBlockers(summary: ContactBulkActionSummary) {
     .map(([reason, count]) => ({ reason, count }))
     .sort((left, right) => right.count - left.count || left.reason.localeCompare(right.reason))
     .slice(0, 3);
+}
+
+function summarizeApolloJobBlockers(details: ContactBulkActionDetail[]) {
+  const reasonCounts = new Map<string, number>();
+
+  for (const detail of details) {
+    if (detail.outcome === "enrolled") {
+      continue;
+    }
+
+    const reason = detail.reason?.trim() || "No reason returned.";
+    reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
+  }
+
+  return Array.from(reasonCounts.entries())
+    .map(([reason, count]) => ({ reason, count }))
+    .sort((left, right) => right.count - left.count || left.reason.localeCompare(right.reason))
+    .slice(0, 5);
+}
+
+function apolloJobTone(status: ApolloPushJobSummary["status"]) {
+  if (status === "SUCCESS") {
+    return "success";
+  }
+
+  if (status === "ERROR" || status === "CANCELLED") {
+    return "danger";
+  }
+
+  return "warning";
 }
 
 function ContactBulkMetric({ label, value }: { label: string; value: number }) {
@@ -1104,6 +1289,7 @@ function ContactColumnFilterControl({
         onChange={(nextValue) => column.setFilterValue(nextValue)}
         options={[
           { value: "", label: "Any sequence state" },
+          { value: "PUSH_BLOCKED", label: "Push blocked" },
           { value: SequenceStatus.NOT_STARTED, label: "Not started" },
           { value: SequenceStatus.READY, label: "Ready" },
           { value: SequenceStatus.ENROLLED, label: "Enrolled" },
