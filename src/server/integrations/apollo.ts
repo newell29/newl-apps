@@ -232,6 +232,30 @@ type ApolloEmailAccountsResponse = {
   data?: unknown;
 };
 
+type ApolloTypedCustomFieldsResponse = {
+  typed_custom_fields?: unknown;
+  custom_fields?: unknown;
+  data?: unknown;
+};
+
+export type ApolloTypedCustomFieldEntry = {
+  id: string;
+  name: string;
+  aliases: string[];
+};
+
+export type ApolloContactCustomFieldSyncInput = {
+  apolloContactId: string;
+  fieldValues: Record<string, string>;
+};
+
+export type ApolloContactCustomFieldSyncResult = {
+  apolloContactId: string;
+  syncedFields: string[];
+  missingFields: string[];
+  rawPayload: Record<string, unknown>;
+};
+
 export async function fetchApolloRepDirectory(): Promise<ApolloRepDirectoryEntry[]> {
   const apiKey = readApolloMasterApiKey();
   const users: ApolloRepDirectoryEntry[] = [];
@@ -326,6 +350,103 @@ export async function fetchApolloEmailAccountDirectory(): Promise<ApolloEmailAcc
   }
 
   return parseApolloEmailAccountsResponse(json);
+}
+
+export async function fetchApolloTypedCustomFieldDirectory(): Promise<ApolloTypedCustomFieldEntry[]> {
+  const apiKey = readApolloMasterApiKey();
+  const response = await fetch(`${DEFAULT_BASE_URL}/api/v1/typed_custom_fields`, {
+    method: "GET",
+    headers: buildApolloHeaders(apiKey),
+    cache: "no-store"
+  });
+  const json = (await response.json().catch(() => null)) as ApolloTypedCustomFieldsResponse | null;
+
+  if (!response.ok) {
+    throw new Error(extractApolloError(json as Record<string, unknown> | null) ?? `Apollo typed custom field sync failed with status ${response.status}.`);
+  }
+
+  if (!json) {
+    throw new Error("Apollo typed custom field sync returned an unreadable response body.");
+  }
+
+  return parseApolloTypedCustomFieldsResponse(json);
+}
+
+export async function syncApolloContactTypedCustomFields(
+  input: ApolloContactCustomFieldSyncInput
+): Promise<ApolloContactCustomFieldSyncResult> {
+  const apolloContactId = input.apolloContactId.trim();
+  if (!apolloContactId) {
+    throw new Error("Apollo contact sync requires an Apollo contact ID.");
+  }
+
+  const requestedFields = Object.entries(input.fieldValues)
+    .map(([name, value]) => [name.trim(), value.trim()] as const)
+    .filter(([name, value]) => name.length > 0 && value.length > 0);
+
+  if (requestedFields.length === 0) {
+    throw new Error("Apollo contact sync requires at least one non-empty custom field value.");
+  }
+
+  const apiKey = readApolloMasterApiKey();
+  const directory = await fetchApolloTypedCustomFieldDirectory();
+  const typedCustomFields = new Map<string, string>();
+  const syncedFields: string[] = [];
+  const missingFields: string[] = [];
+
+  for (const [fieldName, value] of requestedFields) {
+    const matchedField = findApolloTypedCustomField(directory, fieldName);
+    if (!matchedField) {
+      missingFields.push(fieldName);
+      continue;
+    }
+
+    typedCustomFields.set(matchedField.id, value);
+    syncedFields.push(fieldName);
+  }
+
+  if (typedCustomFields.size === 0) {
+    throw new Error(
+      `Apollo typed custom fields could not be resolved for: ${missingFields.join(", ")}.`
+    );
+  }
+
+  const fieldEntries = [...typedCustomFields.entries()].map(([fieldId, value]) => ({
+    typed_custom_field_id: fieldId,
+    value
+  }));
+
+  const patchAttempts: Array<Record<string, unknown>> = [
+    {
+      typed_custom_fields: Object.fromEntries(typedCustomFields)
+    },
+    {
+      typed_custom_fields: fieldEntries
+    }
+  ];
+
+  let rawPayload: Record<string, unknown> | null = null;
+  let lastError: Error | null = null;
+
+  for (const attempt of patchAttempts) {
+    try {
+      rawPayload = await patchApolloJson(`/api/v1/contacts/${apolloContactId}`, apiKey, attempt);
+      break;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("Apollo typed custom field sync failed.");
+    }
+  }
+
+  if (!rawPayload) {
+    throw lastError ?? new Error("Apollo typed custom field sync failed.");
+  }
+
+  return {
+    apolloContactId,
+    syncedFields,
+    missingFields,
+    rawPayload
+  };
 }
 
 export async function fetchApolloContactsForCompany(
@@ -860,6 +981,22 @@ async function postApolloJson(path: string, apiKey: string, body: Record<string,
   return json;
 }
 
+async function patchApolloJson(path: string, apiKey: string, body: Record<string, unknown>) {
+  const response = await fetch(`${DEFAULT_BASE_URL}${path}`, {
+    method: "PATCH",
+    headers: buildApolloHeaders(apiKey),
+    cache: "no-store",
+    body: JSON.stringify(body)
+  });
+  const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+
+  if (!response.ok) {
+    throw new Error(extractApolloError(json) ?? `Apollo request failed with status ${response.status}.`);
+  }
+
+  return json ?? {};
+}
+
 function parseApolloUsersResponse(payload: ApolloUsersResponse | null): ApolloRepDirectoryEntry[] {
   const candidate = Array.isArray(payload?.users)
     ? payload?.users
@@ -960,6 +1097,62 @@ function parseApolloEmailAccountsResponse(payload: ApolloEmailAccountsResponse |
       }
     ];
   });
+}
+
+function parseApolloTypedCustomFieldsResponse(payload: ApolloTypedCustomFieldsResponse | null): ApolloTypedCustomFieldEntry[] {
+  const candidates = Array.isArray(payload?.typed_custom_fields)
+    ? payload?.typed_custom_fields
+    : Array.isArray(payload?.custom_fields)
+      ? payload?.custom_fields
+      : Array.isArray(payload?.data)
+        ? payload?.data
+        : [];
+
+  return candidates.flatMap((entry) => {
+    const record = asRecord(entry);
+    if (!record) {
+      return [];
+    }
+
+    const id = readApolloString(record, ["id", "typed_custom_field_id", "custom_field_id"]);
+    const names = [
+      readApolloString(record, ["name"]),
+      readApolloString(record, ["label"]),
+      readApolloString(record, ["api_name"]),
+      readApolloString(record, ["slug"]),
+      readApolloString(record, ["key"])
+    ].filter((value): value is string => Boolean(value));
+
+    if (!id || names.length === 0) {
+      return [];
+    }
+
+    return [
+      {
+        id,
+        name: names[0],
+        aliases: [...new Set(names.map((value) => normalizeApolloCustomFieldKey(value)).filter(Boolean))]
+      }
+    ];
+  });
+}
+
+function findApolloTypedCustomField(directory: ApolloTypedCustomFieldEntry[], fieldName: string) {
+  const normalizedTarget = normalizeApolloCustomFieldKey(fieldName);
+
+  return (
+    directory.find((entry) => entry.aliases.includes(normalizedTarget)) ??
+    directory.find((entry) => entry.aliases.some((alias) => alias.includes(normalizedTarget) || normalizedTarget.includes(alias))) ??
+    null
+  );
+}
+
+function normalizeApolloCustomFieldKey(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
 
 function parseApolloActivities(
