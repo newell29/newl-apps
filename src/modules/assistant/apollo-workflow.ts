@@ -553,6 +553,7 @@ function parseActivityDateRange(prompt: string) {
   const daysMatch = lower.match(/\blast\s+(\d{1,3})\s+days?\b/);
   const lastWeekdayMatch = lower.match(/\blast\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/);
   const todayLabel = formatDateLabel(now, timezone);
+  const explicitDateLabel = parseExplicitDateLabel(prompt, todayLabel);
 
   if (daysMatch) {
     const days = Math.max(1, Number.parseInt(daysMatch[1], 10));
@@ -602,6 +603,20 @@ function parseActivityDateRange(prompt: string) {
     };
   }
 
+  if (explicitDateLabel) {
+    const startDate = zonedStartOfDay(explicitDateLabel, timezone);
+    const endDate = zonedEndOfDay(explicitDateLabel, timezone);
+
+    return {
+      startDate,
+      endDate,
+      startDateLabel: explicitDateLabel,
+      endDateLabel: explicitDateLabel,
+      timezone,
+      label: "on"
+    };
+  }
+
   const startDateLabel = todayLabel;
   const endDateLabel = todayLabel;
   const startDate = zonedStartOfDay(startDateLabel, timezone);
@@ -619,6 +634,10 @@ function parseActivityDateRange(prompt: string) {
 
 function formatDateRange(request: ApolloInsightRequest) {
   if (request.startDateLabel === request.endDateLabel) {
+    if (request.label === "on") {
+      return `on ${request.startDateLabel} (${request.timezone})`;
+    }
+
     return `${request.label} (${request.startDateLabel}, ${request.timezone})`;
   }
 
@@ -636,6 +655,61 @@ function formatDateLabel(date: Date, timezone: string) {
   const month = parts.find((part) => part.type === "month")?.value;
   const day = parts.find((part) => part.type === "day")?.value;
   return year && month && day ? `${year}-${month}-${day}` : date.toISOString().slice(0, 10);
+}
+
+function parseExplicitDateLabel(prompt: string, todayLabel: string) {
+  const isoMatch = prompt.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+  }
+
+  const monthMatch = prompt.match(
+    /\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:,\s*(20\d{2}))?\b/i
+  );
+  if (!monthMatch) {
+    return null;
+  }
+
+  const month = monthNameToNumber(monthMatch[1]);
+  const day = Number.parseInt(monthMatch[2], 10);
+  const year = monthMatch[3] ? Number.parseInt(monthMatch[3], 10) : Number.parseInt(todayLabel.slice(0, 4), 10);
+
+  if (!month || day < 1 || day > 31) {
+    return null;
+  }
+
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function monthNameToNumber(monthName: string) {
+  switch (monthName.toLowerCase()) {
+    case "january":
+      return 1;
+    case "february":
+      return 2;
+    case "march":
+      return 3;
+    case "april":
+      return 4;
+    case "may":
+      return 5;
+    case "june":
+      return 6;
+    case "july":
+      return 7;
+    case "august":
+      return 8;
+    case "september":
+      return 9;
+    case "october":
+      return 10;
+    case "november":
+      return 11;
+    case "december":
+      return 12;
+    default:
+      return null;
+  }
 }
 
 function resolveLastWeekdayLabel(todayLabel: string, weekdayName: string, timezone: string) {
