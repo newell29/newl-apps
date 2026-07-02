@@ -43,6 +43,17 @@ type AssistantKnowledgePersistenceClient = Pick<
   "assistantKnowledgeDocument" | "assistantKnowledgeChunk"
 >;
 
+type PreparedAssistantKnowledgeDocument = {
+  document: AssistantKnowledgeDocumentInput;
+  chunks: Array<{
+    contentText: string;
+    contentSummary: string;
+    tokenCount: number;
+  }>;
+};
+
+const ASSISTANT_KNOWLEDGE_TRANSACTION_TIMEOUT_MS = 20_000;
+
 export async function syncAssistantKnowledge(tenant: TenantContext) {
   const enabledModuleRows = await prisma.tenantModuleAccess.findMany({
     where: {
@@ -68,10 +79,11 @@ export async function syncAssistantKnowledge(tenant: TenantContext) {
   );
   const documents: AssistantKnowledgeDocumentInput[] = adapterResults.flatMap((result) => result.documents);
   const generatedMemories = adapterResults.flatMap((result) => result.memories ?? []);
+  const preparedDocuments = prepareAssistantKnowledgeDocuments(documents);
   const now = new Date();
 
   await prisma.$transaction(async (tx) => {
-    const persistedDocuments = await persistAssistantKnowledgeDocuments(tx, tenant, documents);
+    const persistedDocuments = await persistAssistantKnowledgeDocuments(tx, tenant, preparedDocuments);
     const documentIdBySourceRef = new Map(
       persistedDocuments.map((document) => [`${document.sourceSystem}:${document.externalId}`, document.id] as const)
     );
@@ -123,7 +135,7 @@ export async function syncAssistantKnowledge(tenant: TenantContext) {
         }))
       });
     }
-  });
+  }, { timeout: ASSISTANT_KNOWLEDGE_TRANSACTION_TIMEOUT_MS });
 
   return {
     documentCount: documents.length
@@ -133,7 +145,7 @@ export async function syncAssistantKnowledge(tenant: TenantContext) {
 export async function persistAssistantKnowledgeDocuments(
   tx: AssistantKnowledgePersistenceClient,
   tenant: TenantContext,
-  documents: AssistantKnowledgeDocumentInput[]
+  documents: PreparedAssistantKnowledgeDocument[]
 ) {
   const now = new Date();
   const persistedRecords: Array<{
@@ -143,7 +155,8 @@ export async function persistAssistantKnowledgeDocuments(
     title: string;
   }> = [];
 
-  for (const document of documents) {
+  for (const preparedDocument of documents) {
+    const { document, chunks } = preparedDocument;
     const record = await upsertKnowledgeDocument(tx, tenant, document, now);
 
     await tx.assistantKnowledgeChunk.deleteMany({
@@ -152,17 +165,15 @@ export async function persistAssistantKnowledgeDocuments(
         documentId: record.id
       }
     });
-
-    const chunks = createKnowledgeChunks(document.content);
     if (chunks.length > 0) {
       await tx.assistantKnowledgeChunk.createMany({
         data: chunks.map((chunk, index) => ({
           tenantId: tenant.tenantId,
           documentId: record.id,
           chunkIndex: index,
-          contentText: chunk,
-          contentSummary: summarizeChunk(chunk),
-          tokenCount: estimateTokenCount(chunk),
+          contentText: chunk.contentText,
+          contentSummary: chunk.contentSummary,
+          tokenCount: chunk.tokenCount,
           metadata: (document.metadata ?? null) as Prisma.InputJsonValue
         }))
       });
@@ -177,6 +188,17 @@ export async function persistAssistantKnowledgeDocuments(
   }
 
   return persistedRecords;
+}
+
+export function prepareAssistantKnowledgeDocuments(documents: AssistantKnowledgeDocumentInput[]): PreparedAssistantKnowledgeDocument[] {
+  return documents.map((document) => ({
+    document,
+    chunks: createKnowledgeChunks(document.content).map((chunk) => ({
+      contentText: chunk,
+      contentSummary: summarizeChunk(chunk),
+      tokenCount: estimateTokenCount(chunk)
+    }))
+  }));
 }
 
 export async function searchAssistantKnowledge(

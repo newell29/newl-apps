@@ -2,6 +2,7 @@ import { AssistantMemoryKind, AssistantSourceKind, IntegrationProvider, type Pri
 
 import {
   type AssistantKnowledgeDocumentInput,
+  prepareAssistantKnowledgeDocuments,
   persistAssistantKnowledgeDocuments
 } from "@/modules/assistant/knowledge";
 import { prisma } from "@/server/db";
@@ -19,6 +20,7 @@ import type { AuthenticatedContext, TenantContext } from "@/server/tenant-contex
 
 const MICROSOFT_GRAPH_SOURCE_SYSTEMS = ["MICROSOFT_GRAPH_MAIL", "MICROSOFT_GRAPH_FILE"] as const;
 const MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS = 20_000;
+const MICROSOFT_GRAPH_KNOWLEDGE_TRANSACTION_TIMEOUT_MS = 20_000;
 
 export type MicrosoftGraphKnowledgeSyncResult = {
   documentCount: number;
@@ -202,6 +204,7 @@ async function syncMicrosoftGraphAssistantKnowledgeUnsafe(
     ...messages.map(mapMessageToKnowledgeDocument),
     ...files.map(mapFileToKnowledgeDocument)
   ];
+  const preparedDocuments = prepareAssistantKnowledgeDocuments(documents);
 
   if (documents.length === 0) {
     return {
@@ -214,9 +217,9 @@ async function syncMicrosoftGraphAssistantKnowledgeUnsafe(
   }
 
   await prisma.$transaction(async (tx) => {
-    const persistedDocuments = await persistAssistantKnowledgeDocuments(tx, context, documents);
+    const persistedDocuments = await persistAssistantKnowledgeDocuments(tx, context, preparedDocuments);
     await replaceMicrosoftGraphMemories(tx, context, documents, persistedDocuments);
-  });
+  }, { timeout: MICROSOFT_GRAPH_KNOWLEDGE_TRANSACTION_TIMEOUT_MS });
 
   return {
     documentCount: documents.length,
@@ -568,6 +571,7 @@ async function syncMicrosoftGraphApplicationMailboxKnowledge(
   const messages = mailboxResult.messages;
   const files: MicrosoftGraphDriveItem[] = [];
   const documents = messages.map(mapMessageToKnowledgeDocument);
+  const preparedDocuments = prepareAssistantKnowledgeDocuments(documents);
   const mailboxFailureReason =
     mailboxResult.failures.length > 0
       ? `Mailbox sync issue(s): ${mailboxResult.failures
@@ -586,9 +590,9 @@ async function syncMicrosoftGraphApplicationMailboxKnowledge(
   }
 
   await prisma.$transaction(async (tx) => {
-    const persistedDocuments = await persistAssistantKnowledgeDocuments(tx, context, documents);
+    const persistedDocuments = await persistAssistantKnowledgeDocuments(tx, context, preparedDocuments);
     await replaceMicrosoftGraphMemories(tx, context, documents, persistedDocuments);
-  });
+  }, { timeout: MICROSOFT_GRAPH_KNOWLEDGE_TRANSACTION_TIMEOUT_MS });
 
   return {
     documentCount: documents.length,
