@@ -28,12 +28,19 @@ export async function runAssistantPrompt(
   prompt: string,
   existingThreadId?: string
 ) {
-  const toolRateReply = await maybeRunAssistantRateRequest(context, prompt);
+  const workspace = await getAssistantWorkspace(context, prompt, existingThreadId, context.userId);
+  const threadPromptContext = workspace.activeThread
+    ? workspace.activeThread.messages
+        .filter((message) => message.role === "USER")
+        .slice(-4)
+        .map((message) => message.content)
+        .join("\n")
+    : null;
+  const toolRateReply = await maybeRunAssistantRateRequest(context, prompt, threadPromptContext);
   if (toolRateReply) {
     return toolRateReply;
   }
 
-  const workspace = await getAssistantWorkspace(context, prompt, existingThreadId, context.userId);
   const indexedSources = await searchAssistantKnowledge(context, prompt);
   const sources = indexedSources.length > 0 ? indexedSources : buildAssistantSources(workspace);
   const providerCredential = await prisma.integrationCredential.findFirst({
@@ -112,6 +119,10 @@ export async function runAssistantPrompt(
         })),
         settings: providerSettings
       });
+
+      if (!liveReply.content || !liveReply.content.trim()) {
+        throw new Error("Assistant provider returned an empty response.");
+      }
 
       answer = liveReply.content;
       provider = liveReply.provider;

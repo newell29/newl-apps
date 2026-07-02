@@ -22,7 +22,7 @@ vi.mock("@/modules/assistant/knowledge", () => ({
   searchAssistantKnowledge: (...args: unknown[]) => searchAssistantKnowledge(...args)
 }));
 
-vi.mock("@/modules/assistant/rate-workflow", () => ({
+vi.mock("@/modules/assistant/rate-tools", () => ({
   maybeRunAssistantRateRequest: (...args: unknown[]) => maybeRunAssistantRateRequest(...args)
 }));
 
@@ -83,7 +83,8 @@ function buildWorkspace() {
         contactCount: 0
       }
     ],
-    recentRateJobs: []
+    recentRateJobs: [],
+    activeThread: null
   };
 }
 
@@ -172,6 +173,37 @@ describe("runAssistantPrompt", () => {
       providerFallback: true,
       liveReplyAttempted: true,
       liveReplyError: "Model request failed."
+    });
+  });
+
+  it("falls back when the live provider returns an empty response", async () => {
+    integrationCredentialFindFirst.mockResolvedValue({
+      provider: IntegrationProvider.OPENAI,
+      status: IntegrationStatus.ACTIVE,
+      publicConfig: {
+        liveResponsesEnabled: true,
+        defaultModel: "gpt-5-mini",
+        fallbackModel: "gpt-5-nano",
+        temperature: 0.2,
+        maxTokens: 900
+      }
+    });
+    generateAssistantReply.mockResolvedValue({
+      content: "   ",
+      provider: "OPENAI",
+      model: "gpt-5-mini",
+      usedFallbackModel: false,
+      rawResponse: {}
+    });
+
+    const result = await runAssistantPrompt(context, "what do you know about my business");
+
+    expect(result.provider).toBe("NEWL_DETERMINISTIC");
+    expect(result.runMetadata).toMatchObject({
+      deterministic: true,
+      providerFallback: true,
+      liveReplyAttempted: true,
+      liveReplyError: "Assistant provider returned an empty response."
     });
   });
 });

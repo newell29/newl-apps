@@ -69,6 +69,47 @@ describe("parseAssistantRatePrompt", () => {
       requestedUpsServices: ["Ground"]
     });
   });
+
+  it("parses quantity when written as qty without a package unit", () => {
+    const parsed = parseAssistantRatePrompt("need a UPS rate from 28273 to 90210 15 lbs 12x4x4 qty 1");
+
+    expect(parsed).toMatchObject({
+      mode: "UPS",
+      origin: {
+        postalCode: "28273"
+      },
+      destination: {
+        postalCode: "90210"
+      },
+      length: 12,
+      width: 4,
+      height: 4,
+      weight: 15,
+      quantity: 1
+    });
+  });
+
+  it("uses prior thread prompt context to complete a quantity-only follow-up", () => {
+    const parsed = parseAssistantRatePrompt(
+      "Quantity is 1",
+      "Need a UPS rate from 28273 to 90210 15 lbs 12x4x4"
+    );
+
+    expect(parsed).toMatchObject({
+      mode: "UPS",
+      origin: {
+        postalCode: "28273"
+      },
+      destination: {
+        postalCode: "90210"
+      },
+      length: 12,
+      width: 4,
+      height: 4,
+      weight: 15,
+      quantity: 1
+    });
+  });
 });
 
 describe("maybeRunAssistantRateRequest", () => {

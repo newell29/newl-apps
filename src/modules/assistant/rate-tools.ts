@@ -78,9 +78,10 @@ const POSTAL_CODE_PATTERN = /\b(?:\d{5}|[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d)\b/g
 
 export async function maybeRunAssistantRateRequest(
   context: TenantContext & { userId: string },
-  prompt: string
+  prompt: string,
+  threadPromptContext?: string | null
 ): Promise<AssistantRateToolResult | null> {
-  const parsed = parseAssistantRatePrompt(prompt);
+  const parsed = parseAssistantRatePrompt(prompt, threadPromptContext);
   if (!parsed) {
     return null;
   }
@@ -116,37 +117,46 @@ export async function maybeRunAssistantRateRequest(
   return runLtlAssistantRate(context, parsed);
 }
 
-export function parseAssistantRatePrompt(prompt: string): ParsedAssistantRatePrompt | null {
+export function parseAssistantRatePrompt(prompt: string, threadPromptContext?: string | null): ParsedAssistantRatePrompt | null {
   const normalized = prompt.trim().toLowerCase();
   if (!normalized) {
     return null;
   }
 
+  const contextualPrompt =
+    threadPromptContext && threadPromptContext.trim().length > 0 ? `${threadPromptContext}\n${prompt}` : prompt;
+  const contextualNormalized = contextualPrompt.trim().toLowerCase();
+
   const quoteLanguagePresent =
-    /(?:\brate\b|\bquote\b|\bpricing\b|\bpriced\b|\b7l\b|\bups\b|\bltl\b|\bfreight\b)/i.test(prompt);
+    /(?:\brate\b|\bquote\b|\bpricing\b|\bpriced\b|\b7l\b|\bups\b|\bltl\b|\bfreight\b)/i.test(contextualPrompt);
   if (!quoteLanguagePresent) {
     return null;
   }
 
   const modeExplicit =
-    /(?:\bups\b|\bparcel\b|\bpackage\b|\bbox\b|\b7l\b|\bseven l\b|\bltl\b|\bfreight\b|\bpallet\b|\bskid\b)/i.test(prompt);
-  const quantityMatch = prompt.match(/(\d+)\s*(pallets?|skids?|plt|packages?|pkgs?|boxes?|cartons?)/i);
-  const quantity = quantityMatch ? Number.parseInt(quantityMatch[1], 10) : null;
-  const quantityToken = quantityMatch?.[2]?.toLowerCase() ?? "";
+    /(?:\bups\b|\bparcel\b|\bpackage\b|\bbox\b|\b7l\b|\bseven l\b|\bltl\b|\bfreight\b|\bpallet\b|\bskid\b)/i.test(contextualPrompt);
+  const quantityWithUnitMatch = contextualPrompt.match(/(\d+)\s*(pallets?|skids?|plt|packages?|pkgs?|boxes?|cartons?)/i);
+  const quantityStandaloneMatch = contextualPrompt.match(/\b(?:qty|quantity)(?:\s+is|:)?\s*(\d+)\b/i);
+  const quantity = quantityWithUnitMatch
+    ? Number.parseInt(quantityWithUnitMatch[1], 10)
+    : quantityStandaloneMatch
+      ? Number.parseInt(quantityStandaloneMatch[1], 10)
+      : null;
+  const quantityToken = quantityWithUnitMatch?.[2]?.toLowerCase() ?? "";
   const quantityUnit =
     quantityToken.includes("pallet") || quantityToken.includes("skid") || quantityToken === "plt"
       ? "PALLET"
-      : quantityMatch
+      : quantityWithUnitMatch
       ? "PACKAGE"
       : null;
-  const weightMatch = prompt.match(/(\d+(?:\.\d+)?)\s*(?:lb|lbs|pounds?)/i);
-  const dimsMatch = prompt.match(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i);
-  const postalMatches = [...prompt.matchAll(POSTAL_CODE_PATTERN)].map((match) => ({
+  const weightMatch = contextualPrompt.match(/(\d+(?:\.\d+)?)\s*(?:lb|lbs|pounds?)/i);
+  const dimsMatch = contextualPrompt.match(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i);
+  const postalMatches = [...contextualPrompt.matchAll(POSTAL_CODE_PATTERN)].map((match) => ({
     value: normalizePostalCode(match[0]),
     index: match.index ?? 0
   }));
-  const cityMatches = findCatalogLocationsInPrompt(prompt);
-  const fromToLabels = extractFromToLabels(prompt);
+  const cityMatches = findCatalogLocationsInPrompt(contextualPrompt);
+  const fromToLabels = extractFromToLabels(contextualPrompt);
 
   const origin =
     resolveLocationFromToken(postalMatches[0]?.value) ??
@@ -158,11 +168,11 @@ export function parseAssistantRatePrompt(prompt: string): ParsedAssistantRatePro
     resolveAssistantRateLocation(fromToLabels.destination);
 
   const requestedUpsServices = UPS_SERVICE_KEYWORDS.flatMap(({ service, needles }) =>
-    needles.some((needle) => normalized.includes(needle)) ? [service] : []
+    needles.some((needle) => contextualNormalized.includes(needle)) ? [service] : []
   );
 
   return {
-    mode: detectExplicitRateMode(normalized, quantityUnit),
+    mode: detectExplicitRateMode(contextualNormalized, quantityUnit),
     modeExplicit,
     origin: origin ?? null,
     destination: destination ?? null,
