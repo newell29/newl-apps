@@ -23,11 +23,32 @@ export type AssistantReplySource = {
   excerpt: string;
 };
 
+export type AssistantConversationTurn = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+export type AssistantMemorySnapshot = {
+  kind: string;
+  title: string;
+  summary: string;
+};
+
 export type AssistantReplyRequest = {
   tenantName: string;
   prompt: string;
   intent: string;
   sources: AssistantReplySource[];
+  conversationHistory: AssistantConversationTurn[];
+  memorySnapshot: AssistantMemorySnapshot[];
+  conversationSummary?: string | null;
+  workspaceSnapshot?: {
+    companyCount: number;
+    contactCount: number;
+    knowledgeDocumentCount: number;
+    memoryCount: number;
+    topCompanyNames: string[];
+  };
   settings: AssistantProviderSettings;
 };
 
@@ -299,7 +320,7 @@ function buildChatCompletionPayload({
       {
         role: "system",
         content:
-          "You are Newl's company assistant. Answer using only the provided tenant-scoped source excerpts. Be concise, operationally useful, and explicit when required facts are missing. If the user asks for a rate, collect missing shipment details instead of inventing a quote. Do not fabricate customer history, service capabilities, pricing, or tool outputs."
+          "You are Newl's company assistant. Answer using only the provided tenant-scoped source excerpts, memory snapshot, and prior conversation turns. Be concise, operationally useful, and explicit when required facts are missing. If the user asks for a rate, collect missing shipment details instead of inventing a quote. Do not fabricate customer history, service capabilities, pricing, tool outputs, or conversation memory."
       },
       {
         role: "user",
@@ -324,6 +345,19 @@ function buildAssistantPrompt(request: AssistantReplyRequest) {
       tenant: request.tenantName,
       intent: request.intent,
       userPrompt: request.prompt,
+      conversationSummary: request.conversationSummary ?? null,
+      conversationHistory: request.conversationHistory.map((turn, index) => ({
+        id: index + 1,
+        role: turn.role,
+        content: turn.content
+      })),
+      workspaceSnapshot: request.workspaceSnapshot ?? null,
+      memorySnapshot: request.memorySnapshot.map((memory, index) => ({
+        id: index + 1,
+        kind: memory.kind,
+        title: memory.title,
+        summary: memory.summary
+      })),
       sourceExcerpts: request.sources.map((source, index) => ({
         id: index + 1,
         title: source.title,
@@ -331,6 +365,8 @@ function buildAssistantPrompt(request: AssistantReplyRequest) {
       })),
       answerRules: [
         "Use the source excerpts as the factual boundary.",
+        "Use the conversation history to preserve continuity and resolve follow-up questions.",
+        "Use the memory snapshot to understand the business context, but do not claim anything that is not present in the supplied memory or excerpts.",
         "If the prompt asks for a rate, explain what details are missing and point to existing rate tools when appropriate.",
         "If the prompt asks for customer or sales insight, cite the relevant company or lead names directly in the prose.",
         "If evidence is thin, say so clearly."

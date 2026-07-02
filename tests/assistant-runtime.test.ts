@@ -84,6 +84,7 @@ function buildWorkspace() {
       }
     ],
     recentRateJobs: [],
+    recentMemories: [],
     activeThread: null
   };
 }
@@ -149,6 +150,17 @@ describe("runAssistantPrompt", () => {
     });
     expect(result.provider).toBe("OPENAI");
     expect(result.answer).toContain("ABC IMPORTS INC is the strongest visible account");
+    expect(generateAssistantReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationHistory: [],
+        memorySnapshot: [],
+        workspaceSnapshot: expect.objectContaining({
+          companyCount: 64,
+          contactCount: 20,
+          topCompanyNames: ["ABC IMPORTS INC"]
+        })
+      })
+    );
   });
 
   it("stores provider fallback state in run metadata when live reply fails", async () => {
@@ -204,6 +216,42 @@ describe("runAssistantPrompt", () => {
       providerFallback: true,
       liveReplyAttempted: true,
       liveReplyError: "Assistant provider returned an empty response."
+    });
+  });
+
+  it("returns a clear interactive greeting instead of a vague fallback", async () => {
+    integrationCredentialFindFirst.mockResolvedValue(null);
+
+    const result = await runAssistantPrompt(context, "Hello");
+
+    expect(result.provider).toBe("NEWL_GUIDANCE");
+    expect(result.answer).toContain("I’m here and working.");
+    expect(result.answer).toContain("customers, Apollo activity, rates, opportunities, risks, or email drafting");
+  });
+
+  it("explains why inbox questions are blocked when Microsoft knowledge is not ready", async () => {
+    getAssistantWorkspace.mockResolvedValue({
+      ...buildWorkspace(),
+      integrations: [],
+      topCompanies: [],
+      openLeads: [],
+      stats: {
+        companyCount: 0,
+        contactCount: 0,
+        openLeadCount: 0,
+        importRecordCount: 0,
+        knowledgeDocumentCount: 0,
+        memoryCount: 0
+      }
+    });
+    integrationCredentialFindFirst.mockResolvedValue(null);
+
+    const result = await runAssistantPrompt(context, "What is in our shared inbox?");
+
+    expect(result.provider).toBe("NEWL_GUIDANCE");
+    expect(result.answer).toContain("Microsoft 365 knowledge is not fully available");
+    expect(result.runMetadata).toMatchObject({
+      blocked: "microsoft-knowledge-not-ready"
     });
   });
 });

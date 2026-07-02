@@ -4,6 +4,7 @@ import { PlatformRole } from "@prisma/client";
 import { SearchProfileCadenceManager } from "@/modules/settings/components/search-profile-cadence-manager";
 import { formatPlatformRole } from "@/modules/settings/access-control";
 import {
+  saveMicrosoftGraphSettingsAction,
   createCarrierPlaceholderAction,
   createUpsQuoteSourceAction,
   removeTenantUserAccessAction,
@@ -19,6 +20,7 @@ import {
   updateSevenLCarrierSelectionAction
 } from "@/modules/settings/actions";
 import { getSettingsShell } from "@/modules/settings/queries";
+import { connectMicrosoftGraphAction } from "@/server/auth/actions";
 import { requireAdmin } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
@@ -58,6 +60,7 @@ export default async function SettingsPage() {
               { href: "#platform-controls", label: "Platform controls" },
               { href: "#quickbooks", label: "QuickBooks" },
               { href: "#assistant-ai", label: "Assistant AI" },
+              { href: "#microsoft-365", label: "Microsoft 365" },
               { href: "#user-access", label: "User access" },
               { href: "#lead-generation-settings", label: "Lead generation" },
               { href: "#quote-tools-settings", label: "Quote tools" }
@@ -289,6 +292,168 @@ export default async function SettingsPage() {
             Save assistant settings
           </button>
         </form>
+      </section>
+
+      <section id="microsoft-365" className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Microsoft 365</h2>
+            <p className="mt-1 text-sm leading-6 text-mutedForeground">
+              Control which inboxes and files the assistant can learn from. Shared mailbox targets are saved in tenant settings, so redeployments do not require re-entering them.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-success/25 bg-success/10 px-2.5 py-1 text-xs font-semibold text-success">
+              Tenant-saved
+            </span>
+            <span
+              className={[
+                "rounded-full px-2.5 py-1 text-xs font-semibold",
+                settings.microsoftGraph.mailboxAccessMode === "ADMIN_SELECTED_MAILBOXES"
+                  ? "border border-accentBorder bg-accentSoft text-primary"
+                  : "border border-border bg-background text-mutedForeground"
+              ].join(" ")}
+            >
+              {settings.microsoftGraph.mailboxAccessMode === "ADMIN_SELECTED_MAILBOXES"
+                ? "Admin-selected mailboxes"
+                : "Signed-in user only"}
+            </span>
+            <span
+              className={[
+                "rounded-full px-2.5 py-1 text-xs font-semibold",
+                settings.microsoftGraphUserConnection.connected
+                  ? "border border-success/25 bg-success/10 text-success"
+                  : "border border-warning/25 bg-warning/10 text-warning"
+              ].join(" ")}
+            >
+              {settings.microsoftGraphUserConnection.connected ? "Delegated access connected" : "Delegated access not connected"}
+            </span>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-4 xl:grid-cols-[1.2fr,0.8fr]">
+          <form action={saveMicrosoftGraphSettingsAction} className="space-y-4">
+            <SelectField
+              label="Mailbox access mode"
+              name="microsoftMailboxAccessMode"
+              defaultValue={settings.microsoftGraph.mailboxAccessMode}
+              options={[
+                { value: "SIGNED_IN_USER", label: "Signed-in user only" },
+                { value: "ADMIN_SELECTED_MAILBOXES", label: "Admin-selected mailboxes" }
+              ]}
+            />
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground" htmlFor="microsoftAdminMailboxTargets">
+                Shared and team inboxes
+              </label>
+              <textarea
+                id="microsoftAdminMailboxTargets"
+                name="microsoftAdminMailboxTargets"
+                rows={6}
+                defaultValue={settings.microsoftGraph.adminMailboxTargets.join("\n")}
+                placeholder={"dispatch@newl.ca\nwarehouse@newl.ca\nsales@newl.ca"}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+              />
+              <p className="text-xs leading-5 text-mutedForeground">
+                Enter one mailbox per line. This list is stored in the tenant database and reused after future deployments.
+              </p>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <label className="flex items-start justify-between gap-3 rounded-md border border-border bg-background p-4 text-sm text-foreground">
+                <span>
+                  <span className="block font-medium">Mail sync</span>
+                  <span className="mt-1 block text-xs leading-5 text-mutedForeground">
+                    Pull Outlook mail into assistant knowledge and customer memory.
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  name="microsoftMailSyncEnabled"
+                  value="true"
+                  defaultChecked={settings.microsoftGraph.mailSyncEnabled}
+                  className="mt-1"
+                />
+              </label>
+
+              <label className="flex items-start justify-between gap-3 rounded-md border border-border bg-background p-4 text-sm text-foreground">
+                <span>
+                  <span className="block font-medium">File sync</span>
+                  <span className="mt-1 block text-xs leading-5 text-mutedForeground">
+                    Pull SharePoint and OneDrive documents into assistant retrieval.
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  name="microsoftFileSyncEnabled"
+                  value="true"
+                  defaultChecked={settings.microsoftGraph.fileSyncEnabled}
+                  className="mt-1"
+                />
+              </label>
+
+              <label className="flex items-start justify-between gap-3 rounded-md border border-border bg-background p-4 text-sm text-foreground">
+                <span>
+                  <span className="block font-medium">Email drafting target</span>
+                  <span className="mt-1 block text-xs leading-5 text-mutedForeground">
+                    Save reviewed drafting intent for Outlook-based replies.
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  name="microsoftDraftingEnabled"
+                  value="true"
+                  defaultChecked={settings.microsoftGraph.draftingEnabled}
+                  className="mt-1"
+                />
+              </label>
+            </div>
+
+            <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
+              Save Microsoft 365 settings
+            </button>
+          </form>
+
+          <div className="space-y-4">
+            <div className="rounded-md border border-border bg-muted/30 p-4">
+              <p className="text-sm font-medium text-foreground">Runtime status</p>
+              <p className="mt-2 text-sm text-mutedForeground">{settings.microsoftGraph.runtimeNotes}</p>
+              <p className="mt-3 text-xs leading-5 text-mutedForeground">
+                {settings.microsoftGraphUserConnection.runtimeNotes}
+              </p>
+            </div>
+
+            <div className="rounded-md border border-border bg-background p-4">
+              <p className="text-sm font-medium text-foreground">Granted delegated scopes</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {settings.microsoftGraphUserConnection.scopes.length > 0 ? (
+                  settings.microsoftGraphUserConnection.scopes.map((scope) => (
+                    <span
+                      key={scope}
+                      className="rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground"
+                    >
+                      {scope}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-xs text-mutedForeground">No delegated Microsoft scopes connected yet.</span>
+                )}
+              </div>
+            </div>
+
+            <form action={connectMicrosoftGraphAction} className="rounded-md border border-border bg-background p-4">
+              <input type="hidden" name="callbackUrl" value="/settings#microsoft-365" />
+              <p className="text-sm font-medium text-foreground">Reconnect delegated Microsoft access</p>
+              <p className="mt-2 text-xs leading-5 text-mutedForeground">
+                Use this after scope changes or if the current user needs to refresh Microsoft consent for Outlook and SharePoint access.
+              </p>
+              <button className="mt-4 rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
+                Connect Microsoft 365
+              </button>
+            </form>
+          </div>
+        </div>
       </section>
 
       <section id="user-access" className="space-y-3">

@@ -51,6 +51,11 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
   const threadId = params?.thread?.trim() || undefined;
   const syncStatus = buildSyncStatus(params);
   const workspace = await getAssistantWorkspace(context, query, threadId, context.userId);
+  const runsByMessageId = new Map(
+    (workspace.activeThread?.recentRuns ?? [])
+      .filter((run) => run.messageId)
+      .map((run) => [run.messageId as string, run])
+  );
 
   return (
     <div className="space-y-6">
@@ -78,28 +83,60 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Active thread</p>
                     <h2 className="mt-1 text-base font-semibold text-foreground">{workspace.activeThread.title}</h2>
+                    {workspace.activeThread.conversationSummary ? (
+                      <p className="mt-2 max-w-2xl text-sm leading-6 text-mutedForeground">
+                        {workspace.activeThread.conversationSummary}
+                      </p>
+                    ) : null}
                   </div>
                   <Link href="/assistant" className="text-sm font-semibold text-primary hover:text-primaryHover">
                     New thread
                   </Link>
                 </div>
                 <div className="space-y-3">
-                  {workspace.activeThread.messages.map((message: (typeof workspace.activeThread.messages)[number]) => (
-                    <div
-                      key={message.id}
-                      className={[
-                        "max-w-[85%] rounded-lg border p-3",
-                        message.role === "USER"
-                          ? "ml-auto border-primary/25 bg-background"
-                          : "mr-auto border-border bg-card"
-                      ].join(" ")}
-                    >
-                      <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">
-                        {formatAssistantRole(message.role)}
-                      </p>
-                      <div className="mt-2 whitespace-pre-line text-sm leading-6 text-foreground">{message.content}</div>
-                    </div>
-                  ))}
+                  {workspace.activeThread.messages.map((message: (typeof workspace.activeThread.messages)[number]) => {
+                    const run = runsByMessageId.get(message.id);
+
+                    return (
+                      <div key={message.id} className="space-y-2">
+                        <div
+                          className={[
+                            "max-w-[85%] rounded-lg border p-3",
+                            message.role === "USER"
+                              ? "ml-auto border-primary/25 bg-background"
+                              : "mr-auto border-border bg-card"
+                          ].join(" ")}
+                        >
+                          <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+                            {formatAssistantRole(message.role)}
+                          </p>
+                          <div className="mt-2 whitespace-pre-line text-sm leading-6 text-foreground">{message.content}</div>
+                        </div>
+                        {message.role === "ASSISTANT" && run?.retrievedSources?.length ? (
+                          <div className="mr-auto max-w-[85%] rounded-md border border-border bg-background p-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+                                Grounded In
+                              </p>
+                              <span className="text-xs text-mutedForeground">
+                                {run.retrievedSources.length} source(s)
+                              </span>
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {run.retrievedSources.slice(0, 4).map((source) => (
+                                <span
+                                  key={source.id}
+                                  className="rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground"
+                                >
+                                  {source.title}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
                 </div>
                 {workspace.activeThread.recentRuns[0]?.providerFallback ? (
                   <div className="rounded-md border border-warning/25 bg-warning/10 p-3 text-sm">
@@ -203,6 +240,43 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
               {workspace.managerSummary.topRisks.length === 0 && workspace.managerSummary.topOpportunities.length === 0 ? (
                 <p className="rounded-md border border-border bg-muted/20 p-4 text-sm text-mutedForeground">
                   No Microsoft or assistant signals are indexed yet.
+                </p>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-foreground">Business memory</h2>
+                <p className="mt-1 text-sm leading-6 text-mutedForeground">
+                  Recent customer, service, opportunity, and risk memory available to the assistant right now.
+                </p>
+              </div>
+              <span className="rounded-full border border-border bg-muted/30 px-2.5 py-1 text-xs font-semibold text-mutedForeground">
+                {workspace.stats.memoryCount}
+              </span>
+            </div>
+            <div className="mt-4 space-y-3">
+              {workspace.recentMemories.slice(0, 4).map((memory) => (
+                <div key={memory.id} className="rounded-md border border-border bg-background p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+                        {formatMemoryKind(memory.kind)}
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-foreground">{memory.title}</p>
+                    </div>
+                    <span className="rounded-full border border-border bg-muted/30 px-2 py-1 text-[11px] font-semibold text-mutedForeground">
+                      {memory.confidence}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-mutedForeground">{truncate(memory.summary, 180)}</p>
+                </div>
+              ))}
+              {workspace.recentMemories.length === 0 ? (
+                <p className="rounded-md border border-border bg-muted/20 p-4 text-sm text-mutedForeground">
+                  No memory has been indexed yet. After knowledge syncs run, the assistant will show customer and business memory here.
                 </p>
               ) : null}
             </div>
@@ -779,6 +853,10 @@ function formatEnum(value: string) {
     .split("_")
     .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ");
+}
+
+function formatMemoryKind(value: string) {
+  return formatEnum(value);
 }
 
 function formatDate(value: Date) {

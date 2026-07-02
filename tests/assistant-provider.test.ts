@@ -62,6 +62,26 @@ describe("assistant provider model normalization", () => {
       tenantName: "Newl Group",
       prompt: "What is your understanding of my business?",
       intent: "GENERAL_INSIGHT",
+      conversationHistory: [
+        {
+          role: "user",
+          content: "What do you know about my business?"
+        }
+      ],
+      memorySnapshot: [
+        {
+          kind: "CUSTOMER_PROFILE",
+          title: "ABC IMPORTS INC",
+          summary: "2 imports, 0 contacts, priority score 86."
+        }
+      ],
+      workspaceSnapshot: {
+        companyCount: 64,
+        contactCount: 20,
+        knowledgeDocumentCount: 252,
+        memoryCount: 73,
+        topCompanyNames: ["ABC IMPORTS INC"]
+      },
       sources: [
         {
           title: "ABC IMPORTS INC",
@@ -86,6 +106,9 @@ describe("assistant provider model normalization", () => {
     expect(requestBody.max_completion_tokens).toBe(900);
     expect(requestBody.max_tokens).toBeUndefined();
     expect(requestBody.temperature).toBeUndefined();
+    const messages = requestBody.messages as Array<{ role: string; content: string }>;
+    expect(messages[1]?.content).toContain("\"conversationHistory\"");
+    expect(messages[1]?.content).toContain("\"memorySnapshot\"");
   });
 
   it("keeps OpenAI-compatible local model requests on max_tokens", async () => {
@@ -107,6 +130,8 @@ describe("assistant provider model normalization", () => {
       tenantName: "Newl Group",
       prompt: "Hello",
       intent: "GENERAL_INSIGHT",
+      conversationHistory: [],
+      memorySnapshot: [],
       sources: [],
       settings: {
         provider: "LOCAL_LLM",

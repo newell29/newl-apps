@@ -29,6 +29,7 @@ export async function runAssistantPrompt(
   existingThreadId?: string
 ) {
   const workspace = await getAssistantWorkspace(context, prompt, existingThreadId, context.userId);
+  const priorConversationSummary = workspace.activeThread?.conversationSummary ?? null;
   const threadPromptContext = workspace.activeThread
     ? workspace.activeThread.messages
         .filter((message) => message.role === "USER")
@@ -36,9 +37,31 @@ export async function runAssistantPrompt(
         .map((message) => message.content)
         .join("\n")
     : null;
+  const conversationHistory = workspace.activeThread
+    ? workspace.activeThread.messages
+        .filter(
+          (message) =>
+            message.role === "USER" || message.role === "ASSISTANT"
+        )
+        .slice(-8)
+        .map((message) => ({
+          role: message.role === "USER" ? "user" : "assistant",
+          content: message.content
+        }))
+    : [];
+  const memorySnapshot = workspace.recentMemories.slice(0, 6).map((memory) => ({
+    kind: memory.kind,
+    title: memory.title,
+    summary: memory.summary
+  }));
   const toolRateReply = await maybeRunAssistantRateRequest(context, prompt, threadPromptContext);
   if (toolRateReply) {
-    return toolRateReply;
+    return finalizeAssistantResponse(workspace, prompt, toolRateReply);
+  }
+
+  const guidanceReply = maybeBuildAssistantGuidanceResponse(workspace, prompt);
+  if (guidanceReply) {
+    return finalizeAssistantResponse(workspace, prompt, guidanceReply);
   }
 
   const indexedSources = await searchAssistantKnowledge(context, prompt);
@@ -73,7 +96,7 @@ export async function runAssistantPrompt(
   const apolloActivityResponse = await maybeRunAssistantApolloActivityRequest(context, prompt);
 
   if (apolloActivityResponse) {
-    return {
+    return finalizeAssistantResponse(workspace, prompt, {
       answer: apolloActivityResponse.answer,
       intent: deterministic.intent,
       provider: "NEWL_APOLLO_WORKFLOW",
@@ -89,7 +112,7 @@ export async function runAssistantPrompt(
         ...apolloActivityResponse.metadata
       },
       sources: apolloActivityResponse.sources
-    };
+    });
   }
 
   let answer = deterministic.answer.join("\n\n");
@@ -117,6 +140,16 @@ export async function runAssistantPrompt(
           title: source.title,
           excerpt: source.excerpt
         })),
+        conversationHistory,
+        memorySnapshot,
+        workspaceSnapshot: {
+          companyCount: workspace.stats.companyCount,
+          contactCount: workspace.stats.contactCount,
+          knowledgeDocumentCount: workspace.stats.knowledgeDocumentCount,
+          memoryCount: workspace.stats.memoryCount,
+          topCompanyNames: workspace.topCompanies.slice(0, 5).map((company) => company.name)
+        },
+        conversationSummary: priorConversationSummary,
         settings: providerSettings
       });
 
@@ -181,7 +214,7 @@ export async function runAssistantPrompt(
     };
   }
 
-  return {
+  return finalizeAssistantResponse(workspace, prompt, {
     answer,
     intent: deterministic.intent,
     provider,
@@ -189,7 +222,198 @@ export async function runAssistantPrompt(
     messageMetadata,
     runMetadata,
     sources
+  });
+}
+
+function maybeBuildAssistantGuidanceResponse(
+  workspace: Awaited<ReturnType<typeof getAssistantWorkspace>>,
+  prompt: string
+) {
+  const normalized = prompt.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  if (/^(hi|hello|hey|good morning|good afternoon|good evening)\b[!.?]*$/.test(normalized)) {
+    return {
+      answer:
+        "I’m here and working. You can ask me about customers, Apollo activity, rates, opportunities, risks, or email drafting. If you want inbox-based answers, make sure Microsoft 365 has been synced into assistant knowledge first.",
+      intent: "GENERAL_INSIGHT",
+      provider: "NEWL_GUIDANCE",
+      model: "assistant-guidance-v1",
+      messageMetadata: {
+        deterministic: true,
+        intent: "GENERAL_INSIGHT",
+        greetingHandled: true
+      },
+      runMetadata: {
+        deterministic: true,
+        intent: "GENERAL_INSIGHT",
+        greetingHandled: true
+      },
+      sources: []
+    };
+  }
+
+  const apolloRequested =
+    /\bapollo\b/.test(normalized) ||
+    /\bhow many calls\b/.test(normalized) ||
+    /\bconnected calls?\b/.test(normalized) ||
+    /\breplies?\b/.test(normalized) ||
+    /\bemails sent\b/.test(normalized);
+  const emailRequested =
+    /\bemail\b/.test(normalized) ||
+    /\binbox\b/.test(normalized) ||
+    /\boutlook\b/.test(normalized) ||
+    /\bmailbox\b/.test(normalized) ||
+    /\bshared inbox\b/.test(normalized);
+
+  const apolloReady = workspace.integrations.some(
+    (integration) => integration.provider === "APOLLO" && integration.activeCount > 0
+  );
+  const microsoftReady = workspace.integrations.some(
+    (integration) => integration.provider === "MICROSOFT_GRAPH" && integration.activeCount > 0
+  );
+  const hasIndexedBusinessKnowledge =
+    workspace.stats.knowledgeDocumentCount > 0 ||
+    workspace.stats.memoryCount > 0 ||
+    workspace.topCompanies.length > 0 ||
+    workspace.openLeads.length > 0;
+
+  if (apolloRequested && !apolloReady) {
+    return {
+      answer:
+        "I can’t answer that from Apollo yet because the Apollo integration is not active for this tenant. Once Apollo is connected and rep mapping is synced, I can answer calls, connected calls, emails sent, replies, and new-lead questions.",
+      intent: "GENERAL_INSIGHT",
+      provider: "NEWL_GUIDANCE",
+      model: "assistant-guidance-v1",
+      messageMetadata: {
+        deterministic: true,
+        intent: "GENERAL_INSIGHT",
+        blocked: "apollo-not-ready"
+      },
+      runMetadata: {
+        deterministic: true,
+        intent: "GENERAL_INSIGHT",
+        blocked: "apollo-not-ready"
+      },
+      sources: []
+    };
+  }
+
+  if (emailRequested && (!microsoftReady || !hasIndexedBusinessKnowledge)) {
+    return {
+      answer:
+        "I can’t answer that from inbox content yet because Microsoft 365 knowledge is not fully available in the assistant. Connect Microsoft 365, save the mailbox targets you want, then run a knowledge sync so email and file content can be indexed into memory.",
+      intent: "GENERAL_INSIGHT",
+      provider: "NEWL_GUIDANCE",
+      model: "assistant-guidance-v1",
+      messageMetadata: {
+        deterministic: true,
+        intent: "GENERAL_INSIGHT",
+        blocked: "microsoft-knowledge-not-ready"
+      },
+      runMetadata: {
+        deterministic: true,
+        intent: "GENERAL_INSIGHT",
+        blocked: "microsoft-knowledge-not-ready"
+      },
+      sources: []
+    };
+  }
+
+  if (!hasIndexedBusinessKnowledge && normalized.split(/\s+/).length >= 4) {
+    return {
+      answer:
+        "I’m not ignoring the request; I just do not have enough indexed business knowledge yet to answer it well. Run assistant knowledge sync after connecting the relevant systems, or ask me something I can answer directly from Apollo, rate tools, or the current app data.",
+      intent: "GENERAL_INSIGHT",
+      provider: "NEWL_GUIDANCE",
+      model: "assistant-guidance-v1",
+      messageMetadata: {
+        deterministic: true,
+        intent: "GENERAL_INSIGHT",
+        blocked: "knowledge-too-thin"
+      },
+      runMetadata: {
+        deterministic: true,
+        intent: "GENERAL_INSIGHT",
+        blocked: "knowledge-too-thin"
+      },
+      sources: []
+    };
+  }
+
+  return null;
+}
+
+function finalizeAssistantResponse(
+  workspace: Awaited<ReturnType<typeof getAssistantWorkspace>>,
+  prompt: string,
+  response: {
+    answer: string;
+    intent: string;
+    provider: string;
+    model: string;
+    messageMetadata: Record<string, unknown>;
+    runMetadata: Record<string, unknown>;
+    sources: Array<{
+      sourceKind: string;
+      sourceId: string | null;
+      title: string;
+      excerpt: string;
+      metadata?: Record<string, unknown>;
+    }>;
+  }
+) {
+  const conversationSummary = buildConversationSummary({
+    priorSummary: workspace.activeThread?.conversationSummary ?? null,
+    recentMessages: workspace.activeThread?.messages ?? [],
+    prompt,
+    answer: response.answer
+  });
+
+  return {
+    ...response,
+    runMetadata: {
+      ...response.runMetadata,
+      conversationSummary
+    }
   };
+}
+
+function buildConversationSummary({
+  priorSummary,
+  recentMessages,
+  prompt,
+  answer
+}: {
+  priorSummary: string | null;
+  recentMessages: Array<{ role: string; content: string }>;
+  prompt: string;
+  answer: string;
+}) {
+  const recapLines = recentMessages
+    .filter((message) => message.role === "USER" || message.role === "ASSISTANT")
+    .slice(-4)
+    .map((message) => `${message.role === "USER" ? "User" : "Assistant"}: ${compactText(message.content, 140)}`);
+
+  const parts = [
+    priorSummary ? `Earlier context: ${compactText(priorSummary, 420)}` : null,
+    recapLines.length > 0 ? `Recent turns: ${recapLines.join(" | ")}` : null,
+    `Latest user request: ${compactText(prompt, 180)}`,
+    `Latest assistant response: ${compactText(answer, 220)}`
+  ].filter((part): part is string => Boolean(part));
+
+  return compactText(parts.join(" || "), 1200);
+}
+
+function compactText(value: string, maxLength: number) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
 }
 
 export async function executeAssistantAutomation(

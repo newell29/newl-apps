@@ -20,6 +20,7 @@ const CLOSED_LEAD_STAGES = [
 ];
 
 const ASSISTANT_INTEGRATION_PROVIDERS = [
+  IntegrationProvider.APOLLO,
   IntegrationProvider.LOCAL_LLM,
   IntegrationProvider.OPENAI,
   IntegrationProvider.MICROSOFT_GRAPH,
@@ -328,6 +329,7 @@ export async function getAssistantWorkspace(
               take: 3,
               select: {
                 id: true,
+                messageId: true,
                 intent: true,
                 status: true,
                 provider: true,
@@ -498,6 +500,10 @@ export async function getAssistantWorkspace(
           title: activeThread.title,
           updatedAt: activeThread.updatedAt,
           lastMessageAt: activeThread.lastMessageAt,
+          conversationSummary:
+            activeThread.runs
+              .map((run) => readRunMetadataString(run.metadata, "conversationSummary"))
+              .find((summary): summary is string => Boolean(summary)) ?? null,
           messages: activeThread.messages.map((message) => ({
             id: message.id,
             role: message.role,
@@ -506,6 +512,7 @@ export async function getAssistantWorkspace(
           })),
           recentRuns: activeThread.runs.map((run) => ({
             id: run.id,
+            messageId: run.messageId,
             intent: run.intent,
             status: run.status,
             provider: run.provider,
