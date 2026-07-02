@@ -2003,10 +2003,17 @@ async function validateApolloPushCandidate({
     contact.sequenceStatus !== SequenceStatus.NOT_STARTED &&
     contact.sequenceStatus !== SequenceStatus.READY
   ) {
-    return {
-      ok: false,
-      reason: "This contact already shows Apollo sequence history. Review it before pushing again."
-    };
+    const liveSequenceStatus = await refreshApolloSequenceStatusForPush({
+      tenantId,
+      contact
+    });
+
+    if (!canBulkUpdateContactSequence(liveSequenceStatus)) {
+      return {
+        ok: false,
+        reason: "This contact already shows Apollo sequence history. Review it before pushing again."
+      };
+    }
   }
 
   if (!contact.assignedRep) {
@@ -2442,6 +2449,72 @@ function canBulkUpdateContactSequence(sequenceStatus: SequenceStatus) {
 
 function requiresSequenceOverrideConfirmation(sequenceStatus: SequenceStatus) {
   return !canBulkUpdateContactSequence(sequenceStatus);
+}
+
+async function refreshApolloSequenceStatusForPush({
+  tenantId,
+  contact
+}: {
+  tenantId: string;
+  contact: ApolloPushContactRecord;
+}) {
+  const lookup = await fetchApolloContactsForCompany({
+    companyName: contact.company.name,
+    domain: contact.company.domain,
+    apolloOrganizationId: contact.company.apolloOrganizationId
+  });
+
+  const incoming = matchIncomingApolloContact(lookup.contacts, {
+    id: contact.id,
+    firstName: null,
+    lastName: null,
+    fullName: contact.fullName,
+    title: null,
+    department: null,
+    seniority: null,
+    email: contact.email,
+    phone: null,
+    linkedinUrl: null,
+    contactStatus: ContactStatus.REVIEWING,
+    apolloContactId: contact.apolloContactId,
+    apolloPersonId: null,
+    sequenceStatus: contact.sequenceStatus,
+    replyStatus: ReplyStatus.NO_REPLY,
+    recommendedSequenceName: contact.recommendedSequenceName,
+    recommendedSequenceId: contact.recommendedSequenceId,
+    selectedSequenceName: contact.selectedSequenceName,
+    selectedSequenceId: contact.selectedSequenceId,
+    sequenceRecommendationReason: null,
+    sequenceOverrideReason: null,
+    sequenceManuallyOverridden: false,
+    lastTouchAt: null,
+    lastReplyAt: null,
+    assignedRep: contact.assignedRep,
+    rawJson: null
+  });
+
+  const resolvedSequenceStatus = incoming?.sequenceStatus ?? SequenceStatus.NOT_STARTED;
+
+  if (resolvedSequenceStatus !== contact.sequenceStatus) {
+    await prisma.contact.update({
+      where: {
+        id: contact.id
+      },
+      data: {
+        sequenceStatus: resolvedSequenceStatus
+      }
+    });
+
+    await appendApolloContactActivity({
+      tenantId,
+      contactId: contact.id,
+      note:
+        `Apollo push validation refreshed sequence status on ${new Date().toISOString()}. ` +
+        `Status now reads ${resolvedSequenceStatus.toLowerCase()}.`
+    });
+  }
+
+  return resolvedSequenceStatus;
 }
 
 function appendLeadNote(existingNotes: string | null, nextNote: string) {
