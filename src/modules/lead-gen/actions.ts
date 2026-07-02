@@ -1135,7 +1135,9 @@ export async function bulkPushContactsToApolloAction(
         const verificationLookup = await verifyApolloSequencePush({
           companyName: group.companyName,
           companyDomain: group.companyDomain,
-          apolloOrganizationId: group.apolloOrganizationId
+          apolloOrganizationId: group.apolloOrganizationId,
+          targetContacts: group.contacts,
+          sequenceId: group.sequenceId
         });
         const verificationContacts: ApolloSyncContactRecord[] = group.contacts
           .map((contact) => contactsById.get(contact.contactId))
@@ -1225,7 +1227,7 @@ export async function bulkPushContactsToApolloAction(
           if (!verified) {
             skippedContacts += 1;
             const reason =
-              "Apollo accepted the push, but the contact was not yet visible in the cadence when Newl Apps verified it.";
+              "Apollo accepted the push, but the cadence enrollment is still propagating in Apollo and was not visible during Newl Apps verification.";
             failureReasons.add(reason);
             details.push({
               contactId: contact.contactId,
@@ -1238,8 +1240,8 @@ export async function bulkPushContactsToApolloAction(
               tenantId: context.tenantId,
               contactId: contact.contactId,
               note:
-                `Apollo accepted the sequence push on ${pushedAtIso}, but the contact was not yet visible in ` +
-                `"${group.sequenceName}" when Newl Apps verified the cadence immediately afterward.`
+                `Apollo accepted the sequence push on ${pushedAtIso}, but the cadence enrollment was still ` +
+                `propagating and was not yet visible in "${group.sequenceName}" during Newl Apps verification.`
             });
             continue;
           }
@@ -2370,33 +2372,66 @@ function isApolloContactEnrolledInSequence(
 async function verifyApolloSequencePush({
   companyName,
   companyDomain,
-  apolloOrganizationId
+  apolloOrganizationId,
+  targetContacts,
+  sequenceId
 }: {
   companyName: string;
   companyDomain: string | null;
   apolloOrganizationId: string | null;
+  targetContacts: ApolloPushReadyContact[];
+  sequenceId: string;
 }) {
-  const firstPass = await fetchApolloContactsForCompany({
-    companyName,
-    domain: companyDomain,
-    apolloOrganizationId
-  });
+  const delaysMs = [0, 1500, 3000, 5000];
+  let latestLookup: ApolloContactLookupResult | null = null;
 
-  if (firstPass.contacts.some((contact) => contact.sequenceStatus !== SequenceStatus.NOT_STARTED)) {
-    return firstPass;
+  for (const delayMs of delaysMs) {
+    if (delayMs > 0) {
+      await sleep(delayMs);
+    }
+
+    latestLookup = await fetchApolloContactsForCompany({
+      companyName,
+      domain: companyDomain,
+      apolloOrganizationId
+    });
+    const currentLookup = latestLookup;
+
+    const allVerified = targetContacts.every((target) => {
+      const incoming = matchIncomingApolloPushTarget(currentLookup.contacts, target);
+      return isApolloContactEnrolledInSequence(incoming, sequenceId);
+    });
+
+    if (allVerified) {
+      return latestLookup;
+    }
   }
 
-  await sleep(1500);
-
-  return fetchApolloContactsForCompany({
-    companyName,
-    domain: companyDomain,
-    apolloOrganizationId
-  });
+  return (
+    latestLookup ??
+    (await fetchApolloContactsForCompany({
+      companyName,
+      domain: companyDomain,
+      apolloOrganizationId
+    }))
+  );
 }
 
 async function sleep(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function matchIncomingApolloPushTarget(
+  incomingContacts: ApolloContactRecord[],
+  targetContact: ApolloPushReadyContact
+) {
+  const normalizedFullName = targetContact.fullName.trim().toLowerCase();
+
+  return (
+    incomingContacts.find((incoming) => incoming.apolloContactId === targetContact.apolloContactId) ??
+    incomingContacts.find((incoming) => incoming.fullName.trim().toLowerCase() === normalizedFullName) ??
+    null
+  );
 }
 
 async function appendApolloContactActivity({
