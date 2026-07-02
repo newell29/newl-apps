@@ -1,6 +1,7 @@
 "use server";
 
 import {
+  AssistantSourceKind,
   AssistantMessageRole,
   JobStatus,
   ModuleKey,
@@ -122,7 +123,7 @@ export async function askAssistantAction(formData: FormData) {
         data: response.sources.map((source) => ({
           tenantId: context.tenantId,
           runId: run.id,
-          sourceKind: source.sourceKind,
+          sourceKind: source.sourceKind as AssistantSourceKind,
           sourceId: source.sourceId,
           title: source.title,
           excerpt: source.excerpt,

@@ -142,7 +142,7 @@ function isSevenLCarrier(
   return value !== null;
 }
 
-export async function getSettingsShell(tenant: TenantContext) {
+export async function getSettingsShell(tenant: TenantContext & { userId?: string | null }) {
   const tradeMiningScoringClient = prisma as TradeMiningScoringClient;
   let tradeMiningScoringConfigWarning: string | null = null;
   const moduleAccess = await prisma.tenantModuleAccess.findMany({
