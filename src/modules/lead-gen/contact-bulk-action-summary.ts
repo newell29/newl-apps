@@ -11,6 +11,8 @@ export type ContactBulkActionSummary = {
   operation: "sequence" | "remove" | "apollo_push" | "apollo_sync" | null;
   message: string;
   completedAt: string | null;
+  jobRunId: string | null;
+  jobStatus: string | null;
   selectedContacts: number;
   updatedContacts: number;
   readyContacts: number;
@@ -31,6 +33,8 @@ export const EMPTY_CONTACT_BULK_ACTION_SUMMARY: ContactBulkActionSummary = {
   operation: null,
   message: "",
   completedAt: null,
+  jobRunId: null,
+  jobStatus: null,
   selectedContacts: 0,
   updatedContacts: 0,
   readyContacts: 0,

@@ -7,6 +7,7 @@ import {
   CandidateStatus,
   ContactStatus,
   ContactOutreachDraftStatus,
+  JobStatus,
   LeadPipelineStage,
   ModuleKey,
   Prisma,
@@ -15,6 +16,12 @@ import {
 } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { EMPTY_APOLLO_QUEUE_SUMMARY, type ApolloQueueSummary } from "@/modules/lead-gen/apollo-queue-summary";
+import {
+  APOLLO_PUSH_JOB_TYPE,
+  createApolloPushJobOutput,
+  type ApolloPushJobInput,
+  type ApolloPushJobOutput
+} from "@/modules/lead-gen/apollo-push-jobs";
 import {
   EMPTY_CONTACT_BULK_ACTION_SUMMARY,
   type ContactBulkActionSummary
@@ -998,6 +1005,116 @@ export async function bulkPushContactsToApolloAction(
           in: contactIds
         }
       },
+      select: {
+        companyId: true
+      }
+    });
+
+    if (contacts.length !== contactIds.length) {
+      throw new Error("One or more selected contacts were not found for this tenant.");
+    }
+
+    const jobInput: ApolloPushJobInput = {
+      contactIds,
+      selectedContacts: contactIds.length,
+      requestedAt: new Date().toISOString()
+    };
+    const jobOutput = createApolloPushJobOutput(
+      contactIds.length,
+      new Set(contacts.map((contact) => contact.companyId)).size
+    );
+
+    const jobRun = await prisma.automationJobRun.create({
+      data: {
+        tenantId: context.tenantId,
+        jobType: APOLLO_PUSH_JOB_TYPE,
+        status: JobStatus.QUEUED,
+        input: jobInput,
+        output: jobOutput
+      }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        action: "lead-gen.apollo-push.queued",
+        entityType: "AutomationJobRun",
+        entityId: jobRun.id,
+        after: {
+          selectedContacts: contactIds.length,
+          companiesTouched: jobOutput.companiesTouched
+        }
+      }
+    });
+
+    queueMicrotask(() => {
+      void runApolloPushJob({
+        tenantId: context.tenantId,
+        userId: context.userId,
+        jobRunId: jobRun.id,
+        contactIds
+      });
+    });
+
+    return {
+      ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+      status: "success",
+      operation: "apollo_push",
+      message: `Queued Apollo push job for ${contactIds.length} contact${contactIds.length === 1 ? "" : "s"}.`,
+      completedAt: new Date().toISOString(),
+      jobRunId: jobRun.id,
+      jobStatus: JobStatus.QUEUED,
+      selectedContacts: contactIds.length,
+      companiesTouched: jobOutput.companiesTouched
+    };
+  } catch (error) {
+    return {
+      ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+      status: "error",
+      operation: "apollo_push",
+      message: error instanceof Error ? error.message : "Apollo push failed.",
+      completedAt: new Date().toISOString()
+    };
+  }
+}
+
+async function runApolloPushJob({
+  tenantId,
+  userId,
+  jobRunId,
+  contactIds
+}: {
+  tenantId: string;
+  userId: string | null;
+  jobRunId: string;
+  contactIds: string[];
+}) {
+  const output = createApolloPushJobOutput(contactIds.length);
+  const failureReasons = new Set<string>();
+  const companyLookupCache = new Map<string, Promise<ApolloContactLookupResult>>();
+
+  try {
+    await prisma.automationJobRun.update({
+      where: {
+        id: jobRunId
+      },
+      data: {
+        status: JobStatus.RUNNING,
+        output: {
+          ...output,
+          startedProcessingAt: new Date().toISOString()
+        }
+      }
+    });
+
+    const contacts = await prisma.contact.findMany({
+      where: {
+        tenantId,
+        id: {
+          in: contactIds
+        }
+      },
       include: {
         company: {
           select: {
@@ -1010,7 +1127,7 @@ export async function bulkPushContactsToApolloAction(
         },
         outreachDrafts: {
           where: {
-            tenantId: context.tenantId
+            tenantId
           },
           orderBy: {
             updatedAt: "desc"
@@ -1020,34 +1137,31 @@ export async function bulkPushContactsToApolloAction(
       }
     });
 
-    if (contacts.length !== contactIds.length) {
-      throw new Error("One or more selected contacts were not found for this tenant.");
-    }
-
     const [repMappings, emailAccounts] = await Promise.all([
-      loadApolloRepMappings(context.tenantId),
+      loadApolloRepMappings(tenantId),
       fetchApolloEmailAccountDirectory().catch(() => [])
     ]);
     const contactsById = new Map(contacts.map((contact) => [contact.id, contact]));
+    output.companiesTouched = new Set(contacts.map((contact) => contact.companyId)).size;
     const groups = new Map<string, ApolloPushGroup>();
-    let skippedContacts = 0;
-    let failedContacts = 0;
-    let enrolledContacts = 0;
-    const failureReasons = new Set<string>();
-    const details: ContactBulkActionSummary["details"] = [];
 
     for (const contact of contacts) {
+      const companyLookup = shouldRefreshApolloSequenceStatus(contact.sequenceStatus)
+        ? await getApolloCompanyLookupForContact(contact, companyLookupCache)
+        : undefined;
       const validation = await validateApolloPushCandidate({
-        tenantId: context.tenantId,
+        tenantId,
         contact,
         repMappings,
-        emailAccounts
+        emailAccounts,
+        companyLookup
       });
 
       if (!validation.ok) {
-        skippedContacts += 1;
+        output.skippedContacts += 1;
+        output.processedContacts += 1;
         failureReasons.add(validation.reason);
-        details.push({
+        output.details.push({
           contactId: contact.id,
           contactName: contact.fullName,
           companyName: contact.company.name,
@@ -1055,23 +1169,35 @@ export async function bulkPushContactsToApolloAction(
           reason: validation.reason
         });
         await appendApolloContactActivity({
-          tenantId: context.tenantId,
+          tenantId,
           contactId: contact.id,
           note: `Apollo sequence push skipped on ${new Date().toISOString()}. ${validation.reason}`
         });
+        await persistApolloPushBlocker({
+          tenantId,
+          contactId: contact.id,
+          reason: validation.reason
+        });
+        await persistApolloPushJobProgress(jobRunId, output);
         continue;
       }
 
+      await persistApolloPushBlocker({
+        tenantId,
+        contactId: contact.id,
+        reason: null
+      });
+
       try {
         const customFieldSync = await syncApolloCustomFieldsForContactPush({
-          tenantId: context.tenantId,
+          tenantId,
           contactId: contact.id,
           apolloContactId: validation.apolloContactId
         });
 
         if (customFieldSync.missingFields.length > 0) {
           await appendApolloContactActivity({
-            tenantId: context.tenantId,
+            tenantId,
             contactId: contact.id,
             note:
               `Apollo custom field sync completed on ${new Date().toISOString()} with partial coverage. ` +
@@ -1081,9 +1207,10 @@ export async function bulkPushContactsToApolloAction(
       } catch (error) {
         const reason =
           error instanceof Error ? error.message : "Apollo custom field sync failed before sequence push.";
-        skippedContacts += 1;
+        output.skippedContacts += 1;
+        output.processedContacts += 1;
         failureReasons.add(reason);
-        details.push({
+        output.details.push({
           contactId: contact.id,
           contactName: contact.fullName,
           companyName: contact.company.name,
@@ -1091,10 +1218,16 @@ export async function bulkPushContactsToApolloAction(
           reason
         });
         await appendApolloContactActivity({
-          tenantId: context.tenantId,
+          tenantId,
           contactId: contact.id,
           note: `Apollo custom field sync failed on ${new Date().toISOString()}. ${reason}`
         });
+        await persistApolloPushBlocker({
+          tenantId,
+          contactId: contact.id,
+          reason
+        });
+        await persistApolloPushJobProgress(jobRunId, output);
         continue;
       }
 
@@ -1141,12 +1274,7 @@ export async function bulkPushContactsToApolloAction(
         });
         const verificationContacts: ApolloSyncContactRecord[] = group.contacts
           .map((contact) => contactsById.get(contact.contactId))
-          .filter(
-            (
-              contact
-            ): contact is (typeof contacts)[number] =>
-              Boolean(contact)
-          )
+          .filter((contact): contact is NonNullable<typeof contact> => Boolean(contact))
           .map((contact) => ({
             id: contact.id,
             companyId: contact.companyId,
@@ -1185,7 +1313,7 @@ export async function bulkPushContactsToApolloAction(
           }));
 
         await syncExistingApolloContactsForCompany({
-          tenantId: context.tenantId,
+          tenantId,
           companyId: group.companyId,
           existingContacts: verificationContacts,
           lookup: verificationLookup
@@ -1209,7 +1337,7 @@ export async function bulkPushContactsToApolloAction(
         if (enrolledIds.length > 0) {
           await prisma.contact.updateMany({
             where: {
-              tenantId: context.tenantId,
+              tenantId,
               id: {
                 in: enrolledIds
               }
@@ -1225,36 +1353,40 @@ export async function bulkPushContactsToApolloAction(
         for (const contact of group.contacts) {
           const verified = verifiedResults.get(contact.contactId) ?? false;
           if (!verified) {
-            skippedContacts += 1;
             const reason =
               "Apollo accepted the push, but the cadence enrollment is still propagating in Apollo and was not visible during Newl Apps verification.";
+            output.skippedContacts += 1;
+            output.processedContacts += 1;
             failureReasons.add(reason);
-            details.push({
+            output.details.push({
               contactId: contact.contactId,
               contactName: contact.fullName,
               companyName: group.companyName,
               outcome: "skipped",
               reason
             });
-            await appendApolloContactActivity({
-              tenantId: context.tenantId,
-              contactId: contact.contactId,
-              note:
-                `Apollo accepted the sequence push on ${pushedAtIso}, but the cadence enrollment was still ` +
+          await appendApolloContactActivity({
+            tenantId,
+            contactId: contact.contactId,
+            note:
+              `Apollo accepted the sequence push on ${pushedAtIso}, but the cadence enrollment was still ` +
                 `propagating and was not yet visible in "${group.sequenceName}" during Newl Apps verification. ` +
                 `${summarizeApolloSequencePushResponse(pushResult.rawPayload)}`
             });
             await storeApolloSequencePushSnapshot({
-              tenantId: context.tenantId,
+              tenantId,
               contactId: contact.contactId,
               sequenceId: group.sequenceId,
               sequenceName: group.sequenceName,
               payload: pushResult.rawPayload
             });
+            await persistApolloPushJobProgress(jobRunId, output);
             continue;
           }
 
-          details.push({
+          output.enrolledContacts += 1;
+          output.processedContacts += 1;
+          output.details.push({
             contactId: contact.contactId,
             contactName: contact.fullName,
             companyName: group.companyName,
@@ -1262,14 +1394,14 @@ export async function bulkPushContactsToApolloAction(
             reason: `Enrolled in "${group.sequenceName}".`
           });
           await appendApolloContactActivity({
-            tenantId: context.tenantId,
+            tenantId,
             contactId: contact.contactId,
             note:
               `Apollo sequence push completed on ${pushedAtIso}. Enrolled in "${group.sequenceName}" as ${contact.fullName}. ` +
               `${summarizeApolloSequencePushResponse(pushResult.rawPayload)}`
           });
           await storeApolloSequencePushSnapshot({
-            tenantId: context.tenantId,
+            tenantId,
             contactId: contact.contactId,
             sequenceId: group.sequenceId,
             sequenceName: group.sequenceName,
@@ -1286,16 +1418,23 @@ export async function bulkPushContactsToApolloAction(
               }
             });
           }
-        }
 
-        enrolledContacts += enrolledIds.length;
+          await persistApolloPushBlocker({
+            tenantId,
+            contactId: contact.contactId,
+            reason: null
+          });
+
+          await persistApolloPushJobProgress(jobRunId, output);
+        }
       } catch (error) {
         const reason = error instanceof Error ? error.message : "Apollo sequence push failed.";
         failureReasons.add(reason);
-        failedContacts += group.contacts.length;
 
         for (const contact of group.contacts) {
-          details.push({
+          output.failedContacts += 1;
+          output.processedContacts += 1;
+          output.details.push({
             contactId: contact.contactId,
             contactName: contact.fullName,
             companyName: group.companyName,
@@ -1303,43 +1442,90 @@ export async function bulkPushContactsToApolloAction(
             reason
           });
           await appendApolloContactActivity({
-            tenantId: context.tenantId,
+            tenantId,
             contactId: contact.contactId,
             note: `Apollo sequence push failed on ${new Date().toISOString()}. ${reason}`
           });
+          await persistApolloPushBlocker({
+            tenantId,
+            contactId: contact.contactId,
+            reason
+          });
         }
+
+        await persistApolloPushJobProgress(jobRunId, output);
       }
     }
 
-    revalidateLeadGenSurfaces();
+    output.completedAt = new Date().toISOString();
+    await prisma.automationJobRun.update({
+      where: {
+        id: jobRunId
+      },
+      data: {
+        status: output.failedContacts > 0 && output.enrolledContacts === 0 ? JobStatus.ERROR : JobStatus.SUCCESS,
+        finishedAt: new Date(),
+        output,
+        errorMessage:
+          output.failedContacts > 0 && output.enrolledContacts === 0
+            ? [...failureReasons][0] ?? "Apollo push failed."
+            : null
+      }
+    });
 
-    return {
-      ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
-      status: failedContacts > 0 && enrolledContacts === 0 ? "error" : "success",
-      operation: "apollo_push",
-      message:
-        enrolledContacts > 0
-          ? `Apollo push processed ${contacts.length} contact${contacts.length === 1 ? "" : "s"}: ${enrolledContacts} enrolled, ${skippedContacts} skipped, ${failedContacts} failed.`
-          : [...failureReasons][0] ?? "No selected contacts were eligible for Apollo sequence push.",
-      completedAt: new Date().toISOString(),
-      selectedContacts: contactIds.length,
-      updatedContacts: enrolledContacts,
-      pushedToApollo: enrolledContacts > 0,
-      enrolledContacts,
-      skippedContacts,
-      failedContacts,
-      companiesTouched: new Set(contacts.map((contact) => contact.companyId)).size,
-      details
-    };
+    await prisma.auditLog.create({
+      data: {
+        tenantId,
+        actorUserId: userId,
+        action: "lead-gen.apollo-push.completed",
+        entityType: "AutomationJobRun",
+        entityId: jobRunId,
+        after: output
+      }
+    });
+
+    revalidateLeadGenSurfaces();
   } catch (error) {
-    return {
-      ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
-      status: "error",
-      operation: "apollo_push",
-      message: error instanceof Error ? error.message : "Apollo push failed.",
-      completedAt: new Date().toISOString()
-    };
+    output.completedAt = new Date().toISOString();
+    const message = error instanceof Error ? error.message : "Apollo push failed.";
+
+    await prisma.automationJobRun.update({
+      where: {
+        id: jobRunId
+      },
+      data: {
+        status: JobStatus.ERROR,
+        finishedAt: new Date(),
+        output,
+        errorMessage: message
+      }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId,
+        actorUserId: userId,
+        action: "lead-gen.apollo-push.failed",
+        entityType: "AutomationJobRun",
+        entityId: jobRunId,
+        after: {
+          errorMessage: message,
+          ...output
+        }
+      }
+    });
   }
+}
+
+async function persistApolloPushJobProgress(jobRunId: string, output: ApolloPushJobOutput) {
+  await prisma.automationJobRun.update({
+    where: {
+      id: jobRunId
+    },
+    data: {
+      output
+    }
+  });
 }
 
 export async function syncSelectedApolloStatusesAction(formData: FormData): Promise<ContactBulkActionSummary>;
@@ -1982,12 +2168,14 @@ async function validateApolloPushCandidate({
   tenantId,
   contact,
   repMappings,
-  emailAccounts
+  emailAccounts,
+  companyLookup
 }: {
   tenantId: string;
   contact: ApolloPushContactRecord;
   repMappings: ReturnType<typeof parseApolloRepMapping>;
   emailAccounts: ApolloEmailAccountDirectoryEntry[];
+  companyLookup?: ApolloContactLookupResult;
 }): Promise<{ ok: true } & ApolloPushReadyContact | { ok: false; reason: string }> {
   let effectiveSequence = resolveEffectiveApolloSequence(contact);
 
@@ -2024,7 +2212,8 @@ async function validateApolloPushCandidate({
   ) {
     const liveSequenceStatus = await refreshApolloSequenceStatusForPush({
       tenantId,
-      contact
+      contact,
+      companyLookup
     });
 
     if (!canBulkUpdateContactSequence(liveSequenceStatus)) {
@@ -2580,26 +2769,113 @@ async function appendApolloContactActivity({
   });
 }
 
+async function persistApolloPushBlocker({
+  tenantId,
+  contactId,
+  reason
+}: {
+  tenantId: string;
+  contactId: string;
+  reason: string | null;
+}) {
+  const contact = await prisma.contact.findFirst({
+    where: {
+      id: contactId,
+      tenantId
+    },
+    select: {
+      id: true,
+      rawJson: true
+    }
+  });
+
+  if (!contact) {
+    return;
+  }
+
+  const currentRawJson = isJsonObject(contact.rawJson) ? contact.rawJson : {};
+  const apolloData = isJsonObject(currentRawJson.apollo) ? currentRawJson.apollo : {};
+  const existingBlocker = isJsonObject(apolloData.pushBlocker) ? apolloData.pushBlocker : null;
+
+  const nextApolloData =
+    reason && reason.trim().length > 0
+      ? {
+          ...apolloData,
+          pushBlocker: {
+            reason: reason.trim(),
+            blockedAt:
+              readString(existingBlocker ?? {}, "blockedAt") ??
+              new Date().toISOString()
+          }
+        }
+      : Object.fromEntries(Object.entries(apolloData).filter(([key]) => key !== "pushBlocker"));
+
+  await prisma.contact.update({
+    where: {
+      id: contactId
+    },
+    data: {
+      rawJson: toInputJsonValue({
+        ...currentRawJson,
+        apollo: nextApolloData
+      })
+    }
+  });
+}
+
 function canBulkUpdateContactSequence(sequenceStatus: SequenceStatus) {
   return sequenceStatus === SequenceStatus.NOT_STARTED || sequenceStatus === SequenceStatus.READY;
+}
+
+function shouldRefreshApolloSequenceStatus(sequenceStatus: SequenceStatus) {
+  return !canBulkUpdateContactSequence(sequenceStatus);
 }
 
 function requiresSequenceOverrideConfirmation(sequenceStatus: SequenceStatus) {
   return !canBulkUpdateContactSequence(sequenceStatus);
 }
 
-async function refreshApolloSequenceStatusForPush({
-  tenantId,
-  contact
-}: {
-  tenantId: string;
-  contact: ApolloPushContactRecord;
-}) {
-  const lookup = await fetchApolloContactsForCompany({
+async function getApolloCompanyLookupForContact(
+  contact: ApolloPushContactRecord,
+  cache: Map<string, Promise<ApolloContactLookupResult>>
+) {
+  const cacheKey = [
+    contact.companyId,
+    contact.company.apolloOrganizationId ?? "",
+    contact.company.domain ?? "",
+    contact.company.name
+  ].join("|");
+
+  const existing = cache.get(cacheKey);
+  if (existing) {
+    return existing;
+  }
+
+  const lookupPromise = fetchApolloContactsForCompany({
     companyName: contact.company.name,
     domain: contact.company.domain,
     apolloOrganizationId: contact.company.apolloOrganizationId
   });
+  cache.set(cacheKey, lookupPromise);
+  return lookupPromise;
+}
+
+async function refreshApolloSequenceStatusForPush({
+  tenantId,
+  contact,
+  companyLookup
+}: {
+  tenantId: string;
+  contact: ApolloPushContactRecord;
+  companyLookup?: ApolloContactLookupResult;
+}) {
+  const lookup =
+    companyLookup ??
+    (await fetchApolloContactsForCompany({
+      companyName: contact.company.name,
+      domain: contact.company.domain,
+      apolloOrganizationId: contact.company.apolloOrganizationId
+    }));
 
   const incoming = matchIncomingApolloContact(lookup.contacts, {
     id: contact.id,
