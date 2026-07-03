@@ -156,6 +156,14 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
+            value: [{ id: "probe-1" }]
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
             value: [
               {
                 id: "file-1",
@@ -334,6 +342,14 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
+            value: [{ id: "probe-2" }]
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
             value: [
               {
                 id: "mail-1",
@@ -480,6 +496,14 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
+            value: [{ id: "probe-1" }]
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
             value: [
               {
                 id: "mail-2",
@@ -552,18 +576,22 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
       })
     );
 
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            access_token: "application-token"
-          }),
-          { status: 200 }
-        )
-      )
-      .mockResolvedValueOnce(
-        new Response(
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+
+      if (url.includes("/oauth2/v2.0/token")) {
+        return new Response(JSON.stringify({ access_token: "application-token" }), { status: 200 });
+      }
+
+      if (url.includes("/users/shared%40newl.ca/messages?$top=1&$select=id")) {
+        return new Response(JSON.stringify({ value: [{ id: "probe-shared" }] }), { status: 200 });
+      }
+
+      if (
+        url.includes("/users/shared%40newl.ca/messages?") &&
+        url.includes("$select=id,subject,bodyPreview,body,webLink,internetMessageId,conversationId,receivedDateTime,from,toRecipients,ccRecipients")
+      ) {
+        return new Response(
           JSON.stringify({
             value: [
               {
@@ -576,10 +604,18 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
             ]
           }),
           { status: 200 }
-        )
-      )
-      .mockResolvedValueOnce(
-        new Response(
+        );
+      }
+
+      if (url.includes("/users/ops%40newl.ca/messages?$top=1&$select=id")) {
+        return new Response(JSON.stringify({ value: [{ id: "probe-ops" }] }), { status: 200 });
+      }
+
+      if (
+        url.includes("/users/ops%40newl.ca/messages?") &&
+        url.includes("$select=id,subject,bodyPreview,body,webLink,internetMessageId,conversationId,receivedDateTime,from,toRecipients,ccRecipients")
+      ) {
+        return new Response(
           JSON.stringify({
             value: [
               {
@@ -592,8 +628,11 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
             ]
           }),
           { status: 200 }
-        )
-      );
+        );
+      }
+
+      throw new Error(`Unexpected fetch URL in test: ${url}`);
+    });
 
     const result = await syncTenantMicrosoftGraphAssistantKnowledge({
       tenantId: "tenant-1",
@@ -658,6 +697,91 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
       })
     );
 
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+
+      if (url.includes("/oauth2/v2.0/token")) {
+        return new Response(JSON.stringify({ access_token: "application-token" }), { status: 200 });
+      }
+
+      if (url.includes("/users/dispatch%40newl.ca/messages?$top=1&$select=id")) {
+        return new Response(JSON.stringify({ value: [{ id: "probe-dispatch" }] }), { status: 200 });
+      }
+
+      if (
+        url.includes("/users/dispatch%40newl.ca/messages?") &&
+        url.includes("$select=id,subject,bodyPreview,body,webLink,internetMessageId,conversationId,receivedDateTime,from,toRecipients,ccRecipients")
+      ) {
+        return new Response(
+          JSON.stringify({
+            value: [
+              {
+                id: "mail-1",
+                subject: "Dispatch mailbox issue",
+                bodyPreview: "Customer complaint.",
+                body: { contentType: "text", content: "Delay issue for shipment 123." },
+                receivedDateTime: "2026-06-25T10:00:00.000Z"
+              }
+            ]
+          }),
+          { status: 200 }
+        );
+      }
+
+      throw new Error(`Unexpected fetch URL in test: ${url}`);
+    });
+
+    const result = await syncTenantMicrosoftGraphAssistantKnowledge({
+      tenantId: "tenant-1",
+      tenantSlug: "tenant-1",
+      tenantName: "Tenant 1"
+    });
+
+    expect(result).toMatchObject({
+      documentCount: 1,
+      mailCount: 1,
+      fileCount: 0,
+      skipped: false
+    });
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/entra-tenant/oauth2/v2.0/token");
+
+    fetchMock.mockRestore();
+  });
+
+  it("resolves valid mailbox aliases when Graph rejects the raw mailbox target as an invalid user", async () => {
+    process.env.MICROSOFT_GRAPH_APP_CLIENT_ID = "graph-app-client";
+    process.env.MICROSOFT_GRAPH_APP_CLIENT_SECRET = "graph-app-secret";
+    process.env.MICROSOFT_GRAPH_APP_TENANT_ID = "graph-app-tenant";
+
+    findIntegrationCredential.mockResolvedValue({
+      provider: IntegrationProvider.MICROSOFT_GRAPH,
+      status: IntegrationStatus.ACTIVE,
+      publicConfig: {
+        adminMailboxTargets: ["sales@newl.ca"],
+        mailboxAccessMode: "ADMIN_SELECTED_MAILBOXES",
+        mailSyncEnabled: true,
+        fileSyncEnabled: false,
+        draftingEnabled: false
+      }
+    });
+
+    const upsert = vi.fn().mockResolvedValue({ id: "doc-1" });
+    const deleteMany = vi.fn().mockResolvedValue({});
+    const createMany = vi.fn().mockResolvedValue({});
+    const deleteMemories = vi.fn().mockResolvedValue({});
+    const createMemories = vi.fn().mockResolvedValue({});
+    const findCompanies = vi.fn().mockResolvedValue([]);
+    const findContacts = vi.fn().mockResolvedValue([]);
+    transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback({
+        company: { findMany: findCompanies },
+        contact: { findMany: findContacts },
+        assistantKnowledgeDocument: { upsert },
+        assistantKnowledgeChunk: { deleteMany, createMany },
+        assistantMemory: { deleteMany: deleteMemories, createMany: createMemories }
+      })
+    );
+
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
@@ -671,13 +795,39 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
+            error: {
+              code: "ErrorInvalidUser",
+              message: "The requested user 'sales@newl.ca' is invalid."
+            }
+          }),
+          { status: 404 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            value: [
+              {
+                id: "user-sales-1",
+                mail: "sales@newlgroup.com",
+                userPrincipalName: "sales@newlgroup.onmicrosoft.com",
+                proxyAddresses: ["SMTP:sales@newlgroup.com", "smtp:sales@newl.ca"]
+              }
+            ]
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
             value: [
               {
                 id: "mail-1",
-                subject: "Dispatch mailbox issue",
-                bodyPreview: "Customer complaint.",
-                body: { contentType: "text", content: "Delay issue for shipment 123." },
-                receivedDateTime: "2026-06-25T10:00:00.000Z"
+                subject: "Sales mailbox quote request",
+                bodyPreview: "Need pricing.",
+                body: { contentType: "text", content: "Need a quote for LTL freight." },
+                receivedDateTime: "2026-06-25T11:00:00.000Z"
               }
             ]
           }),
@@ -697,9 +847,12 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
       fileCount: 0,
       skipped: false
     });
-    expect(fetchMock.mock.calls[0]?.[0]).toContain("/entra-tenant/oauth2/v2.0/token");
+    expect(fetchMock.mock.calls[3]?.[0]).toContain("users/user-sales-1/messages");
 
     fetchMock.mockRestore();
+    delete process.env.MICROSOFT_GRAPH_APP_CLIENT_ID;
+    delete process.env.MICROSOFT_GRAPH_APP_CLIENT_SECRET;
+    delete process.env.MICROSOFT_GRAPH_APP_TENANT_ID;
   });
 
   it("returns a structured skip reason when application mailbox token retrieval fails", async () => {

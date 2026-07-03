@@ -19,7 +19,7 @@ import { getMicrosoftGraphApplicationAccessToken } from "@/server/integrations/m
 import type { AuthenticatedContext, TenantContext } from "@/server/tenant-context";
 
 const MICROSOFT_GRAPH_SOURCE_SYSTEMS = ["MICROSOFT_GRAPH_MAIL", "MICROSOFT_GRAPH_FILE"] as const;
-const MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS = 20_000;
+const MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS = 45_000;
 const MICROSOFT_GRAPH_KNOWLEDGE_TRANSACTION_TIMEOUT_MS = 20_000;
 
 export type MicrosoftGraphKnowledgeSyncResult = {
@@ -842,7 +842,7 @@ async function fetchSelectedMailboxMessages(accessToken: string, mailboxes: stri
 }
 
 async function fetchMailboxMessages(accessToken: string, mailbox: string) {
-  const path = mailbox === "me" ? "me/messages" : `users/${encodeURIComponent(mailbox)}/messages`;
+  const path = mailbox === "me" ? "me/messages" : await resolveMailboxMessagesPath(accessToken, mailbox);
   const response = await fetch(
     `https://graph.microsoft.com/v1.0/${path}?$top=10&$select=id,subject,bodyPreview,body,webLink,internetMessageId,conversationId,receivedDateTime,from,toRecipients,ccRecipients&$orderby=receivedDateTime%20desc`,
     {
@@ -869,6 +869,88 @@ async function fetchMailboxMessages(accessToken: string, mailbox: string) {
         mailboxAddress: mailbox === "me" ? null : mailbox
       }))
     : [];
+}
+
+async function resolveMailboxMessagesPath(accessToken: string, mailbox: string) {
+  const directPath = `users/${encodeURIComponent(mailbox)}/messages`;
+  const probeResponse = await fetch(`https://graph.microsoft.com/v1.0/${directPath}?$top=1&$select=id`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`
+    },
+    cache: "no-store",
+    signal: AbortSignal.timeout(MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS)
+  });
+
+  if (probeResponse.ok) {
+    return directPath;
+  }
+
+  const probeError = await extractMicrosoftGraphResponseError(probeResponse);
+  if (!probeError?.includes("ErrorInvalidUser")) {
+    throw new Error(
+      probeError ?? `Microsoft Graph mail sync failed for ${mailbox} with status ${probeResponse.status}.`
+    );
+  }
+
+  const resolvedUserId = await resolveMailboxUserId(accessToken, mailbox);
+  if (!resolvedUserId) {
+    throw new Error(probeError);
+  }
+
+  return `users/${encodeURIComponent(resolvedUserId)}/messages`;
+}
+
+async function resolveMailboxUserId(accessToken: string, mailbox: string) {
+  const normalizedMailbox = mailbox.trim().toLowerCase();
+  const lookups = [
+    `https://graph.microsoft.com/v1.0/users?$top=5&$select=id,mail,userPrincipalName&$filter=${encodeURIComponent(
+      `mail eq '${escapeODataString(normalizedMailbox)}' or userPrincipalName eq '${escapeODataString(normalizedMailbox)}'`
+    )}`,
+    `https://graph.microsoft.com/v1.0/users?$top=5&$select=id,mail,userPrincipalName,proxyAddresses&$filter=${encodeURIComponent(
+      `proxyAddresses/any(x:x eq 'smtp:${escapeODataString(normalizedMailbox)}' or x eq 'SMTP:${escapeODataString(normalizedMailbox)}')`
+    )}`
+  ];
+
+  for (const url of lookups) {
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        ConsistencyLevel: "eventual"
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS)
+    });
+
+    if (!response.ok) {
+      continue;
+    }
+
+    const json = (await response.json()) as {
+      value?: Array<{
+        id?: string | null;
+        mail?: string | null;
+        userPrincipalName?: string | null;
+        proxyAddresses?: string[] | null;
+      }>;
+    };
+    const match = (json.value ?? []).find((entry) => {
+      const mail = entry.mail?.trim().toLowerCase() ?? null;
+      const userPrincipalName = entry.userPrincipalName?.trim().toLowerCase() ?? null;
+      const proxyAddresses = (entry.proxyAddresses ?? []).map((value) => value.trim().toLowerCase());
+
+      return (
+        mail === normalizedMailbox ||
+        userPrincipalName === normalizedMailbox ||
+        proxyAddresses.includes(`smtp:${normalizedMailbox}`)
+      );
+    });
+
+    if (match?.id) {
+      return match.id;
+    }
+  }
+
+  return null;
 }
 
 async function fetchRecentFiles(accessToken: string) {
@@ -1228,6 +1310,10 @@ function getOrCreateContactFact(
   };
   facts.set(key, created);
   return created;
+}
+
+function escapeODataString(value: string) {
+  return value.replace(/'/g, "''");
 }
 
 function getOrCreateCompanyFact(
