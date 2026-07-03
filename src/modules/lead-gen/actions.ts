@@ -46,6 +46,7 @@ import { DEFAULT_TRADEMINING_SCORING_SETTINGS } from "@/modules/settings/types";
 import { requireAdmin, requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
 import {
+  ApolloRateLimitError,
   fetchApolloEmailAccountDirectory,
   fetchApolloContactsForCompany,
   syncApolloContactTypedCustomFields,
@@ -1084,6 +1085,7 @@ export async function runApolloPushJob({
   const output = createApolloPushJobOutput(contactIds.length);
   const failureReasons = new Set<string>();
   const companyLookupCache = new Map<string, Promise<ApolloContactLookupResult>>();
+  let batchRateLimitReason: string | null = null;
 
   try {
     await prisma.automationJobRun.update({
@@ -1246,7 +1248,10 @@ export async function runApolloPushJob({
       }
     }
 
-    for (const group of groups.values()) {
+    const groupedPushes = [...groups.values()];
+
+    for (let index = 0; index < groupedPushes.length; index += 1) {
+      const group = groupedPushes[index]!;
       try {
         const pushResult = await pushApolloContactsToSequence({
           sequenceId: group.sequenceId,
@@ -1256,13 +1261,27 @@ export async function runApolloPushJob({
           initialStatus: "active"
         });
 
-        const verificationLookup = await verifyApolloSequencePush({
-          companyName: group.companyName,
-          companyDomain: group.companyDomain,
-          apolloOrganizationId: group.apolloOrganizationId,
-          targetContacts: group.contacts,
-          sequenceId: group.sequenceId
-        });
+        let verificationLookup: ApolloContactLookupResult | null = null;
+        let verificationWasRateLimited = false;
+        try {
+          verificationLookup = await verifyApolloSequencePush({
+            companyName: group.companyName,
+            companyDomain: group.companyDomain,
+            apolloOrganizationId: group.apolloOrganizationId,
+            targetContacts: group.contacts,
+            sequenceId: group.sequenceId
+          });
+        } catch (error) {
+          if (error instanceof ApolloRateLimitError) {
+            verificationWasRateLimited = true;
+            batchRateLimitReason =
+              "Apollo rate limit reached while verifying cadence enrollment. Wait a moment, then use Sync Apollo status instead of re-pushing the same contacts.";
+            failureReasons.add(batchRateLimitReason);
+          } else {
+            throw error;
+          }
+        }
+
         const verificationContacts: ApolloSyncContactRecord[] = group.contacts
           .map((contact) => contactsById.get(contact.contactId))
           .filter((contact): contact is NonNullable<typeof contact> => Boolean(contact))
@@ -1303,21 +1322,26 @@ export async function runApolloPushJob({
             }
           }));
 
-        await syncExistingApolloContactsForCompany({
-          tenantId,
-          companyId: group.companyId,
-          existingContacts: verificationContacts,
-          lookup: verificationLookup
-        });
+        if (verificationLookup) {
+          await syncExistingApolloContactsForCompany({
+            tenantId,
+            companyId: group.companyId,
+            existingContacts: verificationContacts,
+            lookup: verificationLookup
+          });
+        }
 
         const pushedAt = new Date();
         const pushedAtIso = pushedAt.toISOString();
         const verifiedResults = new Map<string, boolean>();
         for (const contact of group.contacts) {
+          if (!verificationLookup) {
+            verifiedResults.set(contact.contactId, false);
+            continue;
+          }
+
           const existingContact = contactsById.get(contact.contactId);
-          const incoming = existingContact
-            ? matchIncomingApolloContact(verificationLookup.contacts, existingContact)
-            : null;
+          const incoming = existingContact ? matchIncomingApolloContact(verificationLookup.contacts, existingContact) : null;
           verifiedResults.set(contact.contactId, isApolloContactEnrolledInSequence(incoming, group.sequenceId));
         }
 
@@ -1344,8 +1368,9 @@ export async function runApolloPushJob({
         for (const contact of group.contacts) {
           const verified = verifiedResults.get(contact.contactId) ?? false;
           if (!verified) {
-            const reason =
-              "Apollo accepted the push, but the cadence enrollment is still propagating in Apollo and was not visible during Newl Apps verification.";
+            const reason = verificationWasRateLimited
+              ? "Apollo accepted the push, but Newl Apps hit Apollo rate limits before verification finished. Use Sync Apollo status shortly instead of re-pushing this contact."
+              : "Apollo accepted the push, but the cadence enrollment is still propagating in Apollo and was not yet visible during Newl Apps verification.";
             output.skippedContacts += 1;
             output.processedContacts += 1;
             failureReasons.add(reason);
@@ -1356,13 +1381,12 @@ export async function runApolloPushJob({
               outcome: "skipped",
               reason
             });
-          await appendApolloContactActivity({
-            tenantId,
-            contactId: contact.contactId,
-            note:
-              `Apollo accepted the sequence push on ${pushedAtIso}, but the cadence enrollment was still ` +
-                `propagating and was not yet visible in "${group.sequenceName}" during Newl Apps verification. ` +
-                `${summarizeApolloSequencePushResponse(pushResult.rawPayload)}`
+            await appendApolloContactActivity({
+              tenantId,
+              contactId: contact.contactId,
+              note: verificationWasRateLimited
+                ? `Apollo accepted the sequence push on ${pushedAtIso}, but Newl Apps hit Apollo rate limits before verification finished for "${group.sequenceName}". Use Sync Apollo status instead of re-pushing. ${summarizeApolloSequencePushResponse(pushResult.rawPayload)}`
+                : `Apollo accepted the sequence push on ${pushedAtIso}, but the cadence enrollment was still propagating and was not yet visible in "${group.sequenceName}" during Newl Apps verification. ${summarizeApolloSequencePushResponse(pushResult.rawPayload)}`
             });
             await storeApolloSequencePushSnapshot({
               tenantId,
@@ -1371,6 +1395,13 @@ export async function runApolloPushJob({
               sequenceName: group.sequenceName,
               payload: pushResult.rawPayload
             });
+            if (verificationWasRateLimited) {
+              await persistApolloPushBlocker({
+                tenantId,
+                contactId: contact.contactId,
+                reason
+              });
+            }
             await persistApolloPushJobProgress(jobRunId, output);
             continue;
           }
@@ -1419,23 +1450,35 @@ export async function runApolloPushJob({
           await persistApolloPushJobProgress(jobRunId, output);
         }
       } catch (error) {
-        const reason = error instanceof Error ? error.message : "Apollo sequence push failed.";
+        const isRateLimited = error instanceof ApolloRateLimitError;
+        const reason = isRateLimited
+          ? "Apollo rate limit reached during sequence push. Wait a moment, then retry the blocked contacts instead of immediately re-running the whole batch."
+          : error instanceof Error
+            ? error.message
+            : "Apollo sequence push failed.";
         failureReasons.add(reason);
+        if (isRateLimited) {
+          batchRateLimitReason = reason;
+        }
 
         for (const contact of group.contacts) {
-          output.failedContacts += 1;
+          if (isRateLimited) {
+            output.skippedContacts += 1;
+          } else {
+            output.failedContacts += 1;
+          }
           output.processedContacts += 1;
           output.details.push({
             contactId: contact.contactId,
             contactName: contact.fullName,
             companyName: group.companyName,
-            outcome: "failed",
+            outcome: isRateLimited ? "skipped" : "failed",
             reason
           });
           await appendApolloContactActivity({
             tenantId,
             contactId: contact.contactId,
-            note: `Apollo sequence push failed on ${new Date().toISOString()}. ${reason}`
+            note: `Apollo sequence push ${isRateLimited ? "paused" : "failed"} on ${new Date().toISOString()}. ${reason}`
           });
           await persistApolloPushBlocker({
             tenantId,
@@ -1445,6 +1488,36 @@ export async function runApolloPushJob({
         }
 
         await persistApolloPushJobProgress(jobRunId, output);
+
+        if (isRateLimited) {
+          for (let pendingIndex = index + 1; pendingIndex < groupedPushes.length; pendingIndex += 1) {
+            const pendingGroup = groupedPushes[pendingIndex]!;
+            for (const pendingContact of pendingGroup.contacts) {
+              output.skippedContacts += 1;
+              output.processedContacts += 1;
+              output.details.push({
+                contactId: pendingContact.contactId,
+                contactName: pendingContact.fullName,
+                companyName: pendingGroup.companyName,
+                outcome: "skipped",
+                reason
+              });
+              await appendApolloContactActivity({
+                tenantId,
+                contactId: pendingContact.contactId,
+                note: `Apollo sequence push paused on ${new Date().toISOString()}. ${reason}`
+              });
+              await persistApolloPushBlocker({
+                tenantId,
+                contactId: pendingContact.contactId,
+                reason
+              });
+            }
+          }
+
+          await persistApolloPushJobProgress(jobRunId, output);
+          break;
+        }
       }
     }
 
@@ -1460,7 +1533,7 @@ export async function runApolloPushJob({
         errorMessage:
           output.failedContacts > 0 && output.enrolledContacts === 0
             ? [...failureReasons][0] ?? "Apollo push failed."
-            : null
+            : batchRateLimitReason ?? null,
       }
     });
 
@@ -2587,11 +2660,17 @@ async function verifyApolloSequencePush({
       await sleep(delayMs);
     }
 
-    latestLookup = await fetchApolloContactsForCompany({
-      companyName,
-      domain: companyDomain,
-      apolloOrganizationId
-    });
+    latestLookup = await fetchApolloContactsForCompany(
+      {
+        companyName,
+        domain: companyDomain,
+        apolloOrganizationId
+      },
+      {
+        allowPeopleSearchFallback: false,
+        keywordSearchLimit: 0
+      }
+    );
     const currentLookup = latestLookup;
 
     const allVerified = targetContacts.every((target) => {
@@ -2606,11 +2685,17 @@ async function verifyApolloSequencePush({
 
   return (
     latestLookup ??
-    (await fetchApolloContactsForCompany({
-      companyName,
-      domain: companyDomain,
-      apolloOrganizationId
-    }))
+    (await fetchApolloContactsForCompany(
+      {
+        companyName,
+        domain: companyDomain,
+        apolloOrganizationId
+      },
+      {
+        allowPeopleSearchFallback: false,
+        keywordSearchLimit: 0
+      }
+    ))
   );
 }
 
@@ -2846,6 +2931,9 @@ async function getApolloCompanyLookupForContact(
     companyName: contact.company.name,
     domain: contact.company.domain,
     apolloOrganizationId: contact.company.apolloOrganizationId
+  }, {
+    allowPeopleSearchFallback: false,
+    keywordSearchLimit: 0
   });
   cache.set(cacheKey, lookupPromise);
   return lookupPromise;
@@ -2866,6 +2954,9 @@ async function refreshApolloSequenceStatusForPush({
       companyName: contact.company.name,
       domain: contact.company.domain,
       apolloOrganizationId: contact.company.apolloOrganizationId
+    }, {
+      allowPeopleSearchFallback: false,
+      keywordSearchLimit: 0
     }));
 
   const incoming = matchIncomingApolloContact(lookup.contacts, {
