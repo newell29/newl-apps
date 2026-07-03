@@ -1,4 +1,4 @@
-import { AssistantSourceKind, IntegrationProvider, IntegrationStatus } from "@prisma/client";
+import { AssistantSourceKind, IntegrationProvider, IntegrationStatus, JobStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const findIntegrationCredential = vi.fn();
@@ -7,6 +7,8 @@ const updateAccount = vi.fn();
 const transaction = vi.fn();
 const findMemberships = vi.fn();
 const upsertMailboxSyncState = vi.fn();
+const findMailboxSyncStates = vi.fn();
+const updateMailboxSyncState = vi.fn();
 
 vi.mock("@/server/db", () => ({
   prisma: {
@@ -21,7 +23,9 @@ vi.mock("@/server/db", () => ({
       findMany: (...args: unknown[]) => findMemberships(...args)
     },
     assistantMailboxSyncState: {
-      upsert: (...args: unknown[]) => upsertMailboxSyncState(...args)
+      upsert: (...args: unknown[]) => upsertMailboxSyncState(...args),
+      findMany: (...args: unknown[]) => findMailboxSyncStates(...args),
+      update: (...args: unknown[]) => updateMailboxSyncState(...args)
     },
     $transaction: (...args: unknown[]) => transaction(...args)
   }
@@ -29,6 +33,7 @@ vi.mock("@/server/db", () => ({
 
 import {
   buildMicrosoftGraphMemoriesFromDocuments,
+  runTenantMicrosoftGraphMailboxSyncStep,
   syncMicrosoftGraphAssistantKnowledge,
   syncTenantMicrosoftGraphAssistantKnowledge
 } from "@/modules/assistant/microsoft-graph-sync";
@@ -40,6 +45,8 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
     updateAccount.mockResolvedValue({});
     upsertMailboxSyncState.mockResolvedValue({});
     findMemberships.mockResolvedValue([]);
+    findMailboxSyncStates.mockResolvedValue([]);
+    updateMailboxSyncState.mockResolvedValue({});
     process.env.AUTH_MICROSOFT_ENTRA_ID_ID = "client-id-1";
     process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET = "client-secret-1";
     process.env.AZURE_AD_TENANT_ID = "tenant-id-1";
@@ -957,6 +964,118 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
       skipped: false
     });
     expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("page=2"))).toBe(true);
+
+    fetchMock.mockRestore();
+    delete process.env.MICROSOFT_GRAPH_APP_CLIENT_ID;
+    delete process.env.MICROSOFT_GRAPH_APP_CLIENT_SECRET;
+    delete process.env.MICROSOFT_GRAPH_APP_TENANT_ID;
+  });
+
+  it("processes one resumable mailbox worker page and stores the next checkpoint", async () => {
+    process.env.MICROSOFT_GRAPH_APP_CLIENT_ID = "graph-app-client";
+    process.env.MICROSOFT_GRAPH_APP_CLIENT_SECRET = "graph-app-secret";
+    process.env.MICROSOFT_GRAPH_APP_TENANT_ID = "graph-app-tenant";
+
+    findIntegrationCredential.mockResolvedValue({
+      provider: IntegrationProvider.MICROSOFT_GRAPH,
+      status: IntegrationStatus.ACTIVE,
+      publicConfig: {
+        adminMailboxTargets: ["dispatch@newl.ca"],
+        mailboxAccessMode: "ADMIN_SELECTED_MAILBOXES",
+        mailLookbackDays: 120,
+        maxMailMessagesPerMailbox: 500,
+        mailSyncEnabled: true,
+        fileSyncEnabled: false,
+        draftingEnabled: false
+      }
+    });
+    findMailboxSyncStates.mockResolvedValue([
+      {
+        mailboxAddress: "dispatch@newl.ca",
+        status: JobStatus.QUEUED,
+        metadata: null,
+        lastAttemptedLookbackDays: 120,
+        lastAttemptedMaxMessages: 500
+      }
+    ]);
+
+    const upsert = vi.fn().mockResolvedValue({ id: "doc-1" });
+    const deleteMany = vi.fn().mockResolvedValue({});
+    const createMany = vi.fn().mockResolvedValue({});
+    const deleteMemories = vi.fn().mockResolvedValue({});
+    const createMemories = vi.fn().mockResolvedValue({});
+    const findCompanies = vi.fn().mockResolvedValue([]);
+    const findContacts = vi.fn().mockResolvedValue([]);
+    transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback({
+        company: { findMany: findCompanies },
+        contact: { findMany: findContacts },
+        assistantKnowledgeDocument: { upsert },
+        assistantKnowledgeChunk: { deleteMany, createMany },
+        assistantMemory: { deleteMany: deleteMemories, createMany: createMemories }
+      })
+    );
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+
+      if (url.includes("/oauth2/v2.0/token")) {
+        return new Response(JSON.stringify({ access_token: "application-token" }), { status: 200 });
+      }
+
+      if (url.includes("/users/dispatch%40newl.ca/messages?$top=1&$select=id")) {
+        return new Response(JSON.stringify({ value: [{ id: "probe-dispatch" }] }), { status: 200 });
+      }
+
+      if (
+        url.includes("/users/dispatch%40newl.ca/messages?") &&
+        url.includes("$top=50") &&
+        url.includes("receivedDateTime")
+      ) {
+        return new Response(
+          JSON.stringify({
+            value: [
+              {
+                id: "mail-worker-1",
+                subject: "Dispatch worker issue",
+                bodyPreview: "Need help.",
+                body: { contentType: "text", content: "Customer has a delayed shipment issue." },
+                receivedDateTime: "2026-06-25T10:00:00.000Z"
+              }
+            ],
+            "@odata.nextLink": "https://graph.microsoft.com/v1.0/users/dispatch/messages?page=2"
+          }),
+          { status: 200 }
+        );
+      }
+
+      throw new Error(`Unexpected fetch URL in test: ${url}`);
+    });
+
+    const result = await runTenantMicrosoftGraphMailboxSyncStep({
+      tenantId: "tenant-1",
+      tenantSlug: "tenant-1",
+      tenantName: "Tenant 1"
+    });
+
+    expect(result).toMatchObject({
+      processedMailboxCount: 1,
+      documentCount: 1,
+      mailCount: 1,
+      mailbox: "dispatch@newl.ca",
+      status: "partial",
+      hasMore: true
+    });
+    expect(updateMailboxSyncState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: JobStatus.QUEUED,
+          metadata: expect.objectContaining({
+            nextLink: "https://graph.microsoft.com/v1.0/users/dispatch/messages?page=2"
+          })
+        })
+      })
+    );
 
     fetchMock.mockRestore();
     delete process.env.MICROSOFT_GRAPH_APP_CLIENT_ID;
