@@ -621,6 +621,87 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
     delete process.env.MICROSOFT_GRAPH_APP_TENANT_ID;
   });
 
+  it("reuses the Microsoft Entra auth app credentials for admin-selected mailbox sync when dedicated app env vars are not set", async () => {
+    delete process.env.MICROSOFT_GRAPH_APP_CLIENT_ID;
+    delete process.env.MICROSOFT_GRAPH_APP_CLIENT_SECRET;
+    delete process.env.MICROSOFT_GRAPH_APP_TENANT_ID;
+    process.env.AUTH_MICROSOFT_ENTRA_ID_ID = "entra-client";
+    process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET = "entra-secret";
+    process.env.AZURE_AD_TENANT_ID = "entra-tenant";
+
+    findIntegrationCredential.mockResolvedValue({
+      provider: IntegrationProvider.MICROSOFT_GRAPH,
+      status: IntegrationStatus.ACTIVE,
+      publicConfig: {
+        adminMailboxTargets: ["dispatch@newl.ca"],
+        mailboxAccessMode: "ADMIN_SELECTED_MAILBOXES",
+        mailSyncEnabled: true,
+        fileSyncEnabled: false,
+        draftingEnabled: false
+      }
+    });
+
+    const upsert = vi.fn().mockResolvedValue({ id: "doc-1" });
+    const deleteMany = vi.fn().mockResolvedValue({});
+    const createMany = vi.fn().mockResolvedValue({});
+    const deleteMemories = vi.fn().mockResolvedValue({});
+    const createMemories = vi.fn().mockResolvedValue({});
+    const findCompanies = vi.fn().mockResolvedValue([]);
+    const findContacts = vi.fn().mockResolvedValue([]);
+    transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback({
+        company: { findMany: findCompanies },
+        contact: { findMany: findContacts },
+        assistantKnowledgeDocument: { upsert },
+        assistantKnowledgeChunk: { deleteMany, createMany },
+        assistantMemory: { deleteMany: deleteMemories, createMany: createMemories }
+      })
+    );
+
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            access_token: "application-token"
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            value: [
+              {
+                id: "mail-1",
+                subject: "Dispatch mailbox issue",
+                bodyPreview: "Customer complaint.",
+                body: { contentType: "text", content: "Delay issue for shipment 123." },
+                receivedDateTime: "2026-06-25T10:00:00.000Z"
+              }
+            ]
+          }),
+          { status: 200 }
+        )
+      );
+
+    const result = await syncTenantMicrosoftGraphAssistantKnowledge({
+      tenantId: "tenant-1",
+      tenantSlug: "tenant-1",
+      tenantName: "Tenant 1"
+    });
+
+    expect(result).toMatchObject({
+      documentCount: 1,
+      mailCount: 1,
+      fileCount: 0,
+      skipped: false
+    });
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/entra-tenant/oauth2/v2.0/token");
+
+    fetchMock.mockRestore();
+  });
+
   it("returns a structured skip reason when application mailbox token retrieval fails", async () => {
     process.env.MICROSOFT_GRAPH_APP_CLIENT_ID = "graph-app-client";
     process.env.MICROSOFT_GRAPH_APP_CLIENT_SECRET = "graph-app-secret";

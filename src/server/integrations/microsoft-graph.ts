@@ -135,10 +135,31 @@ function hasDelegatedGraphRuntimeConfigured() {
 
 function hasApplicationMailboxRuntimeConfigured() {
   return Boolean(
-    process.env.MICROSOFT_GRAPH_APP_CLIENT_ID &&
-      process.env.MICROSOFT_GRAPH_APP_CLIENT_SECRET &&
-      process.env.MICROSOFT_GRAPH_APP_TENANT_ID
+    (
+      process.env.MICROSOFT_GRAPH_APP_CLIENT_ID?.trim() ||
+      process.env.AUTH_MICROSOFT_ENTRA_ID_ID?.trim() ||
+      process.env.AZURE_AD_CLIENT_ID?.trim()
+    ) &&
+      (
+        process.env.MICROSOFT_GRAPH_APP_CLIENT_SECRET?.trim() ||
+        process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET?.trim() ||
+        process.env.AZURE_AD_CLIENT_SECRET?.trim()
+      ) &&
+      (
+        process.env.MICROSOFT_GRAPH_APP_TENANT_ID?.trim() ||
+        process.env.AZURE_AD_TENANT_ID?.trim() ||
+        readTenantIdFromIssuer(process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER)
+      )
   );
+}
+
+function readTenantIdFromIssuer(issuer: string | undefined) {
+  if (!issuer) {
+    return null;
+  }
+
+  const match = issuer.match(/login\.microsoftonline\.com\/([^/]+)\/v2\.0/i);
+  return match?.[1] ?? null;
 }
 
 function readMailboxAccessMode(value: unknown): MicrosoftGraphMailboxAccessMode {
