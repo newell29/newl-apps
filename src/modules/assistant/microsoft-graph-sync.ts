@@ -1,4 +1,4 @@
-import { AssistantMemoryKind, AssistantSourceKind, IntegrationProvider, type Prisma } from "@prisma/client";
+import { AssistantMemoryKind, AssistantSourceKind, IntegrationProvider, JobStatus, type Prisma } from "@prisma/client";
 
 import {
   type AssistantKnowledgeDocumentInput,
@@ -21,6 +21,7 @@ import type { AuthenticatedContext, TenantContext } from "@/server/tenant-contex
 const MICROSOFT_GRAPH_SOURCE_SYSTEMS = ["MICROSOFT_GRAPH_MAIL", "MICROSOFT_GRAPH_FILE"] as const;
 const MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS = 45_000;
 const MICROSOFT_GRAPH_KNOWLEDGE_TRANSACTION_TIMEOUT_MS = 20_000;
+const MICROSOFT_GRAPH_MAIL_PAGE_SIZE = 50;
 
 export type MicrosoftGraphKnowledgeSyncResult = {
   documentCount: number;
@@ -43,6 +44,16 @@ export type TenantMicrosoftGraphKnowledgeSyncResult = MicrosoftGraphKnowledgeSyn
     mailCount: number;
     fileCount: number;
   }>;
+};
+
+export type MicrosoftGraphMailboxSyncStepResult = {
+  processedMailboxCount: number;
+  documentCount: number;
+  mailCount: number;
+  mailbox: string | null;
+  status: "success" | "partial" | "skipped";
+  hasMore: boolean;
+  reason: string | null;
 };
 
 type MicrosoftGraphMailMessage = {
@@ -76,6 +87,18 @@ type MicrosoftGraphMailMessage = {
       address?: string | null;
     } | null;
   } | null;
+};
+
+type MicrosoftGraphMailFetchOptions = {
+  lookbackDays: number;
+  maxMessagesPerMailbox: number;
+};
+
+type SelectedMailboxSyncResult = {
+  mailbox: string;
+  messages: MicrosoftGraphMailMessage[];
+  reason: string | null;
+  latestReceivedAt: Date | null;
 };
 
 type MicrosoftGraphDriveItem = {
@@ -196,7 +219,12 @@ async function syncMicrosoftGraphAssistantKnowledgeUnsafe(
   }
 
   const [messages, files] = await Promise.all([
-    settings.mailSyncEnabled ? fetchRecentMail(accessToken) : Promise.resolve([]),
+    settings.mailSyncEnabled
+      ? fetchRecentMail(accessToken, {
+          lookbackDays: settings.mailLookbackDays,
+          maxMessagesPerMailbox: settings.maxMailMessagesPerMailbox
+        })
+      : Promise.resolve([]),
     settings.fileSyncEnabled ? fetchRecentFiles(accessToken) : Promise.resolve([])
   ]);
 
@@ -565,9 +593,18 @@ async function syncMicrosoftGraphApplicationMailboxKnowledge(
   }
 
   const accessToken = await getMicrosoftGraphApplicationAccessToken();
+  if (settings.mailSyncEnabled) {
+    await markMicrosoftMailboxSyncStarted(context, settings.adminMailboxTargets, settings);
+  }
   const mailboxResult = settings.mailSyncEnabled
-    ? await fetchSelectedMailboxMessages(accessToken, settings.adminMailboxTargets)
-    : { messages: [], failures: [] };
+    ? await fetchSelectedMailboxMessages(accessToken, settings.adminMailboxTargets, {
+        lookbackDays: settings.mailLookbackDays,
+        maxMessagesPerMailbox: settings.maxMailMessagesPerMailbox
+      })
+    : { messages: [], failures: [], mailboxResults: [] };
+  if (settings.mailSyncEnabled) {
+    await markMicrosoftMailboxSyncFinished(context, mailboxResult.mailboxResults, settings);
+  }
   const messages = mailboxResult.messages;
   const files: MicrosoftGraphDriveItem[] = [];
   const documents = messages.map(mapMessageToKnowledgeDocument);
@@ -733,6 +770,307 @@ async function syncTenantMicrosoftGraphAssistantKnowledgeUnsafe(
   };
 }
 
+export async function runTenantMicrosoftGraphMailboxSyncStep(
+  tenant: TenantContext
+): Promise<MicrosoftGraphMailboxSyncStepResult> {
+  const integrationCredential = await prisma.integrationCredential.findFirst({
+    where: {
+      tenantId: tenant.tenantId,
+      provider: IntegrationProvider.MICROSOFT_GRAPH,
+      name: MICROSOFT_GRAPH_CREDENTIAL_NAME
+    },
+    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    select: {
+      provider: true,
+      status: true,
+      publicConfig: true
+    }
+  });
+  const settings = parseMicrosoftGraphSettings(integrationCredential);
+
+  if (!settings.mailSyncEnabled) {
+    return {
+      processedMailboxCount: 0,
+      documentCount: 0,
+      mailCount: 0,
+      mailbox: null,
+      status: "skipped",
+      hasMore: false,
+      reason: "Microsoft mail sync is disabled for this tenant."
+    };
+  }
+
+  if (settings.mailboxAccessMode !== "ADMIN_SELECTED_MAILBOXES" || !settings.crossMailboxReady) {
+    return {
+      processedMailboxCount: 0,
+      documentCount: 0,
+      mailCount: 0,
+      mailbox: null,
+      status: "skipped",
+      hasMore: false,
+      reason: settings.runtimeNotes
+    };
+  }
+
+  await ensureConfiguredMailboxSyncStates(tenant, settings.adminMailboxTargets, settings);
+  const states = await prisma.assistantMailboxSyncState.findMany({
+    where: {
+      tenantId: tenant.tenantId,
+      sourceSystem: "MICROSOFT_GRAPH_MAIL",
+      mailboxAddress: {
+        in: settings.adminMailboxTargets
+      }
+    },
+    orderBy: [{ updatedAt: "asc" }]
+  });
+  const stateByMailbox = new Map(states.map((state) => [state.mailboxAddress, state]));
+  const targetMailbox = settings.adminMailboxTargets.find((mailbox) => {
+    const state = stateByMailbox.get(mailbox);
+    return !state || state.status !== JobStatus.SUCCESS || Boolean(readMailboxSyncMetadata(state?.metadata).nextLink);
+  });
+
+  if (!targetMailbox) {
+    return {
+      processedMailboxCount: 0,
+      documentCount: 0,
+      mailCount: 0,
+      mailbox: null,
+      status: "success",
+      hasMore: false,
+      reason: "All configured mailboxes have completed the current deep sync window."
+    };
+  }
+
+  const state = stateByMailbox.get(targetMailbox) ?? null;
+  const metadata = readMailboxSyncMetadata(state?.metadata);
+  const accessToken = await getMicrosoftGraphApplicationAccessToken();
+  const startedAt = new Date();
+  const syncCutoffIso =
+    metadata.syncCutoffIso ??
+    new Date(Date.now() - settings.mailLookbackDays * 24 * 60 * 60 * 1000).toISOString();
+
+  await prisma.assistantMailboxSyncState.upsert({
+    where: {
+      tenantId_sourceSystem_mailboxAddress: {
+        tenantId: tenant.tenantId,
+        sourceSystem: "MICROSOFT_GRAPH_MAIL",
+        mailboxAddress: targetMailbox
+      }
+    },
+    create: {
+      tenantId: tenant.tenantId,
+      sourceSystem: "MICROSOFT_GRAPH_MAIL",
+      mailboxAddress: targetMailbox,
+      status: JobStatus.RUNNING,
+      lastStartedAt: startedAt,
+      lastAttemptedLookbackDays: settings.mailLookbackDays,
+      lastAttemptedMaxMessages: settings.maxMailMessagesPerMailbox,
+      metadata: {
+        syncCutoffIso,
+        nextLink: metadata.nextLink ?? null
+      },
+      lastError: null
+    },
+    update: {
+      status: JobStatus.RUNNING,
+      lastStartedAt: startedAt,
+      lastAttemptedLookbackDays: settings.mailLookbackDays,
+      lastAttemptedMaxMessages: settings.maxMailMessagesPerMailbox,
+      metadata: {
+        syncCutoffIso,
+        nextLink: metadata.nextLink ?? null
+      },
+      lastError: null
+    }
+  });
+
+  try {
+    const pageUrl =
+      metadata.nextLink ??
+      buildMailboxMessagesUrl(
+        await resolveMailboxMessagesPath(accessToken, targetMailbox),
+        new Date(syncCutoffIso),
+        settings.maxMailMessagesPerMailbox
+      );
+    const page = await fetchMailboxMessagesPage(accessToken, targetMailbox, pageUrl);
+    const documents = page.messages.map(mapMessageToKnowledgeDocument);
+    const preparedDocuments = prepareAssistantKnowledgeDocuments(documents);
+
+    if (documents.length > 0) {
+      await prisma.$transaction(async (tx) => {
+        const persistedDocuments = await persistAssistantKnowledgeDocuments(tx, tenant, preparedDocuments);
+        await replaceMicrosoftGraphMemories(tx, tenant, documents, persistedDocuments);
+      }, { timeout: MICROSOFT_GRAPH_KNOWLEDGE_TRANSACTION_TIMEOUT_MS });
+    }
+
+    const finishedAt = new Date();
+    const latestReceivedAt = findLatestMessageReceivedAt(page.messages);
+    await prisma.assistantMailboxSyncState.update({
+      where: {
+        tenantId_sourceSystem_mailboxAddress: {
+          tenantId: tenant.tenantId,
+          sourceSystem: "MICROSOFT_GRAPH_MAIL",
+          mailboxAddress: targetMailbox
+        }
+      },
+      data: {
+        status: page.nextLink ? JobStatus.QUEUED : JobStatus.SUCCESS,
+        lastFinishedAt: finishedAt,
+        lastSuccessfulSyncAt: finishedAt,
+        lastSuccessfulReceivedAt: latestReceivedAt ?? undefined,
+        lastMessageCount: page.messages.length,
+        totalMessageCount: {
+          increment: page.messages.length
+        },
+        lastError: null,
+        metadata: {
+          syncCutoffIso,
+          nextLink: page.nextLink
+        }
+      }
+    });
+
+    return {
+      processedMailboxCount: 1,
+      documentCount: documents.length,
+      mailCount: page.messages.length,
+      mailbox: targetMailbox,
+      status: page.nextLink ? "partial" : "success",
+      hasMore: Boolean(page.nextLink) || hasPendingMailboxAfter(settings.adminMailboxTargets, stateByMailbox, targetMailbox),
+      reason: page.nextLink ? "Mailbox page processed. More pages remain for this mailbox." : null
+    };
+  } catch (error) {
+    const finishedAt = new Date();
+    const reason = error instanceof Error ? error.message : "Unknown Microsoft Graph mailbox worker error.";
+    await prisma.assistantMailboxSyncState.update({
+      where: {
+        tenantId_sourceSystem_mailboxAddress: {
+          tenantId: tenant.tenantId,
+          sourceSystem: "MICROSOFT_GRAPH_MAIL",
+          mailboxAddress: targetMailbox
+        }
+      },
+      data: {
+        status: JobStatus.ERROR,
+        lastFinishedAt: finishedAt,
+        lastError: reason,
+        metadata: {
+          syncCutoffIso,
+          nextLink: metadata.nextLink ?? null
+        }
+      }
+    });
+
+    return {
+      processedMailboxCount: 1,
+      documentCount: 0,
+      mailCount: 0,
+      mailbox: targetMailbox,
+      status: "partial",
+      hasMore: hasPendingMailboxAfter(settings.adminMailboxTargets, stateByMailbox, targetMailbox),
+      reason
+    };
+  }
+}
+
+async function ensureConfiguredMailboxSyncStates(
+  tenant: TenantContext,
+  mailboxes: string[],
+  settings: ReturnType<typeof parseMicrosoftGraphSettings>
+) {
+  const existingStates = await prisma.assistantMailboxSyncState.findMany({
+    where: {
+      tenantId: tenant.tenantId,
+      sourceSystem: "MICROSOFT_GRAPH_MAIL",
+      mailboxAddress: {
+        in: mailboxes
+      }
+    },
+    select: {
+      mailboxAddress: true,
+      lastAttemptedLookbackDays: true,
+      lastAttemptedMaxMessages: true,
+      status: true
+    }
+  });
+  const existingByMailbox = new Map(existingStates.map((state) => [state.mailboxAddress, state]));
+
+  await Promise.all(
+    mailboxes.map((mailbox) => {
+      const existing = existingByMailbox.get(mailbox);
+      const settingsChanged =
+        existing &&
+        (
+          existing.lastAttemptedLookbackDays !== settings.mailLookbackDays ||
+          existing.lastAttemptedMaxMessages !== settings.maxMailMessagesPerMailbox
+        );
+
+      return prisma.assistantMailboxSyncState.upsert({
+        where: {
+          tenantId_sourceSystem_mailboxAddress: {
+            tenantId: tenant.tenantId,
+            sourceSystem: "MICROSOFT_GRAPH_MAIL",
+            mailboxAddress: mailbox
+          }
+        },
+        create: {
+          tenantId: tenant.tenantId,
+          sourceSystem: "MICROSOFT_GRAPH_MAIL",
+          mailboxAddress: mailbox,
+          status: JobStatus.QUEUED,
+          lastAttemptedLookbackDays: settings.mailLookbackDays,
+          lastAttemptedMaxMessages: settings.maxMailMessagesPerMailbox,
+          metadata: {
+            syncCutoffIso: null,
+            nextLink: null
+          }
+        },
+        update: settingsChanged
+          ? {
+              status: JobStatus.QUEUED,
+              lastAttemptedLookbackDays: settings.mailLookbackDays,
+              lastAttemptedMaxMessages: settings.maxMailMessagesPerMailbox,
+              lastError: null,
+              metadata: {
+                syncCutoffIso: null,
+                nextLink: null
+              }
+            }
+          : {}
+      });
+    })
+  );
+}
+
+function hasPendingMailboxAfter(
+  mailboxes: string[],
+  stateByMailbox: Map<string, { mailboxAddress: string; status: JobStatus; metadata: Prisma.JsonValue | null }>,
+  currentMailbox: string
+) {
+  const currentIndex = mailboxes.indexOf(currentMailbox);
+  const remaining = currentIndex >= 0 ? mailboxes.slice(currentIndex + 1) : mailboxes;
+
+  return remaining.some((mailbox) => {
+    const state = stateByMailbox.get(mailbox);
+    return !state || state.status !== JobStatus.SUCCESS || Boolean(readMailboxSyncMetadata(state.metadata).nextLink);
+  });
+}
+
+function readMailboxSyncMetadata(value: Prisma.JsonValue | null | undefined) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      syncCutoffIso: null,
+      nextLink: null
+    };
+  }
+
+  const record = value as Record<string, unknown>;
+  return {
+    syncCutoffIso: typeof record.syncCutoffIso === "string" && record.syncCutoffIso ? record.syncCutoffIso : null,
+    nextLink: typeof record.nextLink === "string" && record.nextLink ? record.nextLink : null
+  };
+}
+
 async function loadMicrosoftEntityDirectory(tx: Prisma.TransactionClient, tenantId: string): Promise<MicrosoftEntityDirectory> {
   const [companies, contacts] = await Promise.all([
     tx.company.findMany({
@@ -796,24 +1134,31 @@ async function loadMicrosoftEntityDirectory(tx: Prisma.TransactionClient, tenant
   };
 }
 
-async function fetchRecentMail(accessToken: string) {
-  return fetchMailboxMessages(accessToken, "me");
+async function fetchRecentMail(accessToken: string, options: MicrosoftGraphMailFetchOptions) {
+  return fetchMailboxMessages(accessToken, "me", options);
 }
 
-async function fetchSelectedMailboxMessages(accessToken: string, mailboxes: string[]) {
+async function fetchSelectedMailboxMessages(
+  accessToken: string,
+  mailboxes: string[],
+  options: MicrosoftGraphMailFetchOptions
+) {
   const results = await Promise.all(
-    mailboxes.map(async (mailbox) => {
+    mailboxes.map(async (mailbox): Promise<SelectedMailboxSyncResult> => {
       try {
+        const messages = await fetchMailboxMessages(accessToken, mailbox, options);
         return {
           mailbox,
-          messages: await fetchMailboxMessages(accessToken, mailbox),
-          reason: null
+          messages,
+          reason: null,
+          latestReceivedAt: findLatestMessageReceivedAt(messages)
         };
       } catch (error) {
         return {
           mailbox,
           messages: [] as MicrosoftGraphMailMessage[],
-          reason: error instanceof Error ? error.message : "Unknown Microsoft Graph mailbox error."
+          reason: error instanceof Error ? error.message : "Unknown Microsoft Graph mailbox error.",
+          latestReceivedAt: null
         };
       }
     })
@@ -822,12 +1167,11 @@ async function fetchSelectedMailboxMessages(accessToken: string, mailboxes: stri
   return {
     messages: results
       .flatMap((result) => result.messages)
-    .sort((left, right) => {
-      const leftTime = parseDate(left.receivedDateTime)?.getTime() ?? 0;
-      const rightTime = parseDate(right.receivedDateTime)?.getTime() ?? 0;
-      return rightTime - leftTime;
-    })
-      .slice(0, 25),
+      .sort((left, right) => {
+        const leftTime = parseDate(left.receivedDateTime)?.getTime() ?? 0;
+        const rightTime = parseDate(right.receivedDateTime)?.getTime() ?? 0;
+        return rightTime - leftTime;
+      }),
     failures: results.flatMap((result) =>
       result.reason
         ? [
@@ -837,23 +1181,139 @@ async function fetchSelectedMailboxMessages(accessToken: string, mailboxes: stri
             }
           ]
         : []
-    )
+    ),
+    mailboxResults: results
   };
 }
 
-async function fetchMailboxMessages(accessToken: string, mailbox: string) {
-  const path = mailbox === "me" ? "me/messages" : await resolveMailboxMessagesPath(accessToken, mailbox);
-  const response = await fetch(
-    `https://graph.microsoft.com/v1.0/${path}?$top=10&$select=id,subject,bodyPreview,body,webLink,internetMessageId,conversationId,receivedDateTime,from,toRecipients,ccRecipients&$orderby=receivedDateTime%20desc`,
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Prefer: 'outlook.body-content-type="text"'
-      },
-      cache: "no-store",
-      signal: AbortSignal.timeout(MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS)
-    }
+async function markMicrosoftMailboxSyncStarted(
+  tenant: TenantContext,
+  mailboxes: string[],
+  settings: ReturnType<typeof parseMicrosoftGraphSettings>
+) {
+  const startedAt = new Date();
+
+  await Promise.all(
+    mailboxes.map((mailbox) =>
+      prisma.assistantMailboxSyncState.upsert({
+        where: {
+          tenantId_sourceSystem_mailboxAddress: {
+            tenantId: tenant.tenantId,
+            sourceSystem: "MICROSOFT_GRAPH_MAIL",
+            mailboxAddress: mailbox
+          }
+        },
+        create: {
+          tenantId: tenant.tenantId,
+          sourceSystem: "MICROSOFT_GRAPH_MAIL",
+          mailboxAddress: mailbox,
+          status: JobStatus.RUNNING,
+          lastStartedAt: startedAt,
+          lastAttemptedLookbackDays: settings.mailLookbackDays,
+          lastAttemptedMaxMessages: settings.maxMailMessagesPerMailbox,
+          lastError: null
+        },
+        update: {
+          status: JobStatus.RUNNING,
+          lastStartedAt: startedAt,
+          lastAttemptedLookbackDays: settings.mailLookbackDays,
+          lastAttemptedMaxMessages: settings.maxMailMessagesPerMailbox,
+          lastError: null
+        }
+      })
+    )
   );
+}
+
+async function markMicrosoftMailboxSyncFinished(
+  tenant: TenantContext,
+  mailboxResults: SelectedMailboxSyncResult[],
+  settings: ReturnType<typeof parseMicrosoftGraphSettings>
+) {
+  const finishedAt = new Date();
+
+  await Promise.all(
+    mailboxResults.map((result) =>
+      prisma.assistantMailboxSyncState.upsert({
+        where: {
+          tenantId_sourceSystem_mailboxAddress: {
+            tenantId: tenant.tenantId,
+            sourceSystem: "MICROSOFT_GRAPH_MAIL",
+            mailboxAddress: result.mailbox
+          }
+        },
+        create: {
+          tenantId: tenant.tenantId,
+          sourceSystem: "MICROSOFT_GRAPH_MAIL",
+          mailboxAddress: result.mailbox,
+          status: result.reason ? JobStatus.ERROR : JobStatus.SUCCESS,
+          lastStartedAt: finishedAt,
+          lastFinishedAt: finishedAt,
+          lastSuccessfulSyncAt: result.reason ? null : finishedAt,
+          lastSuccessfulReceivedAt: result.reason ? null : result.latestReceivedAt,
+          lastAttemptedLookbackDays: settings.mailLookbackDays,
+          lastAttemptedMaxMessages: settings.maxMailMessagesPerMailbox,
+          lastMessageCount: result.messages.length,
+          totalMessageCount: result.messages.length,
+          lastError: result.reason
+        },
+        update: {
+          status: result.reason ? JobStatus.ERROR : JobStatus.SUCCESS,
+          lastFinishedAt: finishedAt,
+          lastSuccessfulSyncAt: result.reason ? undefined : finishedAt,
+          lastSuccessfulReceivedAt: result.reason ? undefined : result.latestReceivedAt,
+          lastAttemptedLookbackDays: settings.mailLookbackDays,
+          lastAttemptedMaxMessages: settings.maxMailMessagesPerMailbox,
+          lastMessageCount: result.messages.length,
+          totalMessageCount: {
+            increment: result.messages.length
+          },
+          lastError: result.reason
+        }
+      })
+    )
+  );
+}
+
+function findLatestMessageReceivedAt(messages: MicrosoftGraphMailMessage[]) {
+  return messages.reduce<Date | null>((latest, message) => {
+    const receivedAt = parseDate(message.receivedDateTime);
+    if (!receivedAt) return latest;
+    if (!latest || receivedAt.getTime() > latest.getTime()) {
+      return receivedAt;
+    }
+    return latest;
+  }, null);
+}
+
+async function fetchMailboxMessages(
+  accessToken: string,
+  mailbox: string,
+  options: MicrosoftGraphMailFetchOptions
+) {
+  const path = mailbox === "me" ? "me/messages" : await resolveMailboxMessagesPath(accessToken, mailbox);
+  const since = new Date(Date.now() - options.lookbackDays * 24 * 60 * 60 * 1000);
+  const messages: MicrosoftGraphMailMessage[] = [];
+  let nextUrl: string | null = buildMailboxMessagesUrl(path, since, options.maxMessagesPerMailbox);
+
+  while (nextUrl && messages.length < options.maxMessagesPerMailbox) {
+    const page = await fetchMailboxMessagesPage(accessToken, mailbox, nextUrl);
+    messages.push(...page.messages);
+    nextUrl = messages.length < options.maxMessagesPerMailbox ? page.nextLink : null;
+  }
+
+  return messages.slice(0, options.maxMessagesPerMailbox);
+}
+
+async function fetchMailboxMessagesPage(accessToken: string, mailbox: string, url: string) {
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Prefer: 'outlook.body-content-type="text"'
+    },
+    cache: "no-store",
+    signal: AbortSignal.timeout(MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS)
+  });
 
   if (!response.ok) {
     throw new Error(
@@ -862,13 +1322,28 @@ async function fetchMailboxMessages(accessToken: string, mailbox: string) {
     );
   }
 
-  const json = (await response.json()) as { value?: MicrosoftGraphMailMessage[] };
-  return Array.isArray(json.value)
-    ? json.value.map((message) => ({
-        ...message,
-        mailboxAddress: mailbox === "me" ? null : mailbox
-      }))
-    : [];
+  const json = (await response.json()) as {
+    value?: MicrosoftGraphMailMessage[];
+    "@odata.nextLink"?: string;
+  };
+
+  return {
+    messages: Array.isArray(json.value)
+      ? json.value.map((message) => ({
+          ...message,
+          mailboxAddress: mailbox === "me" ? null : mailbox
+        }))
+      : [],
+    nextLink: json["@odata.nextLink"] ?? null
+  };
+}
+
+function buildMailboxMessagesUrl(path: string, since: Date, maxMessages: number) {
+  const select = "id,subject,bodyPreview,body,webLink,internetMessageId,conversationId,receivedDateTime,from,toRecipients,ccRecipients";
+  const top = Math.min(MICROSOFT_GRAPH_MAIL_PAGE_SIZE, maxMessages);
+  const filter = encodeURIComponent(`receivedDateTime ge ${since.toISOString()}`);
+
+  return `https://graph.microsoft.com/v1.0/${path}?$top=${top}&$select=${select}&$orderby=receivedDateTime%20desc&$filter=${filter}`;
 }
 
 async function resolveMailboxMessagesPath(accessToken: string, mailbox: string) {

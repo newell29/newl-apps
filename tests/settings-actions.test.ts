@@ -237,6 +237,8 @@ describe("saveTradeMiningScoringSettingsAction", () => {
     const formData = new FormData();
     formData.set("microsoftMailboxAccessMode", "ADMIN_SELECTED_MAILBOXES");
     formData.set("microsoftAdminMailboxTargets", "shared@newl.ca\nops@newl.ca");
+    formData.set("microsoftMailLookbackDays", "180");
+    formData.set("microsoftMaxMailMessagesPerMailbox", "750");
     formData.set("microsoftMailSyncEnabled", "true");
     formData.set("microsoftFileSyncEnabled", "true");
 
@@ -250,6 +252,8 @@ describe("saveTradeMiningScoringSettingsAction", () => {
     expect(args.data.publicConfig).toMatchObject({
       adminMailboxTargets: ["shared@newl.ca", "ops@newl.ca"],
       mailboxAccessMode: "ADMIN_SELECTED_MAILBOXES",
+      mailLookbackDays: 180,
+      maxMailMessagesPerMailbox: 750,
       mailSyncEnabled: true,
       fileSyncEnabled: true,
       draftingEnabled: false

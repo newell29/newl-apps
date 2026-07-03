@@ -18,6 +18,21 @@ type SyncResponse = {
   error?: string;
 };
 
+type MailboxStepResult = {
+  processedMailboxCount: number;
+  documentCount: number;
+  mailCount: number;
+  mailbox: string | null;
+  status: "success" | "partial" | "skipped";
+  hasMore: boolean;
+  reason: string | null;
+};
+
+type MailboxStepResponse = {
+  data?: MailboxStepResult;
+  error?: string;
+};
+
 const progressMessages = [
   "Starting sync",
   "Indexing app knowledge",
@@ -130,6 +145,112 @@ export function AssistantKnowledgeSyncButton() {
       {error ? (
         <div className="rounded-md border border-danger/25 bg-danger/10 p-3 text-xs leading-5 text-foreground">
           <p className="font-semibold">Knowledge sync failed</p>
+          <p className="mt-1 text-mutedForeground">{error}</p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function AssistantMailboxSyncWorkerButton() {
+  const router = useRouter();
+  const [running, setRunning] = useState(false);
+  const [processedPages, setProcessedPages] = useState(0);
+  const [mailCount, setMailCount] = useState(0);
+  const [lastMailbox, setLastMailbox] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function runWorker() {
+    setRunning(true);
+    setError(null);
+    setMessage(null);
+    setProcessedPages(0);
+    setMailCount(0);
+    setLastMailbox(null);
+
+    try {
+      let hasMore = true;
+      let pages = 0;
+      let totalMail = 0;
+      let finalMessage: string | null = null;
+      const maxPagesPerClick = 25;
+
+      while (hasMore && pages < maxPagesPerClick) {
+        const response = await fetch("/api/assistant/microsoft-graph/sync-step", {
+          method: "POST",
+          headers: {
+            accept: "application/json"
+          }
+        });
+        const payload = (await response.json().catch(() => null)) as MailboxStepResponse | null;
+
+        if (!response.ok || !payload?.data) {
+          throw new Error(payload?.error ?? `Mailbox sync worker failed with status ${response.status}.`);
+        }
+
+        const result = payload.data;
+        hasMore = result.hasMore;
+        totalMail += result.mailCount;
+        pages += result.processedMailboxCount > 0 ? 1 : 0;
+        setProcessedPages(pages);
+        setMailCount(totalMail);
+        setLastMailbox(result.mailbox);
+
+        if (result.status === "skipped" || result.processedMailboxCount === 0) {
+          finalMessage = result.reason ?? "No mailbox work is currently queued.";
+          setMessage(finalMessage);
+          break;
+        }
+
+        if (result.reason) {
+          finalMessage = result.reason;
+          setMessage(finalMessage);
+        }
+      }
+
+      if (hasMore && pages >= maxPagesPerClick) {
+        finalMessage = "Paused after a safe batch of mailbox pages. Run it again to continue from the saved checkpoint.";
+        setMessage(finalMessage);
+      } else if (!hasMore && !finalMessage) {
+        setMessage("Mailbox sync checkpoints are complete.");
+      }
+
+      router.refresh();
+    } catch (workerError) {
+      setError(workerError instanceof Error ? workerError.message : "Mailbox sync worker failed for an unknown reason.");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <button
+        type="button"
+        onClick={runWorker}
+        disabled={running}
+        className="rounded-md border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {running ? "Working mailboxes..." : "Continue mailbox sync"}
+      </button>
+      {running || processedPages > 0 || message ? (
+        <div className="rounded-md border border-border bg-muted/30 p-3 text-xs leading-5 text-mutedForeground">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="font-semibold text-foreground">
+              {running ? "Processing mailbox pages" : "Mailbox worker"}
+            </p>
+            <span className="font-medium text-primary">
+              {processedPages} page(s), {mailCount} email(s)
+            </span>
+          </div>
+          {lastMailbox ? <p className="mt-1">Latest mailbox: {lastMailbox}</p> : null}
+          {message ? <p className="mt-1">{message}</p> : null}
+        </div>
+      ) : null}
+      {error ? (
+        <div className="rounded-md border border-danger/25 bg-danger/10 p-3 text-xs leading-5 text-foreground">
+          <p className="font-semibold">Mailbox worker failed</p>
           <p className="mt-1 text-mutedForeground">{error}</p>
         </div>
       ) : null}

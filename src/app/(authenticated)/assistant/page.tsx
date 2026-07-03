@@ -11,7 +11,10 @@ import {
   AssistantAskPendingBar,
   AssistantAskSubmitButton
 } from "@/modules/assistant/components/assistant-ask-controls";
-import { AssistantKnowledgeSyncButton } from "@/modules/assistant/components/assistant-sync-controls";
+import {
+  AssistantKnowledgeSyncButton,
+  AssistantMailboxSyncWorkerButton
+} from "@/modules/assistant/components/assistant-sync-controls";
 import { formatAssistantRole, getAssistantWorkspace } from "@/modules/assistant/queries";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -293,6 +296,7 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
               <AssistantKnowledgeSyncButton />
+              <AssistantMailboxSyncWorkerButton />
               <Link
                 href="/assistant"
                 className="rounded-md border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted/40"
@@ -320,6 +324,66 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
                 ) : null}
               </div>
             ) : null}
+          </section>
+
+          <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-foreground">Microsoft inbox coverage</h2>
+                <p className="mt-1 text-sm leading-6 text-mutedForeground">
+                  Recent indexed mailbox evidence available to assistant search.
+                </p>
+              </div>
+              <span className="rounded-full border border-border bg-muted/30 px-2.5 py-1 text-xs font-semibold text-mutedForeground">
+                {workspace.recentMicrosoftEmails.length}
+              </span>
+            </div>
+            <div className="mt-4 space-y-3">
+              {workspace.mailboxSyncStates.slice(0, 8).map((state) => (
+                <div key={state.id} className="rounded-md border border-border bg-background p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">{state.mailboxAddress}</p>
+                      <p className="mt-1 text-xs text-mutedForeground">
+                        Last run: {state.lastFinishedAt ? formatDate(state.lastFinishedAt) : "Not finished yet"}
+                        {state.lastAttemptedLookbackDays ? ` | ${state.lastAttemptedLookbackDays}d lookback` : ""}
+                      </p>
+                    </div>
+                    <span className={formatStatusBadgeClass(state.status)}>{formatEnum(state.status)}</span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-mutedForeground">
+                    <p>Last pulled: {state.lastMessageCount.toLocaleString("en-US")}</p>
+                    <p>Total pulled: {state.totalMessageCount.toLocaleString("en-US")}</p>
+                    <p className="col-span-2">
+                      Latest received: {state.lastSuccessfulReceivedAt ? formatDate(state.lastSuccessfulReceivedAt) : "Unknown"}
+                    </p>
+                  </div>
+                  {state.lastError ? (
+                    <p className="mt-3 rounded-md border border-warning/25 bg-warning/10 px-3 py-2 text-xs leading-5 text-mutedForeground">
+                      {state.lastError}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+              {workspace.microsoftEmailCoverage.slice(0, 5).map((mailbox) => (
+                <div key={mailbox.mailboxAddress} className="rounded-md border border-border bg-muted/20 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="truncate text-sm font-semibold text-foreground">{mailbox.mailboxAddress}</p>
+                    <span className="text-xs font-medium text-mutedForeground">
+                      {mailbox.recentIndexedCount.toLocaleString("en-US")}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-mutedForeground">
+                    Latest received {mailbox.latestReceivedAt ? formatDate(mailbox.latestReceivedAt) : "unknown"}
+                  </p>
+                </div>
+              ))}
+              {workspace.mailboxSyncStates.length === 0 && workspace.microsoftEmailCoverage.length === 0 ? (
+                <p className="rounded-md border border-border bg-muted/20 p-4 text-sm text-mutedForeground">
+                  No Microsoft email has been indexed yet. Run knowledge sync after mailbox targets are saved.
+                </p>
+              ) : null}
+            </div>
           </section>
 
           {workspace.recentThreads.length > 0 ? (
@@ -633,6 +697,45 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
                 ) : null}
               </div>
             </div>
+            <div className="xl:col-span-2">
+              <h2 className="text-base font-semibold text-foreground">Recent indexed Microsoft emails</h2>
+              <p className="mt-1 text-sm leading-6 text-mutedForeground">
+                Use this to verify what the assistant can currently search from Microsoft 365.
+              </p>
+              <div className="mt-4 overflow-hidden rounded-md border border-border">
+                <table className="w-full min-w-[760px] text-left text-sm">
+                  <thead className="bg-muted/60 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+                    <tr>
+                      <th className="px-4 py-3">Email</th>
+                      <th className="px-4 py-3">Mailbox</th>
+                      <th className="px-4 py-3">From</th>
+                      <th className="px-4 py-3">Received</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border bg-card">
+                    {workspace.recentMicrosoftEmails.map((email) => (
+                      <tr key={email.id} className="align-top">
+                        <td className="px-4 py-3 font-medium text-foreground">{email.title}</td>
+                        <td className="px-4 py-3 text-mutedForeground">{email.mailboxAddress ?? "Signed-in mailbox"}</td>
+                        <td className="px-4 py-3 text-mutedForeground">
+                          {email.fromName ?? email.fromAddress ?? "Unknown sender"}
+                        </td>
+                        <td className="px-4 py-3 text-mutedForeground">
+                          {email.receivedAt ? formatDate(email.receivedAt) : "Unknown"}
+                        </td>
+                      </tr>
+                    ))}
+                    {workspace.recentMicrosoftEmails.length === 0 ? (
+                      <tr>
+                        <td className="px-4 py-5 text-sm text-mutedForeground" colSpan={4}>
+                          No Microsoft emails are indexed yet.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </details>
 
@@ -857,6 +960,18 @@ function formatEnum(value: string) {
 
 function formatMemoryKind(value: string) {
   return formatEnum(value);
+}
+
+function formatStatusBadgeClass(status: string) {
+  if (status === "SUCCESS") {
+    return "rounded-full bg-success/10 px-2.5 py-1 text-xs font-semibold text-success";
+  }
+
+  if (status === "ERROR") {
+    return "rounded-full border border-warning/30 bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning";
+  }
+
+  return "rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs font-semibold text-mutedForeground";
 }
 
 function formatDate(value: Date) {
