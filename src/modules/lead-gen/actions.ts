@@ -1048,15 +1048,6 @@ export async function bulkPushContactsToApolloAction(
       }
     });
 
-    queueMicrotask(() => {
-      void runApolloPushJob({
-        tenantId: context.tenantId,
-        userId: context.userId,
-        jobRunId: jobRun.id,
-        contactIds
-      });
-    });
-
     return {
       ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
       status: "success",
@@ -1079,7 +1070,7 @@ export async function bulkPushContactsToApolloAction(
   }
 }
 
-async function runApolloPushJob({
+export async function runApolloPushJob({
   tenantId,
   userId,
   jobRunId,
