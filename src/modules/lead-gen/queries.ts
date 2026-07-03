@@ -998,8 +998,11 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
     const rawJson = asObject(contact.rawJson);
     const apolloJson = asObject(rawJson.apollo);
     const pushBlocker = asObject(apolloJson.pushBlocker);
+    const pendingSequenceConfirmation = asObject(apolloJson.pendingSequenceConfirmation);
     const effectiveSequenceStatus: ContactSequenceStatusFilter =
-      readString(pushBlocker, "reason") && contact.sequenceStatus !== SequenceStatus.ENROLLED
+      readString(pushBlocker, "reason") &&
+      !readString(pendingSequenceConfirmation, "sequenceId") &&
+      contact.sequenceStatus !== SequenceStatus.ENROLLED
         ? "PUSH_BLOCKED"
         : contact.sequenceStatus;
 

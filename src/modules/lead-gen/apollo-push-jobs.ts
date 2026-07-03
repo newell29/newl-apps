@@ -130,6 +130,10 @@ export function parseApolloPushJobInput(value: Prisma.JsonValue | null): ApolloP
   return asApolloPushJobInput(value);
 }
 
+export function parseApolloPushJobOutput(value: Prisma.JsonValue | null): ApolloPushJobOutput | null {
+  return asApolloPushJobOutput(value);
+}
+
 export function mapApolloPushJobSummary(job: ApolloPushJobRecord): ApolloPushJobSummary {
   const input = asApolloPushJobInput(job.input);
   const output = asApolloPushJobOutput(job.output);

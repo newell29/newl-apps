@@ -20,6 +20,7 @@ import {
   APOLLO_PUSH_JOB_TYPE,
   createApolloPushJobOutput,
   type ApolloPushJobInput,
+  parseApolloPushJobOutput,
   type ApolloPushJobOutput
 } from "@/modules/lead-gen/apollo-push-jobs";
 import {
@@ -61,6 +62,9 @@ import {
   isOpenAiDraftGenerationConfigured
 } from "@/server/integrations/openai";
 import { getAuthenticatedContext } from "@/server/tenant-context";
+
+const APOLLO_PROPAGATION_PENDING_REASON =
+  "Apollo accepted the push, but the cadence enrollment is still propagating in Apollo and was not visible during Newl Apps verification.";
 
 type SearchProfileMutationClient = typeof prisma & {
   tradeMiningSearchProfile?: {
@@ -1171,6 +1175,14 @@ export async function runApolloPushJob({
           contactId: contact.id,
           reason: validation.reason
         });
+        await persistApolloPendingSequenceConfirmation({
+          tenantId,
+          contactId: contact.id,
+          sequenceId: null,
+          sequenceName: null,
+          jobRunId: null,
+          acceptedAt: null
+        });
         await persistApolloPushJobProgress(jobRunId, output);
         continue;
       }
@@ -1179,6 +1191,14 @@ export async function runApolloPushJob({
         tenantId,
         contactId: contact.id,
         reason: null
+      });
+      await persistApolloPendingSequenceConfirmation({
+        tenantId,
+        contactId: contact.id,
+        sequenceId: null,
+        sequenceName: null,
+        jobRunId: null,
+        acceptedAt: null
       });
 
       try {
@@ -1219,6 +1239,14 @@ export async function runApolloPushJob({
           tenantId,
           contactId: contact.id,
           reason
+        });
+        await persistApolloPendingSequenceConfirmation({
+          tenantId,
+          contactId: contact.id,
+          sequenceId: null,
+          sequenceName: null,
+          jobRunId: null,
+          acceptedAt: null
         });
         await persistApolloPushJobProgress(jobRunId, output);
         continue;
@@ -1370,7 +1398,7 @@ export async function runApolloPushJob({
           if (!verified) {
             const reason = verificationWasRateLimited
               ? "Apollo accepted the push, but Newl Apps hit Apollo rate limits before verification finished. Use Sync Apollo status shortly instead of re-pushing this contact."
-              : "Apollo accepted the push, but the cadence enrollment is still propagating in Apollo and was not yet visible during Newl Apps verification.";
+              : APOLLO_PROPAGATION_PENDING_REASON;
             output.skippedContacts += 1;
             output.processedContacts += 1;
             failureReasons.add(reason);
@@ -1400,6 +1428,20 @@ export async function runApolloPushJob({
                 tenantId,
                 contactId: contact.contactId,
                 reason
+              });
+            } else {
+              await persistApolloPendingSequenceConfirmation({
+                tenantId,
+                contactId: contact.contactId,
+                sequenceId: group.sequenceId,
+                sequenceName: group.sequenceName,
+                jobRunId,
+                acceptedAt: pushedAtIso
+              });
+              await persistApolloPushBlocker({
+                tenantId,
+                contactId: contact.contactId,
+                reason: null
               });
             }
             await persistApolloPushJobProgress(jobRunId, output);
@@ -1446,6 +1488,14 @@ export async function runApolloPushJob({
             contactId: contact.contactId,
             reason: null
           });
+          await persistApolloPendingSequenceConfirmation({
+            tenantId,
+            contactId: contact.contactId,
+            sequenceId: null,
+            sequenceName: null,
+            jobRunId: null,
+            acceptedAt: null
+          });
 
           await persistApolloPushJobProgress(jobRunId, output);
         }
@@ -1484,6 +1534,14 @@ export async function runApolloPushJob({
             tenantId,
             contactId: contact.contactId,
             reason
+          });
+          await persistApolloPendingSequenceConfirmation({
+            tenantId,
+            contactId: contact.contactId,
+            sequenceId: null,
+            sequenceName: null,
+            jobRunId: null,
+            acceptedAt: null
           });
         }
 
@@ -2899,6 +2957,247 @@ async function persistApolloPushBlocker({
   });
 }
 
+async function persistApolloPendingSequenceConfirmation({
+  tenantId,
+  contactId,
+  sequenceId,
+  sequenceName,
+  jobRunId,
+  acceptedAt
+}: {
+  tenantId: string;
+  contactId: string;
+  sequenceId: string | null;
+  sequenceName: string | null;
+  jobRunId: string | null;
+  acceptedAt: string | null;
+}) {
+  const contact = await prisma.contact.findFirst({
+    where: {
+      id: contactId,
+      tenantId
+    },
+    select: {
+      id: true,
+      rawJson: true
+    }
+  });
+
+  if (!contact) {
+    return;
+  }
+
+  const currentRawJson = isJsonObject(contact.rawJson) ? contact.rawJson : {};
+  const apolloData = isJsonObject(currentRawJson.apollo) ? currentRawJson.apollo : {};
+
+  const nextApolloData =
+    sequenceId && sequenceName && jobRunId && acceptedAt
+      ? {
+          ...apolloData,
+          pendingSequenceConfirmation: {
+            sequenceId,
+            sequenceName,
+            jobRunId,
+            acceptedAt
+          }
+        }
+      : Object.fromEntries(Object.entries(apolloData).filter(([key]) => key !== "pendingSequenceConfirmation"));
+
+  await prisma.contact.update({
+    where: {
+      id: contactId
+    },
+    data: {
+      rawJson: toInputJsonValue({
+        ...currentRawJson,
+        apollo: nextApolloData
+      })
+    }
+  });
+}
+
+export async function reconcileApolloPushJobPendingResults({
+  tenantId,
+  jobRunId
+}: {
+  tenantId: string;
+  jobRunId: string;
+}) {
+  const job = await prisma.automationJobRun.findFirst({
+    where: {
+      id: jobRunId,
+      tenantId,
+      jobType: APOLLO_PUSH_JOB_TYPE
+    },
+    select: {
+      id: true,
+      status: true,
+      output: true
+    }
+  });
+
+  if (!job) {
+    return false;
+  }
+
+  const output = parseApolloPushJobOutput(job.output);
+  if (!output || output.details.length === 0) {
+    return false;
+  }
+
+  const pendingDetails = output.details.filter(
+    (detail) => detail.outcome === "skipped" && detail.reason === APOLLO_PROPAGATION_PENDING_REASON
+  );
+  if (pendingDetails.length === 0) {
+    return false;
+  }
+
+  const contacts = await prisma.contact.findMany({
+    where: {
+      tenantId,
+      id: {
+        in: pendingDetails.map((detail) => detail.contactId)
+      }
+    },
+    select: {
+      id: true,
+      companyId: true,
+      firstName: true,
+      lastName: true,
+      fullName: true,
+      title: true,
+      department: true,
+      seniority: true,
+      email: true,
+      phone: true,
+      linkedinUrl: true,
+      contactStatus: true,
+      apolloContactId: true,
+      apolloPersonId: true,
+      sequenceStatus: true,
+      replyStatus: true,
+      recommendedSequenceName: true,
+      recommendedSequenceId: true,
+      selectedSequenceName: true,
+      selectedSequenceId: true,
+      sequenceRecommendationReason: true,
+      sequenceOverrideReason: true,
+      sequenceManuallyOverridden: true,
+      lastTouchAt: true,
+      lastReplyAt: true,
+      assignedRep: true,
+      rawJson: true,
+      company: {
+        select: {
+          id: true,
+          name: true,
+          domain: true,
+          linkedinUrl: true,
+          apolloOrganizationId: true
+        }
+      }
+    }
+  });
+
+  const contactsById = new Map(contacts.map((contact) => [contact.id, contact]));
+  const companyLookupCache = new Map<string, Promise<ApolloContactLookupResult>>();
+  let changed = false;
+
+  const nextDetails = await Promise.all(
+    output.details.map(async (detail) => {
+      if (!(detail.outcome === "skipped" && detail.reason === APOLLO_PROPAGATION_PENDING_REASON)) {
+        return detail;
+      }
+
+      const contact = contactsById.get(detail.contactId);
+      if (!contact) {
+        return detail;
+      }
+
+      const cacheKey = [
+        contact.companyId,
+        contact.company.apolloOrganizationId ?? "",
+        contact.company.domain ?? "",
+        contact.company.name
+      ].join("|");
+      const companyLookupPromise =
+        companyLookupCache.get(cacheKey) ??
+        fetchApolloContactsForCompany({
+          companyName: contact.company.name,
+          domain: contact.company.domain,
+          apolloOrganizationId: contact.company.apolloOrganizationId
+        });
+      companyLookupCache.set(cacheKey, companyLookupPromise);
+      const companyLookup = await companyLookupPromise;
+      const liveSequenceStatus = await refreshApolloSequenceStatusForPush({
+        tenantId,
+        contact,
+        companyLookup
+      });
+
+      if (liveSequenceStatus !== SequenceStatus.ENROLLED) {
+        return detail;
+      }
+
+      changed = true;
+      await persistApolloPushBlocker({
+        tenantId,
+        contactId: contact.id,
+        reason: null
+      });
+      await persistApolloPendingSequenceConfirmation({
+        tenantId,
+        contactId: contact.id,
+        sequenceId: null,
+        sequenceName: null,
+        jobRunId: null,
+        acceptedAt: null
+      });
+      await appendApolloContactActivity({
+        tenantId,
+        contactId: contact.id,
+        note:
+          `Apollo enrollment verification completed on ${new Date().toISOString()}. ` +
+          `The contact is now visible in "${contact.selectedSequenceName ?? contact.recommendedSequenceName ?? "Apollo"}".`
+      });
+
+      return {
+        ...detail,
+        outcome: "enrolled" as const,
+        reason: `Enrollment confirmed in "${contact.selectedSequenceName ?? contact.recommendedSequenceName ?? "Apollo"}".`
+      };
+    })
+  );
+
+  if (!changed) {
+    return false;
+  }
+
+  const nextOutput: ApolloPushJobOutput = {
+    ...output,
+    enrolledContacts: nextDetails.filter((detail) => detail.outcome === "enrolled").length,
+    skippedContacts: nextDetails.filter((detail) => detail.outcome === "skipped").length,
+    failedContacts: nextDetails.filter((detail) => detail.outcome === "failed").length,
+    details: nextDetails
+  };
+
+  await prisma.automationJobRun.update({
+    where: {
+      id: jobRunId
+    },
+    data: {
+      output: nextOutput,
+      status: nextOutput.failedContacts > 0 && nextOutput.enrolledContacts === 0 ? JobStatus.ERROR : JobStatus.SUCCESS,
+      errorMessage:
+        nextOutput.failedContacts > 0 && nextOutput.enrolledContacts === 0
+          ? nextOutput.details.find((detail) => detail.outcome === "failed")?.reason ?? "Apollo push failed."
+          : null
+    }
+  });
+
+  return true;
+}
+
 function canBulkUpdateContactSequence(sequenceStatus: SequenceStatus) {
   return sequenceStatus === SequenceStatus.NOT_STARTED || sequenceStatus === SequenceStatus.READY;
 }
@@ -2945,7 +3244,25 @@ async function refreshApolloSequenceStatusForPush({
   companyLookup
 }: {
   tenantId: string;
-  contact: ApolloPushContactRecord;
+  contact: {
+    id: string;
+    fullName: string;
+    email: string | null;
+    apolloContactId: string | null;
+    sequenceStatus: SequenceStatus;
+    recommendedSequenceName: string | null;
+    recommendedSequenceId: string | null;
+    selectedSequenceName: string | null;
+    selectedSequenceId: string | null;
+    lastTouchAt?: Date | null;
+    lastReplyAt?: Date | null;
+    assignedRep: string | null;
+    company: {
+      name: string;
+      domain: string | null;
+      apolloOrganizationId: string | null;
+    };
+  };
   companyLookup?: ApolloContactLookupResult;
 }) {
   const lookup =

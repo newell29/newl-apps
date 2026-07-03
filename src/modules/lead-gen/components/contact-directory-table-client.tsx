@@ -18,6 +18,7 @@ import {
   type ColumnDef
 } from "@tanstack/react-table";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { DataGridColumnMenu } from "@/components/data-grid-column-menu";
 import { usePersistedTableState } from "@/components/use-persisted-table-state";
@@ -111,6 +112,7 @@ export function ContactDirectoryTableClient({
   saveContactDraftAction: (formData: FormData) => Promise<void>;
   generateContactDraftAction: (formData: FormData) => Promise<void>;
 }) {
+  const router = useRouter();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkActionState, runBulkSequenceAction, isBulkSequencePending] = useActionState(
     bulkUpdateContactSequenceAction,
@@ -665,9 +667,10 @@ export function ContactDirectoryTableClient({
         return next.slice(0, 10);
       });
 
-      if (payload.job.status !== "QUEUED" && payload.job.status !== "RUNNING") {
+      if (!isApolloPushJobStillActive(payload.job)) {
         startedApolloPushJobIdsRef.current.delete(payload.job.id);
         setActiveApolloPushJobId(null);
+        router.refresh();
       }
     }
 
@@ -680,7 +683,7 @@ export function ContactDirectoryTableClient({
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [activeApolloPushJobId]);
+  }, [activeApolloPushJobId, router]);
 
   function toggleAllVisible() {
     const visibleIds = table.getRowModel().rows.map((row) => row.original.id);
@@ -1155,6 +1158,19 @@ function summarizeApolloJobBlockers(details: ContactBulkActionDetail[]) {
     .map(([reason, count]) => ({ reason, count }))
     .sort((left, right) => right.count - left.count || left.reason.localeCompare(right.reason))
     .slice(0, 5);
+}
+
+function isApolloPushJobStillActive(job: ApolloPushJobSummary) {
+  if (job.status === "QUEUED" || job.status === "RUNNING") {
+    return true;
+  }
+
+  return job.details.some(
+    (detail) =>
+      detail.outcome === "skipped" &&
+      detail.reason ===
+        "Apollo accepted the push, but the cadence enrollment is still propagating in Apollo and was not visible during Newl Apps verification."
+  );
 }
 
 function apolloJobTone(status: ApolloPushJobSummary["status"]) {

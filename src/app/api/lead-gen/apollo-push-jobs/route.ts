@@ -6,7 +6,7 @@ import {
   getRecentApolloPushJobs,
   parseApolloPushJobInput
 } from "@/modules/lead-gen/apollo-push-jobs";
-import { runApolloPushJob } from "@/modules/lead-gen/actions";
+import { reconcileApolloPushJobPendingResults, runApolloPushJob } from "@/modules/lead-gen/actions";
 import { requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
@@ -21,6 +21,10 @@ export async function GET(request: Request) {
     const jobId = url.searchParams.get("jobId");
 
     if (jobId) {
+      await reconcileApolloPushJobPendingResults({
+        tenantId: context.tenantId,
+        jobRunId: jobId
+      });
       const job = await getApolloPushJobForTenant(context, jobId);
       return NextResponse.json({ job });
     }
