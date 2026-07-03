@@ -90,6 +90,28 @@ export async function getApolloPushJobForTenant(
   return mapApolloPushJobSummary(job);
 }
 
+export async function getApolloPushJobRecordForTenant(
+  tenant: TenantContext,
+  jobRunId: string
+) {
+  return prisma.automationJobRun.findFirst({
+    where: {
+      id: jobRunId,
+      tenantId: tenant.tenantId,
+      jobType: APOLLO_PUSH_JOB_TYPE
+    },
+    select: {
+      id: true,
+      status: true,
+      startedAt: true,
+      finishedAt: true,
+      errorMessage: true,
+      input: true,
+      output: true
+    }
+  });
+}
+
 export function createApolloPushJobOutput(selectedContacts: number, companiesTouched = 0): ApolloPushJobOutput {
   return {
     selectedContacts,
@@ -102,6 +124,10 @@ export function createApolloPushJobOutput(selectedContacts: number, companiesTou
     startedProcessingAt: null,
     completedAt: null
   };
+}
+
+export function parseApolloPushJobInput(value: Prisma.JsonValue | null): ApolloPushJobInput | null {
+  return asApolloPushJobInput(value);
 }
 
 export function mapApolloPushJobSummary(job: ApolloPushJobRecord): ApolloPushJobSummary {

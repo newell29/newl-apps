@@ -18,7 +18,7 @@ import {
   type ColumnDef
 } from "@tanstack/react-table";
 import Link from "next/link";
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { DataGridColumnMenu } from "@/components/data-grid-column-menu";
 import { usePersistedTableState } from "@/components/use-persisted-table-state";
 import type { ApolloPushJobSummary } from "@/modules/lead-gen/apollo-push-jobs";
@@ -132,6 +132,7 @@ export function ContactDirectoryTableClient({
   const [activeApolloPushJobId, setActiveApolloPushJobId] = useState<string | null>(
     initialApolloPushJobs.find((job) => job.status === "QUEUED" || job.status === "RUNNING")?.id ?? null
   );
+  const startedApolloPushJobIdsRef = useRef<Set<string>>(new Set());
   const {
     sorting,
     setSorting,
@@ -608,6 +609,42 @@ export function ContactDirectoryTableClient({
       return;
     }
 
+    const activeJob = apolloPushJobs.find((job) => job.id === activeApolloPushJobId);
+    if (!activeJob) {
+      return;
+    }
+
+    const shouldStartQueuedJob = activeJob.status === "QUEUED";
+    const shouldResumeStalledRunningJob = activeJob.status === "RUNNING" && activeJob.processedContacts === 0;
+
+    if (!shouldStartQueuedJob && !shouldResumeStalledRunningJob) {
+      return;
+    }
+
+    if (startedApolloPushJobIdsRef.current.has(activeJob.id)) {
+      return;
+    }
+
+    startedApolloPushJobIdsRef.current.add(activeJob.id);
+
+    void fetch("/api/lead-gen/apollo-push-jobs", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        jobId: activeJob.id
+      })
+    }).catch(() => {
+      startedApolloPushJobIdsRef.current.delete(activeJob.id);
+    });
+  }, [activeApolloPushJobId, apolloPushJobs]);
+
+  useEffect(() => {
+    if (!activeApolloPushJobId) {
+      return;
+    }
+
     let cancelled = false;
 
     async function pollJob() {
@@ -629,6 +666,7 @@ export function ContactDirectoryTableClient({
       });
 
       if (payload.job.status !== "QUEUED" && payload.job.status !== "RUNNING") {
+        startedApolloPushJobIdsRef.current.delete(payload.job.id);
         setActiveApolloPushJobId(null);
       }
     }
