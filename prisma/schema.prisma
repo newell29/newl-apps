@@ -323,6 +323,7 @@ model Tenant {
   assistantKnowledgeDocuments AssistantKnowledgeDocument[]
   assistantKnowledgeChunks    AssistantKnowledgeChunk[]
   assistantMemories           AssistantMemory[]
+  assistantMailboxSyncStates  AssistantMailboxSyncState[]
   assistantAutomations        AssistantAutomation[]
   assistantAutomationRuns     AssistantAutomationRun[]
   cashflowCustomers           CashflowCustomer[]
@@ -1366,6 +1367,32 @@ model AssistantMemory {
   @@index([tenantId, kind])
   @@index([tenantId, subjectType, subjectId])
   @@index([tenantId, status, updatedAt])
+}
+
+model AssistantMailboxSyncState {
+  id                       String    @id @default(cuid())
+  tenantId                 String
+  mailboxAddress           String
+  sourceSystem             String    @default("MICROSOFT_GRAPH_MAIL")
+  status                   JobStatus @default(QUEUED)
+  lastStartedAt            DateTime?
+  lastFinishedAt           DateTime?
+  lastSuccessfulSyncAt     DateTime?
+  lastSuccessfulReceivedAt DateTime?
+  lastAttemptedLookbackDays Int?
+  lastAttemptedMaxMessages Int?
+  lastMessageCount         Int       @default(0)
+  totalMessageCount        Int       @default(0)
+  lastError                String?
+  metadata                 Json?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, sourceSystem, mailboxAddress])
+  @@index([tenantId, status, updatedAt])
+  @@index([tenantId, mailboxAddress])
 }
 
 model AssistantAutomation {

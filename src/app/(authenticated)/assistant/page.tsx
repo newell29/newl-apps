@@ -335,6 +335,32 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
               </span>
             </div>
             <div className="mt-4 space-y-3">
+              {workspace.mailboxSyncStates.slice(0, 8).map((state) => (
+                <div key={state.id} className="rounded-md border border-border bg-background p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">{state.mailboxAddress}</p>
+                      <p className="mt-1 text-xs text-mutedForeground">
+                        Last run: {state.lastFinishedAt ? formatDate(state.lastFinishedAt) : "Not finished yet"}
+                        {state.lastAttemptedLookbackDays ? ` | ${state.lastAttemptedLookbackDays}d lookback` : ""}
+                      </p>
+                    </div>
+                    <span className={formatStatusBadgeClass(state.status)}>{formatEnum(state.status)}</span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-mutedForeground">
+                    <p>Last pulled: {state.lastMessageCount.toLocaleString("en-US")}</p>
+                    <p>Total pulled: {state.totalMessageCount.toLocaleString("en-US")}</p>
+                    <p className="col-span-2">
+                      Latest received: {state.lastSuccessfulReceivedAt ? formatDate(state.lastSuccessfulReceivedAt) : "Unknown"}
+                    </p>
+                  </div>
+                  {state.lastError ? (
+                    <p className="mt-3 rounded-md border border-warning/25 bg-warning/10 px-3 py-2 text-xs leading-5 text-mutedForeground">
+                      {state.lastError}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
               {workspace.microsoftEmailCoverage.slice(0, 5).map((mailbox) => (
                 <div key={mailbox.mailboxAddress} className="rounded-md border border-border bg-muted/20 p-3">
                   <div className="flex items-start justify-between gap-3">
@@ -348,7 +374,7 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
                   </p>
                 </div>
               ))}
-              {workspace.microsoftEmailCoverage.length === 0 ? (
+              {workspace.mailboxSyncStates.length === 0 && workspace.microsoftEmailCoverage.length === 0 ? (
                 <p className="rounded-md border border-border bg-muted/20 p-4 text-sm text-mutedForeground">
                   No Microsoft email has been indexed yet. Run knowledge sync after mailbox targets are saved.
                 </p>
@@ -930,6 +956,18 @@ function formatEnum(value: string) {
 
 function formatMemoryKind(value: string) {
   return formatEnum(value);
+}
+
+function formatStatusBadgeClass(status: string) {
+  if (status === "SUCCESS") {
+    return "rounded-full bg-success/10 px-2.5 py-1 text-xs font-semibold text-success";
+  }
+
+  if (status === "ERROR") {
+    return "rounded-full border border-warning/30 bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning";
+  }
+
+  return "rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs font-semibold text-mutedForeground";
 }
 
 function formatDate(value: Date) {

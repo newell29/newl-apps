@@ -1,4 +1,4 @@
-import { AssistantMemoryKind, AssistantSourceKind, IntegrationProvider, type Prisma } from "@prisma/client";
+import { AssistantMemoryKind, AssistantSourceKind, IntegrationProvider, JobStatus, type Prisma } from "@prisma/client";
 
 import {
   type AssistantKnowledgeDocumentInput,
@@ -82,6 +82,13 @@ type MicrosoftGraphMailMessage = {
 type MicrosoftGraphMailFetchOptions = {
   lookbackDays: number;
   maxMessagesPerMailbox: number;
+};
+
+type SelectedMailboxSyncResult = {
+  mailbox: string;
+  messages: MicrosoftGraphMailMessage[];
+  reason: string | null;
+  latestReceivedAt: Date | null;
 };
 
 type MicrosoftGraphDriveItem = {
@@ -576,12 +583,18 @@ async function syncMicrosoftGraphApplicationMailboxKnowledge(
   }
 
   const accessToken = await getMicrosoftGraphApplicationAccessToken();
+  if (settings.mailSyncEnabled) {
+    await markMicrosoftMailboxSyncStarted(context, settings.adminMailboxTargets, settings);
+  }
   const mailboxResult = settings.mailSyncEnabled
     ? await fetchSelectedMailboxMessages(accessToken, settings.adminMailboxTargets, {
         lookbackDays: settings.mailLookbackDays,
         maxMessagesPerMailbox: settings.maxMailMessagesPerMailbox
       })
-    : { messages: [], failures: [] };
+    : { messages: [], failures: [], mailboxResults: [] };
+  if (settings.mailSyncEnabled) {
+    await markMicrosoftMailboxSyncFinished(context, mailboxResult.mailboxResults, settings);
+  }
   const messages = mailboxResult.messages;
   const files: MicrosoftGraphDriveItem[] = [];
   const documents = messages.map(mapMessageToKnowledgeDocument);
@@ -820,18 +833,21 @@ async function fetchSelectedMailboxMessages(
   options: MicrosoftGraphMailFetchOptions
 ) {
   const results = await Promise.all(
-    mailboxes.map(async (mailbox) => {
+    mailboxes.map(async (mailbox): Promise<SelectedMailboxSyncResult> => {
       try {
+        const messages = await fetchMailboxMessages(accessToken, mailbox, options);
         return {
           mailbox,
-          messages: await fetchMailboxMessages(accessToken, mailbox, options),
-          reason: null
+          messages,
+          reason: null,
+          latestReceivedAt: findLatestMessageReceivedAt(messages)
         };
       } catch (error) {
         return {
           mailbox,
           messages: [] as MicrosoftGraphMailMessage[],
-          reason: error instanceof Error ? error.message : "Unknown Microsoft Graph mailbox error."
+          reason: error instanceof Error ? error.message : "Unknown Microsoft Graph mailbox error.",
+          latestReceivedAt: null
         };
       }
     })
@@ -854,8 +870,109 @@ async function fetchSelectedMailboxMessages(
             }
           ]
         : []
-    )
+    ),
+    mailboxResults: results
   };
+}
+
+async function markMicrosoftMailboxSyncStarted(
+  tenant: TenantContext,
+  mailboxes: string[],
+  settings: ReturnType<typeof parseMicrosoftGraphSettings>
+) {
+  const startedAt = new Date();
+
+  await Promise.all(
+    mailboxes.map((mailbox) =>
+      prisma.assistantMailboxSyncState.upsert({
+        where: {
+          tenantId_sourceSystem_mailboxAddress: {
+            tenantId: tenant.tenantId,
+            sourceSystem: "MICROSOFT_GRAPH_MAIL",
+            mailboxAddress: mailbox
+          }
+        },
+        create: {
+          tenantId: tenant.tenantId,
+          sourceSystem: "MICROSOFT_GRAPH_MAIL",
+          mailboxAddress: mailbox,
+          status: JobStatus.RUNNING,
+          lastStartedAt: startedAt,
+          lastAttemptedLookbackDays: settings.mailLookbackDays,
+          lastAttemptedMaxMessages: settings.maxMailMessagesPerMailbox,
+          lastError: null
+        },
+        update: {
+          status: JobStatus.RUNNING,
+          lastStartedAt: startedAt,
+          lastAttemptedLookbackDays: settings.mailLookbackDays,
+          lastAttemptedMaxMessages: settings.maxMailMessagesPerMailbox,
+          lastError: null
+        }
+      })
+    )
+  );
+}
+
+async function markMicrosoftMailboxSyncFinished(
+  tenant: TenantContext,
+  mailboxResults: SelectedMailboxSyncResult[],
+  settings: ReturnType<typeof parseMicrosoftGraphSettings>
+) {
+  const finishedAt = new Date();
+
+  await Promise.all(
+    mailboxResults.map((result) =>
+      prisma.assistantMailboxSyncState.upsert({
+        where: {
+          tenantId_sourceSystem_mailboxAddress: {
+            tenantId: tenant.tenantId,
+            sourceSystem: "MICROSOFT_GRAPH_MAIL",
+            mailboxAddress: result.mailbox
+          }
+        },
+        create: {
+          tenantId: tenant.tenantId,
+          sourceSystem: "MICROSOFT_GRAPH_MAIL",
+          mailboxAddress: result.mailbox,
+          status: result.reason ? JobStatus.ERROR : JobStatus.SUCCESS,
+          lastStartedAt: finishedAt,
+          lastFinishedAt: finishedAt,
+          lastSuccessfulSyncAt: result.reason ? null : finishedAt,
+          lastSuccessfulReceivedAt: result.reason ? null : result.latestReceivedAt,
+          lastAttemptedLookbackDays: settings.mailLookbackDays,
+          lastAttemptedMaxMessages: settings.maxMailMessagesPerMailbox,
+          lastMessageCount: result.messages.length,
+          totalMessageCount: result.messages.length,
+          lastError: result.reason
+        },
+        update: {
+          status: result.reason ? JobStatus.ERROR : JobStatus.SUCCESS,
+          lastFinishedAt: finishedAt,
+          lastSuccessfulSyncAt: result.reason ? undefined : finishedAt,
+          lastSuccessfulReceivedAt: result.reason ? undefined : result.latestReceivedAt,
+          lastAttemptedLookbackDays: settings.mailLookbackDays,
+          lastAttemptedMaxMessages: settings.maxMailMessagesPerMailbox,
+          lastMessageCount: result.messages.length,
+          totalMessageCount: {
+            increment: result.messages.length
+          },
+          lastError: result.reason
+        }
+      })
+    )
+  );
+}
+
+function findLatestMessageReceivedAt(messages: MicrosoftGraphMailMessage[]) {
+  return messages.reduce<Date | null>((latest, message) => {
+    const receivedAt = parseDate(message.receivedDateTime);
+    if (!receivedAt) return latest;
+    if (!latest || receivedAt.getTime() > latest.getTime()) {
+      return receivedAt;
+    }
+    return latest;
+  }, null);
 }
 
 async function fetchMailboxMessages(

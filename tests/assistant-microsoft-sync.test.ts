@@ -6,6 +6,7 @@ const findAccount = vi.fn();
 const updateAccount = vi.fn();
 const transaction = vi.fn();
 const findMemberships = vi.fn();
+const upsertMailboxSyncState = vi.fn();
 
 vi.mock("@/server/db", () => ({
   prisma: {
@@ -18,6 +19,9 @@ vi.mock("@/server/db", () => ({
     },
     membership: {
       findMany: (...args: unknown[]) => findMemberships(...args)
+    },
+    assistantMailboxSyncState: {
+      upsert: (...args: unknown[]) => upsertMailboxSyncState(...args)
     },
     $transaction: (...args: unknown[]) => transaction(...args)
   }
@@ -34,6 +38,7 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
     vi.clearAllMocks();
     transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) => callback({}));
     updateAccount.mockResolvedValue({});
+    upsertMailboxSyncState.mockResolvedValue({});
     findMemberships.mockResolvedValue([]);
     process.env.AUTH_MICROSOFT_ENTRA_ID_ID = "client-id-1";
     process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET = "client-secret-1";

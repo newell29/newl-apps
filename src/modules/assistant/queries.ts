@@ -68,6 +68,7 @@ export async function getAssistantWorkspace(
     topCompanies,
     openLeads,
     recentRateJobs,
+    mailboxSyncStates,
     recentMicrosoftEmails,
     recentThreads,
     activeThread
@@ -280,6 +281,28 @@ export async function getAssistantWorkspace(
         startedAt: true,
         finishedAt: true,
         errorMessage: true
+      }
+    }),
+    prisma.assistantMailboxSyncState.findMany({
+      where: tenantWhere(tenant, {
+        sourceSystem: "MICROSOFT_GRAPH_MAIL"
+      }),
+      orderBy: [{ updatedAt: "desc" }],
+      take: 20,
+      select: {
+        id: true,
+        mailboxAddress: true,
+        status: true,
+        lastStartedAt: true,
+        lastFinishedAt: true,
+        lastSuccessfulSyncAt: true,
+        lastSuccessfulReceivedAt: true,
+        lastAttemptedLookbackDays: true,
+        lastAttemptedMaxMessages: true,
+        lastMessageCount: true,
+        totalMessageCount: true,
+        lastError: true,
+        updatedAt: true
       }
     }),
     prisma.assistantKnowledgeDocument.findMany({
@@ -502,6 +525,21 @@ export async function getAssistantWorkspace(
       contact: lead.contact
     })),
     recentRateJobs,
+    mailboxSyncStates: mailboxSyncStates.map((state) => ({
+      id: state.id,
+      mailboxAddress: state.mailboxAddress,
+      status: state.status,
+      lastStartedAt: state.lastStartedAt,
+      lastFinishedAt: state.lastFinishedAt,
+      lastSuccessfulSyncAt: state.lastSuccessfulSyncAt,
+      lastSuccessfulReceivedAt: state.lastSuccessfulReceivedAt,
+      lastAttemptedLookbackDays: state.lastAttemptedLookbackDays,
+      lastAttemptedMaxMessages: state.lastAttemptedMaxMessages,
+      lastMessageCount: state.lastMessageCount,
+      totalMessageCount: state.totalMessageCount,
+      lastError: state.lastError,
+      updatedAt: state.updatedAt
+    })),
     microsoftEmailCoverage: buildMicrosoftEmailCoverage(recentMicrosoftEmails),
     recentMicrosoftEmails: recentMicrosoftEmails.slice(0, 12).map((document) => {
       const metadata = readJsonObject(document.metadata);
