@@ -112,6 +112,13 @@ export type ApolloContactLookupResult = {
   contacts: ApolloContactRecord[];
 };
 
+export class ApolloRateLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ApolloRateLimitError";
+  }
+}
+
 export type ApolloSequencePushInput = {
   sequenceId: string;
   apolloContactIds: string[];
@@ -450,9 +457,15 @@ export async function syncApolloContactTypedCustomFields(
 }
 
 export async function fetchApolloContactsForCompany(
-  input: ApolloCompanyLookupInput
+  input: ApolloCompanyLookupInput,
+  options?: {
+    allowPeopleSearchFallback?: boolean;
+    keywordSearchLimit?: number;
+  }
 ): Promise<ApolloContactLookupResult> {
   const apiKey = readApolloSearchApiKey();
+  const allowPeopleSearchFallback = options?.allowPeopleSearchFallback ?? true;
+  const keywordSearchLimit = options?.keywordSearchLimit ?? APOLLO_PRIMARY_ROLE_KEYWORDS.length + APOLLO_FALLBACK_ROLE_KEYWORDS.length;
   const providedOrganizationId =
     input.apolloOrganizationId?.trim() && input.apolloOrganizationId !== "null"
       ? input.apolloOrganizationId.trim()
@@ -468,7 +481,9 @@ export async function fetchApolloContactsForCompany(
           apiKey,
           companyName: input.companyName,
           domain: input.domain,
-          organizationId: organizationIdForSearch
+          organizationId: organizationIdForSearch,
+          allowPeopleSearchFallback,
+          keywordSearchLimit
         })) ??
         [])
       : [];
@@ -479,7 +494,9 @@ export async function fetchApolloContactsForCompany(
         apiKey,
         companyName: input.companyName,
         domain: input.domain,
-        organizationId: null
+        organizationId: null,
+        allowPeopleSearchFallback,
+        keywordSearchLimit
       })) ??
       [];
   }
@@ -908,12 +925,16 @@ async function searchApolloRelevantPeople({
   apiKey,
   companyName,
   domain,
-  organizationId
+  organizationId,
+  allowPeopleSearchFallback,
+  keywordSearchLimit
 }: {
   apiKey: string;
   companyName: string;
   domain?: string | null;
   organizationId: string | null;
+  allowPeopleSearchFallback: boolean;
+  keywordSearchLimit: number;
 }) {
   const collected: ApolloContactRecord[] = [];
 
@@ -932,6 +953,10 @@ async function searchApolloRelevantPeople({
     return relevantContactsWithoutKeyword;
   }
 
+  if (!allowPeopleSearchFallback) {
+    return dedupeApolloContacts(collected);
+  }
+
   const peopleWithoutKeyword = await searchApolloPeople({
     apiKey,
     companyName,
@@ -946,7 +971,12 @@ async function searchApolloRelevantPeople({
     return relevantPeopleWithoutKeyword;
   }
 
-  for (const keyword of [...APOLLO_PRIMARY_ROLE_KEYWORDS, ...APOLLO_FALLBACK_ROLE_KEYWORDS]) {
+  const keywordQueries = [...APOLLO_PRIMARY_ROLE_KEYWORDS, ...APOLLO_FALLBACK_ROLE_KEYWORDS].slice(
+    0,
+    Math.max(0, keywordSearchLimit)
+  );
+
+  for (const keyword of keywordQueries) {
     const people = await searchApolloPeople({
       apiKey,
       companyName,
@@ -971,7 +1001,11 @@ async function postApolloJson(path: string, apiKey: string, body: Record<string,
   const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
 
   if (!response.ok) {
-    throw new Error(extractApolloError(json) ?? `Apollo request failed with status ${response.status}.`);
+    const message = extractApolloError(json) ?? `Apollo request failed with status ${response.status}.`;
+    if (response.status === 429 || isApolloRateLimitMessage(message)) {
+      throw new ApolloRateLimitError(message);
+    }
+    throw new Error(message);
   }
 
   if (!json) {
@@ -991,7 +1025,11 @@ async function patchApolloJson(path: string, apiKey: string, body: Record<string
   const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
 
   if (!response.ok) {
-    throw new Error(extractApolloError(json) ?? `Apollo request failed with status ${response.status}.`);
+    const message = extractApolloError(json) ?? `Apollo request failed with status ${response.status}.`;
+    if (response.status === 429 || isApolloRateLimitMessage(message)) {
+      throw new ApolloRateLimitError(message);
+    }
+    throw new Error(message);
   }
 
   return json ?? {};
@@ -1863,6 +1901,15 @@ function extractApolloError(payload: Record<string, unknown> | ApolloUsersRespon
   }
 
   return null;
+}
+
+function isApolloRateLimitMessage(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("maximum number of api calls allowed") ||
+    normalized.includes("rate limit") ||
+    normalized.includes("too many requests")
+  );
 }
 
 function readApolloArray(record: Record<string, unknown>, keys: string[]) {
