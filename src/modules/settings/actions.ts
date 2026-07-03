@@ -465,6 +465,8 @@ export async function saveMicrosoftGraphSettingsAction(formData: FormData) {
   const context = await authorizeSettingsMutation();
   const adminMailboxTargets = readTextareaList(formData.get("microsoftAdminMailboxTargets"));
   const mailboxAccessMode = readMicrosoftMailboxAccessMode(formData.get("microsoftMailboxAccessMode"));
+  const mailLookbackDays = readRequiredInteger(formData, "microsoftMailLookbackDays", 1, 365);
+  const maxMailMessagesPerMailbox = readRequiredInteger(formData, "microsoftMaxMailMessagesPerMailbox", 1, 2000);
   const mailSyncEnabled = formData.get("microsoftMailSyncEnabled") === "true";
   const fileSyncEnabled = formData.get("microsoftFileSyncEnabled") === "true";
   const draftingEnabled = formData.get("microsoftDraftingEnabled") === "true";
@@ -496,6 +498,8 @@ export async function saveMicrosoftGraphSettingsAction(formData: FormData) {
       scopes: DEFAULT_MICROSOFT_GRAPH_SCOPES,
       adminMailboxTargets,
       mailboxAccessMode,
+      mailLookbackDays,
+      maxMailMessagesPerMailbox,
       mailSyncEnabled,
       fileSyncEnabled,
       draftingEnabled

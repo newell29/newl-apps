@@ -322,6 +322,40 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
             ) : null}
           </section>
 
+          <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-foreground">Microsoft inbox coverage</h2>
+                <p className="mt-1 text-sm leading-6 text-mutedForeground">
+                  Recent indexed mailbox evidence available to assistant search.
+                </p>
+              </div>
+              <span className="rounded-full border border-border bg-muted/30 px-2.5 py-1 text-xs font-semibold text-mutedForeground">
+                {workspace.recentMicrosoftEmails.length}
+              </span>
+            </div>
+            <div className="mt-4 space-y-3">
+              {workspace.microsoftEmailCoverage.slice(0, 5).map((mailbox) => (
+                <div key={mailbox.mailboxAddress} className="rounded-md border border-border bg-muted/20 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="truncate text-sm font-semibold text-foreground">{mailbox.mailboxAddress}</p>
+                    <span className="text-xs font-medium text-mutedForeground">
+                      {mailbox.recentIndexedCount.toLocaleString("en-US")}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-mutedForeground">
+                    Latest received {mailbox.latestReceivedAt ? formatDate(mailbox.latestReceivedAt) : "unknown"}
+                  </p>
+                </div>
+              ))}
+              {workspace.microsoftEmailCoverage.length === 0 ? (
+                <p className="rounded-md border border-border bg-muted/20 p-4 text-sm text-mutedForeground">
+                  No Microsoft email has been indexed yet. Run knowledge sync after mailbox targets are saved.
+                </p>
+              ) : null}
+            </div>
+          </section>
+
           {workspace.recentThreads.length > 0 ? (
             <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
               <div className="flex items-start justify-between gap-3">
@@ -631,6 +665,45 @@ export default async function AssistantPage({ searchParams }: AssistantPageProps
                     No assistant memories are active yet. After sync, customer profiles and opportunity summaries will appear here.
                   </p>
                 ) : null}
+              </div>
+            </div>
+            <div className="xl:col-span-2">
+              <h2 className="text-base font-semibold text-foreground">Recent indexed Microsoft emails</h2>
+              <p className="mt-1 text-sm leading-6 text-mutedForeground">
+                Use this to verify what the assistant can currently search from Microsoft 365.
+              </p>
+              <div className="mt-4 overflow-hidden rounded-md border border-border">
+                <table className="w-full min-w-[760px] text-left text-sm">
+                  <thead className="bg-muted/60 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+                    <tr>
+                      <th className="px-4 py-3">Email</th>
+                      <th className="px-4 py-3">Mailbox</th>
+                      <th className="px-4 py-3">From</th>
+                      <th className="px-4 py-3">Received</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border bg-card">
+                    {workspace.recentMicrosoftEmails.map((email) => (
+                      <tr key={email.id} className="align-top">
+                        <td className="px-4 py-3 font-medium text-foreground">{email.title}</td>
+                        <td className="px-4 py-3 text-mutedForeground">{email.mailboxAddress ?? "Signed-in mailbox"}</td>
+                        <td className="px-4 py-3 text-mutedForeground">
+                          {email.fromName ?? email.fromAddress ?? "Unknown sender"}
+                        </td>
+                        <td className="px-4 py-3 text-mutedForeground">
+                          {email.receivedAt ? formatDate(email.receivedAt) : "Unknown"}
+                        </td>
+                      </tr>
+                    ))}
+                    {workspace.recentMicrosoftEmails.length === 0 ? (
+                      <tr>
+                        <td className="px-4 py-5 text-sm text-mutedForeground" colSpan={4}>
+                          No Microsoft emails are indexed yet.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>

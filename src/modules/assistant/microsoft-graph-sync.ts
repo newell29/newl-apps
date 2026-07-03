@@ -21,6 +21,7 @@ import type { AuthenticatedContext, TenantContext } from "@/server/tenant-contex
 const MICROSOFT_GRAPH_SOURCE_SYSTEMS = ["MICROSOFT_GRAPH_MAIL", "MICROSOFT_GRAPH_FILE"] as const;
 const MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS = 45_000;
 const MICROSOFT_GRAPH_KNOWLEDGE_TRANSACTION_TIMEOUT_MS = 20_000;
+const MICROSOFT_GRAPH_MAIL_PAGE_SIZE = 50;
 
 export type MicrosoftGraphKnowledgeSyncResult = {
   documentCount: number;
@@ -76,6 +77,11 @@ type MicrosoftGraphMailMessage = {
       address?: string | null;
     } | null;
   } | null;
+};
+
+type MicrosoftGraphMailFetchOptions = {
+  lookbackDays: number;
+  maxMessagesPerMailbox: number;
 };
 
 type MicrosoftGraphDriveItem = {
@@ -196,7 +202,12 @@ async function syncMicrosoftGraphAssistantKnowledgeUnsafe(
   }
 
   const [messages, files] = await Promise.all([
-    settings.mailSyncEnabled ? fetchRecentMail(accessToken) : Promise.resolve([]),
+    settings.mailSyncEnabled
+      ? fetchRecentMail(accessToken, {
+          lookbackDays: settings.mailLookbackDays,
+          maxMessagesPerMailbox: settings.maxMailMessagesPerMailbox
+        })
+      : Promise.resolve([]),
     settings.fileSyncEnabled ? fetchRecentFiles(accessToken) : Promise.resolve([])
   ]);
 
@@ -566,7 +577,10 @@ async function syncMicrosoftGraphApplicationMailboxKnowledge(
 
   const accessToken = await getMicrosoftGraphApplicationAccessToken();
   const mailboxResult = settings.mailSyncEnabled
-    ? await fetchSelectedMailboxMessages(accessToken, settings.adminMailboxTargets)
+    ? await fetchSelectedMailboxMessages(accessToken, settings.adminMailboxTargets, {
+        lookbackDays: settings.mailLookbackDays,
+        maxMessagesPerMailbox: settings.maxMailMessagesPerMailbox
+      })
     : { messages: [], failures: [] };
   const messages = mailboxResult.messages;
   const files: MicrosoftGraphDriveItem[] = [];
@@ -796,17 +810,21 @@ async function loadMicrosoftEntityDirectory(tx: Prisma.TransactionClient, tenant
   };
 }
 
-async function fetchRecentMail(accessToken: string) {
-  return fetchMailboxMessages(accessToken, "me");
+async function fetchRecentMail(accessToken: string, options: MicrosoftGraphMailFetchOptions) {
+  return fetchMailboxMessages(accessToken, "me", options);
 }
 
-async function fetchSelectedMailboxMessages(accessToken: string, mailboxes: string[]) {
+async function fetchSelectedMailboxMessages(
+  accessToken: string,
+  mailboxes: string[],
+  options: MicrosoftGraphMailFetchOptions
+) {
   const results = await Promise.all(
     mailboxes.map(async (mailbox) => {
       try {
         return {
           mailbox,
-          messages: await fetchMailboxMessages(accessToken, mailbox),
+          messages: await fetchMailboxMessages(accessToken, mailbox, options),
           reason: null
         };
       } catch (error) {
@@ -822,12 +840,11 @@ async function fetchSelectedMailboxMessages(accessToken: string, mailboxes: stri
   return {
     messages: results
       .flatMap((result) => result.messages)
-    .sort((left, right) => {
-      const leftTime = parseDate(left.receivedDateTime)?.getTime() ?? 0;
-      const rightTime = parseDate(right.receivedDateTime)?.getTime() ?? 0;
-      return rightTime - leftTime;
-    })
-      .slice(0, 25),
+      .sort((left, right) => {
+        const leftTime = parseDate(left.receivedDateTime)?.getTime() ?? 0;
+        const rightTime = parseDate(right.receivedDateTime)?.getTime() ?? 0;
+        return rightTime - leftTime;
+      }),
     failures: results.flatMap((result) =>
       result.reason
         ? [
@@ -841,34 +858,56 @@ async function fetchSelectedMailboxMessages(accessToken: string, mailboxes: stri
   };
 }
 
-async function fetchMailboxMessages(accessToken: string, mailbox: string) {
+async function fetchMailboxMessages(
+  accessToken: string,
+  mailbox: string,
+  options: MicrosoftGraphMailFetchOptions
+) {
   const path = mailbox === "me" ? "me/messages" : await resolveMailboxMessagesPath(accessToken, mailbox);
-  const response = await fetch(
-    `https://graph.microsoft.com/v1.0/${path}?$top=10&$select=id,subject,bodyPreview,body,webLink,internetMessageId,conversationId,receivedDateTime,from,toRecipients,ccRecipients&$orderby=receivedDateTime%20desc`,
-    {
+  const since = new Date(Date.now() - options.lookbackDays * 24 * 60 * 60 * 1000);
+  const messages: MicrosoftGraphMailMessage[] = [];
+  let nextUrl: string | null = buildMailboxMessagesUrl(path, since, options.maxMessagesPerMailbox);
+
+  while (nextUrl && messages.length < options.maxMessagesPerMailbox) {
+    const response = await fetch(nextUrl, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         Prefer: 'outlook.body-content-type="text"'
       },
       cache: "no-store",
       signal: AbortSignal.timeout(MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS)
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        (await extractMicrosoftGraphResponseError(response)) ??
+          `Microsoft Graph mail sync failed for ${mailbox} with status ${response.status}.`
+      );
     }
-  );
 
-  if (!response.ok) {
-    throw new Error(
-      (await extractMicrosoftGraphResponseError(response)) ??
-        `Microsoft Graph mail sync failed for ${mailbox} with status ${response.status}.`
-    );
-  }
-
-  const json = (await response.json()) as { value?: MicrosoftGraphMailMessage[] };
-  return Array.isArray(json.value)
-    ? json.value.map((message) => ({
+    const json = (await response.json()) as {
+      value?: MicrosoftGraphMailMessage[];
+      "@odata.nextLink"?: string;
+    };
+    const pageMessages = Array.isArray(json.value) ? json.value : [];
+    messages.push(
+      ...pageMessages.map((message) => ({
         ...message,
         mailboxAddress: mailbox === "me" ? null : mailbox
       }))
-    : [];
+    );
+    nextUrl = messages.length < options.maxMessagesPerMailbox ? json["@odata.nextLink"] ?? null : null;
+  }
+
+  return messages.slice(0, options.maxMessagesPerMailbox);
+}
+
+function buildMailboxMessagesUrl(path: string, since: Date, maxMessages: number) {
+  const select = "id,subject,bodyPreview,body,webLink,internetMessageId,conversationId,receivedDateTime,from,toRecipients,ccRecipients";
+  const top = Math.min(MICROSOFT_GRAPH_MAIL_PAGE_SIZE, maxMessages);
+  const filter = encodeURIComponent(`receivedDateTime ge ${since.toISOString()}`);
+
+  return `https://graph.microsoft.com/v1.0/${path}?$top=${top}&$select=${select}&$orderby=receivedDateTime%20desc&$filter=${filter}`;
 }
 
 async function resolveMailboxMessagesPath(accessToken: string, mailbox: string) {

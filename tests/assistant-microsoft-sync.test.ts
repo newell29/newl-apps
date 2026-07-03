@@ -855,6 +855,110 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
     delete process.env.MICROSOFT_GRAPH_APP_TENANT_ID;
   });
 
+  it("paginates mailbox messages within the configured lookback window", async () => {
+    process.env.MICROSOFT_GRAPH_APP_CLIENT_ID = "graph-app-client";
+    process.env.MICROSOFT_GRAPH_APP_CLIENT_SECRET = "graph-app-secret";
+    process.env.MICROSOFT_GRAPH_APP_TENANT_ID = "graph-app-tenant";
+
+    findIntegrationCredential.mockResolvedValue({
+      provider: IntegrationProvider.MICROSOFT_GRAPH,
+      status: IntegrationStatus.ACTIVE,
+      publicConfig: {
+        adminMailboxTargets: ["dispatch@newl.ca"],
+        mailboxAccessMode: "ADMIN_SELECTED_MAILBOXES",
+        mailLookbackDays: 120,
+        maxMailMessagesPerMailbox: 2,
+        mailSyncEnabled: true,
+        fileSyncEnabled: false,
+        draftingEnabled: false
+      }
+    });
+
+    const upsert = vi.fn().mockResolvedValue({ id: "doc-1" });
+    const deleteMany = vi.fn().mockResolvedValue({});
+    const createMany = vi.fn().mockResolvedValue({});
+    const deleteMemories = vi.fn().mockResolvedValue({});
+    const createMemories = vi.fn().mockResolvedValue({});
+    const findCompanies = vi.fn().mockResolvedValue([]);
+    const findContacts = vi.fn().mockResolvedValue([]);
+    transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback({
+        company: { findMany: findCompanies },
+        contact: { findMany: findContacts },
+        assistantKnowledgeDocument: { upsert },
+        assistantKnowledgeChunk: { deleteMany, createMany },
+        assistantMemory: { deleteMany: deleteMemories, createMany: createMemories }
+      })
+    );
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+
+      if (url.includes("/oauth2/v2.0/token")) {
+        return new Response(JSON.stringify({ access_token: "application-token" }), { status: 200 });
+      }
+
+      if (url.includes("/users/dispatch%40newl.ca/messages?$top=1&$select=id")) {
+        return new Response(JSON.stringify({ value: [{ id: "probe-dispatch" }] }), { status: 200 });
+      }
+
+      if (url.includes("$top=2") && url.includes("$filter=receivedDateTime%20ge")) {
+        return new Response(
+          JSON.stringify({
+            value: [
+              {
+                id: "mail-page-1",
+                subject: "First dispatch issue",
+                bodyPreview: "First issue.",
+                body: { contentType: "text", content: "First customer delay issue." },
+                receivedDateTime: "2026-06-25T10:00:00.000Z"
+              }
+            ],
+            "@odata.nextLink": "https://graph.microsoft.com/v1.0/users/dispatch/messages?page=2"
+          }),
+          { status: 200 }
+        );
+      }
+
+      if (url.includes("page=2")) {
+        return new Response(
+          JSON.stringify({
+            value: [
+              {
+                id: "mail-page-2",
+                subject: "Second dispatch opportunity",
+                bodyPreview: "Need a quote.",
+                body: { contentType: "text", content: "Second customer needs a quote for LTL." },
+                receivedDateTime: "2026-06-24T10:00:00.000Z"
+              }
+            ]
+          }),
+          { status: 200 }
+        );
+      }
+
+      throw new Error(`Unexpected fetch URL in test: ${url}`);
+    });
+
+    const result = await syncTenantMicrosoftGraphAssistantKnowledge({
+      tenantId: "tenant-1",
+      tenantSlug: "tenant-1",
+      tenantName: "Tenant 1"
+    });
+
+    expect(result).toMatchObject({
+      documentCount: 2,
+      mailCount: 2,
+      skipped: false
+    });
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("page=2"))).toBe(true);
+
+    fetchMock.mockRestore();
+    delete process.env.MICROSOFT_GRAPH_APP_CLIENT_ID;
+    delete process.env.MICROSOFT_GRAPH_APP_CLIENT_SECRET;
+    delete process.env.MICROSOFT_GRAPH_APP_TENANT_ID;
+  });
+
   it("returns a structured skip reason when application mailbox token retrieval fails", async () => {
     process.env.MICROSOFT_GRAPH_APP_CLIENT_ID = "graph-app-client";
     process.env.MICROSOFT_GRAPH_APP_CLIENT_SECRET = "graph-app-secret";

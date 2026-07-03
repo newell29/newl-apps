@@ -8,6 +8,8 @@ export type MicrosoftGraphSettings = {
   scopes: string[];
   adminMailboxTargets: string[];
   mailboxAccessMode: MicrosoftGraphMailboxAccessMode;
+  mailLookbackDays: number;
+  maxMailMessagesPerMailbox: number;
   mailSyncEnabled: boolean;
   fileSyncEnabled: boolean;
   draftingEnabled: boolean;
@@ -28,10 +30,15 @@ type MicrosoftGraphConfigInput = {
   scopes: string[];
   adminMailboxTargets: string[];
   mailboxAccessMode: MicrosoftGraphMailboxAccessMode;
+  mailLookbackDays: number;
+  maxMailMessagesPerMailbox: number;
   mailSyncEnabled: boolean;
   fileSyncEnabled: boolean;
   draftingEnabled: boolean;
 };
+
+export const DEFAULT_MICROSOFT_GRAPH_MAIL_LOOKBACK_DAYS = 90;
+export const DEFAULT_MICROSOFT_GRAPH_MAX_MAIL_MESSAGES_PER_MAILBOX = 500;
 
 export const DEFAULT_MICROSOFT_GRAPH_SCOPES = [
   "User.Read",
@@ -52,6 +59,18 @@ export function parseMicrosoftGraphSettings(
   const scopes = readStringArray(config.scopes, DEFAULT_MICROSOFT_GRAPH_SCOPES);
   const adminMailboxTargets = readStringArray(config.adminMailboxTargets, []);
   const mailboxAccessMode = readMailboxAccessMode(config.mailboxAccessMode);
+  const mailLookbackDays = readInteger(
+    config.mailLookbackDays,
+    DEFAULT_MICROSOFT_GRAPH_MAIL_LOOKBACK_DAYS,
+    1,
+    365
+  );
+  const maxMailMessagesPerMailbox = readInteger(
+    config.maxMailMessagesPerMailbox,
+    DEFAULT_MICROSOFT_GRAPH_MAX_MAIL_MESSAGES_PER_MAILBOX,
+    1,
+    2_000
+  );
   const mailSyncEnabled = readBoolean(config.mailSyncEnabled) ?? true;
   const fileSyncEnabled = readBoolean(config.fileSyncEnabled) ?? true;
   const draftingEnabled = readBoolean(config.draftingEnabled) ?? false;
@@ -67,6 +86,8 @@ export function parseMicrosoftGraphSettings(
     scopes,
     adminMailboxTargets,
     mailboxAccessMode,
+    mailLookbackDays,
+    maxMailMessagesPerMailbox,
     mailSyncEnabled,
     fileSyncEnabled,
     draftingEnabled,
@@ -88,6 +109,8 @@ export function buildMicrosoftGraphConfig(input: MicrosoftGraphConfigInput) {
     scopes: Array.from(new Set(input.scopes.filter((scope) => scope.trim().length > 0))),
     adminMailboxTargets: Array.from(new Set(input.adminMailboxTargets.filter((target) => target.trim().length > 0))),
     mailboxAccessMode: input.mailboxAccessMode,
+    mailLookbackDays: input.mailLookbackDays,
+    maxMailMessagesPerMailbox: input.maxMailMessagesPerMailbox,
     mailSyncEnabled: input.mailSyncEnabled,
     fileSyncEnabled: input.fileSyncEnabled,
     draftingEnabled: input.draftingEnabled
@@ -168,6 +191,21 @@ function readMailboxAccessMode(value: unknown): MicrosoftGraphMailboxAccessMode 
 
 function readBoolean(value: unknown) {
   return typeof value === "boolean" ? value : undefined;
+}
+
+function readInteger(value: unknown, fallback: number, min: number, max: number) {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number.parseInt(value, 10)
+        : Number.NaN;
+
+  if (!Number.isInteger(parsed)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, parsed));
 }
 
 function readStringArray(value: unknown, fallback: string[]) {

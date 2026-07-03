@@ -68,6 +68,7 @@ export async function getAssistantWorkspace(
     topCompanies,
     openLeads,
     recentRateJobs,
+    recentMicrosoftEmails,
     recentThreads,
     activeThread
   ] = await Promise.all([
@@ -281,6 +282,20 @@ export async function getAssistantWorkspace(
         errorMessage: true
       }
     }),
+    prisma.assistantKnowledgeDocument.findMany({
+      where: tenantWhere(tenant, {
+        sourceSystem: "MICROSOFT_GRAPH_MAIL"
+      }),
+      orderBy: [{ sourceUpdatedAt: "desc" }, { indexedAt: "desc" }],
+      take: 50,
+      select: {
+        id: true,
+        title: true,
+        sourceUpdatedAt: true,
+        indexedAt: true,
+        metadata: true
+      }
+    }),
     prisma.assistantChatThread.findMany({
       where: tenantWhere(tenant, {
         status: "ACTIVE",
@@ -487,6 +502,20 @@ export async function getAssistantWorkspace(
       contact: lead.contact
     })),
     recentRateJobs,
+    microsoftEmailCoverage: buildMicrosoftEmailCoverage(recentMicrosoftEmails),
+    recentMicrosoftEmails: recentMicrosoftEmails.slice(0, 12).map((document) => {
+      const metadata = readJsonObject(document.metadata);
+
+      return {
+        id: document.id,
+        title: document.title,
+        mailboxAddress: readMetadataString(metadata, "mailboxAddress"),
+        fromName: readMetadataString(metadata, "fromName"),
+        fromAddress: readMetadataString(metadata, "fromAddress"),
+        receivedAt: document.sourceUpdatedAt,
+        indexedAt: document.indexedAt
+      };
+    }),
     recentThreads: recentThreads.map((thread) => ({
       id: thread.id,
       title: thread.title,
@@ -698,6 +727,67 @@ function selectTopManagerSignals(
       subjectId: memory.subjectId,
       lastObservedAt: memory.lastObservedAt
     }));
+}
+
+function buildMicrosoftEmailCoverage(
+  documents: Array<{
+    metadata: unknown;
+    sourceUpdatedAt: Date | null;
+    indexedAt: Date | null;
+  }>
+) {
+  const coverage = new Map<
+    string,
+    {
+      mailboxAddress: string;
+      recentIndexedCount: number;
+      latestReceivedAt: Date | null;
+      latestIndexedAt: Date | null;
+    }
+  >();
+
+  for (const document of documents) {
+    const metadata = readJsonObject(document.metadata);
+    const mailboxAddress = readMetadataString(metadata, "mailboxAddress") ?? "Signed-in mailbox";
+    const current =
+      coverage.get(mailboxAddress) ??
+      {
+        mailboxAddress,
+        recentIndexedCount: 0,
+        latestReceivedAt: null,
+        latestIndexedAt: null
+      };
+
+    current.recentIndexedCount += 1;
+    current.latestReceivedAt = maxDate(current.latestReceivedAt, document.sourceUpdatedAt);
+    current.latestIndexedAt = maxDate(current.latestIndexedAt, document.indexedAt);
+    coverage.set(mailboxAddress, current);
+  }
+
+  return Array.from(coverage.values()).sort((left, right) => {
+    const leftTime = left.latestReceivedAt?.getTime() ?? 0;
+    const rightTime = right.latestReceivedAt?.getTime() ?? 0;
+    return rightTime - leftTime;
+  });
+}
+
+function maxDate(left: Date | null, right: Date | null) {
+  if (!left) return right;
+  if (!right) return left;
+  return left.getTime() >= right.getTime() ? left : right;
+}
+
+function readMetadataString(metadata: Record<string, unknown>, key: string) {
+  const value = metadata[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readJsonObject(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return value as Record<string, unknown>;
 }
 
 export function formatAssistantRole(role: AssistantMessageRole) {

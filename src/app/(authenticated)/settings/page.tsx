@@ -343,6 +343,29 @@ export default async function SettingsPage() {
               ]}
             />
 
+            <div className="grid gap-4 md:grid-cols-2">
+              <SelectField
+                label="Email history window"
+                name="microsoftMailLookbackDays"
+                defaultValue={String(settings.microsoftGraph.mailLookbackDays)}
+                options={[
+                  { value: "30", label: "Last 30 days" },
+                  { value: "90", label: "Last 90 days" },
+                  { value: "120", label: "Last 120 days" },
+                  { value: "180", label: "Last 180 days" },
+                  { value: "365", label: "Last 365 days" }
+                ]}
+              />
+              <NumberField
+                label="Max emails per mailbox"
+                name="microsoftMaxMailMessagesPerMailbox"
+                defaultValue={settings.microsoftGraph.maxMailMessagesPerMailbox}
+                min={1}
+                max={2000}
+                info="Caps each mailbox sync run so large inboxes do not time out the request."
+              />
+            </div>
+
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground" htmlFor="microsoftAdminMailboxTargets">
                 Shared and team inboxes
