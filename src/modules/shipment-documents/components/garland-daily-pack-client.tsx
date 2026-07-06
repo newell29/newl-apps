@@ -940,7 +940,7 @@ async function analyzeDocument({
 }): Promise<DraftDocument> {
   const pdfjs = await loadPdfJs();
   const loadingTask = pdfjs.getDocument({
-    data: fileBytes,
+    data: cloneBytes(fileBytes),
     cMapPacked: true,
     cMapUrl: "/pdfjs/cmaps/",
     standardFontDataUrl: "/pdfjs/standard_fonts/",
@@ -998,7 +998,7 @@ async function analyzeDocument({
     documentType,
     sourceFileName,
     outputLabel,
-    fileBytes,
+    fileBytes: cloneBytes(fileBytes),
     pages: extractedPages.sort((left, right) => left.pageNumber - right.pageNumber)
   };
 }
@@ -1063,7 +1063,8 @@ function buildSortedPagesFromGroups(
 }
 
 async function createDocumentResult(fileName: string, fileBytes: Uint8Array, sortedPages: ExtractedPageRecord[]) {
-  const sortedPdfBytes = await rebuildPdfInSortedOrder(fileBytes, sortedPages.map((page) => page.pageNumber - 1));
+  const sourceBytes = cloneBytes(fileBytes);
+  const sortedPdfBytes = await rebuildPdfInSortedOrder(sourceBytes, sortedPages.map((page) => page.pageNumber - 1));
   const pdfBuffer = new ArrayBuffer(sortedPdfBytes.byteLength);
   new Uint8Array(pdfBuffer).set(sortedPdfBytes);
   const blob = new Blob([pdfBuffer], { type: "application/pdf" });
@@ -1074,7 +1075,7 @@ async function createDocumentResult(fileName: string, fileBytes: Uint8Array, sor
     pageCount: sortedPages.length,
     pages: sortedPages,
     pdfBase64: bytesToBase64(sortedPdfBytes),
-    sourceBytes: fileBytes
+    sourceBytes
   };
 }
 
@@ -1192,7 +1193,7 @@ async function detectMissingPsNumbers(
 }
 
 async function rebuildPdfInSortedOrder(fileBytes: Uint8Array, pageIndexes: number[]) {
-  const sourceDocument = await PDFDocument.load(fileBytes);
+  const sourceDocument = await PDFDocument.load(cloneBytes(fileBytes));
   const sortedDocument = await PDFDocument.create();
   const copiedPages = await sortedDocument.copyPages(sourceDocument, pageIndexes);
 
@@ -1314,6 +1315,10 @@ function groupResultPagesForRebuild(pages: ExtractedPageRecord[]) {
 
 async function readFileBytes(file: File) {
   return new Uint8Array(await file.arrayBuffer());
+}
+
+function cloneBytes(bytes: Uint8Array) {
+  return new Uint8Array(bytes);
 }
 
 function bytesToBase64(bytes: Uint8Array) {
