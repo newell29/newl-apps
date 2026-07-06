@@ -511,8 +511,8 @@ async function main() {
     },
     {
       key: ModuleKey.SHIPMENT_DOCUMENTS,
-      name: "Shipment Documents",
-      description: "Customer-specific shipment document packaging, sorting, and outbound prep workflows"
+      name: "Garland Tools",
+      description: "Garland Canada document packaging, BOL consolidation, and shipment packet workflows"
     },
     {
       key: ModuleKey.INVOICE_VERIFICATION,

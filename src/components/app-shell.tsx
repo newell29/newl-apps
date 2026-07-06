@@ -35,12 +35,12 @@ const navSections: NavSection[] = [
     ]
   },
   {
-    label: "Customer Workflows",
+    label: "Garland Tools",
     moduleKey: "SHIPMENT_DOCUMENTS" as ModuleKey,
     items: [
       {
         href: "/shipment-documents",
-        label: "Garland Canada Docs",
+        label: "BOL Consolidation",
         moduleKey: "SHIPMENT_DOCUMENTS" as ModuleKey
       }
     ]

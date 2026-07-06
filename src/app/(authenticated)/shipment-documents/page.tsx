@@ -17,8 +17,8 @@ export default async function ShipmentDocumentsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Shipment Documents"
-        title="Garland Canada daily shipment pack"
+        eyebrow="Garland Tools"
+        title="BOL consolidation"
         description="Upload the day's BOL bundle and pick-ticket bundle, sort each document set by PS number, then download clean customer-ready PDFs."
       />
 
