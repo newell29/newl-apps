@@ -447,7 +447,7 @@ export function GarlandDailyPackClient({
                     <th className="px-3 py-2">Run</th>
                     <th className="px-3 py-2">Recipient</th>
                     <th className="px-3 py-2">BOL/Pick</th>
-                    <th className="px-3 py-2">PS range</th>
+                    <th className="px-3 py-2">PS order</th>
                     <th className="px-3 py-2">Actions</th>
                   </tr>
                 </thead>
@@ -476,8 +476,10 @@ export function GarlandDailyPackClient({
                         </p>
                       </td>
                       <td className="px-3 py-3 align-top text-mutedForeground">
-                        <p>{formatPsRange(run.bolPsNumbers)}</p>
-                        <p>{formatPsRange(run.pickPsNumbers)}</p>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">BOL</p>
+                        <p className="mt-1 text-sm">{formatPsSequence(run.bolPsNumbers)}</p>
+                        <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-mutedForeground">Pick</p>
+                        <p className="mt-1 text-sm">{formatPsSequence(run.pickPsNumbers)}</p>
                       </td>
                       <td className="px-3 py-3 align-top">
                         <div className="flex flex-wrap gap-2">
@@ -523,6 +525,13 @@ function ResultCard({
   description: string;
   result: DocumentResult;
 }) {
+  const orderedPsGroups = groupOrderedPsNumbers(
+    result.pages.map((page) => ({
+      psNumber: page.psNumber,
+      detectionMethod: page.detectionMethod
+    }))
+  );
+
   return (
     <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -546,6 +555,35 @@ function ResultCard({
           value={result.pages.filter((page) => page.detectionMethod === "AI").length.toString()}
         />
         <Stat label="Lowest PS" value={result.pages[0]?.psNumber ?? "N/A"} />
+      </div>
+
+      <div className="mt-4 rounded-md border border-border bg-muted/20 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-foreground">PS sort order</p>
+            <p className="mt-1 text-xs text-mutedForeground">
+              Quick visual check of the final sequence before you email the PDFs.
+            </p>
+          </div>
+          <div className="rounded-full border border-accentBorder bg-accentSoft px-3 py-1 text-xs font-semibold text-primary">
+            {orderedPsGroups.length} PS number{orderedPsGroups.length === 1 ? "" : "s"}
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          {orderedPsGroups.map((group, index) => (
+            <div
+              key={`${result.fileName}-${group.psNumber}-${index}`}
+              className="rounded-full border border-border bg-background px-3 py-1.5 text-xs text-foreground"
+            >
+              <span className="font-semibold">{index + 1}. {group.psNumber}</span>
+              <span className="text-mutedForeground">
+                {" "}
+                · {group.pageCount} page{group.pageCount === 1 ? "" : "s"}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="mt-4 overflow-x-auto rounded-md border border-border">
@@ -587,6 +625,38 @@ function Stat({ label, value }: { label: string; value: string }) {
       <p className="mt-2 text-lg font-semibold text-foreground">{value}</p>
     </div>
   );
+}
+
+function groupOrderedPsNumbers(
+  pages: Array<{
+    psNumber: string;
+  }>
+) {
+  const groups: Array<{ psNumber: string; pageCount: number }> = [];
+
+  for (const page of pages) {
+    const lastGroup = groups.at(-1);
+
+    if (lastGroup && lastGroup.psNumber === page.psNumber) {
+      lastGroup.pageCount += 1;
+      continue;
+    }
+
+    groups.push({
+      psNumber: page.psNumber,
+      pageCount: 1
+    });
+  }
+
+  return groups;
+}
+
+function formatPsSequence(psNumbers: string[]) {
+  if (psNumbers.length === 0) {
+    return "No PS numbers saved";
+  }
+
+  return psNumbers.join(" -> ");
 }
 
 async function processDocument({
@@ -817,12 +887,4 @@ function formatDateTime(value: string) {
     hour: "numeric",
     minute: "2-digit"
   });
-}
-
-function formatPsRange(values: string[]) {
-  if (values.length === 0) {
-    return "No PS numbers saved";
-  }
-
-  return `${values[0]} to ${values[values.length - 1]}`;
 }
