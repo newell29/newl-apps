@@ -47,6 +47,26 @@ describe("shipment document PS helpers", () => {
     expect(grouped[1].pages.map((page) => page.pageNumber)).toEqual([3]);
   });
 
+  it("keeps 3-page and 4-page BOL continuations with the prior PS number", () => {
+    const grouped = groupDetectedShipmentPages("BOL", [
+      { pageNumber: 1, psNumber: "PS100001", detectionMethod: "TEXT", confidence: "HIGH", notes: null },
+      { pageNumber: 2, psNumber: null, detectionMethod: "AI", confidence: "LOW", notes: null },
+      { pageNumber: 3, psNumber: null, detectionMethod: "AI", confidence: "LOW", notes: null },
+      { pageNumber: 4, psNumber: "PS100010", detectionMethod: "TEXT", confidence: "HIGH", notes: null },
+      { pageNumber: 5, psNumber: null, detectionMethod: "AI", confidence: "LOW", notes: null },
+      { pageNumber: 6, psNumber: null, detectionMethod: "AI", confidence: "LOW", notes: null },
+      { pageNumber: 7, psNumber: null, detectionMethod: "AI", confidence: "LOW", notes: null },
+      { pageNumber: 8, psNumber: "PS100020", detectionMethod: "TEXT", confidence: "HIGH", notes: null }
+    ]);
+
+    expect(grouped).toHaveLength(3);
+    expect(grouped[0].pages.map((page) => page.pageNumber)).toEqual([1, 2, 3]);
+    expect(grouped[0].pages.map((page) => page.psNumber)).toEqual(["PS100001", "PS100001", "PS100001"]);
+    expect(grouped[1].pages.map((page) => page.pageNumber)).toEqual([4, 5, 6, 7]);
+    expect(grouped[1].pages.map((page) => page.psNumber)).toEqual(["PS100010", "PS100010", "PS100010", "PS100010"]);
+    expect(grouped[2].pages.map((page) => page.pageNumber)).toEqual([8]);
+  });
+
   it("keeps consecutive multi-page pick tickets together when continuation pages have no PS number", () => {
     const grouped = groupDetectedShipmentPages("PICK_TICKET", [
       { pageNumber: 1, psNumber: "PS100001", detectionMethod: "TEXT", confidence: "HIGH", notes: null },
@@ -69,5 +89,16 @@ describe("shipment document PS helpers", () => {
     expect(unresolved).toHaveLength(1);
     expect(unresolved[0].pageNumber).toBe(1);
     expect(unresolved[0].notes).toContain("Pen mark");
+  });
+
+  it("does not request manual review for continuation pages after a known BOL PS number", () => {
+    const unresolved = findUnresolvedShipmentPages("BOL", [
+      { pageNumber: 1, psNumber: "PS210052", detectionMethod: "AI", confidence: "HIGH", notes: null },
+      { pageNumber: 2, psNumber: null, detectionMethod: "AI", confidence: "LOW", notes: null },
+      { pageNumber: 3, psNumber: null, detectionMethod: "AI", confidence: "LOW", notes: null },
+      { pageNumber: 4, psNumber: null, detectionMethod: "AI", confidence: "LOW", notes: null }
+    ]);
+
+    expect(unresolved).toEqual([]);
   });
 });
