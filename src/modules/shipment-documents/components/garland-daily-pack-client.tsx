@@ -66,7 +66,9 @@ type ProcessingDraft = {
 
 type PdfJsModule = typeof import("pdfjs-dist");
 
-const AI_BATCH_SIZE = 12;
+const AI_BATCH_SIZE = 2;
+const AI_IMAGE_MAX_WIDTH = 1800;
+const AI_IMAGE_JPEG_QUALITY = 0.82;
 
 const CROP_BOXES: Record<ShipmentDocumentType, { x: number; y: number; width: number; height: number }> = {
   BOL: { x: 0, y: 0, width: 1, height: 0.5 },
@@ -1123,11 +1125,14 @@ async function renderCroppedPageImage(
   const sw = Math.max(1, Math.floor(canvas.width * cropBox.width));
   const sh = Math.max(1, Math.floor(canvas.height * cropBox.height));
 
-  cropCanvas.width = sw;
-  cropCanvas.height = sh;
-  cropContext.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+  const scale = Math.min(1, AI_IMAGE_MAX_WIDTH / sw);
+  cropCanvas.width = Math.max(1, Math.floor(sw * scale));
+  cropCanvas.height = Math.max(1, Math.floor(sh * scale));
+  cropContext.fillStyle = "#ffffff";
+  cropContext.fillRect(0, 0, cropCanvas.width, cropCanvas.height);
+  cropContext.drawImage(canvas, sx, sy, sw, sh, 0, 0, cropCanvas.width, cropCanvas.height);
 
-  return cropCanvas.toDataURL("image/png");
+  return cropCanvas.toDataURL("image/jpeg", AI_IMAGE_JPEG_QUALITY);
 }
 
 async function detectMissingPsNumbers(

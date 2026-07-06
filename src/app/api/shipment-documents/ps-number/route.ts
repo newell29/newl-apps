@@ -36,41 +36,43 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Provide a documentType and at least one cropped page image." }, { status: 400 });
   }
 
+  const requestBody = JSON.stringify({
+    model: DEFAULT_VISION_MODEL,
+    response_format: {
+      type: "json_object"
+    },
+    messages: [
+      {
+        role: "system",
+        content:
+          "You extract PS numbers from cropped shipment-document images. Return JSON only with an entries array. Each entry must include pageNumber, psNumber, visibleSuffixDigits, confidence, and notes. psNumber must be formatted as PS followed by digits, or null if the full PS number is not confidently visible. visibleSuffixDigits should be the clearly readable trailing digits only, or null if none are readable. If pen or scan marks cover part of the PS number, use the visible digits in visibleSuffixDigits and explain what is obscured in notes. Do not invent hidden digits."
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: buildPrompt(body.documentType, images.map((image) => image.pageNumber))
+          },
+          ...images.map((image) => ({
+            type: "image_url" as const,
+            image_url: {
+              url: image.imageDataUrl,
+              detail: "high" as const
+            }
+          }))
+        ]
+      }
+    ]
+  });
+
   const response = await fetch(`${OPENAI_API_BASE_URL}/chat/completions`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${apiKey}`
     },
-    body: JSON.stringify({
-      model: DEFAULT_VISION_MODEL,
-      response_format: {
-        type: "json_object"
-      },
-      messages: [
-        {
-          role: "system",
-          content:
-            "You extract PS numbers from cropped shipment-document images. Return JSON only with an entries array. Each entry must include pageNumber, psNumber, visibleSuffixDigits, confidence, and notes. psNumber must be formatted as PS followed by digits, or null if the full PS number is not confidently visible. visibleSuffixDigits should be the clearly readable trailing digits only, or null if none are readable. If pen or scan marks cover part of the PS number, use the visible digits in visibleSuffixDigits and explain what is obscured in notes. Do not invent hidden digits."
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: buildPrompt(body.documentType, images.map((image) => image.pageNumber))
-            },
-            ...images.map((image) => ({
-              type: "image_url" as const,
-              image_url: {
-                url: image.imageDataUrl,
-                detail: "high" as const
-              }
-            }))
-          ]
-        }
-      ]
-    }),
+    body: requestBody,
     cache: "no-store"
   });
 
@@ -78,7 +80,11 @@ export async function POST(request: Request) {
 
   if (!response.ok || !json) {
     return NextResponse.json(
-      { error: readOpenAiError(json) ?? `OpenAI detection failed with status ${response.status}.` },
+      {
+        error:
+          readOpenAiError(json) ??
+          `OpenAI detection failed with status ${response.status}. Request size was ${formatByteSize(requestBody.length)}.`
+      },
       { status: 502 }
     );
   }
@@ -150,6 +156,18 @@ function normalizeVisibleSuffixDigits(value: string | null) {
 
   const digitsOnly = value.replace(/\D+/g, "");
   return digitsOnly.length >= 2 && digitsOnly.length <= 4 ? digitsOnly : null;
+}
+
+function formatByteSize(bytes: number) {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function isValidImagePayload(value: unknown): value is { pageNumber: number; imageDataUrl: string } {
