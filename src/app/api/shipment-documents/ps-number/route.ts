@@ -63,7 +63,8 @@ export async function POST(request: Request) {
             ...images.map((image) => ({
               type: "image_url" as const,
               image_url: {
-                url: image.imageDataUrl
+                url: image.imageDataUrl,
+                detail: "high" as const
               }
             }))
           ]
@@ -134,8 +135,9 @@ function buildPrompt(documentType: ShipmentDocumentType, pageNumbers: number[]) 
     "Each attached image is a cropped header/reference area from one page, in the same order as the page numbers below.",
     `Page numbers: ${pageNumbers.join(", ")}.`,
     documentType === "BOL"
-      ? "For BOL crops, the PS number typically appears near a References label."
-      : "For pick ticket crops, the PS number typically appears near a Pre-Shipper label.",
+      ? "For BOL crops, inspect the small top-right table row near the References label. Ignore large shipping stamps such as MUST SHIP JULY 6; those are not PS numbers."
+      : "For pick ticket crops, inspect the small top header table near the Pre-Shipper label. Ignore large shipping stamps such as MUST SHIP JULY 6; those are not PS numbers.",
+    "The PS number may be small compared with other printed text. Zoom into the header/table area before deciding it is not visible.",
     "If the full PS number is blocked, smudged, or partly covered by pen, return psNumber as null and include any clearly visible ending digits in visibleSuffixDigits.",
     "Return JSON with this shape: {\"entries\":[{\"pageNumber\":1,\"psNumber\":\"PS123456\",\"visibleSuffixDigits\":\"456\",\"confidence\":\"HIGH\",\"notes\":\"short note\"}]}"
   ].join(" ");
