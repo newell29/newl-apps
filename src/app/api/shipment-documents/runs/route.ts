@@ -59,7 +59,7 @@ type SaveRunDocumentPayload = {
   pages: Array<{
     pageNumber: number;
     psNumber: string;
-    detectionMethod: "TEXT" | "AI" | "INHERITED";
+    detectionMethod: "TEXT" | "AI" | "INHERITED" | "MANUAL";
     confidence: string;
     notes?: string | null;
   }>;
@@ -236,7 +236,7 @@ function decodeBase64Pdf(value: string) {
 }
 
 function normalizePsNumbersFromPages(
-  pages: Array<{ psNumber: string; detectionMethod: "TEXT" | "AI" | "INHERITED"; confidence: string; pageNumber: number }>
+  pages: Array<{ psNumber: string; detectionMethod: "TEXT" | "AI" | "INHERITED" | "MANUAL"; confidence: string; pageNumber: number }>
 ) {
   return pages
     .map((page) => normalizePsNumber(page.psNumber))
@@ -244,7 +244,7 @@ function normalizePsNumbersFromPages(
 }
 
 function countAiFallbackPages(
-  pages: Array<{ detectionMethod: "TEXT" | "AI" | "INHERITED" }>
+  pages: Array<{ detectionMethod: "TEXT" | "AI" | "INHERITED" | "MANUAL" }>
 ) {
   return pages.filter((page) => page.detectionMethod === "AI").length;
 }

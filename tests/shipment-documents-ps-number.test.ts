@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   comparePsNumbers,
   extractPsNumberFromText,
+  findUnresolvedShipmentPages,
   formatHumanDateFromIso,
   groupDetectedShipmentPages,
   normalizePsNumber,
@@ -57,5 +58,16 @@ describe("shipment document PS helpers", () => {
     expect(grouped[0].pages.map((page) => page.pageNumber)).toEqual([1, 2]);
     expect(grouped[0].pages[1].detectionMethod).toBe("INHERITED");
     expect(grouped[1].pages.map((page) => page.pageNumber)).toEqual([3]);
+  });
+
+  it("flags unresolved leading pages that still need a manual PS override", () => {
+    const unresolved = findUnresolvedShipmentPages("BOL", [
+      { pageNumber: 1, psNumber: null, detectionMethod: "AI", confidence: "LOW", notes: "Pen mark over the first digits." },
+      { pageNumber: 2, psNumber: "PS100005", detectionMethod: "TEXT", confidence: "HIGH", notes: null }
+    ]);
+
+    expect(unresolved).toHaveLength(1);
+    expect(unresolved[0].pageNumber).toBe(1);
+    expect(unresolved[0].notes).toContain("Pen mark");
   });
 });

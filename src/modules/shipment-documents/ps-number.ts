@@ -1,12 +1,13 @@
 export type ShipmentDocumentType = "BOL" | "PICK_TICKET";
-export type ShipmentPageDetectionMethod = "TEXT" | "AI" | "INHERITED";
+export type ShipmentPageDetectionMethod = "TEXT" | "AI" | "INHERITED" | "MANUAL";
 
 export type DetectedShipmentPage = {
   pageNumber: number;
   psNumber: string | null;
-  detectionMethod: "TEXT" | "AI";
+  detectionMethod: "TEXT" | "AI" | "MANUAL";
   confidence: string;
   notes: string | null;
+  visibleSuffixDigits?: string | null;
 };
 
 export type GroupedShipmentPage = {
@@ -127,4 +128,32 @@ export function groupDetectedShipmentPages(
   }
 
   return groups;
+}
+
+export function findUnresolvedShipmentPages(
+  documentType: ShipmentDocumentType,
+  pages: DetectedShipmentPage[]
+) {
+  const unresolvedPages: DetectedShipmentPage[] = [];
+  let currentGroupPsNumber: string | null = null;
+
+  for (const page of pages) {
+    const normalizedPsNumber = normalizePsNumber(page.psNumber);
+
+    if (normalizedPsNumber) {
+      currentGroupPsNumber = normalizedPsNumber;
+      continue;
+    }
+
+    if (!currentGroupPsNumber) {
+      unresolvedPages.push({
+        ...page,
+        notes:
+          page.notes ??
+          `This ${documentType === "BOL" ? "BOL" : "pick-ticket"} page needs a PS number before the document can be sorted.`
+      });
+    }
+  }
+
+  return unresolvedPages;
 }

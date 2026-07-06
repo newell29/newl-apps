@@ -1,13 +1,14 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { PDFDocument } from "pdf-lib";
 import type { PDFPageProxy } from "pdfjs-dist/types/src/display/api";
 
 import {
   comparePsNumbers,
-  type DetectedShipmentPage,
   extractPsNumberFromText,
+  findUnresolvedShipmentPages,
   formatHumanDateFromIso,
   groupDetectedShipmentPages,
   normalizePsNumber,
@@ -23,6 +24,7 @@ type ExtractedPageRecord = {
   detectionMethod: ShipmentPageDetectionMethod;
   confidence: string;
   notes: string | null;
+  documentGroupId: string;
 };
 
 type DocumentResult = {
@@ -31,6 +33,7 @@ type DocumentResult = {
   pageCount: number;
   pages: ExtractedPageRecord[];
   pdfBase64: string;
+  sourceBytes: Uint8Array;
 };
 
 type ProcessingResult = {
@@ -38,13 +41,36 @@ type ProcessingResult = {
   pickTickets: DocumentResult;
 };
 
+type DraftPageRecord = {
+  pageNumber: number;
+  psNumber: string | null;
+  detectionMethod: Exclude<ShipmentPageDetectionMethod, "INHERITED">;
+  confidence: string;
+  notes: string | null;
+  visibleSuffixDigits: string | null;
+  previewImageDataUrl: string | null;
+};
+
+type DraftDocument = {
+  documentType: ShipmentDocumentType;
+  sourceFileName: string;
+  outputLabel: string;
+  fileBytes: Uint8Array;
+  pages: DraftPageRecord[];
+};
+
+type ProcessingDraft = {
+  bol: DraftDocument;
+  pickTickets: DraftDocument;
+};
+
 type PdfJsModule = typeof import("pdfjs-dist");
 
 const AI_BATCH_SIZE = 12;
 
 const CROP_BOXES: Record<ShipmentDocumentType, { x: number; y: number; width: number; height: number }> = {
-  BOL: { x: 0.6, y: 0.16, width: 0.24, height: 0.15 },
-  PICK_TICKET: { x: 0.56, y: 0.06, width: 0.26, height: 0.16 }
+  BOL: { x: 0.54, y: 0.14, width: 0.31, height: 0.17 },
+  PICK_TICKET: { x: 0.52, y: 0.05, width: 0.31, height: 0.18 }
 };
 
 let pdfJsLoader: Promise<PdfJsModule> | null = null;
@@ -64,11 +90,13 @@ export function GarlandDailyPackClient({
   const [recipientEmail, setRecipientEmail] = useState("");
   const [bolFile, setBolFile] = useState<File | null>(null);
   const [pickTicketFile, setPickTicketFile] = useState<File | null>(null);
+  const [draft, setDraft] = useState<ProcessingDraft | null>(null);
   const [result, setResult] = useState<ProcessingResult | null>(null);
   const [savedRunId, setSavedRunId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState("Upload the daily BOL and pick-ticket PDFs to begin.");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isRebuilding, setIsRebuilding] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [history, setHistory] = useState<ShipmentDocumentHistoryResponse>(initialHistory);
   const [historySearch, setHistorySearch] = useState(initialHistory.search);
@@ -91,8 +119,17 @@ export function GarlandDailyPackClient({
   }, [result]);
 
   const canProcess = Boolean(bolFile && pickTicketFile && !isProcessing);
-  const emailHref = useMemo(() => {
+  const manualReviewItems = useMemo(() => (draft ? collectManualReviewItems(draft) : []), [draft]);
+  const hasManualReviewItems = manualReviewItems.length > 0;
+  const hasInvalidEditedPsNumbers = useMemo(() => {
     if (!result) {
+      return false;
+    }
+
+    return [...result.bol.pages, ...result.pickTickets.pages].some((page) => !normalizePsNumber(page.psNumber));
+  }, [result]);
+  const emailHref = useMemo(() => {
+    if (!result || hasManualReviewItems || hasInvalidEditedPsNumbers) {
       return null;
     }
 
@@ -109,7 +146,7 @@ export function GarlandDailyPackClient({
 
     const recipient = recipientEmail.trim();
     return `mailto:${encodeURIComponent(recipient)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  }, [documentLabel, recipientEmail, result]);
+  }, [documentLabel, hasInvalidEditedPsNumbers, hasManualReviewItems, recipientEmail, result]);
 
   async function handleProcess() {
     if (!bolFile || !pickTicketFile) {
@@ -122,6 +159,7 @@ export function GarlandDailyPackClient({
     }
 
     setError(null);
+    setDraft(null);
     setResult(null);
     setSavedRunId(null);
 
@@ -131,15 +169,15 @@ export function GarlandDailyPackClient({
       setStatus("Loading PDF tools and reading the uploaded files.");
 
       const [bolBytes, pickBytes] = await Promise.all([readFileBytes(bolFile), readFileBytes(pickTicketFile)]);
-      const [bolResult, pickResult] = await Promise.all([
-        processDocument({
+      const [bolDraft, pickDraft] = await Promise.all([
+        analyzeDocument({
           fileBytes: bolBytes,
           sourceFileName: bolFile.name,
           documentType: "BOL",
           outputLabel: `${sanitizeLabelForFilename(documentLabel)} BOLs.pdf`,
           onStatus: setStatus
         }),
-        processDocument({
+        analyzeDocument({
           fileBytes: pickBytes,
           sourceFileName: pickTicketFile.name,
           documentType: "PICK_TICKET",
@@ -148,10 +186,20 @@ export function GarlandDailyPackClient({
         })
       ]);
 
-      setResult({
-        bol: bolResult,
-        pickTickets: pickResult
-      });
+      const nextDraft = {
+        bol: bolDraft,
+        pickTickets: pickDraft
+      };
+
+      setDraft(nextDraft);
+
+      if (collectManualReviewItems(nextDraft).length > 0) {
+        setStatus("AI found a partially obscured or missing PS number. Review the flagged page(s), enter the exact PS, then build the PDFs.");
+        return;
+      }
+
+      const nextResult = await buildProcessingResult(nextDraft);
+      setResult(nextResult);
       setStatus("Sorted PDFs are ready to download.");
     } catch (processingError) {
       const message = processingError instanceof Error ? processingError.message : "Unable to process the PDFs.";
@@ -159,6 +207,65 @@ export function GarlandDailyPackClient({
       setStatus("Processing stopped before the output PDFs were created.");
     } finally {
       setIsProcessing(false);
+    }
+  }
+
+  async function handleBuildFromReview() {
+    if (!draft) {
+      return;
+    }
+
+    setError(null);
+    setSavedRunId(null);
+    setIsRebuilding(true);
+
+    try {
+      const unresolvedItems = collectManualReviewItems(draft);
+      const firstInvalid = unresolvedItems.find((item) => !normalizePsNumber(item.psNumber));
+
+      if (firstInvalid) {
+        throw new Error(
+          `Enter a full PS number for ${firstInvalid.documentType === "BOL" ? "BOL" : "pick-ticket"} page ${firstInvalid.pageNumber} before building the PDFs.`
+        );
+      }
+
+      const nextResult = await buildProcessingResult(draft);
+      setResult(nextResult);
+      setStatus("Sorted PDFs are ready to download.");
+    } catch (buildError) {
+      const message = buildError instanceof Error ? buildError.message : "Unable to build the PDFs after review.";
+      setError(message);
+    } finally {
+      setIsRebuilding(false);
+    }
+  }
+
+  async function handleRebuildAfterEdits() {
+    if (!result) {
+      return;
+    }
+
+    setError(null);
+    setSavedRunId(null);
+    setIsRebuilding(true);
+
+    try {
+      if (hasInvalidEditedPsNumbers) {
+        throw new Error("Each edited PS number must use the PS123456 format before the PDFs can be rebuilt.");
+      }
+
+      const nextResult = await Promise.all([
+        rebuildDocumentFromEditedPages(result.bol),
+        rebuildDocumentFromEditedPages(result.pickTickets)
+      ]).then(([bol, pickTickets]) => ({ bol, pickTickets }));
+
+      setResult(nextResult);
+      setStatus("The PDFs were rebuilt and re-sorted using the updated PS numbers.");
+    } catch (rebuildError) {
+      const message = rebuildError instanceof Error ? rebuildError.message : "Unable to rebuild the PDFs after editing.";
+      setError(message);
+    } finally {
+      setIsRebuilding(false);
     }
   }
 
@@ -267,6 +374,44 @@ export function GarlandDailyPackClient({
     }
   }
 
+  function handleDraftPsOverride(documentType: ShipmentDocumentType, pageNumber: number, value: string) {
+    setDraft((currentDraft) => {
+      if (!currentDraft) {
+        return currentDraft;
+      }
+
+      return {
+        bol:
+          documentType === "BOL"
+            ? updateDraftDocumentPage(currentDraft.bol, pageNumber, value)
+            : currentDraft.bol,
+        pickTickets:
+          documentType === "PICK_TICKET"
+            ? updateDraftDocumentPage(currentDraft.pickTickets, pageNumber, value)
+            : currentDraft.pickTickets
+      };
+    });
+  }
+
+  function handleResultPsEdit(documentType: ShipmentDocumentType, documentGroupId: string, value: string) {
+    setResult((currentResult) => {
+      if (!currentResult) {
+        return currentResult;
+      }
+
+      return {
+        bol:
+          documentType === "BOL"
+            ? updateResultDocumentGroupPs(currentResult.bol, documentGroupId, value)
+            : currentResult.bol,
+        pickTickets:
+          documentType === "PICK_TICKET"
+            ? updateResultDocumentGroupPs(currentResult.pickTickets, documentGroupId, value)
+            : currentResult.pickTickets
+      };
+    });
+  }
+
   return (
     <div className="space-y-6">
       <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
@@ -337,7 +482,8 @@ export function GarlandDailyPackClient({
             <h2 className="text-base font-semibold text-foreground">Email prep</h2>
             <p className="mt-1 text-sm leading-6 text-mutedForeground">
               This first version opens a prefilled draft with subject and body. Browser security does not let us attach
-              the generated PDFs automatically yet, so the CSR still adds the two downloaded files.
+              the generated PDFs automatically yet, so the CSR still adds the two downloaded files. Email stays locked
+              until any flagged or edited PS numbers are resolved and the PDFs are rebuilt.
             </p>
           </div>
           {emailHref ? (
@@ -363,6 +509,14 @@ export function GarlandDailyPackClient({
 
       {result ? (
         <div className="space-y-4">
+          {hasInvalidEditedPsNumbers ? (
+            <div className="rounded-md border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground">
+              One or more edited PS numbers are not in a valid format yet. Use the full format like
+              <code className="mx-1 rounded bg-background px-1 py-0.5 text-[11px]">PS209606</code>
+              before rebuilding or saving.
+            </div>
+          ) : null}
+
           <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
@@ -371,30 +525,103 @@ export function GarlandDailyPackClient({
                   Save the sorted PDFs into searchable Garland history so the team can pull the same package back later.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={handleSaveRun}
-                disabled={isSaving || savedRunId !== null}
-                className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {savedRunId ? "Saved to history" : isSaving ? "Saving..." : "Save to history"}
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleRebuildAfterEdits}
+                  disabled={isRebuilding || hasInvalidEditedPsNumbers}
+                  className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isRebuilding ? "Rebuilding..." : "Re-sort after edits"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveRun}
+                  disabled={isSaving || savedRunId !== null || hasManualReviewItems || hasInvalidEditedPsNumbers || isRebuilding}
+                  className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {savedRunId ? "Saved to history" : isSaving ? "Saving..." : "Save to history"}
+                </button>
+              </div>
             </div>
           </section>
 
           <section className="grid gap-4 xl:grid-cols-2">
             <ResultCard
+              documentType="BOL"
               title="BOL output"
               description="Combined BOL document sorted by PS number."
               result={result.bol}
+              onEditPsNumber={handleResultPsEdit}
             />
             <ResultCard
+              documentType="PICK_TICKET"
               title="Pick-ticket output"
               description="Combined pick-ticket document sorted by PS number."
               result={result.pickTickets}
+              onEditPsNumber={handleResultPsEdit}
             />
           </section>
         </div>
+      ) : null}
+
+      {draft && hasManualReviewItems ? (
+        <section className="rounded-lg border border-warning/30 bg-card p-5 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 className="text-base font-semibold text-foreground">Manual review needed</h2>
+              <p className="mt-1 text-sm leading-6 text-mutedForeground">
+                The AI could not confidently read the full PS number on these starting pages. It may still have caught
+                the visible ending digits to help the CSR key in the exact PS number before the PDFs are built.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleBuildFromReview}
+              disabled={isRebuilding}
+              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isRebuilding ? "Building..." : "Build PDFs with overrides"}
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-4 xl:grid-cols-2">
+            {manualReviewItems.map((item) => (
+              <div key={`${item.documentType}-${item.pageNumber}`} className="rounded-md border border-border bg-muted/20 p-4">
+                <p className="text-sm font-semibold text-foreground">
+                  {item.documentType === "BOL" ? "BOL" : "Pick-ticket"} page {item.pageNumber}
+                </p>
+                <p className="mt-1 text-xs text-mutedForeground">{item.sourceFileName}</p>
+                {item.notes ? <p className="mt-3 text-sm text-mutedForeground">{item.notes}</p> : null}
+                {item.visibleSuffixDigits ? (
+                  <p className="mt-2 text-sm text-foreground">
+                    AI could still read ending digits:
+                    <code className="ml-1 rounded bg-background px-1 py-0.5 text-[11px]">{item.visibleSuffixDigits}</code>
+                  </p>
+                ) : null}
+                {item.previewImageDataUrl ? (
+                  <Image
+                    src={item.previewImageDataUrl}
+                    alt={`${item.documentType} page ${item.pageNumber} PS crop`}
+                    width={320}
+                    height={160}
+                    unoptimized
+                    className="mt-3 max-h-40 w-auto rounded-md border border-border bg-background"
+                  />
+                ) : null}
+                <label className="mt-3 block text-sm font-medium text-foreground">
+                  Exact PS number
+                  <input
+                    value={item.psNumber}
+                    onChange={(event) => handleDraftPsOverride(item.documentType, item.pageNumber, event.target.value)}
+                    className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                    placeholder={item.visibleSuffixDigits ? `PS...${item.visibleSuffixDigits}` : "PS209606"}
+                  />
+                </label>
+              </div>
+            ))}
+          </div>
+        </section>
       ) : null}
 
       <section className="rounded-lg border border-border bg-card shadow-sm">
@@ -517,16 +744,21 @@ export function GarlandDailyPackClient({
 }
 
 function ResultCard({
+  documentType,
   title,
   description,
-  result
+  result,
+  onEditPsNumber
 }: {
+  documentType: ShipmentDocumentType;
   title: string;
   description: string;
   result: DocumentResult;
+  onEditPsNumber: (documentType: ShipmentDocumentType, documentGroupId: string, value: string) => void;
 }) {
   const orderedPsGroups = groupOrderedPsNumbers(
     result.pages.map((page) => ({
+      documentGroupId: page.documentGroupId,
       psNumber: page.psNumber,
       detectionMethod: page.detectionMethod
     }))
@@ -573,7 +805,7 @@ function ResultCard({
         <div className="mt-4 flex flex-wrap gap-2">
           {orderedPsGroups.map((group, index) => (
             <div
-              key={`${result.fileName}-${group.psNumber}-${index}`}
+              key={`${result.fileName}-${group.documentGroupId}-${index}`}
               className="rounded-full border border-border bg-background px-3 py-1.5 text-xs text-foreground"
             >
               <span className="font-semibold">{index + 1}. {group.psNumber}</span>
@@ -581,6 +813,33 @@ function ResultCard({
                 {" "}
                 · {group.pageCount} page{group.pageCount === 1 ? "" : "s"}
               </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-md border border-border bg-muted/20 p-4">
+        <p className="text-sm font-semibold text-foreground">PS corrections</p>
+        <p className="mt-1 text-xs text-mutedForeground">
+          If one PS number needs to be corrected, update it here and then use Re-sort after edits above.
+        </p>
+
+        <div className="mt-4 grid gap-3">
+          {orderedPsGroups.map((group, index) => (
+            <div
+              key={`${result.fileName}-edit-${group.documentGroupId}`}
+              className="grid gap-3 rounded-md border border-border bg-background p-3 md:grid-cols-[auto,1fr,auto]"
+            >
+              <div className="text-sm font-semibold text-foreground">{index + 1}.</div>
+              <input
+                value={group.psNumber}
+                onChange={(event) => onEditPsNumber(documentType, group.documentGroupId, event.target.value)}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                aria-label={`PS number for sorted ${documentType === "BOL" ? "BOL" : "pick-ticket"} group ${index + 1}`}
+              />
+              <p className="text-xs text-mutedForeground">
+                {group.pageCount} page{group.pageCount === 1 ? "" : "s"}
+              </p>
             </div>
           ))}
         </div>
@@ -604,6 +863,8 @@ function ResultCard({
                 <td className="px-3 py-2 text-mutedForeground">
                   {page.detectionMethod === "AI"
                     ? "AI"
+                    : page.detectionMethod === "MANUAL"
+                      ? "Manual"
                     : page.detectionMethod === "INHERITED"
                       ? "Grouped"
                       : "Text"}
@@ -629,20 +890,23 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 function groupOrderedPsNumbers(
   pages: Array<{
+    documentGroupId: string;
     psNumber: string;
+    detectionMethod: ShipmentPageDetectionMethod;
   }>
 ) {
-  const groups: Array<{ psNumber: string; pageCount: number }> = [];
+  const groups: Array<{ documentGroupId: string; psNumber: string; pageCount: number }> = [];
 
   for (const page of pages) {
     const lastGroup = groups.at(-1);
 
-    if (lastGroup && lastGroup.psNumber === page.psNumber) {
+    if (lastGroup && lastGroup.documentGroupId === page.documentGroupId) {
       lastGroup.pageCount += 1;
       continue;
     }
 
     groups.push({
+      documentGroupId: page.documentGroupId,
       psNumber: page.psNumber,
       pageCount: 1
     });
@@ -659,7 +923,7 @@ function formatPsSequence(psNumbers: string[]) {
   return psNumbers.join(" -> ");
 }
 
-async function processDocument({
+async function analyzeDocument({
   fileBytes,
   sourceFileName,
   documentType,
@@ -671,11 +935,11 @@ async function processDocument({
   documentType: ShipmentDocumentType;
   outputLabel: string;
   onStatus: (message: string) => void;
-}): Promise<DocumentResult> {
+}): Promise<DraftDocument> {
   const pdfjs = await loadPdfJs();
   const loadingTask = pdfjs.getDocument({ data: fileBytes });
   const pdf = await loadingTask.promise;
-  const extractedPages: DetectedShipmentPage[] = [];
+  const extractedPages: DraftPageRecord[] = [];
   const missingPages: Array<{ pageNumber: number; imageDataUrl: string }> = [];
 
   for (let pageIndex = 0; pageIndex < pdf.numPages; pageIndex += 1) {
@@ -690,7 +954,9 @@ async function processDocument({
         psNumber,
         detectionMethod: "TEXT",
         confidence: "HIGH",
-        notes: null
+        notes: null,
+        visibleSuffixDigits: null,
+        previewImageDataUrl: null
       });
       continue;
     }
@@ -707,44 +973,100 @@ async function processDocument({
     const aiDetections = await detectMissingPsNumbers(documentType, missingPages);
 
     for (const detection of aiDetections) {
+      const sourceCrop = missingPages.find((page) => page.pageNumber === detection.pageNumber);
       extractedPages.push({
         pageNumber: detection.pageNumber,
-        psNumber: detection.psNumber ?? "",
+        psNumber: detection.psNumber,
         detectionMethod: "AI",
         confidence: detection.psNumber ? detection.confidence ?? "MEDIUM" : "LOW",
-        notes: detection.notes ?? null
+        notes: detection.notes ?? null,
+        visibleSuffixDigits: detection.visibleSuffixDigits ?? null,
+        previewImageDataUrl: sourceCrop?.imageDataUrl ?? null
       });
     }
   }
 
-  const groupedDocuments = groupDetectedShipmentPages(
+  return {
     documentType,
-    extractedPages
-      .map((page) => ({
-        ...page,
-        psNumber: page.psNumber ?? null
-      }))
-      .sort((left, right) => left.pageNumber - right.pageNumber)
+    sourceFileName,
+    outputLabel,
+    fileBytes,
+    pages: extractedPages.sort((left, right) => left.pageNumber - right.pageNumber)
+  };
+}
+
+async function buildProcessingResult(draft: ProcessingDraft): Promise<ProcessingResult> {
+  const [bol, pickTickets] = await Promise.all([
+    buildDocumentResult(draft.bol),
+    buildDocumentResult(draft.pickTickets)
+  ]);
+
+  return {
+    bol,
+    pickTickets
+  };
+}
+
+async function buildDocumentResult(draftDocument: DraftDocument): Promise<DocumentResult> {
+  const groupedDocuments = groupDetectedShipmentPages(
+    draftDocument.documentType,
+    draftDocument.pages.map((page) => ({
+      pageNumber: page.pageNumber,
+      psNumber: normalizePsNumber(page.psNumber),
+      detectionMethod: page.detectionMethod,
+      confidence: page.confidence,
+      notes: page.notes
+    }))
   );
 
-  const sortedPages = [...groupedDocuments]
+  const sortedPages = buildSortedPagesFromGroups(groupedDocuments);
+  return createDocumentResult(draftDocument.outputLabel, draftDocument.fileBytes, sortedPages);
+}
+
+async function rebuildDocumentFromEditedPages(document: DocumentResult): Promise<DocumentResult> {
+  const groupedDocuments = groupResultPagesForRebuild(document.pages);
+  const sortedPages = buildSortedPagesFromGroups(groupedDocuments);
+  return createDocumentResult(document.fileName, document.sourceBytes, sortedPages);
+}
+
+function buildSortedPagesFromGroups(
+  groupedDocuments: Array<{
+    psNumber: string;
+    pages: Array<{
+      pageNumber: number;
+      psNumber: string;
+      detectionMethod: ShipmentPageDetectionMethod;
+      confidence: string;
+      notes: string | null;
+    }>;
+  }>
+) {
+  return [...groupedDocuments]
     .sort((left, right) => {
       const psComparison = comparePsNumbers(left.psNumber, right.psNumber);
       return psComparison !== 0 ? psComparison : left.pages[0].pageNumber - right.pages[0].pageNumber;
     })
-    .flatMap((group) => group.pages);
+    .flatMap((group) =>
+      group.pages.map((page) => ({
+        ...page,
+        documentGroupId: `group-${group.pages[0].pageNumber}`
+      }))
+    );
+}
 
+async function createDocumentResult(fileName: string, fileBytes: Uint8Array, sortedPages: ExtractedPageRecord[]) {
   const sortedPdfBytes = await rebuildPdfInSortedOrder(fileBytes, sortedPages.map((page) => page.pageNumber - 1));
   const pdfBuffer = new ArrayBuffer(sortedPdfBytes.byteLength);
   new Uint8Array(pdfBuffer).set(sortedPdfBytes);
   const blob = new Blob([pdfBuffer], { type: "application/pdf" });
 
   return {
-    fileName: outputLabel,
+    fileName,
     downloadUrl: URL.createObjectURL(blob),
     pageCount: sortedPages.length,
     pages: sortedPages,
-    pdfBase64: bytesToBase64(sortedPdfBytes)
+    pdfBase64: bytesToBase64(sortedPdfBytes),
+    sourceBytes: fileBytes
   };
 }
 
@@ -806,7 +1128,13 @@ async function detectMissingPsNumbers(
   documentType: ShipmentDocumentType,
   pages: Array<{ pageNumber: number; imageDataUrl: string }>
 ) {
-  const results: Array<{ pageNumber: number; psNumber: string | null; confidence?: string; notes?: string | null }> = [];
+  const results: Array<{
+    pageNumber: number;
+    psNumber: string | null;
+    visibleSuffixDigits?: string | null;
+    confidence?: string;
+    notes?: string | null;
+  }> = [];
 
   for (let index = 0; index < pages.length; index += AI_BATCH_SIZE) {
     const batch = pages.slice(index, index + AI_BATCH_SIZE);
@@ -824,7 +1152,13 @@ async function detectMissingPsNumbers(
     const json = (await response.json().catch(() => null)) as
       | {
           error?: string;
-          entries?: Array<{ pageNumber: number; psNumber: string | null; confidence?: string; notes?: string | null }>;
+          entries?: Array<{
+            pageNumber: number;
+            psNumber: string | null;
+            visibleSuffixDigits?: string | null;
+            confidence?: string;
+            notes?: string | null;
+          }>;
         }
       | null;
 
@@ -836,6 +1170,7 @@ async function detectMissingPsNumbers(
       results.push({
         pageNumber: entry.pageNumber,
         psNumber: normalizePsNumber(entry.psNumber),
+        visibleSuffixDigits: entry.visibleSuffixDigits ?? null,
         confidence: entry.confidence,
         notes: entry.notes ?? null
       });
@@ -855,6 +1190,115 @@ async function rebuildPdfInSortedOrder(fileBytes: Uint8Array, pageIndexes: numbe
   }
 
   return sortedDocument.save();
+}
+
+function collectManualReviewItems(draft: ProcessingDraft) {
+  return [
+    ...findDocumentManualReviewItems(draft.bol),
+    ...findDocumentManualReviewItems(draft.pickTickets)
+  ];
+}
+
+function findDocumentManualReviewItems(draftDocument: DraftDocument) {
+  return findUnresolvedShipmentPages(draftDocument.documentType, draftDocument.pages).map((page) => ({
+    documentType: draftDocument.documentType,
+    sourceFileName: draftDocument.sourceFileName,
+    pageNumber: page.pageNumber,
+    psNumber: page.psNumber ?? "",
+    visibleSuffixDigits: page.visibleSuffixDigits ?? null,
+    notes: page.notes,
+    previewImageDataUrl: draftDocument.pages.find((candidate) => candidate.pageNumber === page.pageNumber)?.previewImageDataUrl ?? null
+  }));
+}
+
+function updateDraftDocumentPage(draftDocument: DraftDocument, pageNumber: number, value: string): DraftDocument {
+  return {
+    ...draftDocument,
+    pages: draftDocument.pages.map((page) =>
+      page.pageNumber === pageNumber
+        ? {
+            ...page,
+            psNumber: value,
+            detectionMethod: "MANUAL",
+            confidence: "MANUAL",
+            notes: "PS number was entered manually during review."
+          }
+        : page
+    )
+  };
+}
+
+function updateResultDocumentGroupPs(document: DocumentResult, documentGroupId: string, value: string): DocumentResult {
+  return {
+    ...document,
+    pages: document.pages.map((page) =>
+      page.documentGroupId === documentGroupId
+        ? {
+            ...page,
+            psNumber: value,
+            detectionMethod: page.detectionMethod === "INHERITED" ? "INHERITED" : "MANUAL",
+            confidence: page.detectionMethod === "INHERITED" ? page.confidence : "MANUAL",
+            notes:
+              page.detectionMethod === "INHERITED"
+                ? page.notes
+                : "PS number was adjusted manually after the initial sort."
+          }
+        : page
+    )
+  };
+}
+
+function groupResultPagesForRebuild(pages: ExtractedPageRecord[]) {
+  const groups = new Map<
+    string,
+    {
+      psNumber: string;
+      pages: Array<{
+        pageNumber: number;
+        psNumber: string;
+        detectionMethod: ShipmentPageDetectionMethod;
+        confidence: string;
+        notes: string | null;
+      }>;
+    }
+  >();
+
+  for (const page of pages) {
+    const normalizedPsNumber = normalizePsNumber(page.psNumber);
+
+    if (!normalizedPsNumber) {
+      throw new Error(`PS number for page ${page.pageNumber} is invalid.`);
+    }
+
+    const existingGroup = groups.get(page.documentGroupId);
+
+    if (existingGroup) {
+      existingGroup.pages.push({
+        pageNumber: page.pageNumber,
+        psNumber: normalizedPsNumber,
+        detectionMethod: page.detectionMethod,
+        confidence: page.confidence,
+        notes: page.notes
+      });
+      existingGroup.psNumber = normalizedPsNumber;
+      continue;
+    }
+
+    groups.set(page.documentGroupId, {
+      psNumber: normalizedPsNumber,
+      pages: [
+        {
+          pageNumber: page.pageNumber,
+          psNumber: normalizedPsNumber,
+          detectionMethod: page.detectionMethod,
+          confidence: page.confidence,
+          notes: page.notes
+        }
+      ]
+    });
+  }
+
+  return [...groups.values()];
 }
 
 async function readFileBytes(file: File) {

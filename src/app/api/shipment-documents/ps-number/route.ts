@@ -51,7 +51,7 @@ export async function POST(request: Request) {
         {
           role: "system",
           content:
-            "You extract PS numbers from cropped shipment-document images. Return JSON only with an entries array. Each entry must include pageNumber, psNumber, confidence, and notes. psNumber must be formatted as PS followed by digits, or null if no PS number is visible. Do not invent values."
+            "You extract PS numbers from cropped shipment-document images. Return JSON only with an entries array. Each entry must include pageNumber, psNumber, visibleSuffixDigits, confidence, and notes. psNumber must be formatted as PS followed by digits, or null if the full PS number is not confidently visible. visibleSuffixDigits should be the clearly readable trailing digits only, or null if none are readable. If pen or scan marks cover part of the PS number, use the visible digits in visibleSuffixDigits and explain what is obscured in notes. Do not invent hidden digits."
         },
         {
           role: "user",
@@ -88,6 +88,7 @@ export async function POST(request: Request) {
     entries?: Array<{
       pageNumber?: number;
       psNumber?: string | null;
+      visibleSuffixDigits?: string | null;
       confidence?: string | null;
       notes?: string | null;
     }>;
@@ -98,6 +99,7 @@ export async function POST(request: Request) {
       entries?: Array<{
         pageNumber?: number;
         psNumber?: string | null;
+        visibleSuffixDigits?: string | null;
         confidence?: string | null;
         notes?: string | null;
       }>;
@@ -114,6 +116,7 @@ export async function POST(request: Request) {
     return {
       pageNumber: image.pageNumber,
       psNumber,
+      visibleSuffixDigits: normalizeVisibleSuffixDigits(match?.visibleSuffixDigits ?? null),
       confidence: typeof match?.confidence === "string" ? match.confidence : psNumber ? "MEDIUM" : "LOW",
       notes: typeof match?.notes === "string" ? match.notes : null
     };
@@ -133,8 +136,18 @@ function buildPrompt(documentType: ShipmentDocumentType, pageNumbers: number[]) 
     documentType === "BOL"
       ? "For BOL crops, the PS number typically appears near a References label."
       : "For pick ticket crops, the PS number typically appears near a Pre-Shipper label.",
-    "Return JSON with this shape: {\"entries\":[{\"pageNumber\":1,\"psNumber\":\"PS123456\",\"confidence\":\"HIGH\",\"notes\":\"short note\"}]}"
+    "If the full PS number is blocked, smudged, or partly covered by pen, return psNumber as null and include any clearly visible ending digits in visibleSuffixDigits.",
+    "Return JSON with this shape: {\"entries\":[{\"pageNumber\":1,\"psNumber\":\"PS123456\",\"visibleSuffixDigits\":\"456\",\"confidence\":\"HIGH\",\"notes\":\"short note\"}]}"
   ].join(" ");
+}
+
+function normalizeVisibleSuffixDigits(value: string | null) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const digitsOnly = value.replace(/\D+/g, "");
+  return digitsOnly.length >= 2 && digitsOnly.length <= 4 ? digitsOnly : null;
 }
 
 function isValidImagePayload(value: unknown): value is { pageNumber: number; imageDataUrl: string } {
