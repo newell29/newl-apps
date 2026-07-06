@@ -22,6 +22,7 @@ type NavSection = {
 const navSections: NavSection[] = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/assistant", label: "Company Assistant", moduleKey: "ASSISTANT" as ModuleKey },
+  { href: "/website-inbound", label: "Website Inbound", moduleKey: "WEBSITE_INBOUND" as ModuleKey },
   {
     label: "TradeMining Leads",
     moduleKey: "LEAD_GEN" as ModuleKey,
@@ -31,6 +32,17 @@ const navSections: NavSection[] = [
       { href: "/lead-gen/pipeline", label: "Pipeline", moduleKey: "LEAD_GEN" as ModuleKey },
       { href: "/lead-gen/contacts", label: "Contacts", moduleKey: "LEAD_GEN" as ModuleKey },
       { href: "/operations/logs", label: "Health & Logs", moduleKey: "LEAD_GEN" as ModuleKey }
+    ]
+  },
+  {
+    label: "Customer Workflows",
+    moduleKey: "SHIPMENT_DOCUMENTS" as ModuleKey,
+    items: [
+      {
+        href: "/shipment-documents",
+        label: "Garland Canada Docs",
+        moduleKey: "SHIPMENT_DOCUMENTS" as ModuleKey
+      }
     ]
   },
   { href: "/ups-tools", label: "UPS Tools", moduleKey: "UPS_TOOLS" as ModuleKey },

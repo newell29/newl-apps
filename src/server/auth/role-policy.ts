@@ -11,7 +11,12 @@ export const DEFAULT_ROLE_MATRIX: Record<PlatformRole, RolePolicy> = {
   [PlatformRole.ADMIN]: { modules: "ALL", canMutate: true },
   [PlatformRole.MANAGER]: { modules: "ALL", canMutate: true },
   [PlatformRole.SALES]: {
-    modules: [ModuleKey.ASSISTANT, ModuleKey.LEAD_GEN, ModuleKey.CUSTOMER_CASHFLOW],
+    modules: [
+      ModuleKey.ASSISTANT,
+      ModuleKey.LEAD_GEN,
+      ModuleKey.CUSTOMER_CASHFLOW,
+      ModuleKey.WEBSITE_INBOUND
+    ],
     canMutate: true
   },
   [PlatformRole.OPERATIONS]: {
@@ -21,6 +26,7 @@ export const DEFAULT_ROLE_MATRIX: Record<PlatformRole, RolePolicy> = {
       ModuleKey.UPS_TOOLS,
       ModuleKey.LTL_RATE_PORTAL,
       ModuleKey.TRANSIT_LOOKUP,
+      ModuleKey.SHIPMENT_DOCUMENTS,
       ModuleKey.CUSTOMER_CASHFLOW
     ],
     canMutate: true
@@ -58,8 +64,9 @@ export const ROLE_DESCRIPTIONS: Record<
   },
   [PlatformRole.OPERATIONS]: {
     label: "Operations",
-    description: "Supports lead-gen operations plus shipment, quoting, and transit workflows.",
-    visibilitySummary: "Starts with Assistant, Lead Generation, UPS Tools, LTL Rate Portal, and Transit Lookup."
+    description: "Supports lead-gen operations plus shipment, document packaging, quoting, and transit workflows.",
+    visibilitySummary:
+      "Starts with Assistant, Lead Generation, Shipment Documents, UPS Tools, LTL Rate Portal, and Transit Lookup."
   },
   [PlatformRole.FINANCE]: {
     label: "Finance",

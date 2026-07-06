@@ -40,9 +40,10 @@ export const config = {
    * Run on everything except:
    *  - /api/auth/*                       (Auth.js + dev login)
    *  - /api/integrations/trademining/*   (machine-to-machine ingestion auth)
+   *  - /api/website-inbound              (website form ingestion auth)
    *  - Next.js internals and static files
    */
   matcher: [
-    "/((?!api/auth|api/integrations/trademining|_next/static|_next/image|favicon.ico|.*\\..*).*)"
+    "/((?!api/auth|api/integrations/trademining|api/website-inbound|_next/static|_next/image|favicon.ico|.*\\..*).*)"
   ]
 };

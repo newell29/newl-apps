@@ -510,6 +510,11 @@ async function main() {
       description: "Future transit time lookup module"
     },
     {
+      key: ModuleKey.SHIPMENT_DOCUMENTS,
+      name: "Shipment Documents",
+      description: "Customer-specific shipment document packaging, sorting, and outbound prep workflows"
+    },
+    {
       key: ModuleKey.INVOICE_VERIFICATION,
       name: "Invoice Verification",
       description: "Future invoice verification workflow"
@@ -523,6 +528,11 @@ async function main() {
       key: ModuleKey.CUSTOMER_CASHFLOW,
       name: "Customer Cashflow",
       description: "Customer cashflow, credit exposure, AR, and file billing work queues"
+    },
+    {
+      key: ModuleKey.WEBSITE_INBOUND,
+      name: "Website Inbound",
+      description: "Website form submissions, account setup requests, and inbound lead review"
     }
   ];
 
@@ -632,6 +642,25 @@ async function main() {
     }
   });
 
+  const websiteInboundModule = await prisma.module.findUniqueOrThrow({
+    where: { key: ModuleKey.WEBSITE_INBOUND }
+  });
+
+  await prisma.tenantModuleAccess.upsert({
+    where: {
+      tenantId_moduleId: {
+        tenantId: tenant.id,
+        moduleId: websiteInboundModule.id
+      }
+    },
+    update: { enabled: true },
+    create: {
+      tenantId: tenant.id,
+      moduleId: websiteInboundModule.id,
+      enabled: true
+    }
+  });
+
   await prisma.tenantModuleAccess.upsert({
     where: {
       tenantId_moduleId: {
@@ -674,6 +703,10 @@ async function main() {
     where: { key: ModuleKey.LTL_RATE_PORTAL }
   });
 
+  const shipmentDocumentsModule = await prisma.module.findUniqueOrThrow({
+    where: { key: ModuleKey.SHIPMENT_DOCUMENTS }
+  });
+
   await prisma.tenantModuleAccess.upsert({
     where: {
       tenantId_moduleId: {
@@ -700,6 +733,21 @@ async function main() {
     create: {
       tenantId: tenant.id,
       moduleId: transitLookupModule.id,
+      enabled: true
+    }
+  });
+
+  await prisma.tenantModuleAccess.upsert({
+    where: {
+      tenantId_moduleId: {
+        tenantId: tenant.id,
+        moduleId: shipmentDocumentsModule.id
+      }
+    },
+    update: { enabled: true },
+    create: {
+      tenantId: tenant.id,
+      moduleId: shipmentDocumentsModule.id,
       enabled: true
     }
   });

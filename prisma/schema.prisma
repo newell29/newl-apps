@@ -22,9 +22,20 @@ enum ModuleKey {
   UPS_TOOLS
   LTL_RATE_PORTAL
   TRANSIT_LOOKUP
+  SHIPMENT_DOCUMENTS
   INVOICE_VERIFICATION
   QUICKBOOKS_POSTING
   CUSTOMER_CASHFLOW
+  WEBSITE_INBOUND
+}
+
+enum WebsiteInboundStatus {
+  NEW
+  REVIEWED
+  CONTACTED
+  QUALIFIED
+  CONVERTED
+  CLOSED
 }
 
 enum IntegrationProvider {
@@ -318,6 +329,7 @@ model Tenant {
   ltlBatchQuoteLanes          LtlBatchQuoteLane[]
   assistantThreads            AssistantChatThread[]
   assistantMessages           AssistantChatMessage[]
+  websiteInboundSubmissions   WebsiteInboundSubmission[]
   assistantRuns               AssistantRun[]
   assistantRetrievedSources   AssistantRetrievedSource[]
   assistantKnowledgeDocuments AssistantKnowledgeDocument[]
@@ -472,6 +484,29 @@ model TenantRoleModuleAccess {
   @@unique([tenantId, role, moduleId])
   @@index([tenantId, role, enabled])
   @@index([tenantId, moduleId])
+}
+
+model WebsiteInboundSubmission {
+  id          String               @id @default(cuid())
+  tenantId    String
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  status      WebsiteInboundStatus @default(NEW)
+  formType    String
+  source      String?
+  pageUrl     String?
+  name        String?
+  email       String?
+  company     String?
+  phone       String?
+  primaryNeed String?
+  fields      Json
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, status])
+  @@index([tenantId, formType])
 }
 
 model IntegrationCredential {

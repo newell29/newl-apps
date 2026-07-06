@@ -13,6 +13,7 @@ Planned Modules:
 - Apollo Enrichment
 - Sequence Management
 - Warehouse Capacity Manager
+- Website Inbound
 - Pricing & Quote Engine
 - UPS Transit Time Tool
 - Shipment Visibility

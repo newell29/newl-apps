@@ -170,6 +170,22 @@ Planned boundaries:
 - QuickBooks posting.
 - UPS tools.
 - OpenClaw legacy operations reporting.
+- Website inbound form submission capture.
+
+## Website Inbound
+
+The Website Inbound module stores public website form submissions inside Newl Apps.
+It is tenant-scoped, Prisma/PostgreSQL-backed, and protected by the same module
+permission system as the other app areas.
+
+- Authenticated review UI: `/website-inbound`
+- Public website submission endpoint: `POST /api/website-inbound`
+- Required production token: `WEBSITE_INBOUND_API_TOKEN`
+- Tenant routing: `WEBSITE_INBOUND_TENANT_SLUG` (falls back to `DEFAULT_TENANT_SLUG`, then `newl-group`)
+
+The module appears in Settings under Role Module Visibility as `Website Inbound`.
+Admins can decide which roles can see the page. Read-only users may view it when
+enabled but cannot update submission status.
 
 ## Tenant Safety
 
