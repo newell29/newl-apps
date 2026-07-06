@@ -2,6 +2,7 @@ import { ModuleKey } from "@prisma/client";
 
 import { PageHeader } from "@/components/page-header";
 import { GarlandDailyPackClient } from "@/modules/shipment-documents/components/garland-daily-pack-client";
+import { getShipmentDocumentRunHistory } from "@/modules/shipment-documents/queries";
 import { requireModule } from "@/server/auth/authorization";
 import { isOpenAiDraftGenerationConfigured } from "@/server/integrations/openai";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -11,6 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function ShipmentDocumentsPage() {
   const context = await getAuthenticatedContext();
   await requireModule(context, ModuleKey.SHIPMENT_DOCUMENTS);
+  const history = await getShipmentDocumentRunHistory(context);
 
   return (
     <div className="space-y-6">
@@ -45,7 +47,7 @@ export default async function ShipmentDocumentsPage() {
         </div>
       </section>
 
-      <GarlandDailyPackClient />
+      <GarlandDailyPackClient initialHistory={history} />
     </div>
   );
 }

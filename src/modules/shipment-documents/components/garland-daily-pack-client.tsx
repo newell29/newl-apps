@@ -12,6 +12,7 @@ import {
   sanitizeLabelForFilename,
   type ShipmentDocumentType
 } from "@/modules/shipment-documents/ps-number";
+import type { ShipmentDocumentHistoryResponse, ShipmentDocumentRunSummary } from "@/modules/shipment-documents/types";
 
 type ExtractedPageRecord = {
   pageNumber: number;
@@ -26,6 +27,7 @@ type DocumentResult = {
   downloadUrl: string;
   pageCount: number;
   pages: ExtractedPageRecord[];
+  pdfBase64: string;
 };
 
 type ProcessingResult = {
@@ -48,7 +50,11 @@ function getTodayIsoDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
-export function GarlandDailyPackClient() {
+export function GarlandDailyPackClient({
+  initialHistory
+}: {
+  initialHistory: ShipmentDocumentHistoryResponse;
+}) {
   const [shipmentDate, setShipmentDate] = useState(getTodayIsoDate);
   const [documentLabel, setDocumentLabel] = useState(() => formatHumanDateFromIso(getTodayIsoDate()));
   const [labelManuallyEdited, setLabelManuallyEdited] = useState(false);
@@ -56,9 +62,15 @@ export function GarlandDailyPackClient() {
   const [bolFile, setBolFile] = useState<File | null>(null);
   const [pickTicketFile, setPickTicketFile] = useState<File | null>(null);
   const [result, setResult] = useState<ProcessingResult | null>(null);
+  const [savedRunId, setSavedRunId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState("Upload the daily BOL and pick-ticket PDFs to begin.");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [history, setHistory] = useState<ShipmentDocumentHistoryResponse>(initialHistory);
+  const [historySearch, setHistorySearch] = useState(initialHistory.search);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
 
   useEffect(() => {
     if (!labelManuallyEdited) {
@@ -108,6 +120,7 @@ export function GarlandDailyPackClient() {
 
     setError(null);
     setResult(null);
+    setSavedRunId(null);
 
     setIsProcessing(true);
 
@@ -143,6 +156,111 @@ export function GarlandDailyPackClient() {
       setStatus("Processing stopped before the output PDFs were created.");
     } finally {
       setIsProcessing(false);
+    }
+  }
+
+  async function handleSaveRun() {
+    if (!result || !bolFile || !pickTicketFile) {
+      return;
+    }
+
+    setIsSaving(true);
+    setHistoryError(null);
+
+    try {
+      const response = await fetch("/api/shipment-documents/runs", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          shipmentDate,
+          documentLabel,
+          recipientEmail,
+          sourceBolFileName: bolFile.name,
+          sourcePickTicketFileName: pickTicketFile.name,
+          bol: {
+            fileName: result.bol.fileName,
+            pageCount: result.bol.pageCount,
+            pages: result.bol.pages,
+            pdfBase64: result.bol.pdfBase64
+          },
+          pickTickets: {
+            fileName: result.pickTickets.fileName,
+            pageCount: result.pickTickets.pageCount,
+            pages: result.pickTickets.pages,
+            pdfBase64: result.pickTickets.pdfBase64
+          }
+        })
+      });
+
+      const json = (await response.json().catch(() => null)) as
+        | { error?: string; run?: ShipmentDocumentRunSummary }
+        | null;
+
+      if (!response.ok || !json?.run) {
+        throw new Error(json?.error ?? "Unable to save this shipment document run.");
+      }
+
+      setSavedRunId(json.run.id);
+      setStatus("Sorted PDFs are ready and the run has been saved to history.");
+      await fetchHistory(historySearch);
+    } catch (saveError) {
+      const message = saveError instanceof Error ? saveError.message : "Unable to save this shipment document run.";
+      setHistoryError(message);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function fetchHistory(searchValue: string) {
+    setIsHistoryLoading(true);
+    setHistoryError(null);
+
+    try {
+      const response = await fetch(`/api/shipment-documents/runs?search=${encodeURIComponent(searchValue)}`, {
+        method: "GET"
+      });
+      const json = (await response.json().catch(() => null)) as ShipmentDocumentHistoryResponse | { error?: string } | null;
+
+      if (!response.ok || !json || !("runs" in json)) {
+        throw new Error((json && "error" in json && typeof json.error === "string" ? json.error : null) ?? "Unable to load shipment document history.");
+      }
+
+      setHistory(json);
+    } catch (loadError) {
+      const message = loadError instanceof Error ? loadError.message : "Unable to load shipment document history.";
+      setHistoryError(message);
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  }
+
+  async function handleDeleteRun(runId: string) {
+    if (!window.confirm("Delete this saved shipment document run? This cannot be undone.")) {
+      return;
+    }
+
+    setHistoryError(null);
+
+    try {
+      const response = await fetch(`/api/shipment-documents/runs/${runId}`, {
+        method: "DELETE"
+      });
+      const json = (await response.json().catch(() => null)) as { error?: string } | null;
+
+      if (!response.ok) {
+        throw new Error(json?.error ?? "Unable to delete this shipment document run.");
+      }
+
+      if (savedRunId === runId) {
+        setSavedRunId(null);
+      }
+
+      await fetchHistory(historySearch);
+    } catch (deleteError) {
+      const message = deleteError instanceof Error ? deleteError.message : "Unable to delete this shipment document run.";
+      setHistoryError(message);
     }
   }
 
@@ -241,19 +359,154 @@ export function GarlandDailyPackClient() {
       </section>
 
       {result ? (
-        <section className="grid gap-4 xl:grid-cols-2">
-          <ResultCard
-            title="BOL output"
-            description="Combined BOL document sorted by PS number."
-            result={result.bol}
-          />
-          <ResultCard
-            title="Pick-ticket output"
-            description="Combined pick-ticket document sorted by PS number."
-            result={result.pickTickets}
-          />
-        </section>
+        <div className="space-y-4">
+          <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h2 className="text-base font-semibold text-foreground">Save this run</h2>
+                <p className="mt-1 text-sm leading-6 text-mutedForeground">
+                  Save the sorted PDFs into searchable Garland history so the team can pull the same package back later.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleSaveRun}
+                disabled={isSaving || savedRunId !== null}
+                className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {savedRunId ? "Saved to history" : isSaving ? "Saving..." : "Save to history"}
+              </button>
+            </div>
+          </section>
+
+          <section className="grid gap-4 xl:grid-cols-2">
+            <ResultCard
+              title="BOL output"
+              description="Combined BOL document sorted by PS number."
+              result={result.bol}
+            />
+            <ResultCard
+              title="Pick-ticket output"
+              description="Combined pick-ticket document sorted by PS number."
+              result={result.pickTickets}
+            />
+          </section>
+        </div>
       ) : null}
+
+      <section className="rounded-lg border border-border bg-card shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border p-5">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Saved Garland history</h2>
+            <p className="mt-1 text-sm leading-6 text-mutedForeground">
+              Search historical runs by date label, recipient, source file name, or PS number. Delete any run that was saved by accident or is no longer needed.
+            </p>
+          </div>
+          <div className="rounded-full border border-accentBorder bg-accentSoft px-3 py-1 text-xs font-semibold text-primary">
+            {history.totalCount} saved run{history.totalCount === 1 ? "" : "s"}
+          </div>
+        </div>
+
+        <div className="p-5">
+          <form
+            className="grid gap-3 md:grid-cols-[1fr,auto]"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void fetchHistory(historySearch);
+            }}
+          >
+            <input
+              value={historySearch}
+              onChange={(event) => setHistorySearch(event.target.value)}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+              placeholder="Search date, recipient, source file, or PS number"
+            />
+            <button className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
+              {isHistoryLoading ? "Searching..." : "Search history"}
+            </button>
+          </form>
+
+          {historyError ? (
+            <div className="mt-4 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
+              {historyError}
+            </div>
+          ) : null}
+
+          {history.runs.length === 0 ? (
+            <div className="mt-4 rounded-md border border-border bg-muted/20 px-4 py-6 text-sm text-mutedForeground">
+              No saved Garland shipment-document runs match this search yet.
+            </div>
+          ) : (
+            <div className="mt-4 overflow-x-auto rounded-md border border-border">
+              <table className="min-w-full divide-y divide-border text-sm">
+                <thead className="bg-muted/40 text-left text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+                  <tr>
+                    <th className="px-3 py-2">Run</th>
+                    <th className="px-3 py-2">Recipient</th>
+                    <th className="px-3 py-2">BOL/Pick</th>
+                    <th className="px-3 py-2">PS range</th>
+                    <th className="px-3 py-2">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {history.runs.map((run) => (
+                    <tr key={run.id}>
+                      <td className="px-3 py-3 align-top">
+                        <p className="font-medium text-foreground">{run.documentLabel}</p>
+                        <p className="mt-1 text-xs text-mutedForeground">
+                          Shipment date {formatDate(run.shipmentDate)} · Saved {formatDateTime(run.createdAt)}
+                        </p>
+                        <p className="mt-1 text-xs text-mutedForeground">
+                          {run.createdByName ? `Saved by ${run.createdByName}` : "Saved run"}
+                        </p>
+                      </td>
+                      <td className="px-3 py-3 align-top text-mutedForeground">
+                        <p>{run.recipientEmail ?? "No recipient saved"}</p>
+                        <p className="mt-1 text-xs">{run.sourceBolFileName ?? "No source BOL name"}</p>
+                        <p className="text-xs">{run.sourcePickTicketFileName ?? "No source pick name"}</p>
+                      </td>
+                      <td className="px-3 py-3 align-top text-mutedForeground">
+                        <p>{run.bolPageCount} BOL pages</p>
+                        <p>{run.pickTicketPageCount} pick pages</p>
+                        <p className="mt-1 text-xs">
+                          AI fallback: {run.bolAiFallbackPageCount} / {run.pickAiFallbackPageCount}
+                        </p>
+                      </td>
+                      <td className="px-3 py-3 align-top text-mutedForeground">
+                        <p>{formatPsRange(run.bolPsNumbers)}</p>
+                        <p>{formatPsRange(run.pickPsNumbers)}</p>
+                      </td>
+                      <td className="px-3 py-3 align-top">
+                        <div className="flex flex-wrap gap-2">
+                          <a
+                            href={`/api/shipment-documents/runs/${run.id}?documentType=bol`}
+                            className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted"
+                          >
+                            Download BOL
+                          </a>
+                          <a
+                            href={`/api/shipment-documents/runs/${run.id}?documentType=pick`}
+                            className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted"
+                          >
+                            Download Pick
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteRun(run.id)}
+                            className="rounded-md border border-danger/30 px-3 py-1.5 text-xs font-semibold text-danger transition-colors hover:bg-danger/10"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </section>
     </div>
   );
 }
@@ -405,7 +658,8 @@ async function processDocument({
     fileName: outputLabel,
     downloadUrl: URL.createObjectURL(blob),
     pageCount: sortedPages.length,
-    pages: sortedPages
+    pages: sortedPages,
+    pdfBase64: bytesToBase64(sortedPdfBytes)
   };
 }
 
@@ -520,4 +774,40 @@ async function rebuildPdfInSortedOrder(fileBytes: Uint8Array, pageIndexes: numbe
 
 async function readFileBytes(file: File) {
   return new Uint8Array(await file.arrayBuffer());
+}
+
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+
+  for (const value of bytes) {
+    binary += String.fromCharCode(value);
+  }
+
+  return window.btoa(binary);
+}
+
+function formatDate(value: string) {
+  return new Date(value).toLocaleDateString("en-CA", {
+    year: "numeric",
+    month: "short",
+    day: "numeric"
+  });
+}
+
+function formatDateTime(value: string) {
+  return new Date(value).toLocaleString("en-CA", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
+}
+
+function formatPsRange(values: string[]) {
+  if (values.length === 0) {
+    return "No PS numbers saved";
+  }
+
+  return `${values[0]} to ${values[values.length - 1]}`;
 }

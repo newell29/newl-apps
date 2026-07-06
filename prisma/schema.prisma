@@ -338,6 +338,7 @@ model Tenant {
   assistantMailboxSyncStates  AssistantMailboxSyncState[]
   assistantAutomations        AssistantAutomation[]
   assistantAutomationRuns     AssistantAutomationRun[]
+  shipmentDocumentRuns        ShipmentDocumentRun[]
   cashflowCustomers           CashflowCustomer[]
   cashflowCustomerAliases     CashflowCustomerAlias[]
   cashflowFiles               CashflowFile[]
@@ -369,6 +370,7 @@ model User {
   assistantRuns           AssistantRun[]
   assistantAutomations    AssistantAutomation[]
   assistantAutomationRuns AssistantAutomationRun[]
+  shipmentDocumentRuns    ShipmentDocumentRun[]
 }
 
 // Auth.js (NextAuth) adapter models. Account links an external identity
@@ -507,6 +509,38 @@ model WebsiteInboundSubmission {
   @@index([tenantId, createdAt])
   @@index([tenantId, status])
   @@index([tenantId, formType])
+}
+
+model ShipmentDocumentRun {
+  id                       String   @id @default(cuid())
+  tenantId                 String
+  workflowKey              String   @default("GARLAND_CANADA")
+  documentLabel            String
+  shipmentDate             DateTime
+  recipientEmail           String?
+  sourceBolFileName        String?
+  sourcePickTicketFileName String?
+  outputBolFileName        String
+  outputPickTicketFileName String
+  bolPageCount             Int
+  pickTicketPageCount      Int
+  bolAiFallbackPageCount   Int      @default(0)
+  pickAiFallbackPageCount  Int      @default(0)
+  bolPsNumbers             Json
+  pickPsNumbers            Json
+  searchText               String
+  bolPdfBytes              Bytes
+  pickTicketPdfBytes       Bytes
+  createdByUserId          String?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  tenant     Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy  User?  @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, workflowKey, shipmentDate])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, searchText])
 }
 
 model IntegrationCredential {
