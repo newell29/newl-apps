@@ -74,6 +74,7 @@ describe("ROLE_MATRIX", () => {
   it("gives OPERATIONS assistant + lead-gen + operational modules", () => {
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.ASSISTANT)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.LEAD_GEN)).toBe(true);
+    expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.SHIPMENT_DOCUMENTS)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.UPS_TOOLS)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.LTL_RATE_PORTAL)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.TRANSIT_LOOKUP)).toBe(true);
@@ -86,7 +87,9 @@ describe("ROLE_MATRIX", () => {
       ModuleKey.LEAD_GEN,
       ModuleKey.UPS_TOOLS,
       ModuleKey.LTL_RATE_PORTAL,
-      ModuleKey.TRANSIT_LOOKUP
+      ModuleKey.TRANSIT_LOOKUP,
+      ModuleKey.SHIPMENT_DOCUMENTS,
+      ModuleKey.CUSTOMER_CASHFLOW
     ]);
   });
 
