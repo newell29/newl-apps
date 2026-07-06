@@ -44,7 +44,6 @@ export async function POST(request: Request) {
     },
     body: JSON.stringify({
       model: DEFAULT_VISION_MODEL,
-      temperature: 0,
       response_format: {
         type: "json_object"
       },
