@@ -69,8 +69,8 @@ type PdfJsModule = typeof import("pdfjs-dist");
 const AI_BATCH_SIZE = 12;
 
 const CROP_BOXES: Record<ShipmentDocumentType, { x: number; y: number; width: number; height: number }> = {
-  BOL: { x: 0.54, y: 0.14, width: 0.31, height: 0.17 },
-  PICK_TICKET: { x: 0.52, y: 0.05, width: 0.31, height: 0.18 }
+  BOL: { x: 0.45, y: 0.06, width: 0.53, height: 0.2 },
+  PICK_TICKET: { x: 0.45, y: 0.03, width: 0.52, height: 0.17 }
 };
 
 let pdfJsLoader: Promise<PdfJsModule> | null = null;
