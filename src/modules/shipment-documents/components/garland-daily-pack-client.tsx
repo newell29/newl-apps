@@ -937,7 +937,13 @@ async function analyzeDocument({
   onStatus: (message: string) => void;
 }): Promise<DraftDocument> {
   const pdfjs = await loadPdfJs();
-  const loadingTask = pdfjs.getDocument({ data: fileBytes });
+  const loadingTask = pdfjs.getDocument({
+    data: fileBytes,
+    cMapPacked: true,
+    cMapUrl: "/pdfjs/cmaps/",
+    standardFontDataUrl: "/pdfjs/standard_fonts/",
+    wasmUrl: "/pdfjs/wasm/"
+  });
   const pdf = await loadingTask.promise;
   const extractedPages: DraftPageRecord[] = [];
   const missingPages: Array<{ pageNumber: number; imageDataUrl: string }> = [];
