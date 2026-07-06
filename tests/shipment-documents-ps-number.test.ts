@@ -4,6 +4,7 @@ import {
   comparePsNumbers,
   extractPsNumberFromText,
   formatHumanDateFromIso,
+  groupDetectedShipmentPages,
   normalizePsNumber,
   sanitizeLabelForFilename
 } from "@/modules/shipment-documents/ps-number";
@@ -29,5 +30,19 @@ describe("shipment document PS helpers", () => {
   it("formats and sanitizes document labels for filenames", () => {
     expect(formatHumanDateFromIso("2026-06-26")).toContain("2026");
     expect(sanitizeLabelForFilename("June 26 / 2026")).toBe("June 26 2026");
+  });
+
+  it("keeps consecutive multi-page BOLs together when continuation pages have no PS number", () => {
+    const grouped = groupDetectedShipmentPages("BOL", [
+      { pageNumber: 1, psNumber: "PS100001", detectionMethod: "TEXT", confidence: "HIGH", notes: null },
+      { pageNumber: 2, psNumber: null, detectionMethod: "AI", confidence: "LOW", notes: null },
+      { pageNumber: 3, psNumber: "PS100005", detectionMethod: "TEXT", confidence: "HIGH", notes: null }
+    ]);
+
+    expect(grouped).toHaveLength(2);
+    expect(grouped[0].psNumber).toBe("PS100001");
+    expect(grouped[0].pages.map((page) => page.pageNumber)).toEqual([1, 2]);
+    expect(grouped[0].pages[1].detectionMethod).toBe("INHERITED");
+    expect(grouped[1].pages.map((page) => page.pageNumber)).toEqual([3]);
   });
 });

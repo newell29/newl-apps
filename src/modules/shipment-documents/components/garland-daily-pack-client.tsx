@@ -6,18 +6,21 @@ import type { PDFPageProxy } from "pdfjs-dist/types/src/display/api";
 
 import {
   comparePsNumbers,
+  type DetectedShipmentPage,
   extractPsNumberFromText,
   formatHumanDateFromIso,
+  groupDetectedShipmentPages,
   normalizePsNumber,
   sanitizeLabelForFilename,
-  type ShipmentDocumentType
+  type ShipmentDocumentType,
+  type ShipmentPageDetectionMethod
 } from "@/modules/shipment-documents/ps-number";
 import type { ShipmentDocumentHistoryResponse, ShipmentDocumentRunSummary } from "@/modules/shipment-documents/types";
 
 type ExtractedPageRecord = {
   pageNumber: number;
   psNumber: string;
-  detectionMethod: "TEXT" | "AI";
+  detectionMethod: ShipmentPageDetectionMethod;
   confidence: string;
   notes: string | null;
 };
@@ -560,7 +563,13 @@ function ResultCard({
               <tr key={`${result.fileName}-${page.pageNumber}`}>
                 <td className="px-3 py-2 text-foreground">{page.pageNumber}</td>
                 <td className="px-3 py-2 font-medium text-foreground">{page.psNumber}</td>
-                <td className="px-3 py-2 text-mutedForeground">{page.detectionMethod === "AI" ? "AI" : "Text"}</td>
+                <td className="px-3 py-2 text-mutedForeground">
+                  {page.detectionMethod === "AI"
+                    ? "AI"
+                    : page.detectionMethod === "INHERITED"
+                      ? "Grouped"
+                      : "Text"}
+                </td>
                 <td className="px-3 py-2 text-mutedForeground">{page.confidence}</td>
               </tr>
             ))}
@@ -596,7 +605,7 @@ async function processDocument({
   const pdfjs = await loadPdfJs();
   const loadingTask = pdfjs.getDocument({ data: fileBytes });
   const pdf = await loadingTask.promise;
-  const extractedPages: ExtractedPageRecord[] = [];
+  const extractedPages: DetectedShipmentPage[] = [];
   const missingPages: Array<{ pageNumber: number; imageDataUrl: string }> = [];
 
   for (let pageIndex = 0; pageIndex < pdf.numPages; pageIndex += 1) {
@@ -628,26 +637,32 @@ async function processDocument({
     const aiDetections = await detectMissingPsNumbers(documentType, missingPages);
 
     for (const detection of aiDetections) {
-      if (!detection.psNumber) {
-        throw new Error(
-          `Could not find a PS number on ${documentType} page ${detection.pageNumber}. The output PDF was not created so the CSR can review that page first.`
-        );
-      }
-
       extractedPages.push({
         pageNumber: detection.pageNumber,
-        psNumber: detection.psNumber,
+        psNumber: detection.psNumber ?? "",
         detectionMethod: "AI",
-        confidence: detection.confidence ?? "MEDIUM",
+        confidence: detection.psNumber ? detection.confidence ?? "MEDIUM" : "LOW",
         notes: detection.notes ?? null
       });
     }
   }
 
-  const sortedPages = [...extractedPages].sort((left, right) => {
-    const psComparison = comparePsNumbers(left.psNumber, right.psNumber);
-    return psComparison !== 0 ? psComparison : left.pageNumber - right.pageNumber;
-  });
+  const groupedDocuments = groupDetectedShipmentPages(
+    documentType,
+    extractedPages
+      .map((page) => ({
+        ...page,
+        psNumber: page.psNumber ?? null
+      }))
+      .sort((left, right) => left.pageNumber - right.pageNumber)
+  );
+
+  const sortedPages = [...groupedDocuments]
+    .sort((left, right) => {
+      const psComparison = comparePsNumbers(left.psNumber, right.psNumber);
+      return psComparison !== 0 ? psComparison : left.pages[0].pageNumber - right.pages[0].pageNumber;
+    })
+    .flatMap((group) => group.pages);
 
   const sortedPdfBytes = await rebuildPdfInSortedOrder(fileBytes, sortedPages.map((page) => page.pageNumber - 1));
   const pdfBuffer = new ArrayBuffer(sortedPdfBytes.byteLength);
