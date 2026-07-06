@@ -81,27 +81,6 @@ export function groupDetectedShipmentPages(
   documentType: ShipmentDocumentType,
   pages: DetectedShipmentPage[]
 ) {
-  if (documentType !== "BOL") {
-    return pages.map((page) => {
-      if (!page.psNumber) {
-        throw new Error(`Could not find a PS number on ${documentType} page ${page.pageNumber}.`);
-      }
-
-      return {
-        psNumber: page.psNumber,
-        pages: [
-          {
-            pageNumber: page.pageNumber,
-            psNumber: page.psNumber,
-            detectionMethod: page.detectionMethod,
-            confidence: page.confidence,
-            notes: page.notes
-          }
-        ]
-      };
-    });
-  }
-
   const groups: Array<{ psNumber: string; pages: GroupedShipmentPage[] }> = [];
 
   for (const page of pages) {
@@ -135,7 +114,7 @@ export function groupDetectedShipmentPages(
     }
 
     if (!currentGroup) {
-      throw new Error(`Could not find a PS number on BOL page ${page.pageNumber}.`);
+      throw new Error(`Could not find a PS number on ${documentType} page ${page.pageNumber}.`);
     }
 
     currentGroup.pages.push({
@@ -143,7 +122,7 @@ export function groupDetectedShipmentPages(
       psNumber: currentGroup.psNumber,
       detectionMethod: "INHERITED",
       confidence: "GROUPED",
-      notes: "Grouped with the previous BOL page that started the same shipment document."
+      notes: `Grouped with the previous ${documentType === "BOL" ? "BOL" : "pick-ticket"} page that started the same shipment document.`
     });
   }
 

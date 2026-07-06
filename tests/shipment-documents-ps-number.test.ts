@@ -45,4 +45,17 @@ describe("shipment document PS helpers", () => {
     expect(grouped[0].pages[1].detectionMethod).toBe("INHERITED");
     expect(grouped[1].pages.map((page) => page.pageNumber)).toEqual([3]);
   });
+
+  it("keeps consecutive multi-page pick tickets together when continuation pages have no PS number", () => {
+    const grouped = groupDetectedShipmentPages("PICK_TICKET", [
+      { pageNumber: 1, psNumber: "PS100001", detectionMethod: "TEXT", confidence: "HIGH", notes: null },
+      { pageNumber: 2, psNumber: null, detectionMethod: "AI", confidence: "LOW", notes: null },
+      { pageNumber: 3, psNumber: "PS100005", detectionMethod: "TEXT", confidence: "HIGH", notes: null }
+    ]);
+
+    expect(grouped).toHaveLength(2);
+    expect(grouped[0].pages.map((page) => page.pageNumber)).toEqual([1, 2]);
+    expect(grouped[0].pages[1].detectionMethod).toBe("INHERITED");
+    expect(grouped[1].pages.map((page) => page.pageNumber)).toEqual([3]);
+  });
 });
