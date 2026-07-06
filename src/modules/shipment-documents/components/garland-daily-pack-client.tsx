@@ -69,8 +69,8 @@ type PdfJsModule = typeof import("pdfjs-dist");
 const AI_BATCH_SIZE = 12;
 
 const CROP_BOXES: Record<ShipmentDocumentType, { x: number; y: number; width: number; height: number }> = {
-  BOL: { x: 0.45, y: 0.06, width: 0.53, height: 0.2 },
-  PICK_TICKET: { x: 0.45, y: 0.03, width: 0.52, height: 0.17 }
+  BOL: { x: 0, y: 0, width: 1, height: 0.5 },
+  PICK_TICKET: { x: 0, y: 0, width: 1, height: 0.35 }
 };
 
 let pdfJsLoader: Promise<PdfJsModule> | null = null;
@@ -1093,7 +1093,7 @@ async function renderCroppedPageImage(
   page: PDFPageProxy,
   cropBox: { x: number; y: number; width: number; height: number }
 ) {
-  const viewport = page.getViewport({ scale: 2 });
+  const viewport = page.getViewport({ scale: 3 });
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
 
