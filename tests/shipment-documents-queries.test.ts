@@ -67,6 +67,7 @@ describe("shipment document queries", () => {
         where: expect.objectContaining({
           tenantId: "tenant-1",
           workflowKey: "GARLAND_CANADA",
+          deletedAt: null,
           OR: expect.any(Array)
         })
       })
@@ -75,6 +76,7 @@ describe("shipment document queries", () => {
       where: expect.objectContaining({
         tenantId: "tenant-1",
         workflowKey: "GARLAND_CANADA",
+        deletedAt: null,
         OR: expect.any(Array)
       })
     });
