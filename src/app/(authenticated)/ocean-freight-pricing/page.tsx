@@ -1,28 +1,61 @@
-import { ModuleKey, OceanEquipmentType } from "@prisma/client";
+import { ModuleKey, OceanEquipmentType, type OceanFreightAgent, type OceanFreightAgentContact } from "@prisma/client";
+import type { ReactNode } from "react";
+
 import { PageHeader } from "@/components/page-header";
+import { OceanFreightSuggestInput } from "@/modules/ocean-freight-pricing/components/suggest-input";
+import { OCEAN_EQUIPMENT_LABELS, OCEAN_RATE_STATUS_LABELS } from "@/modules/ocean-freight-pricing/constants";
+import {
+  createOceanFreightRateAction,
+  inactivateOceanFreightRateAction,
+  updateOceanFreightRateAction
+} from "@/modules/ocean-freight-pricing/actions";
+import {
+  getOceanFreightPricingShell,
+  type OceanFreightPricingFilters
+} from "@/modules/ocean-freight-pricing/queries";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
-import { OCEAN_EQUIPMENT_LABELS, OCEAN_RATE_STATUS_LABELS } from "@/modules/ocean-freight-pricing/constants";
-import { getOceanFreightPricingShell } from "@/modules/ocean-freight-pricing/queries";
-import { createOceanFreightAgentAction, createOceanFreightContactAction, createOceanFreightRateAction, inactivateOceanFreightRateAction, updateOceanFreightAgentAction, updateOceanFreightRateAction } from "@/modules/ocean-freight-pricing/actions";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = Promise<{ status?: string }>;
+type SearchParams = Promise<OceanFreightPricingFilters>;
+
+type AgentWithContacts = OceanFreightAgent & {
+  contacts: OceanFreightAgentContact[];
+};
 
 function formatDate(date: Date | null) {
-  return date ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeZone: "UTC" }).format(date) : "—";
+  return date ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeZone: "UTC" }).format(date) : "Open";
+}
+
+function formatDateInput(date: Date | null) {
+  return date?.toISOString().slice(0, 10) ?? "";
+}
+
+function formatMoney(value: { toString(): string }, currency: string) {
+  return `${currency} ${Number(value.toString()).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })}`;
+}
+
+function compactLocation(port: string, country?: string | null, region?: string | null) {
+  return [port, region, country].filter(Boolean).join(", ");
 }
 
 export default async function OceanFreightPricingPage({ searchParams }: { searchParams: SearchParams }) {
   const context = await getAuthenticatedContext();
   await requireModule(context, ModuleKey.OCEAN_FREIGHT_PRICING);
   const params = await searchParams;
-  const shell = await getOceanFreightPricingShell(context, { status: params.status });
+  const shell = await getOceanFreightPricingShell(context, params);
 
   return (
     <div className="space-y-6">
-      <PageHeader eyebrow="Ocean Freight Pricing" title="Ocean freight pricing portal" description="Tenant-safe manual ocean rate table, agent directory, contacts, ratings, and placeholders for future source ingestion and review workflows." />
+      <PageHeader
+        eyebrow="Ocean Freight Pricing"
+        title="Ocean freight pricing portal"
+        description="Tenant-safe ocean rate table, agent directory, contacts, ratings, and future source ingestion and review workflows."
+      />
 
       <div className="grid gap-4 md:grid-cols-4">
         <SummaryCard label="Active rates" value={shell.summary.activeRates} />
@@ -31,41 +64,327 @@ export default async function OceanFreightPricingPage({ searchParams }: { search
         <SummaryCard label="Sources" value={shell.summary.sourceCount} />
       </div>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <RatesTab agents={shell.agents} filters={params} rates={shell.rates} />
+    </div>
+  );
+}
+
+function RatesTab({
+  agents,
+  filters,
+  rates
+}: {
+  agents: AgentWithContacts[];
+  filters: OceanFreightPricingFilters;
+  rates: Awaited<ReturnType<typeof getOceanFreightPricingShell>>["rates"];
+}) {
+  return (
+    <div className="space-y-4">
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold text-slate-950">Rates</h2>
-            <p className="text-sm text-slate-600">Default view shows active, non-expired rates. Expired rows remain queryable as historical data.</p>
+            <h2 className="text-lg font-semibold text-foreground">Rates</h2>
+            <p className="mt-1 text-sm leading-6 text-mutedForeground">
+              Default view shows active, non-expired rates. Use filters to search every visible column or include historical rates.
+            </p>
           </div>
-          <div className="flex gap-2 text-sm">
-            <a className="rounded-full border px-3 py-1" href="/ocean-freight-pricing">Active only</a>
-            <a className="rounded-full border px-3 py-1" href="/ocean-freight-pricing?status=all">Include historical</a>
-          </div>
+          <a
+            href="/ocean-freight-pricing/agents"
+            className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
+          >
+            Manage agents
+          </a>
         </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Lane</th><th className="px-3 py-2">Agent</th><th className="px-3 py-2">Equipment</th><th className="px-3 py-2">Rate</th><th className="px-3 py-2">Validity</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Schedule</th><th className="px-3 py-2">Actions</th></tr></thead>
-            <tbody className="divide-y divide-slate-100">
-              {shell.rates.length === 0 ? <tr><td className="px-3 py-6 text-center text-slate-500" colSpan={8}>No manual ocean rates yet.</td></tr> : shell.rates.map((rate) => (
-                <tr key={rate.id} className="align-top"><td className="px-3 py-3 font-medium text-slate-900">{rate.originPort} → {rate.destinationPort}<div className="text-xs font-normal text-slate-500">{rate.shippingLine ?? "Any line"}</div></td><td className="px-3 py-3">{rate.agent.name}<div className="text-xs text-slate-500">Rating: {rate.agent.internalRating ?? "Not rated"}</div></td><td className="px-3 py-3">{rate.equipmentLabel}</td><td className="px-3 py-3">{rate.currency} {rate.rateAmount.toString()}</td><td className="px-3 py-3">{formatDate(rate.validityStartDate)} – {formatDate(rate.validityEndDate)}</td><td className="px-3 py-3"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs">{OCEAN_RATE_STATUS_LABELS[rate.computedStatus]}</span></td><td className="px-3 py-3 text-slate-600">{rate.scheduleNotes || "Schedule not provided"}</td><td className="px-3 py-3"><details><summary className="cursor-pointer text-blue-700">Edit</summary><form action={updateOceanFreightRateAction} className="mt-2 grid gap-2"><input type="hidden" name="rateId" value={rate.id} /><input className="rounded border px-2 py-1" name="rateAmount" defaultValue={rate.rateAmount.toString()} /><input className="rounded border px-2 py-1" type="date" name="validityEndDate" defaultValue={rate.validityEndDate?.toISOString().slice(0,10)} /><input className="rounded border px-2 py-1" name="correctionNotes" placeholder="Correction notes" required /><textarea className="rounded border px-2 py-1" name="notes" defaultValue={rate.notes ?? ""} /><button className="rounded bg-slate-950 px-3 py-1 text-white">Save</button></form><form action={inactivateOceanFreightRateAction} className="mt-2 grid gap-2"><input type="hidden" name="rateId" value={rate.id} /><input className="rounded border px-2 py-1" name="inactiveReason" placeholder="Inactive reason" required /><button className="rounded bg-red-700 px-3 py-1 text-white">Mark inactive</button></form></details></td></tr>
-              ))}
+
+        <RateFilters agents={agents} filters={filters} />
+
+        <div className="mt-5 overflow-x-auto">
+          <table className="min-w-[1180px] divide-y divide-border text-sm">
+            <thead className="bg-muted/50 text-left text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+              <tr>
+                <th className="px-3 py-3">Agent</th>
+                <th className="px-3 py-3">Origin</th>
+                <th className="px-3 py-3">Destination</th>
+                <th className="px-3 py-3">Equipment type</th>
+                <th className="px-3 py-3 text-right">Rate</th>
+                <th className="px-3 py-3">Carrier</th>
+                <th className="px-3 py-3">Validity</th>
+                <th className="px-3 py-3">Schedule</th>
+                <th className="px-3 py-3">Agent rating</th>
+                <th className="px-3 py-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {rates.length === 0 ? (
+                <tr>
+                  <td className="px-3 py-8 text-center text-mutedForeground" colSpan={10}>
+                    No ocean rates match the current filters.
+                  </td>
+                </tr>
+              ) : (
+                rates.map((rate) => (
+                  <tr key={rate.id} className="align-top hover:bg-muted/30">
+                    <td className="px-3 py-3">
+                      <div className="font-semibold text-foreground">{rate.agent.name}</div>
+                      {rate.agentContact ? (
+                        <div className="mt-1 text-xs text-mutedForeground">{rate.agentContact.fullName}</div>
+                      ) : null}
+                    </td>
+                    <td className="px-3 py-3 text-foreground">
+                      {compactLocation(rate.originPort, rate.originCountry, rate.originRegion)}
+                    </td>
+                    <td className="px-3 py-3 text-foreground">
+                      {compactLocation(rate.destinationPort, rate.destinationCountry, rate.destinationRegion)}
+                    </td>
+                    <td className="px-3 py-3">
+                      <div className="font-medium text-foreground">{OCEAN_EQUIPMENT_LABELS[rate.equipmentType]}</div>
+                      <div className="mt-1 text-xs text-mutedForeground">{rate.equipmentLabel}</div>
+                    </td>
+                    <td className="px-3 py-3 text-right font-semibold text-foreground">
+                      {formatMoney(rate.rateAmount, rate.currency)}
+                    </td>
+                    <td className="px-3 py-3 text-foreground">{rate.shippingLine || "Any carrier"}</td>
+                    <td className="px-3 py-3">
+                      <div className="text-foreground">
+                        {formatDate(rate.validityStartDate)} to {formatDate(rate.validityEndDate)}
+                      </div>
+                      <span className="mt-1 inline-flex rounded-full bg-muted px-2 py-0.5 text-xs font-semibold text-mutedForeground">
+                        {OCEAN_RATE_STATUS_LABELS[rate.computedStatus]}
+                      </span>
+                    </td>
+                    <td className="max-w-[220px] px-3 py-3 text-mutedForeground">
+                      {rate.scheduleNotes || "Schedule not provided"}
+                    </td>
+                    <td className="px-3 py-3">
+                      <RatingPill rating={rate.agent.internalRating} />
+                    </td>
+                    <td className="px-3 py-3">
+                      <details className="min-w-[220px]">
+                        <summary className="cursor-pointer text-sm font-semibold text-primary">Edit</summary>
+                        <form action={updateOceanFreightRateAction} className="mt-3 grid gap-2">
+                          <input type="hidden" name="rateId" value={rate.id} />
+                          <label className="grid gap-1 text-xs font-medium text-mutedForeground">
+                            Rate
+                            <input className="rounded-md border border-border px-2 py-1 text-sm text-foreground" name="rateAmount" defaultValue={rate.rateAmount.toString()} />
+                          </label>
+                          <label className="grid gap-1 text-xs font-medium text-mutedForeground">
+                            Validity end
+                            <input className="rounded-md border border-border px-2 py-1 text-sm text-foreground" type="date" name="validityEndDate" defaultValue={formatDateInput(rate.validityEndDate)} />
+                          </label>
+                          <input className="rounded-md border border-border px-2 py-1 text-sm" name="correctionNotes" placeholder="Correction notes" required />
+                          <textarea className="rounded-md border border-border px-2 py-1 text-sm" name="notes" defaultValue={rate.notes ?? ""} placeholder="Rate notes" />
+                          <button className="rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primaryForeground">
+                            Save rate
+                          </button>
+                        </form>
+                        <form action={inactivateOceanFreightRateAction} className="mt-3 grid gap-2 border-t border-border pt-3">
+                          <input type="hidden" name="rateId" value={rate.id} />
+                          <input className="rounded-md border border-border px-2 py-1 text-sm" name="inactiveReason" placeholder="Inactive reason" required />
+                          <button className="rounded-md bg-red-700 px-3 py-1.5 text-sm font-semibold text-white">
+                            Mark inactive
+                          </button>
+                        </form>
+                      </details>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-2">
-        <FormCard title="Add manual rate"><form action={createOceanFreightRateAction} className="grid gap-3"><select name="agentId" className="rounded border px-3 py-2" required><option value="">Select agent</option>{shell.agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select><select name="agentContactId" className="rounded border px-3 py-2"><option value="">No contact</option>{shell.agents.flatMap((agent) => agent.contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.fullName} — {agent.name}</option>))}</select><div className="grid gap-3 md:grid-cols-2"><input className="rounded border px-3 py-2" name="originPort" placeholder="Origin port" required /><input className="rounded border px-3 py-2" name="destinationPort" placeholder="Destination port" required /><input className="rounded border px-3 py-2" name="originCountry" placeholder="Origin country" /><input className="rounded border px-3 py-2" name="destinationCountry" placeholder="Destination country" /></div><select name="equipmentType" className="rounded border px-3 py-2" required>{Object.values(OceanEquipmentType).map((type) => <option key={type} value={type}>{OCEAN_EQUIPMENT_LABELS[type]}</option>)}</select><div className="grid gap-3 md:grid-cols-3"><input className="rounded border px-3 py-2" name="equipmentLabel" placeholder="Equipment label" /><input className="rounded border px-3 py-2" name="rateAmount" type="number" step="0.01" placeholder="Rate" required /><input className="rounded border px-3 py-2" name="currency" defaultValue="USD" required /></div><div className="grid gap-3 md:grid-cols-2"><input className="rounded border px-3 py-2" name="validityStartDate" type="date" /><input className="rounded border px-3 py-2" name="validityEndDate" type="date" /></div><input className="rounded border px-3 py-2" name="shippingLine" placeholder="Shipping line" /><textarea className="rounded border px-3 py-2" name="scheduleNotes" placeholder="Schedule notes (defaults to Schedule not provided)" /><textarea className="rounded border px-3 py-2" name="freeTimeNotes" placeholder="Free time notes" /><textarea className="rounded border px-3 py-2" name="detentionDemurrageNotes" placeholder="Detention/demurrage notes" /><button className="rounded bg-slate-950 px-4 py-2 text-white">Create manual rate</button></form></FormCard>
-        <FormCard title="Add agent"><form action={createOceanFreightAgentAction} className="grid gap-3"><input className="rounded border px-3 py-2" name="agentName" placeholder="Agent company" required /><input className="rounded border px-3 py-2" name="website" placeholder="Website" /><input className="rounded border px-3 py-2" name="primaryEmailDomain" placeholder="Email domain" /><select className="rounded border px-3 py-2" name="internalRating"><option value="">No rating</option>{[1,2,3,4,5].map((r) => <option key={r} value={r}>{r}</option>)}</select><textarea className="rounded border px-3 py-2" name="reliabilityNotes" placeholder="Reliability notes" /><textarea className="rounded border px-3 py-2" name="serviceNotes" placeholder="Service notes" /><button className="rounded bg-slate-950 px-4 py-2 text-white">Create agent</button></form></FormCard>
-      </section>
-
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><h2 className="text-lg font-semibold">Agents</h2><div className="mt-3 grid gap-3">{shell.agents.length === 0 ? <p className="text-sm text-slate-500">No agents yet.</p> : shell.agents.map((agent) => <details key={agent.id} className="rounded-xl border p-3"><summary className="cursor-pointer font-medium">{agent.name} · rating {agent.internalRating ?? "not rated"} · {agent.activeRateCount} active / {agent.historicalRateCount} total rates</summary><div className="mt-3 grid gap-3 md:grid-cols-2"><form action={updateOceanFreightAgentAction} className="grid gap-2"><input type="hidden" name="agentId" value={agent.id} /><select className="rounded border px-2 py-1" name="internalRating" defaultValue={agent.internalRating ?? ""}><option value="">No rating</option>{[1,2,3,4,5].map((r) => <option key={r} value={r}>{r}</option>)}</select><textarea className="rounded border px-2 py-1" name="reliabilityNotes" defaultValue={agent.reliabilityNotes ?? ""} placeholder="Reliability notes" /><textarea className="rounded border px-2 py-1" name="serviceNotes" defaultValue={agent.serviceNotes ?? ""} placeholder="Service notes" /><textarea className="rounded border px-2 py-1" name="internalNotes" defaultValue={agent.internalNotes ?? ""} placeholder="Internal notes" /><button className="rounded bg-slate-950 px-3 py-1 text-white">Update rating/notes</button></form><form action={createOceanFreightContactAction} className="grid gap-2"><input type="hidden" name="agentId" value={agent.id} /><input className="rounded border px-2 py-1" name="fullName" placeholder="Contact name" required /><input className="rounded border px-2 py-1" name="email" type="email" placeholder="Email" required /><input className="rounded border px-2 py-1" name="phone" placeholder="Phone" /><input className="rounded border px-2 py-1" name="title" placeholder="Title" /><button className="rounded bg-slate-950 px-3 py-1 text-white">Add contact</button></form></div><ul className="mt-3 text-sm text-slate-600">{agent.contacts.map((contact) => <li key={contact.id}>{contact.fullName} · {contact.email} {contact.phone ? `· ${contact.phone}` : ""}</li>)}</ul></details>)}</div></section>
-
-      <section className="grid gap-4 md:grid-cols-3"><PlaceholderTab title="Review Queue" detail="Candidate approval/rejection is intentionally deferred to PR 5; this PR only shows the staging placeholder." /><PlaceholderTab title="Sources" detail="Microsoft Graph source email and attachment ingestion is intentionally deferred to PR 3/4." /><PlaceholderTab title="Jobs" detail="Ocean ingestion/extraction job controls and history are intentionally deferred to PR 3." /></section>
+      <CollapsibleFormCard title="Add manual rate" actionLabel="Create manual rate">
+        <form action={createOceanFreightRateAction} className="grid gap-3">
+          <div className="grid gap-3 md:grid-cols-2">
+            <select name="agentId" className="rounded-md border border-border px-3 py-2" required>
+              <option value="">Select agent</option>
+              {agents.map((agent) => (
+                <option key={agent.id} value={agent.id}>
+                  {agent.name}
+                </option>
+              ))}
+            </select>
+            <select name="agentContactId" className="rounded-md border border-border px-3 py-2">
+              <option value="">No contact</option>
+              {agents.flatMap((agent) =>
+                agent.contacts.map((contact) => (
+                  <option key={contact.id} value={contact.id}>
+                    {contact.fullName} - {agent.name}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <OceanFreightSuggestInput
+              name="originPort"
+              suggestionField="ports"
+              placeholder="Origin port"
+              required
+              className="w-full rounded-md border border-border px-3 py-2 text-sm text-foreground"
+            />
+            <OceanFreightSuggestInput
+              name="destinationPort"
+              suggestionField="ports"
+              placeholder="Destination port"
+              required
+              className="w-full rounded-md border border-border px-3 py-2 text-sm text-foreground"
+            />
+            <OceanFreightSuggestInput
+              name="originCountry"
+              suggestionField="countries"
+              placeholder="Origin country"
+              className="w-full rounded-md border border-border px-3 py-2 text-sm text-foreground"
+            />
+            <OceanFreightSuggestInput
+              name="destinationCountry"
+              suggestionField="countries"
+              placeholder="Destination country"
+              className="w-full rounded-md border border-border px-3 py-2 text-sm text-foreground"
+            />
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <select name="equipmentType" className="rounded-md border border-border px-3 py-2" required>
+              {Object.values(OceanEquipmentType).map((type) => (
+                <option key={type} value={type}>
+                  {OCEAN_EQUIPMENT_LABELS[type]}
+                </option>
+              ))}
+            </select>
+            <input className="rounded-md border border-border px-3 py-2" name="equipmentLabel" placeholder="Equipment label" />
+            <input className="rounded-md border border-border px-3 py-2" name="shippingLine" placeholder="Carrier / shipping line" />
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <input className="rounded-md border border-border px-3 py-2" name="rateAmount" type="number" step="0.01" placeholder="Rate" required />
+            <input className="rounded-md border border-border px-3 py-2" name="currency" defaultValue="USD" required />
+            <input className="rounded-md border border-border px-3 py-2" name="transitTimeDays" type="number" min="0" placeholder="Transit days" />
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <input className="rounded-md border border-border px-3 py-2" name="validityStartDate" type="date" />
+            <input className="rounded-md border border-border px-3 py-2" name="validityEndDate" type="date" />
+          </div>
+          <textarea className="rounded-md border border-border px-3 py-2" name="scheduleNotes" placeholder="Schedule notes (defaults to Schedule not provided)" />
+          <textarea className="rounded-md border border-border px-3 py-2" name="freeTimeNotes" placeholder="Free time notes" />
+          <textarea className="rounded-md border border-border px-3 py-2" name="detentionDemurrageNotes" placeholder="Detention/demurrage notes" />
+          <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground">
+            Create manual rate
+          </button>
+        </form>
+      </CollapsibleFormCard>
     </div>
   );
 }
 
-function SummaryCard({ label, value }: { label: string; value: number }) { return <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><div className="text-sm text-slate-500">{label}</div><div className="mt-2 text-2xl font-semibold text-slate-950">{value}</div></div>; }
-function FormCard({ title, children }: { title: string; children: React.ReactNode }) { return <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><h2 className="mb-3 text-lg font-semibold text-slate-950">{title}</h2>{children}</section>; }
-function PlaceholderTab({ title, detail }: { title: string; detail: string }) { return <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-4"><h3 className="font-semibold text-slate-900">{title}</h3><p className="mt-2 text-sm text-slate-600">{detail}</p></div>; }
+function RateFilters({ agents, filters }: { agents: AgentWithContacts[]; filters: OceanFreightPricingFilters }) {
+  return (
+    <form className="mt-5 grid gap-3 rounded-md border border-border bg-muted/30 p-4" method="get">
+      <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-6">
+        <select className="rounded-md border border-border bg-background px-3 py-2 text-sm" name="agentId" defaultValue={filters.agentId ?? ""}>
+          <option value="">All agents</option>
+          {agents.map((agent) => (
+            <option key={agent.id} value={agent.id}>
+              {agent.name}
+            </option>
+          ))}
+        </select>
+        <OceanFreightSuggestInput
+          name="origin"
+          defaultValue={filters.origin}
+          suggestionField="ports"
+          placeholder="Origin port"
+          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+        />
+        <OceanFreightSuggestInput
+          name="originCountry"
+          defaultValue={filters.originCountry}
+          suggestionField="countries"
+          placeholder="Origin country"
+          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+        />
+        <OceanFreightSuggestInput
+          name="destination"
+          defaultValue={filters.destination}
+          suggestionField="ports"
+          placeholder="Destination port"
+          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+        />
+        <OceanFreightSuggestInput
+          name="destinationCountry"
+          defaultValue={filters.destinationCountry}
+          suggestionField="countries"
+          placeholder="Destination country"
+          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+        />
+        <select className="rounded-md border border-border bg-background px-3 py-2 text-sm" name="equipmentType" defaultValue={filters.equipmentType ?? ""}>
+          <option value="">All equipment</option>
+          {Object.values(OceanEquipmentType).map((type) => (
+            <option key={type} value={type}>
+              {OCEAN_EQUIPMENT_LABELS[type]}
+            </option>
+          ))}
+        </select>
+        <input className="rounded-md border border-border bg-background px-3 py-2 text-sm" name="rateMin" defaultValue={filters.rateMin ?? ""} placeholder="Min rate" />
+        <input className="rounded-md border border-border bg-background px-3 py-2 text-sm" name="rateMax" defaultValue={filters.rateMax ?? ""} placeholder="Max rate" />
+        <input className="rounded-md border border-border bg-background px-3 py-2 text-sm" name="carrier" defaultValue={filters.carrier ?? ""} placeholder="Carrier" />
+        <input className="rounded-md border border-border bg-background px-3 py-2 text-sm" name="validityFrom" defaultValue={filters.validityFrom ?? ""} type="date" />
+        <input className="rounded-md border border-border bg-background px-3 py-2 text-sm" name="validityTo" defaultValue={filters.validityTo ?? ""} type="date" />
+        <input className="rounded-md border border-border bg-background px-3 py-2 text-sm" name="schedule" defaultValue={filters.schedule ?? ""} placeholder="Schedule" />
+        <select className="rounded-md border border-border bg-background px-3 py-2 text-sm" name="agentRating" defaultValue={filters.agentRating ?? ""}>
+          <option value="">Any rating</option>
+          {[1, 2, 3, 4, 5].map((rating) => (
+            <option key={rating} value={rating}>
+              {rating} star
+            </option>
+          ))}
+        </select>
+        <select className="rounded-md border border-border bg-background px-3 py-2 text-sm" name="status" defaultValue={filters.status ?? "active"}>
+          <option value="active">Active only</option>
+          <option value="all">Include historical</option>
+          <option value="expired">Expired only</option>
+          <option value="inactive">Inactive only</option>
+        </select>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground">
+          Apply filters
+        </button>
+        <a className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted" href="/ocean-freight-pricing">
+          Reset
+        </a>
+      </div>
+    </form>
+  );
+}
+
+function RatingPill({ rating }: { rating: number | null }) {
+  return (
+    <span className="inline-flex rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-semibold text-foreground">
+      {rating ? `${rating}/5` : "Not rated"}
+    </span>
+  );
+}
+
+function SummaryCard({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
+      <div className="text-sm font-medium text-mutedForeground">{label}</div>
+      <div className="mt-2 text-2xl font-semibold text-foreground">{value}</div>
+    </div>
+  );
+}
+
+function CollapsibleFormCard({ title, actionLabel, children }: { title: string; actionLabel: string; children: ReactNode }) {
+  return (
+    <details className="group rounded-lg border border-border bg-card shadow-sm">
+      <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 p-5 marker:hidden">
+        <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+        <span className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors group-open:bg-muted group-open:text-foreground">
+          <span className="group-open:hidden">{actionLabel}</span>
+          <span className="hidden group-open:inline">Close</span>
+        </span>
+      </summary>
+      <div className="border-t border-border p-5 pt-4">{children}</div>
+    </details>
+  );
+}

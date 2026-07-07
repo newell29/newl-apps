@@ -392,6 +392,7 @@ model Tenant {
   cashflowAccountingLines       CashflowAccountingLine[]
   cashflowSettings              CashflowSettings?
   oceanFreightAgents            OceanFreightAgent[]
+  oceanFreightAgentBranches     OceanFreightAgentBranch[]
   oceanFreightAgentContacts     OceanFreightAgentContact[]
   oceanFreightSourceEmails      OceanFreightSourceEmail[]
   oceanFreightSourceAttachments OceanFreightSourceAttachment[]
@@ -1391,6 +1392,7 @@ model OceanFreightAgent {
   normalizedName      String
   website             String?
   primaryEmailDomain  String?
+  primaryCountry      String?
   countriesServed     Json?
   portsServed         Json?
   lanesServed         Json?
@@ -1405,14 +1407,40 @@ model OceanFreightAgent {
   updatedAt           DateTime  @updatedAt
 
   tenant     Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branches   OceanFreightAgentBranch[]
   contacts   OceanFreightAgentContact[]
   candidates OceanFreightRateCandidate[]
   rates      OceanFreightRate[]
 
   @@unique([tenantId, normalizedName])
   @@unique([tenantId, id])
+  @@index([tenantId, primaryCountry])
   @@index([tenantId, internalRating])
   @@index([tenantId, lastRateReceivedAt])
+}
+
+model OceanFreightAgentBranch {
+  id        String   @id @default(cuid())
+  tenantId  String
+  agentId   String
+  name      String
+  country   String
+  region    String?
+  city      String?
+  port      String?
+  address   String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  agent  OceanFreightAgent @relation(fields: [tenantId, agentId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, agentId])
+  @@index([tenantId, country])
+  @@index([tenantId, city])
+  @@index([tenantId, port])
 }
 
 model OceanFreightAgentContact {

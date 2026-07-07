@@ -11,6 +11,7 @@ type NavEntry = {
   id: string;
   href: string;
   label: string;
+  exact?: boolean;
   moduleKey?: ModuleKey;
   children?: never;
 };
@@ -65,7 +66,38 @@ const navEntries: NavNode[] = [
       },
       { id: "ups-tools", href: "/ups-tools", label: "UPS Tools", moduleKey: "UPS_TOOLS" as ModuleKey },
       { id: "ltl-rate-portal", href: "/ltl-rate-portal", label: "LTL Rate Portal", moduleKey: "LTL_RATE_PORTAL" as ModuleKey },
-      { id: "ocean-freight-pricing", href: "/ocean-freight-pricing", label: "Ocean Freight Pricing", moduleKey: "OCEAN_FREIGHT_PRICING" as ModuleKey },
+      {
+        id: "ocean-freight-pricing",
+        label: "Ocean Freight Pricing",
+        moduleKey: "OCEAN_FREIGHT_PRICING" as ModuleKey,
+        children: [
+          {
+            id: "ocean-freight-rates",
+            href: "/ocean-freight-pricing",
+            label: "Rates",
+            exact: true,
+            moduleKey: "OCEAN_FREIGHT_PRICING" as ModuleKey
+          },
+          {
+            id: "ocean-freight-sources",
+            href: "/ocean-freight-pricing/sources",
+            label: "Sources",
+            moduleKey: "OCEAN_FREIGHT_PRICING" as ModuleKey
+          },
+          {
+            id: "ocean-freight-agents",
+            href: "/ocean-freight-pricing/agents",
+            label: "Agents",
+            moduleKey: "OCEAN_FREIGHT_PRICING" as ModuleKey
+          },
+          {
+            id: "ocean-freight-jobs",
+            href: "/ocean-freight-pricing/jobs",
+            label: "Jobs",
+            moduleKey: "OCEAN_FREIGHT_PRICING" as ModuleKey
+          }
+        ]
+      },
       { id: "transit-lookup", href: "/transit-lookup", label: "Transit Lookup", moduleKey: "TRANSIT_LOOKUP" as ModuleKey }
     ]
   },
@@ -279,6 +311,10 @@ function filterVisibleNavEntries(entries: NavNode[], enabledModuleKeys?: ModuleK
 function isNavNodeActive(entry: NavNode, pathname: string): boolean {
   if (isNavGroup(entry)) {
     return entry.children.some((child) => isNavNodeActive(child, pathname));
+  }
+
+  if (entry.exact) {
+    return pathname === entry.href;
   }
 
   return pathname === entry.href || pathname.startsWith(`${entry.href}/`);
