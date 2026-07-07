@@ -45,6 +45,7 @@ const navSections: NavSection[] = [
       }
     ]
   },
+  { href: "/tms-bridge", label: "TMS Bridge" },
   { href: "/ups-tools", label: "UPS Tools", moduleKey: "UPS_TOOLS" as ModuleKey },
   { href: "/ltl-rate-portal", label: "LTL Rate Portal", moduleKey: "LTL_RATE_PORTAL" as ModuleKey },
   {
