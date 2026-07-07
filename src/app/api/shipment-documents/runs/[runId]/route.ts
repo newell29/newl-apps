@@ -19,7 +19,7 @@ type ShipmentDocumentRunRouteClient = typeof prisma & {
       bolPdfBytes?: Uint8Array;
       pickTicketPdfBytes?: Uint8Array;
     } | null>;
-    delete(args: { where: { id: string } }): Promise<unknown>;
+    update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<unknown>;
   };
 };
 
@@ -43,7 +43,8 @@ export async function GET(
     const run = await client.shipmentDocumentRun.findFirst({
       where: {
         id: runId,
-        tenantId: context.tenantId
+        tenantId: context.tenantId,
+        deletedAt: null
       },
       select: {
         outputBolFileName: true,
@@ -95,7 +96,8 @@ export async function DELETE(
     const existing = await client.shipmentDocumentRun.findFirst({
       where: {
         id: runId,
-        tenantId: context.tenantId
+        tenantId: context.tenantId,
+        deletedAt: null
       },
       select: {
         id: true
@@ -106,9 +108,13 @@ export async function DELETE(
       return NextResponse.json({ error: "Shipment document run not found." }, { status: 404 });
     }
 
-    await client.shipmentDocumentRun.delete({
+    await client.shipmentDocumentRun.update({
       where: {
         id: runId
+      },
+      data: {
+        deletedAt: new Date(),
+        deletedByUserId: context.userId
       }
     });
 

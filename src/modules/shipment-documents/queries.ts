@@ -145,6 +145,7 @@ export function buildShipmentDocumentRunWhere(
   return {
     tenantId,
     workflowKey: WORKFLOW_KEY,
+    deletedAt: null,
     ...(trimmedSearch
       ? {
           OR: [

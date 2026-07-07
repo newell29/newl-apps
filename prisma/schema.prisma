@@ -614,6 +614,8 @@ model ShipmentDocumentRun {
   bolPdfBytes              Bytes
   pickTicketPdfBytes       Bytes
   createdByUserId          String?
+  deletedAt                DateTime?
+  deletedByUserId          String?
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
 
@@ -623,6 +625,7 @@ model ShipmentDocumentRun {
   @@index([tenantId, workflowKey, shipmentDate])
   @@index([tenantId, createdAt])
   @@index([tenantId, searchText])
+  @@index([tenantId, deletedAt])
 }
 
 model IntegrationCredential {
