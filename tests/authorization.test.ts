@@ -57,9 +57,10 @@ describe("ROLE_MATRIX", () => {
     expect(ROLE_MATRIX[PlatformRole.MANAGER]).toEqual({ modules: "ALL", canMutate: true });
   });
 
-  it("lets SALES access assistant and lead-gen with mutation", () => {
+  it("lets SALES access assistant, lead-gen, and ocean pricing with mutation", () => {
     expect(roleHasModuleAccess(PlatformRole.SALES, ModuleKey.ASSISTANT)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.SALES, ModuleKey.LEAD_GEN)).toBe(true);
+    expect(roleHasModuleAccess(PlatformRole.SALES, ModuleKey.OCEAN_FREIGHT_PRICING)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.SALES, ModuleKey.INVOICE_VERIFICATION)).toBe(false);
     expect(roleCanMutate(PlatformRole.SALES)).toBe(true);
   });
@@ -69,6 +70,7 @@ describe("ROLE_MATRIX", () => {
     expect(roleHasModuleAccess(PlatformRole.FINANCE, ModuleKey.INVOICE_VERIFICATION)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.FINANCE, ModuleKey.QUICKBOOKS_POSTING)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.FINANCE, ModuleKey.LEAD_GEN)).toBe(false);
+    expect(roleHasModuleAccess(PlatformRole.FINANCE, ModuleKey.OCEAN_FREIGHT_PRICING)).toBe(false);
   });
 
   it("gives OPERATIONS assistant + lead-gen + operational modules", () => {
@@ -78,6 +80,7 @@ describe("ROLE_MATRIX", () => {
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.UPS_TOOLS)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.LTL_RATE_PORTAL)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.TRANSIT_LOOKUP)).toBe(true);
+    expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.OCEAN_FREIGHT_PRICING)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.QUICKBOOKS_POSTING)).toBe(false);
   });
 
@@ -89,7 +92,8 @@ describe("ROLE_MATRIX", () => {
       ModuleKey.LTL_RATE_PORTAL,
       ModuleKey.TRANSIT_LOOKUP,
       ModuleKey.SHIPMENT_DOCUMENTS,
-      ModuleKey.CUSTOMER_CASHFLOW
+      ModuleKey.CUSTOMER_CASHFLOW,
+      ModuleKey.OCEAN_FREIGHT_PRICING
     ]);
   });
 
@@ -212,6 +216,24 @@ describe("requireModule", () => {
     });
   });
 
+  it("allows SALES to access OCEAN_FREIGHT_PRICING when enabled for the tenant", async () => {
+    findFirst.mockResolvedValue({ id: "tma-ocean" });
+    await expect(
+      requireModule(ctx(PlatformRole.SALES, "tenant-sales"), ModuleKey.OCEAN_FREIGHT_PRICING)
+    ).resolves.toBeUndefined();
+
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        tenantId: "tenant-sales",
+        enabled: true,
+        module: {
+          key: ModuleKey.OCEAN_FREIGHT_PRICING
+        }
+      },
+      select: { id: true }
+    });
+  });
+
   it("allows OPERATIONS to access LTL_RATE_PORTAL when enabled for the tenant", async () => {
     findFirst.mockResolvedValue({ id: "tma-ltl" });
     await expect(
@@ -263,6 +285,13 @@ describe("requireModule", () => {
   it("rejects TRANSIT_LOOKUP before any DB lookup when the role lacks access", async () => {
     await expect(
       requireModule(ctx(PlatformRole.FINANCE), ModuleKey.TRANSIT_LOOKUP)
+    ).rejects.toBeInstanceOf(AuthorizationError);
+    expect(findFirst).not.toHaveBeenCalled();
+  });
+
+  it("rejects OCEAN_FREIGHT_PRICING before any DB lookup when FINANCE lacks default access", async () => {
+    await expect(
+      requireModule(ctx(PlatformRole.FINANCE), ModuleKey.OCEAN_FREIGHT_PRICING)
     ).rejects.toBeInstanceOf(AuthorizationError);
     expect(findFirst).not.toHaveBeenCalled();
   });

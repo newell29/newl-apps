@@ -533,6 +533,11 @@ async function main() {
       key: ModuleKey.WEBSITE_INBOUND,
       name: "Website Inbound",
       description: "Website form submissions, playbook downloads, and inbound lead review"
+    },
+    {
+      key: ModuleKey.OCEAN_FREIGHT_PRICING,
+      name: "Ocean Freight Pricing",
+      description: "Manual ocean freight rate management, agent directory, and pricing review workspace"
     }
   ];
 
@@ -691,6 +696,25 @@ async function main() {
     create: {
       tenantId: tenant.id,
       moduleId: upsModule.id,
+      enabled: true
+    }
+  });
+
+  const oceanFreightPricingModule = await prisma.module.findUniqueOrThrow({
+    where: { key: ModuleKey.OCEAN_FREIGHT_PRICING }
+  });
+
+  await prisma.tenantModuleAccess.upsert({
+    where: {
+      tenantId_moduleId: {
+        tenantId: tenant.id,
+        moduleId: oceanFreightPricingModule.id
+      }
+    },
+    update: { enabled: true },
+    create: {
+      tenantId: tenant.id,
+      moduleId: oceanFreightPricingModule.id,
       enabled: true
     }
   });
