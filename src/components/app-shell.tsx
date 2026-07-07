@@ -3,61 +3,82 @@
 import type { ModuleKey, PlatformRole } from "@prisma/client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { NewlLogo } from "@/components/newl-logo";
 import { signOutAction } from "@/server/auth/actions";
 
-type NavLink = {
+type NavEntry = {
+  id: string;
   href: string;
   label: string;
   moduleKey?: ModuleKey;
+  children?: never;
 };
 
-type NavSection = {
+type NavGroup = {
+  id: string;
   label: string;
-  href?: string;
   moduleKey?: ModuleKey;
-  items?: NavLink[];
+  children: NavNode[];
 };
 
-const navSections: NavSection[] = [
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/assistant", label: "Company Assistant", moduleKey: "ASSISTANT" as ModuleKey },
-  { href: "/website-inbound", label: "Website Inbound", moduleKey: "WEBSITE_INBOUND" as ModuleKey },
+type NavNode = NavEntry | NavGroup;
+
+const navEntries: NavNode[] = [
+  { id: "dashboard", href: "/dashboard", label: "Dashboard" },
+  { id: "assistant", href: "/assistant", label: "Company Assistant", moduleKey: "ASSISTANT" as ModuleKey },
   {
-    label: "TradeMining Leads",
-    moduleKey: "LEAD_GEN" as ModuleKey,
-    items: [
-      { href: "/lead-gen/search-profiles", label: "Search Profiles", moduleKey: "LEAD_GEN" as ModuleKey },
-      { href: "/lead-gen/candidates", label: "Found Companies", moduleKey: "LEAD_GEN" as ModuleKey },
-      { href: "/lead-gen/pipeline", label: "Pipeline", moduleKey: "LEAD_GEN" as ModuleKey },
-      { href: "/lead-gen/contacts", label: "Contacts", moduleKey: "LEAD_GEN" as ModuleKey },
-      { href: "/operations/logs", label: "Health & Logs", moduleKey: "LEAD_GEN" as ModuleKey }
-    ]
-  },
-  {
-    label: "Garland Tools",
-    moduleKey: "SHIPMENT_DOCUMENTS" as ModuleKey,
-    items: [
+    id: "sales",
+    label: "Sales",
+    children: [
       {
-        href: "/shipment-documents",
-        label: "BOL Consolidation",
-        moduleKey: "SHIPMENT_DOCUMENTS" as ModuleKey
-      }
+        id: "trademining",
+        label: "TradeMining",
+        moduleKey: "LEAD_GEN" as ModuleKey,
+        children: [
+          { id: "lead-search-profiles", href: "/lead-gen/search-profiles", label: "Search Profiles", moduleKey: "LEAD_GEN" as ModuleKey },
+          { id: "lead-candidates", href: "/lead-gen/candidates", label: "Found Companies", moduleKey: "LEAD_GEN" as ModuleKey },
+          { id: "lead-pipeline", href: "/lead-gen/pipeline", label: "Pipeline", moduleKey: "LEAD_GEN" as ModuleKey },
+          { id: "lead-contacts", href: "/lead-gen/contacts", label: "Contacts", moduleKey: "LEAD_GEN" as ModuleKey },
+          { id: "lead-logs", href: "/operations/logs", label: "Health & Logs", moduleKey: "LEAD_GEN" as ModuleKey }
+        ]
+      },
+      { id: "website-inbound", href: "/website-inbound", label: "Website Inbound", moduleKey: "WEBSITE_INBOUND" as ModuleKey }
     ]
   },
-  { href: "/ups-tools", label: "UPS Tools", moduleKey: "UPS_TOOLS" as ModuleKey },
-  { href: "/ltl-rate-portal", label: "LTL Rate Portal", moduleKey: "LTL_RATE_PORTAL" as ModuleKey },
   {
-    label: "Finance",
-    moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey,
-    items: [
-      { href: "/finance/customer-cashflow", label: "Customer Cashflow", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey },
-      { href: "/finance/customer-cashflow/collections", label: "Collections Queue", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey },
-      { href: "/finance/credit-checks", label: "Credit Checks", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey },
-      { href: "/finance/customer-cashflow/settings", label: "Credit Settings", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey }
+    id: "operations",
+    label: "Operations Tools",
+    children: [
+      {
+        id: "garland",
+        label: "Garland",
+        moduleKey: "SHIPMENT_DOCUMENTS" as ModuleKey,
+        children: [
+          {
+            id: "garland-bol-consolidation",
+            href: "/shipment-documents",
+            label: "BOL Consolidation",
+            moduleKey: "SHIPMENT_DOCUMENTS" as ModuleKey
+          }
+        ]
+      },
+      { id: "ups-tools", href: "/ups-tools", label: "UPS Tools", moduleKey: "UPS_TOOLS" as ModuleKey },
+      { id: "ltl-rate-portal", href: "/ltl-rate-portal", label: "LTL Rate Portal", moduleKey: "LTL_RATE_PORTAL" as ModuleKey },
+      { id: "transit-lookup", href: "/transit-lookup", label: "Transit Lookup", moduleKey: "TRANSIT_LOOKUP" as ModuleKey }
     ]
   },
-  { href: "/settings", label: "Settings" }
+  {
+    id: "finance",
+    label: "Finance",
+    children: [
+      { id: "customer-cashflow", href: "/finance/customer-cashflow", label: "Customer Cashflow", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey },
+      { id: "collections-queue", href: "/finance/customer-cashflow/collections", label: "Collections Queue", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey },
+      { id: "credit-checks", href: "/finance/credit-checks", label: "Credit Checks", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey },
+      { id: "credit-settings", href: "/finance/customer-cashflow/settings", label: "Credit Settings", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey }
+    ]
+  },
+  { id: "settings", href: "/settings", label: "Settings" }
 ];
 
 function formatRole(role: PlatformRole) {
@@ -76,7 +97,7 @@ export function AppShell({
   tenantName,
   enabledModuleKeys
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   userName?: string | null;
   userEmail?: string;
   role?: PlatformRole;
@@ -85,18 +106,27 @@ export function AppShell({
 }) {
   const pathname = usePathname();
   const displayName = userName?.trim() || userEmail || "Signed in";
-  const visibleNavSections = navSections
-    .map((section) => ({
-      ...section,
-      items: section.items?.filter((item) => !item.moduleKey || enabledModuleKeys?.includes(item.moduleKey))
-    }))
-    .filter((section) => {
-      if (section.items) {
-        return section.items.length > 0;
-      }
+  const [expandedNavIds, setExpandedNavIds] = useState<Record<string, boolean>>({});
+  const visibleNavEntries = useMemo(
+    () => filterVisibleNavEntries(navEntries, enabledModuleKeys),
+    [enabledModuleKeys]
+  );
 
-      return !section.moduleKey || enabledModuleKeys?.includes(section.moduleKey);
+  useEffect(() => {
+    setExpandedNavIds((current) => {
+      const next = { ...current };
+      openActiveNavGroups(visibleNavEntries, pathname, next);
+      return next;
     });
+  }, [pathname, visibleNavEntries]);
+
+  function toggleNavGroup(entry: NavGroup) {
+    const isOpen = expandedNavIds[entry.id] ?? isNavNodeActive(entry, pathname);
+    setExpandedNavIds((current) => ({
+      ...current,
+      [entry.id]: !isOpen
+    }));
+  }
 
   return (
     <div className="min-h-screen bg-background lg:flex">
@@ -105,63 +135,12 @@ export function AppShell({
           <NewlLogo compact inverse />
         </div>
         <nav className="p-3 lg:flex-1">
-          <div className="space-y-3">
-            {visibleNavSections.map((section) => {
-              const sectionIsActive = section.href
-                ? pathname === section.href || pathname.startsWith(`${section.href}/`)
-                : section.items?.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
-
-              if (section.items) {
-                return (
-                  <div key={section.label} className="space-y-1">
-                    <div
-                      className={[
-                        "rounded-md px-3 py-2 text-xs font-semibold uppercase tracking-wide",
-                        sectionIsActive ? "text-sidebarForeground" : "text-sidebarMuted"
-                      ].join(" ")}
-                    >
-                      {section.label}
-                    </div>
-                    <div className="space-y-1">
-                      {section.items.map((item) => {
-                        const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
-
-                        return (
-                          <Link
-                            key={item.href}
-                            href={item.href}
-                            className={[
-                              "block rounded-md px-3 py-2 pl-6 text-sm font-medium transition-colors",
-                              isActive
-                                ? "bg-sidebarActive text-primaryForeground shadow-sm hover:bg-primaryHover"
-                                : "text-sidebarMuted hover:bg-sidebarHover hover:text-sidebarForeground"
-                            ].join(" ")}
-                          >
-                            {item.label}
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              }
-
-              return (
-                <Link
-                  key={section.href}
-                  href={section.href!}
-                  className={[
-                    "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                    sectionIsActive
-                      ? "bg-sidebarActive text-primaryForeground shadow-sm hover:bg-primaryHover"
-                      : "text-sidebarMuted hover:bg-sidebarHover hover:text-sidebarForeground"
-                  ].join(" ")}
-                >
-                  {section.label}
-                </Link>
-              );
-            })}
-          </div>
+          <NavTree
+            entries={visibleNavEntries}
+            expandedNavIds={expandedNavIds}
+            pathname={pathname}
+            onToggleGroup={toggleNavGroup}
+          />
         </nav>
         {tenantName || role || userEmail ? (
           <div className="border-t border-sidebarForeground/10 p-3 lg:mt-auto">
@@ -194,4 +173,129 @@ export function AppShell({
       <main className="min-w-0 flex-1 p-4 sm:p-6 lg:ml-64 lg:p-8">{children}</main>
     </div>
   );
+}
+
+function NavTree({
+  entries,
+  expandedNavIds,
+  pathname,
+  onToggleGroup,
+  depth = 0
+}: {
+  entries: NavNode[];
+  expandedNavIds: Record<string, boolean>;
+  pathname: string;
+  onToggleGroup: (entry: NavGroup) => void;
+  depth?: number;
+}) {
+  return (
+    <div className={depth === 0 ? "space-y-1" : "space-y-1"}>
+      {entries.map((entry) => {
+        const isActive = isNavNodeActive(entry, pathname);
+        const paddingLeft = 12 + depth * 12;
+
+        if (isNavGroup(entry)) {
+          const isOpen = expandedNavIds[entry.id] ?? isActive;
+
+          return (
+            <div key={entry.id} className="space-y-1">
+              <button
+                type="button"
+                onClick={() => onToggleGroup(entry)}
+                aria-expanded={isOpen}
+                className={[
+                  "flex w-full items-center justify-between rounded-md py-2 pr-3 text-left transition-colors",
+                  depth === 0 ? "text-xs font-semibold uppercase tracking-wide" : "text-sm font-semibold",
+                  isActive
+                    ? "bg-sidebarHover text-sidebarForeground"
+                    : "text-sidebarMuted hover:bg-sidebarHover hover:text-sidebarForeground"
+                ].join(" ")}
+                style={{ paddingLeft }}
+              >
+                <span>{entry.label}</span>
+                <span
+                  aria-hidden="true"
+                  className={["text-xs transition-transform", isOpen ? "rotate-90" : ""].join(" ")}
+                >
+                  &gt;
+                </span>
+              </button>
+              {isOpen ? (
+                <NavTree
+                  entries={entry.children}
+                  expandedNavIds={expandedNavIds}
+                  pathname={pathname}
+                  onToggleGroup={onToggleGroup}
+                  depth={depth + 1}
+                />
+              ) : null}
+            </div>
+          );
+        }
+
+        return (
+          <Link
+            key={entry.id}
+            href={entry.href}
+            className={[
+              "block rounded-md py-2 pr-3 text-sm font-medium transition-colors",
+              isActive
+                ? "bg-sidebarActive text-primaryForeground shadow-sm hover:bg-primaryHover"
+                : "text-sidebarMuted hover:bg-sidebarHover hover:text-sidebarForeground"
+            ].join(" ")}
+            style={{ paddingLeft }}
+          >
+            {entry.label}
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+function filterVisibleNavEntries(entries: NavNode[], enabledModuleKeys?: ModuleKey[]): NavNode[] {
+  const visibleEntries: NavNode[] = [];
+
+  for (const entry of entries) {
+    if (isNavGroup(entry)) {
+      const children = filterVisibleNavEntries(entry.children, enabledModuleKeys);
+      if (children.length > 0) {
+        visibleEntries.push({ ...entry, children });
+      }
+      continue;
+    }
+
+    if (entry.moduleKey && !enabledModuleKeys?.includes(entry.moduleKey)) {
+      continue;
+    }
+
+    visibleEntries.push(entry);
+  }
+
+  return visibleEntries;
+}
+
+function isNavNodeActive(entry: NavNode, pathname: string): boolean {
+  if (isNavGroup(entry)) {
+    return entry.children.some((child) => isNavNodeActive(child, pathname));
+  }
+
+  return pathname === entry.href || pathname.startsWith(`${entry.href}/`);
+}
+
+function openActiveNavGroups(entries: NavNode[], pathname: string, expandedNavIds: Record<string, boolean>) {
+  for (const entry of entries) {
+    if (!isNavGroup(entry)) {
+      continue;
+    }
+
+    if (isNavNodeActive(entry, pathname)) {
+      expandedNavIds[entry.id] = true;
+      openActiveNavGroups(entry.children, pathname, expandedNavIds);
+    }
+  }
+}
+
+function isNavGroup(entry: NavNode): entry is NavGroup {
+  return Array.isArray(entry.children);
 }
