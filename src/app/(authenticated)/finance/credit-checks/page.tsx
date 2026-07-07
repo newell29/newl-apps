@@ -93,8 +93,8 @@ export default async function CreditChecksPage({
         ) : null}
 
         {shell.creditChecks.map((creditCheck) => (
-          <article key={creditCheck.id} className="rounded-lg border border-border bg-card shadow-sm">
-            <div className="grid gap-5 p-5 xl:grid-cols-[0.9fr,1.1fr]">
+          <details key={creditCheck.id} className="group rounded-lg border border-border bg-card shadow-sm">
+            <summary className="flex cursor-pointer list-none flex-col gap-4 p-5 marker:hidden lg:grid lg:grid-cols-[1.3fr,0.9fr,0.8fr,auto] lg:items-center">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={statusBadgeClassName(creditCheck.status)}>{formatStatus(creditCheck.status)}</span>
@@ -108,14 +108,35 @@ export default async function CreditChecksPage({
                     </span>
                   )}
                 </div>
-
-                <h2 className="mt-3 text-xl font-semibold text-foreground">
+                <h2 className="mt-3 text-lg font-semibold text-foreground">
                   {creditCheck.company ?? "Unassigned company"}
                 </h2>
-                {creditCheck.operatingName && creditCheck.operatingName !== creditCheck.company ? (
-                  <p className="mt-1 text-sm text-mutedForeground">Operating as {creditCheck.operatingName}</p>
-                ) : null}
                 <p className="mt-1 text-sm text-mutedForeground">{formatDate(creditCheck.createdAt)}</p>
+              </div>
+
+              <div className="text-sm">
+                <p className="font-medium text-mutedForeground">Contact</p>
+                <p className="mt-1 font-semibold text-foreground">{creditCheck.primaryContactName ?? "Not provided"}</p>
+                <p className="mt-1 break-words text-mutedForeground">{creditCheck.primaryContactEmail ?? "No email captured"}</p>
+              </div>
+
+              <div className="text-sm">
+                <p className="font-medium text-mutedForeground">Credit</p>
+                <p className="mt-1 text-foreground">Requested: {creditCheck.requestedCreditLimit ?? "Not provided"}</p>
+                <p className="mt-1 text-foreground">Approved: {creditCheck.approvedCreditLimit ?? "Not set"}</p>
+              </div>
+
+              <span className="inline-flex min-h-10 items-center justify-center rounded-md border border-border px-3 text-sm font-semibold text-foreground transition-colors group-open:bg-muted group-hover:bg-muted">
+                <span className="group-open:hidden">Open</span>
+                <span className="hidden group-open:inline">Close</span>
+              </span>
+            </summary>
+
+            <div className="grid gap-5 border-t border-border p-5 xl:grid-cols-[0.9fr,1.1fr]">
+              <div>
+                {creditCheck.operatingName && creditCheck.operatingName !== creditCheck.company ? (
+                  <p className="text-sm text-mutedForeground">Operating as {creditCheck.operatingName}</p>
+                ) : null}
 
                 <dl className="mt-4 grid gap-2 text-sm">
                   <SummaryRow label="Primary contact" value={creditCheck.primaryContactName} />
@@ -214,7 +235,7 @@ export default async function CreditChecksPage({
                 </form>
               </div>
             </div>
-          </article>
+          </details>
         ))}
       </section>
     </div>
