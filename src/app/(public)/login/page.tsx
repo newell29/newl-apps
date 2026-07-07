@@ -1,6 +1,11 @@
 import { NewlLogo } from "@/components/newl-logo";
 import { signInWithEntraAction } from "@/server/auth/actions";
-import { isDevLoginEnabled, isTemporaryPasswordLoginEnabled } from "@/server/auth/constants";
+import {
+  isDevLoginEnabled,
+  isLocalPasswordLoginFallbackEnabled,
+  isMicrosoftEntraConfigured,
+  isTemporaryPasswordLoginEnabled
+} from "@/server/auth/constants";
 
 export const dynamic = "force-dynamic";
 
@@ -24,8 +29,10 @@ export default async function LoginPage({
   const errorCode = readParam(params.error);
   const errorMessage = errorCode ? (errorMessages[errorCode] ?? errorMessages.default) : null;
   const devLoginEnabled = isDevLoginEnabled();
+  const localPasswordFallbackEnabled = isLocalPasswordLoginFallbackEnabled();
+  const microsoftLoginEnabled = isMicrosoftEntraConfigured();
   const temporaryPasswordLoginEnabled = isTemporaryPasswordLoginEnabled();
-  const passwordLoginEnabled = devLoginEnabled || temporaryPasswordLoginEnabled;
+  const passwordLoginEnabled = devLoginEnabled || localPasswordFallbackEnabled || temporaryPasswordLoginEnabled;
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-12">
@@ -48,15 +55,17 @@ export default async function LoginPage({
             </div>
           ) : null}
 
-          <form action={signInWithEntraAction} className="mt-6">
-            <input type="hidden" name="callbackUrl" value={callbackUrl} />
-            <button
-              type="submit"
-              className="flex w-full items-center justify-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover"
-            >
-              Sign in with Microsoft
-            </button>
-          </form>
+          {microsoftLoginEnabled ? (
+            <form action={signInWithEntraAction} className="mt-6">
+              <input type="hidden" name="callbackUrl" value={callbackUrl} />
+              <button
+                type="submit"
+                className="flex w-full items-center justify-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover"
+              >
+                Sign in with Microsoft
+              </button>
+            </form>
+          ) : null}
 
           {passwordLoginEnabled ? (
             <div className="mt-6 space-y-3">
@@ -68,9 +77,9 @@ export default async function LoginPage({
                 <span className="h-px flex-1 bg-border" />
               </div>
 
-              {devLoginEnabled ? (
+              {devLoginEnabled || localPasswordFallbackEnabled ? (
                 <div className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-                  Local development bypass is active (AUTH_DEV_BYPASS). This panel never appears in production.
+                  Local development password login is active. This panel never appears in production.
                 </div>
               ) : null}
 
@@ -88,7 +97,7 @@ export default async function LoginPage({
                     name="email"
                     type="email"
                     autoComplete="username"
-                    defaultValue={devLoginEnabled ? "admin@example.com" : ""}
+                    defaultValue={devLoginEnabled || localPasswordFallbackEnabled ? "admin@example.com" : ""}
                     className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
                   />
                 </label>

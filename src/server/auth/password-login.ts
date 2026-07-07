@@ -8,6 +8,7 @@ import {
   SESSION_COOKIE_NAME,
   getSessionMaxAgeSeconds,
   isDevLoginEnabled,
+  isLocalPasswordLoginFallbackEnabled,
   isPasswordLoginEnabled,
   isTemporaryPasswordLoginEnabled
 } from "@/server/auth/constants";
@@ -20,6 +21,8 @@ export async function handlePasswordLogin(request: Request) {
 
   if (isDevLoginEnabled()) {
     console.warn("\n[auth] DEV LOGIN BYPASS ACTIVE - AUTH_DEV_BYPASS=true. Do not enable this in production.\n");
+  } else if (isLocalPasswordLoginFallbackEnabled()) {
+    console.warn("\n[auth] LOCAL PASSWORD LOGIN ACTIVE - Microsoft Entra SSO is not configured.\n");
   } else if (isTemporaryPasswordLoginEnabled()) {
     console.warn("\n[auth] TEMP PASSWORD LOGIN ACTIVE - use only while Microsoft Entra SSO is being configured.\n");
   }

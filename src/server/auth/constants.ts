@@ -4,6 +4,7 @@
 // database client.
 
 const THIRTY_DAYS_SECONDS = 60 * 60 * 24 * 30;
+const PLACEHOLDER_PATTERN = /PLACEHOLDER|CHANGE_ME|<.+>/i;
 
 /**
  * Database session lifetime in seconds. Configurable via SESSION_MAX_AGE_DAYS,
@@ -34,6 +35,18 @@ export function isDevLoginEnabled(): boolean {
   return process.env.NODE_ENV !== "production" && process.env.AUTH_DEV_BYPASS === "true";
 }
 
+export function isMicrosoftEntraConfigured(): boolean {
+  return Boolean(
+    readUsableEnv("AUTH_MICROSOFT_ENTRA_ID_ID", "AZURE_AD_CLIENT_ID") &&
+      readUsableEnv("AUTH_MICROSOFT_ENTRA_ID_SECRET", "AZURE_AD_CLIENT_SECRET") &&
+      (readUsableEnv("AUTH_MICROSOFT_ENTRA_ID_ISSUER") || readUsableEnv("AZURE_AD_TENANT_ID"))
+  );
+}
+
+export function isLocalPasswordLoginFallbackEnabled(): boolean {
+  return process.env.NODE_ENV !== "production" && !isMicrosoftEntraConfigured();
+}
+
 /**
  * Temporary password login for deployed/internal testing while Microsoft Entra
  * is being configured. This is intentionally separate from AUTH_DEV_BYPASS so
@@ -44,5 +57,16 @@ export function isTemporaryPasswordLoginEnabled(): boolean {
 }
 
 export function isPasswordLoginEnabled(): boolean {
-  return isDevLoginEnabled() || isTemporaryPasswordLoginEnabled();
+  return isDevLoginEnabled() || isLocalPasswordLoginFallbackEnabled() || isTemporaryPasswordLoginEnabled();
+}
+
+export function readUsableEnv(...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = process.env[key]?.trim();
+    if (value && !PLACEHOLDER_PATTERN.test(value)) {
+      return value;
+    }
+  }
+
+  return undefined;
 }

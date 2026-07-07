@@ -1,17 +1,17 @@
 import type { NextAuthConfig } from "next-auth";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 
-import { getSessionMaxAgeSeconds } from "@/server/auth/constants";
+import { getSessionMaxAgeSeconds, isMicrosoftEntraConfigured, readUsableEnv } from "@/server/auth/constants";
 
 // Resolve the Entra issuer either from an explicit issuer URL or a tenant id.
 // Real values are never committed; see .env.example for placeholders.
 function resolveEntraIssuer(): string | undefined {
-  const explicitIssuer = process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER;
+  const explicitIssuer = readUsableEnv("AUTH_MICROSOFT_ENTRA_ID_ISSUER");
   if (explicitIssuer) {
     return explicitIssuer;
   }
 
-  const tenantId = process.env.AZURE_AD_TENANT_ID;
+  const tenantId = readUsableEnv("AZURE_AD_TENANT_ID");
   if (tenantId) {
     return `https://login.microsoftonline.com/${tenantId}/v2.0`;
   }
@@ -41,15 +41,19 @@ export const authConfig = {
     signIn: "/login"
   },
   providers: [
-    MicrosoftEntraID({
-      clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID ?? process.env.AZURE_AD_CLIENT_ID,
-      clientSecret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET ?? process.env.AZURE_AD_CLIENT_SECRET,
-      issuer: resolveEntraIssuer(),
-      // Accounts are admin-provisioned: a User row already exists for the
-      // employee. We trust Entra's verified email and link the new SSO Account
-      // to the existing User by email instead of failing with
-      // OAuthAccountNotLinked.
-      allowDangerousEmailAccountLinking: true
-    })
+    ...(isMicrosoftEntraConfigured()
+      ? [
+          MicrosoftEntraID({
+            clientId: readUsableEnv("AUTH_MICROSOFT_ENTRA_ID_ID", "AZURE_AD_CLIENT_ID"),
+            clientSecret: readUsableEnv("AUTH_MICROSOFT_ENTRA_ID_SECRET", "AZURE_AD_CLIENT_SECRET"),
+            issuer: resolveEntraIssuer(),
+            // Accounts are admin-provisioned: a User row already exists for the
+            // employee. We trust Entra's verified email and link the new SSO Account
+            // to the existing User by email instead of failing with
+            // OAuthAccountNotLinked.
+            allowDangerousEmailAccountLinking: true
+          })
+        ]
+      : [])
   ]
 } satisfies NextAuthConfig;
