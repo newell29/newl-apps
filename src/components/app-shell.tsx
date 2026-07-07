@@ -65,6 +65,7 @@ const navEntries: NavNode[] = [
       },
       { id: "ups-tools", href: "/ups-tools", label: "UPS Tools", moduleKey: "UPS_TOOLS" as ModuleKey },
       { id: "ltl-rate-portal", href: "/ltl-rate-portal", label: "LTL Rate Portal", moduleKey: "LTL_RATE_PORTAL" as ModuleKey },
+      { id: "ocean-freight-pricing", href: "/ocean-freight-pricing", label: "Ocean Freight Pricing", moduleKey: "OCEAN_FREIGHT_PRICING" as ModuleKey },
       { id: "transit-lookup", href: "/transit-lookup", label: "Transit Lookup", moduleKey: "TRANSIT_LOOKUP" as ModuleKey }
     ]
   },
