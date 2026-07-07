@@ -38,6 +38,15 @@ enum WebsiteInboundStatus {
   CLOSED
 }
 
+enum CreditCheckStatus {
+  NEW
+  IN_REVIEW
+  REFERENCES_CONTACTED
+  APPROVED
+  DECLINED
+  MORE_INFO_NEEDED
+}
+
 enum IntegrationProvider {
   APOLLO
   TRADEMINING
@@ -330,6 +339,7 @@ model Tenant {
   assistantThreads            AssistantChatThread[]
   assistantMessages           AssistantChatMessage[]
   websiteInboundSubmissions   WebsiteInboundSubmission[]
+  creditChecks                 CreditCheck[]
   assistantRuns               AssistantRun[]
   assistantRetrievedSources   AssistantRetrievedSource[]
   assistantKnowledgeDocuments AssistantKnowledgeDocument[]
@@ -509,6 +519,40 @@ model WebsiteInboundSubmission {
   @@index([tenantId, createdAt])
   @@index([tenantId, status])
   @@index([tenantId, formType])
+}
+
+model CreditCheck {
+  id                   String            @id @default(cuid())
+  tenantId             String
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  status               CreditCheckStatus @default(NEW)
+  source               String?
+  pageUrl              String?
+  legalCompanyName     String?
+  operatingName        String?
+  company              String?
+  mainPhone            String?
+  primaryContactName   String?
+  primaryContactEmail  String?
+  accountsPayableEmail String?
+  requestedCreditLimit String?
+  approvedCreditLimit  String?
+  services             Json?
+  tradeReferences      Json?
+  fields               Json
+  referencesContacted  Boolean           @default(false)
+  referenceNotes       String?
+  internalNotes        String?
+  reviewedByUserId     String?
+  approvedByUserId     String?
+  approvedAt           DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, status])
+  @@index([tenantId, company])
 }
 
 model ShipmentDocumentRun {

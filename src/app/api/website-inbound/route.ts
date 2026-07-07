@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/server/db";
+import { createCreditCheckFromAccountSetup } from "@/modules/credit-checks/create";
 import { summarizeWebsiteInboundFields } from "@/modules/website-inbound/summary";
 import type { WebsiteInboundSubmissionInput } from "@/modules/website-inbound/types";
 
@@ -75,6 +76,19 @@ export async function POST(request: Request) {
   }
 
   const fields = sanitizeFields(payload.fields as Record<string, string | string[]>);
+
+  if (payload.formType === "account_setup") {
+    const result = await createCreditCheckFromAccountSetup({
+      tenantId: tenant.id,
+      formType: payload.formType,
+      source: payload.source ?? "website",
+      pageUrl: payload.pageUrl,
+      fields
+    });
+
+    return NextResponse.json(result, { status: 201 });
+  }
+
   const summary = summarizeWebsiteInboundFields(fields);
   const submission = await prisma.websiteInboundSubmission.create({
     data: {

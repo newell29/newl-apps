@@ -532,7 +532,7 @@ async function main() {
     {
       key: ModuleKey.WEBSITE_INBOUND,
       name: "Website Inbound",
-      description: "Website form submissions, account setup requests, and inbound lead review"
+      description: "Website form submissions, playbook downloads, and inbound lead review"
     }
   ];
 

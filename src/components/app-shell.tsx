@@ -53,6 +53,7 @@ const navSections: NavSection[] = [
     items: [
       { href: "/finance/customer-cashflow", label: "Customer Cashflow", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey },
       { href: "/finance/customer-cashflow/collections", label: "Collections Queue", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey },
+      { href: "/finance/credit-checks", label: "Credit Checks", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey },
       { href: "/finance/customer-cashflow/settings", label: "Credit Settings", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey }
     ]
   },

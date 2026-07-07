@@ -13,7 +13,13 @@ export async function getWebsiteInboundShell(
   } = {}
 ) {
   const where = buildWhere(context.tenantId, filters);
-  const [submissions, totalCount, newCount, accountSetupCount, formTypes, statusCounts] =
+  const baseWhere: Prisma.WebsiteInboundSubmissionWhereInput = {
+    tenantId: context.tenantId,
+    NOT: {
+      formType: "account_setup"
+    }
+  };
+  const [submissions, totalCount, newCount, formTypes, statusCounts] =
     await Promise.all([
       prisma.websiteInboundSubmission.findMany({
         where,
@@ -23,27 +29,17 @@ export async function getWebsiteInboundShell(
         take: 200
       }),
       prisma.websiteInboundSubmission.count({
-        where: {
-          tenantId: context.tenantId
-        }
+        where: baseWhere
       }),
       prisma.websiteInboundSubmission.count({
         where: {
-          tenantId: context.tenantId,
+          ...baseWhere,
           status: WebsiteInboundStatus.NEW
-        }
-      }),
-      prisma.websiteInboundSubmission.count({
-        where: {
-          tenantId: context.tenantId,
-          formType: "account_setup"
         }
       }),
       prisma.websiteInboundSubmission.groupBy({
         by: ["formType"],
-        where: {
-          tenantId: context.tenantId
-        },
+        where: baseWhere,
         _count: {
           _all: true
         },
@@ -53,9 +49,7 @@ export async function getWebsiteInboundShell(
       }),
       prisma.websiteInboundSubmission.groupBy({
         by: ["status"],
-        where: {
-          tenantId: context.tenantId
-        },
+        where: baseWhere,
         _count: {
           _all: true
         }
@@ -67,7 +61,6 @@ export async function getWebsiteInboundShell(
     metrics: {
       totalCount,
       newCount,
-      accountSetupCount,
       visibleCount: submissions.length
     },
     formTypes: formTypes.map((entry) => ({
@@ -93,6 +86,9 @@ function buildWhere(
 
   return {
     tenantId,
+    NOT: {
+      formType: "account_setup"
+    },
     ...(filters.status && filters.status !== "ALL" ? { status: filters.status } : {}),
     ...(filters.formType && filters.formType !== "ALL" ? { formType: filters.formType } : {}),
     ...(search
