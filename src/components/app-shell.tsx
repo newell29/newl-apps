@@ -105,6 +105,7 @@ const navEntries: NavNode[] = [
     id: "finance",
     label: "Finance",
     children: [
+      { id: "invoice-automation", href: "/finance/invoice-automation", label: "Invoice Automation", moduleKey: "INVOICE_VERIFICATION" as ModuleKey },
       { id: "customer-cashflow", href: "/finance/customer-cashflow", label: "Customer Cashflow", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey },
       { id: "collections-queue", href: "/finance/customer-cashflow/collections", label: "Collections Queue", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey },
       { id: "credit-checks", href: "/finance/credit-checks", label: "Credit Checks", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey },

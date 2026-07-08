@@ -391,6 +391,13 @@ model Tenant {
   cashflowFollowUps             CashflowFollowUp[]
   cashflowAccountingLines       CashflowAccountingLine[]
   cashflowSettings              CashflowSettings?
+  accountingDocuments           AccountingDocument[]
+  accountingInvoiceBatches      AccountingInvoiceBatch[]
+  accountingInvoiceStagings     AccountingInvoiceStaging[]
+  quickBooksDirectoryEntities   QuickBooksDirectoryEntity[]
+  accountingServiceMappingRules AccountingServiceMappingRule[]
+  quickBooksPostingBatches      QuickBooksPostingBatch[]
+  quickBooksPostingBatchItems   QuickBooksPostingBatchItem[]
   oceanFreightAgents            OceanFreightAgent[]
   oceanFreightAgentBranches     OceanFreightAgentBranch[]
   oceanFreightAgentContacts     OceanFreightAgentContact[]
@@ -420,6 +427,8 @@ model User {
   assistantAutomations    AssistantAutomation[]
   assistantAutomationRuns AssistantAutomationRun[]
   shipmentDocumentRuns    ShipmentDocumentRun[]
+  uploadedAccountingDocuments AccountingDocument[] @relation("AccountingDocumentUploadedBy")
+  approvedAccountingInvoices AccountingInvoiceStaging[] @relation("AccountingInvoiceApprovedBy")
 }
 
 // Auth.js (NextAuth) adapter models. Account links an external identity
@@ -1852,4 +1861,259 @@ model AssistantAutomationRun {
 
   @@index([tenantId, automationId, startedAt])
   @@index([tenantId, userId, startedAt])
+}
+
+
+enum AccountingInvoiceType {
+  CUSTOMER_INVOICE
+  VENDOR_INVOICE
+}
+
+enum AccountingInvoiceStatus {
+  NEEDS_REVIEW
+  READY_FOR_APPROVAL
+  APPROVED
+  REJECTED
+  VOID
+}
+
+enum AccountingPostingStatus {
+  NOT_READY
+  READY_TO_POST
+  BATCHED
+  POSTED
+  ERROR
+}
+
+enum AccountingInvoiceBatchStatus {
+  UPLOAD_REVIEW
+  DRAFT
+  APPROVED
+  CANCELLED
+  POSTED_PLACEHOLDER
+}
+
+enum QuickBooksDirectoryEntityType {
+  CUSTOMER
+  VENDOR
+  ITEM
+  EXPENSE_ACCOUNT
+  TAX_CODE
+  TERM
+}
+
+enum AccountingStorageBackend {
+  POSTGRES_BYTES
+  EXTERNAL_REF
+}
+
+model AccountingDocument {
+  id               String                   @id @default(cuid())
+  tenantId         String
+  fileName         String
+  contentType      String
+  sizeBytes        Int
+  sha256           String
+  storageBackend   AccountingStorageBackend @default(POSTGRES_BYTES)
+  storageKey       String?
+  storageRef       String?
+  pdfBytes         Bytes?
+  searchText       String                   @default("")
+  uploadedByUserId String?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  tenant     Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  uploadedBy User?                      @relation("AccountingDocumentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: NoAction)
+  invoices   AccountingInvoiceStaging[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, sha256])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, searchText])
+}
+
+model AccountingInvoiceBatch {
+  id              String                       @id @default(cuid())
+  tenantId        String
+  batchNumber     String
+  status          AccountingInvoiceBatchStatus @default(UPLOAD_REVIEW)
+  source          String                       @default("INVOICE_UPLOAD")
+  notes           String?
+  createdByUserId String?
+  approvedByUserId String?
+  approvedAt      DateTime?
+  createdAt       DateTime                     @default(now())
+  updatedAt       DateTime                     @updatedAt
+
+  tenant   Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoices AccountingInvoiceStaging[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, batchNumber])
+  @@index([tenantId, status, createdAt])
+}
+
+model AccountingInvoiceStaging {
+  id                        String                  @id @default(cuid())
+  tenantId                  String
+  documentId                String
+  batchId                   String?
+  invoiceType               AccountingInvoiceType?
+  status                    AccountingInvoiceStatus @default(NEEDS_REVIEW)
+  postingStatus             AccountingPostingStatus @default(NOT_READY)
+  legalEntity               CashflowLegalEntity?
+  shipmentFileNumber        String?
+  shipmentType              String?
+  serviceType               String?
+  businessLine              CashflowBusinessLine?
+  invoiceNumber             String?
+  invoiceDate               DateTime?
+  dueDate                   DateTime?
+  rawEntityName             String?
+  normalizedEntityName      String?
+  qbEntityId                String?
+  qbEntityType              QuickBooksDirectoryEntityType?
+  qbEntityDisplayName       String?
+  qbItemId                  String?
+  qbItemName                String?
+  qbExpenseAccountId        String?
+  qbExpenseAccountName      String?
+  qbTaxCodeId               String?
+  qbTaxCodeName             String?
+  qbTermId                  String?
+  qbTermName                String?
+  currency                  String                  @default("CAD")
+  subtotal                  Decimal?                @db.Decimal(14, 2)
+  tax                       Decimal?                @db.Decimal(14, 2)
+  total                     Decimal?                @db.Decimal(14, 2)
+  taxApplicable             Boolean?
+  productServiceName        String?
+  productServiceId          String?
+  expenseAccountName        String?
+  expenseAccountId          String?
+  exchangeRateToCad         Decimal?                @db.Decimal(14, 6)
+  fxOverrideReason          String?
+  extractionConfidence      Decimal?                @db.Decimal(6, 4)
+  extractionJson            Json?
+  issues                    Json?
+  reviewNotes               String?
+  approvedByUserId          String?
+  approvedAt                DateTime?
+  qbPostingId               String?
+  qbPostingError            String?
+  qbPostingResult           Json?
+  searchText                String                  @default("")
+  createdAt                 DateTime                @default(now())
+  updatedAt                 DateTime                @updatedAt
+
+  tenant     Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  document   AccountingDocument      @relation(fields: [tenantId, documentId], references: [tenantId, id], onDelete: Cascade)
+  batch      AccountingInvoiceBatch? @relation(fields: [tenantId, batchId], references: [tenantId, id], onDelete: NoAction)
+  approvedBy User?                   @relation("AccountingInvoiceApprovedBy", fields: [approvedByUserId], references: [id], onDelete: NoAction)
+  postingItems QuickBooksPostingBatchItem[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, invoiceType, qbEntityId, invoiceNumber])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, postingStatus])
+  @@index([tenantId, shipmentFileNumber])
+  @@index([tenantId, invoiceNumber])
+  @@index([tenantId, normalizedEntityName])
+  @@index([tenantId, qbEntityId])
+  @@index([tenantId, currency])
+  @@index([tenantId, searchText])
+}
+
+model QuickBooksDirectoryEntity {
+  id                 String                       @id @default(cuid())
+  tenantId           String
+  legalEntity        CashflowLegalEntity?
+  entityType         QuickBooksDirectoryEntityType
+  quickBooksId       String
+  displayName        String
+  normalizedName     String
+  currency           String?
+  active             Boolean                      @default(true)
+  parentName         String?
+  accountType        String?
+  fullyQualifiedName String?
+  aliases            Json?
+  rawJson            Json?
+  lastSyncedAt       DateTime?
+  createdAt          DateTime                     @default(now())
+  updatedAt          DateTime                     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, legalEntity, entityType, quickBooksId])
+  @@index([tenantId, entityType, normalizedName])
+  @@index([tenantId, legalEntity, entityType, currency])
+}
+
+model AccountingServiceMappingRule {
+  id                 String                 @id @default(cuid())
+  tenantId           String
+  legalEntity        CashflowLegalEntity?
+  invoiceType        AccountingInvoiceType?
+  servicePrefix      String
+  rawEntityName       String?
+  normalizedEntityName String?
+  businessLine       CashflowBusinessLine
+  customerItemName   String?
+  customerItemId     String?
+  vendorAccountName  String?
+  vendorAccountId    String?
+  requiresReview     Boolean                @default(false)
+  notes              String?
+  active             Boolean                @default(true)
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, legalEntity, invoiceType, servicePrefix, normalizedEntityName])
+  @@index([tenantId, servicePrefix, active])
+}
+
+model QuickBooksPostingBatch {
+  id              String                       @id @default(cuid())
+  tenantId        String
+  accountingBatchId String?
+  status          AccountingInvoiceBatchStatus @default(DRAFT)
+  notes           String?
+  createdByUserId String?
+  approvedByUserId String?
+  approvedAt      DateTime?
+  futurePostStartedAt DateTime?
+  futurePostCompletedAt DateTime?
+  createdAt       DateTime                     @default(now())
+  updatedAt       DateTime                     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  items  QuickBooksPostingBatchItem[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, status, createdAt])
+}
+
+model QuickBooksPostingBatchItem {
+  id               String @id @default(cuid())
+  tenantId         String
+  postingBatchId   String
+  invoiceStagingId String
+  futureActionType String
+  status           AccountingPostingStatus @default(NOT_READY)
+  qbTransactionId  String?
+  qbError          String?
+  qbResult         Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenant       Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  postingBatch QuickBooksPostingBatch @relation(fields: [tenantId, postingBatchId], references: [tenantId, id], onDelete: Cascade)
+  invoice      AccountingInvoiceStaging @relation(fields: [tenantId, invoiceStagingId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, postingBatchId, invoiceStagingId])
+  @@index([tenantId, status])
 }
