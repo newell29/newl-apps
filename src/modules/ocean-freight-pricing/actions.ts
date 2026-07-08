@@ -3,6 +3,7 @@
 import { ModuleKey, OceanEquipmentType, OceanRateSourceType, OceanRateStatus, Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { requireModule, requireMutationAccess } from "@/server/auth/authorization";
+import { triggerOceanFreightEmailIngestion } from "@/modules/ocean-freight-pricing/ingestion";
 import { prisma } from "@/server/db";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
@@ -53,6 +54,8 @@ async function refreshAgentCounts(tenantId: string, agentId: string) {
 function revalidateOceanFreightPricing() {
   revalidatePath("/ocean-freight-pricing");
   revalidatePath("/ocean-freight-pricing/agents");
+  revalidatePath("/ocean-freight-pricing/sources");
+  revalidatePath("/ocean-freight-pricing/jobs");
 }
 
 export async function createOceanFreightAgentAction(formData: FormData) {
@@ -309,5 +312,11 @@ export async function inactivateOceanFreightRateAction(formData: FormData) {
   const after = await prisma.oceanFreightRate.update({ where: { tenantId_id: { tenantId: ctx.tenantId, id } }, data: { status: OceanRateStatus.INACTIVE, inactiveAt: new Date(), inactiveByUserId: ctx.userId, inactiveReason: requiredText(formData, "inactiveReason"), updatedByUserId: ctx.userId } });
   await refreshAgentCounts(ctx.tenantId, after.agentId);
   await prisma.auditLog.create({ data: { tenantId: ctx.tenantId, actorUserId: ctx.userId, action: "ocean-freight.rate.inactivated", entityType: "OceanFreightRate", entityId: id, before, after } });
+  revalidateOceanFreightPricing();
+}
+
+export async function triggerOceanFreightEmailIngestionAction() {
+  const ctx = await authorize();
+  await triggerOceanFreightEmailIngestion(ctx);
   revalidateOceanFreightPricing();
 }
