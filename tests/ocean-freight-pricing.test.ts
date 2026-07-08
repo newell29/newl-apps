@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const prismaMock = vi.hoisted(() => ({
   oceanFreightSourceEmail: { findUnique: vi.fn(), upsert: vi.fn(), findMany: vi.fn() },
+  oceanFreightSourceAttachment: { upsert: vi.fn() },
+  oceanFreightRateCandidate: { create: vi.fn() },
+  oceanFreightRate: { create: vi.fn() },
   automationJobRun: { create: vi.fn(), findMany: vi.fn() },
   auditLog: { create: vi.fn() },
   tenantModuleAccess: { findFirst: vi.fn() },
@@ -49,6 +52,7 @@ describe("ocean freight pricing email ingestion", () => {
     prismaMock.tenantRoleModuleAccess.findMany.mockResolvedValue([]);
     prismaMock.tenantRolePolicy.findUnique.mockResolvedValue(null);
     prismaMock.oceanFreightSourceEmail.upsert.mockImplementation(async ({ create }) => ({ id: `source-${create.graphMessageId}`, ...create }));
+    prismaMock.oceanFreightSourceAttachment.upsert.mockResolvedValue({});
     prismaMock.auditLog.create.mockResolvedValue({});
   });
 
@@ -69,9 +73,50 @@ describe("ocean freight pricing email ingestion", () => {
     const message = { id: "graph-1", mailboxAddress: "Pricing@Example.com", subject: "Ocean rate", receivedDateTime: "2026-07-07T00:00:00Z", body: { content: "FCL 40HQ valid until August" } };
     const result = await persistOceanFreightSourceEmails({ tenantId: "tenant-a", actorUserId: "user-a", jobRunId: "job-1", mailboxes: ["pricing@example.com"], messages: [message, message] });
 
-    expect(result).toMatchObject({ messageCount: 2, storedCount: 2, createdCount: 1, updatedCount: 1, detectedRateEmailCount: 2 });
+    expect(result).toMatchObject({ messageCount: 2, storedCount: 2, createdCount: 1, updatedCount: 1, detectedRateEmailCount: 2, attachmentsFetched: 0, attachmentsStored: 0, attachmentErrors: 0 });
     expect(prismaMock.oceanFreightSourceEmail.upsert).toHaveBeenCalledTimes(2);
     expect(prismaMock.oceanFreightSourceEmail.upsert.mock.calls[0][0].where.tenantId_mailboxAddress_graphMessageId).toEqual({ tenantId: "tenant-a", mailboxAddress: "pricing@example.com", graphMessageId: "graph-1" });
+  });
+
+
+  it("upserts attachment metadata idempotently without creating rates or candidates", async () => {
+    prismaMock.oceanFreightSourceEmail.findUnique.mockResolvedValue(null);
+    const message = { id: "graph-2", mailboxAddress: "pricing@example.com", subject: "Ocean rate", receivedDateTime: "2026-07-07T00:00:00Z", body: { content: "FCL 40HQ valid until August" } };
+    const result = await persistOceanFreightSourceEmails({
+      tenantId: "tenant-a",
+      actorUserId: "user-a",
+      jobRunId: "job-1",
+      mailboxes: ["pricing@example.com"],
+      messages: [message],
+      attachmentFetcher: async () => [
+        { id: "att-1", name: "rates.pdf", contentType: "application/pdf", size: 2048 },
+        { id: "att-2", name: "rates.xlsx", contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", size: 4096 }
+      ]
+    });
+
+    expect(result).toMatchObject({ attachmentsFetched: 2, attachmentsStored: 2, attachmentErrors: 0 });
+    expect(prismaMock.oceanFreightSourceAttachment.upsert).toHaveBeenCalledTimes(2);
+    expect(prismaMock.oceanFreightSourceAttachment.upsert.mock.calls[0][0].where.tenantId_sourceEmailId_graphAttachmentId).toEqual({ tenantId: "tenant-a", sourceEmailId: "source-graph-2", graphAttachmentId: "att-1" });
+    expect(prismaMock.oceanFreightSourceAttachment.upsert.mock.calls[0][0].create).toMatchObject({ tenantId: "tenant-a", sourceEmailId: "source-graph-2", graphAttachmentId: "att-1", fileName: "rates.pdf", contentType: "application/pdf", sizeBytes: 2048, parseStatus: "METADATA_ONLY", parseError: null });
+    expect(prismaMock.oceanFreightRateCandidate.create).not.toHaveBeenCalled();
+    expect(prismaMock.oceanFreightRate.create).not.toHaveBeenCalled();
+  });
+
+  it("records attachment fetch errors without losing source email ingestion", async () => {
+    prismaMock.oceanFreightSourceEmail.findUnique.mockResolvedValue(null);
+    const message = { id: "graph-3", mailboxAddress: "pricing@example.com", subject: "Ocean rate", receivedDateTime: "2026-07-07T00:00:00Z", body: { content: "FCL 40HQ valid until August" } };
+    const result = await persistOceanFreightSourceEmails({
+      tenantId: "tenant-a",
+      actorUserId: "user-a",
+      jobRunId: "job-1",
+      mailboxes: ["pricing@example.com"],
+      messages: [message],
+      attachmentFetcher: async () => { throw new Error("Graph attachment outage"); }
+    });
+
+    expect(result).toMatchObject({ storedCount: 1, attachmentsFetched: 0, attachmentsStored: 0, attachmentErrors: 1 });
+    expect(result.attachmentErrorDetails[0]).toMatchObject({ sourceEmailId: "source-graph-3", graphMessageId: "graph-3", reason: "Graph attachment outage" });
+    expect(prismaMock.oceanFreightSourceAttachment.upsert).not.toHaveBeenCalled();
   });
 
   it("creates an ingestion job with the ocean email ingestion job type", async () => {
@@ -85,7 +130,7 @@ describe("ocean freight pricing email ingestion", () => {
     prismaMock.automationJobRun.findMany.mockResolvedValue([]);
     await getOceanFreightSourcesShell(ctx, { detectedOnly: "true" });
     await getOceanFreightJobsShell(ctx);
-    expect(prismaMock.oceanFreightSourceEmail.findMany.mock.calls[0][0].where).toMatchObject({ tenantId: "tenant-a", rateDetected: true });
+    expect(prismaMock.oceanFreightSourceEmail.findMany.mock.calls[0][0]).toMatchObject({ where: { tenantId: "tenant-a", rateDetected: true }, include: { attachments: expect.any(Object) } });
     expect(prismaMock.automationJobRun.findMany.mock.calls[0][0].where).toMatchObject({ tenantId: "tenant-a", jobType: OCEAN_FREIGHT_EMAIL_INGESTION_JOB_TYPE });
   });
 

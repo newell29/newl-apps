@@ -102,7 +102,7 @@ export async function getOceanFreightSourcesShell(ctx: AuthenticatedContext, fil
   await requireModule(ctx, ModuleKey.OCEAN_FREIGHT_PRICING);
   const where = buildSourceWhere(ctx.tenantId, filters);
   const [sources, mailboxes] = await Promise.all([
-    prisma.oceanFreightSourceEmail.findMany({ where, orderBy: { receivedAt: "desc" }, take: 100 }),
+    prisma.oceanFreightSourceEmail.findMany({ where, orderBy: { receivedAt: "desc" }, take: 100, include: { attachments: { orderBy: { fileName: "asc" } } } }),
     prisma.oceanFreightSourceEmail.findMany({ where: { tenantId: ctx.tenantId }, distinct: ["mailboxAddress"], select: { mailboxAddress: true }, orderBy: { mailboxAddress: "asc" } })
   ]);
   return { sources, mailboxes: mailboxes.map((item) => item.mailboxAddress) };
