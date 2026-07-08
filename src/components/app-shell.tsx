@@ -105,6 +105,32 @@ const navEntries: NavNode[] = [
     id: "finance",
     label: "Finance",
     children: [
+      {
+        id: "invoice-automation",
+        label: "Invoice Automation",
+        moduleKey: "INVOICE_VERIFICATION" as ModuleKey,
+        children: [
+          {
+            id: "invoice-automation-upload",
+            href: "/finance/invoice-automation",
+            label: "Operations Upload",
+            exact: true,
+            moduleKey: "INVOICE_VERIFICATION" as ModuleKey
+          },
+          {
+            id: "invoice-automation-accounting",
+            href: "/finance/invoice-automation/accounting",
+            label: "Accounting Queue",
+            moduleKey: "QUICKBOOKS_POSTING" as ModuleKey
+          },
+          {
+            id: "invoice-automation-posted",
+            href: "/finance/invoice-automation/posted",
+            label: "Posted",
+            moduleKey: "QUICKBOOKS_POSTING" as ModuleKey
+          }
+        ]
+      },
       { id: "customer-cashflow", href: "/finance/customer-cashflow", label: "Customer Cashflow", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey },
       { id: "collections-queue", href: "/finance/customer-cashflow/collections", label: "Collections Queue", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey },
       { id: "credit-checks", href: "/finance/credit-checks", label: "Credit Checks", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey },

@@ -632,6 +632,14 @@ async function main() {
     where: { key: ModuleKey.CUSTOMER_CASHFLOW }
   });
 
+  const invoiceVerificationModule = await prisma.module.findUniqueOrThrow({
+    where: { key: ModuleKey.INVOICE_VERIFICATION }
+  });
+
+  const quickBooksPostingModule = await prisma.module.findUniqueOrThrow({
+    where: { key: ModuleKey.QUICKBOOKS_POSTING }
+  });
+
   await prisma.tenantModuleAccess.upsert({
     where: {
       tenantId_moduleId: {
@@ -643,6 +651,36 @@ async function main() {
     create: {
       tenantId: tenant.id,
       moduleId: customerCashflowModule.id,
+      enabled: true
+    }
+  });
+
+  await prisma.tenantModuleAccess.upsert({
+    where: {
+      tenantId_moduleId: {
+        tenantId: tenant.id,
+        moduleId: invoiceVerificationModule.id
+      }
+    },
+    update: { enabled: true },
+    create: {
+      tenantId: tenant.id,
+      moduleId: invoiceVerificationModule.id,
+      enabled: true
+    }
+  });
+
+  await prisma.tenantModuleAccess.upsert({
+    where: {
+      tenantId_moduleId: {
+        tenantId: tenant.id,
+        moduleId: quickBooksPostingModule.id
+      }
+    },
+    update: { enabled: true },
+    create: {
+      tenantId: tenant.id,
+      moduleId: quickBooksPostingModule.id,
       enabled: true
     }
   });

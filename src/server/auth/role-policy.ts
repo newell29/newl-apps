@@ -28,6 +28,7 @@ export const DEFAULT_ROLE_MATRIX: Record<PlatformRole, RolePolicy> = {
       ModuleKey.LTL_RATE_PORTAL,
       ModuleKey.TRANSIT_LOOKUP,
       ModuleKey.SHIPMENT_DOCUMENTS,
+      ModuleKey.INVOICE_VERIFICATION,
       ModuleKey.CUSTOMER_CASHFLOW,
       ModuleKey.OCEAN_FREIGHT_PRICING
     ],
@@ -66,9 +67,9 @@ export const ROLE_DESCRIPTIONS: Record<
   },
   [PlatformRole.OPERATIONS]: {
     label: "Operations",
-    description: "Supports lead-gen operations plus shipment, document packaging, quoting, and transit workflows.",
+    description: "Supports lead-gen operations plus shipment, document packaging, quoting, invoice intake, and transit workflows.",
     visibilitySummary:
-      "Starts with Assistant, Lead Generation, Shipment Documents, UPS Tools, LTL Rate Portal, Ocean Freight Pricing, and Transit Lookup."
+      "Starts with Assistant, Lead Generation, Shipment Documents, Invoice Verification, UPS Tools, LTL Rate Portal, Ocean Freight Pricing, and Transit Lookup."
   },
   [PlatformRole.FINANCE]: {
     label: "Finance",
