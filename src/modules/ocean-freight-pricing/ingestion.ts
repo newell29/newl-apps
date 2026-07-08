@@ -10,6 +10,8 @@ import {
 import { getMicrosoftGraphApplicationAccessToken } from "@/server/integrations/microsoft-graph-application";
 import {
   fetchMicrosoftGraphMailboxMessages,
+  fetchMicrosoftGraphMessageAttachments,
+  type MicrosoftGraphMailAttachment,
   type MicrosoftGraphMailFetchOptions,
   type MicrosoftGraphMailMessage,
   type MicrosoftGraphMailRecipient
@@ -28,6 +30,7 @@ export type OceanFreightRateDetection = {
 type GraphRecipient = MicrosoftGraphMailRecipient;
 type GraphMailMessage = MicrosoftGraphMailMessage;
 type MailFetchOptions = MicrosoftGraphMailFetchOptions;
+type AttachmentFetcher = (message: GraphMailMessage, sourceEmail: { id: string; mailboxAddress: string }) => Promise<MicrosoftGraphMailAttachment[]>;
 
 type IngestMessagesInput = {
   tenantId: string;
@@ -35,6 +38,7 @@ type IngestMessagesInput = {
   jobRunId: string;
   mailboxes: string[];
   messages: GraphMailMessage[];
+  attachmentFetcher?: AttachmentFetcher;
 };
 
 const RATE_TERMS = [
@@ -121,7 +125,9 @@ export async function runOceanFreightEmailIngestionJob(ctx: TenantContext & { us
       actorUserId: ctx.userId,
       jobRunId,
       mailboxes: settings.adminMailboxTargets,
-      messages: mailboxResults.messages
+      messages: mailboxResults.messages,
+      attachmentFetcher: async (message, sourceEmail) =>
+        fetchMicrosoftGraphMessageAttachments(accessToken, sourceEmail.mailboxAddress, message.id)
     });
     const output = { ...result, failures: mailboxResults.failures };
     const status = mailboxResults.failures.length > 0 ? JobStatus.ERROR : JobStatus.SUCCESS;
@@ -143,6 +149,10 @@ export async function persistOceanFreightSourceEmails(input: IngestMessagesInput
   let createdCount = 0;
   let updatedCount = 0;
   let detectedRateEmailCount = 0;
+  let attachmentsFetched = 0;
+  let attachmentsStored = 0;
+  let attachmentErrors = 0;
+  const attachmentErrorDetails: Array<{ sourceEmailId: string; graphMessageId: string; reason: string }> = [];
   const processedAt = new Date();
 
   for (const message of input.messages) {
@@ -172,7 +182,7 @@ export async function persistOceanFreightSourceEmails(input: IngestMessagesInput
     } satisfies Prisma.OceanFreightSourceEmailUncheckedCreateInput;
 
     const before = await prisma.oceanFreightSourceEmail.findUnique({ where: { tenantId_mailboxAddress_graphMessageId: { tenantId: input.tenantId, mailboxAddress, graphMessageId: message.id } }, select: { id: true } });
-    await prisma.oceanFreightSourceEmail.upsert({
+    const sourceEmail = await prisma.oceanFreightSourceEmail.upsert({
       where: { tenantId_mailboxAddress_graphMessageId: { tenantId: input.tenantId, mailboxAddress, graphMessageId: message.id } },
       create: data,
       update: data
@@ -180,9 +190,48 @@ export async function persistOceanFreightSourceEmails(input: IngestMessagesInput
     storedCount += 1;
     if (before) updatedCount += 1; else createdCount += 1;
     if (detection.rateDetected) detectedRateEmailCount += 1;
+
+    if (input.attachmentFetcher) {
+      try {
+        const attachments = await input.attachmentFetcher(message, { id: sourceEmail.id, mailboxAddress });
+        attachmentsFetched += attachments.length;
+        for (const attachment of attachments) {
+          await upsertOceanFreightSourceAttachment(input.tenantId, sourceEmail.id, attachment);
+          attachmentsStored += 1;
+        }
+      } catch (error) {
+        attachmentErrors += 1;
+        attachmentErrorDetails.push({
+          sourceEmailId: sourceEmail.id,
+          graphMessageId: message.id,
+          reason: error instanceof Error ? error.message : "Unknown Microsoft Graph attachment error."
+        });
+      }
+    }
   }
 
-  return { mailboxCount: input.mailboxes.length, messageCount: input.messages.length, storedCount, createdCount, updatedCount, detectedRateEmailCount };
+  return { mailboxCount: input.mailboxes.length, messageCount: input.messages.length, storedCount, createdCount, updatedCount, detectedRateEmailCount, attachmentsFetched, attachmentsStored, attachmentErrors, attachmentErrorDetails };
+}
+
+async function upsertOceanFreightSourceAttachment(tenantId: string, sourceEmailId: string, attachment: MicrosoftGraphMailAttachment) {
+  const fileName = attachment.name?.trim() || "(unnamed attachment)";
+  const contentType = attachment.contentType?.trim() || null;
+  const sizeBytes = typeof attachment.size === "number" ? attachment.size : null;
+  const stableHashInput = JSON.stringify({
+    graphAttachmentId: attachment.id,
+    fileName,
+    contentType,
+    sizeBytes,
+    contentId: attachment.contentId ?? null,
+    lastModifiedDateTime: attachment.lastModifiedDateTime ?? null
+  });
+  const contentHash = createHash("sha256").update(stableHashInput).digest("hex");
+  const data = { tenantId, sourceEmailId, graphAttachmentId: attachment.id, fileName, contentType, sizeBytes, contentHash, parseStatus: "METADATA_ONLY", parseError: null } satisfies Prisma.OceanFreightSourceAttachmentUncheckedCreateInput;
+  await prisma.oceanFreightSourceAttachment.upsert({
+    where: { tenantId_sourceEmailId_graphAttachmentId: { tenantId, sourceEmailId, graphAttachmentId: attachment.id } },
+    create: data,
+    update: data
+  });
 }
 
 async function getOceanGraphSettings(tenantId: string) {

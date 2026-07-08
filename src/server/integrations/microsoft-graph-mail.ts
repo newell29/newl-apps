@@ -31,6 +31,16 @@ export type MicrosoftGraphMailMessage = {
   } | null;
 };
 
+export type MicrosoftGraphMailAttachment = {
+  id: string;
+  name?: string | null;
+  contentType?: string | null;
+  size?: number | null;
+  isInline?: boolean | null;
+  contentId?: string | null;
+  lastModifiedDateTime?: string | null;
+};
+
 export type MicrosoftGraphMailFetchOptions = {
   lookbackDays: number;
   maxMessagesPerMailbox: number;
@@ -53,6 +63,26 @@ export async function fetchMicrosoftGraphMailboxMessages(
   }
 
   return messages.slice(0, options.maxMessagesPerMailbox);
+}
+
+export async function fetchMicrosoftGraphMessageAttachments(accessToken: string, mailbox: string, messageId: string) {
+  const messagePath = mailbox === "me" ? "me/messages" : await resolveMicrosoftGraphMailboxMessagesPath(accessToken, mailbox);
+  const url = `https://graph.microsoft.com/v1.0/${messagePath}/${encodeURIComponent(messageId)}/attachments?$select=id,name,contentType,size,isInline,contentId,lastModifiedDateTime`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+    signal: AbortSignal.timeout(MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS)
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      (await extractMicrosoftGraphResponseError(response)) ??
+        `Microsoft Graph attachment sync failed for ${mailbox} message ${messageId} with status ${response.status}.`
+    );
+  }
+
+  const json = (await response.json()) as { value?: MicrosoftGraphMailAttachment[] };
+  return Array.isArray(json.value) ? json.value : [];
 }
 
 export async function resolveMicrosoftGraphMailboxMessagesPath(accessToken: string, mailbox: string) {
