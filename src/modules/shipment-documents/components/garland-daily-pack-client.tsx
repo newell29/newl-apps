@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { PDFDocument } from "pdf-lib";
 import type { PDFPageProxy } from "pdfjs-dist/types/src/display/api";
 
@@ -105,6 +105,7 @@ export function GarlandDailyPackClient({
   const [historySearch, setHistorySearch] = useState(initialHistory.search);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [expandedHistoryRunIds, setExpandedHistoryRunIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (!labelManuallyEdited) {
@@ -399,6 +400,12 @@ export function GarlandDailyPackClient({
     });
   }
 
+  function toggleHistoryRun(runId: string) {
+    setExpandedHistoryRunIds((current) =>
+      current.includes(runId) ? current.filter((id) => id !== runId) : [...current, runId]
+    );
+  }
+
   function handleResultPsEdit(documentType: ShipmentDocumentType, documentGroupId: string, value: string) {
     setResult((currentResult) => {
       if (!currentResult) {
@@ -685,60 +692,90 @@ export function GarlandDailyPackClient({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {history.runs.map((run) => (
-                    <tr key={run.id}>
-                      <td className="px-3 py-3 align-top">
-                        <p className="font-medium text-foreground">{run.documentLabel}</p>
-                        <p className="mt-1 text-xs text-mutedForeground">
-                          Shipment date {formatDate(run.shipmentDate)} · Saved {formatDateTime(run.createdAt)}
-                        </p>
-                        <p className="mt-1 text-xs text-mutedForeground">
-                          {run.createdByName ? `Saved by ${run.createdByName}` : "Saved run"}
-                        </p>
-                      </td>
-                      <td className="px-3 py-3 align-top text-mutedForeground">
-                        <p>{run.recipientEmail ?? "No recipient saved"}</p>
-                        <p className="mt-1 text-xs">{run.sourceBolFileName ?? "No source BOL name"}</p>
-                        <p className="text-xs">{run.sourcePickTicketFileName ?? "No source pick name"}</p>
-                      </td>
-                      <td className="px-3 py-3 align-top text-mutedForeground">
-                        <p>{run.bolPageCount} BOL pages</p>
-                        <p>{run.pickTicketPageCount} pick pages</p>
-                        <p className="mt-1 text-xs">
-                          AI fallback: {run.bolAiFallbackPageCount} / {run.pickAiFallbackPageCount}
-                        </p>
-                      </td>
-                      <td className="px-3 py-3 align-top text-mutedForeground">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">BOL</p>
-                        <p className="mt-1 text-sm">{formatPsSequence(run.bolPsNumbers)}</p>
-                        <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-mutedForeground">Pick</p>
-                        <p className="mt-1 text-sm">{formatPsSequence(run.pickPsNumbers)}</p>
-                      </td>
-                      <td className="px-3 py-3 align-top">
-                        <div className="flex flex-wrap gap-2">
-                          <a
-                            href={`/api/shipment-documents/runs/${run.id}?documentType=bol`}
-                            className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted"
-                          >
-                            Download BOL
-                          </a>
-                          <a
-                            href={`/api/shipment-documents/runs/${run.id}?documentType=pick`}
-                            className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted"
-                          >
-                            Download Pick
-                          </a>
-                          <button
-                            type="button"
-                            onClick={() => void handleDeleteRun(run.id)}
-                            className="rounded-md border border-danger/30 px-3 py-1.5 text-xs font-semibold text-danger transition-colors hover:bg-danger/10"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {history.runs.map((run) => {
+                    const isExpanded = expandedHistoryRunIds.includes(run.id);
+
+                    return (
+                      <Fragment key={run.id}>
+                        <tr>
+                          <td className="px-3 py-3 align-top">
+                            <p className="font-medium text-foreground">{run.documentLabel}</p>
+                            <p className="mt-1 text-xs text-mutedForeground">
+                              Shipment date {formatDate(run.shipmentDate)} · Saved {formatDateTime(run.createdAt)}
+                            </p>
+                            <p className="mt-1 text-xs text-mutedForeground">
+                              {run.createdByName ? `Saved by ${run.createdByName}` : "Saved run"}
+                            </p>
+                          </td>
+                          <td className="px-3 py-3 align-top text-mutedForeground">
+                            <p>{run.recipientEmail ?? "No recipient saved"}</p>
+                            <p className="mt-1 text-xs">{run.sourceBolFileName ?? "No source BOL name"}</p>
+                            <p className="text-xs">{run.sourcePickTicketFileName ?? "No source pick name"}</p>
+                          </td>
+                          <td className="px-3 py-3 align-top text-mutedForeground">
+                            <p>{run.bolPageCount} BOL pages</p>
+                            <p>{run.pickTicketPageCount} pick pages</p>
+                            <p className="mt-1 text-xs">
+                              AI fallback: {run.bolAiFallbackPageCount} / {run.pickAiFallbackPageCount}
+                            </p>
+                          </td>
+                          <td className="px-3 py-3 align-top text-mutedForeground">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">BOL</p>
+                            <p className="mt-1 text-sm">{formatPsSummary(run.bolPsNumbers)}</p>
+                            <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-mutedForeground">Pick</p>
+                            <p className="mt-1 text-sm">{formatPsSummary(run.pickPsNumbers)}</p>
+                          </td>
+                          <td className="px-3 py-3 align-top">
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => toggleHistoryRun(run.id)}
+                                aria-expanded={isExpanded}
+                                className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted"
+                              >
+                                {isExpanded ? "Hide details" : "Show details"}
+                              </button>
+                              <a
+                                href={`/api/shipment-documents/runs/${run.id}?documentType=bol`}
+                                className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted"
+                              >
+                                Download BOL
+                              </a>
+                              <a
+                                href={`/api/shipment-documents/runs/${run.id}?documentType=pick`}
+                                className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted"
+                              >
+                                Download Pick
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => void handleDeleteRun(run.id)}
+                                className="rounded-md border border-danger/30 px-3 py-1.5 text-xs font-semibold text-danger transition-colors hover:bg-danger/10"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                        {isExpanded ? (
+                          <tr className="bg-muted/20">
+                            <td colSpan={5} className="px-3 py-4">
+                              <div className="grid gap-4 lg:grid-cols-2">
+                                <div className="rounded-md border border-border bg-background p-4">
+                                  <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">BOL PS order</p>
+                                  <p className="mt-2 text-sm leading-6 text-mutedForeground">{formatPsSequence(run.bolPsNumbers)}</p>
+                                </div>
+                                <div className="rounded-md border border-border bg-background p-4">
+                                  <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Pick PS order</p>
+                                  <p className="mt-2 text-sm leading-6 text-mutedForeground">{formatPsSequence(run.pickPsNumbers)}</p>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -927,6 +964,22 @@ function formatPsSequence(psNumbers: string[]) {
   }
 
   return psNumbers.join(" -> ");
+}
+
+function formatPsSummary(psNumbers: string[]) {
+  if (psNumbers.length === 0) {
+    return "No PS numbers saved";
+  }
+
+  const uniquePsNumbers = [...new Set(psNumbers)];
+  const firstPsNumber = uniquePsNumbers[0];
+  const lastPsNumber = uniquePsNumbers.at(-1);
+
+  if (uniquePsNumbers.length === 1) {
+    return `${firstPsNumber} only`;
+  }
+
+  return `${uniquePsNumbers.length} PS numbers · ${firstPsNumber} to ${lastPsNumber}`;
 }
 
 async function analyzeDocument({
