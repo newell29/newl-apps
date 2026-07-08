@@ -13,6 +13,13 @@ function formatDate(date: Date | null) {
   return date ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(date) : "Not processed";
 }
 
+function formatBytes(bytes: number | null) {
+  if (bytes === null) return "Unknown size";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export default async function OceanFreightSourcesPage({ searchParams }: { searchParams: SearchParams }) {
   const context = await getAuthenticatedContext();
   await requireModule(context, ModuleKey.OCEAN_FREIGHT_PRICING);
@@ -40,16 +47,32 @@ export default async function OceanFreightSourcesPage({ searchParams }: { search
         <div className="mt-5 overflow-x-auto">
           <table className="min-w-[1200px] divide-y divide-border text-sm">
             <thead className="bg-muted/50 text-left text-xs font-semibold uppercase tracking-wide text-mutedForeground">
-              <tr><th className="px-3 py-3">Received</th><th className="px-3 py-3">Mailbox</th><th className="px-3 py-3">Sender</th><th className="px-3 py-3">Subject</th><th className="px-3 py-3">Detected</th><th className="px-3 py-3">Reason</th><th className="px-3 py-3">Preview</th><th className="px-3 py-3">Processed</th><th className="px-3 py-3">Link</th></tr>
+              <tr><th className="px-3 py-3">Received</th><th className="px-3 py-3">Mailbox</th><th className="px-3 py-3">Sender</th><th className="px-3 py-3">Subject</th><th className="px-3 py-3">Detected</th><th className="px-3 py-3">Attachments</th><th className="px-3 py-3">Reason</th><th className="px-3 py-3">Preview</th><th className="px-3 py-3">Processed</th><th className="px-3 py-3">Link</th></tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {shell.sources.length === 0 ? <tr><td className="px-3 py-8 text-center text-mutedForeground" colSpan={9}>No source emails match these filters.</td></tr> : shell.sources.map((source) => (
+              {shell.sources.length === 0 ? <tr><td className="px-3 py-8 text-center text-mutedForeground" colSpan={10}>No source emails match these filters.</td></tr> : shell.sources.map((source) => (
                 <tr key={source.id} className="align-top hover:bg-muted/30">
                   <td className="whitespace-nowrap px-3 py-3 text-mutedForeground">{formatDate(source.receivedAt)}</td>
                   <td className="px-3 py-3 text-mutedForeground">{source.mailboxAddress}</td>
                   <td className="px-3 py-3"><div className="font-medium text-foreground">{source.fromName || source.fromAddress || "Unknown"}</div>{source.fromAddress ? <div className="text-xs text-mutedForeground">{source.fromAddress}</div> : null}</td>
                   <td className="max-w-[260px] px-3 py-3 text-foreground">{source.subject}</td>
                   <td className="px-3 py-3 font-medium">{source.rateDetected ? "Yes" : "No"}</td>
+                  <td className="max-w-[300px] px-3 py-3 text-mutedForeground">
+                    {source.attachments.length === 0 ? "None" : (
+                      <details>
+                        <summary className="cursor-pointer font-medium text-foreground">{source.attachments.length} attachment{source.attachments.length === 1 ? "" : "s"}</summary>
+                        <ul className="mt-2 space-y-2">
+                          {source.attachments.map((attachment) => (
+                            <li key={attachment.id} className="rounded-md bg-muted/40 p-2">
+                              <div className="truncate font-medium text-foreground" title={attachment.fileName}>{attachment.fileName}</div>
+                              <div className="text-xs">{attachment.contentType || "Unknown type"} · {formatBytes(attachment.sizeBytes)}</div>
+                              <div className="text-xs">{attachment.parseStatus || "NOT_PARSED"}{attachment.parseError ? ` · ${attachment.parseError}` : ""}</div>
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
+                  </td>
                   <td className="max-w-[260px] px-3 py-3 text-mutedForeground">{source.detectionReason}</td>
                   <td className="max-w-[320px] px-3 py-3 text-mutedForeground">{source.bodyPreview || source.normalizedBodyText?.slice(0, 220) || "No preview"}</td>
                   <td className="whitespace-nowrap px-3 py-3 text-mutedForeground">{formatDate(source.processedAt)}</td>

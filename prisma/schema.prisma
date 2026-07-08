@@ -623,6 +623,8 @@ model ShipmentDocumentRun {
   searchText               String
   bolPdfBytes              Bytes
   pickTicketPdfBytes       Bytes
+  bolPdfUploadComplete     Boolean  @default(true)
+  pickPdfUploadComplete    Boolean  @default(true)
   createdByUserId          String?
   deletedAt                DateTime?
   deletedByUserId          String?

@@ -1,0 +1,3 @@
+ALTER TABLE "ShipmentDocumentRun"
+ADD COLUMN "bolPdfUploadComplete" BOOLEAN NOT NULL DEFAULT TRUE,
+ADD COLUMN "pickPdfUploadComplete" BOOLEAN NOT NULL DEFAULT TRUE;
