@@ -1,4 +1,4 @@
-import { IntegrationProvider, ModuleKey, OceanEquipmentType, OceanRateStatus, Prisma } from "@prisma/client";
+import { IntegrationProvider, JobStatus, ModuleKey, OceanEquipmentType, OceanRateStatus, Prisma } from "@prisma/client";
 import { OCEAN_FREIGHT_EMAIL_INGESTION_JOB_TYPE } from "@/modules/ocean-freight-pricing/ingestion";
 import {
   OCEAN_FREIGHT_MICROSOFT_GRAPH_CREDENTIAL_NAME,
@@ -127,12 +127,34 @@ export async function getOceanFreightSourcesShell(ctx: AuthenticatedContext, fil
 
 export async function getOceanFreightJobsShell(ctx: AuthenticatedContext) {
   await requireModule(ctx, ModuleKey.OCEAN_FREIGHT_PRICING);
+  await markStaleOceanFreightJobs(ctx.tenantId);
   const jobs = await prisma.automationJobRun.findMany({
     where: { tenantId: ctx.tenantId, jobType: OCEAN_FREIGHT_EMAIL_INGESTION_JOB_TYPE },
     orderBy: { startedAt: "desc" },
     take: 50
   });
   return { jobs };
+}
+
+async function markStaleOceanFreightJobs(tenantId: string) {
+  const staleBefore = new Date(Date.now() - 5 * 60 * 1000);
+  await prisma.automationJobRun.updateMany({
+    where: {
+      tenantId,
+      jobType: OCEAN_FREIGHT_EMAIL_INGESTION_JOB_TYPE,
+      status: JobStatus.RUNNING,
+      startedAt: { lt: staleBefore },
+      finishedAt: null
+    },
+    data: {
+      status: JobStatus.ERROR,
+      finishedAt: new Date(),
+      errorMessage: "Ingestion appears to have timed out before completion. This can happen in preview/serverless environments for long Microsoft Graph syncs.",
+      output: {
+        error: "Stale RUNNING job marked failed after 5 minutes without completion."
+      }
+    }
+  });
 }
 
 export async function getOceanFreightAgentsShell(ctx: AuthenticatedContext, filters?: OceanFreightAgentFilters) {

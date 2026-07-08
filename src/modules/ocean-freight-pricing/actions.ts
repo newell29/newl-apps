@@ -2,6 +2,7 @@
 
 import { IntegrationProvider, IntegrationStatus, ModuleKey, OceanEquipmentType, OceanRateSourceType, OceanRateStatus, Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { triggerOceanFreightEmailIngestion } from "@/modules/ocean-freight-pricing/ingestion";
 import {
@@ -344,8 +345,16 @@ export async function inactivateOceanFreightRateAction(formData: FormData) {
 
 export async function triggerOceanFreightEmailIngestionAction() {
   const ctx = await authorize();
-  await triggerOceanFreightEmailIngestion(ctx);
+  try {
+    await triggerOceanFreightEmailIngestion(ctx);
+  } catch (error) {
+    revalidateOceanFreightPricing();
+    const message = error instanceof Error ? error.message : "Ocean freight ingestion failed.";
+    redirect(`/ocean-freight-pricing/jobs?ingestion=error&message=${encodeURIComponent(message)}`);
+  }
+
   revalidateOceanFreightPricing();
+  redirect("/ocean-freight-pricing/jobs?ingestion=success");
 }
 
 export async function saveOceanFreightMicrosoftGraphSettingsAction(formData: FormData) {

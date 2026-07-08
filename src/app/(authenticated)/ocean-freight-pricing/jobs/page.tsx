@@ -2,11 +2,14 @@ import { ModuleKey, type Prisma } from "@prisma/client";
 
 import { PageHeader } from "@/components/page-header";
 import { triggerOceanFreightEmailIngestionAction } from "@/modules/ocean-freight-pricing/actions";
+import { OceanFreightIngestionSubmitButton } from "@/modules/ocean-freight-pricing/components/ingestion-submit-button";
 import { getOceanFreightJobsShell } from "@/modules/ocean-freight-pricing/queries";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
+
+type SearchParams = Promise<{ ingestion?: string; message?: string }>;
 
 function formatDate(date: Date | null) {
   return date ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(date) : "Running";
@@ -14,20 +17,39 @@ function formatDate(date: Date | null) {
 function readOutput(output: Prisma.JsonValue | null | undefined, key: string) {
   return output && typeof output === "object" && !Array.isArray(output) && typeof output[key as keyof typeof output] === "number" ? String(output[key as keyof typeof output]) : "0";
 }
+function hasRunningJob(jobs: Array<{ status: string }>) {
+  return jobs.some((job) => job.status === "RUNNING" || job.status === "QUEUED");
+}
 
-export default async function OceanFreightJobsPage() {
+export default async function OceanFreightJobsPage({ searchParams }: { searchParams: SearchParams }) {
   const context = await getAuthenticatedContext();
   await requireModule(context, ModuleKey.OCEAN_FREIGHT_PRICING);
+  const params = await searchParams;
   const shell = await getOceanFreightJobsShell(context);
 
   return (
     <div className="space-y-6">
       <PageHeader eyebrow="Ocean Freight Pricing" title="Jobs" description="Microsoft Graph source email ingestion job history for this tenant." />
+      {params.ingestion === "success" ? (
+        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-800">
+          Email ingestion completed. Review the latest job row below for counts and attachment status.
+        </div>
+      ) : null}
+      {params.ingestion === "error" ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
+          Email ingestion failed: {params.message || "Review the latest job row below for details."}
+        </div>
+      ) : null}
       <form action={triggerOceanFreightEmailIngestionAction} className="rounded-lg border border-border bg-card p-4 shadow-sm">
-        <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground">Run Microsoft 365 email ingestion</button>
+        <OceanFreightIngestionSubmitButton />
         <p className="mt-2 text-sm text-mutedForeground">
           Requires Ocean Freight Pricing module access, mutation access, and configured pricing mailbox targets under Sources.
         </p>
+        {hasRunningJob(shell.jobs) ? (
+          <p className="mt-2 text-sm font-medium text-amber-700">
+            An ingestion job is currently running. Refresh this page for updates. In preview, jobs older than 5 minutes are marked failed because the serverless request likely timed out.
+          </p>
+        ) : null}
       </form>
       <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
         <h2 className="text-lg font-semibold text-foreground">Job history</h2>
