@@ -7,6 +7,7 @@ const prismaMock = vi.hoisted(() => ({
   oceanFreightRateCandidate: { create: vi.fn() },
   oceanFreightRate: { create: vi.fn() },
   automationJobRun: { create: vi.fn(), findMany: vi.fn() },
+  integrationCredential: { findFirst: vi.fn() },
   auditLog: { create: vi.fn() },
   tenantModuleAccess: { findFirst: vi.fn() },
   tenantRoleModuleAccess: { findMany: vi.fn() },
@@ -51,6 +52,7 @@ describe("ocean freight pricing email ingestion", () => {
     prismaMock.tenantModuleAccess.findFirst.mockResolvedValue({ id: "access" });
     prismaMock.tenantRoleModuleAccess.findMany.mockResolvedValue([]);
     prismaMock.tenantRolePolicy.findUnique.mockResolvedValue(null);
+    prismaMock.integrationCredential.findFirst.mockResolvedValue(null);
     prismaMock.oceanFreightSourceEmail.upsert.mockImplementation(async ({ create }) => ({ id: `source-${create.graphMessageId}`, ...create }));
     prismaMock.oceanFreightSourceAttachment.upsert.mockResolvedValue({});
     prismaMock.auditLog.create.mockResolvedValue({});

@@ -1,9 +1,13 @@
 "use server";
 
-import { ModuleKey, OceanEquipmentType, OceanRateSourceType, OceanRateStatus, Prisma } from "@prisma/client";
+import { IntegrationProvider, IntegrationStatus, ModuleKey, OceanEquipmentType, OceanRateSourceType, OceanRateStatus, Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { triggerOceanFreightEmailIngestion } from "@/modules/ocean-freight-pricing/ingestion";
+import {
+  buildOceanFreightMicrosoftGraphConfig,
+  OCEAN_FREIGHT_MICROSOFT_GRAPH_CREDENTIAL_NAME
+} from "@/modules/ocean-freight-pricing/microsoft-graph-settings";
 import { prisma } from "@/server/db";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
@@ -15,6 +19,29 @@ function requiredText(formData: FormData, key: string) {
   const value = text(formData, key);
   if (!value) throw new Error(`${key} is required.`);
   return value;
+}
+function integerValue(formData: FormData, key: string, fallback: number, min: number, max: number) {
+  const value = text(formData, key);
+  const parsed = value ? Number(value) : fallback;
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+    throw new Error(`${key} must be between ${min} and ${max}.`);
+  }
+  return parsed;
+}
+function textareaListValue(formData: FormData, key: string) {
+  const value = text(formData, key);
+  if (!value) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      value
+        .split(/[\n,]+/)
+        .map((item) => item.trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
 }
 function dateValue(formData: FormData, key: string) {
   const value = text(formData, key);
@@ -318,5 +345,61 @@ export async function inactivateOceanFreightRateAction(formData: FormData) {
 export async function triggerOceanFreightEmailIngestionAction() {
   const ctx = await authorize();
   await triggerOceanFreightEmailIngestion(ctx);
+  revalidateOceanFreightPricing();
+}
+
+export async function saveOceanFreightMicrosoftGraphSettingsAction(formData: FormData) {
+  const ctx = await authorize();
+  const adminMailboxTargets = textareaListValue(formData, "oceanMicrosoftMailboxTargets");
+  const mailLookbackDays = integerValue(formData, "oceanMicrosoftMailLookbackDays", 30, 1, 365);
+  const maxMailMessagesPerMailbox = integerValue(formData, "oceanMicrosoftMaxMessagesPerMailbox", 500, 1, 2000);
+  const mailSyncEnabled = formData.get("oceanMicrosoftMailSyncEnabled") === "true";
+
+  if (mailSyncEnabled && adminMailboxTargets.length === 0) {
+    throw new Error("Add at least one pricing mailbox before enabling ocean freight email ingestion.");
+  }
+
+  const existing = await prisma.integrationCredential.findFirst({
+    where: {
+      tenantId: ctx.tenantId,
+      provider: IntegrationProvider.MICROSOFT_GRAPH,
+      name: OCEAN_FREIGHT_MICROSOFT_GRAPH_CREDENTIAL_NAME
+    },
+    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    select: { id: true }
+  });
+
+  const data = {
+    tenantId: ctx.tenantId,
+    provider: IntegrationProvider.MICROSOFT_GRAPH,
+    name: OCEAN_FREIGHT_MICROSOFT_GRAPH_CREDENTIAL_NAME,
+    status: mailSyncEnabled ? IntegrationStatus.ACTIVE : IntegrationStatus.DISABLED,
+    publicConfig: buildOceanFreightMicrosoftGraphConfig({
+      adminMailboxTargets,
+      mailLookbackDays,
+      maxMailMessagesPerMailbox,
+      mailSyncEnabled
+    })
+  };
+
+  const credential = existing
+    ? await prisma.integrationCredential.update({ where: { id: existing.id }, data })
+    : await prisma.integrationCredential.create({ data });
+
+  await prisma.auditLog.create({
+    data: {
+      tenantId: ctx.tenantId,
+      actorUserId: ctx.userId,
+      action: "ocean-freight.microsoft-graph-settings.updated",
+      entityType: "IntegrationCredential",
+      entityId: credential.id,
+      after: {
+        mailSyncEnabled,
+        mailLookbackDays,
+        maxMailMessagesPerMailbox,
+        adminMailboxTargetCount: adminMailboxTargets.length
+      }
+    }
+  });
   revalidateOceanFreightPricing();
 }

@@ -25,7 +25,9 @@ export default async function OceanFreightJobsPage() {
       <PageHeader eyebrow="Ocean Freight Pricing" title="Jobs" description="Microsoft Graph source email ingestion job history for this tenant." />
       <form action={triggerOceanFreightEmailIngestionAction} className="rounded-lg border border-border bg-card p-4 shadow-sm">
         <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground">Run Microsoft 365 email ingestion</button>
-        <p className="mt-2 text-sm text-mutedForeground">Requires Ocean Freight Pricing module access, mutation access, and configured Microsoft 365 admin mailbox targets.</p>
+        <p className="mt-2 text-sm text-mutedForeground">
+          Requires Ocean Freight Pricing module access, mutation access, and configured pricing mailbox targets under Sources.
+        </p>
       </form>
       <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
         <h2 className="text-lg font-semibold text-foreground">Job history</h2>

@@ -1,5 +1,9 @@
-import { ModuleKey, OceanEquipmentType, OceanRateStatus, Prisma } from "@prisma/client";
+import { IntegrationProvider, ModuleKey, OceanEquipmentType, OceanRateStatus, Prisma } from "@prisma/client";
 import { OCEAN_FREIGHT_EMAIL_INGESTION_JOB_TYPE } from "@/modules/ocean-freight-pricing/ingestion";
+import {
+  OCEAN_FREIGHT_MICROSOFT_GRAPH_CREDENTIAL_NAME,
+  parseOceanFreightMicrosoftGraphSettings
+} from "@/modules/ocean-freight-pricing/microsoft-graph-settings";
 import { prisma } from "@/server/db";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 import { requireModule } from "@/server/auth/authorization";
@@ -101,11 +105,24 @@ export async function getOceanFreightPricingShell(ctx: AuthenticatedContext, fil
 export async function getOceanFreightSourcesShell(ctx: AuthenticatedContext, filters?: OceanFreightSourceFilters) {
   await requireModule(ctx, ModuleKey.OCEAN_FREIGHT_PRICING);
   const where = buildSourceWhere(ctx.tenantId, filters);
-  const [sources, mailboxes] = await Promise.all([
+  const [sources, mailboxes, microsoftGraphCredential] = await Promise.all([
     prisma.oceanFreightSourceEmail.findMany({ where, orderBy: { receivedAt: "desc" }, take: 100, include: { attachments: { orderBy: { fileName: "asc" } } } }),
-    prisma.oceanFreightSourceEmail.findMany({ where: { tenantId: ctx.tenantId }, distinct: ["mailboxAddress"], select: { mailboxAddress: true }, orderBy: { mailboxAddress: "asc" } })
+    prisma.oceanFreightSourceEmail.findMany({ where: { tenantId: ctx.tenantId }, distinct: ["mailboxAddress"], select: { mailboxAddress: true }, orderBy: { mailboxAddress: "asc" } }),
+    prisma.integrationCredential.findFirst({
+      where: {
+        tenantId: ctx.tenantId,
+        provider: IntegrationProvider.MICROSOFT_GRAPH,
+        name: OCEAN_FREIGHT_MICROSOFT_GRAPH_CREDENTIAL_NAME
+      },
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+      select: { provider: true, status: true, publicConfig: true }
+    })
   ]);
-  return { sources, mailboxes: mailboxes.map((item) => item.mailboxAddress) };
+  return {
+    sources,
+    mailboxes: mailboxes.map((item) => item.mailboxAddress),
+    microsoftGraphSettings: parseOceanFreightMicrosoftGraphSettings(microsoftGraphCredential)
+  };
 }
 
 export async function getOceanFreightJobsShell(ctx: AuthenticatedContext) {

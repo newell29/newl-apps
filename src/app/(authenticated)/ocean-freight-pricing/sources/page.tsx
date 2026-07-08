@@ -1,6 +1,7 @@
 import { ModuleKey } from "@prisma/client";
 
 import { PageHeader } from "@/components/page-header";
+import { saveOceanFreightMicrosoftGraphSettingsAction } from "@/modules/ocean-freight-pricing/actions";
 import { getOceanFreightSourcesShell, type OceanFreightSourceFilters } from "@/modules/ocean-freight-pricing/queries";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -29,6 +30,75 @@ export default async function OceanFreightSourcesPage({ searchParams }: { search
   return (
     <div className="space-y-6">
       <PageHeader eyebrow="Ocean Freight Pricing" title="Sources" description="Source emails ingested from tenant-configured Microsoft 365 mailbox targets." />
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">Pricing mailbox ingestion</h2>
+            <p className="mt-1 text-sm leading-6 text-mutedForeground">
+              Configure the mailboxes used only for Ocean Freight Pricing ingestion. Assistant chat memory uses separate Microsoft 365 settings.
+            </p>
+          </div>
+          <span className="rounded-full border border-border bg-muted px-3 py-1 text-xs font-semibold text-foreground">
+            {shell.microsoftGraphSettings.mailSyncEnabled ? "Enabled" : "Disabled"}
+          </span>
+        </div>
+
+        <form action={saveOceanFreightMicrosoftGraphSettingsAction} className="mt-5 grid gap-4">
+          <label className="grid gap-2 text-sm font-semibold text-foreground">
+            Pricing mailbox targets
+            <textarea
+              className="min-h-28 rounded-md border border-input bg-background px-3 py-2 text-sm font-normal text-foreground"
+              name="oceanMicrosoftMailboxTargets"
+              defaultValue={shell.microsoftGraphSettings.adminMailboxTargets.join("\n")}
+              placeholder="pricing@newlgroup.com"
+            />
+          </label>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <label className="grid gap-2 text-sm font-semibold text-foreground">
+              Email history window
+              <select
+                className="rounded-md border border-input bg-background px-3 py-2 text-sm font-normal"
+                name="oceanMicrosoftMailLookbackDays"
+                defaultValue={String(shell.microsoftGraphSettings.mailLookbackDays)}
+              >
+                <option value="7">Last 7 days</option>
+                <option value="14">Last 14 days</option>
+                <option value="30">Last 30 days</option>
+                <option value="60">Last 60 days</option>
+                <option value="90">Last 90 days</option>
+                <option value="180">Last 180 days</option>
+              </select>
+            </label>
+            <label className="grid gap-2 text-sm font-semibold text-foreground">
+              Max emails per mailbox
+              <input
+                className="rounded-md border border-input bg-background px-3 py-2 text-sm font-normal"
+                name="oceanMicrosoftMaxMessagesPerMailbox"
+                type="number"
+                min="1"
+                max="2000"
+                defaultValue={shell.microsoftGraphSettings.maxMailMessagesPerMailbox}
+              />
+            </label>
+            <label className="flex items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm font-semibold text-foreground">
+              <input
+                name="oceanMicrosoftMailSyncEnabled"
+                value="true"
+                type="checkbox"
+                defaultChecked={shell.microsoftGraphSettings.mailSyncEnabled}
+              />
+              Enable pricing email ingestion
+            </label>
+          </div>
+
+          <p className="text-sm leading-6 text-mutedForeground">{shell.microsoftGraphSettings.runtimeNotes}</p>
+          <button className="w-fit rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground">
+            Save pricing mailbox settings
+          </button>
+        </form>
+      </section>
+
       <form className="grid gap-3 rounded-lg border border-border bg-card p-4 shadow-sm md:grid-cols-6">
         <input name="search" defaultValue={filters.search} placeholder="Search subject/body" className="rounded-md border border-input bg-background px-3 py-2 text-sm" />
         <input name="sender" defaultValue={filters.sender} placeholder="Sender" className="rounded-md border border-input bg-background px-3 py-2 text-sm" />

@@ -2,11 +2,11 @@ import { createHash } from "node:crypto";
 import { IntegrationProvider, JobStatus, ModuleKey, Prisma } from "@prisma/client";
 
 import { requireModule, requireMutationAccess } from "@/server/auth/authorization";
-import { prisma } from "@/server/db";
 import {
-  MICROSOFT_GRAPH_CREDENTIAL_NAME,
-  parseMicrosoftGraphSettings
-} from "@/server/integrations/microsoft-graph";
+  OCEAN_FREIGHT_MICROSOFT_GRAPH_CREDENTIAL_NAME,
+  parseOceanFreightMicrosoftGraphSettings
+} from "@/modules/ocean-freight-pricing/microsoft-graph-settings";
+import { prisma } from "@/server/db";
 import { getMicrosoftGraphApplicationAccessToken } from "@/server/integrations/microsoft-graph-application";
 import {
   fetchMicrosoftGraphMailboxMessages,
@@ -236,11 +236,11 @@ async function upsertOceanFreightSourceAttachment(tenantId: string, sourceEmailI
 
 async function getOceanGraphSettings(tenantId: string) {
   const credential = await prisma.integrationCredential.findFirst({
-    where: { tenantId, provider: IntegrationProvider.MICROSOFT_GRAPH, name: MICROSOFT_GRAPH_CREDENTIAL_NAME },
+    where: { tenantId, provider: IntegrationProvider.MICROSOFT_GRAPH, name: OCEAN_FREIGHT_MICROSOFT_GRAPH_CREDENTIAL_NAME },
     orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
     select: { provider: true, status: true, publicConfig: true }
   });
-  return parseMicrosoftGraphSettings(credential);
+  return parseOceanFreightMicrosoftGraphSettings(credential);
 }
 
 async function fetchSelectedMailboxMessages(accessToken: string, mailboxes: string[], options: MailFetchOptions) {
