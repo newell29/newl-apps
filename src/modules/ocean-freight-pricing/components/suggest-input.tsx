@@ -13,6 +13,7 @@ export function OceanFreightSuggestInput({
   suggestionField,
   placeholder,
   required,
+  disabled,
   className,
   minQueryLength = 2
 }: {
@@ -22,6 +23,7 @@ export function OceanFreightSuggestInput({
   suggestionField: OceanFreightSuggestionField;
   placeholder?: string;
   required?: boolean;
+  disabled?: boolean;
   className?: string;
   minQueryLength?: number;
 }) {
@@ -87,6 +89,7 @@ export function OceanFreightSuggestInput({
         name={name}
         value={value}
         required={required}
+        disabled={disabled}
         placeholder={placeholder ?? `Type ${minQueryLength}+ letters`}
         onChange={(event) => {
           const nextValue = event.target.value;

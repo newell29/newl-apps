@@ -65,6 +65,28 @@ describe("ocean freight pricing email ingestion", () => {
     expect(result.detectionReason).toContain("rate sheet");
   });
 
+  it("does not detect outbound quotes sent from the configured pricing mailbox as agent rates", () => {
+    const result = detectOceanFreightRateEmail({
+      subject: "NEW BOOKING RFQ // TASTE OF NATURE FOOD INC / 1X20GP",
+      bodyText: "Hi, we can offer ocean rate pricing valid until July. POL Shanghai POD Newark.",
+      fromAddress: "pricing@example.com",
+      mailboxAddresses: ["pricing@example.com"]
+    });
+    expect(result.rateDetected).toBe(false);
+    expect(result.detectionReason).toContain("Not an inbound agent rate");
+  });
+
+  it("detects inbound agent rate offers with price evidence", () => {
+    const result = detectOceanFreightRateEmail({
+      subject: "Shanghai FCL rates",
+      bodyText: "POL Shanghai POD LA 40HQ USD 2450 valid until July 31. Carrier ONE.",
+      fromAddress: "agent@forwarder.example",
+      mailboxAddresses: ["pricing@example.com"]
+    });
+    expect(result.rateDetected).toBe(true);
+    expect(result.matchedTerms).toContain("rate amount");
+  });
+
   it("keeps non-rate emails with a negative detection reason", () => {
     const result = detectOceanFreightRateEmail({ subject: "Team lunch", bodyText: "Please confirm attendance." });
     expect(result.rateDetected).toBe(false);

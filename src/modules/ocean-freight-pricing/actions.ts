@@ -1,6 +1,6 @@
 "use server";
 
-import { IntegrationProvider, IntegrationStatus, ModuleKey, OceanEquipmentType, OceanRateSourceType, OceanRateStatus, Prisma } from "@prisma/client";
+import { IntegrationProvider, IntegrationStatus, ModuleKey, OceanEquipmentType, OceanExtractionStatus, OceanRateSourceType, OceanRateStatus, Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireModule, requireMutationAccess } from "@/server/auth/authorization";
@@ -82,8 +82,13 @@ async function refreshAgentCounts(tenantId: string, agentId: string) {
 function revalidateOceanFreightPricing() {
   revalidatePath("/ocean-freight-pricing");
   revalidatePath("/ocean-freight-pricing/agents");
+  revalidatePath("/ocean-freight-pricing/review");
   revalidatePath("/ocean-freight-pricing/sources");
   revalidatePath("/ocean-freight-pricing/jobs");
+}
+function emailDomain(value: string | null) {
+  const domain = value?.split("@")[1]?.trim().toLowerCase();
+  return domain || null;
 }
 
 export async function createOceanFreightAgentAction(formData: FormData) {
@@ -340,6 +345,179 @@ export async function inactivateOceanFreightRateAction(formData: FormData) {
   const after = await prisma.oceanFreightRate.update({ where: { tenantId_id: { tenantId: ctx.tenantId, id } }, data: { status: OceanRateStatus.INACTIVE, inactiveAt: new Date(), inactiveByUserId: ctx.userId, inactiveReason: requiredText(formData, "inactiveReason"), updatedByUserId: ctx.userId } });
   await refreshAgentCounts(ctx.tenantId, after.agentId);
   await prisma.auditLog.create({ data: { tenantId: ctx.tenantId, actorUserId: ctx.userId, action: "ocean-freight.rate.inactivated", entityType: "OceanFreightRate", entityId: id, before, after } });
+  revalidateOceanFreightPricing();
+}
+
+export async function createOceanFreightRateCandidateFromSourceAction(formData: FormData) {
+  const ctx = await authorize();
+  const sourceEmailId = requiredText(formData, "sourceEmailId");
+  const source = await prisma.oceanFreightSourceEmail.findUniqueOrThrow({
+    where: { tenantId_id: { tenantId: ctx.tenantId, id: sourceEmailId } }
+  });
+
+  if (source.fromAddress && source.fromAddress.toLowerCase() === source.mailboxAddress.toLowerCase()) {
+    throw new Error("This email was sent from the configured pricing mailbox, so it looks like an outbound customer quote/RFQ instead of an inbound agent rate.");
+  }
+
+  const existing = await prisma.oceanFreightRateCandidate.findFirst({
+    where: {
+      tenantId: ctx.tenantId,
+      sourceEmailId,
+      status: { in: [OceanExtractionStatus.NEW, OceanExtractionStatus.NEEDS_REVIEW] }
+    },
+    select: { id: true }
+  });
+
+  if (!existing) {
+    const domain = emailDomain(source.fromAddress);
+    const agent = domain
+      ? await prisma.oceanFreightAgent.findFirst({
+          where: { tenantId: ctx.tenantId, primaryEmailDomain: { equals: domain, mode: "insensitive" } },
+          select: { id: true }
+        })
+      : null;
+    const contact = source.fromAddress
+      ? await prisma.oceanFreightAgentContact.findFirst({
+          where: { tenantId: ctx.tenantId, email: { equals: source.fromAddress.toLowerCase(), mode: "insensitive" } },
+          select: { id: true, agentId: true }
+        })
+      : null;
+    const candidate = await prisma.oceanFreightRateCandidate.create({
+      data: {
+        tenantId: ctx.tenantId,
+        sourceType: OceanRateSourceType.EMAIL_BODY,
+        sourceEmailId: source.id,
+        agentId: contact?.agentId ?? agent?.id ?? null,
+        agentContactId: contact?.id ?? null,
+        status: OceanExtractionStatus.NEEDS_REVIEW,
+        agentCompanyNameRaw: source.fromName ?? domain,
+        agentContactEmailRaw: source.fromAddress,
+        notes: [`Source subject: ${source.subject}`, source.bodyPreview ? `Preview: ${source.bodyPreview}` : null].filter(Boolean).join("\n\n"),
+        confidence: source.rateDetected ? 40 : 15,
+        rawExtractionJson: {
+          sourceEmailId: source.id,
+          graphMessageId: source.graphMessageId,
+          detectionReason: source.detectionReason,
+          createdBy: "manual-source-review"
+        }
+      }
+    });
+    await prisma.auditLog.create({ data: { tenantId: ctx.tenantId, actorUserId: ctx.userId, action: "ocean-freight.rate-candidate.created-from-source", entityType: "OceanFreightRateCandidate", entityId: candidate.id, after: candidate } });
+  }
+
+  revalidateOceanFreightPricing();
+  redirect("/ocean-freight-pricing/review");
+}
+
+export async function markOceanFreightSourceNotAgentRateAction(formData: FormData) {
+  const ctx = await authorize();
+  const sourceEmailId = requiredText(formData, "sourceEmailId");
+  const before = await prisma.oceanFreightSourceEmail.findUniqueOrThrow({
+    where: { tenantId_id: { tenantId: ctx.tenantId, id: sourceEmailId } }
+  });
+  const after = await prisma.oceanFreightSourceEmail.update({
+    where: { tenantId_id: { tenantId: ctx.tenantId, id: sourceEmailId } },
+    data: {
+      rateDetected: false,
+      detectionReason: "Manually marked as not an inbound overseas agent rate."
+    }
+  });
+  await prisma.auditLog.create({ data: { tenantId: ctx.tenantId, actorUserId: ctx.userId, action: "ocean-freight.source-email.marked-not-agent-rate", entityType: "OceanFreightSourceEmail", entityId: sourceEmailId, before, after } });
+  revalidateOceanFreightPricing();
+}
+
+export async function approveOceanFreightRateCandidateAction(formData: FormData) {
+  const ctx = await authorize();
+  const candidateId = requiredText(formData, "candidateId");
+  const candidate = await prisma.oceanFreightRateCandidate.findUniqueOrThrow({
+    where: { tenantId_id: { tenantId: ctx.tenantId, id: candidateId } }
+  });
+  const agentId = requiredText(formData, "agentId");
+  const equipmentType = requiredText(formData, "equipmentType") as OceanEquipmentType;
+
+  const rate = await prisma.oceanFreightRate.create({
+    data: {
+      tenantId: ctx.tenantId,
+      agentId,
+      agentContactId: text(formData, "agentContactId"),
+      sourceType: candidate.sourceType,
+      sourceEmailId: candidate.sourceEmailId,
+      sourceAttachmentId: candidate.sourceAttachmentId,
+      sourceCandidateId: candidate.id,
+      originPort: requiredText(formData, "originPort"),
+      originCountry: text(formData, "originCountry"),
+      originRegion: text(formData, "originRegion"),
+      destinationPort: requiredText(formData, "destinationPort"),
+      destinationCountry: text(formData, "destinationCountry"),
+      destinationRegion: text(formData, "destinationRegion"),
+      equipmentType,
+      equipmentLabel: text(formData, "equipmentLabel") ?? equipmentType,
+      rateAmount: requiredText(formData, "rateAmount"),
+      currency: requiredText(formData, "currency").toUpperCase(),
+      shippingLine: text(formData, "shippingLine"),
+      validityStartDate: dateValue(formData, "validityStartDate"),
+      validityEndDate: dateValue(formData, "validityEndDate"),
+      freeTimeNotes: text(formData, "freeTimeNotes"),
+      detentionDemurrageNotes: text(formData, "detentionDemurrageNotes"),
+      transitTimeDays: text(formData, "transitTimeDays") ? Number(text(formData, "transitTimeDays")) : null,
+      transitTimeNotes: text(formData, "transitTimeNotes"),
+      scheduleNotes: text(formData, "scheduleNotes") ?? "Schedule not provided",
+      notes: text(formData, "notes") ?? candidate.notes,
+      correctionNotes: text(formData, "correctionNotes"),
+      createdByUserId: ctx.userId,
+      updatedByUserId: ctx.userId,
+      approvedByUserId: ctx.userId,
+      approvedAt: new Date()
+    }
+  });
+
+  const after = await prisma.oceanFreightRateCandidate.update({
+    where: { tenantId_id: { tenantId: ctx.tenantId, id: candidateId } },
+    data: {
+      status: OceanExtractionStatus.APPROVED,
+      reviewedAt: new Date(),
+      reviewedByUserId: ctx.userId,
+      approvedRateId: rate.id,
+      agentId,
+      agentContactId: text(formData, "agentContactId"),
+      originPort: requiredText(formData, "originPort"),
+      originCountry: text(formData, "originCountry"),
+      destinationPort: requiredText(formData, "destinationPort"),
+      destinationCountry: text(formData, "destinationCountry"),
+      equipmentType,
+      equipmentLabelRaw: text(formData, "equipmentLabel") ?? equipmentType,
+      rateAmount: requiredText(formData, "rateAmount"),
+      currency: requiredText(formData, "currency").toUpperCase(),
+      shippingLine: text(formData, "shippingLine"),
+      validityStartDate: dateValue(formData, "validityStartDate"),
+      validityEndDate: dateValue(formData, "validityEndDate"),
+      notes: text(formData, "notes") ?? candidate.notes
+    }
+  });
+
+  await refreshAgentCounts(ctx.tenantId, agentId);
+  await prisma.auditLog.create({ data: { tenantId: ctx.tenantId, actorUserId: ctx.userId, action: "ocean-freight.rate-candidate.approved", entityType: "OceanFreightRateCandidate", entityId: candidateId, before: candidate, after } });
+  await prisma.auditLog.create({ data: { tenantId: ctx.tenantId, actorUserId: ctx.userId, action: "ocean-freight.rate.created-from-candidate", entityType: "OceanFreightRate", entityId: rate.id, after: rate } });
+  revalidateOceanFreightPricing();
+  redirect("/ocean-freight-pricing");
+}
+
+export async function rejectOceanFreightRateCandidateAction(formData: FormData) {
+  const ctx = await authorize();
+  const candidateId = requiredText(formData, "candidateId");
+  const before = await prisma.oceanFreightRateCandidate.findUniqueOrThrow({
+    where: { tenantId_id: { tenantId: ctx.tenantId, id: candidateId } }
+  });
+  const after = await prisma.oceanFreightRateCandidate.update({
+    where: { tenantId_id: { tenantId: ctx.tenantId, id: candidateId } },
+    data: {
+      status: OceanExtractionStatus.REJECTED,
+      reviewedAt: new Date(),
+      reviewedByUserId: ctx.userId,
+      rejectionReason: requiredText(formData, "rejectionReason")
+    }
+  });
+  await prisma.auditLog.create({ data: { tenantId: ctx.tenantId, actorUserId: ctx.userId, action: "ocean-freight.rate-candidate.rejected", entityType: "OceanFreightRateCandidate", entityId: candidateId, before, after } });
   revalidateOceanFreightPricing();
 }
 
