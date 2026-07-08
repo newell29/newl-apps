@@ -18,12 +18,17 @@ import {
 } from "@/modules/invoice-automation/components";
 import type {
   InvoiceAutomationEntityOption,
+  InvoiceAutomationOcrResult,
   InvoiceAutomationRow,
   InvoiceAutomationUploadDraft,
   InvoiceAutomationUploadResponse
 } from "@/modules/invoice-automation/types";
 
 type PdfJsModule = typeof import("pdfjs-dist");
+
+const OCR_PAGE_LIMIT = 4;
+const OCR_IMAGE_MAX_WIDTH = 1800;
+const OCR_IMAGE_JPEG_QUALITY = 0.82;
 
 let pdfJsLoader: Promise<PdfJsModule> | null = null;
 
@@ -260,20 +265,29 @@ function InvoiceUploadModal({
           throw new Error(`${file.name} is not a PDF.`);
         }
 
+        setStatus(`Reading PDF text from ${file.name}.`);
         const bytes = new Uint8Array(await file.arrayBuffer());
-        const [text, pdfBase64] = await Promise.all([extractPdfText(bytes), bytesToBase64(bytes)]);
-        nextDrafts.push(
-          buildInvoiceDraftFromText({
-            clientId: `${file.name}-${file.size}-${nextDrafts.length}`,
-            fileName: file.name,
-            contentType: file.type || "application/pdf",
-            sizeBytes: file.size,
-            pdfBase64,
-            text,
-            invoiceType,
-            entityOptions
-          })
-        );
+        const pdfBase64 = await bytesToBase64(bytes);
+        const text = await extractPdfText(bytes);
+        let draft = buildInvoiceDraftFromText({
+          clientId: `${file.name}-${file.size}-${nextDrafts.length}`,
+          fileName: file.name,
+          contentType: file.type || "application/pdf",
+          sizeBytes: file.size,
+          pdfBase64,
+          text,
+          invoiceType,
+          entityOptions
+        });
+
+        if (shouldRunVisionOcr(draft)) {
+          setStatus(`Running OCR on ${file.name}.`);
+          const images = await renderInvoicePageImages(bytes);
+          const ocrResult = await runInvoiceVisionOcr(invoiceType, file.name, images);
+          draft = mergeOcrResultIntoDraft(draft, ocrResult, invoiceType, entityOptions);
+        }
+
+        nextDrafts.push(draft);
       }
 
       setDrafts(nextDrafts);
@@ -338,7 +352,7 @@ function InvoiceUploadModal({
           <div>
             <h2 className="text-lg font-semibold text-foreground">{title}</h2>
             <p className="mt-1 text-sm text-mutedForeground">
-              Upload multiple PDFs. The app extracts text, maps the QuickBooks customer/vendor where possible, and lets you review every invoice in one table.
+              Upload multiple PDFs. The app reads embedded PDF text first, uses OCR when needed, maps the QuickBooks customer/vendor where possible, and lets you review every invoice in one table.
             </p>
           </div>
           <button type="button" onClick={onClose} className="rounded-md border border-border px-3 py-2 text-sm font-semibold hover:bg-muted">
@@ -510,7 +524,13 @@ async function loadPdfJs() {
 
 async function extractPdfText(bytes: Uint8Array) {
   const pdfjs = await loadPdfJs();
-  const loadingTask = pdfjs.getDocument({ data: bytes });
+  const loadingTask = pdfjs.getDocument({
+    data: cloneBytes(bytes),
+    cMapPacked: true,
+    cMapUrl: "/pdfjs/cmaps/",
+    standardFontDataUrl: "/pdfjs/standard_fonts/",
+    wasmUrl: "/pdfjs/wasm/"
+  });
   const pdf = await loadingTask.promise;
   const pages: string[] = [];
 
@@ -530,6 +550,197 @@ async function extractPageText(page: PDFPageProxy) {
     .trim();
 }
 
+async function renderInvoicePageImages(bytes: Uint8Array) {
+  const pdfjs = await loadPdfJs();
+  const loadingTask = pdfjs.getDocument({
+    data: cloneBytes(bytes),
+    cMapPacked: true,
+    cMapUrl: "/pdfjs/cmaps/",
+    standardFontDataUrl: "/pdfjs/standard_fonts/",
+    wasmUrl: "/pdfjs/wasm/"
+  });
+  const pdf = await loadingTask.promise;
+  const images: Array<{ pageNumber: number; imageDataUrl: string }> = [];
+  const pageCount = Math.min(pdf.numPages, OCR_PAGE_LIMIT);
+
+  for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    images.push({
+      pageNumber,
+      imageDataUrl: await renderPageImage(page)
+    });
+  }
+
+  return images;
+}
+
+async function renderPageImage(page: PDFPageProxy) {
+  const viewport = page.getViewport({ scale: 2.4 });
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    throw new Error("Browser canvas rendering is not available for invoice OCR.");
+  }
+
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvas, canvasContext: context, viewport }).promise;
+
+  const scale = Math.min(1, OCR_IMAGE_MAX_WIDTH / canvas.width);
+  if (scale >= 1) {
+    return canvas.toDataURL("image/jpeg", OCR_IMAGE_JPEG_QUALITY);
+  }
+
+  const resizedCanvas = document.createElement("canvas");
+  const resizedContext = resizedCanvas.getContext("2d");
+
+  if (!resizedContext) {
+    throw new Error("Browser canvas resizing is not available for invoice OCR.");
+  }
+
+  resizedCanvas.width = Math.max(1, Math.floor(canvas.width * scale));
+  resizedCanvas.height = Math.max(1, Math.floor(canvas.height * scale));
+  resizedContext.fillStyle = "#ffffff";
+  resizedContext.fillRect(0, 0, resizedCanvas.width, resizedCanvas.height);
+  resizedContext.drawImage(canvas, 0, 0, resizedCanvas.width, resizedCanvas.height);
+
+  return resizedCanvas.toDataURL("image/jpeg", OCR_IMAGE_JPEG_QUALITY);
+}
+
+async function runInvoiceVisionOcr(
+  invoiceType: InvoiceAutomationType,
+  fileName: string,
+  images: Array<{ pageNumber: number; imageDataUrl: string }>
+): Promise<InvoiceAutomationOcrResult> {
+  const response = await fetch("/api/finance/invoice-automation/ocr", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      invoiceType,
+      fileName,
+      images
+    })
+  });
+  const json = (await response.json().catch(() => null)) as InvoiceAutomationOcrResult | { error?: string } | null;
+
+  if (!response.ok || !json) {
+    throw new Error("Unable to run invoice OCR.");
+  }
+
+  if (isErrorResponse(json)) {
+    throw new Error(json.error ?? "Unable to run invoice OCR.");
+  }
+
+  return json;
+}
+
+function isErrorResponse(value: InvoiceAutomationOcrResult | { error?: string }): value is { error?: string } {
+  return "error" in value;
+}
+
+function shouldRunVisionOcr(draft: InvoiceAutomationUploadDraft) {
+  const blockingIssues = new Set([
+    "NO_EXTRACTABLE_TEXT",
+    "MISSING_FILE_NUMBER",
+    "MISSING_INVOICE_NUMBER",
+    "MISSING_INVOICE_DATE",
+    "MISSING_CUSTOMER_OR_VENDOR",
+    "MISSING_TOTAL",
+    "MISSING_CURRENCY"
+  ]);
+
+  return draft.extractedText.length < 80 || draft.issueCodes.some((issue) => blockingIssues.has(issue));
+}
+
+function mergeOcrResultIntoDraft(
+  draft: InvoiceAutomationUploadDraft,
+  ocr: InvoiceAutomationOcrResult,
+  invoiceType: InvoiceAutomationType,
+  entityOptions: InvoiceAutomationEntityOption[]
+): InvoiceAutomationUploadDraft {
+  const extractedText = [draft.extractedText, ocr.extractedText, ocr.notes ? `OCR notes: ${ocr.notes}` : ""]
+    .filter((value) => value.trim().length > 0)
+    .join("\n");
+  const shipmentFileNumber = draft.shipmentFileNumber ?? ocr.shipmentFileNumber;
+  const matchedEntity = ocr.entityName
+    ? findBestEntityForOcrName(ocr.entityName, invoiceType, entityOptions, ocr.currency)
+    : null;
+  const quickBooksEntityId = draft.quickBooksEntityId ?? matchedEntity?.id ?? null;
+  const quickBooksEntityDisplayName = draft.quickBooksEntityDisplayName ?? matchedEntity?.displayName ?? null;
+  const quickBooksMatchConfidence = draft.quickBooksMatchConfidence ?? (matchedEntity ? 92 : null);
+  const next: InvoiceAutomationUploadDraft = {
+    ...draft,
+    extractedText,
+    shipmentFileNumber,
+    shipmentType: getShipmentTypeFromInvoiceFileNumber(shipmentFileNumber),
+    businessLine: getBusinessLineFromInvoiceFileNumber(shipmentFileNumber),
+    entityNameRaw: draft.entityNameRaw ?? matchedEntity?.displayName ?? ocr.entityName,
+    quickBooksEntityId,
+    quickBooksEntityDisplayName,
+    quickBooksMatchConfidence,
+    invoiceNumber: draft.invoiceNumber ?? ocr.invoiceNumber,
+    invoiceDate: draft.invoiceDate ?? ocr.invoiceDate,
+    dueDate: draft.dueDate ?? ocr.dueDate,
+    currency: draft.currency ?? ocr.currency,
+    subtotalAmount: draft.subtotalAmount ?? ocr.subtotalAmount,
+    taxAmount: draft.taxAmount ?? ocr.taxAmount,
+    totalAmount: draft.totalAmount ?? ocr.totalAmount,
+    productOrAccountName: draft.productOrAccountName ?? getDefaultProductOrAccount(invoiceType, shipmentFileNumber)
+  };
+
+  return refreshDraftIssues(next);
+}
+
+function findBestEntityForOcrName(
+  entityName: string,
+  invoiceType: InvoiceAutomationType,
+  entityOptions: InvoiceAutomationEntityOption[],
+  currency: string | null
+) {
+  const normalizedOcrName = normalizeEntityForClientMatch(entityName);
+  const candidates = entityOptions.filter((option) => option.entityType === invoiceType);
+  let best: { option: InvoiceAutomationEntityOption; score: number } | null = null;
+
+  for (const option of candidates) {
+    const normalizedOption = option.normalizedName || normalizeEntityForClientMatch(option.displayName);
+    let score = 0;
+
+    if (normalizedOption === normalizedOcrName) {
+      score = 100;
+    } else if (normalizedOption.includes(normalizedOcrName) || normalizedOcrName.includes(normalizedOption)) {
+      score = 90;
+    } else {
+      const parts = normalizedOcrName.split(" ").filter((part) => part.length > 2);
+      const matchedParts = parts.filter((part) => normalizedOption.includes(part)).length;
+      score = parts.length > 0 ? Math.round((matchedParts / parts.length) * 70) : 0;
+    }
+
+    if (currency && option.currency === currency) {
+      score += 8;
+    }
+
+    if (score > (best?.score ?? 0)) {
+      best = { option, score };
+    }
+  }
+
+  return best && best.score >= 55 ? best.option : null;
+}
+
+function normalizeEntityForClientMatch(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/\b(usd|cad|cdn)\b/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function bytesToBase64(bytes: Uint8Array) {
   let binary = "";
   const chunkSize = 0x8000;
@@ -539,3 +750,8 @@ function bytesToBase64(bytes: Uint8Array) {
   return Promise.resolve(btoa(binary));
 }
 
+function cloneBytes(bytes: Uint8Array) {
+  const clone = new Uint8Array(bytes.byteLength);
+  clone.set(bytes);
+  return clone;
+}
