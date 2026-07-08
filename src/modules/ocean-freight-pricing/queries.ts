@@ -1,4 +1,5 @@
 import { ModuleKey, OceanEquipmentType, OceanRateStatus, Prisma } from "@prisma/client";
+import { OCEAN_FREIGHT_EMAIL_INGESTION_JOB_TYPE } from "@/modules/ocean-freight-pricing/ingestion";
 import { prisma } from "@/server/db";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 import { requireModule } from "@/server/auth/authorization";
@@ -26,6 +27,14 @@ export type OceanFreightAgentFilters = {
   branchLocation?: string;
   agentRating?: string;
   activeOnly?: string;
+};
+export type OceanFreightSourceFilters = {
+  detectedOnly?: string;
+  sender?: string;
+  mailbox?: string;
+  receivedFrom?: string;
+  receivedTo?: string;
+  search?: string;
 };
 
 export function getComputedOceanRateStatus(rate: { status: OceanRateStatus; validityStartDate: Date | null; validityEndDate: Date | null }, today = new Date()) {
@@ -88,6 +97,27 @@ export async function getOceanFreightPricingShell(ctx: AuthenticatedContext, fil
   };
 }
 
+
+export async function getOceanFreightSourcesShell(ctx: AuthenticatedContext, filters?: OceanFreightSourceFilters) {
+  await requireModule(ctx, ModuleKey.OCEAN_FREIGHT_PRICING);
+  const where = buildSourceWhere(ctx.tenantId, filters);
+  const [sources, mailboxes] = await Promise.all([
+    prisma.oceanFreightSourceEmail.findMany({ where, orderBy: { receivedAt: "desc" }, take: 100 }),
+    prisma.oceanFreightSourceEmail.findMany({ where: { tenantId: ctx.tenantId }, distinct: ["mailboxAddress"], select: { mailboxAddress: true }, orderBy: { mailboxAddress: "asc" } })
+  ]);
+  return { sources, mailboxes: mailboxes.map((item) => item.mailboxAddress) };
+}
+
+export async function getOceanFreightJobsShell(ctx: AuthenticatedContext) {
+  await requireModule(ctx, ModuleKey.OCEAN_FREIGHT_PRICING);
+  const jobs = await prisma.automationJobRun.findMany({
+    where: { tenantId: ctx.tenantId, jobType: OCEAN_FREIGHT_EMAIL_INGESTION_JOB_TYPE },
+    orderBy: { startedAt: "desc" },
+    take: 50
+  });
+  return { jobs };
+}
+
 export async function getOceanFreightAgentsShell(ctx: AuthenticatedContext, filters?: OceanFreightAgentFilters) {
   await requireModule(ctx, ModuleKey.OCEAN_FREIGHT_PRICING);
   const where = buildAgentWhere(ctx.tenantId, filters);
@@ -102,6 +132,32 @@ export async function getOceanFreightAgentsShell(ctx: AuthenticatedContext, filt
   });
 
   return { agents };
+}
+
+
+function buildSourceWhere(tenantId: string, filters?: OceanFreightSourceFilters): Prisma.OceanFreightSourceEmailWhereInput {
+  const where: Prisma.OceanFreightSourceEmailWhereInput = { tenantId };
+  if (filters?.detectedOnly === "true") where.rateDetected = true;
+  if (filters?.sender?.trim()) where.fromAddress = { contains: filters.sender.trim(), mode: "insensitive" };
+  if (filters?.mailbox?.trim()) where.mailboxAddress = filters.mailbox.trim().toLowerCase();
+  const receivedFrom = readDate(filters?.receivedFrom);
+  const receivedTo = readDate(filters?.receivedTo);
+  if (receivedFrom || receivedTo) where.receivedAt = { ...(receivedFrom ? { gte: receivedFrom } : {}), ...(receivedTo ? { lte: receivedTo } : {}) };
+  const search = filters?.search?.trim();
+  if (search) {
+    where.AND = appendSourceAnd(where.AND, {
+      OR: [
+        { subject: { contains: search, mode: "insensitive" } },
+        { bodyPreview: { contains: search, mode: "insensitive" } },
+        { normalizedBodyText: { contains: search, mode: "insensitive" } }
+      ]
+    });
+  }
+  return where;
+}
+
+function appendSourceAnd(current: Prisma.OceanFreightSourceEmailWhereInput["AND"], next: Prisma.OceanFreightSourceEmailWhereInput): Prisma.OceanFreightSourceEmailWhereInput["AND"] {
+  return Array.isArray(current) ? [...current, next] : current ? [current, next] : [next];
 }
 
 function buildRateWhere(tenantId: string, today: Date, filters?: OceanFreightPricingFilters): Prisma.OceanFreightRateWhereInput {

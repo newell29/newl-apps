@@ -1,63 +1,61 @@
 import { ModuleKey } from "@prisma/client";
 
 import { PageHeader } from "@/components/page-header";
-import { getOceanFreightPricingShell } from "@/modules/ocean-freight-pricing/queries";
+import { getOceanFreightSourcesShell, type OceanFreightSourceFilters } from "@/modules/ocean-freight-pricing/queries";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
 
+type SearchParams = Promise<OceanFreightSourceFilters>;
+
 function formatDate(date: Date | null) {
   return date ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(date) : "Not processed";
 }
 
-export default async function OceanFreightSourcesPage() {
+export default async function OceanFreightSourcesPage({ searchParams }: { searchParams: SearchParams }) {
   const context = await getAuthenticatedContext();
   await requireModule(context, ModuleKey.OCEAN_FREIGHT_PRICING);
-  const shell = await getOceanFreightPricingShell(context, { status: "active" });
+  const filters = await searchParams;
+  const shell = await getOceanFreightSourcesShell(context, filters);
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        eyebrow="Ocean Freight Pricing"
-        title="Sources"
-        description="Trace pricing source emails and attachments captured from future Microsoft Graph ingestion workflows."
-      />
+      <PageHeader eyebrow="Ocean Freight Pricing" title="Sources" description="Source emails ingested from tenant-configured Microsoft 365 mailbox targets." />
+      <form className="grid gap-3 rounded-lg border border-border bg-card p-4 shadow-sm md:grid-cols-6">
+        <input name="search" defaultValue={filters.search} placeholder="Search subject/body" className="rounded-md border border-input bg-background px-3 py-2 text-sm" />
+        <input name="sender" defaultValue={filters.sender} placeholder="Sender" className="rounded-md border border-input bg-background px-3 py-2 text-sm" />
+        <select name="mailbox" defaultValue={filters.mailbox ?? ""} className="rounded-md border border-input bg-background px-3 py-2 text-sm">
+          <option value="">All mailboxes</option>
+          {shell.mailboxes.map((mailbox) => <option key={mailbox} value={mailbox}>{mailbox}</option>)}
+        </select>
+        <input name="receivedFrom" type="date" defaultValue={filters.receivedFrom} className="rounded-md border border-input bg-background px-3 py-2 text-sm" />
+        <input name="receivedTo" type="date" defaultValue={filters.receivedTo} className="rounded-md border border-input bg-background px-3 py-2 text-sm" />
+        <label className="flex items-center gap-2 text-sm text-mutedForeground"><input name="detectedOnly" value="true" type="checkbox" defaultChecked={filters.detectedOnly === "true"} /> Detected only</label>
+        <button className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primaryForeground md:col-span-1">Apply filters</button>
+      </form>
 
       <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
         <h2 className="text-lg font-semibold text-foreground">Source emails</h2>
         <div className="mt-5 overflow-x-auto">
-          <table className="min-w-[900px] divide-y divide-border text-sm">
+          <table className="min-w-[1200px] divide-y divide-border text-sm">
             <thead className="bg-muted/50 text-left text-xs font-semibold uppercase tracking-wide text-mutedForeground">
-              <tr>
-                <th className="px-3 py-3">Received</th>
-                <th className="px-3 py-3">From</th>
-                <th className="px-3 py-3">Subject</th>
-                <th className="px-3 py-3">Rate detected</th>
-                <th className="px-3 py-3">Processed</th>
-              </tr>
+              <tr><th className="px-3 py-3">Received</th><th className="px-3 py-3">Mailbox</th><th className="px-3 py-3">Sender</th><th className="px-3 py-3">Subject</th><th className="px-3 py-3">Detected</th><th className="px-3 py-3">Reason</th><th className="px-3 py-3">Preview</th><th className="px-3 py-3">Processed</th><th className="px-3 py-3">Link</th></tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {shell.sources.length === 0 ? (
-                <tr>
-                  <td className="px-3 py-8 text-center text-mutedForeground" colSpan={5}>
-                    No source emails have been ingested yet.
-                  </td>
+              {shell.sources.length === 0 ? <tr><td className="px-3 py-8 text-center text-mutedForeground" colSpan={9}>No source emails match these filters.</td></tr> : shell.sources.map((source) => (
+                <tr key={source.id} className="align-top hover:bg-muted/30">
+                  <td className="whitespace-nowrap px-3 py-3 text-mutedForeground">{formatDate(source.receivedAt)}</td>
+                  <td className="px-3 py-3 text-mutedForeground">{source.mailboxAddress}</td>
+                  <td className="px-3 py-3"><div className="font-medium text-foreground">{source.fromName || source.fromAddress || "Unknown"}</div>{source.fromAddress ? <div className="text-xs text-mutedForeground">{source.fromAddress}</div> : null}</td>
+                  <td className="max-w-[260px] px-3 py-3 text-foreground">{source.subject}</td>
+                  <td className="px-3 py-3 font-medium">{source.rateDetected ? "Yes" : "No"}</td>
+                  <td className="max-w-[260px] px-3 py-3 text-mutedForeground">{source.detectionReason}</td>
+                  <td className="max-w-[320px] px-3 py-3 text-mutedForeground">{source.bodyPreview || source.normalizedBodyText?.slice(0, 220) || "No preview"}</td>
+                  <td className="whitespace-nowrap px-3 py-3 text-mutedForeground">{formatDate(source.processedAt)}</td>
+                  <td className="px-3 py-3">{source.webLink ? <a href={source.webLink} target="_blank" rel="noreferrer" className="text-primary hover:underline">Open</a> : "—"}</td>
                 </tr>
-              ) : (
-                shell.sources.map((source) => (
-                  <tr key={source.id} className="align-top hover:bg-muted/30">
-                    <td className="px-3 py-3 text-mutedForeground">{formatDate(source.receivedAt)}</td>
-                    <td className="px-3 py-3">
-                      <div className="font-medium text-foreground">{source.fromName || source.fromAddress || "Unknown sender"}</div>
-                      {source.fromAddress ? <div className="text-xs text-mutedForeground">{source.fromAddress}</div> : null}
-                    </td>
-                    <td className="max-w-[420px] px-3 py-3 text-foreground">{source.subject}</td>
-                    <td className="px-3 py-3 text-mutedForeground">{source.rateDetected ? "Yes" : "No"}</td>
-                    <td className="px-3 py-3 text-mutedForeground">{formatDate(source.processedAt)}</td>
-                  </tr>
-                ))
-              )}
+              ))}
             </tbody>
           </table>
         </div>
