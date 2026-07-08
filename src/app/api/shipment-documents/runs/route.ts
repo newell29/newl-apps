@@ -49,6 +49,7 @@ type SaveRunPayload = {
   recipientEmail?: string | null;
   sourceBolFileName?: string | null;
   sourcePickTicketFileName?: string | null;
+  deferPdfUpload?: boolean;
   bol: SaveRunDocumentPayload;
   pickTickets: SaveRunDocumentPayload;
 };
@@ -63,7 +64,7 @@ type SaveRunDocumentPayload = {
     confidence: string;
     notes?: string | null;
   }>;
-  pdfBase64: string;
+  pdfBase64?: string;
 };
 
 export async function GET(request: Request) {
@@ -100,8 +101,9 @@ export async function POST(request: Request) {
 
     const shipmentDate = parseShipmentDate(body.shipmentDate);
     const documentLabel = readRequiredString(body.documentLabel, "documentLabel");
-    const bol = validateDocumentPayload(body.bol, "BOL");
-    const pickTickets = validateDocumentPayload(body.pickTickets, "Pick tickets");
+    const deferPdfUpload = body.deferPdfUpload === true;
+    const bol = validateDocumentPayload(body.bol, "BOL", deferPdfUpload);
+    const pickTickets = validateDocumentPayload(body.pickTickets, "Pick tickets", deferPdfUpload);
     const recipientEmail = readOptionalString(body.recipientEmail);
     const sourceBolFileName = readOptionalString(body.sourceBolFileName);
     const sourcePickTicketFileName = readOptionalString(body.sourcePickTicketFileName);
@@ -134,8 +136,12 @@ export async function POST(request: Request) {
           bolPsNumbers,
           pickPsNumbers
         }),
-        bolPdfBytes: decodeBase64Pdf(bol.pdfBase64),
-        pickTicketPdfBytes: decodeBase64Pdf(pickTickets.pdfBase64),
+        bolPdfBytes: deferPdfUpload ? Buffer.alloc(0) : decodeBase64Pdf(readRequiredString(bol.pdfBase64, "BOL pdfBase64")),
+        pickTicketPdfBytes: deferPdfUpload
+          ? Buffer.alloc(0)
+          : decodeBase64Pdf(readRequiredString(pickTickets.pdfBase64, "Pick tickets pdfBase64")),
+        bolPdfUploadComplete: !deferPdfUpload,
+        pickPdfUploadComplete: !deferPdfUpload,
         createdByUserId: context.userId
       },
       select: {
@@ -188,7 +194,7 @@ function parseShipmentDate(value: string) {
   return parsed;
 }
 
-function validateDocumentPayload(value: SaveRunDocumentPayload | undefined, label: string) {
+function validateDocumentPayload(value: SaveRunDocumentPayload | undefined, label: string, deferPdfUpload: boolean) {
   if (!value) {
     throw new Error(`${label} output is required.`);
   }
@@ -203,7 +209,7 @@ function validateDocumentPayload(value: SaveRunDocumentPayload | undefined, labe
     throw new Error(`${label} pages are required.`);
   }
 
-  const pdfBase64 = readRequiredString(value.pdfBase64, `${label} pdfBase64`);
+  const pdfBase64 = deferPdfUpload ? undefined : readRequiredString(value.pdfBase64, `${label} pdfBase64`);
 
   return {
     fileName,

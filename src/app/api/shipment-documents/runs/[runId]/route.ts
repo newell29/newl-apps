@@ -18,6 +18,8 @@ type ShipmentDocumentRunRouteClient = typeof prisma & {
       outputPickTicketFileName?: string;
       bolPdfBytes?: Uint8Array;
       pickTicketPdfBytes?: Uint8Array;
+      bolPdfUploadComplete?: boolean;
+      pickPdfUploadComplete?: boolean;
     } | null>;
     update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<unknown>;
   };
@@ -50,7 +52,9 @@ export async function GET(
         outputBolFileName: true,
         outputPickTicketFileName: true,
         bolPdfBytes: true,
-        pickTicketPdfBytes: true
+        pickTicketPdfBytes: true,
+        bolPdfUploadComplete: true,
+        pickPdfUploadComplete: true
       }
     });
 
@@ -60,8 +64,9 @@ export async function GET(
 
     const bytes = documentType === "bol" ? run.bolPdfBytes : run.pickTicketPdfBytes;
     const fileName = documentType === "bol" ? run.outputBolFileName : run.outputPickTicketFileName;
+    const uploadComplete = documentType === "bol" ? run.bolPdfUploadComplete : run.pickPdfUploadComplete;
 
-    if (!bytes || !fileName) {
+    if (!uploadComplete || !bytes || !fileName) {
       return NextResponse.json({ error: "The requested shipment document file is unavailable." }, { status: 404 });
     }
 

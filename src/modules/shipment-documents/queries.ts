@@ -146,6 +146,8 @@ export function buildShipmentDocumentRunWhere(
     tenantId,
     workflowKey: WORKFLOW_KEY,
     deletedAt: null,
+    bolPdfUploadComplete: true,
+    pickPdfUploadComplete: true,
     ...(trimmedSearch
       ? {
           OR: [

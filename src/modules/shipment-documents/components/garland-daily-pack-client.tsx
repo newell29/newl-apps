@@ -69,6 +69,7 @@ type PdfJsModule = typeof import("pdfjs-dist");
 const AI_BATCH_SIZE = 2;
 const AI_IMAGE_MAX_WIDTH = 1800;
 const AI_IMAGE_JPEG_QUALITY = 0.82;
+const PDF_SAVE_BASE64_CHUNK_SIZE = 600_000;
 
 const CROP_BOXES: Record<ShipmentDocumentType, { x: number; y: number; width: number; height: number }> = {
   BOL: { x: 0, y: 0, width: 1, height: 0.5 },
@@ -291,17 +292,16 @@ export function GarlandDailyPackClient({
           recipientEmail,
           sourceBolFileName: bolFile.name,
           sourcePickTicketFileName: pickTicketFile.name,
+          deferPdfUpload: true,
           bol: {
             fileName: result.bol.fileName,
             pageCount: result.bol.pageCount,
-            pages: result.bol.pages,
-            pdfBase64: result.bol.pdfBase64
+            pages: result.bol.pages
           },
           pickTickets: {
             fileName: result.pickTickets.fileName,
             pageCount: result.pickTickets.pageCount,
-            pages: result.pickTickets.pages,
-            pdfBase64: result.pickTickets.pdfBase64
+            pages: result.pickTickets.pages
           }
         })
       });
@@ -313,6 +313,10 @@ export function GarlandDailyPackClient({
       if (!response.ok || !json?.run) {
         throw new Error(json?.error ?? "Unable to save this shipment document run.");
       }
+
+      setStatus("Uploading saved PDFs to history...");
+      await uploadSavedPdfChunks(json.run.id, "bol", result.bol.pdfBase64);
+      await uploadSavedPdfChunks(json.run.id, "pick", result.pickTickets.pdfBase64);
 
       setSavedRunId(json.run.id);
       setStatus("Sorted PDFs are ready and the run has been saved to history.");
@@ -1077,6 +1081,32 @@ async function createDocumentResult(fileName: string, fileBytes: Uint8Array, sor
     pdfBase64: bytesToBase64(sortedPdfBytes),
     sourceBytes
   };
+}
+
+async function uploadSavedPdfChunks(runId: string, documentType: "bol" | "pick", pdfBase64: string) {
+  const totalChunks = Math.ceil(pdfBase64.length / PDF_SAVE_BASE64_CHUNK_SIZE);
+
+  for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+    const start = chunkIndex * PDF_SAVE_BASE64_CHUNK_SIZE;
+    const chunkBase64 = pdfBase64.slice(start, start + PDF_SAVE_BASE64_CHUNK_SIZE);
+    const response = await fetch(`/api/shipment-documents/runs/${runId}/pdf-chunks`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        documentType,
+        chunkBase64,
+        chunkIndex,
+        isLast: chunkIndex === totalChunks - 1
+      })
+    });
+    const json = (await response.json().catch(() => null)) as { error?: string } | null;
+
+    if (!response.ok) {
+      throw new Error(json?.error ?? "Unable to upload the saved PDF chunks.");
+    }
+  }
 }
 
 async function loadPdfJs() {
