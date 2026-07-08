@@ -4,6 +4,10 @@ import {
   OCEAN_FREIGHT_MICROSOFT_GRAPH_CREDENTIAL_NAME,
   parseOceanFreightMicrosoftGraphSettings
 } from "@/modules/ocean-freight-pricing/microsoft-graph-settings";
+import {
+  getOceanFreightReviewDisposition,
+  parseOceanFreightAutomationSettings
+} from "@/modules/ocean-freight-pricing/automation-settings";
 import { prisma } from "@/server/db";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 import { requireModule } from "@/server/auth/authorization";
@@ -133,14 +137,15 @@ export async function getOceanFreightSourcesShell(ctx: AuthenticatedContext, fil
   return {
     sources,
     mailboxes: mailboxes.map((item) => item.mailboxAddress),
-    microsoftGraphSettings: parseOceanFreightMicrosoftGraphSettings(microsoftGraphCredential)
+    microsoftGraphSettings: parseOceanFreightMicrosoftGraphSettings(microsoftGraphCredential),
+    automationSettings: parseOceanFreightAutomationSettings(microsoftGraphCredential)
   };
 }
 
 export async function getOceanFreightReviewShell(ctx: AuthenticatedContext, filters?: OceanFreightReviewFilters) {
   await requireModule(ctx, ModuleKey.OCEAN_FREIGHT_PRICING);
   const where = buildReviewWhere(ctx.tenantId, filters);
-  const [candidates, agents] = await Promise.all([
+  const [candidates, agents, microsoftGraphCredential] = await Promise.all([
     prisma.oceanFreightRateCandidate.findMany({
       where,
       orderBy: [{ createdAt: "desc" }],
@@ -156,10 +161,28 @@ export async function getOceanFreightReviewShell(ctx: AuthenticatedContext, filt
       where: { tenantId: ctx.tenantId },
       orderBy: [{ name: "asc" }],
       include: { contacts: { orderBy: { fullName: "asc" } } }
+    }),
+    prisma.integrationCredential.findFirst({
+      where: {
+        tenantId: ctx.tenantId,
+        provider: IntegrationProvider.MICROSOFT_GRAPH,
+        name: OCEAN_FREIGHT_MICROSOFT_GRAPH_CREDENTIAL_NAME
+      },
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+      select: { provider: true, status: true, publicConfig: true }
     })
   ]);
+  const automationSettings = parseOceanFreightAutomationSettings(microsoftGraphCredential);
+  const candidatesWithDisposition = candidates.map((candidate) => ({
+    ...candidate,
+    reviewDisposition: getOceanFreightReviewDisposition(candidate, automationSettings)
+  }));
+  const shouldShowWorkQueueOnly = (filters?.status || "workQueue") === "workQueue";
+  const visibleCandidates = shouldShowWorkQueueOnly && automationSettings.exceptionOnlyReview
+    ? candidatesWithDisposition.filter((candidate) => candidate.reviewDisposition.isHighConfidence || candidate.reviewDisposition.isException)
+    : candidatesWithDisposition;
 
-  return { candidates, agents };
+  return { candidates: visibleCandidates, agents, automationSettings };
 }
 
 export async function getOceanFreightJobsShell(ctx: AuthenticatedContext) {
@@ -234,8 +257,8 @@ function buildSourceWhere(tenantId: string, filters?: OceanFreightSourceFilters)
 
 function buildReviewWhere(tenantId: string, filters?: OceanFreightReviewFilters): Prisma.OceanFreightRateCandidateWhereInput {
   const where: Prisma.OceanFreightRateCandidateWhereInput = { tenantId };
-  const status = filters?.status || "open";
-  if (status === "open") {
+  const status = filters?.status || "workQueue";
+  if (status === "open" || status === "workQueue") {
     where.status = { in: [OceanExtractionStatus.NEW, OceanExtractionStatus.NEEDS_REVIEW] };
   } else if (Object.values(OceanExtractionStatus).includes(status as OceanExtractionStatus)) {
     where.status = status as OceanExtractionStatus;

@@ -9,6 +9,10 @@ import {
   buildOceanFreightMicrosoftGraphConfig,
   OCEAN_FREIGHT_MICROSOFT_GRAPH_CREDENTIAL_NAME
 } from "@/modules/ocean-freight-pricing/microsoft-graph-settings";
+import {
+  DEFAULT_OCEAN_FREIGHT_AUTOMATION_SETTINGS,
+  parseOceanFreightAutomationSettings
+} from "@/modules/ocean-freight-pricing/automation-settings";
 import { prisma } from "@/server/db";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
@@ -553,8 +557,24 @@ export async function saveOceanFreightMicrosoftGraphSettingsAction(formData: For
       name: OCEAN_FREIGHT_MICROSOFT_GRAPH_CREDENTIAL_NAME
     },
     orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
-    select: { id: true }
+    select: { id: true, provider: true, status: true, publicConfig: true }
   });
+  const existingAutomationSettings = parseOceanFreightAutomationSettings(existing);
+  const automationSettings = {
+    classificationEnabled: formData.get("oceanClassificationEnabled") === "true",
+    extractionEnabled: formData.get("oceanExtractionEnabled") === "true",
+    exceptionOnlyReview: formData.get("oceanExceptionOnlyReview") === "true",
+    highConfidenceThreshold: integerValue(formData, "oceanHighConfidenceThreshold", existingAutomationSettings.highConfidenceThreshold, 1, 100),
+    autoPostEnabled: formData.get("oceanAutoPostEnabled") === "true",
+    autoPostMinimumConfidence: integerValue(formData, "oceanAutoPostMinimumConfidence", existingAutomationSettings.autoPostMinimumConfidence, 1, 100),
+    trustedAgentOnlyAutoPost: formData.get("oceanTrustedAgentOnlyAutoPost") === "true",
+    requireValidityEndDate: formData.get("oceanRequireValidityEndDate") === "true",
+    classificationModel: text(formData, "oceanClassificationModel") ?? DEFAULT_OCEAN_FREIGHT_AUTOMATION_SETTINGS.classificationModel
+  };
+
+  if (automationSettings.autoPostEnabled && automationSettings.autoPostMinimumConfidence < automationSettings.highConfidenceThreshold) {
+    throw new Error("Auto-post minimum confidence must be greater than or equal to the high-confidence review threshold.");
+  }
 
   const data = {
     tenantId: ctx.tenantId,
@@ -565,7 +585,8 @@ export async function saveOceanFreightMicrosoftGraphSettingsAction(formData: For
       adminMailboxTargets,
       mailLookbackDays,
       maxMailMessagesPerMailbox,
-      mailSyncEnabled
+      mailSyncEnabled,
+      automationSettings
     })
   };
 
@@ -584,7 +605,8 @@ export async function saveOceanFreightMicrosoftGraphSettingsAction(formData: For
         mailSyncEnabled,
         mailLookbackDays,
         maxMailMessagesPerMailbox,
-        adminMailboxTargetCount: adminMailboxTargets.length
+        adminMailboxTargetCount: adminMailboxTargets.length,
+        automationSettings
       }
     }
   });

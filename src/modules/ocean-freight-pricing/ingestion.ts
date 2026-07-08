@@ -6,6 +6,7 @@ import {
   OCEAN_FREIGHT_MICROSOFT_GRAPH_CREDENTIAL_NAME,
   parseOceanFreightMicrosoftGraphSettings
 } from "@/modules/ocean-freight-pricing/microsoft-graph-settings";
+import { parseOceanFreightAutomationSettings } from "@/modules/ocean-freight-pricing/automation-settings";
 import { prisma } from "@/server/db";
 import { getMicrosoftGraphApplicationAccessToken } from "@/server/integrations/microsoft-graph-application";
 import {
@@ -38,6 +39,7 @@ type IngestMessagesInput = {
   jobRunId: string;
   mailboxes: string[];
   messages: GraphMailMessage[];
+  classificationEnabled?: boolean;
   attachmentFetcher?: AttachmentFetcher;
 };
 
@@ -153,6 +155,7 @@ export async function runOceanFreightEmailIngestionJob(ctx: TenantContext & { us
       jobRunId,
       mailboxes: settings.adminMailboxTargets,
       messages: mailboxResults.messages,
+      classificationEnabled: settings.automationSettings.classificationEnabled,
       attachmentFetcher: async (message, sourceEmail) =>
         fetchMicrosoftGraphMessageAttachments(accessToken, sourceEmail.mailboxAddress, message.id)
     });
@@ -185,13 +188,19 @@ export async function persistOceanFreightSourceEmails(input: IngestMessagesInput
   for (const message of input.messages) {
     const bodyText = normalizeEmailBodyText(message.body?.content ?? message.bodyPreview ?? "");
     const mailboxAddress = (message.mailboxAddress || input.mailboxes[0] || "unknown").toLowerCase();
-    const detection = detectOceanFreightRateEmail({
-      subject: message.subject,
-      bodyPreview: message.bodyPreview,
-      bodyText,
-      fromAddress: message.from?.emailAddress?.address,
-      mailboxAddresses: input.mailboxes
-    });
+    const detection = input.classificationEnabled === false
+      ? {
+          rateDetected: false,
+          matchedTerms: [],
+          detectionReason: "Ocean freight email classification is disabled for this tenant."
+        }
+      : detectOceanFreightRateEmail({
+          subject: message.subject,
+          bodyPreview: message.bodyPreview,
+          bodyText,
+          fromAddress: message.from?.emailAddress?.address,
+          mailboxAddresses: input.mailboxes
+        });
     const bodyContentHash = bodyText ? createHash("sha256").update(bodyText).digest("hex") : null;
     const data = {
       tenantId: input.tenantId,
@@ -273,7 +282,10 @@ async function getOceanGraphSettings(tenantId: string) {
     orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
     select: { provider: true, status: true, publicConfig: true }
   });
-  return parseOceanFreightMicrosoftGraphSettings(credential);
+  return {
+    ...parseOceanFreightMicrosoftGraphSettings(credential),
+    automationSettings: parseOceanFreightAutomationSettings(credential)
+  };
 }
 
 async function fetchSelectedMailboxMessages(accessToken: string, mailboxes: string[], options: MailFetchOptions) {

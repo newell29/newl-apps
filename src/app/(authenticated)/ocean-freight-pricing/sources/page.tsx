@@ -100,6 +100,60 @@ export default async function OceanFreightSourcesPage({ searchParams }: { search
           </div>
 
           <p className="text-sm leading-6 text-mutedForeground">{shell.microsoftGraphSettings.runtimeNotes}</p>
+          <div className="rounded-md border border-border bg-muted/20 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">Classification and autopost controls</h3>
+                <p className="mt-1 text-sm leading-6 text-mutedForeground">
+                  Keep the team focused on high-confidence candidate rates and exceptions. Autopost stays off until you are ready to trust specific agents and thresholds.
+                </p>
+              </div>
+              <span className="rounded-full border border-border bg-background px-3 py-1 text-xs font-semibold text-foreground">
+                {shell.automationSettings.autoPostEnabled ? "Autopost on" : "Autopost off"}
+              </span>
+            </div>
+            <div className="mt-4 grid gap-4 md:grid-cols-3">
+              <label className="grid gap-2 text-sm font-semibold text-foreground">
+                Cheap classifier model
+                <input
+                  className="rounded-md border border-input bg-background px-3 py-2 text-sm font-normal"
+                  name="oceanClassificationModel"
+                  defaultValue={shell.automationSettings.classificationModel}
+                  placeholder="gpt-5-nano"
+                />
+              </label>
+              <label className="grid gap-2 text-sm font-semibold text-foreground">
+                High-confidence threshold
+                <input
+                  className="rounded-md border border-input bg-background px-3 py-2 text-sm font-normal"
+                  name="oceanHighConfidenceThreshold"
+                  type="number"
+                  min="1"
+                  max="100"
+                  defaultValue={shell.automationSettings.highConfidenceThreshold}
+                />
+              </label>
+              <label className="grid gap-2 text-sm font-semibold text-foreground">
+                Autopost threshold
+                <input
+                  className="rounded-md border border-input bg-background px-3 py-2 text-sm font-normal"
+                  name="oceanAutoPostMinimumConfidence"
+                  type="number"
+                  min="1"
+                  max="100"
+                  defaultValue={shell.automationSettings.autoPostMinimumConfidence}
+                />
+              </label>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <ToggleBox name="oceanClassificationEnabled" defaultChecked={shell.automationSettings.classificationEnabled} title="Classify every email" description="Use the configured model once classifier wiring is enabled." />
+              <ToggleBox name="oceanExtractionEnabled" defaultChecked={shell.automationSettings.extractionEnabled} title="Extract candidate rates" description="Create structured candidates from likely inbound agent rates." />
+              <ToggleBox name="oceanExceptionOnlyReview" defaultChecked={shell.automationSettings.exceptionOnlyReview} title="Exception-only review" description="Default queue shows high-confidence candidates and exceptions only." />
+              <ToggleBox name="oceanAutoPostEnabled" defaultChecked={shell.automationSettings.autoPostEnabled} title="Allow autopost" description="Only eligible candidates above the autopost threshold can publish automatically." />
+              <ToggleBox name="oceanTrustedAgentOnlyAutoPost" defaultChecked={shell.automationSettings.trustedAgentOnlyAutoPost} title="Trusted agents only" description="Require a matched agent before any automatic publishing." />
+              <ToggleBox name="oceanRequireValidityEndDate" defaultChecked={shell.automationSettings.requireValidityEndDate} title="Require validity end" description="Prevents open-ended rate offers from autoposting." />
+            </div>
+          </div>
           <button className="w-fit rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground">
             Save pricing mailbox settings
           </button>
@@ -199,5 +253,27 @@ export default async function OceanFreightSourcesPage({ searchParams }: { search
         </div>
       </section>
     </div>
+  );
+}
+
+function ToggleBox({
+  name,
+  defaultChecked,
+  title,
+  description
+}: {
+  name: string;
+  defaultChecked: boolean;
+  title: string;
+  description: string;
+}) {
+  return (
+    <label className="flex items-start gap-3 rounded-md border border-border bg-background px-3 py-3 text-sm">
+      <input name={name} value="true" type="checkbox" defaultChecked={defaultChecked} className="mt-1" />
+      <span>
+        <span className="block font-semibold text-foreground">{title}</span>
+        <span className="mt-1 block leading-5 text-mutedForeground">{description}</span>
+      </span>
+    </label>
   );
 }

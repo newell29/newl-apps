@@ -43,12 +43,20 @@ export default async function OceanFreightReviewPage({ searchParams }: { searchP
       <PageHeader
         eyebrow="Ocean Freight Pricing"
         title="Review queue"
-        description="Review inbound overseas agent pricing sources before publishing approved rates to the schedule."
+        description="Review high-confidence inbound agent rate candidates and exceptions before publishing approved rates to the schedule."
       />
 
-      <form className="grid gap-3 rounded-lg border border-border bg-card p-4 shadow-sm md:grid-cols-[1fr_220px_auto_auto]">
+      <section className="grid gap-4 md:grid-cols-4">
+        <AutomationCard label="Classifier" value={shell.automationSettings.classificationEnabled ? "Enabled" : "Off"} caption={shell.automationSettings.classificationModel} />
+        <AutomationCard label="Review mode" value={shell.automationSettings.exceptionOnlyReview ? "Focused" : "All open"} caption={`High confidence >= ${shell.automationSettings.highConfidenceThreshold}%`} />
+        <AutomationCard label="Autopost" value={shell.automationSettings.autoPostEnabled ? "Allowed" : "Off"} caption={`Minimum ${shell.automationSettings.autoPostMinimumConfidence}%`} />
+        <AutomationCard label="Safety gates" value={shell.automationSettings.trustedAgentOnlyAutoPost ? "Trusted agents" : "Any agent"} caption={shell.automationSettings.requireValidityEndDate ? "Validity required" : "Open validity allowed"} />
+      </section>
+
+      <form className="grid gap-3 rounded-lg border border-border bg-card p-4 shadow-sm md:grid-cols-[1fr_260px_auto_auto]">
         <input name="search" defaultValue={filters.search ?? ""} placeholder="Search agent, source, lane, carrier, or notes" className="rounded-md border border-input bg-background px-3 py-2 text-sm" />
-        <select name="status" defaultValue={filters.status ?? "open"} className="rounded-md border border-input bg-background px-3 py-2 text-sm">
+        <select name="status" defaultValue={filters.status ?? "workQueue"} className="rounded-md border border-input bg-background px-3 py-2 text-sm">
+          <option value="workQueue">High confidence + exceptions</option>
           <option value="open">Open review</option>
           {Object.values(OceanExtractionStatus).map((status) => (
             <option key={status} value={status}>{status}</option>
@@ -71,6 +79,15 @@ export default async function OceanFreightReviewPage({ searchParams }: { searchP
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs font-semibold text-foreground">{candidate.status}</span>
                     <span className="rounded-full border border-border px-2 py-1 text-xs font-semibold text-mutedForeground">{candidate.confidence}% confidence</span>
+                    {candidate.reviewDisposition.isHighConfidence ? (
+                      <span className="rounded-full border border-green-200 bg-green-50 px-2 py-1 text-xs font-semibold text-green-700">High confidence</span>
+                    ) : null}
+                    {candidate.reviewDisposition.isException ? (
+                      <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">Exception</span>
+                    ) : null}
+                    {candidate.reviewDisposition.isAutoPostEligible ? (
+                      <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-1 text-xs font-semibold text-primary">Autopost eligible</span>
+                    ) : null}
                   </div>
                   <div>
                     <h2 className="text-lg font-semibold text-foreground">{candidate.agentCompanyNameRaw || candidate.agent?.name || "Unknown agent"}</h2>
@@ -84,6 +101,16 @@ export default async function OceanFreightReviewPage({ searchParams }: { searchP
                     </div>
                   ) : null}
                   <p className="max-h-44 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-background p-3 text-sm leading-6 text-mutedForeground">{sourcePreview(candidate)}</p>
+                  {candidate.reviewDisposition.reasons.length > 0 ? (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      <p className="font-semibold">Exception reasons</p>
+                      <ul className="mt-2 list-disc space-y-1 pl-5">
+                        {candidate.reviewDisposition.reasons.map((reason) => (
+                          <li key={reason}>{reason}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
                 </div>
 
                 <ReviewApprovalForm candidate={candidate} agents={shell.agents} />
@@ -108,6 +135,16 @@ export default async function OceanFreightReviewPage({ searchParams }: { searchP
           ))
         )}
       </section>
+    </div>
+  );
+}
+
+function AutomationCard({ label, value, caption }: { label: string; value: string; caption: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
+      <p className="text-sm font-medium text-mutedForeground">{label}</p>
+      <p className="mt-2 text-xl font-semibold text-foreground">{value}</p>
+      <p className="mt-1 text-xs text-mutedForeground">{caption}</p>
     </div>
   );
 }

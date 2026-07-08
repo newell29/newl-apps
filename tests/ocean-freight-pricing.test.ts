@@ -1,4 +1,4 @@
-import { JobStatus, OceanRateStatus, PlatformRole } from "@prisma/client";
+import { IntegrationProvider, IntegrationStatus, JobStatus, OceanEquipmentType, OceanRateStatus, PlatformRole } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const prismaMock = vi.hoisted(() => ({
@@ -24,6 +24,11 @@ import {
   persistOceanFreightSourceEmails,
   triggerOceanFreightEmailIngestion
 } from "@/modules/ocean-freight-pricing/ingestion";
+import {
+  DEFAULT_OCEAN_FREIGHT_AUTOMATION_SETTINGS,
+  getOceanFreightReviewDisposition,
+  parseOceanFreightAutomationSettings
+} from "@/modules/ocean-freight-pricing/automation-settings";
 import { getComputedOceanRateStatus, getOceanFreightJobsShell, getOceanFreightSourcesShell } from "@/modules/ocean-freight-pricing/queries";
 import { resolveMicrosoftGraphMailboxMessagesPath } from "@/server/integrations/microsoft-graph-mail";
 
@@ -40,6 +45,70 @@ describe("ocean freight pricing status", () => {
 
   it("labels missing validity as needing validity", () => {
     expect(getComputedOceanRateStatus({ status: OceanRateStatus.ACTIVE, validityStartDate: null, validityEndDate: null }, today)).toBe("NEEDS_VALIDITY");
+  });
+});
+
+describe("ocean freight pricing automation settings", () => {
+  it("parses automation settings from the tenant-scoped ocean Microsoft Graph config", () => {
+    const settings = parseOceanFreightAutomationSettings({
+      provider: IntegrationProvider.MICROSOFT_GRAPH,
+      status: IntegrationStatus.ACTIVE,
+      publicConfig: {
+        oceanClassificationEnabled: true,
+        oceanExtractionEnabled: true,
+        oceanExceptionOnlyReview: true,
+        oceanHighConfidenceThreshold: 82,
+        oceanAutoPostEnabled: true,
+        oceanAutoPostMinimumConfidence: 94,
+        oceanTrustedAgentOnlyAutoPost: true,
+        oceanRequireValidityEndDate: true,
+        oceanClassificationModel: "gpt-5-nano"
+      }
+    });
+
+    expect(settings).toMatchObject({
+      extractionEnabled: true,
+      highConfidenceThreshold: 82,
+      autoPostEnabled: true,
+      autoPostMinimumConfidence: 94,
+      classificationModel: "gpt-5-nano"
+    });
+  });
+
+  it("flags incomplete candidates as exceptions and complete trusted candidates as autopost eligible", () => {
+    const incomplete = getOceanFreightReviewDisposition({
+      status: "NEEDS_REVIEW",
+      confidence: 93,
+      agentId: null,
+      originPort: "Shanghai",
+      destinationPort: null,
+      equipmentType: null,
+      rateAmount: null,
+      currency: null,
+      validityEndDate: null,
+      sourceEmail: { rateDetected: true, fromAddress: "agent@example.com", mailboxAddress: "pricing@example.com" }
+    }, { ...DEFAULT_OCEAN_FREIGHT_AUTOMATION_SETTINGS, autoPostEnabled: true });
+
+    expect(incomplete.isException).toBe(true);
+    expect(incomplete.isAutoPostEligible).toBe(false);
+    expect(incomplete.reasons).toContain("agent is not matched");
+
+    const complete = getOceanFreightReviewDisposition({
+      status: "NEEDS_REVIEW",
+      confidence: 95,
+      agentId: "agent-1",
+      originPort: "Shanghai",
+      destinationPort: "Los Angeles",
+      equipmentType: OceanEquipmentType.FORTY_HQ,
+      rateAmount: "2450",
+      currency: "USD",
+      validityEndDate: new Date("2026-07-31T00:00:00.000Z"),
+      sourceEmail: { rateDetected: true, fromAddress: "agent@example.com", mailboxAddress: "pricing@example.com" }
+    }, { ...DEFAULT_OCEAN_FREIGHT_AUTOMATION_SETTINGS, autoPostEnabled: true });
+
+    expect(complete.isException).toBe(false);
+    expect(complete.isAutoPostEligible).toBe(true);
+    expect(complete.reasons).toEqual([]);
   });
 });
 
