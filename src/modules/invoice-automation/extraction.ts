@@ -86,6 +86,37 @@ export function extractInvoiceNumber(text: string, fallbackName = "") {
     return explicitFileNameInvoice;
   }
 
+  const spacedInvoiceNumberMatch = text.match(/\bI\s*N\s*V\s*O\s*I\s*C\s*E\s+NO\.?[ \t]*[:.]?[ \t]*([A-Z0-9][A-Z0-9._/-]{2,})\b/i);
+  if (spacedInvoiceNumberMatch && !isGenericInvoiceFileToken(spacedInvoiceNumberMatch[1])) {
+    return cleanToken(spacedInvoiceNumberMatch[1]);
+  }
+
+  const spacedFactureMatch = text.match(/\bI\s*n\s+vo\s+ic\s*e\s*\/\s*F\s*a\s*c\s*tu\s*re\s+([A-Z0-9][A-Z0-9._/-]{2,})\b/i);
+  if (spacedFactureMatch && !isGenericInvoiceFileToken(spacedFactureMatch[1])) {
+    return cleanToken(spacedFactureMatch[1]);
+  }
+
+  const invoiceAdjustmentMatch = text.match(/\binvoice\/adjustment\s+invoice\s+nr\s*:\s*([A-Z0-9][A-Z0-9._/-]{2,})\b/i);
+  if (invoiceAdjustmentMatch && !isGenericInvoiceFileToken(invoiceAdjustmentMatch[1])) {
+    return cleanToken(invoiceAdjustmentMatch[1]);
+  }
+
+  const taxInvoiceMatch = text.match(/\btax\s+invoice\s+([A-Z0-9][A-Z0-9._/-]{2,})\b/i);
+  if (taxInvoiceMatch && !isGenericInvoiceFileToken(taxInvoiceMatch[1])) {
+    return cleanToken(taxInvoiceMatch[1]);
+  }
+
+  const fileNumberAdjacentMatch = text.match(/\b(?:OE|OI|AE|AI|TR|DR)\s*[-_#:]?\s*\d+[A-Z]?\d*\s+([A-Z0-9][^\s]*)/i);
+  const fileNumberAdjacentToken = fileNumberAdjacentMatch ? cleanToken(fileNumberAdjacentMatch[1]) : null;
+  if (fileNumberAdjacentToken && /\d/.test(fileNumberAdjacentToken) && !isMoneyLikeToken(fileNumberAdjacentToken)) {
+    return fileNumberAdjacentToken;
+  }
+
+  const shipmentAdjacentInvoice = extractInvoiceNumberAdjacentToFileNumber(text, fallbackName);
+  if (shipmentAdjacentInvoice) {
+    return shipmentAdjacentInvoice;
+  }
+
   const invoiceNumberTableMatch = text.match(/\binvoice\s+number\s+invoice\s+date\s+([A-Z0-9][A-Z0-9._/-]{2,})\b/i);
   if (invoiceNumberTableMatch) {
     return cleanToken(invoiceNumberTableMatch[1]);
@@ -96,7 +127,7 @@ export function extractInvoiceNumber(text: string, fallbackName = "") {
     return cleanToken(dateInvoiceNumberTableMatch[1]);
   }
 
-  const labelMatch = text.match(/\b(?:invoice|inv)\s*(?:number|no\.?|#)\s*[:#-]?\s*([A-Z0-9][A-Z0-9._/-]{2,})/i);
+  const labelMatch = text.match(/\b(?:invoice|inv)[ \t]*(?:number|no\.?|#)[ \t]*[:#-]?[ \t]*([A-Z0-9][A-Z0-9._/-]{2,})/i);
   if (labelMatch && !isGenericInvoiceFileToken(labelMatch[1])) {
     return cleanToken(labelMatch[1]);
   }
@@ -118,6 +149,21 @@ export function extractCurrency(text: string) {
 }
 
 export function extractInvoiceDate(text: string) {
+  const spacedInvoiceDateMatch = text.match(/\bI\s*N\s*V\s*O\s*I\s*C\s*E\s+NO\.?\s*[:.]?\s*[A-Z0-9][A-Z0-9._/-]{2,}\s+([A-Z]{3}\.?\s+\d{1,2},\s*\d{4})\b/i);
+  if (spacedInvoiceDateMatch) {
+    return normalizeDate(spacedInvoiceDateMatch[1]);
+  }
+
+  const tableHeaderDateMatch = text.match(/\bDATE\s*\n\s*(\d{1,2}\s+[A-Z][a-z]{2,},?\s+\d{4})\b/i);
+  if (tableHeaderDateMatch) {
+    return normalizeDate(tableHeaderDateMatch[1]);
+  }
+
+  const spacedDateMatch = text.match(/\bD\s*a\s*te\s+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b/i);
+  if (spacedDateMatch) {
+    return normalizeDate(spacedDateMatch[1]);
+  }
+
   const tableDateMatch = text.match(/\binvoice\s+number\s+invoice\s+date\s+[A-Z0-9][A-Z0-9._/-]{2,}\s+(\d{1,2}-[A-Z][a-z]{2}-\d{2,4})\b/i);
   if (tableDateMatch) {
     return normalizeDate(tableDateMatch[1]);
@@ -487,6 +533,44 @@ function shouldPreferFileNameShipmentNumber(extracted: string, fallback: string)
 
 function normalizeShipmentNumberForComparison(value: string) {
   return value.replace(/^([A-Z]+)(\d+)[A-Z](\d+)$/, "$1$2$3");
+}
+
+function extractInvoiceNumberAdjacentToFileNumber(text: string, fallbackName = "") {
+  const fileNumber = extractShipmentFileNumber(text, fallbackName);
+  if (!fileNumber) {
+    return null;
+  }
+
+  const lines = text.split(/\r?\n/);
+  for (const line of lines) {
+    const normalizedLine = line.replace(/\s+/g, " ").trim();
+    const fileNumberIndex = normalizedLine.toUpperCase().indexOf(fileNumber.toUpperCase());
+    if (fileNumberIndex < 0) {
+      continue;
+    }
+
+    const afterFileNumber = normalizedLine.slice(fileNumberIndex + fileNumber.length).trim();
+    const candidate = afterFileNumber.split(/\s+/)[0];
+    if (candidate && isStrongAdjacentInvoiceToken(candidate)) {
+      return cleanToken(candidate);
+    }
+  }
+
+  return null;
+}
+
+function isStrongAdjacentInvoiceToken(value: string) {
+  const cleaned = cleanToken(value);
+  return (
+    !isGenericInvoiceFileToken(cleaned) &&
+    /\d/.test(cleaned) &&
+    !/^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$/.test(cleaned) &&
+    !isMoneyLikeToken(cleaned)
+  );
+}
+
+function isMoneyLikeToken(value: string) {
+  return /^\d{1,3}(?:,\d{3})*(?:\.\d{2})$/.test(value);
 }
 
 function extractInvoiceNumberFromFileName(fileName: string) {

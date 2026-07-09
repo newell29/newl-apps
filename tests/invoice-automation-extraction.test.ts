@@ -321,6 +321,86 @@ describe("invoice automation extraction", () => {
     expect(truckLine.invoiceNumber).toBe("6652");
   });
 
+  it("extracts common production vendor invoice number and date formats", () => {
+    const hapag = buildInvoiceDraftFromText({
+      clientId: "hapag",
+      fileName: "Approved Invoice Hapag OI348N800 INVP0301_964708257.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions: [],
+      text: "I N V O I C E NO.: 2126345243 DEC. 30, 2025\nTOTAL 2,872.23 USD\nOI348N800"
+    });
+    expect(hapag.invoiceNumber).toBe("2126345243");
+    expect(hapag.invoiceDate).toBe("2025-12-30");
+
+    const lotus = buildInvoiceDraftFromText({
+      clientId: "lotus",
+      fileName: "OI433N31_Lotus.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions: [],
+      text: "DATE\n31 Oct, 2025\nCUST REF NO. INVOICE NO.\nLotus Terminals Ltd OI433N31 LOTUS-24746\nCAD Total $6,747.18"
+    });
+    expect(lotus.invoiceNumber).toBe("LOTUS-24746");
+    expect(lotus.invoiceDate).toBe("2025-10-31");
+
+    const dts = buildInvoiceDraftFromText({
+      clientId: "dts",
+      fileName: "Approved Invoice DTS Advance Customs DR2477N14 TAX INVOICE - B00025152.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions: [],
+      text: "TAX INVOICE B00025152\nNEWELL'S EXPRESS WORLDWIDE LOGISTICS LTD. INVOICE DATE 18-Nov-25\nTOTAL CAD 56.50\nDR2477N14"
+    });
+    expect(dts.invoiceNumber).toBe("B00025152");
+    expect(dts.invoiceDate).toBe("2025-11-18");
+
+    const naagamas = buildInvoiceDraftFromText({
+      clientId: "naagamas",
+      fileName: "AI2740N10_Naagamas.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions: [],
+      text: "DATE\n02 May, 2026\nCUST REF NO. INVOICE NO.\n2301619 Onatario inc O/A Naagamas AI2740N10 67141\nCAD Total $300.00"
+    });
+    expect(naagamas.invoiceNumber).toBe("67141");
+    expect(naagamas.invoiceDate).toBe("2026-05-02");
+
+    const cass = buildInvoiceDraftFromText({
+      clientId: "cass",
+      fileName: "6010085-0003_202519_Cargo Sales Report1.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions: [],
+      text: "IATA CARGO ACCOUNTS SETTLEMENT SYSTEM - CANADA CARGO SALES INVOICE/ADJUSTMENT INVOICE NR : CA-014-132420\nINVOICE DATE : 24-OCT-25\nCURRENCY : CAD\nAE2883N1\nTotal Payable 589.26"
+    });
+    expect(cass.invoiceNumber).toBe("CA-014-132420");
+    expect(cass.invoiceDate).toBe("2025-10-24");
+
+    const minimax = buildInvoiceDraftFromText({
+      clientId: "minimax",
+      fileName: "AE138N24_Minimax.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions: [],
+      text: "I n vo ic e / F a c tu re 3002271\nDa te 09/29/25\nAE138N24\nT O TA L 125.74 CAD"
+    });
+    expect(minimax.invoiceNumber).toBe("3002271");
+    expect(minimax.invoiceDate).toBe("2025-09-29");
+  });
+
   it("builds stable duplicate keys for vendor invoice numbers", () => {
     expect(
       buildVendorInvoiceDuplicateKey({
