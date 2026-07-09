@@ -9,6 +9,7 @@ import { buildInvoiceDuplicateKey, INVOICE_DUPLICATE_CHECK_STATUSES } from "@/mo
 import { buildInvoiceAutomationEntityAlias } from "@/modules/invoice-automation/entity-aliases";
 import {
   buildInvoiceDraftFromText,
+  extractCurrency,
   extractInvoiceAmounts,
   extractShipmentFileNumber,
   getBusinessLineFromInvoiceFileNumber,
@@ -128,6 +129,12 @@ describe("invoice automation extraction", () => {
     });
 
     expect(western.currency).toBe("CAD");
+  });
+
+  it("recognizes non-USD foreign invoice currencies", () => {
+    expect(extractCurrency("Invoice total EUR 1,250.00")).toBe("EUR");
+    expect(extractCurrency("Amount due £950.00")).toBe("GBP");
+    expect(extractCurrency("Currency: MXN Total 2100.00")).toBe("MXN");
   });
 
   it("uses the final amount on prepaid totals freight bills", () => {

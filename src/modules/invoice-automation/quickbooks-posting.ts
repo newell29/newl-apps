@@ -27,6 +27,37 @@ type QuickBooksPostingMappingEntity = {
   Taxable?: boolean;
 };
 
+type QuickBooksTransactionEntityName = "Invoice" | "Bill";
+
+type QuickBooksPostedTransactionEntity = {
+  Id?: string;
+  DocNumber?: string;
+  CurrencyRef?: QuickBooksRef;
+  ExchangeRate?: number | string;
+  TotalAmt?: number | string;
+  HomeTotalAmt?: number | string;
+  TxnTaxDetail?: {
+    TotalTax?: number | string;
+  };
+  Line?: Array<{
+    Amount?: number | string;
+    DetailType?: string;
+  }>;
+};
+
+export type QuickBooksPostedTransactionDetail = {
+  id: string;
+  docNumber: string | null;
+  currency: string | null;
+  exchangeRate: number | null;
+  subtotalAmount: number | null;
+  taxAmount: number | null;
+  totalAmount: number | null;
+  homeSubtotalAmount: number | null;
+  homeTaxAmount: number | null;
+  homeTotalAmount: number | null;
+};
+
 export type QuickBooksSalesInvoicePayload = {
   CustomerRef: QuickBooksRef;
   DocNumber?: string;
@@ -301,6 +332,75 @@ export async function createQuickBooksInvoiceAutomationTransaction({
   };
 }
 
+export async function fetchQuickBooksPostedTransaction({
+  realmId,
+  accessToken,
+  invoiceType,
+  transactionId
+}: {
+  realmId: string;
+  accessToken: string;
+  invoiceType: InvoiceAutomationType;
+  transactionId: string;
+}) {
+  const entityPath = invoiceType === "CUSTOMER" ? "invoice" : "bill";
+  const entityName = invoiceType === "CUSTOMER" ? "Invoice" : "Bill";
+  const url = new URL(`${getQuickBooksApiBaseUrl()}/v3/company/${realmId}/${entityPath}/${transactionId}`);
+  url.searchParams.set("minorversion", "75");
+
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new QuickBooksPostingMappingError(`QuickBooks ${entityPath} read failed with status ${response.status}: ${text.slice(0, 500)}`);
+  }
+
+  const json = (await response.json()) as Record<QuickBooksTransactionEntityName, QuickBooksPostedTransactionEntity | undefined>;
+  const transaction = json[entityName];
+  if (!transaction?.Id) {
+    throw new QuickBooksPostingMappingError("QuickBooks did not return the posted transaction details.");
+  }
+
+  return readQuickBooksPostedTransactionDetail(transaction);
+}
+
+export function readQuickBooksPostedTransactionDetail(
+  transaction: QuickBooksPostedTransactionEntity
+): QuickBooksPostedTransactionDetail {
+  if (!transaction.Id) {
+    throw new QuickBooksPostingMappingError("QuickBooks transaction details are missing an ID.");
+  }
+
+  const currency = transaction.CurrencyRef?.value?.toUpperCase() ?? null;
+  const exchangeRate = readPositiveNumber(transaction.ExchangeRate) ?? (currency === "CAD" ? 1 : null);
+  const subtotalAmount = readTransactionSubtotalAmount(transaction);
+  const taxAmount = readNumber(transaction.TxnTaxDetail?.TotalTax);
+  const totalAmount = readNumber(transaction.TotalAmt);
+  const homeTotalAmount = readNumber(transaction.HomeTotalAmt) ?? convertToHomeAmount(totalAmount, exchangeRate);
+  const homeTaxAmount = convertToHomeAmount(taxAmount, exchangeRate);
+  const homeSubtotalAmount = homeTotalAmount !== null && homeTaxAmount !== null
+    ? roundMoney(homeTotalAmount - homeTaxAmount)
+    : convertToHomeAmount(subtotalAmount, exchangeRate);
+
+  return {
+    id: transaction.Id,
+    docNumber: transaction.DocNumber ?? null,
+    currency,
+    exchangeRate,
+    subtotalAmount,
+    taxAmount,
+    totalAmount,
+    homeSubtotalAmount,
+    homeTaxAmount,
+    homeTotalAmount
+  };
+}
+
 export async function attachPdfToQuickBooksTransaction({
   realmId,
   accessToken,
@@ -432,6 +532,39 @@ function normalizeMappingKey(value: string) {
 
 function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
+}
+
+function readTransactionSubtotalAmount(transaction: QuickBooksPostedTransactionEntity) {
+  const lineSubtotal = transaction.Line
+    ?.filter((line) => line.DetailType === "SalesItemLineDetail" || line.DetailType === "AccountBasedExpenseLineDetail")
+    .reduce((total, line) => total + (readNumber(line.Amount) ?? 0), 0);
+  if (lineSubtotal && Number.isFinite(lineSubtotal)) {
+    return roundMoney(lineSubtotal);
+  }
+
+  const totalAmount = readNumber(transaction.TotalAmt);
+  const taxAmount = readNumber(transaction.TxnTaxDetail?.TotalTax);
+  return totalAmount !== null && taxAmount !== null ? roundMoney(totalAmount - taxAmount) : null;
+}
+
+function readNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function readPositiveNumber(value: unknown) {
+  const number = readNumber(value);
+  return number && number > 0 ? number : null;
+}
+
+function convertToHomeAmount(value: number | null, exchangeRate: number | null) {
+  if (value === null || exchangeRate === null) {
+    return null;
+  }
+  return roundMoney(value * exchangeRate);
 }
 
 function stripUndefined<T extends Record<string, unknown>>(value: T): T {

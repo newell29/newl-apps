@@ -9,6 +9,7 @@ import {
   findExistingQuickBooksTransaction,
   parseQuickBooksEntityOptionId,
   QuickBooksPostingMappingError,
+  readQuickBooksPostedTransactionDetail,
   type QuickBooksPostingMappings
 } from "@/modules/invoice-automation/quickbooks-posting";
 import type { InvoiceAutomationRow } from "@/modules/invoice-automation/types";
@@ -193,6 +194,66 @@ describe("invoice automation QuickBooks posting mapping", () => {
     );
 
     expect(payload.ExchangeRate).toBe(1.3725);
+  });
+
+  it("reads QuickBooks-posted foreign currency home amounts for profitability", () => {
+    const detail = readQuickBooksPostedTransactionDetail({
+      Id: "86351",
+      DocNumber: "TEST-V-USD-001",
+      CurrencyRef: {
+        value: "USD"
+      },
+      ExchangeRate: "1.416651",
+      TotalAmt: 250,
+      HomeTotalAmt: 354.16,
+      TxnTaxDetail: {
+        TotalTax: 0
+      },
+      Line: [
+        {
+          DetailType: "AccountBasedExpenseLineDetail",
+          Amount: 250
+        }
+      ]
+    });
+
+    expect(detail).toEqual({
+      id: "86351",
+      docNumber: "TEST-V-USD-001",
+      currency: "USD",
+      exchangeRate: 1.416651,
+      subtotalAmount: 250,
+      taxAmount: 0,
+      totalAmount: 250,
+      homeSubtotalAmount: 354.16,
+      homeTaxAmount: 0,
+      homeTotalAmount: 354.16
+    });
+  });
+
+  it("treats CAD QuickBooks transactions as home currency when no exchange rate is returned", () => {
+    const detail = readQuickBooksPostedTransactionDetail({
+      Id: "86350",
+      DocNumber: "TEST-V-CAD-001",
+      CurrencyRef: {
+        value: "CAD"
+      },
+      TotalAmt: 113,
+      TxnTaxDetail: {
+        TotalTax: 13
+      },
+      Line: [
+        {
+          DetailType: "AccountBasedExpenseLineDetail",
+          Amount: 100
+        }
+      ]
+    });
+
+    expect(detail.exchangeRate).toBe(1);
+    expect(detail.homeSubtotalAmount).toBe(100);
+    expect(detail.homeTaxAmount).toBe(13);
+    expect(detail.homeTotalAmount).toBe(113);
   });
 
   it("requires explicit QuickBooks product/service and account mappings before posting", () => {
@@ -470,6 +531,13 @@ function invoiceRow(overrides: Partial<InvoiceAutomationRow>): InvoiceAutomation
     subtotalAmount: 100,
     taxAmount: 0,
     totalAmount: 100,
+    quickBooksExchangeRate: null,
+    quickBooksHomeCurrency: null,
+    quickBooksSubtotalHomeAmount: null,
+    quickBooksTaxHomeAmount: null,
+    quickBooksTotalHomeAmount: null,
+    quickBooksFxSource: null,
+    quickBooksFxCapturedAt: null,
     productOrAccountName: "Ocean Freight",
     issueCodes: [],
     createdAt: "2026-07-01T00:00:00.000Z",

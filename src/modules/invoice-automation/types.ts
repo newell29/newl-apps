@@ -64,6 +64,13 @@ export type InvoiceAutomationRow = {
   subtotalAmount: number | null;
   taxAmount: number | null;
   totalAmount: number | null;
+  quickBooksExchangeRate: number | null;
+  quickBooksHomeCurrency: string | null;
+  quickBooksSubtotalHomeAmount: number | null;
+  quickBooksTaxHomeAmount: number | null;
+  quickBooksTotalHomeAmount: number | null;
+  quickBooksFxSource: string | null;
+  quickBooksFxCapturedAt: string | null;
   productOrAccountName: string | null;
   issueCodes: string[];
   createdAt: string;
