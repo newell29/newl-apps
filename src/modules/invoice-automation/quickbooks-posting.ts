@@ -12,6 +12,11 @@ export type QuickBooksPostingMappings = {
   expenseAccounts: Record<string, QuickBooksRef>;
   taxCodes: {
     exempt: QuickBooksRef;
+    gst?: QuickBooksRef;
+    gstPst?: QuickBooksRef;
+    hst?: QuickBooksRef;
+    hst15?: QuickBooksRef;
+    pst?: QuickBooksRef;
     taxable?: QuickBooksRef;
   };
 };
@@ -107,13 +112,13 @@ export class QuickBooksPostingMappingError extends Error {
 export function buildQuickBooksSalesInvoicePayload(
   invoice: InvoiceAutomationRow,
   mappings: QuickBooksPostingMappings,
-  options: { exchangeRate?: number | null } = {}
+  options: { exchangeRate?: number | null; taxContextText?: string | null } = {}
 ): QuickBooksSalesInvoicePayload {
   assertInvoiceType(invoice, "CUSTOMER");
   const customerRef = buildEntityRef(invoice, "CUSTOMER");
   const itemRef = getMappedRef(mappings.productServices, invoice.productOrAccountName, "product/service");
   const lineAmount = getLineAmount(invoice);
-  const taxCodeRef = getTaxCodeRef(invoice, mappings);
+  const taxCodeRef = getTaxCodeRef(invoice, mappings, options.taxContextText);
 
   return stripUndefined({
     CustomerRef: customerRef,
@@ -143,13 +148,13 @@ export function buildQuickBooksSalesInvoicePayload(
 export function buildQuickBooksVendorBillPayload(
   invoice: InvoiceAutomationRow,
   mappings: QuickBooksPostingMappings,
-  options: { exchangeRate?: number | null } = {}
+  options: { exchangeRate?: number | null; taxContextText?: string | null } = {}
 ): QuickBooksVendorBillPayload {
   assertInvoiceType(invoice, "VENDOR");
   const vendorRef = buildEntityRef(invoice, "VENDOR");
   const accountRef = getMappedRef(mappings.expenseAccounts, invoice.productOrAccountName, "expense account");
   const lineAmount = getLineAmount(invoice);
-  const taxCodeRef = getTaxCodeRef(invoice, mappings);
+  const taxCodeRef = getTaxCodeRef(invoice, mappings, options.taxContextText);
 
   return stripUndefined({
     VendorRef: vendorRef,
@@ -221,6 +226,11 @@ export async function fetchQuickBooksPostingMappings({
     expenseAccounts: buildRefMap(accounts),
     taxCodes: {
       exempt: findTaxCodeRef(taxCodes, ["E", "Exempt", "Out of Scope", "NON"]) ?? { value: "E", name: "E" },
+      gst: findTaxCodeRef(taxCodes, ["G", "GST"]) ?? undefined,
+      gstPst: findTaxCodeRefByContains(taxCodes, ["GST PST", "GST/PST", "GST + PST", "British Columbia", "BC 12"]) ?? undefined,
+      hst: findTaxCodeRef(taxCodes, ["H", "HST", "GST/HST", "Taxable"]) ?? undefined,
+      hst15: findTaxCodeRef(taxCodes, ["HNS", "HNB", "HNL", "HPE", "HST 15", "HST15"]) ?? undefined,
+      pst: findTaxCodeRef(taxCodes, ["P", "PST"]) ?? undefined,
       taxable: findTaxCodeRef(taxCodes, ["H", "HST", "GST/HST", "Taxable"]) ?? undefined
     }
   };
@@ -499,15 +509,81 @@ function getMappedRef(
   return mapped;
 }
 
-function getTaxCodeRef(invoice: InvoiceAutomationRow, mappings: QuickBooksPostingMappings) {
+function getTaxCodeRef(invoice: InvoiceAutomationRow, mappings: QuickBooksPostingMappings, taxContextText?: string | null) {
   if (invoice.taxAmount && invoice.taxAmount > 0) {
-    if (!mappings.taxCodes.taxable?.value) {
-      throw new QuickBooksPostingMappingError("Missing QuickBooks taxable sales tax code mapping.");
+    if ((invoice.currency ?? "CAD").toUpperCase() !== "CAD") {
+      return mappings.taxCodes.exempt;
     }
-    return mappings.taxCodes.taxable;
+
+    const context = normalizeTaxContext([
+      taxContextText,
+      invoice.fileName,
+      invoice.entityNameRaw,
+      invoice.quickBooksEntityDisplayName,
+      invoice.productOrAccountName
+    ].filter((value): value is string => Boolean(value)).join(" "));
+    const taxRate = invoice.subtotalAmount && invoice.subtotalAmount > 0
+      ? roundMoney((invoice.taxAmount / invoice.subtotalAmount) * 100)
+      : null;
+
+    if (isBcOrGstPstContext(context) || isApproximateRate(taxRate, 12)) {
+      return requireTaxCode(
+        mappings.taxCodes.gstPst,
+        "Missing QuickBooks GST/PST or BC sales tax code mapping. Refusing to post as HST."
+      );
+    }
+
+    if (isGstOnlyContext(context) || isApproximateRate(taxRate, 5)) {
+      return requireTaxCode(mappings.taxCodes.gst, "Missing QuickBooks GST sales tax code mapping.");
+    }
+
+    if (isHst15Context(context) || isApproximateRate(taxRate, 15) || isApproximateRate(taxRate, 14)) {
+      return requireTaxCode(mappings.taxCodes.hst15, "Missing QuickBooks 15% HST sales tax code mapping.");
+    }
+
+    if (isHst13Context(context) || isApproximateRate(taxRate, 13)) {
+      return requireTaxCode(
+        mappings.taxCodes.hst ?? mappings.taxCodes.taxable,
+        "Missing QuickBooks taxable sales tax code mapping."
+      );
+    }
+
+    return requireTaxCode(mappings.taxCodes.taxable, "Missing QuickBooks taxable sales tax code mapping.");
   }
 
   return mappings.taxCodes.exempt;
+}
+
+function requireTaxCode(ref: QuickBooksRef | undefined, message: string) {
+  if (!ref?.value) {
+    throw new QuickBooksPostingMappingError(message);
+  }
+
+  return ref;
+}
+
+function normalizeTaxContext(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function isBcOrGstPstContext(context: string) {
+  return /\bbritish columbia\b|\bbc\b|\bgst pst\b|\bpst gst\b|\bpst\b/.test(context);
+}
+
+function isGstOnlyContext(context: string) {
+  return /\balberta\b|\bnorthwest territories\b|\bnunavut\b|\byukon\b|\bgst\b/.test(context) && !/\bpst\b|\bqst\b|\bhst\b/.test(context);
+}
+
+function isHst13Context(context: string) {
+  return /\bontario\b|\bhst\b|\bh 13\b/.test(context);
+}
+
+function isHst15Context(context: string) {
+  return /\bnew brunswick\b|\bnewfoundland\b|\blabrador\b|\bnova scotia\b|\bprince edward island\b|\bhns\b|\bhst 15\b/.test(context);
+}
+
+function isApproximateRate(value: number | null, expected: number) {
+  return value !== null && Math.abs(value - expected) <= 0.35;
 }
 
 function getLineAmount(invoice: InvoiceAutomationRow) {
@@ -668,6 +744,25 @@ function findTaxCodeRef(entities: QuickBooksPostingMappingEntity[], names: strin
       [entity.Id, entity.Name, entity.FullyQualifiedName]
         .filter((value): value is string => Boolean(value))
         .some((value) => normalizeMappingKey(value) === normalizedName)
+    );
+    if (match?.Id) {
+      return {
+        value: match.Id,
+        name: match.Name ?? match.FullyQualifiedName ?? name
+      };
+    }
+  }
+
+  return null;
+}
+
+function findTaxCodeRefByContains(entities: QuickBooksPostingMappingEntity[], names: string[]) {
+  for (const name of names) {
+    const normalizedName = normalizeMappingKey(name);
+    const match = entities.find((entity) =>
+      [entity.Name, entity.FullyQualifiedName]
+        .filter((value): value is string => Boolean(value))
+        .some((value) => normalizeMappingKey(value).includes(normalizedName))
     );
     if (match?.Id) {
       return {

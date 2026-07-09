@@ -27,6 +27,10 @@ const mappings: QuickBooksPostingMappings = {
   },
   taxCodes: {
     exempt: { value: "E", name: "E" },
+    gst: { value: "G", name: "G" },
+    gstPst: { value: "BC12", name: "GST/PST BC" },
+    hst: { value: "H", name: "HST" },
+    hst15: { value: "HNS", name: "HNS" },
     taxable: { value: "H", name: "HST" }
   }
 };
@@ -198,6 +202,63 @@ describe("invoice automation QuickBooks posting mapping", () => {
       value: "H",
       name: "HST"
     });
+  });
+
+  it("uses the BC GST/PST tax code instead of HST when BC tax context is detected", () => {
+    const payload = buildQuickBooksVendorBillPayload(
+      invoiceRow({
+        invoiceType: "VENDOR",
+        quickBooksEntityId: "quickbooks:9130351993486396:VENDOR:test-cad",
+        quickBooksEntityDisplayName: "Test Company - DO NOT PROCESS",
+        entityNameRaw: "Test Company - DO NOT PROCESS",
+        fileName: "vendor-cad-bc-gst-pst-12-test-company-ltd.pdf",
+        invoiceNumber: "TEST-V-CAD-BC-006",
+        invoiceDate: "2026-07-10",
+        dueDate: "2026-08-09",
+        shipmentFileNumber: "TR916N26",
+        currency: "CAD",
+        subtotalAmount: 800,
+        taxAmount: 96,
+        totalAmount: 896,
+        productOrAccountName: "5015 Trucking Rate"
+      }),
+      mappings,
+      { taxContextText: "Ship To: Vancouver, British Columbia\nGST/PST 12% $96.00" }
+    );
+
+    expect(payload.Line[0]?.AccountBasedExpenseLineDetail.TaxCodeRef).toEqual({
+      value: "BC12",
+      name: "GST/PST BC"
+    });
+  });
+
+  it("refuses to post BC GST/PST as generic HST when the BC tax code is missing", () => {
+    expect(() =>
+      buildQuickBooksVendorBillPayload(
+        invoiceRow({
+          invoiceType: "VENDOR",
+          quickBooksEntityId: "quickbooks:9130351993486396:VENDOR:test-cad",
+          quickBooksEntityDisplayName: "Test Company - DO NOT PROCESS",
+          entityNameRaw: "Test Company - DO NOT PROCESS",
+          fileName: "vendor-cad-bc-gst-pst-12-test-company-ltd.pdf",
+          invoiceNumber: "TEST-V-CAD-BC-006",
+          shipmentFileNumber: "TR916N26",
+          currency: "CAD",
+          subtotalAmount: 800,
+          taxAmount: 96,
+          totalAmount: 896,
+          productOrAccountName: "5015 Trucking Rate"
+        }),
+        {
+          ...mappings,
+          taxCodes: {
+            ...mappings.taxCodes,
+            gstPst: undefined
+          }
+        },
+        { taxContextText: "Ship To: Vancouver, British Columbia\nGST/PST 12% $96.00" }
+      )
+    ).toThrow(new QuickBooksPostingMappingError("Missing QuickBooks GST/PST or BC sales tax code mapping. Refusing to post as HST."));
   });
 
   it("includes QuickBooks exchange rates for foreign-currency vendor bills when provided", () => {
@@ -425,6 +486,10 @@ describe("invoice automation QuickBooks posting mapping", () => {
             {
               Id: "H",
               Name: "H"
+            },
+            {
+              Id: "BC12",
+              Name: "GST/PST BC"
             }
           ]
         }
@@ -446,6 +511,7 @@ describe("invoice automation QuickBooks posting mapping", () => {
       name: "5015 Trucking Rate"
     });
     expect(fetchedMappings.taxCodes.exempt).toEqual({ value: "E", name: "E" });
+    expect(fetchedMappings.taxCodes.gstPst).toEqual({ value: "BC12", name: "GST/PST BC" });
     expect(fetchedMappings.taxCodes.taxable).toEqual({ value: "H", name: "H" });
   });
 
