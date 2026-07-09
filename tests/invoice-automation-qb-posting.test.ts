@@ -172,7 +172,35 @@ describe("invoice automation QuickBooks posting mapping", () => {
     });
   });
 
-  it("includes QuickBooks exchange rates for foreign-currency transactions when provided", () => {
+  it("marks taxable CAD customer invoices as tax excluded so QuickBooks applies the line tax code", () => {
+    const payload = buildQuickBooksSalesInvoicePayload(
+      invoiceRow({
+        invoiceType: "CUSTOMER",
+        quickBooksEntityId: "quickbooks:9130351993486396:CUSTOMER:test-cad-customer",
+        quickBooksEntityDisplayName: "Test Customer - DO NOT PROCESS",
+        entityNameRaw: "Test Customer - DO NOT PROCESS",
+        invoiceNumber: "TEST-C-CAD-001",
+        invoiceDate: "2026-07-09",
+        dueDate: "2026-08-08",
+        shipmentFileNumber: "TR901N26",
+        currency: "CAD",
+        subtotalAmount: 1000,
+        taxAmount: 130,
+        totalAmount: 1130,
+        productOrAccountName: "Trucking"
+      }),
+      mappings
+    );
+
+    expect(payload.GlobalTaxCalculation).toBe("TaxExcluded");
+    expect(payload.Line[0]?.Amount).toBe(1000);
+    expect(payload.Line[0]?.SalesItemLineDetail.TaxCodeRef).toEqual({
+      value: "H",
+      name: "HST"
+    });
+  });
+
+  it("includes QuickBooks exchange rates for foreign-currency vendor bills when provided", () => {
     const payload = buildQuickBooksVendorBillPayload(
       invoiceRow({
         invoiceType: "VENDOR",
@@ -194,6 +222,31 @@ describe("invoice automation QuickBooks posting mapping", () => {
     );
 
     expect(payload.ExchangeRate).toBe(1.3725);
+  });
+
+  it("includes QuickBooks exchange rates for foreign-currency customer invoices when provided", () => {
+    const payload = buildQuickBooksSalesInvoicePayload(
+      invoiceRow({
+        invoiceType: "CUSTOMER",
+        quickBooksEntityId: "quickbooks:9130351993486396:CUSTOMER:customer-eur",
+        quickBooksEntityDisplayName: "Test Customer - DO NOT PROCESS - EUR",
+        entityNameRaw: "Test Customer - DO NOT PROCESS - EUR",
+        invoiceNumber: "TEST-C-EUR-001",
+        invoiceDate: "2026-07-09",
+        dueDate: "2026-08-08",
+        shipmentFileNumber: "OE901N26",
+        currency: "EUR",
+        subtotalAmount: 900,
+        taxAmount: 0,
+        totalAmount: 900,
+        productOrAccountName: "Ocean Freight"
+      }),
+      mappings,
+      { exchangeRate: 1.4825 }
+    );
+
+    expect(payload.CurrencyRef).toEqual({ value: "EUR" });
+    expect(payload.ExchangeRate).toBe(1.4825);
   });
 
   it("reads QuickBooks-posted foreign currency home amounts for profitability", () => {
@@ -228,6 +281,41 @@ describe("invoice automation QuickBooks posting mapping", () => {
       homeSubtotalAmount: 354.16,
       homeTaxAmount: 0,
       homeTotalAmount: 354.16
+    });
+  });
+
+  it("reads QuickBooks-posted customer invoice home amounts for profitability", () => {
+    const detail = readQuickBooksPostedTransactionDetail({
+      Id: "96351",
+      DocNumber: "TEST-C-EUR-001",
+      CurrencyRef: {
+        value: "EUR"
+      },
+      ExchangeRate: "1.4825",
+      TotalAmt: 1000,
+      HomeTotalAmt: 1482.5,
+      TxnTaxDetail: {
+        TotalTax: 100
+      },
+      Line: [
+        {
+          DetailType: "SalesItemLineDetail",
+          Amount: 900
+        }
+      ]
+    });
+
+    expect(detail).toEqual({
+      id: "96351",
+      docNumber: "TEST-C-EUR-001",
+      currency: "EUR",
+      exchangeRate: 1.4825,
+      subtotalAmount: 900,
+      taxAmount: 100,
+      totalAmount: 1000,
+      homeSubtotalAmount: 1334.25,
+      homeTaxAmount: 148.25,
+      homeTotalAmount: 1482.5
     });
   });
 
