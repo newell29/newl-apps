@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     const authorizationUrl = buildQuickBooksAuthorizationUrl({
       tenantId: context.tenantId,
       legalEntity: entity,
-      returnTo: "/settings#quickbooks"
+      returnTo: "/settings"
     });
 
     return NextResponse.redirect(authorizationUrl, { status: 302 });

@@ -89,6 +89,10 @@ function getQuickBooksEncryptionSecret() {
   return value;
 }
 
+function getQuickBooksStateSecret() {
+  return process.env.QUICKBOOKS_STATE_SECRET?.trim() || getQuickBooksEncryptionSecret();
+}
+
 export function getQuickBooksConnectionName(legalEntity: QuickBooksLegalEntity) {
   return legalEntity === "NEWL_USA" ? "QuickBooks - Newl USA" : "QuickBooks - Newl Worldwide";
 }
@@ -283,7 +287,7 @@ export function parseQuickBooksState(state: string): QuickBooksStatePayload {
     throw new Error("QuickBooks OAuth state is invalid.");
   }
 
-  const expectedSignature = createHmac("sha256", getQuickBooksEncryptionSecret()).update(encoded).digest("base64url");
+  const expectedSignature = createHmac("sha256", getQuickBooksStateSecret()).update(encoded).digest("base64url");
   if (signature !== expectedSignature) {
     throw new Error("QuickBooks OAuth state signature is invalid.");
   }
@@ -293,7 +297,7 @@ export function parseQuickBooksState(state: string): QuickBooksStatePayload {
 
 function signQuickBooksState(payload: QuickBooksStatePayload) {
   const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
-  const signature = createHmac("sha256", getQuickBooksEncryptionSecret()).update(encoded).digest("base64url");
+  const signature = createHmac("sha256", getQuickBooksStateSecret()).update(encoded).digest("base64url");
   return `${QUICKBOOKS_STATE_VERSION}.${encoded}.${signature}`;
 }
 
