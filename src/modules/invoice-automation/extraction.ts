@@ -375,7 +375,10 @@ export function buildInvoiceDraftFromText({
   const shipmentType = getShipmentTypeFromInvoiceFileNumber(shipmentFileNumber);
   const businessLine = getBusinessLineFromInvoiceFileNumber(shipmentFileNumber);
   const currency = extractCurrency(text);
-  const entityMatch = matchQuickBooksEntity(text, invoiceType, entityOptions, currency);
+  const extractedEntityName = extractEntityNameByLabel(text, invoiceType, fileName);
+  const entityMatch = extractedEntityName
+    ? matchQuickBooksEntity(extractedEntityName, invoiceType, entityOptions, currency)
+    : matchQuickBooksEntity(text, invoiceType, entityOptions, currency);
   const amounts = extractInvoiceAmounts(text, currency);
   const invoiceDate = extractInvoiceDate(text);
   const dueDate = extractDueDate(text) ?? defaultDueDateFromInvoiceDate(invoiceDate);
@@ -389,7 +392,7 @@ export function buildInvoiceDraftFromText({
     shipmentFileNumber,
     shipmentType,
     businessLine,
-    entityNameRaw: entityMatch?.option.displayName ?? extractEntityNameByLabel(text, invoiceType, fileName),
+    entityNameRaw: entityMatch?.option.displayName ?? extractedEntityName,
     quickBooksEntityId: entityMatch?.option.id ?? null,
     quickBooksEntityDisplayName: entityMatch?.option.displayName ?? null,
     quickBooksMatchConfidence: entityMatch?.confidence ?? null,
