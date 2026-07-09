@@ -422,6 +422,7 @@ model Tenant {
   invoiceAutomationBatches      InvoiceAutomationBatch[]
   invoiceAutomationInvoices     InvoiceAutomationInvoice[]
   invoiceAutomationQuickBooksEntities InvoiceAutomationQuickBooksEntity[]
+  invoiceAutomationEntityAliases      InvoiceAutomationEntityAlias[]
 }
 
 model User {
@@ -1512,6 +1513,29 @@ model InvoiceAutomationQuickBooksEntity {
   @@index([tenantId, entityType, currency])
   @@index([tenantId, realmId])
   @@index([tenantId, active])
+}
+
+model InvoiceAutomationEntityAlias {
+  id                          String                @id @default(cuid())
+  tenantId                    String
+  invoiceType                 InvoiceAutomationType
+  aliasRawName                String
+  normalizedAlias             String
+  quickBooksEntityId          String
+  quickBooksEntityDisplayName String
+  currency                    String?
+  createdByUserId             String?
+  lastUsedAt                  DateTime              @default(now())
+  usageCount                  Int                   @default(1)
+  createdAt                   DateTime              @default(now())
+  updatedAt                   DateTime              @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, invoiceType, normalizedAlias])
+  @@index([tenantId, invoiceType])
+  @@index([tenantId, quickBooksEntityId])
+  @@index([tenantId, lastUsedAt])
 }
 
 model AssistantChatThread {

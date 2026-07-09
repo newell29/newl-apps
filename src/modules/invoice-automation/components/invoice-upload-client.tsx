@@ -330,7 +330,10 @@ function InvoiceUploadModal({
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState("Choose one or more PDF invoices.");
   const [confirmSendToAccountingOpen, setConfirmSendToAccountingOpen] = useState(false);
-  const relevantEntities = useMemo(() => entityOptions.filter((option) => option.entityType === invoiceType), [entityOptions, invoiceType]);
+  const relevantEntities = useMemo(
+    () => uniqueEntityOptionsById(entityOptions.filter((option) => option.entityType === invoiceType)),
+    [entityOptions, invoiceType]
+  );
   const title = invoiceType === "CUSTOMER" ? "Add customer invoices" : "Add vendor invoices";
   const hasApprovalBlockers = drafts.some((draft) => getInvoiceApprovalBlockingIssues({ ...draft, invoiceType }).length > 0);
 
@@ -531,14 +534,14 @@ function InvoiceUploadModal({
                               quickBooksEntityId: option?.id ?? null,
                               quickBooksEntityDisplayName: option?.displayName ?? null,
                               quickBooksMatchConfidence: option ? 100 : null,
-                              entityNameRaw: option?.displayName ?? draft.entityNameRaw
+                              entityNameRaw: draft.entityNameRaw ?? option?.displayName ?? null
                             });
                           }}
                           className="w-52 rounded-md border border-input bg-background px-2 py-1.5"
                         >
                           <option value="">Needs match</option>
                           {relevantEntities.map((entity) => (
-                            <option key={`${entity.entityType}-${entity.id}-${entity.displayName}`} value={entity.id}>
+                            <option key={`${entity.entityType}-${entity.id}`} value={entity.id}>
                               {entity.displayName}{entity.currency ? ` (${entity.currency})` : ""}
                             </option>
                           ))}
@@ -815,6 +818,7 @@ function shouldRunVisionOcr(draft: InvoiceAutomationUploadDraft) {
     "MISSING_INVOICE_NUMBER",
     "MISSING_INVOICE_DATE",
     "MISSING_CUSTOMER_OR_VENDOR",
+    "MISSING_QB_MATCH",
     "MISSING_TOTAL",
     "MISSING_CURRENCY"
   ]);
@@ -901,11 +905,17 @@ function findBestEntityForOcrName(
 
 function normalizeEntityForClientMatch(value: string) {
   return value
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
     .toLowerCase()
     .replace(/\b(usd|cad|cdn)\b/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function uniqueEntityOptionsById(options: InvoiceAutomationEntityOption[]) {
+  return [...new Map(options.map((option) => [option.id, option])).values()];
 }
 
 function bytesToBase64(bytes: Uint8Array) {

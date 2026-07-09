@@ -5,7 +5,8 @@ import {
   getInvoiceApprovalBlockingIssues,
   getInvoicePostingBlockingIssues
 } from "@/modules/invoice-automation/approval";
-import { buildVendorInvoiceDuplicateKey, VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES } from "@/modules/invoice-automation/duplicates";
+import { buildInvoiceDuplicateKey, INVOICE_DUPLICATE_CHECK_STATUSES } from "@/modules/invoice-automation/duplicates";
+import { buildInvoiceAutomationEntityAlias } from "@/modules/invoice-automation/entity-aliases";
 import {
   buildInvoiceDraftFromText,
   extractInvoiceAmounts,
@@ -13,6 +14,7 @@ import {
   getBusinessLineFromInvoiceFileNumber,
   getDefaultProductOrAccount,
   matchQuickBooksEntity,
+  normalizeInvoiceEntityName,
   splitInvoiceTextIntoDocuments
 } from "@/modules/invoice-automation/extraction";
 import type { InvoiceAutomationEntityOption } from "@/modules/invoice-automation/types";
@@ -60,6 +62,7 @@ describe("invoice automation extraction", () => {
     expect(extractShipmentFileNumber("Shipment file: OE-12345")).toBe("OE12345");
     expect(extractShipmentFileNumber("", "vendor-invoice_TR98765.pdf")).toBe("TR98765");
     expect(extractShipmentFileNumber("NS TR2911T12", "TR2911N12 - Western Canada 1.pdf")).toBe("TR2911N12");
+    expect(extractShipmentFileNumber("", "AE1190N10_PERU CONTAINER LINE E.I.R.L_revised.pdf")).toBe("AE1190N10");
   });
 
   it("maps service prefixes to profitability business lines and QB posting defaults", () => {
@@ -200,6 +203,26 @@ describe("invoice automation extraction", () => {
     expect(matchQuickBooksEntity("Vendor: Fast Trucking", "VENDOR", entityOptions)?.option.id).toBe("qb-vendor-usd");
   });
 
+  it("normalizes camel-case OCR customer names before QuickBooks matching", () => {
+    expect(normalizeInvoiceEntityName("AvariaHealth and BeautyCorp")).toBe("avaria health and beauty corp");
+    expect(
+      matchQuickBooksEntity(
+        "Bill To: AvariaHealth and BeautyCorp",
+        "CUSTOMER",
+        [
+          {
+            id: "qb-avaria-usd",
+            entityType: "CUSTOMER",
+            displayName: "Avaria Health and Beauty Corp - USD",
+            normalizedName: normalizeInvoiceEntityName("Avaria Health and Beauty Corp - USD"),
+            currency: "USD"
+          }
+        ],
+        "USD"
+      )?.option.id
+    ).toBe("qb-avaria-usd");
+  });
+
   it("prefers the QuickBooks vendor profile that matches the invoice currency", () => {
     expect(
       matchQuickBooksEntity("Vendor: Currency Split Carrier\nCurrency: USD", "VENDOR", entityOptions, "USD")?.option.id
@@ -212,6 +235,66 @@ describe("invoice automation extraction", () => {
   it("does not match generic service words to a QuickBooks vendor", () => {
     expect(
       matchQuickBooksEntity("Freight bills assigned to RTS Financial for OE3124N2", "VENDOR", entityOptions)
+    ).toBeNull();
+  });
+
+  it("uses learned customer and vendor aliases as future QuickBooks matches", () => {
+    const learnedAlias = buildInvoiceAutomationEntityAlias({
+      tenantId: "tenant-1",
+      invoiceType: "VENDOR",
+      aliasRawName: "WCE Freight Bills",
+      quickBooksEntityId: "qb-western-cad",
+      quickBooksEntityDisplayName: "Western Canada Express CAD",
+      currency: "CAD",
+      userId: "user-1"
+    });
+
+    expect(learnedAlias).toMatchObject({
+      normalizedAlias: "wce freight bills",
+      quickBooksEntityId: "qb-western-cad",
+      quickBooksEntityDisplayName: "Western Canada Express CAD"
+    });
+
+    const optionsWithAlias: InvoiceAutomationEntityOption[] = [
+      ...entityOptions,
+      {
+        id: learnedAlias!.quickBooksEntityId,
+        entityType: learnedAlias!.invoiceType,
+        displayName: learnedAlias!.quickBooksEntityDisplayName,
+        normalizedName: learnedAlias!.normalizedAlias,
+        currency: learnedAlias!.currency
+      }
+    ];
+
+    expect(
+      matchQuickBooksEntity("Vendor: WCE Freight Bills\nCurrency CAD\nTR238N25", "VENDOR", optionsWithAlias, "CAD")
+        ?.option.id
+    ).toBe("qb-western-cad");
+  });
+
+  it("does not learn aliases that are identical to the selected QuickBooks name or unsafe OCR junk", () => {
+    expect(
+      buildInvoiceAutomationEntityAlias({
+        tenantId: "tenant-1",
+        invoiceType: "CUSTOMER",
+        aliasRawName: "Acme Logistics CAD",
+        quickBooksEntityId: "qb-customer-cad",
+        quickBooksEntityDisplayName: "Acme Logistics CAD",
+        currency: "CAD",
+        userId: "user-1"
+      })
+    ).toBeNull();
+
+    expect(
+      buildInvoiceAutomationEntityAlias({
+        tenantId: "tenant-1",
+        invoiceType: "VENDOR",
+        aliasRawName: "Total",
+        quickBooksEntityId: "qb-vendor-cad",
+        quickBooksEntityDisplayName: "Real Vendor CAD",
+        currency: "CAD",
+        userId: "user-1"
+      })
     ).toBeNull();
   });
 
@@ -401,9 +484,9 @@ describe("invoice automation extraction", () => {
     expect(minimax.invoiceDate).toBe("2025-09-29");
   });
 
-  it("builds stable duplicate keys for vendor invoice numbers", () => {
+  it("builds stable duplicate keys for customer and vendor invoice numbers", () => {
     expect(
-      buildVendorInvoiceDuplicateKey({
+      buildInvoiceDuplicateKey({
         invoiceType: "VENDOR",
         invoiceNumber: " INV-1001 ",
         quickBooksEntityId: "QB-VENDOR-1",
@@ -413,7 +496,7 @@ describe("invoice automation extraction", () => {
     ).toBe("qb:qbvendor1|invoice:inv1001");
 
     expect(
-      buildVendorInvoiceDuplicateKey({
+      buildInvoiceDuplicateKey({
         invoiceType: "VENDOR",
         invoiceNumber: "INV 1001",
         quickBooksEntityId: null,
@@ -423,19 +506,29 @@ describe("invoice automation extraction", () => {
     ).toBe("name:fasttrucking|invoice:inv1001");
 
     expect(
-      buildVendorInvoiceDuplicateKey({
+      buildInvoiceDuplicateKey({
+        invoiceType: "CUSTOMER",
+        invoiceNumber: "INV-1001",
+        quickBooksEntityId: "QB-CUSTOMER-1",
+        quickBooksEntityDisplayName: "Acme Logistics CAD",
+        entityNameRaw: "Acme Logistics"
+      })
+    ).toBe("qb:qbcustomer1|invoice:inv1001");
+
+    expect(
+      buildInvoiceDuplicateKey({
         invoiceType: "CUSTOMER",
         invoiceNumber: "INV-1001",
         quickBooksEntityId: null,
         quickBooksEntityDisplayName: null,
-        entityNameRaw: "Fast Trucking"
+        entityNameRaw: null
       })
     ).toBeNull();
   });
 
-  it("checks uploaded vendor invoice duplicates against posted invoices too", () => {
-    expect(VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES).toContain("POSTED");
-    expect(VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES).not.toContain("REJECTED");
+  it("checks uploaded invoice duplicates against posted invoices too", () => {
+    expect(INVOICE_DUPLICATE_CHECK_STATUSES).toContain("POSTED");
+    expect(INVOICE_DUPLICATE_CHECK_STATUSES).not.toContain("REJECTED");
   });
 
   it("blocks approval when customer or vendor invoice required fields are missing", () => {

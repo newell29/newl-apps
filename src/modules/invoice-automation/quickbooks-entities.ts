@@ -55,14 +55,36 @@ export async function getInvoiceAutomationQuickBooksEntityOptions(
       currency: true
     }
   });
+  const aliases = await prisma.invoiceAutomationEntityAlias.findMany({
+    where: {
+      tenantId: tenant.tenantId
+    },
+    orderBy: [{ invoiceType: "asc" }, { usageCount: "desc" }, { updatedAt: "desc" }],
+    select: {
+      invoiceType: true,
+      normalizedAlias: true,
+      quickBooksEntityId: true,
+      quickBooksEntityDisplayName: true,
+      currency: true
+    }
+  });
 
-  return entities.map((entity) => ({
-    id: buildQuickBooksEntityOptionId(entity),
-    displayName: entity.displayName,
-    normalizedName: entity.normalizedName,
-    currency: entity.currency,
-    entityType: entity.entityType
-  }));
+  return [
+    ...entities.map((entity) => ({
+      id: buildQuickBooksEntityOptionId(entity),
+      displayName: entity.displayName,
+      normalizedName: entity.normalizedName,
+      currency: entity.currency,
+      entityType: entity.entityType
+    })),
+    ...aliases.map((alias) => ({
+      id: alias.quickBooksEntityId,
+      displayName: alias.quickBooksEntityDisplayName,
+      normalizedName: alias.normalizedAlias,
+      currency: alias.currency,
+      entityType: alias.invoiceType
+    }))
+  ];
 }
 
 export async function getInvoiceAutomationQuickBooksSyncSummary(
