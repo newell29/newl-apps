@@ -1,0 +1,35 @@
+name: Run Preview Prisma Migrations
+
+on:
+  workflow_dispatch:
+
+jobs:
+  migrate:
+    name: Deploy preview database migrations
+    runs-on: ubuntu-latest
+    environment: preview
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+      DATABASE_ENVIRONMENT: preview
+      PREVIEW_DATABASE_SIGNATURE: ${{ secrets.PREVIEW_DATABASE_SIGNATURE }}
+      PRODUCTION_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+      PRODUCTION_DATABASE_SIGNATURE: ${{ secrets.PRODUCTION_DATABASE_SIGNATURE }}
+      VERCEL_ENV: preview
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run preview migrations
+        run: npm run db:migrate:preview

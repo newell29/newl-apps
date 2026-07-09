@@ -11,6 +11,7 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "db:safety-check": "tsx scripts/db-safety-check.ts",
+    "db:migrate:preview": "npm run db:safety-check -- --require-preview-db && npm run prisma:migrate:deploy",
     "db:migrate:production": "npm run db:safety-check -- --require-production-db && npm run prisma:migrate:deploy",
     "prisma:generate": "prisma generate",
     "postinstall": "npm run prisma:generate",
