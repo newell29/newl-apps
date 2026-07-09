@@ -361,7 +361,9 @@ export function AccountingQueueClient({
             ) : (
               rows.map((invoice) => {
                 const blockers = getInvoiceApprovalBlockingIssues(invoice);
-                const selectable = invoice.status === "ACCOUNTING_REVIEW" && blockers.length === 0;
+                const selectable =
+                  (invoice.status === "ACCOUNTING_REVIEW" || invoice.status === "APPROVED_FOR_POSTING") &&
+                  blockers.length === 0;
                 const relevantEntities = entityOptionsByType[invoice.invoiceType];
                 return (
                   <tr key={invoice.id} className="align-top hover:bg-muted/30">
