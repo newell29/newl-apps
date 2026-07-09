@@ -39,7 +39,10 @@ type QuickBooksEntityPayload = {
 export async function getInvoiceAutomationQuickBooksEntityOptions(
   tenant: TenantContext
 ): Promise<InvoiceAutomationEntityOption[]> {
-  await syncQuickBooksEntityCache(tenant, { force: false });
+  await syncQuickBooksEntityCache(tenant, { force: false }).catch((error) => {
+    console.warn("Unable to refresh QuickBooks entity cache before reading invoice automation options.", error);
+    return [];
+  });
 
   const entities = await prisma.invoiceAutomationQuickBooksEntity.findMany({
     where: {
@@ -393,7 +396,7 @@ function buildQuickBooksEntityOptionId(entity: {
 
 function formatQuickBooksSyncWarning(credential: QuickBooksCredentialRecord, error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  if (message.includes("Unsupported state or unable to authenticate data")) {
+  if (isQuickBooksCredentialDecryptError(error)) {
     return `${credential.name} needs to be reconnected in Settings because its saved QuickBooks token can no longer be decrypted.`;
   }
 
@@ -402,4 +405,9 @@ function formatQuickBooksSyncWarning(credential: QuickBooksCredentialRecord, err
   }
 
   return `${credential.name} could not be synced: ${message}`;
+}
+
+export function isQuickBooksCredentialDecryptError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /unsupported state|unable to authenticate data|secretRef is not in the expected encrypted format/i.test(message);
 }
