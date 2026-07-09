@@ -72,6 +72,7 @@ function warn(message: string) {
 
 const args = new Set(process.argv.slice(2));
 const requirePreviewDb = args.has("--require-preview-db");
+const requireProductionDb = args.has("--require-production-db");
 const database = parseDatabaseIdentity(process.env.DATABASE_URL, "DATABASE_URL");
 const postgres = parseDatabaseIdentity(process.env.POSTGRES_URL, "POSTGRES_URL");
 const productionSignatures = readProductionSignatures();
@@ -84,6 +85,10 @@ console.log(`VERCEL_ENV: ${vercelEnv}`);
 console.log(`DATABASE_ENVIRONMENT: ${databaseEnvironment ?? "(not set)"}`);
 printIdentity("DATABASE_URL", database);
 printIdentity("POSTGRES_URL", postgres);
+
+if (requirePreviewDb && requireProductionDb) {
+  fail("Use either --require-preview-db or --require-production-db, not both.");
+}
 
 if (!database) {
   fail("DATABASE_URL is required.");
@@ -106,6 +111,26 @@ if (process.env.VERCEL_ENV === "preview" || requirePreviewDb) {
 
   if (databaseEnvironment !== "preview") {
     fail("Preview migrations require DATABASE_ENVIRONMENT=preview.");
+  }
+}
+
+if (requireProductionDb) {
+  if (databaseEnvironment !== "production") {
+    fail("Production migrations require DATABASE_ENVIRONMENT=production.");
+  }
+
+  if (process.env.VERCEL_ENV && process.env.VERCEL_ENV !== "production") {
+    fail(`Production migrations cannot run when VERCEL_ENV=${process.env.VERCEL_ENV}.`);
+  }
+
+  if (productionSignatures.size > 0 && !productionSignatures.has(database.signature)) {
+    fail(
+      `DATABASE_URL resolves to ${database.signature}, but it does not match the configured production database identity.`
+    );
+  }
+
+  if (productionSignatures.size === 0) {
+    warn("No PRODUCTION_DATABASE_URL or PRODUCTION_DATABASE_SIGNATURE is set; relying on DATABASE_ENVIRONMENT=production.");
   }
 }
 
