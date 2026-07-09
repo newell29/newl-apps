@@ -31,7 +31,11 @@ export default async function InvoiceAutomationUploadPage({ searchParams }: { se
         <SummaryCard label="Needs attention" value={shell.summary.needsAttention} />
       </section>
 
-      <InvoiceAutomationUploadClient invoices={shell.invoices} entityOptions={shell.entityOptions} />
+      <InvoiceAutomationUploadClient
+        invoices={shell.invoices}
+        entityOptions={shell.entityOptions}
+        quickBooksSync={shell.quickBooksSync}
+      />
     </div>
   );
 }
@@ -44,4 +48,3 @@ function SummaryCard({ label, value }: { label: string; value: number }) {
     </div>
   );
 }
-

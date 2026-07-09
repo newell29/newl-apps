@@ -12,6 +12,13 @@ export type InvoiceAutomationEntityOption = {
   entityType: InvoiceAutomationType;
 };
 
+export type InvoiceAutomationQuickBooksSyncSummary = {
+  connectionCount: number;
+  customerCount: number;
+  vendorCount: number;
+  lastSyncedAt: string | null;
+};
+
 export type InvoiceAutomationUploadDraft = {
   clientId: string;
   fileName: string;

@@ -1,6 +1,9 @@
 import { IntegrationProvider, IntegrationStatus, type InvoiceAutomationType, type Prisma } from "@prisma/client";
 import { inferCurrencyFromInvoiceEntityName, normalizeInvoiceEntityName } from "@/modules/invoice-automation/extraction";
-import type { InvoiceAutomationEntityOption } from "@/modules/invoice-automation/types";
+import type {
+  InvoiceAutomationEntityOption,
+  InvoiceAutomationQuickBooksSyncSummary
+} from "@/modules/invoice-automation/types";
 import { prisma } from "@/server/db";
 import {
   decryptQuickBooksSecret,
@@ -37,7 +40,7 @@ export async function getInvoiceAutomationQuickBooksEntityOptions(
   tenant: TenantContext
 ): Promise<InvoiceAutomationEntityOption[]> {
   try {
-    await syncQuickBooksEntityCache(tenant);
+    await syncQuickBooksEntityCache(tenant, { force: false });
   } catch (error) {
     console.warn("Unable to sync QuickBooks entity names for invoice automation.", error);
   }
@@ -67,7 +70,64 @@ export async function getInvoiceAutomationQuickBooksEntityOptions(
   }));
 }
 
-async function syncQuickBooksEntityCache(tenant: TenantContext) {
+export async function getInvoiceAutomationQuickBooksSyncSummary(
+  tenant: TenantContext
+): Promise<InvoiceAutomationQuickBooksSyncSummary> {
+  const [connectionCount, customerCount, vendorCount, lastSyncedEntity] = await Promise.all([
+    prisma.integrationCredential.count({
+      where: {
+        tenantId: tenant.tenantId,
+        provider: IntegrationProvider.QUICKBOOKS,
+        status: IntegrationStatus.ACTIVE,
+        secretRef: {
+          not: null
+        }
+      }
+    }),
+    prisma.invoiceAutomationQuickBooksEntity.count({
+      where: {
+        tenantId: tenant.tenantId,
+        entityType: "CUSTOMER",
+        active: true
+      }
+    }),
+    prisma.invoiceAutomationQuickBooksEntity.count({
+      where: {
+        tenantId: tenant.tenantId,
+        entityType: "VENDOR",
+        active: true
+      }
+    }),
+    prisma.invoiceAutomationQuickBooksEntity.findFirst({
+      where: {
+        tenantId: tenant.tenantId,
+        active: true
+      },
+      orderBy: {
+        syncedAt: "desc"
+      },
+      select: {
+        syncedAt: true
+      }
+    })
+  ]);
+
+  return {
+    connectionCount,
+    customerCount,
+    vendorCount,
+    lastSyncedAt: lastSyncedEntity?.syncedAt.toISOString() ?? null
+  };
+}
+
+export async function refreshInvoiceAutomationQuickBooksEntityCache(
+  tenant: TenantContext
+): Promise<InvoiceAutomationQuickBooksSyncSummary> {
+  await syncQuickBooksEntityCache(tenant, { force: true });
+  return getInvoiceAutomationQuickBooksSyncSummary(tenant);
+}
+
+async function syncQuickBooksEntityCache(tenant: TenantContext, { force }: { force: boolean }) {
   const newestSync = await prisma.invoiceAutomationQuickBooksEntity.findFirst({
     where: {
       tenantId: tenant.tenantId,
@@ -81,7 +141,7 @@ async function syncQuickBooksEntityCache(tenant: TenantContext) {
     }
   });
 
-  if (newestSync && Date.now() - newestSync.syncedAt.getTime() < QUICKBOOKS_ENTITY_SYNC_STALE_MS) {
+  if (!force && newestSync && Date.now() - newestSync.syncedAt.getTime() < QUICKBOOKS_ENTITY_SYNC_STALE_MS) {
     return;
   }
 
@@ -266,7 +326,7 @@ async function queryQuickBooksEntities({
   entityName: "Customer" | "Vendor";
   startPosition: number;
 }) {
-  const query = `select Id, DisplayName, FullyQualifiedName, CompanyName, Active, CurrencyRef from ${entityName} where Active = true startposition ${startPosition} maxresults ${QUICKBOOKS_QUERY_PAGE_SIZE}`;
+  const query = `select * from ${entityName} where Active = true startposition ${startPosition} maxresults ${QUICKBOOKS_QUERY_PAGE_SIZE}`;
   const url = new URL(`${getQuickBooksApiBaseUrl()}/v3/company/${realmId}/query`);
   url.searchParams.set("query", query);
   url.searchParams.set("minorversion", "75");

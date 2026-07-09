@@ -3,7 +3,10 @@ import { prisma } from "@/server/db";
 import { tenantWhere } from "@/server/tenant-query";
 import type { TenantContext } from "@/server/tenant-context";
 import { normalizeInvoiceEntityName } from "@/modules/invoice-automation/extraction";
-import { getInvoiceAutomationQuickBooksEntityOptions } from "@/modules/invoice-automation/quickbooks-entities";
+import {
+  getInvoiceAutomationQuickBooksEntityOptions,
+  getInvoiceAutomationQuickBooksSyncSummary
+} from "@/modules/invoice-automation/quickbooks-entities";
 import { toInvoiceAutomationRow } from "@/modules/invoice-automation/row-mapper";
 import type { InvoiceAutomationEntityOption, InvoiceAutomationRow } from "@/modules/invoice-automation/types";
 
@@ -14,18 +17,20 @@ export type InvoiceAutomationFilters = {
 };
 
 export async function getInvoiceAutomationUploadShell(tenant: TenantContext, filters: InvoiceAutomationFilters = {}) {
-  const [invoices, entityOptions] = await Promise.all([
+  const [invoices, entityOptions, quickBooksSync] = await Promise.all([
     getInvoiceAutomationRows(tenant, filters, [
       InvoiceAutomationStatus.OPERATIONS_REVIEW,
       InvoiceAutomationStatus.ACCOUNTING_REVIEW,
       InvoiceAutomationStatus.POSTING_ERROR
     ]),
-    getInvoiceAutomationEntityOptions(tenant)
+    getInvoiceAutomationEntityOptions(tenant),
+    getInvoiceAutomationQuickBooksSyncSummary(tenant)
   ]);
 
   return {
     invoices,
     entityOptions,
+    quickBooksSync,
     filters,
     summary: {
       operationsReview: invoices.filter((invoice) => invoice.status === InvoiceAutomationStatus.OPERATIONS_REVIEW).length,

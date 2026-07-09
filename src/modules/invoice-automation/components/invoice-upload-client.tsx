@@ -23,6 +23,7 @@ import type {
   InvoiceAutomationEntityOption,
   InvoiceAutomationOcrInvoice,
   InvoiceAutomationOcrResult,
+  InvoiceAutomationQuickBooksSyncSummary,
   InvoiceAutomationRow,
   InvoiceAutomationUploadDraft,
   InvoiceAutomationUploadResponse
@@ -38,17 +39,44 @@ let pdfJsLoader: Promise<PdfJsModule> | null = null;
 
 export function InvoiceAutomationUploadClient({
   invoices,
-  entityOptions
+  entityOptions,
+  quickBooksSync
 }: {
   invoices: InvoiceAutomationRow[];
   entityOptions: InvoiceAutomationEntityOption[];
+  quickBooksSync: InvoiceAutomationQuickBooksSyncSummary;
 }) {
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
   const [modalType, setModalType] = useState<InvoiceAutomationType | null>(null);
   const [confirmSendSelectedOpen, setConfirmSendSelectedOpen] = useState(false);
   const [queueError, setQueueError] = useState<string | null>(null);
+  const [quickBooksSyncState, setQuickBooksSyncState] = useState(quickBooksSync);
+  const [quickBooksSyncError, setQuickBooksSyncError] = useState<string | null>(null);
+  const [isRefreshingQuickBooks, setIsRefreshingQuickBooks] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const operationsRows = invoices.filter((invoice) => invoice.status === "OPERATIONS_REVIEW");
+
+  async function refreshQuickBooksNames() {
+    setQuickBooksSyncError(null);
+    setIsRefreshingQuickBooks(true);
+    try {
+      const response = await fetch("/api/finance/invoice-automation/quickbooks-entities/refresh", {
+        method: "POST"
+      });
+      const json = (await response.json().catch(() => null)) as
+        | { summary?: InvoiceAutomationQuickBooksSyncSummary; error?: string }
+        | null;
+      if (!response.ok || !json?.summary) {
+        throw new Error(json?.error ?? "Unable to refresh QuickBooks customer/vendor names.");
+      }
+      setQuickBooksSyncState(json.summary);
+      window.location.reload();
+    } catch (error) {
+      setQuickBooksSyncError(error instanceof Error ? error.message : "Unable to refresh QuickBooks customer/vendor names.");
+    } finally {
+      setIsRefreshingQuickBooks(false);
+    }
+  }
 
   async function sendSelectedToAccounting() {
     setQueueError(null);
@@ -98,6 +126,35 @@ export function InvoiceAutomationUploadClient({
             </button>
           </div>
         </div>
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">QuickBooks customer/vendor lookup</h2>
+            <p className="mt-1 text-sm text-mutedForeground">
+              {quickBooksSyncState.connectionCount > 0
+                ? `${quickBooksSyncState.customerCount.toLocaleString("en-US")} customers and ${quickBooksSyncState.vendorCount.toLocaleString("en-US")} vendors cached from QuickBooks.`
+                : "No active QuickBooks connection was found for this tenant."}
+            </p>
+            <p className="mt-1 text-xs text-mutedForeground">
+              Last refresh: {quickBooksSyncState.lastSyncedAt ? formatShortDateTime(quickBooksSyncState.lastSyncedAt) : "Not synced yet"}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void refreshQuickBooksNames()}
+            disabled={isRefreshingQuickBooks}
+            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isRefreshingQuickBooks ? "Refreshing..." : "Refresh QuickBooks names"}
+          </button>
+        </div>
+        {quickBooksSyncError ? (
+          <div className="mt-3 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
+            {quickBooksSyncError}
+          </div>
+        ) : null}
       </section>
 
       <section className="rounded-lg border border-border bg-card shadow-sm">
@@ -594,6 +651,15 @@ function MoneyInput({ value, onChange }: { value: number | null; onChange: (valu
       className="w-32 rounded-md border border-input bg-background px-2 py-1.5 text-right"
     />
   );
+}
+
+function formatShortDateTime(value: string) {
+  return new Date(value).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
 }
 
 function refreshDraftIssues(draft: InvoiceAutomationUploadDraft): InvoiceAutomationUploadDraft {
