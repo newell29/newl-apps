@@ -345,6 +345,26 @@ enum CashflowBusinessLine {
   OTHER
 }
 
+enum InvoiceAutomationType {
+  CUSTOMER
+  VENDOR
+}
+
+enum InvoiceAutomationStatus {
+  OPERATIONS_REVIEW
+  ACCOUNTING_REVIEW
+  APPROVED_FOR_POSTING
+  POSTED
+  POSTING_ERROR
+  REJECTED
+}
+
+enum InvoiceAutomationBatchStatus {
+  OPERATIONS_REVIEW
+  ACCOUNTING_REVIEW
+  COMPLETED
+}
+
 model Tenant {
   id        String   @id @default(cuid())
   name      String
@@ -398,6 +418,10 @@ model Tenant {
   oceanFreightSourceAttachments OceanFreightSourceAttachment[]
   oceanFreightRateCandidates    OceanFreightRateCandidate[]
   oceanFreightRates             OceanFreightRate[]
+  invoiceAutomationDocuments    InvoiceAutomationDocument[]
+  invoiceAutomationBatches      InvoiceAutomationBatch[]
+  invoiceAutomationInvoices     InvoiceAutomationInvoice[]
+  invoiceAutomationQuickBooksEntities InvoiceAutomationQuickBooksEntity[]
 }
 
 model User {
@@ -1365,6 +1389,129 @@ model CashflowSettings {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
+}
+
+model InvoiceAutomationDocument {
+  id               String   @id @default(cuid())
+  tenantId         String
+  fileName         String
+  contentType      String
+  sizeBytes        Int
+  sha256           String
+  extractedText    String?
+  pdfBytes         Bytes
+  uploadedByUserId String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenant   Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoices InvoiceAutomationInvoice[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, sha256])
+  @@index([tenantId, createdAt])
+}
+
+model InvoiceAutomationBatch {
+  id                   String                       @id @default(cuid())
+  tenantId             String
+  batchNumber          String
+  invoiceType          InvoiceAutomationType
+  status               InvoiceAutomationBatchStatus @default(OPERATIONS_REVIEW)
+  uploadedByUserId     String?
+  sentToAccountingById String?
+  sentToAccountingAt   DateTime?
+  notes                String?
+  createdAt            DateTime                     @default(now())
+  updatedAt            DateTime                     @updatedAt
+
+  tenant   Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoices InvoiceAutomationInvoice[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, batchNumber])
+  @@index([tenantId, invoiceType, createdAt])
+  @@index([tenantId, status])
+}
+
+model InvoiceAutomationInvoice {
+  id                         String                  @id @default(cuid())
+  tenantId                   String
+  batchId                    String
+  documentId                 String
+  invoiceType                InvoiceAutomationType
+  status                     InvoiceAutomationStatus @default(OPERATIONS_REVIEW)
+  fileName                   String
+  shipmentFileNumber         String?
+  shipmentType               String?
+  businessLine               CashflowBusinessLine    @default(OTHER)
+  entityNameRaw              String?
+  quickBooksEntityId         String?
+  quickBooksEntityDisplayName String?
+  quickBooksMatchConfidence  Int?
+  invoiceNumber              String?
+  vendorInvoiceDuplicateKey  String?
+  invoiceDate                DateTime?
+  dueDate                    DateTime?
+  currency                   String?
+  subtotalAmount             Decimal?                @db.Decimal(14, 2)
+  taxAmount                  Decimal?                @db.Decimal(14, 2)
+  totalAmount                Decimal?                @db.Decimal(14, 2)
+  productOrAccountName       String?
+  issueCodes                 Json?
+  extractionJson             Json?
+  reviewNotes                String?
+  uploadedByUserId           String?
+  sentToAccountingById       String?
+  sentToAccountingAt         DateTime?
+  approvedByUserId           String?
+  approvedAt                 DateTime?
+  postedByUserId             String?
+  postedAt                   DateTime?
+  quickBooksTxnId            String?
+  quickBooksTxnNumber        String?
+  quickBooksPostingError     String?
+  createdAt                  DateTime                @default(now())
+  updatedAt                  DateTime                @updatedAt
+
+  tenant   Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  batch    InvoiceAutomationBatch    @relation(fields: [tenantId, batchId], references: [tenantId, id], onDelete: Cascade)
+  document InvoiceAutomationDocument @relation(fields: [tenantId, documentId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, invoiceType, vendorInvoiceDuplicateKey])
+  @@index([tenantId, invoiceType, status])
+  @@index([tenantId, batchId])
+  @@index([tenantId, documentId])
+  @@index([tenantId, shipmentFileNumber])
+  @@index([tenantId, invoiceNumber])
+  @@index([tenantId, entityNameRaw])
+  @@index([tenantId, createdAt])
+}
+
+model InvoiceAutomationQuickBooksEntity {
+  id             String                @id @default(cuid())
+  tenantId       String
+  entityType     InvoiceAutomationType
+  quickBooksId   String
+  displayName    String
+  normalizedName String
+  currency       String?
+  legalEntity    String?
+  realmId        String
+  active         Boolean               @default(true)
+  rawJson        Json?
+  syncedAt       DateTime              @default(now())
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, entityType, realmId, quickBooksId])
+  @@index([tenantId, entityType, normalizedName])
+  @@index([tenantId, entityType, currency])
+  @@index([tenantId, realmId])
+  @@index([tenantId, active])
 }
 
 model AssistantChatThread {
