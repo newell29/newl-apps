@@ -21,6 +21,7 @@ export async function getInvoiceAutomationUploadShell(tenant: TenantContext, fil
     getInvoiceAutomationRows(tenant, filters, [
       InvoiceAutomationStatus.OPERATIONS_REVIEW,
       InvoiceAutomationStatus.ACCOUNTING_REVIEW,
+      InvoiceAutomationStatus.APPROVED_FOR_POSTING,
       InvoiceAutomationStatus.POSTING_ERROR
     ]),
     getInvoiceAutomationEntityOptions(tenant),
@@ -35,6 +36,7 @@ export async function getInvoiceAutomationUploadShell(tenant: TenantContext, fil
     summary: {
       operationsReview: invoices.filter((invoice) => invoice.status === InvoiceAutomationStatus.OPERATIONS_REVIEW).length,
       accountingReview: invoices.filter((invoice) => invoice.status === InvoiceAutomationStatus.ACCOUNTING_REVIEW).length,
+      approvedForPosting: invoices.filter((invoice) => invoice.status === InvoiceAutomationStatus.APPROVED_FOR_POSTING).length,
       needsAttention: invoices.filter((invoice) => invoice.issueCodes.length > 0).length
     }
   };
