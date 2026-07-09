@@ -47,7 +47,16 @@ export function extractShipmentFileNumber(text: string, fallbackName = "") {
     return null;
   }
 
-  return `${match[1].toUpperCase()}${match[2].toUpperCase()}`;
+  const extracted = `${match[1].toUpperCase()}${match[2].toUpperCase()}`;
+  const fallbackMatch = fallbackName.match(FILE_NUMBER_PATTERN);
+  if (fallbackMatch) {
+    const fallback = `${fallbackMatch[1].toUpperCase()}${fallbackMatch[2].toUpperCase()}`;
+    if (shouldPreferFileNameShipmentNumber(extracted, fallback)) {
+      return fallback;
+    }
+  }
+
+  return extracted;
 }
 
 export function getShipmentTypeFromInvoiceFileNumber(fileNumber?: string | null) {
@@ -72,8 +81,23 @@ export function getDefaultProductOrAccount(invoiceType: InvoiceAutomationType, f
 }
 
 export function extractInvoiceNumber(text: string, fallbackName = "") {
+  const explicitFileNameInvoice = extractExplicitInvoiceTokenFromFileName(fallbackName);
+  if (explicitFileNameInvoice) {
+    return explicitFileNameInvoice;
+  }
+
+  const invoiceNumberTableMatch = text.match(/\binvoice\s+number\s+invoice\s+date\s+([A-Z0-9][A-Z0-9._/-]{2,})\b/i);
+  if (invoiceNumberTableMatch) {
+    return cleanToken(invoiceNumberTableMatch[1]);
+  }
+
+  const dateInvoiceNumberTableMatch = text.match(/\bdate\s+invoice\s*#\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+([A-Z0-9][A-Z0-9._/-]{2,})\b/i);
+  if (dateInvoiceNumberTableMatch) {
+    return cleanToken(dateInvoiceNumberTableMatch[1]);
+  }
+
   const labelMatch = text.match(/\b(?:invoice|inv)\s*(?:number|no\.?|#)\s*[:#-]?\s*([A-Z0-9][A-Z0-9._/-]{2,})/i);
-  if (labelMatch) {
+  if (labelMatch && !isGenericInvoiceFileToken(labelMatch[1])) {
     return cleanToken(labelMatch[1]);
   }
 
@@ -82,19 +106,28 @@ export function extractInvoiceNumber(text: string, fallbackName = "") {
     return cleanToken(freightBillMatch[1]);
   }
 
-  const fileNameMatch = fallbackName.match(/\b(?:invoice|inv)[\s_-]*([A-Z0-9][A-Z0-9._-]{2,})/i);
-  return fileNameMatch ? cleanToken(fileNameMatch[1]) : null;
+  return extractInvoiceNumberFromFileName(fallbackName);
 }
 
 export function extractCurrency(text: string) {
   const upper = text.toUpperCase();
   if (/\bUSD\b|US\s*DOLLARS?/.test(upper)) return "USD";
-  if (/\bCAD\b|\bCDN\b|CANADIAN\s*DOLLARS?/.test(upper)) return "CAD";
+  if (/\bCAD\b|\bCDN\b|CANADIAN\s*DOLLARS?|CANADIAN\s+DOL/.test(upper)) return "CAD";
   if (/\$/.test(text)) return "CAD";
   return null;
 }
 
 export function extractInvoiceDate(text: string) {
+  const tableDateMatch = text.match(/\binvoice\s+number\s+invoice\s+date\s+[A-Z0-9][A-Z0-9._/-]{2,}\s+(\d{1,2}-[A-Z][a-z]{2}-\d{2,4})\b/i);
+  if (tableDateMatch) {
+    return normalizeDate(tableDateMatch[1]);
+  }
+
+  const dateInvoiceTableMatch = text.match(/\bdate\s+invoice\s*#\s+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\s+[A-Z0-9][A-Z0-9._/-]{2,}/i);
+  if (dateInvoiceTableMatch) {
+    return normalizeDate(dateInvoiceTableMatch[1]);
+  }
+
   return findDateByLabels(text, ["invoice date", "bill date", "date"]);
 }
 
@@ -217,7 +250,7 @@ export function buildInvoiceDraftFromText({
     shipmentFileNumber,
     shipmentType,
     businessLine,
-    entityNameRaw: entityMatch?.option.displayName ?? extractEntityNameByLabel(text, invoiceType),
+    entityNameRaw: entityMatch?.option.displayName ?? extractEntityNameByLabel(text, invoiceType, fileName),
     quickBooksEntityId: entityMatch?.option.id ?? null,
     quickBooksEntityDisplayName: entityMatch?.option.displayName ?? null,
     quickBooksMatchConfidence: entityMatch?.confidence ?? null,
@@ -252,9 +285,9 @@ export function getInvoiceDraftIssueCodes(draft: Pick<InvoiceAutomationUploadDra
   return issues;
 }
 
-function extractEntityNameByLabel(text: string, invoiceType: InvoiceAutomationType) {
+function extractEntityNameByLabel(text: string, invoiceType: InvoiceAutomationType, fallbackName = "") {
   if (invoiceType === "VENDOR") {
-    return extractVendorName(text);
+    return extractVendorName(text, fallbackName);
   }
 
   const label = invoiceType === "CUSTOMER" ? "(?:bill to|customer|invoice to)" : "(?:vendor|remit to|from)";
@@ -262,7 +295,7 @@ function extractEntityNameByLabel(text: string, invoiceType: InvoiceAutomationTy
   return match ? cleanupLine(match[1]) : null;
 }
 
-function extractVendorName(text: string) {
+function extractVendorName(text: string, fallbackName = "") {
   const patterns = [
     /\bAssigned\s+For\s*:?\s*([\s\S]{0,80}?)([A-Z0-9][A-Z0-9 &.,'/-]+?(?:INCORPORATED|INC\.?|LTD\.?|LIMITED|LLC|CORP\.?|CORPORATION|COMPANY|CO\.?))\b/i,
     /\bcarrier\s+name\s*[–—-]\s*["“]?([^"”\n\r]{3,80})["”]?/i,
@@ -279,18 +312,27 @@ function extractVendorName(text: string) {
     }
   }
 
+  const headerVendor = extractVendorNameFromHeader(text);
+  if (headerVendor) {
+    return headerVendor;
+  }
+
   const labelMatch = text.match(/\b(?:vendor|from)\s*:\s*([^\n\r]{3,80})/i);
   const labeledVendor = labelMatch ? cleanupLine(labelMatch[1]) : null;
-  return labeledVendor && !isFactoringOrPayeeName(labeledVendor) ? labeledVendor : null;
+  if (labeledVendor && !isFactoringOrPayeeName(labeledVendor)) {
+    return labeledVendor;
+  }
+
+  return extractVendorNameFromFileName(fallbackName);
 }
 
 function isFactoringOrPayeeName(value: string) {
-  return /\b(RTS\s+Financial|financial\s+service|factoring|factor|payable\s+to|remit\s+to)\b/i.test(value);
+  return /\b(RTS\s+Financial|financial\s+service|factoring|factor|payable\s+to|remit\s+to|newells?\s+express|newell[’']?s?\s+express)\b/i.test(value);
 }
 
 function findDateByLabels(text: string, labels: string[]) {
   for (const label of labels) {
-    const match = text.match(new RegExp(`${escapeRegExp(label)}\\s*:?\\s*([A-Z][a-z]+\\s+\\d{1,2},\\s*\\d{4}|\\d{4}-\\d{1,2}-\\d{1,2}|\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4})`, "i"));
+    const match = text.match(new RegExp(`${escapeRegExp(label)}\\s*[:：]?\\s*([A-Z][a-z]+\\s+\\d{1,2},\\s*\\d{4}|\\d{4}[/-]\\d{1,2}[/-]\\d{1,2}|\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4}|\\d{1,2}-[A-Z][a-z]{2}-\\d{2,4})`, "i"));
     if (match) {
       return normalizeDate(match[1]);
     }
@@ -431,4 +473,126 @@ function cleanupLine(value: string) {
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function shouldPreferFileNameShipmentNumber(extracted: string, fallback: string) {
+  const extractedPrefix = extracted.match(/^[A-Z]+/)?.[0];
+  const fallbackPrefix = fallback.match(/^[A-Z]+/)?.[0];
+  if (!extractedPrefix || extractedPrefix !== fallbackPrefix) {
+    return false;
+  }
+
+  return normalizeShipmentNumberForComparison(extracted) === normalizeShipmentNumberForComparison(fallback) && extracted !== fallback;
+}
+
+function normalizeShipmentNumberForComparison(value: string) {
+  return value.replace(/^([A-Z]+)(\d+)[A-Z](\d+)$/, "$1$2$3");
+}
+
+function extractInvoiceNumberFromFileName(fileName: string) {
+  const baseName = fileName.replace(/\.pdf$/i, "");
+  const leadingInvMatch = baseName.match(/\binv[_ -]*(\d{5,})(?=\b|[_ -])/i);
+  if (leadingInvMatch) {
+    return cleanToken(leadingInvMatch[1]);
+  }
+
+  const leadingInvoiceNumberMatch = baseName.match(/\binvoice\s+(\d{3,})\s*[-–—]/i);
+  if (leadingInvoiceNumberMatch) {
+    return cleanToken(leadingInvoiceNumberMatch[1]);
+  }
+
+  const shipmentMatch = baseName.match(FILE_NUMBER_PATTERN);
+  if (shipmentMatch?.index !== undefined) {
+    const afterShipment = baseName.slice(shipmentMatch.index + shipmentMatch[0].length).trim();
+    const invoiceNoToken = afterShipment.match(/\binvoice\s*(?:no\.?|#)\s*([A-Z0-9][A-Z0-9._/-]{2,})/i);
+    if (invoiceNoToken && !isGenericInvoiceFileToken(invoiceNoToken[1])) {
+      return cleanToken(invoiceNoToken[1]);
+    }
+
+    const strongToken = afterShipment.match(/\b(?:DN-[A-Z0-9-]+|INV[-_ ]?[A-Z0-9-]+|[A-Z]{2,}[-_][A-Z0-9-]+|[A-Z]{4,}\d[A-Z0-9-]+|\d{5,}(?:-\d+)?)\b/i);
+    if (strongToken) {
+      return cleanToken(strongToken[0].replace(/\s+/g, ""));
+    }
+  }
+
+  const invoiceFileMatch = baseName.match(/\b(?:invoice|inv)[\s_-]*(?:no\.?|#)?\s*([A-Z0-9][A-Z0-9._-]{2,})/i);
+  const candidate = invoiceFileMatch ? cleanToken(invoiceFileMatch[1]) : null;
+  return candidate && !isGenericInvoiceFileToken(candidate) ? candidate : null;
+}
+
+function extractExplicitInvoiceTokenFromFileName(fileName: string) {
+  const baseName = fileName.replace(/\.pdf$/i, "");
+  const explicitMatch = baseName.match(/\binvoice[_\s-]+(?!no\.?\b|#)([A-Z]{2,}\d[A-Z0-9._/-]*)\b/i);
+  if (!explicitMatch) {
+    return null;
+  }
+
+  return cleanToken(explicitMatch[1].replace(/\s+/g, ""));
+}
+
+function extractVendorNameFromFileName(fileName: string) {
+  const baseName = fileName.replace(/\.pdf$/i, "").replace(/[_]+/g, " ");
+  const amountApprovedMatch = baseName.match(/\bamount\s+approved\s+(.+?)\s+(?:OE|OI|AE|AI|TR|DR)\d+[A-Z]?\d*\b/i);
+  if (amountApprovedMatch) {
+    return cleanupVendorNameFromFileName(amountApprovedMatch[1]);
+  }
+
+  const approvedMatch = baseName.match(/\b(?:approved|amount\s+approved)?\s*invoice\s+(.+?)\s+(?:OE|OI|AE|AI|TR|DR)\d+[A-Z]?\d*\b/i);
+  if (approvedMatch) {
+    return cleanupVendorNameFromFileName(approvedMatch[1]);
+  }
+
+  const fileNumberFirstMatch = baseName.match(/\b(?:OE|OI|AE|AI|TR|DR)\d+[A-Z]?\d*\s*[-–—]\s*(.+)$/i);
+  if (fileNumberFirstMatch) {
+    return cleanupVendorNameFromFileName(fileNumberFirstMatch[1]);
+  }
+
+  const invoicePrefixMatch = baseName.match(/\binvoice\s+\d+\s*[-–—]\s*(?:OE|OI|AE|AI|TR|DR)\d+[A-Z]?\d*\s*[-–—]\s*(.+)$/i);
+  if (invoicePrefixMatch) {
+    return cleanupVendorNameFromFileName(invoicePrefixMatch[1]);
+  }
+
+  const leadingInvoiceMatch = baseName.match(/^([A-Z0-9][A-Z0-9 &'./-]+?)\s*[-–—]\s*(?:\d{5,}|(?:OE|OI|AE|AI|TR|DR)\d+[A-Z]?\d*)\b/i);
+  if (leadingInvoiceMatch) {
+    return cleanupVendorNameFromFileName(leadingInvoiceMatch[1]);
+  }
+
+  return null;
+}
+
+function extractVendorNameFromHeader(text: string) {
+  const headerLines = text
+    .split(/\r?\n/)
+    .map((line) => cleanupLine(line) ?? "")
+    .filter(Boolean)
+    .slice(0, 8);
+
+  for (const line of headerLines) {
+    if (!/(?:INCORPORATED|INC\.?|LTD\.?|LIMITED|LLC|CORP\.?|CORPORATION|COMPANY|CO\.?|LOGISTICS|TRANSPORT|TRANSPORTATION|FREIGHT|EXPRESS|CARTAGE)/i.test(line)) {
+      continue;
+    }
+
+    if (!isFactoringOrPayeeName(line)) {
+      return line;
+    }
+  }
+
+  return null;
+}
+
+function cleanupVendorNameFromFileName(value: string) {
+  const cleaned = cleanupLine(
+    value
+      .replace(/\b(?:invoice|inv|approved|amount|pod|tax|revised|from|newells?|express|worldwide|warehousing|ltd)\b/gi, " ")
+      .replace(/\b(?:(?:DN|INV|TAX)[-_ ]?[A-Z0-9]{4,}|[A-Z0-9]*\d[A-Z0-9-]{4,})\b/gi, " ")
+      .replace(/\d{1,2}-[A-Za-z]{3}-\d{2,4}/g, " ")
+      .replace(/\([^)]*\)/g, " ")
+      .replace(/\s+/g, " ")
+  );
+
+  return cleaned && !isGenericInvoiceFileToken(cleaned) && !isFactoringOrPayeeName(cleaned) ? cleaned : null;
+}
+
+function isGenericInvoiceFileToken(value: string) {
+  return /^(invoice|inv|bill|newell|newells?|approved|amount|revised|pod|from|tax|no\.?|number)$/i.test(value.trim());
 }

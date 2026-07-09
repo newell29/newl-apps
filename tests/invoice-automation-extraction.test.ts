@@ -59,6 +59,7 @@ describe("invoice automation extraction", () => {
   it("extracts shipment file numbers from OCR text and uploaded file names", () => {
     expect(extractShipmentFileNumber("Shipment file: OE-12345")).toBe("OE12345");
     expect(extractShipmentFileNumber("", "vendor-invoice_TR98765.pdf")).toBe("TR98765");
+    expect(extractShipmentFileNumber("NS TR2911T12", "TR2911N12 - Western Canada 1.pdf")).toBe("TR2911N12");
   });
 
   it("maps service prefixes to profitability business lines and QB posting defaults", () => {
@@ -81,6 +82,49 @@ describe("invoice automation extraction", () => {
       taxAmount: 130,
       totalAmount: 1130
     });
+  });
+
+  it("normalizes common vendor invoice date and currency formats", () => {
+    const casia = buildInvoiceDraftFromText({
+      clientId: "casia-date",
+      fileName: "Approved Invoice Casia OI348N1002 DN-CNG26040761.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions: [],
+      text: "INVOICE DATE： 2026/04/30 19:27:14\nSAY TOTAL AMOUNT USD 595.77\nOI348N1002"
+    });
+
+    expect(casia.invoiceDate).toBe("2026-04-30");
+    expect(casia.dueDate).toBe("2026-05-30");
+
+    const landAir = buildInvoiceDraftFromText({
+      clientId: "land-air-date",
+      fileName: "Approved Invoice Land Air Express AI1001N2 54714134-3.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions: [],
+      text: "Invoice Number Invoice Date\n127353 20-Nov-25\nPlease Pay this Amount : $499.44\nAI1001N2"
+    });
+
+    expect(landAir.invoiceDate).toBe("2025-11-20");
+    expect(landAir.dueDate).toBe("2025-12-20");
+
+    const western = buildInvoiceDraftFromText({
+      clientId: "western-currency",
+      fileName: "TR2911N12 - Western Canada 1.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions: [],
+      text: "P a r t 1 of 1 1259568587\nNS TR2911T12\n1 PREPAID TOTALS 130 400.89\nPayable in Canadian dol"
+    });
+
+    expect(western.currency).toBe("CAD");
   });
 
   it("uses the final amount on prepaid totals freight bills", () => {
@@ -169,6 +213,112 @@ describe("invoice automation extraction", () => {
     expect(
       matchQuickBooksEntity("Freight bills assigned to RTS Financial for OE3124N2", "VENDOR", entityOptions)
     ).toBeNull();
+  });
+
+  it("uses vendor and invoice tokens from filename-heavy vendor PDFs", () => {
+    const casia = buildInvoiceDraftFromText({
+      clientId: "casia",
+      fileName: "Approved Invoice Casia OI348N1002 DN-CNG26040761.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions: [],
+      text: `
+        CASIA LOGISTICS TECH LIMITED
+        INVOICE
+        INVOICE NO: FCLCNG26040676-D1
+        INVOICE DATE: 2026/04/30
+        SAY TOTAL AMOUNT USD 595.77
+        OI348N1002
+      `
+    });
+
+    expect(casia.entityNameRaw).toBe("CASIA LOGISTICS TECH LIMITED");
+    expect(casia.invoiceNumber).toBe("FCLCNG26040676-D1");
+
+    const landAir = buildInvoiceDraftFromText({
+      clientId: "land-air",
+      fileName: "Approved Invoice Land Air Express AI1001N2 54714134-3.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions: [],
+      text: `
+        INVOICE
+        Land Air Express (Canada) Ltd.
+        Invoice Number Invoice Date
+        127353 20-Nov-25
+        Please Pay this Amount : $499.44
+        Invoice Amount Approved CAD 499.44
+        AI1001N2
+      `
+    });
+
+    expect(landAir.entityNameRaw).toBe("Land Air Express (Canada) Ltd.");
+    expect(landAir.invoiceNumber).toBe("127353");
+
+    const oneCourier = buildInvoiceDraftFromText({
+      clientId: "one-courier",
+      fileName: "Inv_891623158_from_Newells_Express___Warehousing_Ltd._2309009_27244.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions: [],
+      text: "Bill To: Newells Express\nOE3476N2\nTotal: $84.70"
+    });
+    expect(oneCourier.invoiceNumber).toBe("891623158");
+
+    const terminalTransfer = buildInvoiceDraftFromText({
+      clientId: "terminal-transfer",
+      fileName: "Invoice 6968 -TR1765N264 - NEWELL EXPRESS WORLDWIDE LOGISTICS LTD_132626.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions: [],
+      text: "TR1765N264\nTotal: $300.00"
+    });
+    expect(terminalTransfer.invoiceNumber).toBe("6968");
+
+    const scottFreight = buildInvoiceDraftFromText({
+      clientId: "scott-freight",
+      fileName: "Amount Approved Scott Freight AI3102N4 invoice NEW1001-44.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions: [],
+      text: "SCOTT FREIGHT SERVICES LTD.\nInvoice Number 5200\nAI3102N4\nTotal CAD 100.00"
+    });
+    expect(scottFreight.invoiceNumber).toBe("NEW1001-44");
+
+    const casiaBillOfLadingStyle = buildInvoiceDraftFromText({
+      clientId: "casia-oney",
+      fileName: "Approved Invoice Casia OI348N1024 ONEYTA6PU4170800.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions: [],
+      text: "CASIA LOGISTICS TECH LIMITED\nSAY TOTAL AMOUNT USD 45.00\nOI348N1024"
+    });
+    expect(casiaBillOfLadingStyle.invoiceNumber).toBe("ONEYTA6PU4170800");
+
+    const truckLine = buildInvoiceDraftFromText({
+      clientId: "truck-line",
+      fileName: "Amount Approved 777 Truck Line AI3102N4 Invoice No. 6652 & Pod-1.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions: [],
+      text: "NEWELL’S EXPRESS WORLDWIDE LOGISTICS LTD.\nAI3102N4\nTotal 150.00"
+    });
+    expect(truckLine.entityNameRaw).toBe("777 Truck Line");
+    expect(truckLine.invoiceNumber).toBe("6652");
   });
 
   it("builds stable duplicate keys for vendor invoice numbers", () => {
