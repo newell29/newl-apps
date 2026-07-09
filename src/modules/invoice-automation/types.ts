@@ -46,7 +46,9 @@ export type InvoiceAutomationRow = {
   shipmentFileNumber: string | null;
   shipmentType: string | null;
   entityNameRaw: string | null;
+  quickBooksEntityId: string | null;
   quickBooksEntityDisplayName: string | null;
+  quickBooksMatchConfidence: number | null;
   invoiceNumber: string | null;
   invoiceDate: string | null;
   dueDate: string | null;

@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { formatInvoiceApprovalBlocker, getInvoiceApprovalBlockingIssues } from "@/modules/invoice-automation/approval";
 import { buildVendorInvoiceDuplicateKey } from "@/modules/invoice-automation/duplicates";
 import { defaultDueDateFromInvoiceDate, getInvoiceDraftIssueCodes } from "@/modules/invoice-automation/extraction";
+import { toInvoiceAutomationRow } from "@/modules/invoice-automation/row-mapper";
 import type { InvoiceAutomationUploadDraft, InvoiceAutomationUploadResponse } from "@/modules/invoice-automation/types";
 import { requireModule, requireMutationAccess, requireRole } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
@@ -210,28 +211,7 @@ export async function POST(request: Request) {
       batchId: created.batch.id,
       batchNumber: created.batch.batchNumber,
       invoiceCount: created.invoices.length,
-      invoices: created.invoices.map((invoice) => ({
-        id: invoice.id,
-        batchNumber: invoice.batch.batchNumber,
-        invoiceType: invoice.invoiceType,
-        status: invoice.status,
-        fileName: invoice.fileName,
-        shipmentFileNumber: invoice.shipmentFileNumber,
-        shipmentType: invoice.shipmentType,
-        entityNameRaw: invoice.entityNameRaw,
-        quickBooksEntityDisplayName: invoice.quickBooksEntityDisplayName,
-        invoiceNumber: invoice.invoiceNumber,
-        invoiceDate: invoice.invoiceDate?.toISOString().slice(0, 10) ?? null,
-        dueDate: invoice.dueDate?.toISOString().slice(0, 10) ?? null,
-        currency: invoice.currency,
-        subtotalAmount: decimalToNumber(invoice.subtotalAmount),
-        taxAmount: decimalToNumber(invoice.taxAmount),
-        totalAmount: decimalToNumber(invoice.totalAmount),
-        productOrAccountName: invoice.productOrAccountName,
-        issueCodes: Array.isArray(invoice.issueCodes) ? invoice.issueCodes.filter((issue): issue is string => typeof issue === "string") : [],
-        createdAt: invoice.createdAt.toISOString(),
-        sentToAccountingAt: invoice.sentToAccountingAt?.toISOString() ?? null
-      }))
+      invoices: created.invoices.map(toInvoiceAutomationRow)
     };
 
     return NextResponse.json(response, { status: 201 });
@@ -357,8 +337,4 @@ function parseDate(value: string | null) {
 
 function decimalOrNull(value: number | null) {
   return typeof value === "number" && Number.isFinite(value) ? new Prisma.Decimal(value) : null;
-}
-
-function decimalToNumber(value: { toString(): string } | number | null) {
-  return value === null ? null : Number(value.toString());
 }

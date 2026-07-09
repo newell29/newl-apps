@@ -3,6 +3,7 @@ import { prisma } from "@/server/db";
 import { tenantWhere } from "@/server/tenant-query";
 import type { TenantContext } from "@/server/tenant-context";
 import { normalizeInvoiceEntityName } from "@/modules/invoice-automation/extraction";
+import { toInvoiceAutomationRow } from "@/modules/invoice-automation/row-mapper";
 import type { InvoiceAutomationEntityOption, InvoiceAutomationRow } from "@/modules/invoice-automation/types";
 
 export type InvoiceAutomationFilters = {
@@ -153,28 +154,7 @@ async function getInvoiceAutomationRows(
     }
   });
 
-  return rows.map((row) => ({
-    id: row.id,
-    batchNumber: row.batch.batchNumber,
-    invoiceType: row.invoiceType,
-    status: row.status,
-    fileName: row.fileName,
-    shipmentFileNumber: row.shipmentFileNumber,
-    shipmentType: row.shipmentType,
-    entityNameRaw: row.entityNameRaw,
-    quickBooksEntityDisplayName: row.quickBooksEntityDisplayName,
-    invoiceNumber: row.invoiceNumber,
-    invoiceDate: row.invoiceDate?.toISOString().slice(0, 10) ?? null,
-    dueDate: row.dueDate?.toISOString().slice(0, 10) ?? null,
-    currency: row.currency,
-    subtotalAmount: decimal(row.subtotalAmount),
-    taxAmount: decimal(row.taxAmount),
-    totalAmount: decimal(row.totalAmount),
-    productOrAccountName: row.productOrAccountName,
-    issueCodes: readIssueCodes(row.issueCodes),
-    createdAt: row.createdAt.toISOString(),
-    sentToAccountingAt: row.sentToAccountingAt?.toISOString() ?? null
-  }));
+  return rows.map(toInvoiceAutomationRow);
 }
 
 function readStatuses(value: string | undefined, fallback: InvoiceAutomationStatus[]) {
@@ -185,14 +165,6 @@ function readStatuses(value: string | undefined, fallback: InvoiceAutomationStat
   return Object.values(InvoiceAutomationStatus).includes(value as InvoiceAutomationStatus)
     ? [value as InvoiceAutomationStatus]
     : fallback;
-}
-
-function readIssueCodes(value: Prisma.JsonValue) {
-  return Array.isArray(value) ? value.filter((issue): issue is string => typeof issue === "string") : [];
-}
-
-function decimal(value: { toString(): string } | number | null) {
-  return value === null ? null : Number(value.toString());
 }
 
 function dedupeEntityOptions(options: InvoiceAutomationEntityOption[]) {
