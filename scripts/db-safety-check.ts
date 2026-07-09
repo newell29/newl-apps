@@ -143,9 +143,12 @@ if (productionSignatures.has(database.signature)) {
 if (process.env.VERCEL_ENV === "preview" || requirePreviewDb) {
   if (previewSignature) {
     if (database.signature !== previewSignature) {
-      warn(
-        `Preview DATABASE_URL resolves to ${database.signature}, but PREVIEW_DATABASE_SIGNATURE expects ${previewSignature}.`
-      );
+      const message = `Preview DATABASE_URL resolves to ${database.signature}, but PREVIEW_DATABASE_SIGNATURE expects ${previewSignature}.`;
+      if (requirePreviewDb) {
+        fail(message);
+      }
+
+      warn(message);
     }
   } else {
     warn("PREVIEW_DATABASE_SIGNATURE is not set; relying on DATABASE_ENVIRONMENT=preview.");
