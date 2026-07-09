@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { InvoiceAutomationBatchStatus, InvoiceAutomationStatus, ModuleKey, PlatformRole, Prisma, type InvoiceAutomationType } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
+import { buildVendorInvoiceDuplicateKey } from "@/modules/invoice-automation/duplicates";
 import { defaultDueDateFromInvoiceDate, getInvoiceDraftIssueCodes } from "@/modules/invoice-automation/extraction";
 import type { InvoiceAutomationUploadDraft, InvoiceAutomationUploadResponse } from "@/modules/invoice-automation/types";
 import { requireModule, requireMutationAccess, requireRole } from "@/server/auth/authorization";
@@ -38,6 +39,49 @@ export async function POST(request: Request) {
 
     if (invoices.length > 25) {
       return NextResponse.json({ error: "Upload 25 invoices or fewer at a time." }, { status: 400 });
+    }
+
+    const duplicateKeyByClientId = buildDuplicateKeyMap(invoiceType, invoices);
+    const duplicateInUpload = findDuplicateUploadInvoice(invoices, duplicateKeyByClientId);
+    if (duplicateInUpload) {
+      return NextResponse.json(
+        {
+          error: `Duplicate vendor invoice ${duplicateInUpload.invoiceNumber} for ${duplicateInUpload.vendorName} is already in this upload.`
+        },
+        { status: 409 }
+      );
+    }
+
+    const duplicateKeys = [...new Set([...duplicateKeyByClientId.values()])];
+    if (duplicateKeys.length > 0) {
+      const existingDuplicate = await prisma.invoiceAutomationInvoice.findFirst({
+        where: {
+          tenantId: context.tenantId,
+          invoiceType: "VENDOR",
+          vendorInvoiceDuplicateKey: { in: duplicateKeys }
+        },
+        select: {
+          invoiceNumber: true,
+          entityNameRaw: true,
+          quickBooksEntityDisplayName: true,
+          batch: {
+            select: {
+              batchNumber: true
+            }
+          }
+        }
+      });
+
+      if (existingDuplicate) {
+        return NextResponse.json(
+          {
+            error: `Duplicate vendor invoice ${existingDuplicate.invoiceNumber ?? ""} for ${
+              existingDuplicate.quickBooksEntityDisplayName ?? existingDuplicate.entityNameRaw ?? "this vendor"
+            } already exists in batch ${existingDuplicate.batch.batchNumber}.`
+          },
+          { status: 409 }
+        );
+      }
     }
 
     const batchNumber = `IA-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${Date.now().toString(36).toUpperCase()}`;
@@ -103,6 +147,7 @@ export async function POST(request: Request) {
             quickBooksEntityDisplayName: readNullable(invoice.quickBooksEntityDisplayName),
             quickBooksMatchConfidence: invoice.quickBooksMatchConfidence,
             invoiceNumber: readNullable(invoice.invoiceNumber),
+            vendorInvoiceDuplicateKey: duplicateKeyByClientId.get(invoice.clientId) ?? null,
             invoiceDate,
             dueDate,
             currency: readNullable(invoice.currency),
@@ -184,11 +229,69 @@ export async function POST(request: Request) {
     return NextResponse.json(response, { status: 201 });
   } catch (error) {
     console.error(error);
+    if (isUniqueConstraintError(error)) {
+      return NextResponse.json(
+        { error: "This vendor invoice number has already been uploaded for the same vendor." },
+        { status: 409 }
+      );
+    }
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to upload invoices." },
       { status: 500 }
     );
   }
+}
+
+function buildDuplicateKeyMap(invoiceType: InvoiceAutomationType, invoices: InvoiceAutomationUploadDraft[]) {
+  const duplicateKeyByClientId = new Map<string, string>();
+
+  for (const invoice of invoices) {
+    const duplicateKey = buildVendorInvoiceDuplicateKey({
+      invoiceType,
+      invoiceNumber: readNullable(invoice.invoiceNumber),
+      quickBooksEntityId: readNullable(invoice.quickBooksEntityId),
+      quickBooksEntityDisplayName: readNullable(invoice.quickBooksEntityDisplayName),
+      entityNameRaw: readNullable(invoice.entityNameRaw)
+    });
+
+    if (duplicateKey) {
+      duplicateKeyByClientId.set(invoice.clientId, duplicateKey);
+    }
+  }
+
+  return duplicateKeyByClientId;
+}
+
+function findDuplicateUploadInvoice(
+  invoices: InvoiceAutomationUploadDraft[],
+  duplicateKeyByClientId: Map<string, string>
+) {
+  const seen = new Set<string>();
+
+  for (const invoice of invoices) {
+    const duplicateKey = duplicateKeyByClientId.get(invoice.clientId);
+    if (!duplicateKey) {
+      continue;
+    }
+
+    if (seen.has(duplicateKey)) {
+      return {
+        invoiceNumber: readNullable(invoice.invoiceNumber) ?? "unknown",
+        vendorName:
+          readNullable(invoice.quickBooksEntityDisplayName) ??
+          readNullable(invoice.entityNameRaw) ??
+          "this vendor"
+      };
+    }
+
+    seen.add(duplicateKey);
+  }
+
+  return null;
+}
+
+function isUniqueConstraintError(error: unknown) {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "P2002");
 }
 
 function decodeBase64Pdf(value: string) {

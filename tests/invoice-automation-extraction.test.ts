@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { buildVendorInvoiceDuplicateKey } from "@/modules/invoice-automation/duplicates";
 import {
   buildInvoiceDraftFromText,
   extractInvoiceAmounts,
@@ -106,6 +107,38 @@ describe("invoice automation extraction", () => {
   it("does not match generic service words to a QuickBooks vendor", () => {
     expect(
       matchQuickBooksEntity("Freight bills assigned to RTS Financial for OE3124N2", "VENDOR", entityOptions)
+    ).toBeNull();
+  });
+
+  it("builds stable duplicate keys for vendor invoice numbers", () => {
+    expect(
+      buildVendorInvoiceDuplicateKey({
+        invoiceType: "VENDOR",
+        invoiceNumber: " INV-1001 ",
+        quickBooksEntityId: "QB-VENDOR-1",
+        quickBooksEntityDisplayName: "Fast Trucking USD",
+        entityNameRaw: "Fast Trucking"
+      })
+    ).toBe("qb:qbvendor1|invoice:inv1001");
+
+    expect(
+      buildVendorInvoiceDuplicateKey({
+        invoiceType: "VENDOR",
+        invoiceNumber: "INV 1001",
+        quickBooksEntityId: null,
+        quickBooksEntityDisplayName: null,
+        entityNameRaw: "Fast Trucking CAD"
+      })
+    ).toBe("name:fasttrucking|invoice:inv1001");
+
+    expect(
+      buildVendorInvoiceDuplicateKey({
+        invoiceType: "CUSTOMER",
+        invoiceNumber: "INV-1001",
+        quickBooksEntityId: null,
+        quickBooksEntityDisplayName: null,
+        entityNameRaw: "Fast Trucking"
+      })
     ).toBeNull();
   });
 

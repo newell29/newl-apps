@@ -1449,6 +1449,7 @@ model InvoiceAutomationInvoice {
   quickBooksEntityDisplayName String?
   quickBooksMatchConfidence  Int?
   invoiceNumber              String?
+  vendorInvoiceDuplicateKey  String?
   invoiceDate                DateTime?
   dueDate                    DateTime?
   currency                   String?
@@ -1477,6 +1478,7 @@ model InvoiceAutomationInvoice {
   document InvoiceAutomationDocument @relation(fields: [tenantId, documentId], references: [tenantId, id], onDelete: Cascade)
 
   @@unique([tenantId, id])
+  @@unique([tenantId, invoiceType, vendorInvoiceDuplicateKey])
   @@index([tenantId, invoiceType, status])
   @@index([tenantId, batchId])
   @@index([tenantId, documentId])
