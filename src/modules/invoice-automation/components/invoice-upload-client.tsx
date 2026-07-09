@@ -30,6 +30,7 @@ import type {
   InvoiceAutomationUploadDraft,
   InvoiceAutomationUploadResponse
 } from "@/modules/invoice-automation/types";
+import { QuickBooksEntitySearchSelect } from "@/modules/invoice-automation/components/quickbooks-entity-search-select";
 
 type PdfJsModule = typeof import("pdfjs-dist");
 
@@ -528,10 +529,11 @@ function InvoiceUploadModal({
                       <td className="px-3 py-3"><SmallInput value={draft.shipmentFileNumber ?? ""} onChange={(value) => updateDraft(draft.clientId, { shipmentFileNumber: value || null })} /></td>
                       <td className="px-3 py-3"><SmallInput value={draft.entityNameRaw ?? ""} onChange={(value) => updateDraft(draft.clientId, { entityNameRaw: value || null })} /></td>
                       <td className="px-3 py-3">
-                        <select
+                        <QuickBooksEntitySearchSelect
+                          invoiceType={invoiceType}
+                          options={relevantEntities}
                           value={draft.quickBooksEntityId ?? ""}
-                          onChange={(event) => {
-                            const option = relevantEntities.find((entity) => entity.id === event.target.value);
+                          onChange={(option) => {
                             updateDraft(draft.clientId, {
                               quickBooksEntityId: option?.id ?? null,
                               quickBooksEntityDisplayName: option?.displayName ?? null,
@@ -539,15 +541,7 @@ function InvoiceUploadModal({
                               entityNameRaw: draft.entityNameRaw ?? option?.displayName ?? null
                             });
                           }}
-                          className="w-52 rounded-md border border-input bg-background px-2 py-1.5"
-                        >
-                          <option value="">Needs match</option>
-                          {relevantEntities.map((entity) => (
-                            <option key={`${entity.entityType}-${entity.id}`} value={entity.id}>
-                              {entity.displayName}{entity.currency ? ` (${entity.currency})` : ""}
-                            </option>
-                          ))}
-                        </select>
+                        />
                         {draft.quickBooksMatchConfidence ? <div className="mt-1 text-xs text-mutedForeground">{draft.quickBooksMatchConfidence}% confidence</div> : null}
                       </td>
                       <td className="px-3 py-3"><SmallInput value={draft.invoiceNumber ?? ""} onChange={(value) => updateDraft(draft.clientId, { invoiceNumber: value || null })} /></td>

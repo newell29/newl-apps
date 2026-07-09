@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { InvoiceAutomationType } from "@prisma/client";
 import { getInvoiceApprovalBlockingIssues } from "@/modules/invoice-automation/approval";
+import { QuickBooksEntitySearchSelect } from "@/modules/invoice-automation/components/quickbooks-entity-search-select";
 import {
   defaultDueDateFromInvoiceDate,
   deriveInvoiceTotal,
@@ -426,7 +427,7 @@ export function AccountingQueueClient({
                       <SmallInput value={invoice.entityNameRaw ?? ""} onChange={(value) => updateRow(invoice.id, { entityNameRaw: value || null })} />
                     </td>
                     <td className="px-3 py-3">
-                      <EntitySelect
+                      <QuickBooksEntitySearchSelect
                         invoiceType={invoice.invoiceType}
                         options={relevantEntities}
                         value={invoice.quickBooksEntityId ?? ""}
@@ -483,36 +484,6 @@ export function AccountingQueueClient({
         </table>
       </div>
     </section>
-  );
-}
-
-function EntitySelect({
-  invoiceType,
-  options,
-  value,
-  onChange
-}: {
-  invoiceType: InvoiceAutomationType;
-  options: InvoiceAutomationEntityOption[];
-  value: string;
-  onChange: (option: InvoiceAutomationEntityOption | null) => void;
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(event) => {
-        const option = options.find((entity) => entity.id === event.target.value);
-        onChange(option ?? null);
-      }}
-      className="w-56 rounded-md border border-input bg-background px-2 py-1.5"
-    >
-      <option value="">{invoiceType === "CUSTOMER" ? "Match customer" : "Match vendor"}</option>
-      {options.map((entity) => (
-        <option key={`${entity.entityType}-${entity.id}`} value={entity.id}>
-          {entity.displayName}{entity.currency ? ` (${entity.currency})` : ""}
-        </option>
-      ))}
-    </select>
   );
 }
 
