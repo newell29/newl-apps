@@ -7,6 +7,7 @@ import {
   buildQuickBooksSalesInvoicePayload,
   buildQuickBooksVendorBillPayload,
   createQuickBooksInvoiceAutomationTransaction,
+  fetchQuickBooksExchangeRate,
   fetchQuickBooksPostingMappings,
   findExistingQuickBooksTransaction,
   parseQuickBooksEntityOptionId,
@@ -107,6 +108,7 @@ export async function POST(request: Request) {
     const credentials = await getQuickBooksCredentials(context.tenantId);
     const connectionByRealm = new Map<string, QuickBooksConnection>();
     const mappingsByRealm = new Map<string, QuickBooksPostingMappings>();
+    const exchangeRateByRealmCurrencyDate = new Map<string, number>();
     const results = [];
 
     for (const invoice of invoices) {
@@ -124,9 +126,14 @@ export async function POST(request: Request) {
           connectionByRealm
         });
         const mappings = await getMappingsForRealm(connection, mappingsByRealm);
+        const exchangeRate = await getExchangeRateForInvoice({
+          row,
+          connection,
+          exchangeRateByRealmCurrencyDate
+        });
         const payload = row.invoiceType === "CUSTOMER"
-          ? buildQuickBooksSalesInvoicePayload(row, mappings)
-          : buildQuickBooksVendorBillPayload(row, mappings);
+          ? buildQuickBooksSalesInvoicePayload(row, mappings, { exchangeRate })
+          : buildQuickBooksVendorBillPayload(row, mappings, { exchangeRate });
 
         if (mode === "preview") {
           results.push({
@@ -399,6 +406,37 @@ async function getMappingsForRealm(
   });
   mappingsByRealm.set(connection.realmId, mappings);
   return mappings;
+}
+
+async function getExchangeRateForInvoice({
+  row,
+  connection,
+  exchangeRateByRealmCurrencyDate
+}: {
+  row: ReturnType<typeof toInvoiceAutomationRow>;
+  connection: QuickBooksConnection;
+  exchangeRateByRealmCurrencyDate: Map<string, number>;
+}) {
+  const currency = row.currency?.trim().toUpperCase();
+  if (!currency || currency === "CAD") {
+    return null;
+  }
+
+  const asOfDate = row.invoiceDate ?? new Date().toISOString().slice(0, 10);
+  const cacheKey = `${connection.realmId}:${currency}:${asOfDate}`;
+  const cached = exchangeRateByRealmCurrencyDate.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const rate = await fetchQuickBooksExchangeRate({
+    realmId: connection.realmId,
+    accessToken: connection.accessToken,
+    sourceCurrencyCode: currency,
+    asOfDate
+  });
+  exchangeRateByRealmCurrencyDate.set(cacheKey, rate);
+  return rate;
 }
 
 async function getUsableQuickBooksAccessToken(
