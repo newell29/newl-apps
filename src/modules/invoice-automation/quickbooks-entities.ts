@@ -15,6 +15,7 @@ import type { TenantContext } from "@/server/tenant-context";
 
 const QUICKBOOKS_ENTITY_SYNC_STALE_MS = 10 * 60 * 1000;
 const QUICKBOOKS_QUERY_PAGE_SIZE = 1000;
+const QUICKBOOKS_ENTITY_UPSERT_BATCH_SIZE = 100;
 
 type QuickBooksCredentialRecord = {
   id: string;
@@ -39,11 +40,6 @@ type QuickBooksEntityPayload = {
 export async function getInvoiceAutomationQuickBooksEntityOptions(
   tenant: TenantContext
 ): Promise<InvoiceAutomationEntityOption[]> {
-  await syncQuickBooksEntityCache(tenant, { force: false }).catch((error) => {
-    console.warn("Unable to refresh QuickBooks entity cache before reading invoice automation options.", error);
-    return [];
-  });
-
   const entities = await prisma.invoiceAutomationQuickBooksEntity.findMany({
     where: {
       tenantId: tenant.tenantId,
@@ -198,30 +194,18 @@ async function syncQuickBooksCredentialEntities(credential: QuickBooksCredential
     })
   ]);
   const now = new Date();
+  const entities: Prisma.InvoiceAutomationQuickBooksEntityUpsertArgs[] = [
+    ...customers.map((customer) => ({ entityType: "CUSTOMER" as const, payload: customer })),
+    ...vendors.map((vendor) => ({ entityType: "VENDOR" as const, payload: vendor }))
+  ].flatMap((entity) => {
+    const quickBooksId = entity.payload.Id;
+    const displayName = readQuickBooksDisplayName(entity.payload);
+    if (!quickBooksId || !displayName) {
+      return [];
+    }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.invoiceAutomationQuickBooksEntity.updateMany({
-      where: {
-        tenantId: credential.tenantId,
-        realmId
-      },
-      data: {
-        active: false,
-        syncedAt: now
-      }
-    });
-
-    for (const entity of [
-      ...customers.map((customer) => ({ entityType: "CUSTOMER" as const, payload: customer })),
-      ...vendors.map((vendor) => ({ entityType: "VENDOR" as const, payload: vendor }))
-    ]) {
-      const quickBooksId = entity.payload.Id;
-      const displayName = readQuickBooksDisplayName(entity.payload);
-      if (!quickBooksId || !displayName) {
-        continue;
-      }
-
-      await tx.invoiceAutomationQuickBooksEntity.upsert({
+    return [
+      {
         where: {
           tenantId_entityType_realmId_quickBooksId: {
             tenantId: credential.tenantId,
@@ -252,9 +236,27 @@ async function syncQuickBooksCredentialEntities(credential: QuickBooksCredential
           rawJson: entity.payload as Prisma.InputJsonValue,
           syncedAt: now
         }
-      });
+      }
+    ];
+  });
+
+  await prisma.invoiceAutomationQuickBooksEntity.updateMany({
+    where: {
+      tenantId: credential.tenantId,
+      realmId
+    },
+    data: {
+      active: false,
+      syncedAt: now
     }
   });
+
+  for (let index = 0; index < entities.length; index += QUICKBOOKS_ENTITY_UPSERT_BATCH_SIZE) {
+    const batch = entities.slice(index, index + QUICKBOOKS_ENTITY_UPSERT_BATCH_SIZE);
+    for (const entity of batch) {
+      await prisma.invoiceAutomationQuickBooksEntity.upsert(entity);
+    }
+  }
 }
 
 async function getUsableQuickBooksAccessToken(
