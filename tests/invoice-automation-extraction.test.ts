@@ -14,6 +14,7 @@ import {
   getBusinessLineFromInvoiceFileNumber,
   getDefaultProductOrAccount,
   matchQuickBooksEntity,
+  normalizeInvoiceEntityName,
   splitInvoiceTextIntoDocuments
 } from "@/modules/invoice-automation/extraction";
 import type { InvoiceAutomationEntityOption } from "@/modules/invoice-automation/types";
@@ -61,6 +62,7 @@ describe("invoice automation extraction", () => {
     expect(extractShipmentFileNumber("Shipment file: OE-12345")).toBe("OE12345");
     expect(extractShipmentFileNumber("", "vendor-invoice_TR98765.pdf")).toBe("TR98765");
     expect(extractShipmentFileNumber("NS TR2911T12", "TR2911N12 - Western Canada 1.pdf")).toBe("TR2911N12");
+    expect(extractShipmentFileNumber("", "AE1190N10_PERU CONTAINER LINE E.I.R.L_revised.pdf")).toBe("AE1190N10");
   });
 
   it("maps service prefixes to profitability business lines and QB posting defaults", () => {
@@ -199,6 +201,26 @@ describe("invoice automation extraction", () => {
       "qb-customer-cad"
     );
     expect(matchQuickBooksEntity("Vendor: Fast Trucking", "VENDOR", entityOptions)?.option.id).toBe("qb-vendor-usd");
+  });
+
+  it("normalizes camel-case OCR customer names before QuickBooks matching", () => {
+    expect(normalizeInvoiceEntityName("AvariaHealth and BeautyCorp")).toBe("avaria health and beauty corp");
+    expect(
+      matchQuickBooksEntity(
+        "Bill To: AvariaHealth and BeautyCorp",
+        "CUSTOMER",
+        [
+          {
+            id: "qb-avaria-usd",
+            entityType: "CUSTOMER",
+            displayName: "Avaria Health and Beauty Corp - USD",
+            normalizedName: normalizeInvoiceEntityName("Avaria Health and Beauty Corp - USD"),
+            currency: "USD"
+          }
+        ],
+        "USD"
+      )?.option.id
+    ).toBe("qb-avaria-usd");
   });
 
   it("prefers the QuickBooks vendor profile that matches the invoice currency", () => {

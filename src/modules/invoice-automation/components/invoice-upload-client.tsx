@@ -818,6 +818,7 @@ function shouldRunVisionOcr(draft: InvoiceAutomationUploadDraft) {
     "MISSING_INVOICE_NUMBER",
     "MISSING_INVOICE_DATE",
     "MISSING_CUSTOMER_OR_VENDOR",
+    "MISSING_QB_MATCH",
     "MISSING_TOTAL",
     "MISSING_CURRENCY"
   ]);
@@ -904,6 +905,8 @@ function findBestEntityForOcrName(
 
 function normalizeEntityForClientMatch(value: string) {
   return value
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
     .toLowerCase()
     .replace(/\b(usd|cad|cdn)\b/g, "")
     .replace(/[^a-z0-9]+/g, " ")

@@ -1,7 +1,7 @@
 import type { CashflowBusinessLine, InvoiceAutomationType } from "@prisma/client";
 import type { InvoiceAutomationEntityOption, InvoiceAutomationUploadDraft } from "@/modules/invoice-automation/types";
 
-const FILE_NUMBER_PATTERN = /(?:^|[^A-Z0-9])(OE|OI|AE|AI|TR|DR)\s*[-_#:]?\s*(\d+[A-Z]?\d*)\b/i;
+const FILE_NUMBER_PATTERN = /(?:^|[^A-Z0-9])(OE|OI|AE|AI|TR|DR)\s*[-_#:]?\s*(\d+[A-Z]?\d*)(?=$|[^A-Z0-9])/i;
 
 const CUSTOMER_PRODUCT_BY_PREFIX: Record<string, string> = {
   OE: "Ocean Freight",
@@ -23,6 +23,8 @@ const VENDOR_ACCOUNT_BY_PREFIX: Record<string, string> = {
 
 export function normalizeInvoiceEntityName(value: string) {
   return value
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
     .toLowerCase()
     .replace(/\b(usd|cad|cdn)\b/g, "")
     .replace(/[^a-z0-9]+/g, " ")
