@@ -223,16 +223,20 @@ export function InvoiceRowsTable({
   invoices,
   selectedInvoiceIds,
   onSelectionChange,
-  selectableStatus
+  selectableStatus,
+  showQuickBooksPostingDetails = false
 }: {
   invoices: InvoiceAutomationRow[];
   selectedInvoiceIds?: string[];
   onSelectionChange?: (ids: string[]) => void;
   selectableStatus?: string;
+  showQuickBooksPostingDetails?: boolean;
 }) {
+  const columnCount = (onSelectionChange ? 18 : 17) + (showQuickBooksPostingDetails ? 4 : 0);
+
   return (
     <div className="overflow-x-auto">
-      <table className="min-w-[1500px] divide-y divide-border text-sm">
+      <table className={`${showQuickBooksPostingDetails ? "min-w-[1900px]" : "min-w-[1500px]"} divide-y divide-border text-sm`}>
         <thead className="bg-muted/50 text-left text-xs font-semibold uppercase tracking-wide text-mutedForeground">
           <tr>
             {onSelectionChange ? <th className="px-3 py-3">Select</th> : null}
@@ -251,6 +255,14 @@ export function InvoiceRowsTable({
             <th className="px-3 py-3 text-right">Subtotal</th>
             <th className="px-3 py-3 text-right">Tax</th>
             <th className="px-3 py-3 text-right">Total</th>
+            {showQuickBooksPostingDetails ? (
+              <>
+                <th className="px-3 py-3 text-right">QB FX</th>
+                <th className="px-3 py-3 text-right">CAD subtotal</th>
+                <th className="px-3 py-3 text-right">CAD tax</th>
+                <th className="px-3 py-3 text-right">CAD total</th>
+              </>
+            ) : null}
             <th className="px-3 py-3">Item/account</th>
             <th className="px-3 py-3">Issues</th>
           </tr>
@@ -258,7 +270,7 @@ export function InvoiceRowsTable({
         <tbody className="divide-y divide-border">
           {invoices.length === 0 ? (
             <tr>
-              <td colSpan={onSelectionChange ? 18 : 17} className="px-3 py-8 text-center text-mutedForeground">
+              <td colSpan={columnCount} className="px-3 py-8 text-center text-mutedForeground">
                 No uploaded invoices yet.
               </td>
             </tr>
@@ -304,6 +316,17 @@ export function InvoiceRowsTable({
                   <td className="px-3 py-3 text-right">{formatInvoiceMoney(invoice.subtotalAmount, invoice.currency)}</td>
                   <td className="px-3 py-3 text-right">{formatInvoiceMoney(invoice.taxAmount, invoice.currency)}</td>
                   <td className="px-3 py-3 text-right font-semibold text-foreground">{formatInvoiceMoney(invoice.totalAmount, invoice.currency)}</td>
+                  {showQuickBooksPostingDetails ? (
+                    <>
+                      <td className="px-3 py-3 text-right text-mutedForeground">
+                        <div>{formatExchangeRate(invoice.quickBooksExchangeRate)}</div>
+                        {invoice.quickBooksFxSource ? <div className="mt-1 text-xs">{formatInvoiceEnum(invoice.quickBooksFxSource)}</div> : null}
+                      </td>
+                      <td className="px-3 py-3 text-right">{formatInvoiceMoney(invoice.quickBooksSubtotalHomeAmount, invoice.quickBooksHomeCurrency ?? "CAD")}</td>
+                      <td className="px-3 py-3 text-right">{formatInvoiceMoney(invoice.quickBooksTaxHomeAmount, invoice.quickBooksHomeCurrency ?? "CAD")}</td>
+                      <td className="px-3 py-3 text-right font-semibold text-foreground">{formatInvoiceMoney(invoice.quickBooksTotalHomeAmount, invoice.quickBooksHomeCurrency ?? "CAD")}</td>
+                    </>
+                  ) : null}
                   <td className="px-3 py-3">{invoice.productOrAccountName ?? "Missing"}</td>
                   <td className="max-w-[260px] px-3 py-3 text-mutedForeground">
                     {invoice.issueCodes.length === 0 ? "Ready" : invoice.issueCodes.map(formatInvoiceEnum).join(", ")}
@@ -316,6 +339,17 @@ export function InvoiceRowsTable({
       </table>
     </div>
   );
+}
+
+function formatExchangeRate(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return "n/a";
+  }
+
+  return value.toLocaleString("en-US", {
+    maximumFractionDigits: 6,
+    minimumFractionDigits: 2
+  });
 }
 
 function InvoiceUploadModal({
