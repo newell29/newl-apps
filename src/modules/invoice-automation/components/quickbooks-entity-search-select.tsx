@@ -8,11 +8,13 @@ const MAX_VISIBLE_OPTIONS = 75;
 
 export function QuickBooksEntitySearchSelect({
   invoiceType,
+  hasError = false,
   options,
   value,
   onChange
 }: {
   invoiceType: InvoiceAutomationType;
+  hasError?: boolean;
   options: InvoiceAutomationEntityOption[];
   value: string;
   onChange: (option: InvoiceAutomationEntityOption | null) => void;
@@ -35,10 +37,16 @@ export function QuickBooksEntitySearchSelect({
     return limited;
   }, [options, query, selectedOption]);
   const placeholder = invoiceType === "CUSTOMER" ? "Search customers" : "Search vendors";
-  const emptyLabel = invoiceType === "CUSTOMER" ? "Match customer" : "Match vendor";
+  const emptyLabel = hasError ? "Needs QB profile/match" : invoiceType === "CUSTOMER" ? "Match customer" : "Match vendor";
   const selectedLabel = selectedOption
     ? `${selectedOption.displayName}${selectedOption.currency ? ` (${selectedOption.currency})` : ""}`
     : emptyLabel;
+  const closedButtonClassName = [
+    "flex w-full items-center justify-between gap-2 rounded-md border bg-background px-2 py-1.5 text-left text-sm",
+    hasError && !selectedOption
+      ? "border-danger/40 text-danger"
+      : "border-input text-foreground"
+  ].join(" ");
 
   useEffect(() => {
     if (isOpen) {
@@ -58,7 +66,7 @@ export function QuickBooksEntitySearchSelect({
       <button
         type="button"
         onClick={() => setIsOpen((current) => !current)}
-        className="flex w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-2 py-1.5 text-left text-sm"
+        className={closedButtonClassName}
       >
         <span className="truncate">{selectedLabel}</span>
         <span className="text-mutedForeground">v</span>

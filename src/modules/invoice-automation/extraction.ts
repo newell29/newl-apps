@@ -3,6 +3,7 @@ import type { InvoiceAutomationEntityOption, InvoiceAutomationUploadDraft } from
 
 const FILE_NUMBER_PATTERN = /(?:^|[^A-Z0-9])(OE|OI|AE|AI|TR|DR)\s*[-_#:]?\s*(\d+[A-Z]?\d*)(?=$|[^A-Z0-9])/i;
 const COMMON_CURRENCY_CODES = ["CAD", "USD", "EUR", "GBP", "AUD", "MXN", "CNY", "JPY", "CHF", "HKD", "SGD"];
+const AUTO_QB_MATCH_CONFIDENCE_THRESHOLD = 90;
 const CANADIAN_TAX_LABEL_PATTERN = /\b(?:GST|HST|PST|QST|SALES\s+TAX|TAX)\b/i;
 const FOREIGN_TAX_LABEL_PATTERN = /\b(?:VAT|IVA|TVA)\b/i;
 const ENTITY_MATCH_STOPWORDS = new Set([
@@ -349,7 +350,7 @@ export function matchQuickBooksEntity(
     }
   }
 
-  return best && best.confidence >= 55 ? best : null;
+  return best && best.confidence >= AUTO_QB_MATCH_CONFIDENCE_THRESHOLD ? best : null;
 }
 
 export function buildInvoiceDraftFromText({

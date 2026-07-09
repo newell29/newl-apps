@@ -530,6 +530,7 @@ function InvoiceUploadModal({
                       <td className="px-3 py-3"><SmallInput value={draft.entityNameRaw ?? ""} onChange={(value) => updateDraft(draft.clientId, { entityNameRaw: value || null })} /></td>
                       <td className="px-3 py-3">
                         <QuickBooksEntitySearchSelect
+                          hasError={!draft.quickBooksEntityId}
                           invoiceType={invoiceType}
                           options={relevantEntities}
                           value={draft.quickBooksEntityId ?? ""}
@@ -892,7 +893,7 @@ function findBestEntityForOcrName(
     if (normalizedOption === normalizedOcrName) {
       score = 100;
     } else if (normalizedOption.includes(normalizedOcrName) || normalizedOcrName.includes(normalizedOption)) {
-      score = 90;
+      score = 88;
     } else {
       const parts = normalizedOcrName.split(" ").filter((part) => part.length > 2);
       const matchedParts = parts.filter((part) => normalizedOption.includes(part)).length;
@@ -908,7 +909,7 @@ function findBestEntityForOcrName(
     }
   }
 
-  return best && best.score >= 55 ? best.option : null;
+  return best && best.score >= 90 ? best.option : null;
 }
 
 function normalizeEntityForClientMatch(value: string) {
