@@ -65,6 +65,7 @@ describe("invoice automation QuickBooks posting mapping", () => {
       CurrencyRef: {
         value: "CAD"
       },
+      GlobalTaxCalculation: "TaxExcluded",
       PrivateNote: "OI580N5",
       Line: [
         {
@@ -117,6 +118,7 @@ describe("invoice automation QuickBooks posting mapping", () => {
       CurrencyRef: {
         value: "USD"
       },
+      GlobalTaxCalculation: "TaxExcluded",
       PrivateNote: "OI348N1244",
       Line: [
         {
@@ -137,6 +139,34 @@ describe("invoice automation QuickBooks posting mapping", () => {
           }
         }
       ]
+    });
+  });
+
+  it("marks taxable CAD vendor bills as tax excluded so QuickBooks applies the line tax code", () => {
+    const payload = buildQuickBooksVendorBillPayload(
+      invoiceRow({
+        invoiceType: "VENDOR",
+        quickBooksEntityId: "quickbooks:9130351993486396:VENDOR:test-cad",
+        quickBooksEntityDisplayName: "Test Company - DO NOT PROCESS",
+        entityNameRaw: "Test Company - DO NOT PROCESS",
+        invoiceNumber: "TEST-V-CAD-001",
+        invoiceDate: "2026-07-09",
+        dueDate: "2026-08-08",
+        shipmentFileNumber: "TR900N26",
+        currency: "CAD",
+        subtotalAmount: 100,
+        taxAmount: 13,
+        totalAmount: 113,
+        productOrAccountName: "5015 Trucking Rate"
+      }),
+      mappings
+    );
+
+    expect(payload.GlobalTaxCalculation).toBe("TaxExcluded");
+    expect(payload.Line[0]?.Amount).toBe(100);
+    expect(payload.Line[0]?.AccountBasedExpenseLineDetail.TaxCodeRef).toEqual({
+      value: "H",
+      name: "HST"
     });
   });
 
