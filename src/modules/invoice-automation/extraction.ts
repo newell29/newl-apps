@@ -2,6 +2,7 @@ import type { CashflowBusinessLine, InvoiceAutomationType } from "@prisma/client
 import type { InvoiceAutomationEntityOption, InvoiceAutomationUploadDraft } from "@/modules/invoice-automation/types";
 
 const FILE_NUMBER_PATTERN = /(?:^|[^A-Z0-9])(OE|OI|AE|AI|TR|DR)\s*[-_#:]?\s*(\d+[A-Z]?\d*)(?=$|[^A-Z0-9])/i;
+const COMMON_CURRENCY_CODES = ["CAD", "USD", "EUR", "GBP", "AUD", "MXN", "CNY", "JPY", "CHF", "HKD", "SGD"];
 
 const CUSTOMER_PRODUCT_BY_PREFIX: Record<string, string> = {
   OE: "Ocean Freight",
@@ -26,7 +27,7 @@ export function normalizeInvoiceEntityName(value: string) {
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
     .toLowerCase()
-    .replace(/\b(usd|cad|cdn)\b/g, "")
+    .replace(/\b(usd|cad|cdn|eur|gbp)\b/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -40,6 +41,8 @@ export function inferCurrencyFromInvoiceEntityName(value: string | null | undefi
   const upper = value.toUpperCase();
   if (/\bUSD\b|US\s*DOLLARS?/.test(upper)) return "USD";
   if (/\bCAD\b|\bCDN\b|CANADIAN\s*DOLLARS?/.test(upper)) return "CAD";
+  if (/\bEUR\b|EUROS?/.test(upper)) return "EUR";
+  if (/\bGBP\b|POUNDS?|STERLING/.test(upper)) return "GBP";
   return null;
 }
 
@@ -146,6 +149,12 @@ export function extractCurrency(text: string) {
   const upper = text.toUpperCase();
   if (/\bUSD\b|US\s*DOLLARS?/.test(upper)) return "USD";
   if (/\bCAD\b|\bCDN\b|CANADIAN\s*DOLLARS?|CANADIAN\s+DOL/.test(upper)) return "CAD";
+  if (/\bEUR\b|EUROS?|€/.test(upper)) return "EUR";
+  if (/\bGBP\b|POUNDS?|STERLING|£/.test(upper)) return "GBP";
+  const explicitCurrencyMatch = upper.match(/\b(?:CURRENCY|CURR|AMOUNT|TOTAL)\s*:?\s*(CAD|USD|EUR|GBP|AUD|MXN|CNY|JPY|CHF|HKD|SGD)\b/);
+  if (explicitCurrencyMatch) return explicitCurrencyMatch[1];
+  const commonCode = COMMON_CURRENCY_CODES.find((code) => new RegExp(`\\b${code}\\b`).test(upper));
+  if (commonCode) return commonCode;
   if (/\$/.test(text)) return "CAD";
   return null;
 }

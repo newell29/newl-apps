@@ -8,10 +8,12 @@ import {
   buildQuickBooksVendorBillPayload,
   createQuickBooksInvoiceAutomationTransaction,
   fetchQuickBooksExchangeRate,
+  fetchQuickBooksPostedTransaction,
   fetchQuickBooksPostingMappings,
   findExistingQuickBooksTransaction,
   parseQuickBooksEntityOptionId,
   QuickBooksPostingMappingError,
+  type QuickBooksPostedTransactionDetail,
   type QuickBooksPostingMappings
 } from "@/modules/invoice-automation/quickbooks-posting";
 import { toInvoiceAutomationRow } from "@/modules/invoice-automation/row-mapper";
@@ -45,6 +47,9 @@ type QuickBooksConnection = {
   realmId: string;
   accessToken: string;
 };
+
+const QUICKBOOKS_HOME_CURRENCY = "CAD";
+const QUICKBOOKS_FX_SOURCE = "QUICKBOOKS_POSTED_TRANSACTION";
 
 export async function POST(request: Request) {
   try {
@@ -158,6 +163,11 @@ export async function POST(request: Request) {
             pdfBytes: invoice.document.pdfBytes
           });
           const attachmentId = readAttachableId(attachment);
+          const postedDetail = await safelyFetchPostedTransactionDetail({
+            connection,
+            row,
+            transaction
+          });
 
           await markInvoicePostedToQuickBooks({
             tenantId: context.tenantId,
@@ -165,7 +175,8 @@ export async function POST(request: Request) {
             row,
             connection,
             transaction,
-            attachmentId
+            attachmentId,
+            postedDetail
           });
 
           results.push({
@@ -177,6 +188,11 @@ export async function POST(request: Request) {
             quickBooksTxnId: transaction.id,
             quickBooksTxnNumber: transaction.docNumber,
             quickBooksAttachmentId: attachmentId,
+            quickBooksExchangeRate: postedDetail?.exchangeRate ?? null,
+            quickBooksHomeCurrency: postedDetail ? QUICKBOOKS_HOME_CURRENCY : null,
+            quickBooksSubtotalHomeAmount: postedDetail?.homeSubtotalAmount ?? null,
+            quickBooksTaxHomeAmount: postedDetail?.homeTaxAmount ?? null,
+            quickBooksTotalHomeAmount: postedDetail?.homeTotalAmount ?? null,
             retryAction: "attach_pdf_to_existing_transaction",
             posted: true
           });
@@ -273,13 +289,20 @@ export async function POST(request: Request) {
           continue;
         }
 
+        const postedDetail = await safelyFetchPostedTransactionDetail({
+          connection,
+          row,
+          transaction
+        });
+
         await markInvoicePostedToQuickBooks({
           tenantId: context.tenantId,
           userId: context.userId,
           row,
           connection,
           transaction,
-          attachmentId
+          attachmentId,
+          postedDetail
         });
 
         results.push({
@@ -291,6 +314,11 @@ export async function POST(request: Request) {
           quickBooksTxnId: transaction.id,
           quickBooksTxnNumber: transaction.docNumber,
           quickBooksAttachmentId: attachmentId,
+          quickBooksExchangeRate: postedDetail?.exchangeRate ?? null,
+          quickBooksHomeCurrency: postedDetail ? QUICKBOOKS_HOME_CURRENCY : null,
+          quickBooksSubtotalHomeAmount: postedDetail?.homeSubtotalAmount ?? null,
+          quickBooksTaxHomeAmount: postedDetail?.homeTaxAmount ?? null,
+          quickBooksTotalHomeAmount: postedDetail?.homeTotalAmount ?? null,
           posted: true
         });
       } catch (error) {
@@ -357,7 +385,8 @@ async function markInvoicePostedToQuickBooks({
   row,
   connection,
   transaction,
-  attachmentId
+  attachmentId,
+  postedDetail
 }: {
   tenantId: string;
   userId: string;
@@ -365,6 +394,7 @@ async function markInvoicePostedToQuickBooks({
   connection: QuickBooksConnection;
   transaction: { id: string; docNumber: string | null };
   attachmentId: string | null;
+  postedDetail: QuickBooksPostedTransactionDetail | null;
 }) {
   await prisma.invoiceAutomationInvoice.update({
     where: {
@@ -378,7 +408,14 @@ async function markInvoicePostedToQuickBooks({
       postedByUserId: userId,
       postedAt: new Date(),
       quickBooksTxnId: transaction.id,
-      quickBooksTxnNumber: transaction.docNumber,
+      quickBooksTxnNumber: postedDetail?.docNumber ?? transaction.docNumber,
+      quickBooksExchangeRate: postedDetail?.exchangeRate ?? null,
+      quickBooksHomeCurrency: postedDetail ? QUICKBOOKS_HOME_CURRENCY : null,
+      quickBooksSubtotalHomeAmount: postedDetail?.homeSubtotalAmount ?? null,
+      quickBooksTaxHomeAmount: postedDetail?.homeTaxAmount ?? null,
+      quickBooksTotalHomeAmount: postedDetail?.homeTotalAmount ?? null,
+      quickBooksFxSource: postedDetail ? QUICKBOOKS_FX_SOURCE : null,
+      quickBooksFxCapturedAt: postedDetail ? new Date() : null,
       quickBooksPostingError: null
     }
   });
@@ -394,12 +431,47 @@ async function markInvoicePostedToQuickBooks({
         invoiceType: row.invoiceType,
         invoiceNumber: row.invoiceNumber,
         quickBooksTxnId: transaction.id,
-        quickBooksTxnNumber: transaction.docNumber,
+        quickBooksTxnNumber: postedDetail?.docNumber ?? transaction.docNumber,
         quickBooksAttachmentId: attachmentId,
+        quickBooksExchangeRate: postedDetail?.exchangeRate ?? null,
+        quickBooksHomeCurrency: postedDetail ? QUICKBOOKS_HOME_CURRENCY : null,
+        quickBooksSubtotalHomeAmount: postedDetail?.homeSubtotalAmount ?? null,
+        quickBooksTaxHomeAmount: postedDetail?.homeTaxAmount ?? null,
+        quickBooksTotalHomeAmount: postedDetail?.homeTotalAmount ?? null,
         realmId: connection.realmId
       }
     }
   });
+}
+
+async function safelyFetchPostedTransactionDetail({
+  connection,
+  row,
+  transaction
+}: {
+  connection: QuickBooksConnection;
+  row: ReturnType<typeof toInvoiceAutomationRow>;
+  transaction: { id: string; docNumber: string | null };
+}) {
+  try {
+    return await fetchQuickBooksPostedTransaction({
+      realmId: connection.realmId,
+      accessToken: connection.accessToken,
+      invoiceType: row.invoiceType,
+      transactionId: transaction.id
+    });
+  } catch (error) {
+    console.warn(
+      "Unable to fetch posted QuickBooks transaction amounts.",
+      {
+        invoiceId: row.id,
+        invoiceType: row.invoiceType,
+        quickBooksTxnId: transaction.id,
+        error: error instanceof Error ? error.message : error
+      }
+    );
+    return null;
+  }
 }
 
 async function getQuickBooksCredentials(tenantId: string) {

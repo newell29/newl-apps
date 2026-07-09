@@ -31,6 +31,11 @@ type QuickBooksPostingResult = {
   quickBooksTxnId?: string;
   quickBooksTxnNumber?: string | null;
   retryAction?: string;
+  quickBooksExchangeRate?: number | null;
+  quickBooksHomeCurrency?: string | null;
+  quickBooksSubtotalHomeAmount?: number | null;
+  quickBooksTaxHomeAmount?: number | null;
+  quickBooksTotalHomeAmount?: number | null;
   posted?: boolean;
   error?: string;
 };

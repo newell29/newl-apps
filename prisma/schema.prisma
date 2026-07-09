@@ -1436,44 +1436,51 @@ model InvoiceAutomationBatch {
 }
 
 model InvoiceAutomationInvoice {
-  id                         String                  @id @default(cuid())
-  tenantId                   String
-  batchId                    String
-  documentId                 String
-  invoiceType                InvoiceAutomationType
-  status                     InvoiceAutomationStatus @default(OPERATIONS_REVIEW)
-  fileName                   String
-  shipmentFileNumber         String?
-  shipmentType               String?
-  businessLine               CashflowBusinessLine    @default(OTHER)
-  entityNameRaw              String?
-  quickBooksEntityId         String?
-  quickBooksEntityDisplayName String?
-  quickBooksMatchConfidence  Int?
-  invoiceNumber              String?
-  vendorInvoiceDuplicateKey  String?
-  invoiceDate                DateTime?
-  dueDate                    DateTime?
-  currency                   String?
-  subtotalAmount             Decimal?                @db.Decimal(14, 2)
-  taxAmount                  Decimal?                @db.Decimal(14, 2)
-  totalAmount                Decimal?                @db.Decimal(14, 2)
-  productOrAccountName       String?
-  issueCodes                 Json?
-  extractionJson             Json?
-  reviewNotes                String?
-  uploadedByUserId           String?
-  sentToAccountingById       String?
-  sentToAccountingAt         DateTime?
-  approvedByUserId           String?
-  approvedAt                 DateTime?
-  postedByUserId             String?
-  postedAt                   DateTime?
-  quickBooksTxnId            String?
-  quickBooksTxnNumber        String?
-  quickBooksPostingError     String?
-  createdAt                  DateTime                @default(now())
-  updatedAt                  DateTime                @updatedAt
+  id                           String                  @id @default(cuid())
+  tenantId                     String
+  batchId                      String
+  documentId                   String
+  invoiceType                  InvoiceAutomationType
+  status                       InvoiceAutomationStatus @default(OPERATIONS_REVIEW)
+  fileName                     String
+  shipmentFileNumber           String?
+  shipmentType                 String?
+  businessLine                 CashflowBusinessLine    @default(OTHER)
+  entityNameRaw                String?
+  quickBooksEntityId           String?
+  quickBooksEntityDisplayName  String?
+  quickBooksMatchConfidence    Int?
+  invoiceNumber                String?
+  vendorInvoiceDuplicateKey    String?
+  invoiceDate                  DateTime?
+  dueDate                      DateTime?
+  currency                     String?
+  subtotalAmount               Decimal?                @db.Decimal(14, 2)
+  taxAmount                    Decimal?                @db.Decimal(14, 2)
+  totalAmount                  Decimal?                @db.Decimal(14, 2)
+  productOrAccountName         String?
+  issueCodes                   Json?
+  extractionJson               Json?
+  reviewNotes                  String?
+  uploadedByUserId             String?
+  sentToAccountingById         String?
+  sentToAccountingAt           DateTime?
+  approvedByUserId             String?
+  approvedAt                   DateTime?
+  postedByUserId               String?
+  postedAt                     DateTime?
+  quickBooksTxnId              String?
+  quickBooksTxnNumber          String?
+  quickBooksExchangeRate       Decimal?                @db.Decimal(18, 8)
+  quickBooksHomeCurrency       String?
+  quickBooksSubtotalHomeAmount Decimal?                @db.Decimal(14, 2)
+  quickBooksTaxHomeAmount      Decimal?                @db.Decimal(14, 2)
+  quickBooksTotalHomeAmount    Decimal?                @db.Decimal(14, 2)
+  quickBooksFxSource           String?
+  quickBooksFxCapturedAt       DateTime?
+  quickBooksPostingError       String?
+  createdAt                    DateTime                @default(now())
+  updatedAt                    DateTime                @updatedAt
 
   tenant   Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   batch    InvoiceAutomationBatch    @relation(fields: [tenantId, batchId], references: [tenantId, id], onDelete: Cascade)

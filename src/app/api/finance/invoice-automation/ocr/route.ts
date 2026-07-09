@@ -130,7 +130,7 @@ function buildPrompt(invoiceType: "CUSTOMER" | "VENDOR", fileName: string, pageN
       ? "Many trucking vendors factor receivables. If text says bills were sold/assigned/payable to a financial service company, that company is only the factor/payee. Prefer labels such as Assigned For, carrier name, carrier/vendor identity near the invoice table, or the carrier on the load confirmation. Example: if RTS Financial is payable-to but the invoice says 373 CARGO INCORPORATED or Assigned For: 373 CARGO INCORPORATED, return 373 CARGO INCORPORATED as entityName."
       : "Do not use Newl/Newells as the customer just because it appears as sender or remittance contact; use the bill-to/customer being invoiced.",
     "Find the shipment file number if visible. Valid prefixes are OE, OI, AE, AI, TR, and DR.",
-    "Extract invoice number, invoice date, due date, currency, subtotal before tax, sales tax/HST, and total.",
+    "Extract invoice number, invoice date, due date, currency as a three-letter ISO code when visible, subtotal before tax, sales tax/HST, and total. Supported examples include CAD, USD, EUR, GBP, AUD, MXN, CNY, JPY, CHF, HKD, and SGD.",
     "If no due date is visible, return dueDate as null; the app will default payment terms to 30 days after invoice date.",
     "Do not return a service/category label such as Air Freight, Ocean Freight, Trucking, or Warehouse as entityName.",
     "If tax is not present, set taxAmount to 0 only when the invoice clearly has no tax; otherwise use null.",
@@ -214,10 +214,13 @@ function normalizeNullableCode(value: unknown) {
 }
 
 function normalizeCurrency(value: unknown) {
-  const text = readString(value)?.toUpperCase();
-  if (text === "CAD" || text === "CDN") return "CAD";
-  if (text === "USD") return "USD";
-  return null;
+  const text = readString(value)?.toUpperCase().replace(/[^A-Z]/g, "");
+  if (!text) return null;
+  if (text === "CAD" || text === "CDN" || text === "CANDOLLARS" || text === "CANADIANDOLLARS") return "CAD";
+  if (text === "USD" || text === "USDOLLAR" || text === "USDOLLARS") return "USD";
+  if (text === "EUR" || text === "EURO" || text === "EUROS") return "EUR";
+  if (text === "GBP" || text === "POUND" || text === "POUNDS" || text === "STERLING" || text === "BRITISHPOUNDS") return "GBP";
+  return /^[A-Z]{3}$/.test(text) ? text : null;
 }
 
 function readIsoDate(value: unknown) {
