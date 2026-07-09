@@ -24,7 +24,7 @@ export default async function InvoiceAutomationAccountingPage({ searchParams }: 
       <PageHeader
         eyebrow="Finance"
         title="Accounting queue"
-        description="Reviewed customer and vendor invoices waiting for accounting approval and future QuickBooks posting."
+        description="Reviewed customer and vendor invoices waiting for accounting approval. QuickBooks posting remains disabled while this workflow is in testing."
       />
       <InvoiceAutomationTabs />
 

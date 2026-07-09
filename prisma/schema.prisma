@@ -421,6 +421,7 @@ model Tenant {
   invoiceAutomationDocuments    InvoiceAutomationDocument[]
   invoiceAutomationBatches      InvoiceAutomationBatch[]
   invoiceAutomationInvoices     InvoiceAutomationInvoice[]
+  invoiceAutomationQuickBooksEntities InvoiceAutomationQuickBooksEntity[]
 }
 
 model User {
@@ -1486,6 +1487,31 @@ model InvoiceAutomationInvoice {
   @@index([tenantId, invoiceNumber])
   @@index([tenantId, entityNameRaw])
   @@index([tenantId, createdAt])
+}
+
+model InvoiceAutomationQuickBooksEntity {
+  id             String                @id @default(cuid())
+  tenantId       String
+  entityType     InvoiceAutomationType
+  quickBooksId   String
+  displayName    String
+  normalizedName String
+  currency       String?
+  legalEntity    String?
+  realmId        String
+  active         Boolean               @default(true)
+  rawJson        Json?
+  syncedAt       DateTime              @default(now())
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, entityType, realmId, quickBooksId])
+  @@index([tenantId, entityType, normalizedName])
+  @@index([tenantId, entityType, currency])
+  @@index([tenantId, realmId])
+  @@index([tenantId, active])
 }
 
 model AssistantChatThread {

@@ -3,6 +3,7 @@ import { prisma } from "@/server/db";
 import { tenantWhere } from "@/server/tenant-query";
 import type { TenantContext } from "@/server/tenant-context";
 import { normalizeInvoiceEntityName } from "@/modules/invoice-automation/extraction";
+import { getInvoiceAutomationQuickBooksEntityOptions } from "@/modules/invoice-automation/quickbooks-entities";
 import { toInvoiceAutomationRow } from "@/modules/invoice-automation/row-mapper";
 import type { InvoiceAutomationEntityOption, InvoiceAutomationRow } from "@/modules/invoice-automation/types";
 
@@ -58,7 +59,8 @@ export async function getInvoiceAutomationPostedShell(tenant: TenantContext, fil
 }
 
 export async function getInvoiceAutomationEntityOptions(tenant: TenantContext): Promise<InvoiceAutomationEntityOption[]> {
-  const [aliases, customers, vendors] = await Promise.all([
+  const [quickBooksEntities, aliases, customers, vendors] = await Promise.all([
+    getInvoiceAutomationQuickBooksEntityOptions(tenant),
     prisma.cashflowCustomerAlias.findMany({
       where: tenantWhere(tenant),
       orderBy: { sourceCustomerName: "asc" },
@@ -113,7 +115,7 @@ export async function getInvoiceAutomationEntityOptions(tenant: TenantContext): 
     entityType: "VENDOR" as const
   }));
 
-  return dedupeEntityOptions([...customerOptions, ...vendorOptions]);
+  return dedupeEntityOptions([...quickBooksEntities, ...customerOptions, ...vendorOptions]);
 }
 
 async function getInvoiceAutomationRows(

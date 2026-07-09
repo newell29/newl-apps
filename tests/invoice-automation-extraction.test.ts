@@ -38,6 +38,20 @@ const entityOptions: InvoiceAutomationEntityOption[] = [
     displayName: "Air Freight Vendor",
     normalizedName: "air freight vendor",
     currency: "USD"
+  },
+  {
+    id: "qb-fast-cad",
+    entityType: "VENDOR",
+    displayName: "Currency Split Carrier CAD",
+    normalizedName: "currency split carrier",
+    currency: "CAD"
+  },
+  {
+    id: "qb-fast-usd",
+    entityType: "VENDOR",
+    displayName: "Currency Split Carrier USD",
+    normalizedName: "currency split carrier",
+    currency: "USD"
   }
 ];
 
@@ -107,6 +121,15 @@ describe("invoice automation extraction", () => {
       "qb-customer-cad"
     );
     expect(matchQuickBooksEntity("Vendor: Fast Trucking", "VENDOR", entityOptions)?.option.id).toBe("qb-vendor-usd");
+  });
+
+  it("prefers the QuickBooks vendor profile that matches the invoice currency", () => {
+    expect(
+      matchQuickBooksEntity("Vendor: Currency Split Carrier\nCurrency: USD", "VENDOR", entityOptions, "USD")?.option.id
+    ).toBe("qb-fast-usd");
+    expect(
+      matchQuickBooksEntity("Vendor: Currency Split Carrier\nCurrency: CAD", "VENDOR", entityOptions, "CAD")?.option.id
+    ).toBe("qb-fast-cad");
   });
 
   it("does not match generic service words to a QuickBooks vendor", () => {

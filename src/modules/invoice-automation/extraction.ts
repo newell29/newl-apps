@@ -30,6 +30,17 @@ export function normalizeInvoiceEntityName(value: string) {
     .trim();
 }
 
+export function inferCurrencyFromInvoiceEntityName(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const upper = value.toUpperCase();
+  if (/\bUSD\b|US\s*DOLLARS?/.test(upper)) return "USD";
+  if (/\bCAD\b|\bCDN\b|CANADIAN\s*DOLLARS?/.test(upper)) return "CAD";
+  return null;
+}
+
 export function extractShipmentFileNumber(text: string, fallbackName = "") {
   const match = `${text} ${fallbackName}`.match(FILE_NUMBER_PATTERN);
   if (!match) {
@@ -124,9 +135,11 @@ export function splitInvoiceTextIntoDocuments(text: string) {
 export function matchQuickBooksEntity(
   text: string,
   invoiceType: InvoiceAutomationType,
-  options: InvoiceAutomationEntityOption[]
+  options: InvoiceAutomationEntityOption[],
+  invoiceCurrency?: string | null
 ) {
   const normalizedText = normalizeInvoiceEntityName(text);
+  const normalizedInvoiceCurrency = invoiceCurrency?.toUpperCase() ?? null;
   const relevant = options.filter((option) => option.entityType === invoiceType);
   let best: { option: InvoiceAutomationEntityOption; confidence: number } | null = null;
 
@@ -147,8 +160,14 @@ export function matchQuickBooksEntity(
       }
     }
 
-    if (confidence > (best?.confidence ?? 0)) {
-      best = { option, confidence };
+    const optionCurrency = (option.currency ?? inferCurrencyFromInvoiceEntityName(option.displayName))?.toUpperCase() ?? null;
+    if (confidence > 0 && normalizedInvoiceCurrency && optionCurrency) {
+      confidence += optionCurrency === normalizedInvoiceCurrency ? 12 : -8;
+    }
+
+    const boundedConfidence = Math.max(0, Math.min(100, confidence));
+    if (boundedConfidence > (best?.confidence ?? 0)) {
+      best = { option, confidence: boundedConfidence };
     }
   }
 
@@ -177,7 +196,8 @@ export function buildInvoiceDraftFromText({
   const shipmentFileNumber = extractShipmentFileNumber(text, fileName);
   const shipmentType = getShipmentTypeFromInvoiceFileNumber(shipmentFileNumber);
   const businessLine = getBusinessLineFromInvoiceFileNumber(shipmentFileNumber);
-  const entityMatch = matchQuickBooksEntity(text, invoiceType, entityOptions);
+  const currency = extractCurrency(text);
+  const entityMatch = matchQuickBooksEntity(text, invoiceType, entityOptions, currency);
   const amounts = extractInvoiceAmounts(text);
   const invoiceDate = extractInvoiceDate(text);
   const dueDate = extractDueDate(text) ?? defaultDueDateFromInvoiceDate(invoiceDate);
@@ -198,7 +218,7 @@ export function buildInvoiceDraftFromText({
     invoiceNumber: extractInvoiceNumber(text, fileName),
     invoiceDate,
     dueDate,
-    currency: extractCurrency(text),
+    currency,
     subtotalAmount: amounts.subtotalAmount,
     taxAmount: amounts.taxAmount,
     totalAmount: amounts.totalAmount,
