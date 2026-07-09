@@ -232,6 +232,34 @@ describe("invoice automation QuickBooks posting mapping", () => {
     });
   });
 
+  it("uses the Alberta GST tax code instead of HST when Alberta 5% tax context is detected", () => {
+    const payload = buildQuickBooksVendorBillPayload(
+      invoiceRow({
+        invoiceType: "VENDOR",
+        quickBooksEntityId: "quickbooks:9130351993486396:VENDOR:test-cad",
+        quickBooksEntityDisplayName: "Test Company - DO NOT PROCESS",
+        entityNameRaw: "Test Company - DO NOT PROCESS",
+        fileName: "vendor-cad-gst-5-test-company-alberta.pdf",
+        invoiceNumber: "TEST-V-CAD-GST-005",
+        invoiceDate: "2026-07-10",
+        dueDate: "2026-08-09",
+        shipmentFileNumber: "DR915N26",
+        currency: "CAD",
+        subtotalAmount: 410,
+        taxAmount: 20.5,
+        totalAmount: 430.5,
+        productOrAccountName: "5015 Trucking Rate"
+      }),
+      mappings,
+      { taxContextText: "Ship To: Calgary, Alberta\nGST 5% $20.50" }
+    );
+
+    expect(payload.Line[0]?.AccountBasedExpenseLineDetail.TaxCodeRef).toEqual({
+      value: "G",
+      name: "G"
+    });
+  });
+
   it("refuses to post BC GST/PST as generic HST when the BC tax code is missing", () => {
     expect(() =>
       buildQuickBooksVendorBillPayload(
