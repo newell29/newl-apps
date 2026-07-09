@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { InvoiceAutomationType } from "@prisma/client";
 import type { InvoiceAutomationEntityOption } from "@/modules/invoice-automation/types";
 
@@ -17,7 +17,9 @@ export function QuickBooksEntitySearchSelect({
   value: string;
   onChange: (option: InvoiceAutomationEntityOption | null) => void;
 }) {
+  const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const selectedOption = options.find((option) => option.id === value) ?? null;
   const filteredOptions = useMemo(() => {
     const normalizedQuery = normalizeEntitySearch(query);
@@ -34,30 +36,76 @@ export function QuickBooksEntitySearchSelect({
   }, [options, query, selectedOption]);
   const placeholder = invoiceType === "CUSTOMER" ? "Search customers" : "Search vendors";
   const emptyLabel = invoiceType === "CUSTOMER" ? "Match customer" : "Match vendor";
+  const selectedLabel = selectedOption
+    ? `${selectedOption.displayName}${selectedOption.currency ? ` (${selectedOption.currency})` : ""}`
+    : emptyLabel;
+
+  useEffect(() => {
+    if (isOpen) {
+      searchInputRef.current?.focus();
+    }
+  }, [isOpen]);
 
   return (
-    <div className="grid w-56 gap-1">
-      <input
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder={placeholder}
-        className="rounded-md border border-input bg-background px-2 py-1.5 text-sm"
-      />
-      <select
-        value={value}
-        onChange={(event) => {
-          const option = options.find((entity) => entity.id === event.target.value);
-          onChange(option ?? null);
-        }}
-        className="rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+    <div
+      className="relative w-56"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setIsOpen(false);
+        }
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setIsOpen((current) => !current)}
+        className="flex w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-2 py-1.5 text-left text-sm"
       >
-        <option value="">{emptyLabel}</option>
-        {filteredOptions.map((entity) => (
-          <option key={`${entity.entityType}-${entity.id}`} value={entity.id}>
-            {entity.displayName}{entity.currency ? ` (${entity.currency})` : ""}
-          </option>
-        ))}
-      </select>
+        <span className="truncate">{selectedLabel}</span>
+        <span className="text-mutedForeground">v</span>
+      </button>
+      {isOpen ? (
+        <div className="absolute left-0 top-full z-50 mt-1 w-72 rounded-md border border-border bg-background p-2 shadow-lg">
+          <input
+            ref={searchInputRef}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={placeholder}
+            className="mb-2 w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+          />
+          <div className="max-h-64 overflow-y-auto">
+            <button
+              type="button"
+              onClick={() => {
+                onChange(null);
+                setQuery("");
+                setIsOpen(false);
+              }}
+              className="w-full rounded px-2 py-1.5 text-left text-sm text-mutedForeground hover:bg-muted"
+            >
+              {emptyLabel}
+            </button>
+            {filteredOptions.map((entity) => (
+              <button
+                key={`${entity.entityType}-${entity.id}`}
+                type="button"
+                onClick={() => {
+                  onChange(entity);
+                  setQuery("");
+                  setIsOpen(false);
+                }}
+                className={`w-full rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${
+                  entity.id === value ? "bg-muted font-semibold text-foreground" : "text-foreground"
+                }`}
+              >
+                {entity.displayName}{entity.currency ? ` (${entity.currency})` : ""}
+              </button>
+            ))}
+            {filteredOptions.length === 0 ? (
+              <div className="px-2 py-2 text-sm text-mutedForeground">No matches found.</div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
