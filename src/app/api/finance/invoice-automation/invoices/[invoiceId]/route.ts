@@ -41,6 +41,8 @@ const EDITABLE_ACCOUNTING_STATUSES: InvoiceAutomationStatus[] = [
   InvoiceAutomationStatus.POSTING_ERROR
 ];
 
+const DELETABLE_ACCOUNTING_STATUSES = EDITABLE_ACCOUNTING_STATUSES;
+
 export async function PATCH(request: Request, { params }: { params: Params }) {
   try {
     const context = await getAuthenticatedContext();
@@ -206,6 +208,89 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
     }
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to update invoice." },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(_request: Request, { params }: { params: Params }) {
+  try {
+    const context = await getAuthenticatedContext();
+    await requireModule(context, ModuleKey.QUICKBOOKS_POSTING);
+    await requireMutationAccess(context);
+    requireRole(context, [PlatformRole.ADMIN, PlatformRole.MANAGER, PlatformRole.FINANCE]);
+
+    const { invoiceId } = await params;
+    const existing = await prisma.invoiceAutomationInvoice.findUnique({
+      where: {
+        tenantId_id: {
+          tenantId: context.tenantId,
+          id: invoiceId
+        }
+      },
+      select: {
+        id: true,
+        status: true,
+        invoiceType: true,
+        invoiceNumber: true,
+        shipmentFileNumber: true,
+        vendorInvoiceDuplicateKey: true
+      }
+    });
+
+    if (!existing) {
+      return NextResponse.json({ error: "Invoice not found." }, { status: 404 });
+    }
+
+    if (!DELETABLE_ACCOUNTING_STATUSES.includes(existing.status)) {
+      return NextResponse.json({ error: "Only invoices in the accounting queue can be deleted before posting." }, { status: 409 });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.invoiceAutomationInvoice.update({
+        where: {
+          tenantId_id: {
+            tenantId: context.tenantId,
+            id: invoiceId
+          }
+        },
+        data: {
+          status: InvoiceAutomationStatus.REJECTED,
+          vendorInvoiceDuplicateKey: null,
+          approvedByUserId: null,
+          approvedAt: null,
+          quickBooksPostingError: null
+        }
+      });
+
+      await tx.auditLog.create({
+        data: {
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          action: "invoice-automation.accounting-deleted",
+          entityType: "InvoiceAutomationInvoice",
+          entityId: invoiceId,
+          before: {
+            status: existing.status,
+            invoiceNumber: existing.invoiceNumber,
+            shipmentFileNumber: existing.shipmentFileNumber,
+            vendorInvoiceDuplicateKey: existing.vendorInvoiceDuplicateKey
+          },
+          after: {
+            status: InvoiceAutomationStatus.REJECTED,
+            vendorInvoiceDuplicateKey: null
+          }
+        }
+      });
+    });
+
+    revalidateInvoiceAutomation();
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error(error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Unable to delete invoice." },
       { status: 500 }
     );
   }

@@ -149,6 +149,7 @@ describe("invoice automation extraction", () => {
 
   it("checks uploaded vendor invoice duplicates against posted invoices too", () => {
     expect(VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES).toContain("POSTED");
+    expect(VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES).not.toContain("REJECTED");
   });
 
   it("blocks approval when customer or vendor invoice required fields are missing", () => {

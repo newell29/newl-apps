@@ -5,8 +5,7 @@ export const VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES = [
   InvoiceAutomationStatus.ACCOUNTING_REVIEW,
   InvoiceAutomationStatus.APPROVED_FOR_POSTING,
   InvoiceAutomationStatus.POSTED,
-  InvoiceAutomationStatus.POSTING_ERROR,
-  InvoiceAutomationStatus.REJECTED
+  InvoiceAutomationStatus.POSTING_ERROR
 ];
 
 export type InvoiceDuplicateInput = {

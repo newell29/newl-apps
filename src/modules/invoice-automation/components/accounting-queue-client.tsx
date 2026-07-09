@@ -31,6 +31,7 @@ export function AccountingQueueClient({
   const [rows, setRows] = useState<EditableAccountingRow[]>(invoices);
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
   const [savingInvoiceId, setSavingInvoiceId] = useState<string | null>(null);
+  const [deletingInvoiceId, setDeletingInvoiceId] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
   const [message, setMessage] = useState<{ kind: "error" | "success"; text: string } | null>(null);
   const entityOptionsByType = useMemo(
@@ -139,6 +140,32 @@ export function AccountingQueueClient({
     }
   }
 
+  async function deleteRow(invoice: EditableAccountingRow) {
+    const label = invoice.invoiceNumber ?? invoice.shipmentFileNumber ?? invoice.fileName;
+    if (!window.confirm(`Delete ${label} from the accounting queue?`)) {
+      return;
+    }
+
+    setDeletingInvoiceId(invoice.id);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/finance/invoice-automation/invoices/${invoice.id}`, {
+        method: "DELETE"
+      });
+      const json = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) {
+        throw new Error(json?.error ?? "Unable to delete invoice.");
+      }
+      setRows((current) => current.filter((row) => row.id !== invoice.id));
+      setSelectedInvoiceIds((current) => current.filter((id) => id !== invoice.id));
+      setMessage({ kind: "success", text: "Invoice deleted from the accounting queue." });
+    } catch (error) {
+      setMessage({ kind: "error", text: error instanceof Error ? error.message : "Unable to delete invoice." });
+    } finally {
+      setDeletingInvoiceId(null);
+    }
+  }
+
   function toggleSelectAll(checked: boolean) {
     if (checked) {
       setSelectedInvoiceIds(eligibleInvoiceIds);
@@ -207,7 +234,7 @@ export function AccountingQueueClient({
               <th className="px-3 py-3">Total</th>
               <th className="px-3 py-3">Item/account</th>
               <th className="px-3 py-3">Issues</th>
-              <th className="px-3 py-3">Save</th>
+              <th className="px-3 py-3">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -283,14 +310,24 @@ export function AccountingQueueClient({
                       ) : null}
                     </td>
                     <td className="px-3 py-3">
-                      <button
-                        type="button"
-                        onClick={() => void saveRow(invoice)}
-                        disabled={savingInvoiceId === invoice.id}
-                        className="rounded-md border border-border px-3 py-1.5 text-sm font-semibold text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {savingInvoiceId === invoice.id ? "Saving..." : "Save"}
-                      </button>
+                      <div className="flex flex-col gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void saveRow(invoice)}
+                          disabled={savingInvoiceId === invoice.id || deletingInvoiceId === invoice.id}
+                          className="rounded-md border border-border px-3 py-1.5 text-sm font-semibold text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {savingInvoiceId === invoice.id ? "Saving..." : "Save"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void deleteRow(invoice)}
+                          disabled={savingInvoiceId === invoice.id || deletingInvoiceId === invoice.id}
+                          className="rounded-md border border-danger/30 px-3 py-1.5 text-sm font-semibold text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {deletingInvoiceId === invoice.id ? "Deleting..." : "Delete"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
