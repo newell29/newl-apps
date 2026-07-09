@@ -1,4 +1,13 @@
-import type { InvoiceAutomationType } from "@prisma/client";
+import { InvoiceAutomationStatus, type InvoiceAutomationType } from "@prisma/client";
+
+export const VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES = [
+  InvoiceAutomationStatus.OPERATIONS_REVIEW,
+  InvoiceAutomationStatus.ACCOUNTING_REVIEW,
+  InvoiceAutomationStatus.APPROVED_FOR_POSTING,
+  InvoiceAutomationStatus.POSTED,
+  InvoiceAutomationStatus.POSTING_ERROR,
+  InvoiceAutomationStatus.REJECTED
+];
 
 export type InvoiceDuplicateInput = {
   invoiceType: InvoiceAutomationType;

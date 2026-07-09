@@ -3,7 +3,7 @@ import { InvoiceAutomationBatchStatus, InvoiceAutomationStatus, ModuleKey, Platf
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { formatInvoiceApprovalBlocker, getInvoiceApprovalBlockingIssues } from "@/modules/invoice-automation/approval";
-import { buildVendorInvoiceDuplicateKey } from "@/modules/invoice-automation/duplicates";
+import { buildVendorInvoiceDuplicateKey, VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES } from "@/modules/invoice-automation/duplicates";
 import { defaultDueDateFromInvoiceDate, getInvoiceDraftIssueCodes } from "@/modules/invoice-automation/extraction";
 import { toInvoiceAutomationRow } from "@/modules/invoice-automation/row-mapper";
 import type { InvoiceAutomationUploadDraft, InvoiceAutomationUploadResponse } from "@/modules/invoice-automation/types";
@@ -67,6 +67,9 @@ export async function POST(request: Request) {
         where: {
           tenantId: context.tenantId,
           invoiceType: "VENDOR",
+          status: {
+            in: VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES
+          },
           vendorInvoiceDuplicateKey: { in: duplicateKeys }
         },
         select: {

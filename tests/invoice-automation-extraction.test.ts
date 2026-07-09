@@ -5,7 +5,7 @@ import {
   getInvoiceApprovalBlockingIssues,
   getInvoicePostingBlockingIssues
 } from "@/modules/invoice-automation/approval";
-import { buildVendorInvoiceDuplicateKey } from "@/modules/invoice-automation/duplicates";
+import { buildVendorInvoiceDuplicateKey, VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES } from "@/modules/invoice-automation/duplicates";
 import {
   buildInvoiceDraftFromText,
   extractInvoiceAmounts,
@@ -145,6 +145,10 @@ describe("invoice automation extraction", () => {
         entityNameRaw: "Fast Trucking"
       })
     ).toBeNull();
+  });
+
+  it("checks uploaded vendor invoice duplicates against posted invoices too", () => {
+    expect(VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES).toContain("POSTED");
   });
 
   it("blocks approval when customer or vendor invoice required fields are missing", () => {

@@ -1,7 +1,7 @@
 import { InvoiceAutomationStatus, ModuleKey, PlatformRole, Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
-import { buildVendorInvoiceDuplicateKey } from "@/modules/invoice-automation/duplicates";
+import { buildVendorInvoiceDuplicateKey, VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES } from "@/modules/invoice-automation/duplicates";
 import {
   defaultDueDateFromInvoiceDate,
   getBusinessLineFromInvoiceFileNumber,
@@ -99,6 +99,9 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
         where: {
           tenantId: context.tenantId,
           invoiceType: "VENDOR",
+          status: {
+            in: VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES
+          },
           vendorInvoiceDuplicateKey: duplicateKey,
           id: {
             not: invoiceId
