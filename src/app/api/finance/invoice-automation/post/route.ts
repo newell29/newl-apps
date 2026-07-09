@@ -60,7 +60,7 @@ export async function POST(request: Request) {
     const mode = body?.mode === "post" ? "post" : "preview";
 
     if (invoiceIds.length === 0) {
-      return NextResponse.json({ error: "Select at least one approved invoice." }, { status: 400 });
+      return NextResponse.json({ error: "Select at least one approved invoice or posting-error retry." }, { status: 400 });
     }
 
     if (invoiceIds.length > 25) {
@@ -83,7 +83,9 @@ export async function POST(request: Request) {
       where: {
         tenantId: context.tenantId,
         id: { in: invoiceIds },
-        status: InvoiceAutomationStatus.APPROVED_FOR_POSTING
+        status: {
+          in: [InvoiceAutomationStatus.APPROVED_FOR_POSTING, InvoiceAutomationStatus.POSTING_ERROR]
+        }
       },
       include: {
         batch: {
@@ -102,7 +104,7 @@ export async function POST(request: Request) {
     });
 
     if (invoices.length !== invoiceIds.length) {
-      throw new InvoiceApprovalError("One or more selected invoices are not approved for QuickBooks posting.");
+      throw new InvoiceApprovalError("One or more selected invoices are not approved for QuickBooks posting or retry.");
     }
 
     const credentials = await getQuickBooksCredentials(context.tenantId);
@@ -125,6 +127,62 @@ export async function POST(request: Request) {
           parsedRealmId: parsedEntity?.realmId ?? null,
           connectionByRealm
         });
+
+        if (invoice.status === InvoiceAutomationStatus.POSTING_ERROR && invoice.quickBooksTxnId) {
+          const transaction = {
+            id: invoice.quickBooksTxnId,
+            docNumber: invoice.quickBooksTxnNumber ?? row.invoiceNumber ?? null
+          };
+
+          if (mode === "preview") {
+            results.push({
+              invoiceId: row.id,
+              invoiceType: row.invoiceType,
+              invoiceNumber: row.invoiceNumber,
+              shipmentFileNumber: row.shipmentFileNumber,
+              realmId: connection.realmId,
+              quickBooksTxnId: transaction.id,
+              quickBooksTxnNumber: transaction.docNumber,
+              retryAction: "attach_pdf_to_existing_transaction"
+            });
+            continue;
+          }
+
+          const attachment = await attachPdfToQuickBooksTransaction({
+            realmId: connection.realmId,
+            accessToken: connection.accessToken,
+            invoiceType: row.invoiceType,
+            transactionId: transaction.id,
+            fileName: invoice.document.fileName,
+            contentType: invoice.document.contentType || "application/pdf",
+            pdfBytes: invoice.document.pdfBytes
+          });
+          const attachmentId = readAttachableId(attachment);
+
+          await markInvoicePostedToQuickBooks({
+            tenantId: context.tenantId,
+            userId: context.userId,
+            row,
+            connection,
+            transaction,
+            attachmentId
+          });
+
+          results.push({
+            invoiceId: row.id,
+            invoiceType: row.invoiceType,
+            invoiceNumber: row.invoiceNumber,
+            shipmentFileNumber: row.shipmentFileNumber,
+            realmId: connection.realmId,
+            quickBooksTxnId: transaction.id,
+            quickBooksTxnNumber: transaction.docNumber,
+            quickBooksAttachmentId: attachmentId,
+            retryAction: "attach_pdf_to_existing_transaction",
+            posted: true
+          });
+          continue;
+        }
+
         const mappings = await getMappingsForRealm(connection, mappingsByRealm);
         const exchangeRate = await getExchangeRateForInvoice({
           row,
@@ -215,39 +273,13 @@ export async function POST(request: Request) {
           continue;
         }
 
-        await prisma.invoiceAutomationInvoice.update({
-          where: {
-            tenantId_id: {
-              tenantId: context.tenantId,
-              id: row.id
-            }
-          },
-          data: {
-            status: InvoiceAutomationStatus.POSTED,
-            postedByUserId: context.userId,
-            postedAt: new Date(),
-            quickBooksTxnId: transaction.id,
-            quickBooksTxnNumber: transaction.docNumber,
-            quickBooksPostingError: null
-          }
-        });
-
-        await prisma.auditLog.create({
-          data: {
-            tenantId: context.tenantId,
-            actorUserId: context.userId,
-            action: "invoice-automation.posted-to-quickbooks",
-            entityType: "InvoiceAutomationInvoice",
-            entityId: row.id,
-            after: {
-              invoiceType: row.invoiceType,
-              invoiceNumber: row.invoiceNumber,
-              quickBooksTxnId: transaction.id,
-              quickBooksTxnNumber: transaction.docNumber,
-              quickBooksAttachmentId: attachmentId,
-              realmId: connection.realmId
-            }
-          }
+        await markInvoicePostedToQuickBooks({
+          tenantId: context.tenantId,
+          userId: context.userId,
+          row,
+          connection,
+          transaction,
+          attachmentId
         });
 
         results.push({
@@ -317,6 +349,57 @@ function readAttachableId(response: Awaited<ReturnType<typeof attachPdfToQuickBo
   return response.AttachableResponse
     ?.map((row) => row.Attachable?.Id)
     .find((id): id is string => Boolean(id)) ?? null;
+}
+
+async function markInvoicePostedToQuickBooks({
+  tenantId,
+  userId,
+  row,
+  connection,
+  transaction,
+  attachmentId
+}: {
+  tenantId: string;
+  userId: string;
+  row: ReturnType<typeof toInvoiceAutomationRow>;
+  connection: QuickBooksConnection;
+  transaction: { id: string; docNumber: string | null };
+  attachmentId: string | null;
+}) {
+  await prisma.invoiceAutomationInvoice.update({
+    where: {
+      tenantId_id: {
+        tenantId,
+        id: row.id
+      }
+    },
+    data: {
+      status: InvoiceAutomationStatus.POSTED,
+      postedByUserId: userId,
+      postedAt: new Date(),
+      quickBooksTxnId: transaction.id,
+      quickBooksTxnNumber: transaction.docNumber,
+      quickBooksPostingError: null
+    }
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      tenantId,
+      actorUserId: userId,
+      action: "invoice-automation.posted-to-quickbooks",
+      entityType: "InvoiceAutomationInvoice",
+      entityId: row.id,
+      after: {
+        invoiceType: row.invoiceType,
+        invoiceNumber: row.invoiceNumber,
+        quickBooksTxnId: transaction.id,
+        quickBooksTxnNumber: transaction.docNumber,
+        quickBooksAttachmentId: attachmentId,
+        realmId: connection.realmId
+      }
+    }
+  });
 }
 
 async function getQuickBooksCredentials(tenantId: string) {

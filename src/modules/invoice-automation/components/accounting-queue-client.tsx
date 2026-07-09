@@ -30,6 +30,7 @@ type QuickBooksPostingResult = {
   payload?: unknown;
   quickBooksTxnId?: string;
   quickBooksTxnNumber?: string | null;
+  retryAction?: string;
   posted?: boolean;
   error?: string;
 };
@@ -61,7 +62,9 @@ export function AccountingQueueClient({
     () =>
       rows
         .filter((invoice) =>
-          (invoice.status === "ACCOUNTING_REVIEW" || invoice.status === "APPROVED_FOR_POSTING") &&
+          (invoice.status === "ACCOUNTING_REVIEW" ||
+            invoice.status === "APPROVED_FOR_POSTING" ||
+            invoice.status === "POSTING_ERROR") &&
           getInvoiceApprovalBlockingIssues(invoice).length === 0
         )
         .map((invoice) => invoice.id),
@@ -77,7 +80,11 @@ export function AccountingQueueClient({
   const approvedForPostingInvoiceIds = useMemo(
     () =>
       rows
-        .filter((invoice) => invoice.status === "APPROVED_FOR_POSTING" && getInvoiceApprovalBlockingIssues(invoice).length === 0)
+        .filter(
+          (invoice) =>
+            (invoice.status === "APPROVED_FOR_POSTING" || invoice.status === "POSTING_ERROR") &&
+            getInvoiceApprovalBlockingIssues(invoice).length === 0
+        )
         .map((invoice) => invoice.id),
     [rows]
   );
@@ -362,7 +369,9 @@ export function AccountingQueueClient({
               rows.map((invoice) => {
                 const blockers = getInvoiceApprovalBlockingIssues(invoice);
                 const selectable =
-                  (invoice.status === "ACCOUNTING_REVIEW" || invoice.status === "APPROVED_FOR_POSTING") &&
+                  (invoice.status === "ACCOUNTING_REVIEW" ||
+                    invoice.status === "APPROVED_FOR_POSTING" ||
+                    invoice.status === "POSTING_ERROR") &&
                   blockers.length === 0;
                 const relevantEntities = entityOptionsByType[invoice.invoiceType];
                 return (
