@@ -7,7 +7,10 @@ export type InvoiceAutomationRecordWithBatch = InvoiceAutomationInvoice & {
   };
 };
 
-export function toInvoiceAutomationRow(invoice: InvoiceAutomationRecordWithBatch): InvoiceAutomationRow {
+export function toInvoiceAutomationRow(
+  invoice: InvoiceAutomationRecordWithBatch,
+  userNameById: Map<string, string> = new Map()
+): InvoiceAutomationRow {
   return {
     id: invoice.id,
     batchNumber: invoice.batch.batchNumber,
@@ -30,7 +33,8 @@ export function toInvoiceAutomationRow(invoice: InvoiceAutomationRecordWithBatch
     productOrAccountName: invoice.productOrAccountName,
     issueCodes: readIssueCodes(invoice.issueCodes),
     createdAt: invoice.createdAt.toISOString(),
-    sentToAccountingAt: invoice.sentToAccountingAt?.toISOString() ?? null
+    sentToAccountingAt: invoice.sentToAccountingAt?.toISOString() ?? null,
+    sentToAccountingByName: invoice.sentToAccountingById ? userNameById.get(invoice.sentToAccountingById) ?? null : null
   };
 }
 

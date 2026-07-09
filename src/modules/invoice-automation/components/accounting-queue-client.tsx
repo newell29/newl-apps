@@ -204,7 +204,7 @@ export function AccountingQueueClient({
         </div>
       ) : null}
       <div className="overflow-x-auto">
-        <table className="min-w-[1900px] divide-y divide-border text-sm">
+        <table className="min-w-[2000px] divide-y divide-border text-sm">
           <thead className="bg-muted/50 text-left text-xs font-semibold uppercase tracking-wide text-mutedForeground">
             <tr>
               <th className="px-3 py-3">
@@ -221,6 +221,7 @@ export function AccountingQueueClient({
               <th className="px-3 py-3">Status</th>
               <th className="px-3 py-3">Type</th>
               <th className="px-3 py-3">Batch</th>
+              <th className="px-3 py-3">Sent by</th>
               <th className="px-3 py-3">PDF</th>
               <th className="px-3 py-3">File #</th>
               <th className="px-3 py-3">Customer/Vendor</th>
@@ -240,7 +241,7 @@ export function AccountingQueueClient({
           <tbody className="divide-y divide-border">
             {rows.length === 0 ? (
               <tr>
-                <td className="px-3 py-8 text-center text-mutedForeground" colSpan={18}>
+                <td className="px-3 py-8 text-center text-mutedForeground" colSpan={19}>
                   No invoices are waiting in accounting.
                 </td>
               </tr>
@@ -268,6 +269,10 @@ export function AccountingQueueClient({
                     <td className="px-3 py-3"><InvoiceStatusPill value={invoice.status} /></td>
                     <td className="px-3 py-3"><InvoiceTypePill value={invoice.invoiceType} /></td>
                     <td className="px-3 py-3 text-mutedForeground">{invoice.batchNumber}</td>
+                    <td className="px-3 py-3 text-mutedForeground">
+                      <div>{invoice.sentToAccountingByName ?? "Unknown"}</div>
+                      {invoice.sentToAccountingAt ? <div className="mt-1 text-xs">{formatShortDateTime(invoice.sentToAccountingAt)}</div> : null}
+                    </td>
                     <td className="px-3 py-3">
                       <a href={`/api/finance/invoice-automation/invoices/${invoice.id}/pdf`} className="font-semibold text-primary hover:underline">
                         Download
@@ -405,4 +410,13 @@ function MoneyInput({ value, onChange }: { value: number | null; onChange: (valu
       className="w-32 rounded-md border border-input bg-background px-2 py-1.5 text-right"
     />
   );
+}
+
+function formatShortDateTime(value: string) {
+  return new Date(value).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
 }

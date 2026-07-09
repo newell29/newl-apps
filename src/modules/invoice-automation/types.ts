@@ -60,6 +60,7 @@ export type InvoiceAutomationRow = {
   issueCodes: string[];
   createdAt: string;
   sentToAccountingAt: string | null;
+  sentToAccountingByName: string | null;
 };
 
 export type InvoiceAutomationUploadResponse = {

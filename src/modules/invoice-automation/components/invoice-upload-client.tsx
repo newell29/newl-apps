@@ -45,6 +45,7 @@ export function InvoiceAutomationUploadClient({
 }) {
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
   const [modalType, setModalType] = useState<InvoiceAutomationType | null>(null);
+  const [confirmSendSelectedOpen, setConfirmSendSelectedOpen] = useState(false);
   const [queueError, setQueueError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const operationsRows = invoices.filter((invoice) => invoice.status === "OPERATIONS_REVIEW");
@@ -109,7 +110,7 @@ export function InvoiceAutomationUploadClient({
           </div>
           <button
             type="button"
-            onClick={sendSelectedToAccounting}
+            onClick={() => setConfirmSendSelectedOpen(true)}
             disabled={selectedInvoiceIds.length === 0 || isSending}
             className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
           >
@@ -136,6 +137,17 @@ export function InvoiceAutomationUploadClient({
           onClose={() => setModalType(null)}
         />
       ) : null}
+
+      {confirmSendSelectedOpen ? (
+        <ConfirmSendToAccountingDialog
+          invoiceCount={selectedInvoiceIds.length}
+          onCancel={() => setConfirmSendSelectedOpen(false)}
+          onConfirm={() => {
+            setConfirmSendSelectedOpen(false);
+            void sendSelectedToAccounting();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -160,6 +172,7 @@ export function InvoiceRowsTable({
             <th className="px-3 py-3">Status</th>
             <th className="px-3 py-3">Type</th>
             <th className="px-3 py-3">Batch</th>
+            <th className="px-3 py-3">Sent by</th>
             <th className="px-3 py-3">PDF</th>
             <th className="px-3 py-3">File</th>
             <th className="px-3 py-3">Customer/Vendor</th>
@@ -178,7 +191,7 @@ export function InvoiceRowsTable({
         <tbody className="divide-y divide-border">
           {invoices.length === 0 ? (
             <tr>
-              <td colSpan={onSelectionChange ? 17 : 16} className="px-3 py-8 text-center text-mutedForeground">
+              <td colSpan={onSelectionChange ? 18 : 17} className="px-3 py-8 text-center text-mutedForeground">
                 No uploaded invoices yet.
               </td>
             </tr>
@@ -208,6 +221,7 @@ export function InvoiceRowsTable({
                   <td className="px-3 py-3"><InvoiceStatusPill value={invoice.status} /></td>
                   <td className="px-3 py-3"><InvoiceTypePill value={invoice.invoiceType} /></td>
                   <td className="px-3 py-3 text-mutedForeground">{invoice.batchNumber}</td>
+                  <td className="px-3 py-3 text-mutedForeground">{invoice.sentToAccountingByName ?? "Not sent"}</td>
                   <td className="px-3 py-3">
                     <a href={`/api/finance/invoice-automation/invoices/${invoice.id}/pdf`} className="font-semibold text-primary hover:underline">
                       Download
@@ -251,6 +265,7 @@ function InvoiceUploadModal({
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState("Choose one or more PDF invoices.");
+  const [confirmSendToAccountingOpen, setConfirmSendToAccountingOpen] = useState(false);
   const relevantEntities = useMemo(() => entityOptions.filter((option) => option.entityType === invoiceType), [entityOptions, invoiceType]);
   const title = invoiceType === "CUSTOMER" ? "Add customer invoices" : "Add vendor invoices";
   const hasApprovalBlockers = drafts.some((draft) => getInvoiceApprovalBlockingIssues({ ...draft, invoiceType }).length > 0);
@@ -498,13 +513,60 @@ function InvoiceUploadModal({
             </button>
             <button
               type="button"
-              onClick={() => void saveDrafts(true)}
+              onClick={() => setConfirmSendToAccountingOpen(true)}
               disabled={drafts.length === 0 || hasApprovalBlockers || isSaving}
               className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSaving ? "Saving..." : "Approve and send accounting"}
             </button>
           </div>
+        </div>
+      </div>
+      {confirmSendToAccountingOpen ? (
+        <ConfirmSendToAccountingDialog
+          invoiceCount={drafts.length}
+          onCancel={() => setConfirmSendToAccountingOpen(false)}
+          onConfirm={() => {
+            setConfirmSendToAccountingOpen(false);
+            void saveDrafts(true);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ConfirmSendToAccountingDialog({
+  invoiceCount,
+  onCancel,
+  onConfirm
+}: {
+  invoiceCount: number;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-lg border border-border bg-background p-5 shadow-xl">
+        <h2 className="text-base font-semibold text-foreground">Confirm invoice details</h2>
+        <p className="mt-2 text-sm leading-6 text-mutedForeground">
+          Confirm that the file number, customer/vendor, QuickBooks match, invoice number, dates, currency, tax, and totals are correct before sending {invoiceCount} invoice{invoiceCount === 1 ? "" : "s"} to accounting.
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-md border border-border px-4 py-2 text-sm font-semibold hover:bg-muted"
+          >
+            Go back
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground hover:bg-primaryHover"
+          >
+            Confirm and send
+          </button>
         </div>
       </div>
     </div>

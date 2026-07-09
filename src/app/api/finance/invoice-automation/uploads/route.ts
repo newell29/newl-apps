@@ -214,7 +214,7 @@ export async function POST(request: Request) {
       batchId: created.batch.id,
       batchNumber: created.batch.batchNumber,
       invoiceCount: created.invoices.length,
-      invoices: created.invoices.map(toInvoiceAutomationRow)
+      invoices: created.invoices.map((invoice) => toInvoiceAutomationRow(invoice))
     };
 
     return NextResponse.json(response, { status: 201 });

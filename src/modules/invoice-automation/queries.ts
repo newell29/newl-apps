@@ -156,7 +156,10 @@ async function getInvoiceAutomationRows(
     }
   });
 
-  return rows.map(toInvoiceAutomationRow);
+  const userNameById = await getUserNameById(
+    rows.map((row) => row.sentToAccountingById).filter((userId): userId is string => Boolean(userId))
+  );
+  return rows.map((row) => toInvoiceAutomationRow(row, userNameById));
 }
 
 function readStatuses(value: string | undefined, fallback: InvoiceAutomationStatus[]) {
@@ -181,4 +184,26 @@ function dedupeEntityOptions(options: InvoiceAutomationEntityOption[]) {
     deduped.push(option);
   }
   return deduped;
+}
+
+async function getUserNameById(userIds: string[]) {
+  const uniqueUserIds = [...new Set(userIds)];
+  if (uniqueUserIds.length === 0) {
+    return new Map<string, string>();
+  }
+
+  const users = await prisma.user.findMany({
+    where: {
+      id: {
+        in: uniqueUserIds
+      }
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true
+    }
+  });
+
+  return new Map(users.map((user) => [user.id, user.name ?? user.email]));
 }
