@@ -38,6 +38,7 @@ Implementation expectations:
 - After coding, run lint, typecheck, build, and relevant Prisma checks.
 - Never push directly to main.
 - Always create a PR.
+- For PR creation and follow-up, use `reference/CODEX_PR_WORKFLOW.md`. Prefer updating the existing open PR for the current branch over creating a duplicate PR.
 - Include a PR summary with:
   1. What changed
   2. Why it changed
