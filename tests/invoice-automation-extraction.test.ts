@@ -116,6 +116,39 @@ describe("invoice automation extraction", () => {
     expect(segments[1]).toContain("TR144N36");
   });
 
+  it("does not carry the first shipment file number across adjacent freight bill invoices", () => {
+    const segments = splitInvoiceTextIntoDocuments(`
+      P a r t 1 of 2 1254812892
+      NS TR238N25
+      APPOINTMENT SET UP CHARGE 30.00
+      ---------------------------- Tear Here ----------------------------
+      P a r t 2 of 2 1254812892
+      NS TR238N25
+      2 PREPAID TOTALS 220 123.73
+      P a r t 1 of 2 1254812893
+      NS TR238N24
+      CUBE WEIGHT 355 22.33 79.27
+      ---------------------------- Tear Here ----------------------------
+      P a r t 2 of 2 1254812893
+      NS TR238N24
+      1 PREPAID TOTALS 280 133.36
+      P a r t 1 of 2 1254812901
+      NS TR238N29
+      5 SKIDS MERCHANDISE 3,647 18.53 675.79
+      ---------------------------- Tear Here ----------------------------
+      P a r t 2 of 2 1254812901
+      NS TR238N29
+      5 PREPAID TOTALS 3,647 881.23
+    `);
+
+    expect(segments).toHaveLength(3);
+    expect(segments.map((segment) => extractShipmentFileNumber(segment))).toEqual([
+      "TR238N25",
+      "TR238N24",
+      "TR238N29"
+    ]);
+  });
+
   it("matches OCR text to QuickBooks customer and vendor options", () => {
     expect(matchQuickBooksEntity("Bill To: Acme Logistics", "CUSTOMER", entityOptions)?.option.id).toBe(
       "qb-customer-cad"

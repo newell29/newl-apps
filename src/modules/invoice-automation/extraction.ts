@@ -122,6 +122,12 @@ export function splitInvoiceTextIntoDocuments(text: string) {
     return [""];
   }
 
+  const freightBillPartChunks = splitByFreightBillPartHeaders(compact);
+  const groupedFreightBills = groupFreightBillParts(freightBillPartChunks);
+  if (groupedFreightBills.length > 1) {
+    return groupedFreightBills;
+  }
+
   const tearChunks = compact
     .split(/-+\s*Tear\s+Here\s*-+/i)
     .map((chunk) => chunk.trim())
@@ -340,6 +346,21 @@ function groupFreightBillParts(chunks: string[]) {
   }
 
   return order.map((billNumber) => groups.get(billNumber)?.join("\n") ?? "").filter(Boolean);
+}
+
+function splitByFreightBillPartHeaders(text: string) {
+  const partHeaders = [...text.matchAll(/\bP\s*a\s*r\s*t\s+\d+\s+of\s+\d+\s+[A-Z0-9][A-Z0-9._/-]{4,}\b/gi)];
+  if (partHeaders.length <= 1) {
+    return [text];
+  }
+
+  return partHeaders
+    .map((match, index) => {
+      const start = match.index ?? 0;
+      const end = partHeaders[index + 1]?.index ?? text.length;
+      return text.slice(start, end).trim();
+    })
+    .filter(Boolean);
 }
 
 function splitByRepeatedInvoiceHeaders(text: string) {
