@@ -34,6 +34,7 @@ export type QuickBooksSalesInvoicePayload = {
   DueDate?: string;
   CurrencyRef?: QuickBooksRef;
   GlobalTaxCalculation: "TaxExcluded";
+  ExchangeRate?: number;
   PrivateNote?: string;
   Line: Array<{
     DetailType: "SalesItemLineDetail";
@@ -55,6 +56,7 @@ export type QuickBooksVendorBillPayload = {
   DueDate?: string;
   CurrencyRef?: QuickBooksRef;
   GlobalTaxCalculation: "TaxExcluded";
+  ExchangeRate?: number;
   PrivateNote?: string;
   Line: Array<{
     DetailType: "AccountBasedExpenseLineDetail";
@@ -73,7 +75,8 @@ export class QuickBooksPostingMappingError extends Error {
 
 export function buildQuickBooksSalesInvoicePayload(
   invoice: InvoiceAutomationRow,
-  mappings: QuickBooksPostingMappings
+  mappings: QuickBooksPostingMappings,
+  options: { exchangeRate?: number | null } = {}
 ): QuickBooksSalesInvoicePayload {
   assertInvoiceType(invoice, "CUSTOMER");
   const customerRef = buildEntityRef(invoice, "CUSTOMER");
@@ -88,6 +91,7 @@ export function buildQuickBooksSalesInvoicePayload(
     DueDate: invoice.dueDate ?? undefined,
     CurrencyRef: buildCurrencyRef(invoice.currency),
     GlobalTaxCalculation: "TaxExcluded",
+    ExchangeRate: options.exchangeRate ?? undefined,
     PrivateNote: invoice.shipmentFileNumber ?? undefined,
     Line: [
       {
@@ -107,7 +111,8 @@ export function buildQuickBooksSalesInvoicePayload(
 
 export function buildQuickBooksVendorBillPayload(
   invoice: InvoiceAutomationRow,
-  mappings: QuickBooksPostingMappings
+  mappings: QuickBooksPostingMappings,
+  options: { exchangeRate?: number | null } = {}
 ): QuickBooksVendorBillPayload {
   assertInvoiceType(invoice, "VENDOR");
   const vendorRef = buildEntityRef(invoice, "VENDOR");
@@ -122,6 +127,7 @@ export function buildQuickBooksVendorBillPayload(
     DueDate: invoice.dueDate ?? undefined,
     CurrencyRef: buildCurrencyRef(invoice.currency),
     GlobalTaxCalculation: "TaxExcluded",
+    ExchangeRate: options.exchangeRate ?? undefined,
     PrivateNote: invoice.shipmentFileNumber ?? undefined,
     Line: [
       {
@@ -205,6 +211,52 @@ export async function findExistingQuickBooksTransaction({
   const response = await queryQuickBooks({ realmId, accessToken, query });
   const rows = invoiceType === "CUSTOMER" ? response.QueryResponse?.Invoice : response.QueryResponse?.Bill;
   return Array.isArray(rows) ? rows[0] ?? null : null;
+}
+
+export async function fetchQuickBooksExchangeRate({
+  realmId,
+  accessToken,
+  sourceCurrencyCode,
+  asOfDate
+}: {
+  realmId: string;
+  accessToken: string;
+  sourceCurrencyCode: string;
+  asOfDate: string;
+}) {
+  const currency = sourceCurrencyCode.trim().toUpperCase();
+  if (!currency) {
+    throw new QuickBooksPostingMappingError("Missing currency for QuickBooks exchange rate lookup.");
+  }
+
+  const url = new URL(`${getQuickBooksApiBaseUrl()}/v3/company/${realmId}/exchangerate`);
+  url.searchParams.set("sourcecurrencycode", currency);
+  url.searchParams.set("asofdate", asOfDate);
+  url.searchParams.set("minorversion", "75");
+
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new QuickBooksPostingMappingError(`QuickBooks exchange rate lookup failed with status ${response.status}: ${text.slice(0, 500)}`);
+  }
+
+  const json = (await response.json()) as {
+    ExchangeRate?: {
+      Rate?: number | string;
+    };
+  };
+  const rate = Number(json.ExchangeRate?.Rate);
+  if (!Number.isFinite(rate) || rate <= 0) {
+    throw new QuickBooksPostingMappingError(`QuickBooks did not return a valid exchange rate for ${currency} on ${asOfDate}.`);
+  }
+
+  return rate;
 }
 
 export async function createQuickBooksInvoiceAutomationTransaction({

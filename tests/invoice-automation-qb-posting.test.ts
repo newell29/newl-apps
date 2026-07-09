@@ -4,6 +4,7 @@ import {
   buildQuickBooksSalesInvoicePayload,
   buildQuickBooksVendorBillPayload,
   createQuickBooksInvoiceAutomationTransaction,
+  fetchQuickBooksExchangeRate,
   fetchQuickBooksPostingMappings,
   findExistingQuickBooksTransaction,
   parseQuickBooksEntityOptionId,
@@ -170,6 +171,30 @@ describe("invoice automation QuickBooks posting mapping", () => {
     });
   });
 
+  it("includes QuickBooks exchange rates for foreign-currency transactions when provided", () => {
+    const payload = buildQuickBooksVendorBillPayload(
+      invoiceRow({
+        invoiceType: "VENDOR",
+        quickBooksEntityId: "quickbooks:9130351993486396:VENDOR:vendor-usd",
+        quickBooksEntityDisplayName: "Test Company - DO NOT PROCESS - USD",
+        entityNameRaw: "Test Company - DO NOT PROCESS - USD",
+        invoiceNumber: "TEST-V-USD-001",
+        invoiceDate: "2026-07-09",
+        dueDate: "2026-08-08",
+        shipmentFileNumber: "OI901N26",
+        currency: "USD",
+        subtotalAmount: 250,
+        taxAmount: 0,
+        totalAmount: 250,
+        productOrAccountName: "5020 Ocean Freight Rate"
+      }),
+      mappings,
+      { exchangeRate: 1.3725 }
+    );
+
+    expect(payload.ExchangeRate).toBe(1.3725);
+  });
+
   it("requires explicit QuickBooks product/service and account mappings before posting", () => {
     expect(() =>
       buildQuickBooksSalesInvoicePayload(
@@ -303,6 +328,43 @@ describe("invoice automation QuickBooks posting mapping", () => {
       Id: "qb-invoice-1",
       DocNumber: "7488"
     });
+  });
+
+  it("fetches QuickBooks exchange rates for foreign-currency transactions", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(input.toString());
+      expect(url.pathname).toBe("/v3/company/realm-1/exchangerate");
+      expect(url.searchParams.get("sourcecurrencycode")).toBe("USD");
+      expect(url.searchParams.get("asofdate")).toBe("2026-07-09");
+      return jsonResponse({
+        ExchangeRate: {
+          Rate: "1.3725"
+        }
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchQuickBooksExchangeRate({
+        realmId: "realm-1",
+        accessToken: "token-1",
+        sourceCurrencyCode: "usd",
+        asOfDate: "2026-07-09"
+      })
+    ).resolves.toBe(1.3725);
+  });
+
+  it("blocks posting when QuickBooks does not return a usable exchange rate", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ExchangeRate: { Rate: null } })));
+
+    await expect(
+      fetchQuickBooksExchangeRate({
+        realmId: "realm-1",
+        accessToken: "token-1",
+        sourceCurrencyCode: "USD",
+        asOfDate: "2026-07-09"
+      })
+    ).rejects.toThrow("QuickBooks did not return a valid exchange rate for USD on 2026-07-09.");
   });
 
   it("posts customer invoices to the QuickBooks invoice endpoint", async () => {
