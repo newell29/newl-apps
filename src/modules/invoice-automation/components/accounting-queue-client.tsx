@@ -428,6 +428,7 @@ export function AccountingQueueClient({
                     </td>
                     <td className="px-3 py-3">
                       <QuickBooksEntitySearchSelect
+                        hasError={!invoice.quickBooksEntityId}
                         invoiceType={invoice.invoiceType}
                         options={relevantEntities}
                         value={invoice.quickBooksEntityId ?? ""}

@@ -29,6 +29,20 @@ const entityOptions: InvoiceAutomationEntityOption[] = [
     currency: "CAD"
   },
   {
+    id: "qb-alberta-customer-cad",
+    entityType: "CUSTOMER",
+    displayName: "Alberta Ltd CAD",
+    normalizedName: "alberta ltd",
+    currency: "CAD"
+  },
+  {
+    id: "qb-ap-logistics-usd",
+    entityType: "CUSTOMER",
+    displayName: "AP Logistics Sp. Z.O.O. USD",
+    normalizedName: "ap logistics sp z o o",
+    currency: "USD"
+  },
+  {
     id: "qb-vendor-usd",
     entityType: "VENDOR",
     displayName: "Fast Trucking USD",
@@ -55,6 +69,20 @@ const entityOptions: InvoiceAutomationEntityOption[] = [
     displayName: "Currency Split Carrier USD",
     normalizedName: "currency split carrier",
     currency: "USD"
+  },
+  {
+    id: "qb-test-vendor-cad",
+    entityType: "VENDOR",
+    displayName: "Test Company - DO NOT PROCESS",
+    normalizedName: "test company do not process",
+    currency: "CAD"
+  },
+  {
+    id: "qb-canadian-logistics-cad",
+    entityType: "VENDOR",
+    displayName: "Canadian Logistics Express CAD",
+    normalizedName: "canadian logistics express",
+    currency: "CAD"
   }
 ];
 
@@ -293,6 +321,35 @@ describe("invoice automation extraction", () => {
     expect(matchQuickBooksEntity("Vendor: Fast Trucking", "VENDOR", entityOptions)?.option.id).toBe("qb-vendor-usd");
   });
 
+  it("does not auto-populate low-confidence or currency-mismatched QuickBooks customer matches", () => {
+    expect(matchQuickBooksEntity("Bill To: Alberta Ltd\nCurrency: EUR", "CUSTOMER", entityOptions, "EUR")).toBeNull();
+    expect(matchQuickBooksEntity("Bill To: Logistics Sp. Z.O.O.\nCurrency: USD", "CUSTOMER", entityOptions, "USD")).toBeNull();
+
+    const draft = buildInvoiceDraftFromText({
+      clientId: "low-confidence-customer",
+      fileName: "customer-eur-zero-tax-test-co-variant.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "CUSTOMER",
+      entityOptions,
+      text: `
+        Invoice Number: TEST-C-EUR-004
+        Invoice Date: 2026-07-10
+        Bill To: Alberta Ltd
+        File Number: OE914N26
+        Currency: EUR
+        Subtotal EUR 900.00
+        Total EUR 900.00
+      `
+    });
+
+    expect(draft.entityNameRaw).toBe("Alberta Ltd");
+    expect(draft.quickBooksEntityId).toBeNull();
+    expect(draft.quickBooksMatchConfidence).toBeNull();
+    expect(draft.issueCodes).toContain("MISSING_QB_MATCH");
+  });
+
   it("does not match QuickBooks entities on province names alone", () => {
     expect(
       matchQuickBooksEntity(
@@ -314,6 +371,69 @@ describe("invoice automation extraction", () => {
         "CAD"
       )
     ).toBeNull();
+  });
+
+  it("matches bundled vendor invoices to the extracted header vendor before body company names", () => {
+    const draft = buildInvoiceDraftFromText({
+      clientId: "bundle-company-match",
+      fileName: "vendor-multi-invoice-bundle-two-file-numbers.pdf - invoice 1",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions,
+      text: `
+        Test Company - DO NOT PROCESS
+        VENDOR BILL
+        Invoice Number: TEST-V-BUNDLE-009A
+        Invoice Date: 2026-07-10
+        Currency: CAD
+        Shipment File Number: TR919N26
+        Ship via: Canadian Logistics Express
+        Subtotal CAD 275.00
+        HST Ontario 13% CAD 35.75
+        Total CAD 310.75
+      `
+    });
+
+    expect(draft.entityNameRaw).toBe("Test Company - DO NOT PROCESS");
+    expect(draft.quickBooksEntityId).toBe("qb-test-vendor-cad");
+  });
+
+  it("leaves a bundled vendor unmatched instead of matching an unrelated body company", () => {
+    const draft = buildInvoiceDraftFromText({
+      clientId: "bundle-company-no-match",
+      fileName: "vendor-multi-invoice-bundle-two-file-numbers.pdf - invoice 1",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions: [
+        {
+          id: "qb-canadian-logistics-cad",
+          entityType: "VENDOR",
+          displayName: "Canadian Logistics Express CAD",
+          normalizedName: "canadian logistics express",
+          currency: "CAD"
+        }
+      ],
+      text: `
+        Test Company - DO NOT PROCESS
+        VENDOR BILL
+        Invoice Number: TEST-V-BUNDLE-009A
+        Invoice Date: 2026-07-10
+        Currency: CAD
+        Shipment File Number: TR919N26
+        Ship via: Canadian Logistics Express
+        Subtotal CAD 275.00
+        HST Ontario 13% CAD 35.75
+        Total CAD 310.75
+      `
+    });
+
+    expect(draft.entityNameRaw).toBe("Test Company - DO NOT PROCESS");
+    expect(draft.quickBooksEntityId).toBeNull();
+    expect(draft.issueCodes).toContain("MISSING_QB_MATCH");
   });
 
   it("normalizes camel-case OCR customer names before QuickBooks matching", () => {
