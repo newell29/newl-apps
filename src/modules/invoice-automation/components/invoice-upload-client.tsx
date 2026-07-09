@@ -155,6 +155,13 @@ export function InvoiceAutomationUploadClient({
             {quickBooksSyncError}
           </div>
         ) : null}
+        {quickBooksSyncState.warnings.length > 0 ? (
+          <div className="mt-3 space-y-2 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
+            {quickBooksSyncState.warnings.map((warning) => (
+              <p key={warning}>{warning}</p>
+            ))}
+          </div>
+        ) : null}
       </section>
 
       <section className="rounded-lg border border-border bg-card shadow-sm">

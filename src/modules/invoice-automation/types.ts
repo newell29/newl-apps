@@ -17,6 +17,7 @@ export type InvoiceAutomationQuickBooksSyncSummary = {
   customerCount: number;
   vendorCount: number;
   lastSyncedAt: string | null;
+  warnings: string[];
 };
 
 export type InvoiceAutomationUploadDraft = {

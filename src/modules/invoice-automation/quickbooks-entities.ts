@@ -39,11 +39,7 @@ type QuickBooksEntityPayload = {
 export async function getInvoiceAutomationQuickBooksEntityOptions(
   tenant: TenantContext
 ): Promise<InvoiceAutomationEntityOption[]> {
-  try {
-    await syncQuickBooksEntityCache(tenant, { force: false });
-  } catch (error) {
-    console.warn("Unable to sync QuickBooks entity names for invoice automation.", error);
-  }
+  await syncQuickBooksEntityCache(tenant, { force: false });
 
   const entities = await prisma.invoiceAutomationQuickBooksEntity.findMany({
     where: {
@@ -71,7 +67,8 @@ export async function getInvoiceAutomationQuickBooksEntityOptions(
 }
 
 export async function getInvoiceAutomationQuickBooksSyncSummary(
-  tenant: TenantContext
+  tenant: TenantContext,
+  warnings: string[] = []
 ): Promise<InvoiceAutomationQuickBooksSyncSummary> {
   const [connectionCount, customerCount, vendorCount, lastSyncedEntity] = await Promise.all([
     prisma.integrationCredential.count({
@@ -116,15 +113,16 @@ export async function getInvoiceAutomationQuickBooksSyncSummary(
     connectionCount,
     customerCount,
     vendorCount,
-    lastSyncedAt: lastSyncedEntity?.syncedAt.toISOString() ?? null
+    lastSyncedAt: lastSyncedEntity?.syncedAt.toISOString() ?? null,
+    warnings
   };
 }
 
 export async function refreshInvoiceAutomationQuickBooksEntityCache(
   tenant: TenantContext
 ): Promise<InvoiceAutomationQuickBooksSyncSummary> {
-  await syncQuickBooksEntityCache(tenant, { force: true });
-  return getInvoiceAutomationQuickBooksSyncSummary(tenant);
+  const warnings = await syncQuickBooksEntityCache(tenant, { force: true });
+  return getInvoiceAutomationQuickBooksSyncSummary(tenant, warnings);
 }
 
 async function syncQuickBooksEntityCache(tenant: TenantContext, { force }: { force: boolean }) {
@@ -142,7 +140,7 @@ async function syncQuickBooksEntityCache(tenant: TenantContext, { force }: { for
   });
 
   if (!force && newestSync && Date.now() - newestSync.syncedAt.getTime() < QUICKBOOKS_ENTITY_SYNC_STALE_MS) {
-    return;
+    return [];
   }
 
   const credentials = await prisma.integrationCredential.findMany({
@@ -162,10 +160,18 @@ async function syncQuickBooksEntityCache(tenant: TenantContext, { force }: { for
       secretRef: true
     }
   });
+  const warnings: string[] = [];
 
   for (const credential of credentials) {
-    await syncQuickBooksCredentialEntities(credential);
+    try {
+      await syncQuickBooksCredentialEntities(credential);
+    } catch (error) {
+      console.warn(`Unable to sync QuickBooks entities for ${credential.name}.`, error);
+      warnings.push(formatQuickBooksSyncWarning(credential, error));
+    }
   }
+
+  return warnings;
 }
 
 async function syncQuickBooksCredentialEntities(credential: QuickBooksCredentialRecord) {
@@ -383,4 +389,17 @@ function buildQuickBooksEntityOptionId(entity: {
   quickBooksId: string;
 }) {
   return `quickbooks:${entity.realmId}:${entity.entityType}:${entity.quickBooksId}`;
+}
+
+function formatQuickBooksSyncWarning(credential: QuickBooksCredentialRecord, error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("Unsupported state or unable to authenticate data")) {
+    return `${credential.name} needs to be reconnected in Settings because its saved QuickBooks token can no longer be decrypted.`;
+  }
+
+  if (/invalid_grant|refresh token/i.test(message)) {
+    return `${credential.name} needs to be reconnected in Settings because QuickBooks rejected the saved refresh token.`;
+  }
+
+  return `${credential.name} could not be synced: ${message}`;
 }
