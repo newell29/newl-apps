@@ -29,6 +29,10 @@ const mappings: QuickBooksPostingMappings = {
     exempt: { value: "E", name: "E" },
     gst: { value: "G", name: "G" },
     gstPst: { value: "BC12", name: "GST/PST BC" },
+    gstPstBc: { value: "BC12", name: "GST/PST BC" },
+    gstPstManitoba: { value: "MB12", name: "GST/PST MB" },
+    gstPstSaskatchewan: { value: "SK11", name: "GST/PST SK" },
+    gstQstQuebec: { value: "QC14975", name: "GST/QST QC" },
     hst: { value: "H", name: "HST" },
     hst15: { value: "HNS", name: "HNS" },
     taxable: { value: "H", name: "HST" }
@@ -260,6 +264,52 @@ describe("invoice automation QuickBooks posting mapping", () => {
     });
   });
 
+  it("uses province-specific PST/QST tax codes instead of HST for mixed-tax provinces", () => {
+    const cases = [
+      {
+        province: "Manitoba",
+        fileName: "vendor-cad-manitoba-gst-pst-test-company.pdf",
+        taxAmount: 49.2,
+        expected: { value: "MB12", name: "GST/PST MB" }
+      },
+      {
+        province: "Saskatchewan",
+        fileName: "vendor-cad-saskatchewan-gst-pst-test-company.pdf",
+        taxAmount: 45.1,
+        expected: { value: "SK11", name: "GST/PST SK" }
+      },
+      {
+        province: "Quebec",
+        fileName: "vendor-cad-quebec-gst-qst-test-company.pdf",
+        taxAmount: 61.4,
+        expected: { value: "QC14975", name: "GST/QST QC" }
+      }
+    ];
+
+    for (const testCase of cases) {
+      const payload = buildQuickBooksVendorBillPayload(
+        invoiceRow({
+          invoiceType: "VENDOR",
+          quickBooksEntityId: "quickbooks:9130351993486396:VENDOR:test-cad",
+          quickBooksEntityDisplayName: "Test Company - DO NOT PROCESS",
+          entityNameRaw: "Test Company - DO NOT PROCESS",
+          fileName: testCase.fileName,
+          invoiceNumber: `TEST-V-CAD-${testCase.province.toUpperCase()}`,
+          shipmentFileNumber: "TR916N26",
+          currency: "CAD",
+          subtotalAmount: 410,
+          taxAmount: testCase.taxAmount,
+          totalAmount: 410 + testCase.taxAmount,
+          productOrAccountName: "5015 Trucking Rate"
+        }),
+        mappings,
+        { taxContextText: `Ship To: ${testCase.province}\nGST/PST tax` }
+      );
+
+      expect(payload.Line[0]?.AccountBasedExpenseLineDetail.TaxCodeRef).toEqual(testCase.expected);
+    }
+  });
+
   it("refuses to post BC GST/PST as generic HST when the BC tax code is missing", () => {
     expect(() =>
       buildQuickBooksVendorBillPayload(
@@ -281,7 +331,8 @@ describe("invoice automation QuickBooks posting mapping", () => {
           ...mappings,
           taxCodes: {
             ...mappings.taxCodes,
-            gstPst: undefined
+            gstPst: undefined,
+            gstPstBc: undefined
           }
         },
         { taxContextText: "Ship To: Vancouver, British Columbia\nGST/PST 12% $96.00" }

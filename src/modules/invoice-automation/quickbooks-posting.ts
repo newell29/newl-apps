@@ -14,6 +14,10 @@ export type QuickBooksPostingMappings = {
     exempt: QuickBooksRef;
     gst?: QuickBooksRef;
     gstPst?: QuickBooksRef;
+    gstPstBc?: QuickBooksRef;
+    gstPstManitoba?: QuickBooksRef;
+    gstPstSaskatchewan?: QuickBooksRef;
+    gstQstQuebec?: QuickBooksRef;
     hst?: QuickBooksRef;
     hst15?: QuickBooksRef;
     pst?: QuickBooksRef;
@@ -228,6 +232,10 @@ export async function fetchQuickBooksPostingMappings({
       exempt: findTaxCodeRef(taxCodes, ["E", "Exempt", "Out of Scope", "NON"]) ?? { value: "E", name: "E" },
       gst: findTaxCodeRef(taxCodes, ["G", "GST"]) ?? undefined,
       gstPst: findTaxCodeRefByContains(taxCodes, ["GST PST", "GST/PST", "GST + PST", "British Columbia", "BC 12"]) ?? undefined,
+      gstPstBc: findTaxCodeRefByContains(taxCodes, ["GST PST BC", "GST/PST BC", "British Columbia", "BC 12", "BC GST"]) ?? undefined,
+      gstPstManitoba: findTaxCodeRefByContains(taxCodes, ["GST PST MB", "GST/PST MB", "Manitoba", "MB 12", "MB GST"]) ?? undefined,
+      gstPstSaskatchewan: findTaxCodeRefByContains(taxCodes, ["GST PST SK", "GST/PST SK", "Saskatchewan", "SK 11", "SK GST"]) ?? undefined,
+      gstQstQuebec: findTaxCodeRefByContains(taxCodes, ["GST QST", "GST/QST", "Quebec", "Quebec QST", "QC QST", "QST"]) ?? undefined,
       hst: findTaxCodeRef(taxCodes, ["H", "HST", "GST/HST", "Taxable"]) ?? undefined,
       hst15: findTaxCodeRef(taxCodes, ["HNS", "HNB", "HNL", "HPE", "HST 15", "HST15"]) ?? undefined,
       pst: findTaxCodeRef(taxCodes, ["P", "PST"]) ?? undefined,
@@ -525,23 +533,45 @@ function getTaxCodeRef(invoice: InvoiceAutomationRow, mappings: QuickBooksPostin
     const taxRate = invoice.subtotalAmount && invoice.subtotalAmount > 0
       ? roundMoney((invoice.taxAmount / invoice.subtotalAmount) * 100)
       : null;
+    const provinceTaxRegion = detectCanadianProvinceTaxRegion(context);
 
-    if (isBcOrGstPstContext(context) || isApproximateRate(taxRate, 12)) {
+    if (provinceTaxRegion === "BC_GST_PST") {
       return requireTaxCode(
-        mappings.taxCodes.gstPst,
+        mappings.taxCodes.gstPstBc ?? mappings.taxCodes.gstPst,
         "Missing QuickBooks GST/PST or BC sales tax code mapping. Refusing to post as HST."
       );
     }
 
-    if (isGstOnlyContext(context) || isApproximateRate(taxRate, 5)) {
+    if (provinceTaxRegion === "MANITOBA_GST_PST") {
+      return requireTaxCode(
+        mappings.taxCodes.gstPstManitoba,
+        "Missing QuickBooks Manitoba GST/PST sales tax code mapping. Refusing to post as HST."
+      );
+    }
+
+    if (provinceTaxRegion === "SASKATCHEWAN_GST_PST") {
+      return requireTaxCode(
+        mappings.taxCodes.gstPstSaskatchewan,
+        "Missing QuickBooks Saskatchewan GST/PST sales tax code mapping. Refusing to post as HST."
+      );
+    }
+
+    if (provinceTaxRegion === "QUEBEC_GST_QST") {
+      return requireTaxCode(
+        mappings.taxCodes.gstQstQuebec,
+        "Missing QuickBooks Quebec GST/QST sales tax code mapping. Refusing to post as HST."
+      );
+    }
+
+    if (provinceTaxRegion === "GST_ONLY" || isApproximateRate(taxRate, 5)) {
       return requireTaxCode(mappings.taxCodes.gst, "Missing QuickBooks GST sales tax code mapping.");
     }
 
-    if (isHst15Context(context) || isApproximateRate(taxRate, 15) || isApproximateRate(taxRate, 14)) {
+    if (provinceTaxRegion === "HST_15" || isApproximateRate(taxRate, 15) || isApproximateRate(taxRate, 14)) {
       return requireTaxCode(mappings.taxCodes.hst15, "Missing QuickBooks 15% HST sales tax code mapping.");
     }
 
-    if (isHst13Context(context) || isApproximateRate(taxRate, 13)) {
+    if (provinceTaxRegion === "HST_13" || isApproximateRate(taxRate, 13)) {
       return requireTaxCode(
         mappings.taxCodes.hst ?? mappings.taxCodes.taxable,
         "Missing QuickBooks taxable sales tax code mapping."
@@ -566,20 +596,22 @@ function normalizeTaxContext(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-function isBcOrGstPstContext(context: string) {
-  return /\bbritish columbia\b|\bbc\b|\bgst pst\b|\bpst gst\b|\bpst\b/.test(context);
-}
+function detectCanadianProvinceTaxRegion(context: string) {
+  if (/\bbritish columbia\b|\bbc\b/.test(context)) return "BC_GST_PST";
+  if (/\bmanitoba\b|\bmb\b/.test(context)) return "MANITOBA_GST_PST";
+  if (/\bsaskatchewan\b|\bsk\b/.test(context)) return "SASKATCHEWAN_GST_PST";
+  if (/\bquebec\b|\bqc\b|\bqst\b/.test(context)) return "QUEBEC_GST_QST";
+  if (/\balberta\b|\bab\b|\bnorthwest territories\b|\bnwt\b|\bnunavut\b|\bnu\b|\byukon\b|\byt\b/.test(context)) return "GST_ONLY";
+  if (/\bontario\b|\bh 13\b/.test(context)) return "HST_13";
+  if (/\bnew brunswick\b|\bnb\b|\bnewfoundland\b|\blabrador\b|\bnl\b|\bnova scotia\b|\bns\b|\bprince edward island\b|\bpei\b|\bpe\b|\bhns\b|\bhst 15\b/.test(context)) {
+    return "HST_15";
+  }
+  if (/\bgst pst\b|\bpst gst\b/.test(context)) return "BC_GST_PST";
+  if (/\bgst qst\b|\bqst gst\b/.test(context)) return "QUEBEC_GST_QST";
+  if (/\bgst\b/.test(context) && !/\bpst\b|\bqst\b|\bhst\b/.test(context)) return "GST_ONLY";
+  if (/\bhst\b/.test(context)) return "HST_13";
 
-function isGstOnlyContext(context: string) {
-  return /\balberta\b|\bnorthwest territories\b|\bnunavut\b|\byukon\b|\bgst\b/.test(context) && !/\bpst\b|\bqst\b|\bhst\b/.test(context);
-}
-
-function isHst13Context(context: string) {
-  return /\bontario\b|\bhst\b|\bh 13\b/.test(context);
-}
-
-function isHst15Context(context: string) {
-  return /\bnew brunswick\b|\bnewfoundland\b|\blabrador\b|\bnova scotia\b|\bprince edward island\b|\bhns\b|\bhst 15\b/.test(context);
+  return null;
 }
 
 function isApproximateRate(value: number | null, expected: number) {
