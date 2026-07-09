@@ -1,7 +1,7 @@
 import { ModuleKey } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { defaultDueDateFromInvoiceDate } from "@/modules/invoice-automation/extraction";
-import type { InvoiceAutomationOcrResult } from "@/modules/invoice-automation/types";
+import type { InvoiceAutomationOcrInvoice, InvoiceAutomationOcrResult } from "@/modules/invoice-automation/types";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json().catch(() => null)) as InvoiceOcrRequest | null;
-  const images = Array.isArray(body?.images) ? body.images.filter(isValidImagePayload).slice(0, 4) : [];
+  const images = Array.isArray(body?.images) ? body.images.filter(isValidImagePayload).slice(0, 8) : [];
 
   if (!body?.invoiceType || !["CUSTOMER", "VENDOR"].includes(body.invoiceType) || images.length === 0) {
     return NextResponse.json(
@@ -104,10 +104,45 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "OpenAI returned non-JSON invoice OCR output." }, { status: 502 });
   }
 
-  const invoiceDate = readIsoDate(parsed.invoiceDate);
-  const dueDate = readIsoDate(parsed.dueDate) ?? defaultDueDateFromInvoiceDate(invoiceDate);
+  const parsedInvoices = Array.isArray(parsed.invoices)
+    ? parsed.invoices.filter((value): value is Record<string, unknown> => Boolean(value) && typeof value === "object")
+    : [parsed];
   const result: InvoiceAutomationOcrResult = {
     model: DEFAULT_VISION_MODEL,
+    invoices: parsedInvoices.map(normalizeOcrInvoice).filter(hasAnyInvoiceSignal)
+  };
+
+  return NextResponse.json(result);
+}
+
+function buildPrompt(invoiceType: "CUSTOMER" | "VENDOR", fileName: string, pageNumbers: number[]) {
+  return [
+    `Invoice type: ${invoiceType}.`,
+    `Source filename: ${fileName}.`,
+    `Attached page numbers: ${pageNumbers.join(", ")}.`,
+    "The attachment may contain multiple invoices or freight bills. Check for multiple invoice numbers, pro/bill numbers, shipment references, page groups, repeated invoice headers, tear-off sections, or Part 1 of N / Part 2 of N groups.",
+    "If multiple invoices are present, return one entry per invoice in the invoices array. Do not combine totals from separate invoices.",
+    "When a freight bill has multiple pages or parts for the same invoice/pro/bill number, combine only those pages into one invoice entry.",
+    invoiceType === "CUSTOMER"
+      ? "This is a customer invoice Newl sends to its customer. Extract the customer/bill-to name."
+      : "This is a vendor invoice Newl receives from a carrier/vendor. Extract the actual carrier/vendor name, not a factoring company, payment assignee, payable-to party, or remit-to lockbox.",
+    invoiceType === "VENDOR"
+      ? "Many trucking vendors factor receivables. If text says bills were sold/assigned/payable to a financial service company, that company is only the factor/payee. Prefer labels such as Assigned For, carrier name, carrier/vendor identity near the invoice table, or the carrier on the load confirmation. Example: if RTS Financial is payable-to but the invoice says 373 CARGO INCORPORATED or Assigned For: 373 CARGO INCORPORATED, return 373 CARGO INCORPORATED as entityName."
+      : "Do not use Newl/Newells as the customer just because it appears as sender or remittance contact; use the bill-to/customer being invoiced.",
+    "Find the shipment file number if visible. Valid prefixes are OE, OI, AE, AI, TR, and DR.",
+    "Extract invoice number, invoice date, due date, currency, subtotal before tax, sales tax/HST, and total.",
+    "If no due date is visible, return dueDate as null; the app will default payment terms to 30 days after invoice date.",
+    "Do not return a service/category label such as Air Freight, Ocean Freight, Trucking, or Warehouse as entityName.",
+    "If tax is not present, set taxAmount to 0 only when the invoice clearly has no tax; otherwise use null.",
+    "Return JSON with this exact shape: {\"invoices\":[{\"extractedText\":\"short transcription of visible key invoice text\",\"shipmentFileNumber\":\"OE12345\",\"entityName\":\"Customer or Vendor Name\",\"invoiceNumber\":\"INV-123\",\"invoiceDate\":\"2026-07-08\",\"dueDate\":\"2026-08-07\",\"currency\":\"CAD\",\"subtotalAmount\":1000.00,\"taxAmount\":130.00,\"totalAmount\":1130.00,\"taxApplicable\":true,\"confidence\":\"HIGH\",\"notes\":\"short note\"}]}."
+  ].join(" ");
+}
+
+function normalizeOcrInvoice(parsed: Record<string, unknown>): InvoiceAutomationOcrInvoice {
+  const invoiceDate = readIsoDate(parsed.invoiceDate);
+  const dueDate = readIsoDate(parsed.dueDate) ?? defaultDueDateFromInvoiceDate(invoiceDate);
+
+  return {
     extractedText: readString(parsed.extractedText) ?? buildSyntheticExtractedText(parsed),
     shipmentFileNumber: normalizeNullableCode(parsed.shipmentFileNumber),
     entityName: readString(parsed.entityName),
@@ -122,28 +157,10 @@ export async function POST(request: Request) {
     confidence: readString(parsed.confidence) ?? "MEDIUM",
     notes: readString(parsed.notes)
   };
-
-  return NextResponse.json(result);
 }
 
-function buildPrompt(invoiceType: "CUSTOMER" | "VENDOR", fileName: string, pageNumbers: number[]) {
-  return [
-    `Invoice type: ${invoiceType}.`,
-    `Source filename: ${fileName}.`,
-    `Attached page numbers: ${pageNumbers.join(", ")}.`,
-    invoiceType === "CUSTOMER"
-      ? "This is a customer invoice Newl sends to its customer. Extract the customer/bill-to name."
-      : "This is a vendor invoice Newl receives from a carrier/vendor. Extract the actual carrier/vendor name, not a factoring company, payment assignee, payable-to party, or remit-to lockbox.",
-    invoiceType === "VENDOR"
-      ? "Many trucking vendors factor receivables. If text says bills were sold/assigned/payable to a financial service company, that company is only the factor/payee. Prefer labels such as Assigned For, carrier name, carrier/vendor identity near the invoice table, or the carrier on the load confirmation. Example: if RTS Financial is payable-to but the invoice says 373 CARGO INCORPORATED or Assigned For: 373 CARGO INCORPORATED, return 373 CARGO INCORPORATED as entityName."
-      : "Do not use Newl/Newells as the customer just because it appears as sender or remittance contact; use the bill-to/customer being invoiced.",
-    "Find the shipment file number if visible. Valid prefixes are OE, OI, AE, AI, TR, and DR.",
-    "Extract invoice number, invoice date, due date, currency, subtotal before tax, sales tax/HST, and total.",
-    "If no due date is visible, return dueDate as null; the app will default payment terms to 30 days after invoice date.",
-    "Do not return a service/category label such as Air Freight, Ocean Freight, Trucking, or Warehouse as entityName.",
-    "If tax is not present, set taxAmount to 0 only when the invoice clearly has no tax; otherwise use null.",
-    "Return JSON with this exact shape: {\"extractedText\":\"short transcription of visible key invoice text\",\"shipmentFileNumber\":\"OE12345\",\"entityName\":\"Customer or Vendor Name\",\"invoiceNumber\":\"INV-123\",\"invoiceDate\":\"2026-07-08\",\"dueDate\":\"2026-08-07\",\"currency\":\"CAD\",\"subtotalAmount\":1000.00,\"taxAmount\":130.00,\"totalAmount\":1130.00,\"taxApplicable\":true,\"confidence\":\"HIGH\",\"notes\":\"short note\"}."
-  ].join(" ");
+function hasAnyInvoiceSignal(invoice: InvoiceAutomationOcrInvoice) {
+  return Boolean(invoice.invoiceNumber || invoice.shipmentFileNumber || invoice.totalAmount !== null || invoice.extractedText);
 }
 
 function isValidImagePayload(value: unknown): value is { pageNumber: number; imageDataUrl: string } {

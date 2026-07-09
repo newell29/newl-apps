@@ -66,6 +66,11 @@ export function extractInvoiceNumber(text: string, fallbackName = "") {
     return cleanToken(labelMatch[1]);
   }
 
+  const freightBillMatch = text.match(/\bP\s*a\s*r\s*t\s+\d+\s+of\s+\d+\s+([A-Z0-9][A-Z0-9._/-]{4,})\b/i);
+  if (freightBillMatch) {
+    return cleanToken(freightBillMatch[1]);
+  }
+
   const fileNameMatch = fallbackName.match(/\b(?:invoice|inv)[\s_-]*([A-Z0-9][A-Z0-9._-]{2,})/i);
   return fileNameMatch ? cleanToken(fileNameMatch[1]) : null;
 }
@@ -89,13 +94,31 @@ export function extractDueDate(text: string) {
 export function extractInvoiceAmounts(text: string) {
   const subtotal = findMoneyByLabels(text, ["subtotal", "sub total", "amount before tax"]);
   const tax = findMoneyByLabels(text, ["hst", "sales tax", "tax"]);
-  const total = findMoneyByLabels(text, ["total amount", "invoice total", "amount due", "balance due", "total rate", "inv amount", "total"]);
+  const total =
+    findTotalFromPrepaidTotals(text) ??
+    findMoneyByLabels(text, ["total amount", "invoice total", "amount due", "balance due", "total rate", "inv amount", "total"]);
 
   return {
     subtotalAmount: subtotal ?? (total !== null && tax !== null ? roundMoney(total - tax) : null),
     taxAmount: tax,
     totalAmount: total ?? (subtotal !== null && tax !== null ? roundMoney(subtotal + tax) : subtotal)
   };
+}
+
+export function splitInvoiceTextIntoDocuments(text: string) {
+  const compact = text.trim();
+  if (!compact) {
+    return [""];
+  }
+
+  const tearChunks = compact
+    .split(/-+\s*Tear\s+Here\s*-+/i)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean);
+  const chunks = tearChunks.length > 1 ? tearChunks : splitByRepeatedInvoiceHeaders(compact);
+  const grouped = groupFreightBillParts(chunks);
+
+  return grouped.length > 1 ? grouped : [compact];
 }
 
 export function matchQuickBooksEntity(
@@ -259,6 +282,70 @@ function findMoneyByLabels(text: string, labels: string[]) {
   }
 
   return null;
+}
+
+function findTotalFromPrepaidTotals(text: string) {
+  const lines = text.split(/\r?\n/);
+  for (const line of lines) {
+    if (!/\bPREPAID\s+TOTALS\b/i.test(line)) {
+      continue;
+    }
+
+    const amounts = line.match(/-?\d{1,3}(?:,\d{3})*(?:\.\d{2})|-?\d+(?:\.\d{2})/g);
+    const lastAmount = amounts?.at(-1);
+    if (lastAmount) {
+      return parseMoney(lastAmount);
+    }
+  }
+
+  return null;
+}
+
+function groupFreightBillParts(chunks: string[]) {
+  const groups = new Map<string, string[]>();
+  const order: string[] = [];
+
+  for (const chunk of chunks) {
+    const match = chunk.match(/\bP\s*a\s*r\s*t\s+(\d+)\s+of\s+(\d+)\s+([A-Z0-9][A-Z0-9._/-]{4,})\b/i);
+    if (!match) {
+      return [];
+    }
+
+    const billNumber = cleanToken(match[3]);
+    if (!groups.has(billNumber)) {
+      groups.set(billNumber, []);
+      order.push(billNumber);
+    }
+    groups.get(billNumber)?.push(chunk);
+  }
+
+  return order.map((billNumber) => groups.get(billNumber)?.join("\n") ?? "").filter(Boolean);
+}
+
+function splitByRepeatedInvoiceHeaders(text: string) {
+  const starts = [...text.matchAll(/\b(?:invoice|inv)\s*(?:number|no\.?|#)\s*[:#-]?\s*[A-Z0-9][A-Z0-9._/-]{2,}/gi)]
+    .map((match) => match.index ?? 0)
+    .filter((index) => index > 0);
+
+  if (starts.length === 0) {
+    return [text];
+  }
+
+  const chunks: string[] = [];
+  let start = 0;
+  for (const nextStart of starts) {
+    const chunk = text.slice(start, nextStart).trim();
+    if (chunk) {
+      chunks.push(chunk);
+    }
+    start = nextStart;
+  }
+  const finalChunk = text.slice(start).trim();
+  if (finalChunk) {
+    chunks.push(finalChunk);
+  }
+
+  return chunks.length > 1 ? chunks : [text];
 }
 
 function normalizeDate(value: string) {

@@ -6,7 +6,8 @@ import {
   extractShipmentFileNumber,
   getBusinessLineFromInvoiceFileNumber,
   getDefaultProductOrAccount,
-  matchQuickBooksEntity
+  matchQuickBooksEntity,
+  splitInvoiceTextIntoDocuments
 } from "@/modules/invoice-automation/extraction";
 import type { InvoiceAutomationEntityOption } from "@/modules/invoice-automation/types";
 
@@ -60,6 +61,39 @@ describe("invoice automation extraction", () => {
       taxAmount: 130,
       totalAmount: 1130
     });
+  });
+
+  it("uses the final amount on prepaid totals freight bills", () => {
+    expect(extractInvoiceAmounts("1 PREPAID TOTALS 200 139.77\nPREPAID\n139.77")).toMatchObject({
+      totalAmount: 139.77
+    });
+  });
+
+  it("splits multi-invoice freight bill attachments into separate invoice texts", () => {
+    const segments = splitInvoiceTextIntoDocuments(`
+      P a r t 1 of 3 1254395251
+      CN- 0035414
+      7 SKIDS FURNITURE
+      ---------------------------- Tear Here ----------------------------
+      P a r t 2 of 3 1254395251
+      APPOINTMENT SET UP CHARGE 30.00
+      ---------------------------- Tear Here ----------------------------
+      P a r t 3 of 3 1254395251
+      7 PREPAID TOTALS 3,714 1241.21
+      ---------------------------- Tear Here ----------------------------
+      P a r t 1 of 2 1254812888
+      CN-TR144N36
+      1 SKID PLUMBING PARTS
+      ---------------------------- Tear Here ----------------------------
+      P a r t 2 of 2 1254812888
+      1 PREPAID TOTALS 200 139.77
+    `);
+
+    expect(segments).toHaveLength(2);
+    expect(segments[0]).toContain("1254395251");
+    expect(segments[0]).toContain("1241.21");
+    expect(segments[1]).toContain("1254812888");
+    expect(segments[1]).toContain("TR144N36");
   });
 
   it("matches OCR text to QuickBooks customer and vendor options", () => {

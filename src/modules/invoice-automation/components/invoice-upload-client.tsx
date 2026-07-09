@@ -9,7 +9,8 @@ import {
   getBusinessLineFromInvoiceFileNumber,
   getDefaultProductOrAccount,
   getInvoiceDraftIssueCodes,
-  getShipmentTypeFromInvoiceFileNumber
+  getShipmentTypeFromInvoiceFileNumber,
+  splitInvoiceTextIntoDocuments
 } from "@/modules/invoice-automation/extraction";
 import {
   formatInvoiceEnum,
@@ -19,6 +20,7 @@ import {
 } from "@/modules/invoice-automation/components";
 import type {
   InvoiceAutomationEntityOption,
+  InvoiceAutomationOcrInvoice,
   InvoiceAutomationOcrResult,
   InvoiceAutomationRow,
   InvoiceAutomationUploadDraft,
@@ -27,7 +29,7 @@ import type {
 
 type PdfJsModule = typeof import("pdfjs-dist");
 
-const OCR_PAGE_LIMIT = 4;
+const OCR_PAGE_LIMIT = 8;
 const OCR_IMAGE_MAX_WIDTH = 1800;
 const OCR_IMAGE_JPEG_QUALITY = 0.82;
 
@@ -270,25 +272,46 @@ function InvoiceUploadModal({
         const bytes = new Uint8Array(await file.arrayBuffer());
         const pdfBase64 = await bytesToBase64(bytes);
         const text = await extractPdfText(bytes);
-        let draft = buildInvoiceDraftFromText({
-          clientId: `${file.name}-${file.size}-${nextDrafts.length}`,
-          fileName: file.name,
-          contentType: file.type || "application/pdf",
-          sizeBytes: file.size,
-          pdfBase64,
-          text,
-          invoiceType,
-          entityOptions
-        });
+        const textSegments = splitInvoiceTextIntoDocuments(text);
+        const fileDrafts = textSegments.map((segmentText, segmentIndex) =>
+          buildInvoiceDraftFromText({
+            clientId: `${file.name}-${file.size}-${nextDrafts.length}-${segmentIndex}`,
+            fileName: textSegments.length > 1 ? `${file.name} - invoice ${segmentIndex + 1}` : file.name,
+            contentType: file.type || "application/pdf",
+            sizeBytes: file.size,
+            pdfBase64,
+            text: segmentText,
+            invoiceType,
+            entityOptions
+          })
+        );
 
-        if (shouldRunVisionOcr(draft)) {
+        if (fileDrafts.length === 1 && shouldRunVisionOcr(fileDrafts[0])) {
           setStatus(`Running OCR on ${file.name}.`);
           const images = await renderInvoicePageImages(bytes);
           const ocrResult = await runInvoiceVisionOcr(invoiceType, file.name, images);
-          draft = mergeOcrResultIntoDraft(draft, ocrResult, invoiceType, entityOptions);
+          if (ocrResult.invoices.length === 0) {
+            nextDrafts.push(fileDrafts[0]);
+            continue;
+          }
+          nextDrafts.push(
+            ...ocrResult.invoices.map((ocrInvoice, ocrIndex) =>
+              mergeOcrInvoiceIntoDraft(
+                {
+                  ...fileDrafts[0],
+                  clientId: `${file.name}-${file.size}-${nextDrafts.length}-ocr-${ocrIndex}`,
+                  fileName: ocrResult.invoices.length > 1 ? `${file.name} - invoice ${ocrIndex + 1}` : file.name
+                },
+                ocrInvoice,
+                invoiceType,
+                entityOptions
+              )
+            )
+          );
+          continue;
         }
 
-        nextDrafts.push(draft);
+        nextDrafts.push(...fileDrafts);
       }
 
       setDrafts(nextDrafts);
@@ -661,9 +684,9 @@ function shouldRunVisionOcr(draft: InvoiceAutomationUploadDraft) {
   return draft.extractedText.length < 80 || draft.issueCodes.some((issue) => blockingIssues.has(issue));
 }
 
-function mergeOcrResultIntoDraft(
+function mergeOcrInvoiceIntoDraft(
   draft: InvoiceAutomationUploadDraft,
-  ocr: InvoiceAutomationOcrResult,
+  ocr: InvoiceAutomationOcrInvoice,
   invoiceType: InvoiceAutomationType,
   entityOptions: InvoiceAutomationEntityOption[]
 ): InvoiceAutomationUploadDraft {

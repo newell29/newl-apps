@@ -67,8 +67,7 @@ export type InvoiceAutomationUploadResponse = {
   invoices: InvoiceAutomationRow[];
 };
 
-export type InvoiceAutomationOcrResult = {
-  model: string;
+export type InvoiceAutomationOcrInvoice = {
   extractedText: string;
   shipmentFileNumber: string | null;
   entityName: string | null;
@@ -82,4 +81,9 @@ export type InvoiceAutomationOcrResult = {
   taxApplicable: boolean | null;
   confidence: string;
   notes: string | null;
+};
+
+export type InvoiceAutomationOcrResult = {
+  model: string;
+  invoices: InvoiceAutomationOcrInvoice[];
 };
