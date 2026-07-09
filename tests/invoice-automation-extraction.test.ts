@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { getInvoiceApprovalBlockingIssues } from "@/modules/invoice-automation/approval";
+import {
+  formatInvoicePostingBlocker,
+  getInvoiceApprovalBlockingIssues,
+  getInvoicePostingBlockingIssues
+} from "@/modules/invoice-automation/approval";
 import { buildVendorInvoiceDuplicateKey } from "@/modules/invoice-automation/duplicates";
 import {
   buildInvoiceDraftFromText,
@@ -173,6 +177,27 @@ describe("invoice automation extraction", () => {
         productOrAccountName: "Ocean Freight"
       })
     ).toEqual(["missing file number", "missing total amount"]);
+  });
+
+  it("blocks QuickBooks posting when required invoice fields are missing", () => {
+    const invoice = {
+      invoiceType: "VENDOR" as const,
+      fileName: "missing-posting-fields.pdf",
+      shipmentFileNumber: "TR12345",
+      invoiceNumber: "V-101",
+      invoiceDate: "2026-07-08",
+      entityNameRaw: "Fast Trucking",
+      quickBooksEntityId: "qb-vendor-usd",
+      currency: null,
+      totalAmount: 100,
+      productOrAccountName: null
+    };
+    const issues = getInvoicePostingBlockingIssues(invoice);
+
+    expect(issues).toEqual(["missing currency", "missing expense account"]);
+    expect(formatInvoicePostingBlocker(invoice, issues)).toBe(
+      "V-101 cannot be posted to QuickBooks because it has missing currency, missing expense account."
+    );
   });
 
   it("builds a customer invoice draft with editable review fields", () => {

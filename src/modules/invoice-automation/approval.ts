@@ -39,6 +39,19 @@ export function formatInvoiceApprovalBlocker(input: InvoiceAutomationApprovalInp
   return `${label} cannot be approved because it has ${issues.join(", ")}.`;
 }
 
+export function getInvoicePostingBlockingIssues(input: InvoiceAutomationApprovalInput) {
+  return getInvoiceApprovalBlockingIssues(input);
+}
+
+export function formatInvoicePostingBlocker(input: InvoiceAutomationApprovalInput, issues: string[]) {
+  const label =
+    readText(input.invoiceNumber) ??
+    readText(input.shipmentFileNumber) ??
+    readText(input.fileName) ??
+    "one selected invoice";
+  return `${label} cannot be posted to QuickBooks because it has ${issues.join(", ")}.`;
+}
+
 function readText(value: string | null | undefined) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
