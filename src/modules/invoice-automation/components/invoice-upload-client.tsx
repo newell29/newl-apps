@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { InvoiceAutomationType } from "@prisma/client";
 import type { PDFPageProxy } from "pdfjs-dist/types/src/display/api";
+import { getInvoiceApprovalBlockingIssues } from "@/modules/invoice-automation/approval";
 import {
   buildInvoiceDraftFromText,
   defaultDueDateFromInvoiceDate,
@@ -183,7 +184,8 @@ export function InvoiceRowsTable({
             </tr>
           ) : (
             invoices.map((invoice) => {
-              const selectable = !selectableStatus || invoice.status === selectableStatus;
+              const hasApprovalBlockers = getInvoiceApprovalBlockingIssues(invoice).length > 0;
+              const selectable = (!selectableStatus || invoice.status === selectableStatus) && !hasApprovalBlockers;
               return (
                 <tr key={invoice.id} className="align-top hover:bg-muted/30">
                   {onSelectionChange ? (
@@ -251,6 +253,7 @@ function InvoiceUploadModal({
   const [status, setStatus] = useState("Choose one or more PDF invoices.");
   const relevantEntities = useMemo(() => entityOptions.filter((option) => option.entityType === invoiceType), [entityOptions, invoiceType]);
   const title = invoiceType === "CUSTOMER" ? "Add customer invoices" : "Add vendor invoices";
+  const hasApprovalBlockers = drafts.some((draft) => getInvoiceApprovalBlockingIssues({ ...draft, invoiceType }).length > 0);
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) {
@@ -496,7 +499,7 @@ function InvoiceUploadModal({
             <button
               type="button"
               onClick={() => void saveDrafts(true)}
-              disabled={drafts.length === 0 || isSaving}
+              disabled={drafts.length === 0 || hasApprovalBlockers || isSaving}
               className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSaving ? "Saving..." : "Approve and send accounting"}

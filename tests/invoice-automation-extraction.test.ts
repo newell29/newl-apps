@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { getInvoiceApprovalBlockingIssues } from "@/modules/invoice-automation/approval";
 import { buildVendorInvoiceDuplicateKey } from "@/modules/invoice-automation/duplicates";
 import {
   buildInvoiceDraftFromText,
@@ -140,6 +141,38 @@ describe("invoice automation extraction", () => {
         entityNameRaw: "Fast Trucking"
       })
     ).toBeNull();
+  });
+
+  it("blocks approval when customer or vendor invoice required fields are missing", () => {
+    expect(
+      getInvoiceApprovalBlockingIssues({
+        invoiceType: "VENDOR",
+        fileName: "bad-vendor.pdf",
+        shipmentFileNumber: "TR12345",
+        invoiceNumber: "V-100",
+        invoiceDate: "2026-07-08",
+        entityNameRaw: "Fast Trucking",
+        quickBooksEntityId: null,
+        currency: "CAD",
+        totalAmount: 100,
+        productOrAccountName: "5015 Trucking Rate"
+      })
+    ).toContain("missing QuickBooks match");
+
+    expect(
+      getInvoiceApprovalBlockingIssues({
+        invoiceType: "CUSTOMER",
+        fileName: "bad-customer.pdf",
+        shipmentFileNumber: null,
+        invoiceNumber: "C-100",
+        invoiceDate: "2026-07-08",
+        entityNameRaw: "Acme Logistics",
+        quickBooksEntityId: "qb-customer-cad",
+        currency: "CAD",
+        totalAmount: null,
+        productOrAccountName: "Ocean Freight"
+      })
+    ).toEqual(["missing file number", "missing total amount"]);
   });
 
   it("builds a customer invoice draft with editable review fields", () => {

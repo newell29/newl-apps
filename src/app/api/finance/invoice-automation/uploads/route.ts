@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { InvoiceAutomationBatchStatus, InvoiceAutomationStatus, ModuleKey, PlatformRole, Prisma, type InvoiceAutomationType } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
+import { formatInvoiceApprovalBlocker, getInvoiceApprovalBlockingIssues } from "@/modules/invoice-automation/approval";
 import { buildVendorInvoiceDuplicateKey } from "@/modules/invoice-automation/duplicates";
 import { defaultDueDateFromInvoiceDate, getInvoiceDraftIssueCodes } from "@/modules/invoice-automation/extraction";
 import type { InvoiceAutomationUploadDraft, InvoiceAutomationUploadResponse } from "@/modules/invoice-automation/types";
@@ -39,6 +40,13 @@ export async function POST(request: Request) {
 
     if (invoices.length > 25) {
       return NextResponse.json({ error: "Upload 25 invoices or fewer at a time." }, { status: 400 });
+    }
+
+    if (sendToAccounting) {
+      const approvalBlocker = findDraftApprovalBlocker(invoiceType, invoices);
+      if (approvalBlocker) {
+        return NextResponse.json({ error: approvalBlocker }, { status: 422 });
+      }
     }
 
     const duplicateKeyByClientId = buildDuplicateKeyMap(invoiceType, invoices);
@@ -260,6 +268,37 @@ function buildDuplicateKeyMap(invoiceType: InvoiceAutomationType, invoices: Invo
   }
 
   return duplicateKeyByClientId;
+}
+
+function findDraftApprovalBlocker(invoiceType: InvoiceAutomationType, invoices: InvoiceAutomationUploadDraft[]) {
+  for (const invoice of invoices) {
+    const issues = getInvoiceApprovalBlockingIssues({
+      invoiceType,
+      fileName: invoice.fileName,
+      shipmentFileNumber: invoice.shipmentFileNumber,
+      invoiceNumber: invoice.invoiceNumber,
+      invoiceDate: invoice.invoiceDate,
+      entityNameRaw: invoice.entityNameRaw,
+      quickBooksEntityId: invoice.quickBooksEntityId,
+      currency: invoice.currency,
+      totalAmount: invoice.totalAmount,
+      productOrAccountName: invoice.productOrAccountName
+    });
+
+    if (issues.length > 0) {
+      return formatInvoiceApprovalBlocker(
+        {
+          invoiceType,
+          fileName: invoice.fileName,
+          shipmentFileNumber: invoice.shipmentFileNumber,
+          invoiceNumber: invoice.invoiceNumber
+        },
+        issues
+      );
+    }
+  }
+
+  return null;
 }
 
 function findDuplicateUploadInvoice(

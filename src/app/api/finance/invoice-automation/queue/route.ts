@@ -1,6 +1,7 @@
 import { InvoiceAutomationBatchStatus, InvoiceAutomationStatus, ModuleKey, PlatformRole } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
+import { formatInvoiceApprovalBlocker, getInvoiceApprovalBlockingIssues, InvoiceApprovalError } from "@/modules/invoice-automation/approval";
 import { requireModule, requireMutationAccess, requireRole } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -25,10 +26,43 @@ export async function POST(request: Request) {
 
     const now = new Date();
     await prisma.$transaction(async (tx) => {
-      await tx.invoiceAutomationInvoice.updateMany({
+      const selectedInvoices = await tx.invoiceAutomationInvoice.findMany({
         where: {
           tenantId: context.tenantId,
           id: { in: invoiceIds },
+          status: InvoiceAutomationStatus.OPERATIONS_REVIEW
+        },
+        select: {
+          id: true,
+          invoiceType: true,
+          fileName: true,
+          shipmentFileNumber: true,
+          invoiceNumber: true,
+          invoiceDate: true,
+          entityNameRaw: true,
+          quickBooksEntityId: true,
+          currency: true,
+          totalAmount: true,
+          productOrAccountName: true
+        }
+      });
+      const selectedIds = new Set(selectedInvoices.map((invoice) => invoice.id));
+
+      if (selectedInvoices.length !== invoiceIds.length) {
+        throw new InvoiceApprovalError("One or more selected invoices are no longer available for operations review.");
+      }
+
+      for (const invoice of selectedInvoices) {
+        const issues = getInvoiceApprovalBlockingIssues(invoice);
+        if (issues.length > 0) {
+          throw new InvoiceApprovalError(formatInvoiceApprovalBlocker(invoice, issues));
+        }
+      }
+
+      await tx.invoiceAutomationInvoice.updateMany({
+        where: {
+          tenantId: context.tenantId,
+          id: { in: [...selectedIds] },
           status: InvoiceAutomationStatus.OPERATIONS_REVIEW
         },
         data: {
@@ -81,10 +115,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error(error);
+    if (error instanceof InvoiceApprovalError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to send invoices to accounting." },
       { status: 500 }
     );
   }
 }
-

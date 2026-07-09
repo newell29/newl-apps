@@ -2,6 +2,7 @@
 
 import { InvoiceAutomationBatchStatus, InvoiceAutomationStatus, ModuleKey, PlatformRole } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { formatInvoiceApprovalBlocker, getInvoiceApprovalBlockingIssues, InvoiceApprovalError } from "@/modules/invoice-automation/approval";
 import { prisma } from "@/server/db";
 import { requireModule, requireMutationAccess, requireRole } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -20,6 +21,21 @@ export async function sendInvoiceAutomationToAccountingAction(formData: FormData
   const now = new Date();
 
   await prisma.$transaction(async (tx) => {
+    const selectedInvoices = await tx.invoiceAutomationInvoice.findMany({
+      where: {
+        tenantId: context.tenantId,
+        id: { in: invoiceIds },
+        status: InvoiceAutomationStatus.OPERATIONS_REVIEW
+      },
+      select: APPROVAL_VALIDATION_SELECT
+    });
+
+    if (selectedInvoices.length !== invoiceIds.length) {
+      throw new InvoiceApprovalError("One or more selected invoices are no longer available for operations review.");
+    }
+
+    assertInvoicesAreCompleteForApproval(selectedInvoices);
+
     await tx.invoiceAutomationInvoice.updateMany({
       where: {
         tenantId: context.tenantId,
@@ -83,30 +99,47 @@ export async function approveInvoiceAutomationForPostingAction(formData: FormDat
   }
 
   const now = new Date();
-  await prisma.invoiceAutomationInvoice.updateMany({
-    where: {
-      tenantId: context.tenantId,
-      id: { in: invoiceIds },
-      status: InvoiceAutomationStatus.ACCOUNTING_REVIEW
-    },
-    data: {
-      status: InvoiceAutomationStatus.APPROVED_FOR_POSTING,
-      approvedByUserId: context.userId,
-      approvedAt: now
-    }
-  });
+  await prisma.$transaction(async (tx) => {
+    const selectedInvoices = await tx.invoiceAutomationInvoice.findMany({
+      where: {
+        tenantId: context.tenantId,
+        id: { in: invoiceIds },
+        status: InvoiceAutomationStatus.ACCOUNTING_REVIEW
+      },
+      select: APPROVAL_VALIDATION_SELECT
+    });
 
-  await prisma.auditLog.create({
-    data: {
-      tenantId: context.tenantId,
-      actorUserId: context.userId,
-      action: "invoice-automation.approved-for-posting",
-      entityType: "InvoiceAutomationInvoice",
-      after: {
-        invoiceIds,
-        count: invoiceIds.length
-      }
+    if (selectedInvoices.length !== invoiceIds.length) {
+      throw new InvoiceApprovalError("One or more selected invoices are no longer available for accounting review.");
     }
+
+    assertInvoicesAreCompleteForApproval(selectedInvoices);
+
+    await tx.invoiceAutomationInvoice.updateMany({
+      where: {
+        tenantId: context.tenantId,
+        id: { in: invoiceIds },
+        status: InvoiceAutomationStatus.ACCOUNTING_REVIEW
+      },
+      data: {
+        status: InvoiceAutomationStatus.APPROVED_FOR_POSTING,
+        approvedByUserId: context.userId,
+        approvedAt: now
+      }
+    });
+
+    await tx.auditLog.create({
+      data: {
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        action: "invoice-automation.approved-for-posting",
+        entityType: "InvoiceAutomationInvoice",
+        after: {
+          invoiceIds,
+          count: invoiceIds.length
+        }
+      }
+    });
   });
 
   revalidateInvoiceAutomation();
@@ -118,3 +151,35 @@ function revalidateInvoiceAutomation() {
   revalidatePath("/finance/invoice-automation/posted");
 }
 
+const APPROVAL_VALIDATION_SELECT = {
+  invoiceType: true,
+  fileName: true,
+  shipmentFileNumber: true,
+  invoiceNumber: true,
+  invoiceDate: true,
+  entityNameRaw: true,
+  quickBooksEntityId: true,
+  currency: true,
+  totalAmount: true,
+  productOrAccountName: true
+} as const;
+
+function assertInvoicesAreCompleteForApproval(invoices: Array<{
+  invoiceType: "CUSTOMER" | "VENDOR";
+  fileName: string | null;
+  shipmentFileNumber: string | null;
+  invoiceNumber: string | null;
+  invoiceDate: Date | null;
+  entityNameRaw: string | null;
+  quickBooksEntityId: string | null;
+  currency: string | null;
+  totalAmount: { toString(): string } | null;
+  productOrAccountName: string | null;
+}>) {
+  for (const invoice of invoices) {
+    const issues = getInvoiceApprovalBlockingIssues(invoice);
+    if (issues.length > 0) {
+      throw new InvoiceApprovalError(formatInvoiceApprovalBlocker(invoice, issues));
+    }
+  }
+}
