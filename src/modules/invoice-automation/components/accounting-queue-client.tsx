@@ -3,14 +3,18 @@
 import { useMemo, useState } from "react";
 import type { InvoiceAutomationType } from "@prisma/client";
 import { getInvoiceApprovalBlockingIssues } from "@/modules/invoice-automation/approval";
+import { QuickBooksEntitySearchSelect } from "@/modules/invoice-automation/components/quickbooks-entity-search-select";
 import {
   defaultDueDateFromInvoiceDate,
+  deriveInvoiceTotal,
   getBusinessLineFromInvoiceFileNumber,
   getDefaultProductOrAccount,
   getInvoiceDraftIssueCodes,
-  getShipmentTypeFromInvoiceFileNumber
+  getShipmentTypeFromInvoiceFileNumber,
+  normalizeInvoiceAmountsForCurrency
 } from "@/modules/invoice-automation/extraction";
 import {
+  formatInvoiceMoney,
   formatInvoiceEnum,
   InvoiceStatusPill,
   InvoiceTypePill
@@ -112,6 +116,15 @@ export function AccountingQueueClient({
         if (patch.invoiceDate !== undefined && !next.dueDate) {
           next.dueDate = defaultDueDateFromInvoiceDate(next.invoiceDate);
         }
+        const normalizedAmounts = normalizeInvoiceAmountsForCurrency({
+          currency: next.currency,
+          subtotalAmount: next.subtotalAmount,
+          taxAmount: next.taxAmount,
+          totalAmount: next.totalAmount
+        });
+        next.subtotalAmount = normalizedAmounts.subtotalAmount;
+        next.taxAmount = normalizedAmounts.taxAmount;
+        next.totalAmount = normalizedAmounts.totalAmount;
         next.issueCodes = getInvoiceDraftIssueCodes({
           extractedText: "manual accounting edit",
           shipmentFileNumber: next.shipmentFileNumber,
@@ -146,7 +159,7 @@ export function AccountingQueueClient({
           currency: invoice.currency,
           subtotalAmount: invoice.subtotalAmount,
           taxAmount: invoice.taxAmount,
-          totalAmount: invoice.totalAmount,
+          totalAmount: deriveInvoiceTotal(invoice.subtotalAmount, invoice.taxAmount, invoice.totalAmount),
           productOrAccountName: invoice.productOrAccountName
         })
       });
@@ -414,7 +427,7 @@ export function AccountingQueueClient({
                       <SmallInput value={invoice.entityNameRaw ?? ""} onChange={(value) => updateRow(invoice.id, { entityNameRaw: value || null })} />
                     </td>
                     <td className="px-3 py-3">
-                      <EntitySelect
+                      <QuickBooksEntitySearchSelect
                         invoiceType={invoice.invoiceType}
                         options={relevantEntities}
                         value={invoice.quickBooksEntityId ?? ""}
@@ -435,7 +448,7 @@ export function AccountingQueueClient({
                     <td className="px-3 py-3"><SmallInput value={invoice.currency ?? ""} onChange={(value) => updateRow(invoice.id, { currency: value.toUpperCase() || null })} className="w-24" /></td>
                     <td className="px-3 py-3"><MoneyInput value={invoice.subtotalAmount} onChange={(value) => updateRow(invoice.id, { subtotalAmount: value })} /></td>
                     <td className="px-3 py-3"><MoneyInput value={invoice.taxAmount} onChange={(value) => updateRow(invoice.id, { taxAmount: value })} /></td>
-                    <td className="px-3 py-3"><MoneyInput value={invoice.totalAmount} onChange={(value) => updateRow(invoice.id, { totalAmount: value })} /></td>
+                    <td className="px-3 py-3 text-right font-semibold text-foreground">{formatInvoiceMoney(deriveInvoiceTotal(invoice.subtotalAmount, invoice.taxAmount, invoice.totalAmount), invoice.currency)}</td>
                     <td className="px-3 py-3"><SmallInput value={invoice.productOrAccountName ?? ""} onChange={(value) => updateRow(invoice.id, { productOrAccountName: value || null })} /></td>
                     <td className="max-w-[280px] px-3 py-3 text-mutedForeground">
                       {blockers.length === 0 ? "Ready" : blockers.join(", ")}
@@ -471,36 +484,6 @@ export function AccountingQueueClient({
         </table>
       </div>
     </section>
-  );
-}
-
-function EntitySelect({
-  invoiceType,
-  options,
-  value,
-  onChange
-}: {
-  invoiceType: InvoiceAutomationType;
-  options: InvoiceAutomationEntityOption[];
-  value: string;
-  onChange: (option: InvoiceAutomationEntityOption | null) => void;
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(event) => {
-        const option = options.find((entity) => entity.id === event.target.value);
-        onChange(option ?? null);
-      }}
-      className="w-56 rounded-md border border-input bg-background px-2 py-1.5"
-    >
-      <option value="">{invoiceType === "CUSTOMER" ? "Match customer" : "Match vendor"}</option>
-      {options.map((entity) => (
-        <option key={`${entity.entityType}-${entity.id}`} value={entity.id}>
-          {entity.displayName}{entity.currency ? ` (${entity.currency})` : ""}
-        </option>
-      ))}
-    </select>
   );
 }
 

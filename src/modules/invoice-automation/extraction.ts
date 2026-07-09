@@ -3,6 +3,32 @@ import type { InvoiceAutomationEntityOption, InvoiceAutomationUploadDraft } from
 
 const FILE_NUMBER_PATTERN = /(?:^|[^A-Z0-9])(OE|OI|AE|AI|TR|DR)\s*[-_#:]?\s*(\d+[A-Z]?\d*)(?=$|[^A-Z0-9])/i;
 const COMMON_CURRENCY_CODES = ["CAD", "USD", "EUR", "GBP", "AUD", "MXN", "CNY", "JPY", "CHF", "HKD", "SGD"];
+const CANADIAN_TAX_LABEL_PATTERN = /\b(?:GST|HST|PST|QST|SALES\s+TAX|TAX)\b/i;
+const FOREIGN_TAX_LABEL_PATTERN = /\b(?:VAT|IVA|TVA)\b/i;
+const ENTITY_MATCH_STOPWORDS = new Set([
+  "air",
+  "alberta",
+  "bc",
+  "british",
+  "canada",
+  "canadian",
+  "columbia",
+  "drayage",
+  "freight",
+  "gst",
+  "hst",
+  "manitoba",
+  "new",
+  "ontario",
+  "ocean",
+  "pst",
+  "qst",
+  "rate",
+  "saskatchewan",
+  "tax",
+  "trucking",
+  "vendor"
+]);
 
 const CUSTOMER_PRODUCT_BY_PREFIX: Record<string, string> = {
   OE: "Ocean Freight",
@@ -192,18 +218,69 @@ export function extractDueDate(text: string) {
   return findDateByLabels(text, ["due date", "payment due"]);
 }
 
-export function extractInvoiceAmounts(text: string) {
+export function extractInvoiceAmounts(text: string, currency?: string | null) {
   const subtotal = findMoneyByLabels(text, ["subtotal", "sub total", "amount before tax"]);
-  const tax = findMoneyByLabels(text, ["hst", "sales tax", "tax"]);
+  const tax = findCanadianTaxAmount(text) ?? findForeignTaxAmount(text) ?? findMoneyByLabels(text, ["hst", "gst", "pst", "qst", "sales tax", "tax", "vat"]);
   const total =
     findTotalFromPrepaidTotals(text) ??
     findMoneyByLabels(text, ["total amount", "invoice total", "amount due", "balance due", "total rate", "inv amount", "total"]);
 
+  return normalizeInvoiceAmountsForCurrency({
+    currency,
+    subtotalAmount: subtotal,
+    taxAmount: tax,
+    totalAmount: total
+  });
+}
+
+export function normalizeInvoiceAmountsForCurrency({
+  currency,
+  subtotalAmount,
+  taxAmount,
+  totalAmount
+}: {
+  currency?: string | null;
+  subtotalAmount: number | null;
+  taxAmount: number | null;
+  totalAmount: number | null;
+}) {
+  const normalizedCurrency = currency?.toUpperCase() ?? null;
+  const subtotal = subtotalAmount;
+  let tax = taxAmount;
+  let total = totalAmount;
+
+  if (subtotal !== null && tax === null && total !== null && total >= subtotal) {
+    tax = roundMoney(total - subtotal);
+  }
+
+  if (normalizedCurrency && normalizedCurrency !== "CAD" && tax !== null && tax > 0) {
+    const costInclusiveTotal = total ?? (subtotal !== null ? roundMoney(subtotal + tax) : null);
+    return {
+      subtotalAmount: costInclusiveTotal ?? subtotal,
+      taxAmount: 0,
+      totalAmount: costInclusiveTotal ?? subtotal
+    };
+  }
+
+  total = deriveInvoiceTotal(subtotal, tax, total);
+
   return {
     subtotalAmount: subtotal ?? (total !== null && tax !== null ? roundMoney(total - tax) : null),
     taxAmount: tax,
-    totalAmount: total ?? (subtotal !== null && tax !== null ? roundMoney(subtotal + tax) : subtotal)
+    totalAmount: total
   };
+}
+
+export function deriveInvoiceTotal(subtotalAmount: number | null, taxAmount: number | null, fallbackTotal: number | null = null) {
+  if (subtotalAmount !== null && taxAmount !== null) {
+    return roundMoney(subtotalAmount + taxAmount);
+  }
+
+  if (subtotalAmount !== null) {
+    return fallbackTotal ?? subtotalAmount;
+  }
+
+  return fallbackTotal;
 }
 
 export function splitInvoiceTextIntoDocuments(text: string) {
@@ -225,7 +302,11 @@ export function splitInvoiceTextIntoDocuments(text: string) {
   const chunks = tearChunks.length > 1 ? tearChunks : splitByRepeatedInvoiceHeaders(compact);
   const grouped = groupFreightBillParts(chunks);
 
-  return grouped.length > 1 ? grouped : [compact];
+  if (grouped.length > 1) {
+    return grouped;
+  }
+
+  return chunks.length > 1 ? chunks : [compact];
 }
 
 export function matchQuickBooksEntity(
@@ -249,9 +330,10 @@ export function matchQuickBooksEntity(
     if (normalizedText.includes(normalizedName)) {
       confidence = normalizedName.length > 12 ? 96 : 88;
     } else {
-      const parts = normalizedName.split(" ").filter((part) => part.length > 2);
+      const parts = normalizedName.split(" ").filter((part) => part.length > 2 && !ENTITY_MATCH_STOPWORDS.has(part));
       const matchedParts = parts.filter((part) => normalizedText.includes(part)).length;
-      if (parts.length > 0 && matchedParts > 0) {
+      const minimumMatchedParts = Math.min(2, parts.length);
+      if (parts.length > 0 && matchedParts >= minimumMatchedParts) {
         confidence = Math.round((matchedParts / parts.length) * 70);
       }
     }
@@ -294,7 +376,7 @@ export function buildInvoiceDraftFromText({
   const businessLine = getBusinessLineFromInvoiceFileNumber(shipmentFileNumber);
   const currency = extractCurrency(text);
   const entityMatch = matchQuickBooksEntity(text, invoiceType, entityOptions, currency);
-  const amounts = extractInvoiceAmounts(text);
+  const amounts = extractInvoiceAmounts(text, currency);
   const invoiceDate = extractInvoiceDate(text);
   const dueDate = extractDueDate(text) ?? defaultDueDateFromInvoiceDate(invoiceDate);
   const draft: InvoiceAutomationUploadDraft = {
@@ -400,13 +482,59 @@ function findDateByLabels(text: string, labels: string[]) {
 
 function findMoneyByLabels(text: string, labels: string[]) {
   for (const label of labels) {
-    const match = text.match(new RegExp(`${escapeRegExp(label)}\\s*:?\\s*(?:CAD|USD|CDN)?\\s*\\$?\\s*(-?\\d{1,3}(?:,\\d{3})*(?:\\.\\d{2})|-?\\d+(?:\\.\\d{2}))`, "i"));
+    const match = text.match(new RegExp(`(?:^|[^A-Za-z])${escapeRegExp(label)}\\s*:?\\s*(?:CAD|USD|CDN|EUR|GBP|AUD|MXN|CNY|JPY|CHF|HKD|SGD)?\\s*[$€£]?\\s*(-?\\d{1,3}(?:,\\d{3})*(?:\\.\\d{2})|-?\\d+(?:\\.\\d{2}))`, "i"));
     if (match) {
       return parseMoney(match[1]);
     }
   }
 
   return null;
+}
+
+function findCanadianTaxAmount(text: string) {
+  return sumTaxLines(text, CANADIAN_TAX_LABEL_PATTERN);
+}
+
+function findForeignTaxAmount(text: string) {
+  return sumTaxLines(text, FOREIGN_TAX_LABEL_PATTERN);
+}
+
+function sumTaxLines(text: string, labelPattern: RegExp) {
+  let taxAmount = 0;
+  let found = false;
+
+  for (const line of text.split(/\r?\n/)) {
+    if (!labelPattern.test(line) || /\b(?:subtotal|sub\s+total|total|amount\s+due|balance\s+due)\b/i.test(line)) {
+      continue;
+    }
+
+    const amount = parseLastMoneyAmount(line);
+    if (amount === null) {
+      continue;
+    }
+
+    taxAmount += amount;
+    found = true;
+  }
+
+  return found ? roundMoney(taxAmount) : null;
+}
+
+function parseLastMoneyAmount(line: string) {
+  const amountMatches = [
+    ...line.matchAll(/(?:CAD|USD|CDN|EUR|GBP|AUD|MXN|CNY|JPY|CHF|HKD|SGD)?\s*[$€£]?\s*(-?\d{1,3}(?:,\d{3})*(?:\.\d{2})|-?\d+\.\d{2})/gi)
+  ];
+  const candidates = amountMatches
+    .filter((match) => {
+      const index = match.index ?? 0;
+      const before = line.slice(Math.max(0, index - 1), index);
+      const after = line.slice(index + match[0].length, index + match[0].length + 1);
+      return before !== "%" && after !== "%";
+    })
+    .map((match) => parseMoney(match[1]))
+    .filter((amount): amount is number => amount !== null);
+
+  return candidates.at(-1) ?? null;
 }
 
 function findTotalFromPrepaidTotals(text: string) {
@@ -463,26 +591,27 @@ function splitByFreightBillPartHeaders(text: string) {
 }
 
 function splitByRepeatedInvoiceHeaders(text: string) {
-  const starts = [...text.matchAll(/\b(?:invoice|inv)\s*(?:number|no\.?|#)\s*[:#-]?\s*[A-Z0-9][A-Z0-9._/-]{2,}/gi)]
-    .map((match) => match.index ?? 0)
-    .filter((index) => index > 0);
+  const headers = [...text.matchAll(/\b(?:invoice|inv)\s*(?:number|no\.?|#)\s*[:#-]?\s*([A-Z0-9][A-Z0-9._/-]{2,})/gi)]
+    .map((match) => ({
+      index: match.index ?? 0,
+      invoiceNumber: cleanToken(match[1])
+    }))
+    .filter((match) => !isGenericInvoiceFileToken(match.invoiceNumber));
 
-  if (starts.length === 0) {
+  const uniqueInvoiceNumbers = new Set(headers.map((header) => header.invoiceNumber.toUpperCase()));
+  if (headers.length <= 1 || uniqueInvoiceNumbers.size <= 1) {
     return [text];
   }
 
+  const prefix = text.slice(0, headers[0].index).trim();
   const chunks: string[] = [];
-  let start = 0;
-  for (const nextStart of starts) {
-    const chunk = text.slice(start, nextStart).trim();
+  for (const [index, header] of headers.entries()) {
+    const end = headers[index + 1]?.index ?? text.length;
+    const body = text.slice(header.index, end).trim();
+    const chunk = [prefix, body].filter(Boolean).join("\n").trim();
     if (chunk) {
       chunks.push(chunk);
     }
-    start = nextStart;
-  }
-  const finalChunk = text.slice(start).trim();
-  if (finalChunk) {
-    chunks.push(finalChunk);
   }
 
   return chunks.length > 1 ? chunks : [text];

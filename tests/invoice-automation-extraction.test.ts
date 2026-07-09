@@ -72,6 +72,8 @@ describe("invoice automation extraction", () => {
     expect(getBusinessLineFromInvoiceFileNumber("DR12345")).toBe("TRUCKING");
     expect(getDefaultProductOrAccount("CUSTOMER", "OI12345")).toBe("Ocean Freight");
     expect(getDefaultProductOrAccount("VENDOR", "TR12345")).toBe("5015 Trucking Rate");
+    expect(getDefaultProductOrAccount("CUSTOMER", "DR12345")).toBe("Trucking");
+    expect(getDefaultProductOrAccount("VENDOR", "DR12345")).toBe("5015 Trucking Rate");
   });
 
   it("extracts subtotal, tax, and total amounts", () => {
@@ -85,6 +87,56 @@ describe("invoice automation extraction", () => {
       subtotalAmount: 1000,
       taxAmount: 130,
       totalAmount: 1130
+    });
+  });
+
+  it("extracts Canadian provincial tax lines and derives totals", () => {
+    expect(
+      extractInvoiceAmounts(
+        `
+          Subtotal CAD 800.00
+          GST British Columbia 5% CAD 40.00
+          PST British Columbia 7% CAD 56.00
+          Total CAD 896.00
+        `,
+        "CAD"
+      )
+    ).toEqual({
+      subtotalAmount: 800,
+      taxAmount: 96,
+      totalAmount: 896
+    });
+
+    expect(
+      extractInvoiceAmounts(
+        `
+          Subtotal CAD 410.00
+          GST Alberta 5% CAD 20.50
+          Total CAD 430.50
+        `,
+        "CAD"
+      )
+    ).toEqual({
+      subtotalAmount: 410,
+      taxAmount: 20.5,
+      totalAmount: 430.5
+    });
+  });
+
+  it("keeps non-Canadian VAT out of tax and includes it in cost", () => {
+    expect(
+      extractInvoiceAmounts(
+        `
+          Subtotal GBP 600.00
+          VAT United Kingdom 20% GBP 120.00
+          Total GBP 720.00
+        `,
+        "GBP"
+      )
+    ).toEqual({
+      subtotalAmount: 720,
+      taxAmount: 0,
+      totalAmount: 720
     });
   });
 
@@ -203,11 +255,65 @@ describe("invoice automation extraction", () => {
     ]);
   });
 
+  it("splits bundled vendor invoice pages by distinct invoice number", () => {
+    const segments = splitInvoiceTextIntoDocuments(`
+      Test Company - DO NOT PROCESS
+      VENDOR BILL
+      Invoice Number: TEST-V-BUNDLE-009A
+      Invoice Date: 2026-07-10
+      Currency: CAD
+      Shipment File Number: TR919N26
+      Subtotal CAD 275.00
+      HST Ontario 13% CAD 35.75
+      Total CAD 310.75
+
+      Test Company - DO NOT PROCESS
+      VENDOR BILL
+      Invoice Number: TEST-V-BUNDLE-009B
+      Invoice Date: 2026-07-10
+      Currency: CAD
+      Shipment File Number: DR920N26
+      Subtotal CAD 325.00
+      GST Alberta 5% CAD 16.25
+      Total CAD 341.25
+    `);
+
+    expect(segments).toHaveLength(2);
+    expect(segments.map((segment) => extractInvoiceAmounts(segment, "CAD"))).toEqual([
+      { subtotalAmount: 275, taxAmount: 35.75, totalAmount: 310.75 },
+      { subtotalAmount: 325, taxAmount: 16.25, totalAmount: 341.25 }
+    ]);
+    expect(segments.map((segment) => extractShipmentFileNumber(segment))).toEqual(["TR919N26", "DR920N26"]);
+  });
+
   it("matches OCR text to QuickBooks customer and vendor options", () => {
     expect(matchQuickBooksEntity("Bill To: Acme Logistics", "CUSTOMER", entityOptions)?.option.id).toBe(
       "qb-customer-cad"
     );
     expect(matchQuickBooksEntity("Vendor: Fast Trucking", "VENDOR", entityOptions)?.option.id).toBe("qb-vendor-usd");
+  });
+
+  it("does not match QuickBooks entities on province names alone", () => {
+    expect(
+      matchQuickBooksEntity(
+        `
+          Test Company - DO NOT PROCESS
+          HST Ontario 13% CAD 35.75
+          Total CAD 310.75
+        `,
+        "VENDOR",
+        [
+          {
+            id: "qb-an-ontario",
+            entityType: "VENDOR",
+            displayName: "AN Ontario CAD",
+            normalizedName: "an ontario",
+            currency: "CAD"
+          }
+        ],
+        "CAD"
+      )
+    ).toBeNull();
   });
 
   it("normalizes camel-case OCR customer names before QuickBooks matching", () => {

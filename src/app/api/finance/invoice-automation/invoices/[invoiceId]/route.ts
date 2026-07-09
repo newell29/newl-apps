@@ -8,7 +8,8 @@ import {
   getBusinessLineFromInvoiceFileNumber,
   getDefaultProductOrAccount,
   getInvoiceDraftIssueCodes,
-  getShipmentTypeFromInvoiceFileNumber
+  getShipmentTypeFromInvoiceFileNumber,
+  normalizeInvoiceAmountsForCurrency
 } from "@/modules/invoice-automation/extraction";
 import { toInvoiceAutomationRow } from "@/modules/invoice-automation/row-mapper";
 import { requireModule, requireMutationAccess, requireRole } from "@/server/auth/authorization";
@@ -87,6 +88,13 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
     const quickBooksEntityId = readNullable(body.quickBooksEntityId);
     const quickBooksEntityDisplayName = readNullable(body.quickBooksEntityDisplayName);
     const entityNameRaw = readNullable(body.entityNameRaw) ?? quickBooksEntityDisplayName;
+    const currency = readNullable(body.currency)?.toUpperCase() ?? null;
+    const amounts = normalizeInvoiceAmountsForCurrency({
+      currency,
+      subtotalAmount: readMoney(body.subtotalAmount),
+      taxAmount: readMoney(body.taxAmount),
+      totalAmount: readMoney(body.totalAmount)
+    });
     const productOrAccountName =
       readNullable(body.productOrAccountName) ?? getDefaultProductOrAccount(existing.invoiceType, shipmentFileNumber);
     const duplicateKey = buildInvoiceDuplicateKey({
@@ -135,8 +143,8 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
       invoiceDate,
       entityNameRaw,
       quickBooksEntityId,
-      totalAmount: readMoney(body.totalAmount),
-      currency: readNullable(body.currency),
+      totalAmount: amounts.totalAmount,
+      currency,
       productOrAccountName
     });
 
@@ -160,10 +168,10 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
         vendorInvoiceDuplicateKey: duplicateKey,
         invoiceDate: parseDate(invoiceDate),
         dueDate: parseDate(dueDate),
-        currency: readNullable(body.currency)?.toUpperCase() ?? null,
-        subtotalAmount: decimalOrNull(readMoney(body.subtotalAmount)),
-        taxAmount: decimalOrNull(readMoney(body.taxAmount)),
-        totalAmount: decimalOrNull(readMoney(body.totalAmount)),
+        currency,
+        subtotalAmount: decimalOrNull(amounts.subtotalAmount),
+        taxAmount: decimalOrNull(amounts.taxAmount),
+        totalAmount: decimalOrNull(amounts.totalAmount),
         productOrAccountName,
         issueCodes: issueCodes as Prisma.InputJsonValue,
         approvedByUserId: null,
@@ -185,7 +193,7 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
       aliasRawName: entityNameRaw,
       quickBooksEntityId,
       quickBooksEntityDisplayName,
-      currency: readNullable(body.currency),
+      currency,
       userId: context.userId
     });
 

@@ -1,6 +1,6 @@
 import { ModuleKey } from "@prisma/client";
 import { NextResponse } from "next/server";
-import { defaultDueDateFromInvoiceDate } from "@/modules/invoice-automation/extraction";
+import { defaultDueDateFromInvoiceDate, normalizeInvoiceAmountsForCurrency } from "@/modules/invoice-automation/extraction";
 import type { InvoiceAutomationOcrInvoice, InvoiceAutomationOcrResult } from "@/modules/invoice-automation/types";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -130,7 +130,8 @@ function buildPrompt(invoiceType: "CUSTOMER" | "VENDOR", fileName: string, pageN
       ? "Many trucking vendors factor receivables. If text says bills were sold/assigned/payable to a financial service company, that company is only the factor/payee. Prefer labels such as Assigned For, carrier name, carrier/vendor identity near the invoice table, or the carrier on the load confirmation. Example: if RTS Financial is payable-to but the invoice says 373 CARGO INCORPORATED or Assigned For: 373 CARGO INCORPORATED, return 373 CARGO INCORPORATED as entityName."
       : "Do not use Newl/Newells as the customer just because it appears as sender or remittance contact; use the bill-to/customer being invoiced.",
     "Find the shipment file number if visible. Valid prefixes are OE, OI, AE, AI, TR, and DR.",
-    "Extract invoice number, invoice date, due date, currency as a three-letter ISO code when visible, subtotal before tax, sales tax/HST, and total. Supported examples include CAD, USD, EUR, GBP, AUD, MXN, CNY, JPY, CHF, HKD, and SGD.",
+    "Extract invoice number, invoice date, due date, currency as a three-letter ISO code when visible, subtotal before tax, Canadian sales tax/GST/HST/PST/QST, and total. Supported examples include CAD, USD, EUR, GBP, AUD, MXN, CNY, JPY, CHF, HKD, and SGD.",
+    "For non-Canadian vendor taxes such as VAT/IVA/TVA, do not map that value to taxAmount; include it in the total/cost instead because it is not claimable Canadian sales tax.",
     "If no due date is visible, return dueDate as null; the app will default payment terms to 30 days after invoice date.",
     "Do not return a service/category label such as Air Freight, Ocean Freight, Trucking, or Warehouse as entityName.",
     "If tax is not present, set taxAmount to 0 only when the invoice clearly has no tax; otherwise use null.",
@@ -141,6 +142,13 @@ function buildPrompt(invoiceType: "CUSTOMER" | "VENDOR", fileName: string, pageN
 function normalizeOcrInvoice(parsed: Record<string, unknown>): InvoiceAutomationOcrInvoice {
   const invoiceDate = readIsoDate(parsed.invoiceDate);
   const dueDate = readIsoDate(parsed.dueDate) ?? defaultDueDateFromInvoiceDate(invoiceDate);
+  const currency = normalizeCurrency(parsed.currency);
+  const amounts = normalizeInvoiceAmountsForCurrency({
+    currency,
+    subtotalAmount: readNumber(parsed.subtotalAmount),
+    taxAmount: readNumber(parsed.taxAmount),
+    totalAmount: readNumber(parsed.totalAmount)
+  });
 
   return {
     extractedText: readString(parsed.extractedText) ?? buildSyntheticExtractedText(parsed),
@@ -149,10 +157,10 @@ function normalizeOcrInvoice(parsed: Record<string, unknown>): InvoiceAutomation
     invoiceNumber: normalizeNullableCode(parsed.invoiceNumber),
     invoiceDate,
     dueDate,
-    currency: normalizeCurrency(parsed.currency),
-    subtotalAmount: readNumber(parsed.subtotalAmount),
-    taxAmount: readNumber(parsed.taxAmount),
-    totalAmount: readNumber(parsed.totalAmount),
+    currency,
+    subtotalAmount: amounts.subtotalAmount,
+    taxAmount: amounts.taxAmount,
+    totalAmount: amounts.totalAmount,
     taxApplicable: typeof parsed.taxApplicable === "boolean" ? parsed.taxApplicable : null,
     confidence: readString(parsed.confidence) ?? "MEDIUM",
     notes: readString(parsed.notes)

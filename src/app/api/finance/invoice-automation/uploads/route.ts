@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { formatInvoiceApprovalBlocker, getInvoiceApprovalBlockingIssues } from "@/modules/invoice-automation/approval";
 import { buildInvoiceDuplicateKey, INVOICE_DUPLICATE_CHECK_STATUSES } from "@/modules/invoice-automation/duplicates";
 import { learnInvoiceAutomationEntityAlias } from "@/modules/invoice-automation/entity-aliases";
-import { defaultDueDateFromInvoiceDate, getInvoiceDraftIssueCodes } from "@/modules/invoice-automation/extraction";
+import { defaultDueDateFromInvoiceDate, getInvoiceDraftIssueCodes, normalizeInvoiceAmountsForCurrency } from "@/modules/invoice-automation/extraction";
 import { toInvoiceAutomationRow } from "@/modules/invoice-automation/row-mapper";
 import type { InvoiceAutomationUploadDraft, InvoiceAutomationUploadResponse } from "@/modules/invoice-automation/types";
 import { requireModule, requireMutationAccess, requireRole } from "@/server/auth/authorization";
@@ -142,12 +142,23 @@ export async function POST(request: Request) {
           }
         });
 
-        const issueCodes = getInvoiceDraftIssueCodes(invoice);
         const invoiceDate = parseDate(invoice.invoiceDate);
         const dueDate = parseDate(invoice.dueDate) ?? parseDate(defaultDueDateFromInvoiceDate(invoice.invoiceDate));
         const entityNameRaw = readNullable(invoice.entityNameRaw);
         const quickBooksEntityId = readNullable(invoice.quickBooksEntityId);
         const quickBooksEntityDisplayName = readNullable(invoice.quickBooksEntityDisplayName);
+        const currency = readNullable(invoice.currency)?.toUpperCase() ?? null;
+        const amounts = normalizeInvoiceAmountsForCurrency({
+          currency,
+          subtotalAmount: invoice.subtotalAmount,
+          taxAmount: invoice.taxAmount,
+          totalAmount: invoice.totalAmount
+        });
+        const issueCodes = getInvoiceDraftIssueCodes({
+          ...invoice,
+          currency,
+          totalAmount: amounts.totalAmount
+        });
         const row = await tx.invoiceAutomationInvoice.create({
           data: {
             tenantId: context.tenantId,
@@ -167,10 +178,10 @@ export async function POST(request: Request) {
             vendorInvoiceDuplicateKey: duplicateKeyByClientId.get(invoice.clientId) ?? null,
             invoiceDate,
             dueDate,
-            currency: readNullable(invoice.currency),
-            subtotalAmount: decimalOrNull(invoice.subtotalAmount),
-            taxAmount: decimalOrNull(invoice.taxAmount),
-            totalAmount: decimalOrNull(invoice.totalAmount),
+            currency,
+            subtotalAmount: decimalOrNull(amounts.subtotalAmount),
+            taxAmount: decimalOrNull(amounts.taxAmount),
+            totalAmount: decimalOrNull(amounts.totalAmount),
             productOrAccountName: readNullable(invoice.productOrAccountName),
             issueCodes: issueCodes as Prisma.InputJsonValue,
             extractionJson: {

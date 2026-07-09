@@ -7,10 +7,12 @@ import { getInvoiceApprovalBlockingIssues } from "@/modules/invoice-automation/a
 import {
   buildInvoiceDraftFromText,
   defaultDueDateFromInvoiceDate,
+  deriveInvoiceTotal,
   getBusinessLineFromInvoiceFileNumber,
   getDefaultProductOrAccount,
   getInvoiceDraftIssueCodes,
   getShipmentTypeFromInvoiceFileNumber,
+  normalizeInvoiceAmountsForCurrency,
   splitInvoiceTextIntoDocuments
 } from "@/modules/invoice-automation/extraction";
 import {
@@ -28,6 +30,7 @@ import type {
   InvoiceAutomationUploadDraft,
   InvoiceAutomationUploadResponse
 } from "@/modules/invoice-automation/types";
+import { QuickBooksEntitySearchSelect } from "@/modules/invoice-automation/components/quickbooks-entity-search-select";
 
 type PdfJsModule = typeof import("pdfjs-dist");
 
@@ -424,7 +427,7 @@ function InvoiceUploadModal({
         body: JSON.stringify({
           invoiceType,
           sendToAccounting,
-          invoices: drafts.map(refreshDraftIssues)
+          invoices: drafts.map((draft) => refreshDraftIssues(normalizeDraftAmounts(draft)))
         })
       });
       const json = (await response.json().catch(() => null)) as InvoiceAutomationUploadResponse | { error?: string } | null;
@@ -452,7 +455,7 @@ function InvoiceUploadModal({
         if (patch.invoiceDate !== undefined && !next.dueDate) {
           next.dueDate = defaultDueDateFromInvoiceDate(next.invoiceDate);
         }
-        return refreshDraftIssues(next);
+        return refreshDraftIssues(normalizeDraftAmounts(next));
       })
     );
   }
@@ -526,10 +529,11 @@ function InvoiceUploadModal({
                       <td className="px-3 py-3"><SmallInput value={draft.shipmentFileNumber ?? ""} onChange={(value) => updateDraft(draft.clientId, { shipmentFileNumber: value || null })} /></td>
                       <td className="px-3 py-3"><SmallInput value={draft.entityNameRaw ?? ""} onChange={(value) => updateDraft(draft.clientId, { entityNameRaw: value || null })} /></td>
                       <td className="px-3 py-3">
-                        <select
+                        <QuickBooksEntitySearchSelect
+                          invoiceType={invoiceType}
+                          options={relevantEntities}
                           value={draft.quickBooksEntityId ?? ""}
-                          onChange={(event) => {
-                            const option = relevantEntities.find((entity) => entity.id === event.target.value);
+                          onChange={(option) => {
                             updateDraft(draft.clientId, {
                               quickBooksEntityId: option?.id ?? null,
                               quickBooksEntityDisplayName: option?.displayName ?? null,
@@ -537,15 +541,7 @@ function InvoiceUploadModal({
                               entityNameRaw: draft.entityNameRaw ?? option?.displayName ?? null
                             });
                           }}
-                          className="w-52 rounded-md border border-input bg-background px-2 py-1.5"
-                        >
-                          <option value="">Needs match</option>
-                          {relevantEntities.map((entity) => (
-                            <option key={`${entity.entityType}-${entity.id}`} value={entity.id}>
-                              {entity.displayName}{entity.currency ? ` (${entity.currency})` : ""}
-                            </option>
-                          ))}
-                        </select>
+                        />
                         {draft.quickBooksMatchConfidence ? <div className="mt-1 text-xs text-mutedForeground">{draft.quickBooksMatchConfidence}% confidence</div> : null}
                       </td>
                       <td className="px-3 py-3"><SmallInput value={draft.invoiceNumber ?? ""} onChange={(value) => updateDraft(draft.clientId, { invoiceNumber: value || null })} /></td>
@@ -554,7 +550,7 @@ function InvoiceUploadModal({
                       <td className="px-3 py-3"><SmallInput value={draft.currency ?? ""} onChange={(value) => updateDraft(draft.clientId, { currency: value.toUpperCase() || null })} /></td>
                       <td className="px-3 py-3"><MoneyInput value={draft.subtotalAmount} onChange={(value) => updateDraft(draft.clientId, { subtotalAmount: value })} /></td>
                       <td className="px-3 py-3"><MoneyInput value={draft.taxAmount} onChange={(value) => updateDraft(draft.clientId, { taxAmount: value })} /></td>
-                      <td className="px-3 py-3"><MoneyInput value={draft.totalAmount} onChange={(value) => updateDraft(draft.clientId, { totalAmount: value })} /></td>
+                      <td className="px-3 py-3 text-right font-semibold text-foreground">{formatInvoiceMoney(deriveInvoiceTotal(draft.subtotalAmount, draft.taxAmount, draft.totalAmount), draft.currency)}</td>
                       <td className="px-3 py-3"><SmallInput value={draft.productOrAccountName ?? ""} onChange={(value) => updateDraft(draft.clientId, { productOrAccountName: value || null })} /></td>
                       <td className="max-w-[260px] px-3 py-3 text-mutedForeground">
                         {draft.issueCodes.length === 0 ? "Ready" : draft.issueCodes.map(formatInvoiceEnum).join(", ")}
@@ -676,6 +672,18 @@ function refreshDraftIssues(draft: InvoiceAutomationUploadDraft): InvoiceAutomat
   return {
     ...draft,
     issueCodes: getInvoiceDraftIssueCodes(draft)
+  };
+}
+
+function normalizeDraftAmounts(draft: InvoiceAutomationUploadDraft): InvoiceAutomationUploadDraft {
+  return {
+    ...draft,
+    ...normalizeInvoiceAmountsForCurrency({
+      currency: draft.currency,
+      subtotalAmount: draft.subtotalAmount,
+      taxAmount: draft.taxAmount,
+      totalAmount: draft.totalAmount
+    })
   };
 }
 
@@ -864,7 +872,7 @@ function mergeOcrInvoiceIntoDraft(
     productOrAccountName: draft.productOrAccountName ?? getDefaultProductOrAccount(invoiceType, shipmentFileNumber)
   };
 
-  return refreshDraftIssues(next);
+  return refreshDraftIssues(normalizeDraftAmounts(next));
 }
 
 function findBestEntityForOcrName(
