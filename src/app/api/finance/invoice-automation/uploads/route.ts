@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { formatInvoiceApprovalBlocker, getInvoiceApprovalBlockingIssues } from "@/modules/invoice-automation/approval";
 import { buildVendorInvoiceDuplicateKey, VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES } from "@/modules/invoice-automation/duplicates";
+import { learnInvoiceAutomationEntityAlias } from "@/modules/invoice-automation/entity-aliases";
 import { defaultDueDateFromInvoiceDate, getInvoiceDraftIssueCodes } from "@/modules/invoice-automation/extraction";
 import { toInvoiceAutomationRow } from "@/modules/invoice-automation/row-mapper";
 import type { InvoiceAutomationUploadDraft, InvoiceAutomationUploadResponse } from "@/modules/invoice-automation/types";
@@ -143,6 +144,9 @@ export async function POST(request: Request) {
         const issueCodes = getInvoiceDraftIssueCodes(invoice);
         const invoiceDate = parseDate(invoice.invoiceDate);
         const dueDate = parseDate(invoice.dueDate) ?? parseDate(defaultDueDateFromInvoiceDate(invoice.invoiceDate));
+        const entityNameRaw = readNullable(invoice.entityNameRaw);
+        const quickBooksEntityId = readNullable(invoice.quickBooksEntityId);
+        const quickBooksEntityDisplayName = readNullable(invoice.quickBooksEntityDisplayName);
         const row = await tx.invoiceAutomationInvoice.create({
           data: {
             tenantId: context.tenantId,
@@ -154,9 +158,9 @@ export async function POST(request: Request) {
             shipmentFileNumber: readNullable(invoice.shipmentFileNumber),
             shipmentType: readNullable(invoice.shipmentType),
             businessLine: invoice.businessLine,
-            entityNameRaw: readNullable(invoice.entityNameRaw),
-            quickBooksEntityId: readNullable(invoice.quickBooksEntityId),
-            quickBooksEntityDisplayName: readNullable(invoice.quickBooksEntityDisplayName),
+            entityNameRaw,
+            quickBooksEntityId,
+            quickBooksEntityDisplayName,
             quickBooksMatchConfidence: invoice.quickBooksMatchConfidence,
             invoiceNumber: readNullable(invoice.invoiceNumber),
             vendorInvoiceDuplicateKey: duplicateKeyByClientId.get(invoice.clientId) ?? null,
@@ -184,6 +188,16 @@ export async function POST(request: Request) {
               }
             }
           }
+        });
+
+        await learnInvoiceAutomationEntityAlias(tx, {
+          tenantId: context.tenantId,
+          invoiceType,
+          aliasRawName: entityNameRaw,
+          quickBooksEntityId,
+          quickBooksEntityDisplayName,
+          currency: invoice.currency,
+          userId: context.userId
         });
 
         createdInvoices.push(row);

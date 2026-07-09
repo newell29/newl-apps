@@ -2,6 +2,7 @@ import { InvoiceAutomationStatus, ModuleKey, PlatformRole, Prisma } from "@prism
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { buildVendorInvoiceDuplicateKey, VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES } from "@/modules/invoice-automation/duplicates";
+import { learnInvoiceAutomationEntityAlias } from "@/modules/invoice-automation/entity-aliases";
 import {
   defaultDueDateFromInvoiceDate,
   getBusinessLineFromInvoiceFileNumber,
@@ -175,6 +176,16 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
           }
         }
       }
+    });
+
+    await learnInvoiceAutomationEntityAlias(prisma, {
+      tenantId: context.tenantId,
+      invoiceType: existing.invoiceType,
+      aliasRawName: entityNameRaw,
+      quickBooksEntityId,
+      quickBooksEntityDisplayName,
+      currency: readNullable(body.currency),
+      userId: context.userId
     });
 
     await prisma.auditLog.create({

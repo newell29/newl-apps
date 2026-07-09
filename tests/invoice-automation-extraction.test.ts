@@ -6,6 +6,7 @@ import {
   getInvoicePostingBlockingIssues
 } from "@/modules/invoice-automation/approval";
 import { buildVendorInvoiceDuplicateKey, VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES } from "@/modules/invoice-automation/duplicates";
+import { buildInvoiceAutomationEntityAlias } from "@/modules/invoice-automation/entity-aliases";
 import {
   buildInvoiceDraftFromText,
   extractInvoiceAmounts,
@@ -212,6 +213,66 @@ describe("invoice automation extraction", () => {
   it("does not match generic service words to a QuickBooks vendor", () => {
     expect(
       matchQuickBooksEntity("Freight bills assigned to RTS Financial for OE3124N2", "VENDOR", entityOptions)
+    ).toBeNull();
+  });
+
+  it("uses learned customer and vendor aliases as future QuickBooks matches", () => {
+    const learnedAlias = buildInvoiceAutomationEntityAlias({
+      tenantId: "tenant-1",
+      invoiceType: "VENDOR",
+      aliasRawName: "WCE Freight Bills",
+      quickBooksEntityId: "qb-western-cad",
+      quickBooksEntityDisplayName: "Western Canada Express CAD",
+      currency: "CAD",
+      userId: "user-1"
+    });
+
+    expect(learnedAlias).toMatchObject({
+      normalizedAlias: "wce freight bills",
+      quickBooksEntityId: "qb-western-cad",
+      quickBooksEntityDisplayName: "Western Canada Express CAD"
+    });
+
+    const optionsWithAlias: InvoiceAutomationEntityOption[] = [
+      ...entityOptions,
+      {
+        id: learnedAlias!.quickBooksEntityId,
+        entityType: learnedAlias!.invoiceType,
+        displayName: learnedAlias!.quickBooksEntityDisplayName,
+        normalizedName: learnedAlias!.normalizedAlias,
+        currency: learnedAlias!.currency
+      }
+    ];
+
+    expect(
+      matchQuickBooksEntity("Vendor: WCE Freight Bills\nCurrency CAD\nTR238N25", "VENDOR", optionsWithAlias, "CAD")
+        ?.option.id
+    ).toBe("qb-western-cad");
+  });
+
+  it("does not learn aliases that are identical to the selected QuickBooks name or unsafe OCR junk", () => {
+    expect(
+      buildInvoiceAutomationEntityAlias({
+        tenantId: "tenant-1",
+        invoiceType: "CUSTOMER",
+        aliasRawName: "Acme Logistics CAD",
+        quickBooksEntityId: "qb-customer-cad",
+        quickBooksEntityDisplayName: "Acme Logistics CAD",
+        currency: "CAD",
+        userId: "user-1"
+      })
+    ).toBeNull();
+
+    expect(
+      buildInvoiceAutomationEntityAlias({
+        tenantId: "tenant-1",
+        invoiceType: "VENDOR",
+        aliasRawName: "Total",
+        quickBooksEntityId: "qb-vendor-cad",
+        quickBooksEntityDisplayName: "Real Vendor CAD",
+        currency: "CAD",
+        userId: "user-1"
+      })
     ).toBeNull();
   });
 

@@ -36,8 +36,8 @@ export function AccountingQueueClient({
   const [message, setMessage] = useState<{ kind: "error" | "success"; text: string } | null>(null);
   const entityOptionsByType = useMemo(
     () => ({
-      CUSTOMER: entityOptions.filter((option) => option.entityType === "CUSTOMER"),
-      VENDOR: entityOptions.filter((option) => option.entityType === "VENDOR")
+      CUSTOMER: uniqueEntityOptionsById(entityOptions.filter((option) => option.entityType === "CUSTOMER")),
+      VENDOR: uniqueEntityOptionsById(entityOptions.filter((option) => option.entityType === "VENDOR"))
     }),
     [entityOptions]
   );
@@ -294,7 +294,7 @@ export function AccountingQueueClient({
                             quickBooksEntityId: option?.id ?? null,
                             quickBooksEntityDisplayName: option?.displayName ?? null,
                             quickBooksMatchConfidence: option ? 100 : null,
-                            entityNameRaw: option?.displayName ?? invoice.entityNameRaw
+                            entityNameRaw: invoice.entityNameRaw ?? option?.displayName ?? null
                           })
                         }
                       />
@@ -367,12 +367,16 @@ function EntitySelect({
     >
       <option value="">{invoiceType === "CUSTOMER" ? "Match customer" : "Match vendor"}</option>
       {options.map((entity) => (
-        <option key={`${entity.entityType}-${entity.id}-${entity.displayName}`} value={entity.id}>
+        <option key={`${entity.entityType}-${entity.id}`} value={entity.id}>
           {entity.displayName}{entity.currency ? ` (${entity.currency})` : ""}
         </option>
       ))}
     </select>
   );
+}
+
+function uniqueEntityOptionsById(options: InvoiceAutomationEntityOption[]) {
+  return [...new Map(options.map((option) => [option.id, option])).values()];
 }
 
 function SmallInput({
