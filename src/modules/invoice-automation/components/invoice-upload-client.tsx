@@ -460,6 +460,12 @@ function InvoiceUploadModal({
     );
   }
 
+  function removeDraft(clientId: string) {
+    setDrafts((current) => current.filter((draft) => draft.clientId !== clientId));
+    setConfirmSendToAccountingOpen(false);
+    setStatus("Invoice row removed. Remaining rows can be saved without rerunning OCR.");
+  }
+
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/40 p-4">
       <div className="mx-auto max-w-7xl rounded-lg border border-border bg-background shadow-xl">
@@ -500,6 +506,7 @@ function InvoiceUploadModal({
             <table className="min-w-[1600px] divide-y divide-border text-sm">
               <thead className="bg-muted/50 text-left text-xs font-semibold uppercase tracking-wide text-mutedForeground">
                 <tr>
+                  <th className="px-3 py-3">Action</th>
                   <th className="px-3 py-3">PDF</th>
                   <th className="px-3 py-3">File #</th>
                   <th className="px-3 py-3">Customer/Vendor</th>
@@ -518,13 +525,23 @@ function InvoiceUploadModal({
               <tbody className="divide-y divide-border">
                 {drafts.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-8 text-center text-mutedForeground" colSpan={13}>
+                    <td className="px-3 py-8 text-center text-mutedForeground" colSpan={14}>
                       Upload invoice PDFs to preview extracted rows.
                     </td>
                   </tr>
                 ) : (
                   drafts.map((draft) => (
                     <tr key={draft.clientId} className="align-top">
+                      <td className="px-3 py-3">
+                        <button
+                          type="button"
+                          onClick={() => removeDraft(draft.clientId)}
+                          className="rounded-md border border-danger/30 px-2 py-1 text-xs font-semibold text-danger hover:bg-danger/10"
+                          aria-label={`Remove ${draft.fileName}`}
+                        >
+                          Remove
+                        </button>
+                      </td>
                       <td className="max-w-[180px] px-3 py-3 font-medium text-foreground">{draft.fileName}</td>
                       <td className="px-3 py-3"><SmallInput value={draft.shipmentFileNumber ?? ""} onChange={(value) => updateDraft(draft.clientId, { shipmentFileNumber: value || null })} /></td>
                       <td className="px-3 py-3"><SmallInput value={draft.entityNameRaw ?? ""} onChange={(value) => updateDraft(draft.clientId, { entityNameRaw: value || null })} /></td>
