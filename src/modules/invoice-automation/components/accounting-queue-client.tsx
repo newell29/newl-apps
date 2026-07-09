@@ -56,6 +56,7 @@ export function AccountingQueueClient({
   const [savingInvoiceId, setSavingInvoiceId] = useState<string | null>(null);
   const [deletingInvoiceId, setDeletingInvoiceId] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
+  const [downloadingReviewPacket, setDownloadingReviewPacket] = useState(false);
   const [quickBooksPostingMode, setQuickBooksPostingMode] = useState<"preview" | "post" | null>(null);
   const [quickBooksResults, setQuickBooksResults] = useState<QuickBooksPostingResult[]>([]);
   const [message, setMessage] = useState<{ kind: "error" | "success"; text: string } | null>(null);
@@ -199,6 +200,38 @@ export function AccountingQueueClient({
     }
   }
 
+  async function downloadReviewPacket() {
+    const invoiceIdsForPacket = selectedInvoiceIds.filter((id) => eligibleInvoiceIds.includes(id));
+    setDownloadingReviewPacket(true);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/finance/invoice-automation/review-packet", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ invoiceIds: invoiceIdsForPacket })
+      });
+      if (!response.ok) {
+        const json = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(json?.error ?? "Unable to create review PDF.");
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = readDownloadFileName(response.headers.get("content-disposition")) ?? "invoice-review-packet.pdf";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      setMessage({ kind: "success", text: `Review PDF created for ${invoiceIdsForPacket.length} invoice${invoiceIdsForPacket.length === 1 ? "" : "s"}.` });
+    } catch (error) {
+      setMessage({ kind: "error", text: error instanceof Error ? error.message : "Unable to create review PDF." });
+    } finally {
+      setDownloadingReviewPacket(false);
+    }
+  }
+
   async function runQuickBooksPosting(mode: "preview" | "post") {
     const invoiceIdsToPost = selectedInvoiceIds.filter((id) => approvedForPostingInvoiceIds.includes(id));
     let confirmText: string | null = null;
@@ -296,6 +329,14 @@ export function AccountingQueueClient({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void downloadReviewPacket()}
+            disabled={selectedEligibleCount === 0 || downloadingReviewPacket}
+            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {downloadingReviewPacket ? "Building PDF..." : `Download review PDF (${selectedEligibleCount})`}
+          </button>
           <button
             type="button"
             onClick={() => void approveSelected()}
@@ -536,4 +577,9 @@ function formatShortDateTime(value: string) {
     hour: "numeric",
     minute: "2-digit"
   });
+}
+
+function readDownloadFileName(contentDisposition: string | null) {
+  const match = contentDisposition?.match(/filename="([^"]+)"/i);
+  return match?.[1] ?? null;
 }
