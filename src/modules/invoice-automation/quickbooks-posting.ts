@@ -33,6 +33,7 @@ export type QuickBooksSalesInvoicePayload = {
   TxnDate?: string;
   DueDate?: string;
   CurrencyRef?: QuickBooksRef;
+  GlobalTaxCalculation: "TaxExcluded";
   ExchangeRate?: number;
   PrivateNote?: string;
   Line: Array<{
@@ -54,6 +55,7 @@ export type QuickBooksVendorBillPayload = {
   TxnDate?: string;
   DueDate?: string;
   CurrencyRef?: QuickBooksRef;
+  GlobalTaxCalculation: "TaxExcluded";
   ExchangeRate?: number;
   PrivateNote?: string;
   Line: Array<{
@@ -88,6 +90,7 @@ export function buildQuickBooksSalesInvoicePayload(
     TxnDate: invoice.invoiceDate ?? undefined,
     DueDate: invoice.dueDate ?? undefined,
     CurrencyRef: buildCurrencyRef(invoice.currency),
+    GlobalTaxCalculation: "TaxExcluded",
     ExchangeRate: options.exchangeRate ?? undefined,
     PrivateNote: invoice.shipmentFileNumber ?? undefined,
     Line: [
@@ -123,6 +126,7 @@ export function buildQuickBooksVendorBillPayload(
     TxnDate: invoice.invoiceDate ?? undefined,
     DueDate: invoice.dueDate ?? undefined,
     CurrencyRef: buildCurrencyRef(invoice.currency),
+    GlobalTaxCalculation: "TaxExcluded",
     ExchangeRate: options.exchangeRate ?? undefined,
     PrivateNote: invoice.shipmentFileNumber ?? undefined,
     Line: [
