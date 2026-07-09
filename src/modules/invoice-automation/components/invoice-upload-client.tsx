@@ -7,10 +7,12 @@ import { getInvoiceApprovalBlockingIssues } from "@/modules/invoice-automation/a
 import {
   buildInvoiceDraftFromText,
   defaultDueDateFromInvoiceDate,
+  deriveInvoiceTotal,
   getBusinessLineFromInvoiceFileNumber,
   getDefaultProductOrAccount,
   getInvoiceDraftIssueCodes,
   getShipmentTypeFromInvoiceFileNumber,
+  normalizeInvoiceAmountsForCurrency,
   splitInvoiceTextIntoDocuments
 } from "@/modules/invoice-automation/extraction";
 import {
@@ -424,7 +426,7 @@ function InvoiceUploadModal({
         body: JSON.stringify({
           invoiceType,
           sendToAccounting,
-          invoices: drafts.map(refreshDraftIssues)
+          invoices: drafts.map((draft) => refreshDraftIssues(normalizeDraftAmounts(draft)))
         })
       });
       const json = (await response.json().catch(() => null)) as InvoiceAutomationUploadResponse | { error?: string } | null;
@@ -452,7 +454,7 @@ function InvoiceUploadModal({
         if (patch.invoiceDate !== undefined && !next.dueDate) {
           next.dueDate = defaultDueDateFromInvoiceDate(next.invoiceDate);
         }
-        return refreshDraftIssues(next);
+        return refreshDraftIssues(normalizeDraftAmounts(next));
       })
     );
   }
@@ -554,7 +556,7 @@ function InvoiceUploadModal({
                       <td className="px-3 py-3"><SmallInput value={draft.currency ?? ""} onChange={(value) => updateDraft(draft.clientId, { currency: value.toUpperCase() || null })} /></td>
                       <td className="px-3 py-3"><MoneyInput value={draft.subtotalAmount} onChange={(value) => updateDraft(draft.clientId, { subtotalAmount: value })} /></td>
                       <td className="px-3 py-3"><MoneyInput value={draft.taxAmount} onChange={(value) => updateDraft(draft.clientId, { taxAmount: value })} /></td>
-                      <td className="px-3 py-3"><MoneyInput value={draft.totalAmount} onChange={(value) => updateDraft(draft.clientId, { totalAmount: value })} /></td>
+                      <td className="px-3 py-3 text-right font-semibold text-foreground">{formatInvoiceMoney(deriveInvoiceTotal(draft.subtotalAmount, draft.taxAmount, draft.totalAmount), draft.currency)}</td>
                       <td className="px-3 py-3"><SmallInput value={draft.productOrAccountName ?? ""} onChange={(value) => updateDraft(draft.clientId, { productOrAccountName: value || null })} /></td>
                       <td className="max-w-[260px] px-3 py-3 text-mutedForeground">
                         {draft.issueCodes.length === 0 ? "Ready" : draft.issueCodes.map(formatInvoiceEnum).join(", ")}
@@ -676,6 +678,18 @@ function refreshDraftIssues(draft: InvoiceAutomationUploadDraft): InvoiceAutomat
   return {
     ...draft,
     issueCodes: getInvoiceDraftIssueCodes(draft)
+  };
+}
+
+function normalizeDraftAmounts(draft: InvoiceAutomationUploadDraft): InvoiceAutomationUploadDraft {
+  return {
+    ...draft,
+    ...normalizeInvoiceAmountsForCurrency({
+      currency: draft.currency,
+      subtotalAmount: draft.subtotalAmount,
+      taxAmount: draft.taxAmount,
+      totalAmount: draft.totalAmount
+    })
   };
 }
 
@@ -864,7 +878,7 @@ function mergeOcrInvoiceIntoDraft(
     productOrAccountName: draft.productOrAccountName ?? getDefaultProductOrAccount(invoiceType, shipmentFileNumber)
   };
 
-  return refreshDraftIssues(next);
+  return refreshDraftIssues(normalizeDraftAmounts(next));
 }
 
 function findBestEntityForOcrName(

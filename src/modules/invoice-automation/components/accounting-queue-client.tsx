@@ -5,12 +5,15 @@ import type { InvoiceAutomationType } from "@prisma/client";
 import { getInvoiceApprovalBlockingIssues } from "@/modules/invoice-automation/approval";
 import {
   defaultDueDateFromInvoiceDate,
+  deriveInvoiceTotal,
   getBusinessLineFromInvoiceFileNumber,
   getDefaultProductOrAccount,
   getInvoiceDraftIssueCodes,
-  getShipmentTypeFromInvoiceFileNumber
+  getShipmentTypeFromInvoiceFileNumber,
+  normalizeInvoiceAmountsForCurrency
 } from "@/modules/invoice-automation/extraction";
 import {
+  formatInvoiceMoney,
   formatInvoiceEnum,
   InvoiceStatusPill,
   InvoiceTypePill
@@ -112,6 +115,15 @@ export function AccountingQueueClient({
         if (patch.invoiceDate !== undefined && !next.dueDate) {
           next.dueDate = defaultDueDateFromInvoiceDate(next.invoiceDate);
         }
+        const normalizedAmounts = normalizeInvoiceAmountsForCurrency({
+          currency: next.currency,
+          subtotalAmount: next.subtotalAmount,
+          taxAmount: next.taxAmount,
+          totalAmount: next.totalAmount
+        });
+        next.subtotalAmount = normalizedAmounts.subtotalAmount;
+        next.taxAmount = normalizedAmounts.taxAmount;
+        next.totalAmount = normalizedAmounts.totalAmount;
         next.issueCodes = getInvoiceDraftIssueCodes({
           extractedText: "manual accounting edit",
           shipmentFileNumber: next.shipmentFileNumber,
@@ -146,7 +158,7 @@ export function AccountingQueueClient({
           currency: invoice.currency,
           subtotalAmount: invoice.subtotalAmount,
           taxAmount: invoice.taxAmount,
-          totalAmount: invoice.totalAmount,
+          totalAmount: deriveInvoiceTotal(invoice.subtotalAmount, invoice.taxAmount, invoice.totalAmount),
           productOrAccountName: invoice.productOrAccountName
         })
       });
@@ -435,7 +447,7 @@ export function AccountingQueueClient({
                     <td className="px-3 py-3"><SmallInput value={invoice.currency ?? ""} onChange={(value) => updateRow(invoice.id, { currency: value.toUpperCase() || null })} className="w-24" /></td>
                     <td className="px-3 py-3"><MoneyInput value={invoice.subtotalAmount} onChange={(value) => updateRow(invoice.id, { subtotalAmount: value })} /></td>
                     <td className="px-3 py-3"><MoneyInput value={invoice.taxAmount} onChange={(value) => updateRow(invoice.id, { taxAmount: value })} /></td>
-                    <td className="px-3 py-3"><MoneyInput value={invoice.totalAmount} onChange={(value) => updateRow(invoice.id, { totalAmount: value })} /></td>
+                    <td className="px-3 py-3 text-right font-semibold text-foreground">{formatInvoiceMoney(deriveInvoiceTotal(invoice.subtotalAmount, invoice.taxAmount, invoice.totalAmount), invoice.currency)}</td>
                     <td className="px-3 py-3"><SmallInput value={invoice.productOrAccountName ?? ""} onChange={(value) => updateRow(invoice.id, { productOrAccountName: value || null })} /></td>
                     <td className="max-w-[280px] px-3 py-3 text-mutedForeground">
                       {blockers.length === 0 ? "Ready" : blockers.join(", ")}
