@@ -437,7 +437,7 @@ export function AccountingQueueClient({
                             quickBooksEntityId: option?.id ?? null,
                             quickBooksEntityDisplayName: option?.displayName ?? null,
                             quickBooksMatchConfidence: option ? 100 : null,
-                            entityNameRaw: invoice.entityNameRaw ?? option?.displayName ?? null
+                            entityNameRaw: option?.displayName ?? invoice.entityNameRaw ?? null
                           })
                         }
                       />

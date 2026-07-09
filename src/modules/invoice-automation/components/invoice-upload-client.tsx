@@ -539,7 +539,7 @@ function InvoiceUploadModal({
                               quickBooksEntityId: option?.id ?? null,
                               quickBooksEntityDisplayName: option?.displayName ?? null,
                               quickBooksMatchConfidence: option ? 100 : null,
-                              entityNameRaw: draft.entityNameRaw ?? option?.displayName ?? null
+                              entityNameRaw: option?.displayName ?? draft.entityNameRaw ?? null
                             });
                           }}
                         />
@@ -859,7 +859,7 @@ function mergeOcrInvoiceIntoDraft(
     shipmentFileNumber,
     shipmentType: getShipmentTypeFromInvoiceFileNumber(shipmentFileNumber),
     businessLine: getBusinessLineFromInvoiceFileNumber(shipmentFileNumber),
-    entityNameRaw: draft.entityNameRaw ?? matchedEntity?.displayName ?? ocr.entityName,
+    entityNameRaw: matchedEntity?.displayName ?? draft.entityNameRaw ?? ocr.entityName,
     quickBooksEntityId,
     quickBooksEntityDisplayName,
     quickBooksMatchConfidence,
