@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { formatInvoicePostingBlocker, getInvoicePostingBlockingIssues, InvoiceApprovalError } from "@/modules/invoice-automation/approval";
 import {
+  attachPdfToQuickBooksTransaction,
   buildQuickBooksSalesInvoicePayload,
   buildQuickBooksVendorBillPayload,
   createQuickBooksInvoiceAutomationTransaction,
@@ -88,6 +89,13 @@ export async function POST(request: Request) {
           select: {
             batchNumber: true
           }
+        },
+        document: {
+          select: {
+            fileName: true,
+            contentType: true,
+            pdfBytes: true
+          }
         }
       }
     });
@@ -156,6 +164,49 @@ export async function POST(request: Request) {
           payload
         });
         const transaction = readPostedTransaction(posted, row.invoiceType);
+        let attachmentId: string | null = null;
+
+        try {
+          const attachment = await attachPdfToQuickBooksTransaction({
+            realmId: connection.realmId,
+            accessToken: connection.accessToken,
+            invoiceType: row.invoiceType,
+            transactionId: transaction.id,
+            fileName: invoice.document.fileName,
+            contentType: invoice.document.contentType || "application/pdf",
+            pdfBytes: invoice.document.pdfBytes
+          });
+          attachmentId = readAttachableId(attachment);
+        } catch (attachmentError) {
+          const message = attachmentError instanceof Error ? attachmentError.message : "Unable to attach PDF to QuickBooks transaction.";
+          await prisma.invoiceAutomationInvoice.update({
+            where: {
+              tenantId_id: {
+                tenantId: context.tenantId,
+                id: row.id
+              }
+            },
+            data: {
+              status: InvoiceAutomationStatus.POSTING_ERROR,
+              postedByUserId: context.userId,
+              postedAt: new Date(),
+              quickBooksTxnId: transaction.id,
+              quickBooksTxnNumber: transaction.docNumber,
+              quickBooksPostingError: `QuickBooks transaction was created, but the PDF attachment failed: ${message}`
+            }
+          });
+          results.push({
+            invoiceId: row.id,
+            invoiceType: row.invoiceType,
+            invoiceNumber: row.invoiceNumber,
+            shipmentFileNumber: row.shipmentFileNumber,
+            realmId: connection.realmId,
+            quickBooksTxnId: transaction.id,
+            quickBooksTxnNumber: transaction.docNumber,
+            error: `QuickBooks transaction was created, but the PDF attachment failed: ${message}`
+          });
+          continue;
+        }
 
         await prisma.invoiceAutomationInvoice.update({
           where: {
@@ -186,6 +237,7 @@ export async function POST(request: Request) {
               invoiceNumber: row.invoiceNumber,
               quickBooksTxnId: transaction.id,
               quickBooksTxnNumber: transaction.docNumber,
+              quickBooksAttachmentId: attachmentId,
               realmId: connection.realmId
             }
           }
@@ -199,6 +251,7 @@ export async function POST(request: Request) {
           realmId: connection.realmId,
           quickBooksTxnId: transaction.id,
           quickBooksTxnNumber: transaction.docNumber,
+          quickBooksAttachmentId: attachmentId,
           posted: true
         });
       } catch (error) {
@@ -251,6 +304,12 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
+}
+
+function readAttachableId(response: Awaited<ReturnType<typeof attachPdfToQuickBooksTransaction>>) {
+  return response.AttachableResponse
+    ?.map((row) => row.Attachable?.Id)
+    .find((id): id is string => Boolean(id)) ?? null;
 }
 
 async function getQuickBooksCredentials(tenantId: string) {

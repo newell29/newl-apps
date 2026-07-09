@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  attachPdfToQuickBooksTransaction,
   buildQuickBooksSalesInvoicePayload,
   buildQuickBooksVendorBillPayload,
   createQuickBooksInvoiceAutomationTransaction,
@@ -307,6 +308,52 @@ describe("invoice automation QuickBooks posting mapping", () => {
         Id: "qb-invoice-1",
         DocNumber: "INV-100"
       }
+    });
+  });
+
+  it("uploads and attaches the original PDF to the created QuickBooks transaction", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(input.toString()).toContain("/v3/company/realm-1/upload");
+      expect(init?.method).toBe("POST");
+      expect(init?.headers).toEqual({
+        Authorization: "Bearer token-1",
+        Accept: "application/json"
+      });
+      expect(init?.body).toBeInstanceOf(FormData);
+      const keys = Array.from((init?.body as FormData).keys());
+      expect(keys).toEqual(["file_metadata_01", "file_content_01"]);
+      return jsonResponse({
+        AttachableResponse: [
+          {
+            Attachable: {
+              Id: "attach-1",
+              FileName: "test-invoice.pdf"
+            }
+          }
+        ]
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      attachPdfToQuickBooksTransaction({
+        realmId: "realm-1",
+        accessToken: "token-1",
+        invoiceType: "CUSTOMER",
+        transactionId: "qb-invoice-1",
+        fileName: "test-invoice.pdf",
+        contentType: "application/pdf",
+        pdfBytes: new Uint8Array([37, 80, 68, 70])
+      })
+    ).resolves.toEqual({
+      AttachableResponse: [
+        {
+          Attachable: {
+            Id: "attach-1",
+            FileName: "test-invoice.pdf"
+          }
+        }
+      ]
     });
   });
 });

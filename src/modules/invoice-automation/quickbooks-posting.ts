@@ -245,6 +245,73 @@ export async function createQuickBooksInvoiceAutomationTransaction({
   };
 }
 
+export async function attachPdfToQuickBooksTransaction({
+  realmId,
+  accessToken,
+  invoiceType,
+  transactionId,
+  fileName,
+  contentType,
+  pdfBytes
+}: {
+  realmId: string;
+  accessToken: string;
+  invoiceType: InvoiceAutomationType;
+  transactionId: string;
+  fileName: string;
+  contentType: string;
+  pdfBytes: Uint8Array;
+}) {
+  const entityType = invoiceType === "CUSTOMER" ? "Invoice" : "Bill";
+  const uploadFileName = fileName.toLowerCase().endsWith(".pdf") ? fileName : `${fileName}.pdf`;
+  const metadata = {
+    AttachableRef: [
+      {
+        EntityRef: {
+          type: entityType,
+          value: transactionId
+        }
+      }
+    ],
+    FileName: uploadFileName,
+    ContentType: contentType
+  };
+  const pdfArrayBuffer = pdfBytes.buffer.slice(
+    pdfBytes.byteOffset,
+    pdfBytes.byteOffset + pdfBytes.byteLength
+  ) as ArrayBuffer;
+  const form = new FormData();
+  form.append("file_metadata_01", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
+  form.append("file_content_01", new Blob([pdfArrayBuffer], { type: contentType }), uploadFileName);
+
+  const url = new URL(`${getQuickBooksApiBaseUrl()}/v3/company/${realmId}/upload`);
+  url.searchParams.set("minorversion", "75");
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json"
+    },
+    body: form
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new QuickBooksPostingMappingError(`QuickBooks PDF attachment failed with status ${response.status}: ${text.slice(0, 500)}`);
+  }
+
+  return (await response.json()) as {
+    AttachableResponse?: Array<{
+      Attachable?: {
+        Id?: string;
+        FileName?: string;
+      };
+      Fault?: unknown;
+    }>;
+  };
+}
+
 function assertInvoiceType(invoice: InvoiceAutomationRow, expectedType: InvoiceAutomationType) {
   if (invoice.invoiceType !== expectedType) {
     throw new QuickBooksPostingMappingError(`Expected a ${expectedType.toLowerCase()} invoice but received ${invoice.invoiceType}.`);
