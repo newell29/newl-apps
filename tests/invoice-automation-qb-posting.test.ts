@@ -1,7 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildQuickBooksSalesInvoicePayload,
   buildQuickBooksVendorBillPayload,
+  createQuickBooksInvoiceAutomationTransaction,
+  fetchQuickBooksPostingMappings,
+  findExistingQuickBooksTransaction,
   parseQuickBooksEntityOptionId,
   QuickBooksPostingMappingError,
   type QuickBooksPostingMappings
@@ -26,6 +29,10 @@ const mappings: QuickBooksPostingMappings = {
 };
 
 describe("invoice automation QuickBooks posting mapping", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("builds a vendor Bill payload matching the category details example", () => {
     const payload = buildQuickBooksVendorBillPayload(
       invoiceRow({
@@ -171,6 +178,137 @@ describe("invoice automation QuickBooks posting mapping", () => {
       new QuickBooksPostingMappingError("QuickBooks entity type CUSTOMER does not match VENDOR.")
     );
   });
+
+  it("fetches QuickBooks item/account/tax mappings for posting", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(input.toString());
+      const query = url.searchParams.get("query") ?? "";
+      if (query.includes("from Item")) {
+        return jsonResponse({
+          QueryResponse: {
+            Item: [
+              {
+                Id: "item-ocean-freight",
+                Name: "Ocean Freight",
+                FullyQualifiedName: "Ocean Freight"
+              }
+            ]
+          }
+        });
+      }
+      if (query.includes("from Account")) {
+        return jsonResponse({
+          QueryResponse: {
+            Account: [
+              {
+                Id: "acct-5015",
+                Name: "Trucking Rate",
+                FullyQualifiedName: "5015 Trucking Rate",
+                AcctNum: "5015"
+              }
+            ]
+          }
+        });
+      }
+      return jsonResponse({
+        QueryResponse: {
+          TaxCode: [
+            {
+              Id: "E",
+              Name: "E"
+            },
+            {
+              Id: "H",
+              Name: "H"
+            }
+          ]
+        }
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const fetchedMappings = await fetchQuickBooksPostingMappings({
+      realmId: "realm-1",
+      accessToken: "token-1"
+    });
+
+    expect(fetchedMappings.productServices.oceanfreight).toEqual({
+      value: "item-ocean-freight",
+      name: "Ocean Freight"
+    });
+    expect(fetchedMappings.expenseAccounts["5015truckingrate"]).toEqual({
+      value: "acct-5015",
+      name: "5015 Trucking Rate"
+    });
+    expect(fetchedMappings.taxCodes.exempt).toEqual({ value: "E", name: "E" });
+    expect(fetchedMappings.taxCodes.taxable).toEqual({ value: "H", name: "H" });
+  });
+
+  it("queries for duplicate QuickBooks document numbers before creating transactions", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(input.toString());
+      expect(url.searchParams.get("query")).toContain("from Invoice where DocNumber = '7488'");
+      return jsonResponse({
+        QueryResponse: {
+          Invoice: [
+            {
+              Id: "qb-invoice-1",
+              DocNumber: "7488"
+            }
+          ]
+        }
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      findExistingQuickBooksTransaction({
+        realmId: "realm-1",
+        accessToken: "token-1",
+        invoiceType: "CUSTOMER",
+        docNumber: "7488"
+      })
+    ).resolves.toEqual({
+      Id: "qb-invoice-1",
+      DocNumber: "7488"
+    });
+  });
+
+  it("posts customer invoices to the QuickBooks invoice endpoint", async () => {
+    const payload = buildQuickBooksSalesInvoicePayload(
+      invoiceRow({
+        invoiceType: "CUSTOMER",
+        quickBooksEntityId: "quickbooks:realm-1:CUSTOMER:customer-1"
+      }),
+      mappings
+    );
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(input.toString()).toContain("/v3/company/realm-1/invoice");
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual(payload);
+      return jsonResponse({
+        Invoice: {
+          Id: "qb-invoice-1",
+          DocNumber: "INV-100"
+        }
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      createQuickBooksInvoiceAutomationTransaction({
+        realmId: "realm-1",
+        accessToken: "token-1",
+        invoiceType: "CUSTOMER",
+        payload
+      })
+    ).resolves.toEqual({
+      Invoice: {
+        Id: "qb-invoice-1",
+        DocNumber: "INV-100"
+      }
+    });
+  });
 });
 
 function invoiceRow(overrides: Partial<InvoiceAutomationRow>): InvoiceAutomationRow {
@@ -200,4 +338,13 @@ function invoiceRow(overrides: Partial<InvoiceAutomationRow>): InvoiceAutomation
     sentToAccountingByName: "User",
     ...overrides
   };
+}
+
+function jsonResponse(body: unknown) {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: {
+      "content-type": "application/json"
+    }
+  });
 }

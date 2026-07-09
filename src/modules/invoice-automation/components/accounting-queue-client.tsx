@@ -21,6 +21,19 @@ type EditableAccountingRow = InvoiceAutomationRow & {
   businessLine?: InvoiceAutomationUploadDraft["businessLine"];
 };
 
+type QuickBooksPostingResult = {
+  invoiceId: string;
+  invoiceType: InvoiceAutomationType;
+  invoiceNumber: string | null;
+  shipmentFileNumber: string | null;
+  realmId?: string;
+  payload?: unknown;
+  quickBooksTxnId?: string;
+  quickBooksTxnNumber?: string | null;
+  posted?: boolean;
+  error?: string;
+};
+
 export function AccountingQueueClient({
   invoices,
   entityOptions
@@ -33,6 +46,8 @@ export function AccountingQueueClient({
   const [savingInvoiceId, setSavingInvoiceId] = useState<string | null>(null);
   const [deletingInvoiceId, setDeletingInvoiceId] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
+  const [quickBooksPostingMode, setQuickBooksPostingMode] = useState<"preview" | "post" | null>(null);
+  const [quickBooksResults, setQuickBooksResults] = useState<QuickBooksPostingResult[]>([]);
   const [message, setMessage] = useState<{ kind: "error" | "success"; text: string } | null>(null);
   const entityOptionsByType = useMemo(
     () => ({
@@ -45,11 +60,30 @@ export function AccountingQueueClient({
   const eligibleInvoiceIds = useMemo(
     () =>
       rows
+        .filter((invoice) =>
+          (invoice.status === "ACCOUNTING_REVIEW" || invoice.status === "APPROVED_FOR_POSTING") &&
+          getInvoiceApprovalBlockingIssues(invoice).length === 0
+        )
+        .map((invoice) => invoice.id),
+    [rows]
+  );
+  const accountingReviewInvoiceIds = useMemo(
+    () =>
+      rows
         .filter((invoice) => invoice.status === "ACCOUNTING_REVIEW" && getInvoiceApprovalBlockingIssues(invoice).length === 0)
         .map((invoice) => invoice.id),
     [rows]
   );
+  const approvedForPostingInvoiceIds = useMemo(
+    () =>
+      rows
+        .filter((invoice) => invoice.status === "APPROVED_FOR_POSTING" && getInvoiceApprovalBlockingIssues(invoice).length === 0)
+        .map((invoice) => invoice.id),
+    [rows]
+  );
   const selectedEligibleCount = selectedInvoiceIds.filter((id) => eligibleInvoiceIds.includes(id)).length;
+  const selectedAccountingCount = selectedInvoiceIds.filter((id) => accountingReviewInvoiceIds.includes(id)).length;
+  const selectedApprovedCount = selectedInvoiceIds.filter((id) => approvedForPostingInvoiceIds.includes(id)).length;
   const allEligibleSelected = eligibleInvoiceIds.length > 0 && selectedEligibleCount === eligibleInvoiceIds.length;
 
   function updateRow(invoiceId: string, patch: Partial<EditableAccountingRow>) {
@@ -119,7 +153,7 @@ export function AccountingQueueClient({
   }
 
   async function approveSelected() {
-    const invoiceIdsToApprove = selectedInvoiceIds.filter((id) => eligibleInvoiceIds.includes(id));
+    const invoiceIdsToApprove = selectedInvoiceIds.filter((id) => accountingReviewInvoiceIds.includes(id));
     setApproving(true);
     setMessage(null);
     try {
@@ -137,6 +171,59 @@ export function AccountingQueueClient({
       setMessage({ kind: "error", text: error instanceof Error ? error.message : "Unable to approve invoices for posting." });
     } finally {
       setApproving(false);
+    }
+  }
+
+  async function runQuickBooksPosting(mode: "preview" | "post") {
+    const invoiceIdsToPost = selectedInvoiceIds.filter((id) => approvedForPostingInvoiceIds.includes(id));
+    let confirmText: string | null = null;
+    if (mode === "post") {
+      confirmText = window.prompt(
+        `This will create ${invoiceIdsToPost.length} transaction${invoiceIdsToPost.length === 1 ? "" : "s"} in QuickBooks. Type POST TO QUICKBOOKS to continue.`
+      );
+      if (confirmText !== "POST TO QUICKBOOKS") {
+        setMessage({ kind: "error", text: "QuickBooks posting cancelled." });
+        return;
+      }
+    }
+
+    setQuickBooksPostingMode(mode);
+    setQuickBooksResults([]);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/finance/invoice-automation/post", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          invoiceIds: invoiceIdsToPost,
+          mode,
+          confirmText
+        })
+      });
+      const json = (await response.json().catch(() => null)) as {
+        results?: QuickBooksPostingResult[];
+        error?: string;
+        errorCount?: number;
+      } | null;
+      if (!response.ok && !json?.results) {
+        throw new Error(json?.error ?? "Unable to run QuickBooks posting.");
+      }
+      setQuickBooksResults(json?.results ?? []);
+      if (mode === "post" && (json?.errorCount ?? 0) === 0) {
+        setRows((current) => current.filter((row) => !invoiceIdsToPost.includes(row.id)));
+        setSelectedInvoiceIds((current) => current.filter((id) => !invoiceIdsToPost.includes(id)));
+      }
+      setMessage({
+        kind: (json?.errorCount ?? 0) > 0 ? "error" : "success",
+        text:
+          mode === "preview"
+            ? `QuickBooks preview built for ${json?.results?.length ?? 0} invoice${json?.results?.length === 1 ? "" : "s"}.`
+            : `QuickBooks posting finished with ${json?.errorCount ?? 0} error${json?.errorCount === 1 ? "" : "s"}.`
+      });
+    } catch (error) {
+      setMessage({ kind: "error", text: error instanceof Error ? error.message : "Unable to run QuickBooks posting." });
+    } finally {
+      setQuickBooksPostingMode(null);
     }
   }
 
@@ -183,14 +270,32 @@ export function AccountingQueueClient({
             Testing mode only: edit and review invoice details here. This screen does not post anything to QuickBooks.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void approveSelected()}
-          disabled={selectedEligibleCount === 0 || approving}
-          className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {approving ? "Marking reviewed..." : `Mark selected reviewed (${selectedEligibleCount})`}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void approveSelected()}
+            disabled={selectedAccountingCount === 0 || approving}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {approving ? "Marking reviewed..." : `Mark selected reviewed (${selectedAccountingCount})`}
+          </button>
+          <button
+            type="button"
+            onClick={() => void runQuickBooksPosting("preview")}
+            disabled={selectedApprovedCount === 0 || quickBooksPostingMode !== null}
+            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {quickBooksPostingMode === "preview" ? "Building preview..." : `Preview QB payload (${selectedApprovedCount})`}
+          </button>
+          <button
+            type="button"
+            onClick={() => void runQuickBooksPosting("post")}
+            disabled={selectedApprovedCount === 0 || quickBooksPostingMode !== null}
+            className="rounded-md border border-danger/30 px-4 py-2 text-sm font-semibold text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {quickBooksPostingMode === "post" ? "Posting..." : `Post to QB test (${selectedApprovedCount})`}
+          </button>
+        </div>
       </div>
       {message ? (
         <div
@@ -201,6 +306,14 @@ export function AccountingQueueClient({
           }`}
         >
           {message.text}
+        </div>
+      ) : null}
+      {quickBooksResults.length > 0 ? (
+        <div className="m-4 rounded-md border border-border bg-background p-4">
+          <h3 className="text-sm font-semibold text-foreground">QuickBooks result preview</h3>
+          <div className="mt-3 max-h-96 overflow-auto rounded-md bg-muted p-3 text-xs text-foreground">
+            <pre>{JSON.stringify(quickBooksResults, null, 2)}</pre>
+          </div>
         </div>
       ) : null}
       <div className="overflow-x-auto">

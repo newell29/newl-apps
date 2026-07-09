@@ -1,5 +1,6 @@
 import type { InvoiceAutomationType } from "@prisma/client";
 import type { InvoiceAutomationRow } from "@/modules/invoice-automation/types";
+import { getQuickBooksApiBaseUrl } from "@/server/integrations/quickbooks";
 
 export type QuickBooksRef = {
   value: string;
@@ -13,6 +14,17 @@ export type QuickBooksPostingMappings = {
     exempt: QuickBooksRef;
     taxable?: QuickBooksRef;
   };
+};
+
+type QuickBooksQueryEntityName = "Account" | "Item" | "TaxCode";
+
+type QuickBooksPostingMappingEntity = {
+  Id?: string;
+  Name?: string;
+  FullyQualifiedName?: string;
+  AcctNum?: string;
+  Active?: boolean;
+  Taxable?: boolean;
 };
 
 export type QuickBooksSalesInvoicePayload = {
@@ -150,6 +162,89 @@ export function parseQuickBooksEntityOptionId(
   };
 }
 
+export async function fetchQuickBooksPostingMappings({
+  realmId,
+  accessToken
+}: {
+  realmId: string;
+  accessToken: string;
+}): Promise<QuickBooksPostingMappings> {
+  const [items, accounts, taxCodes] = await Promise.all([
+    fetchQuickBooksMappingEntities({ realmId, accessToken, entityName: "Item" }),
+    fetchQuickBooksMappingEntities({ realmId, accessToken, entityName: "Account" }),
+    fetchQuickBooksMappingEntities({ realmId, accessToken, entityName: "TaxCode" })
+  ]);
+
+  return {
+    productServices: buildRefMap(items),
+    expenseAccounts: buildRefMap(accounts),
+    taxCodes: {
+      exempt: findTaxCodeRef(taxCodes, ["E", "Exempt", "Out of Scope", "NON"]) ?? { value: "E", name: "E" },
+      taxable: findTaxCodeRef(taxCodes, ["H", "HST", "GST/HST", "Taxable"]) ?? undefined
+    }
+  };
+}
+
+export async function findExistingQuickBooksTransaction({
+  realmId,
+  accessToken,
+  invoiceType,
+  docNumber
+}: {
+  realmId: string;
+  accessToken: string;
+  invoiceType: InvoiceAutomationType;
+  docNumber: string;
+}) {
+  const entityName = invoiceType === "CUSTOMER" ? "Invoice" : "Bill";
+  const query = `select * from ${entityName} where DocNumber = '${escapeQuickBooksQueryValue(docNumber)}' maxresults 1`;
+  const response = await queryQuickBooks({ realmId, accessToken, query });
+  const rows = invoiceType === "CUSTOMER" ? response.QueryResponse?.Invoice : response.QueryResponse?.Bill;
+  return Array.isArray(rows) ? rows[0] ?? null : null;
+}
+
+export async function createQuickBooksInvoiceAutomationTransaction({
+  realmId,
+  accessToken,
+  invoiceType,
+  payload
+}: {
+  realmId: string;
+  accessToken: string;
+  invoiceType: InvoiceAutomationType;
+  payload: QuickBooksSalesInvoicePayload | QuickBooksVendorBillPayload;
+}) {
+  const entityPath = invoiceType === "CUSTOMER" ? "invoice" : "bill";
+  const url = new URL(`${getQuickBooksApiBaseUrl()}/v3/company/${realmId}/${entityPath}`);
+  url.searchParams.set("minorversion", "75");
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new QuickBooksPostingMappingError(`QuickBooks ${entityPath} create failed with status ${response.status}: ${text.slice(0, 500)}`);
+  }
+
+  return (await response.json()) as {
+    Invoice?: {
+      Id?: string;
+      DocNumber?: string;
+    };
+    Bill?: {
+      Id?: string;
+      DocNumber?: string;
+    };
+  };
+}
+
 function assertInvoiceType(invoice: InvoiceAutomationRow, expectedType: InvoiceAutomationType) {
   if (invoice.invoiceType !== expectedType) {
     throw new QuickBooksPostingMappingError(`Expected a ${expectedType.toLowerCase()} invoice but received ${invoice.invoiceType}.`);
@@ -218,4 +313,117 @@ function roundMoney(value: number) {
 
 function stripUndefined<T extends Record<string, unknown>>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
+}
+
+async function fetchQuickBooksMappingEntities({
+  realmId,
+  accessToken,
+  entityName
+}: {
+  realmId: string;
+  accessToken: string;
+  entityName: QuickBooksQueryEntityName;
+}) {
+  const entities: QuickBooksPostingMappingEntity[] = [];
+  let startPosition = 1;
+
+  while (true) {
+    const query = `select * from ${entityName} where Active = true startposition ${startPosition} maxresults 1000`;
+    const json = await queryQuickBooks({ realmId, accessToken, query });
+    const page = readQueryResponseEntities(json, entityName);
+    entities.push(...page);
+    if (page.length < 1000) {
+      return entities;
+    }
+    startPosition += 1000;
+  }
+}
+
+async function queryQuickBooks({
+  realmId,
+  accessToken,
+  query
+}: {
+  realmId: string;
+  accessToken: string;
+  query: string;
+}) {
+  const url = new URL(`${getQuickBooksApiBaseUrl()}/v3/company/${realmId}/query`);
+  url.searchParams.set("query", query);
+  url.searchParams.set("minorversion", "75");
+
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new QuickBooksPostingMappingError(`QuickBooks query failed with status ${response.status}: ${text.slice(0, 500)}`);
+  }
+
+  return (await response.json()) as {
+    QueryResponse?: Record<string, QuickBooksPostingMappingEntity[] | undefined>;
+  };
+}
+
+function readQueryResponseEntities(
+  json: {
+    QueryResponse?: Record<string, QuickBooksPostingMappingEntity[] | undefined>;
+  },
+  entityName: QuickBooksQueryEntityName
+) {
+  return json.QueryResponse?.[entityName] ?? [];
+}
+
+function buildRefMap(entities: QuickBooksPostingMappingEntity[]) {
+  const refs: Record<string, QuickBooksRef> = {};
+
+  for (const entity of entities) {
+    if (!entity.Id) {
+      continue;
+    }
+    const names = [
+      entity.Name,
+      entity.FullyQualifiedName,
+      entity.AcctNum && entity.Name ? `${entity.AcctNum} ${entity.Name}` : null,
+      entity.AcctNum && entity.FullyQualifiedName ? `${entity.AcctNum} ${entity.FullyQualifiedName}` : null
+    ].filter((value): value is string => Boolean(value));
+    const ref = {
+      value: entity.Id,
+      name: entity.FullyQualifiedName ?? entity.Name
+    };
+
+    for (const name of names) {
+      refs[name] = ref;
+      refs[normalizeMappingKey(name)] = ref;
+    }
+  }
+
+  return refs;
+}
+
+function findTaxCodeRef(entities: QuickBooksPostingMappingEntity[], names: string[]) {
+  for (const name of names) {
+    const normalizedName = normalizeMappingKey(name);
+    const match = entities.find((entity) =>
+      [entity.Id, entity.Name, entity.FullyQualifiedName]
+        .filter((value): value is string => Boolean(value))
+        .some((value) => normalizeMappingKey(value) === normalizedName)
+    );
+    if (match?.Id) {
+      return {
+        value: match.Id,
+        name: match.Name ?? match.FullyQualifiedName ?? name
+      };
+    }
+  }
+
+  return null;
+}
+
+function escapeQuickBooksQueryValue(value: string) {
+  return value.replace(/'/g, "\\'");
 }

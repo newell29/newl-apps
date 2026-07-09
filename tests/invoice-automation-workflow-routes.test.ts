@@ -40,6 +40,7 @@ const mocks = vi.hoisted(() => {
     prisma: {
       $transaction: vi.fn((callback: (transaction: TxMock) => Promise<unknown>) => callback(tx)),
       invoiceAutomationInvoice: {
+        findMany: vi.fn(),
         findFirst: vi.fn(),
         findUnique: vi.fn(),
         update: vi.fn()
@@ -75,6 +76,7 @@ vi.mock("@/modules/invoice-automation/entity-aliases", () => ({
 
 import { POST as approveForPosting } from "@/app/api/finance/invoice-automation/approve/route";
 import { PATCH as editInvoice } from "@/app/api/finance/invoice-automation/invoices/[invoiceId]/route";
+import { POST as postToQuickBooks } from "@/app/api/finance/invoice-automation/post/route";
 import { POST as sendToAccounting } from "@/app/api/finance/invoice-automation/queue/route";
 import { POST as uploadInvoices } from "@/app/api/finance/invoice-automation/uploads/route";
 
@@ -124,6 +126,7 @@ describe("invoice automation workflow routes", () => {
     mocks.requireMutationAccess.mockReturnValue(undefined);
     mocks.requireRole.mockReturnValue(undefined);
     mocks.prisma.$transaction.mockImplementation((callback: (transaction: TxMock) => Promise<unknown>) => callback(mocks.tx));
+    mocks.prisma.invoiceAutomationInvoice.findMany.mockResolvedValue([]);
     mocks.prisma.invoiceAutomationInvoice.findFirst.mockResolvedValue(null);
     mocks.prisma.invoiceAutomationInvoice.findUnique.mockResolvedValue(null);
     mocks.prisma.invoiceAutomationInvoice.update.mockResolvedValue({
@@ -327,6 +330,34 @@ describe("invoice automation workflow routes", () => {
       error: "This customer invoice number already exists for the same customer in batch IA-OTHER."
     });
     expect(mocks.prisma.invoiceAutomationInvoice.update).not.toHaveBeenCalled();
+  });
+
+  it("keeps live QuickBooks posting disabled unless the explicit env flag is enabled", async () => {
+    const originalValue = process.env.QUICKBOOKS_POSTING_ENABLED;
+    delete process.env.QUICKBOOKS_POSTING_ENABLED;
+
+    const response = await postToQuickBooks(
+      new Request("https://newl.test/api/finance/invoice-automation/post", {
+        method: "POST",
+        body: JSON.stringify({
+          invoiceIds: ["invoice-1"],
+          mode: "post",
+          confirmText: "POST TO QUICKBOOKS"
+        })
+      })
+    );
+
+    if (originalValue === undefined) {
+      delete process.env.QUICKBOOKS_POSTING_ENABLED;
+    } else {
+      process.env.QUICKBOOKS_POSTING_ENABLED = originalValue;
+    }
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "QuickBooks posting is disabled. Set QUICKBOOKS_POSTING_ENABLED=true only when ready to run controlled tests."
+    });
+    expect(mocks.prisma.invoiceAutomationInvoice.findMany).not.toHaveBeenCalled();
   });
 });
 
