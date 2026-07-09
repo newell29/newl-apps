@@ -29,6 +29,20 @@ const entityOptions: InvoiceAutomationEntityOption[] = [
     currency: "CAD"
   },
   {
+    id: "qb-alberta-customer-cad",
+    entityType: "CUSTOMER",
+    displayName: "Alberta Ltd CAD",
+    normalizedName: "alberta ltd",
+    currency: "CAD"
+  },
+  {
+    id: "qb-ap-logistics-usd",
+    entityType: "CUSTOMER",
+    displayName: "AP Logistics Sp. Z.O.O. USD",
+    normalizedName: "ap logistics sp z o o",
+    currency: "USD"
+  },
+  {
     id: "qb-vendor-usd",
     entityType: "VENDOR",
     displayName: "Fast Trucking USD",
@@ -305,6 +319,35 @@ describe("invoice automation extraction", () => {
       "qb-customer-cad"
     );
     expect(matchQuickBooksEntity("Vendor: Fast Trucking", "VENDOR", entityOptions)?.option.id).toBe("qb-vendor-usd");
+  });
+
+  it("does not auto-populate low-confidence or currency-mismatched QuickBooks customer matches", () => {
+    expect(matchQuickBooksEntity("Bill To: Alberta Ltd\nCurrency: EUR", "CUSTOMER", entityOptions, "EUR")).toBeNull();
+    expect(matchQuickBooksEntity("Bill To: Logistics Sp. Z.O.O.\nCurrency: USD", "CUSTOMER", entityOptions, "USD")).toBeNull();
+
+    const draft = buildInvoiceDraftFromText({
+      clientId: "low-confidence-customer",
+      fileName: "customer-eur-zero-tax-test-co-variant.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "CUSTOMER",
+      entityOptions,
+      text: `
+        Invoice Number: TEST-C-EUR-004
+        Invoice Date: 2026-07-10
+        Bill To: Alberta Ltd
+        File Number: OE914N26
+        Currency: EUR
+        Subtotal EUR 900.00
+        Total EUR 900.00
+      `
+    });
+
+    expect(draft.entityNameRaw).toBe("Alberta Ltd");
+    expect(draft.quickBooksEntityId).toBeNull();
+    expect(draft.quickBooksMatchConfidence).toBeNull();
+    expect(draft.issueCodes).toContain("MISSING_QB_MATCH");
   });
 
   it("does not match QuickBooks entities on province names alone", () => {
