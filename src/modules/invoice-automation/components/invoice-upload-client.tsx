@@ -5,6 +5,7 @@ import type { InvoiceAutomationType } from "@prisma/client";
 import type { PDFPageProxy } from "pdfjs-dist/types/src/display/api";
 import {
   buildInvoiceDraftFromText,
+  defaultDueDateFromInvoiceDate,
   getBusinessLineFromInvoiceFileNumber,
   getDefaultProductOrAccount,
   getInvoiceDraftIssueCodes,
@@ -340,6 +341,9 @@ function InvoiceUploadModal({
           next.businessLine = getBusinessLineFromInvoiceFileNumber(next.shipmentFileNumber);
           next.productOrAccountName = getDefaultProductOrAccount(invoiceType, next.shipmentFileNumber);
         }
+        if (patch.invoiceDate !== undefined && !next.dueDate) {
+          next.dueDate = defaultDueDateFromInvoiceDate(next.invoiceDate);
+        }
         return refreshDraftIssues(next);
       })
     );
@@ -673,6 +677,8 @@ function mergeOcrResultIntoDraft(
   const quickBooksEntityId = draft.quickBooksEntityId ?? matchedEntity?.id ?? null;
   const quickBooksEntityDisplayName = draft.quickBooksEntityDisplayName ?? matchedEntity?.displayName ?? null;
   const quickBooksMatchConfidence = draft.quickBooksMatchConfidence ?? (matchedEntity ? 92 : null);
+  const invoiceDate = draft.invoiceDate ?? ocr.invoiceDate;
+  const dueDate = draft.dueDate ?? ocr.dueDate ?? defaultDueDateFromInvoiceDate(invoiceDate);
   const next: InvoiceAutomationUploadDraft = {
     ...draft,
     extractedText,
@@ -684,8 +690,8 @@ function mergeOcrResultIntoDraft(
     quickBooksEntityDisplayName,
     quickBooksMatchConfidence,
     invoiceNumber: draft.invoiceNumber ?? ocr.invoiceNumber,
-    invoiceDate: draft.invoiceDate ?? ocr.invoiceDate,
-    dueDate: draft.dueDate ?? ocr.dueDate,
+    invoiceDate,
+    dueDate,
     currency: draft.currency ?? ocr.currency,
     subtotalAmount: draft.subtotalAmount ?? ocr.subtotalAmount,
     taxAmount: draft.taxAmount ?? ocr.taxAmount,

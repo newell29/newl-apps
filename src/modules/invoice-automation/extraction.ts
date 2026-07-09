@@ -89,7 +89,7 @@ export function extractDueDate(text: string) {
 export function extractInvoiceAmounts(text: string) {
   const subtotal = findMoneyByLabels(text, ["subtotal", "sub total", "amount before tax"]);
   const tax = findMoneyByLabels(text, ["hst", "sales tax", "tax"]);
-  const total = findMoneyByLabels(text, ["total amount", "invoice total", "amount due", "balance due", "total"]);
+  const total = findMoneyByLabels(text, ["total amount", "invoice total", "amount due", "balance due", "total rate", "inv amount", "total"]);
 
   return {
     subtotalAmount: subtotal ?? (total !== null && tax !== null ? roundMoney(total - tax) : null),
@@ -129,7 +129,7 @@ export function matchQuickBooksEntity(
     }
   }
 
-  return best;
+  return best && best.confidence >= 55 ? best : null;
 }
 
 export function buildInvoiceDraftFromText({
@@ -156,6 +156,8 @@ export function buildInvoiceDraftFromText({
   const businessLine = getBusinessLineFromInvoiceFileNumber(shipmentFileNumber);
   const entityMatch = matchQuickBooksEntity(text, invoiceType, entityOptions);
   const amounts = extractInvoiceAmounts(text);
+  const invoiceDate = extractInvoiceDate(text);
+  const dueDate = extractDueDate(text) ?? defaultDueDateFromInvoiceDate(invoiceDate);
   const draft: InvoiceAutomationUploadDraft = {
     clientId,
     fileName,
@@ -171,8 +173,8 @@ export function buildInvoiceDraftFromText({
     quickBooksEntityDisplayName: entityMatch?.option.displayName ?? null,
     quickBooksMatchConfidence: entityMatch?.confidence ?? null,
     invoiceNumber: extractInvoiceNumber(text, fileName),
-    invoiceDate: extractInvoiceDate(text),
-    dueDate: extractDueDate(text),
+    invoiceDate,
+    dueDate,
     currency: extractCurrency(text),
     subtotalAmount: amounts.subtotalAmount,
     taxAmount: amounts.taxAmount,
@@ -202,9 +204,39 @@ export function getInvoiceDraftIssueCodes(draft: Pick<InvoiceAutomationUploadDra
 }
 
 function extractEntityNameByLabel(text: string, invoiceType: InvoiceAutomationType) {
+  if (invoiceType === "VENDOR") {
+    return extractVendorName(text);
+  }
+
   const label = invoiceType === "CUSTOMER" ? "(?:bill to|customer|invoice to)" : "(?:vendor|remit to|from)";
   const match = text.match(new RegExp(`${label}\\s*:?\\s*([^\\n\\r]{3,80})`, "i"));
   return match ? cleanupLine(match[1]) : null;
+}
+
+function extractVendorName(text: string) {
+  const patterns = [
+    /\bAssigned\s+For\s*:?\s*([\s\S]{0,80}?)([A-Z0-9][A-Z0-9 &.,'/-]+?(?:INCORPORATED|INC\.?|LTD\.?|LIMITED|LLC|CORP\.?|CORPORATION|COMPANY|CO\.?))\b/i,
+    /\bcarrier\s+name\s*[–—-]\s*["“]?([^"”\n\r]{3,80})["”]?/i,
+    /\bcarrier\s*:?\s*([A-Z0-9][A-Z0-9 &.,'/-]+?(?:INCORPORATED|INC\.?|LTD\.?|LIMITED|LLC|CORP\.?|CORPORATION|COMPANY|CO\.?))\b/i,
+    /(?:^|\n|\r)([A-Z0-9][A-Z0-9 &.,'/-]+?(?:INCORPORATED|INC\.?|LTD\.?|LIMITED|LLC|CORP\.?|CORPORATION|COMPANY|CO\.?))\s+(?:\n|\r|\s)+INVOICE\b/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const rawValue = match?.[2] ?? match?.[1];
+    const cleaned = rawValue ? cleanupLine(rawValue) : null;
+    if (cleaned && !isFactoringOrPayeeName(cleaned)) {
+      return cleaned;
+    }
+  }
+
+  const labelMatch = text.match(/\b(?:vendor|from)\s*:\s*([^\n\r]{3,80})/i);
+  const labeledVendor = labelMatch ? cleanupLine(labelMatch[1]) : null;
+  return labeledVendor && !isFactoringOrPayeeName(labeledVendor) ? labeledVendor : null;
+}
+
+function isFactoringOrPayeeName(value: string) {
+  return /\b(RTS\s+Financial|financial\s+service|factoring|factor|payable\s+to|remit\s+to)\b/i.test(value);
 }
 
 function findDateByLabels(text: string, labels: string[]) {
@@ -235,6 +267,20 @@ function normalizeDate(value: string) {
     return null;
   }
 
+  return parsed.toISOString().slice(0, 10);
+}
+
+export function defaultDueDateFromInvoiceDate(invoiceDate: string | null) {
+  if (!invoiceDate) {
+    return null;
+  }
+
+  const parsed = new Date(`${invoiceDate}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  parsed.setUTCDate(parsed.getUTCDate() + 30);
   return parsed.toISOString().slice(0, 10);
 }
 

@@ -1,5 +1,6 @@
 import { ModuleKey } from "@prisma/client";
 import { NextResponse } from "next/server";
+import { defaultDueDateFromInvoiceDate } from "@/modules/invoice-automation/extraction";
 import type { InvoiceAutomationOcrResult } from "@/modules/invoice-automation/types";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -103,14 +104,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "OpenAI returned non-JSON invoice OCR output." }, { status: 502 });
   }
 
+  const invoiceDate = readIsoDate(parsed.invoiceDate);
+  const dueDate = readIsoDate(parsed.dueDate) ?? defaultDueDateFromInvoiceDate(invoiceDate);
   const result: InvoiceAutomationOcrResult = {
     model: DEFAULT_VISION_MODEL,
     extractedText: readString(parsed.extractedText) ?? buildSyntheticExtractedText(parsed),
     shipmentFileNumber: normalizeNullableCode(parsed.shipmentFileNumber),
     entityName: readString(parsed.entityName),
     invoiceNumber: normalizeNullableCode(parsed.invoiceNumber),
-    invoiceDate: readIsoDate(parsed.invoiceDate),
-    dueDate: readIsoDate(parsed.dueDate),
+    invoiceDate,
+    dueDate,
     currency: normalizeCurrency(parsed.currency),
     subtotalAmount: readNumber(parsed.subtotalAmount),
     taxAmount: readNumber(parsed.taxAmount),
@@ -130,9 +133,14 @@ function buildPrompt(invoiceType: "CUSTOMER" | "VENDOR", fileName: string, pageN
     `Attached page numbers: ${pageNumbers.join(", ")}.`,
     invoiceType === "CUSTOMER"
       ? "This is a customer invoice Newl sends to its customer. Extract the customer/bill-to name."
-      : "This is a vendor invoice Newl receives from a carrier/vendor. Extract the vendor/remit-from name.",
+      : "This is a vendor invoice Newl receives from a carrier/vendor. Extract the actual carrier/vendor name, not a factoring company, payment assignee, payable-to party, or remit-to lockbox.",
+    invoiceType === "VENDOR"
+      ? "Many trucking vendors factor receivables. If text says bills were sold/assigned/payable to a financial service company, that company is only the factor/payee. Prefer labels such as Assigned For, carrier name, carrier/vendor identity near the invoice table, or the carrier on the load confirmation. Example: if RTS Financial is payable-to but the invoice says 373 CARGO INCORPORATED or Assigned For: 373 CARGO INCORPORATED, return 373 CARGO INCORPORATED as entityName."
+      : "Do not use Newl/Newells as the customer just because it appears as sender or remittance contact; use the bill-to/customer being invoiced.",
     "Find the shipment file number if visible. Valid prefixes are OE, OI, AE, AI, TR, and DR.",
     "Extract invoice number, invoice date, due date, currency, subtotal before tax, sales tax/HST, and total.",
+    "If no due date is visible, return dueDate as null; the app will default payment terms to 30 days after invoice date.",
+    "Do not return a service/category label such as Air Freight, Ocean Freight, Trucking, or Warehouse as entityName.",
     "If tax is not present, set taxAmount to 0 only when the invoice clearly has no tax; otherwise use null.",
     "Return JSON with this exact shape: {\"extractedText\":\"short transcription of visible key invoice text\",\"shipmentFileNumber\":\"OE12345\",\"entityName\":\"Customer or Vendor Name\",\"invoiceNumber\":\"INV-123\",\"invoiceDate\":\"2026-07-08\",\"dueDate\":\"2026-08-07\",\"currency\":\"CAD\",\"subtotalAmount\":1000.00,\"taxAmount\":130.00,\"totalAmount\":1130.00,\"taxApplicable\":true,\"confidence\":\"HIGH\",\"notes\":\"short note\"}."
   ].join(" ");

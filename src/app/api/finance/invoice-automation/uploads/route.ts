@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 import { InvoiceAutomationBatchStatus, InvoiceAutomationStatus, ModuleKey, PlatformRole, Prisma, type InvoiceAutomationType } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
-import { getInvoiceDraftIssueCodes } from "@/modules/invoice-automation/extraction";
+import { defaultDueDateFromInvoiceDate, getInvoiceDraftIssueCodes } from "@/modules/invoice-automation/extraction";
 import type { InvoiceAutomationUploadDraft, InvoiceAutomationUploadResponse } from "@/modules/invoice-automation/types";
 import { requireModule, requireMutationAccess, requireRole } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
@@ -85,6 +85,8 @@ export async function POST(request: Request) {
         });
 
         const issueCodes = getInvoiceDraftIssueCodes(invoice);
+        const invoiceDate = parseDate(invoice.invoiceDate);
+        const dueDate = parseDate(invoice.dueDate) ?? parseDate(defaultDueDateFromInvoiceDate(invoice.invoiceDate));
         const row = await tx.invoiceAutomationInvoice.create({
           data: {
             tenantId: context.tenantId,
@@ -101,8 +103,8 @@ export async function POST(request: Request) {
             quickBooksEntityDisplayName: readNullable(invoice.quickBooksEntityDisplayName),
             quickBooksMatchConfidence: invoice.quickBooksMatchConfidence,
             invoiceNumber: readNullable(invoice.invoiceNumber),
-            invoiceDate: parseDate(invoice.invoiceDate),
-            dueDate: parseDate(invoice.dueDate),
+            invoiceDate,
+            dueDate,
             currency: readNullable(invoice.currency),
             subtotalAmount: decimalOrNull(invoice.subtotalAmount),
             taxAmount: decimalOrNull(invoice.taxAmount),
@@ -218,4 +220,3 @@ function decimalOrNull(value: number | null) {
 function decimalToNumber(value: { toString(): string } | number | null) {
   return value === null ? null : Number(value.toString());
 }
-

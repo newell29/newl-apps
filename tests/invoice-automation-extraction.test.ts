@@ -24,6 +24,13 @@ const entityOptions: InvoiceAutomationEntityOption[] = [
     displayName: "Fast Trucking USD",
     normalizedName: "fast trucking",
     currency: "USD"
+  },
+  {
+    id: "qb-air-vendor",
+    entityType: "VENDOR",
+    displayName: "Air Freight Vendor",
+    normalizedName: "air freight vendor",
+    currency: "USD"
   }
 ];
 
@@ -60,6 +67,12 @@ describe("invoice automation extraction", () => {
       "qb-customer-cad"
     );
     expect(matchQuickBooksEntity("Vendor: Fast Trucking", "VENDOR", entityOptions)?.option.id).toBe("qb-vendor-usd");
+  });
+
+  it("does not match generic service words to a QuickBooks vendor", () => {
+    expect(
+      matchQuickBooksEntity("Freight bills assigned to RTS Financial for OE3124N2", "VENDOR", entityOptions)
+    ).toBeNull();
   });
 
   it("builds a customer invoice draft with editable review fields", () => {
@@ -99,5 +112,52 @@ describe("invoice automation extraction", () => {
       productOrAccountName: "Ocean Freight",
       issueCodes: []
     });
+  });
+
+  it("extracts factored trucking invoices to the actual carrier and defaults missing due dates to net 30", () => {
+    const draft = buildInvoiceDraftFromText({
+      clientId: "local-2",
+      fileName: "373 cargo inc OE3124N2.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 256,
+      pdfBase64: "JVBERi0x",
+      invoiceType: "VENDOR",
+      entityOptions,
+      text: `
+        BILL TO:
+        NEWELLS EXPRESS WORLDWIDE LOGISTICS LTD
+
+        ALL BILLS PRESENTED ON THIS INVOICE HAVE BEEN
+        SOLD & ASSIGNED TO AND ARE PAYABLE TO:
+        RTS Financial Service, Inc.
+
+        373 CARGO INCORPORATED
+        INVOICE
+        INV DATE INV # PO # INV AMOUNT
+        6/18/2026 ONUR512 OE3124N2 2,500.00
+
+        Invoice # ONUR512
+        Invoice Date 6/18/2026
+        Reference(Load or W/O) OE3124N2
+        Assigned For:
+        373 CARGO INCORPORATED
+        RATES AND CHARGES
+        (USD) Total Rate $2,500.00
+      `
+    });
+
+    expect(draft).toMatchObject({
+      shipmentFileNumber: "OE3124N2",
+      businessLine: "OCEAN",
+      entityNameRaw: "373 CARGO INCORPORATED",
+      quickBooksEntityId: null,
+      invoiceNumber: "ONUR512",
+      invoiceDate: "2026-06-18",
+      dueDate: "2026-07-18",
+      currency: "USD",
+      totalAmount: 2500,
+      productOrAccountName: "5020 Ocean Freight Rate"
+    });
+    expect(draft.issueCodes).toContain("MISSING_QB_MATCH");
   });
 });
