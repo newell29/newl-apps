@@ -1,7 +1,7 @@
 import { InvoiceAutomationStatus, ModuleKey, PlatformRole, Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
-import { buildVendorInvoiceDuplicateKey, VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES } from "@/modules/invoice-automation/duplicates";
+import { buildInvoiceDuplicateKey, INVOICE_DUPLICATE_CHECK_STATUSES } from "@/modules/invoice-automation/duplicates";
 import { learnInvoiceAutomationEntityAlias } from "@/modules/invoice-automation/entity-aliases";
 import {
   defaultDueDateFromInvoiceDate,
@@ -89,7 +89,7 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
     const entityNameRaw = readNullable(body.entityNameRaw) ?? quickBooksEntityDisplayName;
     const productOrAccountName =
       readNullable(body.productOrAccountName) ?? getDefaultProductOrAccount(existing.invoiceType, shipmentFileNumber);
-    const duplicateKey = buildVendorInvoiceDuplicateKey({
+    const duplicateKey = buildInvoiceDuplicateKey({
       invoiceType: existing.invoiceType,
       invoiceNumber: readNullable(body.invoiceNumber),
       quickBooksEntityId,
@@ -101,9 +101,9 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
       const duplicate = await prisma.invoiceAutomationInvoice.findFirst({
         where: {
           tenantId: context.tenantId,
-          invoiceType: "VENDOR",
+          invoiceType: existing.invoiceType,
           status: {
-            in: VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES
+            in: INVOICE_DUPLICATE_CHECK_STATUSES
           },
           vendorInvoiceDuplicateKey: duplicateKey,
           id: {
@@ -120,8 +120,9 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
       });
 
       if (duplicate) {
+        const entityLabel = getInvoiceEntityLabel(existing.invoiceType);
         return NextResponse.json(
-          { error: `This vendor invoice number already exists for the same vendor in batch ${duplicate.batch.batchNumber}.` },
+          { error: `This ${entityLabel} invoice number already exists for the same ${entityLabel} in batch ${duplicate.batch.batchNumber}.` },
           { status: 409 }
         );
       }
@@ -213,7 +214,7 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
     console.error(error);
     if (isUniqueConstraintError(error)) {
       return NextResponse.json(
-        { error: "This vendor invoice number has already been uploaded for the same vendor." },
+        { error: "This invoice number has already been uploaded for the same customer or vendor." },
         { status: 409 }
       );
     }
@@ -352,4 +353,8 @@ function revalidateInvoiceAutomation() {
   revalidatePath("/finance/invoice-automation");
   revalidatePath("/finance/invoice-automation/accounting");
   revalidatePath("/finance/invoice-automation/posted");
+}
+
+function getInvoiceEntityLabel(invoiceType: "CUSTOMER" | "VENDOR") {
+  return invoiceType === "CUSTOMER" ? "customer" : "vendor";
 }

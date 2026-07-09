@@ -3,7 +3,7 @@ import { InvoiceAutomationBatchStatus, InvoiceAutomationStatus, ModuleKey, Platf
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { formatInvoiceApprovalBlocker, getInvoiceApprovalBlockingIssues } from "@/modules/invoice-automation/approval";
-import { buildVendorInvoiceDuplicateKey, VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES } from "@/modules/invoice-automation/duplicates";
+import { buildInvoiceDuplicateKey, INVOICE_DUPLICATE_CHECK_STATUSES } from "@/modules/invoice-automation/duplicates";
 import { learnInvoiceAutomationEntityAlias } from "@/modules/invoice-automation/entity-aliases";
 import { defaultDueDateFromInvoiceDate, getInvoiceDraftIssueCodes } from "@/modules/invoice-automation/extraction";
 import { toInvoiceAutomationRow } from "@/modules/invoice-automation/row-mapper";
@@ -52,11 +52,11 @@ export async function POST(request: Request) {
     }
 
     const duplicateKeyByClientId = buildDuplicateKeyMap(invoiceType, invoices);
-    const duplicateInUpload = findDuplicateUploadInvoice(invoices, duplicateKeyByClientId);
+    const duplicateInUpload = findDuplicateUploadInvoice(invoiceType, invoices, duplicateKeyByClientId);
     if (duplicateInUpload) {
       return NextResponse.json(
         {
-          error: `Duplicate vendor invoice ${duplicateInUpload.invoiceNumber} for ${duplicateInUpload.vendorName} is already in this upload.`
+          error: `Duplicate ${duplicateInUpload.entityLabel} invoice ${duplicateInUpload.invoiceNumber} for ${duplicateInUpload.entityName} is already in this upload.`
         },
         { status: 409 }
       );
@@ -67,9 +67,9 @@ export async function POST(request: Request) {
       const existingDuplicate = await prisma.invoiceAutomationInvoice.findFirst({
         where: {
           tenantId: context.tenantId,
-          invoiceType: "VENDOR",
+          invoiceType,
           status: {
-            in: VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES
+            in: INVOICE_DUPLICATE_CHECK_STATUSES
           },
           vendorInvoiceDuplicateKey: { in: duplicateKeys }
         },
@@ -86,10 +86,11 @@ export async function POST(request: Request) {
       });
 
       if (existingDuplicate) {
+        const entityLabel = getInvoiceEntityLabel(invoiceType);
         return NextResponse.json(
           {
-            error: `Duplicate vendor invoice ${existingDuplicate.invoiceNumber ?? ""} for ${
-              existingDuplicate.quickBooksEntityDisplayName ?? existingDuplicate.entityNameRaw ?? "this vendor"
+            error: `Duplicate ${entityLabel} invoice ${existingDuplicate.invoiceNumber ?? ""} for ${
+              existingDuplicate.quickBooksEntityDisplayName ?? existingDuplicate.entityNameRaw ?? `this ${entityLabel}`
             } already exists in batch ${existingDuplicate.batch.batchNumber}.`
           },
           { status: 409 }
@@ -236,7 +237,7 @@ export async function POST(request: Request) {
     console.error(error);
     if (isUniqueConstraintError(error)) {
       return NextResponse.json(
-        { error: "This vendor invoice number has already been uploaded for the same vendor." },
+        { error: "This invoice number has already been uploaded for the same customer or vendor." },
         { status: 409 }
       );
     }
@@ -251,7 +252,7 @@ function buildDuplicateKeyMap(invoiceType: InvoiceAutomationType, invoices: Invo
   const duplicateKeyByClientId = new Map<string, string>();
 
   for (const invoice of invoices) {
-    const duplicateKey = buildVendorInvoiceDuplicateKey({
+    const duplicateKey = buildInvoiceDuplicateKey({
       invoiceType,
       invoiceNumber: readNullable(invoice.invoiceNumber),
       quickBooksEntityId: readNullable(invoice.quickBooksEntityId),
@@ -299,9 +300,11 @@ function findDraftApprovalBlocker(invoiceType: InvoiceAutomationType, invoices: 
 }
 
 function findDuplicateUploadInvoice(
+  invoiceType: InvoiceAutomationType,
   invoices: InvoiceAutomationUploadDraft[],
   duplicateKeyByClientId: Map<string, string>
 ) {
+  const entityLabel = getInvoiceEntityLabel(invoiceType);
   const seen = new Set<string>();
 
   for (const invoice of invoices) {
@@ -313,10 +316,11 @@ function findDuplicateUploadInvoice(
     if (seen.has(duplicateKey)) {
       return {
         invoiceNumber: readNullable(invoice.invoiceNumber) ?? "unknown",
-        vendorName:
+        entityName:
           readNullable(invoice.quickBooksEntityDisplayName) ??
           readNullable(invoice.entityNameRaw) ??
-          "this vendor"
+          `this ${entityLabel}`,
+        entityLabel
       };
     }
 
@@ -324,6 +328,10 @@ function findDuplicateUploadInvoice(
   }
 
   return null;
+}
+
+function getInvoiceEntityLabel(invoiceType: InvoiceAutomationType) {
+  return invoiceType === "CUSTOMER" ? "customer" : "vendor";
 }
 
 function isUniqueConstraintError(error: unknown) {

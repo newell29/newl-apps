@@ -5,7 +5,7 @@ import {
   getInvoiceApprovalBlockingIssues,
   getInvoicePostingBlockingIssues
 } from "@/modules/invoice-automation/approval";
-import { buildVendorInvoiceDuplicateKey, VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES } from "@/modules/invoice-automation/duplicates";
+import { buildInvoiceDuplicateKey, INVOICE_DUPLICATE_CHECK_STATUSES } from "@/modules/invoice-automation/duplicates";
 import { buildInvoiceAutomationEntityAlias } from "@/modules/invoice-automation/entity-aliases";
 import {
   buildInvoiceDraftFromText,
@@ -484,9 +484,9 @@ describe("invoice automation extraction", () => {
     expect(minimax.invoiceDate).toBe("2025-09-29");
   });
 
-  it("builds stable duplicate keys for vendor invoice numbers", () => {
+  it("builds stable duplicate keys for customer and vendor invoice numbers", () => {
     expect(
-      buildVendorInvoiceDuplicateKey({
+      buildInvoiceDuplicateKey({
         invoiceType: "VENDOR",
         invoiceNumber: " INV-1001 ",
         quickBooksEntityId: "QB-VENDOR-1",
@@ -496,7 +496,7 @@ describe("invoice automation extraction", () => {
     ).toBe("qb:qbvendor1|invoice:inv1001");
 
     expect(
-      buildVendorInvoiceDuplicateKey({
+      buildInvoiceDuplicateKey({
         invoiceType: "VENDOR",
         invoiceNumber: "INV 1001",
         quickBooksEntityId: null,
@@ -506,19 +506,29 @@ describe("invoice automation extraction", () => {
     ).toBe("name:fasttrucking|invoice:inv1001");
 
     expect(
-      buildVendorInvoiceDuplicateKey({
+      buildInvoiceDuplicateKey({
+        invoiceType: "CUSTOMER",
+        invoiceNumber: "INV-1001",
+        quickBooksEntityId: "QB-CUSTOMER-1",
+        quickBooksEntityDisplayName: "Acme Logistics CAD",
+        entityNameRaw: "Acme Logistics"
+      })
+    ).toBe("qb:qbcustomer1|invoice:inv1001");
+
+    expect(
+      buildInvoiceDuplicateKey({
         invoiceType: "CUSTOMER",
         invoiceNumber: "INV-1001",
         quickBooksEntityId: null,
         quickBooksEntityDisplayName: null,
-        entityNameRaw: "Fast Trucking"
+        entityNameRaw: null
       })
     ).toBeNull();
   });
 
-  it("checks uploaded vendor invoice duplicates against posted invoices too", () => {
-    expect(VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES).toContain("POSTED");
-    expect(VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES).not.toContain("REJECTED");
+  it("checks uploaded invoice duplicates against posted invoices too", () => {
+    expect(INVOICE_DUPLICATE_CHECK_STATUSES).toContain("POSTED");
+    expect(INVOICE_DUPLICATE_CHECK_STATUSES).not.toContain("REJECTED");
   });
 
   it("blocks approval when customer or vendor invoice required fields are missing", () => {

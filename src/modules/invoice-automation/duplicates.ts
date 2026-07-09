@@ -1,12 +1,14 @@
 import { InvoiceAutomationStatus, type InvoiceAutomationType } from "@prisma/client";
 
-export const VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES = [
+export const INVOICE_DUPLICATE_CHECK_STATUSES = [
   InvoiceAutomationStatus.OPERATIONS_REVIEW,
   InvoiceAutomationStatus.ACCOUNTING_REVIEW,
   InvoiceAutomationStatus.APPROVED_FOR_POSTING,
   InvoiceAutomationStatus.POSTED,
   InvoiceAutomationStatus.POSTING_ERROR
 ];
+
+export const VENDOR_INVOICE_DUPLICATE_CHECK_STATUSES = INVOICE_DUPLICATE_CHECK_STATUSES;
 
 export type InvoiceDuplicateInput = {
   invoiceType: InvoiceAutomationType;
@@ -16,21 +18,21 @@ export type InvoiceDuplicateInput = {
   entityNameRaw: string | null;
 };
 
-export function buildVendorInvoiceDuplicateKey(input: InvoiceDuplicateInput) {
-  if (input.invoiceType !== "VENDOR") {
-    return null;
-  }
-
+export function buildInvoiceDuplicateKey(input: InvoiceDuplicateInput) {
   const invoiceNumber = normalizeDuplicateToken(input.invoiceNumber);
-  const vendorToken = input.quickBooksEntityId
+  const entityToken = input.quickBooksEntityId
     ? `qb:${normalizeDuplicateToken(input.quickBooksEntityId)}`
     : `name:${normalizeDuplicateToken(input.quickBooksEntityDisplayName ?? input.entityNameRaw)}`;
 
-  if (!invoiceNumber || vendorToken.endsWith(":")) {
+  if (!invoiceNumber || entityToken.endsWith(":")) {
     return null;
   }
 
-  return `${vendorToken}|invoice:${invoiceNumber}`;
+  return `${entityToken}|invoice:${invoiceNumber}`;
+}
+
+export function buildVendorInvoiceDuplicateKey(input: InvoiceDuplicateInput) {
+  return buildInvoiceDuplicateKey(input);
 }
 
 export function normalizeDuplicateToken(value: string | null | undefined) {
