@@ -30,6 +30,7 @@ import {
 import type {
   InvoiceAutomationCorrectionMemoryHint,
   InvoiceAutomationEntityOption,
+  InvoiceAutomationUploadDocument,
   InvoiceAutomationOcrInvoice,
   InvoiceAutomationOcrResult,
   InvoiceAutomationQuickBooksSyncSummary,
@@ -585,10 +586,12 @@ function InvoiceUploadModal({
         const pdfBase64 = await bytesToBase64(bytes);
         const text = await extractPdfText(bytes);
         const textSegments = splitInvoiceTextIntoDocuments(text);
+        const documentClientId = `${file.name}-${file.size}-${file.lastModified}`;
         const fileDrafts = textSegments.map((segmentText, segmentIndex) =>
           applyDraftCorrectionMemory(
             buildInvoiceDraftFromText({
               clientId: `${file.name}-${file.size}-${nextDrafts.length}-${segmentIndex}`,
+              documentClientId,
               fileName: textSegments.length > 1 ? `${file.name} - invoice ${segmentIndex + 1}` : file.name,
               contentType: file.type || "application/pdf",
               sizeBytes: file.size,
@@ -615,6 +618,7 @@ function InvoiceUploadModal({
                   {
                     ...fileDrafts[0],
                     clientId: `${file.name}-${file.size}-${nextDrafts.length}-ocr-${ocrIndex}`,
+                    documentClientId,
                     fileName: ocrResult.invoices.length > 1 ? `${file.name} - invoice ${ocrIndex + 1}` : file.name
                   },
                   ocrInvoice,
@@ -649,10 +653,13 @@ function InvoiceUploadModal({
     setIsSaving(true);
 
     try {
+      const preparedDrafts = drafts.map((draft) => refreshDraftIssues(normalizeDraftAmounts(draft)));
+      const documents = buildUploadDocuments(preparedDrafts);
       const payload = {
         invoiceType,
         sendToAccounting,
-        invoices: drafts.map((draft) => refreshDraftIssues(normalizeDraftAmounts(draft)))
+        documents,
+        invoices: preparedDrafts.map(stripInvoiceDocumentPayload)
       };
       const requestBody = JSON.stringify(payload);
       if (requestBody.length > UPLOAD_REQUEST_WARNING_BYTES) {
@@ -1028,6 +1035,36 @@ function formatByteSize(bytes: number) {
   }
 
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function buildUploadDocuments(drafts: InvoiceAutomationUploadDraft[]): InvoiceAutomationUploadDocument[] {
+  const documents = new Map<string, InvoiceAutomationUploadDocument>();
+
+  for (const draft of drafts) {
+    const clientDocumentId = draft.documentClientId ?? draft.clientId;
+    if (documents.has(clientDocumentId)) {
+      continue;
+    }
+
+    documents.set(clientDocumentId, {
+      clientDocumentId,
+      fileName: draft.fileName.replace(/ - invoice \d+$/i, ""),
+      contentType: draft.contentType,
+      sizeBytes: draft.sizeBytes,
+      pdfBase64: draft.pdfBase64,
+      extractedText: draft.extractedText || null
+    });
+  }
+
+  return [...documents.values()];
+}
+
+function stripInvoiceDocumentPayload(draft: InvoiceAutomationUploadDraft) {
+  return {
+    ...draft,
+    documentClientId: draft.documentClientId ?? draft.clientId,
+    pdfBase64: ""
+  };
 }
 
 async function loadPdfJs() {

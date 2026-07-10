@@ -409,6 +409,7 @@ export function matchQuickBooksEntity(
 
 export function buildInvoiceDraftFromText({
   clientId,
+  documentClientId,
   fileName,
   contentType,
   sizeBytes,
@@ -418,6 +419,7 @@ export function buildInvoiceDraftFromText({
   entityOptions
 }: {
   clientId: string;
+  documentClientId?: string;
   fileName: string;
   contentType: string;
   sizeBytes: number;
@@ -440,6 +442,7 @@ export function buildInvoiceDraftFromText({
   const dueDate = extractDueDate(text, invoiceDate) ?? defaultDueDateFromInvoiceDate(invoiceDate);
   const draft: InvoiceAutomationUploadDraft = {
     clientId,
+    documentClientId,
     fileName,
     contentType,
     sizeBytes,
