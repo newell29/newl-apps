@@ -27,6 +27,7 @@ enum ModuleKey {
   QUICKBOOKS_POSTING
   CUSTOMER_CASHFLOW
   WEBSITE_INBOUND
+  WEBSITE_GROWTH
   OCEAN_FREIGHT_PRICING
 }
 
@@ -37,6 +38,44 @@ enum WebsiteInboundStatus {
   QUALIFIED
   CONVERTED
   CLOSED
+}
+
+enum WebsiteGrowthOpportunityStatus {
+  NEW
+  REVIEWING
+  APPROVED
+  IN_PROGRESS
+  PUBLISHED
+  MONITORING
+  REJECTED
+}
+
+enum WebsiteGrowthAction {
+  CREATE_PAGE
+  IMPROVE_EXISTING_PAGE
+  ADD_SECTION
+  ADD_INTERNAL_LINKS
+  CREATE_RESOURCE_ARTICLE
+  UPDATE_REDIRECT
+  IGNORE
+  MONITOR
+}
+
+enum WebsiteGrowthDataSource {
+  GOOGLE_SEARCH_CONSOLE_API
+  GOOGLE_SEARCH_CONSOLE_UPLOAD
+  GA4_API
+  GA4_UPLOAD
+  SEMRUSH_UPLOAD
+  INTERNAL_APP_DATA
+  MANUAL
+}
+
+enum WebsiteGrowthImportStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  ERROR
 }
 
 enum CreditCheckStatus {
@@ -391,6 +430,9 @@ model Tenant {
   assistantThreads              AssistantChatThread[]
   assistantMessages             AssistantChatMessage[]
   websiteInboundSubmissions     WebsiteInboundSubmission[]
+  websiteGrowthOpportunities    WebsiteGrowthOpportunity[]
+  websiteGrowthDataImports      WebsiteGrowthDataImport[]
+  websiteGrowthMetrics          WebsiteGrowthMetric[]
   creditChecks                  CreditCheck[]
   assistantRuns                 AssistantRun[]
   assistantRetrievedSources     AssistantRetrievedSource[]
@@ -583,6 +625,87 @@ model WebsiteInboundSubmission {
   @@index([tenantId, createdAt])
   @@index([tenantId, status])
   @@index([tenantId, formType])
+}
+
+model WebsiteGrowthOpportunity {
+  id                 String                         @id @default(cuid())
+  tenantId           String
+  createdAt          DateTime                       @default(now())
+  updatedAt          DateTime                       @updatedAt
+  status             WebsiteGrowthOpportunityStatus @default(NEW)
+  action             WebsiteGrowthAction
+  topic              String
+  primaryKeyword     String?
+  targetPage         String?
+  sourcePage         String?
+  score              Int                            @default(0)
+  confidence         String?
+  reason             String
+  recommendation     String
+  supportingKeywords Json?
+  evidence           Json?
+  notes              String?
+  approvedByUserId   String?
+  publishedAt        DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+  @@index([tenantId, action])
+  @@index([tenantId, score])
+  @@index([tenantId, updatedAt])
+}
+
+model WebsiteGrowthDataImport {
+  id           String                    @id @default(cuid())
+  tenantId     String
+  createdAt    DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+  source       WebsiteGrowthDataSource
+  status       WebsiteGrowthImportStatus @default(PENDING)
+  fileName     String?
+  rowCount     Int                       @default(0)
+  summary      Json?
+  errorMessage String?
+  startedAt    DateTime?
+  completedAt  DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, source])
+  @@index([tenantId, status])
+  @@index([tenantId, createdAt])
+}
+
+model WebsiteGrowthMetric {
+  id              String                  @id @default(cuid())
+  tenantId        String
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  source          WebsiteGrowthDataSource
+  page            String?
+  query           String?
+  country         String?
+  device          String?
+  dateRangeStart  DateTime?
+  dateRangeEnd    DateTime?
+  clicks          Int                     @default(0)
+  impressions     Int                     @default(0)
+  ctr             Float?
+  position        Float?
+  sessions        Int?
+  engagedSessions Int?
+  engagementRate  Float?
+  eventCount      Int?
+  leadCount       Int                     @default(0)
+  raw             Json?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, source])
+  @@index([tenantId, page])
+  @@index([tenantId, query])
+  @@index([tenantId, dateRangeStart])
 }
 
 model CreditCheck {

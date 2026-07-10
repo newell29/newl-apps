@@ -44,7 +44,8 @@ const navEntries: NavNode[] = [
           { id: "lead-logs", href: "/operations/logs", label: "Health & Logs", moduleKey: "LEAD_GEN" as ModuleKey }
         ]
       },
-      { id: "website-inbound", href: "/website-inbound", label: "Website Inbound", moduleKey: "WEBSITE_INBOUND" as ModuleKey }
+      { id: "website-inbound", href: "/website-inbound", label: "Website Inbound", moduleKey: "WEBSITE_INBOUND" as ModuleKey },
+      { id: "website-growth", href: "/website-growth", label: "Website Growth", moduleKey: "WEBSITE_GROWTH" as ModuleKey }
     ]
   },
   {
