@@ -909,6 +909,41 @@ describe("invoice automation extraction", () => {
     });
   });
 
+  it("respects due on receipt customer invoice terms instead of defaulting to net 30", () => {
+    const draft = buildInvoiceDraftFromText({
+      clientId: "customer-due-on-receipt",
+      fileName: "customer-AE1614N12-7499.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 256,
+      pdfBase64: "JVBERi0x",
+      invoiceType: "CUSTOMER",
+      entityOptions,
+      text: `
+        INVOICE#: 7499
+        Booking Number: AE1614N12
+        Customer Name: Eastern Services W.L.L
+        Invoice Date Due Date Payment Terms
+        2026-07-03 Due on Receipt 0
+        Service Air Freight
+        Currency: USD
+        Subtotal: USD 750.00
+        Total: USD 750.00
+      `
+    });
+
+    expect(draft).toMatchObject({
+      shipmentFileNumber: "AE1614N12",
+      businessLine: "AIR",
+      invoiceNumber: "7499",
+      invoiceDate: "2026-07-03",
+      dueDate: "2026-07-03",
+      currency: "USD",
+      subtotalAmount: 750,
+      totalAmount: 750,
+      productOrAccountName: "Air Freight"
+    });
+  });
+
   it("extracts factored trucking invoices to the actual carrier and defaults missing due dates to net 30", () => {
     const draft = buildInvoiceDraftFromText({
       clientId: "local-2",

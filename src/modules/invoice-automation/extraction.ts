@@ -226,10 +226,19 @@ export function extractInvoiceDate(text: string) {
     return normalizeDate(dateInvoiceTableMatch[1]);
   }
 
+  const customerTermsTableMatch = text.match(/\binvoice\s+date\s+due\s+date\s+payment\s+terms\s+(\d{4}[/-]\d{1,2}[/-]\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b/i);
+  if (customerTermsTableMatch) {
+    return normalizeDate(customerTermsTableMatch[1]);
+  }
+
   return findDateByLabels(text, ["invoice date", "bill date", "date"]);
 }
 
-export function extractDueDate(text: string) {
+export function extractDueDate(text: string, invoiceDate: string | null = null) {
+  if (invoiceDate && hasDueOnReceiptTerms(text)) {
+    return invoiceDate;
+  }
+
   return findDateByLabels(text, ["due date", "payment due"]);
 }
 
@@ -399,7 +408,7 @@ export function buildInvoiceDraftFromText({
     : matchQuickBooksEntity(text, invoiceType, entityOptions, currency);
   const amounts = extractInvoiceAmounts(text, currency);
   const invoiceDate = extractInvoiceDate(text);
-  const dueDate = extractDueDate(text) ?? defaultDueDateFromInvoiceDate(invoiceDate);
+  const dueDate = extractDueDate(text, invoiceDate) ?? defaultDueDateFromInvoiceDate(invoiceDate);
   const draft: InvoiceAutomationUploadDraft = {
     clientId,
     fileName,
@@ -499,6 +508,14 @@ function findDateByLabels(text: string, labels: string[]) {
   }
 
   return null;
+}
+
+function hasDueOnReceiptTerms(text: string) {
+  return (
+    /\bdue\s+on\s+receipt\b/i.test(text) ||
+    /\bpayment\s+terms?\s*[:：]?\s*0\b/i.test(text) ||
+    /\bterms?\s*[:：]?\s*(?:due\s+on\s+receipt|0\s*(?:days?)?)\b/i.test(text)
+  );
 }
 
 function findMoneyByLabels(text: string, labels: string[]) {
