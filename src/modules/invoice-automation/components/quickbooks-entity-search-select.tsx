@@ -50,9 +50,11 @@ export function QuickBooksEntitySearchSelect({
 
   useEffect(() => {
     if (isOpen) {
+      setQuery(selectedOption?.displayName ?? "");
       searchInputRef.current?.focus();
+      searchInputRef.current?.select();
     }
-  }, [isOpen]);
+  }, [isOpen, selectedOption]);
 
   return (
     <div

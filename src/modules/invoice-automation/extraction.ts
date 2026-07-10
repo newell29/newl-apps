@@ -69,6 +69,20 @@ export function isInternalNewellEntityName(value: string | null | undefined) {
   return /\bnewell(s)?\b/.test(normalized) || /\bnewl\b/.test(normalized);
 }
 
+export function isUnsafeInvoiceEntityName(value: string | null | undefined) {
+  if (!value) {
+    return true;
+  }
+
+  const normalized = normalizeInvoiceEntityName(value);
+  const original = value.trim().toLowerCase();
+  return (
+    normalized.length < 3 ||
+    /^(cad|cdn|usd|eur|gbp|aud|mxn|cny|jpy|chf|hkd|sgd)$/.test(original) ||
+    /^(invoice|total|subtotal|tax|amount|ocean freight|air freight|trucking|warehouse)$/.test(normalized)
+  );
+}
+
 export function inferCurrencyFromInvoiceEntityName(value: string | null | undefined) {
   if (!value) {
     return null;
@@ -147,6 +161,11 @@ export function extractInvoiceNumber(text: string, fallbackName = "") {
     return cleanToken(invoiceAdjustmentMatch[1]);
   }
 
+  const invoiceNoMatch = text.match(/\binvoice\s+no\.?\s*[:：]\s*([A-Z0-9][A-Z0-9._/-]{2,})\b/i);
+  if (invoiceNoMatch && !isGenericInvoiceFileToken(invoiceNoMatch[1])) {
+    return cleanToken(invoiceNoMatch[1]);
+  }
+
   const taxInvoiceMatch = text.match(/\btax\s+invoice\s+([A-Z0-9][A-Z0-9._/-]{2,})\b/i);
   if (taxInvoiceMatch && !isGenericInvoiceFileToken(taxInvoiceMatch[1])) {
     return cleanToken(taxInvoiceMatch[1]);
@@ -173,7 +192,7 @@ export function extractInvoiceNumber(text: string, fallbackName = "") {
     return cleanToken(dateInvoiceNumberTableMatch[1]);
   }
 
-  const labelMatch = text.match(/\b(?:invoice|inv)[ \t]*(?:number|no\.?|#)[ \t]*[:#-]?[ \t]*([A-Z0-9][A-Z0-9._/-]{2,})/i);
+  const labelMatch = text.match(/\b(?:invoice|inv)[ \t]*(?:number|no\.?|#)[ \t]*[:：#-]?[ \t]*([A-Z0-9][A-Z0-9._/-]{2,})/i);
   if (labelMatch && !isGenericInvoiceFileToken(labelMatch[1])) {
     return cleanToken(labelMatch[1]);
   }
@@ -352,6 +371,9 @@ export function matchQuickBooksEntity(
     if (isInternalNewellEntityName(option.displayName) || isInternalNewellEntityName(normalizedName)) {
       continue;
     }
+    if (isUnsafeInvoiceEntityName(option.displayName) || isUnsafeInvoiceEntityName(normalizedName)) {
+      continue;
+    }
 
     let confidence = 0;
     if (normalizedText.includes(normalizedName)) {
@@ -402,7 +424,8 @@ export function buildInvoiceDraftFromText({
   const shipmentType = getShipmentTypeFromInvoiceFileNumber(shipmentFileNumber);
   const businessLine = getBusinessLineFromInvoiceFileNumber(shipmentFileNumber);
   const currency = extractCurrency(text);
-  const extractedEntityName = extractEntityNameByLabel(text, invoiceType, fileName);
+  const rawExtractedEntityName = extractEntityNameByLabel(text, invoiceType, fileName);
+  const extractedEntityName = isUnsafeInvoiceEntityName(rawExtractedEntityName) ? null : rawExtractedEntityName;
   const entityMatch = extractedEntityName
     ? matchQuickBooksEntity(extractedEntityName, invoiceType, entityOptions, currency)
     : matchQuickBooksEntity(text, invoiceType, entityOptions, currency);

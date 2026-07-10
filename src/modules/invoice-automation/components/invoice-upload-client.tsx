@@ -1138,12 +1138,23 @@ function mergeOcrInvoiceIntoDraft(
     .filter((value) => value.trim().length > 0)
     .join("\n");
   const shipmentFileNumber = draft.shipmentFileNumber ?? ocr.shipmentFileNumber;
-  const matchedEntity = ocr.entityName
-    ? findBestEntityForOcrName(ocr.entityName, invoiceType, entityOptions, ocr.currency)
+  const safeDraftEntityName = isUnsafeOcrEntityName(draft.entityNameRaw) ? null : draft.entityNameRaw;
+  const safeOcrEntityName = isUnsafeOcrEntityName(ocr.entityName) ? null : ocr.entityName;
+  const matchedEntity = safeOcrEntityName || safeDraftEntityName
+    ? findBestEntityForOcrName(safeOcrEntityName ?? safeDraftEntityName ?? "", invoiceType, entityOptions, ocr.currency ?? draft.currency)
     : null;
-  const quickBooksEntityId = draft.quickBooksEntityId ?? matchedEntity?.id ?? null;
-  const quickBooksEntityDisplayName = draft.quickBooksEntityDisplayName ?? matchedEntity?.displayName ?? null;
-  const quickBooksMatchConfidence = draft.quickBooksMatchConfidence ?? (matchedEntity ? 92 : null);
+  const hasSafeDraftEntityMatch =
+    Boolean(draft.quickBooksEntityId) &&
+    !isUnsafeOcrEntityName(draft.quickBooksEntityDisplayName ?? draft.entityNameRaw);
+  const quickBooksEntityId = hasSafeDraftEntityMatch ? draft.quickBooksEntityId : matchedEntity?.id ?? null;
+  const quickBooksEntityDisplayName = hasSafeDraftEntityMatch
+    ? draft.quickBooksEntityDisplayName ?? null
+    : matchedEntity?.displayName ?? null;
+  const quickBooksMatchConfidence = hasSafeDraftEntityMatch
+    ? draft.quickBooksMatchConfidence
+    : matchedEntity
+      ? 92
+      : null;
   const invoiceDate = draft.invoiceDate ?? ocr.invoiceDate;
   const dueDate = draft.dueDate ?? ocr.dueDate ?? defaultDueDateFromInvoiceDate(invoiceDate);
   const next: InvoiceAutomationUploadDraft = {
@@ -1152,7 +1163,7 @@ function mergeOcrInvoiceIntoDraft(
     shipmentFileNumber,
     shipmentType: getShipmentTypeFromInvoiceFileNumber(shipmentFileNumber),
     businessLine: getBusinessLineFromInvoiceFileNumber(shipmentFileNumber),
-    entityNameRaw: matchedEntity?.displayName ?? draft.entityNameRaw ?? ocr.entityName,
+    entityNameRaw: quickBooksEntityDisplayName ?? safeDraftEntityName ?? safeOcrEntityName,
     quickBooksEntityId,
     quickBooksEntityDisplayName,
     quickBooksMatchConfidence,
@@ -1183,6 +1194,9 @@ function findBestEntityForOcrName(
     if (isInternalNewellEntityName(option.displayName) || isInternalNewellEntityName(option.normalizedName)) {
       continue;
     }
+    if (isUnsafeOcrEntityName(option.displayName) || isUnsafeOcrEntityName(option.normalizedName)) {
+      continue;
+    }
 
     const normalizedOption = option.normalizedName || normalizeEntityForClientMatch(option.displayName);
     let score = 0;
@@ -1207,6 +1221,16 @@ function findBestEntityForOcrName(
   }
 
   return best && best.score >= 90 ? best.option : null;
+}
+
+function isUnsafeOcrEntityName(entityName: string | null) {
+  if (!entityName) return true;
+  const normalized = normalizeEntityForClientMatch(entityName);
+  return (
+    normalized.length < 3 ||
+    /^(cad|cdn|usd|eur|gbp|aud|mxn|cny|jpy|chf|hkd|sgd)$/.test(normalized) ||
+    /^(invoice|total|subtotal|tax|amount|ocean freight|air freight|trucking|warehouse)$/.test(normalized)
+  );
 }
 
 function normalizeEntityForClientMatch(value: string) {

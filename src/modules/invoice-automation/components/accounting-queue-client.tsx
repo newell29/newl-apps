@@ -58,7 +58,9 @@ export function AccountingQueueClient({
 }) {
   const [rows, setRows] = useState<EditableAccountingRow[]>(invoices);
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
+  const [dirtyInvoiceIds, setDirtyInvoiceIds] = useState<string[]>([]);
   const [savingInvoiceId, setSavingInvoiceId] = useState<string | null>(null);
+  const [isSavingSelectedEdits, setIsSavingSelectedEdits] = useState(false);
   const [deletingInvoiceId, setDeletingInvoiceId] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
   const [downloadingReviewPacket, setDownloadingReviewPacket] = useState(false);
@@ -143,7 +145,7 @@ export function AccountingQueueClient({
   }
 
   function updateRow(invoiceId: string, patch: Partial<EditableAccountingRow>) {
-    setSelectedInvoiceIds((current) => current.filter((id) => id !== invoiceId));
+    setDirtyInvoiceIds((current) => uniqueStrings([...current, invoiceId]));
     setRows((current) =>
       current.map((row) => {
         if (row.id !== invoiceId) return row;
@@ -185,30 +187,9 @@ export function AccountingQueueClient({
     setSavingInvoiceId(invoice.id);
     setMessage(null);
     try {
-      const response = await fetch(`/api/finance/invoice-automation/invoices/${invoice.id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          shipmentFileNumber: invoice.shipmentFileNumber,
-          entityNameRaw: invoice.entityNameRaw,
-          quickBooksEntityId: invoice.quickBooksEntityId,
-          quickBooksEntityDisplayName: invoice.quickBooksEntityDisplayName,
-          invoiceNumber: invoice.invoiceNumber,
-          invoiceDate: invoice.invoiceDate,
-          dueDate: invoice.dueDate,
-          currency: invoice.currency,
-          subtotalAmount: invoice.subtotalAmount,
-          taxAmount: invoice.taxAmount,
-          totalAmount: deriveInvoiceTotal(invoice.subtotalAmount, invoice.taxAmount, invoice.totalAmount),
-          productOrAccountName: invoice.productOrAccountName
-        })
-      });
-      const json = (await response.json().catch(() => null)) as { invoice?: InvoiceAutomationRow; error?: string } | null;
-      if (!response.ok || !json?.invoice) {
-        throw new Error(json?.error ?? "Unable to save invoice.");
-      }
-      setRows((current) => current.map((row) => (row.id === invoice.id ? json.invoice! : row)));
-      setSelectedInvoiceIds((current) => current.filter((id) => id !== invoice.id));
+      const savedInvoice = await persistInvoiceRow(invoice);
+      setRows((current) => current.map((row) => (row.id === invoice.id ? savedInvoice : row)));
+      setDirtyInvoiceIds((current) => current.filter((id) => id !== invoice.id));
       setMessage({ kind: "success", text: "Invoice saved. Review and select it when ready for posting approval." });
     } catch (error) {
       setMessage({ kind: "error", text: error instanceof Error ? error.message : "Unable to save invoice." });
@@ -217,11 +198,57 @@ export function AccountingQueueClient({
     }
   }
 
+  async function persistInvoiceRow(invoice: EditableAccountingRow) {
+    const response = await fetch(`/api/finance/invoice-automation/invoices/${invoice.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        shipmentFileNumber: invoice.shipmentFileNumber,
+        entityNameRaw: invoice.entityNameRaw,
+        quickBooksEntityId: invoice.quickBooksEntityId,
+        quickBooksEntityDisplayName: invoice.quickBooksEntityDisplayName,
+        invoiceNumber: invoice.invoiceNumber,
+        invoiceDate: invoice.invoiceDate,
+        dueDate: invoice.dueDate,
+        currency: invoice.currency,
+        subtotalAmount: invoice.subtotalAmount,
+        taxAmount: invoice.taxAmount,
+        totalAmount: deriveInvoiceTotal(invoice.subtotalAmount, invoice.taxAmount, invoice.totalAmount),
+        productOrAccountName: invoice.productOrAccountName
+      })
+    });
+    const json = (await response.json().catch(() => null)) as { invoice?: InvoiceAutomationRow; error?: string } | null;
+    if (!response.ok || !json?.invoice) {
+      throw new Error(json?.error ?? "Unable to save invoice.");
+    }
+    return json.invoice;
+  }
+
+  async function saveSelectedDirtyRows(invoiceIds: string[]) {
+    const dirtyRows = rows.filter((row) => invoiceIds.includes(row.id) && dirtyInvoiceIds.includes(row.id));
+    if (dirtyRows.length === 0) {
+      return;
+    }
+
+    setIsSavingSelectedEdits(true);
+    setMessage({ kind: "success", text: `Saving ${dirtyRows.length} edited invoice${dirtyRows.length === 1 ? "" : "s"} before continuing.` });
+    try {
+      const savedRows = await Promise.all(dirtyRows.map((row) => persistInvoiceRow(row)));
+      setRows((current) =>
+        current.map((row) => savedRows.find((savedRow) => savedRow.id === row.id) ?? row)
+      );
+      setDirtyInvoiceIds((current) => current.filter((id) => !savedRows.some((savedRow) => savedRow.id === id)));
+    } finally {
+      setIsSavingSelectedEdits(false);
+    }
+  }
+
   async function approveSelected() {
     const invoiceIdsToApprove = selectedInvoiceIds.filter((id) => accountingReviewInvoiceIds.includes(id));
     setApproving(true);
     setMessage(null);
     try {
+      await saveSelectedDirtyRows(invoiceIdsToApprove);
       const response = await fetch("/api/finance/invoice-automation/approve", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -231,7 +258,13 @@ export function AccountingQueueClient({
       if (!response.ok) {
         throw new Error(json?.error ?? "Unable to approve invoices for posting.");
       }
-      window.location.reload();
+      setRows((current) =>
+        current.map((row) =>
+          invoiceIdsToApprove.includes(row.id) ? { ...row, status: "APPROVED_FOR_POSTING", issueCodes: [] } : row
+        )
+      );
+      setSelectedInvoiceIds((current) => current.filter((id) => !invoiceIdsToApprove.includes(id)));
+      setMessage({ kind: "success", text: `${invoiceIdsToApprove.length} invoice${invoiceIdsToApprove.length === 1 ? "" : "s"} approved for posting.` });
     } catch (error) {
       setMessage({ kind: "error", text: error instanceof Error ? error.message : "Unable to approve invoices for posting." });
     } finally {
@@ -244,6 +277,7 @@ export function AccountingQueueClient({
     setDownloadingReviewPacket(true);
     setMessage(null);
     try {
+      await saveSelectedDirtyRows(invoiceIdsForPacket);
       const response = await fetch("/api/finance/invoice-automation/review-packet", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -274,6 +308,14 @@ export function AccountingQueueClient({
   async function runQuickBooksPosting(mode: "preview" | "post") {
     const invoiceIdsToPost = selectedInvoiceIds.filter((id) => approvedForPostingInvoiceIds.includes(id));
     let confirmText: string | null = null;
+    setMessage(null);
+    try {
+      await saveSelectedDirtyRows(invoiceIdsToPost);
+    } catch (error) {
+      setMessage({ kind: "error", text: error instanceof Error ? error.message : "Unable to save selected edits before QuickBooks posting." });
+      return;
+    }
+
     if (mode === "post") {
       confirmText = window.prompt(
         `This will create ${invoiceIdsToPost.length} transaction${invoiceIdsToPost.length === 1 ? "" : "s"} in QuickBooks. Type POST TO QUICKBOOKS to continue.`
@@ -286,7 +328,6 @@ export function AccountingQueueClient({
 
     setQuickBooksPostingMode(mode);
     setQuickBooksResults([]);
-    setMessage(null);
     try {
       const response = await fetch("/api/finance/invoice-automation/post", {
         method: "POST",
@@ -306,9 +347,11 @@ export function AccountingQueueClient({
         throw new Error(json?.error ?? "Unable to run QuickBooks posting.");
       }
       setQuickBooksResults(json?.results ?? []);
-      if (mode === "post" && (json?.errorCount ?? 0) === 0) {
-        setRows((current) => current.filter((row) => !invoiceIdsToPost.includes(row.id)));
-        setSelectedInvoiceIds((current) => current.filter((id) => !invoiceIdsToPost.includes(id)));
+      const postedInvoiceIds = mode === "post" ? (json?.results ?? []).filter((result) => result.posted).map((result) => result.invoiceId) : [];
+      if (postedInvoiceIds.length > 0) {
+        setRows((current) => current.filter((row) => !postedInvoiceIds.includes(row.id)));
+        setSelectedInvoiceIds((current) => current.filter((id) => !postedInvoiceIds.includes(id)));
+        setDirtyInvoiceIds((current) => current.filter((id) => !postedInvoiceIds.includes(id)));
       }
       setMessage({
         kind: (json?.errorCount ?? 0) > 0 ? "error" : "success",
@@ -371,34 +414,34 @@ export function AccountingQueueClient({
           <button
             type="button"
             onClick={() => void downloadReviewPacket()}
-            disabled={selectedEligibleCount === 0 || downloadingReviewPacket}
+            disabled={selectedEligibleCount === 0 || downloadingReviewPacket || isSavingSelectedEdits}
             className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {downloadingReviewPacket ? "Building PDF..." : `Download review PDF (${selectedEligibleCount})`}
+            {downloadingReviewPacket ? "Building PDF..." : isSavingSelectedEdits ? "Saving..." : `Download review PDF (${selectedEligibleCount})`}
           </button>
           <button
             type="button"
             onClick={() => void approveSelected()}
-            disabled={selectedAccountingCount === 0 || approving}
+            disabled={selectedAccountingCount === 0 || approving || isSavingSelectedEdits}
             className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {approving ? "Marking reviewed..." : `Mark selected reviewed (${selectedAccountingCount})`}
+            {approving ? "Marking reviewed..." : isSavingSelectedEdits ? "Saving..." : `Mark selected reviewed (${selectedAccountingCount})`}
           </button>
           <button
             type="button"
             onClick={() => void runQuickBooksPosting("preview")}
-            disabled={selectedApprovedCount === 0 || quickBooksPostingMode !== null}
+            disabled={selectedApprovedCount === 0 || quickBooksPostingMode !== null || isSavingSelectedEdits}
             className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {quickBooksPostingMode === "preview" ? "Building preview..." : `Preview QB payload (${selectedApprovedCount})`}
+            {quickBooksPostingMode === "preview" ? "Building preview..." : isSavingSelectedEdits ? "Saving..." : `Preview QB payload (${selectedApprovedCount})`}
           </button>
           <button
             type="button"
             onClick={() => void runQuickBooksPosting("post")}
-            disabled={selectedApprovedCount === 0 || quickBooksPostingMode !== null}
+            disabled={selectedApprovedCount === 0 || quickBooksPostingMode !== null || isSavingSelectedEdits}
             className="rounded-md border border-danger/30 px-4 py-2 text-sm font-semibold text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {quickBooksPostingMode === "post" ? "Posting..." : `Post to QB test (${selectedApprovedCount})`}
+            {quickBooksPostingMode === "post" ? "Posting..." : isSavingSelectedEdits ? "Saving..." : `Post to QB test (${selectedApprovedCount})`}
           </button>
         </div>
       </div>
@@ -574,7 +617,7 @@ export function AccountingQueueClient({
                         <button
                           type="button"
                           onClick={() => void saveRow(invoice)}
-                          disabled={savingInvoiceId === invoice.id || deletingInvoiceId === invoice.id}
+                          disabled={savingInvoiceId === invoice.id || deletingInvoiceId === invoice.id || isSavingSelectedEdits}
                           className="rounded-md border border-border px-3 py-1.5 text-sm font-semibold text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {savingInvoiceId === invoice.id ? "Saving..." : "Save"}
@@ -582,7 +625,7 @@ export function AccountingQueueClient({
                         <button
                           type="button"
                           onClick={() => void deleteRow(invoice)}
-                          disabled={savingInvoiceId === invoice.id || deletingInvoiceId === invoice.id}
+                          disabled={savingInvoiceId === invoice.id || deletingInvoiceId === invoice.id || isSavingSelectedEdits}
                           className="rounded-md border border-danger/30 px-3 py-1.5 text-sm font-semibold text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {deletingInvoiceId === invoice.id ? "Deleting..." : "Delete"}

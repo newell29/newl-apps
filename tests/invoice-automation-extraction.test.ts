@@ -734,15 +734,23 @@ describe("invoice automation extraction", () => {
       invoiceType: "VENDOR",
       entityOptions,
       text: `
-        SHIPMENT INFORMATION CASIA LOGISTICS TECH LIMITED Container No ONEU3252580
-        NEWELL'S EXPRESS WORLDWIDE LOGISTICS USA INC. INVOICE
-        INVOICE NO: CNG26060138
-        OI348N1246
+        CASIA LOGISTICS TECH LIMITED
+        INVOICE
+        INVOICE NO： FCLCNG26060116-D1
+        NEWELL'S EXPRESS WORLDWIDE LOGISTICS USA INC. INVOICE DATE： 2026/06/25 18:06:01
+        SHIPMENT INFORMATION
+        Destination： DETROIT,MI HB/L NO.： CNG26060138
+        Sub Total： USD 337.50 USD 337.50 0.00
         SAY TOTAL AMOUNT USD 337.50
+        OI348N1246
+        BENEFICIARY: CASIA LOGISTICS TECH LIMITED
       `
     });
     expect(casiaTypoFileName.entityNameRaw).toBe("Casia Logistics Tech Limited USD");
     expect(casiaTypoFileName.quickBooksEntityId).toBe("qb-casia-usd");
+    expect(casiaTypoFileName.invoiceNumber).toBe("FCLCNG26060116-D1");
+    expect(casiaTypoFileName.invoiceDate).toBe("2026-06-25");
+    expect(casiaTypoFileName.totalAmount).toBe(337.5);
   });
 
   it("extracts common production vendor invoice number and date formats", () => {
