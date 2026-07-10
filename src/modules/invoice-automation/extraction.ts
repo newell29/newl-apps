@@ -137,11 +137,6 @@ export function getDefaultProductOrAccount(invoiceType: InvoiceAutomationType, f
 }
 
 export function extractInvoiceNumber(text: string, fallbackName = "") {
-  const explicitFileNameInvoice = extractExplicitInvoiceTokenFromFileName(fallbackName);
-  if (explicitFileNameInvoice) {
-    return explicitFileNameInvoice;
-  }
-
   const repeatedInvoiceWordNumberMatch = text.match(/\binvoice\s+invoice\s+([A-Z0-9][A-Z0-9._/-]{2,})\b/i);
   if (repeatedInvoiceWordNumberMatch && !isGenericInvoiceFileToken(repeatedInvoiceWordNumberMatch[1])) {
     return cleanToken(repeatedInvoiceWordNumberMatch[1]);
@@ -201,6 +196,11 @@ export function extractInvoiceNumber(text: string, fallbackName = "") {
   const freightBillMatch = text.match(/\bP\s*a\s*r\s*t\s+\d+\s+of\s+\d+\s+([A-Z0-9][A-Z0-9._/-]{4,})\b/i);
   if (freightBillMatch) {
     return cleanToken(freightBillMatch[1]);
+  }
+
+  const explicitFileNameInvoice = extractExplicitInvoiceTokenFromFileName(fallbackName);
+  if (explicitFileNameInvoice) {
+    return explicitFileNameInvoice;
   }
 
   return extractInvoiceNumberFromFileName(fallbackName);

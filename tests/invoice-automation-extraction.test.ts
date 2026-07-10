@@ -759,7 +759,7 @@ describe("invoice automation extraction", () => {
       entityOptions: [],
       text: "SCOTT FREIGHT SERVICES LTD.\nInvoice Number 5200\nAI3102N4\nTotal CAD 100.00"
     });
-    expect(scottFreight.invoiceNumber).toBe("NEW1001-44");
+    expect(scottFreight.invoiceNumber).toBe("5200");
 
     const casiaBillOfLadingStyle = buildInvoiceDraftFromText({
       clientId: "casia-oney",
@@ -1127,6 +1127,7 @@ describe("invoice automation extraction", () => {
     `;
 
     expect(extractInvoiceNumber(newlCustomerInvoiceText, "Invoice-OI348N1256 7531.pdf")).toBe("7531");
+    expect(extractInvoiceNumber(newlCustomerInvoiceText, "Invoice-OI348N1256 9999.pdf")).toBe("7531");
 
     const draft = buildInvoiceDraftFromText({
       clientId: "customer-newl-template",
