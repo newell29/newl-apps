@@ -34,6 +34,7 @@ export type InvoiceAutomationQuickBooksSyncSummary = {
 
 export type InvoiceAutomationUploadDraft = {
   clientId: string;
+  documentClientId?: string;
   fileName: string;
   contentType: string;
   sizeBytes: number;
@@ -55,6 +56,15 @@ export type InvoiceAutomationUploadDraft = {
   totalAmount: number | null;
   productOrAccountName: string | null;
   issueCodes: string[];
+};
+
+export type InvoiceAutomationUploadDocument = {
+  clientDocumentId: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  pdfBase64: string;
+  extractedText: string | null;
 };
 
 export type InvoiceAutomationRow = {

@@ -8,7 +8,7 @@ import { buildInvoiceDuplicateKey, INVOICE_DUPLICATE_CHECK_STATUSES } from "@/mo
 import { learnInvoiceAutomationEntityAlias } from "@/modules/invoice-automation/entity-aliases";
 import { defaultDueDateFromInvoiceDate, getInvoiceDraftIssueCodes, normalizeInvoiceAmountsForCurrency } from "@/modules/invoice-automation/extraction";
 import { toInvoiceAutomationRow } from "@/modules/invoice-automation/row-mapper";
-import type { InvoiceAutomationUploadDraft, InvoiceAutomationUploadResponse } from "@/modules/invoice-automation/types";
+import type { InvoiceAutomationUploadDocument, InvoiceAutomationUploadDraft, InvoiceAutomationUploadResponse } from "@/modules/invoice-automation/types";
 import { requireModule, requireMutationAccess, requireRole } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -18,6 +18,7 @@ export const dynamic = "force-dynamic";
 type UploadPayload = {
   invoiceType?: InvoiceAutomationType;
   sendToAccounting?: boolean;
+  documents?: InvoiceAutomationUploadDocument[];
   invoices?: InvoiceAutomationUploadDraft[];
 };
 
@@ -31,6 +32,7 @@ export async function POST(request: Request) {
     const body = (await request.json().catch(() => null)) as UploadPayload | null;
     const invoiceType = body?.invoiceType;
     const invoices = Array.isArray(body?.invoices) ? body.invoices : [];
+    const documentByClientId = buildUploadDocumentMap(body?.documents);
     const sendToAccounting = body?.sendToAccounting === true;
 
     if (invoiceType !== "CUSTOMER" && invoiceType !== "VENDOR") {
@@ -116,32 +118,21 @@ export async function POST(request: Request) {
       });
 
       const createdInvoices = [];
+      const persistedDocumentByClientId = new Map<string, { id: string; fileName: string }>();
 
       for (const invoice of invoices) {
-        const pdfBytes = decodeBase64Pdf(invoice.pdfBase64);
-        const sha256 = createHash("sha256").update(pdfBytes).digest("hex");
-        const document = await tx.invoiceAutomationDocument.upsert({
-          where: {
-            tenantId_sha256: {
-              tenantId: context.tenantId,
-              sha256
-            }
-          },
-          update: {
-            extractedText: invoice.extractedText?.slice(0, 200000) ?? null,
-            updatedAt: now
-          },
-          create: {
+        const documentClientId = readNullable(invoice.documentClientId) ?? invoice.clientId;
+        let document = persistedDocumentByClientId.get(documentClientId);
+        if (!document) {
+          document = await persistInvoiceAutomationDocument(tx, {
             tenantId: context.tenantId,
-            fileName: readString(invoice.fileName, "invoice.pdf"),
-            contentType: readString(invoice.contentType, "application/pdf"),
-            sizeBytes: Number.isFinite(invoice.sizeBytes) ? invoice.sizeBytes : pdfBytes.byteLength,
-            sha256,
-            extractedText: invoice.extractedText?.slice(0, 200000) ?? null,
-            pdfBytes,
-            uploadedByUserId: context.userId
-          }
-        });
+            userId: context.userId,
+            now,
+            invoice,
+            document: documentByClientId.get(documentClientId)
+          });
+          persistedDocumentByClientId.set(documentClientId, document);
+        }
 
         const invoiceDate = parseDate(invoice.invoiceDate);
         const dueDate = parseDate(invoice.dueDate) ?? parseDate(defaultDueDateFromInvoiceDate(invoice.invoiceDate));
@@ -188,7 +179,7 @@ export async function POST(request: Request) {
             extractionJson: {
               clientId: invoice.clientId,
               suppliedIssueCodes: invoice.issueCodes,
-              textLength: invoice.extractedText.length
+              textLength: typeof invoice.extractedText === "string" ? invoice.extractedText.length : 0
             },
             uploadedByUserId: context.userId,
             sentToAccountingById: sendToAccounting ? context.userId : null,
@@ -354,6 +345,87 @@ function findDuplicateUploadInvoice(
   }
 
   return null;
+}
+
+type UploadTransaction = Prisma.TransactionClient;
+
+function buildUploadDocumentMap(documents: unknown) {
+  const documentByClientId = new Map<string, InvoiceAutomationUploadDocument>();
+  if (!Array.isArray(documents)) {
+    return documentByClientId;
+  }
+
+  for (const document of documents) {
+    if (!document || typeof document !== "object") {
+      continue;
+    }
+
+    const candidate = document as Partial<InvoiceAutomationUploadDocument>;
+    const clientDocumentId = readNullable(candidate.clientDocumentId);
+    if (!clientDocumentId) {
+      continue;
+    }
+
+    documentByClientId.set(clientDocumentId, {
+      clientDocumentId,
+      fileName: readString(candidate.fileName, "invoice.pdf"),
+      contentType: readString(candidate.contentType, "application/pdf"),
+      sizeBytes: Number.isFinite(candidate.sizeBytes) ? Number(candidate.sizeBytes) : 0,
+      pdfBase64: typeof candidate.pdfBase64 === "string" ? candidate.pdfBase64 : "",
+      extractedText: readNullable(candidate.extractedText)
+    });
+  }
+
+  return documentByClientId;
+}
+
+async function persistInvoiceAutomationDocument(
+  tx: UploadTransaction,
+  {
+    tenantId,
+    userId,
+    now,
+    invoice,
+    document
+  }: {
+    tenantId: string;
+    userId: string;
+    now: Date;
+    invoice: InvoiceAutomationUploadDraft;
+    document?: InvoiceAutomationUploadDocument;
+  }
+) {
+  const pdfBase64 = document?.pdfBase64 || invoice.pdfBase64;
+  const pdfBytes = decodeBase64Pdf(pdfBase64);
+  const sha256 = createHash("sha256").update(pdfBytes).digest("hex");
+  const persisted = await tx.invoiceAutomationDocument.upsert({
+    where: {
+      tenantId_sha256: {
+        tenantId,
+        sha256
+      }
+    },
+    update: {
+      extractedText: (document?.extractedText ?? invoice.extractedText)?.slice(0, 200000) ?? null,
+      updatedAt: now
+    },
+    create: {
+      tenantId,
+      fileName: readString(document?.fileName, readString(invoice.fileName, "invoice.pdf")),
+      contentType: readString(document?.contentType, readString(invoice.contentType, "application/pdf")),
+      sizeBytes: Number.isFinite(document?.sizeBytes) && document?.sizeBytes ? document.sizeBytes : Number.isFinite(invoice.sizeBytes) ? invoice.sizeBytes : pdfBytes.byteLength,
+      sha256,
+      extractedText: (document?.extractedText ?? invoice.extractedText)?.slice(0, 200000) ?? null,
+      pdfBytes,
+      uploadedByUserId: userId
+    },
+    select: {
+      id: true,
+      fileName: true
+    }
+  });
+
+  return persisted;
 }
 
 function getInvoiceEntityLabel(invoiceType: InvoiceAutomationType) {
