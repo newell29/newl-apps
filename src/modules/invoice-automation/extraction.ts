@@ -545,9 +545,9 @@ function findDateByLabels(text: string, labels: string[]) {
 
 function hasDueOnReceiptTerms(text: string) {
   return (
-    /\bdue\s+on\s+receipt\b/i.test(text) ||
+    /\bdue\s+(?:on|upon)\s+receipt\b/i.test(text) ||
     /\bpayment\s+terms?\s*[:：]?\s*0\b/i.test(text) ||
-    /\bterms?\s*[:：]?\s*(?:due\s+on\s+receipt|0\s*(?:days?)?)\b/i.test(text)
+    /\bterms?\s*[:：]?\s*(?:due\s+(?:on|upon)\s+receipt|0\s*(?:days?)?)\b/i.test(text)
   );
 }
 

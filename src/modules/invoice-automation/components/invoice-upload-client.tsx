@@ -1156,7 +1156,14 @@ function mergeOcrInvoiceIntoDraft(
       ? 92
       : null;
   const invoiceDate = draft.invoiceDate ?? ocr.invoiceDate;
-  const dueDate = draft.dueDate ?? ocr.dueDate ?? defaultDueDateFromInvoiceDate(invoiceDate);
+  const draftDueDateIsDefault = Boolean(
+    draft.invoiceDate &&
+      draft.dueDate &&
+      draft.dueDate === defaultDueDateFromInvoiceDate(draft.invoiceDate)
+  );
+  const dueDate = ocr.dueDate && (!draft.dueDate || draftDueDateIsDefault)
+    ? ocr.dueDate
+    : draft.dueDate ?? ocr.dueDate ?? defaultDueDateFromInvoiceDate(invoiceDate);
   const next: InvoiceAutomationUploadDraft = {
     ...draft,
     extractedText,

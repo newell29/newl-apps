@@ -1085,6 +1085,29 @@ describe("invoice automation extraction", () => {
       totalAmount: 750,
       productOrAccountName: "Air Freight"
     });
+
+    const ocrStyleDraft = buildInvoiceDraftFromText({
+      clientId: "customer-due-upon-receipt",
+      fileName: "AE1614N12_Eastern Services _Wait time.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 256,
+      pdfBase64: "JVBERi0x",
+      invoiceType: "CUSTOMER",
+      entityOptions,
+      text: `
+        Invoice#: 7499
+        Booking Number: AE1614N12
+        Customer Name: Eastern Services W.L.L
+        Invoice Date: 2026-07-03
+        Due Date: Due Upon Receipt
+        Payment Terms: 0
+        Service: Air Freight
+        Currency: USD
+        Total: USD 750.00
+      `
+    });
+
+    expect(ocrStyleDraft.dueDate).toBe("2026-07-03");
   });
 
   it("extracts factored trucking invoices to the actual carrier and defaults missing due dates to net 30", () => {
