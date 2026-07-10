@@ -15,6 +15,7 @@ import {
   buildInvoiceDraftFromText,
   extractCurrency,
   extractInvoiceAmounts,
+  extractInvoiceNumber,
   extractShipmentFileNumber,
   getBusinessLineFromInvoiceFileNumber,
   getDefaultProductOrAccount,
@@ -1108,6 +1109,45 @@ describe("invoice automation extraction", () => {
     });
 
     expect(ocrStyleDraft.dueDate).toBe("2026-07-03");
+  });
+
+  it("uses the visible Newl customer invoice number instead of the booking file number", () => {
+    const newlCustomerInvoiceText = `
+      INVOICE
+      INVOICE#: 7531
+      Booking Number: OI348N1256
+      Customer Name: AXLE OF DEARBORN INC
+      Invoice Date Due Date Payment Terms
+      2026-07-09 2026-08-08 30
+      Charges
+      Ocean Freight USD 8,260.00
+      Sub Total: USD 8,361.00
+      Taxes: 0.00
+      Total: USD 8,361.00
+    `;
+
+    expect(extractInvoiceNumber(newlCustomerInvoiceText, "Invoice-OI348N1256 7531.pdf")).toBe("7531");
+
+    const draft = buildInvoiceDraftFromText({
+      clientId: "customer-newl-template",
+      fileName: "Invoice-OI348N1256 7531.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 256,
+      pdfBase64: "JVBERi0x",
+      invoiceType: "CUSTOMER",
+      entityOptions,
+      text: newlCustomerInvoiceText
+    });
+
+    expect(draft).toMatchObject({
+      shipmentFileNumber: "OI348N1256",
+      invoiceNumber: "7531",
+      invoiceDate: "2026-07-09",
+      dueDate: "2026-08-08",
+      currency: "USD",
+      totalAmount: 8361,
+      productOrAccountName: "Ocean Freight"
+    });
   });
 
   it("extracts factored trucking invoices to the actual carrier and defaults missing due dates to net 30", () => {

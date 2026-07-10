@@ -57,10 +57,14 @@ export function formatInvoiceMoney(value: number | null, currency?: string | nul
     return "n/a";
   }
 
-  return value.toLocaleString("en-US", {
-    style: "currency",
-    currency: currency || "CAD",
-    maximumFractionDigits: 2
-  });
+  const normalizedCurrency = currency?.trim().toUpperCase() || "CAD";
+  try {
+    return value.toLocaleString("en-US", {
+      style: "currency",
+      currency: normalizedCurrency,
+      maximumFractionDigits: 2
+    });
+  } catch {
+    return `${normalizedCurrency} ${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
 }
-

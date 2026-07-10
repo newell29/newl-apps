@@ -1164,6 +1164,9 @@ function mergeOcrInvoiceIntoDraft(
   const dueDate = ocr.dueDate && (!draft.dueDate || draftDueDateIsDefault)
     ? ocr.dueDate
     : draft.dueDate ?? ocr.dueDate ?? defaultDueDateFromInvoiceDate(invoiceDate);
+  const invoiceNumber = shouldUseOcrInvoiceNumber(draft.invoiceNumber, ocr.invoiceNumber, shipmentFileNumber)
+    ? ocr.invoiceNumber
+    : draft.invoiceNumber ?? ocr.invoiceNumber;
   const next: InvoiceAutomationUploadDraft = {
     ...draft,
     extractedText,
@@ -1174,7 +1177,7 @@ function mergeOcrInvoiceIntoDraft(
     quickBooksEntityId,
     quickBooksEntityDisplayName,
     quickBooksMatchConfidence,
-    invoiceNumber: draft.invoiceNumber ?? ocr.invoiceNumber,
+    invoiceNumber,
     invoiceDate,
     dueDate,
     currency: draft.currency ?? ocr.currency,
@@ -1185,6 +1188,26 @@ function mergeOcrInvoiceIntoDraft(
   };
 
   return refreshDraftIssues(normalizeDraftAmounts(next));
+}
+
+function shouldUseOcrInvoiceNumber(
+  draftInvoiceNumber: string | null,
+  ocrInvoiceNumber: string | null,
+  shipmentFileNumber: string | null
+) {
+  if (!ocrInvoiceNumber) {
+    return false;
+  }
+
+  if (!draftInvoiceNumber) {
+    return true;
+  }
+
+  return isShipmentFileNumberLike(draftInvoiceNumber) || Boolean(shipmentFileNumber && draftInvoiceNumber === shipmentFileNumber);
+}
+
+function isShipmentFileNumberLike(value: string | null | undefined) {
+  return Boolean(value?.match(/^(?:OE|OI|AE|AI|TR|DR)\d+[A-Z]?\d*$/i));
 }
 
 function findBestEntityForOcrName(
