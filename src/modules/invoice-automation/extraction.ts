@@ -60,6 +60,15 @@ export function normalizeInvoiceEntityName(value: string) {
     .trim();
 }
 
+export function isInternalNewellEntityName(value: string | null | undefined) {
+  if (!value) {
+    return false;
+  }
+
+  const normalized = normalizeInvoiceEntityName(value);
+  return /\bnewell(s)?\b/.test(normalized) || /\bnewl\b/.test(normalized);
+}
+
 export function inferCurrencyFromInvoiceEntityName(value: string | null | undefined) {
   if (!value) {
     return null;
@@ -116,6 +125,11 @@ export function extractInvoiceNumber(text: string, fallbackName = "") {
   const explicitFileNameInvoice = extractExplicitInvoiceTokenFromFileName(fallbackName);
   if (explicitFileNameInvoice) {
     return explicitFileNameInvoice;
+  }
+
+  const repeatedInvoiceWordNumberMatch = text.match(/\binvoice\s+invoice\s+([A-Z0-9][A-Z0-9._/-]{2,})\b/i);
+  if (repeatedInvoiceWordNumberMatch && !isGenericInvoiceFileToken(repeatedInvoiceWordNumberMatch[1])) {
+    return cleanToken(repeatedInvoiceWordNumberMatch[1]);
   }
 
   const spacedInvoiceNumberMatch = text.match(/\bI\s*N\s*V\s*O\s*I\s*C\s*E\s+NO\.?[ \t]*[:.]?[ \t]*([A-Z0-9][A-Z0-9._/-]{2,})\b/i);
@@ -324,6 +338,9 @@ export function matchQuickBooksEntity(
   for (const option of relevant) {
     const normalizedName = option.normalizedName || normalizeInvoiceEntityName(option.displayName);
     if (!normalizedName) {
+      continue;
+    }
+    if (isInternalNewellEntityName(option.displayName) || isInternalNewellEntityName(normalizedName)) {
       continue;
     }
 
@@ -765,7 +782,7 @@ function extractVendorNameFromFileName(fileName: string) {
     return cleanupVendorNameFromFileName(amountApprovedMatch[1]);
   }
 
-  const approvedMatch = baseName.match(/\b(?:approved|amount\s+approved)?\s*invoice\s+(.+?)\s+(?:OE|OI|AE|AI|TR|DR)\d+[A-Z]?\d*\b/i);
+  const approvedMatch = baseName.match(/\b(?:approved|amount\s+approved)?\s*invoic(?:e)?\s+(.+?)\s+(?:OE|OI|AE|AI|TR|DR)\d+[A-Z]?\d*\b/i);
   if (approvedMatch) {
     return cleanupVendorNameFromFileName(approvedMatch[1]);
   }
@@ -811,7 +828,8 @@ function extractVendorNameFromHeader(text: string) {
 function cleanupVendorNameFromFileName(value: string) {
   const cleaned = cleanupLine(
     value
-      .replace(/\b(?:invoice|inv|approved|amount|pod|tax|revised|from|newells?|express|worldwide|warehousing|ltd)\b/gi, " ")
+      .replace(/\bnewell[’']?s?\s+express(?:\s+worldwide)?(?:\s+logistics)?(?:\s+warehousing)?(?:\s+ltd\.?)?\b/gi, " ")
+      .replace(/\b(?:invoice|inv|approved|amount|pod|tax|revised|from)\b/gi, " ")
       .replace(/\b(?:(?:DN|INV|TAX)[-_ ]?[A-Z0-9]{4,}|[A-Z0-9]*\d[A-Z0-9-]{4,})\b/gi, " ")
       .replace(/\d{1,2}-[A-Za-z]{3}-\d{2,4}/g, " ")
       .replace(/\([^)]*\)/g, " ")

@@ -83,6 +83,20 @@ const entityOptions: InvoiceAutomationEntityOption[] = [
     displayName: "Canadian Logistics Express CAD",
     normalizedName: "canadian logistics express",
     currency: "CAD"
+  },
+  {
+    id: "qb-casia-usd",
+    entityType: "VENDOR",
+    displayName: "Casia Logistics Tech Limited USD",
+    normalizedName: "casia logistics tech limited",
+    currency: "USD"
+  },
+  {
+    id: "qb-newells-usd",
+    entityType: "VENDOR",
+    displayName: "Newell's Express Worldwide Logistics USA Inc.",
+    normalizedName: "newells express worldwide logistics usa inc",
+    currency: "USD"
   }
 ];
 
@@ -635,6 +649,45 @@ describe("invoice automation extraction", () => {
     });
     expect(truckLine.entityNameRaw).toBe("777 Truck Line");
     expect(truckLine.invoiceNumber).toBe("6652");
+
+    const canadianLogistics = buildInvoiceDraftFromText({
+      clientId: "canadian-logistics",
+      fileName: "Approved Invoice CANADIAN LOGISTICS EXPRESS OI3106N13 Invoice for PB17519 1.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions,
+      text: `
+        DATE 2026-06-29 INVOICE INVOICE 17519 Page: 1/2
+        Bill To 6390 KESTREL ROAD NEWELL'S EXPRESS WORLDWIDE LOGISTICS
+        Remit To CANADIAN LOGISTICS EXPRESS
+        P.O. No. OI3106N13 | Q3106N15
+        TOTAL 2 000,00
+      `
+    });
+    expect(canadianLogistics.entityNameRaw).toBe("Canadian Logistics Express CAD");
+    expect(canadianLogistics.quickBooksEntityId).toBe("qb-canadian-logistics-cad");
+    expect(canadianLogistics.invoiceNumber).toBe("17519");
+
+    const casiaTypoFileName = buildInvoiceDraftFromText({
+      clientId: "casia-typo",
+      fileName: "Approved Invoic Casia OI348N1246 DN-CNG26060138.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions,
+      text: `
+        SHIPMENT INFORMATION CASIA LOGISTICS TECH LIMITED Container No ONEU3252580
+        NEWELL'S EXPRESS WORLDWIDE LOGISTICS USA INC. INVOICE
+        INVOICE NO: CNG26060138
+        OI348N1246
+        SAY TOTAL AMOUNT USD 337.50
+      `
+    });
+    expect(casiaTypoFileName.entityNameRaw).toBe("Casia Logistics Tech Limited USD");
+    expect(casiaTypoFileName.quickBooksEntityId).toBe("qb-casia-usd");
   });
 
   it("extracts common production vendor invoice number and date formats", () => {

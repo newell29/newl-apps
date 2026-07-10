@@ -12,6 +12,7 @@ import {
   getDefaultProductOrAccount,
   getInvoiceDraftIssueCodes,
   getShipmentTypeFromInvoiceFileNumber,
+  isInternalNewellEntityName,
   normalizeInvoiceAmountsForCurrency,
   splitInvoiceTextIntoDocuments
 } from "@/modules/invoice-automation/extraction";
@@ -1151,6 +1152,10 @@ function findBestEntityForOcrName(
   let best: { option: InvoiceAutomationEntityOption; score: number } | null = null;
 
   for (const option of candidates) {
+    if (isInternalNewellEntityName(option.displayName) || isInternalNewellEntityName(option.normalizedName)) {
+      continue;
+    }
+
     const normalizedOption = option.normalizedName || normalizeEntityForClientMatch(option.displayName);
     let score = 0;
 
