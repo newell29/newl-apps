@@ -23,7 +23,8 @@ export async function getInvoiceAutomationUploadShell(tenant: TenantContext, fil
       InvoiceAutomationStatus.OPERATIONS_REVIEW,
       InvoiceAutomationStatus.ACCOUNTING_REVIEW,
       InvoiceAutomationStatus.APPROVED_FOR_POSTING,
-      InvoiceAutomationStatus.POSTING_ERROR
+      InvoiceAutomationStatus.POSTING_ERROR,
+      InvoiceAutomationStatus.POSTED
     ]),
     getInvoiceAutomationEntityOptions(tenant),
     getInvoiceAutomationQuickBooksSyncSummary(tenant),
@@ -40,6 +41,7 @@ export async function getInvoiceAutomationUploadShell(tenant: TenantContext, fil
       operationsReview: invoices.filter((invoice) => invoice.status === InvoiceAutomationStatus.OPERATIONS_REVIEW).length,
       accountingReview: invoices.filter((invoice) => invoice.status === InvoiceAutomationStatus.ACCOUNTING_REVIEW).length,
       approvedForPosting: invoices.filter((invoice) => invoice.status === InvoiceAutomationStatus.APPROVED_FOR_POSTING).length,
+      posted: invoices.filter((invoice) => invoice.status === InvoiceAutomationStatus.POSTED).length,
       needsAttention: invoices.filter((invoice) => invoice.issueCodes.length > 0).length
     }
   };

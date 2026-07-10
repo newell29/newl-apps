@@ -1,6 +1,6 @@
 import { ModuleKey } from "@prisma/client";
 import { NextResponse } from "next/server";
-import { defaultDueDateFromInvoiceDate, normalizeInvoiceAmountsForCurrency } from "@/modules/invoice-automation/extraction";
+import { extractDueDate, normalizeInvoiceAmountsForCurrency } from "@/modules/invoice-automation/extraction";
 import type { InvoiceAutomationOcrInvoice, InvoiceAutomationOcrResult } from "@/modules/invoice-automation/types";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -131,6 +131,7 @@ function buildPrompt(invoiceType: "CUSTOMER" | "VENDOR", fileName: string, pageN
       : "Do not use Newl/Newells as the customer just because it appears as sender or remittance contact; use the bill-to/customer being invoiced.",
     "Find the shipment file number if visible. Valid prefixes are OE, OI, AE, AI, TR, and DR.",
     "Extract invoice number, invoice date, due date, currency as a three-letter ISO code when visible, subtotal before tax, Canadian sales tax/GST/HST/PST/QST, and total. Supported examples include CAD, USD, EUR, GBP, AUD, MXN, CNY, JPY, CHF, HKD, and SGD.",
+    "If the invoice says Due on Receipt, Due Upon Receipt, payment terms 0, or 0 days, set dueDate equal to the invoiceDate.",
     "For non-Canadian vendor taxes such as VAT/IVA/TVA, do not map that value to taxAmount; include it in the total/cost instead because it is not claimable Canadian sales tax.",
     "If no due date is visible, return dueDate as null; the app will default payment terms to 30 days after invoice date.",
     "Do not return a service/category label such as Air Freight, Ocean Freight, Trucking, or Warehouse as entityName.",
@@ -141,7 +142,8 @@ function buildPrompt(invoiceType: "CUSTOMER" | "VENDOR", fileName: string, pageN
 
 function normalizeOcrInvoice(parsed: Record<string, unknown>): InvoiceAutomationOcrInvoice {
   const invoiceDate = readIsoDate(parsed.invoiceDate);
-  const dueDate = readIsoDate(parsed.dueDate) ?? defaultDueDateFromInvoiceDate(invoiceDate);
+  const extractedText = readString(parsed.extractedText) ?? buildSyntheticExtractedText(parsed);
+  const dueDate = readIsoDate(parsed.dueDate) ?? extractDueDate(extractedText, invoiceDate);
   const currency = normalizeCurrency(parsed.currency);
   const amounts = normalizeInvoiceAmountsForCurrency({
     currency,
@@ -151,7 +153,7 @@ function normalizeOcrInvoice(parsed: Record<string, unknown>): InvoiceAutomation
   });
 
   return {
-    extractedText: readString(parsed.extractedText) ?? buildSyntheticExtractedText(parsed),
+    extractedText,
     shipmentFileNumber: normalizeNullableCode(parsed.shipmentFileNumber),
     entityName: readString(parsed.entityName),
     invoiceNumber: normalizeNullableCode(parsed.invoiceNumber),

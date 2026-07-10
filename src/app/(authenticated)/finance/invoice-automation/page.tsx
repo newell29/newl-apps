@@ -25,10 +25,11 @@ export default async function InvoiceAutomationUploadPage({ searchParams }: { se
       />
       <InvoiceAutomationTabs />
 
-      <section className="grid gap-4 md:grid-cols-4">
+      <section className="grid gap-4 md:grid-cols-5">
         <SummaryCard label="Operations review" value={shell.summary.operationsReview} />
         <SummaryCard label="Accounting queue" value={shell.summary.accountingReview} />
         <SummaryCard label="Approved for posting" value={shell.summary.approvedForPosting} />
+        <SummaryCard label="Posted" value={shell.summary.posted} />
         <SummaryCard label="Needs attention" value={shell.summary.needsAttention} />
       </section>
 
