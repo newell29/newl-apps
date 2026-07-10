@@ -42,6 +42,7 @@ export async function POST(request: Request) {
     );
   }
 
+  const invoiceType = body.invoiceType;
   const requestBody = JSON.stringify({
     model: DEFAULT_VISION_MODEL,
     response_format: {
@@ -109,7 +110,7 @@ export async function POST(request: Request) {
     : [parsed];
   const result: InvoiceAutomationOcrResult = {
     model: DEFAULT_VISION_MODEL,
-    invoices: parsedInvoices.map(normalizeOcrInvoice).filter(hasAnyInvoiceSignal)
+    invoices: parsedInvoices.map((invoice) => normalizeOcrInvoice(invoice, invoiceType)).filter(hasAnyInvoiceSignal)
   };
 
   return NextResponse.json(result);
@@ -130,6 +131,9 @@ function buildPrompt(invoiceType: "CUSTOMER" | "VENDOR", fileName: string, pageN
       ? "Many trucking vendors factor receivables. If text says bills were sold/assigned/payable to a financial service company, that company is only the factor/payee. Prefer labels such as Assigned For, carrier name, carrier/vendor identity near the invoice table, or the carrier on the load confirmation. Example: if RTS Financial is payable-to but the invoice says 373 CARGO INCORPORATED or Assigned For: 373 CARGO INCORPORATED, return 373 CARGO INCORPORATED as entityName."
       : "Do not use Newl/Newells as the customer just because it appears as sender or remittance contact; use the bill-to/customer being invoiced.",
     "Find the shipment file number if visible. Valid prefixes are OE, OI, AE, AI, TR, and DR.",
+    invoiceType === "CUSTOMER"
+      ? "For Newl customer invoices, the visible INVOICE# value is the invoiceNumber. The Booking Number or Reference Number with OE/OI/AE/AI/TR/DR prefix is the shipmentFileNumber, not the invoiceNumber."
+      : "Do not use a shipment file number with OE/OI/AE/AI/TR/DR prefix as invoiceNumber unless the vendor document explicitly labels that same value as the invoice number.",
     "Extract invoice number, invoice date, due date, currency as a three-letter ISO code when visible, subtotal before tax, Canadian sales tax/GST/HST/PST/QST, and total. Supported examples include CAD, USD, EUR, GBP, AUD, MXN, CNY, JPY, CHF, HKD, and SGD.",
     "If the invoice says Due on Receipt, Due Upon Receipt, payment terms 0, or 0 days, set dueDate equal to the invoiceDate.",
     "For non-Canadian vendor taxes such as VAT/IVA/TVA, do not map that value to taxAmount; include it in the total/cost instead because it is not claimable Canadian sales tax.",
@@ -140,11 +144,16 @@ function buildPrompt(invoiceType: "CUSTOMER" | "VENDOR", fileName: string, pageN
   ].join(" ");
 }
 
-function normalizeOcrInvoice(parsed: Record<string, unknown>): InvoiceAutomationOcrInvoice {
+function normalizeOcrInvoice(parsed: Record<string, unknown>, invoiceType: "CUSTOMER" | "VENDOR"): InvoiceAutomationOcrInvoice {
   const invoiceDate = readIsoDate(parsed.invoiceDate);
   const extractedText = readString(parsed.extractedText) ?? buildSyntheticExtractedText(parsed);
   const dueDate = readIsoDate(parsed.dueDate) ?? extractDueDate(extractedText, invoiceDate);
   const currency = normalizeCurrency(parsed.currency);
+  const parsedInvoiceNumber = normalizeNullableCode(parsed.invoiceNumber);
+  const shipmentFileNumber = normalizeNullableCode(parsed.shipmentFileNumber);
+  const invoiceNumber = shouldUseInvoiceNumberFromExtractedText(invoiceType, parsedInvoiceNumber, shipmentFileNumber)
+    ? extractInvoiceNumberFromOcrText(extractedText) ?? parsedInvoiceNumber
+    : parsedInvoiceNumber;
   const amounts = normalizeInvoiceAmountsForCurrency({
     currency,
     subtotalAmount: readNumber(parsed.subtotalAmount),
@@ -154,9 +163,9 @@ function normalizeOcrInvoice(parsed: Record<string, unknown>): InvoiceAutomation
 
   return {
     extractedText,
-    shipmentFileNumber: normalizeNullableCode(parsed.shipmentFileNumber),
+    shipmentFileNumber,
     entityName: readString(parsed.entityName),
-    invoiceNumber: normalizeNullableCode(parsed.invoiceNumber),
+    invoiceNumber,
     invoiceDate,
     dueDate,
     currency,
@@ -167,6 +176,32 @@ function normalizeOcrInvoice(parsed: Record<string, unknown>): InvoiceAutomation
     confidence: readString(parsed.confidence) ?? "MEDIUM",
     notes: readString(parsed.notes)
   };
+}
+
+function shouldUseInvoiceNumberFromExtractedText(
+  invoiceType: "CUSTOMER" | "VENDOR",
+  invoiceNumber: string | null,
+  shipmentFileNumber: string | null
+) {
+  if (invoiceType !== "CUSTOMER") {
+    return false;
+  }
+
+  return !invoiceNumber || isShipmentFileNumberLike(invoiceNumber) || Boolean(shipmentFileNumber && invoiceNumber === shipmentFileNumber);
+}
+
+function extractInvoiceNumberFromOcrText(text: string) {
+  const invoiceNumberMatch = text.match(/\binvoice\s*#\s*[:：]?\s*([A-Z0-9][A-Z0-9._/-]{2,})\b/i);
+  if (invoiceNumberMatch) {
+    return normalizeNullableCode(invoiceNumberMatch[1]);
+  }
+
+  const invoiceNumberLabelMatch = text.match(/\binvoice\s*(?:number|no\.?)\s*[:：#-]?\s*([A-Z0-9][A-Z0-9._/-]{2,})\b/i);
+  return invoiceNumberLabelMatch ? normalizeNullableCode(invoiceNumberLabelMatch[1]) : null;
+}
+
+function isShipmentFileNumberLike(value: string | null | undefined) {
+  return Boolean(value?.match(/^(?:OE|OI|AE|AI|TR|DR)\d+[A-Z]?\d*$/i));
 }
 
 function hasAnyInvoiceSignal(invoice: InvoiceAutomationOcrInvoice) {

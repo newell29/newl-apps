@@ -21,6 +21,7 @@ import {
   splitInvoiceTextIntoDocuments
 } from "@/modules/invoice-automation/extraction";
 import {
+  CurrencySelect,
   formatInvoiceEnum,
   formatInvoiceMoney,
   InvoiceStatusPill,
@@ -107,7 +108,7 @@ export function InvoiceAutomationUploadClient({
       if (!response.ok) {
         throw new Error(json?.error ?? "Unable to send invoices to accounting.");
       }
-      window.location.reload();
+      navigateToInvoiceAutomationPage("/finance/invoice-automation/accounting");
     } catch (error) {
       setQueueError(error instanceof Error ? error.message : "Unable to send invoices to accounting.");
     } finally {
@@ -660,7 +661,7 @@ function InvoiceUploadModal({
       if (!response.ok || !json || "error" in json) {
         throw new Error((json && "error" in json ? json.error : null) ?? "Unable to save invoices.");
       }
-      window.location.reload();
+      navigateToInvoiceAutomationPage(sendToAccounting ? "/finance/invoice-automation/accounting" : "/finance/invoice-automation");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Unable to save invoices.");
     } finally {
@@ -822,7 +823,12 @@ function InvoiceUploadModal({
                       <td className="px-3 py-3"><SmallInput value={draft.invoiceNumber ?? ""} onChange={(value) => updateDraft(draft.clientId, { invoiceNumber: value || null })} /></td>
                       <td className="px-3 py-3"><DateInput value={draft.invoiceDate ?? ""} onChange={(value) => updateDraft(draft.clientId, { invoiceDate: value || null })} /></td>
                       <td className="px-3 py-3"><DateInput value={draft.dueDate ?? ""} onChange={(value) => updateDraft(draft.clientId, { dueDate: value || null })} /></td>
-                      <td className="px-3 py-3"><SmallInput value={draft.currency ?? ""} onChange={(value) => updateDraft(draft.clientId, { currency: value.toUpperCase() || null })} /></td>
+                      <td className="px-3 py-3">
+                        <CurrencySelect
+                          value={draft.currency}
+                          onChange={(value) => updateDraft(draft.clientId, { currency: value })}
+                        />
+                      </td>
                       <td className="px-3 py-3"><MoneyInput value={draft.subtotalAmount} onChange={(value) => updateDraft(draft.clientId, { subtotalAmount: value })} /></td>
                       <td className="px-3 py-3"><MoneyInput value={draft.taxAmount} onChange={(value) => updateDraft(draft.clientId, { taxAmount: value })} /></td>
                       <td className="px-3 py-3 text-right font-semibold text-foreground">{formatInvoiceMoney(deriveInvoiceTotal(draft.subtotalAmount, draft.taxAmount, draft.totalAmount), draft.currency)}</td>
@@ -890,6 +896,10 @@ function clearMemoryIssuesForManualPatch(issueCodes: string[], patch: Partial<In
   if (patch.dueDate !== undefined) blocked.add("MEMORY_APPLIED_PAYMENT_TERMS");
   if (blocked.size === 0) return issueCodes;
   return issueCodes.filter((issueCode) => !blocked.has(issueCode));
+}
+
+function navigateToInvoiceAutomationPage(path: string) {
+  window.location.assign(path);
 }
 
 function ConfirmSendToAccountingDialog({
@@ -1164,6 +1174,9 @@ function mergeOcrInvoiceIntoDraft(
   const dueDate = ocr.dueDate && (!draft.dueDate || draftDueDateIsDefault)
     ? ocr.dueDate
     : draft.dueDate ?? ocr.dueDate ?? defaultDueDateFromInvoiceDate(invoiceDate);
+  const invoiceNumber = shouldUseOcrInvoiceNumber(draft.invoiceNumber, ocr.invoiceNumber, shipmentFileNumber)
+    ? ocr.invoiceNumber
+    : draft.invoiceNumber ?? ocr.invoiceNumber;
   const next: InvoiceAutomationUploadDraft = {
     ...draft,
     extractedText,
@@ -1174,7 +1187,7 @@ function mergeOcrInvoiceIntoDraft(
     quickBooksEntityId,
     quickBooksEntityDisplayName,
     quickBooksMatchConfidence,
-    invoiceNumber: draft.invoiceNumber ?? ocr.invoiceNumber,
+    invoiceNumber,
     invoiceDate,
     dueDate,
     currency: draft.currency ?? ocr.currency,
@@ -1185,6 +1198,26 @@ function mergeOcrInvoiceIntoDraft(
   };
 
   return refreshDraftIssues(normalizeDraftAmounts(next));
+}
+
+function shouldUseOcrInvoiceNumber(
+  draftInvoiceNumber: string | null,
+  ocrInvoiceNumber: string | null,
+  shipmentFileNumber: string | null
+) {
+  if (!ocrInvoiceNumber) {
+    return false;
+  }
+
+  if (!draftInvoiceNumber) {
+    return true;
+  }
+
+  return isShipmentFileNumberLike(draftInvoiceNumber) || Boolean(shipmentFileNumber && draftInvoiceNumber === shipmentFileNumber);
+}
+
+function isShipmentFileNumberLike(value: string | null | undefined) {
+  return Boolean(value?.match(/^(?:OE|OI|AE|AI|TR|DR)\d+[A-Z]?\d*$/i));
 }
 
 function findBestEntityForOcrName(

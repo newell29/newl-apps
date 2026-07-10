@@ -137,11 +137,6 @@ export function getDefaultProductOrAccount(invoiceType: InvoiceAutomationType, f
 }
 
 export function extractInvoiceNumber(text: string, fallbackName = "") {
-  const explicitFileNameInvoice = extractExplicitInvoiceTokenFromFileName(fallbackName);
-  if (explicitFileNameInvoice) {
-    return explicitFileNameInvoice;
-  }
-
   const repeatedInvoiceWordNumberMatch = text.match(/\binvoice\s+invoice\s+([A-Z0-9][A-Z0-9._/-]{2,})\b/i);
   if (repeatedInvoiceWordNumberMatch && !isGenericInvoiceFileToken(repeatedInvoiceWordNumberMatch[1])) {
     return cleanToken(repeatedInvoiceWordNumberMatch[1]);
@@ -201,6 +196,11 @@ export function extractInvoiceNumber(text: string, fallbackName = "") {
   const freightBillMatch = text.match(/\bP\s*a\s*r\s*t\s+\d+\s+of\s+\d+\s+([A-Z0-9][A-Z0-9._/-]{4,})\b/i);
   if (freightBillMatch) {
     return cleanToken(freightBillMatch[1]);
+  }
+
+  const explicitFileNameInvoice = extractExplicitInvoiceTokenFromFileName(fallbackName);
+  if (explicitFileNameInvoice) {
+    return explicitFileNameInvoice;
   }
 
   return extractInvoiceNumberFromFileName(fallbackName);
@@ -949,6 +949,11 @@ function extractInvoiceNumberFromFileName(fileName: string) {
       return cleanToken(invoiceNoToken[1]);
     }
 
+    const newlCustomerInvoiceToken = afterShipment.match(/(?:^|[\s_-])(\d{3,8})(?:$|[\s_-])/);
+    if (newlCustomerInvoiceToken) {
+      return cleanToken(newlCustomerInvoiceToken[1]);
+    }
+
     const strongToken = afterShipment.match(/\b(?:DN-[A-Z0-9-]+|INV[-_ ]?[A-Z0-9-]+|[A-Z]{2,}[-_][A-Z0-9-]+|[A-Z]{4,}\d[A-Z0-9-]+|\d{5,}(?:-\d+)?)\b/i);
     if (strongToken) {
       return cleanToken(strongToken[0].replace(/\s+/g, ""));
@@ -962,12 +967,18 @@ function extractInvoiceNumberFromFileName(fileName: string) {
 
 function extractExplicitInvoiceTokenFromFileName(fileName: string) {
   const baseName = fileName.replace(/\.pdf$/i, "");
+  const newlCustomerInvoiceMatch = baseName.match(/\binvoice[_\s-]+(?:OE|OI|AE|AI|TR|DR)\s*[-_#:]?\s*\d+[A-Z]?\d*[\s_-]+(\d{3,8})(?:$|[\s_-])/i);
+  if (newlCustomerInvoiceMatch) {
+    return cleanToken(newlCustomerInvoiceMatch[1]);
+  }
+
   const explicitMatch = baseName.match(/\binvoice[_\s-]+(?!no\.?\b|#)([A-Z]{2,}\d[A-Z0-9._/-]*)\b/i);
   if (!explicitMatch) {
     return null;
   }
 
-  return cleanToken(explicitMatch[1].replace(/\s+/g, ""));
+  const candidate = cleanToken(explicitMatch[1].replace(/\s+/g, ""));
+  return FILE_NUMBER_PATTERN.test(candidate) ? null : candidate;
 }
 
 function extractVendorNameFromFileName(fileName: string) {
