@@ -1,0 +1,672 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import type { PDFPageProxy } from "pdfjs-dist/types/src/display/api";
+
+import type {
+  GarlandCarrierKey,
+  GarlandCarrierManifestHistoryResponse,
+  GarlandCarrierManifestRow
+} from "@/modules/shipment-documents/carrier-manifest-types";
+import { formatHumanDateFromIso } from "@/modules/shipment-documents/ps-number";
+
+type PdfJsModule = typeof import("pdfjs-dist");
+
+type GeneratedWorkbook = {
+  carrier: GarlandCarrierKey;
+  fileName: string;
+  downloadUrl: string;
+  base64: string;
+  rowCount: number;
+  skidCount: number;
+};
+
+type ExtractionResponse = {
+  rows: GarlandCarrierManifestRow[];
+  error?: string;
+};
+
+const TARGET_CARRIERS: Array<{ key: GarlandCarrierKey; label: string }> = [
+  { key: "MIDLAND", label: "Midland" },
+  { key: "SPEEDY", label: "Speedy" },
+  { key: "SURETRACK", label: "Suretrack" }
+];
+const EXTRACTION_BATCH_SIZE = 2;
+const PAGE_IMAGE_MAX_WIDTH = 1400;
+const PAGE_IMAGE_JPEG_QUALITY = 0.74;
+
+let pdfJsLoader: Promise<PdfJsModule> | null = null;
+
+function getTodayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function GarlandCarrierManifestClient({
+  initialHistory
+}: {
+  initialHistory: GarlandCarrierManifestHistoryResponse;
+}) {
+  const [shipmentDate, setShipmentDate] = useState(getTodayIsoDate);
+  const [documentLabel, setDocumentLabel] = useState(() => formatHumanDateFromIso(getTodayIsoDate()));
+  const [labelManuallyEdited, setLabelManuallyEdited] = useState(false);
+  const [bolFile, setBolFile] = useState<File | null>(null);
+  const [rows, setRows] = useState<GarlandCarrierManifestRow[]>([]);
+  const [workbooks, setWorkbooks] = useState<GeneratedWorkbook[]>([]);
+  const [history, setHistory] = useState(initialHistory);
+  const [status, setStatus] = useState("Upload the daily Garland BOL bundle to build carrier manifests.");
+  const [error, setError] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [uploadingSignedCopyRunId, setUploadingSignedCopyRunId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!labelManuallyEdited) {
+      setDocumentLabel(formatHumanDateFromIso(shipmentDate));
+    }
+  }, [shipmentDate, labelManuallyEdited]);
+
+  useEffect(() => {
+    return () => {
+      for (const workbook of workbooks) {
+        URL.revokeObjectURL(workbook.downloadUrl);
+      }
+    };
+  }, [workbooks]);
+
+  const carrierCounts = useMemo(() => buildCarrierCounts(rows), [rows]);
+
+  async function handleBuildManifests() {
+    if (!bolFile) {
+      return;
+    }
+
+    setIsProcessing(true);
+    setError(null);
+    setRows([]);
+    setWorkbooks((current) => {
+      current.forEach((workbook) => URL.revokeObjectURL(workbook.downloadUrl));
+      return [];
+    });
+
+    try {
+      const fileBytes = await readFileAsUint8Array(bolFile);
+      const pdf = await loadPdf(fileBytes);
+      const detectedRows: GarlandCarrierManifestRow[] = [];
+
+      for (let pageIndex = 0; pageIndex < pdf.numPages; pageIndex += EXTRACTION_BATCH_SIZE) {
+        const images = [];
+        const lastPageIndex = Math.min(pdf.numPages, pageIndex + EXTRACTION_BATCH_SIZE);
+
+        for (let batchPageIndex = pageIndex; batchPageIndex < lastPageIndex; batchPageIndex += 1) {
+          const page = await pdf.getPage(batchPageIndex + 1);
+          const imageDataUrl = await renderPageImage(page);
+          images.push({ pageNumber: batchPageIndex + 1, imageDataUrl });
+        }
+
+        setStatus(`Reading BOL pages ${pageIndex + 1}-${lastPageIndex} of ${pdf.numPages}...`);
+        detectedRows.push(...(await extractManifestRows(images)));
+      }
+
+      const sortedRows = sortManifestRows(detectedRows);
+      const nextWorkbooks = TARGET_CARRIERS.flatMap((carrier) => {
+        const carrierRows = sortedRows.filter((row) => row.carrier === carrier.key);
+        return carrierRows.length > 0 ? [buildWorkbook(carrier.key, documentLabel, shipmentDate, carrierRows)] : [];
+      });
+
+      setRows(sortedRows);
+      setWorkbooks(nextWorkbooks);
+      setStatus(
+        nextWorkbooks.length > 0
+          ? `Built ${nextWorkbooks.length} carrier manifest workbook${nextWorkbooks.length === 1 ? "" : "s"}.`
+          : "No Midland, Speedy, or Suretrack BOLs were found in this upload."
+      );
+    } catch (buildError) {
+      const message = buildError instanceof Error ? buildError.message : "Unable to build carrier manifests.";
+      setError(message);
+      setStatus("Carrier manifest build stopped before workbooks were created.");
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  async function handleSaveRun() {
+    if (!bolFile || rows.length === 0 || workbooks.length === 0) {
+      return;
+    }
+
+    setIsSaving(true);
+    setHistoryError(null);
+
+    try {
+      const response = await fetch("/api/shipment-documents/carrier-manifest/runs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          shipmentDate,
+          documentLabel,
+          sourceBolFileName: bolFile.name,
+          rows,
+          workbooks: Object.fromEntries(
+            workbooks.map((workbook) => [workbook.carrier, { fileName: workbook.fileName, base64: workbook.base64 }])
+          )
+        })
+      });
+      const json = (await response.json().catch(() => null)) as GarlandCarrierManifestHistoryResponse | { error?: string } | null;
+
+      if (!response.ok || !json || !("runs" in json)) {
+        throw new Error((json && "error" in json && typeof json.error === "string" ? json.error : null) ?? "Unable to save carrier manifest run.");
+      }
+
+      setHistory(json);
+      setStatus("Carrier manifests were saved to history.");
+    } catch (saveError) {
+      const message = saveError instanceof Error ? saveError.message : "Unable to save carrier manifest run.";
+      setHistoryError(message);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleDeleteRun(runId: string) {
+    if (!window.confirm("Delete this saved carrier manifest run? This cannot be undone from the app.")) {
+      return;
+    }
+
+    setHistoryError(null);
+
+    try {
+      const response = await fetch(`/api/shipment-documents/carrier-manifest/runs/${runId}`, {
+        method: "DELETE"
+      });
+      const json = (await response.json().catch(() => null)) as { error?: string } | null;
+
+      if (!response.ok) {
+        throw new Error(json?.error ?? "Unable to delete carrier manifest run.");
+      }
+
+      await refreshHistory();
+    } catch (deleteError) {
+      const message = deleteError instanceof Error ? deleteError.message : "Unable to delete carrier manifest run.";
+      setHistoryError(message);
+    }
+  }
+
+  async function handleSignedCopyUpload(runId: string, file: File | null) {
+    if (!file) {
+      return;
+    }
+
+    setUploadingSignedCopyRunId(runId);
+    setHistoryError(null);
+
+    try {
+      const response = await fetch(`/api/shipment-documents/carrier-manifest/runs/${runId}/signed-copy`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          fileName: file.name,
+          contentType: file.type || "application/octet-stream",
+          base64: bytesToBase64(await readFileAsUint8Array(file))
+        })
+      });
+      const json = (await response.json().catch(() => null)) as GarlandCarrierManifestHistoryResponse | { error?: string } | null;
+
+      if (!response.ok || !json || !("runs" in json)) {
+        throw new Error((json && "error" in json && typeof json.error === "string" ? json.error : null) ?? "Unable to upload signed copy.");
+      }
+
+      setHistory(json);
+    } catch (uploadError) {
+      const message = uploadError instanceof Error ? uploadError.message : "Unable to upload signed copy.";
+      setHistoryError(message);
+    } finally {
+      setUploadingSignedCopyRunId(null);
+    }
+  }
+
+  async function refreshHistory() {
+    const response = await fetch("/api/shipment-documents/carrier-manifest/runs", { method: "GET" });
+    const json = (await response.json().catch(() => null)) as GarlandCarrierManifestHistoryResponse | { error?: string } | null;
+
+    if (!response.ok || !json || !("runs" in json)) {
+      throw new Error((json && "error" in json && typeof json.error === "string" ? json.error : null) ?? "Unable to refresh carrier manifest history.");
+    }
+
+    setHistory(json);
+  }
+
+  return (
+    <div className="space-y-6">
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="grid gap-4 md:grid-cols-2">
+          <label className="block text-sm font-medium text-foreground">
+            Manifest date
+            <input
+              type="date"
+              value={shipmentDate}
+              onChange={(event) => setShipmentDate(event.target.value)}
+              className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="block text-sm font-medium text-foreground">
+            Document label
+            <input
+              value={documentLabel}
+              onChange={(event) => {
+                setDocumentLabel(event.target.value);
+                setLabelManuallyEdited(true);
+              }}
+              className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+              placeholder="July 10, 2026"
+            />
+          </label>
+          <label className="block text-sm font-medium text-foreground md:col-span-2">
+            Garland BOL PDF
+            <input
+              type="file"
+              accept="application/pdf"
+              onChange={(event) => setBolFile(event.target.files?.[0] ?? null)}
+              className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            />
+          </label>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => void handleBuildManifests()}
+            disabled={!bolFile || isProcessing}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isProcessing ? "Building manifests..." : "Build carrier manifests"}
+          </button>
+          <p className="text-sm text-mutedForeground">{status}</p>
+        </div>
+
+        {error ? (
+          <div className="mt-4 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
+            {error}
+          </div>
+        ) : null}
+      </section>
+
+      {rows.length > 0 ? (
+        <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 className="text-base font-semibold text-foreground">Generated manifests</h2>
+              <p className="mt-1 text-sm leading-6 text-mutedForeground">
+                Review the detected rows, download editable Excel files, then save the run to history.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleSaveRun()}
+              disabled={isSaving || workbooks.length === 0}
+              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSaving ? "Saving..." : "Save to history"}
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            {TARGET_CARRIERS.map((carrier) => (
+              <div key={carrier.key} className="rounded-md border border-border bg-muted/20 p-4">
+                <p className="text-sm font-semibold text-foreground">{carrier.label}</p>
+                <p className="mt-1 text-2xl font-semibold text-foreground">{carrierCounts[carrier.key]}</p>
+                <p className="text-xs text-mutedForeground">rows detected</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {workbooks.map((workbook) => (
+              <a
+                key={workbook.carrier}
+                href={workbook.downloadUrl}
+                download={workbook.fileName}
+                className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted"
+              >
+                Download {formatCarrier(workbook.carrier)} XLS ({workbook.rowCount} rows)
+              </a>
+            ))}
+          </div>
+
+          <ManifestRowsTable rows={rows} />
+        </section>
+      ) : null}
+
+      <section className="rounded-lg border border-border bg-card shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border p-5">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Saved carrier manifest history</h2>
+            <p className="mt-1 text-sm leading-6 text-mutedForeground">
+              Download generated Excel files or upload the final signed copy after loading is complete.
+            </p>
+          </div>
+          <div className="rounded-full border border-accentBorder bg-accentSoft px-3 py-1 text-xs font-semibold text-primary">
+            {history.totalCount} saved run{history.totalCount === 1 ? "" : "s"}
+          </div>
+        </div>
+
+        <div className="p-5">
+          {historyError ? (
+            <div className="mb-4 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
+              {historyError}
+            </div>
+          ) : null}
+
+          {history.runs.length === 0 ? (
+            <div className="rounded-md border border-border bg-muted/20 px-4 py-6 text-sm text-mutedForeground">
+              No saved carrier manifest runs yet.
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-md border border-border">
+              <table className="min-w-full divide-y divide-border text-sm">
+                <thead className="bg-muted/40 text-left text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+                  <tr>
+                    <th className="px-3 py-2">Run</th>
+                    <th className="px-3 py-2">Carriers</th>
+                    <th className="px-3 py-2">Signed copy</th>
+                    <th className="px-3 py-2">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {history.runs.map((run) => (
+                    <tr key={run.id}>
+                      <td className="px-3 py-3 align-top">
+                        <p className="font-medium text-foreground">{run.documentLabel}</p>
+                        <p className="mt-1 text-xs text-mutedForeground">
+                          Shipment date {formatDate(run.shipmentDate)} · Saved {formatDateTime(run.createdAt)}
+                        </p>
+                        <p className="mt-1 text-xs text-mutedForeground">
+                          {run.createdByName ? `Saved by ${run.createdByName}` : "Saved run"}
+                        </p>
+                        <p className="mt-1 text-xs text-mutedForeground">{run.sourceBolFileName ?? "No source file saved"}</p>
+                      </td>
+                      <td className="px-3 py-3 align-top text-mutedForeground">
+                        {TARGET_CARRIERS.map((carrier) => (
+                          <p key={carrier.key}>
+                            {carrier.label}: {run.carrierCounts[carrier.key] ?? 0}
+                          </p>
+                        ))}
+                      </td>
+                      <td className="px-3 py-3 align-top text-mutedForeground">
+                        {run.signedCopyFileName ? (
+                          <>
+                            <a
+                              href={`/api/shipment-documents/carrier-manifest/runs/${run.id}?documentType=signed`}
+                              className="font-semibold text-primary hover:underline"
+                            >
+                              {run.signedCopyFileName}
+                            </a>
+                            <p className="mt-1 text-xs">Uploaded {formatDateTime(run.signedCopyUploadedAt)}</p>
+                          </>
+                        ) : (
+                          <label className="block">
+                            <span className="text-xs font-semibold text-mutedForeground">Upload final signed copy</span>
+                            <input
+                              type="file"
+                              accept="application/pdf,image/*"
+                              disabled={uploadingSignedCopyRunId === run.id}
+                              onChange={(event) => void handleSignedCopyUpload(run.id, event.target.files?.[0] ?? null)}
+                              className="mt-2 w-full text-xs"
+                            />
+                          </label>
+                        )}
+                      </td>
+                      <td className="px-3 py-3 align-top">
+                        <div className="flex flex-wrap gap-2">
+                          {run.hasMidlandWorkbook ? <DownloadLink runId={run.id} type="midland" label="Midland XLS" /> : null}
+                          {run.hasSpeedyWorkbook ? <DownloadLink runId={run.id} type="speedy" label="Speedy XLS" /> : null}
+                          {run.hasSuretrackWorkbook ? <DownloadLink runId={run.id} type="suretrack" label="Suretrack XLS" /> : null}
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteRun(run.id)}
+                            className="rounded-md border border-danger/30 px-3 py-1.5 text-xs font-semibold text-danger transition-colors hover:bg-danger/10"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ManifestRowsTable({ rows }: { rows: GarlandCarrierManifestRow[] }) {
+  return (
+    <div className="mt-4 overflow-x-auto rounded-md border border-border">
+      <table className="min-w-full divide-y divide-border text-sm">
+        <thead className="bg-muted/40 text-left text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+          <tr>
+            <th className="px-3 py-2">Carrier</th>
+            <th className="px-3 py-2">Page</th>
+            <th className="px-3 py-2">SR#</th>
+            <th className="px-3 py-2">PS#</th>
+            <th className="px-3 py-2">City / Pro</th>
+            <th className="px-3 py-2">Skids</th>
+            <th className="px-3 py-2">Confidence</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {rows.map((row, index) => (
+            <tr key={`${row.carrier}-${row.pageNumber}-${row.psNumber}-${index}`}>
+              <td className="px-3 py-2 font-semibold text-foreground">{formatCarrier(row.carrier)}</td>
+              <td className="px-3 py-2 text-mutedForeground">{row.pageNumber}</td>
+              <td className="px-3 py-2 text-mutedForeground">{row.srNumber || "N/A"}</td>
+              <td className="px-3 py-2 text-mutedForeground">{row.psNumber}</td>
+              <td className="px-3 py-2 text-mutedForeground">{row.cityProvince || "N/A"}</td>
+              <td className="px-3 py-2 text-mutedForeground">{row.skids ?? ""}</td>
+              <td className="px-3 py-2 text-mutedForeground">{row.confidence}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function DownloadLink({ runId, type, label }: { runId: string; type: string; label: string }) {
+  return (
+    <a
+      href={`/api/shipment-documents/carrier-manifest/runs/${runId}?documentType=${type}`}
+      className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted"
+    >
+      {label}
+    </a>
+  );
+}
+
+async function extractManifestRows(images: Array<{ pageNumber: number; imageDataUrl: string }>) {
+  const response = await fetch("/api/shipment-documents/carrier-manifest/extract", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ images })
+  });
+  const json = (await response.json().catch(() => null)) as ExtractionResponse | null;
+
+  if (!response.ok || !json) {
+    throw new Error(json?.error ?? "Unable to extract carrier manifest rows.");
+  }
+
+  return Array.isArray(json.rows) ? json.rows : [];
+}
+
+function buildWorkbook(carrier: GarlandCarrierKey, documentLabel: string, shipmentDate: string, rows: GarlandCarrierManifestRow[]): GeneratedWorkbook {
+  const carrierLabel = formatCarrier(carrier);
+  const fileName = `${sanitizeFilename(`${carrierLabel} Manifest ${documentLabel}`)}.xls`;
+  const sortedRows = sortManifestRows(rows);
+  const rowCount = Math.max(sortedRows.length, 16);
+  const skidCount = sortedRows.reduce((total, row) => total + (row.skids ?? 0), 0);
+  const html = buildWorkbookHtml(carrierLabel, documentLabel, shipmentDate, sortedRows, rowCount, skidCount);
+  const bytes = new TextEncoder().encode(html);
+  const blob = new Blob([bytes], { type: "application/vnd.ms-excel" });
+
+  return {
+    carrier,
+    fileName,
+    downloadUrl: URL.createObjectURL(blob),
+    base64: bytesToBase64(bytes),
+    rowCount: sortedRows.length,
+    skidCount
+  };
+}
+
+function buildWorkbookHtml(
+  carrierLabel: string,
+  documentLabel: string,
+  shipmentDate: string,
+  rows: GarlandCarrierManifestRow[],
+  rowCount: number,
+  skidCount: number
+) {
+  const bodyRows = Array.from({ length: rowCount }, (_, index) => {
+    const row = rows[index];
+    return [
+      "<tr>",
+      `<td class="row-number">${index + 1}</td>`,
+      `<td>${escapeHtml(row?.srNumber ?? "")}</td>`,
+      `<td>${escapeHtml(row?.psNumber.replace(/^PS/i, "") ?? "")}</td>`,
+      `<td>${escapeHtml(row?.cityProvince ?? "")}</td>`,
+      `<td class="skids">${row?.skids ?? ""}</td>`,
+      "</tr>"
+    ].join("");
+  }).join("");
+
+  return [
+    "<!doctype html>",
+    "<html>",
+    "<head>",
+    '<meta charset="utf-8" />',
+    "<style>",
+    "body{font-family:Arial,sans-serif;}table{border-collapse:collapse;width:100%;}td,th{border:1px solid #111;padding:6px 8px;font-size:14px;}th{font-size:16px;text-align:left;} .title{font-size:22px;font-weight:700;text-align:center;} .row-number{width:36px;text-align:right;} .skids{text-align:right;width:70px;} .signature{height:44px;font-weight:700;} .summary{font-weight:700;background:#f2f2f2;}",
+    "</style>",
+    "</head>",
+    "<body>",
+    "<table>",
+    `<tr><td class="title" colspan="5">${escapeHtml(`${carrierLabel} Manifest ${documentLabel}`)}</td></tr>`,
+    "<tr><th></th><th>SR#</th><th>PS#</th><th>City / Pro</th><th>Skids</th></tr>",
+    bodyRows,
+    `<tr class="summary"><td colspan="4">Total skids</td><td class="skids">${skidCount}</td></tr>`,
+    `<tr><td class="signature" colspan="2">Driver signature</td><td colspan="2"></td><td>${escapeHtml(shipmentDate)}</td></tr>`,
+    "</table>",
+    "</body>",
+    "</html>"
+  ].join("");
+}
+
+async function readFileAsUint8Array(file: File) {
+  return new Uint8Array(await file.arrayBuffer());
+}
+
+async function loadPdf(fileBytes: Uint8Array) {
+  const pdfjs = await loadPdfJs();
+  const bytes = new Uint8Array(fileBytes.byteLength);
+  bytes.set(fileBytes);
+  return pdfjs.getDocument({ data: bytes }).promise;
+}
+
+async function loadPdfJs() {
+  if (!pdfJsLoader) {
+    pdfJsLoader = import("pdfjs-dist").then((module) => {
+      module.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+      return module;
+    });
+  }
+
+  return pdfJsLoader;
+}
+
+async function renderPageImage(page: PDFPageProxy) {
+  const baseViewport = page.getViewport({ scale: 1 });
+  const scale = Math.min(PAGE_IMAGE_MAX_WIDTH / baseViewport.width, 2);
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    throw new Error("Unable to create a canvas for BOL page rendering.");
+  }
+
+  await page.render({ canvas, canvasContext: context, viewport }).promise;
+  return canvas.toDataURL("image/jpeg", PAGE_IMAGE_JPEG_QUALITY);
+}
+
+function sortManifestRows(rows: GarlandCarrierManifestRow[]) {
+  return [...rows].sort((left, right) => {
+    const carrierComparison = left.carrier.localeCompare(right.carrier);
+    return carrierComparison !== 0 ? carrierComparison : left.pageNumber - right.pageNumber;
+  });
+}
+
+function buildCarrierCounts(rows: GarlandCarrierManifestRow[]): Record<GarlandCarrierKey, number> {
+  return {
+    MIDLAND: rows.filter((row) => row.carrier === "MIDLAND").length,
+    SPEEDY: rows.filter((row) => row.carrier === "SPEEDY").length,
+    SURETRACK: rows.filter((row) => row.carrier === "SURETRACK").length
+  };
+}
+
+function formatCarrier(carrier: GarlandCarrierKey) {
+  return carrier === "SURETRACK" ? "Suretrack" : carrier.charAt(0) + carrier.slice(1).toLowerCase();
+}
+
+function formatDate(value: string | null) {
+  if (!value) {
+    return "N/A";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  }).format(new Date(value));
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) {
+    return "N/A";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+  const chunkSize = 0x8000;
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+
+  return btoa(binary);
+}
+
+function sanitizeFilename(value: string) {
+  return value.replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ").trim();
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}

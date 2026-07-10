@@ -2,6 +2,7 @@ import { ModuleKey } from "@prisma/client";
 
 import { PageHeader } from "@/components/page-header";
 import { GarlandDailyPackClient } from "@/modules/shipment-documents/components/garland-daily-pack-client";
+import { GarlandToolTabs } from "@/modules/shipment-documents/components/garland-tool-tabs";
 import { getShipmentDocumentRunHistory } from "@/modules/shipment-documents/queries";
 import { requireModule } from "@/server/auth/authorization";
 import { isOpenAiDraftGenerationConfigured } from "@/server/integrations/openai";
@@ -21,6 +22,8 @@ export default async function ShipmentDocumentsPage() {
         title="BOL consolidation"
         description="Upload the day's BOL bundle and pick-ticket bundle, sort each document set by PS number, then download clean customer-ready PDFs."
       />
+
+      <GarlandToolTabs active="bol" />
 
       <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
         <div className="grid gap-4 xl:grid-cols-[1.2fr,0.8fr]">

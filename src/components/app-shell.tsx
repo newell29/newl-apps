@@ -61,6 +61,13 @@ const navEntries: NavNode[] = [
             id: "garland-bol-consolidation",
             href: "/shipment-documents",
             label: "BOL Consolidation",
+            exact: true,
+            moduleKey: "SHIPMENT_DOCUMENTS" as ModuleKey
+          },
+          {
+            id: "garland-carrier-manifests",
+            href: "/shipment-documents/carrier-manifests",
+            label: "Carrier Manifests",
             moduleKey: "SHIPMENT_DOCUMENTS" as ModuleKey
           }
         ]
