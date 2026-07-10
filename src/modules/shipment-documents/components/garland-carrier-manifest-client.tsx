@@ -453,7 +453,7 @@ function ManifestRowsTable({ rows }: { rows: GarlandCarrierManifestRow[] }) {
             <th className="px-3 py-2">SR#</th>
             <th className="px-3 py-2">PS#</th>
             <th className="px-3 py-2">City / Pro</th>
-            <th className="px-3 py-2">Skids</th>
+            <th className="px-3 py-2">Pallets</th>
             <th className="px-3 py-2">Confidence</th>
           </tr>
         </thead>
@@ -506,8 +506,8 @@ function buildWorkbook(carrier: GarlandCarrierKey, documentLabel: string, shipme
   const fileName = `${sanitizeFilename(`${carrierLabel} Manifest ${documentLabel}`)}.xls`;
   const sortedRows = sortManifestRows(rows);
   const rowCount = Math.max(sortedRows.length, 16);
-  const skidCount = sortedRows.reduce((total, row) => total + (row.skids ?? 0), 0);
-  const html = buildWorkbookHtml(carrierLabel, documentLabel, shipmentDate, sortedRows, rowCount, skidCount);
+  const palletCount = sortedRows.reduce((total, row) => total + (row.skids ?? 0), 0);
+  const html = buildWorkbookHtml(carrierLabel, documentLabel, shipmentDate, sortedRows, rowCount, palletCount);
   const bytes = new TextEncoder().encode(html);
   const blob = new Blob([bytes], { type: "application/vnd.ms-excel" });
 
@@ -517,7 +517,7 @@ function buildWorkbook(carrier: GarlandCarrierKey, documentLabel: string, shipme
     downloadUrl: URL.createObjectURL(blob),
     base64: bytesToBase64(bytes),
     rowCount: sortedRows.length,
-    skidCount
+    skidCount: palletCount
   };
 }
 
@@ -527,7 +527,7 @@ function buildWorkbookHtml(
   shipmentDate: string,
   rows: GarlandCarrierManifestRow[],
   rowCount: number,
-  skidCount: number
+  palletCount: number
 ) {
   const bodyRows = Array.from({ length: rowCount }, (_, index) => {
     const row = rows[index];
@@ -548,15 +548,15 @@ function buildWorkbookHtml(
     "<head>",
     '<meta charset="utf-8" />',
     "<style>",
-    "body{font-family:Arial,sans-serif;}table{border-collapse:collapse;width:100%;}td,th{border:1px solid #111;padding:6px 8px;font-size:14px;}th{font-size:16px;text-align:left;} .title{font-size:22px;font-weight:700;text-align:center;} .row-number{width:36px;text-align:right;} .skids{text-align:right;width:70px;} .signature{height:44px;font-weight:700;} .summary{font-weight:700;background:#f2f2f2;}",
+    "body{font-family:Arial,sans-serif;}table{border-collapse:collapse;width:100%;}td,th{border:1px solid #111;padding:6px 8px;font-size:14px;}th{font-size:16px;text-align:left;} .title{font-size:22px;font-weight:700;text-align:center;} .row-number{width:36px;text-align:right;} .skids{text-align:right;width:80px;} .signature{height:44px;font-weight:700;} .summary{font-weight:700;background:#f2f2f2;}",
     "</style>",
     "</head>",
     "<body>",
     "<table>",
     `<tr><td class="title" colspan="5">${escapeHtml(`${carrierLabel} Manifest ${documentLabel}`)}</td></tr>`,
-    "<tr><th></th><th>SR#</th><th>PS#</th><th>City / Pro</th><th>Skids</th></tr>",
+    "<tr><th></th><th>SR#</th><th>PS#</th><th>City / Prov</th><th>Pallets</th></tr>",
     bodyRows,
-    `<tr class="summary"><td colspan="4">Total skids</td><td class="skids">${skidCount}</td></tr>`,
+    `<tr class="summary"><td colspan="4">Total pallets</td><td class="skids">${palletCount}</td></tr>`,
     `<tr><td class="signature" colspan="2">Driver signature</td><td colspan="2"></td><td>${escapeHtml(shipmentDate)}</td></tr>`,
     "</table>",
     "</body>",

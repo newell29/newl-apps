@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       {
         role: "system",
         content:
-          "You extract Garland Canada carrier manifest rows from full-page BOL scan images. Return JSON only. Include a row for every page where the CARRIER field contains Midland, Speedy, Suretrack, Sure Track, or Suretrak. Ignore other carriers. Do not drop a matching carrier page just because another field is uncertain."
+          "You extract Garland Canada carrier loading-manifest rows from full-page BOL scan images. Return JSON only. The key fields are carrier, PS/reference number, consignee city/province, and total pallets. Include a row for every page where the CARRIER field contains Midland, Speedy, Suretrack, Sure Track, or Suretrak. Ignore other carriers. Do not drop a matching carrier page just because another field is uncertain."
       },
       {
         role: "user",
@@ -118,7 +118,12 @@ function buildPrompt(pageNumbers: number[]) {
     "Target carrier examples include SURETRACK STANDARD, SURETRAK, SURE TRACK, SPEEDY TRANSPORT, SPEEDY, MIDLAND TRANSPORT, and MIDLAND.",
     "Only return rows for carriers Midland, Speedy, or Suretrack/Sure Track/Suretrak. Ignore all other carriers.",
     "If the carrier is one of those targets, return a row even if PS number, SR number, city/province, or skids are uncertain.",
-    "For matching pages, then inspect shipment/order id, references/PS number, consignee city/province, and skids/pallets/handling-unit count.",
+    "For matching pages, extract these exact fields from the BOL:",
+    "1. carrier from the top-left CARRIER box.",
+    "2. psNumber from the REFERENCES box near the top. It is the PS value before the first dash, for example PS209872 from PS209872-SR810664 - SR810664.",
+    "3. cityProvince from the CONSIGNEE address box. Use only city and province/state, for example OTTAWA, ON or CALGARY, AB. Do not include postal code or country.",
+    "4. skids from the bottom-left Total line in the carrier information section, for example Total: 1 PALLETS means skids 1. If there is a conflict, trust the Total line over the package detail line.",
+    "Also extract srNumber from SHIPMENT ID when visible, but it is secondary.",
     "Normalize carrier to one of MIDLAND, SPEEDY, SURETRACK.",
     "pageNumber must match the attached BOL page number.",
     "SR number should be the SR/shipment/order id digits only when visible, otherwise an empty string.",
