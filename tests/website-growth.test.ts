@@ -71,6 +71,31 @@ describe("website growth integrations", () => {
     expect(status.googleSearchConsole.mode).toBe("oauth");
   });
 
+  it("reports only missing service-account fields once service-account setup has started", () => {
+    const status = getWebsiteGrowthIntegrationStatus({
+      GOOGLE_SEARCH_CONSOLE_SITE_URL: "sc-domain:newlgroup.com",
+      GOOGLE_SEARCH_CONSOLE_SERVICE_ACCOUNT_EMAIL: "service-account@example.iam.gserviceaccount.com"
+    });
+
+    expect(status.googleSearchConsole.configured).toBe(false);
+    expect(status.googleSearchConsole.mode).toBe("not_configured");
+    expect(status.googleSearchConsole.missing).toEqual(["GOOGLE_SEARCH_CONSOLE_PRIVATE_KEY"]);
+  });
+
+  it("reports only missing OAuth fields once OAuth setup has started", () => {
+    const status = getWebsiteGrowthIntegrationStatus({
+      GOOGLE_SEARCH_CONSOLE_SITE_URL: "sc-domain:newlgroup.com",
+      GOOGLE_SEARCH_CONSOLE_CLIENT_ID: "client"
+    });
+
+    expect(status.googleSearchConsole.configured).toBe(false);
+    expect(status.googleSearchConsole.mode).toBe("not_configured");
+    expect(status.googleSearchConsole.missing).toEqual([
+      "GOOGLE_SEARCH_CONSOLE_CLIENT_SECRET",
+      "GOOGLE_SEARCH_CONSOLE_REFRESH_TOKEN"
+    ]);
+  });
+
   it("fetches Search Console rows with service-account credentials", async () => {
     const { privateKey } = generateKeyPairSync("rsa", {
       modulusLength: 2048,
