@@ -5,6 +5,10 @@ import type { InvoiceAutomationType } from "@prisma/client";
 import type { PDFPageProxy } from "pdfjs-dist/types/src/display/api";
 import { getInvoiceApprovalBlockingIssues } from "@/modules/invoice-automation/approval";
 import {
+  applyInvoiceCorrectionMemory,
+  isCorrectionMemoryIssueCode
+} from "@/modules/invoice-automation/correction-memory";
+import {
   buildInvoiceDraftFromText,
   defaultDueDateFromInvoiceDate,
   deriveInvoiceTotal,
@@ -23,6 +27,7 @@ import {
   InvoiceTypePill
 } from "@/modules/invoice-automation/components";
 import type {
+  InvoiceAutomationCorrectionMemoryHint,
   InvoiceAutomationEntityOption,
   InvoiceAutomationOcrInvoice,
   InvoiceAutomationOcrResult,
@@ -49,10 +54,12 @@ let pdfJsLoader: Promise<PdfJsModule> | null = null;
 export function InvoiceAutomationUploadClient({
   invoices,
   entityOptions,
+  correctionMemories,
   quickBooksSync
 }: {
   invoices: InvoiceAutomationRow[];
   entityOptions: InvoiceAutomationEntityOption[];
+  correctionMemories: InvoiceAutomationCorrectionMemoryHint[];
   quickBooksSync: InvoiceAutomationQuickBooksSyncSummary;
 }) {
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
@@ -207,6 +214,7 @@ export function InvoiceAutomationUploadClient({
         <InvoiceUploadModal
           invoiceType={modalType}
           entityOptions={entityOptions}
+          correctionMemories={correctionMemories}
           onClose={() => setModalType(null)}
         />
       ) : null}
@@ -507,10 +515,12 @@ function getDraftSearchText(draft: InvoiceAutomationUploadDraft) {
 function InvoiceUploadModal({
   invoiceType,
   entityOptions,
+  correctionMemories,
   onClose
 }: {
   invoiceType: InvoiceAutomationType;
   entityOptions: InvoiceAutomationEntityOption[];
+  correctionMemories: InvoiceAutomationCorrectionMemoryHint[];
   onClose: () => void;
 }) {
   const [drafts, setDrafts] = useState<InvoiceAutomationUploadDraft[]>([]);
@@ -548,6 +558,10 @@ function InvoiceUploadModal({
     setDraftPage(1);
   }
 
+  function applyDraftCorrectionMemory(draft: InvoiceAutomationUploadDraft) {
+    return refreshDraftIssues(applyInvoiceCorrectionMemory(draft, invoiceType, correctionMemories));
+  }
+
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) {
       return;
@@ -570,16 +584,18 @@ function InvoiceUploadModal({
         const text = await extractPdfText(bytes);
         const textSegments = splitInvoiceTextIntoDocuments(text);
         const fileDrafts = textSegments.map((segmentText, segmentIndex) =>
-          buildInvoiceDraftFromText({
-            clientId: `${file.name}-${file.size}-${nextDrafts.length}-${segmentIndex}`,
-            fileName: textSegments.length > 1 ? `${file.name} - invoice ${segmentIndex + 1}` : file.name,
-            contentType: file.type || "application/pdf",
-            sizeBytes: file.size,
-            pdfBase64,
-            text: segmentText,
-            invoiceType,
-            entityOptions
-          })
+          applyDraftCorrectionMemory(
+            buildInvoiceDraftFromText({
+              clientId: `${file.name}-${file.size}-${nextDrafts.length}-${segmentIndex}`,
+              fileName: textSegments.length > 1 ? `${file.name} - invoice ${segmentIndex + 1}` : file.name,
+              contentType: file.type || "application/pdf",
+              sizeBytes: file.size,
+              pdfBase64,
+              text: segmentText,
+              invoiceType,
+              entityOptions
+            })
+          )
         );
 
         if (fileDrafts.length === 1 && shouldRunVisionOcr(fileDrafts[0])) {
@@ -592,15 +608,17 @@ function InvoiceUploadModal({
           }
           nextDrafts.push(
             ...ocrResult.invoices.map((ocrInvoice, ocrIndex) =>
-              mergeOcrInvoiceIntoDraft(
-                {
-                  ...fileDrafts[0],
-                  clientId: `${file.name}-${file.size}-${nextDrafts.length}-ocr-${ocrIndex}`,
-                  fileName: ocrResult.invoices.length > 1 ? `${file.name} - invoice ${ocrIndex + 1}` : file.name
-                },
-                ocrInvoice,
-                invoiceType,
-                entityOptions
+              applyDraftCorrectionMemory(
+                mergeOcrInvoiceIntoDraft(
+                  {
+                    ...fileDrafts[0],
+                    clientId: `${file.name}-${file.size}-${nextDrafts.length}-ocr-${ocrIndex}`,
+                    fileName: ocrResult.invoices.length > 1 ? `${file.name} - invoice ${ocrIndex + 1}` : file.name
+                  },
+                  ocrInvoice,
+                  invoiceType,
+                  entityOptions
+                )
               )
             )
           );
@@ -654,7 +672,7 @@ function InvoiceUploadModal({
     setDrafts((current) =>
       current.map((draft) => {
         if (draft.clientId !== clientId) return draft;
-        const next = { ...draft, ...patch };
+        const next = { ...draft, ...patch, issueCodes: clearMemoryIssuesForManualPatch(draft.issueCodes, patch) };
         if (patch.shipmentFileNumber !== undefined) {
           next.shipmentType = getShipmentTypeFromInvoiceFileNumber(next.shipmentFileNumber);
           next.businessLine = getBusinessLineFromInvoiceFileNumber(next.shipmentFileNumber);
@@ -663,7 +681,7 @@ function InvoiceUploadModal({
         if (patch.invoiceDate !== undefined && !next.dueDate) {
           next.dueDate = defaultDueDateFromInvoiceDate(next.invoiceDate);
         }
-        return refreshDraftIssues(normalizeDraftAmounts(next));
+        return applyDraftCorrectionMemory(normalizeDraftAmounts(next));
       })
     );
   }
@@ -865,6 +883,15 @@ function InvoiceUploadModal({
   );
 }
 
+function clearMemoryIssuesForManualPatch(issueCodes: string[], patch: Partial<InvoiceAutomationUploadDraft>) {
+  const blocked = new Set<string>();
+  if (patch.currency !== undefined) blocked.add("MEMORY_APPLIED_CURRENCY");
+  if (patch.productOrAccountName !== undefined) blocked.add("MEMORY_APPLIED_PRODUCT_OR_ACCOUNT");
+  if (patch.dueDate !== undefined) blocked.add("MEMORY_APPLIED_PAYMENT_TERMS");
+  if (blocked.size === 0) return issueCodes;
+  return issueCodes.filter((issueCode) => !blocked.has(issueCode));
+}
+
 function ConfirmSendToAccountingDialog({
   invoiceCount,
   onCancel,
@@ -935,9 +962,10 @@ function formatShortDateTime(value: string) {
 }
 
 function refreshDraftIssues(draft: InvoiceAutomationUploadDraft): InvoiceAutomationUploadDraft {
+  const memoryIssueCodes = draft.issueCodes.filter(isCorrectionMemoryIssueCode);
   return {
     ...draft,
-    issueCodes: getInvoiceDraftIssueCodes(draft)
+    issueCodes: [...new Set([...getInvoiceDraftIssueCodes(draft), ...memoryIssueCodes])]
   };
 }
 

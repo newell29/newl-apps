@@ -6,6 +6,10 @@ import {
   getInvoicePostingBlockingIssues
 } from "@/modules/invoice-automation/approval";
 import { buildInvoiceDuplicateKey, INVOICE_DUPLICATE_CHECK_STATUSES } from "@/modules/invoice-automation/duplicates";
+import {
+  applyInvoiceCorrectionMemory,
+  buildInvoiceCorrectionMemoryCandidates
+} from "@/modules/invoice-automation/correction-memory";
 import { buildInvoiceAutomationEntityAlias } from "@/modules/invoice-automation/entity-aliases";
 import {
   buildInvoiceDraftFromText,
@@ -448,6 +452,57 @@ describe("invoice automation extraction", () => {
     expect(draft.entityNameRaw).toBe("Test Company - DO NOT PROCESS");
     expect(draft.quickBooksEntityId).toBeNull();
     expect(draft.issueCodes).toContain("MISSING_QB_MATCH");
+  });
+
+  it("learns and applies safe correction memory for repeated invoice mappings", () => {
+    const memories = buildInvoiceCorrectionMemoryCandidates({
+      tenantId: "tenant-1",
+      invoiceType: "VENDOR",
+      entityNameRaw: "Test Company - DO NOT PROCESS",
+      quickBooksEntityId: "qb-test-vendor-cad",
+      quickBooksEntityDisplayName: "Test Company - DO NOT PROCESS",
+      shipmentFileNumber: "TR900N26",
+      currency: "CAD",
+      productOrAccountName: "5014 Warehouse Rate",
+      invoiceDate: "2026-07-10",
+      dueDate: "2026-07-10",
+      userId: "user-1"
+    });
+    const productMemory = memories.find((memory) => memory.fieldName === "PRODUCT_OR_ACCOUNT");
+    const paymentTermsMemory = memories.find((memory) => memory.fieldName === "PAYMENT_TERMS_DAYS");
+
+    expect(productMemory).toMatchObject({
+      learnedValue: "5014 Warehouse Rate",
+      shipmentPrefix: "TR",
+      quickBooksEntityId: "qb-test-vendor-cad"
+    });
+    expect(paymentTermsMemory?.learnedValue).toBe("0");
+
+    const extractedDraft = buildInvoiceDraftFromText({
+      clientId: "memory-draft",
+      fileName: "test-company-warehouse-trucking.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions,
+      text: `
+        Test Company - DO NOT PROCESS
+        Invoice Number: WH-100
+        Invoice Date: 2026-07-11
+        Shipment File Number: TR901N26
+        Currency CAD
+        Subtotal CAD 100.00
+        Total CAD 100.00
+      `
+    });
+    const corrected = applyInvoiceCorrectionMemory(extractedDraft, "VENDOR", memories);
+
+    expect(extractedDraft.productOrAccountName).toBe("5015 Trucking Rate");
+    expect(corrected.productOrAccountName).toBe("5014 Warehouse Rate");
+    expect(corrected.dueDate).toBe("2026-07-11");
+    expect(corrected.issueCodes).toContain("MEMORY_APPLIED_PRODUCT_OR_ACCOUNT");
+    expect(corrected.issueCodes).toContain("MEMORY_APPLIED_PAYMENT_TERMS");
   });
 
   it("normalizes camel-case OCR customer names before QuickBooks matching", () => {

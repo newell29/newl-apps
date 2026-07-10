@@ -2,6 +2,7 @@ import { InvoiceAutomationStatus, ModuleKey, PlatformRole, Prisma } from "@prism
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { buildInvoiceDuplicateKey, INVOICE_DUPLICATE_CHECK_STATUSES } from "@/modules/invoice-automation/duplicates";
+import { learnInvoiceAutomationCorrectionMemory } from "@/modules/invoice-automation/correction-memory-store";
 import { learnInvoiceAutomationEntityAlias } from "@/modules/invoice-automation/entity-aliases";
 import {
   defaultDueDateFromInvoiceDate,
@@ -194,6 +195,20 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
       quickBooksEntityId,
       quickBooksEntityDisplayName,
       currency,
+      userId: context.userId
+    });
+
+    await learnInvoiceAutomationCorrectionMemory(prisma, {
+      tenantId: context.tenantId,
+      invoiceType: existing.invoiceType,
+      entityNameRaw,
+      quickBooksEntityId,
+      quickBooksEntityDisplayName,
+      shipmentFileNumber,
+      currency,
+      productOrAccountName,
+      invoiceDate,
+      dueDate,
       userId: context.userId
     });
 

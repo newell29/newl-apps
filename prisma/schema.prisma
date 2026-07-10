@@ -423,6 +423,7 @@ model Tenant {
   invoiceAutomationInvoices     InvoiceAutomationInvoice[]
   invoiceAutomationQuickBooksEntities InvoiceAutomationQuickBooksEntity[]
   invoiceAutomationEntityAliases      InvoiceAutomationEntityAlias[]
+  invoiceAutomationCorrectionMemories InvoiceAutomationCorrectionMemory[]
 }
 
 model User {
@@ -1542,6 +1543,34 @@ model InvoiceAutomationEntityAlias {
   @@unique([tenantId, invoiceType, normalizedAlias])
   @@index([tenantId, invoiceType])
   @@index([tenantId, quickBooksEntityId])
+  @@index([tenantId, lastUsedAt])
+}
+
+model InvoiceAutomationCorrectionMemory {
+  id                          String                @id @default(cuid())
+  memoryKey                   String                @unique
+  tenantId                    String
+  invoiceType                 InvoiceAutomationType
+  fieldName                   String
+  normalizedEntityName        String?
+  quickBooksEntityId          String?
+  quickBooksEntityDisplayName String?
+  shipmentPrefix              String?
+  currency                    String?
+  learnedValue                String
+  sourceValue                 String?
+  createdByUserId             String?
+  lastUsedAt                  DateTime              @default(now())
+  usageCount                  Int                   @default(1)
+  createdAt                   DateTime              @default(now())
+  updatedAt                   DateTime              @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, invoiceType])
+  @@index([tenantId, fieldName])
+  @@index([tenantId, quickBooksEntityId])
+  @@index([tenantId, normalizedEntityName])
   @@index([tenantId, lastUsedAt])
 }
 
