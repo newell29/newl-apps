@@ -24,6 +24,7 @@ run("npm", ["run", "prisma:generate"]);
 if (vercelEnv === "preview") {
   console.log("Preview deployment detected. Checking database identity before applying migrations.");
   run("npm", ["run", "db:safety-check", "--", "--require-preview-db"]);
+  run("npx", ["prisma", "migrate", "resolve", "--rolled-back", "20260709220000_add_website_growth_module"]);
   run("npm", ["run", "prisma:migrate:deploy"]);
 } else {
   console.log(
