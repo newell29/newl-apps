@@ -21,6 +21,7 @@ import {
   splitInvoiceTextIntoDocuments
 } from "@/modules/invoice-automation/extraction";
 import {
+  CurrencySelect,
   formatInvoiceEnum,
   formatInvoiceMoney,
   InvoiceStatusPill,
@@ -822,7 +823,12 @@ function InvoiceUploadModal({
                       <td className="px-3 py-3"><SmallInput value={draft.invoiceNumber ?? ""} onChange={(value) => updateDraft(draft.clientId, { invoiceNumber: value || null })} /></td>
                       <td className="px-3 py-3"><DateInput value={draft.invoiceDate ?? ""} onChange={(value) => updateDraft(draft.clientId, { invoiceDate: value || null })} /></td>
                       <td className="px-3 py-3"><DateInput value={draft.dueDate ?? ""} onChange={(value) => updateDraft(draft.clientId, { dueDate: value || null })} /></td>
-                      <td className="px-3 py-3"><SmallInput value={draft.currency ?? ""} onChange={(value) => updateDraft(draft.clientId, { currency: value.toUpperCase() || null })} /></td>
+                      <td className="px-3 py-3">
+                        <CurrencySelect
+                          value={draft.currency}
+                          onChange={(value) => updateDraft(draft.clientId, { currency: value })}
+                        />
+                      </td>
                       <td className="px-3 py-3"><MoneyInput value={draft.subtotalAmount} onChange={(value) => updateDraft(draft.clientId, { subtotalAmount: value })} /></td>
                       <td className="px-3 py-3"><MoneyInput value={draft.taxAmount} onChange={(value) => updateDraft(draft.clientId, { taxAmount: value })} /></td>
                       <td className="px-3 py-3 text-right font-semibold text-foreground">{formatInvoiceMoney(deriveInvoiceTotal(draft.subtotalAmount, draft.taxAmount, draft.totalAmount), draft.currency)}</td>

@@ -1,6 +1,20 @@
 import Link from "next/link";
 import type { InvoiceAutomationStatus, InvoiceAutomationType } from "@prisma/client";
 
+export const INVOICE_AUTOMATION_CURRENCY_CODES = [
+  "CAD",
+  "USD",
+  "EUR",
+  "GBP",
+  "AUD",
+  "MXN",
+  "CNY",
+  "JPY",
+  "CHF",
+  "HKD",
+  "SGD"
+] as const;
+
 export function InvoiceAutomationTabs() {
   const links = [
     { href: "/finance/invoice-automation", label: "Operations Upload" },
@@ -67,4 +81,34 @@ export function formatInvoiceMoney(value: number | null, currency?: string | nul
   } catch {
     return `${normalizedCurrency} ${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
+}
+
+export function CurrencySelect({
+  value,
+  onChange,
+  className = "w-28"
+}: {
+  value: string | null;
+  onChange: (value: string | null) => void;
+  className?: string;
+}) {
+  const normalizedValue = value?.trim().toUpperCase() ?? "";
+  const options = normalizedValue && !INVOICE_AUTOMATION_CURRENCY_CODES.includes(normalizedValue as (typeof INVOICE_AUTOMATION_CURRENCY_CODES)[number])
+    ? [normalizedValue, ...INVOICE_AUTOMATION_CURRENCY_CODES]
+    : INVOICE_AUTOMATION_CURRENCY_CODES;
+
+  return (
+    <select
+      value={normalizedValue}
+      onChange={(event) => onChange(event.target.value || null)}
+      className={`${className} rounded-md border border-input bg-background px-2 py-1.5`}
+    >
+      <option value="">Missing</option>
+      {options.map((currency) => (
+        <option key={currency} value={currency}>
+          {currency}
+        </option>
+      ))}
+    </select>
+  );
 }

@@ -14,6 +14,7 @@ import {
   normalizeInvoiceAmountsForCurrency
 } from "@/modules/invoice-automation/extraction";
 import {
+  CurrencySelect,
   formatInvoiceMoney,
   formatInvoiceEnum,
   InvoiceStatusPill,
@@ -601,7 +602,13 @@ export function AccountingQueueClient({
                     <td className="px-3 py-3"><SmallInput value={invoice.invoiceNumber ?? ""} onChange={(value) => updateRow(invoice.id, { invoiceNumber: value || null })} /></td>
                     <td className="px-3 py-3"><DateInput value={invoice.invoiceDate ?? ""} onChange={(value) => updateRow(invoice.id, { invoiceDate: value || null })} /></td>
                     <td className="px-3 py-3"><DateInput value={invoice.dueDate ?? ""} onChange={(value) => updateRow(invoice.id, { dueDate: value || null })} /></td>
-                    <td className="px-3 py-3"><SmallInput value={invoice.currency ?? ""} onChange={(value) => updateRow(invoice.id, { currency: value.toUpperCase() || null })} className="w-24" /></td>
+                    <td className="px-3 py-3">
+                      <CurrencySelect
+                        value={invoice.currency}
+                        onChange={(value) => updateRow(invoice.id, { currency: value })}
+                        className="w-24"
+                      />
+                    </td>
                     <td className="px-3 py-3"><MoneyInput value={invoice.subtotalAmount} onChange={(value) => updateRow(invoice.id, { subtotalAmount: value })} /></td>
                     <td className="px-3 py-3"><MoneyInput value={invoice.taxAmount} onChange={(value) => updateRow(invoice.id, { taxAmount: value })} /></td>
                     <td className="px-3 py-3 text-right font-semibold text-foreground">{formatInvoiceMoney(deriveInvoiceTotal(invoice.subtotalAmount, invoice.taxAmount, invoice.totalAmount), invoice.currency)}</td>
