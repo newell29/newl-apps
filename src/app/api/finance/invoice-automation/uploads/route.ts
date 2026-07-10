@@ -188,7 +188,7 @@ export async function POST(request: Request) {
             extractionJson: {
               clientId: invoice.clientId,
               suppliedIssueCodes: invoice.issueCodes,
-              textLength: invoice.extractedText.length
+              textLength: typeof invoice.extractedText === "string" ? invoice.extractedText.length : 0
             },
             uploadedByUserId: context.userId,
             sentToAccountingById: sendToAccounting ? context.userId : null,

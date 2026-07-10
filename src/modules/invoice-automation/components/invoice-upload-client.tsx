@@ -49,6 +49,7 @@ type PdfJsModule = typeof import("pdfjs-dist");
 const OCR_PAGE_LIMIT = 8;
 const OCR_IMAGE_MAX_WIDTH = 1800;
 const OCR_IMAGE_JPEG_QUALITY = 0.82;
+const UPLOAD_REQUEST_WARNING_BYTES = 4_000_000;
 
 let pdfJsLoader: Promise<PdfJsModule> | null = null;
 
@@ -648,18 +649,26 @@ function InvoiceUploadModal({
     setIsSaving(true);
 
     try {
+      const payload = {
+        invoiceType,
+        sendToAccounting,
+        invoices: drafts.map((draft) => refreshDraftIssues(normalizeDraftAmounts(draft)))
+      };
+      const requestBody = JSON.stringify(payload);
+      if (requestBody.length > UPLOAD_REQUEST_WARNING_BYTES) {
+        throw new Error(
+          `This invoice batch is too large to save in one request (${formatByteSize(requestBody.length)}). Save fewer PDFs at once, or split large multi-invoice attachments into a smaller batch.`
+        );
+      }
+
       const response = await fetch("/api/finance/invoice-automation/uploads", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          invoiceType,
-          sendToAccounting,
-          invoices: drafts.map((draft) => refreshDraftIssues(normalizeDraftAmounts(draft)))
-        })
+        body: requestBody
       });
-      const json = (await response.json().catch(() => null)) as InvoiceAutomationUploadResponse | { error?: string } | null;
+      const json = await readUploadResponse(response);
       if (!response.ok || !json || "error" in json) {
-        throw new Error((json && "error" in json ? json.error : null) ?? "Unable to save invoices.");
+        throw new Error((json && "error" in json ? json.error : null) ?? buildUploadResponseError(response));
       }
       navigateToInvoiceAutomationPage(sendToAccounting ? "/finance/invoice-automation/accounting" : "/finance/invoice-automation");
     } catch (saveError) {
@@ -989,6 +998,36 @@ function normalizeDraftAmounts(draft: InvoiceAutomationUploadDraft): InvoiceAuto
       totalAmount: draft.totalAmount
     })
   };
+}
+
+async function readUploadResponse(response: Response): Promise<InvoiceAutomationUploadResponse | { error?: string } | null> {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    return (await response.json().catch(() => null)) as InvoiceAutomationUploadResponse | { error?: string } | null;
+  }
+
+  const text = (await response.text().catch(() => "")).trim();
+  if (!text) {
+    return null;
+  }
+
+  return { error: response.ok ? undefined : `${buildUploadResponseError(response)} ${text.slice(0, 180)}`.trim() };
+}
+
+function buildUploadResponseError(response: Response) {
+  if (response.status === 413) {
+    return "This invoice batch is too large for the server to accept. Save fewer PDFs at once, or split large multi-invoice attachments into a smaller batch.";
+  }
+
+  return `Unable to save invoices. Server returned HTTP ${response.status}.`;
+}
+
+function formatByteSize(bytes: number) {
+  if (bytes < 1024 * 1024) {
+    return `${Math.ceil(bytes / 1024).toLocaleString("en-US")} KB`;
+  }
+
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 async function loadPdfJs() {
