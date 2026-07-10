@@ -31,20 +31,19 @@ export function getWebsiteGrowthIntegrationStatus(env: Env = process.env): Websi
   const missingOauth = missingFields(env, gscOauthFields);
   const missingServiceAccount = missingFields(env, gscServiceAccountFields);
   const gscConfigured = missingOauth.length === 0 || missingServiceAccount.length === 0;
+  const gscMode =
+    missingOauth.length === 0
+      ? "oauth"
+      : missingServiceAccount.length === 0
+        ? "service_account"
+        : "not_configured";
 
   return {
     googleSearchConsole: {
       configured: gscConfigured,
-      missing: gscConfigured
-        ? []
-        : Array.from(new Set([...missingOauth, ...missingServiceAccount])),
+      missing: gscConfigured ? [] : getMissingSearchConsoleFields(env, missingOauth, missingServiceAccount),
       siteUrl: env.GOOGLE_SEARCH_CONSOLE_SITE_URL ?? null,
-      mode:
-        missingOauth.length === 0
-          ? "oauth"
-          : missingServiceAccount.length === 0
-            ? "service_account"
-            : "not_configured"
+      mode: gscMode
     },
     ga4: {
       configured:
@@ -205,4 +204,29 @@ function base64Url(value: string | Buffer) {
 
 function missingFields(env: Env, keys: string[]) {
   return keys.filter((key) => !env[key]);
+}
+
+function getMissingSearchConsoleFields(env: Env, missingOauth: string[], missingServiceAccount: string[]) {
+  const serviceAccountFieldsStarted = Boolean(
+    env.GOOGLE_SEARCH_CONSOLE_SERVICE_ACCOUNT_EMAIL || env.GOOGLE_SEARCH_CONSOLE_PRIVATE_KEY
+  );
+  const oauthFieldsStarted = Boolean(
+    env.GOOGLE_SEARCH_CONSOLE_CLIENT_ID ||
+      env.GOOGLE_SEARCH_CONSOLE_CLIENT_SECRET ||
+      env.GOOGLE_SEARCH_CONSOLE_REFRESH_TOKEN
+  );
+
+  if (serviceAccountFieldsStarted) {
+    return missingServiceAccount;
+  }
+
+  if (oauthFieldsStarted) {
+    return missingOauth;
+  }
+
+  return [
+    "GOOGLE_SEARCH_CONSOLE_SITE_URL",
+    "GOOGLE_SEARCH_CONSOLE_SERVICE_ACCOUNT_EMAIL",
+    "GOOGLE_SEARCH_CONSOLE_PRIVATE_KEY"
+  ];
 }
