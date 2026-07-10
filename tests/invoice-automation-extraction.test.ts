@@ -96,6 +96,13 @@ const entityOptions: InvoiceAutomationEntityOption[] = [
     currency: "USD"
   },
   {
+    id: "qb-iata-cass-cad",
+    entityType: "VENDOR",
+    displayName: "IATA CARGO ACCOUNTS SETTLEMENT SYSTEM - CANADA",
+    normalizedName: "iata cargo accounts settlement system canada",
+    currency: "CAD"
+  },
+  {
     id: "qb-newells-usd",
     entityType: "VENDOR",
     displayName: "Newell's Express Worldwide Logistics USA Inc.",
@@ -330,6 +337,79 @@ describe("invoice automation extraction", () => {
       { subtotalAmount: 325, taxAmount: 16.25, totalAmount: 341.25 }
     ]);
     expect(segments.map((segment) => extractShipmentFileNumber(segment))).toEqual(["TR919N26", "DR920N26"]);
+  });
+
+  it("splits IATA CASS statements into shipment-level vendor invoice rows", () => {
+    const segments = splitInvoiceTextIntoDocuments(`
+      IATA CARGO ACCOUNTS SETTLEMENT SYSTEM - CANADA PAYMENT SUMMARY DATE: 26-May-26
+      IATA NUMERIC CODE: 60-1 0085/0003 CURRENCY: CAD BILLING PERIOD: 01-May-26 - 15-May-26 REMITTANCE DATE: 15-Jun-26
+      Net Due - Export: 3839.14 0.00
+      Grand Total 3839.14 0.00
+      Total Payable 3839.14
+
+      IATA CARGO ACCOUNTS SETTLEMENT SYSTEM - CANADA CARGO SALES INVOICE/ADJUSTMENT INVOICE NR : CA-057-039968
+      INVOICE DATE : 26-MAY-26
+      AIRLINE : 057
+      Newell's Express Worldwide Logistics Ltd. Air France
+      IATA NUMERIC CODE : 60-1 0085/0003 CURRENCY : CAD BILLING PERIOD : 01-MAY-26 - 15-MAY-26 PAGE : 1
+      04458731 NC YYZHAM 363.0 519.09 293.13 0.00 0.00 0.00 0.00 812.22 0.00 812.22 260508 1.43
+      RECAPITULATION
+      TOTAL PREPAID CHARGES DUE AIRLINE 812.22
+      0.00 632
+      AE138N32
+      812.22
+      NET TOTAL DUE AIRLINE 812.22
+
+      IATA CARGO ACCOUNTS SETTLEMENT SYSTEM - CANADA CARGO SALES INVOICE/ADJUSTMENT INVOICE NR : CA-235-046380
+      INVOICE DATE : 26-MAY-26
+      AIRLINE : 235
+      Newell's Express Worldwide Logistics Ltd. Turkish Airlines Inc
+      IATA NUMERIC CODE : 60-1 0085/0003 CURRENCY : CAD BILLING PERIOD : 01-MAY-26 - 15-MAY-26 PAGE : 1
+      RECAPITULATION
+      REBATE 4221.36
+      4221.36
+      1290.00
+      AE278N10
+      TAX DUE AGENT 0.00
+      NET TOTAL DUE AIRLINE 1290.00
+
+      IATA CARGO ACCOUNTS SETTLEMENT SYSTEM - CANADA CARGO SALES INVOICE/ADJUSTMENT INVOICE NR : CA-512-005705
+      INVOICE DATE : 26-MAY-26
+      AIRLINE : 512
+      Newell's Express Worldwide Logistics Ltd. Royal Jordanian
+      IATA NUMERIC CODE : 60-1 0085/0003 CURRENCY : CAD BILLING PERIOD : 01-MAY-26 - 15-MAY-26 PAGE : 1
+      75350155 NC YYZAMM 564.0 1426.92 0.00 0.00 0.00 0.00 0.00 1426.92 0.00 1426.92 260503 2.53
+      75351172 NC YULAMM 68.0 310.00 0.00 0.00 0.00 0.00 0.00 310.00 0.00 310.00 260513 4.55
+      AE1614N9 - 1426.92
+      AE1614N10 - 310.00
+    `);
+
+    expect(segments).toHaveLength(4);
+
+    const drafts = segments.map((segment, index) =>
+      buildInvoiceDraftFromText({
+        clientId: `iata-${index}`,
+        fileName: `6010085-0003_202609_Cargo Sales Report.pdf - invoice ${index + 1}`,
+        contentType: "application/pdf",
+        sizeBytes: 100,
+        pdfBase64: "",
+        invoiceType: "VENDOR",
+        entityOptions,
+        text: segment
+      })
+    );
+
+    expect(drafts.map((draft) => draft.shipmentFileNumber)).toEqual(["AE138N32", "AE278N10", "AE1614N9", "AE1614N10"]);
+    expect(drafts.map((draft) => draft.invoiceNumber)).toEqual([
+      "CA-057-039968-AE138N32",
+      "CA-235-046380-AE278N10",
+      "CA-512-005705-AE1614N9",
+      "CA-512-005705-AE1614N10"
+    ]);
+    expect(drafts.map((draft) => draft.totalAmount)).toEqual([812.22, 1290, 1426.92, 310]);
+    expect(drafts.every((draft) => draft.quickBooksEntityId === "qb-iata-cass-cad")).toBe(true);
+    expect(drafts.every((draft) => draft.entityNameRaw === "IATA CARGO ACCOUNTS SETTLEMENT SYSTEM - CANADA")).toBe(true);
+    expect(drafts.every((draft) => draft.productOrAccountName === "5300 Air Freight Rate")).toBe(true);
   });
 
   it("matches OCR text to QuickBooks customer and vendor options", () => {

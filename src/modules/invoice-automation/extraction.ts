@@ -6,6 +6,7 @@ const COMMON_CURRENCY_CODES = ["CAD", "USD", "EUR", "GBP", "AUD", "MXN", "CNY", 
 const AUTO_QB_MATCH_CONFIDENCE_THRESHOLD = 90;
 const CANADIAN_TAX_LABEL_PATTERN = /\b(?:GST|HST|PST|QST|SALES\s+TAX|TAX)\b/i;
 const FOREIGN_TAX_LABEL_PATTERN = /\b(?:VAT|IVA|TVA)\b/i;
+const IATA_CASS_VENDOR_NAME = "IATA CARGO ACCOUNTS SETTLEMENT SYSTEM - CANADA";
 const ENTITY_MATCH_STOPWORDS = new Set([
   "air",
   "alberta",
@@ -332,6 +333,11 @@ export function splitInvoiceTextIntoDocuments(text: string) {
     return [""];
   }
 
+  const iataCassShipmentDocuments = splitIataCassStatementIntoShipmentDocuments(compact);
+  if (iataCassShipmentDocuments.length > 0) {
+    return iataCassShipmentDocuments;
+  }
+
   const freightBillPartChunks = splitByFreightBillPartHeaders(compact);
   const groupedFreightBills = groupFreightBillParts(freightBillPartChunks);
   if (groupedFreightBills.length > 1) {
@@ -479,6 +485,10 @@ export function getInvoiceDraftIssueCodes(draft: Pick<InvoiceAutomationUploadDra
 
 function extractEntityNameByLabel(text: string, invoiceType: InvoiceAutomationType, fallbackName = "") {
   if (invoiceType === "VENDOR") {
+    if (isIataCassStatement(text)) {
+      return IATA_CASS_VENDOR_NAME;
+    }
+
     return extractVendorName(text, fallbackName);
   }
 
@@ -613,6 +623,151 @@ function findTotalFromPrepaidTotals(text: string) {
   }
 
   return null;
+}
+
+function splitIataCassStatementIntoShipmentDocuments(text: string) {
+  if (!isIataCassStatement(text)) {
+    return [];
+  }
+
+  const sections = splitIataCassCargoInvoiceSections(text);
+  const documents: string[] = [];
+  const seen = new Set<string>();
+  const statementCurrency = extractCurrency(text) ?? "CAD";
+  const statementInvoiceDate = extractInvoiceDate(text);
+  const statementRemittanceDate = findDateByLabels(text, ["remittance date"]);
+
+  for (const section of sections) {
+    const cassInvoiceNumber = extractIataCassInvoiceNumber(section);
+    const currency = extractCurrency(section) ?? statementCurrency;
+    const invoiceDate = extractInvoiceDate(section) ?? statementInvoiceDate;
+    const dueDate = findDateByLabels(section, ["remittance date"]) ?? statementRemittanceDate;
+    const shipmentAmounts = extractIataCassShipmentAmounts(section);
+
+    for (const shipmentAmount of shipmentAmounts) {
+      const invoiceNumber = [cassInvoiceNumber, shipmentAmount.fileNumber].filter(Boolean).join("-");
+      const uniqueKey = `${invoiceNumber}:${shipmentAmount.fileNumber}:${shipmentAmount.amount}`;
+      if (seen.has(uniqueKey)) {
+        continue;
+      }
+
+      seen.add(uniqueKey);
+      documents.push(
+        [
+          IATA_CASS_VENDOR_NAME,
+          invoiceNumber ? `INVOICE NUMBER: ${invoiceNumber}` : null,
+          cassInvoiceNumber ? `CASS REFERENCE: ${cassInvoiceNumber}` : null,
+          invoiceDate ? `INVOICE DATE: ${invoiceDate}` : null,
+          dueDate ? `DUE DATE: ${dueDate}` : null,
+          `CURRENCY: ${currency}`,
+          `SHIPMENT FILE NUMBER: ${shipmentAmount.fileNumber}`,
+          `TOTAL AMOUNT: ${currency} ${shipmentAmount.amount.toFixed(2)}`,
+          `NET TOTAL DUE AIRLINE: ${currency} ${shipmentAmount.amount.toFixed(2)}`
+        ]
+          .filter(Boolean)
+          .join("\n")
+      );
+    }
+  }
+
+  return documents;
+}
+
+function isIataCassStatement(text: string) {
+  return /IATA\s+CARGO\s+ACCOUNTS\s+SETTLEMENT\s+SYSTEM\s*-\s*CANADA/i.test(text);
+}
+
+function splitIataCassCargoInvoiceSections(text: string) {
+  const headers = [
+    ...text.matchAll(
+      /IATA\s+CARGO\s+ACCOUNTS\s+SETTLEMENT\s+SYSTEM\s*-\s*CANADA\s+CARGO\s+SALES\s+INVOICE\/ADJUSTMENT\s+INVOICE\s+NR\s*[:：]\s*[A-Z0-9-]+/gi
+    )
+  ];
+
+  if (headers.length === 0) {
+    return [text];
+  }
+
+  return headers
+    .map((header, index) => {
+      const start = header.index ?? 0;
+      const nextHeader = headers[index + 1]?.index;
+      const exportSummaryIndex = text.slice(start).search(/IATA\s+CARGO\s+ACCOUNTS\s+SETTLEMENT\s+SYSTEM\s*-\s*CANADA\s+EXPORT\s+BILLING\s+STATEMENT/i);
+      const endFromSummary = exportSummaryIndex >= 0 ? start + exportSummaryIndex : null;
+      const end = Math.min(nextHeader ?? text.length, endFromSummary ?? text.length);
+      return text.slice(start, end).trim();
+    })
+    .filter(Boolean);
+}
+
+function extractIataCassInvoiceNumber(text: string) {
+  const match = text.match(/\bINVOICE\/ADJUSTMENT\s+INVOICE\s+NR\s*[:：]\s*([A-Z0-9-]+)/i);
+  return match ? cleanToken(match[1]) : null;
+}
+
+function extractIataCassShipmentAmounts(text: string) {
+  const lines = text.split(/\r?\n/);
+  const shipmentAmounts: Array<{ fileNumber: string; amount: number }> = [];
+  const seen = new Set<string>();
+
+  for (const [index, line] of lines.entries()) {
+    const fileNumber = extractShipmentFileNumber(line);
+    if (!fileNumber) {
+      continue;
+    }
+
+    const amount =
+      findIataAmountAfterFileNumber(line, fileNumber) ??
+      findStandaloneMoneyNearLine(lines, index + 1, 2, "forward") ??
+      findStandaloneMoneyNearLine(lines, index - 1, 3, "backward");
+
+    if (amount === null) {
+      continue;
+    }
+
+    const key = `${fileNumber}:${amount}`;
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    shipmentAmounts.push({ fileNumber, amount });
+  }
+
+  return shipmentAmounts;
+}
+
+function findIataAmountAfterFileNumber(line: string, fileNumber: string) {
+  const fileNumberIndex = line.toUpperCase().indexOf(fileNumber.toUpperCase());
+  if (fileNumberIndex < 0) {
+    return null;
+  }
+
+  const afterFileNumber = line.slice(fileNumberIndex + fileNumber.length);
+  return parseLastMoneyAmount(afterFileNumber);
+}
+
+function findStandaloneMoneyNearLine(lines: string[], startIndex: number, maxDistance: number, direction: "forward" | "backward") {
+  for (let distance = 0; distance < maxDistance; distance += 1) {
+    const index = direction === "forward" ? startIndex + distance : startIndex - distance;
+    const line = lines[index]?.trim();
+    if (!line) {
+      continue;
+    }
+    if (!isStandaloneMoneyLine(line)) {
+      continue;
+    }
+
+    return parseLastMoneyAmount(line);
+  }
+
+  return null;
+}
+
+function isStandaloneMoneyLine(line: string) {
+  return /^(?:CAD|USD|CDN|EUR|GBP|AUD|MXN|CNY|JPY|CHF|HKD|SGD)?\s*[$€£]?\s*-?\d{1,3}(?:,\d{3})*(?:\.\d{2})$|^(?:CAD|USD|CDN|EUR|GBP|AUD|MXN|CNY|JPY|CHF|HKD|SGD)?\s*[$€£]?\s*-?\d+\.\d{2}$/.test(
+    line
+  );
 }
 
 function groupFreightBillParts(chunks: string[]) {
