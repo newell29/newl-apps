@@ -443,6 +443,7 @@ model Tenant {
   assistantAutomations          AssistantAutomation[]
   assistantAutomationRuns       AssistantAutomationRun[]
   shipmentDocumentRuns          ShipmentDocumentRun[]
+  shipmentCarrierManifestRuns   ShipmentCarrierManifestRun[]
   cashflowCustomers             CashflowCustomer[]
   cashflowCustomerAliases       CashflowCustomerAlias[]
   cashflowFiles                 CashflowFile[]
@@ -488,6 +489,7 @@ model User {
   assistantAutomations    AssistantAutomation[]
   assistantAutomationRuns AssistantAutomationRun[]
   shipmentDocumentRuns    ShipmentDocumentRun[]
+  shipmentCarrierManifestRuns ShipmentCarrierManifestRun[]
 }
 
 // Auth.js (NextAuth) adapter models. Account links an external identity
@@ -777,6 +779,39 @@ model ShipmentDocumentRun {
   @@index([tenantId, workflowKey, shipmentDate])
   @@index([tenantId, createdAt])
   @@index([tenantId, searchText])
+  @@index([tenantId, deletedAt])
+}
+
+model ShipmentCarrierManifestRun {
+  id                      String   @id @default(cuid())
+  tenantId                String
+  workflowKey             String   @default("GARLAND_CARRIER_MANIFEST")
+  documentLabel           String
+  shipmentDate            DateTime
+  sourceBolFileName       String?
+  carrierCounts           Json
+  manifestRows            Json
+  midlandFileName         String?
+  midlandWorkbookBytes    Bytes?
+  speedyFileName          String?
+  speedyWorkbookBytes     Bytes?
+  suretrackFileName       String?
+  suretrackWorkbookBytes  Bytes?
+  signedCopyFileName      String?
+  signedCopyContentType   String?
+  signedCopyBytes         Bytes?
+  signedCopyUploadedAt    DateTime?
+  createdByUserId         String?
+  deletedAt               DateTime?
+  deletedByUserId         String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy User?  @relation(fields: [createdByUserId], references: [id], onDelete: NoAction)
+
+  @@index([tenantId, workflowKey, shipmentDate])
+  @@index([tenantId, createdAt])
   @@index([tenantId, deletedAt])
 }
 
