@@ -50,7 +50,14 @@ type PdfJsModule = typeof import("pdfjs-dist");
 const OCR_PAGE_LIMIT = 8;
 const OCR_IMAGE_MAX_WIDTH = 1800;
 const OCR_IMAGE_JPEG_QUALITY = 0.82;
-const UPLOAD_REQUEST_WARNING_BYTES = 4_000_000;
+const UPLOAD_REQUEST_TARGET_BYTES = 4_000_000;
+
+type InvoiceUploadSavePayload = {
+  invoiceType: InvoiceAutomationType;
+  sendToAccounting: boolean;
+  documents: InvoiceAutomationUploadDocument[];
+  invoices: InvoiceAutomationUploadDraft[];
+};
 
 let pdfJsLoader: Promise<PdfJsModule> | null = null;
 
@@ -655,28 +662,26 @@ function InvoiceUploadModal({
     try {
       const preparedDrafts = drafts.map((draft) => refreshDraftIssues(normalizeDraftAmounts(draft)));
       const documents = buildUploadDocuments(preparedDrafts);
-      const payload = {
-        invoiceType,
-        sendToAccounting,
-        documents,
-        invoices: preparedDrafts.map(stripInvoiceDocumentPayload)
-      };
-      const requestBody = JSON.stringify(payload);
-      if (requestBody.length > UPLOAD_REQUEST_WARNING_BYTES) {
-        throw new Error(
-          `This invoice batch is too large to save in one request (${formatByteSize(requestBody.length)}). Save fewer PDFs at once, or split large multi-invoice attachments into a smaller batch.`
-        );
+      const payloads = buildUploadPayloadChunks(invoiceType, sendToAccounting, preparedDrafts, documents);
+
+      for (let index = 0; index < payloads.length; index += 1) {
+        if (payloads.length > 1) {
+          setStatus(`Saving invoice batch ${index + 1} of ${payloads.length}.`);
+        }
+
+        const requestBody = JSON.stringify(payloads[index]);
+        const response = await fetch("/api/finance/invoice-automation/uploads", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: requestBody
+        });
+        const json = await readUploadResponse(response);
+        if (!response.ok || !json || "error" in json) {
+          const errorMessage = (json && "error" in json ? json.error : null) ?? buildUploadResponseError(response);
+          throw new Error(payloads.length > 1 ? `Batch ${index + 1} of ${payloads.length}: ${errorMessage}` : errorMessage);
+        }
       }
 
-      const response = await fetch("/api/finance/invoice-automation/uploads", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: requestBody
-      });
-      const json = await readUploadResponse(response);
-      if (!response.ok || !json || "error" in json) {
-        throw new Error((json && "error" in json ? json.error : null) ?? buildUploadResponseError(response));
-      }
       navigateToInvoiceAutomationPage(sendToAccounting ? "/finance/invoice-automation/accounting" : "/finance/invoice-automation");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Unable to save invoices.");
@@ -1057,6 +1062,68 @@ function buildUploadDocuments(drafts: InvoiceAutomationUploadDraft[]): InvoiceAu
   }
 
   return [...documents.values()];
+}
+
+function buildUploadPayloadChunks(
+  invoiceType: InvoiceAutomationType,
+  sendToAccounting: boolean,
+  drafts: InvoiceAutomationUploadDraft[],
+  documents: InvoiceAutomationUploadDocument[]
+): InvoiceUploadSavePayload[] {
+  const documentById = new Map(documents.map((document) => [document.clientDocumentId, document]));
+  const invoicesByDocumentId = new Map<string, InvoiceAutomationUploadDraft[]>();
+
+  for (const draft of drafts) {
+    const documentClientId = draft.documentClientId ?? draft.clientId;
+    const strippedDraft = stripInvoiceDocumentPayload(draft);
+    const documentInvoices = invoicesByDocumentId.get(documentClientId) ?? [];
+    documentInvoices.push(strippedDraft);
+    invoicesByDocumentId.set(documentClientId, documentInvoices);
+  }
+
+  const payloads: InvoiceUploadSavePayload[] = [];
+  let current: InvoiceUploadSavePayload = { invoiceType, sendToAccounting, documents: [], invoices: [] };
+
+  for (const [documentClientId, documentInvoices] of invoicesByDocumentId) {
+    const document = documentById.get(documentClientId);
+    if (!document) {
+      throw new Error("Unable to save invoices because one uploaded PDF is missing its document payload.");
+    }
+
+    const nextPayload = {
+      ...current,
+      documents: [...current.documents, document],
+      invoices: [...current.invoices, ...documentInvoices]
+    };
+    const nextPayloadSize = JSON.stringify(nextPayload).length;
+
+    if (current.invoices.length > 0 && nextPayloadSize > UPLOAD_REQUEST_TARGET_BYTES) {
+      payloads.push(current);
+      current = { invoiceType, sendToAccounting, documents: [document], invoices: documentInvoices };
+      assertUploadPayloadFits(current);
+      continue;
+    }
+
+    current = nextPayload;
+    assertUploadPayloadFits(current);
+  }
+
+  if (current.invoices.length > 0) {
+    payloads.push(current);
+  }
+
+  return payloads;
+}
+
+function assertUploadPayloadFits(payload: InvoiceUploadSavePayload) {
+  const payloadSize = JSON.stringify(payload).length;
+  if (payloadSize <= UPLOAD_REQUEST_TARGET_BYTES) {
+    return;
+  }
+
+  throw new Error(
+    `One uploaded PDF is too large to save in a single request (${formatByteSize(payloadSize)} after encoding). Try compressing that PDF or uploading it separately.`
+  );
 }
 
 function stripInvoiceDocumentPayload(draft: InvoiceAutomationUploadDraft) {
