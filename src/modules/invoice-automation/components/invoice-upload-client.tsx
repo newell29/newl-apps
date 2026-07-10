@@ -107,7 +107,7 @@ export function InvoiceAutomationUploadClient({
       if (!response.ok) {
         throw new Error(json?.error ?? "Unable to send invoices to accounting.");
       }
-      window.location.reload();
+      navigateToInvoiceAutomationPage("/finance/invoice-automation/accounting");
     } catch (error) {
       setQueueError(error instanceof Error ? error.message : "Unable to send invoices to accounting.");
     } finally {
@@ -660,7 +660,7 @@ function InvoiceUploadModal({
       if (!response.ok || !json || "error" in json) {
         throw new Error((json && "error" in json ? json.error : null) ?? "Unable to save invoices.");
       }
-      window.location.reload();
+      navigateToInvoiceAutomationPage(sendToAccounting ? "/finance/invoice-automation/accounting" : "/finance/invoice-automation");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Unable to save invoices.");
     } finally {
@@ -890,6 +890,10 @@ function clearMemoryIssuesForManualPatch(issueCodes: string[], patch: Partial<In
   if (patch.dueDate !== undefined) blocked.add("MEMORY_APPLIED_PAYMENT_TERMS");
   if (blocked.size === 0) return issueCodes;
   return issueCodes.filter((issueCode) => !blocked.has(issueCode));
+}
+
+function navigateToInvoiceAutomationPage(path: string) {
+  window.location.assign(path);
 }
 
 function ConfirmSendToAccountingDialog({
