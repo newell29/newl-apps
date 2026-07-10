@@ -20,6 +20,11 @@ import {
   InvoiceTypePill
 } from "@/modules/invoice-automation/components";
 import type { InvoiceAutomationEntityOption, InvoiceAutomationRow, InvoiceAutomationUploadDraft } from "@/modules/invoice-automation/types";
+import {
+  InvoiceAutomationTableControls,
+  InvoiceAutomationTablePagination,
+  type InvoiceAutomationTablePageSize
+} from "@/modules/invoice-automation/components/table-controls";
 
 type EditableAccountingRow = InvoiceAutomationRow & {
   businessLine?: InvoiceAutomationUploadDraft["businessLine"];
@@ -56,9 +61,16 @@ export function AccountingQueueClient({
   const [savingInvoiceId, setSavingInvoiceId] = useState<string | null>(null);
   const [deletingInvoiceId, setDeletingInvoiceId] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
+  const [downloadingReviewPacket, setDownloadingReviewPacket] = useState(false);
   const [quickBooksPostingMode, setQuickBooksPostingMode] = useState<"preview" | "post" | null>(null);
   const [quickBooksResults, setQuickBooksResults] = useState<QuickBooksPostingResult[]>([]);
   const [message, setMessage] = useState<{ kind: "error" | "success"; text: string } | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [typeFilter, setTypeFilter] = useState("ALL");
+  const [currencyFilter, setCurrencyFilter] = useState("ALL");
+  const [pageSize, setPageSize] = useState<InvoiceAutomationTablePageSize>(25);
+  const [page, setPage] = useState(1);
   const entityOptionsByType = useMemo(
     () => ({
       CUSTOMER: uniqueEntityOptionsById(entityOptions.filter((option) => option.entityType === "CUSTOMER")),
@@ -66,6 +78,20 @@ export function AccountingQueueClient({
     }),
     [entityOptions]
   );
+  const statusOptions = useMemo(() => uniqueStrings(rows.map((invoice) => invoice.status)), [rows]);
+  const currencyOptions = useMemo(() => uniqueStrings(rows.map((invoice) => invoice.currency)), [rows]);
+  const filteredRows = useMemo(() => {
+    const query = normalizeSearch(searchQuery);
+    return rows.filter((invoice) => {
+      if (statusFilter !== "ALL" && invoice.status !== statusFilter) return false;
+      if (typeFilter !== "ALL" && invoice.invoiceType !== typeFilter) return false;
+      if (currencyFilter !== "ALL" && invoice.currency !== currencyFilter) return false;
+      return !query || getAccountingRowSearchText(invoice).includes(query);
+    });
+  }, [currencyFilter, rows, searchQuery, statusFilter, typeFilter]);
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageRows = filteredRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const eligibleInvoiceIds = useMemo(
     () =>
@@ -100,7 +126,21 @@ export function AccountingQueueClient({
   const selectedEligibleCount = selectedInvoiceIds.filter((id) => eligibleInvoiceIds.includes(id)).length;
   const selectedAccountingCount = selectedInvoiceIds.filter((id) => accountingReviewInvoiceIds.includes(id)).length;
   const selectedApprovedCount = selectedInvoiceIds.filter((id) => approvedForPostingInvoiceIds.includes(id)).length;
-  const allEligibleSelected = eligibleInvoiceIds.length > 0 && selectedEligibleCount === eligibleInvoiceIds.length;
+  const filteredEligibleInvoiceIds = filteredRows
+    .filter((invoice) =>
+      (invoice.status === "ACCOUNTING_REVIEW" ||
+        invoice.status === "APPROVED_FOR_POSTING" ||
+        invoice.status === "POSTING_ERROR") &&
+      getInvoiceApprovalBlockingIssues(invoice).length === 0
+    )
+    .map((invoice) => invoice.id);
+  const allFilteredEligibleSelected =
+    filteredEligibleInvoiceIds.length > 0 &&
+    filteredEligibleInvoiceIds.every((id) => selectedInvoiceIds.includes(id));
+
+  function resetToFirstPage() {
+    setPage(1);
+  }
 
   function updateRow(invoiceId: string, patch: Partial<EditableAccountingRow>) {
     setSelectedInvoiceIds((current) => current.filter((id) => id !== invoiceId));
@@ -199,6 +239,38 @@ export function AccountingQueueClient({
     }
   }
 
+  async function downloadReviewPacket() {
+    const invoiceIdsForPacket = selectedInvoiceIds.filter((id) => eligibleInvoiceIds.includes(id));
+    setDownloadingReviewPacket(true);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/finance/invoice-automation/review-packet", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ invoiceIds: invoiceIdsForPacket })
+      });
+      if (!response.ok) {
+        const json = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(json?.error ?? "Unable to create review PDF.");
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = readDownloadFileName(response.headers.get("content-disposition")) ?? "invoice-review-packet.pdf";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      setMessage({ kind: "success", text: `Review PDF created for ${invoiceIdsForPacket.length} invoice${invoiceIdsForPacket.length === 1 ? "" : "s"}.` });
+    } catch (error) {
+      setMessage({ kind: "error", text: error instanceof Error ? error.message : "Unable to create review PDF." });
+    } finally {
+      setDownloadingReviewPacket(false);
+    }
+  }
+
   async function runQuickBooksPosting(mode: "preview" | "post") {
     const invoiceIdsToPost = selectedInvoiceIds.filter((id) => approvedForPostingInvoiceIds.includes(id));
     let confirmText: string | null = null;
@@ -280,9 +352,9 @@ export function AccountingQueueClient({
 
   function toggleSelectAll(checked: boolean) {
     if (checked) {
-      setSelectedInvoiceIds(eligibleInvoiceIds);
+      setSelectedInvoiceIds(uniqueStrings([...selectedInvoiceIds, ...filteredEligibleInvoiceIds]));
     } else {
-      setSelectedInvoiceIds([]);
+      setSelectedInvoiceIds((current) => current.filter((id) => !filteredEligibleInvoiceIds.includes(id)));
     }
   }
 
@@ -296,6 +368,14 @@ export function AccountingQueueClient({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void downloadReviewPacket()}
+            disabled={selectedEligibleCount === 0 || downloadingReviewPacket}
+            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {downloadingReviewPacket ? "Building PDF..." : `Download review PDF (${selectedEligibleCount})`}
+          </button>
           <button
             type="button"
             onClick={() => void approveSelected()}
@@ -341,7 +421,39 @@ export function AccountingQueueClient({
           </div>
         </div>
       ) : null}
-      <div className="overflow-x-auto">
+      <div className="space-y-3 p-4">
+        <InvoiceAutomationTableControls
+          searchQuery={searchQuery}
+          onSearchQueryChange={(value) => {
+            setSearchQuery(value);
+            resetToFirstPage();
+          }}
+          statusFilter={statusFilter}
+          statusOptions={statusOptions}
+          onStatusFilterChange={(value) => {
+            setStatusFilter(value);
+            resetToFirstPage();
+          }}
+          typeFilter={typeFilter}
+          onTypeFilterChange={(value) => {
+            setTypeFilter(value);
+            resetToFirstPage();
+          }}
+          currencyFilter={currencyFilter}
+          currencyOptions={currencyOptions}
+          onCurrencyFilterChange={(value) => {
+            setCurrencyFilter(value);
+            resetToFirstPage();
+          }}
+          pageSize={pageSize}
+          onPageSizeChange={(value) => {
+            setPageSize(value);
+            resetToFirstPage();
+          }}
+          filteredCount={filteredRows.length}
+          totalCount={rows.length}
+        />
+        <div className="overflow-x-auto">
         <table className="min-w-[2000px] divide-y divide-border text-sm">
           <thead className="bg-muted/50 text-left text-xs font-semibold uppercase tracking-wide text-mutedForeground">
             <tr>
@@ -349,8 +461,8 @@ export function AccountingQueueClient({
                 <label className="flex items-center gap-2">
                   <input
                     type="checkbox"
-                    checked={allEligibleSelected}
-                    disabled={eligibleInvoiceIds.length === 0}
+                    checked={allFilteredEligibleSelected}
+                    disabled={filteredEligibleInvoiceIds.length === 0}
                     onChange={(event) => toggleSelectAll(event.target.checked)}
                   />
                   <span>Select all</span>
@@ -377,14 +489,14 @@ export function AccountingQueueClient({
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {rows.length === 0 ? (
+            {pageRows.length === 0 ? (
               <tr>
                 <td className="px-3 py-8 text-center text-mutedForeground" colSpan={19}>
-                  No invoices are waiting in accounting.
+                  {rows.length === 0 ? "No invoices are waiting in accounting." : "No invoices match the current search and filters."}
                 </td>
               </tr>
             ) : (
-              rows.map((invoice) => {
+              pageRows.map((invoice) => {
                 const blockers = getInvoiceApprovalBlockingIssues(invoice);
                 const selectable =
                   (invoice.status === "ACCOUNTING_REVIEW" ||
@@ -483,6 +595,15 @@ export function AccountingQueueClient({
             )}
           </tbody>
         </table>
+        </div>
+        <InvoiceAutomationTablePagination
+          page={currentPage}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          filteredCount={filteredRows.length}
+          totalCount={rows.length}
+          onPageChange={setPage}
+        />
       </div>
     </section>
   );
@@ -490,6 +611,37 @@ export function AccountingQueueClient({
 
 function uniqueEntityOptionsById(options: InvoiceAutomationEntityOption[]) {
   return [...new Map(options.map((option) => [option.id, option])).values()];
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))].sort((a, b) => a.localeCompare(b));
+}
+
+function normalizeSearch(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function getAccountingRowSearchText(invoice: EditableAccountingRow) {
+  return normalizeSearch(
+    [
+      invoice.status,
+      invoice.invoiceType,
+      invoice.batchNumber,
+      invoice.sentToAccountingByName,
+      invoice.fileName,
+      invoice.shipmentFileNumber,
+      invoice.entityNameRaw,
+      invoice.quickBooksEntityDisplayName,
+      invoice.invoiceNumber,
+      invoice.invoiceDate,
+      invoice.dueDate,
+      invoice.currency,
+      invoice.productOrAccountName,
+      invoice.issueCodes.join(" ")
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
 }
 
 function SmallInput({
@@ -536,4 +688,9 @@ function formatShortDateTime(value: string) {
     hour: "numeric",
     minute: "2-digit"
   });
+}
+
+function readDownloadFileName(contentDisposition: string | null) {
+  const match = contentDisposition?.match(/filename="([^"]+)"/i);
+  return match?.[1] ?? null;
 }

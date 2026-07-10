@@ -6,6 +6,10 @@ import {
   getInvoicePostingBlockingIssues
 } from "@/modules/invoice-automation/approval";
 import { buildInvoiceDuplicateKey, INVOICE_DUPLICATE_CHECK_STATUSES } from "@/modules/invoice-automation/duplicates";
+import {
+  applyInvoiceCorrectionMemory,
+  buildInvoiceCorrectionMemoryCandidates
+} from "@/modules/invoice-automation/correction-memory";
 import { buildInvoiceAutomationEntityAlias } from "@/modules/invoice-automation/entity-aliases";
 import {
   buildInvoiceDraftFromText,
@@ -83,6 +87,20 @@ const entityOptions: InvoiceAutomationEntityOption[] = [
     displayName: "Canadian Logistics Express CAD",
     normalizedName: "canadian logistics express",
     currency: "CAD"
+  },
+  {
+    id: "qb-casia-usd",
+    entityType: "VENDOR",
+    displayName: "Casia Logistics Tech Limited USD",
+    normalizedName: "casia logistics tech limited",
+    currency: "USD"
+  },
+  {
+    id: "qb-newells-usd",
+    entityType: "VENDOR",
+    displayName: "Newell's Express Worldwide Logistics USA Inc.",
+    normalizedName: "newells express worldwide logistics usa inc",
+    currency: "USD"
   }
 ];
 
@@ -436,6 +454,57 @@ describe("invoice automation extraction", () => {
     expect(draft.issueCodes).toContain("MISSING_QB_MATCH");
   });
 
+  it("learns and applies safe correction memory for repeated invoice mappings", () => {
+    const memories = buildInvoiceCorrectionMemoryCandidates({
+      tenantId: "tenant-1",
+      invoiceType: "VENDOR",
+      entityNameRaw: "Test Company - DO NOT PROCESS",
+      quickBooksEntityId: "qb-test-vendor-cad",
+      quickBooksEntityDisplayName: "Test Company - DO NOT PROCESS",
+      shipmentFileNumber: "TR900N26",
+      currency: "CAD",
+      productOrAccountName: "5014 Warehouse Rate",
+      invoiceDate: "2026-07-10",
+      dueDate: "2026-07-10",
+      userId: "user-1"
+    });
+    const productMemory = memories.find((memory) => memory.fieldName === "PRODUCT_OR_ACCOUNT");
+    const paymentTermsMemory = memories.find((memory) => memory.fieldName === "PAYMENT_TERMS_DAYS");
+
+    expect(productMemory).toMatchObject({
+      learnedValue: "5014 Warehouse Rate",
+      shipmentPrefix: "TR",
+      quickBooksEntityId: "qb-test-vendor-cad"
+    });
+    expect(paymentTermsMemory?.learnedValue).toBe("0");
+
+    const extractedDraft = buildInvoiceDraftFromText({
+      clientId: "memory-draft",
+      fileName: "test-company-warehouse-trucking.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions,
+      text: `
+        Test Company - DO NOT PROCESS
+        Invoice Number: WH-100
+        Invoice Date: 2026-07-11
+        Shipment File Number: TR901N26
+        Currency CAD
+        Subtotal CAD 100.00
+        Total CAD 100.00
+      `
+    });
+    const corrected = applyInvoiceCorrectionMemory(extractedDraft, "VENDOR", memories);
+
+    expect(extractedDraft.productOrAccountName).toBe("5015 Trucking Rate");
+    expect(corrected.productOrAccountName).toBe("5014 Warehouse Rate");
+    expect(corrected.dueDate).toBe("2026-07-11");
+    expect(corrected.issueCodes).toContain("MEMORY_APPLIED_PRODUCT_OR_ACCOUNT");
+    expect(corrected.issueCodes).toContain("MEMORY_APPLIED_PAYMENT_TERMS");
+  });
+
   it("normalizes camel-case OCR customer names before QuickBooks matching", () => {
     expect(normalizeInvoiceEntityName("AvariaHealth and BeautyCorp")).toBe("avaria health and beauty corp");
     expect(
@@ -635,6 +704,45 @@ describe("invoice automation extraction", () => {
     });
     expect(truckLine.entityNameRaw).toBe("777 Truck Line");
     expect(truckLine.invoiceNumber).toBe("6652");
+
+    const canadianLogistics = buildInvoiceDraftFromText({
+      clientId: "canadian-logistics",
+      fileName: "Approved Invoice CANADIAN LOGISTICS EXPRESS OI3106N13 Invoice for PB17519 1.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions,
+      text: `
+        DATE 2026-06-29 INVOICE INVOICE 17519 Page: 1/2
+        Bill To 6390 KESTREL ROAD NEWELL'S EXPRESS WORLDWIDE LOGISTICS
+        Remit To CANADIAN LOGISTICS EXPRESS
+        P.O. No. OI3106N13 | Q3106N15
+        TOTAL 2 000,00
+      `
+    });
+    expect(canadianLogistics.entityNameRaw).toBe("Canadian Logistics Express CAD");
+    expect(canadianLogistics.quickBooksEntityId).toBe("qb-canadian-logistics-cad");
+    expect(canadianLogistics.invoiceNumber).toBe("17519");
+
+    const casiaTypoFileName = buildInvoiceDraftFromText({
+      clientId: "casia-typo",
+      fileName: "Approved Invoic Casia OI348N1246 DN-CNG26060138.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      pdfBase64: "",
+      invoiceType: "VENDOR",
+      entityOptions,
+      text: `
+        SHIPMENT INFORMATION CASIA LOGISTICS TECH LIMITED Container No ONEU3252580
+        NEWELL'S EXPRESS WORLDWIDE LOGISTICS USA INC. INVOICE
+        INVOICE NO: CNG26060138
+        OI348N1246
+        SAY TOTAL AMOUNT USD 337.50
+      `
+    });
+    expect(casiaTypoFileName.entityNameRaw).toBe("Casia Logistics Tech Limited USD");
+    expect(casiaTypoFileName.quickBooksEntityId).toBe("qb-casia-usd");
   });
 
   it("extracts common production vendor invoice number and date formats", () => {
@@ -853,6 +961,41 @@ describe("invoice automation extraction", () => {
       totalAmount: 2260,
       productOrAccountName: "Ocean Freight",
       issueCodes: []
+    });
+  });
+
+  it("respects due on receipt customer invoice terms instead of defaulting to net 30", () => {
+    const draft = buildInvoiceDraftFromText({
+      clientId: "customer-due-on-receipt",
+      fileName: "customer-AE1614N12-7499.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 256,
+      pdfBase64: "JVBERi0x",
+      invoiceType: "CUSTOMER",
+      entityOptions,
+      text: `
+        INVOICE#: 7499
+        Booking Number: AE1614N12
+        Customer Name: Eastern Services W.L.L
+        Invoice Date Due Date Payment Terms
+        2026-07-03 Due on Receipt 0
+        Service Air Freight
+        Currency: USD
+        Subtotal: USD 750.00
+        Total: USD 750.00
+      `
+    });
+
+    expect(draft).toMatchObject({
+      shipmentFileNumber: "AE1614N12",
+      businessLine: "AIR",
+      invoiceNumber: "7499",
+      invoiceDate: "2026-07-03",
+      dueDate: "2026-07-03",
+      currency: "USD",
+      subtotalAmount: 750,
+      totalAmount: 750,
+      productOrAccountName: "Air Freight"
     });
   });
 

@@ -3,6 +3,7 @@ import { InvoiceAutomationBatchStatus, InvoiceAutomationStatus, ModuleKey, Platf
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { formatInvoiceApprovalBlocker, getInvoiceApprovalBlockingIssues } from "@/modules/invoice-automation/approval";
+import { learnInvoiceAutomationCorrectionMemory } from "@/modules/invoice-automation/correction-memory-store";
 import { buildInvoiceDuplicateKey, INVOICE_DUPLICATE_CHECK_STATUSES } from "@/modules/invoice-automation/duplicates";
 import { learnInvoiceAutomationEntityAlias } from "@/modules/invoice-automation/entity-aliases";
 import { defaultDueDateFromInvoiceDate, getInvoiceDraftIssueCodes, normalizeInvoiceAmountsForCurrency } from "@/modules/invoice-automation/extraction";
@@ -208,7 +209,21 @@ export async function POST(request: Request) {
           aliasRawName: entityNameRaw,
           quickBooksEntityId,
           quickBooksEntityDisplayName,
-          currency: invoice.currency,
+          currency,
+          userId: context.userId
+        });
+
+        await learnInvoiceAutomationCorrectionMemory(tx, {
+          tenantId: context.tenantId,
+          invoiceType,
+          entityNameRaw,
+          quickBooksEntityId,
+          quickBooksEntityDisplayName,
+          shipmentFileNumber: readNullable(invoice.shipmentFileNumber),
+          currency,
+          productOrAccountName: readNullable(invoice.productOrAccountName),
+          invoiceDate,
+          dueDate,
           userId: context.userId
         });
 

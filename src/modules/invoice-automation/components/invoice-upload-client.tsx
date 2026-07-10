@@ -5,6 +5,10 @@ import type { InvoiceAutomationType } from "@prisma/client";
 import type { PDFPageProxy } from "pdfjs-dist/types/src/display/api";
 import { getInvoiceApprovalBlockingIssues } from "@/modules/invoice-automation/approval";
 import {
+  applyInvoiceCorrectionMemory,
+  isCorrectionMemoryIssueCode
+} from "@/modules/invoice-automation/correction-memory";
+import {
   buildInvoiceDraftFromText,
   defaultDueDateFromInvoiceDate,
   deriveInvoiceTotal,
@@ -12,6 +16,7 @@ import {
   getDefaultProductOrAccount,
   getInvoiceDraftIssueCodes,
   getShipmentTypeFromInvoiceFileNumber,
+  isInternalNewellEntityName,
   normalizeInvoiceAmountsForCurrency,
   splitInvoiceTextIntoDocuments
 } from "@/modules/invoice-automation/extraction";
@@ -22,6 +27,7 @@ import {
   InvoiceTypePill
 } from "@/modules/invoice-automation/components";
 import type {
+  InvoiceAutomationCorrectionMemoryHint,
   InvoiceAutomationEntityOption,
   InvoiceAutomationOcrInvoice,
   InvoiceAutomationOcrResult,
@@ -31,6 +37,11 @@ import type {
   InvoiceAutomationUploadResponse
 } from "@/modules/invoice-automation/types";
 import { QuickBooksEntitySearchSelect } from "@/modules/invoice-automation/components/quickbooks-entity-search-select";
+import {
+  InvoiceAutomationTableControls,
+  InvoiceAutomationTablePagination,
+  type InvoiceAutomationTablePageSize
+} from "@/modules/invoice-automation/components/table-controls";
 
 type PdfJsModule = typeof import("pdfjs-dist");
 
@@ -43,10 +54,12 @@ let pdfJsLoader: Promise<PdfJsModule> | null = null;
 export function InvoiceAutomationUploadClient({
   invoices,
   entityOptions,
+  correctionMemories,
   quickBooksSync
 }: {
   invoices: InvoiceAutomationRow[];
   entityOptions: InvoiceAutomationEntityOption[];
+  correctionMemories: InvoiceAutomationCorrectionMemoryHint[];
   quickBooksSync: InvoiceAutomationQuickBooksSyncSummary;
 }) {
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
@@ -201,6 +214,7 @@ export function InvoiceAutomationUploadClient({
         <InvoiceUploadModal
           invoiceType={modalType}
           entityOptions={entityOptions}
+          correctionMemories={correctionMemories}
           onClose={() => setModalType(null)}
         />
       ) : null}
@@ -223,19 +237,110 @@ export function InvoiceRowsTable({
   invoices,
   selectedInvoiceIds,
   onSelectionChange,
-  selectableStatus
+  selectableStatus,
+  showQuickBooksPostingDetails = false
 }: {
   invoices: InvoiceAutomationRow[];
   selectedInvoiceIds?: string[];
   onSelectionChange?: (ids: string[]) => void;
   selectableStatus?: string;
+  showQuickBooksPostingDetails?: boolean;
 }) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [typeFilter, setTypeFilter] = useState("ALL");
+  const [currencyFilter, setCurrencyFilter] = useState("ALL");
+  const [pageSize, setPageSize] = useState<InvoiceAutomationTablePageSize>(25);
+  const [page, setPage] = useState(1);
+  const columnCount = (onSelectionChange ? 18 : 17) + (showQuickBooksPostingDetails ? 4 : 0);
+  const statusOptions = useMemo(() => uniqueStrings(invoices.map((invoice) => invoice.status)), [invoices]);
+  const currencyOptions = useMemo(() => uniqueStrings(invoices.map((invoice) => invoice.currency)), [invoices]);
+  const filteredInvoices = useMemo(() => {
+    const query = normalizeSearch(searchQuery);
+    return invoices.filter((invoice) => {
+      if (statusFilter !== "ALL" && invoice.status !== statusFilter) return false;
+      if (typeFilter !== "ALL" && invoice.invoiceType !== typeFilter) return false;
+      if (currencyFilter !== "ALL" && invoice.currency !== currencyFilter) return false;
+      return !query || getInvoiceRowSearchText(invoice).includes(query);
+    });
+  }, [currencyFilter, invoices, searchQuery, statusFilter, typeFilter]);
+  const totalPages = Math.max(1, Math.ceil(filteredInvoices.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageInvoices = filteredInvoices.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const selectableFilteredInvoiceIds = filteredInvoices
+    .filter((invoice) => {
+      const hasApprovalBlockers = getInvoiceApprovalBlockingIssues(invoice).length > 0;
+      return (!selectableStatus || invoice.status === selectableStatus) && !hasApprovalBlockers;
+    })
+    .map((invoice) => invoice.id);
+  const allFilteredSelectableRowsSelected =
+    selectableFilteredInvoiceIds.length > 0 &&
+    selectableFilteredInvoiceIds.every((id) => selectedInvoiceIds?.includes(id));
+
+  function resetToFirstPage() {
+    setPage(1);
+  }
+
+  function toggleSelectAllFiltered(checked: boolean) {
+    if (!onSelectionChange) return;
+    const current = selectedInvoiceIds ?? [];
+    if (checked) {
+      onSelectionChange(uniqueStrings([...current, ...selectableFilteredInvoiceIds]));
+      return;
+    }
+    onSelectionChange(current.filter((id) => !selectableFilteredInvoiceIds.includes(id)));
+  }
+
   return (
-    <div className="overflow-x-auto">
-      <table className="min-w-[1500px] divide-y divide-border text-sm">
+    <div className="space-y-3">
+      <InvoiceAutomationTableControls
+        searchQuery={searchQuery}
+        onSearchQueryChange={(value) => {
+          setSearchQuery(value);
+          resetToFirstPage();
+        }}
+        statusFilter={statusFilter}
+        statusOptions={statusOptions}
+        onStatusFilterChange={(value) => {
+          setStatusFilter(value);
+          resetToFirstPage();
+        }}
+        typeFilter={typeFilter}
+        onTypeFilterChange={(value) => {
+          setTypeFilter(value);
+          resetToFirstPage();
+        }}
+        currencyFilter={currencyFilter}
+        currencyOptions={currencyOptions}
+        onCurrencyFilterChange={(value) => {
+          setCurrencyFilter(value);
+          resetToFirstPage();
+        }}
+        pageSize={pageSize}
+        onPageSizeChange={(value) => {
+          setPageSize(value);
+          resetToFirstPage();
+        }}
+        filteredCount={filteredInvoices.length}
+        totalCount={invoices.length}
+      />
+      <div className="overflow-x-auto">
+      <table className={`${showQuickBooksPostingDetails ? "min-w-[1900px]" : "min-w-[1500px]"} divide-y divide-border text-sm`}>
         <thead className="bg-muted/50 text-left text-xs font-semibold uppercase tracking-wide text-mutedForeground">
           <tr>
-            {onSelectionChange ? <th className="px-3 py-3">Select</th> : null}
+            {onSelectionChange ? (
+              <th className="px-3 py-3">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={allFilteredSelectableRowsSelected}
+                    disabled={selectableFilteredInvoiceIds.length === 0}
+                    onChange={(event) => toggleSelectAllFiltered(event.target.checked)}
+                  />
+                  <span>Select all</span>
+                </label>
+              </th>
+            ) : null}
             <th className="px-3 py-3">Status</th>
             <th className="px-3 py-3">Type</th>
             <th className="px-3 py-3">Batch</th>
@@ -251,19 +356,27 @@ export function InvoiceRowsTable({
             <th className="px-3 py-3 text-right">Subtotal</th>
             <th className="px-3 py-3 text-right">Tax</th>
             <th className="px-3 py-3 text-right">Total</th>
+            {showQuickBooksPostingDetails ? (
+              <>
+                <th className="px-3 py-3 text-right">QB FX</th>
+                <th className="px-3 py-3 text-right">CAD subtotal</th>
+                <th className="px-3 py-3 text-right">CAD tax</th>
+                <th className="px-3 py-3 text-right">CAD total</th>
+              </>
+            ) : null}
             <th className="px-3 py-3">Item/account</th>
             <th className="px-3 py-3">Issues</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
-          {invoices.length === 0 ? (
+          {pageInvoices.length === 0 ? (
             <tr>
-              <td colSpan={onSelectionChange ? 18 : 17} className="px-3 py-8 text-center text-mutedForeground">
-                No uploaded invoices yet.
+              <td colSpan={columnCount} className="px-3 py-8 text-center text-mutedForeground">
+                {invoices.length === 0 ? "No uploaded invoices yet." : "No invoices match the current search and filters."}
               </td>
             </tr>
           ) : (
-            invoices.map((invoice) => {
+            pageInvoices.map((invoice) => {
               const hasApprovalBlockers = getInvoiceApprovalBlockingIssues(invoice).length > 0;
               const selectable = (!selectableStatus || invoice.status === selectableStatus) && !hasApprovalBlockers;
               return (
@@ -304,6 +417,17 @@ export function InvoiceRowsTable({
                   <td className="px-3 py-3 text-right">{formatInvoiceMoney(invoice.subtotalAmount, invoice.currency)}</td>
                   <td className="px-3 py-3 text-right">{formatInvoiceMoney(invoice.taxAmount, invoice.currency)}</td>
                   <td className="px-3 py-3 text-right font-semibold text-foreground">{formatInvoiceMoney(invoice.totalAmount, invoice.currency)}</td>
+                  {showQuickBooksPostingDetails ? (
+                    <>
+                      <td className="px-3 py-3 text-right text-mutedForeground">
+                        <div>{formatExchangeRate(invoice.quickBooksExchangeRate)}</div>
+                        {invoice.quickBooksFxSource ? <div className="mt-1 text-xs">{formatInvoiceEnum(invoice.quickBooksFxSource)}</div> : null}
+                      </td>
+                      <td className="px-3 py-3 text-right">{formatInvoiceMoney(invoice.quickBooksSubtotalHomeAmount, invoice.quickBooksHomeCurrency ?? "CAD")}</td>
+                      <td className="px-3 py-3 text-right">{formatInvoiceMoney(invoice.quickBooksTaxHomeAmount, invoice.quickBooksHomeCurrency ?? "CAD")}</td>
+                      <td className="px-3 py-3 text-right font-semibold text-foreground">{formatInvoiceMoney(invoice.quickBooksTotalHomeAmount, invoice.quickBooksHomeCurrency ?? "CAD")}</td>
+                    </>
+                  ) : null}
                   <td className="px-3 py-3">{invoice.productOrAccountName ?? "Missing"}</td>
                   <td className="max-w-[260px] px-3 py-3 text-mutedForeground">
                     {invoice.issueCodes.length === 0 ? "Ready" : invoice.issueCodes.map(formatInvoiceEnum).join(", ")}
@@ -314,17 +438,89 @@ export function InvoiceRowsTable({
           )}
         </tbody>
       </table>
+      </div>
+      <InvoiceAutomationTablePagination
+        page={currentPage}
+        totalPages={totalPages}
+        pageSize={pageSize}
+        filteredCount={filteredInvoices.length}
+        totalCount={invoices.length}
+        onPageChange={setPage}
+      />
     </div>
+  );
+}
+
+function formatExchangeRate(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return "n/a";
+  }
+
+  return value.toLocaleString("en-US", {
+    maximumFractionDigits: 6,
+    minimumFractionDigits: 2
+  });
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))].sort((a, b) => a.localeCompare(b));
+}
+
+function normalizeSearch(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function getInvoiceRowSearchText(invoice: InvoiceAutomationRow) {
+  return normalizeSearch(
+    [
+      invoice.status,
+      invoice.invoiceType,
+      invoice.batchNumber,
+      invoice.sentToAccountingByName,
+      invoice.fileName,
+      invoice.shipmentFileNumber,
+      invoice.entityNameRaw,
+      invoice.quickBooksEntityDisplayName,
+      invoice.invoiceNumber,
+      invoice.invoiceDate,
+      invoice.dueDate,
+      invoice.currency,
+      invoice.productOrAccountName,
+      invoice.issueCodes.join(" ")
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+}
+
+function getDraftSearchText(draft: InvoiceAutomationUploadDraft) {
+  return normalizeSearch(
+    [
+      draft.fileName,
+      draft.shipmentFileNumber,
+      draft.entityNameRaw,
+      draft.quickBooksEntityDisplayName,
+      draft.invoiceNumber,
+      draft.invoiceDate,
+      draft.dueDate,
+      draft.currency,
+      draft.productOrAccountName,
+      draft.issueCodes.join(" ")
+    ]
+      .filter(Boolean)
+      .join(" ")
   );
 }
 
 function InvoiceUploadModal({
   invoiceType,
   entityOptions,
+  correctionMemories,
   onClose
 }: {
   invoiceType: InvoiceAutomationType;
   entityOptions: InvoiceAutomationEntityOption[];
+  correctionMemories: InvoiceAutomationCorrectionMemoryHint[];
   onClose: () => void;
 }) {
   const [drafts, setDrafts] = useState<InvoiceAutomationUploadDraft[]>([]);
@@ -333,12 +529,38 @@ function InvoiceUploadModal({
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState("Choose one or more PDF invoices.");
   const [confirmSendToAccountingOpen, setConfirmSendToAccountingOpen] = useState(false);
+  const [draftSearchQuery, setDraftSearchQuery] = useState("");
+  const [draftCurrencyFilter, setDraftCurrencyFilter] = useState("ALL");
+  const [draftIssueFilter, setDraftIssueFilter] = useState("ALL");
+  const [draftPageSize, setDraftPageSize] = useState<InvoiceAutomationTablePageSize>(25);
+  const [draftPage, setDraftPage] = useState(1);
   const relevantEntities = useMemo(
     () => uniqueEntityOptionsById(entityOptions.filter((option) => option.entityType === invoiceType)),
     [entityOptions, invoiceType]
   );
   const title = invoiceType === "CUSTOMER" ? "Add customer invoices" : "Add vendor invoices";
   const hasApprovalBlockers = drafts.some((draft) => getInvoiceApprovalBlockingIssues({ ...draft, invoiceType }).length > 0);
+  const draftCurrencyOptions = useMemo(() => uniqueStrings(drafts.map((draft) => draft.currency)), [drafts]);
+  const filteredDrafts = useMemo(() => {
+    const query = normalizeSearch(draftSearchQuery);
+    return drafts.filter((draft) => {
+      if (draftCurrencyFilter !== "ALL" && draft.currency !== draftCurrencyFilter) return false;
+      if (draftIssueFilter === "READY" && draft.issueCodes.length > 0) return false;
+      if (draftIssueFilter === "ISSUES" && draft.issueCodes.length === 0) return false;
+      return !query || getDraftSearchText(draft).includes(query);
+    });
+  }, [draftCurrencyFilter, draftIssueFilter, draftSearchQuery, drafts]);
+  const draftTotalPages = Math.max(1, Math.ceil(filteredDrafts.length / draftPageSize));
+  const draftCurrentPage = Math.min(draftPage, draftTotalPages);
+  const pageDrafts = filteredDrafts.slice((draftCurrentPage - 1) * draftPageSize, draftCurrentPage * draftPageSize);
+
+  function resetDraftPage() {
+    setDraftPage(1);
+  }
+
+  function applyDraftCorrectionMemory(draft: InvoiceAutomationUploadDraft) {
+    return refreshDraftIssues(applyInvoiceCorrectionMemory(draft, invoiceType, correctionMemories));
+  }
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) {
@@ -362,16 +584,18 @@ function InvoiceUploadModal({
         const text = await extractPdfText(bytes);
         const textSegments = splitInvoiceTextIntoDocuments(text);
         const fileDrafts = textSegments.map((segmentText, segmentIndex) =>
-          buildInvoiceDraftFromText({
-            clientId: `${file.name}-${file.size}-${nextDrafts.length}-${segmentIndex}`,
-            fileName: textSegments.length > 1 ? `${file.name} - invoice ${segmentIndex + 1}` : file.name,
-            contentType: file.type || "application/pdf",
-            sizeBytes: file.size,
-            pdfBase64,
-            text: segmentText,
-            invoiceType,
-            entityOptions
-          })
+          applyDraftCorrectionMemory(
+            buildInvoiceDraftFromText({
+              clientId: `${file.name}-${file.size}-${nextDrafts.length}-${segmentIndex}`,
+              fileName: textSegments.length > 1 ? `${file.name} - invoice ${segmentIndex + 1}` : file.name,
+              contentType: file.type || "application/pdf",
+              sizeBytes: file.size,
+              pdfBase64,
+              text: segmentText,
+              invoiceType,
+              entityOptions
+            })
+          )
         );
 
         if (fileDrafts.length === 1 && shouldRunVisionOcr(fileDrafts[0])) {
@@ -384,15 +608,17 @@ function InvoiceUploadModal({
           }
           nextDrafts.push(
             ...ocrResult.invoices.map((ocrInvoice, ocrIndex) =>
-              mergeOcrInvoiceIntoDraft(
-                {
-                  ...fileDrafts[0],
-                  clientId: `${file.name}-${file.size}-${nextDrafts.length}-ocr-${ocrIndex}`,
-                  fileName: ocrResult.invoices.length > 1 ? `${file.name} - invoice ${ocrIndex + 1}` : file.name
-                },
-                ocrInvoice,
-                invoiceType,
-                entityOptions
+              applyDraftCorrectionMemory(
+                mergeOcrInvoiceIntoDraft(
+                  {
+                    ...fileDrafts[0],
+                    clientId: `${file.name}-${file.size}-${nextDrafts.length}-ocr-${ocrIndex}`,
+                    fileName: ocrResult.invoices.length > 1 ? `${file.name} - invoice ${ocrIndex + 1}` : file.name
+                  },
+                  ocrInvoice,
+                  invoiceType,
+                  entityOptions
+                )
               )
             )
           );
@@ -446,7 +672,7 @@ function InvoiceUploadModal({
     setDrafts((current) =>
       current.map((draft) => {
         if (draft.clientId !== clientId) return draft;
-        const next = { ...draft, ...patch };
+        const next = { ...draft, ...patch, issueCodes: clearMemoryIssuesForManualPatch(draft.issueCodes, patch) };
         if (patch.shipmentFileNumber !== undefined) {
           next.shipmentType = getShipmentTypeFromInvoiceFileNumber(next.shipmentFileNumber);
           next.businessLine = getBusinessLineFromInvoiceFileNumber(next.shipmentFileNumber);
@@ -455,9 +681,15 @@ function InvoiceUploadModal({
         if (patch.invoiceDate !== undefined && !next.dueDate) {
           next.dueDate = defaultDueDateFromInvoiceDate(next.invoiceDate);
         }
-        return refreshDraftIssues(normalizeDraftAmounts(next));
+        return applyDraftCorrectionMemory(normalizeDraftAmounts(next));
       })
     );
+  }
+
+  function removeDraft(clientId: string) {
+    setDrafts((current) => current.filter((draft) => draft.clientId !== clientId));
+    setConfirmSendToAccountingOpen(false);
+    setStatus("Invoice row removed. Remaining rows can be saved without rerunning OCR.");
   }
 
   return (
@@ -496,10 +728,42 @@ function InvoiceUploadModal({
             </div>
           ) : null}
 
-          <div className="overflow-x-auto rounded-md border border-border bg-card">
+          <div className="space-y-3 rounded-md border border-border bg-card p-3">
+            <InvoiceAutomationTableControls
+              searchQuery={draftSearchQuery}
+              onSearchQueryChange={(value) => {
+                setDraftSearchQuery(value);
+                resetDraftPage();
+              }}
+              statusFilter={draftIssueFilter}
+              statusOptions={["READY", "ISSUES"]}
+              statusLabel="Issues"
+              onStatusFilterChange={(value) => {
+                setDraftIssueFilter(value);
+                resetDraftPage();
+              }}
+              typeFilter="ALL"
+              onTypeFilterChange={() => undefined}
+              hideTypeFilter
+              currencyFilter={draftCurrencyFilter}
+              currencyOptions={draftCurrencyOptions}
+              onCurrencyFilterChange={(value) => {
+                setDraftCurrencyFilter(value);
+                resetDraftPage();
+              }}
+              pageSize={draftPageSize}
+              onPageSizeChange={(value) => {
+                setDraftPageSize(value);
+                resetDraftPage();
+              }}
+              filteredCount={filteredDrafts.length}
+              totalCount={drafts.length}
+            />
+            <div className="overflow-x-auto">
             <table className="min-w-[1600px] divide-y divide-border text-sm">
               <thead className="bg-muted/50 text-left text-xs font-semibold uppercase tracking-wide text-mutedForeground">
                 <tr>
+                  <th className="px-3 py-3">Action</th>
                   <th className="px-3 py-3">PDF</th>
                   <th className="px-3 py-3">File #</th>
                   <th className="px-3 py-3">Customer/Vendor</th>
@@ -516,15 +780,25 @@ function InvoiceUploadModal({
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {drafts.length === 0 ? (
+                {pageDrafts.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-8 text-center text-mutedForeground" colSpan={13}>
-                      Upload invoice PDFs to preview extracted rows.
+                    <td className="px-3 py-8 text-center text-mutedForeground" colSpan={14}>
+                      {drafts.length === 0 ? "Upload invoice PDFs to preview extracted rows." : "No extracted invoices match the current search and filters."}
                     </td>
                   </tr>
                 ) : (
-                  drafts.map((draft) => (
+                  pageDrafts.map((draft) => (
                     <tr key={draft.clientId} className="align-top">
+                      <td className="px-3 py-3">
+                        <button
+                          type="button"
+                          onClick={() => removeDraft(draft.clientId)}
+                          className="rounded-md border border-danger/30 px-2 py-1 text-xs font-semibold text-danger hover:bg-danger/10"
+                          aria-label={`Remove ${draft.fileName}`}
+                        >
+                          Remove
+                        </button>
+                      </td>
                       <td className="max-w-[180px] px-3 py-3 font-medium text-foreground">{draft.fileName}</td>
                       <td className="px-3 py-3"><SmallInput value={draft.shipmentFileNumber ?? ""} onChange={(value) => updateDraft(draft.clientId, { shipmentFileNumber: value || null })} /></td>
                       <td className="px-3 py-3"><SmallInput value={draft.entityNameRaw ?? ""} onChange={(value) => updateDraft(draft.clientId, { entityNameRaw: value || null })} /></td>
@@ -561,6 +835,15 @@ function InvoiceUploadModal({
                 )}
               </tbody>
             </table>
+            </div>
+            <InvoiceAutomationTablePagination
+              page={draftCurrentPage}
+              totalPages={draftTotalPages}
+              pageSize={draftPageSize}
+              filteredCount={filteredDrafts.length}
+              totalCount={drafts.length}
+              onPageChange={setDraftPage}
+            />
           </div>
 
           <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
@@ -598,6 +881,15 @@ function InvoiceUploadModal({
       ) : null}
     </div>
   );
+}
+
+function clearMemoryIssuesForManualPatch(issueCodes: string[], patch: Partial<InvoiceAutomationUploadDraft>) {
+  const blocked = new Set<string>();
+  if (patch.currency !== undefined) blocked.add("MEMORY_APPLIED_CURRENCY");
+  if (patch.productOrAccountName !== undefined) blocked.add("MEMORY_APPLIED_PRODUCT_OR_ACCOUNT");
+  if (patch.dueDate !== undefined) blocked.add("MEMORY_APPLIED_PAYMENT_TERMS");
+  if (blocked.size === 0) return issueCodes;
+  return issueCodes.filter((issueCode) => !blocked.has(issueCode));
 }
 
 function ConfirmSendToAccountingDialog({
@@ -670,9 +962,10 @@ function formatShortDateTime(value: string) {
 }
 
 function refreshDraftIssues(draft: InvoiceAutomationUploadDraft): InvoiceAutomationUploadDraft {
+  const memoryIssueCodes = draft.issueCodes.filter(isCorrectionMemoryIssueCode);
   return {
     ...draft,
-    issueCodes: getInvoiceDraftIssueCodes(draft)
+    issueCodes: [...new Set([...getInvoiceDraftIssueCodes(draft), ...memoryIssueCodes])]
   };
 }
 
@@ -887,6 +1180,10 @@ function findBestEntityForOcrName(
   let best: { option: InvoiceAutomationEntityOption; score: number } | null = null;
 
   for (const option of candidates) {
+    if (isInternalNewellEntityName(option.displayName) || isInternalNewellEntityName(option.normalizedName)) {
+      continue;
+    }
+
     const normalizedOption = option.normalizedName || normalizeEntityForClientMatch(option.displayName);
     let score = 0;
 

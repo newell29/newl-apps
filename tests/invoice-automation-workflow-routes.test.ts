@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => {
     requireMutationAccess: vi.fn(),
     requireRole: vi.fn(),
     revalidatePath: vi.fn(),
+    learnInvoiceAutomationCorrectionMemory: vi.fn(),
     learnInvoiceAutomationEntityAlias: vi.fn(),
     tx,
     prisma: {
@@ -72,6 +73,10 @@ vi.mock("next/cache", () => ({
 
 vi.mock("@/modules/invoice-automation/entity-aliases", () => ({
   learnInvoiceAutomationEntityAlias: (...args: unknown[]) => mocks.learnInvoiceAutomationEntityAlias(...args)
+}));
+
+vi.mock("@/modules/invoice-automation/correction-memory-store", () => ({
+  learnInvoiceAutomationCorrectionMemory: (...args: unknown[]) => mocks.learnInvoiceAutomationCorrectionMemory(...args)
 }));
 
 import { POST as approveForPosting } from "@/app/api/finance/invoice-automation/approve/route";
@@ -150,6 +155,7 @@ describe("invoice automation workflow routes", () => {
     mocks.tx.invoiceAutomationBatch.updateMany.mockResolvedValue({ count: 1 });
     mocks.tx.auditLog.create.mockResolvedValue({});
     mocks.prisma.auditLog.create.mockResolvedValue({});
+    mocks.learnInvoiceAutomationCorrectionMemory.mockResolvedValue(undefined);
     mocks.learnInvoiceAutomationEntityAlias.mockResolvedValue(undefined);
   });
 

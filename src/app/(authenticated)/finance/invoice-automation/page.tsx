@@ -35,6 +35,7 @@ export default async function InvoiceAutomationUploadPage({ searchParams }: { se
       <InvoiceAutomationUploadClient
         invoices={shell.invoices}
         entityOptions={shell.entityOptions}
+        correctionMemories={shell.correctionMemories}
         quickBooksSync={shell.quickBooksSync}
       />
     </div>

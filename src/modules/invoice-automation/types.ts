@@ -12,6 +12,18 @@ export type InvoiceAutomationEntityOption = {
   entityType: InvoiceAutomationType;
 };
 
+export type InvoiceAutomationCorrectionMemoryHint = {
+  invoiceType: InvoiceAutomationType;
+  fieldName: string;
+  normalizedEntityName: string | null;
+  quickBooksEntityId: string | null;
+  quickBooksEntityDisplayName: string | null;
+  shipmentPrefix: string | null;
+  currency: string | null;
+  learnedValue: string;
+  usageCount: number;
+};
+
 export type InvoiceAutomationQuickBooksSyncSummary = {
   connectionCount: number;
   customerCount: number;

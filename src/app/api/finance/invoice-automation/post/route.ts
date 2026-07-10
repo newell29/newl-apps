@@ -102,6 +102,7 @@ export async function POST(request: Request) {
           select: {
             fileName: true,
             contentType: true,
+            extractedText: true,
             pdfBytes: true
           }
         }
@@ -205,9 +206,14 @@ export async function POST(request: Request) {
           connection,
           exchangeRateByRealmCurrencyDate
         });
+        const taxContextText = [
+          row.fileName,
+          invoice.document.fileName,
+          invoice.document.extractedText
+        ].filter((value): value is string => Boolean(value)).join("\n");
         const payload = row.invoiceType === "CUSTOMER"
-          ? buildQuickBooksSalesInvoicePayload(row, mappings, { exchangeRate })
-          : buildQuickBooksVendorBillPayload(row, mappings, { exchangeRate });
+          ? buildQuickBooksSalesInvoicePayload(row, mappings, { exchangeRate, taxContextText })
+          : buildQuickBooksVendorBillPayload(row, mappings, { exchangeRate, taxContextText });
 
         if (mode === "preview") {
           results.push({

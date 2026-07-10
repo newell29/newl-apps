@@ -2,6 +2,7 @@ import { InvoiceAutomationStatus, type Prisma } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { tenantWhere } from "@/server/tenant-query";
 import type { TenantContext } from "@/server/tenant-context";
+import { getInvoiceAutomationCorrectionMemoryHints } from "@/modules/invoice-automation/correction-memory-store";
 import { normalizeInvoiceEntityName } from "@/modules/invoice-automation/extraction";
 import {
   getInvoiceAutomationQuickBooksEntityOptions,
@@ -17,7 +18,7 @@ export type InvoiceAutomationFilters = {
 };
 
 export async function getInvoiceAutomationUploadShell(tenant: TenantContext, filters: InvoiceAutomationFilters = {}) {
-  const [invoices, entityOptions, quickBooksSync] = await Promise.all([
+  const [invoices, entityOptions, quickBooksSync, correctionMemories] = await Promise.all([
     getInvoiceAutomationRows(tenant, filters, [
       InvoiceAutomationStatus.OPERATIONS_REVIEW,
       InvoiceAutomationStatus.ACCOUNTING_REVIEW,
@@ -25,13 +26,15 @@ export async function getInvoiceAutomationUploadShell(tenant: TenantContext, fil
       InvoiceAutomationStatus.POSTING_ERROR
     ]),
     getInvoiceAutomationEntityOptions(tenant),
-    getInvoiceAutomationQuickBooksSyncSummary(tenant)
+    getInvoiceAutomationQuickBooksSyncSummary(tenant),
+    getInvoiceAutomationCorrectionMemoryHints(prisma, tenant)
   ]);
 
   return {
     invoices,
     entityOptions,
     quickBooksSync,
+    correctionMemories,
     filters,
     summary: {
       operationsReview: invoices.filter((invoice) => invoice.status === InvoiceAutomationStatus.OPERATIONS_REVIEW).length,
