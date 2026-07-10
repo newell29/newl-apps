@@ -26,7 +26,7 @@ export async function updateWebsiteInboundStatusAction(formData: FormData) {
     throw new Error("Missing website inbound submission ID.");
   }
 
-  await prisma.websiteInboundSubmission.updateMany({
+  const result = await prisma.websiteInboundSubmission.updateMany({
     where: {
       id: submissionId,
       tenantId: context.tenantId
@@ -35,6 +35,10 @@ export async function updateWebsiteInboundStatusAction(formData: FormData) {
       status: parseWebsiteInboundStatus(formData.get("status"))
     }
   });
+
+  if (result.count === 0) {
+    throw new Error("Website inbound submission was not found or could not be updated.");
+  }
 
   revalidatePath("/website-inbound");
 }
