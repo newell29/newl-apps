@@ -535,6 +535,11 @@ async function main() {
       description: "Website form submissions, playbook downloads, and inbound lead review"
     },
     {
+      key: ModuleKey.WEBSITE_GROWTH,
+      name: "Website Growth",
+      description: "SEO content opportunity queue, Search Console sync, analytics context, and website growth planning"
+    },
+    {
       key: ModuleKey.OCEAN_FREIGHT_PRICING,
       name: "Ocean Freight Pricing",
       description: "Manual ocean freight rate management, agent directory, and pricing review workspace"
@@ -689,6 +694,10 @@ async function main() {
     where: { key: ModuleKey.WEBSITE_INBOUND }
   });
 
+  const websiteGrowthModule = await prisma.module.findUniqueOrThrow({
+    where: { key: ModuleKey.WEBSITE_GROWTH }
+  });
+
   await prisma.tenantModuleAccess.upsert({
     where: {
       tenantId_moduleId: {
@@ -700,6 +709,21 @@ async function main() {
     create: {
       tenantId: tenant.id,
       moduleId: websiteInboundModule.id,
+      enabled: true
+    }
+  });
+
+  await prisma.tenantModuleAccess.upsert({
+    where: {
+      tenantId_moduleId: {
+        tenantId: tenant.id,
+        moduleId: websiteGrowthModule.id
+      }
+    },
+    update: { enabled: true },
+    create: {
+      tenantId: tenant.id,
+      moduleId: websiteGrowthModule.id,
       enabled: true
     }
   });

@@ -16,6 +16,7 @@ export const DEFAULT_ROLE_MATRIX: Record<PlatformRole, RolePolicy> = {
       ModuleKey.LEAD_GEN,
       ModuleKey.CUSTOMER_CASHFLOW,
       ModuleKey.WEBSITE_INBOUND,
+      ModuleKey.WEBSITE_GROWTH,
       ModuleKey.OCEAN_FREIGHT_PRICING
     ],
     canMutate: true
@@ -30,6 +31,7 @@ export const DEFAULT_ROLE_MATRIX: Record<PlatformRole, RolePolicy> = {
       ModuleKey.SHIPMENT_DOCUMENTS,
       ModuleKey.INVOICE_VERIFICATION,
       ModuleKey.CUSTOMER_CASHFLOW,
+      ModuleKey.WEBSITE_GROWTH,
       ModuleKey.OCEAN_FREIGHT_PRICING
     ],
     canMutate: true
