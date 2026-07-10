@@ -7,7 +7,7 @@ import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
 const OPENAI_API_BASE_URL = "https://api.openai.com/v1";
-const DEFAULT_VISION_MODEL = process.env.OPENAI_DOCUMENT_VISION_MODEL?.trim() || "gpt-5-mini";
+const DEFAULT_VISION_MODEL = process.env.OPENAI_DOCUMENT_VISION_MODEL?.trim() || "gpt-4.1-mini";
 
 type ExtractionRequest = {
   images: Array<{
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       {
         role: "system",
         content:
-          "You extract Garland Canada carrier manifest rows from BOL page images. Return JSON only. Include a row only when the carrier is Midland, Speedy, or Suretrack/Sure Track. Ignore all other carriers. Do not invent missing fields."
+          "You extract Garland Canada carrier manifest rows from full-page BOL scan images. Return JSON only. Include a row for every page where the CARRIER field contains Midland, Speedy, Suretrack, Sure Track, or Suretrak. Ignore other carriers. Do not drop a matching carrier page just because another field is uncertain."
       },
       {
         role: "user",
@@ -54,13 +54,19 @@ export async function POST(request: Request) {
             type: "text",
             text: buildPrompt(images.map((image) => image.pageNumber))
           },
-          ...images.map((image) => ({
-            type: "image_url" as const,
-            image_url: {
-              url: image.imageDataUrl,
-              detail: "high" as const
+          ...images.flatMap((image) => [
+            {
+              type: "text" as const,
+              text: `BOL page ${image.pageNumber}: inspect this page.`
+            },
+            {
+              type: "image_url" as const,
+              image_url: {
+                url: image.imageDataUrl,
+                detail: "high" as const
+              }
             }
-          }))
+          ])
         ]
       }
     ]
@@ -108,13 +114,17 @@ function buildPrompt(pageNumbers: number[]) {
   return [
     "Each attached image is one full BOL page from the daily Garland BOL bundle.",
     `Page numbers: ${pageNumbers.join(", ")}.`,
-    "For each page, inspect the carrier field, shipment/order id, references/PS number, consignee city/province, and skids/pallets/handling-unit count.",
-    "Only return rows for carriers Midland, Speedy, or Suretrack/Sure Track. Ignore all other carriers.",
+    "For each page, inspect the top-left CARRIER field first. This is the most important field.",
+    "Target carrier examples include SURETRACK STANDARD, SURETRAK, SURE TRACK, SPEEDY TRANSPORT, SPEEDY, MIDLAND TRANSPORT, and MIDLAND.",
+    "Only return rows for carriers Midland, Speedy, or Suretrack/Sure Track/Suretrak. Ignore all other carriers.",
+    "If the carrier is one of those targets, return a row even if PS number, SR number, city/province, or skids are uncertain.",
+    "For matching pages, then inspect shipment/order id, references/PS number, consignee city/province, and skids/pallets/handling-unit count.",
     "Normalize carrier to one of MIDLAND, SPEEDY, SURETRACK.",
-    "SR number should be the SR/shipment/order id digits only when visible.",
-    "PS number should be formatted PS123456 when visible.",
-    "cityProvince should look like CITY, PROVINCE/STATE, for example CALGARY, AB.",
-    "skids should be a number when visible, otherwise null.",
+    "pageNumber must match the attached BOL page number.",
+    "SR number should be the SR/shipment/order id digits only when visible, otherwise an empty string.",
+    "PS number should be formatted PS123456 when visible, otherwise null.",
+    "cityProvince should look like CITY, PROVINCE/STATE, for example CALGARY, AB, otherwise an empty string.",
+    "skids should be a number when visible, otherwise null. Pallets count as skids for this manifest.",
     "Return JSON exactly like: {\"rows\":[{\"pageNumber\":1,\"carrier\":\"SURETRACK\",\"srNumber\":\"810036\",\"psNumber\":\"PS209606\",\"cityProvince\":\"CALGARY, AB\",\"skids\":2,\"confidence\":\"HIGH\",\"notes\":\"short note\"}]}"
   ].join(" ");
 }
@@ -136,10 +146,10 @@ function normalizeRows(value: unknown): GarlandCarrierManifestRow[] {
       return [];
     }
 
-    const pageNumber = typeof record.pageNumber === "number" && Number.isInteger(record.pageNumber) ? record.pageNumber : null;
+    const pageNumber = normalizePageNumber(record.pageNumber);
     const psNumber = normalizePsNumber(typeof record.psNumber === "string" ? record.psNumber : null);
 
-    if (!pageNumber || !psNumber) {
+    if (!pageNumber) {
       return [];
     }
 
@@ -148,7 +158,7 @@ function normalizeRows(value: unknown): GarlandCarrierManifestRow[] {
         carrier,
         pageNumber,
         srNumber: normalizeDigits(record.srNumber),
-        psNumber,
+        psNumber: psNumber ?? "",
         cityProvince: normalizeText(record.cityProvince),
         skids: normalizeSkids(record.skids),
         confidence: normalizeConfidence(record.confidence),
@@ -175,6 +185,20 @@ function normalizeCarrier(value: unknown): GarlandCarrierKey | null {
 
   if (normalized.includes("SURETRACK") || normalized.includes("SURETRAK")) {
     return "SURETRACK";
+  }
+
+  return null;
+}
+
+function normalizePageNumber(value: unknown) {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const digits = value.match(/\d+/)?.[0];
+    const parsed = digits ? Number.parseInt(digits, 10) : Number.NaN;
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
   }
 
   return null;
