@@ -31,6 +31,11 @@ import type {
   InvoiceAutomationUploadResponse
 } from "@/modules/invoice-automation/types";
 import { QuickBooksEntitySearchSelect } from "@/modules/invoice-automation/components/quickbooks-entity-search-select";
+import {
+  InvoiceAutomationTableControls,
+  InvoiceAutomationTablePagination,
+  type InvoiceAutomationTablePageSize
+} from "@/modules/invoice-automation/components/table-controls";
 
 type PdfJsModule = typeof import("pdfjs-dist");
 
@@ -232,14 +237,101 @@ export function InvoiceRowsTable({
   selectableStatus?: string;
   showQuickBooksPostingDetails?: boolean;
 }) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [typeFilter, setTypeFilter] = useState("ALL");
+  const [currencyFilter, setCurrencyFilter] = useState("ALL");
+  const [pageSize, setPageSize] = useState<InvoiceAutomationTablePageSize>(25);
+  const [page, setPage] = useState(1);
   const columnCount = (onSelectionChange ? 18 : 17) + (showQuickBooksPostingDetails ? 4 : 0);
+  const statusOptions = useMemo(() => uniqueStrings(invoices.map((invoice) => invoice.status)), [invoices]);
+  const currencyOptions = useMemo(() => uniqueStrings(invoices.map((invoice) => invoice.currency)), [invoices]);
+  const filteredInvoices = useMemo(() => {
+    const query = normalizeSearch(searchQuery);
+    return invoices.filter((invoice) => {
+      if (statusFilter !== "ALL" && invoice.status !== statusFilter) return false;
+      if (typeFilter !== "ALL" && invoice.invoiceType !== typeFilter) return false;
+      if (currencyFilter !== "ALL" && invoice.currency !== currencyFilter) return false;
+      return !query || getInvoiceRowSearchText(invoice).includes(query);
+    });
+  }, [currencyFilter, invoices, searchQuery, statusFilter, typeFilter]);
+  const totalPages = Math.max(1, Math.ceil(filteredInvoices.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageInvoices = filteredInvoices.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const selectableFilteredInvoiceIds = filteredInvoices
+    .filter((invoice) => {
+      const hasApprovalBlockers = getInvoiceApprovalBlockingIssues(invoice).length > 0;
+      return (!selectableStatus || invoice.status === selectableStatus) && !hasApprovalBlockers;
+    })
+    .map((invoice) => invoice.id);
+  const allFilteredSelectableRowsSelected =
+    selectableFilteredInvoiceIds.length > 0 &&
+    selectableFilteredInvoiceIds.every((id) => selectedInvoiceIds?.includes(id));
+
+  function resetToFirstPage() {
+    setPage(1);
+  }
+
+  function toggleSelectAllFiltered(checked: boolean) {
+    if (!onSelectionChange) return;
+    const current = selectedInvoiceIds ?? [];
+    if (checked) {
+      onSelectionChange(uniqueStrings([...current, ...selectableFilteredInvoiceIds]));
+      return;
+    }
+    onSelectionChange(current.filter((id) => !selectableFilteredInvoiceIds.includes(id)));
+  }
 
   return (
-    <div className="overflow-x-auto">
+    <div className="space-y-3">
+      <InvoiceAutomationTableControls
+        searchQuery={searchQuery}
+        onSearchQueryChange={(value) => {
+          setSearchQuery(value);
+          resetToFirstPage();
+        }}
+        statusFilter={statusFilter}
+        statusOptions={statusOptions}
+        onStatusFilterChange={(value) => {
+          setStatusFilter(value);
+          resetToFirstPage();
+        }}
+        typeFilter={typeFilter}
+        onTypeFilterChange={(value) => {
+          setTypeFilter(value);
+          resetToFirstPage();
+        }}
+        currencyFilter={currencyFilter}
+        currencyOptions={currencyOptions}
+        onCurrencyFilterChange={(value) => {
+          setCurrencyFilter(value);
+          resetToFirstPage();
+        }}
+        pageSize={pageSize}
+        onPageSizeChange={(value) => {
+          setPageSize(value);
+          resetToFirstPage();
+        }}
+        filteredCount={filteredInvoices.length}
+        totalCount={invoices.length}
+      />
+      <div className="overflow-x-auto">
       <table className={`${showQuickBooksPostingDetails ? "min-w-[1900px]" : "min-w-[1500px]"} divide-y divide-border text-sm`}>
         <thead className="bg-muted/50 text-left text-xs font-semibold uppercase tracking-wide text-mutedForeground">
           <tr>
-            {onSelectionChange ? <th className="px-3 py-3">Select</th> : null}
+            {onSelectionChange ? (
+              <th className="px-3 py-3">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={allFilteredSelectableRowsSelected}
+                    disabled={selectableFilteredInvoiceIds.length === 0}
+                    onChange={(event) => toggleSelectAllFiltered(event.target.checked)}
+                  />
+                  <span>Select all</span>
+                </label>
+              </th>
+            ) : null}
             <th className="px-3 py-3">Status</th>
             <th className="px-3 py-3">Type</th>
             <th className="px-3 py-3">Batch</th>
@@ -268,14 +360,14 @@ export function InvoiceRowsTable({
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
-          {invoices.length === 0 ? (
+          {pageInvoices.length === 0 ? (
             <tr>
               <td colSpan={columnCount} className="px-3 py-8 text-center text-mutedForeground">
-                No uploaded invoices yet.
+                {invoices.length === 0 ? "No uploaded invoices yet." : "No invoices match the current search and filters."}
               </td>
             </tr>
           ) : (
-            invoices.map((invoice) => {
+            pageInvoices.map((invoice) => {
               const hasApprovalBlockers = getInvoiceApprovalBlockingIssues(invoice).length > 0;
               const selectable = (!selectableStatus || invoice.status === selectableStatus) && !hasApprovalBlockers;
               return (
@@ -337,6 +429,15 @@ export function InvoiceRowsTable({
           )}
         </tbody>
       </table>
+      </div>
+      <InvoiceAutomationTablePagination
+        page={currentPage}
+        totalPages={totalPages}
+        pageSize={pageSize}
+        filteredCount={filteredInvoices.length}
+        totalCount={invoices.length}
+        onPageChange={setPage}
+      />
     </div>
   );
 }
@@ -350,6 +451,56 @@ function formatExchangeRate(value: number | null | undefined) {
     maximumFractionDigits: 6,
     minimumFractionDigits: 2
   });
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))].sort((a, b) => a.localeCompare(b));
+}
+
+function normalizeSearch(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function getInvoiceRowSearchText(invoice: InvoiceAutomationRow) {
+  return normalizeSearch(
+    [
+      invoice.status,
+      invoice.invoiceType,
+      invoice.batchNumber,
+      invoice.sentToAccountingByName,
+      invoice.fileName,
+      invoice.shipmentFileNumber,
+      invoice.entityNameRaw,
+      invoice.quickBooksEntityDisplayName,
+      invoice.invoiceNumber,
+      invoice.invoiceDate,
+      invoice.dueDate,
+      invoice.currency,
+      invoice.productOrAccountName,
+      invoice.issueCodes.join(" ")
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+}
+
+function getDraftSearchText(draft: InvoiceAutomationUploadDraft) {
+  return normalizeSearch(
+    [
+      draft.fileName,
+      draft.shipmentFileNumber,
+      draft.entityNameRaw,
+      draft.quickBooksEntityDisplayName,
+      draft.invoiceNumber,
+      draft.invoiceDate,
+      draft.dueDate,
+      draft.currency,
+      draft.productOrAccountName,
+      draft.issueCodes.join(" ")
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
 }
 
 function InvoiceUploadModal({
@@ -367,12 +518,34 @@ function InvoiceUploadModal({
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState("Choose one or more PDF invoices.");
   const [confirmSendToAccountingOpen, setConfirmSendToAccountingOpen] = useState(false);
+  const [draftSearchQuery, setDraftSearchQuery] = useState("");
+  const [draftCurrencyFilter, setDraftCurrencyFilter] = useState("ALL");
+  const [draftIssueFilter, setDraftIssueFilter] = useState("ALL");
+  const [draftPageSize, setDraftPageSize] = useState<InvoiceAutomationTablePageSize>(25);
+  const [draftPage, setDraftPage] = useState(1);
   const relevantEntities = useMemo(
     () => uniqueEntityOptionsById(entityOptions.filter((option) => option.entityType === invoiceType)),
     [entityOptions, invoiceType]
   );
   const title = invoiceType === "CUSTOMER" ? "Add customer invoices" : "Add vendor invoices";
   const hasApprovalBlockers = drafts.some((draft) => getInvoiceApprovalBlockingIssues({ ...draft, invoiceType }).length > 0);
+  const draftCurrencyOptions = useMemo(() => uniqueStrings(drafts.map((draft) => draft.currency)), [drafts]);
+  const filteredDrafts = useMemo(() => {
+    const query = normalizeSearch(draftSearchQuery);
+    return drafts.filter((draft) => {
+      if (draftCurrencyFilter !== "ALL" && draft.currency !== draftCurrencyFilter) return false;
+      if (draftIssueFilter === "READY" && draft.issueCodes.length > 0) return false;
+      if (draftIssueFilter === "ISSUES" && draft.issueCodes.length === 0) return false;
+      return !query || getDraftSearchText(draft).includes(query);
+    });
+  }, [draftCurrencyFilter, draftIssueFilter, draftSearchQuery, drafts]);
+  const draftTotalPages = Math.max(1, Math.ceil(filteredDrafts.length / draftPageSize));
+  const draftCurrentPage = Math.min(draftPage, draftTotalPages);
+  const pageDrafts = filteredDrafts.slice((draftCurrentPage - 1) * draftPageSize, draftCurrentPage * draftPageSize);
+
+  function resetDraftPage() {
+    setDraftPage(1);
+  }
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) {
@@ -536,7 +709,38 @@ function InvoiceUploadModal({
             </div>
           ) : null}
 
-          <div className="overflow-x-auto rounded-md border border-border bg-card">
+          <div className="space-y-3 rounded-md border border-border bg-card p-3">
+            <InvoiceAutomationTableControls
+              searchQuery={draftSearchQuery}
+              onSearchQueryChange={(value) => {
+                setDraftSearchQuery(value);
+                resetDraftPage();
+              }}
+              statusFilter={draftIssueFilter}
+              statusOptions={["READY", "ISSUES"]}
+              statusLabel="Issues"
+              onStatusFilterChange={(value) => {
+                setDraftIssueFilter(value);
+                resetDraftPage();
+              }}
+              typeFilter="ALL"
+              onTypeFilterChange={() => undefined}
+              hideTypeFilter
+              currencyFilter={draftCurrencyFilter}
+              currencyOptions={draftCurrencyOptions}
+              onCurrencyFilterChange={(value) => {
+                setDraftCurrencyFilter(value);
+                resetDraftPage();
+              }}
+              pageSize={draftPageSize}
+              onPageSizeChange={(value) => {
+                setDraftPageSize(value);
+                resetDraftPage();
+              }}
+              filteredCount={filteredDrafts.length}
+              totalCount={drafts.length}
+            />
+            <div className="overflow-x-auto">
             <table className="min-w-[1600px] divide-y divide-border text-sm">
               <thead className="bg-muted/50 text-left text-xs font-semibold uppercase tracking-wide text-mutedForeground">
                 <tr>
@@ -557,14 +761,14 @@ function InvoiceUploadModal({
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {drafts.length === 0 ? (
+                {pageDrafts.length === 0 ? (
                   <tr>
                     <td className="px-3 py-8 text-center text-mutedForeground" colSpan={14}>
-                      Upload invoice PDFs to preview extracted rows.
+                      {drafts.length === 0 ? "Upload invoice PDFs to preview extracted rows." : "No extracted invoices match the current search and filters."}
                     </td>
                   </tr>
                 ) : (
-                  drafts.map((draft) => (
+                  pageDrafts.map((draft) => (
                     <tr key={draft.clientId} className="align-top">
                       <td className="px-3 py-3">
                         <button
@@ -612,6 +816,15 @@ function InvoiceUploadModal({
                 )}
               </tbody>
             </table>
+            </div>
+            <InvoiceAutomationTablePagination
+              page={draftCurrentPage}
+              totalPages={draftTotalPages}
+              pageSize={draftPageSize}
+              filteredCount={filteredDrafts.length}
+              totalCount={drafts.length}
+              onPageChange={setDraftPage}
+            />
           </div>
 
           <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
