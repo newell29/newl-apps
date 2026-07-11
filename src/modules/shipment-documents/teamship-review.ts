@@ -868,7 +868,7 @@ function normalizeCarrier(value: unknown) {
     return "UPS";
   }
 
-  if (normalized === "P U" || normalized.includes("PICKUP") || normalized.includes("PICK UP")) {
+  if (normalized === "P U" || normalized.startsWith("P U ") || normalized.includes("PICKUP") || normalized.includes("PICK UP")) {
     return "PICKUP";
   }
 
