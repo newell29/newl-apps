@@ -97,6 +97,7 @@ enum IntegrationProvider {
   SEVEN_L
   TMS
   WMS
+  TEAMSHIP
   OPENCLAW
   OPENAI
   LOCAL_LLM
@@ -411,59 +412,61 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships                   Membership[]
-  moduleAccess                  TenantModuleAccess[]
-  rolePolicies                  TenantRolePolicy[]
-  roleModuleAccess              TenantRoleModuleAccess[]
-  integrationCredentials        IntegrationCredential[]
-  auditLogs                     AuditLog[]
-  jobRuns                       AutomationJobRun[]
-  companies                     Company[]
-  importRecords                 TradeMiningImportRecord[]
-  searchProfiles                TradeMiningSearchProfile[]
-  tradeMiningScoringConfig      TradeMiningScoringConfig?
-  contacts                      Contact[]
-  leads                         Lead[]
-  contactOutreachDrafts         ContactOutreachDraft[]
-  apolloCompanyMatches          ApolloCompanyMatch[]
-  ltlBatchQuoteLanes            LtlBatchQuoteLane[]
-  assistantThreads              AssistantChatThread[]
-  assistantMessages             AssistantChatMessage[]
-  websiteInboundSubmissions     WebsiteInboundSubmission[]
-  websiteGrowthOpportunities    WebsiteGrowthOpportunity[]
-  websiteGrowthDataImports      WebsiteGrowthDataImport[]
-  websiteGrowthMetrics          WebsiteGrowthMetric[]
-  creditChecks                  CreditCheck[]
-  assistantRuns                 AssistantRun[]
-  assistantRetrievedSources     AssistantRetrievedSource[]
-  assistantKnowledgeDocuments   AssistantKnowledgeDocument[]
-  assistantKnowledgeChunks      AssistantKnowledgeChunk[]
-  assistantMemories             AssistantMemory[]
-  assistantMailboxSyncStates    AssistantMailboxSyncState[]
-  assistantAutomations          AssistantAutomation[]
-  assistantAutomationRuns       AssistantAutomationRun[]
-  shipmentDocumentRuns          ShipmentDocumentRun[]
-  shipmentCarrierManifestRuns   ShipmentCarrierManifestRun[]
-  cashflowCustomers             CashflowCustomer[]
-  cashflowCustomerAliases       CashflowCustomerAlias[]
-  cashflowFiles                 CashflowFile[]
-  cashflowCustomerInvoices      CashflowCustomerInvoice[]
-  cashflowVendorBills           CashflowVendorBill[]
-  cashflowSnapshots             CashflowCustomerSnapshot[]
-  cashflowAlerts                CashflowAlert[]
-  cashflowFollowUps             CashflowFollowUp[]
-  cashflowAccountingLines       CashflowAccountingLine[]
-  cashflowSettings              CashflowSettings?
-  oceanFreightAgents            OceanFreightAgent[]
-  oceanFreightAgentBranches     OceanFreightAgentBranch[]
-  oceanFreightAgentContacts     OceanFreightAgentContact[]
-  oceanFreightSourceEmails      OceanFreightSourceEmail[]
-  oceanFreightSourceAttachments OceanFreightSourceAttachment[]
-  oceanFreightRateCandidates    OceanFreightRateCandidate[]
-  oceanFreightRates             OceanFreightRate[]
-  invoiceAutomationDocuments    InvoiceAutomationDocument[]
-  invoiceAutomationBatches      InvoiceAutomationBatch[]
-  invoiceAutomationInvoices     InvoiceAutomationInvoice[]
+  memberships                         Membership[]
+  moduleAccess                        TenantModuleAccess[]
+  rolePolicies                        TenantRolePolicy[]
+  roleModuleAccess                    TenantRoleModuleAccess[]
+  integrationCredentials              IntegrationCredential[]
+  auditLogs                           AuditLog[]
+  jobRuns                             AutomationJobRun[]
+  companies                           Company[]
+  importRecords                       TradeMiningImportRecord[]
+  searchProfiles                      TradeMiningSearchProfile[]
+  tradeMiningScoringConfig            TradeMiningScoringConfig?
+  contacts                            Contact[]
+  leads                               Lead[]
+  contactOutreachDrafts               ContactOutreachDraft[]
+  apolloCompanyMatches                ApolloCompanyMatch[]
+  ltlBatchQuoteLanes                  LtlBatchQuoteLane[]
+  assistantThreads                    AssistantChatThread[]
+  assistantMessages                   AssistantChatMessage[]
+  websiteInboundSubmissions           WebsiteInboundSubmission[]
+  websiteGrowthOpportunities          WebsiteGrowthOpportunity[]
+  websiteGrowthDataImports            WebsiteGrowthDataImport[]
+  websiteGrowthMetrics                WebsiteGrowthMetric[]
+  creditChecks                        CreditCheck[]
+  assistantRuns                       AssistantRun[]
+  assistantRetrievedSources           AssistantRetrievedSource[]
+  assistantKnowledgeDocuments         AssistantKnowledgeDocument[]
+  assistantKnowledgeChunks            AssistantKnowledgeChunk[]
+  assistantMemories                   AssistantMemory[]
+  assistantMailboxSyncStates          AssistantMailboxSyncState[]
+  assistantAutomations                AssistantAutomation[]
+  assistantAutomationRuns             AssistantAutomationRun[]
+  shipmentDocumentRuns                ShipmentDocumentRun[]
+  shipmentCarrierManifestRuns         ShipmentCarrierManifestRun[]
+  teamshipReviewRuns                  TeamshipReviewRun[]
+  teamshipReviewOrders                TeamshipReviewOrder[]
+  cashflowCustomers                   CashflowCustomer[]
+  cashflowCustomerAliases             CashflowCustomerAlias[]
+  cashflowFiles                       CashflowFile[]
+  cashflowCustomerInvoices            CashflowCustomerInvoice[]
+  cashflowVendorBills                 CashflowVendorBill[]
+  cashflowSnapshots                   CashflowCustomerSnapshot[]
+  cashflowAlerts                      CashflowAlert[]
+  cashflowFollowUps                   CashflowFollowUp[]
+  cashflowAccountingLines             CashflowAccountingLine[]
+  cashflowSettings                    CashflowSettings?
+  oceanFreightAgents                  OceanFreightAgent[]
+  oceanFreightAgentBranches           OceanFreightAgentBranch[]
+  oceanFreightAgentContacts           OceanFreightAgentContact[]
+  oceanFreightSourceEmails            OceanFreightSourceEmail[]
+  oceanFreightSourceAttachments       OceanFreightSourceAttachment[]
+  oceanFreightRateCandidates          OceanFreightRateCandidate[]
+  oceanFreightRates                   OceanFreightRate[]
+  invoiceAutomationDocuments          InvoiceAutomationDocument[]
+  invoiceAutomationBatches            InvoiceAutomationBatch[]
+  invoiceAutomationInvoices           InvoiceAutomationInvoice[]
   invoiceAutomationQuickBooksEntities InvoiceAutomationQuickBooksEntity[]
   invoiceAutomationEntityAliases      InvoiceAutomationEntityAlias[]
   invoiceAutomationCorrectionMemories InvoiceAutomationCorrectionMemory[]
@@ -481,15 +484,16 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  memberships             Membership[]
-  accounts                Account[]
-  sessions                Session[]
-  assistantThreads        AssistantChatThread[]
-  assistantRuns           AssistantRun[]
-  assistantAutomations    AssistantAutomation[]
-  assistantAutomationRuns AssistantAutomationRun[]
-  shipmentDocumentRuns    ShipmentDocumentRun[]
+  memberships                 Membership[]
+  accounts                    Account[]
+  sessions                    Session[]
+  assistantThreads            AssistantChatThread[]
+  assistantRuns               AssistantRun[]
+  assistantAutomations        AssistantAutomation[]
+  assistantAutomationRuns     AssistantAutomationRun[]
+  shipmentDocumentRuns        ShipmentDocumentRun[]
   shipmentCarrierManifestRuns ShipmentCarrierManifestRun[]
+  teamshipReviewRuns          TeamshipReviewRun[]
 }
 
 // Auth.js (NextAuth) adapter models. Account links an external identity
@@ -746,9 +750,9 @@ model CreditCheck {
 }
 
 model ShipmentDocumentRun {
-  id                       String   @id @default(cuid())
+  id                       String    @id @default(cuid())
   tenantId                 String
-  workflowKey              String   @default("GARLAND_CANADA")
+  workflowKey              String    @default("GARLAND_CANADA")
   documentLabel            String
   shipmentDate             DateTime
   recipientEmail           String?
@@ -758,23 +762,89 @@ model ShipmentDocumentRun {
   outputPickTicketFileName String
   bolPageCount             Int
   pickTicketPageCount      Int
-  bolAiFallbackPageCount   Int      @default(0)
-  pickAiFallbackPageCount  Int      @default(0)
+  bolAiFallbackPageCount   Int       @default(0)
+  pickAiFallbackPageCount  Int       @default(0)
   bolPsNumbers             Json
   pickPsNumbers            Json
   searchText               String
   bolPdfBytes              Bytes
   pickTicketPdfBytes       Bytes
-  bolPdfUploadComplete     Boolean  @default(true)
-  pickPdfUploadComplete    Boolean  @default(true)
+  bolPdfUploadComplete     Boolean   @default(true)
+  pickPdfUploadComplete    Boolean   @default(true)
   createdByUserId          String?
   deletedAt                DateTime?
   deletedByUserId          String?
-  createdAt                DateTime @default(now())
-  updatedAt                DateTime @updatedAt
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
   tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdBy User?  @relation(fields: [createdByUserId], references: [id], onDelete: NoAction)
+
+  @@index([tenantId, workflowKey, shipmentDate])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, deletedAt])
+}
+
+model ShipmentCarrierManifestRun {
+  id                     String    @id @default(cuid())
+  tenantId               String
+  workflowKey            String    @default("GARLAND_CARRIER_MANIFEST")
+  documentLabel          String
+  shipmentDate           DateTime
+  sourceBolFileName      String?
+  carrierCounts          Json
+  manifestRows           Json
+  midlandFileName        String?
+  midlandWorkbookBytes   Bytes?
+  speedyFileName         String?
+  speedyWorkbookBytes    Bytes?
+  suretrackFileName      String?
+  suretrackWorkbookBytes Bytes?
+  signedCopyFileName     String?
+  signedCopyContentType  String?
+  signedCopyBytes        Bytes?
+  signedCopyUploadedAt   DateTime?
+  createdByUserId        String?
+  deletedAt              DateTime?
+  deletedByUserId        String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy User?  @relation(fields: [createdByUserId], references: [id], onDelete: NoAction)
+
+  @@index([tenantId, workflowKey, shipmentDate])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, deletedAt])
+}
+
+model TeamshipReviewRun {
+  id                    String    @id @default(cuid())
+  tenantId              String
+  workflowKey           String    @default("GARLAND_TEAMSHIP_REVIEW")
+  documentLabel         String
+  shipmentDate          DateTime
+  sourcePdfFileName     String?
+  pdfOrderCount         Int
+  teamshipMatchedCount  Int
+  passedCount           Int
+  failedCount           Int
+  missingTeamshipCount  Int
+  pendingTeamshipCount  Int
+  alertDigestOrderCount Int       @default(0)
+  summary               Json
+  extractedOrders       Json
+  reviewResponse        Json
+  searchText            String
+  createdByUserId       String?
+  deletedAt             DateTime?
+  deletedByUserId       String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  tenant    Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy User?                 @relation(fields: [createdByUserId], references: [id], onDelete: NoAction)
+  orders    TeamshipReviewOrder[]
 
   @@index([tenantId, workflowKey, shipmentDate])
   @@index([tenantId, createdAt])
@@ -782,37 +852,33 @@ model ShipmentDocumentRun {
   @@index([tenantId, deletedAt])
 }
 
-model ShipmentCarrierManifestRun {
-  id                      String   @id @default(cuid())
-  tenantId                String
-  workflowKey             String   @default("GARLAND_CARRIER_MANIFEST")
-  documentLabel           String
-  shipmentDate            DateTime
-  sourceBolFileName       String?
-  carrierCounts           Json
-  manifestRows            Json
-  midlandFileName         String?
-  midlandWorkbookBytes    Bytes?
-  speedyFileName          String?
-  speedyWorkbookBytes     Bytes?
-  suretrackFileName       String?
-  suretrackWorkbookBytes  Bytes?
-  signedCopyFileName      String?
-  signedCopyContentType   String?
-  signedCopyBytes         Bytes?
-  signedCopyUploadedAt    DateTime?
-  createdByUserId         String?
-  deletedAt               DateTime?
-  deletedByUserId         String?
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
+model TeamshipReviewOrder {
+  id              String   @id @default(cuid())
+  tenantId        String
+  runId           String
+  psNumber        String
+  srNumber        String
+  status          String
+  teamshipOrderId String?
+  teamshipUrl     String?
+  carrier         String?
+  shipToName      String?
+  city            String?
+  state           String?
+  shipToPo        String?
+  pageNumbers     Json
+  pdfOrder        Json
+  review          Json
+  mismatchCount   Int      @default(0)
+  createdAt       DateTime @default(now())
 
-  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  createdBy User?  @relation(fields: [createdByUserId], references: [id], onDelete: NoAction)
+  tenant Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  run    TeamshipReviewRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
-  @@index([tenantId, workflowKey, shipmentDate])
-  @@index([tenantId, createdAt])
-  @@index([tenantId, deletedAt])
+  @@index([tenantId, runId])
+  @@index([tenantId, srNumber])
+  @@index([tenantId, psNumber])
+  @@index([tenantId, status])
 }
 
 model IntegrationCredential {
@@ -1564,7 +1630,7 @@ model InvoiceAutomationDocument {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  tenant   Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant   Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   invoices InvoiceAutomationInvoice[]
 
   @@unique([tenantId, id])

@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function GarlandTeamshipReviewPage() {
   const context = await getAuthenticatedContext();
   await requireModule(context, ModuleKey.SHIPMENT_DOCUMENTS);
-  const teamshipStatus = getTeamshipConfigurationStatus();
+  const teamshipStatus = await getTeamshipConfigurationStatus(context.tenantId);
 
   return (
     <div className="space-y-6">
@@ -38,8 +38,8 @@ export default async function GarlandTeamshipReviewPage() {
             <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Teamship API status</p>
             <p className="mt-2 text-sm text-foreground">
               {teamshipStatus.configured
-                ? "Configured in this runtime. Manual pulls and PDF reviews can fetch Teamship orders read-only."
-                : `Not configured in this runtime. Add ${teamshipStatus.missing.join(" and ")} before live Teamship pulls can run.`}
+                ? `Configured from ${teamshipStatus.source === "settings" ? "app settings" : "runtime environment"}. Manual pulls and PDF reviews can fetch Teamship orders read-only.`
+                : `Not configured. Add ${teamshipStatus.missing.join(" and ")} in Settings before live Teamship pulls can run.`}
             </p>
             <p className="mt-2 text-xs leading-5 text-mutedForeground">
               The 15-minute daily-order sync route is scaffolded but intentionally not scheduled yet.
@@ -48,7 +48,7 @@ export default async function GarlandTeamshipReviewPage() {
         </div>
       </section>
 
-      <GarlandTeamshipReviewClient />
+      <GarlandTeamshipReviewClient canDeleteRuns={context.role === "ADMIN"} />
     </div>
   );
 }
