@@ -48,6 +48,9 @@ export type TeamshipReviewHistoryResponse = {
   runs: TeamshipReviewHistoryRun[];
   totalCount: number;
   search: string;
+  dateFrom: string;
+  dateTo: string;
+  allDates: boolean;
 };
 
 type SaveTeamshipReviewRunInput = {
@@ -111,9 +114,14 @@ type TeamshipReviewOrderRecord = {
 
 export async function getTeamshipReviewHistory(
   context: AuthenticatedContext,
-  filters: { search?: string; take?: number } = {}
+  filters: { search?: string; dateFrom?: string | null; dateTo?: string | null; allDates?: boolean; take?: number } = {}
 ): Promise<TeamshipReviewHistoryResponse> {
   const search = filters.search?.trim() ?? "";
+  const allDates = filters.allDates === true;
+  const parsedDateFrom = parseHistoryDate(filters.dateFrom) ?? getTodayInputValue();
+  const parsedDateTo = parseHistoryDate(filters.dateTo) ?? parsedDateFrom;
+  const dateFrom = allDates ? "" : parsedDateFrom <= parsedDateTo ? parsedDateFrom : parsedDateTo;
+  const dateTo = allDates ? "" : parsedDateFrom <= parsedDateTo ? parsedDateTo : parsedDateFrom;
   const take = Math.min(100, Math.max(1, filters.take ?? 40));
   const where: Record<string, unknown> = {
     tenantId: context.tenantId,
@@ -121,11 +129,40 @@ export async function getTeamshipReviewHistory(
     deletedAt: null
   };
 
-  if (search) {
-    where.searchText = {
-      contains: search,
-      mode: "insensitive"
+  if (!allDates) {
+    where.shipmentDate = {
+      gte: new Date(`${dateFrom}T00:00:00.000Z`),
+      lte: new Date(`${dateTo}T23:59:59.999Z`)
     };
+  }
+
+  if (search) {
+    where.OR = [
+      {
+        searchText: {
+          contains: search,
+          mode: "insensitive"
+        }
+      },
+      {
+        orders: {
+          some: {
+            OR: [
+              { psNumber: { contains: search, mode: "insensitive" } },
+              { srNumber: { contains: search, mode: "insensitive" } },
+              { status: { contains: search, mode: "insensitive" } },
+              { teamshipOrderId: { contains: search, mode: "insensitive" } },
+              { teamshipUrl: { contains: search, mode: "insensitive" } },
+              { carrier: { contains: search, mode: "insensitive" } },
+              { shipToName: { contains: search, mode: "insensitive" } },
+              { city: { contains: search, mode: "insensitive" } },
+              { state: { contains: search, mode: "insensitive" } },
+              { shipToPo: { contains: search, mode: "insensitive" } }
+            ]
+          }
+        }
+      }
+    ];
   }
 
   const client = prisma as TeamshipReviewRunQueryClient;
@@ -179,7 +216,10 @@ export async function getTeamshipReviewHistory(
   return {
     runs: runs.map(mapTeamshipReviewRun),
     totalCount,
-    search
+    search,
+    dateFrom,
+    dateTo,
+    allDates
   };
 }
 
@@ -320,8 +360,55 @@ function buildSearchText(input: SaveTeamshipReviewRunInput, orderRows: Array<Rec
     input.documentLabel,
     input.sourcePdfFileName,
     input.shipmentDate.toISOString().slice(0, 10),
+    input.review.fetchedAt,
+    `orders ${input.review.summary.pdfOrderCount}`,
+    `matched ${input.review.summary.teamshipMatchedCount}`,
+    `passed ${input.review.summary.passedCount}`,
+    `failed ${input.review.summary.failedCount}`,
+    `missing ${input.review.summary.missingTeamshipCount}`,
+    `pending ${input.review.summary.pendingTeamshipCount}`,
     input.context.userName,
     input.context.userEmail,
+    ...input.review.teamshipAlerts.flatMap((alert) => [
+      alert.srNumber,
+      alert.reason,
+      alert.rawText,
+      ...alert.items.flatMap((item) => [item.itemNumber, item.description, item.requestedQuantity, item.serialNumber])
+    ]),
+    ...input.review.pdfOrders.flatMap((order) => [
+      order.psNumber,
+      order.srNumber,
+      order.shipToCode,
+      order.shipToName,
+      order.shipToAddress1,
+      order.shipToCity,
+      order.shipToState,
+      order.shipToPostalCode,
+      order.shipToCountry,
+      order.shipToPo,
+      order.freightTerms,
+      order.orderDate,
+      order.shipVia,
+      order.instructions,
+      order.rawText,
+      ...order.items.flatMap((item) => [
+        item.sku,
+        item.description,
+        item.quantity === null ? null : String(item.quantity),
+        item.dueShipDate,
+        ...item.serialNumbers
+      ])
+    ]),
+    ...input.review.reviews.flatMap((review) => [
+      review.psNumber,
+      review.srNumber,
+      review.status,
+      review.teamshipOrderId,
+      review.teamshipUrl,
+      review.alert?.reason,
+      review.alert?.rawText,
+      ...review.fields.flatMap((field) => [field.key, field.label, field.status, field.pdfValue, field.teamshipValue, field.message])
+    ]),
     ...orderRows.flatMap((row) => [
       row.psNumber,
       row.srNumber,
@@ -339,4 +426,19 @@ function buildSearchText(input: SaveTeamshipReviewRunInput, orderRows: Array<Rec
     .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
     .join(" ")
     .slice(0, 12000);
+}
+
+function parseHistoryDate(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null;
+}
+
+function getTodayInputValue() {
+  const now = new Date();
+  const offsetMs = now.getTimezoneOffset() * 60 * 1000;
+  return new Date(now.getTime() - offsetMs).toISOString().slice(0, 10);
 }

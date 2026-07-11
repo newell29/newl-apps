@@ -63,22 +63,36 @@ type TeamshipReviewHistoryResponse = {
   runs: TeamshipReviewHistoryRun[];
   totalCount: number;
   search: string;
+  dateFrom: string;
+  dateTo: string;
+  allDates: boolean;
   error?: string;
 };
 
 let pdfJsLoader: Promise<PdfJsModule> | null = null;
 
 export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: boolean }) {
-  const [shipmentDate, setShipmentDate] = useState(getTodayInputValue());
-  const [documentLabel, setDocumentLabel] = useState(formatDateLabel(getTodayInputValue()));
+  const todayInputValue = getTodayInputValue();
+  const [shipmentDate, setShipmentDate] = useState(todayInputValue);
+  const [documentLabel, setDocumentLabel] = useState(formatDateLabel(todayInputValue));
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [orders, setOrders] = useState<GarlandPdfShippingOrder[]>([]);
   const [review, setReview] = useState<GarlandTeamshipReviewResponse | null>(null);
   const [dailyOrderCount, setDailyOrderCount] = useState<number | null>(null);
   const [dailySyncSummary, setDailySyncSummary] = useState<DailyOrdersResponse["sync"] | null>(null);
   const [alertDigest, setAlertDigest] = useState("");
-  const [history, setHistory] = useState<TeamshipReviewHistoryResponse>({ runs: [], totalCount: 0, search: "" });
+  const [history, setHistory] = useState<TeamshipReviewHistoryResponse>({
+    runs: [],
+    totalCount: 0,
+    search: "",
+    dateFrom: todayInputValue,
+    dateTo: todayInputValue,
+    allDates: false
+  });
   const [historySearch, setHistorySearch] = useState("");
+  const [historyDateFrom, setHistoryDateFrom] = useState(todayInputValue);
+  const [historyDateTo, setHistoryDateTo] = useState(todayInputValue);
+  const [historyAllDates, setHistoryAllDates] = useState(false);
   const [status, setStatus] = useState("Upload the Garland daily shipping-order PDF to begin.");
   const [error, setError] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -88,7 +102,8 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
 
   useEffect(() => {
-    void fetchHistory("");
+    const today = getTodayInputValue();
+    void fetchHistory("", today, today, false);
   }, []);
 
   const extractedSummary = useMemo(() => {
@@ -262,6 +277,9 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
 
       setHistory(json);
       setHistorySearch(json.search);
+      setHistoryDateFrom(json.dateFrom);
+      setHistoryDateTo(json.dateTo);
+      setHistoryAllDates(json.allDates);
       setSaveStatus("Teamship review run saved to history.");
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Unable to save Teamship review run.";
@@ -272,13 +290,29 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     }
   }
 
-  async function fetchHistory(search: string) {
+  async function fetchHistory(search: string, dateFrom: string, dateTo: string, allDates: boolean) {
     setHistoryError(null);
     setIsHistoryLoading(true);
 
     try {
-      const params = search.trim() ? `?search=${encodeURIComponent(search.trim())}` : "";
-      const response = await fetch(`/api/shipment-documents/teamship-review/runs${params}`);
+      const params = new URLSearchParams();
+      if (search.trim()) {
+        params.set("search", search.trim());
+      }
+
+      if (allDates) {
+        params.set("allDates", "true");
+      } else {
+        if (dateFrom) {
+          params.set("dateFrom", dateFrom);
+        }
+        if (dateTo) {
+          params.set("dateTo", dateTo);
+        }
+      }
+
+      const query = params.toString() ? `?${params.toString()}` : "";
+      const response = await fetch(`/api/shipment-documents/teamship-review/runs${query}`);
       const json = (await response.json().catch(() => null)) as TeamshipReviewHistoryResponse | null;
 
       if (!response.ok || !json || isErrorResponse(json)) {
@@ -287,6 +321,9 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
 
       setHistory(json);
       setHistorySearch(json.search);
+      setHistoryDateFrom(json.dateFrom);
+      setHistoryDateTo(json.dateTo);
+      setHistoryAllDates(json.allDates);
     } catch (caught) {
       setHistoryError(caught instanceof Error ? caught.message : "Unable to load Teamship review history.");
     } finally {
@@ -306,14 +343,13 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       const response = await fetch(`/api/shipment-documents/teamship-review/runs/${runId}`, {
         method: "DELETE"
       });
-      const json = (await response.json().catch(() => null)) as TeamshipReviewHistoryResponse | null;
+      const json = (await response.json().catch(() => null)) as { error?: string } | null;
 
       if (!response.ok || !json || isErrorResponse(json)) {
         throw new Error(isErrorResponse(json) ? json.error : "Unable to delete Teamship review run.");
       }
 
-      setHistory(json);
-      setHistorySearch(json.search);
+      await fetchHistory(historySearch, historyDateFrom, historyDateTo, historyAllDates);
     } catch (caught) {
       setHistoryError(caught instanceof Error ? caught.message : "Unable to delete Teamship review run.");
     } finally {
@@ -451,11 +487,35 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       <TeamshipReviewHistorySection
         history={history}
         historySearch={historySearch}
+        historyDateFrom={historyDateFrom}
+        historyDateTo={historyDateTo}
+        historyAllDates={historyAllDates}
         historyError={historyError}
         isHistoryLoading={isHistoryLoading}
         canDeleteRuns={canDeleteRuns}
         onSearchChange={setHistorySearch}
-        onSearch={() => void fetchHistory(historySearch)}
+        onDateFromChange={(value) => {
+          setHistoryDateFrom(value);
+          setHistoryAllDates(false);
+        }}
+        onDateToChange={(value) => {
+          setHistoryDateTo(value);
+          setHistoryAllDates(false);
+        }}
+        onAllDates={() => {
+          setHistoryAllDates(true);
+          setHistoryDateFrom("");
+          setHistoryDateTo("");
+          void fetchHistory(historySearch, "", "", true);
+        }}
+        onToday={() => {
+          const today = getTodayInputValue();
+          setHistoryAllDates(false);
+          setHistoryDateFrom(today);
+          setHistoryDateTo(today);
+          void fetchHistory(historySearch, today, today, false);
+        }}
+        onSearch={() => void fetchHistory(historySearch, historyDateFrom, historyDateTo, historyAllDates)}
         onDelete={(runId) => void deleteRun(runId)}
       />
     </div>
@@ -612,19 +672,33 @@ function ReviewResultsTable({
 function TeamshipReviewHistorySection({
   history,
   historySearch,
+  historyDateFrom,
+  historyDateTo,
+  historyAllDates,
   historyError,
   isHistoryLoading,
   canDeleteRuns,
   onSearchChange,
+  onDateFromChange,
+  onDateToChange,
+  onAllDates,
+  onToday,
   onSearch,
   onDelete
 }: {
   history: TeamshipReviewHistoryResponse;
   historySearch: string;
+  historyDateFrom: string;
+  historyDateTo: string;
+  historyAllDates: boolean;
   historyError: string | null;
   isHistoryLoading: boolean;
   canDeleteRuns: boolean;
   onSearchChange: (value: string) => void;
+  onDateFromChange: (value: string) => void;
+  onDateToChange: (value: string) => void;
+  onAllDates: () => void;
+  onToday: () => void;
   onSearch: () => void;
   onDelete: (runId: string) => void;
 }) {
@@ -634,7 +708,13 @@ function TeamshipReviewHistorySection({
         <div>
           <h2 className="text-base font-semibold text-foreground">Saved Teamship review history</h2>
           <p className="mt-1 text-sm text-mutedForeground">
-            Search by date label, source file, PS/SR number, Teamship order, recipient, carrier, or review status.
+            Search by date label, source file, PS/SR number, Teamship order, recipient, carrier, city, PO, item, serial,
+            alert text, or review status.
+          </p>
+          <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+            {history.allDates
+              ? "Viewing all dates"
+              : `Viewing shipment dates ${history.dateFrom} to ${history.dateTo}`}
           </p>
         </div>
         <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary">
@@ -643,7 +723,7 @@ function TeamshipReviewHistorySection({
       </div>
 
       <div className="border-b border-border p-5">
-        <div className="flex flex-col gap-3 md:flex-row">
+        <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr),180px,180px,auto]">
           <input
             value={historySearch}
             onChange={(event) => onSearchChange(event.target.value)}
@@ -655,6 +735,26 @@ function TeamshipReviewHistorySection({
             placeholder="Search date, source file, PS, SR, Teamship order, or status"
             className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
           />
+          <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+            From
+            <input
+              type="date"
+              value={historyDateFrom}
+              onChange={(event) => onDateFromChange(event.target.value)}
+              disabled={historyAllDates}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-normal normal-case tracking-normal text-foreground disabled:opacity-60"
+            />
+          </label>
+          <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+            To
+            <input
+              type="date"
+              value={historyDateTo}
+              onChange={(event) => onDateToChange(event.target.value)}
+              disabled={historyAllDates}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-normal normal-case tracking-normal text-foreground disabled:opacity-60"
+            />
+          </label>
           <button
             type="button"
             onClick={onSearch}
@@ -662,6 +762,24 @@ function TeamshipReviewHistorySection({
             className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isHistoryLoading ? "Searching..." : "Search history"}
+          </button>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onToday}
+            disabled={isHistoryLoading}
+            className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Today
+          </button>
+          <button
+            type="button"
+            onClick={onAllDates}
+            disabled={isHistoryLoading}
+            className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            All dates
           </button>
         </div>
 

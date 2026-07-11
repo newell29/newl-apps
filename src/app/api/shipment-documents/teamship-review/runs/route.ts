@@ -26,7 +26,10 @@ export async function GET(request: Request) {
     await requireModule(context, ModuleKey.SHIPMENT_DOCUMENTS);
     const { searchParams } = new URL(request.url);
     const history = await getTeamshipReviewHistory(context, {
-      search: searchParams.get("search") ?? ""
+      search: searchParams.get("search") ?? "",
+      dateFrom: searchParams.get("dateFrom"),
+      dateTo: searchParams.get("dateTo"),
+      allDates: searchParams.get("allDates") === "true"
     });
 
     return NextResponse.json(history);
@@ -51,7 +54,8 @@ export async function POST(request: Request) {
     }
 
     const documentLabel = readRequiredString(body.documentLabel, "documentLabel");
-    const shipmentDate = parseShipmentDate(readRequiredString(body.shipmentDate, "shipmentDate"));
+    const shipmentDateInput = readRequiredString(body.shipmentDate, "shipmentDate");
+    const shipmentDate = parseShipmentDate(shipmentDateInput);
     const sourcePdfFileName = readOptionalString(body.sourcePdfFileName);
     const review = readReviewResponse(body.review);
     const alertDigest = readOptionalString(body.alertDigest) ?? "";
@@ -65,7 +69,10 @@ export async function POST(request: Request) {
       alertDigestOrderCount: parseTeamshipAlertDigest(alertDigest).length
     });
 
-    const history = await getTeamshipReviewHistory(context);
+    const history = await getTeamshipReviewHistory(context, {
+      dateFrom: shipmentDateInput,
+      dateTo: shipmentDateInput
+    });
     return NextResponse.json(history, { status: 201 });
   } catch (error) {
     console.error(error);
