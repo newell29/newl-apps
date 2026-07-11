@@ -3,7 +3,7 @@
 import type { PDFPageProxy } from "pdfjs-dist/types/src/display/api";
 import { useMemo, useState } from "react";
 
-import { parseGarlandShippingOrderPages } from "@/modules/shipment-documents/teamship-review";
+import { parseGarlandShippingOrderPages, parseTeamshipAlertDigest } from "@/modules/shipment-documents/teamship-review";
 import type {
   GarlandPdfShippingOrder,
   GarlandTeamshipReviewResponse,
@@ -28,6 +28,7 @@ export function GarlandTeamshipReviewClient() {
   const [dailyOrderCount, setDailyOrderCount] = useState<number | null>(null);
   const [teamshipEmail, setTeamshipEmail] = useState("");
   const [teamshipPassword, setTeamshipPassword] = useState("");
+  const [alertDigest, setAlertDigest] = useState("");
   const [status, setStatus] = useState("Upload the Garland daily shipping-order PDF to begin.");
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -41,6 +42,8 @@ export function GarlandTeamshipReviewClient() {
       .map((order) => order.srNumber)
       .join(", ")}`;
   }, [orders]);
+
+  const parsedAlertCount = useMemo(() => parseTeamshipAlertDigest(alertDigest).length, [alertDigest]);
 
   async function handlePdfSelection(file: File | null) {
     setPdfFile(file);
@@ -100,6 +103,7 @@ export function GarlandTeamshipReviewClient() {
         body: JSON.stringify({
           shipmentDate,
           orders: extractedOrders,
+          alertDigest,
           teamshipCredentials: getOneTimeCredentials(teamshipEmail, teamshipPassword)
         })
       });
@@ -115,7 +119,7 @@ export function GarlandTeamshipReviewClient() {
 
       setReview(json);
       setStatus(
-        `Review complete: ${json.summary.passedCount} green, ${json.summary.failedCount} with discrepancies, ${json.summary.missingTeamshipCount} missing in Teamship.`
+        `Review complete: ${json.summary.passedCount} green, ${json.summary.pendingTeamshipCount} pending Teamship creation, ${json.summary.failedCount} with discrepancies, ${json.summary.missingTeamshipCount} missing without an alert.`
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to run the Teamship review.");
@@ -244,6 +248,31 @@ export function GarlandTeamshipReviewClient() {
         </div>
       </section>
 
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="grid gap-4 xl:grid-cols-[0.9fr,1.1fr]">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Teamship alert digest</h2>
+            <p className="mt-1 text-sm leading-6 text-mutedForeground">
+              Optional: paste the hourly Teamship Alert Digest here. If a Garland PDF order is not in Teamship yet but
+              appears in the digest, it will show amber as pending creation instead of red as an unexplained missing
+              order.
+            </p>
+            <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+              {parsedAlertCount} alert order{parsedAlertCount === 1 ? "" : "s"} detected
+            </p>
+          </div>
+          <label className="space-y-2 text-sm font-semibold text-foreground">
+            Paste alert email text
+            <textarea
+              value={alertDigest}
+              onChange={(event) => setAlertDigest(event.target.value)}
+              placeholder="Teamship Alert Digest&#10;&#10;Shipping Orders — Out of Stock (4)&#10;&#10;Order SR811861..."
+              className="min-h-44 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            />
+          </label>
+        </div>
+      </section>
+
       <section className="grid gap-4 lg:grid-cols-3">
         <SummaryCard label="PDF extraction" value={String(orders.length)} detail={extractedSummary} />
         <SummaryCard
@@ -256,7 +285,7 @@ export function GarlandTeamshipReviewClient() {
           value={review ? `${review.summary.passedCount}/${review.summary.pdfOrderCount} green` : "Not run"}
           detail={
             review
-              ? `${review.summary.failedCount} discrepancy, ${review.summary.missingTeamshipCount} missing Teamship order(s).`
+              ? `${review.summary.pendingTeamshipCount} pending, ${review.summary.failedCount} discrepancy, ${review.summary.missingTeamshipCount} missing without alert.`
               : "Run the review after uploading the Garland PDF."
           }
         />
@@ -328,7 +357,8 @@ function ReviewResultsTable({ review }: { review: GarlandTeamshipReviewResponse 
       <div className="border-b border-border p-5">
         <h2 className="text-base font-semibold text-foreground">Teamship review results</h2>
         <p className="mt-1 text-sm text-mutedForeground">
-          Green orders have no detected discrepancies. Red orders need CSR review before Stage 2 automation updates them.
+          Green orders have no detected discrepancies. Amber orders are known Teamship alert items that have not been
+          pushed into Teamship yet. Red orders need CSR review before Stage 2 automation updates them.
         </p>
       </div>
       <div className="divide-y divide-border">
@@ -355,7 +385,9 @@ function ReviewResultsTable({ review }: { review: GarlandTeamshipReviewResponse 
                   ? "Green"
                   : orderReview.status === "MISSING_TEAMSHIP"
                     ? "Missing Teamship"
-                    : `${orderReview.issueCount} issue${orderReview.issueCount === 1 ? "" : "s"}`}
+                    : orderReview.status === "PENDING_TEAMSHIP"
+                      ? "Pending Teamship"
+                      : `${orderReview.issueCount} issue${orderReview.issueCount === 1 ? "" : "s"}`}
               </span>
             </summary>
             <div className="overflow-x-auto px-5 pb-5">
@@ -402,11 +434,23 @@ function statusPillClass(status: string) {
     return `${base} bg-muted text-mutedForeground`;
   }
 
+  if (status === "PENDING") {
+    return `${base} bg-warning/15 text-warning`;
+  }
+
   return `${base} bg-danger/10 text-danger`;
 }
 
 function formatFieldStatus(status: string) {
-  return status === "MATCH" ? "Match" : status === "INFO" ? "Info" : status === "MISSING" ? "Missing" : "Issue";
+  return status === "MATCH"
+    ? "Match"
+    : status === "INFO"
+      ? "Info"
+      : status === "MISSING"
+        ? "Missing"
+        : status === "PENDING"
+          ? "Pending"
+          : "Issue";
 }
 
 function isErrorResponse(value: unknown): value is { error: string } {
