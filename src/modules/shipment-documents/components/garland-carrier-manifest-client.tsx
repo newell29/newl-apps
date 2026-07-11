@@ -33,10 +33,16 @@ const TARGET_CARRIERS: Array<{ key: GarlandCarrierKey; label: string }> = [
   { key: "SPEEDY", label: "Speedy" },
   { key: "SURETRACK", label: "Suretrack" }
 ];
-const EXTRACTION_BATCH_SIZE = 2;
+const EXTRACTION_BATCH_SIZE = 1;
 const MANIFEST_CROP_IMAGE_WIDTH = 1800;
-const MANIFEST_CROP_IMAGE_JPEG_QUALITY = 0.82;
-const MANIFEST_PAGE_CROP = { x: 0, y: 0, width: 1, height: 0.7 };
+const MANIFEST_CROP_IMAGE_JPEG_QUALITY = 0.88;
+const MANIFEST_CROP_BOXES = [
+  { label: "Header overview", x: 0, y: 0, width: 1, height: 0.18 },
+  { label: "Carrier box", x: 0.02, y: 0.105, width: 0.42, height: 0.085 },
+  { label: "References and shipment id", x: 0.6, y: 0.065, width: 0.38, height: 0.13 },
+  { label: "Consignee city/province", x: 0.48, y: 0.23, width: 0.48, height: 0.13 },
+  { label: "Total pallets", x: 0.02, y: 0.58, width: 0.33, height: 0.08 }
+];
 
 let pdfJsLoader: Promise<PdfJsModule> | null = null;
 
@@ -704,36 +710,63 @@ async function renderManifestPageImage(page: PDFPageProxy) {
   canvas.height = Math.ceil(viewport.height);
   await page.render({ canvas, canvasContext: context, viewport }).promise;
 
-  const cropCanvas = document.createElement("canvas");
-  const cropContext = cropCanvas.getContext("2d");
+  const sheetPadding = 24;
+  const labelHeight = 36;
+  const cropGap = 20;
+  const cropTargetWidth = MANIFEST_CROP_IMAGE_WIDTH - sheetPadding * 2;
+  const renderedCrops = MANIFEST_CROP_BOXES.map((cropBox) => {
+    const sourceWidth = Math.max(1, Math.floor(canvas.width * cropBox.width));
+    const sourceHeight = Math.max(1, Math.floor(canvas.height * cropBox.height));
 
-  if (!cropContext) {
+    return {
+      ...cropBox,
+      sourceX: Math.floor(canvas.width * cropBox.x),
+      sourceY: Math.floor(canvas.height * cropBox.y),
+      sourceWidth,
+      sourceHeight,
+      targetHeight: Math.max(90, Math.round((sourceHeight / sourceWidth) * cropTargetWidth))
+    };
+  });
+  const sheetCanvas = document.createElement("canvas");
+  sheetCanvas.width = MANIFEST_CROP_IMAGE_WIDTH;
+  sheetCanvas.height =
+    sheetPadding * 2 +
+    renderedCrops.reduce((total, crop) => total + labelHeight + crop.targetHeight + cropGap, -cropGap);
+  const sheetContext = sheetCanvas.getContext("2d");
+
+  if (!sheetContext) {
     throw new Error("Unable to create a crop canvas for carrier manifest extraction.");
   }
 
-  const sourceX = Math.floor(canvas.width * MANIFEST_PAGE_CROP.x);
-  const sourceY = Math.floor(canvas.height * MANIFEST_PAGE_CROP.y);
-  const sourceWidth = Math.max(1, Math.floor(canvas.width * MANIFEST_PAGE_CROP.width));
-  const sourceHeight = Math.max(1, Math.floor(canvas.height * MANIFEST_PAGE_CROP.height));
-  const scale = Math.min(1, MANIFEST_CROP_IMAGE_WIDTH / sourceWidth);
+  sheetContext.fillStyle = "#ffffff";
+  sheetContext.fillRect(0, 0, sheetCanvas.width, sheetCanvas.height);
+  sheetContext.font = "700 24px Arial, sans-serif";
+  sheetContext.textBaseline = "top";
 
-  cropCanvas.width = Math.max(1, Math.floor(sourceWidth * scale));
-  cropCanvas.height = Math.max(1, Math.floor(sourceHeight * scale));
-  cropContext.fillStyle = "#ffffff";
-  cropContext.fillRect(0, 0, cropCanvas.width, cropCanvas.height);
-  cropContext.drawImage(
-    canvas,
-    sourceX,
-    sourceY,
-    sourceWidth,
-    sourceHeight,
-    0,
-    0,
-    cropCanvas.width,
-    cropCanvas.height
-  );
+  let yPosition = sheetPadding;
 
-  return cropCanvas.toDataURL("image/jpeg", MANIFEST_CROP_IMAGE_JPEG_QUALITY);
+  for (const crop of renderedCrops) {
+    sheetContext.fillStyle = "#111827";
+    sheetContext.fillText(crop.label, sheetPadding, yPosition);
+    yPosition += labelHeight;
+    sheetContext.drawImage(
+      canvas,
+      crop.sourceX,
+      crop.sourceY,
+      crop.sourceWidth,
+      crop.sourceHeight,
+      sheetPadding,
+      yPosition,
+      cropTargetWidth,
+      crop.targetHeight
+    );
+    sheetContext.strokeStyle = "#ef4444";
+    sheetContext.lineWidth = 3;
+    sheetContext.strokeRect(sheetPadding, yPosition, cropTargetWidth, crop.targetHeight);
+    yPosition += crop.targetHeight + cropGap;
+  }
+
+  return sheetCanvas.toDataURL("image/jpeg", MANIFEST_CROP_IMAGE_JPEG_QUALITY);
 }
 
 function sortManifestRows(rows: GarlandCarrierManifestRow[]) {
