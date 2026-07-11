@@ -27,6 +27,21 @@ export type GarlandPdfShippingOrder = {
   rawText: string;
 };
 
+export type TeamshipAlertOrderItem = {
+  itemNumber: string | null;
+  description: string | null;
+  requestedQuantity: string | null;
+  serialNumber: string | null;
+  rawText: string;
+};
+
+export type TeamshipAlertOrder = {
+  srNumber: string;
+  reason: string;
+  items: TeamshipAlertOrderItem[];
+  rawText: string;
+};
+
 export type TeamshipCustomField = {
   label?: string | null;
   edi_key?: string | null;
@@ -123,7 +138,7 @@ export type TeamshipShippingOrderSummary = TeamshipShippingOrderDetail & {
   order_created_at_date?: string | null;
 };
 
-export type ReviewFieldStatus = "MATCH" | "DISCREPANCY" | "MISSING" | "INFO";
+export type ReviewFieldStatus = "MATCH" | "DISCREPANCY" | "MISSING" | "PENDING" | "INFO";
 
 export type GarlandTeamshipReviewField = {
   key: string;
@@ -138,10 +153,11 @@ export type GarlandTeamshipOrderReview = {
   srNumber: string;
   psNumber: string;
   pageNumbers: number[];
-  status: "PASS" | "FAIL" | "MISSING_TEAMSHIP";
+  status: "PASS" | "FAIL" | "MISSING_TEAMSHIP" | "PENDING_TEAMSHIP";
   teamshipOrderId: string | null;
   teamshipUrl: string | null;
   issueCount: number;
+  alert: TeamshipAlertOrder | null;
   fields: GarlandTeamshipReviewField[];
 };
 
@@ -151,11 +167,13 @@ export type GarlandTeamshipReviewSummary = {
   passedCount: number;
   failedCount: number;
   missingTeamshipCount: number;
+  pendingTeamshipCount: number;
 };
 
 export type GarlandTeamshipReviewResponse = {
   summary: GarlandTeamshipReviewSummary;
   pdfOrders: GarlandPdfShippingOrder[];
   reviews: GarlandTeamshipOrderReview[];
+  teamshipAlerts: TeamshipAlertOrder[];
   fetchedAt: string;
 };

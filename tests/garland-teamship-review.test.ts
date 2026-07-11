@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { buildGarlandTeamshipReview, parseGarlandShippingOrderPages } from "@/modules/shipment-documents/teamship-review";
+import {
+  buildGarlandTeamshipReview,
+  parseGarlandShippingOrderPages,
+  parseTeamshipAlertDigest
+} from "@/modules/shipment-documents/teamship-review";
 import type { TeamshipShippingOrderDetail } from "@/modules/shipment-documents/teamship-review-types";
 import { fetchTeamshipShippingOrdersForReview } from "@/server/integrations/teamship";
 
@@ -72,6 +76,29 @@ E1S 208/240/60/1-15 AMP
 NEWLS 2604816191908 1.00 (              )
 7/10/2026 2:18:18 PM1 / 1`;
 
+const alertDigest = `Teamship Alert Digest
+
+Shipping Orders — Out of Stock (4)
+
+**Order SR811689**
+
+Item Number\tDescription\tRequested Qty\tSerial Number
+**6051XL-S**\t**2 SECT SOLID DOOR REFG SPECIAL OPTIONS**\t**1**\t**2507820100242**
+**Order** **SR811861**
+
+Item Number\tDescription\tRequested Qty\tSerial Number
+C-CLEAN-FORTE\tC-CLEAN STRONG CLEANING STRENGTH (2) 10 LT CONT\t1\tN/A
+**TUBE KIT - MIXED**\t**(1) Red Tube Kit, (1) Green Tube Kit**\t**1**\t**N/A**
+C-CARE-P\tCONVOCARE (2) 10 LITER JUGS PRE MIXED - CCC202\t1\tN/A
+**Order SR812055**
+
+Item Number\tDescription\tRequested Qty\tSerial Number
+[**32Z4178**](https://app.teamshipos.com/view-product/46023)\t**NON-STICK COOKING LINER**\t**4**\t**N/A**
+32Z4175\tFULL SIZE COOKING TRAY BLACK\t1\tN/A
+CMC1032\tMERRYCHEF OVEN CLEANER 6 BOTTLES/CASE\t1\tN/A
+CMC1033\tMERRYCHEF OVEN PROTECTOR 6 BOTTLES/CASE\t1\tN/A
+**Order SR811494**`;
+
 describe("Garland Teamship review", () => {
   afterEach(() => {
     delete process.env.TEAMSHIP_EMAIL;
@@ -100,6 +127,51 @@ describe("Garland Teamship review", () => {
       pageNumbers: [5, 6]
     });
     expect(orders[0]?.items.map((item) => item.sku)).toEqual(["C-CARE-P", "C-CLEAN-FORTE", "TUBE KIT - MIXED"]);
+  });
+
+  it("parses Teamship alert digest orders and item details", () => {
+    const alerts = parseTeamshipAlertDigest(alertDigest);
+
+    expect(alerts.map((alert) => alert.srNumber)).toEqual(["SR811689", "SR811861", "SR812055", "SR811494"]);
+    expect(alerts[1]).toMatchObject({
+      srNumber: "SR811861",
+      reason: "Out of Stock",
+      items: [
+        { itemNumber: "C-CLEAN-FORTE", requestedQuantity: "1", serialNumber: "N/A" },
+        { itemNumber: "TUBE KIT - MIXED", requestedQuantity: "1", serialNumber: "N/A" },
+        { itemNumber: "C-CARE-P", requestedQuantity: "1", serialNumber: "N/A" }
+      ]
+    });
+    expect(alerts[2]?.items[0]).toMatchObject({
+      itemNumber: "32Z4178",
+      description: "NON-STICK COOKING LINER",
+      requestedQuantity: "4",
+      serialNumber: "N/A"
+    });
+    expect(alerts[3]).toMatchObject({ srNumber: "SR811494", items: [] });
+  });
+
+  it("marks missing Teamship orders amber when they are in the alert digest", () => {
+    const [pdfOrder] = parseGarlandShippingOrderPages([{ pageNumber: 5, text: pageFive }]);
+    const review = buildGarlandTeamshipReview([pdfOrder!], [], parseTeamshipAlertDigest(alertDigest));
+
+    expect(review.summary).toMatchObject({
+      pdfOrderCount: 1,
+      teamshipMatchedCount: 0,
+      passedCount: 0,
+      failedCount: 0,
+      missingTeamshipCount: 0,
+      pendingTeamshipCount: 1
+    });
+    expect(review.reviews[0]).toMatchObject({
+      status: "PENDING_TEAMSHIP",
+      issueCount: 0,
+      alert: { srNumber: "SR811861", reason: "Out of Stock" }
+    });
+    expect(review.reviews[0]?.fields[0]).toMatchObject({
+      status: "PENDING",
+      label: "Teamship alert"
+    });
   });
 
   it("extracts ship-to details when PDF.js places Pre-Shipper after the name", () => {

@@ -29,6 +29,8 @@ Expected PDF-only result:
 - PS210210 / SR811861 is one order with `pageNumbers: [5, 6]`.
 - All other orders are single-page orders.
 
+If the hourly Teamship Alert Digest says a PDF order was not pushed into Teamship, paste the digest into the Teamship Review page before running the review. The app parses order lines such as `Order SR811861` and marks those missing Teamship orders amber as pending Teamship creation, not red as unexplained missing orders.
+
 Focused tests:
 
 ```bash
@@ -99,13 +101,38 @@ The authenticated Teamship UI confirmed these current detail-page order IDs for 
 | 30209 | SR810154 | PS210216 | SURETRACK STANDARD, PO PO374982, VANCOUVER AIRPORT HILTON, RICHMOND BC, commodities |
 | 30210 | SR809212 | PS210217 | SURETRACK STANDARD, PO 200242, GEANEL RESTAURANT SUPPLIES L, SASKATOON SK, commodity SKU/SN |
 
-Current unresolved sample orders:
+Current alert-backed sample orders:
 
 - SR811861 / PS210210
 - SR812055 / PS210214
 - SR811494 / PS210215
 
-Those three were present in the PDF sample but were not confirmed in the current Teamship UI detail evidence. Treat them as missing/unverified until a search or API response proves otherwise.
+Those three were present in the PDF sample but were not confirmed in the current Teamship UI detail evidence because they were listed in the hourly Teamship Alert Digest as not pushed into Teamship yet. Treat them as amber pending Teamship creation when the digest is pasted into Newl Apps. Once stock/issues are fixed and Teamship creates the orders, they should move from amber to the normal green/red comparison path.
+
+## Alert Digest Handling
+
+Teamship can send hourly alert emails for Garland shipping orders that were not created in Teamship yet. Example subject/body pattern:
+
+```text
+Teamship Alert Digest
+
+Shipping Orders — Out of Stock (4)
+
+Order SR811861
+
+Item Number    Description    Requested Qty    Serial Number
+C-CLEAN-FORTE  C-CLEAN STRONG CLEANING STRENGTH (2) 10 LT CONT  1  N/A
+TUBE KIT - MIXED  (1) Red Tube Kit, (1) Green Tube Kit  1  N/A
+C-CARE-P  CONVOCARE (2) 10 LITER JUGS PRE MIXED - CCC202  1  N/A
+```
+
+Newl Apps should handle these cases this way:
+
+- If the PDF contains the SR and Teamship contains the SR, compare fields normally.
+- If the PDF contains the SR, Teamship does not contain the SR, and the alert digest contains the SR, mark the order amber `Pending Teamship`.
+- If the PDF contains the SR, Teamship does not contain the SR, and no alert digest contains the SR, mark the order red `Missing Teamship`.
+- The amber state is not a data discrepancy. It means the CSR should wait for Teamship to create the order after the stock/order issue is fixed.
+- When a later Teamship pull finds the order, the same PDF/SR should leave the amber path and be compared normally.
 
 ## Teamship Grid Notes
 

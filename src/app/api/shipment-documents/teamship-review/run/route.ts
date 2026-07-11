@@ -1,7 +1,7 @@
 import { ModuleKey } from "@prisma/client";
 import { NextResponse } from "next/server";
 
-import { buildGarlandTeamshipReview } from "@/modules/shipment-documents/teamship-review";
+import { buildGarlandTeamshipReview, parseTeamshipAlertDigest } from "@/modules/shipment-documents/teamship-review";
 import type { GarlandPdfShippingOrder } from "@/modules/shipment-documents/teamship-review-types";
 import { requireModule } from "@/server/auth/authorization";
 import {
@@ -13,6 +13,7 @@ import { getAuthenticatedContext } from "@/server/tenant-context";
 type ReviewRequest = {
   shipmentDate?: string;
   orders?: GarlandPdfShippingOrder[];
+  alertDigest?: string;
   teamshipCredentials?: {
     email?: string;
     password?: string;
@@ -27,6 +28,7 @@ export async function POST(request: Request) {
 
   const body = (await request.json().catch(() => null)) as ReviewRequest | null;
   const orders = Array.isArray(body?.orders) ? body.orders.filter(isGarlandPdfOrder) : [];
+  const teamshipAlerts = parseTeamshipAlertDigest(typeof body?.alertDigest === "string" ? body.alertDigest : "");
 
   if (orders.length === 0) {
     return NextResponse.json({ error: "Upload and extract at least one Garland PDF shipping order." }, { status: 400 });
@@ -52,7 +54,7 @@ export async function POST(request: Request) {
       credentials: runtimeCredentials
     });
 
-    return NextResponse.json(buildGarlandTeamshipReview(orders, teamshipOrders));
+    return NextResponse.json(buildGarlandTeamshipReview(orders, teamshipOrders, teamshipAlerts));
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to run the Teamship review." },

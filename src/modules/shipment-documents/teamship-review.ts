@@ -6,6 +6,8 @@ import type {
   GarlandTeamshipReviewResponse,
   GarlandTeamshipReviewSummary,
   ReviewFieldStatus,
+  TeamshipAlertOrder,
+  TeamshipAlertOrderItem,
   TeamshipCustomField,
   TeamshipShippingOrderDetail
 } from "@/modules/shipment-documents/teamship-review-types";
@@ -17,6 +19,59 @@ type TextPage = {
 
 const PS_PATTERN = /\bPS\d{6}\b/i;
 const SR_PATTERN = /\bSR\d{5,8}\b/i;
+
+export function parseTeamshipAlertDigest(text: string): TeamshipAlertOrder[] {
+  const lines = text
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const alerts: TeamshipAlertOrder[] = [];
+  let reason = "Teamship alert";
+  let current: { srNumber: string; rawLines: string[] } | null = null;
+
+  const pushCurrent = () => {
+    if (!current) {
+      return;
+    }
+
+    const itemLines = current.rawLines.filter((line) => !/^Item Number\s+Description\s+Requested Qty\s+Serial Number$/i.test(line));
+    alerts.push({
+      srNumber: current.srNumber,
+      reason,
+      items: itemLines.map(parseAlertItemLine),
+      rawText: current.rawLines.join("\n").trim()
+    });
+    current = null;
+  };
+
+  for (const line of lines) {
+    const cleanLine = cleanDigestLine(line);
+    const reasonMatch = cleanLine.match(/^Shipping Orders\s+[—-]\s+(.+?)(?:\s*\(\d+\))?$/i);
+
+    if (reasonMatch?.[1]) {
+      pushCurrent();
+      reason = reasonMatch[1].trim();
+      continue;
+    }
+
+    const orderMatch = cleanLine.match(/\bOrder\s+(SR\d{5,8})\b/i);
+
+    if (orderMatch?.[1]) {
+      pushCurrent();
+      current = { srNumber: orderMatch[1].toUpperCase(), rawLines: [] };
+      continue;
+    }
+
+    if (current) {
+      current.rawLines.push(cleanLine);
+    }
+  }
+
+  pushCurrent();
+
+  return dedupeAlerts(alerts);
+}
 
 export function parseGarlandShippingOrderPages(pages: TextPage[]): GarlandPdfShippingOrder[] {
   const orders: GarlandPdfShippingOrder[] = [];
@@ -274,8 +329,12 @@ function mergeText(left: string, right: string) {
 
 export function buildGarlandTeamshipReview(
   pdfOrders: GarlandPdfShippingOrder[],
-  teamshipOrders: TeamshipShippingOrderDetail[]
+  teamshipOrders: TeamshipShippingOrderDetail[],
+  teamshipAlerts: TeamshipAlertOrder[] = []
 ): GarlandTeamshipReviewResponse {
+  const alertByShipmentId = new Map(
+    teamshipAlerts.map((alert) => [normalizeIdentifier(alert.srNumber), alert] as const).filter(([shipmentId]) => shipmentId.length > 0)
+  );
   const teamshipByShipmentId = new Map(
     teamshipOrders
       .map((order) => [normalizeIdentifier(readTeamshipShipmentId(order)), order] as const)
@@ -283,22 +342,48 @@ export function buildGarlandTeamshipReview(
   );
   const reviews = pdfOrders.map((pdfOrder) => {
     const teamshipOrder = teamshipByShipmentId.get(normalizeIdentifier(pdfOrder.srNumber)) ?? null;
-    return buildOrderReview(pdfOrder, teamshipOrder);
+    const alert = alertByShipmentId.get(normalizeIdentifier(pdfOrder.srNumber)) ?? null;
+    return buildOrderReview(pdfOrder, teamshipOrder, alert);
   });
 
   return {
     summary: summarizeReviews(pdfOrders, reviews),
     pdfOrders,
     reviews,
+    teamshipAlerts,
     fetchedAt: new Date().toISOString()
   };
 }
 
 function buildOrderReview(
   pdfOrder: GarlandPdfShippingOrder,
-  teamshipOrder: TeamshipShippingOrderDetail | null
+  teamshipOrder: TeamshipShippingOrderDetail | null,
+  alert: TeamshipAlertOrder | null
 ): GarlandTeamshipOrderReview {
   if (!teamshipOrder) {
+    if (alert) {
+      return {
+        srNumber: pdfOrder.srNumber,
+        psNumber: pdfOrder.psNumber,
+        pageNumbers: pdfOrder.pageNumbers,
+        status: "PENDING_TEAMSHIP",
+        teamshipOrderId: null,
+        teamshipUrl: null,
+        issueCount: 0,
+        alert,
+        fields: [
+          {
+            key: "teamshipAlert",
+            label: "Teamship alert",
+            status: "PENDING",
+            pdfValue: pdfOrder.srNumber,
+            teamshipValue: alert.reason,
+            message: buildAlertMessage(alert)
+          }
+        ]
+      };
+    }
+
     return {
       srNumber: pdfOrder.srNumber,
       psNumber: pdfOrder.psNumber,
@@ -307,6 +392,7 @@ function buildOrderReview(
       teamshipOrderId: null,
       teamshipUrl: null,
       issueCount: 1,
+      alert: null,
       fields: [
         {
           key: "teamshipOrder",
@@ -346,6 +432,7 @@ function buildOrderReview(
     teamshipOrderId: String(teamshipOrder.id ?? teamshipOrder.order_id ?? ""),
     teamshipUrl: teamshipOrder.url ?? null,
     issueCount,
+    alert,
     fields
   };
 }
@@ -575,11 +662,65 @@ function summarizeReviews(
 ): GarlandTeamshipReviewSummary {
   return {
     pdfOrderCount: pdfOrders.length,
-    teamshipMatchedCount: reviews.filter((review) => review.status !== "MISSING_TEAMSHIP").length,
+    teamshipMatchedCount: reviews.filter((review) => review.status === "PASS" || review.status === "FAIL").length,
     passedCount: reviews.filter((review) => review.status === "PASS").length,
     failedCount: reviews.filter((review) => review.status === "FAIL").length,
-    missingTeamshipCount: reviews.filter((review) => review.status === "MISSING_TEAMSHIP").length
+    missingTeamshipCount: reviews.filter((review) => review.status === "MISSING_TEAMSHIP").length,
+    pendingTeamshipCount: reviews.filter((review) => review.status === "PENDING_TEAMSHIP").length
   };
+}
+
+function cleanDigestLine(line: string) {
+  return line
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/\*\*/g, "")
+    .replace(/[^\S\t]+/g, " ")
+    .trim();
+}
+
+function parseAlertItemLine(line: string): TeamshipAlertOrderItem {
+  const parts = line
+    .split(/\t+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length >= 4) {
+    return {
+      itemNumber: parts[0] ?? null,
+      description: parts.slice(1, -2).join(" ") || null,
+      requestedQuantity: parts.at(-2) ?? null,
+      serialNumber: parts.at(-1) ?? null,
+      rawText: line
+    };
+  }
+
+  return {
+    itemNumber: parts[0] ?? null,
+    description: parts.length > 1 ? parts.slice(1).join(" ") : null,
+    requestedQuantity: null,
+    serialNumber: null,
+    rawText: line
+  };
+}
+
+function dedupeAlerts(alerts: TeamshipAlertOrder[]) {
+  const bySr = new Map<string, TeamshipAlertOrder>();
+  for (const alert of alerts) {
+    bySr.set(normalizeIdentifier(alert.srNumber), alert);
+  }
+
+  return Array.from(bySr.values());
+}
+
+function buildAlertMessage(alert: TeamshipAlertOrder) {
+  const itemSummary = alert.items
+    .map((item) => [item.itemNumber, item.requestedQuantity ? `qty ${item.requestedQuantity}` : null].filter(Boolean).join(" "))
+    .filter(Boolean)
+    .join(", ");
+
+  return itemSummary
+    ? `Teamship alert says this order is pending Teamship creation because of ${alert.reason}: ${itemSummary}.`
+    : `Teamship alert says this order is pending Teamship creation because of ${alert.reason}.`;
 }
 
 function readTeamshipShipToName(order: TeamshipShippingOrderDetail) {
