@@ -450,6 +450,55 @@ NEWLS 2604816191908 1.00 ( )`
     );
   });
 
+  it("calls out Teamship orders with no uploaded PDF and skips already-reviewed PDF orders", () => {
+    const newPdfOrder = samplePdfOrder({
+      psNumber: "PS210300",
+      srNumber: "SR812300",
+      pageNumbers: [1],
+      shipVia: "MIDLAND",
+      shipToName: "NEW PDF CUSTOMER",
+      shipToPo: "PO-NEW",
+      freightTerms: "PPADD-CD",
+      itemSkus: ["SKU-NEW"],
+      serialNumbers: []
+    });
+    const alreadyReviewedPdfOrder = samplePdfOrder({
+      psNumber: "PS210301",
+      srNumber: "SR812301",
+      pageNumbers: [2],
+      shipVia: "SPEEDY",
+      shipToName: "ALREADY REVIEWED CUSTOMER",
+      shipToPo: "PO-OLD",
+      freightTerms: "PPADD-CD",
+      itemSkus: ["SKU-OLD"],
+      serialNumbers: []
+    });
+    const teamshipOrders: TeamshipShippingOrderDetail[] = [
+      sampleTeamshipOrder("SR812300", "PS210300", "MIDLAND", "NEW PDF CUSTOMER", "PO-NEW", "PPADD-CD", ["SKU: SKU-NEW"]),
+      sampleTeamshipOrder("SR812301", "PS210301", "SPEEDY", "ALREADY REVIEWED CUSTOMER", "PO-OLD", "PPADD-CD", ["SKU: SKU-OLD"]),
+      sampleTeamshipOrder("SR812302", "PS210302", "SURETRACK STANDARD", "NO PDF CUSTOMER", "PO-NO-PDF", "PPADD-CD", [
+        "SKU: SKU-NO-PDF"
+      ])
+    ];
+
+    const review = buildGarlandTeamshipReview([newPdfOrder], teamshipOrders, [], {
+      includeUnmatchedTeamshipOrders: true,
+      skippedAlreadyReviewedOrders: [alreadyReviewedPdfOrder]
+    });
+
+    expect(review.summary).toMatchObject({
+      pdfOrderCount: 1,
+      passedCount: 1,
+      noPdfCount: 1,
+      skippedAlreadyReviewedCount: 1
+    });
+    expect(review.reviews.map((order) => [order.srNumber, order.status])).toEqual([
+      ["SR812300", "PASS"],
+      ["SR812302", "NO_PDF"],
+      ["SR812301", "SKIPPED_ALREADY_REVIEWED"]
+    ]);
+  });
+
   it("compares Teamship UI-style field names and commodity SKU values", () => {
     const [pdfOrder] = parseGarlandShippingOrderPages([{ pageNumber: 1, text: pageOne }]);
     const teamshipOrder: TeamshipShippingOrderDetail = {

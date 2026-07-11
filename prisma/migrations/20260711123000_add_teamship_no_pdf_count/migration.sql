@@ -1,0 +1,1 @@
+ALTER TABLE "TeamshipReviewRun" ADD COLUMN "noPdfCount" INTEGER NOT NULL DEFAULT 0;

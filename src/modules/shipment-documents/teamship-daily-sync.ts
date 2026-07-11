@@ -272,6 +272,36 @@ export async function syncTeamshipDailyOrderRange({
   };
 }
 
+export async function getTeamshipSyncedOrdersForReview({
+  tenantId,
+  shipmentDate
+}: {
+  tenantId: string;
+  shipmentDate: string;
+}): Promise<TeamshipShippingOrderDetail[]> {
+  const parsedShipmentDate = parseShipmentDate(shipmentDate);
+  const client = prisma as TeamshipDailySyncClient;
+  const syncedOrders = await client.teamshipSyncedOrder.findMany({
+    where: {
+      tenantId,
+      shipmentDate: parsedShipmentDate
+    },
+    select: {
+      syncKey: true,
+      srNumber: true,
+      teamshipOrderId: true,
+      teamshipUrl: true,
+      carrier: true,
+      shipToName: true,
+      city: true,
+      state: true,
+      rawOrder: true
+    }
+  });
+
+  return syncedOrders.map((order) => order.rawOrder).filter(isTeamshipShippingOrderDetail);
+}
+
 export async function runDueTeamshipDailySyncs(shipmentDate = getTodayInputValue()) {
   const enabledCredentials = await getTeamshipSyncEnabledCredentials();
   const results: TeamshipDailySyncResult[] = [];
@@ -425,6 +455,10 @@ function readFirstString(...values: Array<unknown>) {
   }
 
   return null;
+}
+
+function isTeamshipShippingOrderDetail(value: unknown): value is TeamshipShippingOrderDetail {
+  return Boolean(value && typeof value === "object");
 }
 
 function normalizeSyncKey(value: string | null) {

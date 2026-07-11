@@ -19,7 +19,7 @@ export default async function GarlandTeamshipReviewPage() {
       <PageHeader
         eyebrow="Garland Tools"
         title="Teamship order review"
-        description="Upload Garland's daily shipping-order PDF, pull matching Teamship WMS orders by SR/shipment ID, and highlight field-level discrepancies before CSR review."
+        description="Manually pull Garland Teamship orders, upload the daily Garland shipping-order PDF, and highlight field-level discrepancies before CSR review."
       />
 
       <GarlandToolTabs active="teamship-review" />
@@ -29,9 +29,10 @@ export default async function GarlandTeamshipReviewPage() {
           <div>
             <h2 className="text-base font-semibold text-foreground">Stage 1 workflow</h2>
             <p className="mt-1 text-sm leading-6 text-mutedForeground">
-              The app reads Garland PS/SR shipping orders from the uploaded PDF, fetches matching Teamship shipping
-              order details read-only, and marks each order green when the reviewed fields match or red when a CSR
-              should inspect a discrepancy.
+              First pull the Teamship orders for the shipment date range. Then upload Garland&apos;s PDF batch and run the
+              review. The app compares saved Teamship details against the PDF, skips SRs already saved for that shipment
+              date, marks successful checks green, discrepancies red, pending Teamship alert items amber, and Teamship
+              orders with no matching uploaded PDF as no-PDF review items.
             </p>
           </div>
           <div className="rounded-md border border-border bg-muted/30 p-4">
@@ -42,7 +43,8 @@ export default async function GarlandTeamshipReviewPage() {
                 : `Not configured. Add ${teamshipStatus.missing.join(" and ")} in Settings before live Teamship pulls can run.`}
             </p>
             <p className="mt-2 text-xs leading-5 text-mutedForeground">
-              The 15-minute daily-order sync route is scaffolded but intentionally not scheduled yet.
+              Scheduled cron is intentionally disabled for now; use the manual pull button until we decide whether to
+              upgrade Vercel or use an external scheduler.
             </p>
           </div>
         </div>

@@ -153,7 +153,7 @@ export type GarlandTeamshipOrderReview = {
   srNumber: string;
   psNumber: string;
   pageNumbers: number[];
-  status: "PASS" | "FAIL" | "MISSING_TEAMSHIP" | "PENDING_TEAMSHIP";
+  status: "PASS" | "FAIL" | "MISSING_TEAMSHIP" | "PENDING_TEAMSHIP" | "NO_PDF" | "SKIPPED_ALREADY_REVIEWED";
   teamshipOrderId: string | null;
   teamshipUrl: string | null;
   issueCount: number;
@@ -168,6 +168,8 @@ export type GarlandTeamshipReviewSummary = {
   failedCount: number;
   missingTeamshipCount: number;
   pendingTeamshipCount: number;
+  noPdfCount: number;
+  skippedAlreadyReviewedCount: number;
 };
 
 export type GarlandTeamshipReviewResponse = {

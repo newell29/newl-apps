@@ -51,10 +51,34 @@ Latest verification on 2026-07-11:
 
 ## Runtime Data Flow
 
-- Manual Teamship daily pull is available from the page and calls `/api/shipment-documents/teamship-review/daily-orders` for the selected date.
-- The manual daily pull returns the Garland Teamship order list/count for review visibility; it does not mutate Teamship or save a local cache yet.
-- The PDF review run uses the uploaded Garland PDF as the source of expected SRs, then calls Teamship read-only list/detail APIs to fetch matching shipping orders by SR/shipment ID.
-- The cron-ready GET route exists for the future 15-minute sync, requires `TEAMSHIP_DAILY_SYNC_SECRET`, and is intentionally not scheduled in the repo yet.
+- The intended production flow is manual-first for now: pull Teamship orders for the shipment date range, upload Garland's PDF batch, run the review, then save the review run to history.
+- Manual Teamship pull is available from the page and calls `/api/shipment-documents/teamship-review/daily-orders` with `shipmentDateFrom` and `shipmentDateTo`.
+- Manual pull saves new Teamship orders into Newl Apps' tenant-scoped `TeamshipSyncedOrder` cache and skips orders that already exist. It does not mutate Teamship.
+- The PDF review run uses the uploaded Garland PDF as the source of PDF-inspected SRs and compares against the saved Teamship cache for the selected shipment date when available.
+- If no saved Teamship orders exist for the selected date, the review route can still fall back to the read-only Teamship fetch by uploaded SR/shipment ID.
+- The 15-minute Vercel cron schedule is intentionally disabled for now because Hobby plans only allow daily cron. The protected GET route still exists for a future Vercel Pro upgrade or external scheduler.
+
+## Current CSR Workflow
+
+1. Open `/shipment-documents/teamship-review`.
+2. Set the Teamship manual sync `from` and `to` dates, then click `Pull missing Teamship orders`.
+3. Upload Garland's PDF batch for the shipment date.
+4. Optional: paste the hourly Teamship Alert Digest if any Garland orders are known to be out of stock or otherwise not pushed into Teamship yet.
+5. Click `Run Teamship review`.
+6. Review color-coded results:
+   - Green: PDF and Teamship reviewed fields match.
+   - Red: PDF order is missing from Teamship without an alert, or matched Teamship data has field discrepancies.
+   - Amber `Pending Teamship`: the PDF order is missing from Teamship but appears in the alert digest.
+   - Amber `No PDF`: Teamship has an order for the selected date but the uploaded PDF batch did not include that SR.
+   - Gray `Already reviewed`: the uploaded PDF contains an SR that already has a saved review run for that shipment date, so it was skipped instead of re-verified.
+7. Save the review run to history after CSR review.
+
+Reupload behavior:
+
+- If the same PDF batch is uploaded again for the same shipment date, SRs already saved in Teamship review history are skipped.
+- Only not-yet-reviewed uploaded SRs are reverified.
+- Teamship orders from the saved manual pull that are not present in the uploaded PDF and are not skipped reviewed SRs are called out as `No PDF`.
+- Admins can delete test/error runs from history; deletion is soft-delete and tenant-scoped.
 
 ## PDF Extraction Baseline
 
@@ -261,7 +285,7 @@ Newl Apps should handle these cases this way:
 - Production showed the Teamship Review page and Garland navigation correctly.
 - Production also showed `TEAMSHIP_PASSWORD` missing, so server-side live pulls need that Vercel environment variable before the page can run without one-time manual credentials.
 - The one-time credential fallback is only for manual testing and is not saved.
-- The cron-ready route exists, but the 15-minute schedule is intentionally not enabled yet.
+- The cron-ready route exists, but the 15-minute schedule is intentionally not enabled yet. Manual pull is the operating path until Vercel Pro or an external scheduler is chosen.
 
 ## Safe Testing Rules
 
