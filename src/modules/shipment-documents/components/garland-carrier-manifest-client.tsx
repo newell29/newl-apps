@@ -120,7 +120,7 @@ export function GarlandCarrierManifestClient({
         detectedRows.push(...(await extractManifestRows(images)));
       }
 
-      const sortedRows = sortManifestRows(detectedRows);
+      const sortedRows = sortManifestRows(mergeMultiPageBolRows(detectedRows));
 
       const nextWorkbooks = buildWorkbooksForRows(sortedRows, documentLabel, shipmentDate);
 
@@ -258,7 +258,7 @@ export function GarlandCarrierManifestClient({
           [field]: field === "skids" ? normalizeEditablePallets(value) : value
         };
       });
-      const sortedRows = sortManifestRows(nextRows);
+      const sortedRows = sortManifestRows(mergeMultiPageBolRows(nextRows));
 
       setWorkbooks((currentWorkbooks) => {
         currentWorkbooks.forEach((workbook) => URL.revokeObjectURL(workbook.downloadUrl));
@@ -756,6 +756,53 @@ function sortManifestRows(rows: GarlandCarrierManifestRow[]) {
     const carrierComparison = left.carrier.localeCompare(right.carrier);
     return carrierComparison !== 0 ? carrierComparison : left.pageNumber - right.pageNumber;
   });
+}
+
+function mergeMultiPageBolRows(rows: GarlandCarrierManifestRow[]) {
+  const mergedRows: GarlandCarrierManifestRow[] = [];
+
+  for (const row of rows) {
+    const existingRow = findMatchingBolRow(mergedRows, row);
+
+    if (!existingRow) {
+      mergedRows.push(row);
+      continue;
+    }
+
+    existingRow.srNumber = existingRow.srNumber || row.srNumber;
+    existingRow.psNumber = existingRow.psNumber || row.psNumber;
+    existingRow.cityProvince = existingRow.cityProvince || row.cityProvince;
+    existingRow.skids = existingRow.skids ?? row.skids;
+    existingRow.confidence = combineConfidence(existingRow.confidence, row.confidence);
+    existingRow.notes = [existingRow.notes, `Merged page ${row.pageNumber} as the same multi-page BOL.`]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  return mergedRows;
+}
+
+function findMatchingBolRow(rows: GarlandCarrierManifestRow[], candidate: GarlandCarrierManifestRow) {
+  return rows.find((row) => {
+    if (row.carrier !== candidate.carrier) {
+      return false;
+    }
+
+    if (row.psNumber && candidate.psNumber) {
+      return row.psNumber === candidate.psNumber;
+    }
+
+    if (row.srNumber && candidate.srNumber) {
+      return row.srNumber === candidate.srNumber;
+    }
+
+    return false;
+  });
+}
+
+function combineConfidence(left: GarlandCarrierManifestRow["confidence"], right: GarlandCarrierManifestRow["confidence"]) {
+  const rank = { LOW: 0, MEDIUM: 1, HIGH: 2 };
+  return rank[right] > rank[left] ? right : left;
 }
 
 function buildCarrierCounts(rows: GarlandCarrierManifestRow[]): Record<GarlandCarrierKey, number> {

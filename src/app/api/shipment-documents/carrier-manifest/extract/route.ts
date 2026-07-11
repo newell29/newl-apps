@@ -118,6 +118,7 @@ function buildPrompt(pageNumbers: number[]) {
     "Target carrier examples include SURETRACK STANDARD, SURETRAK, SURE TRACK, SPEEDY TRANSPORT, SPEEDY, MIDLAND TRANSPORT, and MIDLAND.",
     "Only return rows for carriers Midland, Speedy, or Suretrack/Sure Track/Suretrak. Ignore all other carriers.",
     "If the carrier is one of those targets, return a row. Spend extra effort reading the details before leaving anything blank.",
+    "Some BOLs can be multiple pages. Return a row only when the crop sheet shows a new BOL header with a target carrier. If the crop sheet is a continuation page with no target carrier/PS header, return no row for that page.",
     "For matching pages, extract these exact fields from the labeled crops:",
     "1. carrier from Carrier box.",
     "2. psNumber from References / PS box. It is the PS value before the first dash, for example PS209872 from PS209872-SR810664 - SR810664.",
