@@ -154,7 +154,7 @@ function buildPrompt(pageNumbers: number[]) {
   return [
     "Each attached image is a labeled crop sheet made from one scanned Garland BOL page.",
     `Page numbers: ${pageNumbers.join(", ")}.`,
-    "Every crop sheet is compact: Header overview is full-width, and Carrier box, References and shipment id, Consignee city/province, and Total pallets are separate red-bordered panels arranged in two columns.",
+    "Every crop sheet is compact: Header overview and Package totals and skid count are full-width panels, while Carrier box, References and shipment id, and Consignee city/province are separate red-bordered field panels.",
     "Read each labeled panel independently. Do not assume text is missing just because the full header overview is sparse.",
     "Return exactly one OCR entry per attached image. Do not skip non-target carriers. Do not decide whether the app needs the row.",
     "Set isNewBolPage true only when the Header overview shows a new BILL OF LADING header with printed CARRIER, REFERENCES, and SHIPMENT ID fields.",
@@ -163,7 +163,7 @@ function buildPrompt(pageNumbers: number[]) {
     "Read psNumber from References and shipment id. The PS value is before the first dash, for example PS209872 from PS209872-SR810664 - SR810664.",
     "Read srNumber from Shipment ID in References and shipment id. Use digits only, for example 810664 from SR810664.",
     "Read cityProvince from Consignee city/province. Use only city and province/state, for example OTTAWA, ON or CALGARY, AB. Do not include postal code or country.",
-    "Read skids from Total pallets. Total: 1 PALLETS means 1. Pallets count as skids.",
+    "Read skids from Package totals and skid count. Prefer a Total: N PALLETS line when present. If no Total line is visible, count the printed PALLETS/package lines for that BOL. Pallets count as skids.",
     "Use empty strings for unknown text fields and null for unknown skids. Do not use N/A.",
     "Use HIGH confidence when the printed crop labels are clear, MEDIUM when one value is uncertain, and LOW when most fields are blank.",
     "Return JSON exactly like: {\"rows\":[{\"pageNumber\":1,\"isNewBolPage\":true,\"carrier\":\"SURETRACK STANDARD\",\"srNumber\":\"810036\",\"psNumber\":\"PS209606\",\"cityProvince\":\"CALGARY, AB\",\"skids\":2,\"confidence\":\"HIGH\",\"notes\":\"literal OCR from crop sheet\"}]}"
@@ -174,9 +174,9 @@ function buildFallbackPrompt(pageNumbers: number[]) {
   return [
     "Each image is a labeled crop sheet for one scanned Garland BOL page.",
     `Page numbers: ${pageNumbers.join(", ")}.`,
-    "The field panels are red-bordered and arranged in a compact two-column sheet so the small printed text remains readable.",
+    "The field panels are red-bordered and arranged in a compact sheet so the small printed text remains readable.",
     "Return one OCR entry for every image. Do not filter by carrier.",
-    "Read these literal fields from the labels: Carrier box, References and shipment id, Consignee city/province, and Total pallets.",
+    "Read these literal fields from the labels: Carrier box, References and shipment id, Consignee city/province, and Package totals and skid count.",
     "Set isNewBolPage true only for a new BOL header page. Set it false for continuation/footer/signature pages.",
     "Output exactly this JSON shape: {\"rows\":[{\"pageNumber\":1,\"isNewBolPage\":true,\"carrier\":\"SURETRACK STANDARD\",\"srNumber\":\"810036\",\"psNumber\":\"PS209606\",\"cityProvince\":\"CALGARY, AB\",\"skids\":2,\"confidence\":\"HIGH\",\"notes\":\"fallback OCR from crop sheet\"}]}."
   ].join(" ");
