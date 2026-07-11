@@ -22,11 +22,28 @@ export type TeamshipDailySyncResult = {
   errorMessage?: string;
 };
 
+export type TeamshipDailySyncRangeResult = {
+  runIds: string[];
+  tenantId: string;
+  dateFrom: string;
+  dateTo: string;
+  triggerSource: TeamshipSyncTriggerSource;
+  status: "SUCCESS" | "FAILED";
+  fetchedCount: number;
+  insertedCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  storedCount: number;
+  orders: TeamshipShippingOrderDetail[];
+  results: TeamshipDailySyncResult[];
+};
+
 type SyncInput = {
   tenantId: string;
   shipmentDate: string;
   triggerSource: TeamshipSyncTriggerSource;
   createdByUserId?: string | null;
+  insertMissingOnly?: boolean;
 };
 
 type TeamshipDailySyncClient = typeof prisma & {
@@ -91,9 +108,16 @@ export async function syncTeamshipDailyOrders(input: SyncInput): Promise<Teamshi
     const existingKeys = await loadExistingSyncKeys(input.tenantId, syncableOrders.map((order) => order.syncKey));
     let insertedCount = 0;
     let updatedCount = 0;
+    let existingSkippedCount = 0;
 
     for (const order of syncableOrders) {
       const existed = existingKeys.has(order.syncKey);
+
+      if (input.insertMissingOnly && existed) {
+        existingSkippedCount += 1;
+        continue;
+      }
+
       await client.teamshipSyncedOrder.upsert({
         where: {
           tenantId_syncKey: {
@@ -139,7 +163,7 @@ export async function syncTeamshipDailyOrders(input: SyncInput): Promise<Teamshi
       }
     }
 
-    const skippedCount = orders.length - syncableOrders.length;
+    const skippedCount = orders.length - syncableOrders.length + existingSkippedCount;
     const storedCount = await client.teamshipSyncedOrder.count({
       where: {
         tenantId: input.tenantId,
@@ -189,6 +213,53 @@ export async function syncTeamshipDailyOrders(input: SyncInput): Promise<Teamshi
 
     throw error;
   }
+}
+
+export async function syncTeamshipDailyOrderRange({
+  tenantId,
+  dateFrom,
+  dateTo,
+  triggerSource,
+  createdByUserId,
+  insertMissingOnly
+}: {
+  tenantId: string;
+  dateFrom: string;
+  dateTo: string;
+  triggerSource: TeamshipSyncTriggerSource;
+  createdByUserId?: string | null;
+  insertMissingOnly?: boolean;
+}): Promise<TeamshipDailySyncRangeResult> {
+  const dates = enumerateDateRange(dateFrom, dateTo);
+  const results: TeamshipDailySyncResult[] = [];
+
+  for (const shipmentDate of dates) {
+    results.push(
+      await syncTeamshipDailyOrders({
+        tenantId,
+        shipmentDate,
+        triggerSource,
+        createdByUserId,
+        insertMissingOnly
+      })
+    );
+  }
+
+  return {
+    runIds: results.map((result) => result.runId).filter(Boolean),
+    tenantId,
+    dateFrom: dates[0] ?? dateFrom,
+    dateTo: dates.at(-1) ?? dateTo,
+    triggerSource,
+    status: "SUCCESS",
+    fetchedCount: results.reduce((sum, result) => sum + result.fetchedCount, 0),
+    insertedCount: results.reduce((sum, result) => sum + result.insertedCount, 0),
+    updatedCount: results.reduce((sum, result) => sum + result.updatedCount, 0),
+    skippedCount: results.reduce((sum, result) => sum + result.skippedCount, 0),
+    storedCount: results.reduce((sum, result) => sum + result.storedCount, 0),
+    orders: results.flatMap((result) => result.orders),
+    results
+  };
 }
 
 export async function runDueTeamshipDailySyncs(shipmentDate = getTodayInputValue()) {
@@ -354,6 +425,24 @@ function parseShipmentDate(value: string) {
   }
 
   return parsed;
+}
+
+function enumerateDateRange(dateFrom: string, dateTo: string) {
+  const parsedFrom = parseShipmentDate(dateFrom);
+  const parsedTo = parseShipmentDate(dateTo);
+  const start = parsedFrom <= parsedTo ? parsedFrom : parsedTo;
+  const end = parsedFrom <= parsedTo ? parsedTo : parsedFrom;
+  const dates: string[] = [];
+
+  for (let cursor = new Date(start); cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+    dates.push(cursor.toISOString().slice(0, 10));
+
+    if (dates.length > 31) {
+      throw new Error("Manual Teamship sync ranges are limited to 31 days at a time.");
+    }
+  }
+
+  return dates;
 }
 
 function getTodayInputValue() {

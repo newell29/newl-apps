@@ -1,13 +1,15 @@
 import { ModuleKey } from "@prisma/client";
 import { NextResponse } from "next/server";
 
-import { runDueTeamshipDailySyncs, syncTeamshipDailyOrders } from "@/modules/shipment-documents/teamship-daily-sync";
+import { runDueTeamshipDailySyncs, syncTeamshipDailyOrderRange } from "@/modules/shipment-documents/teamship-daily-sync";
 import { requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { getTeamshipConfigurationStatus } from "@/server/integrations/teamship";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
 type DailyOrdersRequest = {
   shipmentDate?: string;
+  shipmentDateFrom?: string;
+  shipmentDateTo?: string;
 };
 
 export const dynamic = "force-dynamic";
@@ -18,7 +20,9 @@ export async function POST(request: Request) {
   await requireMutationAccess(context);
 
   const body = (await request.json().catch(() => null)) as DailyOrdersRequest | null;
-  const shipmentDate = typeof body?.shipmentDate === "string" ? body.shipmentDate : null;
+  const fallbackDate = typeof body?.shipmentDate === "string" ? body.shipmentDate : getTodayInputValue();
+  const shipmentDateFrom = typeof body?.shipmentDateFrom === "string" ? body.shipmentDateFrom : fallbackDate;
+  const shipmentDateTo = typeof body?.shipmentDateTo === "string" ? body.shipmentDateTo : shipmentDateFrom;
   const config = await getTeamshipConfigurationStatus(context.tenantId);
 
   if (!config.configured) {
@@ -32,11 +36,13 @@ export async function POST(request: Request) {
   }
 
   try {
-    const sync = await syncTeamshipDailyOrders({
+    const sync = await syncTeamshipDailyOrderRange({
       tenantId: context.tenantId,
-      shipmentDate: shipmentDate ?? getTodayInputValue(),
+      dateFrom: shipmentDateFrom,
+      dateTo: shipmentDateTo,
       triggerSource: "MANUAL",
-      createdByUserId: context.userId
+      createdByUserId: context.userId,
+      insertMissingOnly: true
     });
 
     return NextResponse.json({
