@@ -60,7 +60,7 @@ type TeamshipDailySyncClient = typeof prisma & {
     findMany(args: {
       where: Record<string, unknown>;
       select: Record<string, boolean>;
-    }): Promise<Array<{ syncKey?: string }>>;
+    }): Promise<ExistingSyncedOrder[]>;
     upsert(args: {
       where: { tenantId_syncKey: { tenantId: string; syncKey: string } };
       update: Record<string, unknown>;
@@ -80,6 +80,10 @@ type SyncableOrder = {
   city: string | null;
   state: string | null;
   rawOrder: Prisma.InputJsonValue;
+};
+
+type ExistingSyncedOrder = Omit<SyncableOrder, "rawOrder"> & {
+  rawOrder: unknown;
 };
 
 export async function syncTeamshipDailyOrders(input: SyncInput): Promise<TeamshipDailySyncResult> {
@@ -105,15 +109,20 @@ export async function syncTeamshipDailyOrders(input: SyncInput): Promise<Teamshi
       srNumbers: []
     });
     const syncableOrders = orders.map(mapSyncableOrder).filter((order): order is SyncableOrder => Boolean(order));
-    const existingKeys = await loadExistingSyncKeys(input.tenantId, syncableOrders.map((order) => order.syncKey));
+    const existingOrders = await loadExistingSyncOrders(input.tenantId, syncableOrders.map((order) => order.syncKey));
     let insertedCount = 0;
     let updatedCount = 0;
     let existingSkippedCount = 0;
 
     for (const order of syncableOrders) {
-      const existed = existingKeys.has(order.syncKey);
+      const existingOrder = existingOrders.get(order.syncKey);
 
-      if (input.insertMissingOnly && existed) {
+      if (input.insertMissingOnly && existingOrder) {
+        existingSkippedCount += 1;
+        continue;
+      }
+
+      if (existingOrder && !hasSyncedOrderChanged(existingOrder, order)) {
         existingSkippedCount += 1;
         continue;
       }
@@ -155,11 +164,12 @@ export async function syncTeamshipDailyOrders(input: SyncInput): Promise<Teamshi
         }
       });
 
-      if (existed) {
+      existingOrders.set(order.syncKey, toExistingSyncedOrder(order));
+
+      if (existingOrder) {
         updatedCount += 1;
       } else {
         insertedCount += 1;
-        existingKeys.add(order.syncKey);
       }
     }
 
@@ -337,9 +347,9 @@ async function isCronSyncDue(tenantId: string, cadenceMinutes: number) {
   return elapsedMs >= cadenceMinutes * 60 * 1000;
 }
 
-async function loadExistingSyncKeys(tenantId: string, syncKeys: string[]) {
+async function loadExistingSyncOrders(tenantId: string, syncKeys: string[]) {
   if (syncKeys.length === 0) {
-    return new Set<string>();
+    return new Map<string, ExistingSyncedOrder>();
   }
 
   const client = prisma as TeamshipDailySyncClient;
@@ -351,11 +361,19 @@ async function loadExistingSyncKeys(tenantId: string, syncKeys: string[]) {
       }
     },
     select: {
-      syncKey: true
+      syncKey: true,
+      srNumber: true,
+      teamshipOrderId: true,
+      teamshipUrl: true,
+      carrier: true,
+      shipToName: true,
+      city: true,
+      state: true,
+      rawOrder: true
     }
   });
 
-  return new Set(existing.map((order) => order.syncKey).filter((value): value is string => Boolean(value)));
+  return new Map(existing.map((order) => [order.syncKey, order]));
 }
 
 function mapSyncableOrder(order: TeamshipShippingOrderDetail): SyncableOrder | null {
@@ -411,6 +429,57 @@ function readFirstString(...values: Array<unknown>) {
 
 function normalizeSyncKey(value: string | null) {
   return value?.trim().replace(/\s+/g, "").toUpperCase() || null;
+}
+
+function hasSyncedOrderChanged(existing: ExistingSyncedOrder, incoming: SyncableOrder) {
+  return (
+    normalizeNullable(existing.srNumber) !== normalizeNullable(incoming.srNumber) ||
+    normalizeNullable(existing.teamshipOrderId) !== normalizeNullable(incoming.teamshipOrderId) ||
+    normalizeNullable(existing.teamshipUrl) !== normalizeNullable(incoming.teamshipUrl) ||
+    normalizeNullable(existing.carrier) !== normalizeNullable(incoming.carrier) ||
+    normalizeNullable(existing.shipToName) !== normalizeNullable(incoming.shipToName) ||
+    normalizeNullable(existing.city) !== normalizeNullable(incoming.city) ||
+    normalizeNullable(existing.state) !== normalizeNullable(incoming.state) ||
+    stableJson(existing.rawOrder) !== stableJson(incoming.rawOrder)
+  );
+}
+
+function toExistingSyncedOrder(order: SyncableOrder): ExistingSyncedOrder {
+  return {
+    syncKey: order.syncKey,
+    srNumber: order.srNumber,
+    teamshipOrderId: order.teamshipOrderId,
+    teamshipUrl: order.teamshipUrl,
+    carrier: order.carrier,
+    shipToName: order.shipToName,
+    city: order.city,
+    state: order.state,
+    rawOrder: order.rawOrder
+  };
+}
+
+function normalizeNullable(value: string | null | undefined) {
+  return value?.trim() || null;
+}
+
+function stableJson(value: unknown) {
+  return JSON.stringify(sortJsonValue(value));
+}
+
+function sortJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortJsonValue);
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entryValue]) => [key, sortJsonValue(entryValue)])
+    );
+  }
+
+  return value;
 }
 
 function parseShipmentDate(value: string) {
