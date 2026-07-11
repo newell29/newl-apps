@@ -2,12 +2,14 @@ import type {
   TeamshipShippingOrderDetail,
   TeamshipShippingOrderSummary
 } from "@/modules/shipment-documents/teamship-review-types";
+import { getTenantTeamshipSettings, resolveTenantTeamshipCredentials } from "@/server/integrations/teamship-settings";
 
 const DEFAULT_TEAMSHIP_API_BASE_URL = "https://app.teamshipos.com/api";
 const DEFAULT_PAGE_LIMIT = 500;
 const DEFAULT_MAX_PAGES = 30;
 
 type TeamshipFetchOptions = {
+  tenantId?: string | null;
   shipmentDate?: string | null;
   srNumbers?: string[];
   credentials?: TeamshipRuntimeCredentials | null;
@@ -17,6 +19,7 @@ type TeamshipFetchOptions = {
 export type TeamshipRuntimeCredentials = {
   email: string;
   password: string;
+  apiBaseUrl?: string | null;
 };
 
 type TeamshipLoginResponse = {
@@ -34,27 +37,42 @@ type TeamshipDetailResponse = {
   data?: TeamshipShippingOrderDetail;
 };
 
-export function isTeamshipConfigured() {
-  return Boolean(getTeamshipEmail() && getTeamshipPassword());
+export async function isTeamshipConfigured(tenantId?: string | null) {
+  const status = await getTeamshipConfigurationStatus(tenantId);
+  return status.configured;
 }
 
-export function getTeamshipConfigurationStatus() {
+export async function getTeamshipConfigurationStatus(tenantId?: string | null) {
+  const tenantSettings = tenantId ? await getTenantTeamshipSettings({ tenantId }) : null;
+  const envConfigured = Boolean(getTeamshipEmail() && getTeamshipPassword());
+  const tenantConfigured = Boolean(
+    tenantSettings?.status === "ACTIVE" && tenantSettings.email && tenantSettings.passwordConfigured
+  );
+
   return {
-    configured: isTeamshipConfigured(),
-    apiBaseUrl: getTeamshipApiBaseUrl(),
-    missing: [getTeamshipEmail() ? null : "TEAMSHIP_EMAIL", getTeamshipPassword() ? null : "TEAMSHIP_PASSWORD"].filter(
-      Boolean
-    ) as string[]
+    configured: tenantConfigured || envConfigured,
+    source: tenantConfigured ? "settings" : envConfigured ? "environment" : "missing",
+    apiBaseUrl: tenantSettings?.apiBaseUrl ?? getTeamshipApiBaseUrl(),
+    missing:
+      tenantConfigured || envConfigured
+        ? []
+        : [
+            tenantSettings?.email || getTeamshipEmail() ? null : "Teamship email",
+            tenantSettings?.passwordConfigured || getTeamshipPassword() ? null : "Teamship password"
+          ].filter(Boolean) as string[]
   };
 }
 
 export async function fetchTeamshipShippingOrdersForReview({
+  tenantId,
   shipmentDate,
   srNumbers = [],
   credentials = null,
   fetchImpl = fetch
 }: TeamshipFetchOptions): Promise<TeamshipShippingOrderDetail[]> {
-  const token = await loginToTeamship(fetchImpl, credentials);
+  const resolvedCredentials = credentials ?? (await resolveTenantTeamshipCredentials(tenantId ? { tenantId } : null));
+  const apiBaseUrl = resolveTeamshipApiBaseUrl(resolvedCredentials);
+  const token = await loginToTeamship(fetchImpl, resolvedCredentials, apiBaseUrl);
   const targetSrNumbers = new Set(srNumbers.map(normalizeIdentifier).filter(Boolean));
   const details = new Map<string, TeamshipShippingOrderDetail>();
   const pageLimit = getTeamshipPageLimit();
@@ -62,7 +80,7 @@ export async function fetchTeamshipShippingOrdersForReview({
 
   for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
     const offset = pageIndex * pageLimit;
-    const rows = await listTeamshipShippingOrders({ token, limit: pageLimit, offset, fetchImpl });
+    const rows = await listTeamshipShippingOrders({ apiBaseUrl, token, limit: pageLimit, offset, fetchImpl });
 
     for (const row of rows) {
       const shipmentId = normalizeTeamshipShipmentId(row);
@@ -79,7 +97,7 @@ export async function fetchTeamshipShippingOrdersForReview({
         continue;
       }
 
-      const detail = await getTeamshipShippingOrder({ token, id: String(orderId), fetchImpl });
+      const detail = await getTeamshipShippingOrder({ apiBaseUrl, token, id: String(orderId), fetchImpl });
       const mergedDetail = mergeTeamshipDetailWithSummary(detail, row);
       const detailShipmentId = normalizeTeamshipShipmentId(mergedDetail);
       details.set(detailShipmentId || String(orderId), mergedDetail);
@@ -123,15 +141,15 @@ function mergeTeamshipDetailWithSummary(
   };
 }
 
-async function loginToTeamship(fetchImpl: typeof fetch, credentials: TeamshipRuntimeCredentials | null) {
+async function loginToTeamship(fetchImpl: typeof fetch, credentials: TeamshipRuntimeCredentials | null, apiBaseUrl: string) {
   const email = credentials?.email.trim() || getTeamshipEmail();
   const password = credentials?.password.trim() || getTeamshipPassword();
 
   if (!email || !password) {
-    throw new Error("Teamship credentials are not configured. Add TEAMSHIP_EMAIL and TEAMSHIP_PASSWORD.");
+    throw new Error("Teamship credentials are not configured. Add Teamship credentials in Settings.");
   }
 
-  const response = await fetchImpl(`${getTeamshipApiBaseUrl()}/v1/login`, {
+  const response = await fetchImpl(`${apiBaseUrl}/v1/login`, {
     method: "POST",
     headers: {
       accept: "application/json",
@@ -156,17 +174,19 @@ async function loginToTeamship(fetchImpl: typeof fetch, credentials: TeamshipRun
 }
 
 async function listTeamshipShippingOrders({
+  apiBaseUrl,
   token,
   limit,
   offset,
   fetchImpl
 }: {
+  apiBaseUrl: string;
   token: string;
   limit: number;
   offset: number;
   fetchImpl: typeof fetch;
 }) {
-  const url = new URL(`${getTeamshipApiBaseUrl()}/v1/ship-inventories`);
+  const url = new URL(`${apiBaseUrl}/v1/ship-inventories`);
   url.searchParams.set("limit", String(limit));
   url.searchParams.set("offset", String(offset));
   url.searchParams.set("order_by", "created_at");
@@ -186,15 +206,17 @@ async function listTeamshipShippingOrders({
 }
 
 async function getTeamshipShippingOrder({
+  apiBaseUrl,
   token,
   id,
   fetchImpl
 }: {
+  apiBaseUrl: string;
   token: string;
   id: string;
   fetchImpl: typeof fetch;
 }) {
-  const response = await fetchImpl(`${getTeamshipApiBaseUrl()}/v1/ship-inventories/${encodeURIComponent(id)}`, {
+  const response = await fetchImpl(`${apiBaseUrl}/v1/ship-inventories/${encodeURIComponent(id)}`, {
     headers: buildTeamshipHeaders(token),
     cache: "no-store"
   });
@@ -217,6 +239,10 @@ function buildTeamshipHeaders(token: string) {
 
 function getTeamshipApiBaseUrl() {
   return (process.env.TEAMSHIP_API_BASE_URL?.trim() || DEFAULT_TEAMSHIP_API_BASE_URL).replace(/\/+$/, "");
+}
+
+function resolveTeamshipApiBaseUrl(credentials: TeamshipRuntimeCredentials | null) {
+  return (credentials?.apiBaseUrl?.trim() || getTeamshipApiBaseUrl()).replace(/\/+$/, "");
 }
 
 function getTeamshipEmail() {

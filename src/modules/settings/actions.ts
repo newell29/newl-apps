@@ -39,6 +39,10 @@ import {
   DEFAULT_MICROSOFT_GRAPH_SCOPES,
   MICROSOFT_GRAPH_CREDENTIAL_NAME
 } from "@/server/integrations/microsoft-graph";
+import {
+  encryptTeamshipSecret,
+  TEAMSHIP_CREDENTIAL_NAME
+} from "@/server/integrations/teamship-settings";
 
 type TradeMiningScoringConfigMutationClient = typeof prisma & {
   tradeMiningScoringConfig?: {
@@ -569,6 +573,61 @@ export async function saveTenantUserAccessAction(formData: FormData) {
   });
 
   revalidateSettingsSurfaces();
+}
+
+export async function saveTeamshipSettingsAction(formData: FormData) {
+  const context = await authorizeSettingsMutation();
+  const email = readRequired(formData, "teamshipEmail").toLowerCase();
+  const password = readOptional(formData, "teamshipPassword");
+  const apiBaseUrl = readOptional(formData, "teamshipApiBaseUrl") ?? null;
+  const status = parseIntegrationStatus(formData.get("teamshipStatus"));
+
+  const existing = await prisma.integrationCredential.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      provider: IntegrationProvider.TEAMSHIP,
+      name: TEAMSHIP_CREDENTIAL_NAME
+    },
+    select: {
+      id: true,
+      secretRef: true
+    }
+  });
+
+  if (status === IntegrationStatus.ACTIVE && !password && !existing?.secretRef) {
+    throw new Error("Enter the Teamship password before saving Teamship as active.");
+  }
+
+  const data = {
+    provider: IntegrationProvider.TEAMSHIP,
+    name: TEAMSHIP_CREDENTIAL_NAME,
+    status,
+    publicConfig: {
+      email,
+      apiBaseUrl,
+      updatedAt: new Date().toISOString()
+    },
+    secretRef: password ? encryptTeamshipSecret({ password }) : existing?.secretRef ?? null
+  };
+
+  if (existing) {
+    await prisma.integrationCredential.update({
+      where: {
+        id: existing.id
+      },
+      data
+    });
+  } else {
+    await prisma.integrationCredential.create({
+      data: {
+        tenantId: context.tenantId,
+        ...data
+      }
+    });
+  }
+
+  revalidateSettingsSurfaces();
+  revalidatePath("/shipment-documents/teamship-review");
 }
 
 export async function removeTenantUserAccessAction(formData: FormData) {

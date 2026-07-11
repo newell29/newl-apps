@@ -34,13 +34,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Upload and extract at least one Garland PDF shipping order." }, { status: 400 });
   }
 
-  const config = getTeamshipConfigurationStatus();
+  const config = await getTeamshipConfigurationStatus(context.tenantId);
   const runtimeCredentials = readRuntimeCredentials(body?.teamshipCredentials);
 
   if (!config.configured && !runtimeCredentials) {
     return NextResponse.json(
       {
-        error: `Teamship is not configured. Missing: ${config.missing.join(", ")}. Enter one-time Teamship credentials for this manual run or add the missing server env vars.`,
+        error: `Teamship is not configured. Missing: ${config.missing.join(", ")}. Add Teamship credentials in Settings.`,
         configuration: config
       },
       { status: 503 }
@@ -49,6 +49,7 @@ export async function POST(request: Request) {
 
   try {
     const teamshipOrders = await fetchTeamshipShippingOrdersForReview({
+      tenantId: context.tenantId,
       shipmentDate: body?.shipmentDate,
       srNumbers: orders.map((order) => order.srNumber),
       credentials: runtimeCredentials
