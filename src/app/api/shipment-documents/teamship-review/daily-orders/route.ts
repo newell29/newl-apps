@@ -10,6 +10,10 @@ import { getAuthenticatedContext } from "@/server/tenant-context";
 
 type DailyOrdersRequest = {
   shipmentDate?: string;
+  teamshipCredentials?: {
+    email?: string;
+    password?: string;
+  };
 };
 
 export const dynamic = "force-dynamic";
@@ -21,11 +25,12 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as DailyOrdersRequest | null;
   const shipmentDate = typeof body?.shipmentDate === "string" ? body.shipmentDate : null;
   const config = getTeamshipConfigurationStatus();
+  const runtimeCredentials = readRuntimeCredentials(body?.teamshipCredentials);
 
-  if (!config.configured) {
+  if (!config.configured && !runtimeCredentials) {
     return NextResponse.json(
       {
-        error: `Teamship is not configured. Missing: ${config.missing.join(", ")}.`,
+        error: `Teamship is not configured. Missing: ${config.missing.join(", ")}. Enter one-time Teamship credentials for this manual pull or add the missing server env vars.`,
         configuration: config
       },
       { status: 503 }
@@ -33,7 +38,11 @@ export async function POST(request: Request) {
   }
 
   try {
-    const orders = await fetchTeamshipShippingOrdersForReview({ shipmentDate, srNumbers: [] });
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      shipmentDate,
+      srNumbers: [],
+      credentials: runtimeCredentials
+    });
 
     return NextResponse.json({
       orders,
@@ -51,6 +60,21 @@ export async function POST(request: Request) {
       { status: 502 }
     );
   }
+}
+
+function readRuntimeCredentials(value: DailyOrdersRequest["teamshipCredentials"]) {
+  const email = typeof value?.email === "string" ? value.email.trim() : "";
+  const password = typeof value?.password === "string" ? value.password.trim() : "";
+
+  if (!email && !password) {
+    return null;
+  }
+
+  if (!email || !password) {
+    return null;
+  }
+
+  return { email, password };
 }
 
 export async function GET(request: Request) {

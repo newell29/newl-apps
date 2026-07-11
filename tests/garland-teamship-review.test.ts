@@ -282,4 +282,47 @@ describe("Garland Teamship review", () => {
       customer: { company: "Garland Canada Distribution" }
     });
   });
+
+  it("uses one-time runtime credentials without requiring Teamship env vars", async () => {
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.endsWith("/v1/login")) {
+        expect(init?.method).toBe("POST");
+        expect(JSON.parse(String(init?.body))).toEqual({
+          email: "one-time@example.com",
+          password: "not-stored"
+        });
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/v1/ship-inventories?")) {
+        return Response.json({
+          data: [{ id: 10, shipment_id: "SR808478", customer: { company: "Garland Canada Distribution" } }]
+        });
+      }
+
+      if (url.endsWith("/v1/ship-inventories/10")) {
+        return Response.json({ data: { id: 10, record_no: "PS210206" } });
+      }
+
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      srNumbers: ["SR808478"],
+      credentials: {
+        email: "one-time@example.com",
+        password: "not-stored"
+      },
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(orders).toHaveLength(1);
+    expect(orders[0]).toMatchObject({
+      id: 10,
+      shipment_id: "SR808478",
+      record_no: "PS210206"
+    });
+  });
 });

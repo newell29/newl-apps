@@ -13,6 +13,10 @@ import { getAuthenticatedContext } from "@/server/tenant-context";
 type ReviewRequest = {
   shipmentDate?: string;
   orders?: GarlandPdfShippingOrder[];
+  teamshipCredentials?: {
+    email?: string;
+    password?: string;
+  };
 };
 
 export const dynamic = "force-dynamic";
@@ -29,11 +33,12 @@ export async function POST(request: Request) {
   }
 
   const config = getTeamshipConfigurationStatus();
+  const runtimeCredentials = readRuntimeCredentials(body?.teamshipCredentials);
 
-  if (!config.configured) {
+  if (!config.configured && !runtimeCredentials) {
     return NextResponse.json(
       {
-        error: `Teamship is not configured. Missing: ${config.missing.join(", ")}.`,
+        error: `Teamship is not configured. Missing: ${config.missing.join(", ")}. Enter one-time Teamship credentials for this manual run or add the missing server env vars.`,
         configuration: config
       },
       { status: 503 }
@@ -43,7 +48,8 @@ export async function POST(request: Request) {
   try {
     const teamshipOrders = await fetchTeamshipShippingOrdersForReview({
       shipmentDate: body?.shipmentDate,
-      srNumbers: orders.map((order) => order.srNumber)
+      srNumbers: orders.map((order) => order.srNumber),
+      credentials: runtimeCredentials
     });
 
     return NextResponse.json(buildGarlandTeamshipReview(orders, teamshipOrders));
@@ -53,6 +59,21 @@ export async function POST(request: Request) {
       { status: 502 }
     );
   }
+}
+
+function readRuntimeCredentials(value: ReviewRequest["teamshipCredentials"]) {
+  const email = typeof value?.email === "string" ? value.email.trim() : "";
+  const password = typeof value?.password === "string" ? value.password.trim() : "";
+
+  if (!email && !password) {
+    return null;
+  }
+
+  if (!email || !password) {
+    return null;
+  }
+
+  return { email, password };
 }
 
 function isGarlandPdfOrder(value: GarlandPdfShippingOrder): value is GarlandPdfShippingOrder {
