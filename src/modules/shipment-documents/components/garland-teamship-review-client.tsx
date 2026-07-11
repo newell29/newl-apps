@@ -16,8 +16,12 @@ type DailyOrdersResponse = {
   orders?: TeamshipShippingOrderDetail[];
   totalCount?: number;
   sync?: {
-    runId: string;
+    runId?: string;
+    runIds?: string[];
     status: "SUCCESS" | "FAILED" | "SKIPPED";
+    dateFrom?: string;
+    dateTo?: string;
+    fetchedCount?: number;
     insertedCount: number;
     updatedCount: number;
     skippedCount: number;
@@ -74,6 +78,8 @@ let pdfJsLoader: Promise<PdfJsModule> | null = null;
 export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: boolean }) {
   const todayInputValue = getTodayInputValue();
   const [shipmentDate, setShipmentDate] = useState(todayInputValue);
+  const [syncDateFrom, setSyncDateFrom] = useState(todayInputValue);
+  const [syncDateTo, setSyncDateTo] = useState(todayInputValue);
   const [documentLabel, setDocumentLabel] = useState(formatDateLabel(todayInputValue));
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [orders, setOrders] = useState<GarlandPdfShippingOrder[]>([]);
@@ -207,14 +213,15 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     setDailyOrderCount(null);
     setDailySyncSummary(null);
     setIsProcessing(true);
-    setStatus("Syncing Garland Canada Distribution orders from Teamship for the selected day...");
+    setStatus(`Pulling missing Garland Teamship orders from ${syncDateFrom} to ${syncDateTo}...`);
 
     try {
       const response = await fetch("/api/shipment-documents/teamship-review/daily-orders", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          shipmentDate
+          shipmentDateFrom: syncDateFrom,
+          shipmentDateTo: syncDateTo
         })
       });
       const json = (await response.json().catch(() => null)) as DailyOrdersResponse | null;
@@ -227,7 +234,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       setDailySyncSummary(json.sync ?? null);
       setStatus(
         json.sync
-          ? `Synced ${json.totalCount ?? json.orders?.length ?? 0} Teamship Garland order(s): ${json.sync.insertedCount} new, ${json.sync.updatedCount} updated, ${json.sync.skippedCount} skipped.`
+          ? `Pulled ${json.sync.insertedCount} new Teamship Garland order(s) from ${json.sync.dateFrom ?? syncDateFrom} to ${json.sync.dateTo ?? syncDateTo}; ${json.sync.skippedCount} already existed or could not be keyed.`
           : `Fetched ${json.totalCount ?? json.orders?.length ?? 0} Teamship Garland order(s) for ${shipmentDate}.`
       );
     } catch (caught) {
@@ -416,9 +423,30 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
             disabled={isProcessing}
             className="rounded-md border border-border px-5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Sync Teamship daily orders
+            Pull missing Teamship orders
           </button>
           <p className="text-sm text-mutedForeground">{status}</p>
+        </div>
+
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <label className="space-y-2 text-sm font-semibold text-foreground">
+            Manual sync from
+            <input
+              type="date"
+              value={syncDateFrom}
+              onChange={(event) => setSyncDateFrom(event.target.value)}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="space-y-2 text-sm font-semibold text-foreground">
+            Manual sync to
+            <input
+              type="date"
+              value={syncDateTo}
+              onChange={(event) => setSyncDateTo(event.target.value)}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            />
+          </label>
         </div>
 
         {error ? (
@@ -460,8 +488,8 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
           value={dailyOrderCount === null ? "Not run" : String(dailyOrderCount)}
           detail={
             dailySyncSummary
-              ? `${dailySyncSummary.insertedCount} new, ${dailySyncSummary.updatedCount} updated, ${dailySyncSummary.storedCount} stored for this shipment date.`
-              : "Manual sync is available here. Scheduled sync is controlled from Settings."
+              ? `${dailySyncSummary.insertedCount} new, ${dailySyncSummary.skippedCount} skipped, ${dailySyncSummary.storedCount} stored across ${dailySyncSummary.dateFrom ?? syncDateFrom} to ${dailySyncSummary.dateTo ?? syncDateTo}.`
+              : "Manual sync pulls missing orders for a selected date range. Scheduled sync is controlled from Settings."
           }
         />
         <SummaryCard
