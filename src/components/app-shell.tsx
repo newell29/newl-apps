@@ -69,6 +69,12 @@ const navEntries: NavNode[] = [
             href: "/shipment-documents/carrier-manifests",
             label: "Carrier Manifests",
             moduleKey: "SHIPMENT_DOCUMENTS" as ModuleKey
+          },
+          {
+            id: "garland-teamship-review",
+            href: "/shipment-documents/teamship-review",
+            label: "Teamship Review",
+            moduleKey: "SHIPMENT_DOCUMENTS" as ModuleKey
           }
         ]
       },

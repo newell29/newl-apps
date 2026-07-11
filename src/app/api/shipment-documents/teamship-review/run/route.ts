@@ -1,0 +1,68 @@
+import { ModuleKey } from "@prisma/client";
+import { NextResponse } from "next/server";
+
+import { buildGarlandTeamshipReview } from "@/modules/shipment-documents/teamship-review";
+import type { GarlandPdfShippingOrder } from "@/modules/shipment-documents/teamship-review-types";
+import { requireModule } from "@/server/auth/authorization";
+import {
+  fetchTeamshipShippingOrdersForReview,
+  getTeamshipConfigurationStatus
+} from "@/server/integrations/teamship";
+import { getAuthenticatedContext } from "@/server/tenant-context";
+
+type ReviewRequest = {
+  shipmentDate?: string;
+  orders?: GarlandPdfShippingOrder[];
+};
+
+export const dynamic = "force-dynamic";
+
+export async function POST(request: Request) {
+  const context = await getAuthenticatedContext();
+  await requireModule(context, ModuleKey.SHIPMENT_DOCUMENTS);
+
+  const body = (await request.json().catch(() => null)) as ReviewRequest | null;
+  const orders = Array.isArray(body?.orders) ? body.orders.filter(isGarlandPdfOrder) : [];
+
+  if (orders.length === 0) {
+    return NextResponse.json({ error: "Upload and extract at least one Garland PDF shipping order." }, { status: 400 });
+  }
+
+  const config = getTeamshipConfigurationStatus();
+
+  if (!config.configured) {
+    return NextResponse.json(
+      {
+        error: `Teamship is not configured. Missing: ${config.missing.join(", ")}.`,
+        configuration: config
+      },
+      { status: 503 }
+    );
+  }
+
+  try {
+    const teamshipOrders = await fetchTeamshipShippingOrdersForReview({
+      shipmentDate: body?.shipmentDate,
+      srNumbers: orders.map((order) => order.srNumber)
+    });
+
+    return NextResponse.json(buildGarlandTeamshipReview(orders, teamshipOrders));
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Unable to run the Teamship review." },
+      { status: 502 }
+    );
+  }
+}
+
+function isGarlandPdfOrder(value: GarlandPdfShippingOrder): value is GarlandPdfShippingOrder {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof value.psNumber === "string" &&
+      /^PS\d{6}$/i.test(value.psNumber) &&
+      typeof value.srNumber === "string" &&
+      /^SR\d{5,8}$/i.test(value.srNumber) &&
+      Array.isArray(value.pageNumbers)
+  );
+}
