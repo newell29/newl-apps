@@ -48,7 +48,16 @@ export async function POST(request: Request) {
       systemPrompt:
         "You extract Garland Canada carrier loading-manifest rows from labeled BOL field-crop images. Return JSON only. The key fields are carrier, PS/reference number, consignee city/province, and total pallets. Include a row for every page where the Carrier box contains Midland, Speedy, Suretrack, Sure Track, or Suretrak. Ignore other carriers. Do not drop a matching carrier page just because another field is uncertain."
     });
-    primaryRows = normalizeRows(readRowsFromParsedResponse(primary.parsed), images.map((image) => image.pageNumber));
+    const parsedRows = readRowsFromParsedResponse(primary.parsed);
+    primaryRows = normalizeRows(parsedRows, images.map((image) => image.pageNumber));
+    logExtractionResult({
+      stage: "primary",
+      model: DEFAULT_VISION_MODEL,
+      pageNumbers: images.map((image) => image.pageNumber),
+      parsed: primary.parsed,
+      parsedRowCount: parsedRows.length,
+      normalizedRowCount: primaryRows.length
+    });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Carrier manifest extraction failed." },
@@ -69,7 +78,16 @@ export async function POST(request: Request) {
         systemPrompt:
           "You are doing OCR on labeled Garland BOL crop sheets. Return JSON only. Be literal: read the text visible in the labeled boxes. Do not return an empty result when a target carrier is visible."
       });
-      fallbackRows = normalizeRows(readRowsFromParsedResponse(fallback.parsed), images.map((image) => image.pageNumber));
+      const parsedRows = readRowsFromParsedResponse(fallback.parsed);
+      fallbackRows = normalizeRows(parsedRows, images.map((image) => image.pageNumber));
+      logExtractionResult({
+        stage: "fallback",
+        model: FALLBACK_VISION_MODEL,
+        pageNumbers: images.map((image) => image.pageNumber),
+        parsed: fallback.parsed,
+        parsedRowCount: parsedRows.length,
+        normalizedRowCount: fallbackRows.length
+      });
     } catch (error) {
       fallbackError = error instanceof Error ? error.message : "Fallback carrier manifest extraction failed.";
     }
@@ -81,6 +99,46 @@ export async function POST(request: Request) {
     fallbackError,
     rows: fallbackRows.length > 0 ? fallbackRows : primaryRows
   });
+}
+
+function logExtractionResult({
+  stage,
+  model,
+  pageNumbers,
+  parsed,
+  parsedRowCount,
+  normalizedRowCount
+}: {
+  stage: "primary" | "fallback";
+  model: string;
+  pageNumbers: number[];
+  parsed: unknown;
+  parsedRowCount: number;
+  normalizedRowCount: number;
+}) {
+  console.info(
+    "[garland-carrier-manifest] extraction",
+    JSON.stringify({
+      stage,
+      model,
+      pageNumbers,
+      responseShape: describeResponseShape(parsed),
+      parsedRowCount,
+      normalizedRowCount
+    })
+  );
+}
+
+function describeResponseShape(value: unknown) {
+  if (Array.isArray(value)) {
+    return "array";
+  }
+
+  if (!value || typeof value !== "object") {
+    return typeof value;
+  }
+
+  return Object.keys(value as Record<string, unknown>).slice(0, 12);
 }
 
 function buildPrompt(pageNumbers: number[]) {

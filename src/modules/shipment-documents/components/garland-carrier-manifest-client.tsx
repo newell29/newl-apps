@@ -86,6 +86,21 @@ export function GarlandCarrierManifestClient({
 
   const carrierCounts = useMemo(() => buildCarrierCounts(rows), [rows]);
 
+  function acceptBolFile(file: File | null) {
+    if (!file) {
+      return;
+    }
+
+    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+      setError("Choose, paste, or drop a PDF file.");
+      return;
+    }
+
+    setBolFile(file);
+    setError(null);
+    setStatus(`${file.name} is ready to process.`);
+  }
+
   async function handleBuildManifests() {
     if (!bolFile) {
       return;
@@ -292,15 +307,39 @@ export function GarlandCarrierManifestClient({
               placeholder="July 10, 2026"
             />
           </label>
-          <label className="block text-sm font-medium text-foreground md:col-span-2">
-            Garland BOL PDF
+          <div
+            className="block rounded-md text-sm font-medium text-foreground outline-none ring-primary focus-within:ring-2 focus:ring-2 md:col-span-2"
+            tabIndex={0}
+            role="group"
+            aria-label="Paste or drop Garland BOL PDF"
+            onPaste={(event) => {
+              const file = Array.from(event.clipboardData.files).find(
+                (candidate) => candidate.type === "application/pdf" || candidate.name.toLowerCase().endsWith(".pdf")
+              );
+
+              if (file) {
+                event.preventDefault();
+                acceptBolFile(file);
+              }
+            }}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              acceptBolFile(event.dataTransfer.files?.[0] ?? null);
+            }}
+          >
+            <label htmlFor="garland-bol-pdf">Garland BOL PDF</label>
             <input
+              id="garland-bol-pdf"
               type="file"
               accept="application/pdf"
-              onChange={(event) => setBolFile(event.target.files?.[0] ?? null)}
+              onChange={(event) => acceptBolFile(event.target.files?.[0] ?? null)}
               className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
             />
-          </label>
+            <p className="mt-1 text-xs font-normal text-mutedForeground">
+              Choose a file, drag it here, or paste a copied PDF.
+            </p>
+          </div>
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
