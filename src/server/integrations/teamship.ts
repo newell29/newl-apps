@@ -73,8 +73,9 @@ export async function fetchTeamshipShippingOrdersForReview({
       }
 
       const detail = await getTeamshipShippingOrder({ token, id: String(orderId), fetchImpl });
+      const mergedDetail = mergeTeamshipDetailWithSummary(detail, row);
       const detailShipmentId = normalizeIdentifier(detail.shipment_id ?? row.shipment_id);
-      details.set(detailShipmentId || String(orderId), detail);
+      details.set(detailShipmentId || String(orderId), mergedDetail);
     }
 
     if (targetSrNumbers.size > 0 && Array.from(targetSrNumbers).every((srNumber) => details.has(srNumber))) {
@@ -87,6 +88,32 @@ export async function fetchTeamshipShippingOrdersForReview({
   }
 
   return Array.from(details.values());
+}
+
+function mergeTeamshipDetailWithSummary(
+  detail: TeamshipShippingOrderDetail,
+  summary: TeamshipShippingOrderSummary
+): TeamshipShippingOrderDetail {
+  return {
+    ...summary,
+    ...detail,
+    id: detail.id ?? summary.id,
+    order_id: detail.order_id ?? summary.order_id,
+    shipment_id: detail.shipment_id ?? summary.shipment_id,
+    customer: detail.customer ?? summary.customer,
+    company: detail.company ?? summary.company,
+    user_company: detail.user_company ?? summary.user_company,
+    customer_name: detail.customer_name ?? summary.customer_name,
+    carrier: detail.carrier ?? summary.carrier,
+    ship_method: detail.ship_method ?? summary.ship_method,
+    shipping_carrier: detail.shipping_carrier ?? summary.shipping_carrier,
+    method: detail.method ?? summary.method,
+    carrier_name: detail.carrier_name ?? summary.carrier_name,
+    po_number: detail.po_number ?? summary.po_number,
+    pickup_eta: detail.pickup_eta ?? summary.pickup_eta,
+    shipment_date: detail.shipment_date ?? summary.shipment_date,
+    url: detail.url ?? summary.url
+  };
 }
 
 async function loginToTeamship(fetchImpl: typeof fetch) {

@@ -188,7 +188,6 @@ describe("Garland Teamship review", () => {
         return Response.json({
           data: {
             id: 10,
-            shipment_id: "SR808478",
             record_no: "PS210206"
           }
         });
@@ -202,7 +201,14 @@ describe("Garland Teamship review", () => {
       fetchImpl: fetchMock as unknown as typeof fetch
     });
 
-    expect(orders).toEqual([{ id: 10, shipment_id: "SR808478", record_no: "PS210206" }]);
+    expect(orders).toEqual([
+      {
+        id: 10,
+        shipment_id: "SR808478",
+        record_no: "PS210206",
+        customer: { company: "Garland Canada Distribution" }
+      }
+    ]);
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls.every(([, init]) => (init?.method ?? "GET") === "GET" || init?.method === "POST")).toBe(
       true
@@ -210,5 +216,70 @@ describe("Garland Teamship review", () => {
     expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes("/v1/ship-inventories") && init?.method)).toBe(
       false
     );
+  });
+
+  it("pulls Garland daily orders by selected day when no SR filter is provided", async () => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_MAX_LIST_PAGES = "1";
+
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+
+      if (url.endsWith("/v1/login")) {
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/v1/ship-inventories?")) {
+        return Response.json({
+          data: [
+            {
+              id: 10,
+              shipment_id: "SR808478",
+              created_at_date: "2026-07-10",
+              customer: { company: "Garland Canada Distribution" }
+            },
+            {
+              id: 11,
+              shipment_id: "SR795656",
+              created_at_date: "2026-07-10",
+              customer: { company: "Other Customer" }
+            },
+            {
+              id: 12,
+              shipment_id: "SR810154",
+              created_at_date: "2026-07-09",
+              customer: { company: "Garland Canada Distribution" }
+            }
+          ]
+        });
+      }
+
+      if (url.endsWith("/v1/ship-inventories/10")) {
+        return Response.json({
+          data: {
+            id: 10,
+            record_no: "PS210206"
+          }
+        });
+      }
+
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      shipmentDate: "2026-07-10",
+      srNumbers: [],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(orders).toHaveLength(1);
+    expect(orders[0]).toMatchObject({
+      id: 10,
+      shipment_id: "SR808478",
+      record_no: "PS210206",
+      customer: { company: "Garland Canada Distribution" }
+    });
   });
 });
