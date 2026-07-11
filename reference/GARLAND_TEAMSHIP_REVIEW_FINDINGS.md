@@ -75,6 +75,61 @@ The sample PDF parsed successfully with these orders:
 | PS210216 | SR810154 | 12 | SURETRACK STANDARD | VANCOUVER AIRPORT HILTON | RICHMOND, BC | PO374982 |
 | PS210217 | SR809212 | 13 | SURETRACK STANDARD | GEANEL RESTAURANT SUPPLIES L | SASKATOON, SK | 200242 |
 
+## Additional PDF Test: PS209287-PS209295
+
+The file `/Users/alexnewell/Downloads/9 ORDERS 11 PAGES - PS209287 - PS209295.pdf` was tested on 2026-07-11 with:
+
+```bash
+TMPDIR=/private/tmp npm run verify:garland-teamship -- \
+  --pdf "/Users/alexnewell/Downloads/9 ORDERS 11 PAGES - PS209287 - PS209295.pdf" \
+  --pdf-only \
+  --json
+```
+
+Extraction result:
+
+- `orderCount` was `9`.
+- PS209287 / SR803322 was grouped as one order across pages `[1, 2]`.
+- PS209288 / SR807926 was grouped as one order across pages `[3, 4]`.
+- The remaining seven orders were single-page orders.
+
+Parsed orders:
+
+| PS | SR | PDF pages | Ship via | Ship to | City/state | PO |
+| --- | --- | --- | --- | --- | --- | --- |
+| PS209287 | SR803322 | 1, 2 | SURETRACK STANDARD | NELLA VANCOUVER | VANCOUVER, BC | P67051 |
+| PS209288 | SR807926 | 3, 4 | SURETRACK STANDARD | RUSSELL HENDRIX EDMONTON | EDMONTON, AB | 00523506 |
+| PS209289 | SR809243 | 5 | UPS CD STD | DAIRY QUEEN #72196 JD TREATS LTD | ASSINIBOIA, SK | JAY PATEL |
+| PS209290 | SR807832 | 6 | UPS | N WASSERSTROM | COLUMBUS, OH | OP00033817 |
+| PS209291 | SR807932 | 7 | SURETRACK STANDARD | JIM MAN LEE STORE LTD. | LITTLE FORT, BC | P68477 |
+| PS209292 | SR807978 | 8 | SPEEDY | CENTRE DE DISTRIBUTION #2 DOYON DESP | LONGUEUIL, QC | 148027 |
+| PS209293 | SR808217 | 9 | SPEEDY | CENTRE DE DISTRIBUTION #2 DOYON DESP | LONGUEUIL, QC | 148019 |
+| PS209294 | SR809250 | 10 | MIDLAND | THE LITTLE PIZZA HOUSE | GRAND-SAULT, NB | 0000037690 |
+| PS209295 | SR807975 | 11 | SPEEDY | TZANET QUEBEC | QUEBEC, QC | 83652 |
+
+Live Teamship check:
+
+- The Teamship search bar located all nine SRs after resetting the grid state first.
+- Required search prep: open `Shipping Orders`, click `All`, click `Clear All Filters`, leave the saved view as `Charlotte bulk view (Default)`, then search the full SR value such as `SR803322`.
+- Searching can fail or return stale/no rows if the grid is still on `Complete`, has a column filter active, or the previous search has not been cleared.
+- Once the row appears, the Teamship order number is the `#` value in the first column. Use the direct detail route `https://members.fulfillit.io/ship-inventories/{orderId}` for read-only detail checks.
+
+Teamship SR search results for this file:
+
+| PS | SR | Teamship order | Search result notes |
+| --- | --- | --- | --- |
+| PS209287 | SR803322 | 27808 | SURETRACK STANDARD, PO P67051, 5 items. |
+| PS209288 | SR807926 | 27809 | SURETRACK STANDARD, PO 00523506, 3 items. |
+| PS209289 | SR809243 | 27810 | UPS CD STD, PO JAY PATEL, 4 items. A second row, `28235`, also exists for the same SR with 1 item and a later pickup/ship date; do not choose the first search result blindly. |
+| PS209290 | SR807832 | 27811 | UPS, PO OP00033817, 1 item. |
+| PS209291 | SR807932 | 27812 | SURETRACK STANDARD, PO P68477, 3 items. |
+| PS209292 | SR807978 | 27814 | SPEEDY, PO 148027, 1 item. |
+| PS209293 | SR808217 | 27815 | SPEEDY, PO 148019, 1 item. |
+| PS209294 | SR809250 | 27816 | MIDLAND, PO 0000037690, 1 item. |
+| PS209295 | SR807975 | 27817 | SPEEDY, PO 83652, 1 item. |
+
+If a search returns multiple rows for the same SR, select the matching Teamship row by carrier, PO, item count, customer, and pickup/ship date before comparing detail fields.
+
 ## Teamship UI Field Mapping
 
 Teamship detail pages expose the reviewed shipping-order data in two places:
@@ -101,6 +156,46 @@ Important mapping:
 | SKU / serial | `pallets[].commodity`, visible as strings like `SKU: E1SGHMV6XHU3US, SN: 2604816191908` |
 
 Do not rely only on visible page text. Some values are form input values or hidden JSON values and may not appear in `innerText`.
+
+## Stage 2 Pallet Entry Findings
+
+The Teamship shipping-order detail route is `https://members.fulfillit.io/ship-inventories/{orderId}`. The grid's order link may open the picking workflow instead, so use the direct detail route for reviewing or automating pallet fields.
+
+Pallet data is stored in hidden `shipInventoryData.pallets[]` and rendered as indexed visible fields:
+
+| Teamship data field | Visible input naming pattern | Notes |
+| --- | --- | --- |
+| `pallets_count` | `pallets_count` | Hidden count of pallet rows. |
+| `pallets[index].quantity` | `pallet_1`, `pallet_2`, etc. | Visible label is No. of Pallets. |
+| `pallets[index].length` | `pallet_1_length` | Dimension is inches. |
+| `pallets[index].width` | `pallet_1_width` | Dimension is inches. |
+| `pallets[index].height` | `pallet_1_height` | Dimension is inches. |
+| `pallets[index].weight` | `pallet_1_weight` | Weight value. |
+| `pallets[index].weight_unit` | `pallet_1_weight_unit` | Existing Garland examples use `lbs`. |
+| `pallets[index].commodity` | `pallet_1_commodity` | Free-text commodity field used for SKU/serial details. |
+
+Observed commodity formats from live Garland Teamship orders:
+
+- Serialized single unit: `SKU: E1SGHMV6XHU3US, SN: 2604816191908`
+- Non-serialized quantity: `SKU: 8030445, QTY: 4`
+- Multiple serials in one row: `SKU: GTBG36-NR36-5001, SN: 2605891101919, 2606891101462`
+
+Observed pallet examples:
+
+| Teamship order | SR | Pallet rows | Notes |
+| --- | --- | --- | --- |
+| 30202 | SR808478 | `1 x 1 x 1`, `1 lbs`, `SKU: E1SGHMV6XHU3US, SN: 2604816191908` | Placeholder dimensions/weight were used. |
+| 30206 | SR810387 | `54 x 30 x 40`, `441 lbs`, `SKU: GTGG48-GT48M-5016, SN: 2606891100446` | Real dimensions/weight were used. |
+| 30208 | SR810386 | quantity `2`, `48 x 40 x 0`, `0 lbs`, `SKU: GTBG36-NR36-5001, SN: 2605891101919, 2606891101462` | Existing data groups two serials into one pallet row. |
+| 30209 | SR810154 | Three pallet rows | Two non-serialized QTY rows use `1 x 1 x 1`, `1 lbs`; the serialized unit uses `41 x 49 x 79`, `880 lbs`. |
+| 30210 | SR809212 | `35 x 25 x 33`, `180 lbs`, `SKU: X16SBMV6DFL1CLUS, SN: 2604816192633` | Real dimensions/weight were used. |
+
+Stage 2 implication:
+
+- The planned automation should be explicit about whether serialized units are always split into separate pallet rows. Existing Teamship data sometimes groups multiple serials for the same SKU into one pallet row with `quantity: 2`.
+- Do not infer valid dimensions or weights from placeholders such as `1 x 1 x 1`, `1 lbs`, `0 height`, or `0 weight`. Those should be treated as missing/incomplete pallet data unless the provided Stage 2 dimension list says otherwise.
+- For non-serialized items, use `QTY: <quantity>` in the commodity string instead of `SN:`.
+- If multiple pallet rows are required, create or update the indexed field set consistently: `pallet_2`, `pallet_2_length`, `pallet_2_width`, `pallet_2_height`, `pallet_2_weight`, `pallet_2_weight_unit`, and `pallet_2_commodity`.
 
 ## Teamship Detail Evidence
 
@@ -154,7 +249,10 @@ Newl Apps should handle these cases this way:
 ## Teamship Grid Notes
 
 - Use the `All` tab in Shipping Orders before searching.
-- The grid may show a saved view such as `Charlotte bulk view (Default)`. Clear filters if search results look wrong.
+- The grid may show a saved view such as `Charlotte bulk view (Default)`. That view can still search Garland SRs, but click `Clear All Filters` first if search results look wrong.
+- Search by the full SR value, including the `SR` prefix. Example: `SR809212` returns Teamship order `#30210` once the grid is reset.
+- Do not rely on searching just the Teamship order number, PS number, PO, or customer name as the primary lookup. Those can match unrelated rows or fail depending on the current view/filter state.
+- If a known SR does not return a row, reset this exact sequence before concluding it is missing: `Shipping Orders` -> `All` -> `Clear All Filters` -> clear the search box -> search full `SR######`.
 - The Teamship grid can be slow and sometimes returns stale or unexpected visible text after search changes. Detail pages are more reliable once the order ID is known.
 - The live All tab showed approximately `1 of 670 pages (10,043 items)` during testing. The Newl API fetcher therefore uses a deeper default scan than the original 12 pages.
 
