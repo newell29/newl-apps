@@ -57,6 +57,7 @@ export async function POST(request: Request) {
       model: DEFAULT_VISION_MODEL,
       pageNumbers: images.map((image) => image.pageNumber),
       parsed: primary.parsed,
+      parsedRows,
       parsedRowCount: parsedRows.length,
       normalizedRowCount: primaryRows.length
     });
@@ -87,6 +88,7 @@ export async function POST(request: Request) {
         model: FALLBACK_VISION_MODEL,
         pageNumbers: images.map((image) => image.pageNumber),
         parsed: fallback.parsed,
+        parsedRows,
         parsedRowCount: parsedRows.length,
         normalizedRowCount: fallbackRows.length
       });
@@ -108,6 +110,7 @@ function logExtractionResult({
   model,
   pageNumbers,
   parsed,
+  parsedRows,
   parsedRowCount,
   normalizedRowCount
 }: {
@@ -115,6 +118,7 @@ function logExtractionResult({
   model: string;
   pageNumbers: number[];
   parsed: unknown;
+  parsedRows: unknown[];
   parsedRowCount: number;
   normalizedRowCount: number;
 }) {
@@ -125,6 +129,7 @@ function logExtractionResult({
       model,
       pageNumbers,
       responseShape: describeResponseShape(parsed),
+      rowDiagnostics: buildRowDiagnostics(parsedRows),
       parsedRowCount,
       normalizedRowCount
     })
@@ -264,11 +269,6 @@ function normalizeRows(value: unknown, pageNumbers: number[]): GarlandCarrierMan
     const isNewBolPage = readBooleanLike(
       readFirstValue(record, ["isNewBolPage", "isNewBol", "newBol", "newBolPage", "headerPresent", "newBillOfLading"])
     );
-
-    if (isNewBolPage === false) {
-      return [];
-    }
-
     const carrier = normalizeCarrier(
       readFirstValue(record, [
         "carrier",
@@ -306,6 +306,13 @@ function normalizeRows(value: unknown, pageNumbers: number[]): GarlandCarrierMan
     const skids = normalizeSkids(
       readFirstValue(record, ["skids", "pallets", "pallet", "palletCount", "totalPallets", "totalSkids", "packageTotal"])
     );
+    const srNumber = normalizeDigits(
+      readFirstValue(record, ["srNumber", "sr", "shipmentId", "shipmentID", "shipment", "orderNumber"])
+    );
+
+    if (isNewBolPage === false && !hasStrongBolFields({ psNumber, srNumber, cityProvince, skids })) {
+      return [];
+    }
 
     if (!pageNumber) {
       return [];
@@ -315,7 +322,7 @@ function normalizeRows(value: unknown, pageNumbers: number[]): GarlandCarrierMan
       {
         carrier,
         pageNumber,
-        srNumber: normalizeDigits(readFirstValue(record, ["srNumber", "sr", "shipmentId", "shipmentID", "shipment", "orderNumber"])),
+        srNumber,
         psNumber: psNumber ?? "",
         cityProvince,
         skids,
@@ -351,9 +358,91 @@ function shouldRunFallback(primaryRows: GarlandCarrierManifestRow[], parsedRows:
     const carrierText = normalizeNullableText(
       readFirstValue(record, ["carrier", "carrierName", "carrierText", "carrierRaw", "carrierBox", "carrierValue"])
     );
+    const psNumber = normalizeManifestPsNumber(
+      readFirstValue(record, ["psNumber", "ps", "preShipper", "reference", "references", "referenceNumber", "psReference"])
+    );
+    const srNumber = normalizeDigits(
+      readFirstValue(record, ["srNumber", "sr", "shipmentId", "shipmentID", "shipment", "orderNumber"])
+    );
+    const cityProvince = normalizeText(
+      readFirstValue(record, [
+        "cityProvince",
+        "cityProv",
+        "city",
+        "destination",
+        "consignee",
+        "consigneeCity",
+        "consigneeCityProvince",
+        "shipToCityProvince"
+      ])
+    );
+    const skids = normalizeSkids(
+      readFirstValue(record, ["skids", "pallets", "pallet", "palletCount", "totalPallets", "totalSkids", "packageTotal"])
+    );
 
-    return isNewBolPage !== false && !carrierText;
+    return !carrierText || (isNewBolPage === false && hasStrongBolFields({ psNumber, srNumber, cityProvince, skids }));
   });
+}
+
+function buildRowDiagnostics(rows: unknown[]) {
+  return rows.slice(0, 5).map((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return { shape: typeof entry };
+    }
+
+    const record = entry as Record<string, unknown>;
+    const psNumber = normalizeManifestPsNumber(
+      readFirstValue(record, ["psNumber", "ps", "preShipper", "reference", "references", "referenceNumber", "psReference"])
+    );
+    const srNumber = normalizeDigits(
+      readFirstValue(record, ["srNumber", "sr", "shipmentId", "shipmentID", "shipment", "orderNumber"])
+    );
+    const cityProvince = normalizeText(
+      readFirstValue(record, [
+        "cityProvince",
+        "cityProv",
+        "city",
+        "destination",
+        "consignee",
+        "consigneeCity",
+        "consigneeCityProvince",
+        "shipToCityProvince"
+      ])
+    );
+    const skids = normalizeSkids(
+      readFirstValue(record, ["skids", "pallets", "pallet", "palletCount", "totalPallets", "totalSkids", "packageTotal"])
+    );
+    const isNewBolPage = readBooleanLike(
+      readFirstValue(record, ["isNewBolPage", "isNewBol", "newBol", "newBolPage", "headerPresent", "newBillOfLading"])
+    );
+
+    return {
+      keys: Object.keys(record).slice(0, 12),
+      carrier: normalizeCarrier(
+        readFirstValue(record, ["carrier", "carrierName", "carrierText", "carrierRaw", "carrierBox", "carrierValue"])
+      ),
+      isNewBolPage,
+      hasPs: Boolean(psNumber),
+      hasSr: Boolean(srNumber),
+      hasCity: cityProvince.length > 0,
+      hasSkids: skids !== null,
+      hasStrongBolFields: hasStrongBolFields({ psNumber, srNumber, cityProvince, skids })
+    };
+  });
+}
+
+function hasStrongBolFields({
+  psNumber,
+  srNumber,
+  cityProvince,
+  skids
+}: {
+  psNumber: string | null;
+  srNumber: string;
+  cityProvince: string;
+  skids: number | null;
+}) {
+  return Boolean(psNumber && (srNumber || cityProvince || skids !== null));
 }
 
 function readRowsFromParsedResponse(value: unknown): unknown[] {
