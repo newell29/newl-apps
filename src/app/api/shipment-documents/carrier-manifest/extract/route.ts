@@ -7,7 +7,8 @@ import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
 const OPENAI_API_BASE_URL = "https://api.openai.com/v1";
-const DEFAULT_VISION_MODEL = process.env.OPENAI_DOCUMENT_VISION_MODEL?.trim() || "gpt-4.1-mini";
+const DEFAULT_VISION_MODEL = process.env.OPENAI_DOCUMENT_VISION_MODEL?.trim() || "gpt-4o";
+const FALLBACK_VISION_MODEL = process.env.OPENAI_DOCUMENT_VISION_FALLBACK_MODEL?.trim() || "gpt-4.1-mini";
 
 type ExtractionRequest = {
   images: Array<{
@@ -36,77 +37,49 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Provide at least one BOL page image." }, { status: 400 });
   }
 
-  const requestBody = JSON.stringify({
-    model: DEFAULT_VISION_MODEL,
-    response_format: {
-      type: "json_object"
-    },
-    messages: [
-      {
-        role: "system",
-        content:
-          "You extract Garland Canada carrier loading-manifest rows from labeled BOL field-crop images. Return JSON only. The key fields are carrier, PS/reference number, consignee city/province, and total pallets. Include a row for every page where the Carrier box contains Midland, Speedy, Suretrack, Sure Track, or Suretrak. Ignore other carriers. Do not drop a matching carrier page just because another field is uncertain."
-      },
-      {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: buildPrompt(images.map((image) => image.pageNumber))
-          },
-          ...images.flatMap((image) => [
-            {
-              type: "text" as const,
-              text: `BOL page ${image.pageNumber}: inspect this page.`
-            },
-            {
-              type: "image_url" as const,
-              image_url: {
-                url: image.imageDataUrl,
-                detail: "high" as const
-              }
-            }
-          ])
-        ]
-      }
-    ]
-  });
+  let primaryRows: GarlandCarrierManifestRow[];
 
-  const response = await fetch(`${OPENAI_API_BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${apiKey}`
-    },
-    body: requestBody,
-    cache: "no-store"
-  });
-
-  const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
-
-  if (!response.ok || !json) {
+  try {
+    const primary = await runOpenAiExtraction({
+      apiKey,
+      images,
+      model: DEFAULT_VISION_MODEL,
+      prompt: buildPrompt(images.map((image) => image.pageNumber)),
+      systemPrompt:
+        "You extract Garland Canada carrier loading-manifest rows from labeled BOL field-crop images. Return JSON only. The key fields are carrier, PS/reference number, consignee city/province, and total pallets. Include a row for every page where the Carrier box contains Midland, Speedy, Suretrack, Sure Track, or Suretrak. Ignore other carriers. Do not drop a matching carrier page just because another field is uncertain."
+    });
+    primaryRows = normalizeRows(readRowsFromParsedResponse(primary.parsed), images.map((image) => image.pageNumber));
+  } catch (error) {
     return NextResponse.json(
-      {
-        error:
-          readOpenAiError(json) ??
-          `Carrier manifest extraction failed with status ${response.status}. Request size was ${formatByteSize(requestBody.length)}.`
-      },
+      { error: error instanceof Error ? error.message : "Carrier manifest extraction failed." },
       { status: 502 }
     );
   }
 
-  const content = readAssistantContent(json);
-  let parsed: unknown;
+  let fallbackRows: GarlandCarrierManifestRow[] = [];
+  let fallbackError: string | null = null;
 
-  try {
-    parsed = JSON.parse(content) as unknown;
-  } catch {
-    return NextResponse.json({ error: "OpenAI returned non-JSON carrier manifest output." }, { status: 502 });
+  if (primaryRows.length === 0) {
+    try {
+      const fallback = await runOpenAiExtraction({
+        apiKey,
+        images,
+        model: FALLBACK_VISION_MODEL,
+        prompt: buildFallbackPrompt(images.map((image) => image.pageNumber)),
+        systemPrompt:
+          "You are doing OCR on labeled Garland BOL crop sheets. Return JSON only. Be literal: read the text visible in the labeled boxes. Do not return an empty result when a target carrier is visible."
+      });
+      fallbackRows = normalizeRows(readRowsFromParsedResponse(fallback.parsed), images.map((image) => image.pageNumber));
+    } catch (error) {
+      fallbackError = error instanceof Error ? error.message : "Fallback carrier manifest extraction failed.";
+    }
   }
 
   return NextResponse.json({
-    model: DEFAULT_VISION_MODEL,
-    rows: normalizeRows(readRowsFromParsedResponse(parsed), images.map((image) => image.pageNumber))
+    model: fallbackRows.length > 0 ? FALLBACK_VISION_MODEL : DEFAULT_VISION_MODEL,
+    fallbackUsed: fallbackRows.length > 0,
+    fallbackError,
+    rows: fallbackRows.length > 0 ? fallbackRows : primaryRows
   });
 }
 
@@ -135,6 +108,96 @@ function buildPrompt(pageNumbers: number[]) {
     "skids should be a number when visible, otherwise null. Pallets count as skids for this manifest.",
     "Return JSON exactly like: {\"rows\":[{\"pageNumber\":1,\"carrier\":\"SURETRACK\",\"srNumber\":\"810036\",\"psNumber\":\"PS209606\",\"cityProvince\":\"CALGARY, AB\",\"skids\":2,\"confidence\":\"HIGH\",\"notes\":\"short note\"}]}"
   ].join(" ");
+}
+
+function buildFallbackPrompt(pageNumbers: number[]) {
+  return [
+    "Each image is one labeled crop sheet from a Garland BOL page.",
+    `Page numbers: ${pageNumbers.join(", ")}.`,
+    "For each page, read the visible text in these labels: Carrier box, References / PS box, Shipment ID, Consignee city/province, Total pallets.",
+    "Return a row if Carrier box contains SURETRACK, SURETRAK, SURE TRACK, SPEEDY, or MIDLAND.",
+    "For non-target carriers, return no row.",
+    "For continuation pages where Carrier box does not show a new carrier value, return no row.",
+    "Map SURETRACK/SURETRAK/SURE TRACK to SURETRACK, SPEEDY to SPEEDY, MIDLAND to MIDLAND.",
+    "Output exactly this JSON shape: {\"rows\":[{\"pageNumber\":1,\"carrier\":\"SURETRACK\",\"srNumber\":\"810036\",\"psNumber\":\"PS209606\",\"cityProvince\":\"CALGARY, AB\",\"skids\":2,\"confidence\":\"HIGH\",\"notes\":\"read from fallback OCR\"}]}."
+  ].join(" ");
+}
+
+async function runOpenAiExtraction({
+  apiKey,
+  images,
+  model,
+  prompt,
+  systemPrompt
+}: {
+  apiKey: string;
+  images: Array<{ pageNumber: number; imageDataUrl: string }>;
+  model: string;
+  prompt: string;
+  systemPrompt: string;
+}) {
+  const requestBody = JSON.stringify({
+    model,
+    response_format: {
+      type: "json_object"
+    },
+    messages: [
+      {
+        role: "system",
+        content: systemPrompt
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: prompt
+          },
+          ...images.flatMap((image) => [
+            {
+              type: "text" as const,
+              text: `BOL page ${image.pageNumber}: inspect this crop sheet.`
+            },
+            {
+              type: "image_url" as const,
+              image_url: {
+                url: image.imageDataUrl,
+                detail: "high" as const
+              }
+            }
+          ])
+        ]
+      }
+    ]
+  });
+
+  const response = await fetch(`${OPENAI_API_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`
+    },
+    body: requestBody,
+    cache: "no-store"
+  });
+  const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+
+  if (!response.ok || !json) {
+    throw new Error(
+      readOpenAiError(json) ??
+        `Carrier manifest extraction failed with status ${response.status}. Request size was ${formatByteSize(requestBody.length)}.`
+    );
+  }
+
+  const content = readAssistantContent(json);
+
+  try {
+    return {
+      parsed: JSON.parse(content) as unknown
+    };
+  } catch {
+    throw new Error("OpenAI returned non-JSON carrier manifest output.");
+  }
 }
 
 function normalizeRows(value: unknown, pageNumbers: number[]): GarlandCarrierManifestRow[] {
