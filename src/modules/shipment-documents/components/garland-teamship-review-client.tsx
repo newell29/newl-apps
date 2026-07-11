@@ -26,6 +26,8 @@ export function GarlandTeamshipReviewClient() {
   const [orders, setOrders] = useState<GarlandPdfShippingOrder[]>([]);
   const [review, setReview] = useState<GarlandTeamshipReviewResponse | null>(null);
   const [dailyOrderCount, setDailyOrderCount] = useState<number | null>(null);
+  const [teamshipEmail, setTeamshipEmail] = useState("");
+  const [teamshipPassword, setTeamshipPassword] = useState("");
   const [status, setStatus] = useState("Upload the Garland daily shipping-order PDF to begin.");
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -95,7 +97,11 @@ export function GarlandTeamshipReviewClient() {
       const response = await fetch("/api/shipment-documents/teamship-review/run", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ shipmentDate, orders: extractedOrders })
+        body: JSON.stringify({
+          shipmentDate,
+          orders: extractedOrders,
+          teamshipCredentials: getOneTimeCredentials(teamshipEmail, teamshipPassword)
+        })
       });
       const json = (await response.json().catch(() => null)) as unknown;
 
@@ -129,7 +135,10 @@ export function GarlandTeamshipReviewClient() {
       const response = await fetch("/api/shipment-documents/teamship-review/daily-orders", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ shipmentDate })
+        body: JSON.stringify({
+          shipmentDate,
+          teamshipCredentials: getOneTimeCredentials(teamshipEmail, teamshipPassword)
+        })
       });
       const json = (await response.json().catch(() => null)) as DailyOrdersResponse | null;
 
@@ -196,6 +205,43 @@ export function GarlandTeamshipReviewClient() {
             {error}
           </div>
         ) : null}
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="grid gap-4 xl:grid-cols-[0.9fr,1.1fr]">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">One-time Teamship login</h2>
+            <p className="mt-1 text-sm leading-6 text-mutedForeground">
+              Optional fallback for manual testing when server Teamship credentials are not configured. These values are
+              sent only with the current manual request, are not saved to Newl Apps history, and are not used by the
+              cron-ready daily sync endpoint.
+            </p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="space-y-2 text-sm font-semibold text-foreground">
+              Teamship email
+              <input
+                type="email"
+                autoComplete="off"
+                value={teamshipEmail}
+                onChange={(event) => setTeamshipEmail(event.target.value)}
+                placeholder="name@example.com"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="space-y-2 text-sm font-semibold text-foreground">
+              Teamship password
+              <input
+                type="password"
+                autoComplete="off"
+                value={teamshipPassword}
+                onChange={(event) => setTeamshipPassword(event.target.value)}
+                placeholder="Only used for this manual request"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              />
+            </label>
+          </div>
+        </div>
       </section>
 
       <section className="grid gap-4 lg:grid-cols-3">
@@ -458,4 +504,22 @@ function getTodayInputValue() {
   const now = new Date();
   const offsetMs = now.getTimezoneOffset() * 60 * 1000;
   return new Date(now.getTime() - offsetMs).toISOString().slice(0, 10);
+}
+
+function getOneTimeCredentials(email: string, password: string) {
+  const trimmedEmail = email.trim();
+  const trimmedPassword = password.trim();
+
+  if (!trimmedEmail && !trimmedPassword) {
+    return undefined;
+  }
+
+  if (!trimmedEmail || !trimmedPassword) {
+    return undefined;
+  }
+
+  return {
+    email: trimmedEmail,
+    password: trimmedPassword
+  };
 }

@@ -10,7 +10,13 @@ const DEFAULT_MAX_PAGES = 12;
 type TeamshipFetchOptions = {
   shipmentDate?: string | null;
   srNumbers?: string[];
+  credentials?: TeamshipRuntimeCredentials | null;
   fetchImpl?: typeof fetch;
+};
+
+export type TeamshipRuntimeCredentials = {
+  email: string;
+  password: string;
 };
 
 type TeamshipLoginResponse = {
@@ -45,9 +51,10 @@ export function getTeamshipConfigurationStatus() {
 export async function fetchTeamshipShippingOrdersForReview({
   shipmentDate,
   srNumbers = [],
+  credentials = null,
   fetchImpl = fetch
 }: TeamshipFetchOptions): Promise<TeamshipShippingOrderDetail[]> {
-  const token = await loginToTeamship(fetchImpl);
+  const token = await loginToTeamship(fetchImpl, credentials);
   const targetSrNumbers = new Set(srNumbers.map(normalizeIdentifier).filter(Boolean));
   const details = new Map<string, TeamshipShippingOrderDetail>();
   const pageLimit = getTeamshipPageLimit();
@@ -116,9 +123,9 @@ function mergeTeamshipDetailWithSummary(
   };
 }
 
-async function loginToTeamship(fetchImpl: typeof fetch) {
-  const email = getTeamshipEmail();
-  const password = getTeamshipPassword();
+async function loginToTeamship(fetchImpl: typeof fetch, credentials: TeamshipRuntimeCredentials | null) {
+  const email = credentials?.email.trim() || getTeamshipEmail();
+  const password = credentials?.password.trim() || getTeamshipPassword();
 
   if (!email || !password) {
     throw new Error("Teamship credentials are not configured. Add TEAMSHIP_EMAIL and TEAMSHIP_PASSWORD.");
