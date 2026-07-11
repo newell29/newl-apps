@@ -330,21 +330,37 @@ function mergeText(left: string, right: string) {
 export function buildGarlandTeamshipReview(
   pdfOrders: GarlandPdfShippingOrder[],
   teamshipOrders: TeamshipShippingOrderDetail[],
-  teamshipAlerts: TeamshipAlertOrder[] = []
+  teamshipAlerts: TeamshipAlertOrder[] = [],
+  options: {
+    includeUnmatchedTeamshipOrders?: boolean;
+    skippedAlreadyReviewedOrders?: GarlandPdfShippingOrder[];
+  } = {}
 ): GarlandTeamshipReviewResponse {
   const alertByShipmentId = new Map(
     teamshipAlerts.map((alert) => [normalizeIdentifier(alert.srNumber), alert] as const).filter(([shipmentId]) => shipmentId.length > 0)
   );
-  const teamshipByShipmentId = new Map(
-    teamshipOrders
-      .map((order) => [normalizeIdentifier(readTeamshipShipmentId(order)), order] as const)
-      .filter(([shipmentId]) => shipmentId.length > 0)
-  );
+  const teamshipByShipmentId = groupTeamshipOrdersByShipmentId(teamshipOrders);
   const reviews = pdfOrders.map((pdfOrder) => {
     const teamshipOrder = teamshipByShipmentId.get(normalizeIdentifier(pdfOrder.srNumber)) ?? null;
     const alert = alertByShipmentId.get(normalizeIdentifier(pdfOrder.srNumber)) ?? null;
     return buildOrderReview(pdfOrder, teamshipOrder, alert);
   });
+  const skippedAlreadyReviewedReviews = (options.skippedAlreadyReviewedOrders ?? []).map(buildSkippedAlreadyReviewedReview);
+  const skippedShipmentIds = new Set(skippedAlreadyReviewedReviews.map((review) => normalizeIdentifier(review.srNumber)));
+
+  if (options.includeUnmatchedTeamshipOrders) {
+    const matchedPdfShipmentIds = new Set(pdfOrders.map((order) => normalizeIdentifier(order.srNumber)));
+
+    for (const [shipmentId, teamshipOrder] of teamshipByShipmentId) {
+      if (!shipmentId || matchedPdfShipmentIds.has(shipmentId) || skippedShipmentIds.has(shipmentId)) {
+        continue;
+      }
+
+      reviews.push(buildNoPdfReview(teamshipOrder));
+    }
+  }
+
+  reviews.push(...skippedAlreadyReviewedReviews);
 
   return {
     summary: summarizeReviews(pdfOrders, reviews),
@@ -353,6 +369,22 @@ export function buildGarlandTeamshipReview(
     teamshipAlerts,
     fetchedAt: new Date().toISOString()
   };
+}
+
+function groupTeamshipOrdersByShipmentId(teamshipOrders: TeamshipShippingOrderDetail[]) {
+  const teamshipByShipmentId = new Map<string, TeamshipShippingOrderDetail>();
+
+  for (const order of teamshipOrders) {
+    const shipmentId = normalizeIdentifier(readTeamshipShipmentId(order));
+
+    if (!shipmentId || teamshipByShipmentId.has(shipmentId)) {
+      continue;
+    }
+
+    teamshipByShipmentId.set(shipmentId, order);
+  }
+
+  return teamshipByShipmentId;
 }
 
 function buildOrderReview(
@@ -434,6 +466,86 @@ function buildOrderReview(
     issueCount,
     alert,
     fields
+  };
+}
+
+function buildNoPdfReview(teamshipOrder: TeamshipShippingOrderDetail): GarlandTeamshipOrderReview {
+  const srNumber = stringifyValue(readTeamshipShipmentId(teamshipOrder)) ?? "UNKNOWN";
+
+  return {
+    srNumber,
+    psNumber: readTeamshipPsNumber(teamshipOrder) ?? "No PDF",
+    pageNumbers: [],
+    status: "NO_PDF",
+    teamshipOrderId: String(teamshipOrder.id ?? teamshipOrder.order_id ?? ""),
+    teamshipUrl: teamshipOrder.url ?? null,
+    issueCount: 1,
+    alert: null,
+    fields: [
+      {
+        key: "uploadedPdf",
+        label: "Uploaded Garland PDF",
+        status: "MISSING",
+        pdfValue: null,
+        teamshipValue: srNumber,
+        message: "Teamship has this shipping order for the selected date, but no matching Garland PDF order was uploaded."
+      },
+      {
+        key: "carrier",
+        label: "Carrier / ship via",
+        status: "INFO",
+        pdfValue: null,
+        teamshipValue: readTeamshipCarrier(teamshipOrder),
+        message: "Teamship value shown for triage."
+      },
+      {
+        key: "ship_to_name",
+        label: "Ship-to name",
+        status: "INFO",
+        pdfValue: null,
+        teamshipValue: readTeamshipShipToName(teamshipOrder),
+        message: "Teamship value shown for triage."
+      },
+      {
+        key: "ship_to_city",
+        label: "Ship-to city",
+        status: "INFO",
+        pdfValue: null,
+        teamshipValue: readTeamshipCity(teamshipOrder),
+        message: "Teamship value shown for triage."
+      },
+      {
+        key: "ship_to_state",
+        label: "Ship-to province/state",
+        status: "INFO",
+        pdfValue: null,
+        teamshipValue: readTeamshipState(teamshipOrder),
+        message: "Teamship value shown for triage."
+      }
+    ]
+  };
+}
+
+function buildSkippedAlreadyReviewedReview(pdfOrder: GarlandPdfShippingOrder): GarlandTeamshipOrderReview {
+  return {
+    srNumber: pdfOrder.srNumber,
+    psNumber: pdfOrder.psNumber,
+    pageNumbers: pdfOrder.pageNumbers,
+    status: "SKIPPED_ALREADY_REVIEWED",
+    teamshipOrderId: null,
+    teamshipUrl: null,
+    issueCount: 0,
+    alert: null,
+    fields: [
+      {
+        key: "alreadyReviewed",
+        label: "Previous review",
+        status: "INFO",
+        pdfValue: pdfOrder.srNumber,
+        teamshipValue: "Already saved",
+        message: "This SR already has a saved Teamship review for this shipment date, so it was not re-verified."
+      }
+    ]
   };
 }
 
@@ -666,7 +778,9 @@ function summarizeReviews(
     passedCount: reviews.filter((review) => review.status === "PASS").length,
     failedCount: reviews.filter((review) => review.status === "FAIL").length,
     missingTeamshipCount: reviews.filter((review) => review.status === "MISSING_TEAMSHIP").length,
-    pendingTeamshipCount: reviews.filter((review) => review.status === "PENDING_TEAMSHIP").length
+    pendingTeamshipCount: reviews.filter((review) => review.status === "PENDING_TEAMSHIP").length,
+    noPdfCount: reviews.filter((review) => review.status === "NO_PDF").length,
+    skippedAlreadyReviewedCount: reviews.filter((review) => review.status === "SKIPPED_ALREADY_REVIEWED").length
   };
 }
 
@@ -762,6 +876,25 @@ function readTeamshipFreightTerms(order: TeamshipShippingOrderDetail) {
 
 function readTeamshipInstructions(order: TeamshipShippingOrderDetail) {
   return order.shipping_instructions ?? stringifyValue(order.edi_field_4);
+}
+
+function readTeamshipCarrier(order: TeamshipShippingOrderDetail) {
+  return (
+    order.carrier ??
+    order.ship_method ??
+    order.shipping_carrier ??
+    order.method ??
+    order.carrier_name ??
+    order.carrier_value ??
+    order.shipping_info?.carrier ??
+    order.shipping_info?.method ??
+    null
+  );
+}
+
+function readTeamshipPsNumber(order: TeamshipShippingOrderDetail) {
+  const candidates = collectTeamshipStrings(order);
+  return candidates.find((candidate) => PS_PATTERN.test(candidate))?.match(PS_PATTERN)?.[0].toUpperCase() ?? null;
 }
 
 function collectTeamshipStrings(order: TeamshipShippingOrderDetail) {

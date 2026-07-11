@@ -36,6 +36,7 @@ export type TeamshipReviewHistoryRun = {
   failedCount: number;
   missingTeamshipCount: number;
   pendingTeamshipCount: number;
+  noPdfCount: number;
   alertDigestOrderCount: number;
   psNumbers: string[];
   srNumbers: string[];
@@ -74,6 +75,12 @@ type TeamshipReviewRunQueryClient = typeof prisma & {
     create(args: { data: Record<string, unknown> }): Promise<unknown>;
     updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<{ count: number }>;
   };
+  teamshipReviewOrder: {
+    findMany(args: {
+      where: Record<string, unknown>;
+      select: { srNumber: true };
+    }): Promise<Array<{ srNumber: string }>>;
+  };
 };
 
 type TeamshipReviewRunRecord = {
@@ -87,6 +94,7 @@ type TeamshipReviewRunRecord = {
   failedCount: number;
   missingTeamshipCount: number;
   pendingTeamshipCount: number;
+  noPdfCount: number;
   alertDigestOrderCount: number;
   createdAt: Date;
   createdBy: {
@@ -182,6 +190,7 @@ export async function getTeamshipReviewHistory(
         failedCount: true,
         missingTeamshipCount: true,
         pendingTeamshipCount: true,
+        noPdfCount: true,
         alertDigestOrderCount: true,
         createdAt: true,
         createdBy: {
@@ -236,10 +245,10 @@ export async function saveTeamshipReviewRun(input: SaveTeamshipReviewRunInput) {
       status: orderReview.status,
       teamshipOrderId: orderReview.teamshipOrderId,
       teamshipUrl: orderReview.teamshipUrl,
-      carrier: readFieldValue(orderReview, "shipVia") ?? pdfOrder?.shipVia ?? null,
-      shipToName: pdfOrder?.shipToName ?? null,
-      city: pdfOrder?.shipToCity ?? null,
-      state: pdfOrder?.shipToState ?? null,
+      carrier: readFieldValue(orderReview, "shipVia") ?? readFieldValue(orderReview, "carrier", "teamship") ?? pdfOrder?.shipVia ?? null,
+      shipToName: pdfOrder?.shipToName ?? readFieldValue(orderReview, "ship_to_name", "teamship") ?? null,
+      city: pdfOrder?.shipToCity ?? readFieldValue(orderReview, "ship_to_city", "teamship") ?? null,
+      state: pdfOrder?.shipToState ?? readFieldValue(orderReview, "ship_to_state", "teamship") ?? null,
       shipToPo: pdfOrder?.shipToPo ?? null,
       pageNumbers: orderReview.pageNumbers as Prisma.InputJsonValue,
       pdfOrder: (pdfOrder ?? null) as Prisma.InputJsonValue,
@@ -264,6 +273,7 @@ export async function saveTeamshipReviewRun(input: SaveTeamshipReviewRunInput) {
       failedCount: review.summary.failedCount,
       missingTeamshipCount: review.summary.missingTeamshipCount,
       pendingTeamshipCount: review.summary.pendingTeamshipCount,
+      noPdfCount: review.summary.noPdfCount,
       alertDigestOrderCount: input.alertDigestOrderCount,
       summary: review.summary as Prisma.InputJsonValue,
       extractedOrders: review.pdfOrders as Prisma.InputJsonValue,
@@ -297,6 +307,35 @@ export async function deleteTeamshipReviewRun(context: AuthenticatedContext, run
   }
 }
 
+export async function getReviewedTeamshipSrNumbers(context: AuthenticatedContext, shipmentDate: Date, srNumbers: string[]) {
+  const normalizedSrNumbers = Array.from(new Set(srNumbers.map((value) => value.trim().toUpperCase()).filter(Boolean)));
+
+  if (normalizedSrNumbers.length === 0) {
+    return new Set<string>();
+  }
+
+  const client = prisma as TeamshipReviewRunQueryClient;
+  const reviewedOrders = await client.teamshipReviewOrder.findMany({
+    where: {
+      tenantId: context.tenantId,
+      srNumber: {
+        in: normalizedSrNumbers
+      },
+      run: {
+        tenantId: context.tenantId,
+        workflowKey: WORKFLOW_KEY,
+        shipmentDate,
+        deletedAt: null
+      }
+    },
+    select: {
+      srNumber: true
+    }
+  });
+
+  return new Set(reviewedOrders.map((order) => order.srNumber.trim().toUpperCase()));
+}
+
 function mapTeamshipReviewRun(record: TeamshipReviewRunRecord): TeamshipReviewHistoryRun {
   const orders = record.orders.map(mapTeamshipReviewOrder);
 
@@ -311,6 +350,7 @@ function mapTeamshipReviewRun(record: TeamshipReviewRunRecord): TeamshipReviewHi
     failedCount: record.failedCount,
     missingTeamshipCount: record.missingTeamshipCount,
     pendingTeamshipCount: record.pendingTeamshipCount,
+    noPdfCount: record.noPdfCount,
     alertDigestOrderCount: record.alertDigestOrderCount,
     psNumbers: orders.map((order) => order.psNumber).filter(Boolean),
     srNumbers: orders.map((order) => order.srNumber).filter(Boolean),
@@ -341,7 +381,7 @@ function mapTeamshipReviewOrder(record: TeamshipReviewOrderRecord): TeamshipRevi
 }
 
 function normalizeReviewStatus(status: string): GarlandTeamshipOrderReview["status"] {
-  return ["PASS", "FAIL", "MISSING_TEAMSHIP", "PENDING_TEAMSHIP"].includes(status)
+  return ["PASS", "FAIL", "MISSING_TEAMSHIP", "PENDING_TEAMSHIP", "NO_PDF", "SKIPPED_ALREADY_REVIEWED"].includes(status)
     ? (status as GarlandTeamshipOrderReview["status"])
     : "FAIL";
 }
@@ -350,9 +390,10 @@ function buildOrderKey(psNumber: string, srNumber: string) {
   return `${psNumber.trim().toUpperCase()}::${srNumber.trim().toUpperCase()}`;
 }
 
-function readFieldValue(orderReview: GarlandTeamshipOrderReview, fieldKey: string) {
+function readFieldValue(orderReview: GarlandTeamshipOrderReview, fieldKey: string, source: "pdf" | "teamship" = "pdf") {
   const field = orderReview.fields.find((candidate) => candidate.key === fieldKey);
-  return field?.pdfValue?.trim() || null;
+  const value = source === "pdf" ? field?.pdfValue : field?.teamshipValue;
+  return value?.trim() || null;
 }
 
 function buildSearchText(input: SaveTeamshipReviewRunInput, orderRows: Array<Record<string, unknown>>) {

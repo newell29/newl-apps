@@ -833,6 +833,7 @@ model TeamshipReviewRun {
   failedCount           Int
   missingTeamshipCount  Int
   pendingTeamshipCount  Int
+  noPdfCount            Int       @default(0)
   alertDigestOrderCount Int       @default(0)
   summary               Json
   extractedOrders       Json

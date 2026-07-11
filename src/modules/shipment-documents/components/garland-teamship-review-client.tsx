@@ -34,7 +34,7 @@ type TeamshipReviewHistoryOrder = {
   id: string;
   psNumber: string;
   srNumber: string;
-  status: "PASS" | "FAIL" | "MISSING_TEAMSHIP" | "PENDING_TEAMSHIP";
+  status: "PASS" | "FAIL" | "MISSING_TEAMSHIP" | "PENDING_TEAMSHIP" | "NO_PDF" | "SKIPPED_ALREADY_REVIEWED";
   teamshipOrderId: string | null;
   carrier: string | null;
   shipToName: string | null;
@@ -55,6 +55,7 @@ type TeamshipReviewHistoryRun = {
   failedCount: number;
   missingTeamshipCount: number;
   pendingTeamshipCount: number;
+  noPdfCount: number;
   alertDigestOrderCount: number;
   psNumbers: string[];
   srNumbers: string[];
@@ -199,6 +200,8 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       setReview(json);
       setStatus(
         `Review complete: ${json.summary.passedCount} green, ${json.summary.pendingTeamshipCount} pending Teamship creation, ${json.summary.failedCount} with discrepancies, ${json.summary.missingTeamshipCount} missing without an alert.`
+          + (json.summary.noPdfCount > 0 ? ` ${json.summary.noPdfCount} Teamship order(s) had no uploaded PDF.` : "")
+          + (json.summary.skippedAlreadyReviewedCount > 0 ? ` ${json.summary.skippedAlreadyReviewedCount} already-reviewed order(s) were skipped.` : "")
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to run the Teamship review.");
@@ -497,8 +500,8 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
           value={review ? `${review.summary.passedCount}/${review.summary.pdfOrderCount} green` : "Not run"}
           detail={
             review
-              ? `${review.summary.pendingTeamshipCount} pending, ${review.summary.failedCount} discrepancy, ${review.summary.missingTeamshipCount} missing without alert.`
-              : "Run the review after uploading the Garland PDF."
+              ? `${review.summary.pendingTeamshipCount} pending, ${review.summary.failedCount} discrepancy, ${review.summary.missingTeamshipCount} missing Teamship, ${review.summary.noPdfCount} no PDF, ${review.summary.skippedAlreadyReviewedCount} skipped.`
+              : "Pull Teamship orders, upload the Garland PDF, then run the review."
           }
         />
       </section>
@@ -621,8 +624,9 @@ function ReviewResultsTable({
         <div>
           <h2 className="text-base font-semibold text-foreground">Teamship review results</h2>
           <p className="mt-1 text-sm text-mutedForeground">
-            Green orders have no detected discrepancies. Amber orders are known Teamship alert items that have not been
-            pushed into Teamship yet. Red orders need CSR review before Stage 2 automation updates them.
+            Green orders have no detected discrepancies. Amber orders are pending Teamship creation or have no uploaded
+            PDF to inspect. Red orders need CSR review before Stage 2 automation updates them. Gray orders were already
+            reviewed and skipped.
           </p>
           {saveStatus ? <p className="mt-2 text-sm font-medium text-mutedForeground">{saveStatus}</p> : null}
         </div>
@@ -643,13 +647,17 @@ function ReviewResultsTable({
                 <span className="font-semibold text-foreground">
                   {orderReview.psNumber} / {orderReview.srNumber}
                 </span>
-                <span className="ml-3 text-sm text-mutedForeground">PDF page(s) {orderReview.pageNumbers.join(", ")}</span>
+                <span className="ml-3 text-sm text-mutedForeground">
+                  {orderReview.pageNumbers.length > 0 ? `PDF page(s) ${orderReview.pageNumbers.join(", ")}` : "No PDF page uploaded"}
+                </span>
               </div>
               <span
                 className={[
                   "rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide",
                   orderReview.status === "PASS"
                     ? "bg-success/10 text-success"
+                    : orderReview.status === "SKIPPED_ALREADY_REVIEWED"
+                      ? "bg-muted text-mutedForeground"
                     : orderReview.status === "MISSING_TEAMSHIP"
                       ? "bg-danger/10 text-danger"
                       : "bg-warning/15 text-warning"
@@ -657,8 +665,12 @@ function ReviewResultsTable({
               >
                 {orderReview.status === "PASS"
                   ? "Green"
+                  : orderReview.status === "SKIPPED_ALREADY_REVIEWED"
+                    ? "Already reviewed"
                   : orderReview.status === "MISSING_TEAMSHIP"
                     ? "Missing Teamship"
+                    : orderReview.status === "NO_PDF"
+                      ? "No PDF uploaded"
                     : orderReview.status === "PENDING_TEAMSHIP"
                       ? "Pending Teamship"
                       : `${orderReview.issueCount} issue${orderReview.issueCount === 1 ? "" : "s"}`}
@@ -831,6 +843,8 @@ function TeamshipReviewHistorySection({
                     <span className={historyRunPillClass(run)}>
                       {run.failedCount + run.missingTeamshipCount > 0
                         ? `${run.failedCount + run.missingTeamshipCount} need review`
+                        : run.noPdfCount > 0
+                          ? `${run.noPdfCount} no PDF`
                         : run.pendingTeamshipCount > 0
                           ? `${run.pendingTeamshipCount} pending`
                           : "Approved"}
@@ -850,6 +864,7 @@ function TeamshipReviewHistorySection({
                   </p>
                   <p className="mt-1">
                     {run.failedCount} discrepancies · {run.pendingTeamshipCount} pending · {run.missingTeamshipCount} missing
+                    {run.noPdfCount > 0 ? ` · ${run.noPdfCount} no PDF` : ""}
                   </p>
                   <p className="mt-1 break-words">SRs: {run.srNumbers.slice(0, 16).join(", ")}</p>
                 </div>
@@ -952,7 +967,7 @@ function historyRunPillClass(run: TeamshipReviewHistoryRun) {
     return `${base} bg-danger/10 text-danger`;
   }
 
-  if (run.pendingTeamshipCount > 0) {
+  if (run.pendingTeamshipCount > 0 || run.noPdfCount > 0) {
     return `${base} bg-warning/15 text-warning`;
   }
 
@@ -966,7 +981,11 @@ function reviewStatusPillClass(status: TeamshipReviewHistoryOrder["status"]) {
     return `${base} bg-success/10 text-success`;
   }
 
-  if (status === "PENDING_TEAMSHIP") {
+  if (status === "SKIPPED_ALREADY_REVIEWED") {
+    return `${base} bg-muted text-mutedForeground`;
+  }
+
+  if (status === "PENDING_TEAMSHIP" || status === "NO_PDF") {
     return `${base} bg-warning/15 text-warning`;
   }
 
@@ -980,6 +999,14 @@ function formatReviewStatus(status: TeamshipReviewHistoryOrder["status"], mismat
 
   if (status === "PENDING_TEAMSHIP") {
     return "Pending";
+  }
+
+  if (status === "NO_PDF") {
+    return "No PDF";
+  }
+
+  if (status === "SKIPPED_ALREADY_REVIEWED") {
+    return "Skipped";
   }
 
   if (status === "MISSING_TEAMSHIP") {
