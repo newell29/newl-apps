@@ -141,6 +141,7 @@ NEWLS 2604816191908 1.00 ( )`
       record_no: "PS210206",
       carrier: "Midland Transport",
       po_number: "0000037656",
+      edi_field_3: "PPADD-CD",
       ship_to_name: "J.R. MAHONEY LTD.",
       ship_to_address_1: "1810 KINGS ROAD",
       ship_to_city: "SYDNEY",
@@ -172,6 +173,7 @@ NEWLS 2604816191908 1.00 ( )`
       record_no: "PS210206",
       carrier: "Speedy",
       po_number: "WRONG-PO",
+      edi_field_3: "PPADD-CD",
       ship_to_name: "J.R. MAHONEY LTD.",
       ship_to_address_1: "1810 KINGS ROAD",
       ship_to_city: "SYDNEY",
@@ -189,6 +191,37 @@ NEWLS 2604816191908 1.00 ( )`
     expect(review.reviews[0]?.fields.filter((field) => field.status === "DISCREPANCY").map((field) => field.key)).toEqual(
       expect.arrayContaining(["po_number", "carrier", "items", "serialNumbers"])
     );
+  });
+
+  it("compares Teamship UI-style field names and commodity SKU values", () => {
+    const [pdfOrder] = parseGarlandShippingOrderPages([{ pageNumber: 1, text: pageOne }]);
+    const teamshipOrder: TeamshipShippingOrderDetail = {
+      id: 30202,
+      amazon_shipment_id1: "SR808478",
+      carrier_value: "MIDLAND",
+      poNumber: "0000037656",
+      ship_first_name: "J.R. MAHONEY LTD.",
+      ship_address_1: "1810 KINGS ROAD",
+      ship_city: "SYDNEY",
+      ship_state: "NS",
+      ship_zip: "B1L 1C5",
+      ship_country: "CA",
+      edi_field_2: "PS210206-SR808478",
+      edi_field_3: "PPADD-CD",
+      edi_field_4: "MIDLAND THIRD PARTY ACCOUNT #129083 GARLAND ATTN. RECEIVING FREIGHT QUOTE 97068",
+      custom_fields: [{ label: "Commodity", value: "SKU: E1SGHMV6XHU3US, SN: 2604816191908" }]
+    };
+
+    const review = buildGarlandTeamshipReview([pdfOrder!], [teamshipOrder]);
+
+    expect(review.summary).toMatchObject({
+      pdfOrderCount: 1,
+      teamshipMatchedCount: 1,
+      passedCount: 1,
+      failedCount: 0,
+      missingTeamshipCount: 0
+    });
+    expect(review.reviews[0]?.status).toBe("PASS");
   });
 
   it("fetches Teamship details read-only by Garland SR/shipment ID", async () => {
