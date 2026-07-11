@@ -34,8 +34,6 @@ const TARGET_CARRIERS: Array<{ key: GarlandCarrierKey; label: string }> = [
   { key: "SURETRACK", label: "Suretrack" }
 ];
 const EXTRACTION_BATCH_SIZE = 1;
-const PAGE_IMAGE_MAX_WIDTH = 2200;
-const PAGE_IMAGE_JPEG_QUALITY = 0.86;
 const MANIFEST_CROP_IMAGE_WIDTH = 1800;
 const MANIFEST_CROP_IMAGE_JPEG_QUALITY = 0.9;
 
@@ -661,39 +659,32 @@ async function loadPdfJs() {
   return pdfJsLoader;
 }
 
-async function renderPageImage(page: PDFPageProxy) {
-  const baseViewport = page.getViewport({ scale: 1 });
-  const scale = Math.min(PAGE_IMAGE_MAX_WIDTH / baseViewport.width, 2);
-  const viewport = page.getViewport({ scale });
+async function renderManifestCropSheet(page: PDFPageProxy) {
+  const viewport = page.getViewport({ scale: 3 });
   const canvas = document.createElement("canvas");
-  canvas.width = Math.ceil(viewport.width);
-  canvas.height = Math.ceil(viewport.height);
   const context = canvas.getContext("2d");
 
   if (!context) {
-    throw new Error("Unable to create a canvas for BOL page rendering.");
+    throw new Error("Browser canvas rendering is not available for carrier manifest processing.");
   }
 
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
   await page.render({ canvas, canvasContext: context, viewport }).promise;
-  return canvas.toDataURL("image/jpeg", PAGE_IMAGE_JPEG_QUALITY);
-}
 
-async function renderManifestCropSheet(page: PDFPageProxy) {
-  const pageImageDataUrl = await renderPageImage(page);
-  const pageImage = await loadImage(pageImageDataUrl);
   const cropGap = 24;
   const labelHeight = 34;
   const sheetPadding = 24;
   const cropTargetWidth = MANIFEST_CROP_IMAGE_WIDTH - sheetPadding * 2;
   const renderedCrops = MANIFEST_CROP_BOXES.map((cropBox) => {
-    const sourceWidth = Math.max(1, Math.floor(pageImage.width * cropBox.width));
-    const sourceHeight = Math.max(1, Math.floor(pageImage.height * cropBox.height));
+    const sourceWidth = Math.max(1, Math.floor(canvas.width * cropBox.width));
+    const sourceHeight = Math.max(1, Math.floor(canvas.height * cropBox.height));
     const targetHeight = Math.max(80, Math.round((sourceHeight / sourceWidth) * cropTargetWidth));
 
     return {
       ...cropBox,
-      sourceX: Math.floor(pageImage.width * cropBox.x),
-      sourceY: Math.floor(pageImage.height * cropBox.y),
+      sourceX: Math.floor(canvas.width * cropBox.x),
+      sourceY: Math.floor(canvas.height * cropBox.y),
       sourceWidth,
       sourceHeight,
       targetHeight
@@ -723,7 +714,7 @@ async function renderManifestCropSheet(page: PDFPageProxy) {
     sheetContext.fillText(crop.label, sheetPadding, yPosition);
     yPosition += labelHeight;
     sheetContext.drawImage(
-      pageImage,
+      canvas,
       crop.sourceX,
       crop.sourceY,
       crop.sourceWidth,
@@ -740,15 +731,6 @@ async function renderManifestCropSheet(page: PDFPageProxy) {
   }
 
   return sheetCanvas.toDataURL("image/jpeg", MANIFEST_CROP_IMAGE_JPEG_QUALITY);
-}
-
-function loadImage(dataUrl: string) {
-  return new Promise<HTMLImageElement>((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Unable to load rendered BOL page image."));
-    image.src = dataUrl;
-  });
 }
 
 function sortManifestRows(rows: GarlandCarrierManifestRow[]) {
