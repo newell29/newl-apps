@@ -109,9 +109,26 @@ Parsed orders:
 
 Live Teamship check:
 
-- The Teamship All Shipping Orders grid did not find SR803322 by SR, PS209287, PO P67051, or NELLA VANCOUVER after clearing filters.
-- A bounded read-only detail-ID scan from `29200` through `30220` did not locate any of the nine SRs.
-- Treat this as a PDF extraction pass but not a live Teamship comparison pass until the Teamship order IDs are known or the records are confirmed present in the current Teamship data set.
+- The Teamship search bar located all nine SRs after resetting the grid state first.
+- Required search prep: open `Shipping Orders`, click `All`, click `Clear All Filters`, leave the saved view as `Charlotte bulk view (Default)`, then search the full SR value such as `SR803322`.
+- Searching can fail or return stale/no rows if the grid is still on `Complete`, has a column filter active, or the previous search has not been cleared.
+- Once the row appears, the Teamship order number is the `#` value in the first column. Use the direct detail route `https://members.fulfillit.io/ship-inventories/{orderId}` for read-only detail checks.
+
+Teamship SR search results for this file:
+
+| PS | SR | Teamship order | Search result notes |
+| --- | --- | --- | --- |
+| PS209287 | SR803322 | 27808 | SURETRACK STANDARD, PO P67051, 5 items. |
+| PS209288 | SR807926 | 27809 | SURETRACK STANDARD, PO 00523506, 3 items. |
+| PS209289 | SR809243 | 27810 | UPS CD STD, PO JAY PATEL, 4 items. A second row, `28235`, also exists for the same SR with 1 item and a later pickup/ship date; do not choose the first search result blindly. |
+| PS209290 | SR807832 | 27811 | UPS, PO OP00033817, 1 item. |
+| PS209291 | SR807932 | 27812 | SURETRACK STANDARD, PO P68477, 3 items. |
+| PS209292 | SR807978 | 27814 | SPEEDY, PO 148027, 1 item. |
+| PS209293 | SR808217 | 27815 | SPEEDY, PO 148019, 1 item. |
+| PS209294 | SR809250 | 27816 | MIDLAND, PO 0000037690, 1 item. |
+| PS209295 | SR807975 | 27817 | SPEEDY, PO 83652, 1 item. |
+
+If a search returns multiple rows for the same SR, select the matching Teamship row by carrier, PO, item count, customer, and pickup/ship date before comparing detail fields.
 
 ## Teamship UI Field Mapping
 
@@ -232,7 +249,10 @@ Newl Apps should handle these cases this way:
 ## Teamship Grid Notes
 
 - Use the `All` tab in Shipping Orders before searching.
-- The grid may show a saved view such as `Charlotte bulk view (Default)`. Clear filters if search results look wrong.
+- The grid may show a saved view such as `Charlotte bulk view (Default)`. That view can still search Garland SRs, but click `Clear All Filters` first if search results look wrong.
+- Search by the full SR value, including the `SR` prefix. Example: `SR809212` returns Teamship order `#30210` once the grid is reset.
+- Do not rely on searching just the Teamship order number, PS number, PO, or customer name as the primary lookup. Those can match unrelated rows or fail depending on the current view/filter state.
+- If a known SR does not return a row, reset this exact sequence before concluding it is missing: `Shipping Orders` -> `All` -> `Clear All Filters` -> clear the search box -> search full `SR######`.
 - The Teamship grid can be slow and sometimes returns stale or unexpected visible text after search changes. Detail pages are more reliable once the order ID is known.
 - The live All tab showed approximately `1 of 670 pages (10,043 items)` during testing. The Newl API fetcher therefore uses a deeper default scan than the original 12 pages.
 
