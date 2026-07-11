@@ -96,17 +96,17 @@ export async function POST(request: Request) {
   }
 
   const content = readAssistantContent(json);
-  let parsed: { rows?: unknown[] };
+  let parsed: unknown;
 
   try {
-    parsed = JSON.parse(content) as { rows?: unknown[] };
+    parsed = JSON.parse(content) as unknown;
   } catch {
     return NextResponse.json({ error: "OpenAI returned non-JSON carrier manifest output." }, { status: 502 });
   }
 
   return NextResponse.json({
     model: DEFAULT_VISION_MODEL,
-    rows: normalizeRows(parsed.rows, images.map((image) => image.pageNumber))
+    rows: normalizeRows(readRowsFromParsedResponse(parsed), images.map((image) => image.pageNumber))
   });
 }
 
@@ -148,14 +148,43 @@ function normalizeRows(value: unknown, pageNumbers: number[]): GarlandCarrierMan
     }
 
     const record = entry as Record<string, unknown>;
-    const carrier = normalizeCarrier(record.carrier);
+    const carrier = normalizeCarrier(
+      readFirstValue(record, [
+        "carrier",
+        "carrierName",
+        "carrierText",
+        "carrierRaw",
+        "carrierBox",
+        "carrierValue",
+        "shippingCarrier"
+      ])
+    );
 
     if (!carrier) {
       return [];
     }
 
-    const pageNumber = normalizePageNumber(readFirstValue(record, ["pageNumber", "page", "bolPage"])) ?? (pageNumbers.length === 1 ? pageNumbers[0] : null);
-    const psNumber = normalizeManifestPsNumber(readFirstValue(record, ["psNumber", "ps", "reference", "references", "referenceNumber"]));
+    const pageNumber =
+      normalizePageNumber(readFirstValue(record, ["pageNumber", "page", "bolPage", "bolPageNumber"])) ??
+      (pageNumbers.length === 1 ? pageNumbers[0] : null);
+    const psNumber = normalizeManifestPsNumber(
+      readFirstValue(record, ["psNumber", "ps", "preShipper", "reference", "references", "referenceNumber", "psReference"])
+    );
+    const cityProvince = normalizeText(
+      readFirstValue(record, [
+        "cityProvince",
+        "cityProv",
+        "city",
+        "destination",
+        "consignee",
+        "consigneeCity",
+        "consigneeCityProvince",
+        "shipToCityProvince"
+      ])
+    );
+    const skids = normalizeSkids(
+      readFirstValue(record, ["skids", "pallets", "pallet", "palletCount", "totalPallets", "totalSkids", "packageTotal"])
+    );
 
     if (!pageNumber) {
       return [];
@@ -165,19 +194,42 @@ function normalizeRows(value: unknown, pageNumbers: number[]): GarlandCarrierMan
       {
         carrier,
         pageNumber,
-        srNumber: normalizeDigits(readFirstValue(record, ["srNumber", "sr", "shipmentId", "shipmentID"])),
+        srNumber: normalizeDigits(readFirstValue(record, ["srNumber", "sr", "shipmentId", "shipmentID", "shipment", "orderNumber"])),
         psNumber: psNumber ?? "",
-        cityProvince: normalizeText(readFirstValue(record, ["cityProvince", "cityProv", "city", "destination", "consigneeCityProvince"])),
-        skids: normalizeSkids(readFirstValue(record, ["skids", "pallets", "palletCount", "totalPallets"])),
+        cityProvince,
+        skids,
         confidence: normalizeConfidence(record.confidence, {
           psNumber: psNumber ?? "",
-          cityProvince: normalizeText(readFirstValue(record, ["cityProvince", "cityProv", "city", "destination", "consigneeCityProvince"])),
-          skids: normalizeSkids(readFirstValue(record, ["skids", "pallets", "palletCount", "totalPallets"]))
+          cityProvince,
+          skids
         }),
         notes: normalizeNullableText(record.notes)
       }
     ];
   });
+}
+
+function readRowsFromParsedResponse(value: unknown): unknown[] {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+
+  const record = value as Record<string, unknown>;
+  const directRows = readFirstValue(record, ["rows", "entries", "pages", "manifests", "documents", "results", "data"]);
+
+  if (Array.isArray(directRows)) {
+    return directRows;
+  }
+
+  if (directRows && typeof directRows === "object") {
+    return readRowsFromParsedResponse(directRows);
+  }
+
+  return [];
 }
 
 function readFirstValue(record: Record<string, unknown>, keys: string[]) {
