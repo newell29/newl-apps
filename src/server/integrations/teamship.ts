@@ -5,7 +5,7 @@ import type {
 
 const DEFAULT_TEAMSHIP_API_BASE_URL = "https://app.teamshipos.com/api";
 const DEFAULT_PAGE_LIMIT = 500;
-const DEFAULT_MAX_PAGES = 12;
+const DEFAULT_MAX_PAGES = 30;
 
 type TeamshipFetchOptions = {
   shipmentDate?: string | null;

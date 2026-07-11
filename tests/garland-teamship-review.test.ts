@@ -77,6 +77,7 @@ describe("Garland Teamship review", () => {
     delete process.env.TEAMSHIP_EMAIL;
     delete process.env.TEAMSHIP_PASSWORD;
     delete process.env.TEAMSHIP_API_BASE_URL;
+    delete process.env.TEAMSHIP_LIST_PAGE_LIMIT;
     delete process.env.TEAMSHIP_MAX_LIST_PAGES;
     vi.restoreAllMocks();
   });
@@ -433,6 +434,52 @@ NEWLS 2604816191908 1.00 ( )`
       id: 30202,
       amazon_shipment_id1: "SR808478",
       edi_field_2: "PS210206-SR808478"
+    });
+  });
+
+  it("continues targeted SR searches beyond the old 12-page scan depth", async () => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_LIST_PAGE_LIMIT = "1";
+
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+
+      if (url.endsWith("/v1/login")) {
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/v1/ship-inventories?")) {
+        const requestUrl = new URL(url);
+        const offset = Number.parseInt(requestUrl.searchParams.get("offset") ?? "0", 10);
+
+        return Response.json({
+          data: [
+            offset === 12
+              ? { id: 30202, shipment_id: "SR808478", customer: { company: "Garland Canada Distribution" } }
+              : { id: 10000 + offset, shipment_id: `SRMISS${offset}`, customer: { company: "Garland Canada Distribution" } }
+          ]
+        });
+      }
+
+      if (url.endsWith("/v1/ship-inventories/30202")) {
+        return Response.json({ data: { id: 30202, shipment_id: "SR808478", record_no: "PS210206" } });
+      }
+
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      srNumbers: ["SR808478"],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(orders).toHaveLength(1);
+    expect(orders[0]).toMatchObject({
+      id: 30202,
+      shipment_id: "SR808478",
+      record_no: "PS210206"
     });
   });
 });
