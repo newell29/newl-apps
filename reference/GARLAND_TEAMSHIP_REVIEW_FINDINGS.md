@@ -39,6 +39,23 @@ npm run lint
 npm run build
 ```
 
+## Stage 1 Verification Evidence
+
+Latest verification on 2026-07-11:
+
+- `TMPDIR=/private/tmp npm test -- garland-teamship-review.test.ts` passed with 13 tests.
+- `TMPDIR=/private/tmp npm run verify:garland-teamship -- --pdf "/Users/alexnewell/Downloads/12 ORDERS 13 PAGES - PS210206 - PS210217.pdf" --pdf-only --json` returned `orderCount: 12` and grouped PS210210 / SR811861 on pages `[5, 6]`.
+- `npm run lint` passed.
+- `npm run build` passed and included `/shipment-documents/teamship-review`, `/api/shipment-documents/teamship-review/run`, and `/api/shipment-documents/teamship-review/daily-orders`.
+- Production `https://newl-apps.vercel.app/shipment-documents/teamship-review` rendered the Teamship Review page, Garland navigation, Teamship API status, one-time login fallback, alert digest section, `Run Teamship review`, and `Fetch Teamship daily orders`.
+
+## Runtime Data Flow
+
+- Manual Teamship daily pull is available from the page and calls `/api/shipment-documents/teamship-review/daily-orders` for the selected date.
+- The manual daily pull returns the Garland Teamship order list/count for review visibility; it does not mutate Teamship or save a local cache yet.
+- The PDF review run uses the uploaded Garland PDF as the source of expected SRs, then calls Teamship read-only list/detail APIs to fetch matching shipping orders by SR/shipment ID.
+- The cron-ready GET route exists for the future 15-minute sync, requires `TEAMSHIP_DAILY_SYNC_SECRET`, and is intentionally not scheduled in the repo yet.
+
 ## PDF Extraction Baseline
 
 The sample PDF parsed successfully with these orders:
