@@ -5,7 +5,7 @@ import {
   parseGarlandShippingOrderPages,
   parseTeamshipAlertDigest
 } from "@/modules/shipment-documents/teamship-review";
-import type { TeamshipShippingOrderDetail } from "@/modules/shipment-documents/teamship-review-types";
+import type { GarlandPdfShippingOrder, TeamshipShippingOrderDetail } from "@/modules/shipment-documents/teamship-review-types";
 import { fetchTeamshipShippingOrdersForReview } from "@/server/integrations/teamship";
 
 const pageFive = `Ship-To Pre-Shipper Print Date
@@ -172,6 +172,190 @@ describe("Garland Teamship review", () => {
       status: "PENDING",
       label: "Teamship alert"
     });
+  });
+
+  it("classifies the 12-order sample as matched or alert-backed pending", () => {
+    const pdfOrders: GarlandPdfShippingOrder[] = [
+      samplePdfOrder({
+        psNumber: "PS210206",
+        srNumber: "SR808478",
+        pageNumbers: [1],
+        shipVia: "MIDLAND",
+        shipToName: "J.R. MAHONEY LTD.",
+        shipToPo: "0000037656",
+        freightTerms: "PPADD-CD",
+        itemSkus: ["E1SGHMV6XHU3US"],
+        serialNumbers: ["2604816191908"]
+      }),
+      samplePdfOrder({
+        psNumber: "PS210207",
+        srNumber: "SR795656",
+        pageNumbers: [2],
+        shipVia: "SPEEDY",
+        shipToName: "CHIPOTLE #5520",
+        shipToPo: "6038",
+        freightTerms: "PPD&ADDg",
+        itemSkus: ["X12DBMV6DFL1CHUS"],
+        serialNumbers: ["2512816191817"]
+      }),
+      samplePdfOrder({
+        psNumber: "PS210208",
+        srNumber: "SR808173",
+        pageNumbers: [3],
+        shipVia: "UPS CD STD",
+        shipToName: "N WASSERSTROM",
+        shipToPo: "OP00033958",
+        freightTerms: "COLG",
+        itemSkus: ["EFW800-5001"],
+        serialNumbers: ["2605891101426"]
+      }),
+      samplePdfOrder({
+        psNumber: "PS210209",
+        srNumber: "SR809846",
+        pageNumbers: [4],
+        shipVia: "SPEEDY",
+        shipToName: "CENTRE DE DISTRIBUTION #2 DOYON",
+        shipToPo: "148856",
+        freightTerms: "PPADD-CD",
+        itemSkus: ["G48-8LL-5008"],
+        serialNumbers: ["2606891101417"]
+      }),
+      samplePdfOrder({
+        psNumber: "PS210210",
+        srNumber: "SR811861",
+        pageNumbers: [5, 6],
+        shipVia: "UPS CD STD",
+        shipToName: "NELLA TORONTO",
+        shipToPo: "2028CTCCONVO",
+        freightTerms: "PPDg",
+        itemSkus: ["C-CARE-P", "C-CLEAN-FORTE", "TUBE KIT - MIXED"],
+        serialNumbers: []
+      }),
+      samplePdfOrder({
+        psNumber: "PS210211",
+        srNumber: "SR810387",
+        pageNumbers: [7],
+        shipVia: "P/U",
+        shipToName: "BARRIE EQUIPMENT SALES",
+        shipToPo: "2026BES8129",
+        freightTerms: "PU",
+        itemSkus: ["GTGG48-GT48M-5016"],
+        serialNumbers: ["2606891100446"]
+      }),
+      samplePdfOrder({
+        psNumber: "PS210212",
+        srNumber: "SR811920",
+        pageNumbers: [8],
+        shipVia: "UPS CD STD",
+        shipToName: "STOP REST EQUIP & SUPPL",
+        shipToPo: "15378",
+        freightTerms: "PPADD-CD",
+        itemSkus: ["8030445"],
+        serialNumbers: []
+      }),
+      samplePdfOrder({
+        psNumber: "PS210213",
+        srNumber: "SR810386",
+        pageNumbers: [9],
+        shipVia: "SPEEDY",
+        shipToName: "LES ENTREPR TZANET INC",
+        shipToPo: "84269",
+        freightTerms: "PPADD-CD",
+        itemSkus: ["GTBG36-NR36-5001"],
+        serialNumbers: ["2605891101919", "2606891101462"]
+      }),
+      samplePdfOrder({
+        psNumber: "PS210214",
+        srNumber: "SR812055",
+        pageNumbers: [10],
+        shipVia: "UPS CD STD",
+        shipToName: "LES ENTREPR TZANET INC",
+        shipToPo: "84542",
+        freightTerms: "PPADD-CD",
+        itemSkus: ["CMC1032", "CMC1033", "32Z4178", "32Z4175"],
+        serialNumbers: []
+      }),
+      samplePdfOrder({
+        psNumber: "PS210215",
+        srNumber: "SR811494",
+        pageNumbers: [11],
+        shipVia: "P/U",
+        shipToName: "NELLA CUTLERY",
+        shipToPo: "31697",
+        freightTerms: "PU",
+        itemSkus: ["WB41003AP3AAUL", "C-START-P", "9797-22", "CST20CB-4"],
+        serialNumbers: []
+      }),
+      samplePdfOrder({
+        psNumber: "PS210216",
+        srNumber: "SR810154",
+        pageNumbers: [12],
+        shipVia: "SURETRACK STANDARD",
+        shipToName: "VANCOUVER AIRPORT HILTON",
+        shipToPo: "PO374982",
+        freightTerms: "PPADD-CD",
+        itemSkus: ["107082", "409355", "24CGP10NEZT"],
+        serialNumbers: ["260523051426"]
+      }),
+      samplePdfOrder({
+        psNumber: "PS210217",
+        srNumber: "SR809212",
+        pageNumbers: [13],
+        shipVia: "SURETRACK STANDARD",
+        shipToName: "GEANEL RESTAURANT SUPPLIES L",
+        shipToPo: "200242",
+        freightTerms: "PPADD-CD",
+        itemSkus: ["X16SBMV6DFL1CLUS"],
+        serialNumbers: ["2604816192633"]
+      })
+    ];
+    const teamshipOrders: TeamshipShippingOrderDetail[] = [
+      sampleTeamshipOrder("SR808478", "PS210206", "MIDLAND", "J.R. MAHONEY LTD.", "0000037656", "PPADD-CD", [
+        "SKU: E1SGHMV6XHU3US, SN: 2604816191908"
+      ]),
+      sampleTeamshipOrder("SR795656", "PS210207", "SPEEDY", "CHIPOTLE #5520", "6038", "PPD&ADDg", [
+        "SKU: X12DBMV6DFL1CHUS, SN: 2512816191817"
+      ]),
+      sampleTeamshipOrder("SR808173", "PS210208", "UPS CD STD", "N WASSERSTROM", "OP00033958", "COLG", [
+        "SKU: EFW800-5001, SN: 2605891101426"
+      ]),
+      sampleTeamshipOrder("SR809846", "PS210209", "SPEEDY", "CENTRE DE DISTRIBUTION #2 DOYON", "148856", "PPADD-CD", [
+        "SKU: G48-8LL-5008, SN: 2606891101417"
+      ]),
+      sampleTeamshipOrder("SR810387", "PS210211", "P/U BARRIE EQUIP", "BARRIE EQUIPMENT SALES", "2026BES8129", "PU", [
+        "SKU: GTGG48-GT48M-5016, SN: 2606891100446"
+      ]),
+      sampleTeamshipOrder("SR811920", "PS210212", "UPS CD STD", "STOP REST EQUIP & SUPPL", "15378", "PPADD-CD", [
+        "SKU: 8030445, QTY: 4"
+      ]),
+      sampleTeamshipOrder("SR810386", "PS210213", "SPEEDY", "LES ENTREPR TZANET INC", "84269", "PPADD-CD", [
+        "SKU: GTBG36-NR36-5001, SN: 2605891101919, 2606891101462"
+      ]),
+      sampleTeamshipOrder("SR810154", "PS210216", "SURETRACK STANDARD", "VANCOUVER AIRPORT HILTON", "PO374982", "PPADD-CD", [
+        "SKU: 107082, QTY: 1",
+        "SKU: 409355, QTY: 1",
+        "SKU: 24CGP10NEZT, SN: 260523051426"
+      ]),
+      sampleTeamshipOrder("SR809212", "PS210217", "SURETRACK STANDARD", "GEANEL RESTAURANT SUPPLIES L", "200242", "PPADD-CD", [
+        "SKU: X16SBMV6DFL1CLUS, SN: 2604816192633"
+      ])
+    ];
+
+    const review = buildGarlandTeamshipReview(pdfOrders, teamshipOrders, parseTeamshipAlertDigest(alertDigest));
+
+    expect(review.summary).toMatchObject({
+      pdfOrderCount: 12,
+      teamshipMatchedCount: 9,
+      passedCount: 9,
+      failedCount: 0,
+      missingTeamshipCount: 0,
+      pendingTeamshipCount: 3
+    });
+    expect(review.reviews.filter((order) => order.status === "PENDING_TEAMSHIP").map((order) => order.srNumber)).toEqual([
+      "SR811861",
+      "SR812055",
+      "SR811494"
+    ]);
   });
 
   it("extracts ship-to details when PDF.js places Pre-Shipper after the name", () => {
@@ -557,3 +741,77 @@ NEWLS 2604816191908 1.00 ( )`
     });
   });
 });
+
+function samplePdfOrder({
+  psNumber,
+  srNumber,
+  pageNumbers,
+  shipVia,
+  shipToName,
+  shipToPo,
+  freightTerms,
+  itemSkus,
+  serialNumbers
+}: {
+  psNumber: string;
+  srNumber: string;
+  pageNumbers: number[];
+  shipVia: string;
+  shipToName: string;
+  shipToPo: string;
+  freightTerms: string;
+  itemSkus: string[];
+  serialNumbers: string[];
+}): GarlandPdfShippingOrder {
+  return {
+    pageNumbers,
+    psNumber,
+    srNumber,
+    shipToCode: null,
+    shipToName,
+    shipToAddress1: "MATCHING ADDRESS",
+    shipToCity: "MATCHING CITY",
+    shipToState: "ON",
+    shipToPostalCode: "L5T 2V5",
+    shipToCountry: "Canada",
+    shipToPo,
+    freightTerms,
+    orderDate: null,
+    shipVia,
+    instructions: "",
+    items: itemSkus.map((sku, index) => ({
+      lineNumber: index + 1,
+      sku,
+      description: "",
+      quantity: null,
+      dueShipDate: null,
+      serialNumbers: index === 0 ? serialNumbers : []
+    })),
+    rawText: ""
+  };
+}
+
+function sampleTeamshipOrder(
+  srNumber: string,
+  psNumber: string,
+  carrier: string,
+  shipToName: string,
+  poNumber: string,
+  freightTerms: string,
+  commodities: string[]
+): TeamshipShippingOrderDetail {
+  return {
+    amazon_shipment_id1: srNumber,
+    carrier_value: carrier,
+    poNumber,
+    ship_first_name: shipToName,
+    ship_address_1: "MATCHING ADDRESS",
+    ship_city: "MATCHING CITY",
+    ship_state: "ON",
+    ship_zip: "L5T 2V5",
+    ship_country: "CA",
+    edi_field_2: `${psNumber}-${srNumber}`,
+    edi_field_3: freightTerms,
+    pallets: commodities.map((commodity) => ({ commodity }))
+  };
+}
