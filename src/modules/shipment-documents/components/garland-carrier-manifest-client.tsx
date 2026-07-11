@@ -35,13 +35,16 @@ const TARGET_CARRIERS: Array<{ key: GarlandCarrierKey; label: string }> = [
 ];
 const EXTRACTION_BATCH_SIZE = 1;
 const MANIFEST_CROP_IMAGE_WIDTH = 1800;
-const MANIFEST_CROP_IMAGE_JPEG_QUALITY = 0.88;
+const MANIFEST_CROP_IMAGE_JPEG_QUALITY = 0.9;
+const MANIFEST_CROP_SHEET_PADDING = 24;
+const MANIFEST_CROP_LABEL_HEIGHT = 34;
+const MANIFEST_CROP_GAP = 18;
 const MANIFEST_CROP_BOXES = [
-  { label: "Header overview", x: 0, y: 0, width: 1, height: 0.18 },
-  { label: "Carrier box", x: 0.02, y: 0.105, width: 0.42, height: 0.085 },
-  { label: "References and shipment id", x: 0.6, y: 0.065, width: 0.38, height: 0.13 },
-  { label: "Consignee city/province", x: 0.48, y: 0.23, width: 0.48, height: 0.13 },
-  { label: "Total pallets", x: 0.02, y: 0.58, width: 0.33, height: 0.08 }
+  { label: "Header overview", x: 0, y: 0, width: 1, height: 0.18, layout: "full" },
+  { label: "Carrier box", x: 0.02, y: 0.105, width: 0.42, height: 0.085, layout: "half" },
+  { label: "References and shipment id", x: 0.6, y: 0.065, width: 0.38, height: 0.13, layout: "half" },
+  { label: "Consignee city/province", x: 0.48, y: 0.23, width: 0.48, height: 0.13, layout: "half" },
+  { label: "Total pallets", x: 0.02, y: 0.58, width: 0.33, height: 0.08, layout: "half" }
 ];
 
 let pdfJsLoader: Promise<PdfJsModule> | null = null;
@@ -710,13 +713,15 @@ async function renderManifestPageImage(page: PDFPageProxy) {
   canvas.height = Math.ceil(viewport.height);
   await page.render({ canvas, canvasContext: context, viewport }).promise;
 
-  const sheetPadding = 24;
-  const labelHeight = 36;
-  const cropGap = 20;
-  const cropTargetWidth = MANIFEST_CROP_IMAGE_WIDTH - sheetPadding * 2;
   const renderedCrops = MANIFEST_CROP_BOXES.map((cropBox) => {
     const sourceWidth = Math.max(1, Math.floor(canvas.width * cropBox.width));
     const sourceHeight = Math.max(1, Math.floor(canvas.height * cropBox.height));
+    const targetWidth =
+      cropBox.layout === "full"
+        ? MANIFEST_CROP_IMAGE_WIDTH - MANIFEST_CROP_SHEET_PADDING * 2
+        : Math.floor(
+            (MANIFEST_CROP_IMAGE_WIDTH - MANIFEST_CROP_SHEET_PADDING * 2 - MANIFEST_CROP_GAP) / 2
+          );
 
     return {
       ...cropBox,
@@ -724,14 +729,35 @@ async function renderManifestPageImage(page: PDFPageProxy) {
       sourceY: Math.floor(canvas.height * cropBox.y),
       sourceWidth,
       sourceHeight,
-      targetHeight: Math.max(90, Math.round((sourceHeight / sourceWidth) * cropTargetWidth))
+      targetWidth,
+      targetHeight: Math.max(95, Math.round((sourceHeight / sourceWidth) * targetWidth))
     };
   });
+  const fullWidthCrops = renderedCrops.filter((crop) => crop.layout === "full");
+  const halfWidthCrops = renderedCrops.filter((crop) => crop.layout !== "full");
+  const halfRows = [];
+
+  for (let index = 0; index < halfWidthCrops.length; index += 2) {
+    halfRows.push(halfWidthCrops.slice(index, index + 2));
+  }
+
   const sheetCanvas = document.createElement("canvas");
   sheetCanvas.width = MANIFEST_CROP_IMAGE_WIDTH;
   sheetCanvas.height =
-    sheetPadding * 2 +
-    renderedCrops.reduce((total, crop) => total + labelHeight + crop.targetHeight + cropGap, -cropGap);
+    MANIFEST_CROP_SHEET_PADDING * 2 +
+    fullWidthCrops.reduce(
+      (total, crop) => total + MANIFEST_CROP_LABEL_HEIGHT + crop.targetHeight + MANIFEST_CROP_GAP,
+      0
+    ) +
+    halfRows.reduce(
+      (total, row) =>
+        total +
+        MANIFEST_CROP_LABEL_HEIGHT +
+        Math.max(...row.map((crop) => crop.targetHeight)) +
+        MANIFEST_CROP_GAP,
+      0
+    ) -
+    MANIFEST_CROP_GAP;
   const sheetContext = sheetCanvas.getContext("2d");
 
   if (!sheetContext) {
@@ -743,30 +769,62 @@ async function renderManifestPageImage(page: PDFPageProxy) {
   sheetContext.font = "700 24px Arial, sans-serif";
   sheetContext.textBaseline = "top";
 
-  let yPosition = sheetPadding;
+  let yPosition = MANIFEST_CROP_SHEET_PADDING;
 
-  for (const crop of renderedCrops) {
-    sheetContext.fillStyle = "#111827";
-    sheetContext.fillText(crop.label, sheetPadding, yPosition);
-    yPosition += labelHeight;
-    sheetContext.drawImage(
-      canvas,
-      crop.sourceX,
-      crop.sourceY,
-      crop.sourceWidth,
-      crop.sourceHeight,
-      sheetPadding,
-      yPosition,
-      cropTargetWidth,
-      crop.targetHeight
-    );
-    sheetContext.strokeStyle = "#ef4444";
-    sheetContext.lineWidth = 3;
-    sheetContext.strokeRect(sheetPadding, yPosition, cropTargetWidth, crop.targetHeight);
-    yPosition += crop.targetHeight + cropGap;
+  for (const crop of fullWidthCrops) {
+    drawManifestCrop(sheetContext, canvas, crop, MANIFEST_CROP_SHEET_PADDING, yPosition);
+    yPosition += MANIFEST_CROP_LABEL_HEIGHT + crop.targetHeight + MANIFEST_CROP_GAP;
+  }
+
+  for (const row of halfRows) {
+    let xPosition = MANIFEST_CROP_SHEET_PADDING;
+
+    for (const crop of row) {
+      drawManifestCrop(sheetContext, canvas, crop, xPosition, yPosition);
+      xPosition += crop.targetWidth + MANIFEST_CROP_GAP;
+    }
+
+    yPosition +=
+      MANIFEST_CROP_LABEL_HEIGHT + Math.max(...row.map((crop) => crop.targetHeight)) + MANIFEST_CROP_GAP;
   }
 
   return sheetCanvas.toDataURL("image/jpeg", MANIFEST_CROP_IMAGE_JPEG_QUALITY);
+}
+
+function drawManifestCrop(
+  sheetContext: CanvasRenderingContext2D,
+  sourceCanvas: HTMLCanvasElement,
+  crop: (typeof MANIFEST_CROP_BOXES)[number] & {
+    sourceX: number;
+    sourceY: number;
+    sourceWidth: number;
+    sourceHeight: number;
+    targetWidth: number;
+    targetHeight: number;
+  },
+  xPosition: number,
+  yPosition: number
+) {
+  sheetContext.fillStyle = "#111827";
+  sheetContext.fillText(crop.label, xPosition, yPosition);
+
+  const cropY = yPosition + MANIFEST_CROP_LABEL_HEIGHT;
+  sheetContext.fillStyle = "#ffffff";
+  sheetContext.fillRect(xPosition, cropY, crop.targetWidth, crop.targetHeight);
+  sheetContext.drawImage(
+    sourceCanvas,
+    crop.sourceX,
+    crop.sourceY,
+    crop.sourceWidth,
+    crop.sourceHeight,
+    xPosition,
+    cropY,
+    crop.targetWidth,
+    crop.targetHeight
+  );
+  sheetContext.strokeStyle = "#ef4444";
+  sheetContext.lineWidth = 3;
+  sheetContext.strokeRect(xPosition, cropY, crop.targetWidth, crop.targetHeight);
 }
 
 function sortManifestRows(rows: GarlandCarrierManifestRow[]) {
