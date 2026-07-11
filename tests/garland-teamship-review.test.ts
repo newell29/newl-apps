@@ -101,6 +101,38 @@ describe("Garland Teamship review", () => {
     expect(orders[0]?.items.map((item) => item.sku)).toEqual(["C-CARE-P", "C-CLEAN-FORTE", "TUBE KIT - MIXED"]);
   });
 
+  it("extracts ship-to details when PDF.js places Pre-Shipper after the name", () => {
+    const orders = parseGarlandShippingOrderPages([
+      {
+        pageNumber: 1,
+        text: `Ship-To Pre-Shipper Print Date
+00096658 PS210206 7/10/2026
+J.R. MAHONEY LTD. Pre-Shipper
+1810 KINGS ROAD
+SYDNEY, NS B1L 1C5
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Order Number SR808478 Ship To PO 0000037656 Frt Terms PPADD-CD
+Order Date 5/29/2026 Ship Via MIDLAND
+Ln Item Number T Ship Qty Qty Open UM
+1 E1SGHMV6XHU3US 891210
+1.00 EA 7/13/2026
+NEWLS 2604816191908 1.00 ( )`
+      }
+    ]);
+
+    expect(orders[0]).toMatchObject({
+      psNumber: "PS210206",
+      srNumber: "SR808478",
+      shipToName: "J.R. MAHONEY LTD.",
+      shipToAddress1: "1810 KINGS ROAD",
+      shipToCity: "SYDNEY",
+      shipToState: "NS",
+      shipToPostalCode: "B1L 1C5",
+      shipToCountry: "Canada"
+    });
+  });
+
   it("marks reviewed orders green when Teamship detail matches the Garland PDF", () => {
     const [pdfOrder] = parseGarlandShippingOrderPages([{ pageNumber: 1, text: pageOne }]);
     const teamshipOrder: TeamshipShippingOrderDetail = {

@@ -115,9 +115,11 @@ function normalizePageLines(text: string) {
 }
 
 function extractShipToName(lines: string[]) {
-  const directLine = lines.find((line) => /^Pre-Shipper/i.test(line) && !/^Pre-Shipper\s*$/i.test(line));
+  const directLine = lines.find(
+    (line) => /Pre-Shipper/i.test(line) && !/^Pre-Shipper\s*$/i.test(line) && !/\bShip-To\b|\bPrint Date\b/i.test(line)
+  );
   if (directLine) {
-    return directLine.replace(/^Pre-Shipper\s*/i, "").trim() || null;
+    return directLine.replace(/Pre-Shipper/i, "").trim() || null;
   }
 
   const preShipperIndex = lines.findIndex((line) => /^Pre-Shipper$/i.test(line));
@@ -129,14 +131,26 @@ function extractShipToName(lines: string[]) {
 }
 
 function extractAddressLines(lines: string[]) {
-  const titleIndex = lines.findIndex((line) => /P\s*I\s*C\s*K\s*L\s*I\s*S\s*T/i.test(line));
+  const psHeaderIndex = lines.findIndex((line) => PS_PATTERN.test(line));
   const orderIndex = lines.findIndex((line) => /(?:Order Number|Sales Order)\s+SR\d+/i.test(line));
 
-  if (titleIndex < 0 || orderIndex < 0 || orderIndex <= titleIndex) {
+  if (psHeaderIndex < 0 || orderIndex < 0 || orderIndex <= psHeaderIndex) {
     return [];
   }
 
-  return lines.slice(titleIndex + 1, orderIndex);
+  return lines
+    .slice(psHeaderIndex + 1, orderIndex)
+    .filter((line) => {
+      if (/P\s*I\s*C\s*K\s*L\s*I\s*S\s*T/i.test(line)) {
+        return false;
+      }
+
+      if (/Pre-Shipper/i.test(line)) {
+        return false;
+      }
+
+      return !/\bShip-To\b|\bPrint Date\b/i.test(line);
+    });
 }
 
 function parseCityStatePostal(lines: string[]) {
