@@ -210,7 +210,9 @@ NEWLS 2604816191908 1.00 ( )`
       edi_field_2: "PS210206-SR808478",
       edi_field_3: "PPADD-CD",
       edi_field_4: "MIDLAND THIRD PARTY ACCOUNT #129083 GARLAND ATTN. RECEIVING FREIGHT QUOTE 97068",
-      custom_fields: [{ label: "Commodity", value: "SKU: E1SGHMV6XHU3US, SN: 2604816191908" }]
+      pallets: [
+        { quantity: 1, length: 1, width: 1, height: 1, weight: 1, commodity: "SKU: E1SGHMV6XHU3US, SN: 2604816191908" }
+      ]
     };
 
     const review = buildGarlandTeamshipReview([pdfOrder!], [teamshipOrder]);
