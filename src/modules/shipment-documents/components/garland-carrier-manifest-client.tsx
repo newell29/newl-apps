@@ -26,14 +26,16 @@ type ExtractionResponse = {
   error?: string;
 };
 
+type EditableManifestField = "srNumber" | "psNumber" | "cityProvince" | "skids";
+
 const TARGET_CARRIERS: Array<{ key: GarlandCarrierKey; label: string }> = [
   { key: "MIDLAND", label: "Midland" },
   { key: "SPEEDY", label: "Speedy" },
   { key: "SURETRACK", label: "Suretrack" }
 ];
-const EXTRACTION_BATCH_SIZE = 2;
-const PAGE_IMAGE_MAX_WIDTH = 1400;
-const PAGE_IMAGE_JPEG_QUALITY = 0.74;
+const EXTRACTION_BATCH_SIZE = 1;
+const PAGE_IMAGE_MAX_WIDTH = 2200;
+const PAGE_IMAGE_JPEG_QUALITY = 0.86;
 
 let pdfJsLoader: Promise<PdfJsModule> | null = null;
 
@@ -109,10 +111,8 @@ export function GarlandCarrierManifestClient({
       }
 
       const sortedRows = sortManifestRows(detectedRows);
-      const nextWorkbooks = TARGET_CARRIERS.flatMap((carrier) => {
-        const carrierRows = sortedRows.filter((row) => row.carrier === carrier.key);
-        return carrierRows.length > 0 ? [buildWorkbook(carrier.key, documentLabel, shipmentDate, carrierRows)] : [];
-      });
+
+      const nextWorkbooks = buildWorkbooksForRows(sortedRows, documentLabel, shipmentDate);
 
       setRows(sortedRows);
       setWorkbooks(nextWorkbooks);
@@ -236,6 +236,29 @@ export function GarlandCarrierManifestClient({
     setHistory(json);
   }
 
+  function handleRowChange(index: number, field: EditableManifestField, value: string) {
+    setRows((currentRows) => {
+      const nextRows = currentRows.map((row, rowIndex) => {
+        if (rowIndex !== index) {
+          return row;
+        }
+
+        return {
+          ...row,
+          [field]: field === "skids" ? normalizeEditablePallets(value) : value
+        };
+      });
+      const sortedRows = sortManifestRows(nextRows);
+
+      setWorkbooks((currentWorkbooks) => {
+        currentWorkbooks.forEach((workbook) => URL.revokeObjectURL(workbook.downloadUrl));
+        return buildWorkbooksForRows(sortedRows, documentLabel, shipmentDate);
+      });
+
+      return sortedRows;
+    });
+  }
+
   return (
     <div className="space-y-6">
       <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
@@ -333,7 +356,7 @@ export function GarlandCarrierManifestClient({
             ))}
           </div>
 
-          <ManifestRowsTable rows={rows} />
+          <ManifestRowsTable rows={rows} onRowChange={handleRowChange} />
         </section>
       ) : null}
 
@@ -442,7 +465,13 @@ export function GarlandCarrierManifestClient({
   );
 }
 
-function ManifestRowsTable({ rows }: { rows: GarlandCarrierManifestRow[] }) {
+function ManifestRowsTable({
+  rows,
+  onRowChange
+}: {
+  rows: GarlandCarrierManifestRow[];
+  onRowChange: (index: number, field: EditableManifestField, value: string) => void;
+}) {
   return (
     <div className="mt-4 overflow-x-auto rounded-md border border-border">
       <table className="min-w-full divide-y divide-border text-sm">
@@ -462,10 +491,39 @@ function ManifestRowsTable({ rows }: { rows: GarlandCarrierManifestRow[] }) {
             <tr key={`${row.carrier}-${row.pageNumber}-${row.psNumber}-${index}`}>
               <td className="px-3 py-2 font-semibold text-foreground">{formatCarrier(row.carrier)}</td>
               <td className="px-3 py-2 text-mutedForeground">{row.pageNumber}</td>
-              <td className="px-3 py-2 text-mutedForeground">{row.srNumber || "N/A"}</td>
-              <td className="px-3 py-2 text-mutedForeground">{row.psNumber}</td>
-              <td className="px-3 py-2 text-mutedForeground">{row.cityProvince || "N/A"}</td>
-              <td className="px-3 py-2 text-mutedForeground">{row.skids ?? ""}</td>
+              <td className="px-3 py-2">
+                <input
+                  value={row.srNumber}
+                  onChange={(event) => onRowChange(index, "srNumber", event.target.value)}
+                  className="w-28 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+                  aria-label={`SR number for page ${row.pageNumber}`}
+                />
+              </td>
+              <td className="px-3 py-2">
+                <input
+                  value={row.psNumber}
+                  onChange={(event) => onRowChange(index, "psNumber", event.target.value)}
+                  className="w-28 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+                  aria-label={`PS number for page ${row.pageNumber}`}
+                />
+              </td>
+              <td className="px-3 py-2">
+                <input
+                  value={row.cityProvince}
+                  onChange={(event) => onRowChange(index, "cityProvince", event.target.value)}
+                  className="w-44 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+                  aria-label={`City and province for page ${row.pageNumber}`}
+                />
+              </td>
+              <td className="px-3 py-2">
+                <input
+                  value={row.skids ?? ""}
+                  inputMode="numeric"
+                  onChange={(event) => onRowChange(index, "skids", event.target.value)}
+                  className="w-20 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+                  aria-label={`Pallet count for page ${row.pageNumber}`}
+                />
+              </td>
               <td className="px-3 py-2 text-mutedForeground">{row.confidence}</td>
             </tr>
           ))}
@@ -521,6 +579,13 @@ function buildWorkbook(carrier: GarlandCarrierKey, documentLabel: string, shipme
   };
 }
 
+function buildWorkbooksForRows(rows: GarlandCarrierManifestRow[], documentLabel: string, shipmentDate: string) {
+  return TARGET_CARRIERS.flatMap((carrier) => {
+    const carrierRows = rows.filter((row) => row.carrier === carrier.key);
+    return carrierRows.length > 0 ? [buildWorkbook(carrier.key, documentLabel, shipmentDate, carrierRows)] : [];
+  });
+}
+
 function buildWorkbookHtml(
   carrierLabel: string,
   documentLabel: string,
@@ -532,7 +597,7 @@ function buildWorkbookHtml(
   const bodyRows = Array.from({ length: rowCount }, (_, index) => {
     const row = rows[index];
     return [
-      "<tr>",
+      '<tr class="manifest-row">',
       `<td class="row-number">${index + 1}</td>`,
       `<td>${escapeHtml(row?.srNumber ?? "")}</td>`,
       `<td>${escapeHtml(row?.psNumber.replace(/^PS/i, "") ?? "")}</td>`,
@@ -548,13 +613,13 @@ function buildWorkbookHtml(
     "<head>",
     '<meta charset="utf-8" />',
     "<style>",
-    "body{font-family:Arial,sans-serif;}table{border-collapse:collapse;width:100%;}td,th{border:1px solid #111;padding:6px 8px;font-size:14px;}th{font-size:16px;text-align:left;} .title{font-size:22px;font-weight:700;text-align:center;} .row-number{width:36px;text-align:right;} .skids{text-align:right;width:80px;} .signature{height:44px;font-weight:700;} .summary{font-weight:700;background:#f2f2f2;}",
+    "@page{size:letter landscape;margin:0.25in;}body{font-family:Arial,sans-serif;margin:0;}table{border-collapse:collapse;width:100%;table-layout:fixed;page-break-inside:avoid;}td,th{border:1px solid #111;padding:4px 8px;font-size:14px;line-height:1.15;}th{font-size:16px;text-align:center;font-weight:700;} .title{font-size:22px;font-weight:700;text-align:center;} .row-number{width:36px;text-align:right;} .sr{width:38%;}.ps{width:15%;}.city{width:34%;}.skids{text-align:right;width:80px;} .manifest-row td{height:24px;} .signature{height:44px;font-weight:700;} .summary{font-weight:700;background:#f2f2f2;}",
     "</style>",
     "</head>",
     "<body>",
     "<table>",
     `<tr><td class="title" colspan="5">${escapeHtml(`${carrierLabel} Manifest ${documentLabel}`)}</td></tr>`,
-    "<tr><th></th><th>SR#</th><th>PS#</th><th>City / Prov</th><th>Pallets</th></tr>",
+    '<tr><th></th><th class="sr">SR#</th><th class="ps">PS#</th><th class="city">City / Prov</th><th class="skids">Pallets</th></tr>',
     bodyRows,
     `<tr class="summary"><td colspan="4">Total pallets</td><td class="skids">${palletCount}</td></tr>`,
     `<tr><td class="signature" colspan="2">Driver signature</td><td colspan="2"></td><td>${escapeHtml(shipmentDate)}</td></tr>`,
@@ -616,6 +681,16 @@ function buildCarrierCounts(rows: GarlandCarrierManifestRow[]): Record<GarlandCa
     SPEEDY: rows.filter((row) => row.carrier === "SPEEDY").length,
     SURETRACK: rows.filter((row) => row.carrier === "SURETRACK").length
   };
+}
+
+function normalizeEditablePallets(value: string) {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(trimmed.replace(/\D+/g, ""), 10);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function formatCarrier(carrier: GarlandCarrierKey) {

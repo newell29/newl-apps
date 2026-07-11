@@ -2,7 +2,7 @@ import { ModuleKey } from "@prisma/client";
 import { NextResponse } from "next/server";
 
 import type { GarlandCarrierKey, GarlandCarrierManifestRow } from "@/modules/shipment-documents/carrier-manifest-types";
-import { normalizePsNumber } from "@/modules/shipment-documents/ps-number";
+import { extractPsNumberFromText, normalizePsNumber } from "@/modules/shipment-documents/ps-number";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
@@ -106,7 +106,7 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     model: DEFAULT_VISION_MODEL,
-    rows: normalizeRows(parsed.rows)
+    rows: normalizeRows(parsed.rows, images.map((image) => image.pageNumber))
   });
 }
 
@@ -117,13 +117,15 @@ function buildPrompt(pageNumbers: number[]) {
     "For each page, inspect the top-left CARRIER field first. This is the most important field.",
     "Target carrier examples include SURETRACK STANDARD, SURETRAK, SURE TRACK, SPEEDY TRANSPORT, SPEEDY, MIDLAND TRANSPORT, and MIDLAND.",
     "Only return rows for carriers Midland, Speedy, or Suretrack/Sure Track/Suretrak. Ignore all other carriers.",
-    "If the carrier is one of those targets, return a row even if PS number, SR number, city/province, or skids are uncertain.",
+    "If the carrier is one of those targets, return a row. Spend extra effort reading the details before leaving anything blank.",
     "For matching pages, extract these exact fields from the BOL:",
     "1. carrier from the top-left CARRIER box.",
     "2. psNumber from the REFERENCES box near the top. It is the PS value before the first dash, for example PS209872 from PS209872-SR810664 - SR810664.",
     "3. cityProvince from the CONSIGNEE address box. Use only city and province/state, for example OTTAWA, ON or CALGARY, AB. Do not include postal code or country.",
     "4. skids from the bottom-left Total line in the carrier information section, for example Total: 1 PALLETS means skids 1. If there is a conflict, trust the Total line over the package detail line.",
-    "Also extract srNumber from SHIPMENT ID when visible, but it is secondary.",
+    "Also extract srNumber from SHIPMENT ID in the top-right corner when visible, but it is secondary.",
+    "Never return N/A for fields. Use an empty string for unknown text fields and null for unknown skids.",
+    "Only use HIGH confidence when carrier, PS number, city/province, and pallet count were all read from the page. Use LOW if only the carrier was found.",
     "Normalize carrier to one of MIDLAND, SPEEDY, SURETRACK.",
     "pageNumber must match the attached BOL page number.",
     "SR number should be the SR/shipment/order id digits only when visible, otherwise an empty string.",
@@ -134,7 +136,7 @@ function buildPrompt(pageNumbers: number[]) {
   ].join(" ");
 }
 
-function normalizeRows(value: unknown): GarlandCarrierManifestRow[] {
+function normalizeRows(value: unknown, pageNumbers: number[]): GarlandCarrierManifestRow[] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -151,8 +153,8 @@ function normalizeRows(value: unknown): GarlandCarrierManifestRow[] {
       return [];
     }
 
-    const pageNumber = normalizePageNumber(record.pageNumber);
-    const psNumber = normalizePsNumber(typeof record.psNumber === "string" ? record.psNumber : null);
+    const pageNumber = normalizePageNumber(readFirstValue(record, ["pageNumber", "page", "bolPage"])) ?? (pageNumbers.length === 1 ? pageNumbers[0] : null);
+    const psNumber = normalizeManifestPsNumber(readFirstValue(record, ["psNumber", "ps", "reference", "references", "referenceNumber"]));
 
     if (!pageNumber) {
       return [];
@@ -162,15 +164,35 @@ function normalizeRows(value: unknown): GarlandCarrierManifestRow[] {
       {
         carrier,
         pageNumber,
-        srNumber: normalizeDigits(record.srNumber),
+        srNumber: normalizeDigits(readFirstValue(record, ["srNumber", "sr", "shipmentId", "shipmentID"])),
         psNumber: psNumber ?? "",
-        cityProvince: normalizeText(record.cityProvince),
-        skids: normalizeSkids(record.skids),
-        confidence: normalizeConfidence(record.confidence),
+        cityProvince: normalizeText(readFirstValue(record, ["cityProvince", "cityProv", "city", "destination", "consigneeCityProvince"])),
+        skids: normalizeSkids(readFirstValue(record, ["skids", "pallets", "palletCount", "totalPallets"])),
+        confidence: normalizeConfidence(record.confidence, {
+          psNumber: psNumber ?? "",
+          cityProvince: normalizeText(readFirstValue(record, ["cityProvince", "cityProv", "city", "destination", "consigneeCityProvince"])),
+          skids: normalizeSkids(readFirstValue(record, ["skids", "pallets", "palletCount", "totalPallets"]))
+        }),
         notes: normalizeNullableText(record.notes)
       }
     ];
   });
+}
+
+function readFirstValue(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function normalizeManifestPsNumber(value: unknown) {
+  const text = normalizeNullableText(value);
+  return normalizePsNumber(text) ?? extractPsNumberFromText(text);
 }
 
 function normalizeCarrier(value: unknown): GarlandCarrierKey | null {
@@ -235,7 +257,14 @@ function normalizeSkids(value: unknown) {
   return null;
 }
 
-function normalizeConfidence(value: unknown): "LOW" | "MEDIUM" | "HIGH" {
+function normalizeConfidence(
+  value: unknown,
+  fields?: { psNumber: string; cityProvince: string; skids: number | null }
+): "LOW" | "MEDIUM" | "HIGH" {
+  if (fields && (!fields.psNumber || !fields.cityProvince || fields.skids === null)) {
+    return "LOW";
+  }
+
   return value === "HIGH" || value === "MEDIUM" || value === "LOW" ? value : "MEDIUM";
 }
 
