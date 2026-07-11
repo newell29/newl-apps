@@ -65,7 +65,7 @@ export async function fetchTeamshipShippingOrdersForReview({
     const rows = await listTeamshipShippingOrders({ token, limit: pageLimit, offset, fetchImpl });
 
     for (const row of rows) {
-      const shipmentId = normalizeIdentifier(row.shipment_id);
+      const shipmentId = normalizeTeamshipShipmentId(row);
       const shouldFetchBySr = targetSrNumbers.size > 0 && targetSrNumbers.has(shipmentId);
       const shouldFetchByDailyGarland =
         targetSrNumbers.size === 0 && isGarlandOrder(row) && (!shipmentDate || hasMatchingDate(row, shipmentDate));
@@ -81,7 +81,7 @@ export async function fetchTeamshipShippingOrdersForReview({
 
       const detail = await getTeamshipShippingOrder({ token, id: String(orderId), fetchImpl });
       const mergedDetail = mergeTeamshipDetailWithSummary(detail, row);
-      const detailShipmentId = normalizeIdentifier(detail.shipment_id ?? row.shipment_id);
+      const detailShipmentId = normalizeTeamshipShipmentId(mergedDetail);
       details.set(detailShipmentId || String(orderId), mergedDetail);
     }
 
@@ -279,6 +279,10 @@ function normalizeIdentifier(value: unknown) {
   return String(value ?? "")
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, "");
+}
+
+function normalizeTeamshipShipmentId(order: TeamshipShippingOrderSummary) {
+  return normalizeIdentifier(order.shipment_id ?? order.amazon_shipment_id1 ?? order.edi_field_1);
 }
 
 function normalizeText(value: unknown) {
