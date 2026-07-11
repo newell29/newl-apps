@@ -7,8 +7,8 @@ import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
 const OPENAI_API_BASE_URL = "https://api.openai.com/v1";
-const DEFAULT_VISION_MODEL = process.env.OPENAI_DOCUMENT_VISION_MODEL?.trim() || "gpt-4o";
-const FALLBACK_VISION_MODEL = process.env.OPENAI_DOCUMENT_VISION_FALLBACK_MODEL?.trim() || "gpt-4.1-mini";
+const DEFAULT_VISION_MODEL = process.env.OPENAI_DOCUMENT_VISION_MODEL?.trim() || "gpt-5-mini";
+const FALLBACK_VISION_MODEL = process.env.OPENAI_DOCUMENT_VISION_FALLBACK_MODEL?.trim() || "gpt-4o";
 
 type ExtractionRequest = {
   images: Array<{
@@ -46,9 +46,18 @@ export async function POST(request: Request) {
       model: DEFAULT_VISION_MODEL,
       prompt: buildPrompt(images.map((image) => image.pageNumber)),
       systemPrompt:
-        "You extract Garland Canada carrier loading-manifest rows from labeled BOL field-crop images. Return JSON only. The key fields are carrier, PS/reference number, consignee city/province, and total pallets. Include a row for every page where the Carrier box contains Midland, Speedy, Suretrack, Sure Track, or Suretrak. Ignore other carriers. Do not drop a matching carrier page just because another field is uncertain."
+        "You extract Garland Canada carrier loading-manifest rows from scanned BOL page images. Return JSON only. The key fields are carrier, PS/reference number, consignee city/province, and total pallets. Include a row for every new BOL whose CARRIER field contains Midland, Speedy, Suretrack, Sure Track, or Suretrak. Ignore other carriers and continuation/footer pages. Do not drop a matching carrier page just because another field is uncertain."
     });
-    primaryRows = normalizeRows(readRowsFromParsedResponse(primary.parsed), images.map((image) => image.pageNumber));
+    const parsedRows = readRowsFromParsedResponse(primary.parsed);
+    primaryRows = normalizeRows(parsedRows, images.map((image) => image.pageNumber));
+    logExtractionResult({
+      stage: "primary",
+      model: DEFAULT_VISION_MODEL,
+      pageNumbers: images.map((image) => image.pageNumber),
+      parsed: primary.parsed,
+      parsedRowCount: parsedRows.length,
+      normalizedRowCount: primaryRows.length
+    });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Carrier manifest extraction failed." },
@@ -67,9 +76,18 @@ export async function POST(request: Request) {
         model: FALLBACK_VISION_MODEL,
         prompt: buildFallbackPrompt(images.map((image) => image.pageNumber)),
         systemPrompt:
-          "You are doing OCR on labeled Garland BOL crop sheets. Return JSON only. Be literal: read the text visible in the labeled boxes. Do not return an empty result when a target carrier is visible."
+          "You are doing OCR on scanned Garland BOL page images. Return JSON only. Read the printed BOL labels and values literally. Do not return an empty result when a target carrier is printed in the CARRIER field of a new BOL."
       });
-      fallbackRows = normalizeRows(readRowsFromParsedResponse(fallback.parsed), images.map((image) => image.pageNumber));
+      const parsedRows = readRowsFromParsedResponse(fallback.parsed);
+      fallbackRows = normalizeRows(parsedRows, images.map((image) => image.pageNumber));
+      logExtractionResult({
+        stage: "fallback",
+        model: FALLBACK_VISION_MODEL,
+        pageNumbers: images.map((image) => image.pageNumber),
+        parsed: fallback.parsed,
+        parsedRowCount: parsedRows.length,
+        normalizedRowCount: fallbackRows.length
+      });
     } catch (error) {
       fallbackError = error instanceof Error ? error.message : "Fallback carrier manifest extraction failed.";
     }
@@ -83,20 +101,60 @@ export async function POST(request: Request) {
   });
 }
 
+function logExtractionResult({
+  stage,
+  model,
+  pageNumbers,
+  parsed,
+  parsedRowCount,
+  normalizedRowCount
+}: {
+  stage: "primary" | "fallback";
+  model: string;
+  pageNumbers: number[];
+  parsed: unknown;
+  parsedRowCount: number;
+  normalizedRowCount: number;
+}) {
+  console.info(
+    "[garland-carrier-manifest] extraction",
+    JSON.stringify({
+      stage,
+      model,
+      pageNumbers,
+      responseShape: describeResponseShape(parsed),
+      parsedRowCount,
+      normalizedRowCount
+    })
+  );
+}
+
+function describeResponseShape(value: unknown) {
+  if (Array.isArray(value)) {
+    return "array";
+  }
+
+  if (!value || typeof value !== "object") {
+    return typeof value;
+  }
+
+  return Object.keys(value as Record<string, unknown>).slice(0, 12);
+}
+
 function buildPrompt(pageNumbers: number[]) {
   return [
-    "Each attached image is a labeled crop sheet from one BOL page in the daily Garland BOL bundle.",
+    "Each attached image is the top portion of one scanned BOL page in the daily Garland BOL bundle.",
     `Page numbers: ${pageNumbers.join(", ")}.`,
-    "For each page, inspect the labeled Carrier box first. This is the most important field.",
+    "For each page, inspect the printed CARRIER field near the top first. This is the most important field.",
     "Target carrier examples include SURETRACK STANDARD, SURETRAK, SURE TRACK, SPEEDY TRANSPORT, SPEEDY, MIDLAND TRANSPORT, and MIDLAND.",
     "Only return rows for carriers Midland, Speedy, or Suretrack/Sure Track/Suretrak. Ignore all other carriers.",
     "If the carrier is one of those targets, return a row. Spend extra effort reading the details before leaving anything blank.",
-    "Some BOLs can be multiple pages. Return a row only when the crop sheet shows a new BOL header with a target carrier. If the crop sheet is a continuation page with no target carrier/PS header, return no row for that page.",
-    "For matching pages, extract these exact fields from the labeled crops:",
-    "1. carrier from Carrier box.",
-    "2. psNumber from References / PS box. It is the PS value before the first dash, for example PS209872 from PS209872-SR810664 - SR810664.",
-    "3. cityProvince from Consignee city/province. Use only city and province/state, for example OTTAWA, ON or CALGARY, AB. Do not include postal code or country.",
-    "4. skids from Total pallets, for example Total: 1 PALLETS means skids 1. If there is a conflict, trust the Total pallets crop.",
+    "Some BOLs can be multiple pages. Return a row only when the image shows a new BILL OF LADING header with printed CARRIER, REFERENCES, and SHIPMENT ID fields. A continuation/footer page can contain a handwritten carrier name near a signature; that is not a new BOL and must return no row.",
+    "For matching pages, extract these exact fields from the printed BOL:",
+    "1. carrier from the printed CARRIER field near the top left.",
+    "2. psNumber from the printed REFERENCES field near the top right. It is the PS value before the first dash, for example PS209872 from PS209872-SR810664 - SR810664.",
+    "3. cityProvince from the CONSIGNEE address. Use only city and province/state, for example OTTAWA, ON or CALGARY, AB. Do not include postal code or country.",
+    "4. skids from the printed Total pallets line, for example Total: 1 PALLETS means skids 1. If there is a conflict, trust the Total line.",
     "Also extract srNumber from Shipment ID when visible, but it is secondary.",
     "Never return N/A for fields. Use an empty string for unknown text fields and null for unknown skids.",
     "Only use HIGH confidence when carrier, PS number, city/province, and pallet count were all read from the page. Use LOW if only the carrier was found.",
@@ -112,12 +170,12 @@ function buildPrompt(pageNumbers: number[]) {
 
 function buildFallbackPrompt(pageNumbers: number[]) {
   return [
-    "Each image is one labeled crop sheet from a Garland BOL page.",
+    "Each image is the top portion of one scanned Garland BOL page.",
     `Page numbers: ${pageNumbers.join(", ")}.`,
-    "For each page, read the visible text in these labels: Carrier box, References / PS box, Shipment ID, Consignee city/province, Total pallets.",
-    "Return a row if Carrier box contains SURETRACK, SURETRAK, SURE TRACK, SPEEDY, or MIDLAND.",
+    "For each page, read the printed labels CARRIER, REFERENCES, SHIPMENT ID, CONSIGNEE, and Total pallets.",
+    "Return a row if the printed CARRIER field of a new BOL contains SURETRACK, SURETRAK, SURE TRACK, SPEEDY, or MIDLAND.",
     "For non-target carriers, return no row.",
-    "For continuation pages where Carrier box does not show a new carrier value, return no row.",
+    "For continuation/footer pages without the printed new-BOL header fields, return no row even if a carrier name is handwritten near a signature.",
     "Map SURETRACK/SURETRAK/SURE TRACK to SURETRACK, SPEEDY to SPEEDY, MIDLAND to MIDLAND.",
     "Output exactly this JSON shape: {\"rows\":[{\"pageNumber\":1,\"carrier\":\"SURETRACK\",\"srNumber\":\"810036\",\"psNumber\":\"PS209606\",\"cityProvince\":\"CALGARY, AB\",\"skids\":2,\"confidence\":\"HIGH\",\"notes\":\"read from fallback OCR\"}]}."
   ].join(" ");
@@ -156,7 +214,7 @@ async function runOpenAiExtraction({
           ...images.flatMap((image) => [
             {
               type: "text" as const,
-              text: `BOL page ${image.pageNumber}: inspect this crop sheet.`
+              text: `BOL page ${image.pageNumber}: inspect this scanned page image.`
             },
             {
               type: "image_url" as const,

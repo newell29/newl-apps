@@ -33,17 +33,10 @@ const TARGET_CARRIERS: Array<{ key: GarlandCarrierKey; label: string }> = [
   { key: "SPEEDY", label: "Speedy" },
   { key: "SURETRACK", label: "Suretrack" }
 ];
-const EXTRACTION_BATCH_SIZE = 1;
+const EXTRACTION_BATCH_SIZE = 2;
 const MANIFEST_CROP_IMAGE_WIDTH = 1800;
-const MANIFEST_CROP_IMAGE_JPEG_QUALITY = 0.9;
-
-const MANIFEST_CROP_BOXES = [
-  { label: "Carrier box", x: 0.025, y: 0.12, width: 0.37, height: 0.06 },
-  { label: "References / PS box", x: 0.615, y: 0.12, width: 0.34, height: 0.06 },
-  { label: "Shipment ID", x: 0.78, y: 0.075, width: 0.19, height: 0.055 },
-  { label: "Consignee city/province", x: 0.49, y: 0.24, width: 0.43, height: 0.105 },
-  { label: "Total pallets", x: 0.025, y: 0.61, width: 0.26, height: 0.065 }
-];
+const MANIFEST_CROP_IMAGE_JPEG_QUALITY = 0.82;
+const MANIFEST_PAGE_CROP = { x: 0, y: 0, width: 1, height: 0.7 };
 
 let pdfJsLoader: Promise<PdfJsModule> | null = null;
 
@@ -86,6 +79,21 @@ export function GarlandCarrierManifestClient({
 
   const carrierCounts = useMemo(() => buildCarrierCounts(rows), [rows]);
 
+  function acceptBolFile(file: File | null) {
+    if (!file) {
+      return;
+    }
+
+    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+      setError("Choose, paste, or drop a PDF file.");
+      return;
+    }
+
+    setBolFile(file);
+    setError(null);
+    setStatus(`${file.name} is ready to process.`);
+  }
+
   async function handleBuildManifests() {
     if (!bolFile) {
       return;
@@ -110,7 +118,7 @@ export function GarlandCarrierManifestClient({
 
         for (let batchPageIndex = pageIndex; batchPageIndex < lastPageIndex; batchPageIndex += 1) {
           const page = await pdf.getPage(batchPageIndex + 1);
-          const imageDataUrl = await renderManifestCropSheet(page);
+          const imageDataUrl = await renderManifestPageImage(page);
           images.push({ pageNumber: batchPageIndex + 1, imageDataUrl });
         }
 
@@ -292,15 +300,39 @@ export function GarlandCarrierManifestClient({
               placeholder="July 10, 2026"
             />
           </label>
-          <label className="block text-sm font-medium text-foreground md:col-span-2">
-            Garland BOL PDF
+          <div
+            className="block rounded-md text-sm font-medium text-foreground outline-none ring-primary focus-within:ring-2 focus:ring-2 md:col-span-2"
+            tabIndex={0}
+            role="group"
+            aria-label="Paste or drop Garland BOL PDF"
+            onPaste={(event) => {
+              const file = Array.from(event.clipboardData.files).find(
+                (candidate) => candidate.type === "application/pdf" || candidate.name.toLowerCase().endsWith(".pdf")
+              );
+
+              if (file) {
+                event.preventDefault();
+                acceptBolFile(file);
+              }
+            }}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              acceptBolFile(event.dataTransfer.files?.[0] ?? null);
+            }}
+          >
+            <label htmlFor="garland-bol-pdf">Garland BOL PDF</label>
             <input
+              id="garland-bol-pdf"
               type="file"
               accept="application/pdf"
-              onChange={(event) => setBolFile(event.target.files?.[0] ?? null)}
+              onChange={(event) => acceptBolFile(event.target.files?.[0] ?? null)}
               className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
             />
-          </label>
+            <p className="mt-1 text-xs font-normal text-mutedForeground">
+              Choose a file, drag it here, or paste a copied PDF.
+            </p>
+          </div>
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -659,7 +691,7 @@ async function loadPdfJs() {
   return pdfJsLoader;
 }
 
-async function renderManifestCropSheet(page: PDFPageProxy) {
+async function renderManifestPageImage(page: PDFPageProxy) {
   const viewport = page.getViewport({ scale: 3 });
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
@@ -672,65 +704,36 @@ async function renderManifestCropSheet(page: PDFPageProxy) {
   canvas.height = Math.ceil(viewport.height);
   await page.render({ canvas, canvasContext: context, viewport }).promise;
 
-  const cropGap = 24;
-  const labelHeight = 34;
-  const sheetPadding = 24;
-  const cropTargetWidth = MANIFEST_CROP_IMAGE_WIDTH - sheetPadding * 2;
-  const renderedCrops = MANIFEST_CROP_BOXES.map((cropBox) => {
-    const sourceWidth = Math.max(1, Math.floor(canvas.width * cropBox.width));
-    const sourceHeight = Math.max(1, Math.floor(canvas.height * cropBox.height));
-    const targetHeight = Math.max(80, Math.round((sourceHeight / sourceWidth) * cropTargetWidth));
+  const cropCanvas = document.createElement("canvas");
+  const cropContext = cropCanvas.getContext("2d");
 
-    return {
-      ...cropBox,
-      sourceX: Math.floor(canvas.width * cropBox.x),
-      sourceY: Math.floor(canvas.height * cropBox.y),
-      sourceWidth,
-      sourceHeight,
-      targetHeight
-    };
-  });
-  const sheetHeight =
-    sheetPadding * 2 +
-    renderedCrops.reduce((total, crop) => total + labelHeight + crop.targetHeight + cropGap, -cropGap);
-  const sheetCanvas = document.createElement("canvas");
-  sheetCanvas.width = MANIFEST_CROP_IMAGE_WIDTH;
-  sheetCanvas.height = sheetHeight;
-  const sheetContext = sheetCanvas.getContext("2d");
-
-  if (!sheetContext) {
+  if (!cropContext) {
     throw new Error("Unable to create a crop canvas for carrier manifest extraction.");
   }
 
-  sheetContext.fillStyle = "#ffffff";
-  sheetContext.fillRect(0, 0, sheetCanvas.width, sheetCanvas.height);
-  sheetContext.font = "700 24px Arial, sans-serif";
-  sheetContext.textBaseline = "top";
+  const sourceX = Math.floor(canvas.width * MANIFEST_PAGE_CROP.x);
+  const sourceY = Math.floor(canvas.height * MANIFEST_PAGE_CROP.y);
+  const sourceWidth = Math.max(1, Math.floor(canvas.width * MANIFEST_PAGE_CROP.width));
+  const sourceHeight = Math.max(1, Math.floor(canvas.height * MANIFEST_PAGE_CROP.height));
+  const scale = Math.min(1, MANIFEST_CROP_IMAGE_WIDTH / sourceWidth);
 
-  let yPosition = sheetPadding;
+  cropCanvas.width = Math.max(1, Math.floor(sourceWidth * scale));
+  cropCanvas.height = Math.max(1, Math.floor(sourceHeight * scale));
+  cropContext.fillStyle = "#ffffff";
+  cropContext.fillRect(0, 0, cropCanvas.width, cropCanvas.height);
+  cropContext.drawImage(
+    canvas,
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight,
+    0,
+    0,
+    cropCanvas.width,
+    cropCanvas.height
+  );
 
-  for (const crop of renderedCrops) {
-    sheetContext.fillStyle = "#111827";
-    sheetContext.fillText(crop.label, sheetPadding, yPosition);
-    yPosition += labelHeight;
-    sheetContext.drawImage(
-      canvas,
-      crop.sourceX,
-      crop.sourceY,
-      crop.sourceWidth,
-      crop.sourceHeight,
-      sheetPadding,
-      yPosition,
-      cropTargetWidth,
-      crop.targetHeight
-    );
-    sheetContext.strokeStyle = "#ef4444";
-    sheetContext.lineWidth = 4;
-    sheetContext.strokeRect(sheetPadding, yPosition, cropTargetWidth, crop.targetHeight);
-    yPosition += crop.targetHeight + cropGap;
-  }
-
-  return sheetCanvas.toDataURL("image/jpeg", MANIFEST_CROP_IMAGE_JPEG_QUALITY);
+  return cropCanvas.toDataURL("image/jpeg", MANIFEST_CROP_IMAGE_JPEG_QUALITY);
 }
 
 function sortManifestRows(rows: GarlandCarrierManifestRow[]) {
