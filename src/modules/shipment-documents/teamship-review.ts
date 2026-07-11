@@ -278,7 +278,7 @@ export function buildGarlandTeamshipReview(
 ): GarlandTeamshipReviewResponse {
   const teamshipByShipmentId = new Map(
     teamshipOrders
-      .map((order) => [normalizeIdentifier(order.shipment_id), order] as const)
+      .map((order) => [normalizeIdentifier(readTeamshipShipmentId(order)), order] as const)
       .filter(([shipmentId]) => shipmentId.length > 0)
   );
   const reviews = pdfOrders.map((pdfOrder) => {
@@ -321,9 +321,10 @@ function buildOrderReview(
   }
 
   const fields: GarlandTeamshipReviewField[] = [
-    exactField("shipment_id", "Shipment ID / SR", pdfOrder.srNumber, teamshipOrder.shipment_id),
+    exactField("shipment_id", "Shipment ID / SR", pdfOrder.srNumber, readTeamshipShipmentId(teamshipOrder)),
     psField(pdfOrder.psNumber, teamshipOrder),
-    exactField("po_number", "Ship To PO", pdfOrder.shipToPo, teamshipOrder.po_number),
+    exactField("po_number", "Ship To PO", pdfOrder.shipToPo, readTeamshipPoNumber(teamshipOrder)),
+    exactField("freight_terms", "Freight terms", pdfOrder.freightTerms, readTeamshipFreightTerms(teamshipOrder)),
     carrierField(pdfOrder.shipVia, teamshipOrder),
     textField("ship_to_name", "Ship-to name", pdfOrder.shipToName, readTeamshipShipToName(teamshipOrder)),
     textField("ship_to_address_1", "Ship-to address", pdfOrder.shipToAddress1, readTeamshipAddress1(teamshipOrder)),
@@ -333,7 +334,7 @@ function buildOrderReview(
     countryField(pdfOrder.shipToCountry, readTeamshipCountry(teamshipOrder)),
     itemSkuField(pdfOrder, teamshipOrder),
     serialField(pdfOrder, teamshipOrder),
-    instructionsField(pdfOrder.instructions, teamshipOrder.shipping_instructions)
+    instructionsField(pdfOrder.instructions, readTeamshipInstructions(teamshipOrder))
   ];
   const issueCount = fields.filter((field) => field.status === "DISCREPANCY" || field.status === "MISSING").length;
 
@@ -396,6 +397,7 @@ function carrierField(pdfShipVia: string | null, teamshipOrder: TeamshipShipping
     teamshipOrder.shipping_carrier,
     teamshipOrder.method,
     teamshipOrder.carrier_name,
+    teamshipOrder.carrier_value,
     teamshipOrder.shipping_info?.carrier,
     teamshipOrder.shipping_info?.method
   ].filter(Boolean);
@@ -436,14 +438,19 @@ function itemSkuField(
 ): GarlandTeamshipReviewField {
   const pdfSkus = pdfOrder.items.map((item) => normalizeSku(item.sku)).filter(Boolean);
   const teamshipSkus = (teamshipOrder.items ?? []).map((item) => normalizeSku(item.sku)).filter(Boolean);
-  const missingSkus = pdfSkus.filter((sku) => !teamshipSkus.includes(sku));
+  const teamshipStrings = collectTeamshipStrings(teamshipOrder).map(normalizeSku).filter(Boolean);
+  const missingSkus = pdfSkus.filter(
+    (sku) => !teamshipSkus.includes(sku) && !teamshipStrings.some((candidate) => candidate.includes(sku))
+  );
 
   return {
     key: "items",
     label: "Item SKUs",
     status: missingSkus.length === 0 && pdfSkus.length > 0 ? "MATCH" : "DISCREPANCY",
     pdfValue: pdfOrder.items.map((item) => item.sku).join(", ") || null,
-    teamshipValue: (teamshipOrder.items ?? []).map((item) => item.sku).filter(Boolean).join(", ") || null,
+    teamshipValue:
+      (teamshipOrder.items ?? []).map((item) => item.sku).filter(Boolean).join(", ") ||
+      (missingSkus.length === 0 ? "Found in Teamship fields" : null),
     message:
       missingSkus.length === 0 && pdfSkus.length > 0
         ? "All PDF SKUs were found in Teamship."
@@ -576,27 +583,44 @@ function summarizeReviews(
 }
 
 function readTeamshipShipToName(order: TeamshipShippingOrderDetail) {
-  return order.ship_to_name ?? order.shipping_info?.shipping_address?.name ?? null;
+  const firstLastName = [order.ship_first_name, order.ship_last_name].filter(Boolean).join(" ").trim();
+  return order.ship_to_name ?? (firstLastName || order.shipping_info?.shipping_address?.name || null);
 }
 
 function readTeamshipAddress1(order: TeamshipShippingOrderDetail) {
-  return order.ship_to_address_1 ?? order.shipping_info?.shipping_address?.address_1 ?? null;
+  return order.ship_to_address_1 ?? order.ship_address_1 ?? order.shipping_info?.shipping_address?.address_1 ?? null;
 }
 
 function readTeamshipCity(order: TeamshipShippingOrderDetail) {
-  return order.ship_to_city ?? order.shipping_info?.shipping_address?.city ?? null;
+  return order.ship_to_city ?? order.ship_city ?? order.shipping_info?.shipping_address?.city ?? null;
 }
 
 function readTeamshipState(order: TeamshipShippingOrderDetail) {
-  return order.ship_to_state ?? order.shipping_info?.shipping_address?.state ?? null;
+  return order.ship_to_state ?? order.ship_state ?? order.shipping_info?.shipping_address?.state ?? null;
 }
 
 function readTeamshipPostalCode(order: TeamshipShippingOrderDetail) {
-  return order.ship_to_zip ?? order.shipping_info?.shipping_address?.zip ?? null;
+  return order.ship_to_zip ?? order.ship_zip ?? order.shipping_info?.shipping_address?.zip ?? null;
 }
 
 function readTeamshipCountry(order: TeamshipShippingOrderDetail) {
-  return order.ship_to_country ?? order.shipping_info?.shipping_address?.country ?? null;
+  return order.ship_to_country ?? order.ship_country ?? order.shipping_info?.shipping_address?.country ?? null;
+}
+
+function readTeamshipShipmentId(order: TeamshipShippingOrderDetail) {
+  return order.shipment_id ?? order.amazon_shipment_id1 ?? stringifyValue(order.edi_field_1);
+}
+
+function readTeamshipPoNumber(order: TeamshipShippingOrderDetail) {
+  return order.po_number ?? order.poNumber ?? null;
+}
+
+function readTeamshipFreightTerms(order: TeamshipShippingOrderDetail) {
+  return stringifyValue(order.edi_field_3);
+}
+
+function readTeamshipInstructions(order: TeamshipShippingOrderDetail) {
+  return order.shipping_instructions ?? stringifyValue(order.edi_field_4);
 }
 
 function collectTeamshipStrings(order: TeamshipShippingOrderDetail) {
