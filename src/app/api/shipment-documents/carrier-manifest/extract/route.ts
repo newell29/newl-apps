@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       {
         role: "system",
         content:
-          "You extract Garland Canada carrier loading-manifest rows from full-page BOL scan images. Return JSON only. The key fields are carrier, PS/reference number, consignee city/province, and total pallets. Include a row for every page where the CARRIER field contains Midland, Speedy, Suretrack, Sure Track, or Suretrak. Ignore other carriers. Do not drop a matching carrier page just because another field is uncertain."
+          "You extract Garland Canada carrier loading-manifest rows from labeled BOL field-crop images. Return JSON only. The key fields are carrier, PS/reference number, consignee city/province, and total pallets. Include a row for every page where the Carrier box contains Midland, Speedy, Suretrack, Sure Track, or Suretrak. Ignore other carriers. Do not drop a matching carrier page just because another field is uncertain."
       },
       {
         role: "user",
@@ -112,18 +112,18 @@ export async function POST(request: Request) {
 
 function buildPrompt(pageNumbers: number[]) {
   return [
-    "Each attached image is one full BOL page from the daily Garland BOL bundle.",
+    "Each attached image is a labeled crop sheet from one BOL page in the daily Garland BOL bundle.",
     `Page numbers: ${pageNumbers.join(", ")}.`,
-    "For each page, inspect the top-left CARRIER field first. This is the most important field.",
+    "For each page, inspect the labeled Carrier box first. This is the most important field.",
     "Target carrier examples include SURETRACK STANDARD, SURETRAK, SURE TRACK, SPEEDY TRANSPORT, SPEEDY, MIDLAND TRANSPORT, and MIDLAND.",
     "Only return rows for carriers Midland, Speedy, or Suretrack/Sure Track/Suretrak. Ignore all other carriers.",
     "If the carrier is one of those targets, return a row. Spend extra effort reading the details before leaving anything blank.",
-    "For matching pages, extract these exact fields from the BOL:",
-    "1. carrier from the top-left CARRIER box.",
-    "2. psNumber from the REFERENCES box near the top. It is the PS value before the first dash, for example PS209872 from PS209872-SR810664 - SR810664.",
-    "3. cityProvince from the CONSIGNEE address box. Use only city and province/state, for example OTTAWA, ON or CALGARY, AB. Do not include postal code or country.",
-    "4. skids from the bottom-left Total line in the carrier information section, for example Total: 1 PALLETS means skids 1. If there is a conflict, trust the Total line over the package detail line.",
-    "Also extract srNumber from SHIPMENT ID in the top-right corner when visible, but it is secondary.",
+    "For matching pages, extract these exact fields from the labeled crops:",
+    "1. carrier from Carrier box.",
+    "2. psNumber from References / PS box. It is the PS value before the first dash, for example PS209872 from PS209872-SR810664 - SR810664.",
+    "3. cityProvince from Consignee city/province. Use only city and province/state, for example OTTAWA, ON or CALGARY, AB. Do not include postal code or country.",
+    "4. skids from Total pallets, for example Total: 1 PALLETS means skids 1. If there is a conflict, trust the Total pallets crop.",
+    "Also extract srNumber from Shipment ID when visible, but it is secondary.",
     "Never return N/A for fields. Use an empty string for unknown text fields and null for unknown skids.",
     "Only use HIGH confidence when carrier, PS number, city/province, and pallet count were all read from the page. Use LOW if only the carrier was found.",
     "Normalize carrier to one of MIDLAND, SPEEDY, SURETRACK.",

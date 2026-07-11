@@ -36,6 +36,16 @@ const TARGET_CARRIERS: Array<{ key: GarlandCarrierKey; label: string }> = [
 const EXTRACTION_BATCH_SIZE = 1;
 const PAGE_IMAGE_MAX_WIDTH = 2200;
 const PAGE_IMAGE_JPEG_QUALITY = 0.86;
+const MANIFEST_CROP_IMAGE_WIDTH = 1800;
+const MANIFEST_CROP_IMAGE_JPEG_QUALITY = 0.9;
+
+const MANIFEST_CROP_BOXES = [
+  { label: "Carrier box", x: 0.025, y: 0.12, width: 0.37, height: 0.06 },
+  { label: "References / PS box", x: 0.615, y: 0.12, width: 0.34, height: 0.06 },
+  { label: "Shipment ID", x: 0.78, y: 0.075, width: 0.19, height: 0.055 },
+  { label: "Consignee city/province", x: 0.49, y: 0.24, width: 0.43, height: 0.105 },
+  { label: "Total pallets", x: 0.025, y: 0.61, width: 0.26, height: 0.065 }
+];
 
 let pdfJsLoader: Promise<PdfJsModule> | null = null;
 
@@ -102,7 +112,7 @@ export function GarlandCarrierManifestClient({
 
         for (let batchPageIndex = pageIndex; batchPageIndex < lastPageIndex; batchPageIndex += 1) {
           const page = await pdf.getPage(batchPageIndex + 1);
-          const imageDataUrl = await renderPageImage(page);
+          const imageDataUrl = await renderManifestCropSheet(page);
           images.push({ pageNumber: batchPageIndex + 1, imageDataUrl });
         }
 
@@ -666,6 +676,79 @@ async function renderPageImage(page: PDFPageProxy) {
 
   await page.render({ canvas, canvasContext: context, viewport }).promise;
   return canvas.toDataURL("image/jpeg", PAGE_IMAGE_JPEG_QUALITY);
+}
+
+async function renderManifestCropSheet(page: PDFPageProxy) {
+  const pageImageDataUrl = await renderPageImage(page);
+  const pageImage = await loadImage(pageImageDataUrl);
+  const cropGap = 24;
+  const labelHeight = 34;
+  const sheetPadding = 24;
+  const cropTargetWidth = MANIFEST_CROP_IMAGE_WIDTH - sheetPadding * 2;
+  const renderedCrops = MANIFEST_CROP_BOXES.map((cropBox) => {
+    const sourceWidth = Math.max(1, Math.floor(pageImage.width * cropBox.width));
+    const sourceHeight = Math.max(1, Math.floor(pageImage.height * cropBox.height));
+    const targetHeight = Math.max(80, Math.round((sourceHeight / sourceWidth) * cropTargetWidth));
+
+    return {
+      ...cropBox,
+      sourceX: Math.floor(pageImage.width * cropBox.x),
+      sourceY: Math.floor(pageImage.height * cropBox.y),
+      sourceWidth,
+      sourceHeight,
+      targetHeight
+    };
+  });
+  const sheetHeight =
+    sheetPadding * 2 +
+    renderedCrops.reduce((total, crop) => total + labelHeight + crop.targetHeight + cropGap, -cropGap);
+  const sheetCanvas = document.createElement("canvas");
+  sheetCanvas.width = MANIFEST_CROP_IMAGE_WIDTH;
+  sheetCanvas.height = sheetHeight;
+  const sheetContext = sheetCanvas.getContext("2d");
+
+  if (!sheetContext) {
+    throw new Error("Unable to create a crop canvas for carrier manifest extraction.");
+  }
+
+  sheetContext.fillStyle = "#ffffff";
+  sheetContext.fillRect(0, 0, sheetCanvas.width, sheetCanvas.height);
+  sheetContext.font = "700 24px Arial, sans-serif";
+  sheetContext.textBaseline = "top";
+
+  let yPosition = sheetPadding;
+
+  for (const crop of renderedCrops) {
+    sheetContext.fillStyle = "#111827";
+    sheetContext.fillText(crop.label, sheetPadding, yPosition);
+    yPosition += labelHeight;
+    sheetContext.drawImage(
+      pageImage,
+      crop.sourceX,
+      crop.sourceY,
+      crop.sourceWidth,
+      crop.sourceHeight,
+      sheetPadding,
+      yPosition,
+      cropTargetWidth,
+      crop.targetHeight
+    );
+    sheetContext.strokeStyle = "#ef4444";
+    sheetContext.lineWidth = 4;
+    sheetContext.strokeRect(sheetPadding, yPosition, cropTargetWidth, crop.targetHeight);
+    yPosition += crop.targetHeight + cropGap;
+  }
+
+  return sheetCanvas.toDataURL("image/jpeg", MANIFEST_CROP_IMAGE_JPEG_QUALITY);
+}
+
+function loadImage(dataUrl: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Unable to load rendered BOL page image."));
+    image.src = dataUrl;
+  });
 }
 
 function sortManifestRows(rows: GarlandCarrierManifestRow[]) {
