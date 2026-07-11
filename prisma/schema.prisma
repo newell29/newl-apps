@@ -447,6 +447,8 @@ model Tenant {
   shipmentCarrierManifestRuns         ShipmentCarrierManifestRun[]
   teamshipReviewRuns                  TeamshipReviewRun[]
   teamshipReviewOrders                TeamshipReviewOrder[]
+  teamshipDailySyncRuns               TeamshipDailySyncRun[]
+  teamshipSyncedOrders                TeamshipSyncedOrder[]
   cashflowCustomers                   CashflowCustomer[]
   cashflowCustomerAliases             CashflowCustomerAlias[]
   cashflowFiles                       CashflowFile[]
@@ -879,6 +881,57 @@ model TeamshipReviewOrder {
   @@index([tenantId, srNumber])
   @@index([tenantId, psNumber])
   @@index([tenantId, status])
+}
+
+model TeamshipDailySyncRun {
+  id              String    @id @default(cuid())
+  tenantId        String
+  shipmentDate    DateTime
+  triggerSource   String
+  status          String
+  fetchedCount    Int       @default(0)
+  insertedCount   Int       @default(0)
+  updatedCount    Int       @default(0)
+  skippedCount    Int       @default(0)
+  errorMessage    String?
+  createdByUserId String?
+  startedAt       DateTime  @default(now())
+  finishedAt      DateTime?
+  createdAt       DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, shipmentDate])
+  @@index([tenantId, triggerSource, startedAt])
+  @@index([tenantId, status])
+}
+
+model TeamshipSyncedOrder {
+  id              String   @id @default(cuid())
+  tenantId        String
+  syncKey         String
+  shipmentDate    DateTime
+  srNumber        String?
+  teamshipOrderId String?
+  teamshipUrl     String?
+  carrier         String?
+  shipToName      String?
+  city            String?
+  state           String?
+  rawOrder        Json
+  firstSyncedAt   DateTime @default(now())
+  lastSyncedAt    DateTime @default(now())
+  syncCount       Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, syncKey])
+  @@index([tenantId, shipmentDate])
+  @@index([tenantId, srNumber])
+  @@index([tenantId, teamshipOrderId])
+  @@index([tenantId, lastSyncedAt])
 }
 
 model IntegrationCredential {

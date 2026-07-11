@@ -15,6 +15,14 @@ type PdfJsModule = typeof import("pdfjs-dist");
 type DailyOrdersResponse = {
   orders?: TeamshipShippingOrderDetail[];
   totalCount?: number;
+  sync?: {
+    runId: string;
+    status: "SUCCESS" | "FAILED" | "SKIPPED";
+    insertedCount: number;
+    updatedCount: number;
+    skippedCount: number;
+    storedCount: number;
+  };
   error?: string;
 };
 
@@ -67,6 +75,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
   const [orders, setOrders] = useState<GarlandPdfShippingOrder[]>([]);
   const [review, setReview] = useState<GarlandTeamshipReviewResponse | null>(null);
   const [dailyOrderCount, setDailyOrderCount] = useState<number | null>(null);
+  const [dailySyncSummary, setDailySyncSummary] = useState<DailyOrdersResponse["sync"] | null>(null);
   const [alertDigest, setAlertDigest] = useState("");
   const [history, setHistory] = useState<TeamshipReviewHistoryResponse>({ runs: [], totalCount: 0, search: "" });
   const [historySearch, setHistorySearch] = useState("");
@@ -99,6 +108,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     setOrders([]);
     setReview(null);
     setDailyOrderCount(null);
+    setDailySyncSummary(null);
     setError(null);
 
     if (!file) {
@@ -180,8 +190,9 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
   async function fetchDailyOrders() {
     setError(null);
     setDailyOrderCount(null);
+    setDailySyncSummary(null);
     setIsProcessing(true);
-    setStatus("Fetching Garland Canada Distribution orders from Teamship for the selected day...");
+    setStatus("Syncing Garland Canada Distribution orders from Teamship for the selected day...");
 
     try {
       const response = await fetch("/api/shipment-documents/teamship-review/daily-orders", {
@@ -198,10 +209,15 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       }
 
       setDailyOrderCount(json.totalCount ?? json.orders?.length ?? 0);
-      setStatus(`Fetched ${json.totalCount ?? json.orders?.length ?? 0} Teamship Garland order(s) for ${shipmentDate}.`);
+      setDailySyncSummary(json.sync ?? null);
+      setStatus(
+        json.sync
+          ? `Synced ${json.totalCount ?? json.orders?.length ?? 0} Teamship Garland order(s): ${json.sync.insertedCount} new, ${json.sync.updatedCount} updated, ${json.sync.skippedCount} skipped.`
+          : `Fetched ${json.totalCount ?? json.orders?.length ?? 0} Teamship Garland order(s) for ${shipmentDate}.`
+      );
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to fetch Teamship daily orders.");
-      setStatus("Teamship daily-order pull stopped.");
+      setError(caught instanceof Error ? caught.message : "Unable to sync Teamship daily orders.");
+      setStatus("Teamship daily-order sync stopped.");
     } finally {
       setIsProcessing(false);
     }
@@ -364,7 +380,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
             disabled={isProcessing}
             className="rounded-md border border-border px-5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Fetch Teamship daily orders
+            Sync Teamship daily orders
           </button>
           <p className="text-sm text-mutedForeground">{status}</p>
         </div>
@@ -404,9 +420,13 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       <section className="grid gap-4 lg:grid-cols-3">
         <SummaryCard label="PDF extraction" value={String(orders.length)} detail={extractedSummary} />
         <SummaryCard
-          label="Teamship daily pull"
+          label="Teamship daily sync"
           value={dailyOrderCount === null ? "Not run" : String(dailyOrderCount)}
-          detail="Manual pull is available now. The 15-minute cron remains intentionally disabled."
+          detail={
+            dailySyncSummary
+              ? `${dailySyncSummary.insertedCount} new, ${dailySyncSummary.updatedCount} updated, ${dailySyncSummary.storedCount} stored for this shipment date.`
+              : "Manual sync is available here. Scheduled sync is controlled from Settings."
+          }
         />
         <SummaryCard
           label="Review result"
