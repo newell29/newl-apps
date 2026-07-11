@@ -44,6 +44,8 @@ export type TeamshipPalletDim = {
   length?: number | string | null;
   height?: number | string | null;
   weight?: number | string | null;
+  weight_unit?: string | null;
+  commodity?: string | null;
 };
 
 export type TeamshipShippingOrderDetail = {
@@ -93,6 +95,7 @@ export type TeamshipShippingOrderDetail = {
   user_company?: string | null;
   customer_name?: string | null;
   items?: TeamshipShippingOrderItem[];
+  pallets?: TeamshipPalletDim[];
   pallet_dims?: TeamshipPalletDim[];
   shipping_info?: {
     carrier?: string | null;
