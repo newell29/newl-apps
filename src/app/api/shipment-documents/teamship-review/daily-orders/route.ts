@@ -1,19 +1,13 @@
 import { ModuleKey } from "@prisma/client";
 import { NextResponse } from "next/server";
 
-import { requireModule } from "@/server/auth/authorization";
-import {
-  fetchTeamshipShippingOrdersForReview,
-  getTeamshipConfigurationStatus
-} from "@/server/integrations/teamship";
+import { runDueTeamshipDailySyncs, syncTeamshipDailyOrders } from "@/modules/shipment-documents/teamship-daily-sync";
+import { requireModule, requireMutationAccess } from "@/server/auth/authorization";
+import { getTeamshipConfigurationStatus } from "@/server/integrations/teamship";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
 type DailyOrdersRequest = {
   shipmentDate?: string;
-  teamshipCredentials?: {
-    email?: string;
-    password?: string;
-  };
 };
 
 export const dynamic = "force-dynamic";
@@ -21,13 +15,13 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   const context = await getAuthenticatedContext();
   await requireModule(context, ModuleKey.SHIPMENT_DOCUMENTS);
+  await requireMutationAccess(context);
 
   const body = (await request.json().catch(() => null)) as DailyOrdersRequest | null;
   const shipmentDate = typeof body?.shipmentDate === "string" ? body.shipmentDate : null;
   const config = await getTeamshipConfigurationStatus(context.tenantId);
-  const runtimeCredentials = readRuntimeCredentials(body?.teamshipCredentials);
 
-  if (!config.configured && !runtimeCredentials) {
+  if (!config.configured) {
     return NextResponse.json(
       {
         error: `Teamship is not configured. Missing: ${config.missing.join(", ")}. Add Teamship credentials in Settings.`,
@@ -38,49 +32,29 @@ export async function POST(request: Request) {
   }
 
   try {
-    const orders = await fetchTeamshipShippingOrdersForReview({
+    const sync = await syncTeamshipDailyOrders({
       tenantId: context.tenantId,
-      shipmentDate,
-      srNumbers: [],
-      credentials: runtimeCredentials
+      shipmentDate: shipmentDate ?? getTodayInputValue(),
+      triggerSource: "MANUAL",
+      createdByUserId: context.userId
     });
 
     return NextResponse.json({
-      orders,
-      totalCount: orders.length,
+      orders: sync.orders,
+      totalCount: sync.fetchedCount,
       fetchedAt: new Date().toISOString(),
-      cron: {
-        enabled: false,
-        cadence: "15 minutes",
-        note: "Manual daily-order retrieval is implemented. The recurring cron is intentionally not scheduled yet."
-      }
+      sync
     });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unable to fetch Teamship daily orders." },
+      { error: error instanceof Error ? error.message : "Unable to sync Teamship daily orders." },
       { status: 502 }
     );
   }
 }
 
-function readRuntimeCredentials(value: DailyOrdersRequest["teamshipCredentials"]) {
-  const email = typeof value?.email === "string" ? value.email.trim() : "";
-  const password = typeof value?.password === "string" ? value.password.trim() : "";
-
-  if (!email && !password) {
-    return null;
-  }
-
-  if (!email || !password) {
-    return null;
-  }
-
-  return { email, password };
-}
-
 export async function GET(request: Request) {
-  const config = await getTeamshipConfigurationStatus();
-  const syncSecret = process.env.TEAMSHIP_DAILY_SYNC_SECRET?.trim();
+  const syncSecret = process.env.TEAMSHIP_DAILY_SYNC_SECRET?.trim() || process.env.CRON_SECRET?.trim();
 
   if (!syncSecret) {
     return NextResponse.json(
@@ -88,8 +62,7 @@ export async function GET(request: Request) {
         enabled: false,
         scheduled: false,
         cadence: "15 minutes",
-        message:
-          "Garland Teamship daily-order sync is scaffolded, but TEAMSHIP_DAILY_SYNC_SECRET is not configured and no Vercel cron schedule is enabled yet."
+        message: "Garland Teamship daily-order sync requires TEAMSHIP_DAILY_SYNC_SECRET or CRON_SECRET before cron requests can run."
       },
       { status: 503 }
     );
@@ -104,32 +77,25 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized Garland Teamship daily sync request." }, { status: 401 });
   }
 
-  if (!config.configured) {
-    return NextResponse.json(
-      {
-        error: `Teamship is not configured. Missing: ${config.missing.join(", ")}.`,
-        configuration: config
-      },
-      { status: 503 }
-    );
-  }
-
   const requestUrl = new URL(request.url);
   const shipmentDate = requestUrl.searchParams.get("shipmentDate") ?? getTodayInputValue();
 
   try {
-  const orders = await fetchTeamshipShippingOrdersForReview({ shipmentDate, srNumbers: [] });
+    const results = await runDueTeamshipDailySyncs(shipmentDate);
 
     return NextResponse.json({
-      orders,
-      totalCount: orders.length,
+      results,
+      tenantCount: results.length,
+      totalFetchedCount: results.reduce((sum, result) => sum + result.fetchedCount, 0),
+      totalInsertedCount: results.reduce((sum, result) => sum + result.insertedCount, 0),
+      totalUpdatedCount: results.reduce((sum, result) => sum + result.updatedCount, 0),
+      totalSkippedCount: results.reduce((sum, result) => sum + result.skippedCount, 0),
       fetchedAt: new Date().toISOString(),
       cron: {
         enabled: true,
-        scheduled: false,
-        cadence: "15 minutes",
+        scheduled: true,
         shipmentDate,
-        note: "This endpoint is cron-ready and read-only, but no Vercel cron schedule is enabled in the repo yet."
+        note: "Tenant Settings control whether each tenant syncs and how often it is eligible to run."
       }
     });
   } catch (error) {

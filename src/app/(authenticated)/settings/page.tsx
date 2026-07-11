@@ -360,7 +360,35 @@ export default async function SettingsPage() {
                 { value: "DISABLED", label: "Disabled" }
               ]}
             />
+            <SelectField
+              label="Cron sync cadence"
+              name="teamshipSyncCadenceMinutes"
+              defaultValue={String(settings.teamship.syncCadenceMinutes)}
+              options={[
+                { value: "15", label: "Every 15 minutes" },
+                { value: "30", label: "Every 30 minutes" },
+                { value: "60", label: "Hourly" },
+                { value: "120", label: "Every 2 hours" }
+              ]}
+            />
           </div>
+
+          <label className="flex items-start gap-3 rounded-md border border-border bg-muted/30 p-4 text-sm text-foreground">
+            <input
+              type="checkbox"
+              name="teamshipSyncEnabled"
+              value="true"
+              defaultChecked={settings.teamship.syncEnabled}
+              className="mt-1"
+            />
+            <span>
+              <span className="block font-semibold">Enable scheduled Teamship daily-order sync</span>
+              <span className="mt-1 block leading-6 text-mutedForeground">
+                When enabled, the cron runner stores Garland Teamship orders for the current day. Repeated syncs update
+                the same SR/order records instead of adding duplicates.
+              </span>
+            </span>
+          </label>
 
           <div className="rounded-md border border-border bg-muted/30 p-4">
             <p className="text-sm font-medium text-foreground">Saved credential status</p>
@@ -368,6 +396,10 @@ export default async function SettingsPage() {
               {settings.teamship.passwordConfigured
                 ? "A Teamship password is saved. Enter a new password only when you want to replace it."
                 : "No Teamship password is saved yet."}
+            </p>
+            <p className="mt-1 text-xs text-mutedForeground">
+              Scheduled sync is {settings.teamship.syncEnabled ? "enabled" : "disabled"} at a{" "}
+              {settings.teamship.syncCadenceMinutes}-minute cadence.
             </p>
             {settings.teamship.updatedAt ? (
               <p className="mt-1 text-xs text-mutedForeground">Last updated {formatDateTime(settings.teamship.updatedAt)}.</p>

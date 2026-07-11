@@ -22,6 +22,8 @@ export type TeamshipSettings = {
   apiBaseUrl: string | null;
   status: IntegrationStatus;
   passwordConfigured: boolean;
+  syncEnabled: boolean;
+  syncCadenceMinutes: number;
   updatedAt: string | null;
 };
 
@@ -44,9 +46,40 @@ export function parseTeamshipSettings(credential?: TeamshipCredentialRecord | nu
     apiBaseUrl: typeof config.apiBaseUrl === "string" && config.apiBaseUrl.trim() ? config.apiBaseUrl.trim() : null,
     status: credential?.status ?? IntegrationStatus.DISABLED,
     passwordConfigured: Boolean(credential?.secretRef),
+    syncEnabled: config.syncEnabled === true,
+    syncCadenceMinutes: readSyncCadenceMinutes(config.syncCadenceMinutes),
     updatedAt:
       typeof config.updatedAt === "string" && config.updatedAt.trim().length > 0 ? config.updatedAt.trim() : null
   };
+}
+
+export async function getTeamshipSyncEnabledCredentials() {
+  const credentials = await prisma.integrationCredential.findMany({
+    where: {
+      provider: IntegrationProvider.TEAMSHIP,
+      name: TEAMSHIP_CREDENTIAL_NAME,
+      status: IntegrationStatus.ACTIVE
+    },
+    select: {
+      tenantId: true,
+      publicConfig: true,
+      secretRef: true
+    }
+  });
+
+  return credentials
+    .map((credential) => ({
+      tenantId: credential.tenantId,
+      settings: parseTeamshipSettings({
+        id: "",
+        provider: IntegrationProvider.TEAMSHIP,
+        name: TEAMSHIP_CREDENTIAL_NAME,
+        status: IntegrationStatus.ACTIVE,
+        publicConfig: credential.publicConfig,
+        secretRef: credential.secretRef
+      })
+    }))
+    .filter((credential) => credential.settings.syncEnabled && credential.settings.passwordConfigured && credential.settings.email);
 }
 
 export async function getTenantTeamshipSettings(tenant: Pick<TenantContext, "tenantId">) {
@@ -110,6 +143,8 @@ export function buildTeamshipCredentialRecord({
     publicConfig: {
       email,
       apiBaseUrl: apiBaseUrl?.trim() || null,
+      syncEnabled: false,
+      syncCadenceMinutes: 15,
       updatedAt: new Date().toISOString()
     },
     secretRef: encryptTeamshipSecret({ password })
@@ -155,4 +190,9 @@ function getTeamshipEncryptionSecret() {
   }
 
   return value;
+}
+
+function readSyncCadenceMinutes(value: unknown) {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : 15;
+  return [15, 30, 60, 120].includes(parsed) ? parsed : 15;
 }

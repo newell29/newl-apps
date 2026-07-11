@@ -581,6 +581,8 @@ export async function saveTeamshipSettingsAction(formData: FormData) {
   const password = readOptional(formData, "teamshipPassword");
   const apiBaseUrl = readOptional(formData, "teamshipApiBaseUrl") ?? null;
   const status = parseIntegrationStatus(formData.get("teamshipStatus"));
+  const syncEnabled = formData.get("teamshipSyncEnabled") === "true";
+  const syncCadenceMinutes = readTeamshipSyncCadenceMinutes(formData.get("teamshipSyncCadenceMinutes"));
 
   const existing = await prisma.integrationCredential.findFirst({
     where: {
@@ -605,6 +607,8 @@ export async function saveTeamshipSettingsAction(formData: FormData) {
     publicConfig: {
       email,
       apiBaseUrl,
+      syncEnabled,
+      syncCadenceMinutes,
       updatedAt: new Date().toISOString()
     },
     secretRef: password ? encryptTeamshipSecret({ password }) : existing?.secretRef ?? null
@@ -628,6 +632,11 @@ export async function saveTeamshipSettingsAction(formData: FormData) {
 
   revalidateSettingsSurfaces();
   revalidatePath("/shipment-documents/teamship-review");
+}
+
+function readTeamshipSyncCadenceMinutes(value: FormDataEntryValue | null) {
+  const parsed = typeof value === "string" ? Number(value) : 15;
+  return [15, 30, 60, 120].includes(parsed) ? parsed : 15;
 }
 
 export async function removeTenantUserAccessAction(formData: FormData) {
