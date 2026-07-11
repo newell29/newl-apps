@@ -97,11 +97,13 @@ export async function POST(request: Request) {
     }
   }
 
+  const responseRows = fallbackRows.length > 0 ? [...primaryRows, ...fallbackRows] : primaryRows;
+
   return NextResponse.json({
-    model: fallbackRows.length > 0 ? FALLBACK_VISION_MODEL : DEFAULT_VISION_MODEL,
+    model: fallbackRows.length > 0 ? `${DEFAULT_VISION_MODEL}+${FALLBACK_VISION_MODEL}` : DEFAULT_VISION_MODEL,
     fallbackUsed: fallbackRows.length > 0,
     fallbackError,
-    rows: fallbackRows.length > 0 ? fallbackRows : primaryRows
+    rows: responseRows
   });
 }
 
@@ -152,7 +154,8 @@ function buildPrompt(pageNumbers: number[]) {
   return [
     "Each attached image is a labeled crop sheet made from one scanned Garland BOL page.",
     `Page numbers: ${pageNumbers.join(", ")}.`,
-    "Every crop sheet has labels such as Header overview, Carrier box, References and shipment id, Consignee city/province, and Total pallets.",
+    "Every crop sheet is compact: Header overview is full-width, and Carrier box, References and shipment id, Consignee city/province, and Total pallets are separate red-bordered panels arranged in two columns.",
+    "Read each labeled panel independently. Do not assume text is missing just because the full header overview is sparse.",
     "Return exactly one OCR entry per attached image. Do not skip non-target carriers. Do not decide whether the app needs the row.",
     "Set isNewBolPage true only when the Header overview shows a new BILL OF LADING header with printed CARRIER, REFERENCES, and SHIPMENT ID fields.",
     "Set isNewBolPage false for continuation/footer pages, signature pages, or pages that only show lower BOL sections. A handwritten carrier name in a signature area is not a new BOL.",
@@ -171,6 +174,7 @@ function buildFallbackPrompt(pageNumbers: number[]) {
   return [
     "Each image is a labeled crop sheet for one scanned Garland BOL page.",
     `Page numbers: ${pageNumbers.join(", ")}.`,
+    "The field panels are red-bordered and arranged in a compact two-column sheet so the small printed text remains readable.",
     "Return one OCR entry for every image. Do not filter by carrier.",
     "Read these literal fields from the labels: Carrier box, References and shipment id, Consignee city/province, and Total pallets.",
     "Set isNewBolPage true only for a new BOL header page. Set it false for continuation/footer/signature pages.",
@@ -211,7 +215,7 @@ async function runOpenAiExtraction({
           ...images.flatMap((image) => [
             {
               type: "text" as const,
-              text: `BOL page ${image.pageNumber}: inspect this scanned page image.`
+              text: `BOL page ${image.pageNumber}: inspect this compact labeled crop sheet.`
             },
             {
               type: "image_url" as const,
@@ -339,7 +343,7 @@ function normalizeRows(value: unknown, pageNumbers: number[]): GarlandCarrierMan
 
 function shouldRunFallback(primaryRows: GarlandCarrierManifestRow[], parsedRows: unknown[]) {
   if (primaryRows.length > 0) {
-    return false;
+    return primaryRows.some((row) => !hasStrongManifestRow(row));
   }
 
   if (parsedRows.length === 0) {
@@ -381,6 +385,15 @@ function shouldRunFallback(primaryRows: GarlandCarrierManifestRow[], parsedRows:
     );
 
     return !carrierText || (isNewBolPage === false && hasStrongBolFields({ psNumber, srNumber, cityProvince, skids }));
+  });
+}
+
+function hasStrongManifestRow(row: GarlandCarrierManifestRow) {
+  return hasStrongBolFields({
+    psNumber: row.psNumber || null,
+    srNumber: row.srNumber,
+    cityProvince: row.cityProvince,
+    skids: row.skids
   });
 }
 
