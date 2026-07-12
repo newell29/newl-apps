@@ -145,6 +145,7 @@ type PayloadInspectionResponse = TeamshipPayloadInspectionResult | { error: stri
 type ShipmentWorkspaceStatus = GarlandTeamshipOrderReview["status"] | "TEAMSHIP_PULLED" | "PDF_READY";
 type TeamshipReviewWorkflowStatus = "NEEDS_SETUP" | "READY_TO_PRINT" | "BOL_PRINTED" | "NEEDS_REVIEW" | "NO_PDF" | "SKIPPED";
 type ProductDimensionEditField = "quantity" | "lengthIn" | "widthIn" | "heightIn" | "weightLb";
+type WorkspaceQueueFilter = "ALL" | "ISSUES" | "APPROVED" | "PENDING" | "NO_PDF" | "NEEDS_SETUP" | "READY_TO_PRINT" | "BOL_PRINTED";
 
 type ShipmentWorkspaceRow = {
   id: string;
@@ -457,6 +458,27 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
 
     setSelectedUpdateSrNumbers(new Set(issueSrNumbers));
     await createUpdateJob(issueSrNumbers);
+  }
+
+  function replaceSelectedShipments(srNumbers: string[]) {
+    setSelectedUpdateSrNumbers(new Set(srNumbers.map((srNumber) => srNumber.trim()).filter(Boolean)));
+  }
+
+  async function createUpdateJobForSrNumbers(srNumbers: string[]) {
+    if (!review) {
+      setError("Run the Teamship review before creating an update job.");
+      return;
+    }
+
+    const selectedSrNumbers = srNumbers.map((srNumber) => srNumber.trim()).filter(Boolean);
+
+    if (selectedSrNumbers.length === 0) {
+      setError("No visible shipments are available for agent update.");
+      return;
+    }
+
+    setSelectedUpdateSrNumbers(new Set(selectedSrNumbers));
+    await createUpdateJob(selectedSrNumbers);
   }
 
   async function updateJobAction(jobId: string, action: "approve" | "cancel" | "rescan") {
@@ -1006,6 +1028,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         onSelectIssueShipments={selectIssueShipments}
         onSelectAllEligibleShipments={selectAllEligibleShipments}
         onClearSelectedShipments={clearSelectedShipments}
+        onReplaceUpdateSelection={replaceSelectedShipments}
         onToggleUpdateSelection={(srNumber, selected) => {
           setSelectedUpdateSrNumbers((current) => {
             const next = new Set(current);
@@ -1020,6 +1043,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         onUpdateJobModeChange={setUpdateJobMode}
         onCreateUpdateJob={() => void createUpdateJob()}
         onCreateIssueUpdateJob={() => void createUpdateJobForIssueShipments()}
+        onCreateUpdateJobForSrNumbers={(srNumbers) => void createUpdateJobForSrNumbers(srNumbers)}
         onCreateSingleUpdateJob={(srNumber) => void createUpdateJob([srNumber])}
         onUpdateJobAction={(jobId, action) => void updateJobAction(jobId, action)}
         onRescanShipment={(srNumber) => void runReview({ rescan: true, srNumber })}
@@ -1060,6 +1084,21 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
           setHistoryDateTo(today);
           void fetchHistory(historySearch, today, today, false);
         }}
+        onYesterday={() => {
+          const yesterday = getRelativeInputDate(-1);
+          setHistoryAllDates(false);
+          setHistoryDateFrom(yesterday);
+          setHistoryDateTo(yesterday);
+          void fetchHistory(historySearch, yesterday, yesterday, false);
+        }}
+        onLastSevenDays={() => {
+          const today = getTodayInputValue();
+          const lastSevenDays = getRelativeInputDate(-6);
+          setHistoryAllDates(false);
+          setHistoryDateFrom(lastSevenDays);
+          setHistoryDateTo(today);
+          void fetchHistory(historySearch, lastSevenDays, today, false);
+        }}
         onSearch={() => void fetchHistory(historySearch, historyDateFrom, historyDateTo, historyAllDates)}
         onDelete={(runId) => void deleteRun(runId)}
         onOrderWorkflowAction={(runId, orderId, action) => void updateSavedOrderWorkflow(runId, orderId, action)}
@@ -1087,10 +1126,12 @@ function ShipmentReviewWorkspace({
   onSelectIssueShipments,
   onSelectAllEligibleShipments,
   onClearSelectedShipments,
+  onReplaceUpdateSelection,
   onToggleUpdateSelection,
   onUpdateJobModeChange,
   onCreateUpdateJob,
   onCreateIssueUpdateJob,
+  onCreateUpdateJobForSrNumbers,
   onCreateSingleUpdateJob,
   onUpdateJobAction,
   onRescanShipment,
@@ -1118,10 +1159,12 @@ function ShipmentReviewWorkspace({
   onSelectIssueShipments: () => void;
   onSelectAllEligibleShipments: () => void;
   onClearSelectedShipments: () => void;
+  onReplaceUpdateSelection: (srNumbers: string[]) => void;
   onToggleUpdateSelection: (srNumber: string, selected: boolean) => void;
   onUpdateJobModeChange: (mode: TeamshipUpdateAgentMode) => void;
   onCreateUpdateJob: () => void;
   onCreateIssueUpdateJob: () => void;
+  onCreateUpdateJobForSrNumbers: (srNumbers: string[]) => void;
   onCreateSingleUpdateJob: (srNumber: string) => void;
   onUpdateJobAction: (jobId: string, action: "approve" | "cancel" | "rescan") => void;
   onRescanShipment: (srNumber: string) => void;
@@ -1132,9 +1175,31 @@ function ShipmentReviewWorkspace({
   onInspectPayload: (input: { srNumber: string; expectedSerials: string[]; expectedSkus: string[] }) => void;
 }) {
   const [expandedRowIds, setExpandedRowIds] = useState<Set<string>>(new Set());
+  const [workspaceSearch, setWorkspaceSearch] = useState("");
+  const [workspaceFilter, setWorkspaceFilter] = useState<WorkspaceQueueFilter>("ALL");
   const selectedCount = selectedUpdateSrNumbers.size;
   const issueEligibleCount = review?.reviews.filter(isIssueUpdateEligibleReview).length ?? 0;
   const eligibleCount = review?.reviews.filter(isUpdateEligibleReview).length ?? 0;
+  const visibleRows = useMemo(
+    () =>
+      rows.filter((row) =>
+        rowMatchesWorkspaceFilters({
+          row,
+          search: workspaceSearch,
+          filter: workspaceFilter,
+          workflowStatus: getWorkspaceWorkflowStatus(row, updateJobs)
+        })
+      ),
+    [rows, workspaceSearch, workspaceFilter, updateJobs]
+  );
+  const visibleIssueSrNumbers = visibleRows
+    .filter((row) => row.review && row.srNumber && isIssueUpdateEligibleReview(row.review))
+    .map((row) => row.srNumber!)
+    .filter(Boolean);
+  const visibleEligibleSrNumbers = visibleRows
+    .filter((row) => row.review && row.srNumber && isUpdateEligibleReview(row.review))
+    .map((row) => row.srNumber!)
+    .filter(Boolean);
 
   useEffect(() => {
     setExpandedRowIds(new Set(rows.filter((row) => row.review && row.status !== "PASS").map((row) => row.id)));
@@ -1188,11 +1253,11 @@ function ShipmentReviewWorkspace({
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => setExpandedRowIds(new Set(rows.map((row) => row.id)))}
-            disabled={rows.length === 0}
+            onClick={() => setExpandedRowIds(new Set(visibleRows.map((row) => row.id)))}
+            disabled={visibleRows.length === 0}
             className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Expand all
+            Expand visible
           </button>
           <button
             type="button"
@@ -1231,11 +1296,27 @@ function ShipmentReviewWorkspace({
           </p>
           <button
             type="button"
+            onClick={() => onReplaceUpdateSelection(visibleIssueSrNumbers)}
+            disabled={isUpdateJobLoading || visibleIssueSrNumbers.length === 0}
+            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Select visible issues ({visibleIssueSrNumbers.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => onReplaceUpdateSelection(visibleEligibleSrNumbers)}
+            disabled={isUpdateJobLoading || visibleEligibleSrNumbers.length === 0}
+            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Select visible drafts ({visibleEligibleSrNumbers.length})
+          </button>
+          <button
+            type="button"
             onClick={onSelectIssueShipments}
             disabled={isUpdateJobLoading || issueEligibleCount === 0}
             className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Select issue drafts ({issueEligibleCount})
+            Select all issues ({issueEligibleCount})
           </button>
           <button
             type="button"
@@ -1267,9 +1348,17 @@ function ShipmentReviewWorkspace({
           </label>
           <button
             type="button"
+            onClick={() => onCreateUpdateJobForSrNumbers(visibleIssueSrNumbers)}
+            disabled={isUpdateJobLoading || !review || visibleIssueSrNumbers.length === 0}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Create visible issue draft ({visibleIssueSrNumbers.length})
+          </button>
+          <button
+            type="button"
             onClick={onCreateIssueUpdateJob}
             disabled={isUpdateJobLoading || !review || issueEligibleCount === 0}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-md border border-primary/40 px-4 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
           >
             Create draft for all issues ({issueEligibleCount})
           </button>
@@ -1289,6 +1378,47 @@ function ShipmentReviewWorkspace({
           </p>
         ) : null}
       </div>
+      <div className="grid gap-3 border-b border-border bg-background px-5 py-4 xl:grid-cols-[minmax(0,1fr),220px,auto]">
+        <input
+          value={workspaceSearch}
+          onChange={(event) => setWorkspaceSearch(event.target.value)}
+          placeholder="Search PS, SR, Teamship order, recipient, carrier, city, SKU, or serial"
+          className="min-w-0 rounded-md border border-input bg-background px-3 py-2 text-sm"
+        />
+        <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+          Queue view
+          <select
+            value={workspaceFilter}
+            onChange={(event) => setWorkspaceFilter(event.target.value as WorkspaceQueueFilter)}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-semibold normal-case tracking-normal text-foreground"
+          >
+            <option value="ALL">All shipments</option>
+            <option value="ISSUES">Issues only</option>
+            <option value="APPROVED">Approved / matched</option>
+            <option value="PENDING">Pending Teamship</option>
+            <option value="NO_PDF">No PDF</option>
+            <option value="NEEDS_SETUP">Needs bot setup</option>
+            <option value="READY_TO_PRINT">Ready to print</option>
+            <option value="BOL_PRINTED">BOL printed</option>
+          </select>
+        </label>
+        <div className="flex items-end gap-2">
+          <span className="rounded-full bg-muted px-3 py-2 text-xs font-bold uppercase tracking-wide text-mutedForeground">
+            {visibleRows.length}/{rows.length} visible
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setWorkspaceSearch("");
+              setWorkspaceFilter("ALL");
+            }}
+            disabled={!workspaceSearch && workspaceFilter === "ALL"}
+            className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Clear filters
+          </button>
+        </div>
+      </div>
       <TeamshipUpdateJobsPanel
         jobs={updateJobs}
         status={updateJobStatus}
@@ -1301,7 +1431,10 @@ function ShipmentReviewWorkspace({
             Pull Teamship orders or upload a Garland PDF to start building the shipment workspace.
           </p>
         ) : null}
-        {rows.map((row) => {
+        {rows.length > 0 && visibleRows.length === 0 ? (
+          <p className="p-5 text-sm text-mutedForeground">No shipments match the current workspace filters.</p>
+        ) : null}
+        {visibleRows.map((row) => {
           const isExpanded = expandedRowIds.has(row.id);
           const srKey = normalizeIdentifier(row.srNumber);
           const payloadInspection = srKey ? payloadInspections[srKey] ?? null : null;
@@ -2008,6 +2141,8 @@ function TeamshipReviewHistorySection({
   onDateToChange,
   onAllDates,
   onToday,
+  onYesterday,
+  onLastSevenDays,
   onSearch,
   onDelete,
   onOrderWorkflowAction
@@ -2025,6 +2160,8 @@ function TeamshipReviewHistorySection({
   onDateToChange: (value: string) => void;
   onAllDates: () => void;
   onToday: () => void;
+  onYesterday: () => void;
+  onLastSevenDays: () => void;
   onSearch: () => void;
   onDelete: (runId: string) => void;
   onOrderWorkflowAction: (runId: string, orderId: string, action: "markBolPrinted" | "clearBolPrinted") => void;
@@ -2099,6 +2236,22 @@ function TeamshipReviewHistorySection({
             className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
           >
             Today
+          </button>
+          <button
+            type="button"
+            onClick={onYesterday}
+            disabled={isHistoryLoading}
+            className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Yesterday
+          </button>
+          <button
+            type="button"
+            onClick={onLastSevenDays}
+            disabled={isHistoryLoading}
+            className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Last 7 days
           </button>
           <button
             type="button"
@@ -2916,6 +3069,113 @@ function getWorkspaceWorkflowStatus(row: ShipmentWorkspaceRow, updateJobs: Teams
   return "NEEDS_SETUP";
 }
 
+function rowMatchesWorkspaceFilters({
+  row,
+  search,
+  filter,
+  workflowStatus
+}: {
+  row: ShipmentWorkspaceRow;
+  search: string;
+  filter: WorkspaceQueueFilter;
+  workflowStatus: TeamshipReviewWorkflowStatus;
+}) {
+  if (!rowMatchesWorkspaceStatusFilter(row, filter, workflowStatus)) {
+    return false;
+  }
+
+  const normalizedSearch = normalizeSearchText(search);
+
+  if (!normalizedSearch) {
+    return true;
+  }
+
+  return buildWorkspaceSearchText(row, workflowStatus).includes(normalizedSearch);
+}
+
+function rowMatchesWorkspaceStatusFilter(
+  row: ShipmentWorkspaceRow,
+  filter: WorkspaceQueueFilter,
+  workflowStatus: TeamshipReviewWorkflowStatus
+) {
+  if (filter === "ALL") {
+    return true;
+  }
+
+  if (filter === "ISSUES") {
+    return row.status === "FAIL" || row.status === "MISSING_TEAMSHIP" || workflowStatus === "NEEDS_REVIEW";
+  }
+
+  if (filter === "APPROVED") {
+    return row.status === "PASS";
+  }
+
+  if (filter === "PENDING") {
+    return row.status === "PENDING_TEAMSHIP";
+  }
+
+  if (filter === "NO_PDF") {
+    return row.status === "NO_PDF" || workflowStatus === "NO_PDF";
+  }
+
+  return workflowStatus === filter;
+}
+
+function buildWorkspaceSearchText(row: ShipmentWorkspaceRow, workflowStatus: TeamshipReviewWorkflowStatus) {
+  const values = [
+    row.psNumber,
+    row.srNumber,
+    row.teamshipOrderId,
+    row.teamshipUrl,
+    row.carrier,
+    row.shipToName,
+    row.cityState,
+    formatWorkspaceStatus(row.status, row.issueCount),
+    formatWorkflowStatus(workflowStatus),
+    row.pdfPages.join(" "),
+    row.pdfOrder?.shipToCode,
+    row.pdfOrder?.shipToPo,
+    row.pdfOrder?.freightTerms,
+    row.pdfOrder?.instructions,
+    row.pdfOrder?.rawText,
+    ...((row.pdfOrder?.items ?? []).flatMap((item) => [
+      item.sku,
+      item.description,
+      item.quantity === null ? null : String(item.quantity),
+      item.dueShipDate,
+      ...item.serialNumbers
+    ])),
+    ...((row.review?.fields ?? []).flatMap((field) => [
+      field.key,
+      field.label,
+      field.status,
+      field.pdfValue,
+      field.teamshipValue,
+      field.message
+    ])),
+    ...((row.review?.pdfItems ?? []).flatMap((item) => [item.sku, item.quantity, ...item.serialNumbers])),
+    ...((row.review?.teamshipItems ?? []).flatMap((item) => [item.sku, item.quantity, ...item.serialNumbers])),
+    ...((row.review?.productDimensions ?? []).flatMap((dimension) => [
+      dimension.sku,
+      dimension.source,
+      dimension.productType,
+      dimension.confidence,
+      dimension.note,
+      dimension.quantity === null ? null : String(dimension.quantity),
+      dimension.lengthIn === null ? null : String(dimension.lengthIn),
+      dimension.widthIn === null ? null : String(dimension.widthIn),
+      dimension.heightIn === null ? null : String(dimension.heightIn),
+      dimension.weightLb === null ? null : String(dimension.weightLb)
+    ]))
+  ];
+
+  return normalizeSearchText(values.filter((value): value is string => typeof value === "string" && value.trim().length > 0).join(" "));
+}
+
+function normalizeSearchText(value: string) {
+  return value.trim().toLowerCase();
+}
+
 function findLatestUpdateOrder(srNumber: string | null, updateJobs: TeamshipUpdateJobSummary[]) {
   const srKey = normalizeIdentifier(srNumber);
 
@@ -3526,6 +3786,13 @@ async function extractPageText(page: PDFPageProxy) {
 
 function getTodayInputValue() {
   const now = new Date();
+  const offsetMs = now.getTimezoneOffset() * 60 * 1000;
+  return new Date(now.getTime() - offsetMs).toISOString().slice(0, 10);
+}
+
+function getRelativeInputDate(dayOffset: number) {
+  const now = new Date();
+  now.setDate(now.getDate() + dayOffset);
   const offsetMs = now.getTimezoneOffset() * 60 * 1000;
   return new Date(now.getTime() - offsetMs).toISOString().slice(0, 10);
 }
