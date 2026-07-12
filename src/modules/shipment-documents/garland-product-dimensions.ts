@@ -40,6 +40,7 @@ export function buildGarlandProductDimensionRecommendations({
 }): GarlandProductDimensionRecommendation[] {
   const skuOrder = new Set<string>();
   const recommendations: GarlandProductDimensionRecommendation[] = [];
+  const isUps = isUpsGarlandOrder({ pdfOrder, teamshipOrder });
 
   for (const sku of pdfOrder?.items.map((item) => item.sku) ?? []) {
     addSku(skuOrder, sku);
@@ -53,7 +54,13 @@ export function buildGarlandProductDimensionRecommendations({
 
   for (const observedRow of observedRows) {
     addSku(skuOrder, observedRow.sku);
-    recommendations.push(observedRow);
+    if (!isUps) {
+      recommendations.push(observedRow);
+    }
+  }
+
+  if (isUps) {
+    return dedupeRecommendations(Array.from(skuOrder).map(buildUpsRuleRecommendation));
   }
 
   for (const sku of skuOrder) {
@@ -75,6 +82,22 @@ export function buildGarlandProductDimensionRecommendations({
   }
 
   return dedupeRecommendations(recommendations);
+}
+
+function buildUpsRuleRecommendation(sku: string): GarlandProductDimensionRecommendation {
+  return {
+    sku,
+    source: "UPS_RULE",
+    productType: null,
+    quantity: null,
+    lengthIn: 1,
+    widthIn: 1,
+    heightIn: 1,
+    weightLb: 1,
+    weightUnit: "lbs",
+    confidence: "HIGH",
+    note: "Garland UPS rule: always use 1 x 1 x 1 and 1 lb regardless of SKU."
+  };
 }
 
 function extractTeamshipPalletDimensionRows(order: TeamshipShippingOrderDetail): GarlandProductDimensionRecommendation[] {
@@ -199,6 +222,36 @@ function normalizeSku(value: string | null | undefined) {
   return value?.trim().toUpperCase().replace(/\s+/g, " ") || null;
 }
 
+function isUpsGarlandOrder({
+  pdfOrder,
+  teamshipOrder
+}: {
+  pdfOrder: GarlandPdfShippingOrder | null;
+  teamshipOrder: TeamshipShippingOrderDetail | null;
+}) {
+  const carrierValues = [
+    pdfOrder?.shipVia,
+    teamshipOrder?.carrier,
+    teamshipOrder?.ship_method,
+    teamshipOrder?.shipping_carrier,
+    teamshipOrder?.method,
+    teamshipOrder?.carrier_name,
+    teamshipOrder?.carrier_value,
+    teamshipOrder?.shipping_info?.carrier,
+    teamshipOrder?.shipping_info?.method
+  ];
+
+  return carrierValues.some((value) => normalizeCarrier(value).includes("UPS"));
+}
+
+function normalizeCarrier(value: string | null | undefined) {
+  return value?.toUpperCase().replace(/[^A-Z0-9]/g, "") ?? "";
+}
+
 function sourceRank(source: GarlandProductDimensionRecommendation["source"]) {
-  return source === "TEAMSHIP_PALLET" ? 0 : 1;
+  if (source === "UPS_RULE") {
+    return 0;
+  }
+
+  return source === "TEAMSHIP_PALLET" ? 1 : 2;
 }
