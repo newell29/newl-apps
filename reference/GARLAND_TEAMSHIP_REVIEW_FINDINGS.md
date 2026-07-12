@@ -260,15 +260,16 @@ Dry-run payload rules:
 
 The VM worker should first pass this CLI validation on the server before any browser automation or API update path is enabled. Later, the same payload shape should be stored in `TeamshipUpdateJob` / `TeamshipUpdateOrder` / `TeamshipUpdateField` records with admin approval and evidence capture.
 
-Server dry-run evidence captured July 12, 2026 on the Tailscale VM (`openclaw@100.120.250.105`):
+Server dry-run evidence captured July 12, 2026 on the Tailscale VM (`openclaw@100.120.250.105`) after PR #162 was merged to `main`:
 
-- Branch tested: `codex/teamship-phase2-dry-run-worker`.
+- Branch tested: `main` at `204a8a3`.
 - Input PDF: `/home/openclaw/newl-apps/phase2-dry-run-inputs/9 ORDERS 11 PAGES - PS209287 - PS209295.pdf`.
-- Clean JSON artifact: `/home/openclaw/newl-apps/phase2-dry-run-output/live-dry-run-2026-07-11.clean.json`.
+- Clean JSON artifact: `/home/openclaw/newl-apps/phase2-dry-run-output/live-dry-run-2026-07-12-main.json`.
 - Result: 9 PDF orders extracted, 9 Teamship orders fetched read-only, `dryRun: true`, `wouldUpdateTeamship: false`.
-- Summary: 2 ready orders, 7 blocked orders, 0 skipped orders, 6 planned pallet rows, 0 planned mapped field updates.
+- Summary: 2 ready orders, 7 blocked orders, 0 skipped orders, 19 planned pallet rows, 0 planned mapped field updates.
 - The 2 ready orders were UPS shipments using the UPS `1 x 1 x 1`, `1 lbs` rule.
-- The 7 blocked orders were non-UPS shipments missing usable SKU dimension/weight recommendations, which should remain `Needs Review` until the SKU directory has trusted dimensions.
+- The 7 blocked orders were non-UPS shipments missing usable SKU dimension/weight recommendations, which should remain `Needs Review` for dimension/weight until the SKU directory has trusted dimensions.
+- Even blocked orders still produced commodity/comment fields, for example `SKU: MCO-ED-10M-5004 SN: 2605891102181` and `SKU: MCO-ED-10M-5004 SN: 2605891102182` on separate lines, without writing placeholder dimensions.
 
 ## Teamship Detail Evidence
 
