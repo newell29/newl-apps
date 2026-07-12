@@ -4,7 +4,10 @@ import { NextResponse } from "next/server";
 import { getTeamshipSyncedOrdersForReview } from "@/modules/shipment-documents/teamship-daily-sync";
 import { buildGarlandTeamshipReview, parseTeamshipAlertDigest } from "@/modules/shipment-documents/teamship-review";
 import { getReviewedTeamshipSrNumbers } from "@/modules/shipment-documents/teamship-review-history";
-import type { GarlandPdfShippingOrder } from "@/modules/shipment-documents/teamship-review-types";
+import type {
+  GarlandPdfShippingOrder,
+  TeamshipShippingOrderDetail
+} from "@/modules/shipment-documents/teamship-review-types";
 import { requireModule } from "@/server/auth/authorization";
 import {
   fetchTeamshipShippingOrdersForReview,
@@ -64,15 +67,25 @@ export async function POST(request: Request) {
       tenantId: context.tenantId,
       shipmentDate: shipmentDateInput
     });
-    const teamshipOrders =
-      syncedTeamshipOrders.length > 0
-        ? syncedTeamshipOrders
-        : await fetchTeamshipShippingOrdersForReview({
-            tenantId: context.tenantId,
-            shipmentDate: shipmentDateInput,
-            srNumbers: ordersToReview.map((order) => order.srNumber),
-            credentials: runtimeCredentials
-          });
+    let freshTeamshipOrders: TeamshipShippingOrderDetail[] = [];
+
+    try {
+      freshTeamshipOrders =
+        ordersToReview.length > 0
+          ? await fetchTeamshipShippingOrdersForReview({
+              tenantId: context.tenantId,
+              shipmentDate: shipmentDateInput,
+              srNumbers: ordersToReview.map((order) => order.srNumber),
+              credentials: runtimeCredentials
+            })
+          : [];
+    } catch (freshFetchError) {
+      if (syncedTeamshipOrders.length === 0) {
+        throw freshFetchError;
+      }
+    }
+
+    const teamshipOrders = mergeFreshTeamshipOrders(freshTeamshipOrders, syncedTeamshipOrders);
 
     return NextResponse.json(
       buildGarlandTeamshipReview(ordersToReview, teamshipOrders, teamshipAlerts, {
@@ -133,4 +146,45 @@ function isGarlandPdfOrder(value: GarlandPdfShippingOrder): value is GarlandPdfS
       /^SR\d{5,8}$/i.test(value.srNumber) &&
       Array.isArray(value.pageNumbers)
   );
+}
+
+function mergeFreshTeamshipOrders(
+  freshOrders: TeamshipShippingOrderDetail[],
+  cachedOrders: TeamshipShippingOrderDetail[]
+) {
+  const byKey = new Map<string, TeamshipShippingOrderDetail>();
+
+  for (const order of cachedOrders) {
+    byKey.set(normalizeTeamshipOrderKey(order), order);
+  }
+
+  for (const order of freshOrders) {
+    byKey.set(normalizeTeamshipOrderKey(order), order);
+  }
+
+  return Array.from(byKey.values());
+}
+
+function normalizeTeamshipOrderKey(order: TeamshipShippingOrderDetail) {
+  return normalizeIdentifier(
+    stringifyValue(order.shipment_id) ??
+      stringifyValue(order.amazon_shipment_id1) ??
+      stringifyValue(order.edi_field_1) ??
+      stringifyValue(order.order_number) ??
+      stringifyValue(order.display_id) ??
+      stringifyValue(order.id) ??
+      stringifyValue(order.order_id)
+  );
+}
+
+function normalizeIdentifier(value: string | null) {
+  return value?.trim().replace(/[^A-Z0-9]/gi, "").toUpperCase() || "";
+}
+
+function stringifyValue(value: unknown) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return String(value);
 }
