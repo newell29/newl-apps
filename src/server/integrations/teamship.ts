@@ -113,7 +113,6 @@ export async function fetchTeamshipShippingOrdersForReview({
             webBaseUrl,
             webCookieHeader,
             id: String(orderId),
-            skuQueries: collectTeamshipSkuQueries(mergedDetail),
             fetchImpl
           }).catch(() => null);
 
@@ -175,17 +174,6 @@ export function parseTeamshipShippingOrderUiPage(html: string): Partial<Teamship
   return {
     items,
     pallet_dims: pallets
-  };
-}
-
-export function parseTeamshipInventoryEditResponse(value: unknown): Partial<TeamshipShippingOrderDetail> {
-  const inventories = collectTeamshipInventoryRecords(value);
-  const items = inventories
-    .map(readTeamshipUiInventoryItem)
-    .filter((item): item is NonNullable<ReturnType<typeof readTeamshipUiInventoryItem>> => Boolean(item));
-
-  return {
-    items
   };
 }
 
@@ -341,13 +329,11 @@ async function getTeamshipShippingOrderUiDetail({
   webBaseUrl,
   webCookieHeader,
   id,
-  skuQueries,
   fetchImpl
 }: {
   webBaseUrl: string;
   webCookieHeader: string;
   id: string;
-  skuQueries: string[];
   fetchImpl: typeof fetch;
 }) {
   const response = await fetchImpl(`${webBaseUrl}/ship-inventories/${encodeURIComponent(id)}`, {
@@ -364,74 +350,11 @@ async function getTeamshipShippingOrderUiDetail({
 
   const html = await response.text();
   const parsed = parseTeamshipShippingOrderUiPage(html);
-  const endpointDetail = await getTeamshipInventoryEditDetail({
-    webBaseUrl,
-    webCookieHeader,
-    html,
-    id,
-    skuQueries: collectTeamshipSkuQueries(parsed, skuQueries),
-    fetchImpl
-  }).catch(() => null);
 
   return {
     ...parsed,
-    items: mergeArrayValues(parsed.items, endpointDetail?.items),
     url: `${webBaseUrl}/ship-inventories/${encodeURIComponent(id)}`
   };
-}
-
-async function getTeamshipInventoryEditDetail({
-  webBaseUrl,
-  webCookieHeader,
-  html,
-  id,
-  skuQueries,
-  fetchImpl
-}: {
-  webBaseUrl: string;
-  webCookieHeader: string;
-  html: string;
-  id: string;
-  skuQueries: string[];
-  fetchImpl: typeof fetch;
-}) {
-  const warehouseId = readHtmlFormValueById(html, "warehouse_id_") ?? readHtmlFormValueByName(html, "warehouse_id");
-  const csrfToken = readMetaContentByName(html, "csrf-token") ?? readHtmlFormValueByName(html, "_token");
-  const items: NonNullable<TeamshipShippingOrderDetail["items"]> = [];
-
-  if (!warehouseId || skuQueries.length === 0) {
-    return { items };
-  }
-
-  for (const sku of skuQueries) {
-    const url = new URL(`${webBaseUrl}/admin/get-prod-ship-invt-edit`);
-    url.searchParams.set("query", sku);
-    url.searchParams.set("warehouse_id", warehouseId);
-    url.searchParams.set("ship_inventory_id", id);
-
-    if (csrfToken) {
-      url.searchParams.set("_token", csrfToken);
-    }
-
-    const response = await fetchImpl(url, {
-      headers: {
-        accept: "application/json,text/plain,*/*",
-        cookie: webCookieHeader,
-        "x-requested-with": "XMLHttpRequest"
-      },
-      cache: "no-store"
-    });
-
-    if (!response.ok) {
-      continue;
-    }
-
-    const json = await readJsonOrText(response);
-    const parsed = parseTeamshipInventoryEditResponse(json);
-    items.push(...(parsed.items ?? []));
-  }
-
-  return { items };
 }
 
 function mergeTeamshipUiDetail(
@@ -540,76 +463,6 @@ function normalizeText(value: unknown) {
     .trim();
 }
 
-function collectTeamshipSkuQueries(...sources: Array<Partial<TeamshipShippingOrderDetail> | string[] | undefined | null>) {
-  const skus: string[] = [];
-
-  for (const source of sources) {
-    if (!source) {
-      continue;
-    }
-
-    if (Array.isArray(source)) {
-      skus.push(...source);
-      continue;
-    }
-
-    skus.push(...collectSkusFromItemArray(source.items));
-    skus.push(...collectSkusFromItemArray(source.order_items));
-    skus.push(...collectSkusFromItemArray(source.orderItems));
-    skus.push(...collectSkusFromPalletArray(source.pallets));
-    skus.push(...collectSkusFromPalletArray(source.pallet_dims));
-  }
-
-  return Array.from(new Set(skus.map(normalizeSkuQuery).filter((sku) => sku.length >= 3))).slice(0, 25);
-}
-
-function collectSkusFromItemArray(items: unknown) {
-  if (!Array.isArray(items)) {
-    return [];
-  }
-
-  return items
-    .map((item) => {
-      const record = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
-      return firstString([
-        record.sku,
-        record.item_number,
-        record.itemNumber,
-        record.product_sku,
-        record.productSku,
-        readNestedValue(record.product, ["sku"]),
-        readNestedValue(record.product, ["item_number"]),
-        readNestedValue(record.product, ["itemNumber"])
-      ]);
-    })
-    .filter((sku): sku is string => Boolean(sku));
-}
-
-function collectSkusFromPalletArray(pallets: unknown) {
-  if (!Array.isArray(pallets)) {
-    return [];
-  }
-
-  return pallets
-    .map((pallet) => {
-      const record = pallet && typeof pallet === "object" ? (pallet as Record<string, unknown>) : {};
-      return extractSkuFromText(firstString([record.commodity])) ?? firstString([record.sku, record.item_number, record.itemNumber]);
-    })
-    .filter((sku): sku is string => Boolean(sku));
-}
-
-function extractSkuFromText(value: string | null) {
-  const match = value?.match(/\bSKU\s*[:#-]?\s*([A-Z0-9][A-Z0-9._/-]{2,})/i);
-  return match?.[1]?.trim() ?? null;
-}
-
-function normalizeSkuQuery(value: unknown) {
-  return String(value ?? "")
-    .trim()
-    .replace(/\s+/g, " ")
-    .toUpperCase();
-}
-
 function readTeamshipUiInventoryItem(record: unknown) {
   if (!record || typeof record !== "object") {
     return null;
@@ -678,54 +531,6 @@ function parseJsonArray(value: string | null) {
 
   const parsed = safeJsonParse(value);
   return Array.isArray(parsed) ? parsed : [];
-}
-
-async function readJsonOrText(response: Response) {
-  const text = await response.text();
-  const parsed = safeJsonParse(text);
-  return parsed ?? text;
-}
-
-function collectTeamshipInventoryRecords(value: unknown): Array<Record<string, unknown>> {
-  const records: Array<Record<string, unknown>> = [];
-
-  const visit = (current: unknown) => {
-    if (Array.isArray(current)) {
-      current.forEach(visit);
-      return;
-    }
-
-    if (!current || typeof current !== "object") {
-      return;
-    }
-
-    const record = current as Record<string, unknown>;
-
-    if (isTeamshipInventoryRecord(record)) {
-      records.push(record);
-      return;
-    }
-
-    for (const childValue of Object.values(record)) {
-      visit(childValue);
-    }
-  };
-
-  visit(value);
-  return records;
-}
-
-function isTeamshipInventoryRecord(record: Record<string, unknown>) {
-  return Boolean(
-    record.item ||
-      record.pivot ||
-      record.customAttribut ||
-      record.customAttribute ||
-      record.custom_attributes ||
-      record.customAttributes ||
-      record.inventory_id ||
-      record.inventoryId
-  );
 }
 
 function safeJsonParse(value: string) {
@@ -808,22 +613,92 @@ function readHtmlFormValueByName(html: string, name: string) {
 }
 
 function readHtmlFormValue(html: string, attributeName: "id" | "name", expectedValue: string) {
-  const fieldPattern = /<(input|textarea)\b[^>]*>(?:([\s\S]*?)<\/textarea>)?/gi;
+  let position = 0;
 
-  for (const match of html.matchAll(fieldPattern)) {
-    const tag = match[0] ?? "";
-    if (readHtmlAttribute(tag, attributeName) !== expectedValue) {
+  while (position < html.length) {
+    const inputIndex = indexOfIgnoreCase(html, "<input", position);
+    const textareaIndex = indexOfIgnoreCase(html, "<textarea", position);
+    const startIndex = minNonNegative(inputIndex, textareaIndex);
+
+    if (startIndex < 0) {
+      break;
+    }
+
+    const tag = readHtmlOpeningTag(html, startIndex);
+
+    if (!tag) {
+      position = startIndex + 1;
       continue;
     }
 
-    if ((match[1] ?? "").toLowerCase() === "textarea") {
-      return decodeHtmlEntities(match[2] ?? "");
+    position = tag.endIndex;
+
+    if (readHtmlAttribute(tag.markup, attributeName) !== expectedValue) {
+      continue;
     }
 
-    return readHtmlAttribute(tag, "value");
+    if (tag.name === "textarea") {
+      const closeIndex = indexOfIgnoreCase(html, "</textarea>", tag.endIndex);
+      return decodeHtmlEntities(closeIndex >= 0 ? html.slice(tag.endIndex, closeIndex) : "");
+    }
+
+    return readHtmlAttribute(tag.markup, "value");
   }
 
   return null;
+}
+
+function readHtmlOpeningTag(html: string, startIndex: number) {
+  const nameMatch = html.slice(startIndex, startIndex + 20).match(/^<([a-z0-9-]+)/i);
+
+  if (!nameMatch?.[1]) {
+    return null;
+  }
+
+  let quote: string | null = null;
+
+  for (let index = startIndex + 1; index < html.length; index += 1) {
+    const char = html[index];
+
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      }
+
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+
+    if (char === ">") {
+      return {
+        name: nameMatch[1].toLowerCase(),
+        markup: html.slice(startIndex, index + 1),
+        endIndex: index + 1
+      };
+    }
+  }
+
+  return null;
+}
+
+function indexOfIgnoreCase(value: string, search: string, fromIndex: number) {
+  return value.toLowerCase().indexOf(search.toLowerCase(), fromIndex);
+}
+
+function minNonNegative(left: number, right: number) {
+  if (left < 0) {
+    return right;
+  }
+
+  if (right < 0) {
+    return left;
+  }
+
+  return Math.min(left, right);
 }
 
 function readMetaContentByName(html: string, expectedName: string) {
