@@ -1709,7 +1709,7 @@ function PayloadInspectionMatchList({
 }
 
 function ItemDetailsComparison({ review }: { review: GarlandTeamshipOrderReview }) {
-  const maxRows = Math.max(review.pdfItems.length, review.teamshipItems.length);
+  const rows = buildItemComparisonRows(review);
 
   return (
     <div className="rounded-md border border-border bg-background">
@@ -1719,7 +1719,7 @@ function ItemDetailsComparison({ review }: { review: GarlandTeamshipOrderReview 
           Shows every parsed Garland PDF item beside the item/serial details fetched from Teamship for this shipment.
         </p>
       </div>
-      {maxRows === 0 ? (
+      {rows.length === 0 ? (
         <p className="px-3 py-3 text-sm text-mutedForeground">No item detail was parsed from the PDF or Teamship response.</p>
       ) : (
         <div className="overflow-x-auto">
@@ -1727,23 +1727,20 @@ function ItemDetailsComparison({ review }: { review: GarlandTeamshipOrderReview 
             <thead className="bg-muted/40 text-xs uppercase tracking-wide text-mutedForeground">
               <tr>
                 <th className="px-3 py-2">Line</th>
+                <th className="px-3 py-2">SKU</th>
                 <th className="px-3 py-2">Garland PDF item</th>
                 <th className="px-3 py-2">Teamship item</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {Array.from({ length: maxRows }, (_, index) => {
-                const pdfItem = review.pdfItems[index] ?? null;
-                const teamshipItem = review.teamshipItems[index] ?? null;
-
-                return (
-                  <tr key={`${review.srNumber}-item-${index}`}>
-                    <td className="px-3 py-2 font-semibold text-foreground">{index + 1}</td>
-                    <td className="px-3 py-2 text-mutedForeground">{formatSkuSerialItem(pdfItem)}</td>
-                    <td className="px-3 py-2 text-mutedForeground">{formatSkuSerialItem(teamshipItem)}</td>
-                  </tr>
-                );
-              })}
+              {rows.map((row, index) => (
+                <tr key={`${review.srNumber}-item-${row.key}`}>
+                  <td className="px-3 py-2 font-semibold text-foreground">{index + 1}</td>
+                  <td className="px-3 py-2 font-semibold text-foreground">{row.label}</td>
+                  <td className="px-3 py-2 text-mutedForeground">{formatGroupedSkuSerialItems(row.pdfItems)}</td>
+                  <td className="px-3 py-2 text-mutedForeground">{formatGroupedSkuSerialItems(row.teamshipItems)}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -2579,15 +2576,86 @@ function formatDimensionSource(source: GarlandTeamshipOrderReview["productDimens
   return source === "TEAMSHIP_PALLET" ? "Teamship pallet" : "Garland sheet";
 }
 
-function formatSkuSerialItem(item: GarlandTeamshipOrderReview["pdfItems"][number] | null) {
-  if (!item?.sku) {
-    return item && item.serialNumbers.length > 0 ? `SKU blank | SN: ${item.serialNumbers.join(", ")}` : "Blank";
+type ItemDetail = GarlandTeamshipOrderReview["pdfItems"][number];
+
+type ItemComparisonRow = {
+  key: string;
+  label: string;
+  pdfItems: ItemDetail[];
+  teamshipItems: ItemDetail[];
+};
+
+function buildItemComparisonRows(review: GarlandTeamshipOrderReview): ItemComparisonRow[] {
+  const rows = new Map<string, ItemComparisonRow>();
+
+  const addItems = (items: ItemDetail[], side: "pdfItems" | "teamshipItems") => {
+    items.forEach((item, index) => {
+      const key = buildItemComparisonKey(item, index);
+
+      if (!key) {
+        return;
+      }
+
+      const existing = rows.get(key.value) ?? {
+        key: key.value,
+        label: key.label,
+        pdfItems: [],
+        teamshipItems: []
+      };
+
+      existing[side].push(item);
+      rows.set(key.value, existing);
+    });
+  };
+
+  addItems(review.pdfItems, "pdfItems");
+  addItems(review.teamshipItems, "teamshipItems");
+
+  return Array.from(rows.values()).sort((left, right) => left.label.localeCompare(right.label, undefined, { numeric: true }));
+}
+
+function buildItemComparisonKey(item: ItemDetail, index: number) {
+  const sku = item.sku?.trim();
+
+  if (sku) {
+    return {
+      value: `sku:${normalizeIdentifier(sku)}`,
+      label: sku
+    };
   }
 
-  const skuText = item.quantity ? `${item.sku} (qty ${item.quantity})` : item.sku;
-  const serialText = item.serialNumbers.length > 0 ? item.serialNumbers.join(", ") : "Blank";
+  const serials = item.serialNumbers.map(normalizeIdentifier).filter(Boolean);
 
-  return `${skuText} | SN: ${serialText}`;
+  if (serials.length > 0) {
+    return {
+      value: `serial:${serials.join("|")}`,
+      label: "Serial-only"
+    };
+  }
+
+  if (item.quantity) {
+    return {
+      value: `quantity:${item.quantity}:${index}`,
+      label: "Quantity-only"
+    };
+  }
+
+  return null;
+}
+
+function formatGroupedSkuSerialItems(items: ItemDetail[]) {
+  if (items.length === 0) {
+    return "Blank";
+  }
+
+  const skus = uniqueClientStrings(items.map((item) => item.sku).filter((sku): sku is string => Boolean(sku)));
+  const quantities = uniqueClientStrings(items.map((item) => item.quantity).filter((quantity): quantity is string => Boolean(quantity)));
+  const serials = uniqueClientStrings(items.flatMap((item) => item.serialNumbers));
+  const skuText = skus.length > 0 ? skus.join(", ") : "SKU blank";
+  const quantityText = quantities.length > 0 ? ` (qty ${quantities.join(" + ")})` : "";
+  const serialText = serials.length > 0 ? serials.join(", ") : "Blank";
+
+  return `${skuText}${quantityText} | SN: ${serialText}`;
 }
 
 function formatDimensions(dimension: GarlandTeamshipOrderReview["productDimensions"][number]) {
