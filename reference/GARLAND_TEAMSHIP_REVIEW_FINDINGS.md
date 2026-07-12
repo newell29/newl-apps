@@ -260,6 +260,34 @@ Dry-run payload rules:
 
 The VM worker should first pass this CLI validation on the server before any browser automation or API update path is enabled. Later, the same payload shape should be stored in `TeamshipUpdateJob` / `TeamshipUpdateOrder` / `TeamshipUpdateField` records with admin approval and evidence capture.
 
+## Stage 2 Production UI And Agent Contract
+
+Newl Apps now has the production control-tower layer for Phase 2:
+
+- Teamship credentials continue to be stored in tenant Settings under Teamship WMS. The encrypted password is used by Newl Apps for read-only verification/rescans; the VM agent should authenticate to Newl Apps with the ingestion/agent token and execute only approved update jobs.
+- Users can select reviewed shipments in the Teamship Review workspace and create a Phase 2 update draft.
+- Update jobs persist as `TeamshipUpdateJob` / `TeamshipUpdateOrder` records with statuses such as `DRAFT`, `NEEDS_REVIEW`, `APPROVED`, `RUNNING`, `SUCCESS`, `FAILED`, and `CANCELLED`.
+- Drafts with blocked dimension/weight recommendations cannot be approved for the agent. Commodity/comment rows are still planned, but placeholder dimensions are not allowed.
+- The VM agent claims approved jobs through `POST /api/shipment-documents/teamship-review/update-jobs/agent/next` using the ingestion bearer token or `x-newl-ingestion-key`.
+- The VM agent reports completion through `PATCH /api/shipment-documents/teamship-review/update-jobs/agent/:jobId` with `SUCCESS`, `FAILED`, or `NEEDS_REVIEW` plus evidence payload.
+- When the agent reports `SUCCESS`, Newl Apps automatically performs a Teamship rescan using the stored PDF order snapshot and tenant Teamship credentials, then stores the verification response on the job.
+- Users can also manually rescan a Phase 2 job from the UI, and can force a page-level Teamship rescan from the main review controls so already-reviewed SRs are checked again.
+
+The VM worker implementation still needs to perform the actual Teamship UI/API edits. It should start in dry-run mode against the `executionPayload` returned by the claim endpoint, capture screenshots/evidence, then later enable live saves one field group at a time.
+
+Agent endpoint examples:
+
+```bash
+curl -X POST "$NEWL_APPS_BASE_URL/api/shipment-documents/teamship-review/update-jobs/agent/next" \
+  -H "Authorization: Bearer $NEWL_AGENT_TOKEN" \
+  -H "x-newl-agent-id: teamship-vm-agent"
+
+curl -X PATCH "$NEWL_APPS_BASE_URL/api/shipment-documents/teamship-review/update-jobs/agent/$JOB_ID" \
+  -H "Authorization: Bearer $NEWL_AGENT_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{"status":"SUCCESS","result":{"dryRun":true,"screenshots":[],"notes":"No live save performed."}}'
+```
+
 Server dry-run evidence captured July 12, 2026 on the Tailscale VM (`openclaw@100.120.250.105`) after PR #162 was merged to `main`:
 
 - Branch tested: `main` at `204a8a3`.

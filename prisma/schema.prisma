@@ -449,6 +449,8 @@ model Tenant {
   teamshipReviewOrders                TeamshipReviewOrder[]
   teamshipDailySyncRuns               TeamshipDailySyncRun[]
   teamshipSyncedOrders                TeamshipSyncedOrder[]
+  teamshipUpdateJobs                  TeamshipUpdateJob[]
+  teamshipUpdateOrders                TeamshipUpdateOrder[]
   garlandProductDimensionObservations GarlandProductDimensionObservation[]
   cashflowCustomers                   CashflowCustomer[]
   cashflowCustomerAliases             CashflowCustomerAlias[]
@@ -497,6 +499,8 @@ model User {
   shipmentDocumentRuns        ShipmentDocumentRun[]
   shipmentCarrierManifestRuns ShipmentCarrierManifestRun[]
   teamshipReviewRuns          TeamshipReviewRun[]
+  teamshipUpdateJobsCreated   TeamshipUpdateJob[] @relation("TeamshipUpdateJobCreatedBy")
+  teamshipUpdateJobsApproved  TeamshipUpdateJob[] @relation("TeamshipUpdateJobApprovedBy")
 }
 
 // Auth.js (NextAuth) adapter models. Account links an external identity
@@ -961,6 +965,75 @@ model GarlandProductDimensionObservation {
   @@index([tenantId, sku])
   @@index([tenantId, sourceSrNumber])
   @@index([tenantId, observedAt])
+}
+
+model TeamshipUpdateJob {
+  id                    String    @id @default(cuid())
+  tenantId              String
+  workflowKey           String    @default("GARLAND_TEAMSHIP_PHASE2_UPDATE")
+  documentLabel         String
+  shipmentDate          DateTime
+  sourcePdfFileName     String?
+  status                String    @default("DRAFT")
+  agentMode             String    @default("DRY_RUN")
+  dryRun                Boolean   @default(true)
+  selectedSrNumbers     Json
+  summary               Json
+  sourceReviewResponse  Json
+  sourcePdfOrders       Json
+  plan                  Json
+  searchText            String
+  errorMessage          String?
+  agentId               String?
+  agentClaimedAt        DateTime?
+  agentStartedAt        DateTime?
+  agentFinishedAt       DateTime?
+  approvedByUserId      String?
+  approvedAt            DateTime?
+  createdByUserId       String?
+  lastVerificationAt    DateTime?
+  verificationResponse  Json?
+  agentResult           Json?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  tenant     Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy  User?                 @relation("TeamshipUpdateJobCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction)
+  approvedBy User?                 @relation("TeamshipUpdateJobApprovedBy", fields: [approvedByUserId], references: [id], onDelete: NoAction)
+  orders     TeamshipUpdateOrder[]
+
+  @@index([tenantId, workflowKey, shipmentDate])
+  @@index([tenantId, status])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, searchText])
+}
+
+model TeamshipUpdateOrder {
+  id                  String    @id @default(cuid())
+  tenantId            String
+  jobId               String
+  psNumber            String
+  srNumber            String
+  teamshipOrderId     String?
+  teamshipUrl         String?
+  status              String    @default("PENDING")
+  sourceReviewStatus  String
+  plannedFieldUpdates Json
+  plannedPalletRows   Json
+  validationIssues    Json
+  agentResult         Json?
+  verificationReview  Json?
+  errorMessage        String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  tenant Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  job    TeamshipUpdateJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, jobId])
+  @@index([tenantId, srNumber])
+  @@index([tenantId, psNumber])
+  @@index([tenantId, status])
 }
 
 model IntegrationCredential {
