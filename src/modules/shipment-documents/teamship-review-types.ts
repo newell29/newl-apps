@@ -215,3 +215,27 @@ export type GarlandTeamshipReviewResponse = {
   teamshipAlerts: TeamshipAlertOrder[];
   fetchedAt: string;
 };
+
+export type TeamshipPayloadInspectionMatch = {
+  path: string;
+  key: string | null;
+  valuePreview: string;
+  matchedValue: string | null;
+  reason: "EXPECTED_SERIAL" | "SERIAL_LIKE_KEY" | "SERIAL_TEXT" | "EXPECTED_SKU";
+};
+
+export type TeamshipPayloadInspectionResult = {
+  srNumber: string;
+  teamshipOrderId: string | null;
+  teamshipUrl: string | null;
+  fetchedAt: string;
+  inspectedEndpoints: string[];
+  expectedSerials: string[];
+  expectedSkus: string[];
+  searchedValueCount: number;
+  exactSerialMatches: TeamshipPayloadInspectionMatch[];
+  serialLikeMatches: TeamshipPayloadInspectionMatch[];
+  skuMatches: TeamshipPayloadInspectionMatch[];
+  conclusion: "EXPECTED_SERIAL_FOUND" | "SERIAL_EVIDENCE_FOUND" | "NO_SERIAL_EVIDENCE" | "TEAMSHIP_ORDER_NOT_FOUND";
+  message: string;
+};

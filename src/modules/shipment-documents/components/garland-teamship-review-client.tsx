@@ -9,6 +9,8 @@ import type {
   GarlandPdfShippingOrder,
   GarlandTeamshipOrderReview,
   GarlandTeamshipReviewResponse,
+  TeamshipPayloadInspectionMatch,
+  TeamshipPayloadInspectionResult,
   TeamshipShippingOrderDetail
 } from "@/modules/shipment-documents/teamship-review-types";
 
@@ -135,6 +137,8 @@ type TeamshipUpdateJobsResponse = {
 
 type TeamshipUpdateAgentMode = "DRY_RUN" | "LIVE_API";
 
+type PayloadInspectionResponse = TeamshipPayloadInspectionResult | { error: string };
+
 type ShipmentWorkspaceStatus = GarlandTeamshipOrderReview["status"] | "TEAMSHIP_PULLED" | "PDF_READY";
 
 type ShipmentWorkspaceRow = {
@@ -181,6 +185,9 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
   const [selectedUpdateSrNumbers, setSelectedUpdateSrNumbers] = useState<Set<string>>(new Set());
   const [updateJobMode, setUpdateJobMode] = useState<TeamshipUpdateAgentMode>("DRY_RUN");
   const [updateJobStatus, setUpdateJobStatus] = useState<string | null>(null);
+  const [payloadInspections, setPayloadInspections] = useState<Record<string, TeamshipPayloadInspectionResult>>({});
+  const [payloadInspectionErrors, setPayloadInspectionErrors] = useState<Record<string, string>>({});
+  const [payloadInspectionLoadingSr, setPayloadInspectionLoadingSr] = useState<string | null>(null);
   const [historySearch, setHistorySearch] = useState("");
   const [historyDateFrom, setHistoryDateFrom] = useState(todayInputValue);
   const [historyDateTo, setHistoryDateTo] = useState(todayInputValue);
@@ -444,6 +451,52 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       setError(caught instanceof Error ? caught.message : "Unable to update Teamship update job.");
     } finally {
       setIsUpdateJobLoading(false);
+    }
+  }
+
+  async function inspectTeamshipPayload({
+    srNumber,
+    expectedSerials,
+    expectedSkus
+  }: {
+    srNumber: string;
+    expectedSerials: string[];
+    expectedSkus: string[];
+  }) {
+    const srKey = normalizeIdentifier(srNumber);
+    setPayloadInspectionLoadingSr(srKey);
+    setPayloadInspectionErrors((current) => {
+      const next = { ...current };
+      delete next[srKey];
+      return next;
+    });
+    setStatus(`Inspecting fetched Teamship payload for ${srNumber}...`);
+
+    try {
+      const response = await fetch("/api/shipment-documents/teamship-review/inspect-payload", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          shipmentDate,
+          srNumber,
+          expectedSerials,
+          expectedSkus
+        })
+      });
+      const json = (await response.json().catch(() => null)) as PayloadInspectionResponse | null;
+
+      if (!response.ok || !json || isErrorResponse(json)) {
+        throw new Error(isErrorResponse(json) ? json.error : "Unable to inspect the Teamship payload.");
+      }
+
+      setPayloadInspections((current) => ({ ...current, [srKey]: json }));
+      setStatus(json.message);
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "Unable to inspect the Teamship payload.";
+      setPayloadInspectionErrors((current) => ({ ...current, [srKey]: message }));
+      setStatus("Teamship payload inspection stopped before results were created.");
+    } finally {
+      setPayloadInspectionLoadingSr(null);
     }
   }
 
@@ -802,6 +855,10 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         onCreateSingleUpdateJob={(srNumber) => void createUpdateJob([srNumber])}
         onUpdateJobAction={(jobId, action) => void updateJobAction(jobId, action)}
         onRescanShipment={(srNumber) => void runReview({ rescan: true, srNumber })}
+        payloadInspections={payloadInspections}
+        payloadInspectionErrors={payloadInspectionErrors}
+        payloadInspectionLoadingSr={payloadInspectionLoadingSr}
+        onInspectPayload={(input) => void inspectTeamshipPayload(input)}
       />
       <TeamshipReviewHistorySection
         history={history}
@@ -866,7 +923,11 @@ function ShipmentReviewWorkspace({
   onCreateIssueUpdateJob,
   onCreateSingleUpdateJob,
   onUpdateJobAction,
-  onRescanShipment
+  onRescanShipment,
+  payloadInspections,
+  payloadInspectionErrors,
+  payloadInspectionLoadingSr,
+  onInspectPayload
 }: {
   rows: ShipmentWorkspaceRow[];
   review: GarlandTeamshipReviewResponse | null;
@@ -893,6 +954,10 @@ function ShipmentReviewWorkspace({
   onCreateSingleUpdateJob: (srNumber: string) => void;
   onUpdateJobAction: (jobId: string, action: "approve" | "cancel" | "rescan") => void;
   onRescanShipment: (srNumber: string) => void;
+  payloadInspections: Record<string, TeamshipPayloadInspectionResult>;
+  payloadInspectionErrors: Record<string, string>;
+  payloadInspectionLoadingSr: string | null;
+  onInspectPayload: (input: { srNumber: string; expectedSerials: string[]; expectedSkus: string[] }) => void;
 }) {
   const [expandedRowIds, setExpandedRowIds] = useState<Set<string>>(new Set());
   const selectedCount = selectedUpdateSrNumbers.size;
@@ -1063,6 +1128,12 @@ function ShipmentReviewWorkspace({
         ) : null}
         {rows.map((row) => {
           const isExpanded = expandedRowIds.has(row.id);
+          const srKey = normalizeIdentifier(row.srNumber);
+          const payloadInspection = srKey ? payloadInspections[srKey] ?? null : null;
+          const payloadInspectionError = srKey ? payloadInspectionErrors[srKey] ?? null : null;
+          const isPayloadInspectionLoading = Boolean(srKey && payloadInspectionLoadingSr === srKey);
+          const expectedSerials = row.review ? collectReviewPdfSerials(row.review) : row.pdfOrder ? collectPdfOrderSerials(row.pdfOrder) : [];
+          const expectedSkus = row.review ? collectReviewPdfSkus(row.review) : row.pdfOrder ? collectPdfOrderSkus(row.pdfOrder) : [];
 
           return (
             <details
@@ -1136,6 +1207,24 @@ function ShipmentReviewWorkspace({
                       event.preventDefault();
                       event.stopPropagation();
                       if (row.srNumber) {
+                        onInspectPayload({
+                          srNumber: row.srNumber,
+                          expectedSerials,
+                          expectedSkus
+                        });
+                      }
+                    }}
+                    disabled={!row.srNumber || isPayloadInspectionLoading || expectedSerials.length === 0}
+                    className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isPayloadInspectionLoading ? "Inspecting..." : "Inspect payload"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (row.srNumber) {
                         onCreateSingleUpdateJob(row.srNumber);
                       }
                     }}
@@ -1149,7 +1238,11 @@ function ShipmentReviewWorkspace({
                   </span>
                 </div>
               </summary>
-              <ShipmentWorkspaceDetails row={row} />
+              <ShipmentWorkspaceDetails
+                row={row}
+                payloadInspection={payloadInspection}
+                payloadInspectionError={payloadInspectionError}
+              />
             </details>
           );
         })}
@@ -1348,10 +1441,19 @@ function TeamshipUpdateJobsPanel({
   );
 }
 
-function ShipmentWorkspaceDetails({ row }: { row: ShipmentWorkspaceRow }) {
+function ShipmentWorkspaceDetails({
+  row,
+  payloadInspection,
+  payloadInspectionError
+}: {
+  row: ShipmentWorkspaceRow;
+  payloadInspection: TeamshipPayloadInspectionResult | null;
+  payloadInspectionError: string | null;
+}) {
   if (row.review) {
     return (
       <div className="space-y-4 px-5 pb-5">
+        <TeamshipPayloadInspectionPanel inspection={payloadInspection} error={payloadInspectionError} />
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
             <thead className="bg-muted/40 text-xs uppercase tracking-wide text-mutedForeground">
@@ -1386,6 +1488,9 @@ function ShipmentWorkspaceDetails({ row }: { row: ShipmentWorkspaceRow }) {
 
   return (
     <div className="grid gap-3 px-5 pb-5 text-sm text-mutedForeground md:grid-cols-2">
+      <div className="md:col-span-2">
+        <TeamshipPayloadInspectionPanel inspection={payloadInspection} error={payloadInspectionError} />
+      </div>
       <div className="rounded-md border border-border bg-background p-3">
         <p className="text-xs font-bold uppercase tracking-wide text-mutedForeground">Garland PDF</p>
         <p className="mt-2 text-foreground">{row.pdfOrder ? row.pdfOrder.shipToName ?? "Ship-to missing" : "No PDF order matched yet"}</p>
@@ -1396,6 +1501,127 @@ function ShipmentWorkspaceDetails({ row }: { row: ShipmentWorkspaceRow }) {
         <p className="mt-2 text-foreground">{row.teamshipOrder ? row.teamshipOrderId ?? "Order ID missing" : "No Teamship order matched yet"}</p>
         <p>{row.teamshipOrder ? [row.carrier, row.shipToName, row.cityState].filter(Boolean).join(" · ") : "Pull Teamship orders to inspect."}</p>
       </div>
+    </div>
+  );
+}
+
+function TeamshipPayloadInspectionPanel({
+  inspection,
+  error
+}: {
+  inspection: TeamshipPayloadInspectionResult | null;
+  error: string | null;
+}) {
+  if (!inspection && !error) {
+    return null;
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm font-semibold text-danger">
+        Payload inspection failed: {error}
+      </div>
+    );
+  }
+
+  if (!inspection) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-md border border-border bg-background">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-3 py-2">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">Teamship payload inspection</h3>
+          <p className="mt-1 text-xs text-mutedForeground">
+            Read-only diagnostic for the fetched Teamship API payload. Raw JSON is not shown, only safe paths and previews.
+          </p>
+        </div>
+        <span className={payloadInspectionPillClass(inspection.conclusion)}>{formatPayloadInspectionConclusion(inspection.conclusion)}</span>
+      </div>
+      <div className="grid gap-3 px-3 py-3 text-sm md:grid-cols-3">
+        <div className="rounded-md border border-border bg-muted/20 p-3">
+          <p className="text-xs font-bold uppercase tracking-wide text-mutedForeground">Expected PDF serials</p>
+          <p className="mt-1 font-semibold text-foreground">{inspection.expectedSerials.join(", ") || "None parsed"}</p>
+        </div>
+        <div className="rounded-md border border-border bg-muted/20 p-3">
+          <p className="text-xs font-bold uppercase tracking-wide text-mutedForeground">Payload searched</p>
+          <p className="mt-1 font-semibold text-foreground">{inspection.searchedValueCount} values</p>
+          <p className="mt-1 text-xs text-mutedForeground">{inspection.inspectedEndpoints.join(" + ")}</p>
+        </div>
+        <div className="rounded-md border border-border bg-muted/20 p-3">
+          <p className="text-xs font-bold uppercase tracking-wide text-mutedForeground">Teamship order</p>
+          <p className="mt-1 font-semibold text-foreground">{inspection.teamshipOrderId ?? "Not matched"}</p>
+          {inspection.teamshipUrl ? (
+            <a href={inspection.teamshipUrl} target="_blank" rel="noreferrer" className="mt-1 block text-xs font-semibold text-primary hover:underline">
+              Open Teamship order
+            </a>
+          ) : null}
+        </div>
+      </div>
+      <p className="px-3 pb-3 text-sm font-medium text-mutedForeground">{inspection.message}</p>
+      <div className="grid gap-3 px-3 pb-3 xl:grid-cols-3">
+        <PayloadInspectionMatchList
+          title="Expected serial matches"
+          emptyText="No exact PDF serial value found in this payload."
+          matches={inspection.exactSerialMatches}
+        />
+        <PayloadInspectionMatchList
+          title="Serial-like paths"
+          emptyText="No serial-like key or SN text found."
+          matches={inspection.serialLikeMatches}
+        />
+        <PayloadInspectionMatchList
+          title="Expected SKU paths"
+          emptyText="No expected SKU value found."
+          matches={inspection.skuMatches}
+        />
+      </div>
+    </div>
+  );
+}
+
+function PayloadInspectionMatchList({
+  title,
+  emptyText,
+  matches
+}: {
+  title: string;
+  emptyText: string;
+  matches: TeamshipPayloadInspectionMatch[];
+}) {
+  return (
+    <div className="rounded-md border border-border bg-card">
+      <div className="border-b border-border px-3 py-2">
+        <p className="text-xs font-bold uppercase tracking-wide text-mutedForeground">
+          {title} ({matches.length})
+        </p>
+      </div>
+      {matches.length === 0 ? (
+        <p className="px-3 py-3 text-xs text-mutedForeground">{emptyText}</p>
+      ) : (
+        <div className="max-h-64 overflow-y-auto">
+          <table className="min-w-full text-left text-xs">
+            <thead className="bg-muted/40 uppercase tracking-wide text-mutedForeground">
+              <tr>
+                <th className="px-3 py-2">Path</th>
+                <th className="px-3 py-2">Value preview</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {matches.map((match, index) => (
+                <tr key={`${match.path}-${match.reason}-${index}`}>
+                  <td className="max-w-xs px-3 py-2 font-mono text-[11px] text-mutedForeground">{match.path}</td>
+                  <td className="max-w-xs px-3 py-2 text-mutedForeground">
+                    {match.matchedValue ? <span className="mr-2 font-semibold text-foreground">{match.matchedValue}</span> : null}
+                    {match.valuePreview}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -1735,6 +1961,36 @@ function statusPillClass(status: string) {
   return `${base} bg-danger/10 text-danger`;
 }
 
+function payloadInspectionPillClass(conclusion: TeamshipPayloadInspectionResult["conclusion"]) {
+  const base = "rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide";
+
+  if (conclusion === "EXPECTED_SERIAL_FOUND") {
+    return `${base} bg-success/10 text-success`;
+  }
+
+  if (conclusion === "SERIAL_EVIDENCE_FOUND") {
+    return `${base} bg-warning/15 text-warning`;
+  }
+
+  return `${base} bg-danger/10 text-danger`;
+}
+
+function formatPayloadInspectionConclusion(conclusion: TeamshipPayloadInspectionResult["conclusion"]) {
+  if (conclusion === "EXPECTED_SERIAL_FOUND") {
+    return "Serial found";
+  }
+
+  if (conclusion === "SERIAL_EVIDENCE_FOUND") {
+    return "Serial evidence";
+  }
+
+  if (conclusion === "TEAMSHIP_ORDER_NOT_FOUND") {
+    return "Order not found";
+  }
+
+  return "No serial evidence";
+}
+
 function formatFieldStatus(status: string) {
   return status === "MATCH"
     ? "Match"
@@ -1959,6 +2215,26 @@ function formatStatusLabel(status: string) {
     .split("_")
     .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function collectReviewPdfSerials(review: GarlandTeamshipOrderReview) {
+  return uniqueClientStrings(review.pdfItems.flatMap((item) => item.serialNumbers));
+}
+
+function collectPdfOrderSerials(order: GarlandPdfShippingOrder) {
+  return uniqueClientStrings(order.items.flatMap((item) => item.serialNumbers));
+}
+
+function collectReviewPdfSkus(review: GarlandTeamshipOrderReview) {
+  return uniqueClientStrings(review.pdfItems.map((item) => item.sku).filter((sku): sku is string => Boolean(sku)));
+}
+
+function collectPdfOrderSkus(order: GarlandPdfShippingOrder) {
+  return uniqueClientStrings(order.items.map((item) => item.sku).filter((sku): sku is string => Boolean(sku)));
+}
+
+function uniqueClientStrings(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
 function buildShipmentWorkspaceRows({
