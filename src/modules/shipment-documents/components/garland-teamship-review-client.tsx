@@ -1361,6 +1361,17 @@ function ShipmentReviewWorkspace({
                       No Teamship link
                     </span>
                   )}
+                  {buildTeamshipBolEditorUrl(row.teamshipOrderId) ? (
+                    <a
+                      href={buildTeamshipBolEditorUrl(row.teamshipOrderId) ?? undefined}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(event) => event.stopPropagation()}
+                      className="rounded-md border border-primary/30 px-3 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/10"
+                    >
+                      Open editable BOL
+                    </a>
+                  ) : null}
                   <button
                     type="button"
                     onClick={(event) => {
@@ -1596,9 +1607,21 @@ function TeamshipUpdateJobsPanel({
                         </td>
                         <td className="px-3 py-2">
                           {order.teamshipUrl ? (
-                            <a href={order.teamshipUrl} target="_blank" rel="noreferrer" className="font-semibold text-primary hover:underline">
-                              {order.teamshipOrderId ?? "Open"}
-                            </a>
+                            <div className="space-y-1">
+                              <a href={order.teamshipUrl} target="_blank" rel="noreferrer" className="block font-semibold text-primary hover:underline">
+                                {order.teamshipOrderId ?? "Open"}
+                              </a>
+                              {buildTeamshipBolEditorUrl(order.teamshipOrderId) ? (
+                                <a
+                                  href={buildTeamshipBolEditorUrl(order.teamshipOrderId) ?? undefined}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="block text-xs font-semibold text-primary hover:underline"
+                                >
+                                  Open editable BOL
+                                </a>
+                              ) : null}
+                            </div>
                           ) : (
                             <span className="text-mutedForeground">Not matched</span>
                           )}
@@ -2191,9 +2214,21 @@ function TeamshipReviewHistorySection({
                         <td className="px-3 py-2 text-mutedForeground">{order.carrier ?? "Missing"}</td>
                         <td className="px-3 py-2 text-mutedForeground">
                           {order.teamshipUrl ? (
-                            <a href={order.teamshipUrl} target="_blank" rel="noreferrer" className="font-semibold text-primary hover:underline">
-                              {order.teamshipOrderId ?? "Open"}
-                            </a>
+                            <div className="space-y-1">
+                              <a href={order.teamshipUrl} target="_blank" rel="noreferrer" className="block font-semibold text-primary hover:underline">
+                                {order.teamshipOrderId ?? "Open"}
+                              </a>
+                              {buildTeamshipBolEditorUrl(order.teamshipOrderId) ? (
+                                <a
+                                  href={buildTeamshipBolEditorUrl(order.teamshipOrderId) ?? undefined}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="block text-xs font-semibold text-primary hover:underline"
+                                >
+                                  Open editable BOL
+                                </a>
+                              ) : null}
+                            </div>
                           ) : (
                             order.teamshipOrderId ?? "Not matched"
                           )}
@@ -2700,6 +2735,10 @@ function readTeamshipUrl(order: TeamshipShippingOrderDetail | null) {
 
 function buildTeamshipOrderUrl(orderId: string | null) {
   return orderId ? `https://app.teamshipos.com/ship-inventories/${encodeURIComponent(orderId)}` : null;
+}
+
+function buildTeamshipBolEditorUrl(orderId: string | null) {
+  return orderId ? `https://app.teamshipos.com/ship-inventories/${encodeURIComponent(orderId)}/bol-editor` : null;
 }
 
 function shipmentRowClass(status: ShipmentWorkspaceStatus, workflowStatus: TeamshipReviewWorkflowStatus) {
