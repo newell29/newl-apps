@@ -573,6 +573,59 @@ NEWLS 2604816191908 1.00 ( )`
     expect(fieldsByKey.get("shipping_instructions")).toMatchObject({ status: "MATCH" });
   });
 
+  it("adds SKU dimension recommendations from Teamship pallets and Garland reference rows", () => {
+    const pdfOrder = samplePdfOrder({
+      psNumber: "PS210500",
+      srNumber: "SR812500",
+      pageNumbers: [1],
+      shipVia: "MIDLAND",
+      shipToName: "DIM TEST CUSTOMER",
+      shipToPo: "PO-DIMS",
+      freightTerms: "PPADD-CD",
+      itemSkus: ["99560025", "X16SBMV6DFL1CLUS"],
+      serialNumbers: []
+    });
+    const teamshipOrder = sampleTeamshipOrder("SR812500", "PS210500", "MIDLAND", "DIM TEST CUSTOMER", "PO-DIMS", "PPADD-CD", [
+      "SKU: X16SBMV6DFL1CLUS, SN: 2604816192633"
+    ]);
+    teamshipOrder.pallets = [
+      {
+        quantity: 1,
+        length: 35,
+        width: 25,
+        height: 33,
+        weight: 180,
+        weight_unit: "lbs",
+        commodity: "SKU: X16SBMV6DFL1CLUS, SN: 2604816192633"
+      }
+    ];
+
+    const review = buildGarlandTeamshipReview([pdfOrder], [teamshipOrder]);
+
+    expect(review.reviews[0]?.productDimensions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sku: "99560025",
+          source: "GARLAND_REFERENCE",
+          lengthIn: 48,
+          widthIn: 40,
+          heightIn: 16,
+          weightLb: 81,
+          confidence: "HIGH"
+        }),
+        expect.objectContaining({
+          sku: "X16SBMV6DFL1CLUS",
+          source: "TEAMSHIP_PALLET",
+          lengthIn: 35,
+          widthIn: 25,
+          heightIn: 33,
+          weightLb: 180,
+          confidence: "HIGH"
+        })
+      ])
+    );
+  });
+
   it("fetches Teamship details read-only by Garland SR/shipment ID", async () => {
     process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
     process.env.TEAMSHIP_PASSWORD = "configured-in-env";

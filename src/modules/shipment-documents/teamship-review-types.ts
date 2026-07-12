@@ -149,6 +149,20 @@ export type GarlandTeamshipReviewField = {
   message: string;
 };
 
+export type GarlandProductDimensionRecommendation = {
+  sku: string;
+  source: "TEAMSHIP_PALLET" | "GARLAND_REFERENCE";
+  productType: string | null;
+  quantity: number | null;
+  lengthIn: number | null;
+  widthIn: number | null;
+  heightIn: number | null;
+  weightLb: number | null;
+  weightUnit: string | null;
+  confidence: "HIGH" | "MEDIUM" | "LOW";
+  note: string;
+};
+
 export type GarlandTeamshipOrderReview = {
   srNumber: string;
   psNumber: string;
@@ -159,6 +173,7 @@ export type GarlandTeamshipOrderReview = {
   issueCount: number;
   alert: TeamshipAlertOrder | null;
   fields: GarlandTeamshipReviewField[];
+  productDimensions: GarlandProductDimensionRecommendation[];
 };
 
 export type GarlandTeamshipReviewSummary = {

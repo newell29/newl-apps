@@ -195,6 +195,8 @@ Mapping note from SR808478 testing:
 
 The Teamship shipping-order detail route is `https://members.fulfillit.io/ship-inventories/{orderId}`. The grid's order link may open the picking workflow instead, so use the direct detail route for reviewing or automating pallet fields.
 
+Garland provided a freight-dimension workbook named `FREIGHT DIMS - NEWLS (version 1) (version 1).xlsb`. The app normalizes the `DIMS` and `BEV-AIR` sheets into a checked-in reference directory with these fields: SKU/model, product type, length inches, width inches, height inches, and weight pounds. The Teamship Review page combines this Garland reference data with observed Teamship pallet rows and shows SKU dimension recommendations inside each expanded shipment row. The current review run can also export a SKU dimension directory CSV.
+
 Pallet data is stored in hidden `shipInventoryData.pallets[]` and rendered as indexed visible fields:
 
 | Teamship data field | Visible input naming pattern | Notes |

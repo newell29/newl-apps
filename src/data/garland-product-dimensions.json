@@ -1,0 +1,6824 @@
+[
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "72205017",
+    "sourceSheet": "DIMS",
+    "weightLb": 7,
+    "widthIn": null
+  },
+  {
+    "heightIn": 16,
+    "lengthIn": 48,
+    "productType": null,
+    "sku": "99560025",
+    "sourceSheet": "DIMS",
+    "weightLb": 81,
+    "widthIn": 40
+  },
+  {
+    "heightIn": 10,
+    "lengthIn": 27,
+    "productType": null,
+    "sku": "99560027",
+    "sourceSheet": "DIMS",
+    "weightLb": 40,
+    "widthIn": 19
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "99560103",
+    "sourceSheet": "DIMS",
+    "weightLb": 11,
+    "widthIn": null
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "99560109",
+    "sourceSheet": "DIMS",
+    "weightLb": 20,
+    "widthIn": null
+  },
+  {
+    "heightIn": 24,
+    "lengthIn": 42,
+    "productType": null,
+    "sku": "99650024",
+    "sourceSheet": "DIMS",
+    "weightLb": 148,
+    "widthIn": 30
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "200078344",
+    "sourceSheet": "DIMS",
+    "weightLb": 1,
+    "widthIn": null
+  },
+  {
+    "heightIn": 9,
+    "lengthIn": 12,
+    "productType": "Accessories",
+    "sku": "020008821",
+    "sourceSheet": "DIMS",
+    "weightLb": 2.3,
+    "widthIn": 10
+  },
+  {
+    "heightIn": 2,
+    "lengthIn": 53,
+    "productType": "Accessories",
+    "sku": "1009",
+    "sourceSheet": "DIMS",
+    "weightLb": 55,
+    "widthIn": 43
+  },
+  {
+    "heightIn": 15,
+    "lengthIn": 58,
+    "productType": "Lincoln",
+    "sku": "1010",
+    "sourceSheet": "DIMS",
+    "weightLb": 176,
+    "widthIn": 43
+  },
+  {
+    "heightIn": 17,
+    "lengthIn": 52,
+    "productType": "Lincoln",
+    "sku": "1012",
+    "sourceSheet": "DIMS",
+    "weightLb": 175,
+    "widthIn": 45
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "1083357SP",
+    "sourceSheet": "DIMS",
+    "weightLb": 33,
+    "widthIn": null
+  },
+  {
+    "heightIn": 1,
+    "lengthIn": 1,
+    "productType": "Frymaster",
+    "sku": "1088521SP",
+    "sourceSheet": "DIMS",
+    "weightLb": 2.6,
+    "widthIn": 1
+  },
+  {
+    "heightIn": 52,
+    "lengthIn": 31,
+    "productType": null,
+    "sku": "111467E",
+    "sourceSheet": "DIMS",
+    "weightLb": 132,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 24,
+    "lengthIn": 60,
+    "productType": "Lincoln",
+    "sku": "1116-000-U-KF006",
+    "sourceSheet": "DIMS",
+    "weightLb": 345,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 24,
+    "lengthIn": 60,
+    "productType": "Lincoln",
+    "sku": "1117-000-U-K1837",
+    "sourceSheet": "DIMS",
+    "weightLb": 365,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 52,
+    "lengthIn": 58,
+    "productType": "Lincoln",
+    "sku": "1117-000-U-KF004",
+    "sourceSheet": "DIMS",
+    "weightLb": 365,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 58,
+    "lengthIn": 28,
+    "productType": "Lincoln",
+    "sku": "1117-000-U-KF006",
+    "sourceSheet": "DIMS",
+    "weightLb": 365,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 40,
+    "lengthIn": 33,
+    "productType": "Cleveland",
+    "sku": "111721",
+    "sourceSheet": "DIMS",
+    "weightLb": 100,
+    "widthIn": 25
+  },
+  {
+    "heightIn": 6,
+    "lengthIn": 22,
+    "productType": "Accessories",
+    "sku": "111726",
+    "sourceSheet": "DIMS",
+    "weightLb": 50,
+    "widthIn": 12
+  },
+  {
+    "heightIn": 26,
+    "lengthIn": 62,
+    "productType": null,
+    "sku": "1130-000-U-KF005",
+    "sourceSheet": "DIMS",
+    "weightLb": 352,
+    "widthIn": 43
+  },
+  {
+    "heightIn": 51,
+    "lengthIn": 29,
+    "productType": null,
+    "sku": "113130G",
+    "sourceSheet": "DIMS",
+    "weightLb": 176,
+    "widthIn": 31
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 41,
+    "productType": "Lincoln",
+    "sku": "1132-000-U-KF006",
+    "sourceSheet": "DIMS",
+    "weightLb": 365,
+    "widthIn": 60
+  },
+  {
+    "heightIn": 26,
+    "lengthIn": 62,
+    "productType": "Lincoln",
+    "sku": "1132-000-V-KF006",
+    "sourceSheet": "DIMS",
+    "weightLb": 352,
+    "widthIn": 43
+  },
+  {
+    "heightIn": 43,
+    "lengthIn": 24,
+    "productType": "Frymaster",
+    "sku": "11814N00118",
+    "sourceSheet": "DIMS",
+    "weightLb": 322,
+    "widthIn": 55
+  },
+  {
+    "heightIn": 1,
+    "lengthIn": 1,
+    "productType": "Lincoln",
+    "sku": "1342",
+    "sourceSheet": "DIMS",
+    "weightLb": 2,
+    "widthIn": 1
+  },
+  {
+    "heightIn": 36,
+    "lengthIn": 85,
+    "productType": "Lincoln",
+    "sku": "1400-FB1G",
+    "sourceSheet": "DIMS",
+    "weightLb": 750,
+    "widthIn": 66
+  },
+  {
+    "heightIn": 36,
+    "lengthIn": 87,
+    "productType": "Lincoln",
+    "sku": "1450-000-U-K1825",
+    "sourceSheet": "DIMS",
+    "weightLb": 935,
+    "widthIn": 68
+  },
+  {
+    "heightIn": 36,
+    "lengthIn": 85,
+    "productType": "Lincoln",
+    "sku": "1450-000-U-K1826",
+    "sourceSheet": "DIMS",
+    "weightLb": 750,
+    "widthIn": 66
+  },
+  {
+    "heightIn": 35,
+    "lengthIn": 84,
+    "productType": "Lincoln",
+    "sku": "1450-000-U-K1913",
+    "sourceSheet": "DIMS",
+    "weightLb": 750,
+    "widthIn": 65
+  },
+  {
+    "heightIn": 35,
+    "lengthIn": 84,
+    "productType": "Lincoln",
+    "sku": "1451-000-U-K1912",
+    "sourceSheet": "DIMS",
+    "weightLb": 750,
+    "widthIn": 65
+  },
+  {
+    "heightIn": 1,
+    "lengthIn": 1,
+    "productType": "Lincoln",
+    "sku": "1530",
+    "sourceSheet": "DIMS",
+    "weightLb": 3,
+    "widthIn": 1
+  },
+  {
+    "heightIn": 29,
+    "lengthIn": 84,
+    "productType": "Lincoln",
+    "sku": "1600-000-U-K2069",
+    "sourceSheet": "DIMS",
+    "weightLb": 850,
+    "widthIn": 69
+  },
+  {
+    "heightIn": 28,
+    "lengthIn": 85,
+    "productType": "Lincoln",
+    "sku": "1600-004-U-K2049",
+    "sourceSheet": "DIMS",
+    "weightLb": 850,
+    "widthIn": 66
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 86.8,
+    "productType": "Lincoln",
+    "sku": "1601-002-U-K2049",
+    "sourceSheet": "DIMS",
+    "weightLb": 704,
+    "widthIn": 71
+  },
+  {
+    "heightIn": 19,
+    "lengthIn": 48,
+    "productType": "Lincoln",
+    "sku": "1612",
+    "sourceSheet": "DIMS",
+    "weightLb": 230,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 50,
+    "lengthIn": 52,
+    "productType": "Delfield",
+    "sku": "1864PTBMP",
+    "sourceSheet": "DIMS",
+    "weightLb": 520,
+    "widthIn": 36
+  },
+  {
+    "heightIn": 49,
+    "lengthIn": 38,
+    "productType": null,
+    "sku": "18660BSTMP",
+    "sourceSheet": "DIMS",
+    "weightLb": 660,
+    "widthIn": 66
+  },
+  {
+    "heightIn": 76,
+    "lengthIn": 66,
+    "productType": "Delfield",
+    "sku": "18872PDLP",
+    "sourceSheet": "DIMS",
+    "weightLb": 775,
+    "widthIn": 35
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": "Accessories",
+    "sku": "1951204-0003",
+    "sourceSheet": "DIMS",
+    "weightLb": 40,
+    "widthIn": null
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": "Accessories",
+    "sku": "1951205-0002",
+    "sourceSheet": "DIMS",
+    "weightLb": 27,
+    "widthIn": null
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": "Accessories",
+    "sku": "1951217-0002",
+    "sourceSheet": "DIMS",
+    "weightLb": 7,
+    "widthIn": null
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": "Accessories",
+    "sku": "1951223-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 27,
+    "widthIn": null
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": "Accessories",
+    "sku": "1951225-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 22,
+    "widthIn": null
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": "Accessories",
+    "sku": "1951226-0002",
+    "sourceSheet": "DIMS",
+    "weightLb": 44,
+    "widthIn": null
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": "Accessories",
+    "sku": "1951227-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 40,
+    "widthIn": null
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": "Accessories",
+    "sku": "1951228-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 18,
+    "widthIn": null
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 35,
+    "productType": "Frymaster",
+    "sku": "1ESG35T0N000001",
+    "sourceSheet": "DIMS",
+    "weightLb": 170,
+    "widthIn": 21
+  },
+  {
+    "heightIn": 47,
+    "lengthIn": 35,
+    "productType": "Frymaster",
+    "sku": "1PRG50TSPV00002",
+    "sourceSheet": "DIMS",
+    "weightLb": 183,
+    "widthIn": 21
+  },
+  {
+    "heightIn": 1,
+    "lengthIn": 1,
+    "productType": "Frymaster",
+    "sku": "2109291",
+    "sourceSheet": "DIMS",
+    "weightLb": 7,
+    "widthIn": 1
+  },
+  {
+    "heightIn": 36,
+    "lengthIn": 36,
+    "productType": "Cleveland",
+    "sku": "21CET162083EZT",
+    "sourceSheet": "DIMS",
+    "weightLb": 248,
+    "widthIn": 31
+  },
+  {
+    "heightIn": 38,
+    "lengthIn": 28,
+    "productType": "Cleveland",
+    "sku": "21CET82083ETC",
+    "sourceSheet": "DIMS",
+    "weightLb": 190,
+    "widthIn": 28
+  },
+  {
+    "heightIn": 29,
+    "lengthIn": 35,
+    "productType": "Cleveland",
+    "sku": "21CET82083MCS",
+    "sourceSheet": "DIMS",
+    "weightLb": 190,
+    "widthIn": 28
+  },
+  {
+    "heightIn": 36,
+    "lengthIn": 35,
+    "productType": "Cleveland",
+    "sku": "21CGA5NMCS",
+    "sourceSheet": "DIMS",
+    "weightLb": 275,
+    "widthIn": 28
+  },
+  {
+    "heightIn": 37,
+    "lengthIn": 42,
+    "productType": null,
+    "sku": "22CCT62082403EZT",
+    "sourceSheet": "DIMS",
+    "weightLb": 278,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 32,
+    "lengthIn": 42,
+    "productType": null,
+    "sku": "22CGT3.1NATEZT",
+    "sourceSheet": "DIMS",
+    "weightLb": 550,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 40,
+    "lengthIn": 42,
+    "productType": null,
+    "sku": "22CGT6.1NATEZT",
+    "sourceSheet": "DIMS",
+    "weightLb": 344,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 29,
+    "lengthIn": 40,
+    "productType": "Cleveland",
+    "sku": "22CGT6.1NATMCS",
+    "sourceSheet": "DIMS",
+    "weightLb": 335,
+    "widthIn": 37
+  },
+  {
+    "heightIn": 79,
+    "lengthIn": 49,
+    "productType": null,
+    "sku": "24CEA10.22083EZT",
+    "sourceSheet": "DIMS",
+    "weightLb": 484,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 77,
+    "lengthIn": 42,
+    "productType": "Cleveland",
+    "sku": "24CEA102083MCS",
+    "sourceSheet": "DIMS",
+    "weightLb": 550,
+    "widthIn": 50
+  },
+  {
+    "heightIn": 39,
+    "lengthIn": 78,
+    "productType": "Cleveland",
+    "sku": "24CGA10.2LPMCS",
+    "sourceSheet": "DIMS",
+    "weightLb": 500,
+    "widthIn": 44
+  },
+  {
+    "heightIn": 80,
+    "lengthIn": 49,
+    "productType": null,
+    "sku": "24CGA10.2NEZT",
+    "sourceSheet": "DIMS",
+    "weightLb": 528,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 77,
+    "lengthIn": 46,
+    "productType": "Convotherm",
+    "sku": "24CGA10.2NMCS",
+    "sourceSheet": "DIMS",
+    "weightLb": 500,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 77,
+    "lengthIn": 41,
+    "productType": "Cleveland",
+    "sku": "24CGA10NEZT",
+    "sourceSheet": "DIMS",
+    "weightLb": 750,
+    "widthIn": 47
+  },
+  {
+    "heightIn": 77,
+    "lengthIn": 41,
+    "productType": "Cleveland",
+    "sku": "24CGA10NMCS",
+    "sourceSheet": "DIMS",
+    "weightLb": 570,
+    "widthIn": 48
+  },
+  {
+    "heightIn": 80,
+    "lengthIn": 44,
+    "productType": "Cleveland",
+    "sku": "24CGMNMCSHL",
+    "sourceSheet": "DIMS",
+    "weightLb": 615,
+    "widthIn": 44
+  },
+  {
+    "heightIn": 79,
+    "lengthIn": 41,
+    "productType": null,
+    "sku": "24CGP10NEZT",
+    "sourceSheet": "DIMS",
+    "weightLb": 880,
+    "widthIn": 49
+  },
+  {
+    "heightIn": 81,
+    "lengthIn": 41,
+    "productType": "Cleveland",
+    "sku": "24CGP10NMCS",
+    "sourceSheet": "DIMS",
+    "weightLb": 800,
+    "widthIn": 48
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 58,
+    "productType": "Lincoln",
+    "sku": "2500000U0001620",
+    "sourceSheet": "DIMS",
+    "weightLb": 250,
+    "widthIn": 24
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 58,
+    "productType": "Lincoln",
+    "sku": "2501000U00V1620",
+    "sourceSheet": "DIMS",
+    "weightLb": 210,
+    "widthIn": 29
+  },
+  {
+    "heightIn": 1,
+    "lengthIn": 1,
+    "productType": "Accessories",
+    "sku": "2666364",
+    "sourceSheet": "DIMS",
+    "weightLb": 0.5,
+    "widthIn": 1
+  },
+  {
+    "heightIn": 27,
+    "lengthIn": 59,
+    "productType": "Lincoln",
+    "sku": "2824-GUN-0002",
+    "sourceSheet": "DIMS",
+    "weightLb": 435,
+    "widthIn": 52
+  },
+  {
+    "heightIn": 54,
+    "lengthIn": 38,
+    "productType": "Frymaster",
+    "sku": "2FQE30U0QT00121",
+    "sourceSheet": "DIMS",
+    "weightLb": 528,
+    "widthIn": 44
+  },
+  {
+    "heightIn": 58,
+    "lengthIn": 38,
+    "productType": "Frymaster",
+    "sku": "2FQG30UOQT00206",
+    "sourceSheet": "DIMS",
+    "weightLb": 565,
+    "widthIn": 44
+  },
+  {
+    "heightIn": 50,
+    "lengthIn": 28,
+    "productType": "Frymaster",
+    "sku": "31814PF",
+    "sourceSheet": "DIMS",
+    "weightLb": 815,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 46,
+    "lengthIn": 46,
+    "productType": null,
+    "sku": "33ER33-0038",
+    "sourceSheet": "DIMS",
+    "weightLb": 440,
+    "widthIn": 46
+  },
+  {
+    "heightIn": 19,
+    "lengthIn": 48,
+    "productType": "Convotherm",
+    "sku": "3462278",
+    "sourceSheet": "DIMS",
+    "weightLb": 125,
+    "widthIn": 38
+  },
+  {
+    "heightIn": 13,
+    "lengthIn": 47,
+    "productType": null,
+    "sku": "3456269",
+    "sourceSheet": "DIMS",
+    "weightLb": 65,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 35,
+    "lengthIn": 31,
+    "productType": "Merrychef",
+    "sku": "35CSWMV6DFU1GMUS",
+    "sourceSheet": "DIMS",
+    "weightLb": 200,
+    "widthIn": 34
+  },
+  {
+    "heightIn": 81,
+    "lengthIn": 18,
+    "productType": "Cleveland",
+    "sku": "36CGM16300MCS",
+    "sourceSheet": "DIMS",
+    "weightLb": 1144,
+    "widthIn": 18
+  },
+  {
+    "heightIn": 82,
+    "lengthIn": 46,
+    "productType": null,
+    "sku": "36CGM300MCS",
+    "sourceSheet": "DIMS",
+    "weightLb": 660,
+    "widthIn": 46
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 45,
+    "productType": "Heavy Duty Range",
+    "sku": "36ER35-0008",
+    "sourceSheet": "DIMS",
+    "weightLb": 600,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 46,
+    "productType": null,
+    "sku": "36ES11-0103",
+    "sourceSheet": "DIMS",
+    "weightLb": 275,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 46,
+    "productType": null,
+    "sku": "36ES21-0010",
+    "sourceSheet": "DIMS",
+    "weightLb": 220,
+    "widthIn": 46
+  },
+  {
+    "heightIn": 54,
+    "lengthIn": 54,
+    "productType": "Frymaster",
+    "sku": "3FQG30U0QT00079",
+    "sourceSheet": "DIMS",
+    "weightLb": 750,
+    "widthIn": 44
+  },
+  {
+    "heightIn": 54,
+    "lengthIn": 54,
+    "productType": null,
+    "sku": "3FQG30U0QT00142",
+    "sourceSheet": "DIMS",
+    "weightLb": 707,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 42,
+    "lengthIn": 35,
+    "productType": null,
+    "sku": "403P-DHL-WS1",
+    "sourceSheet": "DIMS",
+    "weightLb": 176,
+    "widthIn": 34
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 29,
+    "productType": "Delfield",
+    "sku": "406CAP",
+    "sourceSheet": "DIMS",
+    "weightLb": 168,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 32,
+    "productType": "Delfield",
+    "sku": "406P-STAR2",
+    "sourceSheet": "DIMS",
+    "weightLb": 300,
+    "widthIn": 31
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 32,
+    "productType": "Delfield",
+    "sku": "406P-STAR4",
+    "sourceSheet": "DIMS",
+    "weightLb": 300,
+    "widthIn": 31
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 30,
+    "productType": "Delfield",
+    "sku": "407CAP",
+    "sourceSheet": "DIMS",
+    "weightLb": 168,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 30,
+    "productType": "Delfield",
+    "sku": "407CAP-DHL",
+    "sourceSheet": "DIMS",
+    "weightLb": 350,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 52,
+    "lengthIn": 30,
+    "productType": "Delfield",
+    "sku": "4427NP-6",
+    "sourceSheet": "DIMS",
+    "weightLb": 485,
+    "widthIn": 34
+  },
+  {
+    "heightIn": 35,
+    "lengthIn": 51,
+    "productType": "Delfield",
+    "sku": "4448NP-12",
+    "sourceSheet": "DIMS",
+    "weightLb": 350,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 53,
+    "lengthIn": 51,
+    "productType": "Delfield",
+    "sku": "4448NP-18M",
+    "sourceSheet": "DIMS",
+    "weightLb": 320,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 51,
+    "productType": "Delfield",
+    "sku": "4448NP-8",
+    "sourceSheet": "DIMS",
+    "weightLb": 316,
+    "widthIn": 52
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 32,
+    "productType": "Delfield",
+    "sku": "4527NP",
+    "sourceSheet": "DIMS",
+    "weightLb": 223,
+    "widthIn": 36
+  },
+  {
+    "heightIn": 51,
+    "lengthIn": 63,
+    "productType": "Delfield",
+    "sku": "4460NP-24M",
+    "sourceSheet": "DIMS",
+    "weightLb": 430,
+    "widthIn": 36
+  },
+  {
+    "heightIn": 52,
+    "lengthIn": 68,
+    "productType": "Delfield",
+    "sku": "4464NP",
+    "sourceSheet": "DIMS",
+    "weightLb": 500,
+    "widthIn": 36
+  },
+  {
+    "heightIn": 53,
+    "lengthIn": 78,
+    "productType": "Delfield",
+    "sku": "4472NP-12",
+    "sourceSheet": "DIMS",
+    "weightLb": 396,
+    "widthIn": 36
+  },
+  {
+    "heightIn": 35,
+    "lengthIn": 73,
+    "productType": "Delfield",
+    "sku": "4472NP-18",
+    "sourceSheet": "DIMS",
+    "weightLb": 485,
+    "widthIn": 52
+  },
+  {
+    "heightIn": 55,
+    "lengthIn": 66,
+    "productType": "Frymaster",
+    "sku": "4FQG30U0QT00059",
+    "sourceSheet": "DIMS",
+    "weightLb": 928,
+    "widthIn": 44
+  },
+  {
+    "heightIn": 85,
+    "lengthIn": 37,
+    "productType": "Delfield",
+    "sku": "6025XL-S",
+    "sourceSheet": "DIMS",
+    "weightLb": 320,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 88,
+    "lengthIn": 43,
+    "productType": null,
+    "sku": "6025XL-S-I1",
+    "sourceSheet": "DIMS",
+    "weightLb": 352,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 85,
+    "lengthIn": 56,
+    "productType": "Delfield",
+    "sku": "6051XL-S",
+    "sourceSheet": "DIMS",
+    "weightLb": 458,
+    "widthIn": 38
+  },
+  {
+    "heightIn": 85,
+    "lengthIn": 37,
+    "productType": "Delfield",
+    "sku": "6151XL-S",
+    "sourceSheet": "DIMS",
+    "weightLb": 445,
+    "widthIn": 55
+  },
+  {
+    "heightIn": 84,
+    "lengthIn": 56,
+    "productType": null,
+    "sku": "6151XL-S-MQ1V",
+    "sourceSheet": "DIMS",
+    "weightLb": 440,
+    "widthIn": 38
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 22,
+    "productType": "Delfield",
+    "sku": "8148-EFNP",
+    "sourceSheet": "DIMS",
+    "weightLb": 300,
+    "widthIn": 52
+  },
+  {
+    "heightIn": 55,
+    "lengthIn": 35,
+    "productType": "Frymaster",
+    "sku": "8BC00181",
+    "sourceSheet": "DIMS",
+    "weightLb": 194,
+    "widthIn": 20
+  },
+  {
+    "heightIn": 14,
+    "lengthIn": 26,
+    "productType": "Accessories",
+    "sku": "9797-22",
+    "sourceSheet": "DIMS",
+    "weightLb": 22,
+    "widthIn": 16
+  },
+  {
+    "heightIn": 10,
+    "lengthIn": 14,
+    "productType": "Cleveland",
+    "sku": "9797-50",
+    "sourceSheet": "DIMS",
+    "weightLb": 5,
+    "widthIn": 20
+  },
+  {
+    "heightIn": 1,
+    "lengthIn": 1,
+    "productType": "Accessories",
+    "sku": "9799-02",
+    "sourceSheet": "DIMS",
+    "weightLb": 1,
+    "widthIn": 1
+  },
+  {
+    "heightIn": 22,
+    "lengthIn": 47,
+    "productType": "Inducs Induction",
+    "sku": "99650040",
+    "sourceSheet": "DIMS",
+    "weightLb": 154,
+    "widthIn": 31
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "A4505560-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 11,
+    "widthIn": null
+  },
+  {
+    "heightIn": 12,
+    "lengthIn": 64,
+    "productType": "Accessories",
+    "sku": "A4508843-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 10,
+    "widthIn": 33
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "A4518278-0002",
+    "sourceSheet": "DIMS",
+    "weightLb": 7,
+    "widthIn": null
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "A4523547-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 11,
+    "widthIn": null
+  },
+  {
+    "heightIn": 6,
+    "lengthIn": 29,
+    "productType": null,
+    "sku": "A4523603-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 3,
+    "widthIn": 27
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "A4524101-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 7,
+    "widthIn": null
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "A4527335-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 11,
+    "widthIn": null
+  },
+  {
+    "heightIn": 25,
+    "lengthIn": 40,
+    "productType": "Accessories",
+    "sku": "A4528351-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 187,
+    "widthIn": 48
+  },
+  {
+    "heightIn": 15,
+    "lengthIn": 41,
+    "productType": null,
+    "sku": "A4528798-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 154,
+    "widthIn": 50
+  },
+  {
+    "heightIn": 12,
+    "lengthIn": 76,
+    "productType": "Accessories",
+    "sku": "A4528802-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 100,
+    "widthIn": 40
+  },
+  {
+    "heightIn": 5,
+    "lengthIn": 39,
+    "productType": null,
+    "sku": "A4528827-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 20,
+    "widthIn": 19
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "A4606400-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 9,
+    "widthIn": null
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "A4607910-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 7,
+    "widthIn": null
+  },
+  {
+    "heightIn": 12,
+    "lengthIn": 65,
+    "productType": "Accessories",
+    "sku": "A4608414-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 110,
+    "widthIn": 16
+  },
+  {
+    "heightIn": 12,
+    "lengthIn": 65,
+    "productType": "Accessories",
+    "sku": "A4608416-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 110,
+    "widthIn": 16
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "A4611340-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 11,
+    "widthIn": null
+  },
+  {
+    "heightIn": 27,
+    "lengthIn": 43,
+    "productType": "Bevair",
+    "sku": "BB72HC-1-B-27",
+    "sourceSheet": "DIMS",
+    "weightLb": 456,
+    "widthIn": 75
+  },
+  {
+    "heightIn": 44,
+    "lengthIn": 28,
+    "productType": null,
+    "sku": "BB72HC-1-FG-PT-S",
+    "sourceSheet": "DIMS",
+    "weightLb": 396,
+    "widthIn": 76
+  },
+  {
+    "heightIn": 53,
+    "lengthIn": 53,
+    "productType": "Frymaster",
+    "sku": "BIELA314T00043",
+    "sourceSheet": "DIMS",
+    "weightLb": 600,
+    "widthIn": 44
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 54,
+    "productType": "Frymaster",
+    "sku": "BIGLA330T00053",
+    "sourceSheet": "DIMS",
+    "weightLb": 720,
+    "widthIn": 54
+  },
+  {
+    "heightIn": 55,
+    "lengthIn": 66,
+    "productType": "Frymaster",
+    "sku": "BIGLA430T00049",
+    "sourceSheet": "DIMS",
+    "weightLb": 800,
+    "widthIn": 44
+  },
+  {
+    "heightIn": 33,
+    "lengthIn": 43,
+    "productType": "Bevair",
+    "sku": "BM23HC-B",
+    "sourceSheet": "DIMS",
+    "weightLb": 176,
+    "widthIn": 27
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 36,
+    "productType": "Frymaster",
+    "sku": "C15MC00001",
+    "sourceSheet": "DIMS",
+    "weightLb": 154,
+    "widthIn": 21
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 36,
+    "productType": null,
+    "sku": "C15MC00024",
+    "sourceSheet": "DIMS",
+    "weightLb": 154,
+    "widthIn": 22
+  },
+  {
+    "heightIn": 47,
+    "lengthIn": 30,
+    "productType": null,
+    "sku": "C18-7S-0094",
+    "sourceSheet": "DIMS",
+    "weightLb": 249,
+    "widthIn": 46
+  },
+  {
+    "heightIn": 47,
+    "lengthIn": 45,
+    "productType": null,
+    "sku": "C36-10R",
+    "sourceSheet": "DIMS",
+    "weightLb": 600,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 46,
+    "lengthIn": 47,
+    "productType": "Garland unit",
+    "sku": "C36-6R",
+    "sourceSheet": "DIMS",
+    "weightLb": 567,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 47,
+    "lengthIn": 57,
+    "productType": "Cleveland",
+    "sku": "C4ET2020GB",
+    "sourceSheet": "DIMS",
+    "weightLb": 946,
+    "widthIn": 85
+  },
+  {
+    "heightIn": 35,
+    "lengthIn": 45,
+    "productType": "Cleveland",
+    "sku": "C4ET6.20EB",
+    "sourceSheet": "DIMS",
+    "weightLb": 670,
+    "widthIn": 50
+  },
+  {
+    "heightIn": 28,
+    "lengthIn": 38,
+    "productType": "Cleveland",
+    "sku": "CET00095",
+    "sourceSheet": "DIMS",
+    "weightLb": 210,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 28,
+    "lengthIn": 28,
+    "productType": "Cleveland",
+    "sku": "CET00096",
+    "sourceSheet": "DIMS",
+    "weightLb": 210,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 36,
+    "lengthIn": 27,
+    "productType": "Cleveland",
+    "sku": "CET00129",
+    "sourceSheet": "DIMS",
+    "weightLb": 335,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 43,
+    "productType": "Griddle",
+    "sku": "CG-36R-0105",
+    "sourceSheet": "DIMS",
+    "weightLb": 460,
+    "widthIn": 33
+  },
+  {
+    "heightIn": 40,
+    "lengthIn": 52,
+    "productType": "Griddle",
+    "sku": "CG-48R-0099",
+    "sourceSheet": "DIMS",
+    "weightLb": 625,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 43,
+    "lengthIn": 40,
+    "productType": "Griddle",
+    "sku": "CG-60F",
+    "sourceSheet": "DIMS",
+    "weightLb": 770,
+    "widthIn": 65
+  },
+  {
+    "heightIn": 43,
+    "lengthIn": 64,
+    "productType": "Griddle",
+    "sku": "CG-60F-0061",
+    "sourceSheet": "DIMS",
+    "weightLb": 600,
+    "widthIn": 33
+  },
+  {
+    "heightIn": 54.8,
+    "lengthIn": 46,
+    "productType": "Garland unit",
+    "sku": "CGPC-0033",
+    "sourceSheet": "DIMS",
+    "weightLb": 350,
+    "widthIn": 29.6
+  },
+  {
+    "heightIn": 47,
+    "lengthIn": 46,
+    "productType": null,
+    "sku": "CPG24-0117",
+    "sourceSheet": "DIMS",
+    "weightLb": 660,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 77,
+    "lengthIn": 40,
+    "productType": "Delfield",
+    "sku": "CSRT2020-4",
+    "sourceSheet": "DIMS",
+    "weightLb": 155,
+    "widthIn": 36
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 31,
+    "productType": "Convotherm",
+    "sku": "CST10CB-4",
+    "sourceSheet": "DIMS",
+    "weightLb": 100,
+    "widthIn": 46
+  },
+  {
+    "heightIn": 32,
+    "lengthIn": 48,
+    "productType": "Convotherm",
+    "sku": "CST10CBCA-4",
+    "sourceSheet": "DIMS",
+    "weightLb": 100,
+    "widthIn": 34
+  },
+  {
+    "heightIn": 54,
+    "lengthIn": 46,
+    "productType": "Convotherm",
+    "sku": "CST20CB-4",
+    "sourceSheet": "DIMS",
+    "weightLb": 150,
+    "widthIn": 31
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 31,
+    "productType": "Convotherm",
+    "sku": "CST20CBCA-4",
+    "sourceSheet": "DIMS",
+    "weightLb": 100,
+    "widthIn": 47
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 41,
+    "productType": "Convotherm",
+    "sku": "CST20OB-4",
+    "sourceSheet": "DIMS",
+    "weightLb": 100,
+    "widthIn": 46
+  },
+  {
+    "heightIn": 42,
+    "lengthIn": 32,
+    "productType": null,
+    "sku": "CST20OB-4",
+    "sourceSheet": "DIMS",
+    "weightLb": 132,
+    "widthIn": 48
+  },
+  {
+    "heightIn": 47,
+    "lengthIn": 28,
+    "productType": null,
+    "sku": "CT96HC-1-B",
+    "sourceSheet": "DIMS",
+    "weightLb": 176,
+    "widthIn": 24
+  },
+  {
+    "heightIn": 66,
+    "lengthIn": 36,
+    "productType": "Delfield",
+    "sku": "CV10E",
+    "sourceSheet": "DIMS",
+    "weightLb": 400,
+    "widthIn": 40
+  },
+  {
+    "heightIn": 28,
+    "lengthIn": 27,
+    "productType": "Cleveland",
+    "sku": "CV21CET8F-1698",
+    "sourceSheet": "DIMS",
+    "weightLb": 190,
+    "widthIn": 34
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 52,
+    "productType": "Delfield",
+    "sku": "D4427NP-12M",
+    "sourceSheet": "DIMS",
+    "weightLb": 250,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 53,
+    "lengthIn": 31,
+    "productType": "Delfield",
+    "sku": "D4427NP-12M-TH3",
+    "sourceSheet": "DIMS",
+    "weightLb": 275,
+    "widthIn": 36
+  },
+  {
+    "heightIn": 52,
+    "lengthIn": 35,
+    "productType": "Delfield",
+    "sku": "D4432NP-12M",
+    "sourceSheet": "DIMS",
+    "weightLb": 250,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 52,
+    "lengthIn": 51,
+    "productType": "Delfield",
+    "sku": "D4448NP-12",
+    "sourceSheet": "DIMS",
+    "weightLb": 395,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 52,
+    "lengthIn": 63,
+    "productType": "Delfield",
+    "sku": "D4460NP-18M",
+    "sourceSheet": "DIMS",
+    "weightLb": 495,
+    "widthIn": 37
+  },
+  {
+    "heightIn": 50,
+    "lengthIn": 65,
+    "productType": "Delfield",
+    "sku": "D4460NP-24M",
+    "sourceSheet": "DIMS",
+    "weightLb": 495,
+    "widthIn": 36
+  },
+  {
+    "heightIn": 52,
+    "lengthIn": 68,
+    "productType": "Delfield",
+    "sku": "D4464NP-16",
+    "sourceSheet": "DIMS",
+    "weightLb": 522,
+    "widthIn": 36
+  },
+  {
+    "heightIn": 50,
+    "lengthIn": 40,
+    "productType": "Delfield",
+    "sku": "D4472NP-30M",
+    "sourceSheet": "DIMS",
+    "weightLb": 545,
+    "widthIn": 78
+  },
+  {
+    "heightIn": 22,
+    "lengthIn": 40,
+    "productType": "Delfield",
+    "sku": "DIS-1013-ET",
+    "sourceSheet": "DIMS",
+    "weightLb": 27,
+    "widthIn": 47
+  },
+  {
+    "heightIn": 22,
+    "lengthIn": 40,
+    "productType": "Delfield",
+    "sku": "DIS-1200ET",
+    "sourceSheet": "DIMS",
+    "weightLb": 35,
+    "widthIn": 47
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 38,
+    "productType": null,
+    "sku": "DP60HC",
+    "sourceSheet": "DIMS",
+    "weightLb": 385,
+    "widthIn": 70
+  },
+  {
+    "heightIn": 29,
+    "lengthIn": 24,
+    "productType": "Cleveland",
+    "sku": "E1SGHMV6XHU2US",
+    "sourceSheet": "DIMS",
+    "weightLb": 132,
+    "widthIn": 32
+  },
+  {
+    "heightIn": 28,
+    "lengthIn": 25,
+    "productType": "Stock Pot Stove",
+    "sku": "E20-SP-0005",
+    "sourceSheet": "DIMS",
+    "weightLb": 170,
+    "widthIn": 25
+  },
+  {
+    "heightIn": 20,
+    "lengthIn": 78,
+    "productType": null,
+    "sku": "E22-36-72GMX-0028",
+    "sourceSheet": "DIMS",
+    "weightLb": 462,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 39,
+    "lengthIn": 29,
+    "productType": "Griddle",
+    "sku": "E24-24G-0013",
+    "sourceSheet": "DIMS",
+    "weightLb": 200,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 13,
+    "lengthIn": 36,
+    "productType": "Griddle",
+    "sku": "E24-36G",
+    "sourceSheet": "DIMS",
+    "weightLb": 300,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 65,
+    "productType": null,
+    "sku": "E24-60G-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 572,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 23,
+    "lengthIn": 35,
+    "productType": "Merrychef",
+    "sku": "E2SDBMV6DFL1SBUS",
+    "sourceSheet": "DIMS",
+    "weightLb": 140,
+    "widthIn": 21
+  },
+  {
+    "heightIn": 24,
+    "lengthIn": 39,
+    "productType": "Merrychef",
+    "sku": "E2SDBMV6DHL1CLUS",
+    "sourceSheet": "DIMS",
+    "weightLb": 160,
+    "widthIn": 40
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 22,
+    "productType": null,
+    "sku": "E2SDBMV6DHL2AXCA",
+    "sourceSheet": "DIMS",
+    "weightLb": 152,
+    "widthIn": 36
+  },
+  {
+    "heightIn": 23,
+    "lengthIn": 35,
+    "productType": "Merrychef",
+    "sku": "E2SDBMV6DHU1BKUS",
+    "sourceSheet": "DIMS",
+    "weightLb": 180,
+    "widthIn": 21
+  },
+  {
+    "heightIn": 23,
+    "lengthIn": 35,
+    "productType": "Merrychef",
+    "sku": "E2SDBMV6DHU2CLUS",
+    "sourceSheet": "DIMS",
+    "weightLb": 170,
+    "widthIn": 21
+  },
+  {
+    "heightIn": 23,
+    "lengthIn": 35,
+    "productType": "Merrychef",
+    "sku": "E2SDXMV6SNU1CLUS",
+    "sourceSheet": "DIMS",
+    "weightLb": 200,
+    "widthIn": 21
+  },
+  {
+    "heightIn": 35,
+    "lengthIn": 32,
+    "productType": "Merrychef",
+    "sku": "E3CXXMV6DFU2GMUS",
+    "sourceSheet": "DIMS",
+    "weightLb": 176,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 32,
+    "productType": "Merrychef",
+    "sku": "E4CSVMV6DFU1GMCA",
+    "sourceSheet": "DIMS",
+    "weightLb": 220,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 35,
+    "productType": null,
+    "sku": "E4CSVMV6DFU1GMCA",
+    "sourceSheet": "DIMS",
+    "weightLb": 220,
+    "widthIn": 31
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 35,
+    "productType": "Merrychef",
+    "sku": "E4SSTMV6DFU1AEUS",
+    "sourceSheet": "DIMS",
+    "weightLb": 220,
+    "widthIn": 31
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 35,
+    "productType": "Merrychef",
+    "sku": "E4SSTMV6DFU1GMUS",
+    "sourceSheet": "DIMS",
+    "weightLb": 220,
+    "widthIn": 31
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 35,
+    "productType": "Merrychef",
+    "sku": "E4SSTMV6DFU1SWUS",
+    "sourceSheet": "DIMS",
+    "weightLb": 220,
+    "widthIn": 32
+  },
+  {
+    "heightIn": 23,
+    "lengthIn": 36,
+    "productType": "Deep Fat Fryer",
+    "sku": "ED-15F-0028",
+    "sourceSheet": "DIMS",
+    "weightLb": 50,
+    "widthIn": 24
+  },
+  {
+    "heightIn": 22,
+    "lengthIn": 40,
+    "productType": "Hot Plate",
+    "sku": "ED-15HSE-0042",
+    "sourceSheet": "DIMS",
+    "weightLb": 50,
+    "widthIn": 47
+  },
+  {
+    "heightIn": 40,
+    "lengthIn": 37,
+    "productType": null,
+    "sku": "ED-15SF-0029",
+    "sourceSheet": "DIMS",
+    "weightLb": 154,
+    "widthIn": 25
+  },
+  {
+    "heightIn": 19,
+    "lengthIn": 27,
+    "productType": "Griddle",
+    "sku": "ED-24G-0012",
+    "sourceSheet": "DIMS",
+    "weightLb": 135,
+    "widthIn": 27
+  },
+  {
+    "heightIn": 20,
+    "lengthIn": 29,
+    "productType": null,
+    "sku": "ED-24G-0065",
+    "sourceSheet": "DIMS",
+    "weightLb": 220,
+    "widthIn": 29
+  },
+  {
+    "heightIn": 7,
+    "lengthIn": 12,
+    "productType": null,
+    "sku": "ED-30B-0005",
+    "sourceSheet": "DIMS",
+    "weightLb": 106,
+    "widthIn": 13
+  },
+  {
+    "heightIn": 20,
+    "lengthIn": 46,
+    "productType": "Deep Fat Fryer",
+    "sku": "ED-30FT-0056",
+    "sourceSheet": "DIMS",
+    "weightLb": 70,
+    "widthIn": 36
+  },
+  {
+    "heightIn": 24,
+    "lengthIn": 37,
+    "productType": "Deep Fat Fryer",
+    "sku": "ED-30SFT-0035",
+    "sourceSheet": "DIMS",
+    "weightLb": 143,
+    "widthIn": 28
+  },
+  {
+    "heightIn": 19,
+    "lengthIn": 41,
+    "productType": "Griddle",
+    "sku": "ED-36G-0013",
+    "sourceSheet": "DIMS",
+    "weightLb": 175,
+    "widthIn": 27
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 37,
+    "productType": null,
+    "sku": "EHE160C",
+    "sourceSheet": "DIMS",
+    "weightLb": 440,
+    "widthIn": 65
+  },
+  {
+    "heightIn": 44,
+    "lengthIn": 57,
+    "productType": "Delfield",
+    "sku": "EHEI48C",
+    "sourceSheet": "DIMS",
+    "weightLb": 280,
+    "widthIn": 36
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 37,
+    "productType": "Delfield",
+    "sku": "EHEI60C",
+    "sourceSheet": "DIMS",
+    "weightLb": 310,
+    "widthIn": 65
+  },
+  {
+    "heightIn": 53,
+    "lengthIn": 44,
+    "productType": "Cleveland",
+    "sku": "EM00020",
+    "sourceSheet": "DIMS",
+    "weightLb": null,
+    "widthIn": 44
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 36,
+    "productType": "Delfield",
+    "sku": "F2936CP",
+    "sourceSheet": "DIMS",
+    "weightLb": 275,
+    "widthIn": 40
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 36,
+    "productType": "Delfield",
+    "sku": "F2952CP",
+    "sourceSheet": "DIMS",
+    "weightLb": 400,
+    "widthIn": 56
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 37,
+    "productType": "Delfield",
+    "sku": "F2960CP",
+    "sourceSheet": "DIMS",
+    "weightLb": 479,
+    "widthIn": 64
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 36,
+    "productType": "Delfield",
+    "sku": "F2962CP",
+    "sourceSheet": "DIMS",
+    "weightLb": 480,
+    "widthIn": 66
+  },
+  {
+    "heightIn": 32,
+    "lengthIn": 38,
+    "productType": "Delfield",
+    "sku": "F2973CP",
+    "sourceSheet": "DIMS",
+    "weightLb": 616,
+    "widthIn": 78
+  },
+  {
+    "heightIn": 88,
+    "lengthIn": 47,
+    "productType": "MULTIPLEX",
+    "sku": "FB08ETF-R-AC10",
+    "sourceSheet": "DIMS",
+    "weightLb": 550,
+    "widthIn": 46
+  },
+  {
+    "heightIn": 86,
+    "lengthIn": 40,
+    "productType": "Bevair",
+    "sku": "FB27HC-1S-18",
+    "sourceSheet": "DIMS",
+    "weightLb": 438,
+    "widthIn": 32
+  },
+  {
+    "heightIn": 90,
+    "lengthIn": 39,
+    "productType": "Bevair",
+    "sku": "FB49HC-1S",
+    "sourceSheet": "DIMS",
+    "weightLb": 570,
+    "widthIn": 57
+  },
+  {
+    "heightIn": 36,
+    "lengthIn": 84,
+    "productType": null,
+    "sku": "FB72HC-1S",
+    "sourceSheet": "DIMS",
+    "weightLb": 725,
+    "widthIn": 78
+  },
+  {
+    "heightIn": 36,
+    "lengthIn": 43,
+    "productType": "Frymaster",
+    "sku": "FGP155N00041",
+    "sourceSheet": "DIMS",
+    "weightLb": 284,
+    "widthIn": 54
+  },
+  {
+    "heightIn": 42,
+    "lengthIn": 54,
+    "productType": "Frymaster",
+    "sku": "FMJ350E00008",
+    "sourceSheet": "DIMS",
+    "weightLb": 206,
+    "widthIn": 53
+  },
+  {
+    "heightIn": 54,
+    "lengthIn": 38,
+    "productType": "Frymaster",
+    "sku": "FPEL214BL00020",
+    "sourceSheet": "DIMS",
+    "weightLb": null,
+    "widthIn": 44
+  },
+  {
+    "heightIn": 54,
+    "lengthIn": 44,
+    "productType": null,
+    "sku": "FPPH25500818",
+    "sourceSheet": "DIMS",
+    "weightLb": 484,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 53,
+    "lengthIn": 44,
+    "productType": "Frymaster",
+    "sku": "FPPH35500564",
+    "sourceSheet": "DIMS",
+    "weightLb": 669,
+    "widthIn": 53
+  },
+  {
+    "heightIn": 54,
+    "lengthIn": 70,
+    "productType": "Frymaster",
+    "sku": "FPPH45500379",
+    "sourceSheet": "DIMS",
+    "weightLb": 860,
+    "widthIn": 44
+  },
+  {
+    "heightIn": 20,
+    "lengthIn": 54,
+    "productType": "Frymaster",
+    "sku": "FPRE11700177",
+    "sourceSheet": "DIMS",
+    "weightLb": 350,
+    "widthIn": 34
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 54,
+    "productType": "Frymaster",
+    "sku": "FPRE21700302",
+    "sourceSheet": "DIMS",
+    "weightLb": 360,
+    "widthIn": 40
+  },
+  {
+    "heightIn": 43,
+    "lengthIn": 54,
+    "productType": "Frymaster",
+    "sku": "FPRE31700229",
+    "sourceSheet": "DIMS",
+    "weightLb": 350,
+    "widthIn": 54
+  },
+  {
+    "heightIn": 43,
+    "lengthIn": 54,
+    "productType": "Frymaster",
+    "sku": "FPRE417",
+    "sourceSheet": "DIMS",
+    "weightLb": 350,
+    "widthIn": 54
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 30,
+    "productType": null,
+    "sku": "G18-BRL-0004",
+    "sourceSheet": "DIMS",
+    "weightLb": 176,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 28,
+    "lengthIn": 25,
+    "productType": "Stock Pot Stove",
+    "sku": "G20-SPH-008",
+    "sourceSheet": "DIMS",
+    "weightLb": 110,
+    "widthIn": 25
+  },
+  {
+    "heightIn": 28,
+    "lengthIn": 49,
+    "productType": "Gas Restaurant Range",
+    "sku": "G24-4L-0006",
+    "sourceSheet": "DIMS",
+    "weightLb": 302,
+    "widthIn": 40
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 42,
+    "productType": null,
+    "sku": "G24-BRL-0054",
+    "sourceSheet": "DIMS",
+    "weightLb": 275,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 46,
+    "productType": null,
+    "sku": "G30-BRL-0031",
+    "sourceSheet": "DIMS",
+    "weightLb": 264,
+    "widthIn": 46
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 41,
+    "productType": "Gas Restaurant Range",
+    "sku": "G36-2G24R-0071",
+    "sourceSheet": "DIMS",
+    "weightLb": 495,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 42,
+    "productType": "Gas Restaurant Range",
+    "sku": "G36-4G12C-0026",
+    "sourceSheet": "DIMS",
+    "weightLb": 460,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 40,
+    "lengthIn": 42,
+    "productType": "Gas Restaurant Range",
+    "sku": "G36-6C-0064",
+    "sourceSheet": "DIMS",
+    "weightLb": 630,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 42,
+    "lengthIn": 42,
+    "productType": "Gas Restaurant Range",
+    "sku": "G36-6R-0007",
+    "sourceSheet": "DIMS",
+    "weightLb": 430,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 42,
+    "productType": "Broiler",
+    "sku": "G36-BRL-0002",
+    "sourceSheet": "DIMS",
+    "weightLb": 300,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 50,
+    "lengthIn": 65,
+    "productType": "Gas Restaurant Range",
+    "sku": "G48-4G24RS-0095",
+    "sourceSheet": "DIMS",
+    "weightLb": 604,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 40,
+    "lengthIn": 65,
+    "productType": "Gas Restaurant Range",
+    "sku": "G60-10CC-0017",
+    "sourceSheet": "DIMS",
+    "weightLb": 726,
+    "widthIn": 50
+  },
+  {
+    "heightIn": 49,
+    "lengthIn": 65,
+    "productType": "Gas Restaurant Range",
+    "sku": "G60-10RR-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 726,
+    "widthIn": 65
+  },
+  {
+    "heightIn": 50,
+    "lengthIn": 65,
+    "productType": "Gas Restaurant Range",
+    "sku": "G60-2G48RR-0046",
+    "sourceSheet": "DIMS",
+    "weightLb": 851,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 49,
+    "lengthIn": 65,
+    "productType": "Gas Restaurant Range",
+    "sku": "G60-4G36CC-0024",
+    "sourceSheet": "DIMS",
+    "weightLb": 826,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 65,
+    "productType": "Gas Restaurant Range",
+    "sku": "G60-4G36RR-0121",
+    "sourceSheet": "DIMS",
+    "weightLb": 826,
+    "widthIn": 50
+  },
+  {
+    "heightIn": 50,
+    "lengthIn": 65,
+    "productType": "Gas Restaurant Range",
+    "sku": "G60-6G24CC-0060",
+    "sourceSheet": "DIMS",
+    "weightLb": 775,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 42,
+    "lengthIn": 72,
+    "productType": "Delfield",
+    "sku": "GAFR12P-S",
+    "sourceSheet": "DIMS",
+    "weightLb": 690,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 80,
+    "lengthIn": 48,
+    "productType": "Delfield",
+    "sku": "GAFRI1P-S",
+    "sourceSheet": "DIMS",
+    "weightLb": 466,
+    "widthIn": 40
+  },
+  {
+    "heightIn": 97,
+    "lengthIn": 41,
+    "productType": null,
+    "sku": "GAFRI1P-S",
+    "sourceSheet": "DIMS",
+    "weightLb": 495,
+    "widthIn": 43
+  },
+  {
+    "heightIn": 89,
+    "lengthIn": 48,
+    "productType": "Delfield",
+    "sku": "GARRI2P-S",
+    "sourceSheet": "DIMS",
+    "weightLb": 718,
+    "widthIn": 60
+  },
+  {
+    "heightIn": 97,
+    "lengthIn": 73,
+    "productType": null,
+    "sku": "GARRI2P-S",
+    "sourceSheet": "DIMS",
+    "weightLb": 715,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 81,
+    "lengthIn": 35,
+    "productType": "Delfield",
+    "sku": "GBF1P-S",
+    "sourceSheet": "DIMS",
+    "weightLb": 329,
+    "widthIn": 36
+  },
+  {
+    "heightIn": 81,
+    "lengthIn": 35,
+    "productType": "Delfield",
+    "sku": "GBF1P-SH",
+    "sourceSheet": "DIMS",
+    "weightLb": 336,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 81,
+    "lengthIn": 35,
+    "productType": "Delfield",
+    "sku": "GBF1P-SH-IK",
+    "sourceSheet": "DIMS",
+    "weightLb": 312,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 81,
+    "lengthIn": 35,
+    "productType": "Delfield",
+    "sku": "GBF1P-S-IJ",
+    "sourceSheet": "DIMS",
+    "weightLb": 330,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 35,
+    "lengthIn": 81,
+    "productType": "Delfield",
+    "sku": "GBF1P-S-IJ-M481",
+    "sourceSheet": "DIMS",
+    "weightLb": 336,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 81,
+    "lengthIn": 35,
+    "productType": "Delfield",
+    "sku": "GBF1P-S-M481",
+    "sourceSheet": "DIMS",
+    "weightLb": 336,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 81,
+    "lengthIn": 40,
+    "productType": "Delfield",
+    "sku": "GBF1P-S-M481-GAR",
+    "sourceSheet": "DIMS",
+    "weightLb": 336,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 81,
+    "lengthIn": 35,
+    "productType": "Delfield",
+    "sku": "GBF1P-S-PP2",
+    "sourceSheet": "DIMS",
+    "weightLb": 330,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 81,
+    "lengthIn": 57,
+    "productType": "Delfield",
+    "sku": "GBF2P-S",
+    "sourceSheet": "DIMS",
+    "weightLb": 350,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 82,
+    "lengthIn": 42,
+    "productType": "Delfield",
+    "sku": "GBF2P-S-M481",
+    "sourceSheet": "DIMS",
+    "weightLb": 435,
+    "widthIn": 62
+  },
+  {
+    "heightIn": 84,
+    "lengthIn": 59,
+    "productType": "Delfield",
+    "sku": "GBF2P-S-M481-GAR",
+    "sourceSheet": "DIMS",
+    "weightLb": 532,
+    "widthIn": 43
+  },
+  {
+    "heightIn": 81,
+    "lengthIn": 91,
+    "productType": "Delfield",
+    "sku": "GBF3P-S",
+    "sourceSheet": "DIMS",
+    "weightLb": 763,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 80,
+    "lengthIn": 36,
+    "productType": "Delfield",
+    "sku": "GBR1P-G",
+    "sourceSheet": "DIMS",
+    "weightLb": 236,
+    "widthIn": 43
+  },
+  {
+    "heightIn": 87,
+    "lengthIn": 40,
+    "productType": "Delfield",
+    "sku": "GBR1P-LH-M481-GAR",
+    "sourceSheet": "DIMS",
+    "weightLb": 312,
+    "widthIn": 40
+  },
+  {
+    "heightIn": 89,
+    "lengthIn": 41,
+    "productType": null,
+    "sku": "GBR1P-L-M481-GAR",
+    "sourceSheet": "DIMS",
+    "weightLb": 385,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 82,
+    "lengthIn": 42,
+    "productType": "Delfield",
+    "sku": "GBR1P-SH",
+    "sourceSheet": "DIMS",
+    "weightLb": 495,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 81,
+    "lengthIn": 42,
+    "productType": "Delfield",
+    "sku": "GBR1P-S-IJ",
+    "sourceSheet": "DIMS",
+    "weightLb": 312,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 81,
+    "lengthIn": 35,
+    "productType": "Delfield",
+    "sku": "GBR1P-S-M481",
+    "sourceSheet": "DIMS",
+    "weightLb": 312,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 87,
+    "lengthIn": 40,
+    "productType": "Delfield",
+    "sku": "GBR1P-S-M481-GAR",
+    "sourceSheet": "DIMS",
+    "weightLb": 312,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 88,
+    "lengthIn": 58,
+    "productType": "Delfield",
+    "sku": "GBR2P-G",
+    "sourceSheet": "DIMS",
+    "weightLb": 322,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 88,
+    "lengthIn": 58,
+    "productType": "Delfield",
+    "sku": "GBR2P-G-I21",
+    "sourceSheet": "DIMS",
+    "weightLb": 410,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 88,
+    "lengthIn": 58,
+    "productType": "Delfield",
+    "sku": "GBR2P-S",
+    "sourceSheet": "DIMS",
+    "weightLb": 495,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 81,
+    "lengthIn": 62,
+    "productType": "Delfield",
+    "sku": "GBR2P-S-M481",
+    "sourceSheet": "DIMS",
+    "weightLb": 435,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 84,
+    "lengthIn": 59,
+    "productType": "Delfield",
+    "sku": "GBR2P-S-M481-GAR",
+    "sourceSheet": "DIMS",
+    "weightLb": 435,
+    "widthIn": 43
+  },
+  {
+    "heightIn": 81,
+    "lengthIn": 89,
+    "productType": "Delfield",
+    "sku": "GBR3P-S",
+    "sourceSheet": "DIMS",
+    "weightLb": 727,
+    "widthIn": 43
+  },
+  {
+    "heightIn": 81,
+    "lengthIn": 89,
+    "productType": "Delfield",
+    "sku": "GBSR3P-S-I30",
+    "sourceSheet": "DIMS",
+    "weightLb": 700,
+    "widthIn": 44
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 39,
+    "productType": "Griddle",
+    "sku": "GBTG36-AR36",
+    "sourceSheet": "DIMS",
+    "weightLb": 365,
+    "widthIn": 39
+  },
+  {
+    "heightIn": 42,
+    "lengthIn": 42,
+    "productType": null,
+    "sku": "GTBG48-NR48-5002",
+    "sourceSheet": "DIMS",
+    "weightLb": 450,
+    "widthIn": 55
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 19,
+    "productType": null,
+    "sku": "GCTOG24-4-0005",
+    "sourceSheet": "DIMS",
+    "weightLb": 176,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 190,
+    "productType": null,
+    "sku": "GD-15F-0005",
+    "sourceSheet": "DIMS",
+    "weightLb": 143,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 30,
+    "productType": null,
+    "sku": "GD-15F-0025",
+    "sourceSheet": "DIMS",
+    "weightLb": 253,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 22,
+    "lengthIn": 35,
+    "productType": "Griddle",
+    "sku": "GD-15GTH-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 85,
+    "widthIn": 25
+  },
+  {
+    "heightIn": 22,
+    "lengthIn": 35,
+    "productType": "Griddle",
+    "sku": "GD-15GTH-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 85,
+    "widthIn": 25
+  },
+  {
+    "heightIn": 20,
+    "lengthIn": 29,
+    "productType": null,
+    "sku": "GD-18RBFF-0021",
+    "sourceSheet": "DIMS",
+    "weightLb": 132,
+    "widthIn": 29
+  },
+  {
+    "heightIn": 19,
+    "lengthIn": 29,
+    "productType": "Griddle",
+    "sku": "GD-24G-0024",
+    "sourceSheet": "DIMS",
+    "weightLb": 121,
+    "widthIn": 29
+  },
+  {
+    "heightIn": 20,
+    "lengthIn": 30,
+    "productType": "Griddle",
+    "sku": "GD-24GTH-0003",
+    "sourceSheet": "DIMS",
+    "weightLb": 176,
+    "widthIn": 28
+  },
+  {
+    "heightIn": 21,
+    "lengthIn": 27,
+    "productType": "Griddle",
+    "sku": "GD-24GTH-0006",
+    "sourceSheet": "DIMS",
+    "weightLb": 146,
+    "widthIn": 27
+  },
+  {
+    "heightIn": 19,
+    "lengthIn": 28,
+    "productType": "Broiler",
+    "sku": "GD-24RB-0002",
+    "sourceSheet": "DIMS",
+    "weightLb": 200,
+    "widthIn": 27
+  },
+  {
+    "heightIn": 20,
+    "lengthIn": 29,
+    "productType": "Broiler",
+    "sku": "GD-24RB-0005",
+    "sourceSheet": "DIMS",
+    "weightLb": 165,
+    "widthIn": 29
+  },
+  {
+    "heightIn": 27,
+    "lengthIn": 39,
+    "productType": "Broiler",
+    "sku": "GD-26RBFF-0019",
+    "sourceSheet": "DIMS",
+    "weightLb": 210,
+    "widthIn": 19
+  },
+  {
+    "heightIn": 28,
+    "lengthIn": 19,
+    "productType": "Broiler",
+    "sku": "GD-30RB-0004",
+    "sourceSheet": "DIMS",
+    "weightLb": 200,
+    "widthIn": 37
+  },
+  {
+    "heightIn": 27,
+    "lengthIn": 39,
+    "productType": "Griddle",
+    "sku": "GD-36GTH-0005",
+    "sourceSheet": "DIMS",
+    "weightLb": 200,
+    "widthIn": 19
+  },
+  {
+    "heightIn": 20,
+    "lengthIn": 42,
+    "productType": null,
+    "sku": "GD-36GTH-0031",
+    "sourceSheet": "DIMS",
+    "weightLb": 275,
+    "widthIn": 29
+  },
+  {
+    "heightIn": 47,
+    "lengthIn": 35,
+    "productType": "Frymaster",
+    "sku": "GF14",
+    "sourceSheet": "DIMS",
+    "weightLb": 158,
+    "widthIn": 20
+  },
+  {
+    "heightIn": 47,
+    "lengthIn": 35,
+    "productType": "Frymaster",
+    "sku": "GF1400543",
+    "sourceSheet": "DIMS",
+    "weightLb": 158,
+    "widthIn": 20
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 20,
+    "productType": "Frymaster",
+    "sku": "GF1400544",
+    "sourceSheet": "DIMS",
+    "weightLb": 179,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 43,
+    "productType": "Frymaster",
+    "sku": "GF1400577",
+    "sourceSheet": "DIMS",
+    "weightLb": 152,
+    "widthIn": 36
+  },
+  {
+    "heightIn": 47,
+    "lengthIn": 36,
+    "productType": "Frymaster",
+    "sku": "GF1400619",
+    "sourceSheet": "DIMS",
+    "weightLb": 143,
+    "widthIn": 18
+  },
+  {
+    "heightIn": 47,
+    "lengthIn": 36,
+    "productType": "Frymaster",
+    "sku": "GF1400626",
+    "sourceSheet": "DIMS",
+    "weightLb": 154,
+    "widthIn": 22
+  },
+  {
+    "heightIn": 56,
+    "lengthIn": 45,
+    "productType": "Frymaster",
+    "sku": "GF16FR00028",
+    "sourceSheet": "DIMS",
+    "weightLb": 220,
+    "widthIn": 25
+  },
+  {
+    "heightIn": 47,
+    "lengthIn": 47,
+    "productType": "Frymaster",
+    "sku": "GF16SPR00014",
+    "sourceSheet": "DIMS",
+    "weightLb": 132,
+    "widthIn": 25
+  },
+  {
+    "heightIn": 51,
+    "lengthIn": 20,
+    "productType": "Frymaster",
+    "sku": "GF40",
+    "sourceSheet": "DIMS",
+    "weightLb": 176,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 4,
+    "productType": null,
+    "sku": "GF4000207",
+    "sourceSheet": "DIMS",
+    "weightLb": 174,
+    "widthIn": 22
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 36,
+    "productType": null,
+    "sku": "GF4000208",
+    "sourceSheet": "DIMS",
+    "weightLb": 174,
+    "widthIn": 22
+  },
+  {
+    "heightIn": 47,
+    "lengthIn": 36,
+    "productType": null,
+    "sku": "GF4000215",
+    "sourceSheet": "DIMS",
+    "weightLb": 174,
+    "widthIn": 18
+  },
+  {
+    "heightIn": 47,
+    "lengthIn": 36,
+    "productType": null,
+    "sku": "GF4000216",
+    "sourceSheet": "DIMS",
+    "weightLb": 174,
+    "widthIn": 18
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 38,
+    "productType": null,
+    "sku": "GF48HC-S",
+    "sourceSheet": "DIMS",
+    "weightLb": 288,
+    "widthIn": 52
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 65,
+    "productType": "Gas Restaurant Range",
+    "sku": "GFE60-10RR-0029",
+    "sourceSheet": "DIMS",
+    "weightLb": 726,
+    "widthIn": 49
+  },
+  {
+    "heightIn": 49,
+    "lengthIn": 66,
+    "productType": "Gas Restaurant Range",
+    "sku": "GFE60-6G24RR-0082",
+    "sourceSheet": "DIMS",
+    "weightLb": 826,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 51,
+    "lengthIn": 66,
+    "productType": null,
+    "sku": "GFE60-6G24RR-0119",
+    "sourceSheet": "DIMS",
+    "weightLb": 880,
+    "widthIn": 61
+  },
+  {
+    "heightIn": 49,
+    "lengthIn": 65,
+    "productType": "Gas Restaurant Range",
+    "sku": "GFE60-6R24RR",
+    "sourceSheet": "DIMS",
+    "weightLb": 826,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 36,
+    "lengthIn": 25,
+    "productType": "Gas Restaurant Range",
+    "sku": "GFIR36M",
+    "sourceSheet": "DIMS",
+    "weightLb": 250,
+    "widthIn": 40
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 41,
+    "productType": "Gas Restaurant Range",
+    "sku": "GIR36-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 220,
+    "widthIn": 58
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 53,
+    "productType": "Salamander",
+    "sku": "GIR36-0038",
+    "sourceSheet": "DIMS",
+    "weightLb": 200,
+    "widthIn": 39
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 41,
+    "productType": "Salamander",
+    "sku": "GIR36C-0010",
+    "sourceSheet": "DIMS",
+    "weightLb": 200,
+    "widthIn": 56
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 29,
+    "productType": "Salamander",
+    "sku": "GIR36C-0012",
+    "sourceSheet": "DIMS",
+    "weightLb": 160,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 41,
+    "productType": "Salamander",
+    "sku": "GIR36C-0015",
+    "sourceSheet": "DIMS",
+    "weightLb": 160,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 29,
+    "productType": "Salamander",
+    "sku": "GIR36C-0017",
+    "sourceSheet": "DIMS",
+    "weightLb": 160,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 65,
+    "productType": "Gas Restaurant Range",
+    "sku": "GIR48-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 230,
+    "widthIn": 55
+  },
+  {
+    "heightIn": 28,
+    "lengthIn": 65,
+    "productType": "Gas Restaurant Range",
+    "sku": "GIR60-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 260,
+    "widthIn": 54
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 65,
+    "productType": "Gas Restaurant Range",
+    "sku": "GIR60-0002",
+    "sourceSheet": "DIMS",
+    "weightLb": 260,
+    "widthIn": 56
+  },
+  {
+    "heightIn": 28,
+    "lengthIn": 64,
+    "productType": "Salamander",
+    "sku": "GIR60-0039",
+    "sourceSheet": "DIMS",
+    "weightLb": 260,
+    "widthIn": 55
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 65,
+    "productType": "Salamander",
+    "sku": "GIR60-0055",
+    "sourceSheet": "DIMS",
+    "weightLb": 260,
+    "widthIn": 56
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 27,
+    "productType": "Salamander",
+    "sku": "GIRCM36-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 200,
+    "widthIn": 39
+  },
+  {
+    "heightIn": 80,
+    "lengthIn": 45,
+    "productType": "Cleveland",
+    "sku": "GM00008",
+    "sourceSheet": "DIMS",
+    "weightLb": 520,
+    "widthIn": 44
+  },
+  {
+    "heightIn": 80,
+    "lengthIn": 43,
+    "productType": "Cleveland",
+    "sku": "GM00025",
+    "sourceSheet": "DIMS",
+    "weightLb": 520,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 119,
+    "productType": "KOLPAK",
+    "sku": "GP038233",
+    "sourceSheet": "DIMS",
+    "weightLb": 200,
+    "widthIn": 19
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 56,
+    "productType": "Deck Oven",
+    "sku": "GPD-48-0029",
+    "sourceSheet": "DIMS",
+    "weightLb": 810,
+    "widthIn": 68
+  },
+  {
+    "heightIn": 43,
+    "lengthIn": 29,
+    "productType": "Grill",
+    "sku": "GSL4S-0002",
+    "sourceSheet": "DIMS",
+    "weightLb": 500,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 29,
+    "productType": "Grill",
+    "sku": "GSL6S-0002",
+    "sourceSheet": "DIMS",
+    "weightLb": 500,
+    "widthIn": 43
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 29,
+    "productType": "Broiler",
+    "sku": "GTBG24-AR24-0003",
+    "sourceSheet": "DIMS",
+    "weightLb": 265,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 42,
+    "productType": "Broiler",
+    "sku": "GTBG36-AB36-0003",
+    "sourceSheet": "DIMS",
+    "weightLb": 352,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 39,
+    "lengthIn": 33,
+    "productType": "Broiler",
+    "sku": "GTBG48-AB48-0010",
+    "sourceSheet": "DIMS",
+    "weightLb": 514,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 29,
+    "lengthIn": 64,
+    "productType": "Broiler",
+    "sku": "GTBG60-AR60-0002",
+    "sourceSheet": "DIMS",
+    "weightLb": 581,
+    "widthIn": 40
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 76,
+    "productType": "Broiler",
+    "sku": "GTBG72-NR72-0012",
+    "sourceSheet": "DIMS",
+    "weightLb": 580,
+    "widthIn": 40
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 29,
+    "productType": "Griddle",
+    "sku": "GTGG24-GT24M-0002",
+    "sourceSheet": "DIMS",
+    "weightLb": 270,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 43,
+    "lengthIn": 41,
+    "productType": "Griddle",
+    "sku": "GTGG36-GT36M-0002",
+    "sourceSheet": "DIMS",
+    "weightLb": 370,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 40,
+    "lengthIn": 54,
+    "productType": "Griddle",
+    "sku": "GTGG48-GT48M-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 441,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 29,
+    "lengthIn": 64,
+    "productType": "Griddle",
+    "sku": "GTGG60-GT60M-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 578,
+    "widthIn": 40
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 76,
+    "productType": "Griddle",
+    "sku": "GTGG72-GT72-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 800,
+    "widthIn": 40
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 27,
+    "productType": "Hot Plate",
+    "sku": "GTOG12-2-0003",
+    "sourceSheet": "DIMS",
+    "weightLb": 73,
+    "widthIn": 39
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 30,
+    "productType": "Hot Plate",
+    "sku": "GTOG24-4-0003",
+    "sourceSheet": "DIMS",
+    "weightLb": 165,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 32,
+    "lengthIn": 42,
+    "productType": "Hot Plate",
+    "sku": "GTOG36-6-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 440,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 20,
+    "lengthIn": 37,
+    "productType": "Hot Plate",
+    "sku": "GTOG48-8",
+    "sourceSheet": "DIMS",
+    "weightLb": 247,
+    "widthIn": 52
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 41,
+    "productType": "Delfield",
+    "sku": "GUF27P-D",
+    "sourceSheet": "DIMS",
+    "weightLb": 168,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 54,
+    "lengthIn": 31,
+    "productType": "Delfield",
+    "sku": "GUF27P-S",
+    "sourceSheet": "DIMS",
+    "weightLb": 145,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 35,
+    "productType": "Delfield",
+    "sku": "GUF32P-D",
+    "sourceSheet": "DIMS",
+    "weightLb": 189,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 42,
+    "lengthIn": 30,
+    "productType": "Delfield",
+    "sku": "GUR27P-D",
+    "sourceSheet": "DIMS",
+    "weightLb": 168,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 76,
+    "productType": "Delfield",
+    "sku": "GUR27P-S",
+    "sourceSheet": "DIMS",
+    "weightLb": 400,
+    "widthIn": 36
+  },
+  {
+    "heightIn": 42,
+    "lengthIn": 36,
+    "productType": "Delfield",
+    "sku": "GUR32P-D",
+    "sourceSheet": "DIMS",
+    "weightLb": 220,
+    "widthIn": 37
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 35,
+    "productType": "Delfield",
+    "sku": "GUR32P-S",
+    "sourceSheet": "DIMS",
+    "weightLb": 165,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 51,
+    "productType": "Delfield",
+    "sku": "GUR48P-S",
+    "sourceSheet": "DIMS",
+    "weightLb": 207,
+    "widthIn": 36
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 65,
+    "productType": "Delfield",
+    "sku": "GUR60BP-S",
+    "sourceSheet": "DIMS",
+    "weightLb": 234,
+    "widthIn": 36
+  },
+  {
+    "heightIn": 53,
+    "lengthIn": 52,
+    "productType": "Delfield",
+    "sku": "GUR60P-D",
+    "sourceSheet": "DIMS",
+    "weightLb": 284,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 50,
+    "lengthIn": 63,
+    "productType": "Delfield",
+    "sku": "GUR60P-S",
+    "sourceSheet": "DIMS",
+    "weightLb": 234,
+    "widthIn": 36
+  },
+  {
+    "heightIn": 83,
+    "lengthIn": 68,
+    "productType": "Cleveland",
+    "sku": "HA-M00224",
+    "sourceSheet": "DIMS",
+    "weightLb": 1365,
+    "widthIn": 54
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 40,
+    "productType": "Broiler",
+    "sku": "HEEGM24CL-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 338,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 52,
+    "productType": "Broiler",
+    "sku": "HEEGM36CL-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 391,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 35,
+    "lengthIn": 66,
+    "productType": "Broiler",
+    "sku": "HEEGM48CL-0002",
+    "sourceSheet": "DIMS",
+    "weightLb": 572,
+    "widthIn": 46
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 76,
+    "productType": "Broiler",
+    "sku": "HEEGM60CL-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 620,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 89,
+    "lengthIn": 42,
+    "productType": null,
+    "sku": "HF1HC-1S",
+    "sourceSheet": "DIMS",
+    "weightLb": 385,
+    "widthIn": 34
+  },
+  {
+    "heightIn": 36,
+    "lengthIn": 88,
+    "productType": null,
+    "sku": "HF2HC-1G",
+    "sourceSheet": "DIMS",
+    "weightLb": 596,
+    "widthIn": 55
+  },
+  {
+    "heightIn": 89,
+    "lengthIn": 55,
+    "productType": null,
+    "sku": "HR2HC-1S-003",
+    "sourceSheet": "DIMS",
+    "weightLb": 495,
+    "widthIn": 36
+  },
+  {
+    "heightIn": 88,
+    "lengthIn": 36,
+    "productType": null,
+    "sku": "HRPS1WHC-1S",
+    "sourceSheet": "DIMS",
+    "weightLb": 396,
+    "widthIn": 38
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 27,
+    "productType": "Cheesemelter",
+    "sku": "ICRMA-24-00018",
+    "sourceSheet": "DIMS",
+    "weightLb": 110,
+    "widthIn": 39
+  },
+  {
+    "heightIn": 9,
+    "lengthIn": 42,
+    "productType": "Cleveland",
+    "sku": "KAK",
+    "sourceSheet": "DIMS",
+    "weightLb": 10,
+    "widthIn": 9
+  },
+  {
+    "heightIn": 55,
+    "lengthIn": 45,
+    "productType": null,
+    "sku": "KDL00263",
+    "sourceSheet": "DIMS",
+    "weightLb": 286,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 59,
+    "lengthIn": 44,
+    "productType": "Cleveland",
+    "sku": "KDL40TP",
+    "sourceSheet": "DIMS",
+    "weightLb": 275,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 54,
+    "lengthIn": 48,
+    "productType": "Cleveland",
+    "sku": "KDL60T",
+    "sourceSheet": "DIMS",
+    "weightLb": 364,
+    "widthIn": 48
+  },
+  {
+    "heightIn": 59,
+    "lengthIn": 56,
+    "productType": null,
+    "sku": "KDLT00765",
+    "sourceSheet": "DIMS",
+    "weightLb": 262,
+    "widthIn": 56
+  },
+  {
+    "heightIn": 1,
+    "lengthIn": 1,
+    "productType": "Cleveland",
+    "sku": "KE004233",
+    "sourceSheet": "DIMS",
+    "weightLb": 1.4,
+    "widthIn": 1
+  },
+  {
+    "heightIn": 53,
+    "lengthIn": 38,
+    "productType": "Cleveland",
+    "sku": "KEL00433",
+    "sourceSheet": "DIMS",
+    "weightLb": 500,
+    "widthIn": 38
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 44,
+    "productType": "Cleveland",
+    "sku": "KEL00595",
+    "sourceSheet": "DIMS",
+    "weightLb": 700,
+    "widthIn": 53
+  },
+  {
+    "heightIn": 53,
+    "lengthIn": 38,
+    "productType": "Cleveland",
+    "sku": "KEL25P",
+    "sourceSheet": "DIMS",
+    "weightLb": 146,
+    "widthIn": 38
+  },
+  {
+    "heightIn": 53,
+    "lengthIn": 38,
+    "productType": "Cleveland",
+    "sku": "KEL40P",
+    "sourceSheet": "DIMS",
+    "weightLb": 200,
+    "widthIn": 38
+  },
+  {
+    "heightIn": 46,
+    "lengthIn": 46,
+    "productType": "Cleveland",
+    "sku": "KEL40T",
+    "sourceSheet": "DIMS",
+    "weightLb": 365,
+    "widthIn": 43
+  },
+  {
+    "heightIn": 58,
+    "lengthIn": 44,
+    "productType": "Cleveland",
+    "sku": "KEL40TP",
+    "sourceSheet": "DIMS",
+    "weightLb": 370,
+    "widthIn": 44
+  },
+  {
+    "heightIn": 56,
+    "lengthIn": 45,
+    "productType": "Cleveland",
+    "sku": "KEL60P",
+    "sourceSheet": "DIMS",
+    "weightLb": 425,
+    "widthIn": 46
+  },
+  {
+    "heightIn": 54,
+    "lengthIn": 48,
+    "productType": "Cleveland",
+    "sku": "KEL60T",
+    "sourceSheet": "DIMS",
+    "weightLb": 415,
+    "widthIn": 48
+  },
+  {
+    "heightIn": 44,
+    "lengthIn": 49,
+    "productType": "Cleveland",
+    "sku": "KEL80T",
+    "sourceSheet": "DIMS",
+    "weightLb": 470,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 37,
+    "lengthIn": 58,
+    "productType": "Cleveland",
+    "sku": "KELT00867",
+    "sourceSheet": "DIMS",
+    "weightLb": 304,
+    "widthIn": 37
+  },
+  {
+    "heightIn": 53,
+    "lengthIn": 49,
+    "productType": "Cleveland",
+    "sku": "KELT01116",
+    "sourceSheet": "DIMS",
+    "weightLb": 415,
+    "widthIn": 50
+  },
+  {
+    "heightIn": 54,
+    "lengthIn": 38,
+    "productType": "Cleveland",
+    "sku": "KELT01117",
+    "sourceSheet": "DIMS",
+    "weightLb": 304,
+    "widthIn": 38
+  },
+  {
+    "heightIn": 56,
+    "lengthIn": 45,
+    "productType": null,
+    "sku": "KELT01423",
+    "sourceSheet": "DIMS",
+    "weightLb": 352,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 40,
+    "lengthIn": 39,
+    "productType": null,
+    "sku": "KET00542",
+    "sourceSheet": "DIMS",
+    "weightLb": 137,
+    "widthIn": 28
+  },
+  {
+    "heightIn": 59,
+    "lengthIn": 37,
+    "productType": "Cleveland",
+    "sku": "KET00867",
+    "sourceSheet": "DIMS",
+    "weightLb": 304,
+    "widthIn": 37
+  },
+  {
+    "heightIn": 25,
+    "lengthIn": 33,
+    "productType": "Cleveland",
+    "sku": "KET12T",
+    "sourceSheet": "DIMS",
+    "weightLb": 225,
+    "widthIn": 53
+  },
+  {
+    "heightIn": 39,
+    "lengthIn": 39,
+    "productType": "Cleveland",
+    "sku": "KET12TP",
+    "sourceSheet": "DIMS",
+    "weightLb": 220,
+    "widthIn": 29
+  },
+  {
+    "heightIn": 36,
+    "lengthIn": 53,
+    "productType": "Cleveland",
+    "sku": "KET20T",
+    "sourceSheet": "DIMS",
+    "weightLb": 260,
+    "widthIn": 37
+  },
+  {
+    "heightIn": 36,
+    "lengthIn": 53,
+    "productType": "Cleveland",
+    "sku": "KET20TP",
+    "sourceSheet": "DIMS",
+    "weightLb": 260,
+    "widthIn": 37
+  },
+  {
+    "heightIn": 55,
+    "lengthIn": 45,
+    "productType": "Cleveland",
+    "sku": "KGL40P",
+    "sourceSheet": "DIMS",
+    "weightLb": 440,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 36,
+    "lengthIn": 53,
+    "productType": "Cleveland",
+    "sku": "KGL40T",
+    "sourceSheet": "DIMS",
+    "weightLb": 260,
+    "widthIn": 37
+  },
+  {
+    "heightIn": 62,
+    "lengthIn": 48,
+    "productType": "Cleveland",
+    "sku": "KGL40TP",
+    "sourceSheet": "DIMS",
+    "weightLb": 520,
+    "widthIn": 48
+  },
+  {
+    "heightIn": 62,
+    "lengthIn": 48,
+    "productType": "Cleveland",
+    "sku": "KGL40TSH",
+    "sourceSheet": "DIMS",
+    "weightLb": 520,
+    "widthIn": 48
+  },
+  {
+    "heightIn": 63,
+    "lengthIn": 55,
+    "productType": "Cleveland",
+    "sku": "KGL60TP",
+    "sourceSheet": "DIMS",
+    "weightLb": 625,
+    "widthIn": 56
+  },
+  {
+    "heightIn": 50,
+    "lengthIn": 58,
+    "productType": "Cleveland",
+    "sku": "KGL80T",
+    "sourceSheet": "DIMS",
+    "weightLb": 630,
+    "widthIn": 56
+  },
+  {
+    "heightIn": 60,
+    "lengthIn": 55,
+    "productType": null,
+    "sku": "KGLT01720",
+    "sourceSheet": "DIMS",
+    "weightLb": 528,
+    "widthIn": 55
+  },
+  {
+    "heightIn": 59,
+    "lengthIn": 57,
+    "productType": null,
+    "sku": "KGLT01740",
+    "sourceSheet": "DIMS",
+    "weightLb": 610,
+    "widthIn": 56
+  },
+  {
+    "heightIn": 37,
+    "lengthIn": 38,
+    "productType": "Cleveland",
+    "sku": "KGT12T",
+    "sourceSheet": "DIMS",
+    "weightLb": 250,
+    "widthIn": 28
+  },
+  {
+    "heightIn": 78,
+    "lengthIn": 46,
+    "productType": null,
+    "sku": "M100XRM-0137",
+    "sourceSheet": "DIMS",
+    "weightLb": 748,
+    "widthIn": 46
+  },
+  {
+    "heightIn": 77,
+    "lengthIn": 45,
+    "productType": "Broiler",
+    "sku": "M110XM-0005",
+    "sourceSheet": "DIMS",
+    "weightLb": 810,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 46,
+    "lengthIn": 45,
+    "productType": "Heavy Duty Range",
+    "sku": "M12ES-0044",
+    "sourceSheet": "DIMS",
+    "weightLb": 125,
+    "widthIn": 29
+  },
+  {
+    "heightIn": 47,
+    "lengthIn": 35,
+    "productType": "Heavy Duty Range",
+    "sku": "M14FMD",
+    "sourceSheet": "DIMS",
+    "weightLb": 191,
+    "widthIn": 21
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 50,
+    "productType": "Broiler",
+    "sku": "M34B-0017",
+    "sourceSheet": "DIMS",
+    "weightLb": 510,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 17,
+    "productType": "Accessories",
+    "sku": "M34DD-0004",
+    "sourceSheet": "DIMS",
+    "weightLb": 75,
+    "widthIn": 34
+  },
+  {
+    "heightIn": 27,
+    "lengthIn": 51,
+    "productType": "Heavy Duty Range",
+    "sku": "M35SS",
+    "sourceSheet": "DIMS",
+    "weightLb": 220,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 43,
+    "lengthIn": 45,
+    "productType": "Heavy Duty Range",
+    "sku": "M43R-0057",
+    "sourceSheet": "DIMS",
+    "weightLb": 440,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 46,
+    "lengthIn": 46,
+    "productType": "Heavy Duty Range",
+    "sku": "M43RC-0758",
+    "sourceSheet": "DIMS",
+    "weightLb": 450,
+    "widthIn": 46
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 45,
+    "productType": "Heavy Duty Range",
+    "sku": "M44R-1494",
+    "sourceSheet": "DIMS",
+    "weightLb": 440,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 42,
+    "productType": "Heavy Duty Range",
+    "sku": "M45R-0341",
+    "sourceSheet": "DIMS",
+    "weightLb": 510,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 43,
+    "lengthIn": 45,
+    "productType": "Heavy Duty Range",
+    "sku": "M48R",
+    "sourceSheet": "DIMS",
+    "weightLb": 600,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 42,
+    "productType": "Heavy Duty Range",
+    "sku": "M48S",
+    "sourceSheet": "DIMS",
+    "weightLb": 600,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 76,
+    "lengthIn": 5,
+    "productType": "Accessories",
+    "sku": "M68LPBG-0002",
+    "sourceSheet": "DIMS",
+    "weightLb": 75,
+    "widthIn": 17
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 78,
+    "productType": "Accessories",
+    "sku": "M68SD-0002",
+    "sourceSheet": "DIMS",
+    "weightLb": 150,
+    "widthIn": 40
+  },
+  {
+    "heightIn": 19,
+    "lengthIn": 36,
+    "productType": "Frymaster",
+    "sku": "MCG182700002",
+    "sourceSheet": "DIMS",
+    "weightLb": 176,
+    "widthIn": 26
+  },
+  {
+    "heightIn": 18,
+    "lengthIn": 35,
+    "productType": "Frymaster",
+    "sku": "MCG272700002",
+    "sourceSheet": "DIMS",
+    "weightLb": 105,
+    "widthIn": 33
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 43,
+    "productType": "Convection Oven",
+    "sku": "MCO-E-5-C-0088",
+    "sourceSheet": "DIMS",
+    "weightLb": 310,
+    "widthIn": 34
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 43,
+    "productType": "Convection Oven",
+    "sku": "MCOE5LMD-CD2081",
+    "sourceSheet": "DIMS",
+    "weightLb": 264,
+    "widthIn": 34
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 44,
+    "productType": "Convection Oven",
+    "sku": "MCO-ES-10S-0176",
+    "sourceSheet": "DIMS",
+    "weightLb": 510,
+    "widthIn": 54
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 45,
+    "productType": "Convection Oven",
+    "sku": "MCO-GS-10S-0374",
+    "sourceSheet": "DIMS",
+    "weightLb": 510,
+    "widthIn": 55
+  },
+  {
+    "heightIn": 1,
+    "lengthIn": 1,
+    "productType": "Accessories",
+    "sku": "MCP00246",
+    "sourceSheet": "DIMS",
+    "weightLb": 0.5,
+    "widthIn": 1
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 43,
+    "productType": "Grill",
+    "sku": "ME-3PX-0066",
+    "sourceSheet": "DIMS",
+    "weightLb": 935,
+    "widthIn": 43
+  },
+  {
+    "heightIn": 44,
+    "lengthIn": 44,
+    "productType": null,
+    "sku": "MG-3PX-0066",
+    "sourceSheet": "DIMS",
+    "weightLb": 924,
+    "widthIn": 44
+  },
+  {
+    "heightIn": 20,
+    "lengthIn": 32,
+    "productType": "Frymaster",
+    "sku": "MHD32S00005",
+    "sourceSheet": "DIMS",
+    "weightLb": 100,
+    "widthIn": 32
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 32,
+    "productType": "Frymaster",
+    "sku": "MHD42S00006",
+    "sourceSheet": "DIMS",
+    "weightLb": 150,
+    "widthIn": 32
+  },
+  {
+    "heightIn": 24,
+    "lengthIn": 28,
+    "productType": null,
+    "sku": "MHG22S00003",
+    "sourceSheet": "DIMS",
+    "weightLb": 44,
+    "widthIn": 26
+  },
+  {
+    "heightIn": 24,
+    "lengthIn": 26,
+    "productType": "Merco/Savory",
+    "sku": "MHG22S00007",
+    "sourceSheet": "DIMS",
+    "weightLb": 71,
+    "widthIn": 21
+  },
+  {
+    "heightIn": 21,
+    "lengthIn": 38,
+    "productType": "Merco/Savory",
+    "sku": "MHG23S00004",
+    "sourceSheet": "DIMS",
+    "weightLb": 75,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 41,
+    "productType": "Salamander",
+    "sku": "MIR-34L-0063",
+    "sourceSheet": "DIMS",
+    "weightLb": 160,
+    "widthIn": 56
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 36,
+    "productType": "Frymaster",
+    "sku": "MJ14000053",
+    "sourceSheet": "DIMS",
+    "weightLb": 187,
+    "widthIn": 22
+  },
+  {
+    "heightIn": 47,
+    "lengthIn": 35,
+    "productType": "Frymaster",
+    "sku": "MJ14000056",
+    "sourceSheet": "DIMS",
+    "weightLb": 191,
+    "widthIn": 21
+  },
+  {
+    "heightIn": 20,
+    "lengthIn": 46,
+    "productType": "Frymaster",
+    "sku": "MJ14000061",
+    "sourceSheet": "DIMS",
+    "weightLb": 193,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 36,
+    "productType": "Frymaster",
+    "sku": "MJ15000063",
+    "sourceSheet": "DIMS",
+    "weightLb": 200,
+    "widthIn": 22
+  },
+  {
+    "heightIn": 55,
+    "lengthIn": 40,
+    "productType": "Frymaster",
+    "sku": "MJ1CF01262",
+    "sourceSheet": "DIMS",
+    "weightLb": 262,
+    "widthIn": 43
+  },
+  {
+    "heightIn": 55,
+    "lengthIn": 83,
+    "productType": "Cleveland",
+    "sku": "MKDL0169",
+    "sourceSheet": "DIMS",
+    "weightLb": 830,
+    "widthIn": 63
+  },
+  {
+    "heightIn": 86,
+    "lengthIn": 37,
+    "productType": null,
+    "sku": "MMR23HC-1-B",
+    "sourceSheet": "DIMS",
+    "weightLb": 352,
+    "widthIn": 30
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "MS-40L",
+    "sourceSheet": "DIMS",
+    "weightLb": 1,
+    "widthIn": null
+  },
+  {
+    "heightIn": 73,
+    "lengthIn": 42,
+    "productType": "Convotherm",
+    "sku": "MS6102082403REC",
+    "sourceSheet": "DIMS",
+    "weightLb": 310,
+    "widthIn": 49
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "MS-80L",
+    "sourceSheet": "DIMS",
+    "weightLb": 3,
+    "widthIn": null
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 46,
+    "productType": null,
+    "sku": "MST6SE-0064",
+    "sourceSheet": "DIMS",
+    "weightLb": 275,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 84,
+    "lengthIn": 33,
+    "productType": "Heavy Duty Range",
+    "sku": "MT34-1B",
+    "sourceSheet": "DIMS",
+    "weightLb": 360,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 32,
+    "productType": "Delfield",
+    "sku": "N225P",
+    "sourceSheet": "DIMS",
+    "weightLb": 115,
+    "widthIn": 20
+  },
+  {
+    "heightIn": 32,
+    "lengthIn": 30,
+    "productType": null,
+    "sku": "N8143BP",
+    "sourceSheet": "DIMS",
+    "weightLb": 165,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 24,
+    "lengthIn": 30,
+    "productType": null,
+    "sku": "N8731-D",
+    "sourceSheet": "DIMS",
+    "weightLb": 121,
+    "widthIn": 37
+  },
+  {
+    "heightIn": 23,
+    "lengthIn": 77,
+    "productType": "Delfield",
+    "sku": "N8773-D",
+    "sourceSheet": "DIMS",
+    "weightLb": 190,
+    "widthIn": 29
+  },
+  {
+    "heightIn": 24,
+    "lengthIn": 30,
+    "productType": null,
+    "sku": "N8859",
+    "sourceSheet": "DIMS",
+    "weightLb": 220,
+    "widthIn": 65
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "P32Z4186",
+    "sourceSheet": "DIMS",
+    "weightLb": 1,
+    "widthIn": null
+  },
+  {
+    "heightIn": 1,
+    "lengthIn": 1,
+    "productType": "Merrychef",
+    "sku": "P80011",
+    "sourceSheet": "DIMS",
+    "weightLb": 2,
+    "widthIn": 1
+  },
+  {
+    "heightIn": 88,
+    "lengthIn": 43,
+    "productType": "Cleveland",
+    "sku": "PDL00002",
+    "sourceSheet": "DIMS",
+    "weightLb": 600,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 24,
+    "lengthIn": 36,
+    "productType": "Frymaster",
+    "sku": "PF50-120",
+    "sourceSheet": "DIMS",
+    "weightLb": 85,
+    "widthIn": 24
+  },
+  {
+    "heightIn": 33,
+    "lengthIn": 31,
+    "productType": "Frymaster",
+    "sku": "PF80LP00001",
+    "sourceSheet": "DIMS",
+    "weightLb": 100,
+    "widthIn": 34
+  },
+  {
+    "heightIn": 47,
+    "lengthIn": 36,
+    "productType": "Frymaster",
+    "sku": "PH15500832",
+    "sourceSheet": "DIMS",
+    "weightLb": 202,
+    "widthIn": 22
+  },
+  {
+    "heightIn": 26,
+    "lengthIn": 42,
+    "productType": "Frymaster",
+    "sku": "PMSDU50C",
+    "sourceSheet": "DIMS",
+    "weightLb": 143,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 97,
+    "lengthIn": 46,
+    "productType": null,
+    "sku": "PRI2XTHC-1AS",
+    "sourceSheet": "DIMS",
+    "weightLb": 616,
+    "widthIn": 80
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "PSA1297",
+    "sourceSheet": "DIMS",
+    "weightLb": 14,
+    "widthIn": null
+  },
+  {
+    "heightIn": 1,
+    "lengthIn": 1,
+    "productType": "Merrychef",
+    "sku": "PSB3168",
+    "sourceSheet": "DIMS",
+    "weightLb": 2.5,
+    "widthIn": 1
+  },
+  {
+    "heightIn": 37,
+    "lengthIn": 40,
+    "productType": "Frymaster",
+    "sku": "PSDU100",
+    "sourceSheet": "DIMS",
+    "weightLb": 79,
+    "widthIn": 32
+  },
+  {
+    "heightIn": 28,
+    "lengthIn": 40,
+    "productType": "Frymaster",
+    "sku": "PSDU50",
+    "sourceSheet": "DIMS",
+    "weightLb": 60,
+    "widthIn": 47
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "PSF161",
+    "sourceSheet": "DIMS",
+    "weightLb": 5,
+    "widthIn": null
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "PSR160",
+    "sourceSheet": "DIMS",
+    "weightLb": 7,
+    "widthIn": null
+  },
+  {
+    "heightIn": 1,
+    "lengthIn": 1,
+    "productType": "Merrychef",
+    "sku": "PSR310",
+    "sourceSheet": "DIMS",
+    "weightLb": 3,
+    "widthIn": 1
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "PSR318",
+    "sourceSheet": "DIMS",
+    "weightLb": 7,
+    "widthIn": null
+  },
+  {
+    "heightIn": 68,
+    "lengthIn": 53,
+    "productType": "Cleveland",
+    "sku": "Q12070",
+    "sourceSheet": "DIMS",
+    "weightLb": 1365,
+    "widthIn": 81
+  },
+  {
+    "heightIn": 53,
+    "lengthIn": 84,
+    "productType": "Cleveland",
+    "sku": "Q12106",
+    "sourceSheet": "DIMS",
+    "weightLb": 850,
+    "widthIn": 64
+  },
+  {
+    "heightIn": 65,
+    "lengthIn": 58,
+    "productType": null,
+    "sku": "Q13494",
+    "sourceSheet": "DIMS",
+    "weightLb": 1100,
+    "widthIn": 85
+  },
+  {
+    "heightIn": 66,
+    "lengthIn": 55,
+    "productType": null,
+    "sku": "Q13536",
+    "sourceSheet": "DIMS",
+    "weightLb": 872,
+    "widthIn": 86
+  },
+  {
+    "heightIn": 56,
+    "lengthIn": 45,
+    "productType": null,
+    "sku": "Q13562",
+    "sourceSheet": "DIMS",
+    "weightLb": 440,
+    "widthIn": 46
+  },
+  {
+    "heightIn": 86,
+    "lengthIn": 37,
+    "productType": null,
+    "sku": "RB49HC-1S",
+    "sourceSheet": "DIMS",
+    "weightLb": 495,
+    "widthIn": 56
+  },
+  {
+    "heightIn": 56,
+    "lengthIn": 34,
+    "productType": "Frymaster",
+    "sku": "RE11400873",
+    "sourceSheet": "DIMS",
+    "weightLb": 196,
+    "widthIn": 20
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 20,
+    "productType": "Frymaster",
+    "sku": "RE11700590",
+    "sourceSheet": "DIMS",
+    "weightLb": 215,
+    "widthIn": 55
+  },
+  {
+    "heightIn": 55,
+    "lengthIn": 37,
+    "productType": null,
+    "sku": "RE117BL00091",
+    "sourceSheet": "DIMS",
+    "weightLb": 256,
+    "widthIn": 23
+  },
+  {
+    "heightIn": 56,
+    "lengthIn": 43,
+    "productType": "Frymaster",
+    "sku": "RE18000159",
+    "sourceSheet": "DIMS",
+    "weightLb": 196,
+    "widthIn": 29
+  },
+  {
+    "heightIn": 51,
+    "lengthIn": 46,
+    "productType": null,
+    "sku": "S18F-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 176,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 52,
+    "lengthIn": 46,
+    "productType": "Deep Fat Fryer",
+    "sku": "S18SF-0003",
+    "sourceSheet": "DIMS",
+    "weightLb": 220,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 66,
+    "productType": "Restaurant Range",
+    "sku": "S684-0013",
+    "sourceSheet": "DIMS",
+    "weightLb": 630,
+    "widthIn": 54
+  },
+  {
+    "heightIn": 54,
+    "lengthIn": 65,
+    "productType": "Restaurant Range",
+    "sku": "S684RC2-0041",
+    "sourceSheet": "DIMS",
+    "weightLb": 650,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 46,
+    "lengthIn": 45,
+    "productType": "Restaurant Range",
+    "sku": "S686-0012",
+    "sourceSheet": "DIMS",
+    "weightLb": 385,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 46,
+    "productType": "Restaurant Range",
+    "sku": "S686RC-0099",
+    "sourceSheet": "DIMS",
+    "weightLb": 395,
+    "widthIn": 49
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 45,
+    "productType": "Restaurant Range",
+    "sku": "S686RC-0209",
+    "sourceSheet": "DIMS",
+    "weightLb": 400,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 34,
+    "productType": "Delfield",
+    "sku": "SALD1",
+    "sourceSheet": "DIMS",
+    "weightLb": 70,
+    "widthIn": 27
+  },
+  {
+    "heightIn": 55,
+    "lengthIn": 60,
+    "productType": "Frymaster",
+    "sku": "SCFHDC360N00101",
+    "sourceSheet": "DIMS",
+    "weightLb": 700,
+    "widthIn": 44
+  },
+  {
+    "heightIn": 44,
+    "lengthIn": 54,
+    "productType": "Cleveland",
+    "sku": "SEL30T208HTP",
+    "sourceSheet": "DIMS",
+    "weightLb": 500,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 43,
+    "lengthIn": 42,
+    "productType": "Cleveland",
+    "sku": "SEL30TR",
+    "sourceSheet": "DIMS",
+    "weightLb": 420,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 59,
+    "lengthIn": 49,
+    "productType": "Cleveland",
+    "sku": "SEL40T208PTP",
+    "sourceSheet": "DIMS",
+    "weightLb": null,
+    "widthIn": 54
+  },
+  {
+    "heightIn": 54,
+    "lengthIn": 58,
+    "productType": "Cleveland",
+    "sku": "SEL40TR",
+    "sourceSheet": "DIMS",
+    "weightLb": 610,
+    "widthIn": 48
+  },
+  {
+    "heightIn": 54,
+    "lengthIn": 50,
+    "productType": null,
+    "sku": "SELTR00251",
+    "sourceSheet": "DIMS",
+    "weightLb": 632,
+    "widthIn": 60
+  },
+  {
+    "heightIn": 53,
+    "lengthIn": 45,
+    "productType": "Cleveland",
+    "sku": "SELTRO00254",
+    "sourceSheet": "DIMS",
+    "weightLb": 503,
+    "widthIn": 52
+  },
+  {
+    "heightIn": 59,
+    "lengthIn": 37,
+    "productType": "Cleveland",
+    "sku": "SET10208",
+    "sourceSheet": "DIMS",
+    "weightLb": 200,
+    "widthIn": 37
+  },
+  {
+    "heightIn": 55,
+    "lengthIn": 39,
+    "productType": null,
+    "sku": "SET10208P",
+    "sourceSheet": "DIMS",
+    "weightLb": 214,
+    "widthIn": 39
+  },
+  {
+    "heightIn": 7,
+    "lengthIn": 13,
+    "productType": null,
+    "sku": "SF-3",
+    "sourceSheet": "DIMS",
+    "weightLb": 11,
+    "widthIn": 22
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "SF342",
+    "sourceSheet": "DIMS",
+    "weightLb": 3,
+    "widthIn": null
+  },
+  {
+    "heightIn": 9,
+    "lengthIn": 24,
+    "productType": "Cleveland",
+    "sku": "SG-28",
+    "sourceSheet": "DIMS",
+    "weightLb": 10,
+    "widthIn": 24
+  },
+  {
+    "heightIn": 54,
+    "lengthIn": 44,
+    "productType": "Cleveland",
+    "sku": "SGL30TNATPTP",
+    "sourceSheet": "DIMS",
+    "weightLb": 498,
+    "widthIn": 46
+  },
+  {
+    "heightIn": 44,
+    "lengthIn": 54,
+    "productType": "Cleveland",
+    "sku": "SGL30TR",
+    "sourceSheet": "DIMS",
+    "weightLb": 500,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 44,
+    "lengthIn": 45,
+    "productType": "Cleveland",
+    "sku": "SGL40T1",
+    "sourceSheet": "DIMS",
+    "weightLb": 610,
+    "widthIn": 55
+  },
+  {
+    "heightIn": 54,
+    "lengthIn": 50,
+    "productType": null,
+    "sku": "SGL40TNATHTP",
+    "sourceSheet": "DIMS",
+    "weightLb": 638,
+    "widthIn": 60
+  },
+  {
+    "heightIn": 49,
+    "lengthIn": 58,
+    "productType": "Cleveland",
+    "sku": "SGL40TNATPTP",
+    "sourceSheet": "DIMS",
+    "weightLb": 663,
+    "widthIn": 43
+  },
+  {
+    "heightIn": 49,
+    "lengthIn": 58,
+    "productType": "Cleveland",
+    "sku": "SGL40TR",
+    "sourceSheet": "DIMS",
+    "weightLb": 663,
+    "widthIn": 43
+  },
+  {
+    "heightIn": 24,
+    "lengthIn": 36,
+    "productType": "Convotherm",
+    "sku": "SGLP200CLBP",
+    "sourceSheet": "DIMS",
+    "weightLb": 20,
+    "widthIn": 24
+  },
+  {
+    "heightIn": 55,
+    "lengthIn": 60,
+    "productType": null,
+    "sku": "SGLT100545",
+    "sourceSheet": "DIMS",
+    "weightLb": 660,
+    "widthIn": 50
+  },
+  {
+    "heightIn": 44,
+    "lengthIn": 54,
+    "productType": null,
+    "sku": "SGLTR00624",
+    "sourceSheet": "DIMS",
+    "weightLb": 500,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 57,
+    "productType": "Stock Pot Stove",
+    "sku": "SP-1844-2F-0001",
+    "sourceSheet": "DIMS",
+    "weightLb": 275,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 55,
+    "lengthIn": 44,
+    "productType": "Bevair",
+    "sku": "SPE27HC-12M-B",
+    "sourceSheet": "DIMS",
+    "weightLb": 220,
+    "widthIn": 32
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 38,
+    "productType": null,
+    "sku": "SPE48HC-18M-DS",
+    "sourceSheet": "DIMS",
+    "weightLb": 352,
+    "widthIn": 52
+  },
+  {
+    "heightIn": 44,
+    "lengthIn": 34,
+    "productType": null,
+    "sku": "SPE48HC-S",
+    "sourceSheet": "DIMS",
+    "weightLb": 275,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 49,
+    "lengthIn": 38,
+    "productType": null,
+    "sku": "SPE48HC-18M-STL",
+    "sourceSheet": "DIMS",
+    "weightLb": 354,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 38,
+    "lengthIn": 49,
+    "productType": "Bevair",
+    "sku": "SPE60HC-08",
+    "sourceSheet": "DIMS",
+    "weightLb": 392,
+    "widthIn": 63
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 49,
+    "productType": null,
+    "sku": "SPED27HC",
+    "sourceSheet": "DIMS",
+    "weightLb": 220,
+    "widthIn": 31
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 38,
+    "productType": "Bevair",
+    "sku": "SPED60HC-16-2",
+    "sourceSheet": "DIMS",
+    "weightLb": 408,
+    "widthIn": 62
+  },
+  {
+    "heightIn": 39,
+    "lengthIn": 48,
+    "productType": "Bevair",
+    "sku": "SPED60HC-24M-2",
+    "sourceSheet": "DIMS",
+    "weightLb": 424,
+    "widthIn": 62
+  },
+  {
+    "heightIn": 43,
+    "lengthIn": 40,
+    "productType": "Bevair",
+    "sku": "SPED72HC-12C-4",
+    "sourceSheet": "DIMS",
+    "weightLb": 448,
+    "widthIn": 74
+  },
+  {
+    "heightIn": 49,
+    "lengthIn": 38,
+    "productType": null,
+    "sku": "SPED72HC-18C-2",
+    "sourceSheet": "DIMS",
+    "weightLb": 495,
+    "widthIn": 76
+  },
+  {
+    "heightIn": 50,
+    "lengthIn": 76,
+    "productType": null,
+    "sku": "SPED72HC-30M-2R",
+    "sourceSheet": "DIMS",
+    "weightLb": 396,
+    "widthIn": 38
+  },
+  {
+    "heightIn": 46,
+    "lengthIn": 35,
+    "productType": null,
+    "sku": "SR114E00084",
+    "sourceSheet": "DIMS",
+    "weightLb": 176,
+    "widthIn": 22
+  },
+  {
+    "heightIn": 46,
+    "lengthIn": 35,
+    "productType": "Frymaster",
+    "sku": "SR114E00125",
+    "sourceSheet": "DIMS",
+    "weightLb": 176,
+    "widthIn": 22
+  },
+  {
+    "heightIn": 47,
+    "lengthIn": 34,
+    "productType": "Frymaster",
+    "sku": "SR142N00001",
+    "sourceSheet": "DIMS",
+    "weightLb": 154,
+    "widthIn": 19
+  },
+  {
+    "heightIn": 47,
+    "lengthIn": 36,
+    "productType": "Frymaster",
+    "sku": "SR142P00001",
+    "sourceSheet": "DIMS",
+    "weightLb": 154,
+    "widthIn": 18
+  },
+  {
+    "heightIn": 47,
+    "lengthIn": 18,
+    "productType": "Frymaster",
+    "sku": "SR152N00001",
+    "sourceSheet": "DIMS",
+    "weightLb": 137,
+    "widthIn": 36
+  },
+  {
+    "heightIn": 46,
+    "lengthIn": 35,
+    "productType": null,
+    "sku": "SR152P00001",
+    "sourceSheet": "DIMS",
+    "weightLb": 137,
+    "widthIn": 19
+  },
+  {
+    "heightIn": 46.4,
+    "lengthIn": 22.4,
+    "productType": "Frymaster",
+    "sku": "SR162P00001",
+    "sourceSheet": "DIMS",
+    "weightLb": 213.4,
+    "widthIn": 40.4
+  },
+  {
+    "heightIn": 1,
+    "lengthIn": 1,
+    "productType": "Merrychef",
+    "sku": "SR318",
+    "sourceSheet": "DIMS",
+    "weightLb": 2,
+    "widthIn": 1
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "SR320",
+    "sourceSheet": "DIMS",
+    "weightLb": 5,
+    "widthIn": null
+  },
+  {
+    "heightIn": 1,
+    "lengthIn": 1,
+    "productType": "Merrychef",
+    "sku": "SR361",
+    "sourceSheet": "DIMS",
+    "weightLb": 1,
+    "widthIn": 1
+  },
+  {
+    "heightIn": 54,
+    "lengthIn": 65,
+    "productType": "Restaurant Range",
+    "sku": "SS684-0015",
+    "sourceSheet": "DIMS",
+    "weightLb": 630,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 45,
+    "productType": "Restaurant Range",
+    "sku": "SS686-0014",
+    "sourceSheet": "DIMS",
+    "weightLb": 385,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 46,
+    "lengthIn": 46,
+    "productType": null,
+    "sku": "SS686RC-0006",
+    "sourceSheet": "DIMS",
+    "weightLb": 440,
+    "widthIn": 46
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 42,
+    "productType": "Restaurant Range",
+    "sku": "SS686RC-0227",
+    "sourceSheet": "DIMS",
+    "weightLb": 395,
+    "widthIn": 43
+  },
+  {
+    "heightIn": 43,
+    "lengthIn": 45,
+    "productType": "Restaurant Range",
+    "sku": "SS686RC-185",
+    "sourceSheet": "DIMS",
+    "weightLb": 395,
+    "widthIn": 44
+  },
+  {
+    "heightIn": 9,
+    "lengthIn": 22,
+    "productType": "Ice-O-Matic",
+    "sku": "SSCK-FB",
+    "sourceSheet": "DIMS",
+    "weightLb": 10,
+    "widthIn": 10
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 29,
+    "productType": null,
+    "sku": "SS-CS24-36",
+    "sourceSheet": "DIMS",
+    "weightLb": 48,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 54,
+    "lengthIn": 52,
+    "productType": null,
+    "sku": "ST4448NP",
+    "sourceSheet": "DIMS",
+    "weightLb": 220,
+    "widthIn": 36
+  },
+  {
+    "heightIn": 44,
+    "lengthIn": 28,
+    "productType": null,
+    "sku": "STACK-36",
+    "sourceSheet": "DIMS",
+    "weightLb": 88,
+    "widthIn": 33
+  },
+  {
+    "heightIn": 42,
+    "lengthIn": 45,
+    "productType": "Convection Oven",
+    "sku": "SUME-100-0032",
+    "sourceSheet": "DIMS",
+    "weightLb": 510,
+    "widthIn": 55
+  },
+  {
+    "heightIn": 42,
+    "lengthIn": 44,
+    "productType": "Convection Oven",
+    "sku": "SUMG-100-0106",
+    "sourceSheet": "DIMS",
+    "weightLb": 515,
+    "widthIn": 55
+  },
+  {
+    "heightIn": 42,
+    "lengthIn": 55,
+    "productType": "Convection Oven",
+    "sku": "SUMGGS10ESS-0009",
+    "sourceSheet": "DIMS",
+    "weightLb": 515,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 55,
+    "lengthIn": 120,
+    "productType": "Cleveland",
+    "sku": "TMKEL0079",
+    "sourceSheet": "DIMS",
+    "weightLb": 1840,
+    "widthIn": 64
+  },
+  {
+    "heightIn": 42,
+    "lengthIn": 30,
+    "productType": "Gas Restaurant Range",
+    "sku": "U24-4L-0002",
+    "sourceSheet": "DIMS",
+    "weightLb": 302,
+    "widthIn": 43
+  },
+  {
+    "heightIn": 40,
+    "lengthIn": 42,
+    "productType": "Gas Restaurant Range",
+    "sku": "U36-2G24R-0062",
+    "sourceSheet": "DIMS",
+    "weightLb": 385,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 39,
+    "lengthIn": 40,
+    "productType": "Gas Restaurant Range",
+    "sku": "U36-4G12R-0055",
+    "sourceSheet": "DIMS",
+    "weightLb": 460,
+    "widthIn": 40
+  },
+  {
+    "heightIn": 42,
+    "lengthIn": 42,
+    "productType": null,
+    "sku": "U36-6C-0020",
+    "sourceSheet": "DIMS",
+    "weightLb": 550,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 42,
+    "productType": "Gas Restaurant Range",
+    "sku": "U36-6R-0004",
+    "sourceSheet": "DIMS",
+    "weightLb": 430,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 42,
+    "lengthIn": 42,
+    "productType": null,
+    "sku": "U36-6S-0012",
+    "sourceSheet": "DIMS",
+    "weightLb": 385,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 40,
+    "lengthIn": 41,
+    "productType": "Gas Restaurant Range",
+    "sku": "U36-G36R-0005",
+    "sourceSheet": "DIMS",
+    "weightLb": 530,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 50,
+    "lengthIn": 65,
+    "productType": "Gas Restaurant Range",
+    "sku": "U48-4G24LL-0024",
+    "sourceSheet": "DIMS",
+    "weightLb": 667,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 49,
+    "lengthIn": 65,
+    "productType": "Gas Restaurant Range",
+    "sku": "U48-8LL-0005",
+    "sourceSheet": "DIMS",
+    "weightLb": 572,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 50,
+    "lengthIn": 65,
+    "productType": "Gas Restaurant Range",
+    "sku": "U60-10RR-0002",
+    "sourceSheet": "DIMS",
+    "weightLb": 726,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 50,
+    "lengthIn": 65,
+    "productType": "Gas Restaurant Range",
+    "sku": "U60-4G36RR-0064",
+    "sourceSheet": "DIMS",
+    "weightLb": 826,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 50,
+    "lengthIn": 65,
+    "productType": "Gas Restaurant Range",
+    "sku": "U60-6G24CC-0021",
+    "sourceSheet": "DIMS",
+    "weightLb": 775,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 1,
+    "lengthIn": 1,
+    "productType": "Delfield",
+    "sku": "UC000-CYT-0051",
+    "sourceSheet": "DIMS",
+    "weightLb": 2,
+    "widthIn": 1
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 48,
+    "productType": "Delfield",
+    "sku": "UC4048P",
+    "sourceSheet": "DIMS",
+    "weightLb": 236,
+    "widthIn": 50
+  },
+  {
+    "heightIn": 40,
+    "lengthIn": 37,
+    "productType": "Bevair",
+    "sku": "UCF24AHC",
+    "sourceSheet": "DIMS",
+    "weightLb": 190,
+    "widthIn": 29
+  },
+  {
+    "heightIn": 35,
+    "lengthIn": 40,
+    "productType": "Bevair",
+    "sku": "UCF27AHC",
+    "sourceSheet": "DIMS",
+    "weightLb": 178,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 32,
+    "lengthIn": 26,
+    "productType": null,
+    "sku": "UCR34HC",
+    "sourceSheet": "DIMS",
+    "weightLb": 176,
+    "widthIn": 38
+  },
+  {
+    "heightIn": 36,
+    "lengthIn": 34,
+    "productType": null,
+    "sku": "UCR48AHC-104",
+    "sourceSheet": "DIMS",
+    "weightLb": 220,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 35,
+    "lengthIn": 40,
+    "productType": "Bevair",
+    "sku": "UCR60AHC",
+    "sourceSheet": "DIMS",
+    "weightLb": 290,
+    "widthIn": 62
+  },
+  {
+    "heightIn": 33,
+    "lengthIn": 35,
+    "productType": "Bevair",
+    "sku": "UCRD27AHC-2",
+    "sourceSheet": "DIMS",
+    "weightLb": 214,
+    "widthIn": 29
+  },
+  {
+    "heightIn": 35,
+    "lengthIn": 40,
+    "productType": "Bevair",
+    "sku": "UCRD48AHC-4",
+    "sourceSheet": "DIMS",
+    "weightLb": 310,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 35,
+    "lengthIn": 33,
+    "productType": null,
+    "sku": "UCRD72AHC-6",
+    "sourceSheet": "DIMS",
+    "weightLb": 528,
+    "widthIn": 76
+  },
+  {
+    "heightIn": 36,
+    "lengthIn": 33,
+    "productType": "Frymaster",
+    "sku": "UHCTHD6T00004",
+    "sourceSheet": "DIMS",
+    "weightLb": 396,
+    "widthIn": 58
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 41,
+    "productType": "Salamander",
+    "sku": "UIE36C-0010",
+    "sourceSheet": "DIMS",
+    "weightLb": 160,
+    "widthIn": 29
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 56,
+    "productType": "Salamander",
+    "sku": "UIR36-0025",
+    "sourceSheet": "DIMS",
+    "weightLb": 200,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 30,
+    "productType": null,
+    "sku": "UIR36C-0008",
+    "sourceSheet": "DIMS",
+    "weightLb": 220,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 65,
+    "productType": "Salamander",
+    "sku": "UIR60-0006",
+    "sourceSheet": "DIMS",
+    "weightLb": 260,
+    "widthIn": 56
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 31,
+    "productType": "Hot Plate",
+    "sku": "UTOG24-4-0002",
+    "sourceSheet": "DIMS",
+    "weightLb": 135,
+    "widthIn": 29
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 39,
+    "productType": "Hot Plate",
+    "sku": "UTOG36-SU6-0003",
+    "sourceSheet": "DIMS",
+    "weightLb": 191,
+    "widthIn": 39
+  },
+  {
+    "heightIn": 54,
+    "lengthIn": 44,
+    "productType": "Convotherm",
+    "sku": "VB11001BP3AAUL",
+    "sourceSheet": "DIMS",
+    "weightLb": 435,
+    "widthIn": 38
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 64,
+    "productType": "Convotherm",
+    "sku": "VB31002EP3AAUL",
+    "sourceSheet": "DIMS",
+    "weightLb": 400,
+    "widthIn": 34
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 53,
+    "productType": "Convotherm",
+    "sku": "VB41004CP3AAUL",
+    "sourceSheet": "DIMS",
+    "weightLb": 650,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 50,
+    "lengthIn": 65,
+    "productType": "Convotherm",
+    "sku": "VS21002BP3AAUL",
+    "sourceSheet": "DIMS",
+    "weightLb": 500,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 47,
+    "lengthIn": 37,
+    "productType": null,
+    "sku": "VSP1002BB2AAUL",
+    "sourceSheet": "DIMS",
+    "weightLb": 275,
+    "widthIn": 23
+  },
+  {
+    "heightIn": 50,
+    "lengthIn": 65,
+    "productType": "Convotherm",
+    "sku": "WB21002AP3AAUL",
+    "sourceSheet": "DIMS",
+    "weightLb": 500,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 53,
+    "productType": "Convotherm",
+    "sku": "WB41002AP3AAUL",
+    "sourceSheet": "DIMS",
+    "weightLb": 475,
+    "widthIn": 44
+  },
+  {
+    "heightIn": 86,
+    "lengthIn": 56,
+    "productType": "Convotherm",
+    "sku": "WB71006AP2AAUL",
+    "sourceSheet": "DIMS",
+    "weightLb": 900,
+    "widthIn": 46
+  },
+  {
+    "heightIn": 55,
+    "lengthIn": 46,
+    "productType": "Convotherm",
+    "sku": "WS21003AP3AAUL",
+    "sourceSheet": "DIMS",
+    "weightLb": 450,
+    "widthIn": 53
+  },
+  {
+    "heightIn": 54,
+    "lengthIn": 44,
+    "productType": null,
+    "sku": "WS31004AP3AAUL",
+    "sourceSheet": "DIMS",
+    "weightLb": 495,
+    "widthIn": 38
+  },
+  {
+    "heightIn": 51,
+    "lengthIn": 46,
+    "productType": "Convotherm",
+    "sku": "WS41002AP3AAUL",
+    "sourceSheet": "DIMS",
+    "weightLb": 475,
+    "widthIn": 54
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 30,
+    "productType": "Bevair",
+    "sku": "WTF20HC-104",
+    "sourceSheet": "DIMS",
+    "weightLb": 140,
+    "widthIn": 25
+  },
+  {
+    "heightIn": 32,
+    "lengthIn": 36,
+    "productType": null,
+    "sku": "WTF27AHC",
+    "sourceSheet": "DIMS",
+    "weightLb": 171,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 44,
+    "lengthIn": 39,
+    "productType": null,
+    "sku": "WTF36AHC-FIP",
+    "sourceSheet": "DIMS",
+    "weightLb": 220,
+    "widthIn": 34
+  },
+  {
+    "heightIn": 32,
+    "lengthIn": 36,
+    "productType": "Bevair",
+    "sku": "WTR27AHC",
+    "sourceSheet": "DIMS",
+    "weightLb": 202,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 38,
+    "lengthIn": 27,
+    "productType": "Bevair",
+    "sku": "WTRCS36HC",
+    "sourceSheet": "DIMS",
+    "weightLb": 350,
+    "widthIn": 40
+  },
+  {
+    "heightIn": 27,
+    "lengthIn": 40,
+    "productType": "Bevair",
+    "sku": "WTRCS48HC",
+    "sourceSheet": "DIMS",
+    "weightLb": 253,
+    "widthIn": 58
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 36,
+    "productType": "Merrychef",
+    "sku": "X12DBMV6DFL1CLUS",
+    "sourceSheet": "DIMS",
+    "weightLb": 161,
+    "widthIn": 21
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 36,
+    "productType": null,
+    "sku": "X12DBMV6DHL1BKUS",
+    "sourceSheet": "DIMS",
+    "weightLb": 161,
+    "widthIn": 21
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 36,
+    "productType": null,
+    "sku": "X12DBMV6DHL1JJCA",
+    "sourceSheet": "DIMS",
+    "weightLb": 161,
+    "widthIn": 22
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 36,
+    "productType": null,
+    "sku": "X12DXMV6SNL1BKUS",
+    "sourceSheet": "DIMS",
+    "weightLb": 176,
+    "widthIn": 21
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 36,
+    "productType": null,
+    "sku": "X12DXMV6SNL1CLUS",
+    "sourceSheet": "DIMS",
+    "weightLb": 253,
+    "widthIn": 21
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 36,
+    "productType": null,
+    "sku": "X16SBMV6DFL1BKUS",
+    "sourceSheet": "DIMS",
+    "weightLb": 176,
+    "widthIn": 26
+  },
+  {
+    "heightIn": 33,
+    "lengthIn": 35,
+    "productType": "Merrychef",
+    "sku": "X16SBMV6DFL1CLUS",
+    "sourceSheet": "DIMS",
+    "weightLb": 180,
+    "widthIn": 25
+  },
+  {
+    "heightIn": 35,
+    "lengthIn": 36,
+    "productType": null,
+    "sku": "X16SBMV6DFL1SWCA",
+    "sourceSheet": "DIMS",
+    "weightLb": 220,
+    "widthIn": 26
+  },
+  {
+    "heightIn": 40,
+    "lengthIn": 36,
+    "productType": null,
+    "sku": "X16SBMV6DHL1AXCA",
+    "sourceSheet": "DIMS",
+    "weightLb": 209,
+    "widthIn": 26
+  },
+  {
+    "heightIn": 40,
+    "lengthIn": 42,
+    "productType": "Gas Restaurant Range",
+    "sku": "X24-4S-0002",
+    "sourceSheet": "DIMS",
+    "weightLb": 221,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 42,
+    "lengthIn": 42,
+    "productType": "Gas Restaurant Range",
+    "sku": "X36-6R-0002",
+    "sourceSheet": "DIMS",
+    "weightLb": 440,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 51,
+    "lengthIn": 66,
+    "productType": null,
+    "sku": "X60-10RR-0033",
+    "sourceSheet": "DIMS",
+    "weightLb": 660,
+    "widthIn": 46
+  },
+  {
+    "heightIn": 51,
+    "lengthIn": 66,
+    "productType": null,
+    "sku": "X60-6G24RR-0069",
+    "sourceSheet": "DIMS",
+    "weightLb": 825,
+    "widthIn": 46
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 46,
+    "productType": null,
+    "sku": "XPG24-0117",
+    "sourceSheet": "DIMS",
+    "weightLb": 715,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 42,
+    "lengthIn": 50,
+    "productType": "Xpress Grills",
+    "sku": "XPG36-2L-0046",
+    "sourceSheet": "DIMS",
+    "weightLb": 800,
+    "widthIn": 43
+  },
+  {
+    "heightIn": 65,
+    "lengthIn": 55,
+    "productType": "Cleveland",
+    "sku": "Q13571",
+    "sourceSheet": "DIMS",
+    "weightLb": 1100,
+    "widthIn": 123
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "CMC",
+    "sourceSheet": "DIMS",
+    "weightLb": 10,
+    "widthIn": null
+  },
+  {
+    "heightIn": 44,
+    "lengthIn": 54,
+    "productType": null,
+    "sku": "SGLTR00428",
+    "sourceSheet": "DIMS",
+    "weightLb": 500,
+    "widthIn": 45
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "DPK14",
+    "sourceSheet": "DIMS",
+    "weightLb": 10,
+    "widthIn": null
+  },
+  {
+    "heightIn": 27,
+    "lengthIn": 39,
+    "productType": null,
+    "sku": "GD-36RB-5001",
+    "sourceSheet": "DIMS",
+    "weightLb": 200,
+    "widthIn": 18
+  },
+  {
+    "heightIn": 40,
+    "lengthIn": 42,
+    "productType": null,
+    "sku": "G36-6C-5001",
+    "sourceSheet": "DIMS",
+    "weightLb": 630,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 27,
+    "lengthIn": 39,
+    "productType": null,
+    "sku": "GD-36G-5002",
+    "sourceSheet": "DIMS",
+    "weightLb": 200,
+    "widthIn": 19
+  },
+  {
+    "heightIn": 28,
+    "lengthIn": 19,
+    "productType": null,
+    "sku": "GD-30RB-5003",
+    "sourceSheet": "DIMS",
+    "weightLb": 200,
+    "widthIn": 37
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "8263714",
+    "sourceSheet": "DIMS",
+    "weightLb": 1,
+    "widthIn": null
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": "FILTER POWDER",
+    "sku": "8030002",
+    "sourceSheet": "DIMS",
+    "weightLb": 5,
+    "widthIn": null
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": "FILTER PAPER",
+    "sku": "8030345",
+    "sourceSheet": "DIMS",
+    "weightLb": 5,
+    "widthIn": null
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": "GOOFER STICKER",
+    "sku": "8030197",
+    "sourceSheet": "DIMS",
+    "weightLb": 5,
+    "widthIn": null
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "99570019",
+    "sourceSheet": "DIMS",
+    "weightLb": 50,
+    "widthIn": null
+  },
+  {
+    "heightIn": 35,
+    "lengthIn": 36,
+    "productType": null,
+    "sku": "X16SBMV6DFL1MSCA",
+    "sourceSheet": "DIMS",
+    "weightLb": 220,
+    "widthIn": 26
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "PSF158",
+    "sourceSheet": "DIMS",
+    "weightLb": 10,
+    "widthIn": null
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "CMC1032",
+    "sourceSheet": "DIMS",
+    "weightLb": 10,
+    "widthIn": null
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "32Z4079",
+    "sourceSheet": "DIMS",
+    "weightLb": 1,
+    "widthIn": null
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "32Z4181",
+    "sourceSheet": "DIMS",
+    "weightLb": 1,
+    "widthIn": null
+  },
+  {
+    "heightIn": 47,
+    "lengthIn": 36,
+    "productType": null,
+    "sku": "GF1400626",
+    "sourceSheet": "DIMS",
+    "weightLb": 154,
+    "widthIn": 22
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "00C31-041A",
+    "sourceSheet": "DIMS",
+    "weightLb": 5,
+    "widthIn": null
+  },
+  {
+    "heightIn": 43,
+    "lengthIn": 40,
+    "productType": null,
+    "sku": "SPE72HC-08",
+    "sourceSheet": "DIMS",
+    "weightLb": 448,
+    "widthIn": 74
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 33,
+    "productType": null,
+    "sku": "WTR24AHC-FLT",
+    "sourceSheet": "DIMS",
+    "weightLb": 168,
+    "widthIn": 29
+  },
+  {
+    "heightIn": 44,
+    "lengthIn": 33,
+    "productType": null,
+    "sku": "WTR72AHC",
+    "sourceSheet": "DIMS",
+    "weightLb": 347,
+    "widthIn": 75
+  },
+  {
+    "heightIn": 35,
+    "lengthIn": 33,
+    "productType": null,
+    "sku": "WTR48AHC-FLT",
+    "sourceSheet": "DIMS",
+    "weightLb": 266,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 42,
+    "productType": null,
+    "sku": "M48-23R-5001",
+    "sourceSheet": "DIMS",
+    "weightLb": 600,
+    "widthIn": 42
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "1951221-5001",
+    "sourceSheet": "DIMS",
+    "weightLb": 40,
+    "widthIn": null
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 56,
+    "productType": null,
+    "sku": "UIR36-5014",
+    "sourceSheet": "DIMS",
+    "weightLb": 200,
+    "widthIn": 41
+  },
+  {
+    "heightIn": null,
+    "lengthIn": null,
+    "productType": null,
+    "sku": "1951217-5001",
+    "sourceSheet": "DIMS",
+    "weightLb": 40,
+    "widthIn": null
+  },
+  {
+    "heightIn": 42,
+    "lengthIn": 42,
+    "productType": null,
+    "sku": "X36-6R-5002",
+    "sourceSheet": "DIMS",
+    "weightLb": 440,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 45,
+    "productType": null,
+    "sku": "MCO-GS-10M-5005",
+    "sourceSheet": "DIMS",
+    "weightLb": 510,
+    "widthIn": 55
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 42,
+    "productType": null,
+    "sku": "GTBG36-NR36-5013",
+    "sourceSheet": "DIMS",
+    "weightLb": 352,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 28,
+    "lengthIn": 76,
+    "productType": null,
+    "sku": "SPGCR-03937",
+    "sourceSheet": "DIMS",
+    "weightLb": 600,
+    "widthIn": 40
+  },
+  {
+    "heightIn": 54,
+    "lengthIn": 65,
+    "productType": null,
+    "sku": "SS684-5005",
+    "sourceSheet": "DIMS",
+    "weightLb": 630,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 65,
+    "productType": null,
+    "sku": "G60-4G36RR-5013",
+    "sourceSheet": "DIMS",
+    "weightLb": 826,
+    "widthIn": 50
+  },
+  {
+    "heightIn": 28,
+    "lengthIn": 65,
+    "productType": null,
+    "sku": "GIR60-5019",
+    "sourceSheet": "DIMS",
+    "weightLb": 260,
+    "widthIn": 54
+  },
+  {
+    "heightIn": 58,
+    "lengthIn": 38,
+    "productType": null,
+    "sku": "2FQG30U0QT00330",
+    "sourceSheet": "DIMS",
+    "weightLb": 565,
+    "widthIn": 44
+  },
+  {
+    "heightIn": 55,
+    "lengthIn": 44,
+    "productType": null,
+    "sku": "1FPRG",
+    "sourceSheet": "DIMS",
+    "weightLb": 340,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 55,
+    "lengthIn": 41,
+    "productType": null,
+    "sku": "2FPRG",
+    "sourceSheet": "DIMS",
+    "weightLb": 520,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 55,
+    "lengthIn": 54,
+    "productType": null,
+    "sku": "3FPRG",
+    "sourceSheet": "DIMS",
+    "weightLb": 720,
+    "widthIn": 44
+  },
+  {
+    "heightIn": 55,
+    "lengthIn": 70,
+    "productType": null,
+    "sku": "4FPRG",
+    "sourceSheet": "DIMS",
+    "weightLb": 1073,
+    "widthIn": 44
+  },
+  {
+    "heightIn": 46,
+    "lengthIn": 33,
+    "productType": null,
+    "sku": "SPE27HC-B",
+    "sourceSheet": "DIMS",
+    "weightLb": 202,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 40,
+    "lengthIn": 54,
+    "productType": null,
+    "sku": "GTGG48-GT48M-5047",
+    "sourceSheet": "DIMS",
+    "weightLb": 441,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 45,
+    "productType": null,
+    "sku": "XPE36AC",
+    "sourceSheet": "DIMS",
+    "weightLb": 800,
+    "widthIn": 43
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 36,
+    "productType": null,
+    "sku": "CH000A60",
+    "sourceSheet": "DIMS",
+    "weightLb": 200,
+    "widthIn": 135
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 36,
+    "productType": null,
+    "sku": "CH000A61",
+    "sourceSheet": "DIMS",
+    "weightLb": 200,
+    "widthIn": 135
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 36,
+    "productType": null,
+    "sku": "CH000A62",
+    "sourceSheet": "DIMS",
+    "weightLb": 200,
+    "widthIn": 135
+  },
+  {
+    "heightIn": 51,
+    "lengthIn": 46,
+    "productType": null,
+    "sku": "CH000A40",
+    "sourceSheet": "DIMS",
+    "weightLb": 660,
+    "widthIn": 96
+  },
+  {
+    "heightIn": 49,
+    "lengthIn": 40,
+    "productType": null,
+    "sku": "PSDU100",
+    "sourceSheet": "DIMS",
+    "weightLb": 89,
+    "widthIn": 32
+  },
+  {
+    "heightIn": 49,
+    "lengthIn": 40,
+    "productType": null,
+    "sku": "A4611340-5001",
+    "sourceSheet": "DIMS",
+    "weightLb": 89,
+    "widthIn": 32
+  },
+  {
+    "heightIn": 44,
+    "lengthIn": 53,
+    "productType": null,
+    "sku": "FPPH255",
+    "sourceSheet": "DIMS",
+    "weightLb": 502,
+    "widthIn": 35
+  },
+  {
+    "heightIn": 46,
+    "lengthIn": 97,
+    "productType": null,
+    "sku": "CH000A45",
+    "sourceSheet": "DIMS",
+    "weightLb": 500,
+    "widthIn": 47
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 160,
+    "productType": null,
+    "sku": "CH000A43P",
+    "sourceSheet": "DIMS",
+    "weightLb": 648,
+    "widthIn": 40
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 43,
+    "productType": null,
+    "sku": "MG-3PX-5004",
+    "sourceSheet": "DIMS",
+    "weightLb": 925,
+    "widthIn": 43
+  },
+  {
+    "heightIn": 50,
+    "lengthIn": 66,
+    "productType": null,
+    "sku": "G48-8LL-5017",
+    "sourceSheet": "DIMS",
+    "weightLb": 572,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 29,
+    "productType": null,
+    "sku": "GTBG24-NR24",
+    "sourceSheet": "DIMS",
+    "weightLb": 283,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 44,
+    "lengthIn": 35,
+    "productType": null,
+    "sku": "SPE60HC-24M",
+    "sourceSheet": "DIMS",
+    "weightLb": 392,
+    "widthIn": 63
+  },
+  {
+    "heightIn": 23,
+    "lengthIn": 35,
+    "productType": null,
+    "sku": "E2SDBMV6DFL2SBUS",
+    "sourceSheet": "DIMS",
+    "weightLb": 140,
+    "widthIn": 21
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 36,
+    "productType": null,
+    "sku": "X12DBMV6DFL1BKUS",
+    "sourceSheet": "DIMS",
+    "weightLb": 161,
+    "widthIn": 21
+  },
+  {
+    "heightIn": 19,
+    "lengthIn": 41,
+    "productType": null,
+    "sku": "ED-36G-5006",
+    "sourceSheet": "DIMS",
+    "weightLb": 175,
+    "widthIn": 27
+  },
+  {
+    "heightIn": 29,
+    "lengthIn": 64,
+    "productType": null,
+    "sku": "GTGG60-GT60M-5005",
+    "sourceSheet": "DIMS",
+    "weightLb": 578,
+    "widthIn": 40
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 30,
+    "productType": null,
+    "sku": "GTOG24-4-5001",
+    "sourceSheet": "DIMS",
+    "weightLb": 165,
+    "widthIn": 42
+  },
+  {
+    "heightIn": 35,
+    "lengthIn": 26,
+    "productType": null,
+    "sku": "UCR20HC",
+    "sourceSheet": "DIMS",
+    "weightLb": 119,
+    "widthIn": 23
+  },
+  {
+    "heightIn": 38,
+    "lengthIn": 32,
+    "productType": null,
+    "sku": "UCF24HC",
+    "sourceSheet": "DIMS",
+    "weightLb": 182,
+    "widthIn": 29
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 29,
+    "productType": null,
+    "sku": "GTOG12-2-5001",
+    "sourceSheet": "DIMS",
+    "weightLb": 73,
+    "widthIn": 39
+  },
+  {
+    "heightIn": 44,
+    "lengthIn": 28,
+    "productType": null,
+    "sku": "STACK-19",
+    "sourceSheet": "DIMS",
+    "weightLb": 88,
+    "widthIn": 33
+  },
+  {
+    "heightIn": 36,
+    "lengthIn": 35,
+    "productType": null,
+    "sku": "21CGA5NEZT",
+    "sourceSheet": "DIMS",
+    "weightLb": 275,
+    "widthIn": 28
+  },
+  {
+    "heightIn": 37,
+    "lengthIn": 40,
+    "productType": null,
+    "sku": "22CET62082403EZT",
+    "sourceSheet": "DIMS",
+    "weightLb": 235,
+    "widthIn": 28
+  },
+  {
+    "heightIn": 43,
+    "lengthIn": 34,
+    "productType": null,
+    "sku": "DD36HC-B-02",
+    "sourceSheet": "DIMS",
+    "weightLb": 232,
+    "widthIn": 39
+  },
+  {
+    "heightIn": 27,
+    "lengthIn": 38,
+    "productType": null,
+    "sku": "WTRCS72HC",
+    "sourceSheet": "DIMS",
+    "weightLb": 575,
+    "widthIn": 78
+  },
+  {
+    "heightIn": 27,
+    "lengthIn": 38,
+    "productType": null,
+    "sku": "WTRCS84HC",
+    "sourceSheet": "DIMS",
+    "weightLb": 650,
+    "widthIn": 89
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 30,
+    "productType": null,
+    "sku": "UCR32AHC",
+    "sourceSheet": "DIMS",
+    "weightLb": 230,
+    "widthIn": 32
+  },
+  {
+    "heightIn": 88,
+    "lengthIn": 41,
+    "productType": null,
+    "sku": "HR3HC-1S",
+    "sourceSheet": "DIMS",
+    "weightLb": 791,
+    "widthIn": 80
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 56,
+    "productType": null,
+    "sku": "GPD-60-5002",
+    "sourceSheet": "DIMS",
+    "weightLb": 810,
+    "widthIn": 68
+  },
+  {
+    "heightIn": 41,
+    "lengthIn": 32,
+    "productType": null,
+    "sku": "406P-STAR2",
+    "sourceSheet": "DIMS",
+    "weightLb": 300,
+    "widthIn": 31
+  },
+  {
+    "heightIn": 44,
+    "lengthIn": 31,
+    "productType": "Bevair",
+    "sku": "BB78HC-1-B",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 444,
+    "widthIn": 81
+  },
+  {
+    "heightIn": 38,
+    "lengthIn": 27,
+    "productType": "Bevair",
+    "sku": "BB48HC-1-B-ALT",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 306,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 27,
+    "lengthIn": 38,
+    "productType": "Bevair",
+    "sku": "BB48HC-1-B-ALT",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 306,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 32,
+    "lengthIn": 43,
+    "productType": "Bevair",
+    "sku": "BB58HC-1-S",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 354,
+    "widthIn": 62
+  },
+  {
+    "heightIn": 40,
+    "lengthIn": 27,
+    "productType": "Bevair",
+    "sku": "BB72HC-1-B-ALT",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 372,
+    "widthIn": 75
+  },
+  {
+    "heightIn": 27,
+    "lengthIn": 43,
+    "productType": "Bevair",
+    "sku": "BB72HC-1-FG-PT-S",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 456,
+    "widthIn": 75
+  },
+  {
+    "heightIn": 27,
+    "lengthIn": 43,
+    "productType": "Bevair",
+    "sku": "BB72HC-1-G-B",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 375,
+    "widthIn": 75
+  },
+  {
+    "heightIn": 40,
+    "lengthIn": 27,
+    "productType": "Bevair",
+    "sku": "BB72HC-1-G-S",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 388,
+    "widthIn": 75
+  },
+  {
+    "heightIn": 43,
+    "lengthIn": 27,
+    "productType": "Bevair",
+    "sku": "BB72HC-1-GS-S",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 381,
+    "widthIn": 75
+  },
+  {
+    "heightIn": 60,
+    "lengthIn": 35,
+    "productType": "Bevair",
+    "sku": "BZ13HC-B",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 350,
+    "widthIn": 33
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 42,
+    "productType": "Bevair",
+    "sku": "DD50HC-1-B",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 290,
+    "widthIn": 53
+  },
+  {
+    "heightIn": 31,
+    "lengthIn": 42,
+    "productType": "Bevair",
+    "sku": "DD50HC-1-S",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 290,
+    "widthIn": 53
+  },
+  {
+    "heightIn": 62,
+    "lengthIn": 342,
+    "productType": "Bevair",
+    "sku": "DD58HC-1-C-S",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 45,
+    "widthIn": 32
+  },
+  {
+    "heightIn": 37,
+    "lengthIn": 48,
+    "productType": "Bevair",
+    "sku": "DPD119HC-3",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 703,
+    "widthIn": 122
+  },
+  {
+    "heightIn": 46,
+    "lengthIn": 39,
+    "productType": "Bevair",
+    "sku": "DPD72HC-4",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 586,
+    "widthIn": 75
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 41,
+    "productType": "Bevair",
+    "sku": "DW49HC-B",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 274,
+    "widthIn": 52
+  },
+  {
+    "heightIn": 36,
+    "lengthIn": 85,
+    "productType": "Bevair",
+    "sku": "FB27HC-1S",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 438,
+    "widthIn": 32
+  },
+  {
+    "heightIn": 36,
+    "lengthIn": 85,
+    "productType": "Bevair",
+    "sku": "FB35HC-1G",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 503,
+    "widthIn": 56
+  },
+  {
+    "heightIn": 45,
+    "lengthIn": 32,
+    "productType": "Bevair",
+    "sku": "FLG24HC-1-B",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 208,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 38,
+    "productType": "Bevair",
+    "sku": "GF24HC-B",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 186,
+    "widthIn": 27
+  },
+  {
+    "heightIn": 88,
+    "lengthIn": 37,
+    "productType": "Bevair",
+    "sku": "HBR23HC-1-HG",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 420,
+    "widthIn": 31
+  },
+  {
+    "heightIn": 88,
+    "lengthIn": 37,
+    "productType": "Bevair",
+    "sku": "HBR49HC-1-HS",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 590,
+    "widthIn": 56
+  },
+  {
+    "heightIn": 85,
+    "lengthIn": 37,
+    "productType": "Bevair",
+    "sku": "HBF23HC-1-HS-18",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 428,
+    "widthIn": 31
+  },
+  {
+    "heightIn": 88,
+    "lengthIn": 41,
+    "productType": "Bevair",
+    "sku": "HH2-1S-PT",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 460,
+    "widthIn": 55
+  },
+  {
+    "heightIn": 88,
+    "lengthIn": 41,
+    "productType": "Bevair",
+    "sku": "HR1HC-1HG",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 356,
+    "widthIn": 33
+  },
+  {
+    "heightIn": 88,
+    "lengthIn": 36,
+    "productType": "Bevair",
+    "sku": "HRP2HC-1S",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 571,
+    "widthIn": 55
+  },
+  {
+    "heightIn": 88,
+    "lengthIn": 33,
+    "productType": "Bevair",
+    "sku": "HRPS1WHC-1S",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 432,
+    "widthIn": 41
+  },
+  {
+    "heightIn": 88,
+    "lengthIn": 45,
+    "productType": "Bevair",
+    "sku": "PRD2HC-1AS-02-6C",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 650,
+    "widthIn": 60
+  },
+  {
+    "heightIn": 87,
+    "lengthIn": 35,
+    "productType": "Bevair",
+    "sku": "PF1HC-1AS",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 330,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 88,
+    "lengthIn": 45,
+    "productType": "Bevair",
+    "sku": "PRF24-24HC-1AS",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 684,
+    "widthIn": 60
+  },
+  {
+    "heightIn": 36,
+    "lengthIn": 85,
+    "productType": "Bevair",
+    "sku": "RB27HC-1S",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 358,
+    "widthIn": 32
+  },
+  {
+    "heightIn": 37,
+    "lengthIn": 48,
+    "productType": "Bevair",
+    "sku": "SPE32HC-12M",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 242,
+    "widthIn": 37
+  },
+  {
+    "heightIn": 33,
+    "lengthIn": 44,
+    "productType": "Bevair",
+    "sku": "SPE36HC-10",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 252,
+    "widthIn": 38
+  },
+  {
+    "heightIn": 33,
+    "lengthIn": 44,
+    "productType": "Bevair",
+    "sku": "SPE48HC-10",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 296,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 33,
+    "lengthIn": 44,
+    "productType": "Bevair",
+    "sku": "SPE48HC12",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 264,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 38,
+    "productType": "Bevair",
+    "sku": "SPE48HC-12M",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 336,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 38,
+    "lengthIn": 48,
+    "productType": "Bevair",
+    "sku": "SPE48HC-18M-DS",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 376,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 38,
+    "lengthIn": 49,
+    "productType": "Bevair",
+    "sku": "SPE48HC-18M-STL",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 354,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 38,
+    "lengthIn": 44,
+    "productType": "Bevair",
+    "sku": "SPE60HC-16-CL",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 346,
+    "widthIn": 63
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 39,
+    "productType": "Bevair",
+    "sku": "SPED60HC-16-2",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 420,
+    "widthIn": 62
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 39,
+    "productType": "Bevair",
+    "sku": "SPED60HC-16-4",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 445,
+    "widthIn": 62
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 38,
+    "productType": "Bevair",
+    "sku": "SPED48HC-18M-4",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 394,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 38,
+    "lengthIn": 49,
+    "productType": "Bevair",
+    "sku": "SPE60HC-24M",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 392,
+    "widthIn": 63
+  },
+  {
+    "heightIn": 33,
+    "lengthIn": 46,
+    "productType": "Bevair",
+    "sku": "SPED27HC",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 232,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 38,
+    "productType": "Bevair",
+    "sku": "SPED60HC-16-4",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 408,
+    "widthIn": 62
+  },
+  {
+    "heightIn": 33,
+    "lengthIn": 43,
+    "productType": "Bevair",
+    "sku": "SPED72HC-18-4",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 460,
+    "widthIn": 74
+  },
+  {
+    "heightIn": 32,
+    "lengthIn": 35,
+    "productType": "Bevair",
+    "sku": "UCF27AHC-23",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 178,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 33,
+    "lengthIn": 35,
+    "productType": "Bevair",
+    "sku": "UCFD27AHC-2-23",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 214,
+    "widthIn": 29
+  },
+  {
+    "heightIn": 38,
+    "lengthIn": 32,
+    "productType": "Bevair",
+    "sku": "UCF24AHC-24",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 185,
+    "widthIn": 29
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 32,
+    "productType": "Bevair",
+    "sku": "UCFR48AHC",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 295,
+    "widthIn": 52
+  },
+  {
+    "heightIn": 26,
+    "lengthIn": 35,
+    "productType": "Bevair",
+    "sku": "UCR20HC-25",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 119,
+    "widthIn": 23
+  },
+  {
+    "heightIn": 44,
+    "lengthIn": 32,
+    "productType": "Bevair",
+    "sku": "UCR24AHC-24",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 164,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 34,
+    "productType": "Bevair",
+    "sku": "UCR27AHC-24-23",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 164,
+    "widthIn": 32
+  },
+  {
+    "heightIn": 30,
+    "lengthIn": 34,
+    "productType": "Bevair",
+    "sku": "UCR27HC",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 157,
+    "widthIn": 32
+  },
+  {
+    "heightIn": 33,
+    "lengthIn": 39,
+    "productType": "Bevair",
+    "sku": "UCR36AHC-09-104",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 204,
+    "widthIn": 39
+  },
+  {
+    "heightIn": 33,
+    "lengthIn": 35,
+    "productType": "Bevair",
+    "sku": "UCR60AHC",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 290,
+    "widthIn": 62
+  },
+  {
+    "heightIn": 33,
+    "lengthIn": 35,
+    "productType": "Bevair",
+    "sku": "UCRD48AHC4",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 310,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 33,
+    "lengthIn": 35,
+    "productType": "Bevair",
+    "sku": "UCRD48AHC-4-104",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 310,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 32,
+    "lengthIn": 36,
+    "productType": "Bevair",
+    "sku": "WTF27AHC-FIP-23/ WTF27AHC-FIP-24-23",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 202,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 35,
+    "lengthIn": 27,
+    "productType": "Bevair",
+    "sku": "WTFCS48HC",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 375,
+    "widthIn": 58
+  },
+  {
+    "heightIn": 36,
+    "lengthIn": 33,
+    "productType": "Bevair",
+    "sku": "WTF60AHC-FIP",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 340,
+    "widthIn": 63
+  },
+  {
+    "heightIn": 26,
+    "lengthIn": 35,
+    "productType": "Bevair",
+    "sku": "WTR20HC",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 116,
+    "widthIn": 23
+  },
+  {
+    "heightIn": 33,
+    "lengthIn": 35,
+    "productType": "Bevair",
+    "sku": "WTR60AHC-FIP",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 312,
+    "widthIn": 62
+  },
+  {
+    "heightIn": 35,
+    "lengthIn": 44,
+    "productType": "Bevair",
+    "sku": "WTR67AHC",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 400,
+    "widthIn": 69
+  },
+  {
+    "heightIn": 33,
+    "lengthIn": 44,
+    "productType": "Bevair",
+    "sku": "WTR72AHC",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 334,
+    "widthIn": 75
+  },
+  {
+    "heightIn": 27,
+    "lengthIn": 38,
+    "productType": "Bevair",
+    "sku": "WTRCS36HC-ALT",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 350,
+    "widthIn": 40
+  },
+  {
+    "heightIn": 27,
+    "lengthIn": 38,
+    "productType": "Bevair",
+    "sku": "WTRCS48HC-ALT",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 375,
+    "widthIn": 58
+  },
+  {
+    "heightIn": 38,
+    "lengthIn": 27,
+    "productType": "Bevair",
+    "sku": "WTRCS36HV-ALT-FLT",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 350,
+    "widthIn": 40
+  },
+  {
+    "heightIn": 38,
+    "lengthIn": 27,
+    "productType": "Bevair",
+    "sku": "WTRCS72HC-76-17",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 575,
+    "widthIn": 78
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 35,
+    "productType": "Bevair",
+    "sku": "WTRD48AHC-2",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 400,
+    "widthIn": 50
+  },
+  {
+    "heightIn": 27,
+    "lengthIn": 38,
+    "productType": "Bevair",
+    "sku": "WTRCS48HC-23",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 375,
+    "widthIn": 58
+  },
+  {
+    "heightIn": 35,
+    "lengthIn": 42,
+    "productType": "Bevair",
+    "sku": "SPE32HC-08",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 220,
+    "widthIn": 33
+  },
+  {
+    "heightIn": 27,
+    "lengthIn": 52,
+    "productType": "Bevair",
+    "sku": "MT41-48-1-SDB",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 262,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 33,
+    "lengthIn": 43,
+    "productType": "Bevair",
+    "sku": "SPE72HC-18M",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 432,
+    "widthIn": 74
+  },
+  {
+    "heightIn": 88,
+    "lengthIn": 42,
+    "productType": "Bevair",
+    "sku": "PR2HC-1AS-003",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 552,
+    "widthIn": 60
+  },
+  {
+    "heightIn": 87,
+    "lengthIn": 35,
+    "productType": "Bevair",
+    "sku": "PF1HC-1AS-003",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 330,
+    "widthIn": 45
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 38,
+    "productType": "Bevair",
+    "sku": "SPE72HC-30M",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 446,
+    "widthIn": 74
+  },
+  {
+    "heightIn": 48,
+    "lengthIn": 36,
+    "productType": "Bevair",
+    "sku": "SPE48HC-18M",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 336,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 83,
+    "lengthIn": 27,
+    "productType": "Bevair",
+    "sku": "VMHCSL-18-1-B",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 500,
+    "widthIn": 50
+  },
+  {
+    "heightIn": 46,
+    "lengthIn": 33,
+    "productType": "Bevair",
+    "sku": "SPED36HC-10C-2",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 278,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 85,
+    "lengthIn": 36,
+    "productType": "Bevair",
+    "sku": "RB49HC-1G",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 536,
+    "widthIn": 54
+  },
+  {
+    "heightIn": 27,
+    "lengthIn": 38,
+    "productType": "Bevair",
+    "sku": "WTFCS52HC",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 400,
+    "widthIn": 58
+  },
+  {
+    "heightIn": 88,
+    "lengthIn": 45,
+    "productType": "Bevair",
+    "sku": "PFI2HC-1AS",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 610,
+    "widthIn": 78
+  },
+  {
+    "heightIn": 35,
+    "lengthIn": 33,
+    "productType": "Bevair",
+    "sku": "DELF5817",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 258,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 46,
+    "lengthIn": 33,
+    "productType": "Bevair",
+    "sku": "SPED48HC-12-4-CL",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 356,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 43,
+    "lengthIn": 33,
+    "productType": "Bevair",
+    "sku": "SPE72HC-18-23",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 388,
+    "widthIn": 74
+  },
+  {
+    "heightIn": 86,
+    "lengthIn": 34,
+    "productType": "Bevair",
+    "sku": "MT49-1-SDB",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 462,
+    "widthIn": 51
+  },
+  {
+    "heightIn": 34,
+    "lengthIn": 57,
+    "productType": "Bevair",
+    "sku": "DD78HC-1-B",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 405,
+    "widthIn": 84
+  },
+  {
+    "heightIn": 38,
+    "lengthIn": 27,
+    "productType": "Bevair",
+    "sku": "BB36HC-1-G-B",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 232,
+    "widthIn": 39
+  },
+  {
+    "heightIn": 102,
+    "lengthIn": 70,
+    "productType": "Bevair",
+    "sku": "RCBL-202-R-PFA-HC",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 1694,
+    "widthIn": 50
+  },
+  {
+    "heightIn": 44,
+    "lengthIn": 35,
+    "productType": "Bevair",
+    "sku": "WTF67AHC",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 431,
+    "widthIn": 70
+  },
+  {
+    "heightIn": 35,
+    "lengthIn": 33,
+    "productType": "Bevair",
+    "sku": "WTFD27AHC-2-FLT",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 228,
+    "widthIn": 30
+  },
+  {
+    "heightIn": 85,
+    "lengthIn": 34,
+    "productType": "Bevair",
+    "sku": "FB23HC-1G",
+    "sourceSheet": "BEV-AIR",
+    "weightLb": 408,
+    "widthIn": 28
+  }
+]

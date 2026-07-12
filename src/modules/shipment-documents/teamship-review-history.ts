@@ -448,7 +448,20 @@ function buildSearchText(input: SaveTeamshipReviewRunInput, orderRows: Array<Rec
       review.teamshipUrl,
       review.alert?.reason,
       review.alert?.rawText,
-      ...review.fields.flatMap((field) => [field.key, field.label, field.status, field.pdfValue, field.teamshipValue, field.message])
+      ...review.fields.flatMap((field) => [field.key, field.label, field.status, field.pdfValue, field.teamshipValue, field.message]),
+      ...review.productDimensions.flatMap((dimension) => [
+        dimension.sku,
+        dimension.source,
+        dimension.productType,
+        dimension.quantity === null ? null : String(dimension.quantity),
+        dimension.lengthIn === null ? null : String(dimension.lengthIn),
+        dimension.widthIn === null ? null : String(dimension.widthIn),
+        dimension.heightIn === null ? null : String(dimension.heightIn),
+        dimension.weightLb === null ? null : String(dimension.weightLb),
+        dimension.weightUnit,
+        dimension.confidence,
+        dimension.note
+      ])
     ]),
     ...orderRows.flatMap((row) => [
       row.psNumber,

@@ -342,6 +342,20 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     }
   }
 
+  function downloadSkuDirectoryCsv() {
+    setError(null);
+
+    if (!review) {
+      setError("Run the Teamship review before generating the SKU directory.");
+      return;
+    }
+
+    downloadBlob(
+      new Blob([buildSkuDirectoryCsv(review.reviews)], { type: "text/csv;charset=utf-8" }),
+      `Garland SKU Dimension Directory - ${documentLabel.trim() || shipmentDate}.csv`
+    );
+  }
+
   async function fetchHistory(search: string, dateFrom: string, dateTo: string, allDates: boolean) {
     setHistoryError(null);
     setIsHistoryLoading(true);
@@ -534,6 +548,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         saveStatus={saveStatus}
         onSave={() => void saveRunToHistory()}
         onDownloadSummary={() => void downloadReviewSummaryPdf()}
+        onDownloadSkuDirectory={() => void downloadSkuDirectoryCsv()}
       />
       <TeamshipReviewHistorySection
         history={history}
@@ -582,7 +597,8 @@ function ShipmentReviewWorkspace({
   isSaving,
   saveStatus,
   onSave,
-  onDownloadSummary
+  onDownloadSummary,
+  onDownloadSkuDirectory
 }: {
   rows: ShipmentWorkspaceRow[];
   review: GarlandTeamshipReviewResponse | null;
@@ -593,6 +609,7 @@ function ShipmentReviewWorkspace({
   saveStatus: string | null;
   onSave: () => void;
   onDownloadSummary: () => void;
+  onDownloadSkuDirectory: () => void;
 }) {
   const [expandedRowIds, setExpandedRowIds] = useState<Set<string>>(new Set());
 
@@ -672,6 +689,14 @@ function ShipmentReviewWorkspace({
           </button>
           <button
             type="button"
+            onClick={onDownloadSkuDirectory}
+            disabled={!review}
+            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Download SKU directory CSV
+          </button>
+          <button
+            type="button"
             onClick={onSave}
             disabled={isSaving || !review}
             className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
@@ -746,31 +771,34 @@ function ShipmentReviewWorkspace({
 function ShipmentWorkspaceDetails({ row }: { row: ShipmentWorkspaceRow }) {
   if (row.review) {
     return (
-      <div className="overflow-x-auto px-5 pb-5">
-        <table className="min-w-full text-left text-sm">
-          <thead className="bg-muted/40 text-xs uppercase tracking-wide text-mutedForeground">
-            <tr>
-              <th className="px-3 py-2">Field</th>
-              <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2">Garland PDF</th>
-              <th className="px-3 py-2">Teamship</th>
-              <th className="px-3 py-2">Note</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {row.review.fields.map((field) => (
-              <tr key={field.key}>
-                <td className="px-3 py-2 font-medium text-foreground">{field.label}</td>
-                <td className="px-3 py-2">
-                  <span className={statusPillClass(field.status)}>{formatFieldStatus(field.status)}</span>
-                </td>
-                <td className="max-w-xs px-3 py-2 text-mutedForeground">{field.pdfValue ?? "Blank"}</td>
-                <td className="max-w-xs px-3 py-2 text-mutedForeground">{field.teamshipValue ?? "Blank"}</td>
-                <td className="px-3 py-2 text-mutedForeground">{field.message}</td>
+      <div className="space-y-4 px-5 pb-5">
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-left text-sm">
+            <thead className="bg-muted/40 text-xs uppercase tracking-wide text-mutedForeground">
+              <tr>
+                <th className="px-3 py-2">Field</th>
+                <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2">Garland PDF</th>
+                <th className="px-3 py-2">Teamship</th>
+                <th className="px-3 py-2">Note</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {row.review.fields.map((field) => (
+                <tr key={field.key}>
+                  <td className="px-3 py-2 font-medium text-foreground">{field.label}</td>
+                  <td className="px-3 py-2">
+                    <span className={statusPillClass(field.status)}>{formatFieldStatus(field.status)}</span>
+                  </td>
+                  <td className="max-w-xs px-3 py-2 text-mutedForeground">{field.pdfValue ?? "Blank"}</td>
+                  <td className="max-w-xs px-3 py-2 text-mutedForeground">{field.teamshipValue ?? "Blank"}</td>
+                  <td className="px-3 py-2 text-mutedForeground">{field.message}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <ProductDimensionsTable dimensions={row.review.productDimensions} />
       </div>
     );
   }
@@ -787,6 +815,54 @@ function ShipmentWorkspaceDetails({ row }: { row: ShipmentWorkspaceRow }) {
         <p className="mt-2 text-foreground">{row.teamshipOrder ? row.teamshipOrderId ?? "Order ID missing" : "No Teamship order matched yet"}</p>
         <p>{row.teamshipOrder ? [row.carrier, row.shipToName, row.cityState].filter(Boolean).join(" · ") : "Pull Teamship orders to inspect."}</p>
       </div>
+    </div>
+  );
+}
+
+function ProductDimensionsTable({ dimensions }: { dimensions: GarlandTeamshipOrderReview["productDimensions"] }) {
+  return (
+    <div className="rounded-md border border-border bg-background">
+      <div className="border-b border-border px-3 py-2">
+        <h3 className="text-sm font-semibold text-foreground">SKU dimensions for Teamship update bot</h3>
+        <p className="mt-1 text-xs text-mutedForeground">
+          Combines Teamship pallet rows with Garland&apos;s provided freight dimension sheet. Low confidence usually means
+          the Teamship row looks like placeholder pallet data.
+        </p>
+      </div>
+      {dimensions.length === 0 ? (
+        <p className="px-3 py-3 text-sm text-mutedForeground">No SKU dimension recommendation found for this shipment.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-left text-sm">
+            <thead className="bg-muted/40 text-xs uppercase tracking-wide text-mutedForeground">
+              <tr>
+                <th className="px-3 py-2">SKU</th>
+                <th className="px-3 py-2">Source</th>
+                <th className="px-3 py-2">Qty</th>
+                <th className="px-3 py-2">Dims</th>
+                <th className="px-3 py-2">Weight</th>
+                <th className="px-3 py-2">Confidence</th>
+                <th className="px-3 py-2">Note</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {dimensions.map((dimension, index) => (
+                <tr key={`${dimension.sku}-${dimension.source}-${index}`}>
+                  <td className="px-3 py-2 font-semibold text-foreground">{dimension.sku}</td>
+                  <td className="px-3 py-2 text-mutedForeground">{formatDimensionSource(dimension.source)}</td>
+                  <td className="px-3 py-2 text-mutedForeground">{dimension.quantity ?? "Blank"}</td>
+                  <td className="px-3 py-2 text-mutedForeground">{formatDimensions(dimension)}</td>
+                  <td className="px-3 py-2 text-mutedForeground">{formatWeight(dimension)}</td>
+                  <td className="px-3 py-2">
+                    <span className={dimensionConfidenceClass(dimension.confidence)}>{dimension.confidence}</span>
+                  </td>
+                  <td className="max-w-sm px-3 py-2 text-mutedForeground">{dimension.note}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -1348,6 +1424,98 @@ function formatWorkspaceStatus(status: ShipmentWorkspaceStatus, issueCount: numb
   }
 
   return "PDF ready";
+}
+
+function formatDimensionSource(source: GarlandTeamshipOrderReview["productDimensions"][number]["source"]) {
+  return source === "TEAMSHIP_PALLET" ? "Teamship pallet" : "Garland sheet";
+}
+
+function formatDimensions(dimension: GarlandTeamshipOrderReview["productDimensions"][number]) {
+  return [dimension.lengthIn, dimension.widthIn, dimension.heightIn].every((value) => value !== null)
+    ? `${dimension.lengthIn}" x ${dimension.widthIn}" x ${dimension.heightIn}"`
+    : "Blank";
+}
+
+function formatWeight(dimension: GarlandTeamshipOrderReview["productDimensions"][number]) {
+  return dimension.weightLb === null ? "Blank" : `${dimension.weightLb} ${dimension.weightUnit ?? "lbs"}`;
+}
+
+function dimensionConfidenceClass(confidence: GarlandTeamshipOrderReview["productDimensions"][number]["confidence"]) {
+  const base = "rounded-full px-2 py-0.5 text-xs font-bold uppercase tracking-wide";
+
+  if (confidence === "HIGH") {
+    return `${base} bg-success/10 text-success`;
+  }
+
+  if (confidence === "MEDIUM") {
+    return `${base} bg-warning/15 text-warning`;
+  }
+
+  return `${base} bg-danger/10 text-danger`;
+}
+
+function buildSkuDirectoryCsv(reviews: GarlandTeamshipOrderReview[]) {
+  const rows = new Map<string, string[]>();
+
+  for (const review of reviews) {
+    for (const dimension of review.productDimensions) {
+      const key = [
+        dimension.sku,
+        dimension.source,
+        dimension.lengthIn,
+        dimension.widthIn,
+        dimension.heightIn,
+        dimension.weightLb,
+        dimension.quantity
+      ].join("|");
+      const existing = rows.get(key);
+      const orderRef = `${review.psNumber}/${review.srNumber}`;
+
+      if (existing) {
+        existing[11] = appendUnique(existing[11] ?? "", orderRef);
+        continue;
+      }
+
+      rows.set(key, [
+        dimension.sku,
+        formatDimensionSource(dimension.source),
+        dimension.productType ?? "",
+        dimension.quantity === null ? "" : String(dimension.quantity),
+        dimension.lengthIn === null ? "" : String(dimension.lengthIn),
+        dimension.widthIn === null ? "" : String(dimension.widthIn),
+        dimension.heightIn === null ? "" : String(dimension.heightIn),
+        dimension.weightLb === null ? "" : String(dimension.weightLb),
+        dimension.weightUnit ?? "lbs",
+        dimension.confidence,
+        dimension.note,
+        orderRef
+      ]);
+    }
+  }
+
+  return toCsv([
+    ["SKU", "Source", "Product Type", "Qty", "Length In", "Width In", "Height In", "Weight Lb", "Weight Unit", "Confidence", "Note", "Orders"],
+    ...Array.from(rows.values()).sort((left, right) => left[0].localeCompare(right[0]) || left[1].localeCompare(right[1]))
+  ]);
+}
+
+function appendUnique(value: string, nextValue: string) {
+  const values = new Set(value.split("; ").filter(Boolean));
+  values.add(nextValue);
+  return Array.from(values).join("; ");
+}
+
+function toCsv(rows: string[][]) {
+  return rows
+    .map((row) =>
+      row
+        .map((value) => {
+          const escaped = value.replace(/"/g, '""');
+          return /[",\n\r]/.test(escaped) ? `"${escaped}"` : escaped;
+        })
+        .join(",")
+    )
+    .join("\n");
 }
 
 async function buildReviewSummaryPdf({
