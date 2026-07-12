@@ -11,6 +11,7 @@ import type {
   TeamshipCustomField,
   TeamshipShippingOrderDetail
 } from "@/modules/shipment-documents/teamship-review-types";
+import { buildGarlandProductDimensionRecommendations } from "@/modules/shipment-documents/garland-product-dimensions";
 
 type TextPage = {
   pageNumber: number;
@@ -403,6 +404,7 @@ function buildOrderReview(
         teamshipUrl: null,
         issueCount: 0,
         alert,
+        productDimensions: buildGarlandProductDimensionRecommendations({ pdfOrder, teamshipOrder: null }),
         fields: [
           {
             key: "teamshipAlert",
@@ -425,6 +427,7 @@ function buildOrderReview(
       teamshipUrl: null,
       issueCount: 1,
       alert: null,
+      productDimensions: buildGarlandProductDimensionRecommendations({ pdfOrder, teamshipOrder: null }),
       fields: [
         {
           key: "teamshipOrder",
@@ -465,6 +468,7 @@ function buildOrderReview(
     teamshipUrl: teamshipOrder.url ?? null,
     issueCount,
     alert,
+    productDimensions: buildGarlandProductDimensionRecommendations({ pdfOrder, teamshipOrder }),
     fields
   };
 }
@@ -481,6 +485,7 @@ function buildNoPdfReview(teamshipOrder: TeamshipShippingOrderDetail): GarlandTe
     teamshipUrl: teamshipOrder.url ?? null,
     issueCount: 1,
     alert: null,
+    productDimensions: buildGarlandProductDimensionRecommendations({ pdfOrder: null, teamshipOrder }),
     fields: [
       {
         key: "uploadedPdf",
@@ -536,6 +541,7 @@ function buildSkippedAlreadyReviewedReview(pdfOrder: GarlandPdfShippingOrder): G
     teamshipUrl: null,
     issueCount: 0,
     alert: null,
+    productDimensions: buildGarlandProductDimensionRecommendations({ pdfOrder, teamshipOrder: null }),
     fields: [
       {
         key: "alreadyReviewed",
