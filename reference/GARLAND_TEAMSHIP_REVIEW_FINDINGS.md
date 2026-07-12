@@ -237,6 +237,29 @@ Stage 2 implication:
 - For non-serialized items, use `QTY: <quantity>` in the commodity string instead of `SN:`.
 - If multiple pallet rows are required, create or update the indexed field set consistently: `pallet_2`, `pallet_2_length`, `pallet_2_width`, `pallet_2_height`, `pallet_2_weight`, `pallet_2_weight_unit`, and `pallet_2_commodity`.
 
+## Stage 2 Dry-Run Contract
+
+Newl Apps remains the control tower. The VM worker should not decide what to update independently; it should execute structured, approved Newl Apps instructions. The first safe contract is the Phase 2 dry-run planner:
+
+```bash
+TEAMSHIP_EMAIL="..." TEAMSHIP_PASSWORD="..." npm run verify:garland-teamship-phase2 -- --pdf "/path/to/garland-orders.pdf" --shipment-date YYYY-MM-DD --json
+```
+
+The command reads the Garland PDF, fetches matching Teamship shipping orders read-only, builds the structured update payload, validates it, and prints JSON evidence. It must not call Teamship update endpoints or click/save in the Teamship UI. The payload always includes `mode: "DRY_RUN"`, `dryRun: true`, and `wouldUpdateTeamship: false`.
+
+Dry-run payload rules:
+
+- Matched PDF + Teamship orders can become `READY` only when every PDF item has a valid dimension/weight source and valid commodity text.
+- Missing Teamship, pending Teamship, no-PDF, and already-reviewed rows are `SKIPPED`.
+- Missing SKU dimensions block the order with a validation issue instead of guessing.
+- Planned field updates are limited to mapped review fields for now: `po_number -> poNumber`, `freight_terms -> edi_field_3`, `carrier -> carrier_value`, and `shipping_instructions -> edi_field_4`.
+- Planned pallet rows use the documented Teamship field names, including `pallets_count`, `pallet_1_length`, `pallet_1_weight`, and `pallet_1_commodity`.
+- Serialized items use commodity text `SKU: <sku>, SN: <serials>`.
+- Non-serialized items use commodity text `SKU: <sku>, QTY: <quantity>`.
+- UPS orders use the UPS rule dimensions: `1 x 1 x 1`, `1 lbs`.
+
+The VM worker should first pass this CLI validation on the server before any browser automation or API update path is enabled. Later, the same payload shape should be stored in `TeamshipUpdateJob` / `TeamshipUpdateOrder` / `TeamshipUpdateField` records with admin approval and evidence capture.
+
 ## Teamship Detail Evidence
 
 The authenticated Teamship UI confirmed these current detail-page order IDs for the sample:
