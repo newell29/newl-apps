@@ -1093,6 +1093,9 @@ function TeamshipUpdateJobsPanel({
                     type="button"
                     onClick={(event) => {
                       event.preventDefault();
+                      if (!confirmUpdateJobApproval(job)) {
+                        return;
+                      }
                       onAction(job.id, "approve");
                     }}
                     disabled={isLoading || job.status !== "DRAFT" || job.summary.blockedCount > 0}
@@ -1693,6 +1696,26 @@ function formatAgentRunWindow(job: TeamshipUpdateJobSummary) {
   }
 
   return "Not run yet";
+}
+
+function confirmUpdateJobApproval(job: TeamshipUpdateJobSummary) {
+  const mode = job.agentMode === "LIVE_API" ? "LIVE TEAMSHIP UPDATE" : "dry-run evidence";
+  const srList = formatSrConfirmationList(job.selectedSrNumbers);
+  const liveWarning =
+    job.agentMode === "LIVE_API"
+      ? "\n\nThis can write changes to Teamship when the VM worker is running in live mode. Confirm only after you have reviewed the selected orders."
+      : "\n\nThis will let the VM worker generate evidence without writing to Teamship.";
+
+  return window.confirm(
+    `Approve this ${mode} job for the VM agent?\n\nSelected SRs (${job.selectedSrNumbers.length}): ${srList}${liveWarning}`
+  );
+}
+
+function formatSrConfirmationList(srNumbers: string[]) {
+  const visible = srNumbers.slice(0, 12).join(", ");
+  const remaining = srNumbers.length - 12;
+
+  return remaining > 0 ? `${visible}, and ${remaining} more` : visible || "none";
 }
 
 function formatStatusLabel(status: string) {
