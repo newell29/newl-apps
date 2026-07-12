@@ -270,7 +270,7 @@ Newl Apps now has the production control-tower layer for Phase 2:
 - Drafts with blocked dimension/weight recommendations cannot be approved for the agent. Commodity/comment rows are still planned, but placeholder dimensions are not allowed.
 - The VM agent claims approved jobs through `POST /api/shipment-documents/teamship-review/update-jobs/agent/next` using the ingestion bearer token or `x-newl-ingestion-key`. The claim response includes the tenant Teamship credentials from Settings so the worker does not need a separate hardcoded Teamship username/password.
 - The VM agent reports completion through `PATCH /api/shipment-documents/teamship-review/update-jobs/agent/:jobId` with `SUCCESS`, `FAILED`, or `NEEDS_REVIEW` plus evidence payload.
-- When the agent reports `SUCCESS`, Newl Apps automatically performs a Teamship rescan using the stored PDF order snapshot and tenant Teamship credentials, then stores the verification response on the job.
+- When the agent reports `SUCCESS` or `NEEDS_REVIEW`, Newl Apps automatically performs a Teamship rescan using the stored PDF order snapshot and tenant Teamship credentials, then stores the verification response on the job. `NEEDS_REVIEW` is included because partial live updates may successfully change some orders while another order fails.
 - Users can also manually rescan a Phase 2 job from the UI, and can force a page-level Teamship rescan from the main review controls so already-reviewed SRs are checked again.
 
 The VM worker implementation supports both dry-run evidence and guarded live API execution:
@@ -285,7 +285,7 @@ TEAMSHIP_AGENT_INTERVAL_MS="30000" \
 npm run worker:teamship-phase2
 ```
 
-The worker claims approved jobs, confirms Teamship credentials were supplied from Settings, converts the approved `executionPayload` into execution evidence, reports `SUCCESS` or `FAILED`, and lets Newl Apps automatically rescan Teamship after a successful completion. In `dry-run` mode it does not call Teamship update endpoints, click save, or write to Teamship.
+The worker claims approved jobs, confirms Teamship credentials were supplied from Settings, converts the approved `executionPayload` into execution evidence, reports `SUCCESS`, `NEEDS_REVIEW`, or `FAILED`, and lets Newl Apps automatically rescan Teamship after `SUCCESS` or `NEEDS_REVIEW` completion. In `dry-run` mode it does not call Teamship update endpoints, click save, or write to Teamship.
 
 For live execution, two approvals are required:
 
@@ -305,7 +305,7 @@ npm run worker:teamship-phase2
 
 Live mode logs into Teamship using the tenant Settings credentials, submits the approved order-level fields and pallet rows to `/v1/ship-inventories/:id`, reports evidence back to Newl Apps, and triggers the automatic Teamship rescan. The worker blocks live updates before Teamship login unless every READY SR in the job is explicitly listed in `TEAMSHIP_LIVE_ALLOWLIST_SR_NUMBERS` or passed with `--allow-sr`. Keep `MAX_CONCURRENCY=1` operationally on the VM, and initially release one field group at a time with allowlisted orders: commodity/comment first, then pallet dimensions/weight, then mapped order-level fields.
 
-If any individual Teamship order update fails, the worker must preserve the per-order evidence and report the job as `NEEDS_REVIEW` instead of discarding the partial result. Successful rows stay traceable as updated evidence, failed rows show the Teamship/API error, and the CSR/admin can rescan or correct manually from the Phase 2 update jobs panel.
+If any individual Teamship order update fails, the worker must preserve the per-order evidence and report the job as `NEEDS_REVIEW` instead of discarding the partial result. Successful rows stay traceable as updated evidence, failed rows show the Teamship/API error, and Newl Apps immediately rescans Teamship so the Phase 2 panel has post-agent verification evidence. The CSR/admin can also rescan or correct manually from the Phase 2 update jobs panel.
 
 `NEEDS_REVIEW` jobs must not be re-approved for the agent because the stored execution plan may include rows that already succeeded. After review, rescan Teamship details or create a new update draft for the exact follow-up SRs.
 
