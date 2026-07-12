@@ -238,10 +238,12 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     }
   }
 
-  async function runReview({ rescan = false }: { rescan?: boolean } = {}) {
+  async function runReview({ rescan = false, srNumber = null }: { rescan?: boolean; srNumber?: string | null } = {}) {
     setError(null);
-    setReview(null);
     setUpdateJobStatus(null);
+    if (!srNumber) {
+      setReview(null);
+    }
 
     let extractedOrders = orders;
 
@@ -257,17 +259,25 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         throw new Error("Upload a Garland shipping-order PDF with at least one PS/SR order before running the review.");
       }
 
+      const ordersToReview = srNumber
+        ? extractedOrders.filter((order) => normalizeIdentifier(order.srNumber) === normalizeIdentifier(srNumber))
+        : extractedOrders;
+
+      if (ordersToReview.length === 0) {
+        throw new Error(`No uploaded Garland PDF order was found for ${srNumber}.`);
+      }
+
       setIsProcessing(true);
-      setStatus("Fetching Teamship orders and comparing reviewed fields...");
+      setStatus(srNumber ? `Rescanning Teamship details for ${srNumber}...` : "Fetching Teamship orders and comparing reviewed fields...");
 
       const response = await fetch("/api/shipment-documents/teamship-review/run", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           shipmentDate,
-          orders: extractedOrders,
+          orders: ordersToReview,
           alertDigest,
-          rescan
+          rescan: rescan || Boolean(srNumber)
         })
       });
       const json = (await response.json().catch(() => null)) as unknown;
@@ -280,12 +290,13 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         throw new Error("Teamship review returned an unexpected response.");
       }
 
-      setReview(json);
-      setSelectedUpdateSrNumbers(new Set(json.reviews.filter(isUpdateEligibleReview).map((row) => row.srNumber)));
+      const nextReview = srNumber && review ? mergePartialReview(review, json) : json;
+      setReview(nextReview);
+      setSelectedUpdateSrNumbers(new Set(nextReview.reviews.filter(isUpdateEligibleReview).map((row) => row.srNumber)));
       setStatus(
-        `${rescan ? "Rescan complete" : "Review complete"}: ${json.summary.passedCount} green, ${json.summary.pendingTeamshipCount} pending Teamship creation, ${json.summary.failedCount} with discrepancies, ${json.summary.missingTeamshipCount} missing without an alert.`
-          + (json.summary.noPdfCount > 0 ? ` ${json.summary.noPdfCount} Teamship order(s) had no uploaded PDF.` : "")
-          + (json.summary.skippedAlreadyReviewedCount > 0 ? ` ${json.summary.skippedAlreadyReviewedCount} already-reviewed order(s) were skipped.` : "")
+        `${rescan || srNumber ? "Rescan complete" : "Review complete"}: ${nextReview.summary.passedCount} green, ${nextReview.summary.pendingTeamshipCount} pending Teamship creation, ${nextReview.summary.failedCount} with discrepancies, ${nextReview.summary.missingTeamshipCount} missing without an alert.`
+          + (nextReview.summary.noPdfCount > 0 ? ` ${nextReview.summary.noPdfCount} Teamship order(s) had no uploaded PDF.` : "")
+          + (nextReview.summary.skippedAlreadyReviewedCount > 0 ? ` ${nextReview.summary.skippedAlreadyReviewedCount} already-reviewed order(s) were skipped.` : "")
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to run the Teamship review.");
@@ -314,7 +325,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     }
   }
 
-  async function createUpdateJob() {
+  async function createUpdateJob(selectedSrNumberOverride?: string[]) {
     setError(null);
     setUpdateJobStatus(null);
 
@@ -323,7 +334,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       return;
     }
 
-    const selectedSrNumbers = Array.from(selectedUpdateSrNumbers);
+    const selectedSrNumbers = selectedSrNumberOverride ?? Array.from(selectedUpdateSrNumbers);
 
     if (selectedSrNumbers.length === 0) {
       setError("Select at least one shipment before creating an update job.");
@@ -364,6 +375,43 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     } finally {
       setIsUpdateJobLoading(false);
     }
+  }
+
+  function selectIssueShipments() {
+    if (!review) {
+      return;
+    }
+
+    setSelectedUpdateSrNumbers(new Set(review.reviews.filter(isIssueUpdateEligibleReview).map((row) => row.srNumber)));
+  }
+
+  function selectAllEligibleShipments() {
+    if (!review) {
+      return;
+    }
+
+    setSelectedUpdateSrNumbers(new Set(review.reviews.filter(isUpdateEligibleReview).map((row) => row.srNumber)));
+  }
+
+  function clearSelectedShipments() {
+    setSelectedUpdateSrNumbers(new Set());
+  }
+
+  async function createUpdateJobForIssueShipments() {
+    if (!review) {
+      setError("Run the Teamship review before creating an update job.");
+      return;
+    }
+
+    const issueSrNumbers = review.reviews.filter(isIssueUpdateEligibleReview).map((row) => row.srNumber);
+
+    if (issueSrNumbers.length === 0) {
+      setError("No issue shipments are available for agent update.");
+      return;
+    }
+
+    setSelectedUpdateSrNumbers(new Set(issueSrNumbers));
+    await createUpdateJob(issueSrNumbers);
   }
 
   async function updateJobAction(jobId: string, action: "approve" | "cancel" | "rescan") {
@@ -734,6 +782,9 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         updateJobs={updateJobs}
         updateJobStatus={updateJobStatus}
         isUpdateJobLoading={isUpdateJobLoading}
+        onSelectIssueShipments={selectIssueShipments}
+        onSelectAllEligibleShipments={selectAllEligibleShipments}
+        onClearSelectedShipments={clearSelectedShipments}
         onToggleUpdateSelection={(srNumber, selected) => {
           setSelectedUpdateSrNumbers((current) => {
             const next = new Set(current);
@@ -747,7 +798,10 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         }}
         onUpdateJobModeChange={setUpdateJobMode}
         onCreateUpdateJob={() => void createUpdateJob()}
+        onCreateIssueUpdateJob={() => void createUpdateJobForIssueShipments()}
+        onCreateSingleUpdateJob={(srNumber) => void createUpdateJob([srNumber])}
         onUpdateJobAction={(jobId, action) => void updateJobAction(jobId, action)}
+        onRescanShipment={(srNumber) => void runReview({ rescan: true, srNumber })}
       />
       <TeamshipReviewHistorySection
         history={history}
@@ -803,10 +857,16 @@ function ShipmentReviewWorkspace({
   updateJobs,
   updateJobStatus,
   isUpdateJobLoading,
+  onSelectIssueShipments,
+  onSelectAllEligibleShipments,
+  onClearSelectedShipments,
   onToggleUpdateSelection,
   onUpdateJobModeChange,
   onCreateUpdateJob,
-  onUpdateJobAction
+  onCreateIssueUpdateJob,
+  onCreateSingleUpdateJob,
+  onUpdateJobAction,
+  onRescanShipment
 }: {
   rows: ShipmentWorkspaceRow[];
   review: GarlandTeamshipReviewResponse | null;
@@ -823,13 +883,21 @@ function ShipmentReviewWorkspace({
   updateJobs: TeamshipUpdateJobSummary[];
   updateJobStatus: string | null;
   isUpdateJobLoading: boolean;
+  onSelectIssueShipments: () => void;
+  onSelectAllEligibleShipments: () => void;
+  onClearSelectedShipments: () => void;
   onToggleUpdateSelection: (srNumber: string, selected: boolean) => void;
   onUpdateJobModeChange: (mode: TeamshipUpdateAgentMode) => void;
   onCreateUpdateJob: () => void;
+  onCreateIssueUpdateJob: () => void;
+  onCreateSingleUpdateJob: (srNumber: string) => void;
   onUpdateJobAction: (jobId: string, action: "approve" | "cancel" | "rescan") => void;
+  onRescanShipment: (srNumber: string) => void;
 }) {
   const [expandedRowIds, setExpandedRowIds] = useState<Set<string>>(new Set());
   const selectedCount = selectedUpdateSrNumbers.size;
+  const issueEligibleCount = review?.reviews.filter(isIssueUpdateEligibleReview).length ?? 0;
+  const eligibleCount = review?.reviews.filter(isUpdateEligibleReview).length ?? 0;
 
   useEffect(() => {
     setExpandedRowIds(new Set(rows.filter((row) => row.review && row.status !== "PASS").map((row) => row.id)));
@@ -921,6 +989,30 @@ function ShipmentReviewWorkspace({
           >
             {isSaving ? "Saving..." : "Save review run"}
           </button>
+          <button
+            type="button"
+            onClick={onSelectIssueShipments}
+            disabled={isUpdateJobLoading || issueEligibleCount === 0}
+            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Select issues ({issueEligibleCount})
+          </button>
+          <button
+            type="button"
+            onClick={onSelectAllEligibleShipments}
+            disabled={isUpdateJobLoading || eligibleCount === 0}
+            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Select all ({eligibleCount})
+          </button>
+          <button
+            type="button"
+            onClick={onClearSelectedShipments}
+            disabled={isUpdateJobLoading || selectedCount === 0}
+            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Clear selection
+          </button>
           <label className="min-w-56 space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
             Agent mode
             <select
@@ -933,6 +1025,14 @@ function ShipmentReviewWorkspace({
               <option value="LIVE_API">Live Teamship update</option>
             </select>
           </label>
+          <button
+            type="button"
+            onClick={onCreateIssueUpdateJob}
+            disabled={isUpdateJobLoading || !review || issueEligibleCount === 0}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Create draft for all issues ({issueEligibleCount})
+          </button>
           <button
             type="button"
             onClick={onCreateUpdateJob}
@@ -1016,6 +1116,34 @@ function ShipmentReviewWorkspace({
                       No Teamship link
                     </span>
                   )}
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (row.srNumber) {
+                        onRescanShipment(row.srNumber);
+                      }
+                    }}
+                    disabled={!row.srNumber || !row.pdfOrder}
+                    className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Rescan this shipment
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (row.srNumber) {
+                        onCreateSingleUpdateJob(row.srNumber);
+                      }
+                    }}
+                    disabled={!row.review || !row.srNumber || !isUpdateEligibleReview(row.review)}
+                    className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Draft this one
+                  </button>
                   <span className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-mutedForeground">
                     {isExpanded ? "Collapse" : "Expand"}
                   </span>
@@ -1250,6 +1378,7 @@ function ShipmentWorkspaceDetails({ row }: { row: ShipmentWorkspaceRow }) {
             </tbody>
           </table>
         </div>
+        <ItemDetailsComparison review={row.review} />
         <ProductDimensionsTable dimensions={row.review.productDimensions} />
       </div>
     );
@@ -1267,6 +1396,54 @@ function ShipmentWorkspaceDetails({ row }: { row: ShipmentWorkspaceRow }) {
         <p className="mt-2 text-foreground">{row.teamshipOrder ? row.teamshipOrderId ?? "Order ID missing" : "No Teamship order matched yet"}</p>
         <p>{row.teamshipOrder ? [row.carrier, row.shipToName, row.cityState].filter(Boolean).join(" · ") : "Pull Teamship orders to inspect."}</p>
       </div>
+    </div>
+  );
+}
+
+function ItemDetailsComparison({ review }: { review: GarlandTeamshipOrderReview }) {
+  const maxRows = Math.max(review.pdfItems.length, review.teamshipItems.length);
+
+  return (
+    <div className="rounded-md border border-border bg-background">
+      <div className="border-b border-border px-3 py-2">
+        <h3 className="text-sm font-semibold text-foreground">SKU and serial detail</h3>
+        <p className="mt-1 text-xs text-mutedForeground">
+          Shows every parsed Garland PDF item beside the item/serial details fetched from Teamship for this shipment.
+        </p>
+      </div>
+      {maxRows === 0 ? (
+        <p className="px-3 py-3 text-sm text-mutedForeground">No item detail was parsed from the PDF or Teamship response.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-left text-sm">
+            <thead className="bg-muted/40 text-xs uppercase tracking-wide text-mutedForeground">
+              <tr>
+                <th className="px-3 py-2">Line</th>
+                <th className="px-3 py-2">Garland SKU</th>
+                <th className="px-3 py-2">Garland serial(s)</th>
+                <th className="px-3 py-2">Teamship SKU</th>
+                <th className="px-3 py-2">Teamship serial(s)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {Array.from({ length: maxRows }, (_, index) => {
+                const pdfItem = review.pdfItems[index] ?? null;
+                const teamshipItem = review.teamshipItems[index] ?? null;
+
+                return (
+                  <tr key={`${review.srNumber}-item-${index}`}>
+                    <td className="px-3 py-2 font-semibold text-foreground">{index + 1}</td>
+                    <td className="px-3 py-2 text-mutedForeground">{formatItemSku(pdfItem)}</td>
+                    <td className="px-3 py-2 text-mutedForeground">{formatItemSerials(pdfItem)}</td>
+                    <td className="px-3 py-2 text-mutedForeground">{formatItemSku(teamshipItem)}</td>
+                    <td className="px-3 py-2 text-mutedForeground">{formatItemSerials(teamshipItem)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -1630,6 +1807,64 @@ function isUpdateEligibleReview(review: GarlandTeamshipOrderReview) {
   return Boolean(review.teamshipOrderId && (review.status === "PASS" || review.status === "FAIL"));
 }
 
+function isIssueUpdateEligibleReview(review: GarlandTeamshipOrderReview) {
+  return isUpdateEligibleReview(review) && review.issueCount > 0;
+}
+
+function mergePartialReview(
+  current: GarlandTeamshipReviewResponse,
+  partial: GarlandTeamshipReviewResponse
+): GarlandTeamshipReviewResponse {
+  const partialReviewSrNumbers = new Set(partial.reviews.map((row) => normalizeIdentifier(row.srNumber)));
+  const partialPdfSrNumbers = new Set(partial.pdfOrders.map((order) => normalizeIdentifier(order.srNumber)));
+  const reviews = [
+    ...current.reviews.filter((row) => !partialReviewSrNumbers.has(normalizeIdentifier(row.srNumber))),
+    ...partial.reviews
+  ];
+  const pdfOrders = [
+    ...current.pdfOrders.filter((order) => !partialPdfSrNumbers.has(normalizeIdentifier(order.srNumber))),
+    ...partial.pdfOrders
+  ];
+
+  return {
+    ...current,
+    pdfOrders,
+    reviews,
+    summary: summarizeReviewRows(pdfOrders, reviews),
+    fetchedAt: partial.fetchedAt,
+    teamshipAlerts: mergeTeamshipAlerts(current.teamshipAlerts, partial.teamshipAlerts)
+  };
+}
+
+function summarizeReviewRows(
+  pdfOrders: GarlandPdfShippingOrder[],
+  reviews: GarlandTeamshipReviewResponse["reviews"]
+): GarlandTeamshipReviewResponse["summary"] {
+  return {
+    pdfOrderCount: pdfOrders.length,
+    teamshipMatchedCount: reviews.filter((row) => Boolean(row.teamshipOrderId)).length,
+    passedCount: reviews.filter((row) => row.status === "PASS").length,
+    failedCount: reviews.filter((row) => row.status === "FAIL").length,
+    missingTeamshipCount: reviews.filter((row) => row.status === "MISSING_TEAMSHIP").length,
+    pendingTeamshipCount: reviews.filter((row) => row.status === "PENDING_TEAMSHIP").length,
+    noPdfCount: reviews.filter((row) => row.status === "NO_PDF").length,
+    skippedAlreadyReviewedCount: reviews.filter((row) => row.status === "SKIPPED_ALREADY_REVIEWED").length
+  };
+}
+
+function mergeTeamshipAlerts(
+  current: GarlandTeamshipReviewResponse["teamshipAlerts"],
+  partial: GarlandTeamshipReviewResponse["teamshipAlerts"]
+) {
+  const alerts = new Map<string, GarlandTeamshipReviewResponse["teamshipAlerts"][number]>();
+
+  for (const alert of [...current, ...partial]) {
+    alerts.set(normalizeIdentifier(alert.srNumber), alert);
+  }
+
+  return Array.from(alerts.values());
+}
+
 function updateJobStatusClass(status: TeamshipUpdateJobSummary["status"]) {
   const base = "rounded-full px-2 py-0.5 text-xs font-bold uppercase tracking-wide";
 
@@ -1988,6 +2223,22 @@ function formatDimensionSource(source: GarlandTeamshipOrderReview["productDimens
   }
 
   return source === "TEAMSHIP_PALLET" ? "Teamship pallet" : "Garland sheet";
+}
+
+function formatItemSku(item: GarlandTeamshipOrderReview["pdfItems"][number] | null) {
+  if (!item?.sku) {
+    return "Blank";
+  }
+
+  return item.quantity ? `${item.sku} (qty ${item.quantity})` : item.sku;
+}
+
+function formatItemSerials(item: GarlandTeamshipOrderReview["pdfItems"][number] | null) {
+  if (!item || item.serialNumbers.length === 0) {
+    return "Blank";
+  }
+
+  return item.serialNumbers.join(", ");
 }
 
 function formatDimensions(dimension: GarlandTeamshipOrderReview["productDimensions"][number]) {

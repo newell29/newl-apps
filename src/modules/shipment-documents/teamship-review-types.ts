@@ -51,6 +51,17 @@ export type TeamshipCustomField = {
 export type TeamshipShippingOrderItem = {
   sku?: string | null;
   inventory_count?: number | string | null;
+  quantity?: number | string | null;
+  qty?: number | string | null;
+  serial?: string | null;
+  serial_number?: string | null;
+  serialNumber?: string | null;
+  product?: {
+    sku?: string | null;
+    serial?: string | null;
+    serial_number?: string | null;
+    serialNumber?: string | null;
+  } | null;
 };
 
 export type TeamshipPalletDim = {
@@ -110,6 +121,8 @@ export type TeamshipShippingOrderDetail = {
   user_company?: string | null;
   customer_name?: string | null;
   items?: TeamshipShippingOrderItem[];
+  order_items?: TeamshipShippingOrderItem[];
+  orderItems?: TeamshipShippingOrderItem[];
   pallets?: TeamshipPalletDim[];
   pallet_dims?: TeamshipPalletDim[];
   shipping_info?: {
@@ -163,6 +176,12 @@ export type GarlandProductDimensionRecommendation = {
   note: string;
 };
 
+export type GarlandTeamshipItemDetail = {
+  sku: string | null;
+  quantity: string | null;
+  serialNumbers: string[];
+};
+
 export type GarlandTeamshipOrderReview = {
   srNumber: string;
   psNumber: string;
@@ -173,6 +192,8 @@ export type GarlandTeamshipOrderReview = {
   issueCount: number;
   alert: TeamshipAlertOrder | null;
   fields: GarlandTeamshipReviewField[];
+  pdfItems: GarlandTeamshipItemDetail[];
+  teamshipItems: GarlandTeamshipItemDetail[];
   productDimensions: GarlandProductDimensionRecommendation[];
 };
 

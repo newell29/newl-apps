@@ -2,6 +2,7 @@ import type {
   GarlandPdfShippingOrder,
   GarlandProductDimensionRecommendation,
   GarlandShippingOrderItem,
+  GarlandTeamshipItemDetail,
   GarlandTeamshipOrderReview,
   GarlandTeamshipReviewField,
   GarlandTeamshipReviewResponse,
@@ -407,6 +408,8 @@ function buildOrderReview(
         teamshipUrl: null,
         issueCount: 0,
         alert,
+        pdfItems: buildPdfItemDetails(pdfOrder),
+        teamshipItems: [],
         productDimensions: buildGarlandProductDimensionRecommendations({ pdfOrder, teamshipOrder: null, learnedProductDimensions }),
         fields: [
           {
@@ -430,6 +433,8 @@ function buildOrderReview(
       teamshipUrl: null,
       issueCount: 1,
       alert: null,
+      pdfItems: buildPdfItemDetails(pdfOrder),
+      teamshipItems: [],
       productDimensions: buildGarlandProductDimensionRecommendations({ pdfOrder, teamshipOrder: null, learnedProductDimensions }),
       fields: [
         {
@@ -471,6 +476,8 @@ function buildOrderReview(
     teamshipUrl: teamshipOrder.url ?? null,
     issueCount,
     alert,
+    pdfItems: buildPdfItemDetails(pdfOrder),
+    teamshipItems: readTeamshipItemDetails(teamshipOrder),
     productDimensions: buildGarlandProductDimensionRecommendations({ pdfOrder, teamshipOrder, learnedProductDimensions }),
     fields
   };
@@ -491,6 +498,8 @@ function buildNoPdfReview(
     teamshipUrl: teamshipOrder.url ?? null,
     issueCount: 1,
     alert: null,
+    pdfItems: [],
+    teamshipItems: readTeamshipItemDetails(teamshipOrder),
     productDimensions: buildGarlandProductDimensionRecommendations({ pdfOrder: null, teamshipOrder, learnedProductDimensions }),
     fields: [
       {
@@ -547,6 +556,8 @@ function buildSkippedAlreadyReviewedReview(pdfOrder: GarlandPdfShippingOrder): G
     teamshipUrl: null,
     issueCount: 0,
     alert: null,
+    pdfItems: buildPdfItemDetails(pdfOrder),
+    teamshipItems: [],
     productDimensions: buildGarlandProductDimensionRecommendations({ pdfOrder, teamshipOrder: null }),
     fields: [
       {
@@ -648,7 +659,8 @@ function itemSkuField(
   teamshipOrder: TeamshipShippingOrderDetail
 ): GarlandTeamshipReviewField {
   const pdfSkus = pdfOrder.items.map((item) => normalizeSku(item.sku)).filter(Boolean);
-  const teamshipSkus = (teamshipOrder.items ?? []).map((item) => normalizeSku(item.sku)).filter(Boolean);
+  const teamshipItems = readTeamshipItemDetails(teamshipOrder);
+  const teamshipSkus = teamshipItems.map((item) => normalizeSku(item.sku)).filter(Boolean);
   const teamshipStrings = collectTeamshipStrings(teamshipOrder).map(normalizeSku).filter(Boolean);
   const missingSkus = pdfSkus.filter(
     (sku) => !teamshipSkus.includes(sku) && !teamshipStrings.some((candidate) => candidate.includes(sku))
@@ -660,7 +672,7 @@ function itemSkuField(
     status: missingSkus.length === 0 && pdfSkus.length > 0 ? "MATCH" : "DISCREPANCY",
     pdfValue: pdfOrder.items.map((item) => item.sku).join(", ") || null,
     teamshipValue:
-      (teamshipOrder.items ?? []).map((item) => item.sku).filter(Boolean).join(", ") ||
+      teamshipItems.map((item) => item.sku).filter(Boolean).join(", ") ||
       (missingSkus.length === 0 ? "Found in Teamship fields" : null),
     message:
       missingSkus.length === 0 && pdfSkus.length > 0
@@ -687,6 +699,8 @@ function serialField(
   }
 
   const teamshipSerialStrings = collectTeamshipSerialStrings(teamshipOrder);
+  const teamshipItemSerials = readTeamshipItemDetails(teamshipOrder).flatMap((item) => item.serialNumbers);
+  const visibleTeamshipSerials = uniqueStrings([...teamshipItemSerials, ...teamshipSerialStrings]);
   const teamshipStrings = [...collectTeamshipStrings(teamshipOrder), ...teamshipSerialStrings].map(normalizeIdentifier);
   const missingSerials = pdfSerials.filter(
     (serial) => !teamshipStrings.some((candidate) => candidate.includes(normalizeIdentifier(serial)))
@@ -697,12 +711,147 @@ function serialField(
     label: "Serial numbers",
     status: missingSerials.length === 0 ? "MATCH" : "DISCREPANCY",
     pdfValue: pdfSerials.join(", "),
-    teamshipValue: missingSerials.length === 0 ? uniqueStrings(teamshipSerialStrings).join(", ") || "Found in Teamship fields" : "Not all serials found",
+    teamshipValue: visibleTeamshipSerials.join(", ") || (missingSerials.length === 0 ? "Found in Teamship fields" : "No serials found in fetched Teamship detail"),
     message:
       missingSerials.length === 0
         ? "All PDF serial numbers were found somewhere in the Teamship order detail."
         : `Serial number(s) not found in Teamship detail: ${missingSerials.join(", ")}.`
   };
+}
+
+function buildPdfItemDetails(pdfOrder: GarlandPdfShippingOrder): GarlandTeamshipItemDetail[] {
+  return pdfOrder.items.map((item) => ({
+    sku: item.sku || null,
+    quantity: item.quantity == null ? null : String(item.quantity),
+    serialNumbers: uniqueStrings(item.serialNumbers)
+  }));
+}
+
+function readTeamshipItemDetails(order: TeamshipShippingOrderDetail): GarlandTeamshipItemDetail[] {
+  const itemDetails = [
+    ...readTeamshipItemsFromArray(order.items),
+    ...readTeamshipItemsFromArray(order.order_items),
+    ...readTeamshipItemsFromArray(order.orderItems),
+    ...readTeamshipItemsFromPallets(order.pallets),
+    ...readTeamshipItemsFromPallets(order.pallet_dims)
+  ];
+  const merged = new Map<string, GarlandTeamshipItemDetail>();
+
+  for (const item of itemDetails) {
+    const key = [normalizeSku(item.sku), item.quantity ?? "", item.serialNumbers.map(normalizeIdentifier).join("|")].join("::");
+    if (!key.replace(/:/g, "")) {
+      continue;
+    }
+
+    const existing = merged.get(key);
+    if (existing) {
+      existing.serialNumbers = uniqueStrings([...existing.serialNumbers, ...item.serialNumbers]);
+      existing.sku ||= item.sku;
+      existing.quantity ||= item.quantity;
+      continue;
+    }
+
+    merged.set(key, {
+      sku: item.sku,
+      quantity: item.quantity,
+      serialNumbers: uniqueStrings(item.serialNumbers)
+    });
+  }
+
+  return Array.from(merged.values());
+}
+
+function readTeamshipItemsFromArray(items: unknown): GarlandTeamshipItemDetail[] {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items
+    .map((item) => {
+      const record = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+      const sku = firstString([
+        record.sku,
+        record.item_number,
+        record.itemNumber,
+        record.product_sku,
+        record.productSku,
+        readNestedValue(record.product, ["sku", "item_number", "itemNumber"])
+      ]);
+      const quantity = firstString([
+        record.inventory_count,
+        record.quantity,
+        record.qty,
+        record.requested_quantity,
+        record.requestedQuantity,
+        record.ordered,
+        record.ordered_quantity,
+        record.orderedQuantity
+      ]);
+      const serialNumbers = collectTeamshipSerialStrings(record as TeamshipShippingOrderDetail);
+
+      return {
+        sku,
+        quantity,
+        serialNumbers
+      };
+    })
+    .filter((item) => item.sku || item.quantity || item.serialNumbers.length > 0);
+}
+
+function readTeamshipItemsFromPallets(pallets: unknown): GarlandTeamshipItemDetail[] {
+  if (!Array.isArray(pallets)) {
+    return [];
+  }
+
+  return pallets
+    .map((pallet) => {
+      const record = pallet && typeof pallet === "object" ? (pallet as Record<string, unknown>) : {};
+      const commodity = stringifyValue(record.commodity);
+      const sku = extractSkuFromText(commodity) ?? firstString([record.sku, record.item_number, record.itemNumber]);
+      const serialNumbers = uniqueStrings([...extractSerialsFromText(commodity ?? ""), ...collectTeamshipSerialStrings(record as TeamshipShippingOrderDetail)]);
+
+      return {
+        sku,
+        quantity: firstString([record.quantity, record.qty]),
+        serialNumbers
+      };
+    })
+    .filter((item) => item.sku || item.quantity || item.serialNumbers.length > 0);
+}
+
+function readNestedValue(value: unknown, keys: string[]) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  for (const key of keys) {
+    if (record[key] != null) {
+      return record[key];
+    }
+  }
+
+  return null;
+}
+
+function firstString(values: unknown[]) {
+  for (const value of values) {
+    const stringValue = stringifyValue(value);
+    if (stringValue) {
+      return stringValue;
+    }
+  }
+
+  return null;
+}
+
+function extractSkuFromText(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const match = value.match(/\bSKU\s*[:#-]?\s*([A-Z0-9][A-Z0-9._/-]{2,})/i);
+  return match?.[1]?.trim() ?? null;
 }
 
 function instructionsField(pdfInstructions: string | null, teamshipInstructions: string | null | undefined) {
