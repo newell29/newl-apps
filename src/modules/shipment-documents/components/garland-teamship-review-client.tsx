@@ -85,6 +85,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [orders, setOrders] = useState<GarlandPdfShippingOrder[]>([]);
   const [review, setReview] = useState<GarlandTeamshipReviewResponse | null>(null);
+  const [dailyOrders, setDailyOrders] = useState<TeamshipShippingOrderDetail[]>([]);
   const [dailyOrderCount, setDailyOrderCount] = useState<number | null>(null);
   const [dailySyncSummary, setDailySyncSummary] = useState<DailyOrdersResponse["sync"] | null>(null);
   const [alertDigest, setAlertDigest] = useState("");
@@ -215,6 +216,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     setError(null);
     setDailyOrderCount(null);
     setDailySyncSummary(null);
+    setDailyOrders([]);
     setIsProcessing(true);
     setStatus(`Pulling missing Garland Teamship orders from ${syncDateFrom} to ${syncDateTo}...`);
 
@@ -235,6 +237,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
 
       setDailyOrderCount(json.totalCount ?? json.orders?.length ?? 0);
       setDailySyncSummary(json.sync ?? null);
+      setDailyOrders(json.orders ?? []);
       setStatus(
         json.sync
           ? `Pulled ${json.sync.insertedCount} new Teamship Garland order(s) from ${json.sync.dateFrom ?? syncDateFrom} to ${json.sync.dateTo ?? syncDateTo}; ${json.sync.skippedCount} already existed or could not be keyed.`
@@ -506,6 +509,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         />
       </section>
 
+      {dailyOrders.length > 0 ? <TeamshipDailyOrdersTable orders={dailyOrders} /> : null}
       {orders.length > 0 ? <ExtractedOrdersTable orders={orders} /> : null}
       {review ? (
         <ReviewResultsTable
@@ -560,6 +564,46 @@ function SummaryCard({ label, value, detail }: { label: string; value: string; d
       <p className="mt-2 text-2xl font-bold text-foreground">{value}</p>
       <p className="mt-2 text-sm leading-5 text-mutedForeground">{detail}</p>
     </div>
+  );
+}
+
+function TeamshipDailyOrdersTable({ orders }: { orders: TeamshipShippingOrderDetail[] }) {
+  return (
+    <section className="rounded-lg border border-border bg-card shadow-sm">
+      <div className="border-b border-border p-5">
+        <h2 className="text-base font-semibold text-foreground">Pulled Teamship orders</h2>
+        <p className="mt-1 text-sm text-mutedForeground">
+          These are the Teamship orders returned for the manual sync range. Existing orders still appear here so you can
+          confirm what Newl Apps will compare against the uploaded Garland PDF.
+        </p>
+      </div>
+      <div className="max-h-[28rem] overflow-auto">
+        <table className="min-w-full text-left text-sm">
+          <thead className="sticky top-0 bg-muted/50 text-xs uppercase tracking-wide text-mutedForeground">
+            <tr>
+              <th className="px-4 py-3">SR</th>
+              <th className="px-4 py-3">Teamship</th>
+              <th className="px-4 py-3">Carrier</th>
+              <th className="px-4 py-3">Ship to</th>
+              <th className="px-4 py-3">City/state</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {orders.map((order, index) => (
+              <tr key={`${readTeamshipShipmentId(order) ?? "missing-sr"}-${readTeamshipOrderId(order) ?? index}`}>
+                <td className="px-4 py-3 font-semibold text-foreground">{readTeamshipShipmentId(order) ?? "Missing"}</td>
+                <td className="px-4 py-3 text-mutedForeground">{readTeamshipOrderId(order) ?? "Missing"}</td>
+                <td className="px-4 py-3 text-mutedForeground">{readTeamshipCarrier(order) ?? "Missing"}</td>
+                <td className="px-4 py-3 text-mutedForeground">{readTeamshipShipToName(order) ?? "Missing"}</td>
+                <td className="px-4 py-3 text-mutedForeground">
+                  {[readTeamshipCity(order), readTeamshipState(order)].filter(Boolean).join(", ") || "Missing"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -1042,6 +1086,55 @@ function formatDateTime(value: string) {
     hour: "numeric",
     minute: "2-digit"
   }).format(new Date(value));
+}
+
+function readTeamshipOrderId(order: TeamshipShippingOrderDetail) {
+  return stringifyValue(order.id ?? order.order_id);
+}
+
+function readTeamshipShipmentId(order: TeamshipShippingOrderDetail) {
+  return stringifyValue(order.shipment_id ?? order.amazon_shipment_id1 ?? order.edi_field_1 ?? order.order_number ?? order.display_id);
+}
+
+function readTeamshipCarrier(order: TeamshipShippingOrderDetail) {
+  return stringifyValue(
+    order.carrier ??
+      order.ship_method ??
+      order.shipping_carrier ??
+      order.method ??
+      order.carrier_name ??
+      order.carrier_value ??
+      order.shipping_info?.carrier ??
+      order.shipping_info?.method
+  );
+}
+
+function readTeamshipShipToName(order: TeamshipShippingOrderDetail) {
+  const firstLastName = [order.ship_first_name, order.ship_last_name].filter(Boolean).join(" ").trim();
+  return stringifyValue(
+    order.ship_to_name ??
+      (firstLastName || null) ??
+      order.shipping_info?.shipping_address?.company ??
+      order.shipping_info?.shipping_address?.name ??
+      order.customer?.company ??
+      order.customer?.name
+  );
+}
+
+function readTeamshipCity(order: TeamshipShippingOrderDetail) {
+  return stringifyValue(order.ship_to_city ?? order.ship_city ?? order.shipping_info?.shipping_address?.city);
+}
+
+function readTeamshipState(order: TeamshipShippingOrderDetail) {
+  return stringifyValue(order.ship_to_state ?? order.ship_state ?? order.shipping_info?.shipping_address?.state);
+}
+
+function stringifyValue(value: unknown) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return String(value);
 }
 
 function isErrorResponse(value: unknown): value is { error: string } {
