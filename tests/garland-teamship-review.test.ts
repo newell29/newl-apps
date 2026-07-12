@@ -7,7 +7,11 @@ import {
 } from "@/modules/shipment-documents/teamship-review";
 import { buildTeamshipPayloadInspection } from "@/modules/shipment-documents/teamship-payload-inspector";
 import type { GarlandPdfShippingOrder, TeamshipShippingOrderDetail } from "@/modules/shipment-documents/teamship-review-types";
-import { fetchTeamshipShippingOrdersForReview, parseTeamshipShippingOrderUiPage } from "@/server/integrations/teamship";
+import {
+  fetchTeamshipShippingOrdersForReview,
+  parseTeamshipInventoryEditResponse,
+  parseTeamshipShippingOrderUiPage
+} from "@/server/integrations/teamship";
 
 const pageFive = `Ship-To Pre-Shipper Print Date
 10018968 PS210210 7/10/2026
@@ -933,6 +937,31 @@ NEWLS 2604816191908 1.00 ( )`
     ]);
   });
 
+  it("parses Teamship inventory edit endpoint serials from custom attributes", () => {
+    const parsed = parseTeamshipInventoryEditResponse({
+      data: [
+        {
+          inventory_id: 60023,
+          customAttribut: [{ name: "Serial", value: "2604816191908", type: "string" }],
+          pivot: { quantity: 1 },
+          item: {
+            sku: {
+              code: "E1SGHMV6XHU3US"
+            }
+          }
+        }
+      ]
+    });
+
+    expect(parsed.items).toEqual([
+      expect.objectContaining({
+        sku: "E1SGHMV6XHU3US",
+        quantity: "1",
+        serial_number: "2604816191908"
+      })
+    ]);
+  });
+
   it("enriches targeted Teamship orders from the UI page when API detail omits serials", async () => {
     process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
     process.env.TEAMSHIP_PASSWORD = "configured-in-env";
@@ -994,6 +1023,10 @@ NEWLS 2604816191908 1.00 ( )`
         );
       }
 
+      if (url.includes("/admin/get-prod-ship-invt-edit?")) {
+        return Response.json([]);
+      }
+
       throw new Error(`Unexpected Teamship fetch: ${url}`);
     });
 
@@ -1023,6 +1056,101 @@ NEWLS 2604816191908 1.00 ( )`
         expect.objectContaining({
           commodity: "SKU: E1SGHMV6XHU3US, SN: 2604816191908"
         })
+      ]
+    });
+  });
+
+  it("enriches targeted Teamship orders from the Teamship inventory edit endpoint when page hidden inventory is empty", async () => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_MAX_LIST_PAGES = "1";
+
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/v1/login")) {
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/api/v1/ship-inventories?")) {
+        return Response.json({
+          data: [{ id: 30202, shipment_id: "SR808478", customer: { company: "Garland Canada Distribution" } }]
+        });
+      }
+
+      if (url.endsWith("/api/v1/ship-inventories/30202")) {
+        return Response.json({
+          data: {
+            id: 30202,
+            shipment_id: "SR808478",
+            edi_field_2: "PS210206-SR808478",
+            items: [{ sku: "E1SGHMV6XHU3US", quantity: 1 }]
+          }
+        });
+      }
+
+      if (url.endsWith("/login") && (init?.method ?? "GET") === "GET") {
+        return new Response('<input type="hidden" name="_token" value="csrf-1">', {
+          headers: {
+            "set-cookie": "teamship_session=before-login; Path=/"
+          }
+        });
+      }
+
+      if (url.endsWith("/login") && init?.method === "POST") {
+        return new Response("", {
+          status: 302,
+          headers: {
+            "set-cookie": "teamship_session=after-login; Path=/"
+          }
+        });
+      }
+
+      if (url.endsWith("/ship-inventories/30202")) {
+        return new Response(sampleTeamshipUiPageHtmlWithoutInventory());
+      }
+
+      if (url.includes("/admin/get-prod-ship-invt-edit?")) {
+        const requestUrl = new URL(url);
+        expect(requestUrl.searchParams.get("query")).toBe("E1SGHMV6XHU3US");
+        expect(requestUrl.searchParams.get("warehouse_id")).toBe("102");
+        expect(requestUrl.searchParams.get("ship_inventory_id")).toBe("30202");
+        expect(requestUrl.searchParams.get("_token")).toBe("csrf-page");
+        expect(init?.headers).toMatchObject({
+          cookie: "teamship_session=after-login",
+          "x-requested-with": "XMLHttpRequest"
+        });
+        return Response.json([
+          {
+            inventory_id: 60023,
+            customAttribut: [{ name: "Serial", value: "2604816191908", type: "string" }],
+            pivot: { quantity: 1 },
+            item: {
+              sku: {
+                code: "E1SGHMV6XHU3US"
+              }
+            }
+          }
+        ]);
+      }
+
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      srNumbers: ["SR808478"],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(orders[0]).toMatchObject({
+      items: [
+        { sku: "E1SGHMV6XHU3US", quantity: 1 },
+        {
+          sku: "E1SGHMV6XHU3US",
+          quantity: "1",
+          serial_number: "2604816191908"
+        }
       ]
     });
   });
@@ -1369,6 +1497,8 @@ function sampleTeamshipUiPageHtml({
   const escapedInventories = JSON.stringify(inventories).replace(/"/g, "&quot;");
 
   return `
+    <meta name="csrf-token" content="csrf-page">
+    <input type="hidden" id="warehouse_id_" value="102">
     <input type="hidden" id="inventories_all" value="${escapedInventories}">
     <input type="hidden" id="pallets_count" value="1">
     <input id="pallet_1" value="1">
@@ -1378,5 +1508,14 @@ function sampleTeamshipUiPageHtml({
     <input id="pallet_1_weight" value="1">
     <input id="pallet_1_weight_unit" value="lbs">
     <input id="pallet_1_commodity" value="${commodity}">
+  `;
+}
+
+function sampleTeamshipUiPageHtmlWithoutInventory() {
+  return `
+    <meta name="csrf-token" content="csrf-page">
+    <input type="hidden" id="warehouse_id_" value="102">
+    <input type="hidden" id="inventories_all" value="[]">
+    <input type="hidden" id="pallets_count" value="0">
   `;
 }
