@@ -273,7 +273,7 @@ Newl Apps now has the production control-tower layer for Phase 2:
 - When the agent reports `SUCCESS`, Newl Apps automatically performs a Teamship rescan using the stored PDF order snapshot and tenant Teamship credentials, then stores the verification response on the job.
 - Users can also manually rescan a Phase 2 job from the UI, and can force a page-level Teamship rescan from the main review controls so already-reviewed SRs are checked again.
 
-The VM worker implementation is available as a safe dry-run executor:
+The VM worker implementation supports both dry-run evidence and guarded live API execution:
 
 ```bash
 NEWL_APPS_BASE_URL="https://newl-apps.vercel.app" \
@@ -287,7 +287,22 @@ npm run worker:teamship-phase2
 
 The worker claims approved jobs, confirms Teamship credentials were supplied from Settings, converts the approved `executionPayload` into execution evidence, reports `SUCCESS` or `FAILED`, and lets Newl Apps automatically rescan Teamship after a successful completion. In `dry-run` mode it does not call Teamship update endpoints, click save, or write to Teamship.
 
-Live saves are intentionally blocked until a verified Teamship API/browser update adapter is added. To enable production writes later, implement the adapter behind `TEAMSHIP_AGENT_MODE=live-api`, keep `MAX_CONCURRENCY=1`, and release one field group at a time: commodity/comment first, then pallet dimensions/weight, then mapped order-level fields.
+For live execution, two approvals are required:
+
+- The user must create the update draft in `Live Teamship update` mode and approve it in Newl Apps.
+- The VM worker must be started with `TEAMSHIP_AGENT_MODE=live-api` and `TEAMSHIP_ALLOW_LIVE_UPDATES=true`.
+
+```bash
+NEWL_APPS_BASE_URL="https://newl-apps.vercel.app" \
+NEWL_AGENT_TOKEN="..." \
+NEWL_AGENT_ID="teamship-vm-agent" \
+TEAMSHIP_AGENT_MODE="live-api" \
+TEAMSHIP_ALLOW_LIVE_UPDATES="true" \
+TEAMSHIP_AGENT_LOOP="true" \
+npm run worker:teamship-phase2
+```
+
+Live mode logs into Teamship using the tenant Settings credentials, submits the approved order-level fields and pallet rows to `/v1/ship-inventories/:id`, reports evidence back to Newl Apps, and triggers the automatic Teamship rescan. Keep `MAX_CONCURRENCY=1` operationally on the VM, and initially release one field group at a time with allowlisted orders: commodity/comment first, then pallet dimensions/weight, then mapped order-level fields.
 
 Agent endpoint examples:
 

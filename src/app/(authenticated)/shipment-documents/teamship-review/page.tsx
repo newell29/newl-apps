@@ -27,12 +27,13 @@ export default async function GarlandTeamshipReviewPage() {
       <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
         <div className="grid gap-4 xl:grid-cols-[1.2fr,0.8fr]">
           <div>
-            <h2 className="text-base font-semibold text-foreground">Stage 1 workflow</h2>
+            <h2 className="text-base font-semibold text-foreground">Review and update workflow</h2>
             <p className="mt-1 text-sm leading-6 text-mutedForeground">
               First pull the Teamship orders for the shipment date range. Then upload Garland&apos;s PDF batch and run the
               review. The app compares saved Teamship details against the PDF, skips SRs already saved for that shipment
               date, marks successful checks green, discrepancies red, pending Teamship alert items amber, and Teamship
-              orders with no matching uploaded PDF as no-PDF review items.
+              orders with no matching uploaded PDF as no-PDF review items. For Phase 2, select reviewed shipments, create
+              a dry-run or live update draft, approve the VM agent, and rescan Teamship after the agent reports completion.
             </p>
           </div>
           <div className="rounded-md border border-border bg-muted/30 p-4">

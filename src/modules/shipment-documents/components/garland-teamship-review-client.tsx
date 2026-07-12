@@ -126,6 +126,8 @@ type TeamshipUpdateJobsResponse = {
   error?: string;
 };
 
+type TeamshipUpdateAgentMode = "DRY_RUN" | "LIVE_API";
+
 type ShipmentWorkspaceStatus = GarlandTeamshipOrderReview["status"] | "TEAMSHIP_PULLED" | "PDF_READY";
 
 type ShipmentWorkspaceRow = {
@@ -170,6 +172,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
   });
   const [updateJobs, setUpdateJobs] = useState<TeamshipUpdateJobSummary[]>([]);
   const [selectedUpdateSrNumbers, setSelectedUpdateSrNumbers] = useState<Set<string>>(new Set());
+  const [updateJobMode, setUpdateJobMode] = useState<TeamshipUpdateAgentMode>("DRY_RUN");
   const [updateJobStatus, setUpdateJobStatus] = useState<string | null>(null);
   const [historySearch, setHistorySearch] = useState("");
   const [historyDateFrom, setHistoryDateFrom] = useState(todayInputValue);
@@ -332,7 +335,8 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
           shipmentDate,
           sourcePdfFileName: pdfFile?.name ?? null,
           review,
-          selectedSrNumbers
+          selectedSrNumbers,
+          agentMode: updateJobMode
         })
       });
       const json = (await response.json().catch(() => null)) as TeamshipUpdateJobsResponse | null;
@@ -342,7 +346,11 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       }
 
       setUpdateJobs(json.jobs);
-      setUpdateJobStatus("Teamship update draft created. Review blocked rows before approving the agent.");
+      setUpdateJobStatus(
+        updateJobMode === "LIVE_API"
+          ? "Live Teamship update draft created. Review it carefully before approving the VM agent."
+          : "Dry-run Teamship update draft created. Review blocked rows before approving the agent."
+      );
     } catch (caught) {
       setUpdateJobStatus(null);
       setError(caught instanceof Error ? caught.message : "Unable to create Teamship update job.");
@@ -715,6 +723,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         onDownloadSummary={() => void downloadReviewSummaryPdf()}
         onDownloadSkuDirectory={() => void downloadSkuDirectoryCsv()}
         selectedUpdateSrNumbers={selectedUpdateSrNumbers}
+        updateJobMode={updateJobMode}
         updateJobs={updateJobs}
         updateJobStatus={updateJobStatus}
         isUpdateJobLoading={isUpdateJobLoading}
@@ -729,6 +738,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
             return next;
           });
         }}
+        onUpdateJobModeChange={setUpdateJobMode}
         onCreateUpdateJob={() => void createUpdateJob()}
         onUpdateJobAction={(jobId, action) => void updateJobAction(jobId, action)}
       />
@@ -782,10 +792,12 @@ function ShipmentReviewWorkspace({
   onDownloadSummary,
   onDownloadSkuDirectory,
   selectedUpdateSrNumbers,
+  updateJobMode,
   updateJobs,
   updateJobStatus,
   isUpdateJobLoading,
   onToggleUpdateSelection,
+  onUpdateJobModeChange,
   onCreateUpdateJob,
   onUpdateJobAction
 }: {
@@ -800,10 +812,12 @@ function ShipmentReviewWorkspace({
   onDownloadSummary: () => void;
   onDownloadSkuDirectory: () => void;
   selectedUpdateSrNumbers: Set<string>;
+  updateJobMode: TeamshipUpdateAgentMode;
   updateJobs: TeamshipUpdateJobSummary[];
   updateJobStatus: string | null;
   isUpdateJobLoading: boolean;
   onToggleUpdateSelection: (srNumber: string, selected: boolean) => void;
+  onUpdateJobModeChange: (mode: TeamshipUpdateAgentMode) => void;
   onCreateUpdateJob: () => void;
   onUpdateJobAction: (jobId: string, action: "approve" | "cancel" | "rescan") => void;
 }) {
@@ -900,6 +914,18 @@ function ShipmentReviewWorkspace({
           >
             {isSaving ? "Saving..." : "Save review run"}
           </button>
+          <label className="min-w-56 space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+            Agent mode
+            <select
+              value={updateJobMode}
+              onChange={(event) => onUpdateJobModeChange(event.target.value === "LIVE_API" ? "LIVE_API" : "DRY_RUN")}
+              disabled={isUpdateJobLoading || !review}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-semibold normal-case tracking-normal text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <option value="DRY_RUN">Dry run evidence only</option>
+              <option value="LIVE_API">Live Teamship update</option>
+            </select>
+          </label>
           <button
             type="button"
             onClick={onCreateUpdateJob}
@@ -909,6 +935,12 @@ function ShipmentReviewWorkspace({
             Create update draft ({selectedCount})
           </button>
         </div>
+        {updateJobMode === "LIVE_API" ? (
+          <p className="mt-3 max-w-3xl rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs font-semibold text-warning">
+            Live mode still requires approving the draft below and running the VM worker with live updates enabled. Use this only for
+            selected orders you want the agent to write back to Teamship.
+          </p>
+        ) : null}
       </div>
       <TeamshipUpdateJobsPanel
         jobs={updateJobs}
@@ -1008,7 +1040,7 @@ function TeamshipUpdateJobsPanel({
         <div>
           <h3 className="text-sm font-semibold text-foreground">Phase 2 Teamship update jobs</h3>
           <p className="mt-1 text-xs text-mutedForeground">
-            Create a draft from selected shipments, approve it for the VM agent, then rescan Teamship after the agent reports completion.
+            Create a dry-run or live draft from selected shipments, approve it for the VM agent, then rescan Teamship after the agent reports completion.
           </p>
           {status ? <p className="mt-2 text-xs font-semibold text-mutedForeground">{status}</p> : null}
         </div>
@@ -1030,7 +1062,9 @@ function TeamshipUpdateJobsPanel({
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-semibold text-foreground">{job.documentLabel}</span>
                     <span className={updateJobStatusClass(job.status)}>{formatUpdateJobStatus(job.status)}</span>
-                    {job.dryRun ? <span className="rounded-full bg-warning/15 px-2 py-0.5 text-xs font-bold text-warning">Dry run</span> : null}
+                    <span className={job.dryRun ? "rounded-full bg-warning/15 px-2 py-0.5 text-xs font-bold text-warning" : "rounded-full bg-danger/10 px-2 py-0.5 text-xs font-bold text-danger"}>
+                      {job.dryRun ? "Dry run" : "Live update"}
+                    </span>
                   </div>
                   <p className="mt-1 text-xs text-mutedForeground">
                     Created {formatDateTime(job.createdAt)} by {job.createdByName ?? "Unknown"} · {job.selectedSrNumbers.length} selected SRs
@@ -1043,6 +1077,7 @@ function TeamshipUpdateJobsPanel({
                   <p>
                     {job.summary.plannedFieldUpdateCount} field updates · {job.summary.plannedPalletRowCount} pallet/comment rows
                   </p>
+                  <p>Agent mode: {job.agentMode === "LIVE_API" ? "Live Teamship API" : "Dry-run evidence"}</p>
                   {job.lastVerificationAt ? <p>Last rescan {formatDateTime(job.lastVerificationAt)}</p> : null}
                 </div>
                 <div className="flex flex-wrap gap-2 lg:justify-end">
