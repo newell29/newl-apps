@@ -88,6 +88,13 @@ type TeamshipUpdateOrderSummary = {
   plannedPalletRowCount: number;
   validationIssues: string[];
   errorMessage: string | null;
+  agentEvidence: {
+    status: string;
+    fieldActionCount: number;
+    palletActionCount: number;
+    responseStatus: number | null;
+    error: string | null;
+  } | null;
 };
 
 type TeamshipUpdateJobSummary = {
@@ -1129,6 +1136,7 @@ function TeamshipUpdateJobsPanel({
                       <th className="px-3 py-2">SR</th>
                       <th className="px-3 py-2">Status</th>
                       <th className="px-3 py-2">Planned</th>
+                      <th className="px-3 py-2">Agent evidence</th>
                       <th className="px-3 py-2">Issues</th>
                       <th className="px-3 py-2">Teamship</th>
                     </tr>
@@ -1143,6 +1151,22 @@ function TeamshipUpdateJobsPanel({
                         </td>
                         <td className="px-3 py-2 text-mutedForeground">
                           {order.plannedFieldUpdateCount} fields · {order.plannedPalletRowCount} pallet/comment rows
+                        </td>
+                        <td className="max-w-xs px-3 py-2 text-mutedForeground">
+                          {order.agentEvidence ? (
+                            <div className="space-y-1">
+                              <p className="font-semibold text-foreground">
+                                {formatStatusLabel(order.agentEvidence.status)}
+                                {order.agentEvidence.responseStatus ? ` · HTTP ${order.agentEvidence.responseStatus}` : ""}
+                              </p>
+                              <p>
+                                {order.agentEvidence.fieldActionCount} field action(s) · {order.agentEvidence.palletActionCount} pallet action(s)
+                              </p>
+                              {order.agentEvidence.error ? <p className="font-semibold text-danger">{order.agentEvidence.error}</p> : null}
+                            </div>
+                          ) : (
+                            "Not run yet"
+                          )}
                         </td>
                         <td className="max-w-sm px-3 py-2 text-mutedForeground">
                           {order.validationIssues.length > 0 ? order.validationIssues.join("; ") : order.errorMessage ?? "None"}
