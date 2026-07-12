@@ -17,6 +17,7 @@ type CreateUpdateJobPayload = {
   sourcePdfFileName?: unknown;
   review?: unknown;
   selectedSrNumbers?: unknown;
+  agentMode?: unknown;
 };
 
 export async function GET() {
@@ -51,7 +52,8 @@ export async function POST(request: Request) {
       shipmentDate: readRequiredString(body.shipmentDate, "shipmentDate"),
       sourcePdfFileName: readOptionalString(body.sourcePdfFileName),
       review: readReviewResponse(body.review),
-      selectedSrNumbers: readStringArray(body.selectedSrNumbers)
+      selectedSrNumbers: readStringArray(body.selectedSrNumbers),
+      agentMode: readAgentMode(body.agentMode)
     });
     const jobs = await getTeamshipUpdateJobs(context);
 
@@ -79,6 +81,10 @@ function readOptionalString(value: unknown) {
 
 function readStringArray(value: unknown) {
   return Array.isArray(value) ? value.map(String).map((item) => item.trim()).filter(Boolean) : [];
+}
+
+function readAgentMode(value: unknown) {
+  return value === "LIVE_API" ? "LIVE_API" : "DRY_RUN";
 }
 
 function readReviewResponse(value: unknown): GarlandTeamshipReviewResponse {

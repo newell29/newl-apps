@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 
 import { getGarlandLearnedProductDimensionRecommendations } from "@/modules/shipment-documents/garland-product-dimension-directory";
 import { collectGarlandProductDimensionSkus } from "@/modules/shipment-documents/garland-product-dimensions";
+import type { TeamshipPhase2AgentMode } from "@/modules/shipment-documents/teamship-phase2-agent-execution";
 import {
   buildTeamshipPhase2DryRunPlan,
   type TeamshipPhase2DryRunPlan,
@@ -17,7 +18,6 @@ import { fetchTeamshipShippingOrdersForReview } from "@/server/integrations/team
 import type { AuthenticatedContext, TenantContext } from "@/server/tenant-context";
 
 const WORKFLOW_KEY = "GARLAND_TEAMSHIP_PHASE2_UPDATE";
-const AGENT_MODE = "DRY_RUN";
 
 export type TeamshipUpdateJobStatus =
   | "DRAFT"
@@ -86,6 +86,7 @@ type CreateTeamshipUpdateJobInput = {
   sourcePdfFileName: string | null;
   review: GarlandTeamshipReviewResponse;
   selectedSrNumbers: string[];
+  agentMode?: TeamshipPhase2AgentMode;
 };
 
 type TeamshipUpdateJobClient = typeof prisma & {
@@ -212,6 +213,7 @@ export async function createTeamshipUpdateJob(context: AuthenticatedContext, inp
     throw new Error("None of the selected shipments are available in the current review plan.");
   }
 
+  const agentMode = normalizeAgentMode(input.agentMode);
   const selectedPdfOrders = input.review.pdfOrders.filter((order) => selectedSrNumbers.includes(normalizeIdentifier(order.srNumber)));
   const selectedReviewResponse: GarlandTeamshipReviewResponse = {
     ...input.review,
@@ -234,8 +236,8 @@ export async function createTeamshipUpdateJob(context: AuthenticatedContext, inp
       shipmentDate: parseShipmentDate(input.shipmentDate),
       sourcePdfFileName: input.sourcePdfFileName,
       status: selectedOrders.some((order) => order.status === "BLOCKED") ? "NEEDS_REVIEW" : "DRAFT",
-      agentMode: AGENT_MODE,
-      dryRun: true,
+      agentMode,
+      dryRun: agentMode === "DRY_RUN",
       selectedSrNumbers: selectedSrNumbers as Prisma.InputJsonValue,
       summary: selectedPlan.summary as Prisma.InputJsonValue,
       sourceReviewResponse: selectedReviewResponse as unknown as Prisma.InputJsonValue,
@@ -553,6 +555,10 @@ function normalizeJobStatus(value: string): TeamshipUpdateJobStatus {
   return ["DRAFT", "APPROVED", "RUNNING", "SUCCESS", "FAILED", "NEEDS_REVIEW", "CANCELLED"].includes(value)
     ? (value as TeamshipUpdateJobStatus)
     : "NEEDS_REVIEW";
+}
+
+function normalizeAgentMode(value: TeamshipPhase2AgentMode | null | undefined): TeamshipPhase2AgentMode {
+  return value === "LIVE_API" ? "LIVE_API" : "DRY_RUN";
 }
 
 function normalizeOrderStatus(value: string): TeamshipUpdateOrderStatus {

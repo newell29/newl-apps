@@ -1,8 +1,15 @@
+import {
+  executeTeamshipPhase2Job,
+  type TeamshipPhase2AgentMode,
+  type TeamshipPhase2ExecutionResult
+} from "@/modules/shipment-documents/teamship-phase2-agent-execution";
+
 type WorkerOptions = {
   baseUrl: string;
   token: string;
   agentId: string;
   mode: "dry-run" | "live-api";
+  allowLiveUpdates: boolean;
   loop: boolean;
   intervalMs: number;
 };
@@ -26,6 +33,7 @@ type CompleteResponse = {
 type TeamshipUpdateJobSummary = {
   id: string;
   documentLabel: string;
+  agentMode: TeamshipPhase2AgentMode;
   status: string;
   dryRun: boolean;
   selectedSrNumbers: string[];
@@ -68,38 +76,6 @@ type TeamshipPhase2OrderPlan = {
     teamshipFields: Record<string, string | number>;
   }>;
   validationIssues: string[];
-};
-
-type AgentExecutionResult = {
-  mode: "DRY_RUN" | "LIVE_API";
-  dryRun: boolean;
-  wouldUpdateTeamship: boolean;
-  executedAt: string;
-  agentId: string;
-  jobId: string;
-  summary: TeamshipPhase2DryRunPlan["summary"];
-  orders: Array<{
-    psNumber: string;
-    srNumber: string;
-    teamshipOrderId: string | null;
-    status: TeamshipPhase2OrderPlan["status"];
-    fieldActions: Array<{
-      teamshipField: string;
-      from: string | null;
-      to: string;
-      reason: string;
-    }>;
-    palletActions: Array<{
-      rowNumber: number;
-      sku: string;
-      quantity: number;
-      hasUsableDimensions: boolean;
-      commodity: string;
-      fields: Record<string, string | number>;
-    }>;
-    validationIssues: string[];
-  }>;
-  notes: string[];
 };
 
 async function main() {
@@ -168,60 +144,24 @@ async function executeJob({
 }: {
   options: WorkerOptions;
   claimed: ClaimResponse & { job: TeamshipUpdateJobSummary; executionPayload: TeamshipPhase2DryRunPlan };
-}): Promise<AgentExecutionResult> {
-  if (options.mode === "live-api") {
-    throw new Error(
-      "LIVE_API mode is intentionally not enabled yet. Add a verified Teamship update adapter before setting TEAMSHIP_AGENT_MODE=live-api."
-    );
+}): Promise<TeamshipPhase2ExecutionResult> {
+  if (claimed.job.agentMode === "LIVE_API" && options.mode !== "live-api") {
+    throw new Error("This approved job requires LIVE_API mode, but the VM worker is running in dry-run mode.");
   }
 
-  return buildDryRunEvidence({ options, job: claimed.job, plan: claimed.executionPayload });
-}
-
-function buildDryRunEvidence({
-  options,
-  job,
-  plan
-}: {
-  options: WorkerOptions;
-  job: TeamshipUpdateJobSummary;
-  plan: TeamshipPhase2DryRunPlan;
-}): AgentExecutionResult {
-  return {
-    mode: "DRY_RUN",
-    dryRun: true,
-    wouldUpdateTeamship: false,
-    executedAt: new Date().toISOString(),
-    agentId: options.agentId,
-    jobId: job.id,
-    summary: plan.summary,
-    orders: plan.orders.map((order) => ({
-      psNumber: order.psNumber,
-      srNumber: order.srNumber,
-      teamshipOrderId: order.teamshipOrderId,
-      status: order.status,
-      fieldActions: order.plannedFieldUpdates.map((field) => ({
-        teamshipField: field.teamshipField,
-        from: field.currentValue,
-        to: field.proposedValue,
-        reason: field.reason
-      })),
-      palletActions: order.plannedPalletRows.map((row) => ({
-        rowNumber: row.rowNumber,
-        sku: row.sku,
-        quantity: row.quantity,
-        hasUsableDimensions: row.hasUsableDimensions,
-        commodity: row.commodity,
-        fields: row.teamshipFields
-      })),
-      validationIssues: order.validationIssues
-    })),
-    notes: [
-      "Dry-run worker did not call Teamship update endpoints and did not save changes.",
-      "The returned fieldActions and palletActions are the exact approved instructions a live adapter must execute.",
-      "Newl Apps will rescan Teamship after this completion response is accepted."
-    ]
-  };
+  return executeTeamshipPhase2Job({
+    job: {
+      id: claimed.job.id,
+      agentMode: claimed.job.agentMode,
+      dryRun: claimed.job.dryRun
+    },
+    plan: claimed.executionPayload,
+    credentials: claimed.teamshipCredentials!,
+    options: {
+      agentId: options.agentId,
+      allowLiveUpdates: options.allowLiveUpdates
+    }
+  });
 }
 
 async function claimNextJob(options: WorkerOptions): Promise<ClaimResponse> {
@@ -284,6 +224,7 @@ function readOptions(args: string[]): WorkerOptions {
   const token = readStringOption(args, "--token") ?? process.env.NEWL_AGENT_TOKEN ?? process.env.INGESTION_API_TOKEN;
   const agentId = readStringOption(args, "--agent-id") ?? process.env.NEWL_AGENT_ID ?? "teamship-vm-agent";
   const mode = readMode(readStringOption(args, "--mode") ?? process.env.TEAMSHIP_AGENT_MODE ?? "dry-run");
+  const allowLiveUpdates = args.includes("--allow-live-updates") || process.env.TEAMSHIP_ALLOW_LIVE_UPDATES === "true";
   const loop = args.includes("--loop") || process.env.TEAMSHIP_AGENT_LOOP === "true";
   const intervalMs = readPositiveNumber(readStringOption(args, "--interval-ms") ?? process.env.TEAMSHIP_AGENT_INTERVAL_MS, 30_000);
 
@@ -300,6 +241,7 @@ function readOptions(args: string[]): WorkerOptions {
     token,
     agentId,
     mode,
+    allowLiveUpdates,
     loop,
     intervalMs
   };

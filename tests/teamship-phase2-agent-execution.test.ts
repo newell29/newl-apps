@@ -1,0 +1,229 @@
+import { describe, expect, it, vi } from "vitest";
+
+import {
+  buildTeamshipUpdatePayload,
+  executeTeamshipPhase2Job
+} from "@/modules/shipment-documents/teamship-phase2-agent-execution";
+import { buildTeamshipPhase2DryRunPlan } from "@/modules/shipment-documents/teamship-phase2-dry-run";
+import type { GarlandTeamshipReviewResponse } from "@/modules/shipment-documents/teamship-review-types";
+
+describe("Teamship Phase 2 agent execution", () => {
+  it("builds the live update payload from approved field and pallet plans", () => {
+    const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
+    const payload = buildTeamshipUpdatePayload(plan.orders[0]!);
+
+    expect(payload).toMatchObject({
+      edi_field_3: "PPADD-CD",
+      pallets_count: 2,
+      pallet_1: 1,
+      pallet_1_length: 48,
+      pallet_1_width: 40,
+      pallet_1_height: 50,
+      pallet_1_weight: 500,
+      pallet_1_weight_unit: "lbs",
+      pallet_1_commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908",
+      pallet_2: 4,
+      pallet_2_commodity: "SKU: 8030445 QTY: 4"
+    });
+    expect(payload.pallet_dims).toEqual([
+      expect.objectContaining({
+        quantity: 1,
+        length: 48,
+        width: 40,
+        height: 50,
+        weight: 500,
+        commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908"
+      }),
+      expect.objectContaining({
+        quantity: 4,
+        length: 10,
+        width: 10,
+        height: 10,
+        weight: 25,
+        commodity: "SKU: 8030445 QTY: 4"
+      })
+    ]);
+  });
+
+  it("blocks live jobs unless the VM worker explicitly allows live updates", async () => {
+    const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
+
+    await expect(
+      executeTeamshipPhase2Job({
+        job: {
+          id: "job_1",
+          agentMode: "LIVE_API",
+          dryRun: false
+        },
+        plan,
+        credentials: {
+          email: "teamship@example.com",
+          password: "secret",
+          apiBaseUrl: "https://teamship.example/api"
+        },
+        options: {
+          agentId: "agent",
+          allowLiveUpdates: false,
+          fetchImpl: vi.fn() as unknown as typeof fetch
+        }
+      })
+    ).rejects.toThrow("Live Teamship updates require");
+  });
+
+  it("logs in and submits a live PATCH for each ready order when allowed", async () => {
+    const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ data: { token: "token_123" } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 30202 } }, 200));
+
+    const result = await executeTeamshipPhase2Job({
+      job: {
+        id: "job_1",
+        agentMode: "LIVE_API",
+        dryRun: false
+      },
+      plan,
+      credentials: {
+        email: "teamship@example.com",
+        password: "secret",
+        apiBaseUrl: "https://teamship.example/api"
+      },
+      options: {
+        agentId: "agent",
+        allowLiveUpdates: true,
+        fetchImpl: fetchImpl as unknown as typeof fetch
+      }
+    });
+
+    expect(result).toMatchObject({
+      mode: "LIVE_API",
+      dryRun: false,
+      wouldUpdateTeamship: true
+    });
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      "https://teamship.example/api/v1/ship-inventories/30202",
+      expect.objectContaining({
+        method: "PATCH",
+        headers: expect.objectContaining({
+          authorization: "Bearer token_123"
+        }),
+        body: expect.stringContaining("\"edi_field_3\":\"PPADD-CD\"")
+      })
+    );
+  });
+});
+
+function jsonResponse(body: unknown, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body
+  };
+}
+
+function sampleReview(): GarlandTeamshipReviewResponse {
+  return {
+    summary: {
+      pdfOrderCount: 1,
+      teamshipMatchedCount: 1,
+      passedCount: 0,
+      failedCount: 1,
+      missingTeamshipCount: 0,
+      pendingTeamshipCount: 0,
+      noPdfCount: 0,
+      skippedAlreadyReviewedCount: 0
+    },
+    fetchedAt: "2026-07-12T00:00:00.000Z",
+    teamshipAlerts: [],
+    pdfOrders: [
+      {
+        pageNumbers: [1],
+        psNumber: "PS210206",
+        srNumber: "SR808478",
+        shipToCode: null,
+        shipToName: "J.R. MAHONEY LTD.",
+        shipToAddress1: "1810 KINGS ROAD",
+        shipToCity: "SYDNEY",
+        shipToState: "NS",
+        shipToPostalCode: "B1L 1C5",
+        shipToCountry: "Canada",
+        shipToPo: "0000037656",
+        freightTerms: "PPADD-CD",
+        orderDate: null,
+        shipVia: "MIDLAND",
+        instructions: "MIDLAND THIRD PARTY ACCOUNT",
+        rawText: "",
+        items: [
+          {
+            lineNumber: 1,
+            sku: "E1SGHMV6XHU3US",
+            description: "",
+            quantity: 1,
+            dueShipDate: null,
+            serialNumbers: ["2604816191908"]
+          },
+          {
+            lineNumber: 2,
+            sku: "8030445",
+            description: "",
+            quantity: 4,
+            dueShipDate: null,
+            serialNumbers: []
+          }
+        ]
+      }
+    ],
+    reviews: [
+      {
+        psNumber: "PS210206",
+        srNumber: "SR808478",
+        pageNumbers: [1],
+        status: "FAIL",
+        teamshipOrderId: "30202",
+        teamshipUrl: "https://members.fulfillit.io/ship-inventories/30202",
+        issueCount: 1,
+        alert: null,
+        fields: [
+          {
+            key: "freight_terms",
+            label: "Freight terms",
+            status: "MISSING",
+            pdfValue: "PPADD-CD",
+            teamshipValue: null,
+            message: "PDF has a value, but Teamship does not."
+          }
+        ],
+        productDimensions: [
+          {
+            sku: "E1SGHMV6XHU3US",
+            source: "TEAMSHIP_LEARNED",
+            productType: null,
+            quantity: null,
+            lengthIn: 48,
+            widthIn: 40,
+            heightIn: 50,
+            weightLb: 500,
+            weightUnit: "lbs",
+            confidence: "HIGH",
+            note: "Learned from Teamship."
+          },
+          {
+            sku: "8030445",
+            source: "GARLAND_REFERENCE",
+            productType: null,
+            quantity: null,
+            lengthIn: 10,
+            widthIn: 10,
+            heightIn: 10,
+            weightLb: 25,
+            weightUnit: "lbs",
+            confidence: "MEDIUM",
+            note: "Garland reference."
+          }
+        ]
+      }
+    ]
+  };
+}
