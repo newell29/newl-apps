@@ -1727,10 +1727,8 @@ function ItemDetailsComparison({ review }: { review: GarlandTeamshipOrderReview 
             <thead className="bg-muted/40 text-xs uppercase tracking-wide text-mutedForeground">
               <tr>
                 <th className="px-3 py-2">Line</th>
-                <th className="px-3 py-2">Garland SKU</th>
-                <th className="px-3 py-2">Garland serial(s)</th>
-                <th className="px-3 py-2">Teamship SKU</th>
-                <th className="px-3 py-2">Teamship serial(s)</th>
+                <th className="px-3 py-2">Garland PDF item</th>
+                <th className="px-3 py-2">Teamship item</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -1741,10 +1739,8 @@ function ItemDetailsComparison({ review }: { review: GarlandTeamshipOrderReview 
                 return (
                   <tr key={`${review.srNumber}-item-${index}`}>
                     <td className="px-3 py-2 font-semibold text-foreground">{index + 1}</td>
-                    <td className="px-3 py-2 text-mutedForeground">{formatItemSku(pdfItem)}</td>
-                    <td className="px-3 py-2 text-mutedForeground">{formatItemSerials(pdfItem)}</td>
-                    <td className="px-3 py-2 text-mutedForeground">{formatItemSku(teamshipItem)}</td>
-                    <td className="px-3 py-2 text-mutedForeground">{formatItemSerials(teamshipItem)}</td>
+                    <td className="px-3 py-2 text-mutedForeground">{formatSkuSerialItem(pdfItem)}</td>
+                    <td className="px-3 py-2 text-mutedForeground">{formatSkuSerialItem(teamshipItem)}</td>
                   </tr>
                 );
               })}
@@ -2583,20 +2579,15 @@ function formatDimensionSource(source: GarlandTeamshipOrderReview["productDimens
   return source === "TEAMSHIP_PALLET" ? "Teamship pallet" : "Garland sheet";
 }
 
-function formatItemSku(item: GarlandTeamshipOrderReview["pdfItems"][number] | null) {
+function formatSkuSerialItem(item: GarlandTeamshipOrderReview["pdfItems"][number] | null) {
   if (!item?.sku) {
-    return "Blank";
+    return item && item.serialNumbers.length > 0 ? `SKU blank | SN: ${item.serialNumbers.join(", ")}` : "Blank";
   }
 
-  return item.quantity ? `${item.sku} (qty ${item.quantity})` : item.sku;
-}
+  const skuText = item.quantity ? `${item.sku} (qty ${item.quantity})` : item.sku;
+  const serialText = item.serialNumbers.length > 0 ? item.serialNumbers.join(", ") : "Blank";
 
-function formatItemSerials(item: GarlandTeamshipOrderReview["pdfItems"][number] | null) {
-  if (!item || item.serialNumbers.length === 0) {
-    return "Blank";
-  }
-
-  return item.serialNumbers.join(", ");
+  return `${skuText} | SN: ${serialText}`;
 }
 
 function formatDimensions(dimension: GarlandTeamshipOrderReview["productDimensions"][number]) {
