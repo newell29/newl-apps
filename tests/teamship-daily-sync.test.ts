@@ -13,6 +13,10 @@ const prismaMock = vi.hoisted(() => ({
     findMany: vi.fn(),
     upsert: vi.fn(),
     count: vi.fn()
+  },
+  garlandProductDimensionObservation: {
+    createMany: vi.fn(),
+    findMany: vi.fn()
   }
 }));
 
@@ -48,6 +52,8 @@ describe("Teamship daily sync", () => {
     prismaMock.teamshipDailySyncRun.update.mockResolvedValue({});
     prismaMock.teamshipSyncedOrder.upsert.mockResolvedValue({});
     prismaMock.teamshipSyncedOrder.count.mockResolvedValue(1);
+    prismaMock.garlandProductDimensionObservation.createMany.mockResolvedValue({ count: 0 });
+    prismaMock.garlandProductDimensionObservation.findMany.mockResolvedValue([]);
     fetchTeamshipShippingOrdersForReviewMock.mockResolvedValue([teamshipOrder]);
   });
 
@@ -120,6 +126,69 @@ describe("Teamship daily sync", () => {
       insertedCount: 0,
       updatedCount: 1,
       skippedCount: 0
+    });
+  });
+
+  it("learns valid non-UPS Teamship pallet dimensions during sync", async () => {
+    prismaMock.teamshipSyncedOrder.findMany.mockResolvedValue([]);
+    prismaMock.garlandProductDimensionObservation.createMany.mockResolvedValue({ count: 1 });
+    fetchTeamshipShippingOrdersForReviewMock.mockResolvedValue([
+      {
+        ...teamshipOrder,
+        pallets: [
+          {
+            quantity: 1,
+            length: 54,
+            width: 30,
+            height: 40,
+            weight: 441,
+            weight_unit: "lbs",
+            commodity: "SKU: GTGG48-GT48M-5016, SN: 2606891100446"
+          }
+        ]
+      },
+      {
+        ...teamshipOrder,
+        id: "teamship-ups",
+        shipment_id: "SR812346",
+        carrier: "UPS CD STD",
+        pallets: [
+          {
+            quantity: 1,
+            length: 54,
+            width: 30,
+            height: 40,
+            weight: 441,
+            weight_unit: "lbs",
+            commodity: "SKU: SHOULD-NOT-LEARN"
+          }
+        ]
+      }
+    ]);
+
+    await syncTeamshipDailyOrders({
+      tenantId: "tenant-1",
+      shipmentDate: "2026-07-11",
+      triggerSource: "MANUAL"
+    });
+
+    expect(prismaMock.garlandProductDimensionObservation.createMany).toHaveBeenCalledWith({
+      skipDuplicates: true,
+      data: [
+        expect.objectContaining({
+          tenantId: "tenant-1",
+          sku: "GTGG48-GT48M-5016",
+          sourceTeamshipOrderId: "teamship-1",
+          sourceSrNumber: "SR812345",
+          carrier: "MIDLAND",
+          quantity: 1,
+          lengthIn: 54,
+          widthIn: 30,
+          heightIn: 40,
+          weightLb: 441,
+          weightUnit: "lbs"
+        })
+      ]
     });
   });
 });

@@ -33,10 +33,12 @@ for (const row of garlandReferenceRows as GarlandReferenceRow[]) {
 
 export function buildGarlandProductDimensionRecommendations({
   pdfOrder,
-  teamshipOrder
+  teamshipOrder,
+  learnedProductDimensions = []
 }: {
   pdfOrder: GarlandPdfShippingOrder | null;
   teamshipOrder: TeamshipShippingOrderDetail | null;
+  learnedProductDimensions?: GarlandProductDimensionRecommendation[];
 }): GarlandProductDimensionRecommendation[] {
   const skuOrder = new Set<string>();
   const recommendations: GarlandProductDimensionRecommendation[] = [];
@@ -63,6 +65,12 @@ export function buildGarlandProductDimensionRecommendations({
     return dedupeRecommendations(Array.from(skuOrder).map(buildUpsRuleRecommendation));
   }
 
+  const learnedBySku = groupRecommendationsBySku(learnedProductDimensions);
+
+  for (const sku of skuOrder) {
+    recommendations.push(...(learnedBySku.get(sku) ?? []));
+  }
+
   for (const sku of skuOrder) {
     for (const row of referenceBySku.get(sku) ?? []) {
       recommendations.push({
@@ -84,6 +92,34 @@ export function buildGarlandProductDimensionRecommendations({
   return dedupeRecommendations(recommendations);
 }
 
+export function collectGarlandProductDimensionSkus({
+  pdfOrders = [],
+  teamshipOrders = []
+}: {
+  pdfOrders?: GarlandPdfShippingOrder[];
+  teamshipOrders?: TeamshipShippingOrderDetail[];
+}) {
+  const skuOrder = new Set<string>();
+
+  for (const pdfOrder of pdfOrders) {
+    for (const item of pdfOrder.items) {
+      addSku(skuOrder, item.sku);
+    }
+  }
+
+  for (const teamshipOrder of teamshipOrders) {
+    for (const item of teamshipOrder.items ?? []) {
+      addSku(skuOrder, item.sku);
+    }
+
+    for (const observedRow of extractTeamshipPalletDimensionRows(teamshipOrder)) {
+      addSku(skuOrder, observedRow.sku);
+    }
+  }
+
+  return Array.from(skuOrder);
+}
+
 function buildUpsRuleRecommendation(sku: string): GarlandProductDimensionRecommendation {
   return {
     sku,
@@ -100,7 +136,7 @@ function buildUpsRuleRecommendation(sku: string): GarlandProductDimensionRecomme
   };
 }
 
-function extractTeamshipPalletDimensionRows(order: TeamshipShippingOrderDetail): GarlandProductDimensionRecommendation[] {
+export function extractTeamshipPalletDimensionRows(order: TeamshipShippingOrderDetail): GarlandProductDimensionRecommendation[] {
   const rows: GarlandProductDimensionRecommendation[] = [];
   const pallets = [...(order.pallets ?? []), ...(order.pallet_dims ?? [])];
 
@@ -113,6 +149,17 @@ function extractTeamshipPalletDimensionRows(order: TeamshipShippingOrderDetail):
   }
 
   return rows;
+}
+
+export function isLearnableTeamshipDimension(recommendation: GarlandProductDimensionRecommendation) {
+  return (
+    recommendation.source === "TEAMSHIP_PALLET" &&
+    recommendation.confidence !== "LOW" &&
+    isPositiveNumber(recommendation.lengthIn) &&
+    isPositiveNumber(recommendation.widthIn) &&
+    isPositiveNumber(recommendation.heightIn) &&
+    isPositiveNumber(recommendation.weightLb)
+  );
 }
 
 function buildObservedRecommendation(sku: string, pallet: TeamshipPalletDim): GarlandProductDimensionRecommendation {
@@ -222,7 +269,7 @@ function normalizeSku(value: string | null | undefined) {
   return value?.trim().toUpperCase().replace(/\s+/g, " ") || null;
 }
 
-function isUpsGarlandOrder({
+export function isUpsGarlandOrder({
   pdfOrder,
   teamshipOrder
 }: {
@@ -248,10 +295,36 @@ function normalizeCarrier(value: string | null | undefined) {
   return value?.toUpperCase().replace(/[^A-Z0-9]/g, "") ?? "";
 }
 
+function groupRecommendationsBySku(recommendations: GarlandProductDimensionRecommendation[]) {
+  const grouped = new Map<string, GarlandProductDimensionRecommendation[]>();
+
+  for (const recommendation of recommendations) {
+    const sku = normalizeSku(recommendation.sku);
+
+    if (!sku) {
+      continue;
+    }
+
+    const rows = grouped.get(sku) ?? [];
+    rows.push({ ...recommendation, sku });
+    grouped.set(sku, rows);
+  }
+
+  return grouped;
+}
+
+function isPositiveNumber(value: number | null) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
 function sourceRank(source: GarlandProductDimensionRecommendation["source"]) {
   if (source === "UPS_RULE") {
     return 0;
   }
 
-  return source === "TEAMSHIP_PALLET" ? 1 : 2;
+  if (source === "TEAMSHIP_PALLET") {
+    return 1;
+  }
+
+  return source === "TEAMSHIP_LEARNED" ? 2 : 3;
 }

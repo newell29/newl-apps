@@ -151,7 +151,7 @@ export type GarlandTeamshipReviewField = {
 
 export type GarlandProductDimensionRecommendation = {
   sku: string;
-  source: "UPS_RULE" | "TEAMSHIP_PALLET" | "GARLAND_REFERENCE";
+  source: "UPS_RULE" | "TEAMSHIP_PALLET" | "TEAMSHIP_LEARNED" | "GARLAND_REFERENCE";
   productType: string | null;
   quantity: number | null;
   lengthIn: number | null;

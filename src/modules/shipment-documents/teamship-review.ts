@@ -1,5 +1,6 @@
 import type {
   GarlandPdfShippingOrder,
+  GarlandProductDimensionRecommendation,
   GarlandShippingOrderItem,
   GarlandTeamshipOrderReview,
   GarlandTeamshipReviewField,
@@ -335,6 +336,7 @@ export function buildGarlandTeamshipReview(
   options: {
     includeUnmatchedTeamshipOrders?: boolean;
     skippedAlreadyReviewedOrders?: GarlandPdfShippingOrder[];
+    learnedProductDimensions?: GarlandProductDimensionRecommendation[];
   } = {}
 ): GarlandTeamshipReviewResponse {
   const alertByShipmentId = new Map(
@@ -344,7 +346,7 @@ export function buildGarlandTeamshipReview(
   const reviews = pdfOrders.map((pdfOrder) => {
     const teamshipOrder = teamshipByShipmentId.get(normalizeIdentifier(pdfOrder.srNumber)) ?? null;
     const alert = alertByShipmentId.get(normalizeIdentifier(pdfOrder.srNumber)) ?? null;
-    return buildOrderReview(pdfOrder, teamshipOrder, alert);
+    return buildOrderReview(pdfOrder, teamshipOrder, alert, options.learnedProductDimensions ?? []);
   });
   const skippedAlreadyReviewedReviews = (options.skippedAlreadyReviewedOrders ?? []).map(buildSkippedAlreadyReviewedReview);
   const skippedShipmentIds = new Set(skippedAlreadyReviewedReviews.map((review) => normalizeIdentifier(review.srNumber)));
@@ -357,7 +359,7 @@ export function buildGarlandTeamshipReview(
         continue;
       }
 
-      reviews.push(buildNoPdfReview(teamshipOrder));
+      reviews.push(buildNoPdfReview(teamshipOrder, options.learnedProductDimensions ?? []));
     }
   }
 
@@ -391,7 +393,8 @@ function groupTeamshipOrdersByShipmentId(teamshipOrders: TeamshipShippingOrderDe
 function buildOrderReview(
   pdfOrder: GarlandPdfShippingOrder,
   teamshipOrder: TeamshipShippingOrderDetail | null,
-  alert: TeamshipAlertOrder | null
+  alert: TeamshipAlertOrder | null,
+  learnedProductDimensions: GarlandProductDimensionRecommendation[]
 ): GarlandTeamshipOrderReview {
   if (!teamshipOrder) {
     if (alert) {
@@ -404,7 +407,7 @@ function buildOrderReview(
         teamshipUrl: null,
         issueCount: 0,
         alert,
-        productDimensions: buildGarlandProductDimensionRecommendations({ pdfOrder, teamshipOrder: null }),
+        productDimensions: buildGarlandProductDimensionRecommendations({ pdfOrder, teamshipOrder: null, learnedProductDimensions }),
         fields: [
           {
             key: "teamshipAlert",
@@ -427,7 +430,7 @@ function buildOrderReview(
       teamshipUrl: null,
       issueCount: 1,
       alert: null,
-      productDimensions: buildGarlandProductDimensionRecommendations({ pdfOrder, teamshipOrder: null }),
+      productDimensions: buildGarlandProductDimensionRecommendations({ pdfOrder, teamshipOrder: null, learnedProductDimensions }),
       fields: [
         {
           key: "teamshipOrder",
@@ -468,12 +471,15 @@ function buildOrderReview(
     teamshipUrl: teamshipOrder.url ?? null,
     issueCount,
     alert,
-    productDimensions: buildGarlandProductDimensionRecommendations({ pdfOrder, teamshipOrder }),
+    productDimensions: buildGarlandProductDimensionRecommendations({ pdfOrder, teamshipOrder, learnedProductDimensions }),
     fields
   };
 }
 
-function buildNoPdfReview(teamshipOrder: TeamshipShippingOrderDetail): GarlandTeamshipOrderReview {
+function buildNoPdfReview(
+  teamshipOrder: TeamshipShippingOrderDetail,
+  learnedProductDimensions: GarlandProductDimensionRecommendation[]
+): GarlandTeamshipOrderReview {
   const srNumber = stringifyValue(readTeamshipShipmentId(teamshipOrder)) ?? "UNKNOWN";
 
   return {
@@ -485,7 +491,7 @@ function buildNoPdfReview(teamshipOrder: TeamshipShippingOrderDetail): GarlandTe
     teamshipUrl: teamshipOrder.url ?? null,
     issueCount: 1,
     alert: null,
-    productDimensions: buildGarlandProductDimensionRecommendations({ pdfOrder: null, teamshipOrder }),
+    productDimensions: buildGarlandProductDimensionRecommendations({ pdfOrder: null, teamshipOrder, learnedProductDimensions }),
     fields: [
       {
         key: "uploadedPdf",

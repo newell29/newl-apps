@@ -449,6 +449,7 @@ model Tenant {
   teamshipReviewOrders                TeamshipReviewOrder[]
   teamshipDailySyncRuns               TeamshipDailySyncRun[]
   teamshipSyncedOrders                TeamshipSyncedOrder[]
+  garlandProductDimensionObservations GarlandProductDimensionObservation[]
   cashflowCustomers                   CashflowCustomer[]
   cashflowCustomerAliases             CashflowCustomerAlias[]
   cashflowFiles                       CashflowFile[]
@@ -933,6 +934,33 @@ model TeamshipSyncedOrder {
   @@index([tenantId, srNumber])
   @@index([tenantId, teamshipOrderId])
   @@index([tenantId, lastSyncedAt])
+}
+
+model GarlandProductDimensionObservation {
+  id                    String   @id @default(cuid())
+  tenantId              String
+  observationKey        String
+  sku                   String
+  source                String   @default("TEAMSHIP_PALLET")
+  sourceTeamshipOrderId String?
+  sourceSrNumber        String?
+  carrier               String?
+  commodity             String?
+  quantity              Float?
+  lengthIn              Float
+  widthIn               Float
+  heightIn              Float
+  weightLb              Float
+  weightUnit            String?  @default("lbs")
+  observedAt            DateTime @default(now())
+  createdAt             DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, observationKey])
+  @@index([tenantId, sku])
+  @@index([tenantId, sourceSrNumber])
+  @@index([tenantId, observedAt])
 }
 
 model IntegrationCredential {

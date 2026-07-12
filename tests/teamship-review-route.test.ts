@@ -4,6 +4,7 @@ import type { GarlandPdfShippingOrder, TeamshipShippingOrderDetail } from "@/mod
 
 const getTeamshipSyncedOrdersForReviewMock = vi.hoisted(() => vi.fn());
 const getReviewedTeamshipSrNumbersMock = vi.hoisted(() => vi.fn());
+const getGarlandLearnedProductDimensionRecommendationsMock = vi.hoisted(() => vi.fn());
 const fetchTeamshipShippingOrdersForReviewMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/server/tenant-context", () => ({
@@ -22,6 +23,10 @@ vi.mock("@/server/auth/authorization", () => ({
 
 vi.mock("@/modules/shipment-documents/teamship-daily-sync", () => ({
   getTeamshipSyncedOrdersForReview: getTeamshipSyncedOrdersForReviewMock
+}));
+
+vi.mock("@/modules/shipment-documents/garland-product-dimension-directory", () => ({
+  getGarlandLearnedProductDimensionRecommendations: getGarlandLearnedProductDimensionRecommendationsMock
 }));
 
 vi.mock("@/modules/shipment-documents/teamship-review-history", () => ({
@@ -61,6 +66,7 @@ describe("Teamship review route", () => {
 
     getReviewedTeamshipSrNumbersMock.mockResolvedValue(new Set());
     getTeamshipSyncedOrdersForReviewMock.mockResolvedValue([cachedOrder]);
+    getGarlandLearnedProductDimensionRecommendationsMock.mockResolvedValue([]);
     fetchTeamshipShippingOrdersForReviewMock.mockResolvedValue([freshOrder]);
 
     const response = await POST(
