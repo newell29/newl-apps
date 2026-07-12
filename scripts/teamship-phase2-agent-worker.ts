@@ -112,10 +112,12 @@ async function runOnce(options: WorkerOptions) {
     await completeJob({
       options,
       jobId: claimed.job.id,
-      status: "SUCCESS",
+      status: result.hasFailures ? "NEEDS_REVIEW" : "SUCCESS",
       result
     });
-    console.log(`Reported ${result.mode} completion for job ${claimed.job.id}.`);
+    console.log(
+      `Reported ${result.mode} ${result.hasFailures ? "needs-review" : "success"} completion for job ${claimed.job.id}.`
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown Teamship Phase 2 worker error.";
     await completeJob({

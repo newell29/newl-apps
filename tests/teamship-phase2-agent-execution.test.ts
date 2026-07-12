@@ -113,6 +113,43 @@ describe("Teamship Phase 2 agent execution", () => {
       })
     );
   });
+
+  it("preserves per-order evidence when a live Teamship update fails", async () => {
+    const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ data: { token: "token_123" } }))
+      .mockResolvedValueOnce(jsonResponse({ error: "bad request" }, 400));
+
+    const result = await executeTeamshipPhase2Job({
+      job: {
+        id: "job_1",
+        agentMode: "LIVE_API",
+        dryRun: false
+      },
+      plan,
+      credentials: {
+        email: "teamship@example.com",
+        password: "secret",
+        apiBaseUrl: "https://teamship.example/api"
+      },
+      options: {
+        agentId: "agent",
+        allowLiveUpdates: true,
+        fetchImpl: fetchImpl as unknown as typeof fetch
+      }
+    });
+
+    expect(result.hasFailures).toBe(true);
+    expect(result.orders[0]).toMatchObject({
+      srNumber: "SR808478",
+      status: "FAILED",
+      error: "Teamship update failed with status 400.",
+      updatePayload: expect.objectContaining({
+        edi_field_3: "PPADD-CD"
+      })
+    });
+  });
 });
 
 function jsonResponse(body: unknown, status = 200) {

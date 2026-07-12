@@ -29,6 +29,7 @@ export type TeamshipPhase2ExecutionResult = {
   jobId: string;
   summary: TeamshipPhase2DryRunPlan["summary"];
   orders: TeamshipPhase2ExecutionOrderResult[];
+  hasFailures: boolean;
   notes: string[];
 };
 
@@ -106,6 +107,7 @@ export function buildDryRunEvidence({
     jobId: job.id,
     summary: plan.summary,
     orders: plan.orders.map((order) => mapPlannedOrder(order)),
+    hasFailures: false,
     notes: [
       "Dry-run worker did not call Teamship update endpoints and did not save changes.",
       "The returned fieldActions and palletActions are the exact approved instructions a live adapter must execute.",
@@ -171,10 +173,6 @@ async function executeLiveApiUpdates({
 
   const failedOrders = orders.filter((order) => order.status === "FAILED");
 
-  if (failedOrders.length > 0) {
-    throw new Error(`Live Teamship update failed for ${failedOrders.length} order(s): ${failedOrders.map((order) => order.srNumber).join(", ")}`);
-  }
-
   return {
     mode: "LIVE_API",
     dryRun: false,
@@ -184,8 +182,11 @@ async function executeLiveApiUpdates({
     jobId: job.id,
     summary: plan.summary,
     orders,
+    hasFailures: failedOrders.length > 0,
     notes: [
-      "Live API worker submitted approved order-level fields and pallet rows to Teamship.",
+      failedOrders.length > 0
+        ? `Live API worker completed with ${failedOrders.length} failed order(s): ${failedOrders.map((order) => order.srNumber).join(", ")}.`
+        : "Live API worker submitted approved order-level fields and pallet rows to Teamship.",
       "Newl Apps will rescan Teamship after this completion response is accepted."
     ]
   };
