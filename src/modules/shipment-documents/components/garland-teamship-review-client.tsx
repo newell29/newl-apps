@@ -2986,6 +2986,10 @@ function formatDimensionSource(source: GarlandTeamshipOrderReview["productDimens
     return "CSR override";
   }
 
+  if (source === "CSR_LEARNED") {
+    return "CSR learned";
+  }
+
   if (source === "UPS_RULE") {
     return "UPS rule";
   }

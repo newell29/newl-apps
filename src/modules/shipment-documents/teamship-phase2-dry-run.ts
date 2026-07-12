@@ -316,15 +316,19 @@ function dimensionSourceRank(recommendation: GarlandProductDimensionRecommendati
     return 1;
   }
 
-  if (recommendation.source === "TEAMSHIP_PALLET") {
+  if (recommendation.source === "CSR_LEARNED") {
     return 2;
   }
 
-  if (recommendation.source === "TEAMSHIP_LEARNED") {
+  if (recommendation.source === "TEAMSHIP_PALLET") {
     return 3;
   }
 
-  return 4;
+  if (recommendation.source === "TEAMSHIP_LEARNED") {
+    return 4;
+  }
+
+  return 5;
 }
 
 function buildCommodity(item: GarlandShippingOrderItem, quantity: number) {

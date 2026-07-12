@@ -1,6 +1,9 @@
 import { Prisma } from "@prisma/client";
 
-import { getGarlandLearnedProductDimensionRecommendations } from "@/modules/shipment-documents/garland-product-dimension-directory";
+import {
+  getGarlandLearnedProductDimensionRecommendations,
+  recordGarlandCsrProductDimensionOverrides
+} from "@/modules/shipment-documents/garland-product-dimension-directory";
 import { collectGarlandProductDimensionSkus } from "@/modules/shipment-documents/garland-product-dimensions";
 import type { TeamshipPhase2AgentMode } from "@/modules/shipment-documents/teamship-phase2-agent-execution";
 import {
@@ -278,6 +281,12 @@ export async function createTeamshipUpdateJob(context: AuthenticatedContext, inp
       }
     },
     include: includeJobDetails
+  });
+  await recordGarlandCsrProductDimensionOverrides({
+    tenantId: context.tenantId,
+    documentLabel: input.documentLabel,
+    pdfOrders: selectedPdfOrders,
+    dimensions: selectedReviewResponse.reviews.flatMap((review) => review.productDimensions)
   });
 
   return mapUpdateJob(job);

@@ -4,6 +4,7 @@ import {
   isUpsGarlandOrder
 } from "@/modules/shipment-documents/garland-product-dimensions";
 import type {
+  GarlandPdfShippingOrder,
   GarlandProductDimensionRecommendation,
   TeamshipShippingOrderDetail
 } from "@/modules/shipment-documents/teamship-review-types";
@@ -55,6 +56,7 @@ type LearnedDimensionAggregate = {
   count: number;
   latestObservedAt: Date;
   sourceSrNumbers: Set<string>;
+  sources: Set<string>;
 };
 
 export async function recordGarlandProductDimensionObservations({
@@ -65,6 +67,40 @@ export async function recordGarlandProductDimensionObservations({
   orders: TeamshipShippingOrderDetail[];
 }) {
   const rows = orders.flatMap((order) => buildObservationRows({ tenantId, order }));
+
+  if (rows.length === 0) {
+    return { observedCount: 0, insertedCount: 0 };
+  }
+
+  const client = prisma as ProductDimensionObservationClient;
+  const result = await client.garlandProductDimensionObservation.createMany({
+    data: rows,
+    skipDuplicates: true
+  });
+
+  return {
+    observedCount: rows.length,
+    insertedCount: result.count
+  };
+}
+
+export async function recordGarlandCsrProductDimensionOverrides({
+  tenantId,
+  documentLabel,
+  pdfOrders,
+  dimensions
+}: {
+  tenantId: string;
+  documentLabel: string;
+  pdfOrders: GarlandPdfShippingOrder[];
+  dimensions: GarlandProductDimensionRecommendation[];
+}) {
+  const rows = buildCsrOverrideRows({
+    tenantId,
+    documentLabel,
+    pdfOrders,
+    dimensions
+  });
 
   if (rows.length === 0) {
     return { observedCount: 0, insertedCount: 0 };
@@ -200,6 +236,88 @@ function buildObservationRows({
   return rows;
 }
 
+function buildCsrOverrideRows({
+  tenantId,
+  documentLabel,
+  pdfOrders,
+  dimensions
+}: {
+  tenantId: string;
+  documentLabel: string;
+  pdfOrders: GarlandPdfShippingOrder[];
+  dimensions: GarlandProductDimensionRecommendation[];
+}): ProductDimensionObservationCreateInput[] {
+  const pdfOrderBySku = new Map<string, GarlandPdfShippingOrder>();
+
+  for (const order of pdfOrders) {
+    for (const item of order.items) {
+      const sku = normalizeSku(item.sku);
+
+      if (sku && !pdfOrderBySku.has(sku)) {
+        pdfOrderBySku.set(sku, order);
+      }
+    }
+  }
+
+  const rows: ProductDimensionObservationCreateInput[] = [];
+
+  for (const dimension of dimensions) {
+    if (dimension.source !== "CSR_OVERRIDE") {
+      continue;
+    }
+
+    const sku = normalizeSku(dimension.sku);
+
+    if (
+      !sku ||
+      dimension.lengthIn === null ||
+      dimension.widthIn === null ||
+      dimension.heightIn === null ||
+      dimension.weightLb === null ||
+      !isPositiveNumber(dimension.lengthIn) ||
+      !isPositiveNumber(dimension.widthIn) ||
+      !isPositiveNumber(dimension.heightIn) ||
+      !isPositiveNumber(dimension.weightLb)
+    ) {
+      continue;
+    }
+
+    const pdfOrder = pdfOrderBySku.get(sku) ?? null;
+    const sourceSrNumber = pdfOrder?.srNumber ?? null;
+    const sourceTeamshipOrderId = null;
+    const sourceOrderKey = normalizeObservationPart(sourceSrNumber ?? documentLabel);
+    const observationKey = [
+      "CSR_OVERRIDE",
+      sourceOrderKey,
+      sku,
+      formatNumberKey(dimension.lengthIn),
+      formatNumberKey(dimension.widthIn),
+      formatNumberKey(dimension.heightIn),
+      formatNumberKey(dimension.weightLb),
+      normalizeObservationPart(dimension.weightUnit ?? "lbs")
+    ].join("|");
+
+    rows.push({
+      tenantId,
+      observationKey,
+      sku,
+      source: "CSR_OVERRIDE",
+      sourceTeamshipOrderId,
+      sourceSrNumber,
+      carrier: pdfOrder?.shipVia ?? null,
+      commodity: null,
+      quantity: dimension.quantity,
+      lengthIn: dimension.lengthIn,
+      widthIn: dimension.widthIn,
+      heightIn: dimension.heightIn,
+      weightLb: dimension.weightLb,
+      weightUnit: dimension.weightUnit ?? "lbs"
+    });
+  }
+
+  return rows;
+}
+
 function aggregateObservations(observations: ProductDimensionObservationRecord[]) {
   const aggregates = new Map<string, LearnedDimensionAggregate>();
 
@@ -221,10 +339,12 @@ function aggregateObservations(observations: ProductDimensionObservationRecord[]
       weightUnit: observation.weightUnit ?? "lbs",
       count: 0,
       latestObservedAt: observation.observedAt,
-      sourceSrNumbers: new Set<string>()
+      sourceSrNumbers: new Set<string>(),
+      sources: new Set<string>()
     };
 
     aggregate.count += 1;
+    aggregate.sources.add(observation.source);
 
     if (observation.observedAt > aggregate.latestObservedAt) {
       aggregate.latestObservedAt = observation.observedAt;
@@ -243,10 +363,13 @@ function aggregateObservations(observations: ProductDimensionObservationRecord[]
 function mapAggregateToRecommendation(aggregate: LearnedDimensionAggregate): GarlandProductDimensionRecommendation {
   const exampleSrNumbers = Array.from(aggregate.sourceSrNumbers).slice(0, 3);
   const exampleText = exampleSrNumbers.length > 0 ? ` Examples: ${exampleSrNumbers.join(", ")}.` : "";
+  const source = aggregate.sources.has("CSR_OVERRIDE") ? "CSR_LEARNED" : "TEAMSHIP_LEARNED";
+  const sourceText =
+    source === "CSR_LEARNED" ? "CSR-entered Newl Apps override" : "saved Teamship pallet observation";
 
   return {
     sku: aggregate.sku,
-    source: "TEAMSHIP_LEARNED",
+    source,
     productType: null,
     quantity: null,
     lengthIn: aggregate.lengthIn,
@@ -255,7 +378,7 @@ function mapAggregateToRecommendation(aggregate: LearnedDimensionAggregate): Gar
     weightLb: aggregate.weightLb,
     weightUnit: aggregate.weightUnit,
     confidence: aggregate.count >= 2 ? "HIGH" : "MEDIUM",
-    note: `Learned from ${aggregate.count} saved Teamship pallet observation(s), latest ${aggregate.latestObservedAt.toISOString().slice(0, 10)}.${exampleText}`
+    note: `Learned from ${aggregate.count} ${sourceText}(s), latest ${aggregate.latestObservedAt.toISOString().slice(0, 10)}.${exampleText}`
   };
 }
 
@@ -295,4 +418,8 @@ function normalizeObservationPart(value: string | null | undefined) {
 
 function formatNumberKey(value: number) {
   return Number(value.toFixed(3)).toString();
+}
+
+function isPositiveNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
