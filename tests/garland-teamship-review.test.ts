@@ -532,6 +532,47 @@ NEWLS 2604816191908 1.00 ( )`
     expect(review.reviews[0]?.status).toBe("PASS");
   });
 
+  it("maps Teamship UI/custom labels for freight terms, special instructions, and serials", () => {
+    const [pdfOrder] = parseGarlandShippingOrderPages([{ pageNumber: 1, text: pageOne }]);
+    const teamshipOrder = {
+      id: 30202,
+      amazon_shipment_id1: "SR808478",
+      carrier_value: "MIDLAND",
+      poNumber: "0000037656",
+      ship_first_name: "J.R. MAHONEY LTD.",
+      ship_address_1: "1810 KINGS ROAD",
+      ship_city: "SYDNEY",
+      ship_state: "NS",
+      ship_zip: "B1L 1C5",
+      ship_country: "CA",
+      edi_field_2: "PS210206-SR808478",
+      special_instructions: "MIDLAND THIRD PARTY ACCOUNT #129083 GARLAND ATTN. RECEIVING FREIGHT QUOTE 97068",
+      custom_fields: [
+        { label: "Freight Terms Code", value: "PPADD-CD" },
+        { label: "Commodity", value: "SKU: E1SGHMV6XHU3US" }
+      ],
+      order_items: [
+        {
+          sku: "E1SGHMV6XHU3US",
+          product: {
+            serial: "2604816191908"
+          }
+        }
+      ]
+    } as unknown as TeamshipShippingOrderDetail;
+
+    const review = buildGarlandTeamshipReview([pdfOrder!], [teamshipOrder]);
+    const fieldsByKey = new Map(review.reviews[0]?.fields.map((field) => [field.key, field]));
+
+    expect(review.summary).toMatchObject({
+      passedCount: 1,
+      failedCount: 0
+    });
+    expect(fieldsByKey.get("freight_terms")).toMatchObject({ status: "MATCH", teamshipValue: "PPADD-CD" });
+    expect(fieldsByKey.get("serialNumbers")).toMatchObject({ status: "MATCH", teamshipValue: "2604816191908" });
+    expect(fieldsByKey.get("shipping_instructions")).toMatchObject({ status: "MATCH" });
+  });
+
   it("fetches Teamship details read-only by Garland SR/shipment ID", async () => {
     process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
     process.env.TEAMSHIP_PASSWORD = "configured-in-env";
