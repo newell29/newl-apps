@@ -17,6 +17,7 @@ export type TeamshipPhase2WorkerJob = {
 export type TeamshipPhase2ExecutionOptions = {
   agentId: string;
   allowLiveUpdates: boolean;
+  liveAllowlistSrNumbers?: string[];
   fetchImpl?: typeof fetch;
 };
 
@@ -85,6 +86,8 @@ export async function executeTeamshipPhase2Job({
   if (!options.allowLiveUpdates) {
     throw new Error("Live Teamship updates require TEAMSHIP_ALLOW_LIVE_UPDATES=true or --allow-live-updates on the VM worker.");
   }
+
+  assertLiveAllowlist(plan, options.liveAllowlistSrNumbers);
 
   return executeLiveApiUpdates({ job, plan, credentials, options });
 }
@@ -237,6 +240,23 @@ export function buildTeamshipUpdatePayload(order: TeamshipPhase2OrderPlan): Reco
   };
 }
 
+function assertLiveAllowlist(plan: TeamshipPhase2DryRunPlan, allowlistSrNumbers: string[] | undefined) {
+  const allowlist = new Set((allowlistSrNumbers ?? []).map(normalizeIdentifier).filter(Boolean));
+
+  if (allowlist.size === 0) {
+    throw new Error("Live Teamship updates require TEAMSHIP_LIVE_ALLOWLIST_SR_NUMBERS or --allow-sr for rollout safety.");
+  }
+
+  const blockedSrNumbers = plan.orders
+    .filter((order) => order.status === "READY")
+    .map((order) => order.srNumber)
+    .filter((srNumber) => !allowlist.has(normalizeIdentifier(srNumber)));
+
+  if (blockedSrNumbers.length > 0) {
+    throw new Error(`Live Teamship update blocked because these SRs are not allowlisted: ${blockedSrNumbers.join(", ")}.`);
+  }
+}
+
 async function loginToTeamship(fetchImpl: typeof fetch, credentials: TeamshipPhase2AgentCredentials, apiBaseUrl: string) {
   const response = await fetchImpl(`${apiBaseUrl}/v1/login`, {
     method: "POST",
@@ -318,4 +338,10 @@ function buildTeamshipHeaders(token: string) {
 
 function resolveTeamshipApiBaseUrl(credentials: TeamshipPhase2AgentCredentials) {
   return (credentials.apiBaseUrl?.trim() || process.env.TEAMSHIP_API_BASE_URL?.trim() || DEFAULT_TEAMSHIP_API_BASE_URL).replace(/\/+$/, "");
+}
+
+function normalizeIdentifier(value: string) {
+  return value
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
 }

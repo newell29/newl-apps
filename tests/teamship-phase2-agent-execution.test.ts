@@ -64,10 +64,39 @@ describe("Teamship Phase 2 agent execution", () => {
         options: {
           agentId: "agent",
           allowLiveUpdates: false,
+          liveAllowlistSrNumbers: ["SR808478"],
           fetchImpl: vi.fn() as unknown as typeof fetch
         }
       })
     ).rejects.toThrow("Live Teamship updates require");
+  });
+
+  it("blocks live jobs before Teamship login when the SR is not allowlisted", async () => {
+    const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
+    const fetchImpl = vi.fn();
+
+    await expect(
+      executeTeamshipPhase2Job({
+        job: {
+          id: "job_1",
+          agentMode: "LIVE_API",
+          dryRun: false
+        },
+        plan,
+        credentials: {
+          email: "teamship@example.com",
+          password: "secret",
+          apiBaseUrl: "https://teamship.example/api"
+        },
+        options: {
+          agentId: "agent",
+          allowLiveUpdates: true,
+          liveAllowlistSrNumbers: ["SR000000"],
+          fetchImpl: fetchImpl as unknown as typeof fetch
+        }
+      })
+    ).rejects.toThrow("not allowlisted");
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("logs in and submits a live PATCH for each ready order when allowed", async () => {
@@ -92,6 +121,7 @@ describe("Teamship Phase 2 agent execution", () => {
       options: {
         agentId: "agent",
         allowLiveUpdates: true,
+        liveAllowlistSrNumbers: ["SR808478"],
         fetchImpl: fetchImpl as unknown as typeof fetch
       }
     });
@@ -136,6 +166,7 @@ describe("Teamship Phase 2 agent execution", () => {
       options: {
         agentId: "agent",
         allowLiveUpdates: true,
+        liveAllowlistSrNumbers: ["SR808478"],
         fetchImpl: fetchImpl as unknown as typeof fetch
       }
     });
