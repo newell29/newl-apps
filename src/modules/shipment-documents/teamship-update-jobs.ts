@@ -407,7 +407,7 @@ export async function completeTeamshipUpdateJobFromAgent({
   let verification: GarlandTeamshipReviewResponse | null = null;
   let verificationError: string | null = null;
 
-  if (status === "SUCCESS") {
+  if (shouldVerifyAfterAgentCompletion(status)) {
     try {
       verification = await verifyTeamshipUpdateJob(context, job);
     } catch (error) {
@@ -580,6 +580,10 @@ function readAgentOrderResults(value: unknown) {
       status: order.status,
       error: typeof order.error === "string" && order.error.trim().length > 0 ? order.error.trim() : null
     }));
+}
+
+function shouldVerifyAfterAgentCompletion(status: "SUCCESS" | "FAILED" | "NEEDS_REVIEW") {
+  return status === "SUCCESS" || status === "NEEDS_REVIEW";
 }
 
 function mapAgentOrderStatus(status: string, finalStatus: "SUCCESS" | "FAILED" | "NEEDS_REVIEW"): TeamshipUpdateOrderStatus {
