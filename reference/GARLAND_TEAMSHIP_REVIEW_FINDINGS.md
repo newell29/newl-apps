@@ -268,12 +268,26 @@ Newl Apps now has the production control-tower layer for Phase 2:
 - Users can select reviewed shipments in the Teamship Review workspace and create a Phase 2 update draft.
 - Update jobs persist as `TeamshipUpdateJob` / `TeamshipUpdateOrder` records with statuses such as `DRAFT`, `NEEDS_REVIEW`, `APPROVED`, `RUNNING`, `SUCCESS`, `FAILED`, and `CANCELLED`.
 - Drafts with blocked dimension/weight recommendations cannot be approved for the agent. Commodity/comment rows are still planned, but placeholder dimensions are not allowed.
-- The VM agent claims approved jobs through `POST /api/shipment-documents/teamship-review/update-jobs/agent/next` using the ingestion bearer token or `x-newl-ingestion-key`.
+- The VM agent claims approved jobs through `POST /api/shipment-documents/teamship-review/update-jobs/agent/next` using the ingestion bearer token or `x-newl-ingestion-key`. The claim response includes the tenant Teamship credentials from Settings so the worker does not need a separate hardcoded Teamship username/password.
 - The VM agent reports completion through `PATCH /api/shipment-documents/teamship-review/update-jobs/agent/:jobId` with `SUCCESS`, `FAILED`, or `NEEDS_REVIEW` plus evidence payload.
 - When the agent reports `SUCCESS`, Newl Apps automatically performs a Teamship rescan using the stored PDF order snapshot and tenant Teamship credentials, then stores the verification response on the job.
 - Users can also manually rescan a Phase 2 job from the UI, and can force a page-level Teamship rescan from the main review controls so already-reviewed SRs are checked again.
 
-The VM worker implementation still needs to perform the actual Teamship UI/API edits. It should start in dry-run mode against the `executionPayload` returned by the claim endpoint, capture screenshots/evidence, then later enable live saves one field group at a time.
+The VM worker implementation is available as a safe dry-run executor:
+
+```bash
+NEWL_APPS_BASE_URL="https://newl-apps.vercel.app" \
+NEWL_AGENT_TOKEN="..." \
+NEWL_AGENT_ID="teamship-vm-agent" \
+TEAMSHIP_AGENT_MODE="dry-run" \
+TEAMSHIP_AGENT_LOOP="true" \
+TEAMSHIP_AGENT_INTERVAL_MS="30000" \
+npm run worker:teamship-phase2
+```
+
+The worker claims approved jobs, confirms Teamship credentials were supplied from Settings, converts the approved `executionPayload` into execution evidence, reports `SUCCESS` or `FAILED`, and lets Newl Apps automatically rescan Teamship after a successful completion. In `dry-run` mode it does not call Teamship update endpoints, click save, or write to Teamship.
+
+Live saves are intentionally blocked until a verified Teamship API/browser update adapter is added. To enable production writes later, implement the adapter behind `TEAMSHIP_AGENT_MODE=live-api`, keep `MAX_CONCURRENCY=1`, and release one field group at a time: commodity/comment first, then pallet dimensions/weight, then mapped order-level fields.
 
 Agent endpoint examples:
 
@@ -361,7 +375,7 @@ Newl Apps should handle these cases this way:
 ## Newl App Runtime Notes
 
 - Production showed the Teamship Review page and Garland navigation correctly.
-- Production also showed `TEAMSHIP_PASSWORD` missing, so server-side live pulls need that Vercel environment variable before the page can run without one-time manual credentials.
+- Production Teamship access should use tenant Settings under Teamship WMS. Do not rely on `TEAMSHIP_EMAIL` / `TEAMSHIP_PASSWORD` Vercel variables for normal app behavior.
 - The one-time credential fallback is only for manual testing and is not saved.
 - The cron-ready route exists, but the 15-minute schedule is intentionally not enabled yet. Manual pull is the operating path until Vercel Pro or an external scheduler is chosen.
 
