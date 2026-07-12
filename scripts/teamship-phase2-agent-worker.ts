@@ -10,6 +10,7 @@ type WorkerOptions = {
   agentId: string;
   mode: "dry-run" | "live-api";
   allowLiveUpdates: boolean;
+  liveAllowlistSrNumbers: string[];
   loop: boolean;
   intervalMs: number;
 };
@@ -161,7 +162,8 @@ async function executeJob({
     credentials: claimed.teamshipCredentials!,
     options: {
       agentId: options.agentId,
-      allowLiveUpdates: options.allowLiveUpdates
+      allowLiveUpdates: options.allowLiveUpdates,
+      liveAllowlistSrNumbers: options.liveAllowlistSrNumbers
     }
   });
 }
@@ -227,6 +229,7 @@ function readOptions(args: string[]): WorkerOptions {
   const agentId = readStringOption(args, "--agent-id") ?? process.env.NEWL_AGENT_ID ?? "teamship-vm-agent";
   const mode = readMode(readStringOption(args, "--mode") ?? process.env.TEAMSHIP_AGENT_MODE ?? "dry-run");
   const allowLiveUpdates = args.includes("--allow-live-updates") || process.env.TEAMSHIP_ALLOW_LIVE_UPDATES === "true";
+  const liveAllowlistSrNumbers = readListOption(args, "--allow-sr", process.env.TEAMSHIP_LIVE_ALLOWLIST_SR_NUMBERS);
   const loop = args.includes("--loop") || process.env.TEAMSHIP_AGENT_LOOP === "true";
   const intervalMs = readPositiveNumber(readStringOption(args, "--interval-ms") ?? process.env.TEAMSHIP_AGENT_INTERVAL_MS, 30_000);
 
@@ -244,6 +247,7 @@ function readOptions(args: string[]): WorkerOptions {
     agentId,
     mode,
     allowLiveUpdates,
+    liveAllowlistSrNumbers,
     loop,
     intervalMs
   };
@@ -252,6 +256,16 @@ function readOptions(args: string[]): WorkerOptions {
 function readStringOption(args: string[], name: string) {
   const index = args.indexOf(name);
   return index >= 0 ? args[index + 1]?.trim() || null : null;
+}
+
+function readListOption(args: string[], name: string, fallback: string | undefined) {
+  return [
+    ...args.flatMap((arg, index) => (arg === name ? [args[index + 1] ?? ""] : [])),
+    fallback ?? ""
+  ]
+    .flatMap((value) => value.split(","))
+    .map((value) => value.trim())
+    .filter(Boolean);
 }
 
 function readMode(value: string): WorkerOptions["mode"] {
