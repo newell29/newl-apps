@@ -27,7 +27,12 @@ export function buildTeamshipPayloadInspection({
       teamshipOrderId: null,
       teamshipUrl: null,
       fetchedAt: new Date().toISOString(),
-      inspectedEndpoints: ["GET /v1/ship-inventories", "GET /v1/ship-inventories/{id}", "GET /ship-inventories/{id} UI page"],
+      inspectedEndpoints: [
+        "GET /v1/ship-inventories",
+        "GET /v1/ship-inventories/{id}",
+        "GET /ship-inventories/{id} UI page",
+        "GET /admin/get-prod-ship-invt-edit"
+      ],
       expectedSerials: normalizedExpectedSerials,
       expectedSkus: normalizedExpectedSkus,
       searchedValueCount: 0,
@@ -57,7 +62,12 @@ export function buildTeamshipPayloadInspection({
     teamshipOrderId: readFirstString(teamshipOrder.id, teamshipOrder.order_id),
     teamshipUrl: readFirstString(teamshipOrder.url) ?? buildTeamshipOrderUrl(readFirstString(teamshipOrder.id, teamshipOrder.order_id)),
     fetchedAt: new Date().toISOString(),
-    inspectedEndpoints: ["GET /v1/ship-inventories", "GET /v1/ship-inventories/{id}", "GET /ship-inventories/{id} UI page"],
+    inspectedEndpoints: [
+      "GET /v1/ship-inventories",
+      "GET /v1/ship-inventories/{id}",
+      "GET /ship-inventories/{id} UI page",
+      "GET /admin/get-prod-ship-invt-edit"
+    ],
     expectedSerials: normalizedExpectedSerials,
     expectedSkus: normalizedExpectedSkus,
     searchedValueCount: inspection.searchedValueCount,
