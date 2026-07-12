@@ -337,7 +337,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
 
       const nextReview = srNumber && review ? mergePartialReview(review, json) : json;
       setReview(nextReview);
-      setSelectedUpdateSrNumbers(new Set(nextReview.reviews.filter(isUpdateEligibleReview).map((row) => row.srNumber)));
+      setSelectedUpdateSrNumbers(new Set());
       setStatus(
         `${rescan || srNumber ? "Rescan complete" : "Review complete"}: ${nextReview.summary.passedCount} green, ${nextReview.summary.pendingTeamshipCount} pending Teamship creation, ${nextReview.summary.failedCount} with discrepancies, ${nextReview.summary.missingTeamshipCount} missing without an alert.`
           + (nextReview.summary.noPdfCount > 0 ? ` ${nextReview.summary.noPdfCount} Teamship order(s) had no uploaded PDF.` : "")
@@ -1226,13 +1226,16 @@ function ShipmentReviewWorkspace({
           >
             {isSaving ? "Saving..." : "Save review run"}
           </button>
+          <p className="basis-full text-xs font-medium text-mutedForeground">
+            Saving the review does not run the bot. Select shipments below only when you want to create a separate Teamship update draft.
+          </p>
           <button
             type="button"
             onClick={onSelectIssueShipments}
             disabled={isUpdateJobLoading || issueEligibleCount === 0}
             className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Select issues ({issueEligibleCount})
+            Select issue drafts ({issueEligibleCount})
           </button>
           <button
             type="button"
@@ -1240,7 +1243,7 @@ function ShipmentReviewWorkspace({
             disabled={isUpdateJobLoading || eligibleCount === 0}
             className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Select all ({eligibleCount})
+            Select all drafts ({eligibleCount})
           </button>
           <button
             type="button"
@@ -1276,7 +1279,7 @@ function ShipmentReviewWorkspace({
             disabled={isUpdateJobLoading || !review || selectedCount === 0}
             className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Create update draft ({selectedCount})
+            Create selected draft ({selectedCount})
           </button>
         </div>
         {updateJobMode === "LIVE_API" ? (
@@ -1327,7 +1330,7 @@ function ShipmentReviewWorkspace({
                           onClick={(event) => event.stopPropagation()}
                           onChange={(event) => onToggleUpdateSelection(row.srNumber!, event.target.checked)}
                         />
-                        Agent update
+                        Select for bot draft
                       </label>
                     ) : null}
                     <span className="font-semibold text-foreground">{row.psNumber ?? "No PS"}</span>
