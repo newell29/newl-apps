@@ -177,11 +177,18 @@ Important mapping:
 | Ship-to country | `ship_country` |
 | Carrier / ship via | `carrier`, `carrier_value` |
 | Ship-to PO | `po_number`, `poNumber` |
-| Freight terms | `edi_field_3` |
-| Shipping instructions | `edi_field_4` |
-| SKU / serial | `pallets[].commodity`, visible as strings like `SKU: E1SGHMV6XHU3US, SN: 2604816191908` |
+| Freight terms | `edi_field_3`, custom labels such as `Freight Terms Code`, or UI-style keys such as `freight_terms_code` |
+| Shipping instructions | `edi_field_4`, `shipping_instructions`, custom labels such as `Special Instructions`, or UI-style keys such as `special_instructions` |
+| SKU / serial | `pallets[].commodity`, nested item/product serial fields, or visible strings like `SKU: E1SGHMV6XHU3US, SN: 2604816191908` |
 
 Do not rely only on visible page text. Some values are form input values or hidden JSON values and may not appear in `innerText`.
+
+Mapping note from SR808478 testing:
+
+- Teamship can display values in UI/custom-label fields even when the older API aliases are blank. The reviewer should check custom field labels and UI-style keys before marking a PDF value missing.
+- `Freight Terms Code` maps to the Garland PDF freight terms value, for example `PPADD-CD`.
+- `Special Instructions` maps to the Garland PDF shipping instructions.
+- Item serials may appear under nested item/product fields or commodity text, not only under the typed `items` array.
 
 ## Stage 2 Pallet Entry Findings
 

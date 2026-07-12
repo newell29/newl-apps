@@ -674,7 +674,8 @@ function serialField(
     };
   }
 
-  const teamshipStrings = collectTeamshipStrings(teamshipOrder).map(normalizeIdentifier);
+  const teamshipSerialStrings = collectTeamshipSerialStrings(teamshipOrder);
+  const teamshipStrings = [...collectTeamshipStrings(teamshipOrder), ...teamshipSerialStrings].map(normalizeIdentifier);
   const missingSerials = pdfSerials.filter(
     (serial) => !teamshipStrings.some((candidate) => candidate.includes(normalizeIdentifier(serial)))
   );
@@ -684,7 +685,7 @@ function serialField(
     label: "Serial numbers",
     status: missingSerials.length === 0 ? "MATCH" : "DISCREPANCY",
     pdfValue: pdfSerials.join(", "),
-    teamshipValue: missingSerials.length === 0 ? "Found in Teamship fields" : "Not all serials found",
+    teamshipValue: missingSerials.length === 0 ? uniqueStrings(teamshipSerialStrings).join(", ") || "Found in Teamship fields" : "Not all serials found",
     message:
       missingSerials.length === 0
         ? "All PDF serial numbers were found somewhere in the Teamship order detail."
@@ -871,11 +872,28 @@ function readTeamshipPoNumber(order: TeamshipShippingOrderDetail) {
 }
 
 function readTeamshipFreightTerms(order: TeamshipShippingOrderDetail) {
-  return stringifyValue(order.edi_field_3);
+  return (
+    stringifyValue(order.edi_field_3) ??
+    readCustomFieldValue(order.custom_fields, ["freight terms code", "freight terms", "frt terms"]) ??
+    readTeamshipValueByKeys(order, ["freight_terms_code", "freightTermsCode", "freight_terms", "freightTerms", "frt_terms", "frtTerms"])
+  );
 }
 
 function readTeamshipInstructions(order: TeamshipShippingOrderDetail) {
-  return order.shipping_instructions ?? stringifyValue(order.edi_field_4);
+  return (
+    order.shipping_instructions ??
+    stringifyValue(order.edi_field_4) ??
+    readCustomFieldValue(order.custom_fields, ["special instructions", "shipping instructions", "instructions"]) ??
+    readTeamshipValueByKeys(order, [
+      "special_instructions",
+      "specialInstructions",
+      "shipping_instructions",
+      "shippingInstructions",
+      "instructions",
+      "delivery_instructions",
+      "deliveryInstructions"
+    ])
+  );
 }
 
 function readTeamshipCarrier(order: TeamshipShippingOrderDetail) {
@@ -924,6 +942,100 @@ function collectTeamshipStrings(order: TeamshipShippingOrderDetail) {
   return strings.filter(Boolean);
 }
 
+function collectTeamshipSerialStrings(order: TeamshipShippingOrderDetail) {
+  const serials: string[] = [];
+
+  const visit = (value: unknown, key = "") => {
+    if (typeof value === "string" || typeof value === "number") {
+      const text = String(value);
+      if (isSerialLikeKey(key)) {
+        serials.push(text);
+      }
+      serials.push(...extractSerialsFromText(text));
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      value.forEach((childValue) => visit(childValue, key));
+      return;
+    }
+
+    if (value && typeof value === "object") {
+      Object.entries(value as Record<string, unknown>).forEach(([childKey, childValue]) => {
+        if (isSensitiveTeamshipKey(childKey)) {
+          return;
+        }
+        visit(childValue, childKey);
+      });
+    }
+  };
+
+  visit(order);
+  return uniqueStrings(serials.map((serial) => serial.trim()).filter(Boolean));
+}
+
+function extractSerialsFromText(value: string) {
+  const serials: string[] = [];
+  const patterns = [
+    /\b(?:serial|serial\s*number|sn)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{5,})\b/gi,
+    /\bSN\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{5,})\b/gi
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of value.matchAll(pattern)) {
+      if (match[1]) {
+        serials.push(match[1]);
+      }
+    }
+  }
+
+  return serials;
+}
+
+function isSerialLikeKey(key: string) {
+  const normalized = normalizeObjectKey(key);
+  return normalized.includes("serial") || normalized === "sn";
+}
+
+function readTeamshipValueByKeys(order: TeamshipShippingOrderDetail, keys: string[]) {
+  const targetKeys = keys.map(normalizeObjectKey).filter(Boolean);
+  const visited = new Set<unknown>();
+
+  const visit = (value: unknown): string | null => {
+    if (!value || typeof value !== "object") {
+      return null;
+    }
+
+    if (visited.has(value)) {
+      return null;
+    }
+    visited.add(value);
+
+    for (const [key, childValue] of Object.entries(value as Record<string, unknown>)) {
+      if (isSensitiveTeamshipKey(key)) {
+        continue;
+      }
+
+      const normalizedKey = normalizeObjectKey(key);
+      const keyMatches = targetKeys.some((targetKey) => normalizedKey === targetKey || normalizedKey.includes(targetKey));
+      const stringValue = stringifyValue(childValue);
+
+      if (keyMatches && stringValue) {
+        return stringValue;
+      }
+
+      const nestedValue = visit(childValue);
+      if (nestedValue) {
+        return nestedValue;
+      }
+    }
+
+    return null;
+  };
+
+  return visit(order);
+}
+
 export function readCustomFieldValue(fields: TeamshipCustomField[] | undefined, labels: string[]) {
   const normalizedLabels = labels.map(normalizeText);
   const field = fields?.find((candidate) => {
@@ -933,6 +1045,19 @@ export function readCustomFieldValue(fields: TeamshipCustomField[] | undefined, 
   });
 
   return stringifyValue(field?.value);
+}
+
+function isSensitiveTeamshipKey(key: string) {
+  const normalized = key.toLowerCase();
+  return normalized.includes("token") || normalized.includes("password");
+}
+
+function normalizeObjectKey(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values));
 }
 
 function stringifyValue(value: unknown) {
