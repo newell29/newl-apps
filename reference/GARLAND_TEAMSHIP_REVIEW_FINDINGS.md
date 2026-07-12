@@ -65,13 +65,15 @@ Latest verification on 2026-07-11:
 3. Upload Garland's PDF batch for the shipment date.
 4. Optional: paste the hourly Teamship Alert Digest if any Garland orders are known to be out of stock or otherwise not pushed into Teamship yet.
 5. Click `Run Teamship review`.
-6. Review color-coded results:
+6. Review the `Shipment review workspace` table. Each shipment is one expandable row; the row itself is color-coded and the field-by-field comparison opens inside that row instead of rendering as a separate results block down the page.
    - Green: PDF and Teamship reviewed fields match.
    - Red: PDF order is missing from Teamship without an alert, or matched Teamship data has field discrepancies.
    - Amber `Pending Teamship`: the PDF order is missing from Teamship but appears in the alert digest.
    - Amber `No PDF`: Teamship has an order for the selected date but the uploaded PDF batch did not include that SR.
    - Gray `Already reviewed`: the uploaded PDF contains an SR that already has a saved review run for that shipment date, so it was skipped instead of re-verified.
-7. Save the review run to history after CSR review.
+7. Use the row-level `Open shipping order` link to jump to the matching Teamship order when the Teamship order ID is known.
+8. Download the run summary PDF when a quick manager/CSR review packet is needed. The PDF summarizes each shipment, its status color, PDF pages, Teamship order ID, and any non-matching fields.
+9. Save the review run to history after CSR review.
 
 Reupload behavior:
 

@@ -1,11 +1,13 @@
 "use client";
 
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import type { PDFPageProxy } from "pdfjs-dist/types/src/display/api";
 import { useEffect, useMemo, useState } from "react";
 
 import { parseGarlandShippingOrderPages, parseTeamshipAlertDigest } from "@/modules/shipment-documents/teamship-review";
 import type {
   GarlandPdfShippingOrder,
+  GarlandTeamshipOrderReview,
   GarlandTeamshipReviewResponse,
   TeamshipShippingOrderDetail
 } from "@/modules/shipment-documents/teamship-review-types";
@@ -74,6 +76,25 @@ type TeamshipReviewHistoryResponse = {
   error?: string;
 };
 
+type ShipmentWorkspaceStatus = GarlandTeamshipOrderReview["status"] | "TEAMSHIP_PULLED" | "PDF_READY";
+
+type ShipmentWorkspaceRow = {
+  id: string;
+  status: ShipmentWorkspaceStatus;
+  psNumber: string | null;
+  srNumber: string | null;
+  pdfPages: number[];
+  carrier: string | null;
+  shipToName: string | null;
+  cityState: string | null;
+  teamshipOrderId: string | null;
+  teamshipUrl: string | null;
+  issueCount: number;
+  review: GarlandTeamshipOrderReview | null;
+  pdfOrder: GarlandPdfShippingOrder | null;
+  teamshipOrder: TeamshipShippingOrderDetail | null;
+};
+
 let pdfJsLoader: Promise<PdfJsModule> | null = null;
 
 export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: boolean }) {
@@ -114,17 +135,11 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     void fetchHistory("", today, today, false);
   }, []);
 
-  const extractedSummary = useMemo(() => {
-    if (orders.length === 0) {
-      return "No PDF orders extracted yet.";
-    }
-
-    return `${orders.length} PDF order${orders.length === 1 ? "" : "s"} extracted: ${orders
-      .map((order) => order.srNumber)
-      .join(", ")}`;
-  }, [orders]);
-
   const parsedAlertCount = useMemo(() => parseTeamshipAlertDigest(alertDigest).length, [alertDigest]);
+  const workspaceRows = useMemo(
+    () => buildShipmentWorkspaceRows({ review, pdfOrders: orders, teamshipOrders: dailyOrders }),
+    [review, orders, dailyOrders]
+  );
 
   async function handlePdfSelection(file: File | null) {
     setPdfFile(file);
@@ -303,6 +318,30 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     }
   }
 
+  async function downloadReviewSummaryPdf() {
+    setError(null);
+
+    if (!review) {
+      setError("Run the Teamship review before generating the summary PDF.");
+      return;
+    }
+
+    try {
+      const pdfBytes = await buildReviewSummaryPdf({
+        documentLabel: documentLabel.trim() || formatDateLabel(shipmentDate),
+        shipmentDate,
+        review,
+        rows: workspaceRows
+      });
+      downloadBlob(
+        new Blob([new Uint8Array(pdfBytes)], { type: "application/pdf" }),
+        `Teamship Review Summary - ${documentLabel.trim() || shipmentDate}.pdf`
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to generate the Teamship review summary PDF.");
+    }
+  }
+
   async function fetchHistory(search: string, dateFrom: string, dateTo: string, allDates: boolean) {
     setHistoryError(null);
     setIsHistoryLoading(true);
@@ -462,63 +501,40 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         ) : null}
       </section>
 
-      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
-        <div className="grid gap-4 xl:grid-cols-[0.9fr,1.1fr]">
+      <details className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-foreground">Teamship alert digest</h2>
-            <p className="mt-1 text-sm leading-6 text-mutedForeground">
-              Optional: paste the hourly Teamship Alert Digest here. If a Garland PDF order is not in Teamship yet but
-              appears in the digest, it will show amber as pending creation instead of red as an unexplained missing
-              order.
-            </p>
-            <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
-              {parsedAlertCount} alert order{parsedAlertCount === 1 ? "" : "s"} detected
+            <p className="mt-1 text-sm text-mutedForeground">
+              Optional. Paste only when Teamship says orders are blocked or out of stock.
             </p>
           </div>
-          <label className="space-y-2 text-sm font-semibold text-foreground">
-            Paste alert email text
-            <textarea
-              value={alertDigest}
-              onChange={(event) => setAlertDigest(event.target.value)}
-              placeholder="Teamship Alert Digest&#10;&#10;Shipping Orders — Out of Stock (4)&#10;&#10;Order SR811861..."
-              className="min-h-44 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            />
-          </label>
-        </div>
-      </section>
+          <span className="rounded-full bg-muted px-3 py-1 text-xs font-bold uppercase tracking-wide text-mutedForeground">
+            {parsedAlertCount} alert order{parsedAlertCount === 1 ? "" : "s"}
+          </span>
+        </summary>
+        <label className="mt-4 block space-y-2 text-sm font-semibold text-foreground">
+          Paste alert email text
+          <textarea
+            value={alertDigest}
+            onChange={(event) => setAlertDigest(event.target.value)}
+            placeholder="Teamship Alert Digest&#10;&#10;Shipping Orders — Out of Stock (4)&#10;&#10;Order SR811861..."
+            className="min-h-44 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          />
+        </label>
+      </details>
 
-      <section className="grid gap-4 lg:grid-cols-3">
-        <SummaryCard label="PDF extraction" value={String(orders.length)} detail={extractedSummary} />
-        <SummaryCard
-          label="Teamship daily sync"
-          value={dailyOrderCount === null ? "Not run" : String(dailyOrderCount)}
-          detail={
-            dailySyncSummary
-              ? `${dailySyncSummary.insertedCount} new, ${dailySyncSummary.skippedCount} skipped, ${dailySyncSummary.storedCount} stored across ${dailySyncSummary.dateFrom ?? syncDateFrom} to ${dailySyncSummary.dateTo ?? syncDateTo}.`
-              : "Manual sync pulls missing orders for a selected date range. Scheduled sync is controlled from Settings."
-          }
-        />
-        <SummaryCard
-          label="Review result"
-          value={review ? `${review.summary.passedCount}/${review.summary.pdfOrderCount} green` : "Not run"}
-          detail={
-            review
-              ? `${review.summary.pendingTeamshipCount} pending, ${review.summary.failedCount} discrepancy, ${review.summary.missingTeamshipCount} missing Teamship, ${review.summary.noPdfCount} no PDF, ${review.summary.skippedAlreadyReviewedCount} skipped.`
-              : "Pull Teamship orders, upload the Garland PDF, then run the review."
-          }
-        />
-      </section>
-
-      {dailyOrders.length > 0 ? <TeamshipDailyOrdersTable orders={dailyOrders} /> : null}
-      {orders.length > 0 ? <ExtractedOrdersTable orders={orders} /> : null}
-      {review ? (
-        <ReviewResultsTable
-          review={review}
-          isSaving={isSaving}
-          saveStatus={saveStatus}
-          onSave={() => void saveRunToHistory()}
-        />
-      ) : null}
+      <ShipmentReviewWorkspace
+        rows={workspaceRows}
+        review={review}
+        pdfOrderCount={orders.length}
+        teamshipOrderCount={dailyOrderCount ?? dailyOrders.length}
+        syncSummary={dailySyncSummary}
+        isSaving={isSaving}
+        saveStatus={saveStatus}
+        onSave={() => void saveRunToHistory()}
+        onDownloadSummary={() => void downloadReviewSummaryPdf()}
+      />
       <TeamshipReviewHistorySection
         history={history}
         historySearch={historySearch}
@@ -557,199 +573,178 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
   );
 }
 
-function SummaryCard({ label, value, detail }: { label: string; value: string; detail: string }) {
-  return (
-    <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
-      <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</p>
-      <p className="mt-2 text-2xl font-bold text-foreground">{value}</p>
-      <p className="mt-2 text-sm leading-5 text-mutedForeground">{detail}</p>
-    </div>
-  );
-}
-
-function TeamshipDailyOrdersTable({ orders }: { orders: TeamshipShippingOrderDetail[] }) {
-  return (
-    <section className="rounded-lg border border-border bg-card shadow-sm">
-      <div className="border-b border-border p-5">
-        <h2 className="text-base font-semibold text-foreground">Pulled Teamship orders</h2>
-        <p className="mt-1 text-sm text-mutedForeground">
-          These are the Teamship orders returned for the manual sync range. Existing orders still appear here so you can
-          confirm what Newl Apps will compare against the uploaded Garland PDF.
-        </p>
-      </div>
-      <div className="max-h-[28rem] overflow-auto">
-        <table className="min-w-full text-left text-sm">
-          <thead className="sticky top-0 bg-muted/50 text-xs uppercase tracking-wide text-mutedForeground">
-            <tr>
-              <th className="px-4 py-3">SR</th>
-              <th className="px-4 py-3">Teamship</th>
-              <th className="px-4 py-3">Carrier</th>
-              <th className="px-4 py-3">Ship to</th>
-              <th className="px-4 py-3">City/state</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {orders.map((order, index) => (
-              <tr key={`${readTeamshipShipmentId(order) ?? "missing-sr"}-${readTeamshipOrderId(order) ?? index}`}>
-                <td className="px-4 py-3 font-semibold text-foreground">{readTeamshipShipmentId(order) ?? "Missing"}</td>
-                <td className="px-4 py-3 text-mutedForeground">{readTeamshipOrderId(order) ?? "Missing"}</td>
-                <td className="px-4 py-3 text-mutedForeground">{readTeamshipCarrier(order) ?? "Missing"}</td>
-                <td className="px-4 py-3 text-mutedForeground">{readTeamshipShipToName(order) ?? "Missing"}</td>
-                <td className="px-4 py-3 text-mutedForeground">
-                  {[readTeamshipCity(order), readTeamshipState(order)].filter(Boolean).join(", ") || "Missing"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function ExtractedOrdersTable({ orders }: { orders: GarlandPdfShippingOrder[] }) {
-  return (
-    <section className="rounded-lg border border-border bg-card shadow-sm">
-      <div className="border-b border-border p-5">
-        <h2 className="text-base font-semibold text-foreground">Extracted Garland PDF orders</h2>
-        <p className="mt-1 text-sm text-mutedForeground">
-          This is the order list the app will use to fetch matching Teamship shipment IDs.
-        </p>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-left text-sm">
-          <thead className="bg-muted/50 text-xs uppercase tracking-wide text-mutedForeground">
-            <tr>
-              <th className="px-4 py-3">Pages</th>
-              <th className="px-4 py-3">PS</th>
-              <th className="px-4 py-3">SR</th>
-              <th className="px-4 py-3">Ship via</th>
-              <th className="px-4 py-3">Ship to</th>
-              <th className="px-4 py-3">Items</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {orders.map((order) => (
-              <tr key={`${order.psNumber}-${order.srNumber}`}>
-                <td className="px-4 py-3 text-mutedForeground">{order.pageNumbers.join(", ")}</td>
-                <td className="px-4 py-3 font-semibold text-foreground">{order.psNumber}</td>
-                <td className="px-4 py-3 font-semibold text-foreground">{order.srNumber}</td>
-                <td className="px-4 py-3">{order.shipVia ?? "Missing"}</td>
-                <td className="px-4 py-3">
-                  <div className="font-medium text-foreground">{order.shipToName ?? "Missing"}</div>
-                  <div className="text-mutedForeground">
-                    {[order.shipToCity, order.shipToState, order.shipToPostalCode].filter(Boolean).join(", ")}
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-mutedForeground">{order.items.map((item) => item.sku).join(", ")}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function ReviewResultsTable({
+function ShipmentReviewWorkspace({
+  rows,
   review,
+  pdfOrderCount,
+  teamshipOrderCount,
+  syncSummary,
   isSaving,
   saveStatus,
-  onSave
+  onSave,
+  onDownloadSummary
 }: {
-  review: GarlandTeamshipReviewResponse;
+  rows: ShipmentWorkspaceRow[];
+  review: GarlandTeamshipReviewResponse | null;
+  pdfOrderCount: number;
+  teamshipOrderCount: number;
+  syncSummary: DailyOrdersResponse["sync"] | null;
   isSaving: boolean;
   saveStatus: string | null;
   onSave: () => void;
+  onDownloadSummary: () => void;
 }) {
   return (
     <section className="rounded-lg border border-border bg-card shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border p-5">
         <div>
-          <h2 className="text-base font-semibold text-foreground">Teamship review results</h2>
+          <h2 className="text-base font-semibold text-foreground">Shipment review workspace</h2>
           <p className="mt-1 text-sm text-mutedForeground">
-            Green orders have no detected discrepancies. Amber orders are pending Teamship creation or have no uploaded
-            PDF to inspect. Red orders need CSR review before Stage 2 automation updates them. Gray orders were already
-            reviewed and skipped.
+            Each shipment lives on one expandable line. The line changes color after review, and the details expand
+            underneath the shipment instead of running down the page.
           </p>
+          <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold uppercase tracking-wide">
+            <span className="rounded-full bg-muted px-3 py-1 text-mutedForeground">{teamshipOrderCount} Teamship</span>
+            <span className="rounded-full bg-muted px-3 py-1 text-mutedForeground">{pdfOrderCount} PDF</span>
+            {syncSummary ? (
+              <span className="rounded-full bg-muted px-3 py-1 text-mutedForeground">
+                {syncSummary.insertedCount} new / {syncSummary.skippedCount} skipped
+              </span>
+            ) : null}
+            {review ? (
+              <>
+                <span className="rounded-full bg-success/10 px-3 py-1 text-success">{review.summary.passedCount} green</span>
+                <span className="rounded-full bg-warning/15 px-3 py-1 text-warning">
+                  {review.summary.pendingTeamshipCount + review.summary.noPdfCount} amber
+                </span>
+                <span className="rounded-full bg-danger/10 px-3 py-1 text-danger">
+                  {review.summary.failedCount + review.summary.missingTeamshipCount} red
+                </span>
+              </>
+            ) : null}
+          </div>
           {saveStatus ? <p className="mt-2 text-sm font-medium text-mutedForeground">{saveStatus}</p> : null}
         </div>
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={isSaving}
-          className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {isSaving ? "Saving..." : "Save review run"}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onDownloadSummary}
+            disabled={!review}
+            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Download summary PDF
+          </button>
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={isSaving || !review}
+            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSaving ? "Saving..." : "Save review run"}
+          </button>
+        </div>
       </div>
       <div className="divide-y divide-border">
-        {review.reviews.map((orderReview) => (
-          <details key={`${orderReview.psNumber}-${orderReview.srNumber}`} open={orderReview.status !== "PASS"}>
-            <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-3 px-5 py-4">
+        {rows.length === 0 ? (
+          <p className="p-5 text-sm text-mutedForeground">
+            Pull Teamship orders or upload a Garland PDF to start building the shipment workspace.
+          </p>
+        ) : null}
+        {rows.map((row) => (
+          <details key={row.id} className={shipmentRowClass(row.status)} open={row.review ? row.status !== "PASS" : false}>
+            <summary className="grid cursor-pointer gap-3 px-5 py-4 lg:grid-cols-[1fr,1fr,auto] lg:items-center">
               <div>
-                <span className="font-semibold text-foreground">
-                  {orderReview.psNumber} / {orderReview.srNumber}
-                </span>
-                <span className="ml-3 text-sm text-mutedForeground">
-                  {orderReview.pageNumbers.length > 0 ? `PDF page(s) ${orderReview.pageNumbers.join(", ")}` : "No PDF page uploaded"}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold text-foreground">{row.psNumber ?? "No PS"}</span>
+                  <span className="text-sm font-semibold text-mutedForeground">/ {row.srNumber ?? "No SR"}</span>
+                  <span className={shipmentStatusPillClass(row.status)}>{formatWorkspaceStatus(row.status, row.issueCount)}</span>
+                </div>
+                <p className="mt-1 text-sm text-mutedForeground">
+                  {row.pdfPages.length > 0 ? `PDF page(s) ${row.pdfPages.join(", ")}` : "No PDF page uploaded"}
+                </p>
+              </div>
+
+              <div className="text-sm text-mutedForeground">
+                <p className="font-medium text-foreground">{row.shipToName ?? "Missing ship-to"}</p>
+                <p>
+                  {[row.carrier, row.cityState].filter(Boolean).join(" · ") || "Carrier/city missing"}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                {row.teamshipUrl ? (
+                  <a
+                    href={row.teamshipUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={(event) => event.stopPropagation()}
+                    className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
+                  >
+                    Open shipping order
+                  </a>
+                ) : (
+                  <span className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-mutedForeground">
+                    No Teamship link
+                  </span>
+                )}
+                <span className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-mutedForeground">
+                  Expand
                 </span>
               </div>
-              <span
-                className={[
-                  "rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide",
-                  orderReview.status === "PASS"
-                    ? "bg-success/10 text-success"
-                    : orderReview.status === "SKIPPED_ALREADY_REVIEWED"
-                      ? "bg-muted text-mutedForeground"
-                    : orderReview.status === "MISSING_TEAMSHIP"
-                      ? "bg-danger/10 text-danger"
-                      : "bg-warning/15 text-warning"
-                ].join(" ")}
-              >
-                {orderReview.status === "PASS"
-                  ? "Green"
-                  : orderReview.status === "SKIPPED_ALREADY_REVIEWED"
-                    ? "Already reviewed"
-                  : orderReview.status === "MISSING_TEAMSHIP"
-                    ? "Missing Teamship"
-                    : orderReview.status === "NO_PDF"
-                      ? "No PDF uploaded"
-                    : orderReview.status === "PENDING_TEAMSHIP"
-                      ? "Pending Teamship"
-                      : `${orderReview.issueCount} issue${orderReview.issueCount === 1 ? "" : "s"}`}
-              </span>
             </summary>
-            <div className="overflow-x-auto px-5 pb-5">
-              <table className="min-w-full text-left text-sm">
-                <thead className="bg-muted/40 text-xs uppercase tracking-wide text-mutedForeground">
-                  <tr>
-                    <th className="px-3 py-2">Field</th>
-                    <th className="px-3 py-2">Status</th>
-                    <th className="px-3 py-2">Garland PDF</th>
-                    <th className="px-3 py-2">Teamship</th>
-                    <th className="px-3 py-2">Note</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {orderReview.fields.map((field) => (
-                    <tr key={field.key}>
-                      <td className="px-3 py-2 font-medium text-foreground">{field.label}</td>
-                      <td className="px-3 py-2">
-                        <span className={statusPillClass(field.status)}>{formatFieldStatus(field.status)}</span>
-                      </td>
-                      <td className="max-w-xs px-3 py-2 text-mutedForeground">{field.pdfValue ?? "Blank"}</td>
-                      <td className="max-w-xs px-3 py-2 text-mutedForeground">{field.teamshipValue ?? "Blank"}</td>
-                      <td className="px-3 py-2 text-mutedForeground">{field.message}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <ShipmentWorkspaceDetails row={row} />
           </details>
         ))}
       </div>
     </section>
+  );
+}
+
+function ShipmentWorkspaceDetails({ row }: { row: ShipmentWorkspaceRow }) {
+  if (row.review) {
+    return (
+      <div className="overflow-x-auto px-5 pb-5">
+        <table className="min-w-full text-left text-sm">
+          <thead className="bg-muted/40 text-xs uppercase tracking-wide text-mutedForeground">
+            <tr>
+              <th className="px-3 py-2">Field</th>
+              <th className="px-3 py-2">Status</th>
+              <th className="px-3 py-2">Garland PDF</th>
+              <th className="px-3 py-2">Teamship</th>
+              <th className="px-3 py-2">Note</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {row.review.fields.map((field) => (
+              <tr key={field.key}>
+                <td className="px-3 py-2 font-medium text-foreground">{field.label}</td>
+                <td className="px-3 py-2">
+                  <span className={statusPillClass(field.status)}>{formatFieldStatus(field.status)}</span>
+                </td>
+                <td className="max-w-xs px-3 py-2 text-mutedForeground">{field.pdfValue ?? "Blank"}</td>
+                <td className="max-w-xs px-3 py-2 text-mutedForeground">{field.teamshipValue ?? "Blank"}</td>
+                <td className="px-3 py-2 text-mutedForeground">{field.message}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-3 px-5 pb-5 text-sm text-mutedForeground md:grid-cols-2">
+      <div className="rounded-md border border-border bg-background p-3">
+        <p className="text-xs font-bold uppercase tracking-wide text-mutedForeground">Garland PDF</p>
+        <p className="mt-2 text-foreground">{row.pdfOrder ? row.pdfOrder.shipToName ?? "Ship-to missing" : "No PDF order matched yet"}</p>
+        <p>{row.pdfOrder ? `Items: ${row.pdfOrder.items.map((item) => item.sku).join(", ") || "none parsed"}` : "Upload PDF to inspect."}</p>
+      </div>
+      <div className="rounded-md border border-border bg-background p-3">
+        <p className="text-xs font-bold uppercase tracking-wide text-mutedForeground">Teamship</p>
+        <p className="mt-2 text-foreground">{row.teamshipOrder ? row.teamshipOrderId ?? "Order ID missing" : "No Teamship order matched yet"}</p>
+        <p>{row.teamshipOrder ? [row.carrier, row.shipToName, row.cityState].filter(Boolean).join(" · ") : "Pull Teamship orders to inspect."}</p>
+      </div>
+    </div>
   );
 }
 
@@ -1060,6 +1055,409 @@ function formatReviewStatus(status: TeamshipReviewHistoryOrder["status"], mismat
   return `${mismatchCount} issue${mismatchCount === 1 ? "" : "s"}`;
 }
 
+function buildShipmentWorkspaceRows({
+  review,
+  pdfOrders,
+  teamshipOrders
+}: {
+  review: GarlandTeamshipReviewResponse | null;
+  pdfOrders: GarlandPdfShippingOrder[];
+  teamshipOrders: TeamshipShippingOrderDetail[];
+}) {
+  const teamshipBySr = new Map<string, TeamshipShippingOrderDetail>();
+  const seenSr = new Set<string>();
+
+  for (const order of teamshipOrders) {
+    const srNumber = normalizeIdentifier(readTeamshipShipmentId(order));
+
+    if (srNumber) {
+      teamshipBySr.set(srNumber, order);
+    }
+  }
+
+  if (review) {
+    return review.reviews.map((orderReview) => {
+      const srNumber = normalizeIdentifier(orderReview.srNumber);
+      const teamshipOrder = srNumber ? teamshipBySr.get(srNumber) ?? null : null;
+
+      if (srNumber) {
+        seenSr.add(srNumber);
+      }
+
+      return mapReviewRow(orderReview, findPdfOrder(pdfOrders, orderReview), teamshipOrder);
+    });
+  }
+
+  const rows = teamshipOrders.map((teamshipOrder) => {
+    const row = mapTeamshipRow(teamshipOrder);
+    const srNumber = normalizeIdentifier(row.srNumber);
+
+    if (srNumber) {
+      seenSr.add(srNumber);
+    }
+
+    return row;
+  });
+
+  for (const pdfOrder of pdfOrders) {
+    const srNumber = normalizeIdentifier(pdfOrder.srNumber);
+
+    if (srNumber && seenSr.has(srNumber)) {
+      continue;
+    }
+
+    rows.push(mapPdfRow(pdfOrder));
+  }
+
+  return rows;
+}
+
+function mapReviewRow(
+  review: GarlandTeamshipOrderReview,
+  pdfOrder: GarlandPdfShippingOrder | null,
+  teamshipOrder: TeamshipShippingOrderDetail | null
+): ShipmentWorkspaceRow {
+  const teamshipOrderId = review.teamshipOrderId ?? (teamshipOrder ? readTeamshipOrderId(teamshipOrder) : null);
+  const city = pdfOrder?.shipToCity ?? readReviewTeamshipValue(review, "ship_to_city") ?? readTeamshipNullable(teamshipOrder, readTeamshipCity);
+  const state =
+    pdfOrder?.shipToState ?? readReviewTeamshipValue(review, "ship_to_state") ?? readTeamshipNullable(teamshipOrder, readTeamshipState);
+
+  return {
+    id: `review-${review.srNumber || review.psNumber}`,
+    status: review.status,
+    psNumber: review.psNumber || pdfOrder?.psNumber || null,
+    srNumber: review.srNumber || pdfOrder?.srNumber || readTeamshipNullable(teamshipOrder, readTeamshipShipmentId),
+    pdfPages: review.pageNumbers.length > 0 ? review.pageNumbers : pdfOrder?.pageNumbers ?? [],
+    carrier: pdfOrder?.shipVia ?? readReviewTeamshipValue(review, "carrier") ?? readTeamshipNullable(teamshipOrder, readTeamshipCarrier),
+    shipToName:
+      pdfOrder?.shipToName ??
+      readReviewTeamshipValue(review, "ship_to_name") ??
+      readTeamshipNullable(teamshipOrder, readTeamshipShipToName),
+    cityState: [city, state].filter(Boolean).join(", ") || null,
+    teamshipOrderId,
+    teamshipUrl: review.teamshipUrl ?? readTeamshipUrl(teamshipOrder) ?? buildTeamshipOrderUrl(teamshipOrderId),
+    issueCount: review.issueCount,
+    review,
+    pdfOrder,
+    teamshipOrder
+  };
+}
+
+function mapTeamshipRow(teamshipOrder: TeamshipShippingOrderDetail): ShipmentWorkspaceRow {
+  const teamshipOrderId = readTeamshipOrderId(teamshipOrder);
+  const city = readTeamshipCity(teamshipOrder);
+  const state = readTeamshipState(teamshipOrder);
+
+  return {
+    id: `teamship-${teamshipOrderId ?? readTeamshipShipmentId(teamshipOrder) ?? readTeamshipFallbackIdentifier(teamshipOrder)}`,
+    status: "TEAMSHIP_PULLED",
+    psNumber: stringifyCustomField(teamshipOrder, "ps") ?? stringifyCustomField(teamshipOrder, "pre") ?? null,
+    srNumber: readTeamshipShipmentId(teamshipOrder),
+    pdfPages: [],
+    carrier: readTeamshipCarrier(teamshipOrder),
+    shipToName: readTeamshipShipToName(teamshipOrder),
+    cityState: [city, state].filter(Boolean).join(", ") || null,
+    teamshipOrderId,
+    teamshipUrl: readTeamshipUrl(teamshipOrder) ?? buildTeamshipOrderUrl(teamshipOrderId),
+    issueCount: 0,
+    review: null,
+    pdfOrder: null,
+    teamshipOrder
+  };
+}
+
+function mapPdfRow(pdfOrder: GarlandPdfShippingOrder): ShipmentWorkspaceRow {
+  return {
+    id: `pdf-${pdfOrder.srNumber || pdfOrder.psNumber}`,
+    status: "PDF_READY",
+    psNumber: pdfOrder.psNumber,
+    srNumber: pdfOrder.srNumber,
+    pdfPages: pdfOrder.pageNumbers,
+    carrier: pdfOrder.shipVia,
+    shipToName: pdfOrder.shipToName,
+    cityState: [pdfOrder.shipToCity, pdfOrder.shipToState].filter(Boolean).join(", ") || null,
+    teamshipOrderId: null,
+    teamshipUrl: null,
+    issueCount: 0,
+    review: null,
+    pdfOrder,
+    teamshipOrder: null
+  };
+}
+
+function findPdfOrder(pdfOrders: GarlandPdfShippingOrder[], review: GarlandTeamshipOrderReview) {
+  const reviewSr = normalizeIdentifier(review.srNumber);
+  const reviewPs = normalizeIdentifier(review.psNumber);
+
+  return (
+    pdfOrders.find((order) => {
+      const orderSr = normalizeIdentifier(order.srNumber);
+      const orderPs = normalizeIdentifier(order.psNumber);
+
+      return (reviewSr && orderSr === reviewSr) || (reviewPs && orderPs === reviewPs);
+    }) ?? null
+  );
+}
+
+function readTeamshipNullable(
+  order: TeamshipShippingOrderDetail | null,
+  reader: (teamshipOrder: TeamshipShippingOrderDetail) => string | null
+) {
+  return order ? reader(order) : null;
+}
+
+function readReviewTeamshipValue(review: GarlandTeamshipOrderReview, key: string) {
+  return review.fields.find((field) => field.key === key)?.teamshipValue ?? null;
+}
+
+function stringifyCustomField(order: TeamshipShippingOrderDetail, needle: string) {
+  const lowerNeedle = needle.toLowerCase();
+  const field = order.custom_fields?.find((customField) =>
+    [customField.label, customField.edi_key].some((value) => value?.toLowerCase().includes(lowerNeedle))
+  );
+
+  return stringifyValue(field?.value);
+}
+
+function normalizeIdentifier(value: string | null) {
+  return value?.replace(/[^A-Z0-9]/gi, "").toUpperCase() ?? "";
+}
+
+function readTeamshipUrl(order: TeamshipShippingOrderDetail | null) {
+  return stringifyValue(order?.url) ?? buildTeamshipOrderUrl(order ? readTeamshipOrderId(order) : null);
+}
+
+function buildTeamshipOrderUrl(orderId: string | null) {
+  return orderId ? `https://app.teamshipos.com/view-shipping-order/${encodeURIComponent(orderId)}` : null;
+}
+
+function shipmentRowClass(status: ShipmentWorkspaceStatus) {
+  const base = "border-l-4";
+
+  if (status === "PASS") {
+    return `${base} border-success bg-success/5`;
+  }
+
+  if (status === "FAIL" || status === "MISSING_TEAMSHIP") {
+    return `${base} border-danger bg-danger/5`;
+  }
+
+  if (status === "PENDING_TEAMSHIP" || status === "NO_PDF") {
+    return `${base} border-warning bg-warning/10`;
+  }
+
+  if (status === "SKIPPED_ALREADY_REVIEWED") {
+    return `${base} border-border bg-muted/30`;
+  }
+
+  return `${base} border-border bg-card`;
+}
+
+function shipmentStatusPillClass(status: ShipmentWorkspaceStatus) {
+  const base = "rounded-full px-2.5 py-1 text-xs font-bold uppercase tracking-wide";
+
+  if (status === "PASS") {
+    return `${base} bg-success/10 text-success`;
+  }
+
+  if (status === "FAIL" || status === "MISSING_TEAMSHIP") {
+    return `${base} bg-danger/10 text-danger`;
+  }
+
+  if (status === "PENDING_TEAMSHIP" || status === "NO_PDF") {
+    return `${base} bg-warning/15 text-warning`;
+  }
+
+  if (status === "SKIPPED_ALREADY_REVIEWED") {
+    return `${base} bg-muted text-mutedForeground`;
+  }
+
+  return `${base} bg-muted text-mutedForeground`;
+}
+
+function formatWorkspaceStatus(status: ShipmentWorkspaceStatus, issueCount: number) {
+  if (status === "PASS") {
+    return "Approved";
+  }
+
+  if (status === "FAIL") {
+    return `${issueCount} issue${issueCount === 1 ? "" : "s"}`;
+  }
+
+  if (status === "MISSING_TEAMSHIP") {
+    return "Missing Teamship";
+  }
+
+  if (status === "PENDING_TEAMSHIP") {
+    return "Pending";
+  }
+
+  if (status === "NO_PDF") {
+    return "No PDF";
+  }
+
+  if (status === "SKIPPED_ALREADY_REVIEWED") {
+    return "Skipped";
+  }
+
+  if (status === "TEAMSHIP_PULLED") {
+    return "Pulled";
+  }
+
+  return "PDF ready";
+}
+
+async function buildReviewSummaryPdf({
+  documentLabel,
+  shipmentDate,
+  review,
+  rows
+}: {
+  documentLabel: string;
+  shipmentDate: string;
+  review: GarlandTeamshipReviewResponse;
+  rows: ShipmentWorkspaceRow[];
+}) {
+  const pdfDoc = await PDFDocument.create();
+  const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const margin = 42;
+  const pageWidth = 612;
+  const pageHeight = 792;
+  let page = pdfDoc.addPage([pageWidth, pageHeight]);
+  let y = pageHeight - 48;
+
+  const drawText = (text: string, x: number, nextY: number, options?: { size?: number; bold?: boolean; color?: ReturnType<typeof rgb> }) => {
+    page.drawText(text, {
+      x,
+      y: nextY,
+      size: options?.size ?? 9,
+      font: options?.bold ? boldFont : regularFont,
+      color: options?.color ?? rgb(0.12, 0.14, 0.18)
+    });
+  };
+
+  const addPageIfNeeded = (heightNeeded: number) => {
+    if (y - heightNeeded > 48) {
+      return;
+    }
+
+    page = pdfDoc.addPage([pageWidth, pageHeight]);
+    y = pageHeight - 48;
+  };
+
+  drawText("Garland Teamship Review Summary", margin, y, { size: 16, bold: true });
+  y -= 20;
+  drawText(`${documentLabel} · Shipment date ${formatDisplayDate(`${shipmentDate}T00:00:00.000Z`)}`, margin, y, { size: 10 });
+  y -= 22;
+  drawText(
+    `${review.summary.passedCount} approved · ${review.summary.failedCount} failed · ${review.summary.missingTeamshipCount} missing Teamship · ${review.summary.noPdfCount} no PDF`,
+    margin,
+    y,
+    { size: 9 }
+  );
+  y -= 22;
+
+  for (const row of rows) {
+    addPageIfNeeded(58);
+
+    page.drawRectangle({
+      x: margin,
+      y: y - 29,
+      width: 8,
+      height: 34,
+      color: summaryStatusColor(row.status)
+    });
+    drawText(
+      `${row.psNumber ?? "No PS"} / ${row.srNumber ?? "No SR"} - ${formatWorkspaceStatus(row.status, row.issueCount)}`,
+      margin + 14,
+      y,
+      { size: 10, bold: true }
+    );
+    y -= 14;
+    drawText(
+      [row.shipToName, row.carrier, row.cityState, row.pdfPages.length > 0 ? `PDF pages ${row.pdfPages.join(", ")}` : "No PDF page"]
+        .filter(Boolean)
+        .join(" · "),
+      margin + 14,
+      y,
+      { size: 8 }
+    );
+    y -= 13;
+
+    if (row.teamshipOrderId) {
+      drawText(`Teamship order: ${row.teamshipOrderId}`, margin + 14, y, { size: 8 });
+      y -= 13;
+    }
+
+    if (row.review?.fields.some((field) => field.status !== "MATCH" && field.status !== "INFO")) {
+      const issueSummary = row.review.fields
+        .filter((field) => field.status !== "MATCH" && field.status !== "INFO")
+        .map((field) => `${field.label}: ${field.message}`)
+        .join("; ");
+
+      for (const line of wrapPdfText(issueSummary, 106)) {
+        drawText(line, margin + 14, y, { size: 8, color: rgb(0.64, 0.18, 0.25) });
+        y -= 11;
+      }
+    }
+
+    y -= 8;
+  }
+
+  return pdfDoc.save();
+}
+
+function wrapPdfText(text: string, maxLength: number) {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let line = "";
+
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+
+    if (candidate.length > maxLength && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = candidate;
+    }
+  }
+
+  if (line) {
+    lines.push(line);
+  }
+
+  return lines.length > 0 ? lines : [text];
+}
+
+function summaryStatusColor(status: ShipmentWorkspaceStatus) {
+  if (status === "PASS") {
+    return rgb(0.09, 0.55, 0.28);
+  }
+
+  if (status === "FAIL" || status === "MISSING_TEAMSHIP") {
+    return rgb(0.86, 0.18, 0.28);
+  }
+
+  if (status === "PENDING_TEAMSHIP" || status === "NO_PDF") {
+    return rgb(0.88, 0.56, 0.12);
+  }
+
+  return rgb(0.48, 0.52, 0.6);
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName.replace(/[^\w .-]/g, "_");
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function formatDateLabel(dateValue: string) {
   return new Intl.DateTimeFormat("en-US", {
     month: "long",
@@ -1127,6 +1525,10 @@ function readTeamshipCity(order: TeamshipShippingOrderDetail) {
 
 function readTeamshipState(order: TeamshipShippingOrderDetail) {
   return stringifyValue(order.ship_to_state ?? order.ship_state ?? order.shipping_info?.shipping_address?.state);
+}
+
+function readTeamshipFallbackIdentifier(order: TeamshipShippingOrderDetail) {
+  return stringifyValue(order.record_no ?? order.display_id ?? order.order_number) ?? "unknown";
 }
 
 function stringifyValue(value: unknown) {
