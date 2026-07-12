@@ -2410,7 +2410,7 @@ function readTeamshipUrl(order: TeamshipShippingOrderDetail | null) {
 }
 
 function buildTeamshipOrderUrl(orderId: string | null) {
-  return orderId ? `https://app.teamshipos.com/view-shipping-order/${encodeURIComponent(orderId)}` : null;
+  return orderId ? `https://app.teamshipos.com/ship-inventories/${encodeURIComponent(orderId)}` : null;
 }
 
 function shipmentRowClass(status: ShipmentWorkspaceStatus) {

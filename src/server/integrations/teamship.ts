@@ -72,8 +72,11 @@ export async function fetchTeamshipShippingOrdersForReview({
 }: TeamshipFetchOptions): Promise<TeamshipShippingOrderDetail[]> {
   const resolvedCredentials = credentials ?? (await resolveTenantTeamshipCredentials(tenantId ? { tenantId } : null));
   const apiBaseUrl = resolveTeamshipApiBaseUrl(resolvedCredentials);
+  const webBaseUrl = resolveTeamshipWebBaseUrl(apiBaseUrl);
   const token = await loginToTeamship(fetchImpl, resolvedCredentials, apiBaseUrl);
   const targetSrNumbers = new Set(srNumbers.map(normalizeIdentifier).filter(Boolean));
+  const shouldEnrichFromUiPage = targetSrNumbers.size > 0;
+  let webCookieHeader: string | null | undefined;
   const details = new Map<string, TeamshipShippingOrderDetail>();
   const pageLimit = getTeamshipPageLimit();
   const maxPages = getTeamshipMaxPages();
@@ -98,7 +101,27 @@ export async function fetchTeamshipShippingOrdersForReview({
       }
 
       const detail = await getTeamshipShippingOrder({ apiBaseUrl, token, id: String(orderId), fetchImpl });
-      const mergedDetail = mergeTeamshipDetailWithSummary(detail, row);
+      let mergedDetail = mergeTeamshipDetailWithSummary(detail, row);
+
+      if (shouldEnrichFromUiPage) {
+        if (webCookieHeader === undefined) {
+          webCookieHeader = await loginToTeamshipWeb(fetchImpl, resolvedCredentials, webBaseUrl).catch(() => null);
+        }
+
+        if (webCookieHeader) {
+          const uiDetail = await getTeamshipShippingOrderUiDetail({
+            webBaseUrl,
+            webCookieHeader,
+            id: String(orderId),
+            fetchImpl
+          }).catch(() => null);
+
+          if (uiDetail) {
+            mergedDetail = mergeTeamshipUiDetail(mergedDetail, uiDetail);
+          }
+        }
+      }
+
       const detailShipmentId = normalizeTeamshipShipmentId(mergedDetail);
       details.set(detailShipmentId || String(orderId), mergedDetail);
     }
@@ -138,6 +161,19 @@ function mergeTeamshipDetailWithSummary(
     pickup_eta: detail.pickup_eta ?? summary.pickup_eta,
     shipment_date: detail.shipment_date ?? summary.shipment_date,
     url: detail.url ?? summary.url
+  };
+}
+
+export function parseTeamshipShippingOrderUiPage(html: string): Partial<TeamshipShippingOrderDetail> {
+  const inventories = parseJsonArray(readHtmlFormValueById(html, "inventories_all"));
+  const items = inventories
+    .map(readTeamshipUiInventoryItem)
+    .filter((item): item is NonNullable<ReturnType<typeof readTeamshipUiInventoryItem>> => Boolean(item));
+  const pallets = readTeamshipUiPallets(html);
+
+  return {
+    items,
+    pallet_dims: pallets
   };
 }
 
@@ -237,12 +273,120 @@ function buildTeamshipHeaders(token: string) {
   };
 }
 
+async function loginToTeamshipWeb(
+  fetchImpl: typeof fetch,
+  credentials: TeamshipRuntimeCredentials | null,
+  webBaseUrl: string
+) {
+  const email = credentials?.email.trim() || getTeamshipEmail();
+  const password = credentials?.password.trim() || getTeamshipPassword();
+
+  if (!email || !password) {
+    throw new Error("Teamship credentials are not configured. Add Teamship credentials in Settings.");
+  }
+
+  const cookieJar = new Map<string, string>();
+  const loginPageResponse = await fetchImpl(`${webBaseUrl}/login`, {
+    headers: {
+      accept: "text/html"
+    },
+    cache: "no-store"
+  });
+  mergeSetCookies(cookieJar, readSetCookies(loginPageResponse.headers));
+  const loginPageHtml = await loginPageResponse.text().catch(() => "");
+  const csrfToken = readHtmlFormValueByName(loginPageHtml, "_token") ?? readMetaContentByName(loginPageHtml, "csrf-token");
+  const body = new URLSearchParams({
+    email,
+    password
+  });
+
+  if (csrfToken) {
+    body.set("_token", csrfToken);
+  }
+
+  const loginResponse = await fetchImpl(`${webBaseUrl}/login`, {
+    method: "POST",
+    headers: {
+      accept: "text/html,application/xhtml+xml",
+      "content-type": "application/x-www-form-urlencoded",
+      cookie: serializeCookies(cookieJar)
+    },
+    body,
+    cache: "no-store",
+    redirect: "manual"
+  });
+  mergeSetCookies(cookieJar, readSetCookies(loginResponse.headers));
+
+  const cookieHeader = serializeCookies(cookieJar);
+  if (!cookieHeader) {
+    throw new Error(`Teamship web login did not return a session cookie. Teamship returned status ${loginResponse.status}.`);
+  }
+
+  return cookieHeader;
+}
+
+async function getTeamshipShippingOrderUiDetail({
+  webBaseUrl,
+  webCookieHeader,
+  id,
+  fetchImpl
+}: {
+  webBaseUrl: string;
+  webCookieHeader: string;
+  id: string;
+  fetchImpl: typeof fetch;
+}) {
+  const response = await fetchImpl(`${webBaseUrl}/ship-inventories/${encodeURIComponent(id)}`, {
+    headers: {
+      accept: "text/html,application/xhtml+xml",
+      cookie: webCookieHeader
+    },
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(`Unable to load Teamship UI shipping order ${id}. Teamship returned status ${response.status}.`);
+  }
+
+  const html = await response.text();
+  const parsed = parseTeamshipShippingOrderUiPage(html);
+
+  return {
+    ...parsed,
+    url: `${webBaseUrl}/ship-inventories/${encodeURIComponent(id)}`
+  };
+}
+
+function mergeTeamshipUiDetail(
+  detail: TeamshipShippingOrderDetail,
+  uiDetail: Partial<TeamshipShippingOrderDetail>
+): TeamshipShippingOrderDetail {
+  return {
+    ...detail,
+    items: mergeArrayValues(detail.items, uiDetail.items),
+    pallet_dims: mergeArrayValues(detail.pallet_dims, uiDetail.pallet_dims),
+    url: uiDetail.url ?? detail.url
+  };
+}
+
+function mergeArrayValues<T>(left: T[] | undefined, right: T[] | undefined) {
+  return [...(left ?? []), ...(right ?? [])];
+}
+
 function getTeamshipApiBaseUrl() {
   return (process.env.TEAMSHIP_API_BASE_URL?.trim() || DEFAULT_TEAMSHIP_API_BASE_URL).replace(/\/+$/, "");
 }
 
 function resolveTeamshipApiBaseUrl(credentials: TeamshipRuntimeCredentials | null) {
   return (credentials?.apiBaseUrl?.trim() || getTeamshipApiBaseUrl()).replace(/\/+$/, "");
+}
+
+function resolveTeamshipWebBaseUrl(apiBaseUrl: string) {
+  try {
+    return new URL(apiBaseUrl).origin.replace(/\/+$/, "");
+  } catch {
+    return apiBaseUrl.replace(/\/api\/?$/i, "").replace(/\/+$/, "");
+  }
 }
 
 function getTeamshipEmail() {
@@ -317,4 +461,253 @@ function normalizeText(value: unknown) {
     .replace(/[^A-Z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function readTeamshipUiInventoryItem(record: unknown) {
+  if (!record || typeof record !== "object") {
+    return null;
+  }
+
+  const inventory = record as Record<string, unknown>;
+  const sku = firstString([
+    readNestedValue(inventory, ["item", "sku", "code"]),
+    readNestedValue(inventory, ["item", "sku_code"]),
+    readNestedValue(inventory, ["item", "code"]),
+    readNestedValue(inventory, ["item", "sku"]),
+    inventory.sku,
+    inventory.sku_code
+  ]);
+  const serial = readCustomAttributeValue(inventory, "serial") ?? firstString([inventory.serial, inventory.serial_number, inventory.serialNumber]);
+  const quantity = firstString([
+    readNestedValue(inventory, ["pivot", "quantity"]),
+    inventory.quantity,
+    inventory.reserved_quantity,
+    inventory.on_hand
+  ]);
+
+  if (!sku && !serial && !quantity) {
+    return null;
+  }
+
+  return {
+    sku,
+    quantity,
+    serial_number: serial,
+    product: {
+      sku,
+      serial
+    }
+  };
+}
+
+function readTeamshipUiPallets(html: string) {
+  const count = Number.parseInt(readHtmlFormValueById(html, "pallets_count") ?? "", 10);
+  const maxCount = Number.isFinite(count) && count > 0 ? count : 10;
+  const pallets: TeamshipShippingOrderDetail["pallet_dims"] = [];
+
+  for (let index = 1; index <= maxCount; index += 1) {
+    const pallet = {
+      quantity: readHtmlFormValueById(html, `pallet_${index}`),
+      length: readHtmlFormValueById(html, `pallet_${index}_length`),
+      width: readHtmlFormValueById(html, `pallet_${index}_width`),
+      height: readHtmlFormValueById(html, `pallet_${index}_height`),
+      weight: readHtmlFormValueById(html, `pallet_${index}_weight`),
+      weight_unit: readHtmlFormValueById(html, `pallet_${index}_weight_unit`) ?? "lbs",
+      commodity: readHtmlFormValueById(html, `pallet_${index}_commodity`)
+    };
+
+    if (Object.values(pallet).some((value) => value && String(value).trim())) {
+      pallets.push(pallet);
+    }
+  }
+
+  return pallets;
+}
+
+function parseJsonArray(value: string | null) {
+  if (!value) {
+    return [];
+  }
+
+  const parsed = safeJsonParse(value);
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+function safeJsonParse(value: string) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function readCustomAttributeValue(record: Record<string, unknown>, name: string) {
+  const attributes = [
+    record.customAttribut,
+    record.customAttribute,
+    record.custom_attributes,
+    record.customAttributes,
+    readNestedValue(record, ["item", "customAttribut"]),
+    readNestedValue(record, ["item", "customAttribute"]),
+    readNestedValue(record, ["item", "custom_attributes"]),
+    readNestedValue(record, ["item", "customAttributes"])
+  ];
+  const normalizedName = normalizeText(name);
+
+  for (const attributeGroup of attributes) {
+    if (!Array.isArray(attributeGroup)) {
+      continue;
+    }
+
+    for (const attribute of attributeGroup) {
+      if (!attribute || typeof attribute !== "object") {
+        continue;
+      }
+
+      const attributeRecord = attribute as Record<string, unknown>;
+      const attributeName = normalizeText(firstString([attributeRecord.name, attributeRecord.label, attributeRecord.key]));
+
+      if (attributeName === normalizedName) {
+        return firstString([attributeRecord.value, attributeRecord.attribute_value, attributeRecord.attributeValue]);
+      }
+    }
+  }
+
+  return null;
+}
+
+function readNestedValue(value: unknown, path: string[]) {
+  let current = value;
+
+  for (const key of path) {
+    if (!current || typeof current !== "object") {
+      return null;
+    }
+
+    current = (current as Record<string, unknown>)[key];
+  }
+
+  return current;
+}
+
+function firstString(values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(value);
+    }
+  }
+
+  return null;
+}
+
+function readHtmlFormValueById(html: string, id: string) {
+  return readHtmlFormValue(html, "id", id);
+}
+
+function readHtmlFormValueByName(html: string, name: string) {
+  return readHtmlFormValue(html, "name", name);
+}
+
+function readHtmlFormValue(html: string, attributeName: "id" | "name", expectedValue: string) {
+  const fieldPattern = /<(input|textarea)\b[^>]*>(?:([\s\S]*?)<\/textarea>)?/gi;
+
+  for (const match of html.matchAll(fieldPattern)) {
+    const tag = match[0] ?? "";
+    if (readHtmlAttribute(tag, attributeName) !== expectedValue) {
+      continue;
+    }
+
+    if ((match[1] ?? "").toLowerCase() === "textarea") {
+      return decodeHtmlEntities(match[2] ?? "");
+    }
+
+    return readHtmlAttribute(tag, "value");
+  }
+
+  return null;
+}
+
+function readMetaContentByName(html: string, expectedName: string) {
+  const metaPattern = /<meta\b[^>]*>/gi;
+
+  for (const match of html.matchAll(metaPattern)) {
+    const tag = match[0] ?? "";
+    const name = readHtmlAttribute(tag, "name") ?? readHtmlAttribute(tag, "property");
+
+    if (name === expectedName) {
+      return readHtmlAttribute(tag, "content");
+    }
+  }
+
+  return null;
+}
+
+function readHtmlAttribute(tag: string, attributeName: string) {
+  const attributePattern = new RegExp(`\\s${escapeRegExp(attributeName)}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]+))`, "i");
+  const match = tag.match(attributePattern);
+  return decodeHtmlEntities(match?.[2] ?? match?.[3] ?? match?.[4] ?? "");
+}
+
+function decodeHtmlEntities(value: string) {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&#34;/g, '"')
+    .replace(/&#x22;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/gi, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function readSetCookies(headers: Headers) {
+  const headersWithSetCookie = headers as Headers & { getSetCookie?: () => string[] };
+  const setCookies = headersWithSetCookie.getSetCookie?.();
+
+  if (setCookies?.length) {
+    return setCookies;
+  }
+
+  const combined = headers.get("set-cookie");
+  return combined ? splitSetCookieHeader(combined) : [];
+}
+
+function splitSetCookieHeader(value: string) {
+  return value
+    .split(/,(?=\s*[^;,]+=)/g)
+    .map((cookie) => cookie.trim())
+    .filter(Boolean);
+}
+
+function mergeSetCookies(cookieJar: Map<string, string>, setCookies: string[]) {
+  for (const setCookie of setCookies) {
+    const [nameValue] = setCookie.split(";");
+    const separatorIndex = nameValue?.indexOf("=") ?? -1;
+
+    if (!nameValue || separatorIndex <= 0) {
+      continue;
+    }
+
+    const name = nameValue.slice(0, separatorIndex).trim();
+    const value = nameValue.slice(separatorIndex + 1).trim();
+
+    if (name && value) {
+      cookieJar.set(name, value);
+    }
+  }
+}
+
+function serializeCookies(cookieJar: Map<string, string>) {
+  return Array.from(cookieJar.entries())
+    .map(([name, value]) => `${name}=${value}`)
+    .join("; ");
 }

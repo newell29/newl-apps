@@ -7,7 +7,7 @@ import {
 } from "@/modules/shipment-documents/teamship-review";
 import { buildTeamshipPayloadInspection } from "@/modules/shipment-documents/teamship-payload-inspector";
 import type { GarlandPdfShippingOrder, TeamshipShippingOrderDetail } from "@/modules/shipment-documents/teamship-review-types";
-import { fetchTeamshipShippingOrdersForReview } from "@/server/integrations/teamship";
+import { fetchTeamshipShippingOrdersForReview, parseTeamshipShippingOrderUiPage } from "@/server/integrations/teamship";
 
 const pageFive = `Ship-To Pre-Shipper Print Date
 10018968 PS210210 7/10/2026
@@ -890,13 +890,183 @@ NEWLS 2604816191908 1.00 ( )`
         customer: { company: "Garland Canada Distribution" }
       }
     ]);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(fetchMock.mock.calls.every(([, init]) => (init?.method ?? "GET") === "GET" || init?.method === "POST")).toBe(
       true
     );
     expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes("/v1/ship-inventories") && init?.method)).toBe(
       false
     );
+  });
+
+  it("parses Teamship UI page inventory serials from hidden order data", () => {
+    const parsed = parseTeamshipShippingOrderUiPage(
+      sampleTeamshipUiPageHtml({
+        sku: "E1SGHMV6XHU3US",
+        serial: "2604816191908",
+        quantity: 1,
+        commodity: "SKU: E1SGHMV6XHU3US, SN: 2604816191908"
+      })
+    );
+
+    expect(parsed.items).toEqual([
+      expect.objectContaining({
+        sku: "E1SGHMV6XHU3US",
+        quantity: "1",
+        serial_number: "2604816191908",
+        product: {
+          sku: "E1SGHMV6XHU3US",
+          serial: "2604816191908"
+        }
+      })
+    ]);
+    expect(parsed.pallet_dims).toEqual([
+      expect.objectContaining({
+        quantity: "1",
+        length: "1",
+        width: "1",
+        height: "1",
+        weight: "1",
+        weight_unit: "lbs",
+        commodity: "SKU: E1SGHMV6XHU3US, SN: 2604816191908"
+      })
+    ]);
+  });
+
+  it("enriches targeted Teamship orders from the UI page when API detail omits serials", async () => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_MAX_LIST_PAGES = "1";
+
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/v1/login")) {
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/api/v1/ship-inventories?")) {
+        return Response.json({
+          data: [{ id: 30202, shipment_id: "SR808478", customer: { company: "Garland Canada Distribution" } }]
+        });
+      }
+
+      if (url.endsWith("/api/v1/ship-inventories/30202")) {
+        return Response.json({
+          data: {
+            id: 30202,
+            shipment_id: "SR808478",
+            edi_field_2: "PS210206-SR808478",
+            items: [{ sku: "E1SGHMV6XHU3US", quantity: 1 }]
+          }
+        });
+      }
+
+      if (url.endsWith("/login") && (init?.method ?? "GET") === "GET") {
+        return new Response('<input type="hidden" name="_token" value="csrf-1">', {
+          headers: {
+            "set-cookie": "teamship_session=before-login; Path=/"
+          }
+        });
+      }
+
+      if (url.endsWith("/login") && init?.method === "POST") {
+        return new Response("", {
+          status: 302,
+          headers: {
+            "set-cookie": "teamship_session=after-login; Path=/"
+          }
+        });
+      }
+
+      if (url.endsWith("/ship-inventories/30202")) {
+        expect(init?.headers).toMatchObject({
+          cookie: "teamship_session=after-login"
+        });
+        return new Response(
+          sampleTeamshipUiPageHtml({
+            sku: "E1SGHMV6XHU3US",
+            serial: "2604816191908",
+            quantity: 1,
+            commodity: "SKU: E1SGHMV6XHU3US, SN: 2604816191908"
+          })
+        );
+      }
+
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      srNumbers: ["SR808478"],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(orders).toHaveLength(1);
+    expect(orders[0]).toMatchObject({
+      id: 30202,
+      shipment_id: "SR808478",
+      url: "https://teamship.test/ship-inventories/30202",
+      items: [
+        { sku: "E1SGHMV6XHU3US", quantity: 1 },
+        {
+          sku: "E1SGHMV6XHU3US",
+          quantity: "1",
+          serial_number: "2604816191908",
+          product: {
+            sku: "E1SGHMV6XHU3US",
+            serial: "2604816191908"
+          }
+        }
+      ],
+      pallet_dims: [
+        expect.objectContaining({
+          commodity: "SKU: E1SGHMV6XHU3US, SN: 2604816191908"
+        })
+      ]
+    });
+  });
+
+  it("matches PDF serials after Teamship UI enrichment adds inventory serials", () => {
+    const pdfOrder = samplePdfOrder({
+      psNumber: "PS210206",
+      srNumber: "SR808478",
+      pageNumbers: [1],
+      shipVia: "MIDLAND",
+      shipToName: "MATCHING CUSTOMER",
+      shipToPo: "PO-1",
+      freightTerms: "PPADD-CD",
+      itemSkus: ["E1SGHMV6XHU3US"],
+      serialNumbers: ["2604816191908"]
+    });
+    const parsed = parseTeamshipShippingOrderUiPage(
+      sampleTeamshipUiPageHtml({
+        sku: "E1SGHMV6XHU3US",
+        serial: "2604816191908",
+        quantity: 1,
+        commodity: "SKU: E1SGHMV6XHU3US, SN: 2604816191908"
+      })
+    );
+    const teamshipOrder: TeamshipShippingOrderDetail = {
+      ...sampleTeamshipOrder("SR808478", "PS210206", "MIDLAND", "MATCHING CUSTOMER", "PO-1", "PPADD-CD", []),
+      items: parsed.items,
+      pallet_dims: parsed.pallet_dims
+    };
+
+    const review = buildGarlandTeamshipReview([pdfOrder], [teamshipOrder]);
+    const serialReview = review.reviews[0]?.fields.find((field) => field.key === "serialNumbers");
+
+    expect(serialReview).toMatchObject({
+      status: "MATCH",
+      pdfValue: "2604816191908",
+      teamshipValue: expect.stringContaining("2604816191908")
+    });
+    expect(review.reviews[0]?.teamshipItems).toEqual([
+      expect.objectContaining({
+        sku: "E1SGHMV6XHU3US",
+        serialNumbers: ["2604816191908"]
+      })
+    ]);
   });
 
   it("pulls Garland daily orders by selected day when no SR filter is provided", async () => {
@@ -1171,4 +1341,42 @@ function sampleTeamshipOrder(
     edi_field_3: freightTerms,
     pallets: commodities.map((commodity) => ({ commodity }))
   };
+}
+
+function sampleTeamshipUiPageHtml({
+  sku,
+  serial,
+  quantity,
+  commodity
+}: {
+  sku: string;
+  serial: string;
+  quantity: number;
+  commodity: string;
+}) {
+  const inventories = [
+    {
+      reserved_quantity: quantity,
+      customAttribut: [{ id: 7, name: "Serial", value: serial, type: "string" }],
+      pivot: { quantity },
+      item: {
+        sku: {
+          code: sku
+        }
+      }
+    }
+  ];
+  const escapedInventories = JSON.stringify(inventories).replace(/"/g, "&quot;");
+
+  return `
+    <input type="hidden" id="inventories_all" value="${escapedInventories}">
+    <input type="hidden" id="pallets_count" value="1">
+    <input id="pallet_1" value="1">
+    <input id="pallet_1_length" value="1">
+    <input id="pallet_1_width" value="1">
+    <input id="pallet_1_height" value="1">
+    <input id="pallet_1_weight" value="1">
+    <input id="pallet_1_weight_unit" value="lbs">
+    <input id="pallet_1_commodity" value="${commodity}">
+  `;
 }
