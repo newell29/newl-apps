@@ -304,6 +304,8 @@ npm run worker:teamship-phase2
 
 Live mode logs into Teamship using the tenant Settings credentials, submits the approved order-level fields and pallet rows to `/v1/ship-inventories/:id`, reports evidence back to Newl Apps, and triggers the automatic Teamship rescan. Keep `MAX_CONCURRENCY=1` operationally on the VM, and initially release one field group at a time with allowlisted orders: commodity/comment first, then pallet dimensions/weight, then mapped order-level fields.
 
+If any individual Teamship order update fails, the worker must preserve the per-order evidence and report the job as `NEEDS_REVIEW` instead of discarding the partial result. Successful rows stay traceable as updated evidence, failed rows show the Teamship/API error, and the CSR/admin can rescan or correct manually from the Phase 2 update jobs panel.
+
 Agent endpoint examples:
 
 ```bash

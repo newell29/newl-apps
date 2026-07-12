@@ -407,15 +407,36 @@ export async function completeTeamshipUpdateJobFromAgent({
 
   const finalStatus = verificationError ? "NEEDS_REVIEW" : status;
   const client = prisma as TeamshipUpdateJobClient;
-  await client.teamshipUpdateOrder.updateMany({
-    where: {
-      tenantId: context.tenantId,
-      jobId
-    },
-    data: {
-      status: finalStatus === "SUCCESS" ? "SUCCESS" : finalStatus
-    }
-  });
+  const agentOrderResults = readAgentOrderResults(agentResult);
+
+  if (agentOrderResults.length > 0) {
+    await Promise.all(
+      agentOrderResults.map((order) =>
+        client.teamshipUpdateOrder.updateMany({
+          where: {
+            tenantId: context.tenantId,
+            jobId,
+            srNumber: order.srNumber
+          },
+          data: {
+            status: mapAgentOrderStatus(order.status, finalStatus),
+            agentResult: order as unknown as Prisma.InputJsonValue,
+            errorMessage: order.error ?? null
+          }
+        })
+      )
+    );
+  } else {
+    await client.teamshipUpdateOrder.updateMany({
+      where: {
+        tenantId: context.tenantId,
+        jobId
+      },
+      data: {
+        status: finalStatus === "SUCCESS" ? "SUCCESS" : finalStatus
+      }
+    });
+  }
 
   const updated = await client.teamshipUpdateJob.update({
     where: { id: jobId },
@@ -533,6 +554,38 @@ function mapUpdateJob(job: TeamshipUpdateJobRecord): TeamshipUpdateJobSummary {
     approvedByName: readUserName(job.approvedBy),
     orders: job.orders.map(mapUpdateOrder)
   };
+}
+
+function readAgentOrderResults(value: unknown) {
+  const payload = value && typeof value === "object" ? (value as { orders?: unknown }) : null;
+  const orders = Array.isArray(payload?.orders) ? payload.orders : [];
+
+  return orders
+    .map((order) => (order && typeof order === "object" ? (order as { srNumber?: unknown; status?: unknown; error?: unknown }) : null))
+    .filter((order): order is { srNumber: string; status: string; error?: string } => {
+      return typeof order?.srNumber === "string" && order.srNumber.trim().length > 0 && typeof order.status === "string";
+    })
+    .map((order) => ({
+      srNumber: order.srNumber.trim(),
+      status: order.status,
+      error: typeof order.error === "string" && order.error.trim().length > 0 ? order.error.trim() : null
+    }));
+}
+
+function mapAgentOrderStatus(status: string, finalStatus: "SUCCESS" | "FAILED" | "NEEDS_REVIEW"): TeamshipUpdateOrderStatus {
+  if (status === "UPDATED") {
+    return "SUCCESS";
+  }
+
+  if (status === "FAILED") {
+    return "FAILED";
+  }
+
+  if (status === "READY" || status === "BLOCKED" || status === "SKIPPED") {
+    return finalStatus === "SUCCESS" ? "SUCCESS" : finalStatus;
+  }
+
+  return finalStatus === "SUCCESS" ? "SUCCESS" : finalStatus;
 }
 
 function mapUpdateOrder(order: TeamshipUpdateOrderRecord): TeamshipUpdateOrderSummary {
