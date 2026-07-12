@@ -1427,6 +1427,10 @@ function formatWorkspaceStatus(status: ShipmentWorkspaceStatus, issueCount: numb
 }
 
 function formatDimensionSource(source: GarlandTeamshipOrderReview["productDimensions"][number]["source"]) {
+  if (source === "UPS_RULE") {
+    return "UPS rule";
+  }
+
   return source === "TEAMSHIP_PALLET" ? "Teamship pallet" : "Garland sheet";
 }
 

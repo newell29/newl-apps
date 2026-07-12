@@ -197,6 +197,8 @@ The Teamship shipping-order detail route is `https://members.fulfillit.io/ship-i
 
 Garland provided a freight-dimension workbook named `FREIGHT DIMS - NEWLS (version 1) (version 1).xlsb`. The app normalizes the `DIMS` and `BEV-AIR` sheets into a checked-in reference directory with these fields: SKU/model, product type, length inches, width inches, height inches, and weight pounds. The Teamship Review page combines this Garland reference data with observed Teamship pallet rows and shows SKU dimension recommendations inside each expanded shipment row. The current review run can also export a SKU dimension directory CSV.
 
+UPS exception: for Garland UPS orders, always enter `1 x 1 x 1` and `1 lbs` for dimensions/weight regardless of SKU, Garland reference-sheet data, or observed SKU history. The Teamship Review dimension recommendation should show this as a high-confidence `UPS rule` source and suppress SKU-specific alternatives for that UPS order.
+
 Pallet data is stored in hidden `shipInventoryData.pallets[]` and rendered as indexed visible fields:
 
 | Teamship data field | Visible input naming pattern | Notes |

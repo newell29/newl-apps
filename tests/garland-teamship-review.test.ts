@@ -626,6 +626,56 @@ NEWLS 2604816191908 1.00 ( )`
     );
   });
 
+  it("uses the Garland UPS placeholder dimension rule instead of SKU-specific dimensions", () => {
+    const pdfOrder = samplePdfOrder({
+      psNumber: "PS210501",
+      srNumber: "SR812501",
+      pageNumbers: [1],
+      shipVia: "UPS CD STD",
+      shipToName: "UPS DIM TEST CUSTOMER",
+      shipToPo: "PO-UPS-DIMS",
+      freightTerms: "PPADD-CD",
+      itemSkus: ["99560025"],
+      serialNumbers: []
+    });
+    const teamshipOrder = sampleTeamshipOrder(
+      "SR812501",
+      "PS210501",
+      "UPS",
+      "UPS DIM TEST CUSTOMER",
+      "PO-UPS-DIMS",
+      "PPADD-CD",
+      ["SKU: 99560025"]
+    );
+    teamshipOrder.pallets = [
+      {
+        quantity: 1,
+        length: 48,
+        width: 40,
+        height: 16,
+        weight: 81,
+        weight_unit: "lbs",
+        commodity: "SKU: 99560025"
+      }
+    ];
+
+    const review = buildGarlandTeamshipReview([pdfOrder], [teamshipOrder]);
+
+    expect(review.reviews[0]?.productDimensions).toEqual([
+      expect.objectContaining({
+        sku: "99560025",
+        source: "UPS_RULE",
+        lengthIn: 1,
+        widthIn: 1,
+        heightIn: 1,
+        weightLb: 1,
+        confidence: "HIGH"
+      })
+    ]);
+    expect(review.reviews[0]?.productDimensions.map((dimension) => dimension.source)).not.toContain("GARLAND_REFERENCE");
+    expect(review.reviews[0]?.productDimensions.map((dimension) => dimension.source)).not.toContain("TEAMSHIP_PALLET");
+  });
+
   it("fetches Teamship details read-only by Garland SR/shipment ID", async () => {
     process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
     process.env.TEAMSHIP_PASSWORD = "configured-in-env";
