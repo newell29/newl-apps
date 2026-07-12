@@ -76,6 +76,56 @@ type TeamshipReviewHistoryResponse = {
   error?: string;
 };
 
+type TeamshipUpdateOrderSummary = {
+  id: string;
+  psNumber: string;
+  srNumber: string;
+  teamshipOrderId: string | null;
+  teamshipUrl: string | null;
+  status: "READY" | "BLOCKED" | "SKIPPED" | "APPROVED" | "RUNNING" | "SUCCESS" | "FAILED" | "NEEDS_REVIEW";
+  sourceReviewStatus: string;
+  plannedFieldUpdateCount: number;
+  plannedPalletRowCount: number;
+  validationIssues: string[];
+  errorMessage: string | null;
+};
+
+type TeamshipUpdateJobSummary = {
+  id: string;
+  documentLabel: string;
+  shipmentDate: string;
+  sourcePdfFileName: string | null;
+  status: "DRAFT" | "APPROVED" | "RUNNING" | "SUCCESS" | "FAILED" | "NEEDS_REVIEW" | "CANCELLED";
+  agentMode: string;
+  dryRun: boolean;
+  selectedSrNumbers: string[];
+  summary: {
+    orderCount: number;
+    readyCount: number;
+    blockedCount: number;
+    skippedCount: number;
+    plannedFieldUpdateCount: number;
+    plannedPalletRowCount: number;
+  };
+  errorMessage: string | null;
+  agentId: string | null;
+  createdAt: string;
+  approvedAt: string | null;
+  agentClaimedAt: string | null;
+  agentStartedAt: string | null;
+  agentFinishedAt: string | null;
+  lastVerificationAt: string | null;
+  createdByName: string | null;
+  approvedByName: string | null;
+  orders: TeamshipUpdateOrderSummary[];
+};
+
+type TeamshipUpdateJobsResponse = {
+  jobs: TeamshipUpdateJobSummary[];
+  totalCount: number;
+  error?: string;
+};
+
 type ShipmentWorkspaceStatus = GarlandTeamshipOrderReview["status"] | "TEAMSHIP_PULLED" | "PDF_READY";
 
 type ShipmentWorkspaceRow = {
@@ -118,6 +168,9 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     dateTo: todayInputValue,
     allDates: false
   });
+  const [updateJobs, setUpdateJobs] = useState<TeamshipUpdateJobSummary[]>([]);
+  const [selectedUpdateSrNumbers, setSelectedUpdateSrNumbers] = useState<Set<string>>(new Set());
+  const [updateJobStatus, setUpdateJobStatus] = useState<string | null>(null);
   const [historySearch, setHistorySearch] = useState("");
   const [historyDateFrom, setHistoryDateFrom] = useState(todayInputValue);
   const [historyDateTo, setHistoryDateTo] = useState(todayInputValue);
@@ -129,10 +182,12 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [isUpdateJobLoading, setIsUpdateJobLoading] = useState(false);
 
   useEffect(() => {
     const today = getTodayInputValue();
     void fetchHistory("", today, today, false);
+    void fetchUpdateJobs();
   }, []);
 
   const parsedAlertCount = useMemo(() => parseTeamshipAlertDigest(alertDigest).length, [alertDigest]);
@@ -173,9 +228,10 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     }
   }
 
-  async function runReview() {
+  async function runReview({ rescan = false }: { rescan?: boolean } = {}) {
     setError(null);
     setReview(null);
+    setUpdateJobStatus(null);
 
     let extractedOrders = orders;
 
@@ -200,7 +256,8 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         body: JSON.stringify({
           shipmentDate,
           orders: extractedOrders,
-          alertDigest
+          alertDigest,
+          rescan
         })
       });
       const json = (await response.json().catch(() => null)) as unknown;
@@ -214,8 +271,9 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       }
 
       setReview(json);
+      setSelectedUpdateSrNumbers(new Set(json.reviews.filter(isUpdateEligibleReview).map((row) => row.srNumber)));
       setStatus(
-        `Review complete: ${json.summary.passedCount} green, ${json.summary.pendingTeamshipCount} pending Teamship creation, ${json.summary.failedCount} with discrepancies, ${json.summary.missingTeamshipCount} missing without an alert.`
+        `${rescan ? "Rescan complete" : "Review complete"}: ${json.summary.passedCount} green, ${json.summary.pendingTeamshipCount} pending Teamship creation, ${json.summary.failedCount} with discrepancies, ${json.summary.missingTeamshipCount} missing without an alert.`
           + (json.summary.noPdfCount > 0 ? ` ${json.summary.noPdfCount} Teamship order(s) had no uploaded PDF.` : "")
           + (json.summary.skippedAlreadyReviewedCount > 0 ? ` ${json.summary.skippedAlreadyReviewedCount} already-reviewed order(s) were skipped.` : "")
       );
@@ -224,6 +282,105 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       setStatus("Teamship review stopped before results were created.");
     } finally {
       setIsProcessing(false);
+    }
+  }
+
+  async function fetchUpdateJobs() {
+    setIsUpdateJobLoading(true);
+
+    try {
+      const response = await fetch("/api/shipment-documents/teamship-review/update-jobs");
+      const json = (await response.json().catch(() => null)) as TeamshipUpdateJobsResponse | null;
+
+      if (!response.ok || !json || isErrorResponse(json)) {
+        throw new Error(isErrorResponse(json) ? json.error : "Unable to load Teamship update jobs.");
+      }
+
+      setUpdateJobs(json.jobs);
+    } catch (caught) {
+      setUpdateJobStatus(caught instanceof Error ? caught.message : "Unable to load Teamship update jobs.");
+    } finally {
+      setIsUpdateJobLoading(false);
+    }
+  }
+
+  async function createUpdateJob() {
+    setError(null);
+    setUpdateJobStatus(null);
+
+    if (!review) {
+      setError("Run the Teamship review before creating an update job.");
+      return;
+    }
+
+    const selectedSrNumbers = Array.from(selectedUpdateSrNumbers);
+
+    if (selectedSrNumbers.length === 0) {
+      setError("Select at least one shipment before creating an update job.");
+      return;
+    }
+
+    setIsUpdateJobLoading(true);
+    setUpdateJobStatus("Creating Teamship update draft...");
+
+    try {
+      const response = await fetch("/api/shipment-documents/teamship-review/update-jobs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          documentLabel: documentLabel.trim() || formatDateLabel(shipmentDate),
+          shipmentDate,
+          sourcePdfFileName: pdfFile?.name ?? null,
+          review,
+          selectedSrNumbers
+        })
+      });
+      const json = (await response.json().catch(() => null)) as TeamshipUpdateJobsResponse | null;
+
+      if (!response.ok || !json || isErrorResponse(json)) {
+        throw new Error(isErrorResponse(json) ? json.error : "Unable to create Teamship update job.");
+      }
+
+      setUpdateJobs(json.jobs);
+      setUpdateJobStatus("Teamship update draft created. Review blocked rows before approving the agent.");
+    } catch (caught) {
+      setUpdateJobStatus(null);
+      setError(caught instanceof Error ? caught.message : "Unable to create Teamship update job.");
+    } finally {
+      setIsUpdateJobLoading(false);
+    }
+  }
+
+  async function updateJobAction(jobId: string, action: "approve" | "cancel" | "rescan") {
+    setError(null);
+    setUpdateJobStatus(action === "approve" ? "Approving job for agent..." : action === "rescan" ? "Rescanning Teamship details..." : "Cancelling job...");
+    setIsUpdateJobLoading(true);
+
+    try {
+      const response = await fetch(`/api/shipment-documents/teamship-review/update-jobs/${jobId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action })
+      });
+      const json = (await response.json().catch(() => null)) as TeamshipUpdateJobsResponse | null;
+
+      if (!response.ok || !json || isErrorResponse(json)) {
+        throw new Error(isErrorResponse(json) ? json.error : "Unable to update Teamship update job.");
+      }
+
+      setUpdateJobs(json.jobs);
+      setUpdateJobStatus(
+        action === "approve"
+          ? "Job approved. The VM agent can claim it on its next run."
+          : action === "rescan"
+            ? "Teamship details rescanned for this job."
+            : "Job cancelled."
+      );
+    } catch (caught) {
+      setUpdateJobStatus(null);
+      setError(caught instanceof Error ? caught.message : "Unable to update Teamship update job.");
+    } finally {
+      setIsUpdateJobLoading(false);
     }
   }
 
@@ -478,6 +635,14 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
           </button>
           <button
             type="button"
+            onClick={() => void runReview({ rescan: true })}
+            disabled={isProcessing || !pdfFile}
+            className="rounded-md border border-border px-5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Rescan Teamship details
+          </button>
+          <button
+            type="button"
             onClick={() => void fetchDailyOrders()}
             disabled={isProcessing}
             className="rounded-md border border-border px-5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
@@ -549,6 +714,23 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         onSave={() => void saveRunToHistory()}
         onDownloadSummary={() => void downloadReviewSummaryPdf()}
         onDownloadSkuDirectory={() => void downloadSkuDirectoryCsv()}
+        selectedUpdateSrNumbers={selectedUpdateSrNumbers}
+        updateJobs={updateJobs}
+        updateJobStatus={updateJobStatus}
+        isUpdateJobLoading={isUpdateJobLoading}
+        onToggleUpdateSelection={(srNumber, selected) => {
+          setSelectedUpdateSrNumbers((current) => {
+            const next = new Set(current);
+            if (selected) {
+              next.add(srNumber);
+            } else {
+              next.delete(srNumber);
+            }
+            return next;
+          });
+        }}
+        onCreateUpdateJob={() => void createUpdateJob()}
+        onUpdateJobAction={(jobId, action) => void updateJobAction(jobId, action)}
       />
       <TeamshipReviewHistorySection
         history={history}
@@ -598,7 +780,14 @@ function ShipmentReviewWorkspace({
   saveStatus,
   onSave,
   onDownloadSummary,
-  onDownloadSkuDirectory
+  onDownloadSkuDirectory,
+  selectedUpdateSrNumbers,
+  updateJobs,
+  updateJobStatus,
+  isUpdateJobLoading,
+  onToggleUpdateSelection,
+  onCreateUpdateJob,
+  onUpdateJobAction
 }: {
   rows: ShipmentWorkspaceRow[];
   review: GarlandTeamshipReviewResponse | null;
@@ -610,8 +799,16 @@ function ShipmentReviewWorkspace({
   onSave: () => void;
   onDownloadSummary: () => void;
   onDownloadSkuDirectory: () => void;
+  selectedUpdateSrNumbers: Set<string>;
+  updateJobs: TeamshipUpdateJobSummary[];
+  updateJobStatus: string | null;
+  isUpdateJobLoading: boolean;
+  onToggleUpdateSelection: (srNumber: string, selected: boolean) => void;
+  onCreateUpdateJob: () => void;
+  onUpdateJobAction: (jobId: string, action: "approve" | "cancel" | "rescan") => void;
 }) {
   const [expandedRowIds, setExpandedRowIds] = useState<Set<string>>(new Set());
+  const selectedCount = selectedUpdateSrNumbers.size;
 
   useEffect(() => {
     setExpandedRowIds(new Set(rows.filter((row) => row.review && row.status !== "PASS").map((row) => row.id)));
@@ -703,8 +900,22 @@ function ShipmentReviewWorkspace({
           >
             {isSaving ? "Saving..." : "Save review run"}
           </button>
+          <button
+            type="button"
+            onClick={onCreateUpdateJob}
+            disabled={isUpdateJobLoading || !review || selectedCount === 0}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Create update draft ({selectedCount})
+          </button>
         </div>
       </div>
+      <TeamshipUpdateJobsPanel
+        jobs={updateJobs}
+        status={updateJobStatus}
+        isLoading={isUpdateJobLoading}
+        onAction={onUpdateJobAction}
+      />
       <div className="divide-y divide-border">
         {rows.length === 0 ? (
           <p className="p-5 text-sm text-mutedForeground">
@@ -724,6 +935,18 @@ function ShipmentReviewWorkspace({
               <summary className="grid cursor-pointer gap-3 px-5 py-4 lg:grid-cols-[1fr,1fr,auto] lg:items-center">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
+                    {row.review && row.srNumber ? (
+                      <label className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1 text-xs font-semibold text-mutedForeground">
+                        <input
+                          type="checkbox"
+                          checked={selectedUpdateSrNumbers.has(row.srNumber)}
+                          disabled={!isUpdateEligibleReview(row.review)}
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={(event) => onToggleUpdateSelection(row.srNumber!, event.target.checked)}
+                        />
+                        Agent update
+                      </label>
+                    ) : null}
                     <span className="font-semibold text-foreground">{row.psNumber ?? "No PS"}</span>
                     <span className="text-sm font-semibold text-mutedForeground">/ {row.srNumber ?? "No SR"}</span>
                     <span className={shipmentStatusPillClass(row.status)}>{formatWorkspaceStatus(row.status, row.issueCount)}</span>
@@ -765,6 +988,149 @@ function ShipmentReviewWorkspace({
         })}
       </div>
     </section>
+  );
+}
+
+function TeamshipUpdateJobsPanel({
+  jobs,
+  status,
+  isLoading,
+  onAction
+}: {
+  jobs: TeamshipUpdateJobSummary[];
+  status: string | null;
+  isLoading: boolean;
+  onAction: (jobId: string, action: "approve" | "cancel" | "rescan") => void;
+}) {
+  return (
+    <div className="border-b border-border bg-muted/20 px-5 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">Phase 2 Teamship update jobs</h3>
+          <p className="mt-1 text-xs text-mutedForeground">
+            Create a draft from selected shipments, approve it for the VM agent, then rescan Teamship after the agent reports completion.
+          </p>
+          {status ? <p className="mt-2 text-xs font-semibold text-mutedForeground">{status}</p> : null}
+        </div>
+        <span className="rounded-full bg-background px-3 py-1 text-xs font-bold uppercase tracking-wide text-mutedForeground">
+          {jobs.length} job{jobs.length === 1 ? "" : "s"}
+        </span>
+      </div>
+
+      {jobs.length === 0 ? (
+        <p className="mt-3 rounded-md border border-dashed border-border bg-background p-3 text-sm text-mutedForeground">
+          No Phase 2 update jobs yet. Select reviewed shipments above and create an update draft.
+        </p>
+      ) : (
+        <div className="mt-3 space-y-3">
+          {jobs.slice(0, 5).map((job) => (
+            <details key={job.id} className="rounded-md border border-border bg-background">
+              <summary className="grid cursor-pointer gap-3 px-4 py-3 lg:grid-cols-[1fr,1fr,auto] lg:items-center">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-foreground">{job.documentLabel}</span>
+                    <span className={updateJobStatusClass(job.status)}>{formatUpdateJobStatus(job.status)}</span>
+                    {job.dryRun ? <span className="rounded-full bg-warning/15 px-2 py-0.5 text-xs font-bold text-warning">Dry run</span> : null}
+                  </div>
+                  <p className="mt-1 text-xs text-mutedForeground">
+                    Created {formatDateTime(job.createdAt)} by {job.createdByName ?? "Unknown"} · {job.selectedSrNumbers.length} selected SRs
+                  </p>
+                </div>
+                <div className="text-xs text-mutedForeground">
+                  <p>
+                    {job.summary.readyCount} ready · {job.summary.blockedCount} blocked · {job.summary.skippedCount} skipped
+                  </p>
+                  <p>
+                    {job.summary.plannedFieldUpdateCount} field updates · {job.summary.plannedPalletRowCount} pallet/comment rows
+                  </p>
+                  {job.lastVerificationAt ? <p>Last rescan {formatDateTime(job.lastVerificationAt)}</p> : null}
+                </div>
+                <div className="flex flex-wrap gap-2 lg:justify-end">
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      onAction(job.id, "approve");
+                    }}
+                    disabled={isLoading || !["DRAFT", "NEEDS_REVIEW"].includes(job.status) || job.summary.blockedCount > 0}
+                    className="rounded-md border border-border px-3 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Approve agent
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      onAction(job.id, "rescan");
+                    }}
+                    disabled={isLoading}
+                    className="rounded-md border border-border px-3 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Rescan
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      onAction(job.id, "cancel");
+                    }}
+                    disabled={isLoading || ["SUCCESS", "FAILED", "CANCELLED"].includes(job.status)}
+                    className="rounded-md border border-danger/30 px-3 py-2 text-xs font-semibold text-danger transition-colors hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </summary>
+              <div className="overflow-x-auto px-4 pb-4">
+                {job.errorMessage ? (
+                  <div className="mb-3 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs font-semibold text-danger">
+                    {job.errorMessage}
+                  </div>
+                ) : null}
+                <table className="min-w-full text-left text-xs">
+                  <thead className="bg-muted/40 uppercase tracking-wide text-mutedForeground">
+                    <tr>
+                      <th className="px-3 py-2">PS</th>
+                      <th className="px-3 py-2">SR</th>
+                      <th className="px-3 py-2">Status</th>
+                      <th className="px-3 py-2">Planned</th>
+                      <th className="px-3 py-2">Issues</th>
+                      <th className="px-3 py-2">Teamship</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {job.orders.map((order) => (
+                      <tr key={order.id}>
+                        <td className="px-3 py-2 font-semibold text-foreground">{order.psNumber}</td>
+                        <td className="px-3 py-2 font-semibold text-foreground">{order.srNumber}</td>
+                        <td className="px-3 py-2">
+                          <span className={updateOrderStatusClass(order.status)}>{formatUpdateOrderStatus(order.status)}</span>
+                        </td>
+                        <td className="px-3 py-2 text-mutedForeground">
+                          {order.plannedFieldUpdateCount} fields · {order.plannedPalletRowCount} pallet/comment rows
+                        </td>
+                        <td className="max-w-sm px-3 py-2 text-mutedForeground">
+                          {order.validationIssues.length > 0 ? order.validationIssues.join("; ") : order.errorMessage ?? "None"}
+                        </td>
+                        <td className="px-3 py-2">
+                          {order.teamshipUrl ? (
+                            <a href={order.teamshipUrl} target="_blank" rel="noreferrer" className="font-semibold text-primary hover:underline">
+                              {order.teamshipOrderId ?? "Open"}
+                            </a>
+                          ) : (
+                            <span className="text-mutedForeground">Not matched</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1172,6 +1538,70 @@ function formatReviewStatus(status: TeamshipReviewHistoryOrder["status"], mismat
   }
 
   return `${mismatchCount} issue${mismatchCount === 1 ? "" : "s"}`;
+}
+
+function isUpdateEligibleReview(review: GarlandTeamshipOrderReview) {
+  return Boolean(review.teamshipOrderId && (review.status === "PASS" || review.status === "FAIL"));
+}
+
+function updateJobStatusClass(status: TeamshipUpdateJobSummary["status"]) {
+  const base = "rounded-full px-2 py-0.5 text-xs font-bold uppercase tracking-wide";
+
+  if (status === "SUCCESS") {
+    return `${base} bg-success/10 text-success`;
+  }
+
+  if (status === "FAILED" || status === "NEEDS_REVIEW") {
+    return `${base} bg-danger/10 text-danger`;
+  }
+
+  if (status === "APPROVED" || status === "RUNNING") {
+    return `${base} bg-warning/15 text-warning`;
+  }
+
+  if (status === "CANCELLED") {
+    return `${base} bg-muted text-mutedForeground`;
+  }
+
+  return `${base} bg-primary/10 text-primary`;
+}
+
+function updateOrderStatusClass(status: TeamshipUpdateOrderSummary["status"]) {
+  const base = "rounded-full px-2 py-0.5 text-xs font-bold uppercase tracking-wide";
+
+  if (status === "SUCCESS") {
+    return `${base} bg-success/10 text-success`;
+  }
+
+  if (status === "BLOCKED" || status === "FAILED" || status === "NEEDS_REVIEW") {
+    return `${base} bg-danger/10 text-danger`;
+  }
+
+  if (status === "APPROVED" || status === "RUNNING") {
+    return `${base} bg-warning/15 text-warning`;
+  }
+
+  if (status === "SKIPPED") {
+    return `${base} bg-muted text-mutedForeground`;
+  }
+
+  return `${base} bg-primary/10 text-primary`;
+}
+
+function formatUpdateJobStatus(status: TeamshipUpdateJobSummary["status"]) {
+  return formatStatusLabel(status);
+}
+
+function formatUpdateOrderStatus(status: TeamshipUpdateOrderSummary["status"]) {
+  return formatStatusLabel(status);
+}
+
+function formatStatusLabel(status: string) {
+  return status
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function buildShipmentWorkspaceRows({

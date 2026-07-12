@@ -21,6 +21,7 @@ type ReviewRequest = {
   shipmentDate?: string;
   orders?: GarlandPdfShippingOrder[];
   alertDigest?: string;
+  rescan?: boolean;
   teamshipCredentials?: {
     email?: string;
     password?: string;
@@ -38,16 +39,19 @@ export async function POST(request: Request) {
   const teamshipAlerts = parseTeamshipAlertDigest(typeof body?.alertDigest === "string" ? body.alertDigest : "");
   const shipmentDateInput = typeof body?.shipmentDate === "string" ? body.shipmentDate : getTodayInputValue();
   const shipmentDate = parseShipmentDate(shipmentDateInput);
+  const forceRescan = body?.rescan === true;
 
   if (orders.length === 0) {
     return NextResponse.json({ error: "Upload and extract at least one Garland PDF shipping order." }, { status: 400 });
   }
 
-  const reviewedSrNumbers = await getReviewedTeamshipSrNumbers(
-    context,
-    shipmentDate,
-    orders.map((order) => order.srNumber)
-  );
+  const reviewedSrNumbers = forceRescan
+    ? new Set<string>()
+    : await getReviewedTeamshipSrNumbers(
+        context,
+        shipmentDate,
+        orders.map((order) => order.srNumber)
+      );
   const skippedAlreadyReviewedOrders = orders.filter((order) => reviewedSrNumbers.has(order.srNumber.trim().toUpperCase()));
   const ordersToReview = orders.filter((order) => !reviewedSrNumbers.has(order.srNumber.trim().toUpperCase()));
 
