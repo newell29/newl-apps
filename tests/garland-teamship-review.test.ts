@@ -1072,6 +1072,35 @@ NEWLS 2604816191908 1.00 ( )`
     ]);
   });
 
+  it("merges Teamship SKU-only rows with matching pallet serial rows for display", () => {
+    const pdfOrder = samplePdfOrder({
+      psNumber: "PS210206",
+      srNumber: "SR808478",
+      pageNumbers: [1],
+      shipVia: "MIDLAND",
+      shipToName: "MATCHING CUSTOMER",
+      shipToPo: "PO-1",
+      freightTerms: "PPADD-CD",
+      itemSkus: ["E1SGHMV6XHU3US"],
+      serialNumbers: ["2604816191908"]
+    });
+    const teamshipOrder: TeamshipShippingOrderDetail = {
+      ...sampleTeamshipOrder("SR808478", "PS210206", "MIDLAND", "MATCHING CUSTOMER", "PO-1", "PPADD-CD", []),
+      items: [{ sku: "E1SGHMV6XHU3US", quantity: 1 }],
+      pallet_dims: [{ quantity: 1, commodity: "SKU: E1SGHMV6XHU3US, SN: 2604816191908" }]
+    };
+
+    const review = buildGarlandTeamshipReview([pdfOrder], [teamshipOrder]);
+
+    expect(review.reviews[0]?.teamshipItems).toEqual([
+      {
+        sku: "E1SGHMV6XHU3US",
+        quantity: "1",
+        serialNumbers: ["2604816191908"]
+      }
+    ]);
+  });
+
   it("pulls Garland daily orders by selected day when no SR filter is provided", async () => {
     process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
     process.env.TEAMSHIP_PASSWORD = "configured-in-env";

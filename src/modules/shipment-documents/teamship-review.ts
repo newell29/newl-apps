@@ -738,7 +738,12 @@ function readTeamshipItemDetails(order: TeamshipShippingOrderDetail): GarlandTea
   const merged = new Map<string, GarlandTeamshipItemDetail>();
 
   for (const item of itemDetails) {
-    const key = [normalizeSku(item.sku), item.quantity ?? "", item.serialNumbers.map(normalizeIdentifier).join("|")].join("::");
+    const normalizedSku = normalizeSku(item.sku);
+    const normalizedSerials = item.serialNumbers.map(normalizeIdentifier).filter(Boolean);
+    const key = normalizedSku
+      ? [normalizedSku, item.quantity ?? ""].join("::")
+      : [item.quantity ?? "", normalizedSerials.join("|")].join("::");
+
     if (!key.replace(/:/g, "")) {
       continue;
     }

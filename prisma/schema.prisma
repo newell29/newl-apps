@@ -861,24 +861,28 @@ model TeamshipReviewRun {
 }
 
 model TeamshipReviewOrder {
-  id              String   @id @default(cuid())
-  tenantId        String
-  runId           String
-  psNumber        String
-  srNumber        String
-  status          String
-  teamshipOrderId String?
-  teamshipUrl     String?
-  carrier         String?
-  shipToName      String?
-  city            String?
-  state           String?
-  shipToPo        String?
-  pageNumbers     Json
-  pdfOrder        Json
-  review          Json
-  mismatchCount   Int      @default(0)
-  createdAt       DateTime @default(now())
+  id                 String    @id @default(cuid())
+  tenantId           String
+  runId              String
+  psNumber           String
+  srNumber           String
+  status             String
+  teamshipOrderId    String?
+  teamshipUrl        String?
+  carrier            String?
+  shipToName         String?
+  city               String?
+  state              String?
+  shipToPo           String?
+  pageNumbers        Json
+  pdfOrder           Json
+  review             Json
+  mismatchCount      Int       @default(0)
+  workflowStatus     String    @default("NEEDS_SETUP")
+  bolPrintedAt       DateTime?
+  bolPrintedByUserId String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   tenant Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   run    TeamshipReviewRun @relation(fields: [runId], references: [id], onDelete: Cascade)
@@ -887,6 +891,7 @@ model TeamshipReviewOrder {
   @@index([tenantId, srNumber])
   @@index([tenantId, psNumber])
   @@index([tenantId, status])
+  @@index([tenantId, workflowStatus])
 }
 
 model TeamshipDailySyncRun {

@@ -318,13 +318,17 @@ function isPositiveNumber(value: number | null) {
 }
 
 function sourceRank(source: GarlandProductDimensionRecommendation["source"]) {
-  if (source === "UPS_RULE") {
+  if (source === "CSR_OVERRIDE") {
     return 0;
   }
 
-  if (source === "TEAMSHIP_PALLET") {
+  if (source === "UPS_RULE") {
     return 1;
   }
 
-  return source === "TEAMSHIP_LEARNED" ? 2 : 3;
+  if (source === "TEAMSHIP_PALLET") {
+    return 2;
+  }
+
+  return source === "TEAMSHIP_LEARNED" ? 3 : 4;
 }
