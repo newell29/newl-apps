@@ -573,6 +573,64 @@ NEWLS 2604816191908 1.00 ( )`
     expect(fieldsByKey.get("shipping_instructions")).toMatchObject({ status: "MATCH" });
   });
 
+  it("compares and exposes every SKU and serial for multi-line Teamship orders", () => {
+    const pdfOrder = samplePdfOrder({
+      psNumber: "PS210207",
+      srNumber: "SR811861",
+      itemSkus: ["C-CLEAN-FORTE", "TUBE KIT - MIXED", "C-CARE-P"],
+      serialNumbers: []
+    });
+    pdfOrder.items[0]!.serialNumbers = ["2501111111111"];
+    pdfOrder.items[1]!.serialNumbers = ["2502222222222"];
+    pdfOrder.items[2]!.serialNumbers = ["2503333333333"];
+    const teamshipOrder = {
+      id: 30203,
+      amazon_shipment_id1: "SR811861",
+      carrier_value: "SPEEDY",
+      poNumber: "PO-1",
+      ship_first_name: "CHIPOTLE #5520",
+      ship_address_1: "MATCHING ADDRESS",
+      ship_city: "MILTON",
+      ship_state: "ON",
+      ship_zip: "L5T 2V5",
+      ship_country: "CA",
+      edi_field_2: "PS210207-SR811861",
+      edi_field_3: "PPADD-CD",
+      order_items: [
+        {
+          sku: "C-CLEAN-FORTE",
+          quantity: 1,
+          product: { serial: "2501111111111" }
+        },
+        {
+          sku: "TUBE KIT - MIXED",
+          quantity: 1,
+          serial_number: "2502222222222"
+        },
+        {
+          sku: "C-CARE-P",
+          quantity: 1,
+          product: { serialNumber: "2503333333333" }
+        }
+      ]
+    } as unknown as TeamshipShippingOrderDetail;
+
+    const review = buildGarlandTeamshipReview([pdfOrder], [teamshipOrder]);
+    const fieldsByKey = new Map(review.reviews[0]?.fields.map((field) => [field.key, field]));
+
+    expect(fieldsByKey.get("items")).toMatchObject({ status: "MATCH" });
+    expect(fieldsByKey.get("serialNumbers")).toMatchObject({
+      status: "MATCH",
+      teamshipValue: "2501111111111, 2502222222222, 2503333333333"
+    });
+    expect(review.reviews[0]?.pdfItems).toHaveLength(3);
+    expect(review.reviews[0]?.teamshipItems).toEqual([
+      { sku: "C-CLEAN-FORTE", quantity: "1", serialNumbers: ["2501111111111"] },
+      { sku: "TUBE KIT - MIXED", quantity: "1", serialNumbers: ["2502222222222"] },
+      { sku: "C-CARE-P", quantity: "1", serialNumbers: ["2503333333333"] }
+    ]);
+  });
+
   it("adds SKU dimension recommendations from Teamship pallets and Garland reference rows", () => {
     const pdfOrder = samplePdfOrder({
       psNumber: "PS210500",
