@@ -189,6 +189,7 @@ Mapping note from SR808478 testing:
 - `Freight Terms Code` maps to the Garland PDF freight terms value, for example `PPADD-CD`.
 - `Special Instructions` maps to the Garland PDF shipping instructions.
 - Item serials may appear under nested item/product fields or commodity text, not only under the typed `items` array.
+- Daily synced Teamship orders are useful for the work queue and `No PDF` detection, but a review run should fetch fresh Teamship detail for uploaded SRs before comparing serials. Otherwise an older cached raw payload can make visible Teamship serials look missing in Newl Apps.
 
 ## Stage 2 Pallet Entry Findings
 

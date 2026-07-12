@@ -594,6 +594,26 @@ function ShipmentReviewWorkspace({
   onSave: () => void;
   onDownloadSummary: () => void;
 }) {
+  const [expandedRowIds, setExpandedRowIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setExpandedRowIds(new Set(rows.filter((row) => row.review && row.status !== "PASS").map((row) => row.id)));
+  }, [rows]);
+
+  function setRowOpen(rowId: string, isOpen: boolean) {
+    setExpandedRowIds((current) => {
+      const next = new Set(current);
+
+      if (isOpen) {
+        next.add(rowId);
+      } else {
+        next.delete(rowId);
+      }
+
+      return next;
+    });
+  }
+
   return (
     <section className="rounded-lg border border-border bg-card shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border p-5">
@@ -628,6 +648,22 @@ function ShipmentReviewWorkspace({
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
+            onClick={() => setExpandedRowIds(new Set(rows.map((row) => row.id)))}
+            disabled={rows.length === 0}
+            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Expand all
+          </button>
+          <button
+            type="button"
+            onClick={() => setExpandedRowIds(new Set())}
+            disabled={rows.length === 0}
+            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Collapse all
+          </button>
+          <button
+            type="button"
             onClick={onDownloadSummary}
             disabled={!review}
             className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
@@ -650,51 +686,58 @@ function ShipmentReviewWorkspace({
             Pull Teamship orders or upload a Garland PDF to start building the shipment workspace.
           </p>
         ) : null}
-        {rows.map((row) => (
-          <details key={row.id} className={shipmentRowClass(row.status)} open={row.review ? row.status !== "PASS" : false}>
-            <summary className="grid cursor-pointer gap-3 px-5 py-4 lg:grid-cols-[1fr,1fr,auto] lg:items-center">
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-semibold text-foreground">{row.psNumber ?? "No PS"}</span>
-                  <span className="text-sm font-semibold text-mutedForeground">/ {row.srNumber ?? "No SR"}</span>
-                  <span className={shipmentStatusPillClass(row.status)}>{formatWorkspaceStatus(row.status, row.issueCount)}</span>
+        {rows.map((row) => {
+          const isExpanded = expandedRowIds.has(row.id);
+
+          return (
+            <details
+              key={row.id}
+              className={shipmentRowClass(row.status)}
+              open={isExpanded}
+              onToggle={(event) => setRowOpen(row.id, event.currentTarget.open)}
+            >
+              <summary className="grid cursor-pointer gap-3 px-5 py-4 lg:grid-cols-[1fr,1fr,auto] lg:items-center">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-foreground">{row.psNumber ?? "No PS"}</span>
+                    <span className="text-sm font-semibold text-mutedForeground">/ {row.srNumber ?? "No SR"}</span>
+                    <span className={shipmentStatusPillClass(row.status)}>{formatWorkspaceStatus(row.status, row.issueCount)}</span>
+                  </div>
+                  <p className="mt-1 text-sm text-mutedForeground">
+                    {row.pdfPages.length > 0 ? `PDF page(s) ${row.pdfPages.join(", ")}` : "No PDF page uploaded"}
+                  </p>
                 </div>
-                <p className="mt-1 text-sm text-mutedForeground">
-                  {row.pdfPages.length > 0 ? `PDF page(s) ${row.pdfPages.join(", ")}` : "No PDF page uploaded"}
-                </p>
-              </div>
 
-              <div className="text-sm text-mutedForeground">
-                <p className="font-medium text-foreground">{row.shipToName ?? "Missing ship-to"}</p>
-                <p>
-                  {[row.carrier, row.cityState].filter(Boolean).join(" · ") || "Carrier/city missing"}
-                </p>
-              </div>
+                <div className="text-sm text-mutedForeground">
+                  <p className="font-medium text-foreground">{row.shipToName ?? "Missing ship-to"}</p>
+                  <p>{[row.carrier, row.cityState].filter(Boolean).join(" · ") || "Carrier/city missing"}</p>
+                </div>
 
-              <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                {row.teamshipUrl ? (
-                  <a
-                    href={row.teamshipUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={(event) => event.stopPropagation()}
-                    className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
-                  >
-                    Open shipping order
-                  </a>
-                ) : (
+                <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                  {row.teamshipUrl ? (
+                    <a
+                      href={row.teamshipUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(event) => event.stopPropagation()}
+                      className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
+                    >
+                      Open shipping order
+                    </a>
+                  ) : (
+                    <span className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-mutedForeground">
+                      No Teamship link
+                    </span>
+                  )}
                   <span className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-mutedForeground">
-                    No Teamship link
+                    {isExpanded ? "Collapse" : "Expand"}
                   </span>
-                )}
-                <span className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-mutedForeground">
-                  Expand
-                </span>
-              </div>
-            </summary>
-            <ShipmentWorkspaceDetails row={row} />
-          </details>
-        ))}
+                </div>
+              </summary>
+              <ShipmentWorkspaceDetails row={row} />
+            </details>
+          );
+        })}
       </div>
     </section>
   );
