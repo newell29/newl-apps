@@ -5,6 +5,7 @@ import {
   parseGarlandShippingOrderPages,
   parseTeamshipAlertDigest
 } from "@/modules/shipment-documents/teamship-review";
+import { buildTeamshipPayloadInspection } from "@/modules/shipment-documents/teamship-payload-inspector";
 import type { GarlandPdfShippingOrder, TeamshipShippingOrderDetail } from "@/modules/shipment-documents/teamship-review-types";
 import { fetchTeamshipShippingOrdersForReview } from "@/server/integrations/teamship";
 
@@ -577,6 +578,11 @@ NEWLS 2604816191908 1.00 ( )`
     const pdfOrder = samplePdfOrder({
       psNumber: "PS210207",
       srNumber: "SR811861",
+      pageNumbers: [1],
+      shipVia: "SPEEDY",
+      shipToName: "CHIPOTLE #5520",
+      shipToPo: "PO-1",
+      freightTerms: "PPADD-CD",
       itemSkus: ["C-CLEAN-FORTE", "TUBE KIT - MIXED", "C-CARE-P"],
       serialNumbers: []
     });
@@ -629,6 +635,63 @@ NEWLS 2604816191908 1.00 ( )`
       { sku: "TUBE KIT - MIXED", quantity: "1", serialNumbers: ["2502222222222"] },
       { sku: "C-CARE-P", quantity: "1", serialNumbers: ["2503333333333"] }
     ]);
+  });
+
+  it("inspects fetched Teamship payload paths for expected serial values", () => {
+    const inspection = buildTeamshipPayloadInspection({
+      srNumber: "SR808478",
+      expectedSerials: ["2604816191908"],
+      expectedSkus: ["E1SGHMV6XHU3US"],
+      teamshipOrder: {
+        id: 30202,
+        shipment_id: "SR808478",
+        items: [
+          {
+            sku: "E1SGHMV6XHU3US",
+            product: {
+              serial: "2604816191908"
+            }
+          }
+        ]
+      }
+    });
+
+    expect(inspection.conclusion).toBe("EXPECTED_SERIAL_FOUND");
+    expect(inspection.exactSerialMatches).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.items[0].product.serial",
+          matchedValue: "2604816191908",
+          reason: "EXPECTED_SERIAL"
+        })
+      ])
+    );
+    expect(inspection.skuMatches).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.items[0].sku",
+          matchedValue: "E1SGHMV6XHU3US"
+        })
+      ])
+    );
+  });
+
+  it("reports when the current Teamship payload has no serial evidence", () => {
+    const inspection = buildTeamshipPayloadInspection({
+      srNumber: "SR808478",
+      expectedSerials: ["2604816191908"],
+      expectedSkus: ["E1SGHMV6XHU3US"],
+      teamshipOrder: {
+        id: 30202,
+        shipment_id: "SR808478",
+        items: [{ sku: "E1SGHMV6XHU3US" }]
+      }
+    });
+
+    expect(inspection.conclusion).toBe("NO_SERIAL_EVIDENCE");
+    expect(inspection.exactSerialMatches).toEqual([]);
+    expect(inspection.serialLikeMatches).toEqual([]);
+    expect(inspection.message).toContain("separate Teamship");
   });
 
   it("adds SKU dimension recommendations from Teamship pallets and Garland reference rows", () => {
