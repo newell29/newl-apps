@@ -307,6 +307,8 @@ Live mode logs into Teamship using the tenant Settings credentials, submits the 
 
 If any individual Teamship order update fails, the worker must preserve the per-order evidence and report the job as `NEEDS_REVIEW` instead of discarding the partial result. Successful rows stay traceable as updated evidence, failed rows show the Teamship/API error, and the CSR/admin can rescan or correct manually from the Phase 2 update jobs panel.
 
+`NEEDS_REVIEW` jobs must not be re-approved for the agent because the stored execution plan may include rows that already succeeded. After review, rescan Teamship details or create a new update draft for the exact follow-up SRs.
+
 Agent endpoint examples:
 
 ```bash

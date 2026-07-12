@@ -285,8 +285,8 @@ export async function createTeamshipUpdateJob(context: AuthenticatedContext, inp
 export async function approveTeamshipUpdateJob(context: AuthenticatedContext, jobId: string) {
   const existing = await findTenantJob(context, jobId);
 
-  if (!["DRAFT", "NEEDS_REVIEW"].includes(existing.status)) {
-    throw new Error(`Only draft or needs-review jobs can be approved. Current status: ${existing.status}.`);
+  if (existing.status !== "DRAFT") {
+    throw new Error(`Only draft jobs can be approved for the agent. Current status: ${existing.status}.`);
   }
 
   const blockedOrders = existing.orders.filter((order) => order.status === "BLOCKED");
