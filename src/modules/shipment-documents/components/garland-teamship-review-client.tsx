@@ -1094,7 +1094,7 @@ function TeamshipUpdateJobsPanel({
                       event.preventDefault();
                       onAction(job.id, "approve");
                     }}
-                    disabled={isLoading || !["DRAFT", "NEEDS_REVIEW"].includes(job.status) || job.summary.blockedCount > 0}
+                    disabled={isLoading || job.status !== "DRAFT" || job.summary.blockedCount > 0}
                     className="rounded-md border border-border px-3 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Approve agent
@@ -1127,6 +1127,11 @@ function TeamshipUpdateJobsPanel({
                 {job.errorMessage ? (
                   <div className="mb-3 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs font-semibold text-danger">
                     {job.errorMessage}
+                  </div>
+                ) : null}
+                {job.status === "NEEDS_REVIEW" ? (
+                  <div className="mb-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs font-semibold text-warning">
+                    This job needs review and cannot be re-approved. Rescan Teamship details or create a new update draft for any follow-up work.
                   </div>
                 ) : null}
                 <table className="min-w-full text-left text-xs">
