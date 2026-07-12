@@ -27,7 +27,7 @@ export function buildTeamshipPayloadInspection({
       teamshipOrderId: null,
       teamshipUrl: null,
       fetchedAt: new Date().toISOString(),
-      inspectedEndpoints: ["GET /v1/ship-inventories", "GET /v1/ship-inventories/{id}"],
+      inspectedEndpoints: ["GET /v1/ship-inventories", "GET /v1/ship-inventories/{id}", "GET /ship-inventories/{id} UI page"],
       expectedSerials: normalizedExpectedSerials,
       expectedSkus: normalizedExpectedSkus,
       searchedValueCount: 0,
@@ -57,7 +57,7 @@ export function buildTeamshipPayloadInspection({
     teamshipOrderId: readFirstString(teamshipOrder.id, teamshipOrder.order_id),
     teamshipUrl: readFirstString(teamshipOrder.url) ?? buildTeamshipOrderUrl(readFirstString(teamshipOrder.id, teamshipOrder.order_id)),
     fetchedAt: new Date().toISOString(),
-    inspectedEndpoints: ["GET /v1/ship-inventories", "GET /v1/ship-inventories/{id}"],
+    inspectedEndpoints: ["GET /v1/ship-inventories", "GET /v1/ship-inventories/{id}", "GET /ship-inventories/{id} UI page"],
     expectedSerials: normalizedExpectedSerials,
     expectedSkus: normalizedExpectedSkus,
     searchedValueCount: inspection.searchedValueCount,
@@ -295,5 +295,5 @@ function readFirstString(...values: Array<unknown>) {
 }
 
 function buildTeamshipOrderUrl(orderId: string | null) {
-  return orderId ? `https://app.teamshipos.com/view-shipping-order/${encodeURIComponent(orderId)}` : null;
+  return orderId ? `https://app.teamshipos.com/ship-inventories/${encodeURIComponent(orderId)}` : null;
 }
