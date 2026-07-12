@@ -30,8 +30,7 @@ export function buildTeamshipPayloadInspection({
       inspectedEndpoints: [
         "GET /v1/ship-inventories",
         "GET /v1/ship-inventories/{id}",
-        "GET /ship-inventories/{id} UI page",
-        "GET /admin/get-prod-ship-invt-edit"
+        "GET /ship-inventories/{id} UI page"
       ],
       expectedSerials: normalizedExpectedSerials,
       expectedSkus: normalizedExpectedSkus,
@@ -65,8 +64,7 @@ export function buildTeamshipPayloadInspection({
     inspectedEndpoints: [
       "GET /v1/ship-inventories",
       "GET /v1/ship-inventories/{id}",
-      "GET /ship-inventories/{id} UI page",
-      "GET /admin/get-prod-ship-invt-edit"
+      "GET /ship-inventories/{id} UI page"
     ],
     expectedSerials: normalizedExpectedSerials,
     expectedSkus: normalizedExpectedSkus,
