@@ -1085,6 +1085,7 @@ function TeamshipUpdateJobsPanel({
                     {job.summary.plannedFieldUpdateCount} field updates · {job.summary.plannedPalletRowCount} pallet/comment rows
                   </p>
                   <p>Agent mode: {job.agentMode === "LIVE_API" ? "Live Teamship API" : "Dry-run evidence"}</p>
+                  {job.agentId ? <p>Agent: {job.agentId}</p> : null}
                   {job.lastVerificationAt ? <p>Last rescan {formatDateTime(job.lastVerificationAt)}</p> : null}
                 </div>
                 <div className="flex flex-wrap gap-2 lg:justify-end">
@@ -1124,6 +1125,24 @@ function TeamshipUpdateJobsPanel({
                 </div>
               </summary>
               <div className="overflow-x-auto px-4 pb-4">
+                <div className="mb-3 grid gap-2 rounded-md border border-border bg-muted/20 p-3 text-xs text-mutedForeground md:grid-cols-2 xl:grid-cols-4">
+                  <p>
+                    <span className="font-semibold text-foreground">Approved:</span>{" "}
+                    {job.approvedAt ? `${formatDateTime(job.approvedAt)} by ${job.approvedByName ?? "Unknown"}` : "Not approved yet"}
+                  </p>
+                  <p>
+                    <span className="font-semibold text-foreground">Claimed:</span>{" "}
+                    {job.agentClaimedAt ? `${formatDateTime(job.agentClaimedAt)} by ${job.agentId ?? "agent"}` : "Not claimed yet"}
+                  </p>
+                  <p>
+                    <span className="font-semibold text-foreground">Started/finished:</span>{" "}
+                    {formatAgentRunWindow(job)}
+                  </p>
+                  <p>
+                    <span className="font-semibold text-foreground">Verification:</span>{" "}
+                    {job.lastVerificationAt ? formatDateTime(job.lastVerificationAt) : "Not rescanned yet"}
+                  </p>
+                </div>
                 {job.errorMessage ? (
                   <div className="mb-3 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs font-semibold text-danger">
                     {job.errorMessage}
@@ -1658,6 +1677,22 @@ function formatUpdateJobStatus(status: TeamshipUpdateJobSummary["status"]) {
 
 function formatUpdateOrderStatus(status: TeamshipUpdateOrderSummary["status"]) {
   return formatStatusLabel(status);
+}
+
+function formatAgentRunWindow(job: TeamshipUpdateJobSummary) {
+  if (job.agentStartedAt && job.agentFinishedAt) {
+    return `${formatDateTime(job.agentStartedAt)} -> ${formatDateTime(job.agentFinishedAt)}`;
+  }
+
+  if (job.agentStartedAt) {
+    return `Started ${formatDateTime(job.agentStartedAt)}`;
+  }
+
+  if (job.agentFinishedAt) {
+    return `Finished ${formatDateTime(job.agentFinishedAt)}`;
+  }
+
+  return "Not run yet";
 }
 
 function formatStatusLabel(status: string) {
