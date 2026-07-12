@@ -158,6 +158,13 @@ type ShipmentWorkspaceRow = {
   teamshipOrder: TeamshipShippingOrderDetail | null;
 };
 
+type UploadedPdfBatch = {
+  id: string;
+  fileName: string;
+  orderCount: number;
+  orders: GarlandPdfShippingOrder[];
+};
+
 let pdfJsLoader: Promise<PdfJsModule> | null = null;
 
 export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: boolean }) {
@@ -166,7 +173,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
   const [syncDateFrom, setSyncDateFrom] = useState(todayInputValue);
   const [syncDateTo, setSyncDateTo] = useState(todayInputValue);
   const [documentLabel, setDocumentLabel] = useState(formatDateLabel(todayInputValue));
-  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [pdfBatches, setPdfBatches] = useState<UploadedPdfBatch[]>([]);
   const [orders, setOrders] = useState<GarlandPdfShippingOrder[]>([]);
   const [review, setReview] = useState<GarlandTeamshipReviewResponse | null>(null);
   const [dailyOrders, setDailyOrders] = useState<TeamshipShippingOrderDetail[]>([]);
@@ -208,41 +215,74 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
   }, []);
 
   const parsedAlertCount = useMemo(() => parseTeamshipAlertDigest(alertDigest).length, [alertDigest]);
+  const sourcePdfFileName = useMemo(() => formatSourcePdfFileNames(pdfBatches), [pdfBatches]);
   const workspaceRows = useMemo(
     () => buildShipmentWorkspaceRows({ review, pdfOrders: orders, teamshipOrders: dailyOrders }),
     [review, orders, dailyOrders]
   );
 
-  async function handlePdfSelection(file: File | null) {
-    setPdfFile(file);
-    setOrders([]);
+  async function handlePdfSelection(fileList: FileList | null) {
+    const files = Array.from(fileList ?? []).filter((file) => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"));
+
+    if (files.length === 0) {
+      if (pdfBatches.length === 0) {
+        setStatus("Upload one or more Garland shipping-order PDFs to begin.");
+      }
+
+      return;
+    }
+
     setReview(null);
     setDailyOrderCount(null);
     setDailySyncSummary(null);
     setError(null);
-
-    if (!file) {
-      setStatus("Upload the Garland daily shipping-order PDF to begin.");
-      return;
-    }
-
     setIsProcessing(true);
-    setStatus("Reading embedded PDF text from Garland shipping orders...");
+    setStatus(`Reading embedded PDF text from ${files.length} Garland attachment${files.length === 1 ? "" : "s"}...`);
 
     try {
-      const parsedOrders = await extractOrdersFromPdf(file);
-      setOrders(parsedOrders);
-      setStatus(
-        parsedOrders.length > 0
-          ? `Ready to review ${parsedOrders.length} Garland order${parsedOrders.length === 1 ? "" : "s"} against Teamship.`
-          : "No Garland PS/SR orders were found in this PDF."
-      );
+      const batches: UploadedPdfBatch[] = [];
+
+      for (const file of files) {
+        const parsedOrders = await extractOrdersFromPdf(file);
+        batches.push({
+          id: `${Date.now()}-${batches.length}-${file.name}`,
+          fileName: file.name,
+          orderCount: parsedOrders.length,
+          orders: parsedOrders
+        });
+      }
+
+      const nextBatches = [...pdfBatches, ...batches];
+      const mergedOrders = mergeUploadedPdfOrders(nextBatches.flatMap((batch) => batch.orders));
+
+      setPdfBatches(nextBatches);
+      setOrders(mergedOrders);
+      setStatus(buildPdfUploadStatus(nextBatches, mergedOrders.length));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to read the Garland PDF.");
       setStatus("PDF extraction stopped before Teamship review.");
     } finally {
       setIsProcessing(false);
     }
+  }
+
+  function removePdfBatch(batchId: string) {
+    const nextBatches = pdfBatches.filter((batch) => batch.id !== batchId);
+    const mergedOrders = mergeUploadedPdfOrders(nextBatches.flatMap((batch) => batch.orders));
+
+    setPdfBatches(nextBatches);
+    setOrders(mergedOrders);
+    setReview(null);
+    setError(null);
+    setStatus(nextBatches.length > 0 ? buildPdfUploadStatus(nextBatches, mergedOrders.length) : "Upload one or more Garland shipping-order PDFs to begin.");
+  }
+
+  function clearPdfBatches() {
+    setPdfBatches([]);
+    setOrders([]);
+    setReview(null);
+    setError(null);
+    setStatus("Upload one or more Garland shipping-order PDFs to begin.");
   }
 
   async function runReview({ rescan = false, srNumber = null }: { rescan?: boolean; srNumber?: string | null } = {}) {
@@ -252,18 +292,11 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       setReview(null);
     }
 
-    let extractedOrders = orders;
+    const extractedOrders = orders;
 
     try {
-      if (extractedOrders.length === 0 && pdfFile) {
-        setIsProcessing(true);
-        setStatus("Extracting PDF orders before Teamship review...");
-        extractedOrders = await extractOrdersFromPdf(pdfFile);
-        setOrders(extractedOrders);
-      }
-
       if (extractedOrders.length === 0) {
-        throw new Error("Upload a Garland shipping-order PDF with at least one PS/SR order before running the review.");
+        throw new Error("Upload at least one Garland shipping-order PDF with a PS/SR order before running the review.");
       }
 
       const ordersToReview = srNumber
@@ -358,7 +391,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         body: JSON.stringify({
           documentLabel: documentLabel.trim() || formatDateLabel(shipmentDate),
           shipmentDate,
-          sourcePdfFileName: pdfFile?.name ?? null,
+          sourcePdfFileName,
           review,
           selectedSrNumbers,
           agentMode: updateJobMode
@@ -565,7 +598,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         body: JSON.stringify({
           documentLabel: trimmedLabel,
           shipmentDate,
-          sourcePdfFileName: pdfFile?.name ?? null,
+          sourcePdfFileName,
           review,
           alertDigest
         })
@@ -730,21 +763,70 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
 
         <div className="mt-4 grid gap-4 lg:grid-cols-1">
           <label className="space-y-2 text-sm font-semibold text-foreground">
-            Garland shipping-order PDF
+            Garland shipping-order PDFs
             <input
               type="file"
               accept="application/pdf"
-              onChange={(event) => void handlePdfSelection(event.target.files?.[0] ?? null)}
+              multiple
+              onChange={(event) => {
+                void handlePdfSelection(event.target.files);
+                event.currentTarget.value = "";
+              }}
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
             />
           </label>
         </div>
 
+        {pdfBatches.length > 0 ? (
+          <div className="mt-4 rounded-md border border-border bg-muted/30 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-foreground">
+                  Uploaded Garland attachments
+                </p>
+                <p className="text-xs text-mutedForeground">
+                  Add more PDFs as Garland sends them. Duplicate PS/SR orders are merged before review.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={clearPdfBatches}
+                disabled={isProcessing}
+                className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-background disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Clear PDFs
+              </button>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {pdfBatches.map((batch) => (
+                <span
+                  key={batch.id}
+                  className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground"
+                >
+                  <span className="font-semibold">{batch.fileName}</span>
+                  <span className="text-mutedForeground">
+                    {batch.orderCount} order{batch.orderCount === 1 ? "" : "s"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removePdfBatch(batch.id)}
+                    disabled={isProcessing}
+                    className="font-semibold text-primary hover:text-primaryHover disabled:cursor-not-allowed disabled:opacity-50"
+                    aria-label={`Remove ${batch.fileName}`}
+                  >
+                    Remove
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <button
             type="button"
             onClick={() => void runReview()}
-            disabled={isProcessing || !pdfFile}
+            disabled={isProcessing || pdfBatches.length === 0}
             className="rounded-md bg-primary px-5 py-2.5 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
           >
             Run Teamship review
@@ -752,7 +834,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
           <button
             type="button"
             onClick={() => void runReview({ rescan: true })}
-            disabled={isProcessing || !pdfFile}
+            disabled={isProcessing || pdfBatches.length === 0}
             className="rounded-md border border-border px-5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
           >
             Rescan Teamship details
@@ -2849,6 +2931,47 @@ function isReviewResponse(value: unknown): value is GarlandTeamshipReviewRespons
       "reviews" in value &&
       Array.isArray((value as GarlandTeamshipReviewResponse).reviews)
   );
+}
+
+function mergeUploadedPdfOrders(orders: GarlandPdfShippingOrder[]) {
+  const byKey = new Map<string, GarlandPdfShippingOrder>();
+
+  for (const order of orders) {
+    byKey.set(buildPdfOrderKey(order), order);
+  }
+
+  return Array.from(byKey.values()).sort((left, right) => {
+    const leftPs = normalizeIdentifier(left.psNumber);
+    const rightPs = normalizeIdentifier(right.psNumber);
+
+    if (leftPs !== rightPs) {
+      return leftPs.localeCompare(rightPs, undefined, { numeric: true });
+    }
+
+    return normalizeIdentifier(left.srNumber).localeCompare(normalizeIdentifier(right.srNumber), undefined, { numeric: true });
+  });
+}
+
+function buildPdfOrderKey(order: GarlandPdfShippingOrder) {
+  return `${normalizeIdentifier(order.psNumber)}-${normalizeIdentifier(order.srNumber)}`;
+}
+
+function formatSourcePdfFileNames(batches: UploadedPdfBatch[]) {
+  const fileNames = Array.from(new Set(batches.map((batch) => batch.fileName.trim()).filter(Boolean)));
+  return fileNames.length > 0 ? fileNames.join(", ") : null;
+}
+
+function buildPdfUploadStatus(batches: UploadedPdfBatch[], mergedOrderCount: number) {
+  const attachmentCount = batches.length;
+  const extractedOrderCount = batches.reduce((total, batch) => total + batch.orderCount, 0);
+
+  if (mergedOrderCount === 0) {
+    return `${attachmentCount} PDF attachment${attachmentCount === 1 ? "" : "s"} uploaded, but no Garland PS/SR orders were found yet.`;
+  }
+
+  const duplicateCount = Math.max(0, extractedOrderCount - mergedOrderCount);
+
+  return `Ready to review ${mergedOrderCount} Garland order${mergedOrderCount === 1 ? "" : "s"} from ${attachmentCount} PDF attachment${attachmentCount === 1 ? "" : "s"}${duplicateCount > 0 ? ` (${duplicateCount} duplicate PS/SR ${duplicateCount === 1 ? "order was" : "orders were"} merged).` : "."}`;
 }
 
 async function extractOrdersFromPdf(file: File) {
