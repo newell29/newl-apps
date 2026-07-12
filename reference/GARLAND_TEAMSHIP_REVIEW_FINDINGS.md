@@ -214,11 +214,11 @@ Pallet data is stored in hidden `shipInventoryData.pallets[]` and rendered as in
 | `pallets[index].weight_unit` | `pallet_1_weight_unit` | Existing Garland examples use `lbs`. |
 | `pallets[index].commodity` | `pallet_1_commodity` | Free-text commodity field used for SKU/serial details. |
 
-Observed commodity formats from live Garland Teamship orders:
+Observed commodity formats from existing live Garland Teamship orders:
 
 - Serialized single unit: `SKU: E1SGHMV6XHU3US, SN: 2604816191908`
-- Non-serialized quantity: `SKU: 8030445, QTY: 4`
-- Multiple serials in one row: `SKU: GTBG36-NR36-5001, SN: 2605891101919, 2606891101462`
+- Non-serialized quantity: `SKU: 8030445 QTY: 4`
+- Multiple serials should be written as separate commodity/comment lines, for example `SKU: GTBG36-NR36-5001 SN: 2605891101919` and `SKU: GTBG36-NR36-5001 SN: 2606891101462`.
 
 Observed pallet examples:
 
@@ -234,7 +234,7 @@ Stage 2 implication:
 
 - The planned automation should be explicit about whether serialized units are always split into separate pallet rows. Existing Teamship data sometimes groups multiple serials for the same SKU into one pallet row with `quantity: 2`.
 - Do not infer valid dimensions or weights from placeholders such as `1 x 1 x 1`, `1 lbs`, `0 height`, or `0 weight`. Those should be treated as missing/incomplete pallet data unless the provided Stage 2 dimension list says otherwise.
-- For non-serialized items, use `QTY: <quantity>` in the commodity string instead of `SN:`.
+- For non-serialized items, use `SKU: <sku> QTY: <quantity>` in the commodity string instead of `SN:`.
 - If multiple pallet rows are required, create or update the indexed field set consistently: `pallet_2`, `pallet_2_length`, `pallet_2_width`, `pallet_2_height`, `pallet_2_weight`, `pallet_2_weight_unit`, and `pallet_2_commodity`.
 
 ## Stage 2 Dry-Run Contract
@@ -251,14 +251,24 @@ Dry-run payload rules:
 
 - Matched PDF + Teamship orders can become `READY` only when every PDF item has a valid dimension/weight source and valid commodity text.
 - Missing Teamship, pending Teamship, no-PDF, and already-reviewed rows are `SKIPPED`.
-- Missing SKU dimensions block the order with a validation issue instead of guessing.
+- Missing SKU dimensions block the dimension/weight update with a validation issue instead of guessing, but they do not block the commodity/comment plan.
 - Planned field updates are limited to mapped review fields for now: `po_number -> poNumber`, `freight_terms -> edi_field_3`, `carrier -> carrier_value`, and `shipping_instructions -> edi_field_4`.
 - Planned pallet rows use the documented Teamship field names, including `pallets_count`, `pallet_1_length`, `pallet_1_weight`, and `pallet_1_commodity`.
-- Serialized items use commodity text `SKU: <sku>, SN: <serials>`.
-- Non-serialized items use commodity text `SKU: <sku>, QTY: <quantity>`.
+- Serialized items use one commodity/comment line per serial: `SKU: <sku> SN: <serial>`.
+- Non-serialized items use commodity text `SKU: <sku> QTY: <quantity>`.
 - UPS orders use the UPS rule dimensions: `1 x 1 x 1`, `1 lbs`.
 
 The VM worker should first pass this CLI validation on the server before any browser automation or API update path is enabled. Later, the same payload shape should be stored in `TeamshipUpdateJob` / `TeamshipUpdateOrder` / `TeamshipUpdateField` records with admin approval and evidence capture.
+
+Server dry-run evidence captured July 12, 2026 on the Tailscale VM (`openclaw@100.120.250.105`):
+
+- Branch tested: `codex/teamship-phase2-dry-run-worker`.
+- Input PDF: `/home/openclaw/newl-apps/phase2-dry-run-inputs/9 ORDERS 11 PAGES - PS209287 - PS209295.pdf`.
+- Clean JSON artifact: `/home/openclaw/newl-apps/phase2-dry-run-output/live-dry-run-2026-07-11.clean.json`.
+- Result: 9 PDF orders extracted, 9 Teamship orders fetched read-only, `dryRun: true`, `wouldUpdateTeamship: false`.
+- Summary: 2 ready orders, 7 blocked orders, 0 skipped orders, 6 planned pallet rows, 0 planned mapped field updates.
+- The 2 ready orders were UPS shipments using the UPS `1 x 1 x 1`, `1 lbs` rule.
+- The 7 blocked orders were non-UPS shipments missing usable SKU dimension/weight recommendations, which should remain `Needs Review` until the SKU directory has trusted dimensions.
 
 ## Teamship Detail Evidence
 

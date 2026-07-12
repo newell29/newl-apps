@@ -49,14 +49,15 @@ export type TeamshipPhase2PalletRowPlan = {
   rowNumber: number;
   sku: string;
   quantity: number;
-  lengthIn: number;
-  widthIn: number;
-  heightIn: number;
-  weightLb: number;
+  lengthIn: number | null;
+  widthIn: number | null;
+  heightIn: number | null;
+  weightLb: number | null;
   weightUnit: string;
   commodity: string;
-  dimensionSource: GarlandProductDimensionRecommendation["source"];
-  dimensionConfidence: GarlandProductDimensionRecommendation["confidence"];
+  hasUsableDimensions: boolean;
+  dimensionSource: GarlandProductDimensionRecommendation["source"] | "MISSING";
+  dimensionConfidence: GarlandProductDimensionRecommendation["confidence"] | "LOW";
   sourceNote: string;
   teamshipFields: Record<string, string | number>;
 };
@@ -149,7 +150,7 @@ function buildOrderPlan({
     status,
     sourceReviewStatus: orderReview.status,
     plannedFieldUpdates,
-    plannedPalletRows: plannedPalletRows.filter((row): row is TeamshipPhase2PalletRowPlan => Boolean(row)),
+    plannedPalletRows,
     validationIssues
   };
 }
@@ -188,28 +189,30 @@ function buildPalletRowPlan({
   item: GarlandShippingOrderItem;
   dimensions: GarlandProductDimensionRecommendation | null;
   pdfOrder: GarlandPdfShippingOrder;
-}): TeamshipPhase2PalletRowPlan | null {
-  if (!dimensions || dimensions.lengthIn === null || dimensions.widthIn === null || dimensions.heightIn === null || dimensions.weightLb === null) {
-    return null;
-  }
-
+}): TeamshipPhase2PalletRowPlan {
   const quantity = readItemQuantity(item);
-  const weightUnit = dimensions.weightUnit?.trim() || "lbs";
   const commodity = buildCommodity(item, quantity);
+  const hasUsableDimensions = Boolean(dimensions);
+  const weightUnit = dimensions?.weightUnit?.trim() || "lbs";
 
   return {
     rowNumber,
     sku: item.sku.trim().toUpperCase(),
     quantity,
-    lengthIn: dimensions.lengthIn,
-    widthIn: dimensions.widthIn,
-    heightIn: dimensions.heightIn,
-    weightLb: dimensions.weightLb,
+    lengthIn: dimensions?.lengthIn ?? null,
+    widthIn: dimensions?.widthIn ?? null,
+    heightIn: dimensions?.heightIn ?? null,
+    weightLb: dimensions?.weightLb ?? null,
     weightUnit,
     commodity,
-    dimensionSource: dimensions.source,
-    dimensionConfidence: dimensions.confidence,
-    sourceNote: isUpsGarlandOrder({ pdfOrder, teamshipOrder: null }) ? "UPS order placeholder rule." : dimensions.note,
+    hasUsableDimensions,
+    dimensionSource: dimensions?.source ?? "MISSING",
+    dimensionConfidence: dimensions?.confidence ?? "LOW",
+    sourceNote: dimensions
+      ? isUpsGarlandOrder({ pdfOrder, teamshipOrder: null })
+        ? "UPS order placeholder rule."
+        : dimensions.note
+      : "No usable dimension/weight recommendation found; commodity text can still be prepared.",
     teamshipFields: buildTeamshipPalletFields({
       rowNumber,
       quantity,
@@ -229,20 +232,25 @@ function buildTeamshipPalletFields({
 }: {
   rowNumber: number;
   quantity: number;
-  dimensions: GarlandProductDimensionRecommendation;
+  dimensions: GarlandProductDimensionRecommendation | null;
   weightUnit: string;
   commodity: string;
 }) {
-  return {
+  const fields: Record<string, string | number> = {
     pallets_count: rowNumber,
     [`pallet_${rowNumber}`]: quantity,
-    [`pallet_${rowNumber}_length`]: dimensions.lengthIn ?? 0,
-    [`pallet_${rowNumber}_width`]: dimensions.widthIn ?? 0,
-    [`pallet_${rowNumber}_height`]: dimensions.heightIn ?? 0,
-    [`pallet_${rowNumber}_weight`]: dimensions.weightLb ?? 0,
-    [`pallet_${rowNumber}_weight_unit`]: weightUnit,
     [`pallet_${rowNumber}_commodity`]: commodity
   };
+
+  if (dimensions) {
+    fields[`pallet_${rowNumber}_length`] = dimensions.lengthIn ?? 0;
+    fields[`pallet_${rowNumber}_width`] = dimensions.widthIn ?? 0;
+    fields[`pallet_${rowNumber}_height`] = dimensions.heightIn ?? 0;
+    fields[`pallet_${rowNumber}_weight`] = dimensions.weightLb ?? 0;
+    fields[`pallet_${rowNumber}_weight_unit`] = weightUnit;
+  }
+
+  return fields;
 }
 
 function validateOrderPlan({
@@ -250,7 +258,7 @@ function validateOrderPlan({
   plannedPalletRows
 }: {
   pdfOrder: GarlandPdfShippingOrder;
-  plannedPalletRows: Array<TeamshipPhase2PalletRowPlan | null>;
+  plannedPalletRows: TeamshipPhase2PalletRowPlan[];
 }) {
   const issues: string[] = [];
 
@@ -258,12 +266,13 @@ function validateOrderPlan({
     const row = plannedPalletRows[index];
     const sku = item.sku.trim().toUpperCase();
 
-    if (!row) {
+    if (!row.hasUsableDimensions) {
       issues.push(`No usable dimension/weight recommendation found for SKU ${sku}.`);
-      return;
-    }
-
-    if (![row.lengthIn, row.widthIn, row.heightIn, row.weightLb].every((value) => Number.isFinite(value) && value > 0)) {
+    } else if (
+      ![row.lengthIn, row.widthIn, row.heightIn, row.weightLb].every(
+        (value) => typeof value === "number" && Number.isFinite(value) && value > 0
+      )
+    ) {
       issues.push(`SKU ${sku} has invalid dimensions or weight.`);
     }
 
@@ -318,10 +327,14 @@ function buildCommodity(item: GarlandShippingOrderItem, quantity: number) {
   const sku = item.sku.trim().toUpperCase();
 
   if (item.serialNumbers.length > 0) {
-    return `SKU: ${sku}, SN: ${item.serialNumbers.map((serialNumber) => serialNumber.trim()).filter(Boolean).join(", ")}`;
+    return item.serialNumbers
+      .map((serialNumber) => serialNumber.trim())
+      .filter(Boolean)
+      .map((serialNumber) => `SKU: ${sku} SN: ${serialNumber}`)
+      .join("\n");
   }
 
-  return `SKU: ${sku}, QTY: ${quantity}`;
+  return `SKU: ${sku} QTY: ${quantity}`;
 }
 
 function readItemQuantity(item: GarlandShippingOrderItem) {

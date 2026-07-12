@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { buildTeamshipPhase2DryRunPlan } from "@/modules/shipment-documents/teamship-phase2-dry-run";
 import { buildGarlandTeamshipReview, parseGarlandShippingOrderPages } from "@/modules/shipment-documents/teamship-review";
+import type { TeamshipShippingOrderDetail } from "@/modules/shipment-documents/teamship-review-types";
 import { fetchTeamshipShippingOrdersForReview } from "@/server/integrations/teamship";
 
 type TextItemLike = {
@@ -26,6 +27,7 @@ type PdfJsLegacyModule = {
 type CliOptions = {
   pdfPath: string;
   shipmentDate: string | null;
+  teamshipJsonPath: string | null;
   json: boolean;
   allowBlocked: boolean;
 };
@@ -33,18 +35,16 @@ type CliOptions = {
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const pdfOrders = await extractOrdersFromPdf(options.pdfPath);
-  const credentials = readTeamshipCredentials();
-  const teamshipOrders = await fetchTeamshipShippingOrdersForReview({
-    shipmentDate: options.shipmentDate,
-    srNumbers: pdfOrders.map((order) => order.srNumber),
-    credentials
-  });
+  const teamshipOrders = options.teamshipJsonPath
+    ? await readTeamshipFixture(options.teamshipJsonPath)
+    : await fetchLiveTeamshipOrders({ shipmentDate: options.shipmentDate, pdfOrders });
   const review = buildGarlandTeamshipReview(pdfOrders, teamshipOrders);
   const plan = buildTeamshipPhase2DryRunPlan(review);
   const result = {
     mode: "teamship-phase2-dry-run-validation",
     pdfPath: options.pdfPath,
     shipmentDate: options.shipmentDate,
+    teamshipSource: options.teamshipJsonPath ? "fixture-json" : "live-read-only",
     extractedPdfOrderCount: pdfOrders.length,
     fetchedTeamshipOrderCount: teamshipOrders.length,
     plan
@@ -55,6 +55,33 @@ async function main() {
   if (!options.allowBlocked && plan.summary.blockedCount > 0) {
     throw new Error(`Phase 2 dry-run validation blocked ${plan.summary.blockedCount} order(s).`);
   }
+}
+
+async function fetchLiveTeamshipOrders({
+  shipmentDate,
+  pdfOrders
+}: {
+  shipmentDate: string | null;
+  pdfOrders: Array<{ srNumber: string }>;
+}) {
+  const credentials = readTeamshipCredentials();
+
+  return fetchTeamshipShippingOrdersForReview({
+    shipmentDate,
+    srNumbers: pdfOrders.map((order) => order.srNumber),
+    credentials
+  });
+}
+
+async function readTeamshipFixture(teamshipJsonPath: string): Promise<TeamshipShippingOrderDetail[]> {
+  const parsed = JSON.parse(await readFile(teamshipJsonPath, "utf8")) as unknown;
+  const orders = Array.isArray(parsed) ? parsed : typeof parsed === "object" && parsed ? (parsed as { orders?: unknown }).orders : null;
+
+  if (!Array.isArray(orders)) {
+    throw new Error("Teamship fixture JSON must be an array of orders or an object with an orders array.");
+  }
+
+  return orders.filter((order): order is TeamshipShippingOrderDetail => Boolean(order && typeof order === "object"));
 }
 
 async function extractOrdersFromPdf(pdfPath: string) {
@@ -127,6 +154,7 @@ function readTeamshipCredentials() {
 function parseArgs(args: string[]): CliOptions {
   let pdfPath = process.env.GARLAND_TEAMSHIP_PDF_PATH?.trim() ?? "";
   let shipmentDate = process.env.GARLAND_TEAMSHIP_SHIPMENT_DATE?.trim() || null;
+  let teamshipJsonPath = process.env.GARLAND_TEAMSHIP_TEAMSHIP_JSON_PATH?.trim() || null;
   let json = false;
   let allowBlocked = false;
 
@@ -141,6 +169,12 @@ function parseArgs(args: string[]): CliOptions {
 
     if (arg === "--shipment-date") {
       shipmentDate = args[index + 1] ?? null;
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--teamship-json") {
+      teamshipJsonPath = args[index + 1] ? path.resolve(args[index + 1]!) : null;
       index += 1;
       continue;
     }
@@ -170,6 +204,7 @@ function parseArgs(args: string[]): CliOptions {
   return {
     pdfPath: path.resolve(pdfPath),
     shipmentDate,
+    teamshipJsonPath,
     json,
     allowBlocked
   };
@@ -193,10 +228,12 @@ to Teamship.
 
 Usage:
   TEAMSHIP_EMAIL='name@example.com' TEAMSHIP_PASSWORD='...' npm run verify:garland-teamship-phase2 -- --pdf '/path/to/orders.pdf' --shipment-date 2026-07-11
+  npm run verify:garland-teamship-phase2 -- --pdf '/path/to/orders.pdf' --teamship-json '/path/to/teamship-fixture.json'
 
 Options:
   --pdf <path>             Garland daily shipping-order PDF.
   --shipment-date <date>   Optional YYYY-MM-DD date passed to the Teamship list filter.
+  --teamship-json <path>    Use a local Teamship detail fixture instead of live Teamship reads.
   --json                   Print JSON output. Currently the default output is also JSON for auditability.
   --allow-blocked          Exit 0 even when some orders are blocked by missing dimensions or missing Teamship data.
 `);

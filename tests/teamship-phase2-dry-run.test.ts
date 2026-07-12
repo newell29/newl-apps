@@ -30,7 +30,7 @@ describe("Teamship Phase 2 dry-run planner", () => {
       expect.objectContaining({
         rowNumber: 1,
         sku: "E1SGHMV6XHU3US",
-        commodity: "SKU: E1SGHMV6XHU3US, SN: 2604816191908",
+        commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908",
         lengthIn: 48,
         widthIn: 40,
         heightIn: 50,
@@ -43,23 +43,23 @@ describe("Teamship Phase 2 dry-run planner", () => {
           pallet_1_height: 50,
           pallet_1_weight: 500,
           pallet_1_weight_unit: "lbs",
-          pallet_1_commodity: "SKU: E1SGHMV6XHU3US, SN: 2604816191908"
+          pallet_1_commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908"
         })
       }),
       expect.objectContaining({
         rowNumber: 2,
         sku: "8030445",
-        commodity: "SKU: 8030445, QTY: 4",
+        commodity: "SKU: 8030445 QTY: 4",
         teamshipFields: expect.objectContaining({
           pallets_count: 2,
           pallet_2: 4,
-          pallet_2_commodity: "SKU: 8030445, QTY: 4"
+          pallet_2_commodity: "SKU: 8030445 QTY: 4"
         })
       })
     ]);
   });
 
-  it("blocks orders when a SKU has no usable dimensions", () => {
+  it("still prepares commodity text when a SKU has no usable dimensions", () => {
     const review = sampleReview();
     review.reviews[0]!.productDimensions = review.reviews[0]!.productDimensions.filter(
       (dimension) => dimension.sku !== "8030445"
@@ -72,6 +72,36 @@ describe("Teamship Phase 2 dry-run planner", () => {
       blockedCount: 1
     });
     expect(plan.orders[0]?.validationIssues).toContain("No usable dimension/weight recommendation found for SKU 8030445.");
+    expect(plan.orders[0]?.plannedPalletRows[1]).toMatchObject({
+      rowNumber: 2,
+      sku: "8030445",
+      commodity: "SKU: 8030445 QTY: 4",
+      hasUsableDimensions: false,
+      dimensionSource: "MISSING",
+      lengthIn: null,
+      widthIn: null,
+      heightIn: null,
+      weightLb: null,
+      teamshipFields: {
+        pallets_count: 2,
+        pallet_2: 4,
+        pallet_2_commodity: "SKU: 8030445 QTY: 4"
+      }
+    });
+  });
+
+  it("formats multiple serials as separate commodity lines", () => {
+    const review = sampleReview();
+    review.pdfOrders[0]!.items[0]!.serialNumbers = ["2604816191908", "2604816191909"];
+
+    const plan = buildTeamshipPhase2DryRunPlan(review);
+
+    expect(plan.orders[0]?.plannedPalletRows[0]).toMatchObject({
+      commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908\nSKU: E1SGHMV6XHU3US SN: 2604816191909",
+      teamshipFields: expect.objectContaining({
+        pallet_1_commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908\nSKU: E1SGHMV6XHU3US SN: 2604816191909"
+      })
+    });
   });
 
   it("skips missing Teamship orders instead of preparing updates", () => {
