@@ -73,6 +73,15 @@ export type TeamshipUpdateOrderSummary = {
   plannedPalletRowCount: number;
   validationIssues: string[];
   errorMessage: string | null;
+  agentEvidence: TeamshipUpdateOrderAgentEvidence | null;
+};
+
+export type TeamshipUpdateOrderAgentEvidence = {
+  status: string;
+  fieldActionCount: number;
+  palletActionCount: number;
+  responseStatus: number | null;
+  error: string | null;
 };
 
 export type TeamshipUpdateJobsResponse = {
@@ -151,6 +160,7 @@ type TeamshipUpdateOrderRecord = {
   plannedFieldUpdates: unknown;
   plannedPalletRows: unknown;
   validationIssues: unknown;
+  agentResult: unknown;
   errorMessage: string | null;
 };
 
@@ -600,7 +610,35 @@ function mapUpdateOrder(order: TeamshipUpdateOrderRecord): TeamshipUpdateOrderSu
     plannedFieldUpdateCount: readJsonArray(order.plannedFieldUpdates).length,
     plannedPalletRowCount: readJsonArray(order.plannedPalletRows).length,
     validationIssues: readStringArray(order.validationIssues),
-    errorMessage: order.errorMessage
+    errorMessage: order.errorMessage,
+    agentEvidence: readOrderAgentEvidence(order.agentResult)
+  };
+}
+
+function readOrderAgentEvidence(value: unknown): TeamshipUpdateOrderAgentEvidence | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const evidence = value as {
+    status?: unknown;
+    fieldActions?: unknown;
+    palletActions?: unknown;
+    responseStatus?: unknown;
+    error?: unknown;
+  };
+  const status = typeof evidence.status === "string" && evidence.status.trim() ? evidence.status.trim() : null;
+
+  if (!status) {
+    return null;
+  }
+
+  return {
+    status,
+    fieldActionCount: readJsonArray(evidence.fieldActions).length,
+    palletActionCount: readJsonArray(evidence.palletActions).length,
+    responseStatus: typeof evidence.responseStatus === "number" && Number.isFinite(evidence.responseStatus) ? evidence.responseStatus : null,
+    error: typeof evidence.error === "string" && evidence.error.trim() ? evidence.error.trim() : null
   };
 }
 
