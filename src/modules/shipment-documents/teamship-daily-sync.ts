@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 
+import { recordGarlandProductDimensionObservations } from "@/modules/shipment-documents/garland-product-dimension-directory";
 import type { TeamshipShippingOrderDetail } from "@/modules/shipment-documents/teamship-review-types";
 import { prisma } from "@/server/db";
 import { fetchTeamshipShippingOrdersForReview } from "@/server/integrations/teamship";
@@ -179,6 +180,10 @@ export async function syncTeamshipDailyOrders(input: SyncInput): Promise<Teamshi
         tenantId: input.tenantId,
         shipmentDate
       }
+    });
+    await recordGarlandProductDimensionObservations({
+      tenantId: input.tenantId,
+      orders
     });
 
     await client.teamshipDailySyncRun.update({

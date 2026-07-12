@@ -1,6 +1,8 @@
 import { ModuleKey } from "@prisma/client";
 import { NextResponse } from "next/server";
 
+import { getGarlandLearnedProductDimensionRecommendations } from "@/modules/shipment-documents/garland-product-dimension-directory";
+import { collectGarlandProductDimensionSkus } from "@/modules/shipment-documents/garland-product-dimensions";
 import { getTeamshipSyncedOrdersForReview } from "@/modules/shipment-documents/teamship-daily-sync";
 import { buildGarlandTeamshipReview, parseTeamshipAlertDigest } from "@/modules/shipment-documents/teamship-review";
 import { getReviewedTeamshipSrNumbers } from "@/modules/shipment-documents/teamship-review-history";
@@ -86,11 +88,19 @@ export async function POST(request: Request) {
     }
 
     const teamshipOrders = mergeFreshTeamshipOrders(freshTeamshipOrders, syncedTeamshipOrders);
+    const learnedProductDimensions = await getGarlandLearnedProductDimensionRecommendations({
+      tenantId: context.tenantId,
+      skus: collectGarlandProductDimensionSkus({
+        pdfOrders: orders,
+        teamshipOrders
+      })
+    });
 
     return NextResponse.json(
       buildGarlandTeamshipReview(ordersToReview, teamshipOrders, teamshipAlerts, {
         includeUnmatchedTeamshipOrders: syncedTeamshipOrders.length > 0,
-        skippedAlreadyReviewedOrders
+        skippedAlreadyReviewedOrders,
+        learnedProductDimensions
       })
     );
   } catch (error) {

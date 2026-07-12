@@ -199,6 +199,8 @@ Garland provided a freight-dimension workbook named `FREIGHT DIMS - NEWLS (versi
 
 UPS exception: for Garland UPS orders, always enter `1 x 1 x 1` and `1 lbs` for dimensions/weight regardless of SKU, Garland reference-sheet data, or observed SKU history. The Teamship Review dimension recommendation should show this as a high-confidence `UPS rule` source and suppress SKU-specific alternatives for that UPS order.
 
+Learning rule: each manual or due Teamship sync records valid non-UPS pallet dimension rows into Newl Apps' tenant-scoped `GarlandProductDimensionObservation` directory. The app ignores placeholders such as `1 x 1 x 1`, zero height/weight, missing dimensions, and all UPS rows. Teamship Review then shows these historical observations as `Teamship learned` recommendations before falling back to the static Garland reference sheet. For now, the learning path is manual-sync friendly; if Newl upgrades Vercel cron later, the same sync path can run daily without changing the directory model.
+
 Pallet data is stored in hidden `shipInventoryData.pallets[]` and rendered as indexed visible fields:
 
 | Teamship data field | Visible input naming pattern | Notes |

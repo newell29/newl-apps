@@ -626,6 +626,49 @@ NEWLS 2604816191908 1.00 ( )`
     );
   });
 
+  it("adds learned Teamship dimension recommendations ahead of Garland reference rows", () => {
+    const pdfOrder = samplePdfOrder({
+      psNumber: "PS210502",
+      srNumber: "SR812502",
+      pageNumbers: [1],
+      shipVia: "MIDLAND",
+      shipToName: "LEARNED DIM TEST CUSTOMER",
+      shipToPo: "PO-LEARNED-DIMS",
+      freightTerms: "PPADD-CD",
+      itemSkus: ["99560025"],
+      serialNumbers: []
+    });
+
+    const review = buildGarlandTeamshipReview([pdfOrder], [], [], {
+      learnedProductDimensions: [
+        {
+          sku: "99560025",
+          source: "TEAMSHIP_LEARNED",
+          productType: null,
+          quantity: null,
+          lengthIn: 50,
+          widthIn: 42,
+          heightIn: 18,
+          weightLb: 90,
+          weightUnit: "lbs",
+          confidence: "MEDIUM",
+          note: "Learned from 1 saved Teamship pallet observation."
+        }
+      ]
+    });
+    const dimensions = review.reviews[0]?.productDimensions ?? [];
+
+    expect(dimensions.map((dimension) => dimension.source)).toEqual(["TEAMSHIP_LEARNED", "GARLAND_REFERENCE"]);
+    expect(dimensions[0]).toMatchObject({
+      sku: "99560025",
+      source: "TEAMSHIP_LEARNED",
+      lengthIn: 50,
+      widthIn: 42,
+      heightIn: 18,
+      weightLb: 90
+    });
+  });
+
   it("uses the Garland UPS placeholder dimension rule instead of SKU-specific dimensions", () => {
     const pdfOrder = samplePdfOrder({
       psNumber: "PS210501",

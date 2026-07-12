@@ -1431,6 +1431,10 @@ function formatDimensionSource(source: GarlandTeamshipOrderReview["productDimens
     return "UPS rule";
   }
 
+  if (source === "TEAMSHIP_LEARNED") {
+    return "Teamship learned";
+  }
+
   return source === "TEAMSHIP_PALLET" ? "Teamship pallet" : "Garland sheet";
 }
 
