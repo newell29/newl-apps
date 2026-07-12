@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const prismaMock = vi.hoisted(() => ({
   teamshipUpdateJob: {
     findFirst: vi.fn(),
+    create: vi.fn(),
     update: vi.fn()
   },
   teamshipUpdateOrder: {
@@ -11,6 +12,7 @@ const prismaMock = vi.hoisted(() => ({
 }));
 const fetchTeamshipShippingOrdersForReviewMock = vi.hoisted(() => vi.fn());
 const getGarlandLearnedProductDimensionRecommendationsMock = vi.hoisted(() => vi.fn());
+const recordGarlandCsrProductDimensionOverridesMock = vi.hoisted(() => vi.fn());
 const collectGarlandProductDimensionSkusMock = vi.hoisted(() => vi.fn());
 const buildGarlandTeamshipReviewMock = vi.hoisted(() => vi.fn());
 
@@ -23,24 +25,27 @@ vi.mock("@/server/integrations/teamship", () => ({
 }));
 
 vi.mock("@/modules/shipment-documents/garland-product-dimension-directory", () => ({
-  getGarlandLearnedProductDimensionRecommendations: getGarlandLearnedProductDimensionRecommendationsMock
+  getGarlandLearnedProductDimensionRecommendations: getGarlandLearnedProductDimensionRecommendationsMock,
+  recordGarlandCsrProductDimensionOverrides: recordGarlandCsrProductDimensionOverridesMock
 }));
 
 vi.mock("@/modules/shipment-documents/garland-product-dimensions", () => ({
-  collectGarlandProductDimensionSkus: collectGarlandProductDimensionSkusMock
+  collectGarlandProductDimensionSkus: collectGarlandProductDimensionSkusMock,
+  isUpsGarlandOrder: vi.fn(() => false)
 }));
 
 vi.mock("@/modules/shipment-documents/teamship-review", () => ({
   buildGarlandTeamshipReview: buildGarlandTeamshipReviewMock
 }));
 
-import { completeTeamshipUpdateJobFromAgent } from "@/modules/shipment-documents/teamship-update-jobs";
+import { completeTeamshipUpdateJobFromAgent, createTeamshipUpdateJob } from "@/modules/shipment-documents/teamship-update-jobs";
 
 describe("Teamship update jobs", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     fetchTeamshipShippingOrdersForReviewMock.mockResolvedValue([{ shipment_id: "SR808478" }]);
     getGarlandLearnedProductDimensionRecommendationsMock.mockResolvedValue([]);
+    recordGarlandCsrProductDimensionOverridesMock.mockResolvedValue({ observedCount: 1, insertedCount: 1 });
     collectGarlandProductDimensionSkusMock.mockReturnValue(["E1SGHMV6XHU3US"]);
     buildGarlandTeamshipReviewMock.mockReturnValue({
       pdfOrders: [samplePdfOrder()],
@@ -104,6 +109,47 @@ describe("Teamship update jobs", () => {
       lastVerificationAt: expect.any(String)
     });
   });
+
+  it("records CSR-entered dimensions in the product directory when creating an update draft", async () => {
+    const job = sampleCreatedJob();
+    prismaMock.teamshipUpdateJob.create.mockResolvedValue(job);
+
+    await createTeamshipUpdateJob(
+      {
+        tenantId: "tenant-1",
+        tenantSlug: "newl",
+        tenantName: "Newl",
+        userId: "user-1",
+        userEmail: "alex.newell@newl.ca",
+        userName: "Alex Newell",
+        role: "ADMIN"
+      },
+      {
+        documentLabel: "July 11, 2026",
+        shipmentDate: "2026-07-11",
+        sourcePdfFileName: "garland.pdf",
+        selectedSrNumbers: ["SR808478"],
+        agentMode: "DRY_RUN",
+        review: sampleReviewWithCsrOverride()
+      }
+    );
+
+    expect(recordGarlandCsrProductDimensionOverridesMock).toHaveBeenCalledWith({
+      tenantId: "tenant-1",
+      documentLabel: "July 11, 2026",
+      pdfOrders: [samplePdfOrder()],
+      dimensions: expect.arrayContaining([
+        expect.objectContaining({
+          sku: "E1SGHMV6XHU3US",
+          source: "CSR_OVERRIDE",
+          lengthIn: 48,
+          widthIn: 40,
+          heightIn: 50,
+          weightLb: 500
+        })
+      ])
+    });
+  });
 });
 
 function sampleJob() {
@@ -151,6 +197,88 @@ function sampleJob() {
         validationIssues: [],
         agentResult: null,
         errorMessage: null
+      }
+    ]
+  };
+}
+
+function sampleCreatedJob() {
+  return {
+    ...sampleJob(),
+    status: "DRAFT",
+    agentMode: "DRY_RUN",
+    dryRun: true,
+    agentId: null,
+    agentClaimedAt: null,
+    agentStartedAt: null,
+    approvedAt: null,
+    createdAt: new Date("2026-07-11T11:55:00.000Z"),
+    orders: [
+      {
+        ...sampleJob().orders[0],
+        status: "READY",
+        plannedFieldUpdates: [],
+        plannedPalletRows: []
+      }
+    ]
+  };
+}
+
+function sampleReviewWithCsrOverride() {
+  return {
+    summary: {
+      pdfOrderCount: 1,
+      teamshipMatchedCount: 1,
+      passedCount: 1,
+      failedCount: 0,
+      missingTeamshipCount: 0,
+      pendingTeamshipCount: 0,
+      noPdfCount: 0,
+      skippedAlreadyReviewedCount: 0
+    },
+    fetchedAt: "2026-07-11T12:00:00.000Z",
+    teamshipAlerts: [],
+    pdfOrders: [samplePdfOrder()],
+    reviews: [
+      {
+        psNumber: "PS210206",
+        srNumber: "SR808478",
+        pageNumbers: [1],
+        status: "PASS",
+        teamshipOrderId: "30202",
+        teamshipUrl: "https://members.fulfillit.io/ship-inventories/30202",
+        issueCount: 0,
+        alert: null,
+        fields: [],
+        pdfItems: [
+          {
+            sku: "E1SGHMV6XHU3US",
+            quantity: "1",
+            serialNumbers: ["2604816191908"]
+          }
+        ],
+        teamshipItems: [
+          {
+            sku: "E1SGHMV6XHU3US",
+            quantity: "1",
+            serialNumbers: ["2604816191908"]
+          }
+        ],
+        productDimensions: [
+          {
+            sku: "E1SGHMV6XHU3US",
+            source: "CSR_OVERRIDE",
+            productType: null,
+            quantity: 1,
+            lengthIn: 48,
+            widthIn: 40,
+            heightIn: 50,
+            weightLb: 500,
+            weightUnit: "lbs",
+            confidence: "HIGH",
+            note: "CSR override entered before Teamship bot update."
+          }
+        ]
       }
     ]
   };

@@ -326,9 +326,13 @@ function sourceRank(source: GarlandProductDimensionRecommendation["source"]) {
     return 1;
   }
 
-  if (source === "TEAMSHIP_PALLET") {
+  if (source === "CSR_LEARNED") {
     return 2;
   }
 
-  return source === "TEAMSHIP_LEARNED" ? 3 : 4;
+  if (source === "TEAMSHIP_PALLET") {
+    return 3;
+  }
+
+  return source === "TEAMSHIP_LEARNED" ? 4 : 5;
 }

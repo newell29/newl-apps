@@ -191,6 +191,30 @@ function sampleReview(): GarlandTeamshipReviewResponse {
             message: "PDF has a value, but Teamship does not."
           }
         ],
+        pdfItems: [
+          {
+            sku: "E1SGHMV6XHU3US",
+            quantity: "1",
+            serialNumbers: ["2604816191908"]
+          },
+          {
+            sku: "8030445",
+            quantity: "4",
+            serialNumbers: []
+          }
+        ],
+        teamshipItems: [
+          {
+            sku: "E1SGHMV6XHU3US",
+            quantity: "1",
+            serialNumbers: ["2604816191908"]
+          },
+          {
+            sku: "8030445",
+            quantity: "4",
+            serialNumbers: []
+          }
+        ],
         productDimensions: [
           {
             sku: "E1SGHMV6XHU3US",
