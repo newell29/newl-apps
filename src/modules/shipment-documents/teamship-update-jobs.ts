@@ -9,6 +9,7 @@ import {
   type TeamshipPhase2OrderPlan
 } from "@/modules/shipment-documents/teamship-phase2-dry-run";
 import { buildGarlandTeamshipReview } from "@/modules/shipment-documents/teamship-review";
+import { markTeamshipReviewOrdersReadyToPrint } from "@/modules/shipment-documents/teamship-review-history";
 import type {
   GarlandPdfShippingOrder,
   GarlandTeamshipReviewResponse
@@ -460,6 +461,14 @@ export async function completeTeamshipUpdateJobFromAgent({
     },
     include: includeJobDetails
   });
+
+  if (finalStatus === "SUCCESS") {
+    await markTeamshipReviewOrdersReadyToPrint({
+      tenantId: context.tenantId,
+      shipmentDate: job.shipmentDate,
+      srNumbers: updated.orders.filter((order) => order.status === "SUCCESS").map((order) => order.srNumber)
+    });
+  }
 
   return mapUpdateJob(updated);
 }

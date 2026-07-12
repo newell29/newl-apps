@@ -40,12 +40,15 @@ type TeamshipReviewHistoryOrder = {
   srNumber: string;
   status: "PASS" | "FAIL" | "MISSING_TEAMSHIP" | "PENDING_TEAMSHIP" | "NO_PDF" | "SKIPPED_ALREADY_REVIEWED";
   teamshipOrderId: string | null;
+  teamshipUrl: string | null;
   carrier: string | null;
   shipToName: string | null;
   city: string | null;
   state: string | null;
   pageNumbers: number[];
   mismatchCount: number;
+  workflowStatus: TeamshipReviewWorkflowStatus;
+  bolPrintedAt: string | null;
 };
 
 type TeamshipReviewHistoryRun = {
@@ -140,6 +143,8 @@ type TeamshipUpdateAgentMode = "DRY_RUN" | "LIVE_API";
 type PayloadInspectionResponse = TeamshipPayloadInspectionResult | { error: string };
 
 type ShipmentWorkspaceStatus = GarlandTeamshipOrderReview["status"] | "TEAMSHIP_PULLED" | "PDF_READY";
+type TeamshipReviewWorkflowStatus = "NEEDS_SETUP" | "READY_TO_PRINT" | "BOL_PRINTED" | "NEEDS_REVIEW" | "NO_PDF" | "SKIPPED";
+type ProductDimensionEditField = "quantity" | "lengthIn" | "widthIn" | "heightIn" | "weightLb";
 
 type ShipmentWorkspaceRow = {
   id: string;
@@ -662,6 +667,63 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     );
   }
 
+  function updateProductDimensionOverride(srNumber: string, sku: string, field: ProductDimensionEditField, rawValue: string) {
+    const normalizedSrNumber = normalizeIdentifier(srNumber);
+    const normalizedSku = normalizeIdentifier(sku);
+    const nextValue = parseDimensionInput(rawValue);
+
+    setReview((current) => {
+      if (!current) {
+        return current;
+      }
+
+      return {
+        ...current,
+        reviews: current.reviews.map((orderReview) => {
+          if (normalizeIdentifier(orderReview.srNumber) !== normalizedSrNumber) {
+            return orderReview;
+          }
+
+          const existingIndex = orderReview.productDimensions.findIndex((dimension) => normalizeIdentifier(dimension.sku) === normalizedSku);
+          const nextDimensions =
+            existingIndex >= 0
+              ? orderReview.productDimensions.map((dimension, index) =>
+                  index === existingIndex
+                    ? {
+                        ...dimension,
+                        [field]: nextValue,
+                        source: "CSR_OVERRIDE" as const,
+                        confidence: "HIGH" as const,
+                        note: buildOverrideNote(dimension.note)
+                      }
+                    : dimension
+                )
+              : [
+                  ...orderReview.productDimensions,
+                  {
+                    sku,
+                    source: "CSR_OVERRIDE" as const,
+                    productType: null,
+                    quantity: field === "quantity" ? nextValue : null,
+                    lengthIn: field === "lengthIn" ? nextValue : null,
+                    widthIn: field === "widthIn" ? nextValue : null,
+                    heightIn: field === "heightIn" ? nextValue : null,
+                    weightLb: field === "weightLb" ? nextValue : null,
+                    weightUnit: "lbs",
+                    confidence: "HIGH" as const,
+                    note: "CSR override entered before Teamship bot update."
+                  }
+                ];
+
+          return {
+            ...orderReview,
+            productDimensions: nextDimensions
+          };
+        })
+      };
+    });
+  }
+
   async function fetchHistory(search: string, dateFrom: string, dateTo: string, allDates: boolean) {
     setHistoryError(null);
     setIsHistoryLoading(true);
@@ -724,6 +786,30 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       await fetchHistory(historySearch, historyDateFrom, historyDateTo, historyAllDates);
     } catch (caught) {
       setHistoryError(caught instanceof Error ? caught.message : "Unable to delete Teamship review run.");
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  }
+
+  async function updateSavedOrderWorkflow(runId: string, orderId: string, action: "markBolPrinted" | "clearBolPrinted") {
+    setHistoryError(null);
+    setIsHistoryLoading(true);
+
+    try {
+      const response = await fetch(`/api/shipment-documents/teamship-review/runs/${runId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action, orderId })
+      });
+      const json = (await response.json().catch(() => null)) as { error?: string } | null;
+
+      if (!response.ok || !json || isErrorResponse(json)) {
+        throw new Error(isErrorResponse(json) ? json.error : "Unable to update Teamship review order.");
+      }
+
+      await fetchHistory(historySearch, historyDateFrom, historyDateTo, historyAllDates);
+    } catch (caught) {
+      setHistoryError(caught instanceof Error ? caught.message : "Unable to update Teamship review order.");
     } finally {
       setIsHistoryLoading(false);
     }
@@ -937,6 +1023,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         onCreateSingleUpdateJob={(srNumber) => void createUpdateJob([srNumber])}
         onUpdateJobAction={(jobId, action) => void updateJobAction(jobId, action)}
         onRescanShipment={(srNumber) => void runReview({ rescan: true, srNumber })}
+        onProductDimensionChange={updateProductDimensionOverride}
         payloadInspections={payloadInspections}
         payloadInspectionErrors={payloadInspectionErrors}
         payloadInspectionLoadingSr={payloadInspectionLoadingSr}
@@ -975,6 +1062,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         }}
         onSearch={() => void fetchHistory(historySearch, historyDateFrom, historyDateTo, historyAllDates)}
         onDelete={(runId) => void deleteRun(runId)}
+        onOrderWorkflowAction={(runId, orderId, action) => void updateSavedOrderWorkflow(runId, orderId, action)}
       />
     </div>
   );
@@ -1006,6 +1094,7 @@ function ShipmentReviewWorkspace({
   onCreateSingleUpdateJob,
   onUpdateJobAction,
   onRescanShipment,
+  onProductDimensionChange,
   payloadInspections,
   payloadInspectionErrors,
   payloadInspectionLoadingSr,
@@ -1036,6 +1125,7 @@ function ShipmentReviewWorkspace({
   onCreateSingleUpdateJob: (srNumber: string) => void;
   onUpdateJobAction: (jobId: string, action: "approve" | "cancel" | "rescan") => void;
   onRescanShipment: (srNumber: string) => void;
+  onProductDimensionChange: (srNumber: string, sku: string, field: ProductDimensionEditField, rawValue: string) => void;
   payloadInspections: Record<string, TeamshipPayloadInspectionResult>;
   payloadInspectionErrors: Record<string, string>;
   payloadInspectionLoadingSr: string | null;
@@ -1216,11 +1306,12 @@ function ShipmentReviewWorkspace({
           const isPayloadInspectionLoading = Boolean(srKey && payloadInspectionLoadingSr === srKey);
           const expectedSerials = row.review ? collectReviewPdfSerials(row.review) : row.pdfOrder ? collectPdfOrderSerials(row.pdfOrder) : [];
           const expectedSkus = row.review ? collectReviewPdfSkus(row.review) : row.pdfOrder ? collectPdfOrderSkus(row.pdfOrder) : [];
+          const workflowStatus = getWorkspaceWorkflowStatus(row, updateJobs);
 
           return (
             <details
               key={row.id}
-              className={shipmentRowClass(row.status)}
+              className={shipmentRowClass(row.status, workflowStatus)}
               open={isExpanded}
               onToggle={(event) => setRowOpen(row.id, event.currentTarget.open)}
             >
@@ -1242,6 +1333,7 @@ function ShipmentReviewWorkspace({
                     <span className="font-semibold text-foreground">{row.psNumber ?? "No PS"}</span>
                     <span className="text-sm font-semibold text-mutedForeground">/ {row.srNumber ?? "No SR"}</span>
                     <span className={shipmentStatusPillClass(row.status)}>{formatWorkspaceStatus(row.status, row.issueCount)}</span>
+                    <span className={workflowStatusPillClass(workflowStatus)}>{formatWorkflowStatus(workflowStatus)}</span>
                   </div>
                   <p className="mt-1 text-sm text-mutedForeground">
                     {row.pdfPages.length > 0 ? `PDF page(s) ${row.pdfPages.join(", ")}` : "No PDF page uploaded"}
@@ -1322,6 +1414,7 @@ function ShipmentReviewWorkspace({
               </summary>
               <ShipmentWorkspaceDetails
                 row={row}
+                onProductDimensionChange={onProductDimensionChange}
                 payloadInspection={payloadInspection}
                 payloadInspectionError={payloadInspectionError}
               />
@@ -1525,10 +1618,12 @@ function TeamshipUpdateJobsPanel({
 
 function ShipmentWorkspaceDetails({
   row,
+  onProductDimensionChange,
   payloadInspection,
   payloadInspectionError
 }: {
   row: ShipmentWorkspaceRow;
+  onProductDimensionChange: (srNumber: string, sku: string, field: ProductDimensionEditField, rawValue: string) => void;
   payloadInspection: TeamshipPayloadInspectionResult | null;
   payloadInspectionError: string | null;
 }) {
@@ -1563,7 +1658,12 @@ function ShipmentWorkspaceDetails({
           </table>
         </div>
         <ItemDetailsComparison review={row.review} />
-        <ProductDimensionsTable dimensions={row.review.productDimensions} />
+        <ProductDimensionsTable
+          dimensions={row.review.productDimensions}
+          items={row.review.pdfItems}
+          srNumber={row.review.srNumber}
+          onDimensionChange={onProductDimensionChange}
+        />
       </div>
     );
   }
@@ -1749,18 +1849,30 @@ function ItemDetailsComparison({ review }: { review: GarlandTeamshipOrderReview 
   );
 }
 
-function ProductDimensionsTable({ dimensions }: { dimensions: GarlandTeamshipOrderReview["productDimensions"] }) {
+function ProductDimensionsTable({
+  dimensions,
+  items,
+  srNumber,
+  onDimensionChange
+}: {
+  dimensions: GarlandTeamshipOrderReview["productDimensions"];
+  items: GarlandTeamshipOrderReview["pdfItems"];
+  srNumber: string;
+  onDimensionChange: (srNumber: string, sku: string, field: ProductDimensionEditField, rawValue: string) => void;
+}) {
+  const rows = buildEditableDimensionRows(dimensions, items);
+
   return (
     <div className="rounded-md border border-border bg-background">
       <div className="border-b border-border px-3 py-2">
         <h3 className="text-sm font-semibold text-foreground">SKU dimensions for Teamship update bot</h3>
         <p className="mt-1 text-xs text-mutedForeground">
-          Combines Teamship pallet rows with Garland&apos;s provided freight dimension sheet. Low confidence usually means
-          the Teamship row looks like placeholder pallet data.
+          CSR overrides are used first when creating the Teamship bot draft. Enter values here if the Garland sheet or learned
+          Teamship value needs a correction before the bot updates Teamship.
         </p>
       </div>
-      {dimensions.length === 0 ? (
-        <p className="px-3 py-3 text-sm text-mutedForeground">No SKU dimension recommendation found for this shipment.</p>
+      {rows.length === 0 ? (
+        <p className="px-3 py-3 text-sm text-mutedForeground">No SKU was parsed for this shipment.</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
@@ -1776,13 +1888,49 @@ function ProductDimensionsTable({ dimensions }: { dimensions: GarlandTeamshipOrd
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {dimensions.map((dimension, index) => (
+              {rows.map((dimension, index) => (
                 <tr key={`${dimension.sku}-${dimension.source}-${index}`}>
                   <td className="px-3 py-2 font-semibold text-foreground">{dimension.sku}</td>
                   <td className="px-3 py-2 text-mutedForeground">{formatDimensionSource(dimension.source)}</td>
-                  <td className="px-3 py-2 text-mutedForeground">{dimension.quantity ?? "Blank"}</td>
-                  <td className="px-3 py-2 text-mutedForeground">{formatDimensions(dimension)}</td>
-                  <td className="px-3 py-2 text-mutedForeground">{formatWeight(dimension)}</td>
+                  <td className="px-3 py-2">
+                    <DimensionInput
+                      label={`Quantity for ${dimension.sku}`}
+                      value={dimension.quantity}
+                      onChange={(value) => onDimensionChange(srNumber, dimension.sku, "quantity", value)}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex min-w-56 flex-wrap items-center gap-1">
+                      <DimensionInput
+                        label={`Length for ${dimension.sku}`}
+                        value={dimension.lengthIn}
+                        onChange={(value) => onDimensionChange(srNumber, dimension.sku, "lengthIn", value)}
+                      />
+                      <span className="text-mutedForeground">x</span>
+                      <DimensionInput
+                        label={`Width for ${dimension.sku}`}
+                        value={dimension.widthIn}
+                        onChange={(value) => onDimensionChange(srNumber, dimension.sku, "widthIn", value)}
+                      />
+                      <span className="text-mutedForeground">x</span>
+                      <DimensionInput
+                        label={`Height for ${dimension.sku}`}
+                        value={dimension.heightIn}
+                        onChange={(value) => onDimensionChange(srNumber, dimension.sku, "heightIn", value)}
+                      />
+                      <span className="text-xs text-mutedForeground">in</span>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-1">
+                      <DimensionInput
+                        label={`Weight for ${dimension.sku}`}
+                        value={dimension.weightLb}
+                        onChange={(value) => onDimensionChange(srNumber, dimension.sku, "weightLb", value)}
+                      />
+                      <span className="text-xs text-mutedForeground">{dimension.weightUnit ?? "lbs"}</span>
+                    </div>
+                  </td>
                   <td className="px-3 py-2">
                     <span className={dimensionConfidenceClass(dimension.confidence)}>{dimension.confidence}</span>
                   </td>
@@ -1794,6 +1942,29 @@ function ProductDimensionsTable({ dimensions }: { dimensions: GarlandTeamshipOrd
         </div>
       )}
     </div>
+  );
+}
+
+function DimensionInput({
+  label,
+  value,
+  onChange
+}: {
+  label: string;
+  value: number | null;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <input
+      aria-label={label}
+      type="number"
+      min="0"
+      step="0.01"
+      value={value ?? ""}
+      onChange={(event) => onChange(event.target.value)}
+      className="w-20 rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground"
+      placeholder="-"
+    />
   );
 }
 
@@ -1812,7 +1983,8 @@ function TeamshipReviewHistorySection({
   onAllDates,
   onToday,
   onSearch,
-  onDelete
+  onDelete,
+  onOrderWorkflowAction
 }: {
   history: TeamshipReviewHistoryResponse;
   historySearch: string;
@@ -1829,6 +2001,7 @@ function TeamshipReviewHistorySection({
   onToday: () => void;
   onSearch: () => void;
   onDelete: (runId: string) => void;
+  onOrderWorkflowAction: (runId: string, orderId: string, action: "markBolPrinted" | "clearBolPrinted") => void;
 }) {
   return (
     <section className="rounded-lg border border-border bg-card shadow-sm">
@@ -1984,9 +2157,11 @@ function TeamshipReviewHistorySection({
                       <th className="px-3 py-2">PS</th>
                       <th className="px-3 py-2">SR</th>
                       <th className="px-3 py-2">Status</th>
+                      <th className="px-3 py-2">Workflow</th>
                       <th className="px-3 py-2">Ship to</th>
                       <th className="px-3 py-2">Carrier</th>
                       <th className="px-3 py-2">Teamship</th>
+                      <th className="px-3 py-2">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -2000,11 +2175,50 @@ function TeamshipReviewHistorySection({
                             {formatReviewStatus(order.status, order.mismatchCount)}
                           </span>
                         </td>
+                        <td className="px-3 py-2">
+                          <div className="space-y-1">
+                            <span className={workflowStatusPillClass(order.workflowStatus)}>
+                              {formatWorkflowStatus(order.workflowStatus)}
+                            </span>
+                            {order.bolPrintedAt ? (
+                              <p className="text-xs text-mutedForeground">Printed {formatDateTime(order.bolPrintedAt)}</p>
+                            ) : null}
+                          </div>
+                        </td>
                         <td className="px-3 py-2 text-mutedForeground">
                           {[order.shipToName, order.city, order.state].filter(Boolean).join(", ") || "Missing"}
                         </td>
                         <td className="px-3 py-2 text-mutedForeground">{order.carrier ?? "Missing"}</td>
-                        <td className="px-3 py-2 text-mutedForeground">{order.teamshipOrderId ?? "Not matched"}</td>
+                        <td className="px-3 py-2 text-mutedForeground">
+                          {order.teamshipUrl ? (
+                            <a href={order.teamshipUrl} target="_blank" rel="noreferrer" className="font-semibold text-primary hover:underline">
+                              {order.teamshipOrderId ?? "Open"}
+                            </a>
+                          ) : (
+                            order.teamshipOrderId ?? "Not matched"
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          {order.workflowStatus === "BOL_PRINTED" ? (
+                            <button
+                              type="button"
+                              onClick={() => onOrderWorkflowAction(run.id, order.id, "clearBolPrinted")}
+                              disabled={isHistoryLoading}
+                              className="rounded-md border border-border px-2 py-1 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              Mark not printed
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => onOrderWorkflowAction(run.id, order.id, "markBolPrinted")}
+                              disabled={isHistoryLoading || order.workflowStatus === "NO_PDF" || order.workflowStatus === "SKIPPED"}
+                              className="rounded-md border border-border px-2 py-1 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              Mark BOL printed
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -2488,8 +2702,16 @@ function buildTeamshipOrderUrl(orderId: string | null) {
   return orderId ? `https://app.teamshipos.com/ship-inventories/${encodeURIComponent(orderId)}` : null;
 }
 
-function shipmentRowClass(status: ShipmentWorkspaceStatus) {
+function shipmentRowClass(status: ShipmentWorkspaceStatus, workflowStatus: TeamshipReviewWorkflowStatus) {
   const base = "border-l-4";
+
+  if (workflowStatus === "BOL_PRINTED") {
+    return `${base} border-success bg-success/10`;
+  }
+
+  if (workflowStatus === "READY_TO_PRINT") {
+    return `${base} border-primary bg-primary/5`;
+  }
 
   if (status === "PASS") {
     return `${base} border-success bg-success/5`;
@@ -2565,6 +2787,10 @@ function formatWorkspaceStatus(status: ShipmentWorkspaceStatus, issueCount: numb
 }
 
 function formatDimensionSource(source: GarlandTeamshipOrderReview["productDimensions"][number]["source"]) {
+  if (source === "CSR_OVERRIDE") {
+    return "CSR override";
+  }
+
   if (source === "UPS_RULE") {
     return "UPS rule";
   }
@@ -2574,6 +2800,96 @@ function formatDimensionSource(source: GarlandTeamshipOrderReview["productDimens
   }
 
   return source === "TEAMSHIP_PALLET" ? "Teamship pallet" : "Garland sheet";
+}
+
+function workflowStatusPillClass(status: TeamshipReviewWorkflowStatus) {
+  const base = "rounded-full px-2.5 py-1 text-xs font-bold uppercase tracking-wide";
+
+  if (status === "BOL_PRINTED") {
+    return `${base} bg-success/10 text-success`;
+  }
+
+  if (status === "READY_TO_PRINT") {
+    return `${base} bg-primary/10 text-primary`;
+  }
+
+  if (status === "NEEDS_REVIEW" || status === "NO_PDF") {
+    return `${base} bg-danger/10 text-danger`;
+  }
+
+  if (status === "SKIPPED") {
+    return `${base} bg-muted text-mutedForeground`;
+  }
+
+  return `${base} bg-warning/15 text-warning`;
+}
+
+function formatWorkflowStatus(status: TeamshipReviewWorkflowStatus) {
+  if (status === "BOL_PRINTED") {
+    return "BOL printed";
+  }
+
+  if (status === "READY_TO_PRINT") {
+    return "Ready to print";
+  }
+
+  if (status === "NEEDS_REVIEW") {
+    return "Needs review";
+  }
+
+  if (status === "NO_PDF") {
+    return "No PDF";
+  }
+
+  if (status === "SKIPPED") {
+    return "Skipped";
+  }
+
+  return "Needs setup";
+}
+
+function getWorkspaceWorkflowStatus(row: ShipmentWorkspaceRow, updateJobs: TeamshipUpdateJobSummary[]): TeamshipReviewWorkflowStatus {
+  if (row.status === "NO_PDF") {
+    return "NO_PDF";
+  }
+
+  if (row.status === "SKIPPED_ALREADY_REVIEWED") {
+    return "SKIPPED";
+  }
+
+  if (!row.review || row.status === "FAIL" || row.status === "MISSING_TEAMSHIP" || row.status === "PENDING_TEAMSHIP") {
+    return "NEEDS_REVIEW";
+  }
+
+  const latestUpdateOrder = findLatestUpdateOrder(row.srNumber, updateJobs);
+
+  if (latestUpdateOrder?.status === "SUCCESS") {
+    return "READY_TO_PRINT";
+  }
+
+  if (latestUpdateOrder && ["FAILED", "NEEDS_REVIEW", "BLOCKED"].includes(latestUpdateOrder.status)) {
+    return "NEEDS_REVIEW";
+  }
+
+  return "NEEDS_SETUP";
+}
+
+function findLatestUpdateOrder(srNumber: string | null, updateJobs: TeamshipUpdateJobSummary[]) {
+  const srKey = normalizeIdentifier(srNumber);
+
+  if (!srKey) {
+    return null;
+  }
+
+  for (const job of updateJobs) {
+    const order = job.orders.find((candidate) => normalizeIdentifier(candidate.srNumber) === srKey);
+
+    if (order) {
+      return order;
+    }
+  }
+
+  return null;
 }
 
 type ItemDetail = GarlandTeamshipOrderReview["pdfItems"][number];
@@ -2658,14 +2974,70 @@ function formatGroupedSkuSerialItems(items: ItemDetail[]) {
   return `${skuText}${quantityText} | SN: ${serialText}`;
 }
 
-function formatDimensions(dimension: GarlandTeamshipOrderReview["productDimensions"][number]) {
-  return [dimension.lengthIn, dimension.widthIn, dimension.heightIn].every((value) => value !== null)
-    ? `${dimension.lengthIn}" x ${dimension.widthIn}" x ${dimension.heightIn}"`
-    : "Blank";
+function buildEditableDimensionRows(
+  dimensions: GarlandTeamshipOrderReview["productDimensions"],
+  items: GarlandTeamshipOrderReview["pdfItems"]
+) {
+  const rows = new Map<string, GarlandTeamshipOrderReview["productDimensions"][number]>();
+
+  for (const dimension of dimensions) {
+    const skuKey = normalizeIdentifier(dimension.sku);
+
+    if (skuKey) {
+      rows.set(skuKey, dimension);
+    }
+  }
+
+  for (const item of items) {
+    const sku = item.sku?.trim();
+    const skuKey = normalizeIdentifier(sku ?? null);
+
+    if (!sku || !skuKey || rows.has(skuKey)) {
+      continue;
+    }
+
+    rows.set(skuKey, {
+      sku,
+      source: "CSR_OVERRIDE",
+      productType: null,
+      quantity: parseItemQuantity(item.quantity),
+      lengthIn: null,
+      widthIn: null,
+      heightIn: null,
+      weightLb: null,
+      weightUnit: "lbs",
+      confidence: "LOW",
+      note: "No dimension recommendation found yet. CSR can enter an override before creating the bot draft."
+    });
+  }
+
+  return Array.from(rows.values()).sort((left, right) => left.sku.localeCompare(right.sku, undefined, { numeric: true }));
 }
 
-function formatWeight(dimension: GarlandTeamshipOrderReview["productDimensions"][number]) {
-  return dimension.weightLb === null ? "Blank" : `${dimension.weightLb} ${dimension.weightUnit ?? "lbs"}`;
+function parseItemQuantity(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number(value.replace(/[^0-9.]/g, ""));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function parseDimensionInput(value: string) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function buildOverrideNote(existingNote: string) {
+  return existingNote.includes("CSR override")
+    ? existingNote
+    : `${existingNote ? `${existingNote} ` : ""}CSR override entered before Teamship bot update.`.trim();
 }
 
 function dimensionConfidenceClass(confidence: GarlandTeamshipOrderReview["productDimensions"][number]["confidence"]) {

@@ -9,6 +9,8 @@ import type { AuthenticatedContext } from "@/server/tenant-context";
 
 const WORKFLOW_KEY = "GARLAND_TEAMSHIP_REVIEW";
 
+export type TeamshipReviewWorkflowStatus = "NEEDS_SETUP" | "READY_TO_PRINT" | "BOL_PRINTED" | "NEEDS_REVIEW" | "NO_PDF" | "SKIPPED";
+
 export type TeamshipReviewHistoryOrder = {
   id: string;
   psNumber: string;
@@ -23,6 +25,8 @@ export type TeamshipReviewHistoryOrder = {
   shipToPo: string | null;
   pageNumbers: number[];
   mismatchCount: number;
+  workflowStatus: TeamshipReviewWorkflowStatus;
+  bolPrintedAt: string | null;
 };
 
 export type TeamshipReviewHistoryRun = {
@@ -80,6 +84,7 @@ type TeamshipReviewRunQueryClient = typeof prisma & {
       where: Record<string, unknown>;
       select: { srNumber: true };
     }): Promise<Array<{ srNumber: string }>>;
+    updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<{ count: number }>;
   };
 };
 
@@ -118,6 +123,8 @@ type TeamshipReviewOrderRecord = {
   shipToPo: string | null;
   pageNumbers: unknown;
   mismatchCount: number;
+  workflowStatus: string;
+  bolPrintedAt: Date | null;
 };
 
 export async function getTeamshipReviewHistory(
@@ -165,7 +172,8 @@ export async function getTeamshipReviewHistory(
               { shipToName: { contains: search, mode: "insensitive" } },
               { city: { contains: search, mode: "insensitive" } },
               { state: { contains: search, mode: "insensitive" } },
-              { shipToPo: { contains: search, mode: "insensitive" } }
+              { shipToPo: { contains: search, mode: "insensitive" } },
+              { workflowStatus: { contains: search, mode: "insensitive" } }
             ]
           }
         }
@@ -214,7 +222,9 @@ export async function getTeamshipReviewHistory(
             state: true,
             shipToPo: true,
             pageNumbers: true,
-            mismatchCount: true
+            mismatchCount: true,
+            workflowStatus: true,
+            bolPrintedAt: true
           }
         }
       }
@@ -253,7 +263,8 @@ export async function saveTeamshipReviewRun(input: SaveTeamshipReviewRunInput) {
       pageNumbers: orderReview.pageNumbers as Prisma.InputJsonValue,
       pdfOrder: (pdfOrder ?? null) as Prisma.InputJsonValue,
       review: orderReview as Prisma.InputJsonValue,
-      mismatchCount: orderReview.issueCount
+      mismatchCount: orderReview.issueCount,
+      workflowStatus: getInitialWorkflowStatus(orderReview)
     };
   });
 
@@ -305,6 +316,87 @@ export async function deleteTeamshipReviewRun(context: AuthenticatedContext, run
   if (result.count === 0) {
     throw new Error("Teamship review run was not found or was already deleted.");
   }
+}
+
+export async function markTeamshipReviewOrderBolPrinted({
+  context,
+  runId,
+  orderId,
+  printed
+}: {
+  context: AuthenticatedContext;
+  runId: string;
+  orderId: string;
+  printed: boolean;
+}) {
+  const client = prisma as TeamshipReviewRunQueryClient;
+  const result = await client.teamshipReviewOrder.updateMany({
+    where: {
+      id: orderId,
+      runId,
+      tenantId: context.tenantId,
+      run: {
+        tenantId: context.tenantId,
+        workflowKey: WORKFLOW_KEY,
+        deletedAt: null
+      }
+    },
+    data: printed
+      ? {
+          workflowStatus: "BOL_PRINTED",
+          bolPrintedAt: new Date(),
+          bolPrintedByUserId: context.userId
+        }
+      : {
+          workflowStatus: "READY_TO_PRINT",
+          bolPrintedAt: null,
+          bolPrintedByUserId: null
+        }
+  });
+
+  if (result.count === 0) {
+    throw new Error("Teamship review order was not found or belongs to a deleted run.");
+  }
+}
+
+export async function markTeamshipReviewOrdersReadyToPrint({
+  tenantId,
+  shipmentDate,
+  srNumbers
+}: {
+  tenantId: string;
+  shipmentDate: Date;
+  srNumbers: string[];
+}) {
+  const normalizedSrNumbers = Array.from(new Set(srNumbers.map((value) => value.trim().toUpperCase()).filter(Boolean)));
+
+  if (normalizedSrNumbers.length === 0) {
+    return 0;
+  }
+
+  const client = prisma as TeamshipReviewRunQueryClient;
+  const result = await client.teamshipReviewOrder.updateMany({
+    where: {
+      tenantId,
+      srNumber: {
+        in: normalizedSrNumbers
+      },
+      workflowStatus: {
+        not: "BOL_PRINTED"
+      },
+      run: {
+        tenantId,
+        workflowKey: WORKFLOW_KEY,
+        shipmentDate,
+        deletedAt: null
+      }
+    },
+    data: {
+      workflowStatus: "READY_TO_PRINT"
+    }
+  });
+
+  return result.count;
 }
 
 export async function getReviewedTeamshipSrNumbers(context: AuthenticatedContext, shipmentDate: Date, srNumbers: string[]) {
@@ -376,8 +468,32 @@ function mapTeamshipReviewOrder(record: TeamshipReviewOrderRecord): TeamshipRevi
     pageNumbers: Array.isArray(record.pageNumbers)
       ? record.pageNumbers.filter((value): value is number => typeof value === "number")
       : [],
-    mismatchCount: record.mismatchCount
+    mismatchCount: record.mismatchCount,
+    workflowStatus: normalizeWorkflowStatus(record.workflowStatus),
+    bolPrintedAt: record.bolPrintedAt ? record.bolPrintedAt.toISOString() : null
   };
+}
+
+function getInitialWorkflowStatus(orderReview: GarlandTeamshipOrderReview): TeamshipReviewWorkflowStatus {
+  if (orderReview.status === "NO_PDF") {
+    return "NO_PDF";
+  }
+
+  if (orderReview.status === "SKIPPED_ALREADY_REVIEWED") {
+    return "SKIPPED";
+  }
+
+  if (orderReview.status === "MISSING_TEAMSHIP" || orderReview.status === "PENDING_TEAMSHIP" || orderReview.status === "FAIL") {
+    return "NEEDS_REVIEW";
+  }
+
+  return "NEEDS_SETUP";
+}
+
+function normalizeWorkflowStatus(status: string): TeamshipReviewWorkflowStatus {
+  return ["NEEDS_SETUP", "READY_TO_PRINT", "BOL_PRINTED", "NEEDS_REVIEW", "NO_PDF", "SKIPPED"].includes(status)
+    ? (status as TeamshipReviewWorkflowStatus)
+    : "NEEDS_SETUP";
 }
 
 function normalizeReviewStatus(status: string): GarlandTeamshipOrderReview["status"] {
@@ -472,7 +588,8 @@ function buildSearchText(input: SaveTeamshipReviewRunInput, orderRows: Array<Rec
       row.shipToName,
       row.city,
       row.state,
-      row.shipToPo
+      row.shipToPo,
+      row.workflowStatus
     ])
   ];
 
