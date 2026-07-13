@@ -160,9 +160,10 @@ function buildFieldUpdates(fields: GarlandTeamshipReviewField[]) {
 
   for (const field of fields) {
     const teamshipField = FIELD_UPDATE_DESTINATIONS[field.key];
-    const proposedValue = field.pdfValue?.trim();
+    const proposedValue = (field.proposedValue ?? field.pdfValue)?.trim();
+    const hasCsrOverride = Boolean(field.proposedValue?.trim());
 
-    if (!teamshipField || !proposedValue || (field.status !== "DISCREPANCY" && field.status !== "MISSING")) {
+    if (!teamshipField || !proposedValue || (!hasCsrOverride && field.status !== "DISCREPANCY" && field.status !== "MISSING")) {
       continue;
     }
 
@@ -172,7 +173,7 @@ function buildFieldUpdates(fields: GarlandTeamshipReviewField[]) {
       teamshipField,
       currentValue: field.teamshipValue,
       proposedValue,
-      reason: field.message
+      reason: hasCsrOverride ? `CSR override entered in Newl Apps. ${field.message}` : field.message
     });
   }
 
@@ -191,7 +192,7 @@ function buildPalletRowPlan({
   pdfOrder: GarlandPdfShippingOrder;
 }): TeamshipPhase2PalletRowPlan {
   const quantity = readItemQuantity(item);
-  const commodity = buildCommodity(item, quantity);
+  const commodity = item.commodityOverride?.trim() || buildCommodity(item, quantity);
   const hasUsableDimensions = Boolean(dimensions);
   const weightUnit = dimensions?.weightUnit?.trim() || "lbs";
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   addPalletDraftLineToReviewState,
   removePalletDraftLineFromReviewState,
+  updatePalletCommodityOverrideInReviewState,
   updateReviewFieldProposedValueInReviewState
 } from "@/modules/shipment-documents/garland-teamship-review-client-state";
 import { buildTeamshipPhase2DryRunPlan } from "@/modules/shipment-documents/teamship-phase2-dry-run";
@@ -206,7 +207,8 @@ describe("Teamship Phase 2 dry-run planner", () => {
 
     const plan = buildTeamshipPhase2DryRunPlan(nextReview!);
 
-    expect(nextReview?.reviews[0]?.fields[0]?.pdfValue).toBe("COLLECT");
+    expect(nextReview?.reviews[0]?.fields[0]?.pdfValue).toBe("PPADD-CD");
+    expect(nextReview?.reviews[0]?.fields[0]?.proposedValue).toBe("COLLECT");
     expect(plan.orders[0]?.plannedFieldUpdates).toEqual([
       expect.objectContaining({
         reviewFieldKey: "freight_terms",
@@ -214,6 +216,62 @@ describe("Teamship Phase 2 dry-run planner", () => {
         proposedValue: "COLLECT"
       })
     ]);
+  });
+
+  it("creates a field update for a matching Teamship field when CSR enters a bot action", () => {
+    const review = sampleReview();
+    review.reviews[0]!.status = "PASS";
+    review.reviews[0]!.issueCount = 0;
+    review.reviews[0]!.fields[0] = {
+      key: "freight_terms",
+      label: "Freight terms",
+      status: "MATCH",
+      pdfValue: "PPADD-CD",
+      teamshipValue: "PPADD-CD",
+      message: "Values match."
+    };
+
+    expect(buildTeamshipPhase2DryRunPlan(review).orders[0]?.plannedFieldUpdates).toEqual([]);
+
+    const nextReview = updateReviewFieldProposedValueInReviewState({
+      review,
+      srNumber: "SR808478",
+      fieldKey: "freight_terms",
+      value: "PREPAID"
+    });
+    const plan = buildTeamshipPhase2DryRunPlan(nextReview!);
+
+    expect(plan.orders[0]?.plannedFieldUpdates).toEqual([
+      expect.objectContaining({
+        reviewFieldKey: "freight_terms",
+        teamshipField: "edi_field_3",
+        currentValue: "PPADD-CD",
+        proposedValue: "PREPAID",
+        reason: expect.stringContaining("CSR override")
+      })
+    ]);
+  });
+
+  it("uses CSR-edited pallet commodity text in the dry-run payload", () => {
+    const review = sampleReview();
+    const nextState = updatePalletCommodityOverrideInReviewState({
+      orders: review.pdfOrders,
+      review,
+      srNumber: "SR808478",
+      itemIndex: 0,
+      value: "SKU: E1SGHMV6XHU3US SN: 2604816191908\nCSR NOTE: USE FRONT DOCK"
+    });
+
+    const plan = buildTeamshipPhase2DryRunPlan(nextState.review!);
+
+    expect(nextState.orders[0]?.items[0]?.commodityOverride).toContain("CSR NOTE");
+    expect(nextState.review?.pdfOrders[0]?.items[0]?.commodityOverride).toContain("CSR NOTE");
+    expect(plan.orders[0]?.plannedPalletRows[0]).toMatchObject({
+      commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908\nCSR NOTE: USE FRONT DOCK",
+      teamshipFields: expect.objectContaining({
+        pallet_1_commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908\nCSR NOTE: USE FRONT DOCK"
+      })
+    });
   });
 });
 
