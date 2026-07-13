@@ -12,7 +12,7 @@ import { buildTeamshipPhase2DryRunPlan } from "@/modules/shipment-documents/team
 import type { GarlandTeamshipReviewResponse } from "@/modules/shipment-documents/teamship-review-types";
 
 describe("Teamship Phase 2 dry-run planner", () => {
-  it("builds a no-mutation dry-run payload with field and pallet updates", () => {
+  it("builds a no-mutation dry-run payload with pallet updates only by default", () => {
     const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
 
     expect(plan).toMatchObject({
@@ -23,17 +23,11 @@ describe("Teamship Phase 2 dry-run planner", () => {
         orderCount: 1,
         readyCount: 1,
         blockedCount: 0,
-        plannedFieldUpdateCount: 1,
+        plannedFieldUpdateCount: 0,
         plannedPalletRowCount: 2
       }
     });
-    expect(plan.orders[0]?.plannedFieldUpdates).toEqual([
-      expect.objectContaining({
-        reviewFieldKey: "freight_terms",
-        teamshipField: "edi_field_3",
-        proposedValue: "PPADD-CD"
-      })
-    ]);
+    expect(plan.orders[0]?.plannedFieldUpdates).toEqual([]);
     expect(plan.orders[0]?.plannedPalletRows).toEqual([
       expect.objectContaining({
         rowNumber: 1,
@@ -210,11 +204,17 @@ describe("Teamship Phase 2 dry-run planner", () => {
 
   it("uses CSR-edited proposed shipment field values in the dry-run payload", () => {
     const review = sampleReview();
-    const nextReview = updateReviewFieldProposedValueInReviewState({
+    const reviewWithValue = updateReviewFieldProposedValueInReviewState({
       review,
       srNumber: "SR808478",
       fieldKey: "freight_terms",
       value: "COLLECT"
+    });
+    const nextReview = updateReviewFieldBotActionEnabledInReviewState({
+      review: reviewWithValue,
+      srNumber: "SR808478",
+      fieldKey: "freight_terms",
+      enabled: true
     });
 
     const plan = buildTeamshipPhase2DryRunPlan(nextReview!);
@@ -245,11 +245,17 @@ describe("Teamship Phase 2 dry-run planner", () => {
 
     expect(buildTeamshipPhase2DryRunPlan(review).orders[0]?.plannedFieldUpdates).toEqual([]);
 
-    const nextReview = updateReviewFieldProposedValueInReviewState({
+    const reviewWithValue = updateReviewFieldProposedValueInReviewState({
       review,
       srNumber: "SR808478",
       fieldKey: "freight_terms",
       value: "PREPAID"
+    });
+    const nextReview = updateReviewFieldBotActionEnabledInReviewState({
+      review: reviewWithValue,
+      srNumber: "SR808478",
+      fieldKey: "freight_terms",
+      enabled: true
     });
     const plan = buildTeamshipPhase2DryRunPlan(nextReview!);
 

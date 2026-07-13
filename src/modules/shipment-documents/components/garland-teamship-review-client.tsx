@@ -2452,11 +2452,11 @@ function CompactValueCell({ label, value, emphasis = false }: { label: string; v
 function formatCompactBotAction(field: GarlandTeamshipReviewField) {
   const proposedValue = field.proposedValue ?? (field.status === "MATCH" || field.status === "INFO" ? "" : field.pdfValue ?? "");
 
-  if (!proposedValue.trim()) {
+  if (!proposedValue.trim() || field.botActionEnabled !== true) {
     return "(not included)";
   }
 
-  return field.botActionEnabled === false ? "(disabled)" : "(included)";
+  return "(included)";
 }
 
 function ProposedFieldUpdateCard({
@@ -2473,7 +2473,7 @@ function ProposedFieldUpdateCard({
   const proposedValue = field.proposedValue ?? (field.status === "MATCH" || field.status === "INFO" ? "" : field.pdfValue ?? "");
   const isCustomOverride = Boolean(field.proposedValue?.trim());
   const hasProposedValue = Boolean(proposedValue.trim());
-  const isIncluded = hasProposedValue && field.botActionEnabled !== false;
+  const isIncluded = hasProposedValue && field.botActionEnabled === true;
   const helpText =
     field.status === "MATCH" || field.status === "INFO"
       ? "Leave blank for no bot update. Enter a value only if the CSR wants Teamship changed anyway."

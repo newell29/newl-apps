@@ -180,7 +180,7 @@ function buildFieldUpdates(fields: GarlandTeamshipReviewField[]) {
       (hasGarlandInstructionNoise(rawProposedValue) || hasGarlandInstructionNoise(currentValue));
 
     if (
-      field.botActionEnabled === false ||
+      field.botActionEnabled !== true ||
       !teamshipField ||
       !proposedValue ||
       (!hasCsrOverride && field.status !== "DISCREPANCY" && field.status !== "MISSING" && !hasSpecialInstructionsCompaction)
