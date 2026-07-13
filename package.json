@@ -22,6 +22,7 @@
     "verify:auth": "tsx scripts/verify-auth.ts",
     "verify:garland-teamship": "tsx scripts/verify-garland-teamship-review.ts",
     "verify:garland-teamship-phase2": "tsx scripts/garland-teamship-phase2-dry-run.ts",
+    "smoke:teamship-phase2-manual": "tsx scripts/teamship-phase2-manual-smoke.ts",
     "worker:teamship-phase2": "tsx scripts/teamship-phase2-agent-worker.ts"
   },
   "dependencies": {
