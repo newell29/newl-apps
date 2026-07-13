@@ -13,7 +13,8 @@ vi.mock("@/server/db", () => ({
 
 import {
   getGarlandLearnedProductDimensionRecommendations,
-  recordGarlandCsrProductDimensionOverrides
+  recordGarlandCsrProductDimensionOverrides,
+  recordGarlandProductDimensionObservations
 } from "@/modules/shipment-documents/garland-product-dimension-directory";
 
 describe("Garland product dimension directory", () => {
@@ -116,6 +117,77 @@ describe("Garland product dimension directory", () => {
         note: expect.stringContaining("CSR-entered Newl Apps override")
       })
     ]);
+  });
+
+  it("does not save Teamship placeholder pallet dimensions as product directory observations", async () => {
+    const result = await recordGarlandProductDimensionObservations({
+      tenantId: "tenant-1",
+      orders: [
+        {
+          id: "30202",
+          shipment_id: "SR808478",
+          carrier_value: "MIDLAND",
+          pallets: [
+            {
+              quantity: 1,
+              length: 1,
+              width: 1,
+              height: 1,
+              weight: 1,
+              weight_unit: "lbs",
+              commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908"
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(result).toEqual({ observedCount: 0, insertedCount: 0 });
+    expect(prismaMock.garlandProductDimensionObservation.createMany).not.toHaveBeenCalled();
+  });
+
+  it("saves real Teamship warehouse pallet dimensions as product directory observations", async () => {
+    const result = await recordGarlandProductDimensionObservations({
+      tenantId: "tenant-1",
+      orders: [
+        {
+          id: "30202",
+          shipment_id: "SR808478",
+          carrier_value: "MIDLAND",
+          pallets: [
+            {
+              quantity: 1,
+              length: 48,
+              width: 40,
+              height: 50,
+              weight: 500,
+              weight_unit: "lbs",
+              commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908"
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(result).toEqual({ observedCount: 1, insertedCount: 1 });
+    expect(prismaMock.garlandProductDimensionObservation.createMany).toHaveBeenCalledWith({
+      skipDuplicates: true,
+      data: [
+        expect.objectContaining({
+          tenantId: "tenant-1",
+          sku: "E1SGHMV6XHU3US",
+          source: "TEAMSHIP_PALLET",
+          sourceTeamshipOrderId: "30202",
+          sourceSrNumber: "SR808478",
+          carrier: "MIDLAND",
+          lengthIn: 48,
+          widthIn: 40,
+          heightIn: 50,
+          weightLb: 500,
+          weightUnit: "lbs"
+        })
+      ]
+    });
   });
 });
 

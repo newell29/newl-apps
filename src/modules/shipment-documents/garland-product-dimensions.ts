@@ -197,7 +197,7 @@ function extractSkusFromCommodity(value: string | null | undefined) {
     return [];
   }
 
-  const matches = Array.from(text.matchAll(/\bSKU\s*:\s*([^,;]+)/gi))
+  const matches = Array.from(text.matchAll(/\bSKU\s*:\s*([^\n,;]+?)(?=\s+\b(?:SN|SERIAL|QTY)\s*:|[,;\n]|$)/gi))
     .map((match) => normalizeSku(match[1]))
     .filter((sku): sku is string => Boolean(sku));
 
