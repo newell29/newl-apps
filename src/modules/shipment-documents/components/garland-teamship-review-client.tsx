@@ -3393,7 +3393,7 @@ function formatWorkflowStatus(status: TeamshipReviewWorkflowStatus) {
   return "Needs setup";
 }
 
-function getWorkspaceWorkflowStatus(row: ShipmentWorkspaceRow, updateJobs: TeamshipUpdateJobSummary[]): TeamshipReviewWorkflowStatus {
+export function getWorkspaceWorkflowStatus(row: ShipmentWorkspaceRow, updateJobs: TeamshipUpdateJobSummary[]): TeamshipReviewWorkflowStatus {
   if (row.status === "NO_PDF") {
     return "NO_PDF";
   }
@@ -3419,7 +3419,7 @@ function getWorkspaceWorkflowStatus(row: ShipmentWorkspaceRow, updateJobs: Teams
   return "NEEDS_SETUP";
 }
 
-function rowMatchesWorkspaceFilters({
+export function rowMatchesWorkspaceFilters({
   row,
   search,
   filter,
@@ -3440,7 +3440,9 @@ function rowMatchesWorkspaceFilters({
     return true;
   }
 
-  return buildWorkspaceSearchText(row, workflowStatus).includes(normalizedSearch);
+  const searchText = buildWorkspaceSearchText(row, workflowStatus);
+
+  return searchText.includes(normalizedSearch) || compactSearchText(searchText).includes(compactSearchText(normalizedSearch));
 }
 
 function rowMatchesWorkspaceStatusFilter(
@@ -3523,7 +3525,16 @@ function buildWorkspaceSearchText(row: ShipmentWorkspaceRow, workflowStatus: Tea
 }
 
 function normalizeSearchText(value: string) {
-  return value.trim().toLowerCase();
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function compactSearchText(value: string) {
+  return value.replace(/\s+/g, "");
 }
 
 function findLatestUpdateOrder(srNumber: string | null, updateJobs: TeamshipUpdateJobSummary[]) {
