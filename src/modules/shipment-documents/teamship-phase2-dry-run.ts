@@ -409,12 +409,10 @@ function dimensionSourceRank(recommendation: GarlandProductDimensionRecommendati
 function buildCommodity(item: GarlandShippingOrderItem, quantity: number) {
   const sku = item.sku.trim().toUpperCase();
 
-  if (item.serialNumbers.length > 0) {
-    return item.serialNumbers
-      .map((serialNumber) => serialNumber.trim())
-      .filter(Boolean)
-      .map((serialNumber) => `SKU: ${sku} SN: ${serialNumber}`)
-      .join("\n");
+  const serialNumbers = Array.from(new Set(item.serialNumbers.map((serialNumber) => serialNumber.trim()).filter(Boolean)));
+
+  if (serialNumbers.length > 0) {
+    return `SKU: ${sku} SN: ${serialNumbers.join(", ")}`;
   }
 
   return `SKU: ${sku} QTY: ${quantity}`;

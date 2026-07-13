@@ -218,7 +218,7 @@ Observed commodity formats from existing live Garland Teamship orders:
 
 - Serialized single unit: `SKU: E1SGHMV6XHU3US, SN: 2604816191908`
 - Non-serialized quantity: `SKU: 8030445 QTY: 4`
-- Multiple serials should be written as separate commodity/comment lines, for example `SKU: GTBG36-NR36-5001 SN: 2605891101919` and `SKU: GTBG36-NR36-5001 SN: 2606891101462`.
+- Multiple serials for the same SKU should keep the SKU once and list serials in one commodity/comment line, for example `SKU: GTBG36-NR36-5001 SN: 2605891101919, 2606891101462`.
 
 Observed pallet examples:
 
@@ -254,7 +254,7 @@ Dry-run payload rules:
 - Missing SKU dimensions block the dimension/weight update with a validation issue instead of guessing, but they do not block the commodity/comment plan.
 - Planned field updates are limited to mapped review fields for now: `po_number -> poNumber`, `freight_terms -> edi_field_3`, `carrier -> carrier_value`, and `shipping_instructions -> edi_field_4`.
 - Planned pallet rows use the documented Teamship field names, including `pallets_count`, `pallet_1_length`, `pallet_1_weight`, and `pallet_1_commodity`.
-- Serialized items use one commodity/comment line per serial: `SKU: <sku> SN: <serial>`.
+- Serialized items use one commodity/comment line per SKU and list all serials after `SN:`, for example `SKU: <sku> SN: <serial>, <serial>`.
 - Non-serialized items use commodity text `SKU: <sku> QTY: <quantity>`.
 - UPS orders use the UPS rule dimensions: `1 x 1 x 1`, `1 lbs`.
 
@@ -331,7 +331,7 @@ Server dry-run evidence captured July 12, 2026 on the Tailscale VM (`openclaw@10
 - Summary: 2 ready orders, 7 blocked orders, 0 skipped orders, 19 planned pallet rows, 0 planned mapped field updates.
 - The 2 ready orders were UPS shipments using the UPS `1 x 1 x 1`, `1 lbs` rule.
 - The 7 blocked orders were non-UPS shipments missing usable SKU dimension/weight recommendations, which should remain `Needs Review` for dimension/weight until the SKU directory has trusted dimensions.
-- Even blocked orders still produced commodity/comment fields, for example `SKU: MCO-ED-10M-5004 SN: 2605891102181` and `SKU: MCO-ED-10M-5004 SN: 2605891102182` on separate lines, without writing placeholder dimensions.
+- Even blocked orders still produced commodity/comment fields, for example `SKU: MCO-ED-10M-5004 SN: 2605891102181, 2605891102182` on one line, without writing placeholder dimensions.
 
 ## Teamship Detail Evidence
 
