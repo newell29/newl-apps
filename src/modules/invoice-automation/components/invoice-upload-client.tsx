@@ -72,6 +72,7 @@ export function InvoiceAutomationUploadClient({
   correctionMemories: InvoiceAutomationCorrectionMemoryHint[];
   quickBooksSync: InvoiceAutomationQuickBooksSyncSummary;
 }) {
+  const [invoiceRows, setInvoiceRows] = useState(invoices);
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
   const [modalType, setModalType] = useState<InvoiceAutomationType | null>(null);
   const [confirmSendSelectedOpen, setConfirmSendSelectedOpen] = useState(false);
@@ -80,7 +81,35 @@ export function InvoiceAutomationUploadClient({
   const [quickBooksSyncError, setQuickBooksSyncError] = useState<string | null>(null);
   const [isRefreshingQuickBooks, setIsRefreshingQuickBooks] = useState(false);
   const [isSending, setIsSending] = useState(false);
-  const operationsRows = invoices.filter((invoice) => invoice.status === "OPERATIONS_REVIEW");
+  const operationsRows = invoiceRows.filter((invoice) => invoice.status === "OPERATIONS_REVIEW");
+
+  async function saveOperationInvoice(invoice: InvoiceAutomationRow) {
+    const response = await fetch(`/api/finance/invoice-automation/invoices/${invoice.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        shipmentFileNumber: invoice.shipmentFileNumber,
+        entityNameRaw: invoice.entityNameRaw,
+        quickBooksEntityId: invoice.quickBooksEntityId,
+        quickBooksEntityDisplayName: invoice.quickBooksEntityDisplayName,
+        invoiceNumber: invoice.invoiceNumber,
+        invoiceDate: invoice.invoiceDate,
+        dueDate: invoice.dueDate,
+        currency: invoice.currency,
+        subtotalAmount: invoice.subtotalAmount,
+        taxAmount: invoice.taxAmount,
+        totalAmount: deriveInvoiceTotal(invoice.subtotalAmount, invoice.taxAmount, invoice.totalAmount),
+        productOrAccountName: invoice.productOrAccountName,
+        reviewNotes: invoice.reviewNotes
+      })
+    });
+    const json = (await response.json().catch(() => null)) as { invoice?: InvoiceAutomationRow; error?: string } | null;
+    if (!response.ok || !json?.invoice) {
+      throw new Error(json?.error ?? "Unable to save invoice.");
+    }
+    setInvoiceRows((current) => current.map((row) => (row.id === invoice.id ? json.invoice! : row)));
+    setSelectedInvoiceIds((current) => current.filter((id) => id !== invoice.id || json.invoice?.status === "OPERATIONS_REVIEW"));
+  }
 
   async function refreshQuickBooksNames() {
     setQuickBooksSyncError(null);
@@ -213,10 +242,14 @@ export function InvoiceAutomationUploadClient({
           </div>
         ) : null}
         <InvoiceRowsTable
-          invoices={invoices}
+          invoices={invoiceRows}
           selectedInvoiceIds={selectedInvoiceIds}
           onSelectionChange={setSelectedInvoiceIds}
           selectableStatus="OPERATIONS_REVIEW"
+          editableOperationsRows
+          entityOptions={entityOptions}
+          onOperationInvoiceChange={(invoice) => setInvoiceRows((current) => current.map((row) => (row.id === invoice.id ? invoice : row)))}
+          onOperationInvoiceSave={saveOperationInvoice}
         />
       </section>
 
@@ -248,13 +281,21 @@ export function InvoiceRowsTable({
   selectedInvoiceIds,
   onSelectionChange,
   selectableStatus,
-  showQuickBooksPostingDetails = false
+  showQuickBooksPostingDetails = false,
+  editableOperationsRows = false,
+  entityOptions = [],
+  onOperationInvoiceChange,
+  onOperationInvoiceSave
 }: {
   invoices: InvoiceAutomationRow[];
   selectedInvoiceIds?: string[];
   onSelectionChange?: (ids: string[]) => void;
   selectableStatus?: string;
   showQuickBooksPostingDetails?: boolean;
+  editableOperationsRows?: boolean;
+  entityOptions?: InvoiceAutomationEntityOption[];
+  onOperationInvoiceChange?: (invoice: InvoiceAutomationRow) => void;
+  onOperationInvoiceSave?: (invoice: InvoiceAutomationRow) => Promise<void>;
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
@@ -262,9 +303,18 @@ export function InvoiceRowsTable({
   const [currencyFilter, setCurrencyFilter] = useState("ALL");
   const [pageSize, setPageSize] = useState<InvoiceAutomationTablePageSize>(25);
   const [page, setPage] = useState(1);
-  const columnCount = (onSelectionChange ? 18 : 17) + (showQuickBooksPostingDetails ? 4 : 0);
+  const [savingOperationInvoiceId, setSavingOperationInvoiceId] = useState<string | null>(null);
+  const [operationSaveError, setOperationSaveError] = useState<string | null>(null);
+  const columnCount = (onSelectionChange ? 20 : 19) + (showQuickBooksPostingDetails ? 4 : 0) + (editableOperationsRows ? 1 : 0);
   const statusOptions = useMemo(() => uniqueStrings(invoices.map((invoice) => invoice.status)), [invoices]);
   const currencyOptions = useMemo(() => uniqueStrings(invoices.map((invoice) => invoice.currency)), [invoices]);
+  const entityOptionsByType = useMemo(
+    () => ({
+      CUSTOMER: uniqueEntityOptionsById(entityOptions.filter((option) => option.entityType === "CUSTOMER")),
+      VENDOR: uniqueEntityOptionsById(entityOptions.filter((option) => option.entityType === "VENDOR"))
+    }),
+    [entityOptions]
+  );
   const filteredInvoices = useMemo(() => {
     const query = normalizeSearch(searchQuery);
     return invoices.filter((invoice) => {
@@ -301,6 +351,53 @@ export function InvoiceRowsTable({
     onSelectionChange(current.filter((id) => !selectableFilteredInvoiceIds.includes(id)));
   }
 
+  function updateOperationInvoice(invoice: InvoiceAutomationRow, patch: Partial<InvoiceAutomationRow>) {
+    if (!onOperationInvoiceChange) return;
+    const next = { ...invoice, ...patch };
+    if (patch.shipmentFileNumber !== undefined) {
+      next.shipmentType = getShipmentTypeFromInvoiceFileNumber(next.shipmentFileNumber);
+      next.productOrAccountName = getDefaultProductOrAccount(next.invoiceType, next.shipmentFileNumber);
+    }
+    if (patch.invoiceDate !== undefined && !next.dueDate) {
+      next.dueDate = defaultDueDateFromInvoiceDate(next.invoiceDate);
+    }
+    const amounts = normalizeInvoiceAmountsForCurrency({
+      currency: next.currency,
+      subtotalAmount: next.subtotalAmount,
+      taxAmount: next.taxAmount,
+      totalAmount: next.totalAmount,
+      preserveNonCadTax: true
+    });
+    next.subtotalAmount = amounts.subtotalAmount;
+    next.taxAmount = amounts.taxAmount;
+    next.totalAmount = amounts.totalAmount;
+    next.issueCodes = getInvoiceDraftIssueCodes({
+      extractedText: "manual operations edit",
+      shipmentFileNumber: next.shipmentFileNumber,
+      invoiceNumber: next.invoiceNumber,
+      invoiceDate: next.invoiceDate,
+      entityNameRaw: next.entityNameRaw,
+      quickBooksEntityId: next.quickBooksEntityId,
+      totalAmount: next.totalAmount,
+      currency: next.currency,
+      productOrAccountName: next.productOrAccountName
+    });
+    onOperationInvoiceChange(next);
+  }
+
+  async function saveOperationInvoice(invoice: InvoiceAutomationRow) {
+    if (!onOperationInvoiceSave) return;
+    setOperationSaveError(null);
+    setSavingOperationInvoiceId(invoice.id);
+    try {
+      await onOperationInvoiceSave(invoice);
+    } catch (error) {
+      setOperationSaveError(error instanceof Error ? error.message : "Unable to save invoice.");
+    } finally {
+      setSavingOperationInvoiceId(null);
+    }
+  }
+
   return (
     <div className="space-y-3">
       <InvoiceAutomationTableControls
@@ -335,6 +432,11 @@ export function InvoiceRowsTable({
         totalCount={invoices.length}
       />
       <div className="overflow-x-auto">
+      {operationSaveError ? (
+        <div className="m-3 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
+          {operationSaveError}
+        </div>
+      ) : null}
       <table className={`${showQuickBooksPostingDetails ? "min-w-[1900px]" : "min-w-[1500px]"} divide-y divide-border text-sm`}>
         <thead className="bg-muted/50 text-left text-xs font-semibold uppercase tracking-wide text-mutedForeground">
           <tr>
@@ -351,6 +453,7 @@ export function InvoiceRowsTable({
                 </label>
               </th>
             ) : null}
+            {editableOperationsRows ? <th className="px-3 py-3">Action</th> : null}
             <th className="px-3 py-3">Status</th>
             <th className="px-3 py-3">Type</th>
             <th className="px-3 py-3">Batch</th>
@@ -366,6 +469,7 @@ export function InvoiceRowsTable({
             <th className="px-3 py-3 text-right">Subtotal</th>
             <th className="px-3 py-3 text-right">Tax</th>
             <th className="px-3 py-3 text-right">Total</th>
+            <th className="px-3 py-3">Notes</th>
             {showQuickBooksPostingDetails ? (
               <>
                 <th className="px-3 py-3 text-right">QB FX</th>
@@ -389,6 +493,7 @@ export function InvoiceRowsTable({
             pageInvoices.map((invoice) => {
               const hasApprovalBlockers = getInvoiceApprovalBlockingIssues(invoice).length > 0;
               const selectable = (!selectableStatus || invoice.status === selectableStatus) && !hasApprovalBlockers;
+              const editable = editableOperationsRows && invoice.status === "OPERATIONS_REVIEW";
               return (
                 <tr key={invoice.id} className="align-top hover:bg-muted/30">
                   {onSelectionChange ? (
@@ -408,6 +513,20 @@ export function InvoiceRowsTable({
                       />
                     </td>
                   ) : null}
+                  {editableOperationsRows ? (
+                    <td className="px-3 py-3">
+                      {editable ? (
+                        <button
+                          type="button"
+                          onClick={() => void saveOperationInvoice(invoice)}
+                          disabled={savingOperationInvoiceId === invoice.id}
+                          className="rounded-md border border-border px-3 py-1.5 text-sm font-semibold text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {savingOperationInvoiceId === invoice.id ? "Saving..." : "Save"}
+                        </button>
+                      ) : null}
+                    </td>
+                  ) : null}
                   <td className="px-3 py-3"><InvoiceStatusPill value={invoice.status} /></td>
                   <td className="px-3 py-3"><InvoiceTypePill value={invoice.invoiceType} /></td>
                   <td className="px-3 py-3 text-mutedForeground">{invoice.batchNumber}</td>
@@ -417,15 +536,40 @@ export function InvoiceRowsTable({
                       Download
                     </a>
                   </td>
-                  <td className="px-3 py-3 font-medium text-foreground">{invoice.shipmentFileNumber ?? "Missing"}</td>
-                  <td className="px-3 py-3 text-foreground">{invoice.entityNameRaw ?? "Missing"}</td>
-                  <td className="px-3 py-3 text-mutedForeground">{invoice.quickBooksEntityDisplayName ?? "Needs match"}</td>
-                  <td className="px-3 py-3">{invoice.invoiceNumber ?? "Missing"}</td>
-                  <td className="px-3 py-3">{invoice.invoiceDate ?? "Missing"}</td>
-                  <td className="px-3 py-3">{invoice.dueDate ?? "Missing"}</td>
-                  <td className="px-3 py-3">{invoice.currency ?? "Missing"}</td>
-                  <td className="px-3 py-3 text-right">{formatInvoiceMoney(invoice.subtotalAmount, invoice.currency)}</td>
-                  <td className="px-3 py-3 text-right">{formatInvoiceMoney(invoice.taxAmount, invoice.currency)}</td>
+                  <td className="px-3 py-3 font-medium text-foreground">
+                    {editable ? <SmallInput value={invoice.shipmentFileNumber ?? ""} onChange={(value) => updateOperationInvoice(invoice, { shipmentFileNumber: value || null })} /> : invoice.shipmentFileNumber ?? "Missing"}
+                  </td>
+                  <td className="px-3 py-3 text-foreground">
+                    {editable ? <SmallInput value={invoice.entityNameRaw ?? ""} onChange={(value) => updateOperationInvoice(invoice, { entityNameRaw: value || null })} /> : invoice.entityNameRaw ?? "Missing"}
+                  </td>
+                  <td className="px-3 py-3 text-mutedForeground">
+                    {editable ? (
+                      <QuickBooksEntitySearchSelect
+                        hasError={!invoice.quickBooksEntityId}
+                        invoiceType={invoice.invoiceType}
+                        options={entityOptionsByType[invoice.invoiceType]}
+                        value={invoice.quickBooksEntityId ?? ""}
+                        onChange={(option) =>
+                          updateOperationInvoice(invoice, {
+                            quickBooksEntityId: option?.id ?? null,
+                            quickBooksEntityDisplayName: option?.displayName ?? null,
+                            quickBooksMatchConfidence: option ? 100 : null,
+                            entityNameRaw: option?.displayName ?? invoice.entityNameRaw ?? null
+                          })
+                        }
+                      />
+                    ) : (
+                      invoice.quickBooksEntityDisplayName ?? "Needs match"
+                    )}
+                  </td>
+                  <td className="px-3 py-3">{editable ? <SmallInput value={invoice.invoiceNumber ?? ""} onChange={(value) => updateOperationInvoice(invoice, { invoiceNumber: value || null })} /> : invoice.invoiceNumber ?? "Missing"}</td>
+                  <td className="px-3 py-3">{editable ? <DateInput value={invoice.invoiceDate ?? ""} onChange={(value) => updateOperationInvoice(invoice, { invoiceDate: value || null })} /> : invoice.invoiceDate ?? "Missing"}</td>
+                  <td className="px-3 py-3">{editable ? <DateInput value={invoice.dueDate ?? ""} onChange={(value) => updateOperationInvoice(invoice, { dueDate: value || null })} /> : invoice.dueDate ?? "Missing"}</td>
+                  <td className="px-3 py-3">
+                    {editable ? <CurrencySelect value={invoice.currency} onChange={(value) => updateOperationInvoice(invoice, { currency: value })} className="w-24" /> : invoice.currency ?? "Missing"}
+                  </td>
+                  <td className="px-3 py-3 text-right">{editable ? <MoneyInput value={invoice.subtotalAmount} onChange={(value) => updateOperationInvoice(invoice, { subtotalAmount: value })} /> : formatInvoiceMoney(invoice.subtotalAmount, invoice.currency)}</td>
+                  <td className="px-3 py-3 text-right">{editable ? <MoneyInput value={invoice.taxAmount} onChange={(value) => updateOperationInvoice(invoice, { taxAmount: value })} /> : formatInvoiceMoney(invoice.taxAmount, invoice.currency)}</td>
                   <td className="px-3 py-3 text-right font-semibold text-foreground">{formatInvoiceMoney(invoice.totalAmount, invoice.currency)}</td>
                   {showQuickBooksPostingDetails ? (
                     <>
@@ -438,7 +582,10 @@ export function InvoiceRowsTable({
                       <td className="px-3 py-3 text-right font-semibold text-foreground">{formatInvoiceMoney(invoice.quickBooksTotalHomeAmount, invoice.quickBooksHomeCurrency ?? "CAD")}</td>
                     </>
                   ) : null}
-                  <td className="px-3 py-3">{invoice.productOrAccountName ?? "Missing"}</td>
+                  <td className="px-3 py-3">
+                    {editable ? <NotesInput value={invoice.reviewNotes ?? ""} onChange={(value) => updateOperationInvoice(invoice, { reviewNotes: value || null })} /> : invoice.reviewNotes ?? ""}
+                  </td>
+                  <td className="px-3 py-3">{editable ? <SmallInput value={invoice.productOrAccountName ?? ""} onChange={(value) => updateOperationInvoice(invoice, { productOrAccountName: value || null })} /> : invoice.productOrAccountName ?? "Missing"}</td>
                   <td className="max-w-[260px] px-3 py-3 text-mutedForeground">
                     {invoice.issueCodes.length === 0 ? "Ready" : invoice.issueCodes.map(formatInvoiceEnum).join(", ")}
                   </td>
@@ -496,6 +643,7 @@ function getInvoiceRowSearchText(invoice: InvoiceAutomationRow) {
       invoice.dueDate,
       invoice.currency,
       invoice.productOrAccountName,
+      invoice.reviewNotes,
       invoice.issueCodes.join(" ")
     ]
       .filter(Boolean)
@@ -515,6 +663,7 @@ function getDraftSearchText(draft: InvoiceAutomationUploadDraft) {
       draft.dueDate,
       draft.currency,
       draft.productOrAccountName,
+      draft.reviewNotes,
       draft.issueCodes.join(" ")
     ]
       .filter(Boolean)
@@ -797,6 +946,7 @@ function InvoiceUploadModal({
                   <th className="px-3 py-3">Subtotal</th>
                   <th className="px-3 py-3">Tax</th>
                   <th className="px-3 py-3">Total</th>
+                  <th className="px-3 py-3">Notes</th>
                   <th className="px-3 py-3">Item/account</th>
                   <th className="px-3 py-3">Issues</th>
                 </tr>
@@ -804,7 +954,7 @@ function InvoiceUploadModal({
               <tbody className="divide-y divide-border">
                 {pageDrafts.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-8 text-center text-mutedForeground" colSpan={14}>
+                    <td className="px-3 py-8 text-center text-mutedForeground" colSpan={15}>
                       {drafts.length === 0 ? "Upload invoice PDFs to preview extracted rows." : "No extracted invoices match the current search and filters."}
                     </td>
                   </tr>
@@ -853,6 +1003,7 @@ function InvoiceUploadModal({
                       <td className="px-3 py-3"><MoneyInput value={draft.subtotalAmount} onChange={(value) => updateDraft(draft.clientId, { subtotalAmount: value })} /></td>
                       <td className="px-3 py-3"><MoneyInput value={draft.taxAmount} onChange={(value) => updateDraft(draft.clientId, { taxAmount: value })} /></td>
                       <td className="px-3 py-3 text-right font-semibold text-foreground">{formatInvoiceMoney(deriveInvoiceTotal(draft.subtotalAmount, draft.taxAmount, draft.totalAmount), draft.currency)}</td>
+                      <td className="px-3 py-3"><NotesInput value={draft.reviewNotes ?? ""} onChange={(value) => updateDraft(draft.clientId, { reviewNotes: value || null })} /></td>
                       <td className="px-3 py-3"><SmallInput value={draft.productOrAccountName ?? ""} onChange={(value) => updateDraft(draft.clientId, { productOrAccountName: value || null })} /></td>
                       <td className="max-w-[260px] px-3 py-3 text-mutedForeground">
                         {draft.issueCodes.length === 0 ? "Ready" : draft.issueCodes.map(formatInvoiceEnum).join(", ")}
@@ -968,15 +1119,28 @@ function DateInput({ value, onChange }: { value: string; onChange: (value: strin
   return <input type="date" value={value} onChange={(event) => onChange(event.target.value)} className="w-36 rounded-md border border-input bg-background px-2 py-1.5" />;
 }
 
+function NotesInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <textarea
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      rows={2}
+      className="w-52 rounded-md border border-input bg-background px-2 py-1.5"
+      placeholder="Optional notes"
+    />
+  );
+}
+
 function MoneyInput({ value, onChange }: { value: number | null; onChange: (value: number | null) => void }) {
   return (
     <input
       type="number"
       step="0.01"
+      min="0"
       value={value ?? ""}
       onChange={(event) => {
         const next = Number(event.target.value);
-        onChange(event.target.value === "" || Number.isNaN(next) ? null : next);
+        onChange(event.target.value === "" || Number.isNaN(next) ? null : Math.max(0, next));
       }}
       className="w-32 rounded-md border border-input bg-background px-2 py-1.5 text-right"
     />
@@ -1007,7 +1171,8 @@ function normalizeDraftAmounts(draft: InvoiceAutomationUploadDraft): InvoiceAuto
       currency: draft.currency,
       subtotalAmount: draft.subtotalAmount,
       taxAmount: draft.taxAmount,
-      totalAmount: draft.totalAmount
+      totalAmount: draft.totalAmount,
+      preserveNonCadTax: true
     })
   };
 }
@@ -1320,6 +1485,7 @@ function mergeOcrInvoiceIntoDraft(
   const invoiceNumber = shouldUseOcrInvoiceNumber(draft.invoiceNumber, ocr.invoiceNumber, shipmentFileNumber)
     ? ocr.invoiceNumber
     : draft.invoiceNumber ?? ocr.invoiceNumber;
+  const shouldUseOcrAmounts = Boolean(ocr.taxAmount !== null && ocr.taxAmount > 0) || draft.totalAmount === null;
   const next: InvoiceAutomationUploadDraft = {
     ...draft,
     extractedText,
@@ -1334,9 +1500,9 @@ function mergeOcrInvoiceIntoDraft(
     invoiceDate,
     dueDate,
     currency: draft.currency ?? ocr.currency,
-    subtotalAmount: draft.subtotalAmount ?? ocr.subtotalAmount,
-    taxAmount: draft.taxAmount ?? ocr.taxAmount,
-    totalAmount: draft.totalAmount ?? ocr.totalAmount,
+    subtotalAmount: shouldUseOcrAmounts ? ocr.subtotalAmount ?? draft.subtotalAmount : draft.subtotalAmount ?? ocr.subtotalAmount,
+    taxAmount: shouldUseOcrAmounts ? ocr.taxAmount ?? draft.taxAmount : draft.taxAmount ?? ocr.taxAmount,
+    totalAmount: shouldUseOcrAmounts ? ocr.totalAmount ?? draft.totalAmount : draft.totalAmount ?? ocr.totalAmount,
     productOrAccountName: draft.productOrAccountName ?? getDefaultProductOrAccount(invoiceType, shipmentFileNumber)
   };
 

@@ -163,7 +163,8 @@ export function AccountingQueueClient({
           currency: next.currency,
           subtotalAmount: next.subtotalAmount,
           taxAmount: next.taxAmount,
-          totalAmount: next.totalAmount
+          totalAmount: next.totalAmount,
+          preserveNonCadTax: true
         });
         next.subtotalAmount = normalizedAmounts.subtotalAmount;
         next.taxAmount = normalizedAmounts.taxAmount;
@@ -215,7 +216,8 @@ export function AccountingQueueClient({
         subtotalAmount: invoice.subtotalAmount,
         taxAmount: invoice.taxAmount,
         totalAmount: deriveInvoiceTotal(invoice.subtotalAmount, invoice.taxAmount, invoice.totalAmount),
-        productOrAccountName: invoice.productOrAccountName
+        productOrAccountName: invoice.productOrAccountName,
+        reviewNotes: invoice.reviewNotes
       })
     });
     const json = (await response.json().catch(() => null)) as { invoice?: InvoiceAutomationRow; error?: string } | null;
@@ -527,6 +529,7 @@ export function AccountingQueueClient({
               <th className="px-3 py-3">Subtotal</th>
               <th className="px-3 py-3">Tax</th>
               <th className="px-3 py-3">Total</th>
+              <th className="px-3 py-3">Notes</th>
               <th className="px-3 py-3">Item/account</th>
               <th className="px-3 py-3">Issues</th>
               <th className="px-3 py-3">Actions</th>
@@ -535,7 +538,7 @@ export function AccountingQueueClient({
           <tbody className="divide-y divide-border">
             {pageRows.length === 0 ? (
               <tr>
-                <td className="px-3 py-8 text-center text-mutedForeground" colSpan={19}>
+                <td className="px-3 py-8 text-center text-mutedForeground" colSpan={20}>
                   {rows.length === 0 ? "No invoices are waiting in accounting." : "No invoices match the current search and filters."}
                 </td>
               </tr>
@@ -612,6 +615,7 @@ export function AccountingQueueClient({
                     <td className="px-3 py-3"><MoneyInput value={invoice.subtotalAmount} onChange={(value) => updateRow(invoice.id, { subtotalAmount: value })} /></td>
                     <td className="px-3 py-3"><MoneyInput value={invoice.taxAmount} onChange={(value) => updateRow(invoice.id, { taxAmount: value })} /></td>
                     <td className="px-3 py-3 text-right font-semibold text-foreground">{formatInvoiceMoney(deriveInvoiceTotal(invoice.subtotalAmount, invoice.taxAmount, invoice.totalAmount), invoice.currency)}</td>
+                    <td className="px-3 py-3"><NotesInput value={invoice.reviewNotes ?? ""} onChange={(value) => updateRow(invoice.id, { reviewNotes: value || null })} /></td>
                     <td className="px-3 py-3"><SmallInput value={invoice.productOrAccountName ?? ""} onChange={(value) => updateRow(invoice.id, { productOrAccountName: value || null })} /></td>
                     <td className="max-w-[280px] px-3 py-3 text-mutedForeground">
                       {blockers.length === 0 ? "Ready" : blockers.join(", ")}
@@ -687,6 +691,7 @@ function getAccountingRowSearchText(invoice: EditableAccountingRow) {
       invoice.dueDate,
       invoice.currency,
       invoice.productOrAccountName,
+      invoice.reviewNotes,
       invoice.issueCodes.join(" ")
     ]
       .filter(Boolean)
@@ -716,15 +721,28 @@ function DateInput({ value, onChange }: { value: string; onChange: (value: strin
   return <input type="date" value={value} onChange={(event) => onChange(event.target.value)} className="w-36 rounded-md border border-input bg-background px-2 py-1.5" />;
 }
 
+function NotesInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <textarea
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      rows={2}
+      className="w-52 rounded-md border border-input bg-background px-2 py-1.5"
+      placeholder="Optional notes"
+    />
+  );
+}
+
 function MoneyInput({ value, onChange }: { value: number | null; onChange: (value: number | null) => void }) {
   return (
     <input
       type="number"
       step="0.01"
+      min="0"
       value={value ?? ""}
       onChange={(event) => {
         const next = Number(event.target.value);
-        onChange(event.target.value === "" || Number.isNaN(next) ? null : next);
+        onChange(event.target.value === "" || Number.isNaN(next) ? null : Math.max(0, next));
       }}
       className="w-32 rounded-md border border-input bg-background px-2 py-1.5 text-right"
     />

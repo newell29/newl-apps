@@ -264,7 +264,8 @@ export function extractDueDate(text: string, invoiceDate: string | null = null) 
 
 export function extractInvoiceAmounts(text: string, currency?: string | null) {
   const subtotal = findMoneyByLabels(text, ["subtotal", "sub total", "amount before tax"]);
-  const tax = findCanadianTaxAmount(text) ?? findForeignTaxAmount(text) ?? findMoneyByLabels(text, ["hst", "gst", "pst", "qst", "sales tax", "tax", "vat"]);
+  const canadianTax = findCanadianTaxAmount(text);
+  const tax = canadianTax ?? findForeignTaxAmount(text) ?? findMoneyByLabels(text, ["hst", "gst", "pst", "qst", "sales tax", "tax", "vat"]);
   const total =
     findTotalFromPrepaidTotals(text) ??
     findMoneyByLabels(text, ["total amount", "invoice total", "amount due", "balance due", "total rate", "inv amount", "total"]);
@@ -273,7 +274,8 @@ export function extractInvoiceAmounts(text: string, currency?: string | null) {
     currency,
     subtotalAmount: subtotal,
     taxAmount: tax,
-    totalAmount: total
+    totalAmount: total,
+    preserveNonCadTax: canadianTax !== null
   });
 }
 
@@ -281,23 +283,25 @@ export function normalizeInvoiceAmountsForCurrency({
   currency,
   subtotalAmount,
   taxAmount,
-  totalAmount
+  totalAmount,
+  preserveNonCadTax = false
 }: {
   currency?: string | null;
   subtotalAmount: number | null;
   taxAmount: number | null;
   totalAmount: number | null;
+  preserveNonCadTax?: boolean;
 }) {
   const normalizedCurrency = currency?.toUpperCase() ?? null;
-  const subtotal = subtotalAmount;
-  let tax = taxAmount;
-  let total = totalAmount;
+  const subtotal = nonNegativeMoneyOrNull(subtotalAmount);
+  let tax = nonNegativeMoneyOrNull(taxAmount);
+  let total = nonNegativeMoneyOrNull(totalAmount);
 
   if (subtotal !== null && tax === null && total !== null && total >= subtotal) {
     tax = roundMoney(total - subtotal);
   }
 
-  if (normalizedCurrency && normalizedCurrency !== "CAD" && tax !== null && tax > 0) {
+  if (normalizedCurrency && normalizedCurrency !== "CAD" && tax !== null && tax > 0 && !preserveNonCadTax) {
     const costInclusiveTotal = total ?? (subtotal !== null ? roundMoney(subtotal + tax) : null);
     return {
       subtotalAmount: costInclusiveTotal ?? subtotal,
@@ -463,6 +467,7 @@ export function buildInvoiceDraftFromText({
     taxAmount: amounts.taxAmount,
     totalAmount: amounts.totalAmount,
     productOrAccountName: getDefaultProductOrAccount(invoiceType, shipmentFileNumber),
+    reviewNotes: null,
     issueCodes: []
   };
 
@@ -609,6 +614,10 @@ function parseLastMoneyAmount(line: string) {
     .filter((amount): amount is number => amount !== null);
 
   return candidates.at(-1) ?? null;
+}
+
+function nonNegativeMoneyOrNull(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 function findTotalFromPrepaidTotals(text: string) {

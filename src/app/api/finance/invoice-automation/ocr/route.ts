@@ -158,7 +158,8 @@ function normalizeOcrInvoice(parsed: Record<string, unknown>, invoiceType: "CUST
     currency,
     subtotalAmount: readNumber(parsed.subtotalAmount),
     taxAmount: readNumber(parsed.taxAmount),
-    totalAmount: readNumber(parsed.totalAmount)
+    totalAmount: readNumber(parsed.totalAmount),
+    preserveNonCadTax: true
   });
 
   return {

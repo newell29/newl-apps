@@ -55,6 +55,7 @@ export type InvoiceAutomationUploadDraft = {
   taxAmount: number | null;
   totalAmount: number | null;
   productOrAccountName: string | null;
+  reviewNotes: string | null;
   issueCodes: string[];
 };
 
@@ -94,6 +95,7 @@ export type InvoiceAutomationRow = {
   quickBooksFxSource: string | null;
   quickBooksFxCapturedAt: string | null;
   productOrAccountName: string | null;
+  reviewNotes?: string | null;
   issueCodes: string[];
   createdAt: string;
   sentToAccountingAt: string | null;
