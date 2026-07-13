@@ -169,14 +169,21 @@ function buildFieldUpdates(fields: GarlandTeamshipReviewField[]) {
 
   for (const field of fields) {
     const teamshipField = FIELD_UPDATE_DESTINATIONS[field.key];
-    const proposedValue = (field.proposedValue ?? field.pdfValue)?.trim();
+    const rawProposedValue = (field.proposedValue ?? field.pdfValue)?.trim();
+    const proposedValue = normalizeProposedFieldValue(field.key, rawProposedValue);
+    const currentValue = field.teamshipValue?.trim() ?? "";
     const hasCsrOverride = Boolean(field.proposedValue?.trim());
+    const hasSpecialInstructionsCompaction =
+      field.key === "shipping_instructions" &&
+      Boolean(proposedValue) &&
+      currentValue !== proposedValue &&
+      (hasGarlandInstructionNoise(rawProposedValue) || hasGarlandInstructionNoise(currentValue));
 
     if (
       field.botActionEnabled === false ||
       !teamshipField ||
       !proposedValue ||
-      (!hasCsrOverride && field.status !== "DISCREPANCY" && field.status !== "MISSING")
+      (!hasCsrOverride && field.status !== "DISCREPANCY" && field.status !== "MISSING" && !hasSpecialInstructionsCompaction)
     ) {
       continue;
     }
@@ -187,11 +194,54 @@ function buildFieldUpdates(fields: GarlandTeamshipReviewField[]) {
       teamshipField,
       currentValue: field.teamshipValue,
       proposedValue,
-      reason: hasCsrOverride ? `CSR override entered in Newl Apps. ${field.message}` : field.message
+      reason: buildFieldUpdateReason({ field, hasCsrOverride, hasSpecialInstructionsCompaction })
     });
   }
 
   return updates;
+}
+
+function normalizeProposedFieldValue(fieldKey: GarlandTeamshipReviewField["key"], value: string | null | undefined) {
+  if (fieldKey === "shipping_instructions") {
+    return compactGarlandSpecialInstructions(value);
+  }
+
+  return value?.trim() ?? "";
+}
+
+export function compactGarlandSpecialInstructions(value: string | null | undefined) {
+  return (
+    value
+      ?.replace(/\*{3,}/g, " ")
+      .replace(/\*/g, "")
+      .replace(/\s*\r?\n+\s*/g, " ")
+      .replace(/\s{2,}/g, " ")
+      .trim() ?? ""
+  );
+}
+
+function hasGarlandInstructionNoise(value: string | null | undefined) {
+  return Boolean(value && (/\*{3,}/.test(value) || /\r?\n/.test(value)));
+}
+
+function buildFieldUpdateReason({
+  field,
+  hasCsrOverride,
+  hasSpecialInstructionsCompaction
+}: {
+  field: GarlandTeamshipReviewField;
+  hasCsrOverride: boolean;
+  hasSpecialInstructionsCompaction: boolean;
+}) {
+  if (hasCsrOverride) {
+    return `CSR override entered in Newl Apps. ${field.message}`;
+  }
+
+  if (hasSpecialInstructionsCompaction) {
+    return "Garland special instructions were compacted for BOL space: removed star separators and collapsed line breaks into spaces.";
+  }
+
+  return field.message;
 }
 
 function buildPalletRowPlan({

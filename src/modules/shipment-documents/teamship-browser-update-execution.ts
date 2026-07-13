@@ -2,7 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { chromium, type Browser, type Page } from "playwright-core";
 
-import type { TeamshipPhase2DryRunPlan, TeamshipPhase2OrderPlan } from "@/modules/shipment-documents/teamship-phase2-dry-run";
+import {
+  compactGarlandSpecialInstructions,
+  type TeamshipPhase2DryRunPlan,
+  type TeamshipPhase2OrderPlan
+} from "@/modules/shipment-documents/teamship-phase2-dry-run";
 import {
   buildDryRunEvidence,
   buildTeamshipUpdatePayload,
@@ -33,9 +37,17 @@ type PalletControlSnapshot = {
   }>;
 };
 
-type BolWeightCleanupSnapshot = {
+type EditableBolFieldSnapshot = {
+  field: string;
+  before: string;
+  after: string;
+  updated: boolean;
+};
+
+type BolEditorCleanupSnapshot = {
   bolEditorUrl: string;
   generatedBol: boolean;
+  instructions: EditableBolFieldSnapshot | null;
   weightFieldCount: number;
   clearedWeightFieldCount: number;
   fields: Array<{
@@ -176,7 +188,7 @@ export async function executeTeamshipPhase2BrowserJob({
 
         await saveScreenshot(page, orderScreenshotDir, "04-after-reload");
         const palletSnapshot = order.plannedPalletRows.length > 0 ? await readPalletSnapshot(page) : null;
-        const bolWeightCleanup = await openBolEditorAndClearCustomerOrderWeights({
+        const bolEditorCleanup = await openBolEditorAndApplyCleanup({
           page,
           order,
           orderUrl: teamshipUrl,
@@ -194,7 +206,7 @@ export async function executeTeamshipPhase2BrowserJob({
               teamshipUrl,
               screenshotDir: orderScreenshotDir,
               palletSnapshot,
-              bolWeightCleanup
+              bolEditorCleanup
             }
           },
           responseStatus: 200
@@ -452,7 +464,7 @@ async function clickSaveIfPresent(page: Page) {
   return false;
 }
 
-async function openBolEditorAndClearCustomerOrderWeights({
+async function openBolEditorAndApplyCleanup({
   page,
   order,
   orderUrl,
@@ -466,24 +478,26 @@ async function openBolEditorAndClearCustomerOrderWeights({
   appBaseUrl: string;
   screenshotDir: string;
   allowedHosts: string[] | undefined;
-}): Promise<BolWeightCleanupSnapshot> {
+}): Promise<BolEditorCleanupSnapshot> {
   const bolEditorUrl = resolveBolEditorUrl({ order, appBaseUrl, allowedHosts });
   const generatedBol = await ensureBolEditorReady({ page, orderUrl, bolEditorUrl });
 
-  await saveScreenshot(page, screenshotDir, "05-bol-editor-before-weight-cleanup");
-  const cleanup = await clearCustomerOrderWeightFields(page);
+  await saveScreenshot(page, screenshotDir, "05-bol-editor-before-cleanup");
+  const instructions = await compactBolEditorInstructions(page, order);
+  const weightCleanup = await clearCustomerOrderWeightFields(page);
 
-  if (cleanup.clearedWeightFieldCount > 0) {
+  if (instructions?.updated || weightCleanup.clearedWeightFieldCount > 0) {
     await clickSaveIfPresent(page);
     await waitForTeamshipIdle(page);
   }
 
-  await saveScreenshot(page, screenshotDir, "06-bol-editor-after-weight-cleanup");
+  await saveScreenshot(page, screenshotDir, "06-bol-editor-after-cleanup");
 
   return {
     bolEditorUrl,
     generatedBol,
-    ...cleanup
+    instructions,
+    ...weightCleanup
   };
 }
 
@@ -553,14 +567,20 @@ async function clickGenerateBol(page: Page) {
 
 async function clearCustomerOrderWeightFields(page: Page) {
   const fieldNames = await findCustomerOrderWeightFieldNames(page);
-  const fields: BolWeightCleanupSnapshot["fields"] = [];
+  const fields: BolEditorCleanupSnapshot["fields"] = [];
 
   if (fieldNames.length === 0) {
     throw new Error("Could not find Customer Order Information weight fields in the Teamship BOL editor.");
   }
 
   for (const fieldName of fieldNames) {
-    fields.push(await clearEditableBolField(page, fieldName));
+    const result = await setEditableBolField(page, fieldName, "");
+    fields.push({
+      field: result.field,
+      before: result.before,
+      after: result.after,
+      cleared: result.updated
+    });
   }
 
   return {
@@ -625,16 +645,53 @@ async function findCustomerOrderWeightFieldNames(page: Page) {
   });
 }
 
-async function clearEditableBolField(page: Page, fieldName: string) {
+async function compactBolEditorInstructions(page: Page, order: TeamshipPhase2OrderPlan): Promise<EditableBolFieldSnapshot | null> {
+  const locator = page.locator('[data-field-content="instructions"]').first();
+
+  if ((await locator.count()) === 0) {
+    return null;
+  }
+
+  const before = normalizeFieldText((await locator.textContent().catch(() => "")) ?? "");
+  const nextValue = buildBolEditorInstructionsValue({ order, currentValue: before });
+
+  if (!nextValue || before === nextValue) {
+    return null;
+  }
+
+  return setEditableBolField(page, "instructions", nextValue);
+}
+
+function buildBolEditorInstructionsValue({ order, currentValue }: { order: TeamshipPhase2OrderPlan; currentValue: string }) {
+  const specialInstructionsUpdate = order.plannedFieldUpdates.find(
+    (field) => field.reviewFieldKey === "shipping_instructions" || field.teamshipField === "edi_field_4"
+  );
+  const compactedSpecialInstructions = compactGarlandSpecialInstructions(specialInstructionsUpdate?.proposedValue);
+
+  if (compactedSpecialInstructions) {
+    const paymentTerms =
+      order.plannedFieldUpdates.find((field) => field.teamshipField === "edi_field_3")?.proposedValue ?? extractPaymentTerms(currentValue);
+
+    return paymentTerms ? `Payment Terms:${paymentTerms} ${compactedSpecialInstructions}` : compactedSpecialInstructions;
+  }
+
+  if (hasGarlandInstructionNoise(currentValue)) {
+    return compactGarlandSpecialInstructions(currentValue);
+  }
+
+  return null;
+}
+
+async function setEditableBolField(page: Page, fieldName: string, value: string): Promise<EditableBolFieldSnapshot> {
   const locator = page.locator(`[data-field-content="${fieldName}"]`).first();
   const before = normalizeFieldText((await locator.textContent().catch(() => "")) ?? "");
 
-  if (!before || /^click to edit$/i.test(before)) {
+  if (before === value || (!value && (!before || /^click to edit$/i.test(before)))) {
     return {
       field: fieldName,
       before,
       after: before,
-      cleared: false
+      updated: false
     };
   }
 
@@ -642,7 +699,7 @@ async function clearEditableBolField(page: Page, fieldName: string) {
   await locator.click({ force: true });
   await page.waitForTimeout(250);
 
-  const cleared = await page.evaluate(() => {
+  const updated = await page.evaluate((nextValue) => {
     const active = document.activeElement;
 
     if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
@@ -650,9 +707,9 @@ async function clearEditableBolField(page: Page, fieldName: string) {
       const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
 
       if (descriptor?.set) {
-        descriptor.set.call(active, "");
+        descriptor.set.call(active, nextValue);
       } else {
-        active.value = "";
+        active.value = nextValue;
       }
 
       active.dispatchEvent(new Event("input", { bubbles: true }));
@@ -662,7 +719,7 @@ async function clearEditableBolField(page: Page, fieldName: string) {
     }
 
     if (active instanceof HTMLElement && active.isContentEditable) {
-      active.textContent = "";
+      active.textContent = nextValue;
       active.dispatchEvent(new Event("input", { bubbles: true }));
       active.dispatchEvent(new Event("change", { bubbles: true }));
       active.dispatchEvent(new Event("blur", { bubbles: true }));
@@ -670,9 +727,9 @@ async function clearEditableBolField(page: Page, fieldName: string) {
     }
 
     return false;
-  });
+  }, value);
 
-  if (cleared) {
+  if (updated) {
     await page.keyboard.press("Enter").catch(() => undefined);
     await waitForTeamshipIdle(page);
   }
@@ -683,7 +740,7 @@ async function clearEditableBolField(page: Page, fieldName: string) {
     field: fieldName,
     before,
     after,
-    cleared
+    updated
   };
 }
 
@@ -826,4 +883,12 @@ function normalizeIdentifier(value: string) {
 
 function normalizeFieldText(value: string) {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function extractPaymentTerms(value: string) {
+  return value.match(/Payment\s+Terms\s*:?\s*([A-Z0-9-]+)/i)?.[1]?.trim() ?? null;
+}
+
+function hasGarlandInstructionNoise(value: string | null | undefined) {
+  return Boolean(value && (/\*{3,}/.test(value) || /\r?\n/.test(value)));
 }

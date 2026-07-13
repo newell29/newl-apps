@@ -5,7 +5,7 @@ import {
   buildTeamshipUpdatePayload,
   executeTeamshipPhase2Job
 } from "@/modules/shipment-documents/teamship-phase2-agent-execution";
-import { buildTeamshipPhase2DryRunPlan } from "@/modules/shipment-documents/teamship-phase2-dry-run";
+import { buildTeamshipPhase2DryRunPlan, compactGarlandSpecialInstructions } from "@/modules/shipment-documents/teamship-phase2-dry-run";
 import type { GarlandTeamshipReviewResponse } from "@/modules/shipment-documents/teamship-review-types";
 
 describe("Teamship Phase 2 agent execution", () => {
@@ -42,6 +42,57 @@ describe("Teamship Phase 2 agent execution", () => {
         height: 10,
         weight: 25,
         commodity: "SKU: 8030445 QTY: 4"
+      })
+    ]);
+  });
+
+  it("compacts Garland special instructions before planning bot updates", () => {
+    expect(
+      compactGarlandSpecialInstructions(`PLEASE DELIVER TO ARLEIGH NELLA @ 647-308-0048
+
+TAG: SPIRIT OF YORK
+
+****************************************
+***DANGEROUS GOODS - C-CLEAN-FORTE***
+PROPER NAME:
+UN1814, POTASSIUM HYDROXIDE SOLUTION, CLASS 8 PG II`)
+    ).toBe(
+      "PLEASE DELIVER TO ARLEIGH NELLA @ 647-308-0048 TAG: SPIRIT OF YORK DANGEROUS GOODS - C-CLEAN-FORTE PROPER NAME: UN1814, POTASSIUM HYDROXIDE SOLUTION, CLASS 8 PG II"
+    );
+  });
+
+  it("plans special-instructions compaction even when Garland and Teamship values match", () => {
+    const messyInstructions = `PLEASE DELIVER TO ARLEIGH NELLA @ 647-308-0048
+TAG: SPIRIT OF YORK
+****************************************
+***DANGEROUS GOODS - C-CLEAN-FORTE***
+PROPER NAME: UN1814`;
+    const plan = buildTeamshipPhase2DryRunPlan({
+      ...sampleReview(),
+      reviews: [
+        {
+          ...sampleReview().reviews[0]!,
+          fields: [
+            {
+              key: "shipping_instructions",
+              label: "Shipping instructions",
+              status: "MATCH",
+              pdfValue: messyInstructions,
+              teamshipValue: messyInstructions,
+              message: "Values match."
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(plan.orders[0]?.plannedFieldUpdates).toEqual([
+      expect.objectContaining({
+        reviewFieldKey: "shipping_instructions",
+        teamshipField: "edi_field_4",
+        proposedValue:
+          "PLEASE DELIVER TO ARLEIGH NELLA @ 647-308-0048 TAG: SPIRIT OF YORK DANGEROUS GOODS - C-CLEAN-FORTE PROPER NAME: UN1814",
+        reason: expect.stringContaining("compacted for BOL space")
       })
     ]);
   });
