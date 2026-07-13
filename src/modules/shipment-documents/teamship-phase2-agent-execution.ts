@@ -44,6 +44,7 @@ export type TeamshipPhase2ExecutionOrderResult = {
     from: string | null;
     to: string;
     reason: string;
+    browserInstruction: TeamshipBrowserFieldInstruction;
   }>;
   palletActions: Array<{
     rowNumber: number;
@@ -52,7 +53,24 @@ export type TeamshipPhase2ExecutionOrderResult = {
     hasUsableDimensions: boolean;
     commodity: string;
     fields: Record<string, string | number>;
+    browserInstruction: {
+      targetPage: "TEAMSHIP_ORDER_PALLETS" | "TEAMSHIP_BOL_EDITOR";
+      routeTemplate: "/ship-inventories/{teamshipOrderId}/bol-editor";
+      targetRowNumber: number;
+      zeroBasedLineItemIndex: number;
+      actionBeforeFill: "FILL_EXISTING_PALLET_ROW" | "CLICK_ADD_ANOTHER_PALLET_SIZE";
+      addAnotherPalletSizeButtonText: "Add Another Pallet Size" | null;
+      bolEditorAddLineItemButtonText: "+ Add Line Item" | null;
+      fieldSelectors: {
+        packages: string;
+        commodity: string;
+        dimensions: string;
+      };
+      saveInstruction: TeamshipBrowserSaveInstruction;
+      note: string;
+    };
   }>;
+  saveInstruction: TeamshipBrowserSaveInstruction;
   validationIssues: string[];
   updatePayload?: Record<string, unknown>;
   responseStatus?: number;
@@ -60,6 +78,32 @@ export type TeamshipPhase2ExecutionOrderResult = {
 };
 
 const DEFAULT_TEAMSHIP_API_BASE_URL = "https://app.teamshipos.com/api";
+
+type TeamshipBrowserSaveInstruction = {
+  action: "CLICK_SAVE_BUTTON_AFTER_EDIT" | "CONFIRM_INLINE_SAVE_OR_AUTOSAVE";
+  buttonNames: string[];
+  verification: string;
+  fallback: string;
+};
+
+type TeamshipBrowserFieldInstruction = {
+  preferredExecution: "TEAMSHIP_API";
+  browserFallbackPage: "TEAMSHIP_SHIPPING_ORDER" | "TEAMSHIP_BOL_EDITOR";
+  routeTemplate: "/ship-inventories/{teamshipOrderId}" | "/ship-inventories/{teamshipOrderId}/bol-editor";
+  fieldLabel: string;
+  primaryLocator: {
+    strategy: "LABEL_OR_NAME" | "DATA_FIELD_CONTENT";
+    label?: string;
+    selector?: string;
+  };
+  bolEditorFallback?: {
+    dataField: string;
+    selector: string;
+    note: string;
+  };
+  editInstruction: string;
+  saveInstruction: TeamshipBrowserSaveInstruction;
+};
 
 type TeamshipLoginResponse = {
   data?: {
@@ -205,7 +249,8 @@ function mapPlannedOrder(order: TeamshipPhase2OrderPlan): TeamshipPhase2Executio
       teamshipField: field.teamshipField,
       from: field.currentValue,
       to: field.proposedValue,
-      reason: field.reason
+      reason: field.reason,
+      browserInstruction: buildFieldBrowserInstruction(field.teamshipField)
     })),
     palletActions: order.plannedPalletRows.map((row) => ({
       rowNumber: row.rowNumber,
@@ -213,9 +258,167 @@ function mapPlannedOrder(order: TeamshipPhase2OrderPlan): TeamshipPhase2Executio
       quantity: row.quantity,
       hasUsableDimensions: row.hasUsableDimensions,
       commodity: row.commodity,
-      fields: row.teamshipFields
+      fields: row.teamshipFields,
+      browserInstruction: buildPalletBrowserInstruction(row.rowNumber)
     })),
+    saveInstruction: buildOrderCompletionSaveInstruction(),
     validationIssues: order.validationIssues
+  };
+}
+
+function buildPalletBrowserInstruction(rowNumber: number) {
+  const lineItemIndex = rowNumber - 1;
+  const fieldSelectors = {
+    packages: `[data-field-content="line_item_${lineItemIndex}_packages"]`,
+    commodity: `[data-field-content="line_item_${lineItemIndex}_commodity"]`,
+    dimensions: `[data-field-content="line_item_${lineItemIndex}_dimensions"]`
+  };
+
+  if (rowNumber === 1) {
+    return {
+      targetPage: "TEAMSHIP_BOL_EDITOR" as const,
+      routeTemplate: "/ship-inventories/{teamshipOrderId}/bol-editor" as const,
+      targetRowNumber: rowNumber,
+      zeroBasedLineItemIndex: lineItemIndex,
+      actionBeforeFill: "FILL_EXISTING_PALLET_ROW" as const,
+      addAnotherPalletSizeButtonText: null,
+      bolEditorAddLineItemButtonText: null,
+      fieldSelectors,
+      saveInstruction: buildInlineBolEditorSaveInstruction(),
+      note: "Use the existing first pallet row in the Teamship BOL editor."
+    };
+  }
+
+  return {
+    targetPage: "TEAMSHIP_BOL_EDITOR" as const,
+    routeTemplate: "/ship-inventories/{teamshipOrderId}/bol-editor" as const,
+    targetRowNumber: rowNumber,
+    zeroBasedLineItemIndex: lineItemIndex,
+    actionBeforeFill: "CLICK_ADD_ANOTHER_PALLET_SIZE" as const,
+    addAnotherPalletSizeButtonText: "Add Another Pallet Size" as const,
+    bolEditorAddLineItemButtonText: "+ Add Line Item" as const,
+    fieldSelectors,
+    saveInstruction: buildInlineBolEditorSaveInstruction(),
+    note:
+      `If editing Teamship shipment pallet rows, click "Add Another Pallet Size" until pallet row ${rowNumber} exists. ` +
+      `If editing the BOL editor, click "+ Add Line Item" until line item ${rowNumber} exists, then fill this row's fields.`
+  };
+}
+
+function buildFieldBrowserInstruction(teamshipField: string): TeamshipBrowserFieldInstruction {
+  const instruction = FIELD_BROWSER_INSTRUCTIONS[teamshipField];
+
+  if (instruction) {
+    return instruction;
+  }
+
+  return {
+    preferredExecution: "TEAMSHIP_API",
+    browserFallbackPage: "TEAMSHIP_SHIPPING_ORDER",
+    routeTemplate: "/ship-inventories/{teamshipOrderId}",
+    fieldLabel: teamshipField,
+    primaryLocator: {
+      strategy: "LABEL_OR_NAME",
+      label: teamshipField
+    },
+    editInstruction: `Find the Teamship order field named "${teamshipField}", replace it with the approved Newl Apps value, then save.`,
+    saveInstruction: buildShippingOrderSaveInstruction()
+  };
+}
+
+const FIELD_BROWSER_INSTRUCTIONS: Record<string, TeamshipBrowserFieldInstruction> = {
+  poNumber: {
+    preferredExecution: "TEAMSHIP_API",
+    browserFallbackPage: "TEAMSHIP_SHIPPING_ORDER",
+    routeTemplate: "/ship-inventories/{teamshipOrderId}",
+    fieldLabel: "PO Number",
+    primaryLocator: {
+      strategy: "LABEL_OR_NAME",
+      label: "PO Number"
+    },
+    bolEditorFallback: {
+      dataField: "customer_order_0_order_number",
+      selector: '[data-field-content="customer_order_0_order_number"]',
+      note: "The BOL editor renders the customer PO in Customer Order Information. Prefer the shipping-order field when available."
+    },
+    editInstruction: "Open the Teamship shipping order, find PO Number, replace it with the approved Newl Apps value, then save.",
+    saveInstruction: buildShippingOrderSaveInstruction()
+  },
+  edi_field_3: {
+    preferredExecution: "TEAMSHIP_API",
+    browserFallbackPage: "TEAMSHIP_SHIPPING_ORDER",
+    routeTemplate: "/ship-inventories/{teamshipOrderId}",
+    fieldLabel: "Freight Terms Code",
+    primaryLocator: {
+      strategy: "LABEL_OR_NAME",
+      label: "Freight Terms Code"
+    },
+    bolEditorFallback: {
+      dataField: "instructions",
+      selector: '[data-field-content="instructions"]',
+      note: "The BOL editor shows this inside the INSTRUCTIONS block as Payment Terms:<value>; keep the full instruction text intact."
+    },
+    editInstruction: "Open the Teamship shipping order, find Freight Terms Code, replace it with the approved Newl Apps value, then save.",
+    saveInstruction: buildShippingOrderSaveInstruction()
+  },
+  carrier_value: {
+    preferredExecution: "TEAMSHIP_API",
+    browserFallbackPage: "TEAMSHIP_BOL_EDITOR",
+    routeTemplate: "/ship-inventories/{teamshipOrderId}/bol-editor",
+    fieldLabel: "Carrier / Ship Via",
+    primaryLocator: {
+      strategy: "DATA_FIELD_CONTENT",
+      selector: '[data-field-content="carrier"]'
+    },
+    editInstruction: "Open the editable BOL, click the CARRIER field, replace it with the approved Newl Apps carrier value, and confirm the inline save.",
+    saveInstruction: buildInlineBolEditorSaveInstruction()
+  },
+  edi_field_4: {
+    preferredExecution: "TEAMSHIP_API",
+    browserFallbackPage: "TEAMSHIP_SHIPPING_ORDER",
+    routeTemplate: "/ship-inventories/{teamshipOrderId}",
+    fieldLabel: "Special Instructions",
+    primaryLocator: {
+      strategy: "LABEL_OR_NAME",
+      label: "Special Instructions"
+    },
+    bolEditorFallback: {
+      dataField: "instructions",
+      selector: '[data-field-content="instructions"]',
+      note: "The BOL editor displays Special Instructions in the INSTRUCTIONS block below Payment Terms."
+    },
+    editInstruction: "Open the Teamship shipping order, find Special Instructions, replace it with the approved Newl Apps value, then save.",
+    saveInstruction: buildShippingOrderSaveInstruction()
+  }
+};
+
+function buildShippingOrderSaveInstruction(): TeamshipBrowserSaveInstruction {
+  return {
+    action: "CLICK_SAVE_BUTTON_AFTER_EDIT",
+    buttonNames: ["Save", "Update", "Save Changes"],
+    verification: "Wait for Teamship to finish saving, then re-read the field and confirm it matches the approved Newl Apps value.",
+    fallback: "If the page uses inline autosave and no Save/Update button is visible, blur the field, wait for network idle, and verify the displayed value."
+  };
+}
+
+function buildInlineBolEditorSaveInstruction(): TeamshipBrowserSaveInstruction {
+  return {
+    action: "CONFIRM_INLINE_SAVE_OR_AUTOSAVE",
+    buttonNames: ["Save", "Update", "Done", "✓"],
+    verification: "After editing, confirm the BOL field displays the approved value and any loading indicator has cleared before moving to the next field.",
+    fallback:
+      "The Teamship BOL editor may autosave inline fields. If no Save/Update button appears, press Enter or blur the field, wait for Livewire/network idle, and verify the field text changed."
+  };
+}
+
+function buildOrderCompletionSaveInstruction(): TeamshipBrowserSaveInstruction {
+  return {
+    action: "CLICK_SAVE_BUTTON_AFTER_EDIT",
+    buttonNames: ["Save", "Update", "Save Changes"],
+    verification:
+      "Before reporting SUCCESS, every edited order-level field and BOL editor line must display the approved Newl Apps value after save/autosave.",
+    fallback:
+      "If Teamship provides only inline autosave for the BOL editor, verify the updated display values and wait for loading indicators to clear before reporting completion."
   };
 }
 
