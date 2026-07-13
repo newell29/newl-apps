@@ -1101,6 +1101,38 @@ NEWLS 2604816191908 1.00 ( )`
     ]);
   });
 
+  it("omits quantity-only item details from Garland PDF and Teamship summary rows", () => {
+    const pdfOrder = samplePdfOrder({
+      psNumber: "PS210206",
+      srNumber: "SR808478",
+      pageNumbers: [1],
+      shipVia: "MIDLAND",
+      shipToName: "MATCHING CUSTOMER",
+      shipToPo: "PO-1",
+      freightTerms: "PPADD-CD",
+      itemSkus: ["369110"],
+      serialNumbers: []
+    });
+    pdfOrder.items.push({
+      lineNumber: 2,
+      sku: "",
+      description: "",
+      quantity: 1,
+      dueShipDate: null,
+      serialNumbers: []
+    });
+    const teamshipOrder: TeamshipShippingOrderDetail = {
+      ...sampleTeamshipOrder("SR808478", "PS210206", "MIDLAND", "MATCHING CUSTOMER", "PO-1", "PPADD-CD", []),
+      items: [{ sku: "369110", quantity: 1 }, { quantity: 1 }],
+      pallet_dims: [{ quantity: 1 }]
+    };
+
+    const review = buildGarlandTeamshipReview([pdfOrder], [teamshipOrder]);
+
+    expect(review.reviews[0]?.pdfItems).toEqual([{ sku: "369110", quantity: null, serialNumbers: [] }]);
+    expect(review.reviews[0]?.teamshipItems).toEqual([{ sku: "369110", quantity: "1", serialNumbers: [] }]);
+  });
+
   it("pulls Garland daily orders by selected day when no SR filter is provided", async () => {
     process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
     process.env.TEAMSHIP_PASSWORD = "configured-in-env";

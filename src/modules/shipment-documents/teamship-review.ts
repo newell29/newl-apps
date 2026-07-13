@@ -720,11 +720,13 @@ function serialField(
 }
 
 function buildPdfItemDetails(pdfOrder: GarlandPdfShippingOrder): GarlandTeamshipItemDetail[] {
-  return pdfOrder.items.map((item) => ({
-    sku: item.sku || null,
-    quantity: item.quantity == null ? null : String(item.quantity),
-    serialNumbers: uniqueStrings(item.serialNumbers)
-  }));
+  return pdfOrder.items
+    .map((item) => ({
+      sku: item.sku || null,
+      quantity: item.quantity == null ? null : String(item.quantity),
+      serialNumbers: uniqueStrings(item.serialNumbers)
+    }))
+    .filter(hasItemIdentity);
 }
 
 function readTeamshipItemDetails(order: TeamshipShippingOrderDetail): GarlandTeamshipItemDetail[] {
@@ -800,7 +802,7 @@ function readTeamshipItemsFromArray(items: unknown): GarlandTeamshipItemDetail[]
         serialNumbers
       };
     })
-    .filter((item) => item.sku || item.quantity || item.serialNumbers.length > 0);
+    .filter(hasItemIdentity);
 }
 
 function readTeamshipItemsFromPallets(pallets: unknown): GarlandTeamshipItemDetail[] {
@@ -821,7 +823,11 @@ function readTeamshipItemsFromPallets(pallets: unknown): GarlandTeamshipItemDeta
         serialNumbers
       };
     })
-    .filter((item) => item.sku || item.quantity || item.serialNumbers.length > 0);
+    .filter(hasItemIdentity);
+}
+
+function hasItemIdentity(item: GarlandTeamshipItemDetail) {
+  return Boolean(item.sku || item.serialNumbers.length > 0);
 }
 
 function readNestedValue(value: unknown, keys: string[]) {
