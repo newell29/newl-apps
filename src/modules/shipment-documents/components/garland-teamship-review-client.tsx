@@ -605,6 +605,13 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       setDailyOrderCount(json.totalCount ?? json.orders?.length ?? 0);
       setDailySyncSummary(json.sync ?? null);
       setDailyOrders(json.orders ?? []);
+      const syncedDateFrom = json.sync?.dateFrom ?? syncDateFrom;
+      const syncedDateTo = json.sync?.dateTo ?? syncDateTo;
+
+      if (!review && pdfBatches.length === 0 && syncedDateFrom === syncedDateTo && syncedDateFrom !== shipmentDate) {
+        handleShipmentDateChange(syncedDateFrom);
+      }
+
       setStatus(
         json.sync
           ? `Pulled ${json.sync.insertedCount} new Teamship Garland order(s) from ${json.sync.dateFrom ?? syncDateFrom} to ${json.sync.dateTo ?? syncDateTo}; ${json.sync.skippedCount} already existed or could not be keyed.`
@@ -639,12 +646,13 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     setSaveStatus("Saving Teamship review run...");
 
     try {
+      const saveShipmentDate = getSaveShipmentDate();
       const response = await fetch("/api/shipment-documents/teamship-review/runs", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           documentLabel: trimmedLabel,
-          shipmentDate,
+          shipmentDate: saveShipmentDate,
           sourcePdfFileName,
           review,
           teamshipOrders: review ? undefined : dailyOrders,
@@ -662,7 +670,9 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       setHistoryDateFrom(json.dateFrom);
       setHistoryDateTo(json.dateTo);
       setHistoryAllDates(json.allDates);
-      setSaveStatus("Teamship review run saved to history.");
+      setSaveStatus(
+        `Teamship review run saved to history. Showing ${json.totalCount} saved run${json.totalCount === 1 ? "" : "s"} for ${formatHistoryRange(json)}.`
+      );
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Unable to save Teamship review run.";
       setError(message);
@@ -913,6 +923,17 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       currentLabel.trim() === formatDateLabel(shipmentDate) ? formatDateLabel(nextDate) : currentLabel
     );
     setShipmentDate(nextDate);
+  }
+
+  function getSaveShipmentDate() {
+    if (review) {
+      return shipmentDate;
+    }
+
+    const syncedDateFrom = dailySyncSummary?.dateFrom ?? syncDateFrom;
+    const syncedDateTo = dailySyncSummary?.dateTo ?? syncDateTo;
+
+    return syncedDateFrom && syncedDateFrom === syncedDateTo ? syncedDateFrom : shipmentDate;
   }
 
   return (
@@ -4141,6 +4162,18 @@ function formatDisplayDate(value: string) {
     year: "numeric",
     timeZone: "UTC"
   }).format(new Date(value));
+}
+
+function formatHistoryRange(history: TeamshipReviewHistoryResponse) {
+  if (history.allDates) {
+    return "all dates";
+  }
+
+  if (history.dateFrom === history.dateTo) {
+    return formatDateLabel(history.dateFrom);
+  }
+
+  return `${formatDateLabel(history.dateFrom)} to ${formatDateLabel(history.dateTo)}`;
 }
 
 function formatDateTime(value: string) {
