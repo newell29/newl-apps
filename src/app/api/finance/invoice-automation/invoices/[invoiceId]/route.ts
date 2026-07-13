@@ -36,6 +36,7 @@ type InvoiceUpdatePayload = {
   taxAmount?: unknown;
   totalAmount?: unknown;
   productOrAccountName?: unknown;
+  reviewNotes?: unknown;
 };
 
 const EDITABLE_ACCOUNTING_STATUSES: InvoiceAutomationStatus[] = [
@@ -43,15 +44,16 @@ const EDITABLE_ACCOUNTING_STATUSES: InvoiceAutomationStatus[] = [
   InvoiceAutomationStatus.APPROVED_FOR_POSTING,
   InvoiceAutomationStatus.POSTING_ERROR
 ];
+const EDITABLE_OPERATIONS_STATUSES: InvoiceAutomationStatus[] = [
+  InvoiceAutomationStatus.OPERATIONS_REVIEW
+];
 
 const DELETABLE_ACCOUNTING_STATUSES = EDITABLE_ACCOUNTING_STATUSES;
 
 export async function PATCH(request: Request, { params }: { params: Params }) {
   try {
     const context = await getAuthenticatedContext();
-    await requireModule(context, ModuleKey.QUICKBOOKS_POSTING);
     await requireMutationAccess(context);
-    requireRole(context, [PlatformRole.ADMIN, PlatformRole.MANAGER, PlatformRole.FINANCE]);
 
     const { invoiceId } = await params;
     const body = (await request.json().catch(() => null)) as InvoiceUpdatePayload | null;
@@ -79,8 +81,19 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
       return NextResponse.json({ error: "Invoice not found." }, { status: 404 });
     }
 
-    if (!EDITABLE_ACCOUNTING_STATUSES.includes(existing.status)) {
-      return NextResponse.json({ error: "Only invoices in the accounting queue can be edited before posting." }, { status: 409 });
+    if (EDITABLE_OPERATIONS_STATUSES.includes(existing.status)) {
+      await requireModule(context, ModuleKey.INVOICE_VERIFICATION);
+      requireRole(context, [PlatformRole.ADMIN, PlatformRole.MANAGER, PlatformRole.OPERATIONS, PlatformRole.FINANCE]);
+    } else if (EDITABLE_ACCOUNTING_STATUSES.includes(existing.status)) {
+      await requireModule(context, ModuleKey.QUICKBOOKS_POSTING);
+      requireRole(context, [PlatformRole.ADMIN, PlatformRole.MANAGER, PlatformRole.FINANCE]);
+    } else {
+      return NextResponse.json({ error: "Only invoices in operations review or the accounting queue can be edited before posting." }, { status: 409 });
+    }
+
+    const negativeAmountField = findNegativeAmountField(body);
+    if (negativeAmountField) {
+      return NextResponse.json({ error: `${negativeAmountField} cannot be negative.` }, { status: 400 });
     }
 
     const shipmentFileNumber = readNullable(body.shipmentFileNumber);
@@ -94,7 +107,8 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
       currency,
       subtotalAmount: readMoney(body.subtotalAmount),
       taxAmount: readMoney(body.taxAmount),
-      totalAmount: readMoney(body.totalAmount)
+      totalAmount: readMoney(body.totalAmount),
+      preserveNonCadTax: true
     });
     const productOrAccountName =
       readNullable(body.productOrAccountName) ?? getDefaultProductOrAccount(existing.invoiceType, shipmentFileNumber);
@@ -157,7 +171,9 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
         }
       },
       data: {
-        status: InvoiceAutomationStatus.ACCOUNTING_REVIEW,
+        status: existing.status === InvoiceAutomationStatus.OPERATIONS_REVIEW
+          ? InvoiceAutomationStatus.OPERATIONS_REVIEW
+          : InvoiceAutomationStatus.ACCOUNTING_REVIEW,
         shipmentFileNumber,
         shipmentType: getShipmentTypeFromInvoiceFileNumber(shipmentFileNumber),
         businessLine: getBusinessLineFromInvoiceFileNumber(shipmentFileNumber),
@@ -174,6 +190,7 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
         taxAmount: decimalOrNull(amounts.taxAmount),
         totalAmount: decimalOrNull(amounts.totalAmount),
         productOrAccountName,
+        reviewNotes: readNullable(body.reviewNotes),
         issueCodes: issueCodes as Prisma.InputJsonValue,
         approvedByUserId: null,
         approvedAt: null,
@@ -220,12 +237,14 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
         entityType: "InvoiceAutomationInvoice",
         entityId: invoiceId,
         before: {
-          status: existing.status
+          status: existing.status,
+          reviewNotes: existing.reviewNotes
         },
         after: {
           status: updated.status,
           invoiceNumber: updated.invoiceNumber,
-          shipmentFileNumber: updated.shipmentFileNumber
+          shipmentFileNumber: updated.shipmentFileNumber,
+          reviewNotes: updated.reviewNotes
         }
       }
     });
@@ -353,6 +372,24 @@ function readMoney(value: unknown) {
   if (typeof value === "string" && value.trim()) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
+function findNegativeAmountField(body: InvoiceUpdatePayload) {
+  const fields: Array<[keyof InvoiceUpdatePayload, string]> = [
+    ["subtotalAmount", "Subtotal"],
+    ["taxAmount", "Tax"],
+    ["totalAmount", "Total"]
+  ];
+
+  for (const [field, label] of fields) {
+    const value = body[field];
+    const parsed = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : null;
+    if (typeof parsed === "number" && Number.isFinite(parsed) && parsed < 0) {
+      return label;
+    }
   }
 
   return null;

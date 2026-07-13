@@ -144,7 +144,8 @@ export async function POST(request: Request) {
           currency,
           subtotalAmount: invoice.subtotalAmount,
           taxAmount: invoice.taxAmount,
-          totalAmount: invoice.totalAmount
+          totalAmount: invoice.totalAmount,
+          preserveNonCadTax: true
         });
         const issueCodes = getInvoiceDraftIssueCodes({
           ...invoice,
@@ -175,6 +176,7 @@ export async function POST(request: Request) {
             taxAmount: decimalOrNull(amounts.taxAmount),
             totalAmount: decimalOrNull(amounts.totalAmount),
             productOrAccountName: readNullable(invoice.productOrAccountName),
+            reviewNotes: readNullable(invoice.reviewNotes),
             issueCodes: issueCodes as Prisma.InputJsonValue,
             extractionJson: {
               clientId: invoice.clientId,

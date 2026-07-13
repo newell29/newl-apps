@@ -38,6 +38,7 @@ export function toInvoiceAutomationRow(
     quickBooksFxSource: invoice.quickBooksFxSource,
     quickBooksFxCapturedAt: invoice.quickBooksFxCapturedAt?.toISOString() ?? null,
     productOrAccountName: invoice.productOrAccountName,
+    reviewNotes: invoice.reviewNotes,
     issueCodes: readIssueCodes(invoice.issueCodes),
     createdAt: invoice.createdAt.toISOString(),
     sentToAccountingAt: invoice.sentToAccountingAt?.toISOString() ?? null,
