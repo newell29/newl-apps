@@ -91,6 +91,15 @@ type TeamshipReviewHistoryResponse = {
   error?: string;
 };
 
+type TeamshipReviewRunWorkspaceResponse = {
+  id: string;
+  documentLabel: string;
+  shipmentDate: string;
+  sourcePdfFileName: string | null;
+  review: GarlandTeamshipReviewResponse;
+  error?: string;
+};
+
 type TeamshipUpdateOrderSummary = {
   id: string;
   psNumber: string;
@@ -969,6 +978,61 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     }
   }
 
+  async function loadRunForEditing(runId: string) {
+    setHistoryError(null);
+    setError(null);
+    setIsHistoryLoading(true);
+    setStatus("Loading saved Teamship review for editing...");
+
+    try {
+      const response = await fetch(`/api/shipment-documents/teamship-review/runs/${runId}`);
+      const json = (await response.json().catch(() => null)) as TeamshipReviewRunWorkspaceResponse | null;
+
+      if (!response.ok || !json || isErrorResponse(json)) {
+        throw new Error(isErrorResponse(json) ? json.error : "Unable to load Teamship review run.");
+      }
+
+      if (!isReviewResponse(json.review)) {
+        throw new Error("Saved Teamship review run returned an unexpected payload.");
+      }
+
+      const restoredOrders = mergeUploadedPdfOrders(json.review.pdfOrders);
+      setShipmentDate(json.shipmentDate);
+      setSyncDateFrom(json.shipmentDate);
+      setSyncDateTo(json.shipmentDate);
+      setDocumentLabel(json.documentLabel || formatDateLabel(json.shipmentDate));
+      setReview(json.review);
+      setOrders(restoredOrders);
+      setDailyOrders([]);
+      setDailyOrderCount(json.review.summary.teamshipMatchedCount);
+      setDailySyncSummary(null);
+      setSelectedUpdateSrNumbers(new Set());
+      setPayloadInspections({});
+      setPayloadInspectionErrors({});
+      setPdfBatches(
+        json.sourcePdfFileName
+          ? [
+              {
+                id: `saved-${json.id}`,
+                fileName: json.sourcePdfFileName,
+                orderCount: restoredOrders.length,
+                orders: restoredOrders
+              }
+            ]
+          : []
+      );
+      setStatus(
+        `Loaded ${json.documentLabel || formatDateLabel(json.shipmentDate)} for editing: ${json.review.summary.passedCount} green, ${json.review.summary.failedCount} with discrepancies, ${json.review.summary.noPdfCount} no PDF.`
+      );
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "Unable to load Teamship review run.";
+      setHistoryError(message);
+      setStatus("Saved Teamship review could not be loaded for editing.");
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  }
+
   async function updateSavedOrderWorkflow(runId: string, orderId: string, action: "markBolPrinted" | "clearBolPrinted") {
     setHistoryError(null);
     setIsHistoryLoading(true);
@@ -1301,6 +1365,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         }}
         onSearch={() => void fetchHistory(historySearch, historyDateFrom, historyDateTo, historyAllDates)}
         onDelete={(runId) => void deleteRun(runId)}
+        onLoadForEditing={(runId) => void loadRunForEditing(runId)}
         onOrderWorkflowAction={(runId, orderId, action) => void updateSavedOrderWorkflow(runId, orderId, action)}
       />
     </div>
@@ -2774,6 +2839,7 @@ function TeamshipReviewHistorySection({
   onLastSevenDays,
   onSearch,
   onDelete,
+  onLoadForEditing,
   onOrderWorkflowAction
 }: {
   history: TeamshipReviewHistoryResponse;
@@ -2793,6 +2859,7 @@ function TeamshipReviewHistorySection({
   onLastSevenDays: () => void;
   onSearch: () => void;
   onDelete: (runId: string) => void;
+  onLoadForEditing: (runId: string) => void;
   onOrderWorkflowAction: (runId: string, orderId: string, action: "markBolPrinted" | "clearBolPrinted") => void;
 }) {
   return (
@@ -2940,6 +3007,17 @@ function TeamshipReviewHistorySection({
                 </div>
 
                 <div className="flex flex-wrap gap-2 lg:justify-end">
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      onLoadForEditing(run.id);
+                    }}
+                    disabled={isHistoryLoading}
+                    className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Load/edit
+                  </button>
                   {canDeleteRuns ? (
                     <button
                       type="button"
