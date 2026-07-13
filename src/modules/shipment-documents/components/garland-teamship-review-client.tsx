@@ -194,6 +194,101 @@ type UploadedPdfBatch = {
 
 let pdfJsLoader: Promise<PdfJsModule> | null = null;
 
+
+export function GarlandTeamshipBotRunsClient() {
+  const [updateJobs, setUpdateJobs] = useState<TeamshipUpdateJobSummary[]>([]);
+  const [updateJobStatus, setUpdateJobStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isUpdateJobLoading, setIsUpdateJobLoading] = useState(false);
+
+  useEffect(() => {
+    void fetchUpdateJobs();
+  }, []);
+
+  async function fetchUpdateJobs() {
+    setIsUpdateJobLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/shipment-documents/teamship-review/update-jobs");
+      const json = (await response.json().catch(() => null)) as TeamshipUpdateJobsResponse | null;
+
+      if (!response.ok || !json || isErrorResponse(json)) {
+        throw new Error(isErrorResponse(json) ? json.error : "Unable to load Teamship update jobs.");
+      }
+
+      setUpdateJobs(json.jobs);
+      setUpdateJobStatus(`Loaded ${json.jobs.length} bot draft${json.jobs.length === 1 ? "" : "s"} and run history item${json.jobs.length === 1 ? "" : "s"}.`);
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "Unable to load Teamship update jobs.";
+      setError(message);
+      setUpdateJobStatus(message);
+    } finally {
+      setIsUpdateJobLoading(false);
+    }
+  }
+
+  async function updateJobAction(jobId: string, action: "approve" | "cancel" | "rescan") {
+    setError(null);
+    setUpdateJobStatus(action === "approve" ? "Approving job for agent..." : action === "rescan" ? "Rescanning Teamship details..." : "Cancelling job...");
+    setIsUpdateJobLoading(true);
+
+    try {
+      const response = await fetch(`/api/shipment-documents/teamship-review/update-jobs/${jobId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action })
+      });
+      const json = (await response.json().catch(() => null)) as TeamshipUpdateJobsResponse | null;
+
+      if (!response.ok || !json || isErrorResponse(json)) {
+        throw new Error(isErrorResponse(json) ? json.error : "Unable to update Teamship update job.");
+      }
+
+      setUpdateJobs(json.jobs);
+      setUpdateJobStatus(
+        action === "approve"
+          ? "Job approved. The VM agent can claim it on its next run."
+          : action === "rescan"
+            ? "Teamship details rescanned for this job."
+            : "Job cancelled."
+      );
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "Unable to update Teamship update job.";
+      setError(message);
+      setUpdateJobStatus(null);
+    } finally {
+      setIsUpdateJobLoading(false);
+    }
+  }
+
+  return (
+    <section className="overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
+      {error ? (
+        <div className="m-5 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-sm font-medium text-danger">
+          {error}
+        </div>
+      ) : null}
+      <div className="border-b border-border bg-card px-5 py-4">
+        <button
+          type="button"
+          onClick={() => void fetchUpdateJobs()}
+          disabled={isUpdateJobLoading}
+          className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isUpdateJobLoading ? "Refreshing..." : "Refresh bot runs"}
+        </button>
+      </div>
+      <TeamshipUpdateJobsPanel
+        jobs={updateJobs}
+        status={updateJobStatus}
+        isLoading={isUpdateJobLoading}
+        onAction={(jobId, action) => void updateJobAction(jobId, action)}
+      />
+    </section>
+  );
+}
+
 export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: boolean }) {
   const todayInputValue = getTodayInputValue();
   const [shipmentDate, setShipmentDate] = useState(todayInputValue);
@@ -514,39 +609,6 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
 
     setSelectedUpdateSrNumbers(new Set(selectedSrNumbers));
     await createUpdateJob(selectedSrNumbers);
-  }
-
-  async function updateJobAction(jobId: string, action: "approve" | "cancel" | "rescan") {
-    setError(null);
-    setUpdateJobStatus(action === "approve" ? "Approving job for agent..." : action === "rescan" ? "Rescanning Teamship details..." : "Cancelling job...");
-    setIsUpdateJobLoading(true);
-
-    try {
-      const response = await fetch(`/api/shipment-documents/teamship-review/update-jobs/${jobId}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action })
-      });
-      const json = (await response.json().catch(() => null)) as TeamshipUpdateJobsResponse | null;
-
-      if (!response.ok || !json || isErrorResponse(json)) {
-        throw new Error(isErrorResponse(json) ? json.error : "Unable to update Teamship update job.");
-      }
-
-      setUpdateJobs(json.jobs);
-      setUpdateJobStatus(
-        action === "approve"
-          ? "Job approved. The VM agent can claim it on its next run."
-          : action === "rescan"
-            ? "Teamship details rescanned for this job."
-            : "Job cancelled."
-      );
-    } catch (caught) {
-      setUpdateJobStatus(null);
-      setError(caught instanceof Error ? caught.message : "Unable to update Teamship update job.");
-    } finally {
-      setIsUpdateJobLoading(false);
-    }
   }
 
   async function inspectTeamshipPayload({
@@ -1303,7 +1365,6 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         onCreateIssueUpdateJob={() => void createUpdateJobForIssueShipments()}
         onCreateUpdateJobForSrNumbers={(srNumbers) => void createUpdateJobForSrNumbers(srNumbers)}
         onCreateSingleUpdateJob={(srNumber) => void createUpdateJob([srNumber])}
-        onUpdateJobAction={(jobId, action) => void updateJobAction(jobId, action)}
         onRescanShipment={(srNumber) => void runReview({ rescan: true, srNumber })}
         onFieldProposedValueChange={updateReviewFieldProposedValue}
         onFieldBotActionEnabledChange={updateReviewFieldBotActionEnabled}
@@ -1399,7 +1460,6 @@ function ShipmentReviewWorkspace({
   onCreateIssueUpdateJob,
   onCreateUpdateJobForSrNumbers,
   onCreateSingleUpdateJob,
-  onUpdateJobAction,
   onRescanShipment,
   onFieldProposedValueChange,
   onFieldBotActionEnabledChange,
@@ -1439,7 +1499,6 @@ function ShipmentReviewWorkspace({
   onCreateIssueUpdateJob: () => void;
   onCreateUpdateJobForSrNumbers: (srNumbers: string[]) => void;
   onCreateSingleUpdateJob: (srNumber: string) => void;
-  onUpdateJobAction: (jobId: string, action: "approve" | "cancel" | "rescan") => void;
   onRescanShipment: (srNumber: string) => void;
   onFieldProposedValueChange: (srNumber: string, fieldKey: string, value: string) => void;
   onFieldBotActionEnabledChange: (srNumber: string, fieldKey: string, enabled: boolean) => void;
@@ -1757,12 +1816,10 @@ function ShipmentReviewWorkspace({
           </p>
         ) : null}
       </div>
-      <TeamshipUpdateJobsPanel
-        jobs={updateJobs}
-        status={updateJobStatus}
-        isLoading={isUpdateJobLoading}
-        onAction={onUpdateJobAction}
-      />
+      <div className="border-b border-border bg-muted/20 px-5 py-4 text-sm text-mutedForeground">
+        Bot draft summaries and approval controls now live on the Bot Runs page so the shipment queue stays focused on orders.
+        {updateJobStatus ? <p className="mt-2 text-xs font-semibold">{updateJobStatus}</p> : null}
+      </div>
       <div className="divide-y divide-border">
         {rows.length === 0 ? (
           <p className="p-5 text-sm text-mutedForeground">
