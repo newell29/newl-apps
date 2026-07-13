@@ -24,6 +24,7 @@ export type TeamshipBrowserExecutionOptions = {
   headed?: boolean;
   slowMoMs?: number;
   errorPauseMs?: number;
+  fieldUpdatesEnabled?: boolean;
   bolCleanupEnabled?: boolean;
   screenshotRootDir?: string | null;
   allowedHosts?: string[];
@@ -178,13 +179,16 @@ export async function executeTeamshipPhase2BrowserJob({
         await saveScreenshot(page, orderScreenshotDir, "01-before");
 
         const fieldUpdateErrors: string[] = [];
+        const fieldUpdatesSkipped = !options.fieldUpdatesEnabled && order.plannedFieldUpdates.length > 0;
 
-        try {
-          await fillOrderFieldUpdates(page, order);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "Unknown Teamship field update failure.";
-          fieldUpdateErrors.push(message);
-          await saveScreenshot(page, orderScreenshotDir, "field-update-error").catch(() => undefined);
+        if (options.fieldUpdatesEnabled) {
+          try {
+            await fillOrderFieldUpdates(page, order);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Unknown Teamship field update failure.";
+            fieldUpdateErrors.push(message);
+            await saveScreenshot(page, orderScreenshotDir, "field-update-error").catch(() => undefined);
+          }
         }
 
         if (order.plannedPalletRows.length > 0) {
@@ -230,6 +234,8 @@ export async function executeTeamshipPhase2BrowserJob({
               palletSnapshot,
               bolEditorCleanup,
               bolEditorCleanupSkipped: !options.bolCleanupEnabled,
+              fieldUpdatesSkipped,
+              skippedFieldUpdateCount: fieldUpdatesSkipped ? order.plannedFieldUpdates.length : 0,
               fieldUpdateErrors
             }
           },
