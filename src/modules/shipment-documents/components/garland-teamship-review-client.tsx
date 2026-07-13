@@ -1369,7 +1369,7 @@ function ShipmentReviewWorkspace({
         </div>
       </div>
 
-      <div className="border-b border-border bg-muted/20 p-5">
+      <div className="border-b border-border bg-muted/20 p-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h3 className="text-sm font-semibold text-foreground">Daily actions</h3>
@@ -1423,8 +1423,8 @@ function ShipmentReviewWorkspace({
         </div>
       </div>
 
-      <div className="border-b border-border bg-card p-5">
-        <div className="space-y-4">
+      <div className="border-b border-border bg-card p-4">
+        <div className="space-y-3">
           <div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr),220px,auto] lg:items-end">
             <input
               value={workspaceSearch}
@@ -1512,45 +1512,67 @@ function ShipmentReviewWorkspace({
         </div>
       </div>
 
-      <div className="border-b border-border bg-muted/20 p-5">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <label className="min-w-56 space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
-            Agent mode
-            <select
-              value={updateJobMode}
-              onChange={(event) => onUpdateJobModeChange(event.target.value === "LIVE_API" ? "LIVE_API" : "DRY_RUN")}
-              disabled={isUpdateJobLoading || !review}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-semibold normal-case tracking-normal text-foreground disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <option value="DRY_RUN">Dry run evidence only</option>
-              <option value="LIVE_API">Live Teamship update</option>
-            </select>
-          </label>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => onCreateUpdateJobForSrNumbers(visibleIssueSrNumbers)}
-              disabled={isUpdateJobLoading || !review || visibleIssueSrNumbers.length === 0}
-              className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Create visible issue draft ({visibleIssueSrNumbers.length})
-            </button>
-            <button
-              type="button"
-              onClick={onCreateIssueUpdateJob}
-              disabled={isUpdateJobLoading || !review || issueEligibleCount === 0}
-              className="rounded-md border border-primary/40 px-4 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Create draft for all issues ({issueEligibleCount})
-            </button>
-            <button
-              type="button"
-              onClick={onCreateUpdateJob}
-              disabled={isUpdateJobLoading || !review || selectedCount === 0}
-              className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Create selected draft ({selectedCount})
-            </button>
+      <div className="border-b border-border bg-muted/20 p-4">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),auto] xl:items-end">
+          <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Run the Teamship bot</p>
+                <h3 className="mt-1 text-base font-semibold text-foreground">Create a draft, then approve it for the VM agent</h3>
+                <p className="mt-1 max-w-3xl text-sm text-mutedForeground">
+                  Select shipments and individual bot changes inside each expanded row. Creating a draft does not update Teamship.
+                  The actual bot run starts when an admin approves the draft in the jobs section below.
+                </p>
+              </div>
+              <span className="rounded-full bg-background px-3 py-1 text-xs font-bold uppercase tracking-wide text-mutedForeground">
+                {selectedCount} selected
+              </span>
+            </div>
+            <div className="mt-3 grid gap-2 text-xs font-semibold text-mutedForeground md:grid-cols-3">
+              <span className="rounded-xl border border-border bg-background px-3 py-2">1. Select shipments / bot changes</span>
+              <span className="rounded-xl border border-border bg-background px-3 py-2">2. Create a bot draft</span>
+              <span className="rounded-xl border border-border bg-background px-3 py-2">3. Approve / run the agent below</span>
+            </div>
+          </div>
+          <div className="space-y-3">
+            <label className="block min-w-60 space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+              Agent mode
+              <select
+                value={updateJobMode}
+                onChange={(event) => onUpdateJobModeChange(event.target.value === "LIVE_API" ? "LIVE_API" : "DRY_RUN")}
+                disabled={isUpdateJobLoading || !review}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-semibold normal-case tracking-normal text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <option value="DRY_RUN">Dry run evidence only</option>
+                <option value="LIVE_API">Live Teamship update</option>
+              </select>
+            </label>
+            <div className="flex flex-wrap gap-2 xl:justify-end">
+              <button
+                type="button"
+                onClick={() => onCreateUpdateJobForSrNumbers(visibleIssueSrNumbers)}
+                disabled={isUpdateJobLoading || !review || visibleIssueSrNumbers.length === 0}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Create visible issue draft ({visibleIssueSrNumbers.length})
+              </button>
+              <button
+                type="button"
+                onClick={onCreateIssueUpdateJob}
+                disabled={isUpdateJobLoading || !review || issueEligibleCount === 0}
+                className="rounded-md border border-primary/40 px-4 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Create all issue draft ({issueEligibleCount})
+              </button>
+              <button
+                type="button"
+                onClick={onCreateUpdateJob}
+                disabled={isUpdateJobLoading || !review || selectedCount === 0}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Create selected bot draft ({selectedCount})
+              </button>
+            </div>
           </div>
         </div>
         {updateJobMode === "LIVE_API" ? (
@@ -1592,7 +1614,7 @@ function ShipmentReviewWorkspace({
               open={isExpanded}
               onToggle={(event) => setRowOpen(row.id, event.currentTarget.open)}
             >
-              <summary className="grid cursor-pointer gap-4 px-5 py-5 xl:grid-cols-[minmax(0,1fr),auto] xl:items-center">
+              <summary className="grid cursor-pointer gap-3 px-4 py-3 xl:grid-cols-[minmax(0,1fr),auto] xl:items-center">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     {row.review && row.srNumber ? (
@@ -1607,11 +1629,11 @@ function ShipmentReviewWorkspace({
                         Agent update
                       </label>
                     ) : null}
-                    <span className="text-lg font-semibold text-foreground">{row.psNumber ?? "No PS"} / {row.srNumber ?? "No SR"}</span>
+                    <span className="text-base font-semibold text-foreground">{row.psNumber ?? "No PS"} / {row.srNumber ?? "No SR"}</span>
                     <span className={shipmentStatusPillClass(row.status)}>{formatWorkspaceStatus(row.status, row.issueCount)}</span>
                     <span className={workflowStatusPillClass(workflowStatus)}>{formatWorkflowStatus(workflowStatus)}</span>
                   </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-mutedForeground">
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-mutedForeground">
                     <span className="font-medium text-foreground">{row.shipToName ?? "Missing ship-to"}</span>
                     <span>{[row.carrier, row.cityState].filter(Boolean).join(" · ") || "Carrier/city missing"}</span>
                     <span>{row.pdfPages.length > 0 ? `PDF page(s) ${row.pdfPages.join(", ")}` : "No PDF page uploaded"}</span>
@@ -1690,7 +1712,7 @@ function ShipmentReviewWorkspace({
                     disabled={!row.review || !row.srNumber || !isUpdateEligibleReview(row.review)}
                     className="rounded-xl border border-primary/40 bg-primary px-3 py-2 text-sm font-semibold text-primaryForeground shadow-sm transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    Draft
+                    Create draft
                   </button>
                   <span className="rounded-xl border border-border bg-background px-3 py-2 text-sm font-semibold text-mutedForeground shadow-sm">
                     {isExpanded ? "Collapse" : "Expand"}
@@ -1788,9 +1810,9 @@ function TeamshipUpdateJobsPanel({
     <div className="border-b border-border bg-muted/20 px-5 py-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-foreground">Phase 2 Teamship update jobs</h3>
+          <h3 className="text-sm font-semibold text-foreground">Bot drafts and run history</h3>
           <p className="mt-1 text-xs text-mutedForeground">
-            Create a dry-run or live draft from selected shipments, approve it for the VM agent, then rescan Teamship after the agent reports completion.
+            Drafts are safe until approved. Click Approve / run bot on a draft to release it to the VM agent, then rescan Teamship after completion.
           </p>
           {status ? <p className="mt-2 text-xs font-semibold text-mutedForeground">{status}</p> : null}
         </div>
@@ -1801,7 +1823,7 @@ function TeamshipUpdateJobsPanel({
 
       {jobs.length === 0 ? (
         <p className="mt-3 rounded-md border border-dashed border-border bg-background p-3 text-sm text-mutedForeground">
-          No Phase 2 update jobs yet. Select reviewed shipments above and create an update draft.
+          No bot drafts yet. Select reviewed shipments above, create a bot draft, then approve it here when ready.
         </p>
       ) : (
         <div className="mt-3 space-y-3">
@@ -1844,7 +1866,7 @@ function TeamshipUpdateJobsPanel({
                     disabled={isLoading || job.status !== "DRAFT" || job.summary.blockedCount > 0}
                     className="rounded-md border border-border px-3 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    Approve agent
+                    Approve / run bot
                   </button>
                   <button
                     type="button"
@@ -2002,14 +2024,14 @@ function ShipmentWorkspaceDetails({
     const orderReview = row.review;
 
     return (
-      <div className="space-y-5 border-t border-border bg-background/70 px-5 pb-5 pt-5">
+      <div className="space-y-3 border-t border-border bg-background/70 px-4 pb-4 pt-3">
         <TeamshipPayloadInspectionPanel inspection={payloadInspection} error={payloadInspectionError} />
-        <div className="rounded-2xl border border-border bg-card shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-4">
+        <div className="rounded-xl border border-border bg-card shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-3 py-3">
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-mutedForeground">Mismatch editor</p>
-              <h3 className="mt-1 text-base font-semibold text-foreground">Review Teamship fields before the bot draft</h3>
-              <p className="mt-1 text-sm text-mutedForeground">
+              <h3 className="mt-1 text-sm font-semibold text-foreground">Review Teamship fields before the bot draft</h3>
+              <p className="mt-1 text-xs text-mutedForeground">
                 Edit the bot action when the CSR wants Teamship changed, even if the PDF and Teamship currently match.
               </p>
             </div>
@@ -2027,7 +2049,7 @@ function ShipmentWorkspaceDetails({
                   </div>
                   <p className="mt-1 text-xs text-mutedForeground">{field.message}</p>
                 </div>
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1fr,1fr,1.2fr]">
+                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[1fr,1fr,1.15fr]">
                   <ValuePreviewCard label="Garland PDF" value={field.pdfValue} emphasis={field.status !== "MATCH"} />
                   <ValuePreviewCard label="Teamship current" value={field.teamshipValue} />
                   <ProposedFieldUpdateCard
@@ -2236,9 +2258,9 @@ function stagePillClass(state: string) {
 
 function ValuePreviewCard({ label, value, emphasis = false }: { label: string; value: string | null; emphasis?: boolean }) {
   return (
-    <div className={emphasis ? "rounded-xl border border-primary/25 bg-primary/5 p-3" : "rounded-xl border border-border bg-background p-3"}>
+    <div className={emphasis ? "rounded-lg border border-primary/25 bg-primary/5 p-2" : "rounded-lg border border-border bg-background p-2"}>
       <p className="text-xs font-bold uppercase tracking-wide text-mutedForeground">{label}</p>
-      <p className="mt-2 whitespace-pre-wrap text-sm font-semibold text-foreground">{value?.trim() || "Blank"}</p>
+      <p className="mt-1 whitespace-pre-wrap text-xs font-semibold text-foreground">{value?.trim() || "Blank"}</p>
     </div>
   );
 }
@@ -2264,14 +2286,14 @@ function ProposedFieldUpdateCard({
       : "Edit this if the Garland PDF value needs a CSR override before creating the Teamship bot draft.";
 
   return (
-    <div className={isIncluded ? "rounded-xl border border-primary/25 bg-primary/5 p-3" : "rounded-xl border border-border bg-muted/20 p-3"}>
+    <div className={isIncluded ? "rounded-lg border border-primary/25 bg-primary/5 p-2" : "rounded-lg border border-border bg-muted/20 p-2"}>
       <span className="flex flex-wrap items-center justify-between gap-2 text-xs font-bold uppercase tracking-wide text-mutedForeground">
         <span>Bot action</span>
         <span className={isCustomOverride ? "rounded-full bg-primary/10 px-2 py-0.5 text-primary" : "rounded-full bg-background px-2 py-0.5"}>
           {isIncluded ? (isCustomOverride ? "CSR override" : "Included") : "Not included"}
         </span>
       </span>
-      <label className="mt-3 flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground">
+      <label className="mt-2 flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-xs font-semibold text-foreground">
         <input
           type="checkbox"
           checked={isIncluded}
@@ -2284,7 +2306,7 @@ function ProposedFieldUpdateCard({
       <textarea
         value={proposedValue}
         onChange={(event) => onChange(srNumber, field.key, event.target.value)}
-        className="mt-2 min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-semibold text-foreground"
+        className="mt-2 min-h-14 w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs font-semibold text-foreground"
         placeholder="Leave blank to skip this field update"
       />
       <span className="mt-2 block text-xs text-mutedForeground">
@@ -2421,12 +2443,12 @@ function ProductDimensionsTable({
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-card shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-4">
+    <div className="rounded-xl border border-border bg-card shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-3 py-3">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-mutedForeground">Pallet plan</p>
-          <h3 className="mt-1 text-base font-semibold text-foreground">SKU dimensions and commodity lines for the Teamship bot</h3>
-          <p className="mt-1 text-sm text-mutedForeground">
+          <h3 className="mt-1 text-sm font-semibold text-foreground">SKU dimensions and commodity lines for the Teamship bot</h3>
+          <p className="mt-1 text-xs text-mutedForeground">
             Choose which Garland SKU/SN rows the bot should add to Teamship. Missing DIMs do not remove an included SKU/SN commodity update.
           </p>
         </div>
@@ -2460,16 +2482,16 @@ function ProductDimensionsTable({
             const isIncluded = row.item.botActionEnabled !== false;
 
             return (
-              <div key={`${row.itemIndex}-${sku}`} className={`grid gap-4 px-4 py-4 lg:grid-cols-[6px,minmax(0,1fr)] ${isIncluded ? "" : "bg-muted/20 opacity-75"}`}>
+              <div key={`${row.itemIndex}-${sku}`} className={`grid gap-3 px-3 py-3 lg:grid-cols-[4px,minmax(0,1fr)] ${isIncluded ? "" : "bg-muted/20 opacity-75"}`}>
                 <span className={isIncluded ? (hasDims ? "rounded-full bg-success" : "rounded-full bg-warning") : "rounded-full bg-mutedForeground/40"} aria-hidden="true" />
-                <div className="min-w-0 space-y-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 space-y-3">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <p className="text-xs font-bold uppercase tracking-[0.18em] text-mutedForeground">
                         Pallet {row.itemIndex + 1} - {dimension ? formatDimensionSource(dimension.source) : "No DIM history"}
                       </p>
-                      <h4 className="mt-1 text-lg font-semibold text-foreground">{sku}</h4>
-                      <p className="mt-1 text-sm text-mutedForeground">
+                      <h4 className="mt-1 text-base font-semibold text-foreground">{sku}</h4>
+                      <p className="mt-0.5 text-xs text-mutedForeground">
                         Qty {row.item.quantity ?? 1} · {formatSerialSummary(row.item.serialNumbers)} · {row.item.description || "No description"}
                       </p>
                     </div>
@@ -2496,7 +2518,7 @@ function ProductDimensionsTable({
                     </div>
                   </div>
 
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+                  <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
                     <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
                       Qty
                       <DimensionInput
@@ -2545,8 +2567,8 @@ function ProductDimensionsTable({
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-border bg-muted/20 p-3">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="rounded-lg border border-border bg-muted/20 p-2">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
                         <label className="text-xs font-bold uppercase tracking-wide text-mutedForeground" htmlFor={`commodity-${srNumber}-${row.itemIndex}`}>
                           Commodity text for Teamship
@@ -2555,10 +2577,10 @@ function ProductDimensionsTable({
                           id={`commodity-${srNumber}-${row.itemIndex}`}
                           value={row.item.commodityOverride ?? buildCommodityPreview(row.item)}
                           onChange={(event) => onPalletCommodityChange(srNumber, row.itemIndex, event.target.value)}
-                          className="mt-2 min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm font-semibold text-foreground"
+                          className="mt-1.5 min-h-14 w-full rounded-md border border-input bg-background px-2 py-1.5 font-mono text-xs font-semibold text-foreground"
                           placeholder="SKU: XXXXX SN: XXXXX"
                         />
-                        <p className="mt-2 text-xs text-mutedForeground">
+                        <p className="mt-1.5 text-xs text-mutedForeground">
                           Edit this before creating the bot draft if Teamship should receive different pallet commodity text.
                         </p>
                       </div>
@@ -2598,7 +2620,7 @@ function DimensionInput({
       step="0.01"
       value={value ?? ""}
       onChange={(event) => onChange(event.target.value)}
-      className="w-full rounded-md border border-input bg-background px-2 py-2 text-sm text-foreground"
+      className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground"
       placeholder="-"
     />
   );
@@ -2920,7 +2942,7 @@ function statusPillClass(status: string) {
 }
 
 function fieldComparisonRowClass(status: string) {
-  const base = "grid gap-4 px-4 py-4 xl:grid-cols-[minmax(180px,0.65fr),minmax(0,1.35fr)]";
+  const base = "grid gap-3 px-3 py-3 xl:grid-cols-[minmax(170px,0.55fr),minmax(0,1.45fr)]";
 
   if (status === "MATCH" || status === "INFO") {
     return `${base} bg-card`;
