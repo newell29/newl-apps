@@ -33,6 +33,19 @@ type PalletControlSnapshot = {
   }>;
 };
 
+type BolWeightCleanupSnapshot = {
+  bolEditorUrl: string;
+  generatedBol: boolean;
+  weightFieldCount: number;
+  clearedWeightFieldCount: number;
+  fields: Array<{
+    field: string;
+    before: string;
+    after: string;
+    cleared: boolean;
+  }>;
+};
+
 const DEFAULT_TEAMSHIP_APP_BASE_URL = "https://app.teamshipos.com";
 const DEFAULT_ALLOWED_HOSTS = ["app.teamshipos.com", "members.fulfillit.io", "staging.teamshipos.com"];
 
@@ -163,6 +176,14 @@ export async function executeTeamshipPhase2BrowserJob({
 
         await saveScreenshot(page, orderScreenshotDir, "04-after-reload");
         const palletSnapshot = order.plannedPalletRows.length > 0 ? await readPalletSnapshot(page) : null;
+        const bolWeightCleanup = await openBolEditorAndClearCustomerOrderWeights({
+          page,
+          order,
+          orderUrl: teamshipUrl,
+          appBaseUrl,
+          screenshotDir: orderScreenshotDir,
+          allowedHosts: options.allowedHosts
+        });
 
         orders.push({
           ...mappedOrder,
@@ -172,7 +193,8 @@ export async function executeTeamshipPhase2BrowserJob({
             browser: {
               teamshipUrl,
               screenshotDir: orderScreenshotDir,
-              palletSnapshot
+              palletSnapshot,
+              bolWeightCleanup
             }
           },
           responseStatus: 200
@@ -413,6 +435,258 @@ async function clickSave(page: Page) {
   throw new Error('Could not find a visible "Save", "Update", or "Save Changes" button.');
 }
 
+async function clickSaveIfPresent(page: Page) {
+  const saveButtons = page.getByRole("button", { name: /^(save|update|save changes|done|✓)$/i });
+  const count = await saveButtons.count();
+
+  for (let index = count - 1; index >= 0; index -= 1) {
+    const button = saveButtons.nth(index);
+
+    if (await button.isVisible().catch(() => false)) {
+      await button.scrollIntoViewIfNeeded();
+      await button.click();
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function openBolEditorAndClearCustomerOrderWeights({
+  page,
+  order,
+  orderUrl,
+  appBaseUrl,
+  screenshotDir,
+  allowedHosts
+}: {
+  page: Page;
+  order: TeamshipPhase2OrderPlan;
+  orderUrl: string;
+  appBaseUrl: string;
+  screenshotDir: string;
+  allowedHosts: string[] | undefined;
+}): Promise<BolWeightCleanupSnapshot> {
+  const bolEditorUrl = resolveBolEditorUrl({ order, appBaseUrl, allowedHosts });
+  const generatedBol = await ensureBolEditorReady({ page, orderUrl, bolEditorUrl });
+
+  await saveScreenshot(page, screenshotDir, "05-bol-editor-before-weight-cleanup");
+  const cleanup = await clearCustomerOrderWeightFields(page);
+
+  if (cleanup.clearedWeightFieldCount > 0) {
+    await clickSaveIfPresent(page);
+    await waitForTeamshipIdle(page);
+  }
+
+  await saveScreenshot(page, screenshotDir, "06-bol-editor-after-weight-cleanup");
+
+  return {
+    bolEditorUrl,
+    generatedBol,
+    ...cleanup
+  };
+}
+
+async function ensureBolEditorReady({
+  page,
+  orderUrl,
+  bolEditorUrl
+}: {
+  page: Page;
+  orderUrl: string;
+  bolEditorUrl: string;
+}) {
+  await page.goto(bolEditorUrl, { waitUntil: "domcontentloaded" });
+  await waitForTeamshipIdle(page);
+
+  if (await hasCustomerOrderInformation(page)) {
+    return false;
+  }
+
+  await page.goto(orderUrl, { waitUntil: "domcontentloaded" });
+  await waitForTeamshipIdle(page);
+  await clickGenerateBol(page);
+  await waitForTeamshipIdle(page);
+  await page.goto(bolEditorUrl, { waitUntil: "domcontentloaded" });
+  await waitForTeamshipIdle(page);
+
+  if (!(await hasCustomerOrderInformation(page))) {
+    throw new Error("Generated/opened the Teamship BOL editor, but Customer Order Information was not found.");
+  }
+
+  return true;
+}
+
+async function hasCustomerOrderInformation(page: Page) {
+  return (await page.getByText(/customer order information/i).count()) > 0;
+}
+
+async function clickGenerateBol(page: Page) {
+  const existingGenerateButton = page.getByText(/generate bol/i).last();
+
+  if (await existingGenerateButton.isVisible().catch(() => false)) {
+    await existingGenerateButton.click();
+    return;
+  }
+
+  const bolButtons = page.getByRole("button", { name: /bol/i });
+  const count = await bolButtons.count();
+
+  for (let index = count - 1; index >= 0; index -= 1) {
+    const button = bolButtons.nth(index);
+
+    if (await button.isVisible().catch(() => false)) {
+      await button.click();
+      await waitForTeamshipIdle(page);
+      break;
+    }
+  }
+
+  const generateButton = page.getByText(/generate bol/i).last();
+
+  if (!(await generateButton.isVisible().catch(() => false))) {
+    throw new Error('Could not find "Generate BOL" on the Teamship order page before opening the BOL editor.');
+  }
+
+  await generateButton.click();
+}
+
+async function clearCustomerOrderWeightFields(page: Page) {
+  const fieldNames = await findCustomerOrderWeightFieldNames(page);
+  const fields: BolWeightCleanupSnapshot["fields"] = [];
+
+  if (fieldNames.length === 0) {
+    throw new Error("Could not find Customer Order Information weight fields in the Teamship BOL editor.");
+  }
+
+  for (const fieldName of fieldNames) {
+    fields.push(await clearEditableBolField(page, fieldName));
+  }
+
+  return {
+    weightFieldCount: fields.length,
+    clearedWeightFieldCount: fields.filter((field) => field.cleared).length,
+    fields
+  };
+}
+
+async function findCustomerOrderWeightFieldNames(page: Page) {
+  return page.evaluate(() => {
+    const directFields = Array.from(document.querySelectorAll<HTMLElement>("[data-field-content]"))
+      .map((element) => element.getAttribute("data-field-content") ?? "")
+      .filter((fieldName) => /^customer_order_\d+_weight$/i.test(fieldName));
+
+    if (directFields.length > 0) {
+      return Array.from(new Set(directFields));
+    }
+
+    const heading = findTextElement("CUSTOMER ORDER INFORMATION");
+    const weightHeader = findTextElement("WEIGHT");
+
+    if (!heading || !weightHeader) {
+      return [];
+    }
+
+    const headingRect = heading.getBoundingClientRect();
+    const weightRect = weightHeader.getBoundingClientRect();
+    const fields = Array.from(document.querySelectorAll<HTMLElement>("[data-field-content]"))
+      .filter((element) => {
+        const fieldName = element.getAttribute("data-field-content") ?? "";
+        const rect = element.getBoundingClientRect();
+
+        return (
+          /^customer_order_\d+_/i.test(fieldName) &&
+          rect.top > weightRect.bottom &&
+          rect.top > headingRect.bottom &&
+          rect.left >= weightRect.left - 8 &&
+          rect.right <= weightRect.right + 8
+        );
+      })
+      .map((element) => element.getAttribute("data-field-content") ?? "");
+
+    return Array.from(new Set(fields));
+
+    function findTextElement(text: string) {
+      const normalizedText = text.trim().toLowerCase();
+
+      return (
+        Array.from(document.querySelectorAll<HTMLElement>("h1,h2,h3,h4,h5,h6,label,span,div,p,th,td"))
+          .filter((element) => isVisible(element))
+          .find((element) => (element.textContent ?? "").trim().toLowerCase() === normalizedText) ?? null
+      );
+    }
+
+    function isVisible(element: HTMLElement) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+
+      return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+    }
+  });
+}
+
+async function clearEditableBolField(page: Page, fieldName: string) {
+  const locator = page.locator(`[data-field-content="${fieldName}"]`).first();
+  const before = normalizeFieldText((await locator.textContent().catch(() => "")) ?? "");
+
+  if (!before || /^click to edit$/i.test(before)) {
+    return {
+      field: fieldName,
+      before,
+      after: before,
+      cleared: false
+    };
+  }
+
+  await locator.scrollIntoViewIfNeeded();
+  await locator.click({ force: true });
+  await page.waitForTimeout(250);
+
+  const cleared = await page.evaluate(() => {
+    const active = document.activeElement;
+
+    if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+      const prototype = active instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
+
+      if (descriptor?.set) {
+        descriptor.set.call(active, "");
+      } else {
+        active.value = "";
+      }
+
+      active.dispatchEvent(new Event("input", { bubbles: true }));
+      active.dispatchEvent(new Event("change", { bubbles: true }));
+      active.dispatchEvent(new Event("blur", { bubbles: true }));
+      return true;
+    }
+
+    if (active instanceof HTMLElement && active.isContentEditable) {
+      active.textContent = "";
+      active.dispatchEvent(new Event("input", { bubbles: true }));
+      active.dispatchEvent(new Event("change", { bubbles: true }));
+      active.dispatchEvent(new Event("blur", { bubbles: true }));
+      return true;
+    }
+
+    return false;
+  });
+
+  if (cleared) {
+    await page.keyboard.press("Enter").catch(() => undefined);
+    await waitForTeamshipIdle(page);
+  }
+
+  const after = normalizeFieldText((await locator.textContent().catch(() => "")) ?? "");
+
+  return {
+    field: fieldName,
+    before,
+    after,
+    cleared
+  };
+}
+
 async function readPalletSnapshot(page: Page): Promise<PalletControlSnapshot> {
   return page.evaluate(String.raw`
     (() => {
@@ -460,6 +734,24 @@ function resolveOrderUrl({
   if (!allowed.has(url.hostname)) {
     throw new Error(`Teamship browser update blocked for unapproved host: ${url.hostname}.`);
   }
+
+  return url.toString();
+}
+
+function resolveBolEditorUrl({
+  order,
+  appBaseUrl,
+  allowedHosts
+}: {
+  order: TeamshipPhase2OrderPlan;
+  appBaseUrl: string;
+  allowedHosts: string[] | undefined;
+}) {
+  const baseOrderUrl = resolveOrderUrl({ order, appBaseUrl, allowedHosts });
+  const url = new URL(baseOrderUrl);
+  url.pathname = `/ship-inventories/${encodeURIComponent(order.teamshipOrderId ?? "")}/bol-editor`;
+  url.search = "";
+  url.hash = "";
 
   return url.toString();
 }
@@ -530,4 +822,8 @@ function sanitizePathSegment(value: string) {
 
 function normalizeIdentifier(value: string) {
   return value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function normalizeFieldText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
 }
