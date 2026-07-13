@@ -1,16 +1,22 @@
+import { executeTeamshipPhase2BrowserJob } from "@/modules/shipment-documents/teamship-browser-update-execution";
 import {
   executeTeamshipPhase2Job,
   type TeamshipPhase2AgentMode,
   type TeamshipPhase2ExecutionResult
 } from "@/modules/shipment-documents/teamship-phase2-agent-execution";
+import type { TeamshipPhase2DryRunPlan } from "@/modules/shipment-documents/teamship-phase2-dry-run";
 
 type WorkerOptions = {
   baseUrl: string;
   token: string;
   agentId: string;
-  mode: "dry-run" | "live-api";
+  mode: "dry-run" | "live-api" | "live-browser";
   allowLiveUpdates: boolean;
   liveAllowlistSrNumbers: string[];
+  browserExecutablePath: string | null;
+  browserHeaded: boolean;
+  browserScreenshotRootDir: string | null;
+  browserAllowedHosts: string[];
   loop: boolean;
   intervalMs: number;
 };
@@ -22,6 +28,7 @@ type ClaimResponse = {
     email: string;
     password: string;
     apiBaseUrl: string | null;
+    appBaseUrl?: string | null;
   } | null;
   error?: string;
 };
@@ -38,45 +45,6 @@ type TeamshipUpdateJobSummary = {
   status: string;
   dryRun: boolean;
   selectedSrNumbers: string[];
-};
-
-type TeamshipPhase2DryRunPlan = {
-  mode: "DRY_RUN";
-  dryRun: true;
-  wouldUpdateTeamship: false;
-  summary: {
-    orderCount: number;
-    readyCount: number;
-    blockedCount: number;
-    skippedCount: number;
-    plannedFieldUpdateCount: number;
-    plannedPalletRowCount: number;
-  };
-  orders: TeamshipPhase2OrderPlan[];
-};
-
-type TeamshipPhase2OrderPlan = {
-  psNumber: string;
-  srNumber: string;
-  teamshipOrderId: string | null;
-  teamshipUrl: string | null;
-  status: "READY" | "BLOCKED" | "SKIPPED";
-  plannedFieldUpdates: Array<{
-    label: string;
-    teamshipField: string;
-    currentValue: string | null;
-    proposedValue: string;
-    reason: string;
-  }>;
-  plannedPalletRows: Array<{
-    rowNumber: number;
-    sku: string;
-    quantity: number;
-    hasUsableDimensions: boolean;
-    commodity: string;
-    teamshipFields: Record<string, string | number>;
-  }>;
-  validationIssues: string[];
 };
 
 async function main() {
@@ -126,7 +94,7 @@ async function runOnce(options: WorkerOptions) {
       jobId: claimed.job.id,
       status: "FAILED",
       result: {
-        mode: options.mode === "dry-run" ? "DRY_RUN" : "LIVE_API",
+        mode: options.mode === "dry-run" ? "DRY_RUN" : options.mode === "live-browser" ? "LIVE_BROWSER" : "LIVE_API",
         dryRun: options.mode === "dry-run",
         wouldUpdateTeamship: options.mode !== "dry-run",
         executedAt: new Date().toISOString(),
@@ -148,8 +116,29 @@ async function executeJob({
   options: WorkerOptions;
   claimed: ClaimResponse & { job: TeamshipUpdateJobSummary; executionPayload: TeamshipPhase2DryRunPlan };
 }): Promise<TeamshipPhase2ExecutionResult> {
-  if (claimed.job.agentMode === "LIVE_API" && options.mode !== "live-api") {
-    throw new Error("This approved job requires LIVE_API mode, but the VM worker is running in dry-run mode.");
+  if (claimed.job.agentMode === "LIVE_API" && options.mode === "dry-run") {
+    throw new Error("This approved job requires live mode, but the VM worker is running in dry-run mode.");
+  }
+
+  if (claimed.job.agentMode === "LIVE_API" && options.mode === "live-browser") {
+    return executeTeamshipPhase2BrowserJob({
+      job: {
+        id: claimed.job.id,
+        agentMode: claimed.job.agentMode,
+        dryRun: claimed.job.dryRun
+      },
+      plan: claimed.executionPayload,
+      credentials: claimed.teamshipCredentials!,
+      options: {
+        agentId: options.agentId,
+        allowLiveUpdates: options.allowLiveUpdates,
+        liveAllowlistSrNumbers: options.liveAllowlistSrNumbers,
+        browserExecutablePath: options.browserExecutablePath,
+        headed: options.browserHeaded,
+        screenshotRootDir: options.browserScreenshotRootDir,
+        allowedHosts: options.browserAllowedHosts
+      }
+    });
   }
 
   return executeTeamshipPhase2Job({
@@ -230,6 +219,12 @@ function readOptions(args: string[]): WorkerOptions {
   const mode = readMode(readStringOption(args, "--mode") ?? process.env.TEAMSHIP_AGENT_MODE ?? "dry-run");
   const allowLiveUpdates = args.includes("--allow-live-updates") || process.env.TEAMSHIP_ALLOW_LIVE_UPDATES === "true";
   const liveAllowlistSrNumbers = readListOption(args, "--allow-sr", process.env.TEAMSHIP_LIVE_ALLOWLIST_SR_NUMBERS);
+  const browserExecutablePath =
+    readStringOption(args, "--browser-executable-path") ?? process.env.TEAMSHIP_BROWSER_EXECUTABLE_PATH ?? null;
+  const browserHeaded = args.includes("--headed") || process.env.TEAMSHIP_BROWSER_HEADED === "true";
+  const browserScreenshotRootDir =
+    readStringOption(args, "--screenshot-dir") ?? process.env.TEAMSHIP_BROWSER_SCREENSHOT_DIR ?? null;
+  const browserAllowedHosts = readListOption(args, "--browser-allowed-host", process.env.TEAMSHIP_BROWSER_ALLOWED_HOSTS);
   const loop = args.includes("--loop") || process.env.TEAMSHIP_AGENT_LOOP === "true";
   const intervalMs = readPositiveNumber(readStringOption(args, "--interval-ms") ?? process.env.TEAMSHIP_AGENT_INTERVAL_MS, 30_000);
 
@@ -248,6 +243,10 @@ function readOptions(args: string[]): WorkerOptions {
     mode,
     allowLiveUpdates,
     liveAllowlistSrNumbers,
+    browserExecutablePath,
+    browserHeaded,
+    browserScreenshotRootDir,
+    browserAllowedHosts,
     loop,
     intervalMs
   };
@@ -269,11 +268,11 @@ function readListOption(args: string[], name: string, fallback: string | undefin
 }
 
 function readMode(value: string): WorkerOptions["mode"] {
-  if (value === "dry-run" || value === "live-api") {
+  if (value === "dry-run" || value === "live-api" || value === "live-browser") {
     return value;
   }
 
-  throw new Error("TEAMSHIP_AGENT_MODE must be dry-run or live-api.");
+  throw new Error("TEAMSHIP_AGENT_MODE must be dry-run, live-api, or live-browser.");
 }
 
 function readPositiveNumber(value: string | undefined | null, fallback: number) {

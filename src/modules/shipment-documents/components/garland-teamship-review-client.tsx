@@ -1959,7 +1959,7 @@ function TeamshipUpdateJobsPanel({
                   <p>
                     {job.summary.plannedFieldUpdateCount} field updates · {job.summary.plannedPalletRowCount} pallet/comment rows
                   </p>
-                  <p>Agent mode: {job.agentMode === "LIVE_API" ? "Live Teamship API" : "Dry-run evidence"}</p>
+                  <p>Agent mode: {job.agentMode === "LIVE_API" ? "Live Teamship update" : "Dry-run evidence"}</p>
                   {job.agentId ? <p>Agent: {job.agentId}</p> : null}
                   {job.lastVerificationAt ? <p>Last rescan {formatDateTime(job.lastVerificationAt)}</p> : null}
                 </div>

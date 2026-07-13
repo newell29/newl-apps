@@ -1,6 +1,7 @@
 import type { TeamshipPhase2DryRunPlan, TeamshipPhase2OrderPlan } from "@/modules/shipment-documents/teamship-phase2-dry-run";
 
 export type TeamshipPhase2AgentMode = "DRY_RUN" | "LIVE_API";
+export type TeamshipPhase2ExecutionMode = TeamshipPhase2AgentMode | "LIVE_BROWSER";
 
 export type TeamshipPhase2AgentCredentials = {
   email: string;
@@ -23,7 +24,7 @@ export type TeamshipPhase2ExecutionOptions = {
 };
 
 export type TeamshipPhase2ExecutionResult = {
-  mode: TeamshipPhase2AgentMode;
+  mode: TeamshipPhase2ExecutionMode;
   dryRun: boolean;
   wouldUpdateTeamship: boolean;
   executedAt: string;
