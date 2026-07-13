@@ -9,7 +9,7 @@ import type { AuthenticatedContext } from "@/server/tenant-context";
 
 const WORKFLOW_KEY = "GARLAND_TEAMSHIP_REVIEW";
 
-export type TeamshipReviewWorkflowStatus = "NEEDS_SETUP" | "READY_TO_PRINT" | "BOL_PRINTED" | "NEEDS_REVIEW" | "NO_PDF" | "SKIPPED";
+export type TeamshipReviewWorkflowStatus = "NEEDS_SETUP" | "READY_TO_PRINT" | "BOL_PRINTED" | "ORDER_COMPLETE" | "NEEDS_REVIEW" | "NO_PDF" | "SKIPPED";
 
 export type TeamshipReviewHistoryOrder = {
   id: string;
@@ -27,6 +27,7 @@ export type TeamshipReviewHistoryOrder = {
   mismatchCount: number;
   workflowStatus: TeamshipReviewWorkflowStatus;
   bolPrintedAt: string | null;
+  orderCompletedAt: string | null;
 };
 
 export type TeamshipReviewHistoryRun = {
@@ -145,6 +146,7 @@ type TeamshipReviewOrderRecord = {
   mismatchCount: number;
   workflowStatus: string;
   bolPrintedAt: Date | null;
+  orderCompletedAt: Date | null;
 };
 
 export async function getTeamshipReviewHistory(
@@ -244,7 +246,8 @@ export async function getTeamshipReviewHistory(
             pageNumbers: true,
             mismatchCount: true,
             workflowStatus: true,
-            bolPrintedAt: true
+            bolPrintedAt: true,
+            orderCompletedAt: true
           }
         }
       }
@@ -376,16 +379,16 @@ export async function deleteTeamshipReviewRun(context: AuthenticatedContext, run
   }
 }
 
-export async function markTeamshipReviewOrderBolPrinted({
+export async function updateTeamshipReviewOrderWorkflow({
   context,
   runId,
   orderId,
-  printed
+  action
 }: {
   context: AuthenticatedContext;
   runId: string;
   orderId: string;
-  printed: boolean;
+  action: "markBolPrinted" | "clearBolPrinted" | "markOrderComplete" | "clearOrderComplete";
 }) {
   const client = prisma as TeamshipReviewRunQueryClient;
   const result = await client.teamshipReviewOrder.updateMany({
@@ -399,22 +402,52 @@ export async function markTeamshipReviewOrderBolPrinted({
         deletedAt: null
       }
     },
-    data: printed
-      ? {
-          workflowStatus: "BOL_PRINTED",
-          bolPrintedAt: new Date(),
-          bolPrintedByUserId: context.userId
-        }
-      : {
-          workflowStatus: "READY_TO_PRINT",
-          bolPrintedAt: null,
-          bolPrintedByUserId: null
-        }
+    data: buildOrderWorkflowUpdateData(action, context.userId)
   });
 
   if (result.count === 0) {
     throw new Error("Teamship review order was not found or belongs to a deleted run.");
   }
+}
+
+function buildOrderWorkflowUpdateData(action: "markBolPrinted" | "clearBolPrinted" | "markOrderComplete" | "clearOrderComplete", userId: string) {
+  const now = new Date();
+
+  if (action === "markOrderComplete") {
+    return {
+      workflowStatus: "ORDER_COMPLETE",
+      bolPrintedAt: now,
+      bolPrintedByUserId: userId,
+      orderCompletedAt: now,
+      orderCompletedByUserId: userId
+    };
+  }
+
+  if (action === "clearOrderComplete") {
+    return {
+      workflowStatus: "BOL_PRINTED",
+      orderCompletedAt: null,
+      orderCompletedByUserId: null
+    };
+  }
+
+  if (action === "markBolPrinted") {
+    return {
+      workflowStatus: "BOL_PRINTED",
+      bolPrintedAt: now,
+      bolPrintedByUserId: userId,
+      orderCompletedAt: null,
+      orderCompletedByUserId: null
+    };
+  }
+
+  return {
+    workflowStatus: "READY_TO_PRINT",
+    bolPrintedAt: null,
+    bolPrintedByUserId: null,
+    orderCompletedAt: null,
+    orderCompletedByUserId: null
+  };
 }
 
 export async function markTeamshipReviewOrdersReadyToPrint({
@@ -531,7 +564,8 @@ function mapTeamshipReviewOrder(record: TeamshipReviewOrderRecord): TeamshipRevi
       : [],
     mismatchCount: record.mismatchCount,
     workflowStatus: normalizeWorkflowStatus(record.workflowStatus),
-    bolPrintedAt: record.bolPrintedAt ? record.bolPrintedAt.toISOString() : null
+    bolPrintedAt: record.bolPrintedAt ? record.bolPrintedAt.toISOString() : null,
+    orderCompletedAt: record.orderCompletedAt ? record.orderCompletedAt.toISOString() : null
   };
 }
 
@@ -552,7 +586,7 @@ function getInitialWorkflowStatus(orderReview: GarlandTeamshipOrderReview): Team
 }
 
 function normalizeWorkflowStatus(status: string): TeamshipReviewWorkflowStatus {
-  return ["NEEDS_SETUP", "READY_TO_PRINT", "BOL_PRINTED", "NEEDS_REVIEW", "NO_PDF", "SKIPPED"].includes(status)
+  return ["NEEDS_SETUP", "READY_TO_PRINT", "BOL_PRINTED", "ORDER_COMPLETE", "NEEDS_REVIEW", "NO_PDF", "SKIPPED"].includes(status)
     ? (status as TeamshipReviewWorkflowStatus)
     : "NEEDS_SETUP";
 }
