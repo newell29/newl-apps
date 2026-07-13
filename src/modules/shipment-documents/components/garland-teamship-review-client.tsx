@@ -2665,7 +2665,7 @@ function ProductDimensionsTable({
                       Length
                       <DimensionInput
                         label={`Length for ${sku}`}
-                        value={dimension?.lengthIn ?? null}
+                        value={dimension?.lengthIn ?? 1}
                         onChange={(value) => onDimensionChange(srNumber, sku, "lengthIn", value)}
                       />
                     </label>
@@ -2673,7 +2673,7 @@ function ProductDimensionsTable({
                       Width
                       <DimensionInput
                         label={`Width for ${sku}`}
-                        value={dimension?.widthIn ?? null}
+                        value={dimension?.widthIn ?? 1}
                         onChange={(value) => onDimensionChange(srNumber, sku, "widthIn", value)}
                       />
                     </label>
@@ -2681,7 +2681,7 @@ function ProductDimensionsTable({
                       Height
                       <DimensionInput
                         label={`Height for ${sku}`}
-                        value={dimension?.heightIn ?? null}
+                        value={dimension?.heightIn ?? 1}
                         onChange={(value) => onDimensionChange(srNumber, sku, "heightIn", value)}
                       />
                     </label>
@@ -2689,7 +2689,7 @@ function ProductDimensionsTable({
                       Weight
                       <DimensionInput
                         label={`Weight for ${sku}`}
-                        value={dimension?.weightLb ?? null}
+                        value={dimension?.weightLb ?? 1}
                         onChange={(value) => onDimensionChange(srNumber, sku, "weightLb", value)}
                       />
                     </label>

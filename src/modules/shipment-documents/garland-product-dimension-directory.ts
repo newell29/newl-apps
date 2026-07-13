@@ -282,6 +282,10 @@ function buildCsrOverrideRows({
       continue;
     }
 
+    if (isPlaceholderDimension(dimension)) {
+      continue;
+    }
+
     const pdfOrder = pdfOrderBySku.get(sku) ?? null;
     const sourceSrNumber = pdfOrder?.srNumber ?? null;
     const sourceTeamshipOrderId = null;
@@ -422,4 +426,8 @@ function formatNumberKey(value: number) {
 
 function isPositiveNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function isPlaceholderDimension(dimension: GarlandProductDimensionRecommendation) {
+  return dimension.lengthIn === 1 && dimension.widthIn === 1 && dimension.heightIn === 1 && dimension.weightLb === 1;
 }
