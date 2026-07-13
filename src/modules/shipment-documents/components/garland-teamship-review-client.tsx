@@ -1539,7 +1539,7 @@ function ShipmentReviewWorkspace({
             <WorkspaceStatCard label="Needs attention" value={workspaceStats.needsAttention} tone="danger" />
             <WorkspaceStatCard label="Ready to print" value={workspaceStats.readyToPrint} tone="primary" />
             <WorkspaceStatCard label="Complete" value={workspaceStats.complete} tone="success" />
-            <WorkspaceStatCard label="No PDF" value={workspaceStats.noPdf} tone="warning" />
+            <WorkspaceStatCard label="Missing PDF" value={workspaceStats.noPdf} tone="warning" />
           </div>
         </div>
       </div>
@@ -1618,7 +1618,7 @@ function ShipmentReviewWorkspace({
                 <option value="ISSUES">Issues only</option>
                 <option value="APPROVED">Approved / matched</option>
                 <option value="PENDING">Pending Teamship</option>
-                <option value="NO_PDF">No PDF</option>
+                <option value="NO_PDF">Missing Garland PDF</option>
                 <option value="NEEDS_SETUP">Needs bot setup</option>
                 <option value="READY_TO_PRINT">Ready to print</option>
                 <option value="BOL_PRINTED">BOL printed</option>
@@ -1628,6 +1628,18 @@ function ShipmentReviewWorkspace({
               <span className="rounded-full bg-muted px-3 py-2 text-xs font-bold uppercase tracking-wide text-mutedForeground">
                 {visibleRows.length}/{rows.length} visible
               </span>
+              <button
+                type="button"
+                onClick={() => setWorkspaceFilter("NO_PDF")}
+                disabled={workspaceStats.noPdf === 0}
+                className={`rounded-xl border px-3 py-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                  workspaceFilter === "NO_PDF"
+                    ? "border-warning bg-warning/15 text-warning"
+                    : "border-border text-foreground hover:bg-muted"
+                }`}
+              >
+                Missing Garland PDF ({workspaceStats.noPdf})
+              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -3247,7 +3259,7 @@ function formatReviewStatus(status: TeamshipReviewHistoryOrder["status"], mismat
   }
 
   if (status === "NO_PDF") {
-    return "No PDF";
+    return "Missing Garland PDF";
   }
 
   if (status === "SKIPPED_ALREADY_REVIEWED") {
@@ -3715,7 +3727,7 @@ function formatWorkspaceStatus(status: ShipmentWorkspaceStatus, issueCount: numb
   }
 
   if (status === "NO_PDF") {
-    return "No PDF";
+    return "Missing Garland PDF";
   }
 
   if (status === "SKIPPED_ALREADY_REVIEWED") {
@@ -3785,7 +3797,7 @@ function formatWorkflowStatus(status: TeamshipReviewWorkflowStatus) {
   }
 
   if (status === "NO_PDF") {
-    return "No PDF";
+    return "Missing Garland PDF";
   }
 
   if (status === "SKIPPED") {
