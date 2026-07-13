@@ -2,7 +2,7 @@
 
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import type { PDFPageProxy } from "pdfjs-dist/types/src/display/api";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   addPalletDraftLineToReviewState,
@@ -356,10 +356,18 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       const nextReview = srNumber && review ? mergePartialReview(review, json) : json;
       setReview(nextReview);
       setSelectedUpdateSrNumbers(new Set());
+      const autoSaveMessage = srNumber
+        ? ""
+        : await autoSaveReviewSnapshot({
+            reviewSnapshot: nextReview,
+            shipmentDateSnapshot: shipmentDate,
+            sourcePdfFileNameSnapshot: sourcePdfFileName
+          });
       setStatus(
         `${rescan || srNumber ? "Rescan complete" : "Review complete"}: ${nextReview.summary.passedCount} green, ${nextReview.summary.pendingTeamshipCount} pending Teamship creation, ${nextReview.summary.failedCount} with discrepancies, ${nextReview.summary.missingTeamshipCount} missing without an alert.`
           + (nextReview.summary.noPdfCount > 0 ? ` ${nextReview.summary.noPdfCount} Teamship order(s) had no uploaded PDF.` : "")
           + (nextReview.summary.skippedAlreadyReviewedCount > 0 ? ` ${nextReview.summary.skippedAlreadyReviewedCount} already-reviewed order(s) were skipped.` : "")
+          + autoSaveMessage
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to run the Teamship review.");
@@ -604,7 +612,8 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
 
       setDailyOrderCount(json.totalCount ?? json.orders?.length ?? 0);
       setDailySyncSummary(json.sync ?? null);
-      setDailyOrders(json.orders ?? []);
+      const fetchedOrders = json.orders ?? [];
+      setDailyOrders(fetchedOrders);
       const syncedDateFrom = json.sync?.dateFrom ?? syncDateFrom;
       const syncedDateTo = json.sync?.dateTo ?? syncDateTo;
 
@@ -612,10 +621,23 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         handleShipmentDateChange(syncedDateFrom);
       }
 
+      const autoSaveMessage =
+        json.sync &&
+        syncedDateFrom === syncedDateTo &&
+        fetchedOrders.length > 0 &&
+        ((json.sync.insertedCount ?? 0) > 0 || (json.sync.updatedCount ?? 0) > 0)
+          ? await autoSaveReviewSnapshot({
+              reviewSnapshot: null,
+              teamshipOrdersSnapshot: fetchedOrders,
+              shipmentDateSnapshot: syncedDateFrom,
+              sourcePdfFileNameSnapshot: null
+            })
+          : "";
+
       setStatus(
-        json.sync
+        (json.sync
           ? `Pulled ${json.sync.insertedCount} new Teamship Garland order(s) from ${json.sync.dateFrom ?? syncDateFrom} to ${json.sync.dateTo ?? syncDateTo}; ${json.sync.skippedCount} already existed or could not be keyed.`
-          : `Fetched ${json.totalCount ?? json.orders?.length ?? 0} Teamship Garland order(s) for ${shipmentDate}.`
+          : `Fetched ${json.totalCount ?? json.orders?.length ?? 0} Teamship Garland order(s) for ${shipmentDate}.`) + autoSaveMessage
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to sync Teamship daily orders.");
@@ -635,35 +657,16 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       return;
     }
 
-    const trimmedLabel = documentLabel.trim();
-
-    if (!trimmedLabel) {
-      setError("Enter a document label before saving the Teamship review run.");
-      return;
-    }
-
     setIsSaving(true);
     setSaveStatus("Saving Teamship review run...");
 
     try {
-      const saveShipmentDate = getSaveShipmentDate();
-      const response = await fetch("/api/shipment-documents/teamship-review/runs", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          documentLabel: trimmedLabel,
-          shipmentDate: saveShipmentDate,
-          sourcePdfFileName,
-          review,
-          teamshipOrders: review ? undefined : dailyOrders,
-          alertDigest
-        })
+      const json = await postRunToHistory({
+        reviewSnapshot: review,
+        teamshipOrdersSnapshot: dailyOrders,
+        shipmentDateSnapshot: getSaveShipmentDate(),
+        sourcePdfFileNameSnapshot: sourcePdfFileName
       });
-      const json = (await response.json().catch(() => null)) as TeamshipReviewHistoryResponse | null;
-
-      if (!response.ok || !json || isErrorResponse(json)) {
-        throw new Error(isErrorResponse(json) ? json.error : "Unable to save Teamship review run.");
-      }
 
       setHistory(json);
       setHistorySearch(json.search);
@@ -680,6 +683,78 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     } finally {
       setIsSaving(false);
     }
+  }
+
+  async function autoSaveReviewSnapshot({
+    reviewSnapshot,
+    teamshipOrdersSnapshot = dailyOrders,
+    shipmentDateSnapshot,
+    sourcePdfFileNameSnapshot
+  }: {
+    reviewSnapshot: GarlandTeamshipReviewResponse | null;
+    teamshipOrdersSnapshot?: TeamshipShippingOrderDetail[];
+    shipmentDateSnapshot: string;
+    sourcePdfFileNameSnapshot: string | null;
+  }) {
+    setIsSaving(true);
+    setSaveStatus("Auto-saving Teamship review history...");
+
+    try {
+      const json = await postRunToHistory({
+        reviewSnapshot,
+        teamshipOrdersSnapshot,
+        shipmentDateSnapshot,
+        sourcePdfFileNameSnapshot
+      });
+
+      setHistory(json);
+      setHistorySearch(json.search);
+      setHistoryDateFrom(json.dateFrom);
+      setHistoryDateTo(json.dateTo);
+      setHistoryAllDates(json.allDates);
+      setSaveStatus(`Auto-saved to history. Showing ${json.totalCount} saved run${json.totalCount === 1 ? "" : "s"} for ${formatHistoryRange(json)}.`);
+      return " Auto-saved to history.";
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "Unable to auto-save Teamship review run.";
+      setSaveStatus(null);
+      setError(message);
+      return ` Auto-save failed: ${message}`;
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function postRunToHistory({
+    reviewSnapshot,
+    teamshipOrdersSnapshot,
+    shipmentDateSnapshot,
+    sourcePdfFileNameSnapshot
+  }: {
+    reviewSnapshot: GarlandTeamshipReviewResponse | null;
+    teamshipOrdersSnapshot: TeamshipShippingOrderDetail[];
+    shipmentDateSnapshot: string;
+    sourcePdfFileNameSnapshot: string | null;
+  }) {
+    const label = documentLabel.trim() || formatDateLabel(shipmentDateSnapshot);
+    const response = await fetch("/api/shipment-documents/teamship-review/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        documentLabel: label,
+        shipmentDate: shipmentDateSnapshot,
+        sourcePdfFileName: sourcePdfFileNameSnapshot,
+        review: reviewSnapshot,
+        teamshipOrders: reviewSnapshot ? undefined : teamshipOrdersSnapshot,
+        alertDigest
+      })
+    });
+    const json = (await response.json().catch(() => null)) as TeamshipReviewHistoryResponse | null;
+
+    if (!response.ok || !json || isErrorResponse(json)) {
+      throw new Error(isErrorResponse(json) ? json.error : "Unable to save Teamship review run.");
+    }
+
+    return json;
   }
 
   async function downloadReviewSummaryPdf() {
@@ -1316,6 +1391,7 @@ function ShipmentReviewWorkspace({
   const [expandedRowIds, setExpandedRowIds] = useState<Set<string>>(new Set());
   const [workspaceSearch, setWorkspaceSearch] = useState("");
   const [workspaceFilter, setWorkspaceFilter] = useState<WorkspaceQueueFilter>("ALL");
+  const autoExpandedRowIdsRef = useRef<Set<string>>(new Set());
   const selectedCount = selectedUpdateSrNumbers.size;
   const issueEligibleCount = review?.reviews.filter(isIssueUpdateEligibleReview).length ?? 0;
   const eligibleCount = review?.reviews.filter(isUpdateEligibleReview).length ?? 0;
@@ -1342,7 +1418,20 @@ function ShipmentReviewWorkspace({
   const workspaceStats = buildWorkspaceStats(rows, updateJobs);
 
   useEffect(() => {
-    setExpandedRowIds(new Set(rows.filter((row) => row.review && row.status !== "PASS").map((row) => row.id)));
+    const currentRowIds = new Set(rows.map((row) => row.id));
+
+    setExpandedRowIds((current) => {
+      const next = new Set(Array.from(current).filter((rowId) => currentRowIds.has(rowId)));
+
+      for (const row of rows) {
+        if (!autoExpandedRowIdsRef.current.has(row.id) && row.review && row.status !== "PASS") {
+          next.add(row.id);
+        }
+      }
+
+      return next;
+    });
+    autoExpandedRowIdsRef.current = currentRowIds;
   }, [rows]);
 
   function setRowOpen(rowId: string, isOpen: boolean) {
@@ -2063,22 +2152,31 @@ function ShipmentWorkspaceDetails({
           <div className="divide-y divide-border">
             {orderReview.fields.map((field) => (
               <div key={field.key} className={fieldComparisonRowClass(field.status)}>
-                <div className="min-w-0">
+                <div className="min-w-0 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-semibold text-foreground">{field.label}</span>
                     <span className={statusPillClass(field.status)}>{formatFieldStatus(field.status)}</span>
                   </div>
-                  <p className="mt-1 text-xs text-mutedForeground">{field.message}</p>
+                  <p className="text-xs leading-5 text-mutedForeground">{field.message}</p>
                 </div>
-                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[1fr,1fr,1.15fr]">
-                  <ValuePreviewCard label="Garland PDF" value={field.pdfValue} emphasis={field.status !== "MATCH"} />
-                  <ValuePreviewCard label="Teamship current" value={field.teamshipValue} />
-                  <ProposedFieldUpdateCard
-                    field={field}
-                    srNumber={orderReview.srNumber}
-                    onChange={onFieldProposedValueChange}
-                    onEnabledChange={onFieldBotActionEnabledChange}
-                  />
+                <div className="min-w-0 space-y-2">
+                  <div className="grid gap-2 md:grid-cols-2">
+                    <CompactValueCell label="Garland" value={field.pdfValue} emphasis={field.status !== "MATCH"} />
+                    <CompactValueCell label="Teamship" value={field.teamshipValue} />
+                  </div>
+                  <details className="rounded-lg border border-border bg-background">
+                    <summary className="cursor-pointer px-2.5 py-1.5 text-xs font-bold uppercase tracking-wide text-mutedForeground">
+                      Bot action {formatCompactBotAction(field)}
+                    </summary>
+                    <div className="border-t border-border p-2">
+                      <ProposedFieldUpdateCard
+                        field={field}
+                        srNumber={orderReview.srNumber}
+                        onChange={onFieldProposedValueChange}
+                        onEnabledChange={onFieldBotActionEnabledChange}
+                      />
+                    </div>
+                  </details>
                 </div>
               </div>
             ))}
@@ -2277,13 +2375,23 @@ function stagePillClass(state: string) {
   return `${base} bg-muted text-mutedForeground`;
 }
 
-function ValuePreviewCard({ label, value, emphasis = false }: { label: string; value: string | null; emphasis?: boolean }) {
+function CompactValueCell({ label, value, emphasis = false }: { label: string; value: string | null; emphasis?: boolean }) {
   return (
-    <div className={emphasis ? "rounded-lg border border-primary/25 bg-primary/5 p-2" : "rounded-lg border border-border bg-background p-2"}>
-      <p className="text-xs font-bold uppercase tracking-wide text-mutedForeground">{label}</p>
-      <p className="mt-1 whitespace-pre-wrap text-xs font-semibold text-foreground">{value?.trim() || "Blank"}</p>
+    <div className={emphasis ? "rounded-md border border-primary/20 bg-primary/5 px-2 py-1.5" : "rounded-md border border-border bg-muted/20 px-2 py-1.5"}>
+      <span className="mr-2 text-[10px] font-bold uppercase tracking-wide text-mutedForeground">{label}</span>
+      <span className="whitespace-pre-wrap break-words text-xs font-semibold text-foreground">{value?.trim() || "Blank"}</span>
     </div>
   );
+}
+
+function formatCompactBotAction(field: GarlandTeamshipReviewField) {
+  const proposedValue = field.proposedValue ?? (field.status === "MATCH" || field.status === "INFO" ? "" : field.pdfValue ?? "");
+
+  if (!proposedValue.trim()) {
+    return "(not included)";
+  }
+
+  return field.botActionEnabled === false ? "(disabled)" : "(included)";
 }
 
 function ProposedFieldUpdateCard({
@@ -2963,7 +3071,7 @@ function statusPillClass(status: string) {
 }
 
 function fieldComparisonRowClass(status: string) {
-  const base = "grid gap-3 px-3 py-3 xl:grid-cols-[minmax(170px,0.55fr),minmax(0,1.45fr)]";
+  const base = "grid gap-2 px-3 py-2 xl:grid-cols-[minmax(150px,0.42fr),minmax(0,1.58fr)] xl:items-start";
 
   if (status === "MATCH" || status === "INFO") {
     return `${base} bg-card`;
