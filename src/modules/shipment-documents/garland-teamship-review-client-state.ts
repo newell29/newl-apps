@@ -32,7 +32,8 @@ export function addPalletDraftLineToReviewState({
     description: "CSR-added Teamship pallet line",
     quantity: 1,
     dueShipDate: null,
-    serialNumbers: line.serialNumbers
+    serialNumbers: line.serialNumbers,
+    botActionEnabled: true
   };
   const nextReviewItem = {
     sku: nextItem.sku,
@@ -202,6 +203,55 @@ export function updatePalletCommodityOverrideInReviewState({
   };
 }
 
+export function updatePalletBotActionEnabledInReviewState({
+  orders,
+  review,
+  srNumber,
+  itemIndex,
+  enabled
+}: {
+  orders: GarlandPdfShippingOrder[];
+  review: GarlandTeamshipReviewResponse | null;
+  srNumber: string;
+  itemIndex: number;
+  enabled: boolean;
+}) {
+  const normalizedSrNumber = normalizeIdentifier(srNumber);
+
+  if (!normalizedSrNumber || itemIndex < 0) {
+    return { orders, review };
+  }
+
+  const updateOrder = (order: GarlandPdfShippingOrder) =>
+    normalizeIdentifier(order.srNumber) === normalizedSrNumber
+      ? {
+          ...order,
+          items: order.items.map((item, index) =>
+            index === itemIndex
+              ? {
+                  ...item,
+                  botActionEnabled: enabled
+                }
+              : item
+          )
+        }
+      : order;
+
+  const nextOrders = orders.map(updateOrder);
+
+  if (!review) {
+    return { orders: nextOrders, review };
+  }
+
+  return {
+    orders: nextOrders,
+    review: {
+      ...review,
+      pdfOrders: review.pdfOrders.map(updateOrder)
+    }
+  };
+}
+
 export function updateReviewFieldProposedValueInReviewState({
   review,
   srNumber,
@@ -233,6 +283,44 @@ export function updateReviewFieldProposedValueInReviewState({
                 ? {
                     ...field,
                     proposedValue: nextValue
+                  }
+                : field
+            )
+          }
+        : orderReview
+    )
+  };
+}
+
+export function updateReviewFieldBotActionEnabledInReviewState({
+  review,
+  srNumber,
+  fieldKey,
+  enabled
+}: {
+  review: GarlandTeamshipReviewResponse | null;
+  srNumber: string;
+  fieldKey: string;
+  enabled: boolean;
+}) {
+  const normalizedSrNumber = normalizeIdentifier(srNumber);
+  const normalizedFieldKey = normalizeIdentifier(fieldKey);
+
+  if (!review || !normalizedSrNumber || !normalizedFieldKey) {
+    return review;
+  }
+
+  return {
+    ...review,
+    reviews: review.reviews.map((orderReview) =>
+      normalizeIdentifier(orderReview.srNumber) === normalizedSrNumber
+        ? {
+            ...orderReview,
+            fields: orderReview.fields.map((field) =>
+              normalizeIdentifier(field.key) === normalizedFieldKey
+                ? {
+                    ...field,
+                    botActionEnabled: enabled
                   }
                 : field
             )

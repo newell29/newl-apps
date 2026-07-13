@@ -7,7 +7,9 @@ import { useEffect, useMemo, useState } from "react";
 import {
   addPalletDraftLineToReviewState,
   removePalletDraftLineFromReviewState,
+  updatePalletBotActionEnabledInReviewState,
   updatePalletCommodityOverrideInReviewState,
+  updateReviewFieldBotActionEnabledInReviewState,
   updateReviewFieldProposedValueInReviewState,
   type GarlandTeamshipPalletDraftLine
 } from "@/modules/shipment-documents/garland-teamship-review-client-state";
@@ -786,6 +788,13 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     setReview(nextState.review);
   }
 
+  function updatePalletBotActionEnabled(srNumber: string, itemIndex: number, enabled: boolean) {
+    const nextState = updatePalletBotActionEnabledInReviewState({ orders, review, srNumber, itemIndex, enabled });
+
+    setOrders(nextState.orders);
+    setReview(nextState.review);
+  }
+
   function updateReviewFieldProposedValue(srNumber: string, fieldKey: string, value: string) {
     setReview((current) =>
       updateReviewFieldProposedValueInReviewState({
@@ -793,6 +802,17 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         srNumber,
         fieldKey,
         value
+      })
+    );
+  }
+
+  function updateReviewFieldBotActionEnabled(srNumber: string, fieldKey: string, enabled: boolean) {
+    setReview((current) =>
+      updateReviewFieldBotActionEnabledInReviewState({
+        review: current,
+        srNumber,
+        fieldKey,
+        enabled
       })
     );
   }
@@ -1126,10 +1146,12 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         onUpdateJobAction={(jobId, action) => void updateJobAction(jobId, action)}
         onRescanShipment={(srNumber) => void runReview({ rescan: true, srNumber })}
         onFieldProposedValueChange={updateReviewFieldProposedValue}
+        onFieldBotActionEnabledChange={updateReviewFieldBotActionEnabled}
         onProductDimensionChange={updateProductDimensionOverride}
         onAddPalletDraftLine={addPalletDraftLine}
         onRemovePalletDraftLine={removePalletDraftLine}
         onPalletCommodityChange={updatePalletCommodityOverride}
+        onPalletBotActionEnabledChange={updatePalletBotActionEnabled}
         payloadInspections={payloadInspections}
         payloadInspectionErrors={payloadInspectionErrors}
         payloadInspectionLoadingSr={payloadInspectionLoadingSr}
@@ -1219,10 +1241,12 @@ function ShipmentReviewWorkspace({
   onUpdateJobAction,
   onRescanShipment,
   onFieldProposedValueChange,
+  onFieldBotActionEnabledChange,
   onProductDimensionChange,
   onAddPalletDraftLine,
   onRemovePalletDraftLine,
   onPalletCommodityChange,
+  onPalletBotActionEnabledChange,
   payloadInspections,
   payloadInspectionErrors,
   payloadInspectionLoadingSr,
@@ -1257,10 +1281,12 @@ function ShipmentReviewWorkspace({
   onUpdateJobAction: (jobId: string, action: "approve" | "cancel" | "rescan") => void;
   onRescanShipment: (srNumber: string) => void;
   onFieldProposedValueChange: (srNumber: string, fieldKey: string, value: string) => void;
+  onFieldBotActionEnabledChange: (srNumber: string, fieldKey: string, enabled: boolean) => void;
   onProductDimensionChange: (srNumber: string, sku: string, field: ProductDimensionEditField, rawValue: string) => void;
   onAddPalletDraftLine: (srNumber: string, line: NewPalletDraftLine) => void;
   onRemovePalletDraftLine: (srNumber: string, itemIndex: number) => void;
   onPalletCommodityChange: (srNumber: string, itemIndex: number, value: string) => void;
+  onPalletBotActionEnabledChange: (srNumber: string, itemIndex: number, enabled: boolean) => void;
   payloadInspections: Record<string, TeamshipPayloadInspectionResult>;
   payloadInspectionErrors: Record<string, string>;
   payloadInspectionLoadingSr: string | null;
@@ -1674,10 +1700,12 @@ function ShipmentReviewWorkspace({
               <ShipmentWorkspaceDetails
                 row={row}
                 onFieldProposedValueChange={onFieldProposedValueChange}
+                onFieldBotActionEnabledChange={onFieldBotActionEnabledChange}
                 onProductDimensionChange={onProductDimensionChange}
                 onAddPalletDraftLine={onAddPalletDraftLine}
                 onRemovePalletDraftLine={onRemovePalletDraftLine}
                 onPalletCommodityChange={onPalletCommodityChange}
+                onPalletBotActionEnabledChange={onPalletBotActionEnabledChange}
                 payloadInspection={payloadInspection}
                 payloadInspectionError={payloadInspectionError}
               />
@@ -1950,19 +1978,23 @@ function TeamshipUpdateJobsPanel({
 function ShipmentWorkspaceDetails({
   row,
   onFieldProposedValueChange,
+  onFieldBotActionEnabledChange,
   onProductDimensionChange,
   onAddPalletDraftLine,
   onRemovePalletDraftLine,
   onPalletCommodityChange,
+  onPalletBotActionEnabledChange,
   payloadInspection,
   payloadInspectionError
 }: {
   row: ShipmentWorkspaceRow;
   onFieldProposedValueChange: (srNumber: string, fieldKey: string, value: string) => void;
+  onFieldBotActionEnabledChange: (srNumber: string, fieldKey: string, enabled: boolean) => void;
   onProductDimensionChange: (srNumber: string, sku: string, field: ProductDimensionEditField, rawValue: string) => void;
   onAddPalletDraftLine: (srNumber: string, line: NewPalletDraftLine) => void;
   onRemovePalletDraftLine: (srNumber: string, itemIndex: number) => void;
   onPalletCommodityChange: (srNumber: string, itemIndex: number, value: string) => void;
+  onPalletBotActionEnabledChange: (srNumber: string, itemIndex: number, enabled: boolean) => void;
   payloadInspection: TeamshipPayloadInspectionResult | null;
   payloadInspectionError: string | null;
 }) {
@@ -2002,6 +2034,7 @@ function ShipmentWorkspaceDetails({
                     field={field}
                     srNumber={orderReview.srNumber}
                     onChange={onFieldProposedValueChange}
+                    onEnabledChange={onFieldBotActionEnabledChange}
                   />
                 </div>
               </div>
@@ -2017,6 +2050,7 @@ function ShipmentWorkspaceDetails({
           onAddPalletDraftLine={onAddPalletDraftLine}
           onRemovePalletDraftLine={onRemovePalletDraftLine}
           onPalletCommodityChange={onPalletCommodityChange}
+          onPalletBotActionEnabledChange={onPalletBotActionEnabledChange}
         />
       </div>
     );
@@ -2212,27 +2246,41 @@ function ValuePreviewCard({ label, value, emphasis = false }: { label: string; v
 function ProposedFieldUpdateCard({
   field,
   srNumber,
-  onChange
+  onChange,
+  onEnabledChange
 }: {
   field: GarlandTeamshipReviewField;
   srNumber: string;
   onChange: (srNumber: string, fieldKey: string, value: string) => void;
+  onEnabledChange: (srNumber: string, fieldKey: string, enabled: boolean) => void;
 }) {
   const proposedValue = field.proposedValue ?? (field.status === "MATCH" || field.status === "INFO" ? "" : field.pdfValue ?? "");
   const isCustomOverride = Boolean(field.proposedValue?.trim());
+  const hasProposedValue = Boolean(proposedValue.trim());
+  const isIncluded = hasProposedValue && field.botActionEnabled !== false;
   const helpText =
     field.status === "MATCH" || field.status === "INFO"
       ? "Leave blank for no bot update. Enter a value only if the CSR wants Teamship changed anyway."
       : "Edit this if the Garland PDF value needs a CSR override before creating the Teamship bot draft.";
 
   return (
-    <label className="rounded-xl border border-primary/25 bg-primary/5 p-3">
+    <div className={isIncluded ? "rounded-xl border border-primary/25 bg-primary/5 p-3" : "rounded-xl border border-border bg-muted/20 p-3"}>
       <span className="flex flex-wrap items-center justify-between gap-2 text-xs font-bold uppercase tracking-wide text-mutedForeground">
         <span>Bot action</span>
         <span className={isCustomOverride ? "rounded-full bg-primary/10 px-2 py-0.5 text-primary" : "rounded-full bg-background px-2 py-0.5"}>
-          {isCustomOverride ? "CSR override" : field.status === "MATCH" || field.status === "INFO" ? "No update unless edited" : "Bot will propose"}
+          {isIncluded ? (isCustomOverride ? "CSR override" : "Included") : "Not included"}
         </span>
       </span>
+      <label className="mt-3 flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground">
+        <input
+          type="checkbox"
+          checked={isIncluded}
+          disabled={!hasProposedValue}
+          onChange={(event) => onEnabledChange(srNumber, field.key, event.target.checked)}
+          className="h-4 w-4 rounded border-input"
+        />
+        Include this field in the bot draft
+      </label>
       <textarea
         value={proposedValue}
         onChange={(event) => onChange(srNumber, field.key, event.target.value)}
@@ -2240,9 +2288,9 @@ function ProposedFieldUpdateCard({
         placeholder="Leave blank to skip this field update"
       />
       <span className="mt-2 block text-xs text-mutedForeground">
-        {helpText}
+        {hasProposedValue ? helpText : "Enter a bot value before this action can be included."}
       </span>
-    </label>
+    </div>
   );
 }
 
@@ -2339,7 +2387,8 @@ function ProductDimensionsTable({
   onDimensionChange,
   onAddPalletDraftLine,
   onRemovePalletDraftLine,
-  onPalletCommodityChange
+  onPalletCommodityChange,
+  onPalletBotActionEnabledChange
 }: {
   dimensions: GarlandTeamshipOrderReview["productDimensions"];
   items: GarlandPdfShippingOrder["items"];
@@ -2348,8 +2397,10 @@ function ProductDimensionsTable({
   onAddPalletDraftLine: (srNumber: string, line: NewPalletDraftLine) => void;
   onRemovePalletDraftLine: (srNumber: string, itemIndex: number) => void;
   onPalletCommodityChange: (srNumber: string, itemIndex: number, value: string) => void;
+  onPalletBotActionEnabledChange: (srNumber: string, itemIndex: number, enabled: boolean) => void;
 }) {
   const rows = buildEditablePalletRows(dimensions, items);
+  const includedCount = rows.filter((row) => row.item.botActionEnabled !== false).length;
   const readyCount = rows.filter((row) => row.dimension && hasCompleteDimensionValues(row.dimension)).length;
   const missingCount = rows.length - readyCount;
 
@@ -2376,10 +2427,13 @@ function ProductDimensionsTable({
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-mutedForeground">Pallet plan</p>
           <h3 className="mt-1 text-base font-semibold text-foreground">SKU dimensions and commodity lines for the Teamship bot</h3>
           <p className="mt-1 text-sm text-mutedForeground">
-            Every Garland SKU/SN line becomes a Teamship pallet commodity row. Missing DIMs do not remove the SKU/SN commodity update.
+            Choose which Garland SKU/SN rows the bot should add to Teamship. Missing DIMs do not remove an included SKU/SN commodity update.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-full bg-success/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-success">
+            {includedCount} included
+          </span>
           <span className="rounded-full bg-success/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-success">
             {readyCount} DIM sets ready
           </span>
@@ -2403,10 +2457,11 @@ function ProductDimensionsTable({
             const dimension = row.dimension;
             const hasDims = Boolean(dimension && hasCompleteDimensionValues(dimension));
             const sku = row.item.sku.trim().toUpperCase();
+            const isIncluded = row.item.botActionEnabled !== false;
 
             return (
-              <div key={`${row.itemIndex}-${sku}`} className="grid gap-4 px-4 py-4 lg:grid-cols-[6px,minmax(0,1fr)]">
-                <span className={hasDims ? "rounded-full bg-success" : "rounded-full bg-warning"} aria-hidden="true" />
+              <div key={`${row.itemIndex}-${sku}`} className={`grid gap-4 px-4 py-4 lg:grid-cols-[6px,minmax(0,1fr)] ${isIncluded ? "" : "bg-muted/20 opacity-75"}`}>
+                <span className={isIncluded ? (hasDims ? "rounded-full bg-success" : "rounded-full bg-warning") : "rounded-full bg-mutedForeground/40"} aria-hidden="true" />
                 <div className="min-w-0 space-y-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
@@ -2419,6 +2474,15 @@ function ProductDimensionsTable({
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
+                      <label className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground">
+                        <input
+                          type="checkbox"
+                          checked={isIncluded}
+                          onChange={(event) => onPalletBotActionEnabledChange(srNumber, row.itemIndex, event.target.checked)}
+                          className="h-4 w-4 rounded border-input"
+                        />
+                        Include in bot draft
+                      </label>
                       <span className={hasDims ? dimensionConfidenceClass(dimension!.confidence) : "rounded-full bg-warning/15 px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-warning"}>
                         {hasDims ? "DIMs + commodity ready" : "Commodity ready - DIMs missing"}
                       </span>
@@ -2499,7 +2563,7 @@ function ProductDimensionsTable({
                         </p>
                       </div>
                       <span className="rounded-full bg-background px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-mutedForeground">
-                        {row.item.commodityOverride?.trim() ? "CSR edited" : "Bot will add"}
+                        {isIncluded ? (row.item.commodityOverride?.trim() ? "CSR edited" : "Bot will add") : "Skipped"}
                       </span>
                     </div>
                   </div>
