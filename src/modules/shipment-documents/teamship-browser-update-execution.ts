@@ -395,13 +395,13 @@ async function clickAddAnotherPalletSize(page: Page) {
 
 async function fillPalletRows(page: Page, order: TeamshipPhase2OrderPlan) {
   const rows = order.plannedPalletRows.map((row) => ({
-    quantity: row.quantity,
-    lengthIn: row.lengthIn ?? 1,
-    widthIn: row.widthIn ?? 1,
-    heightIn: row.heightIn ?? 1,
-    weightLb: row.weightLb ?? 1,
+    quantity: normalizePositiveNumber(row.quantity, 1),
+    lengthIn: normalizePositiveNumber(row.lengthIn, 1),
+    widthIn: normalizePositiveNumber(row.widthIn, 1),
+    heightIn: normalizePositiveNumber(row.heightIn, 1),
+    weightLb: normalizePositiveNumber(row.weightLb, 1),
     weightUnit: row.weightUnit || "lbs",
-    commodity: row.commodity
+    commodity: row.commodity.trim() || `SKU: ${row.sku.trim().toUpperCase()}`
   }));
   const serializedRows = JSON.stringify(rows);
 
@@ -410,10 +410,10 @@ async function fillPalletRows(page: Page, order: TeamshipPhase2OrderPlan) {
       const rows = ${serializedRows};
       ${PALLET_DOM_HELPERS}
       const controls = collectPalletControls();
-      const controlsPerRow = 7;
+      const controlsPerRow = controls.length >= rows.length * 7 ? 7 : controls.length >= rows.length * 6 ? 6 : 0;
 
-      if (controls.length < rows.length * controlsPerRow) {
-        throw new Error("Not enough visible pallet controls. Found " + controls.length + ", expected " + rows.length * controlsPerRow + ".");
+      if (!controlsPerRow) {
+        throw new Error("Not enough visible pallet controls. Found " + controls.length + ", expected at least " + rows.length * 6 + ".");
       }
 
       for (const [index, row] of rows.entries()) {
@@ -423,11 +423,20 @@ async function fillPalletRows(page: Page, order: TeamshipPhase2OrderPlan) {
         setElementValue(controls[offset + 2], String(row.widthIn));
         setElementValue(controls[offset + 3], String(row.heightIn));
         setElementValue(controls[offset + 4], String(row.weightLb));
-        setElementValue(controls[offset + 5], row.weightUnit || "lbs");
-        setElementValue(controls[offset + 6], row.commodity);
+
+        if (controlsPerRow === 7) {
+          setElementValue(controls[offset + 5], row.weightUnit || "lbs");
+          setElementValue(controls[offset + 6], row.commodity);
+        } else {
+          setElementValue(controls[offset + 5], row.commodity);
+        }
       }
     })()
   `);
+}
+
+function normalizePositiveNumber(value: number | null | undefined, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 async function clickSave(page: Page) {
