@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   addPalletDraftLineToReviewState,
   removePalletDraftLineFromReviewState,
+  updatePalletBotActionEnabledInReviewState,
   updatePalletCommodityOverrideInReviewState,
+  updateReviewFieldBotActionEnabledInReviewState,
   updateReviewFieldProposedValueInReviewState
 } from "@/modules/shipment-documents/garland-teamship-review-client-state";
 import { buildTeamshipPhase2DryRunPlan } from "@/modules/shipment-documents/teamship-phase2-dry-run";
@@ -272,6 +274,50 @@ describe("Teamship Phase 2 dry-run planner", () => {
         pallet_1_commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908\nCSR NOTE: USE FRONT DOCK"
       })
     });
+  });
+
+  it("excludes unchecked shipment field bot actions from the dry-run payload", () => {
+    const review = sampleReview();
+    const nextReview = updateReviewFieldBotActionEnabledInReviewState({
+      review,
+      srNumber: "SR808478",
+      fieldKey: "freight_terms",
+      enabled: false
+    });
+
+    const plan = buildTeamshipPhase2DryRunPlan(nextReview!);
+
+    expect(nextReview?.reviews[0]?.fields[0]?.botActionEnabled).toBe(false);
+    expect(plan.summary.plannedFieldUpdateCount).toBe(0);
+    expect(plan.orders[0]?.plannedFieldUpdates).toEqual([]);
+  });
+
+  it("excludes unchecked pallet rows from the dry-run payload and renumbers included rows", () => {
+    const review = sampleReview();
+    const nextState = updatePalletBotActionEnabledInReviewState({
+      orders: review.pdfOrders,
+      review,
+      srNumber: "SR808478",
+      itemIndex: 0,
+      enabled: false
+    });
+
+    const plan = buildTeamshipPhase2DryRunPlan(nextState.review!);
+
+    expect(nextState.orders[0]?.items[0]?.botActionEnabled).toBe(false);
+    expect(plan.summary.plannedPalletRowCount).toBe(1);
+    expect(plan.orders[0]?.plannedPalletRows).toEqual([
+      expect.objectContaining({
+        rowNumber: 1,
+        sku: "8030445",
+        commodity: "SKU: 8030445 QTY: 4",
+        teamshipFields: expect.objectContaining({
+          pallets_count: 1,
+          pallet_1: 4,
+          pallet_1_commodity: "SKU: 8030445 QTY: 4"
+        })
+      })
+    ]);
   });
 });
 

@@ -131,7 +131,8 @@ function buildOrderPlan({
   }
 
   const plannedFieldUpdates = buildFieldUpdates(orderReview.fields);
-  const plannedPalletRows = pdfOrder.items.map((item, index) =>
+  const includedPalletItems = pdfOrder.items.filter((item) => item.botActionEnabled !== false);
+  const plannedPalletRows = includedPalletItems.map((item, index) =>
     buildPalletRowPlan({
       rowNumber: index + 1,
       item,
@@ -139,7 +140,7 @@ function buildOrderPlan({
       pdfOrder
     })
   );
-  const validationIssues = validateOrderPlan({ pdfOrder, plannedPalletRows });
+  const validationIssues = validateOrderPlan({ palletItems: includedPalletItems, plannedPalletRows });
   const status = validationIssues.length === 0 ? "READY" : "BLOCKED";
 
   return {
@@ -163,7 +164,12 @@ function buildFieldUpdates(fields: GarlandTeamshipReviewField[]) {
     const proposedValue = (field.proposedValue ?? field.pdfValue)?.trim();
     const hasCsrOverride = Boolean(field.proposedValue?.trim());
 
-    if (!teamshipField || !proposedValue || (!hasCsrOverride && field.status !== "DISCREPANCY" && field.status !== "MISSING")) {
+    if (
+      field.botActionEnabled === false ||
+      !teamshipField ||
+      !proposedValue ||
+      (!hasCsrOverride && field.status !== "DISCREPANCY" && field.status !== "MISSING")
+    ) {
       continue;
     }
 
@@ -254,18 +260,17 @@ function buildTeamshipPalletFields({
   return fields;
 }
 
-function validateOrderPlan({
-  pdfOrder,
-  plannedPalletRows
-}: {
-  pdfOrder: GarlandPdfShippingOrder;
-  plannedPalletRows: TeamshipPhase2PalletRowPlan[];
-}) {
+function validateOrderPlan({ palletItems, plannedPalletRows }: { palletItems: GarlandShippingOrderItem[]; plannedPalletRows: TeamshipPhase2PalletRowPlan[] }) {
   const issues: string[] = [];
 
-  pdfOrder.items.forEach((item, index) => {
+  palletItems.forEach((item, index) => {
     const row = plannedPalletRows[index];
     const sku = item.sku.trim().toUpperCase();
+
+    if (!row) {
+      issues.push(`No bot pallet row was prepared for SKU ${sku}.`);
+      return;
+    }
 
     if (!row.hasUsableDimensions) {
       issues.push(`No usable dimension/weight recommendation found for SKU ${sku}.`);
