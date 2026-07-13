@@ -524,9 +524,9 @@ function normalizePositiveNumber(value: number | null | undefined, fallback: num
 }
 
 async function tagPalletControls(page: Page, expectedRows: number): Promise<TaggedPalletControls> {
-  return page.evaluate(
-    String.raw`
-      ((expectedRows) => {
+  return page.evaluate(String.raw`
+      (() => {
+        const expectedRows = ${JSON.stringify(expectedRows)};
         ${PALLET_DOM_HELPERS}
         const controls = collectPalletControls();
         const controlsPerRow = controls.length >= expectedRows * 7 ? 7 : controls.length >= expectedRows * 6 ? 6 : 0;
@@ -544,10 +544,8 @@ async function tagPalletControls(page: Page, expectedRows: number): Promise<Tagg
           controlsPerRow,
           controlCount: controls.length
         };
-      })
-    `,
-    expectedRows
-  );
+      })()
+    `);
 }
 
 async function fillPalletControl(page: Page, index: number, value: string) {
