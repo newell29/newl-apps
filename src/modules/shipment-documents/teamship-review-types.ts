@@ -5,6 +5,7 @@ export type GarlandShippingOrderItem = {
   quantity: number | null;
   dueShipDate: string | null;
   serialNumbers: string[];
+  commodityOverride?: string | null;
 };
 
 export type GarlandPdfShippingOrder = {
@@ -160,6 +161,7 @@ export type GarlandTeamshipReviewField = {
   pdfValue: string | null;
   teamshipValue: string | null;
   message: string;
+  proposedValue?: string | null;
 };
 
 export type GarlandProductDimensionRecommendation = {

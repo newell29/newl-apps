@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   addPalletDraftLineToReviewState,
   removePalletDraftLineFromReviewState,
+  updatePalletCommodityOverrideInReviewState,
   updateReviewFieldProposedValueInReviewState,
   type GarlandTeamshipPalletDraftLine
 } from "@/modules/shipment-documents/garland-teamship-review-client-state";
@@ -778,6 +779,13 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     setReview(nextState.review);
   }
 
+  function updatePalletCommodityOverride(srNumber: string, itemIndex: number, value: string) {
+    const nextState = updatePalletCommodityOverrideInReviewState({ orders, review, srNumber, itemIndex, value });
+
+    setOrders(nextState.orders);
+    setReview(nextState.review);
+  }
+
   function updateReviewFieldProposedValue(srNumber: string, fieldKey: string, value: string) {
     setReview((current) =>
       updateReviewFieldProposedValueInReviewState({
@@ -1121,6 +1129,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         onProductDimensionChange={updateProductDimensionOverride}
         onAddPalletDraftLine={addPalletDraftLine}
         onRemovePalletDraftLine={removePalletDraftLine}
+        onPalletCommodityChange={updatePalletCommodityOverride}
         payloadInspections={payloadInspections}
         payloadInspectionErrors={payloadInspectionErrors}
         payloadInspectionLoadingSr={payloadInspectionLoadingSr}
@@ -1213,6 +1222,7 @@ function ShipmentReviewWorkspace({
   onProductDimensionChange,
   onAddPalletDraftLine,
   onRemovePalletDraftLine,
+  onPalletCommodityChange,
   payloadInspections,
   payloadInspectionErrors,
   payloadInspectionLoadingSr,
@@ -1250,6 +1260,7 @@ function ShipmentReviewWorkspace({
   onProductDimensionChange: (srNumber: string, sku: string, field: ProductDimensionEditField, rawValue: string) => void;
   onAddPalletDraftLine: (srNumber: string, line: NewPalletDraftLine) => void;
   onRemovePalletDraftLine: (srNumber: string, itemIndex: number) => void;
+  onPalletCommodityChange: (srNumber: string, itemIndex: number, value: string) => void;
   payloadInspections: Record<string, TeamshipPayloadInspectionResult>;
   payloadInspectionErrors: Record<string, string>;
   payloadInspectionLoadingSr: string | null;
@@ -1666,6 +1677,7 @@ function ShipmentReviewWorkspace({
                 onProductDimensionChange={onProductDimensionChange}
                 onAddPalletDraftLine={onAddPalletDraftLine}
                 onRemovePalletDraftLine={onRemovePalletDraftLine}
+                onPalletCommodityChange={onPalletCommodityChange}
                 payloadInspection={payloadInspection}
                 payloadInspectionError={payloadInspectionError}
               />
@@ -1941,6 +1953,7 @@ function ShipmentWorkspaceDetails({
   onProductDimensionChange,
   onAddPalletDraftLine,
   onRemovePalletDraftLine,
+  onPalletCommodityChange,
   payloadInspection,
   payloadInspectionError
 }: {
@@ -1949,6 +1962,7 @@ function ShipmentWorkspaceDetails({
   onProductDimensionChange: (srNumber: string, sku: string, field: ProductDimensionEditField, rawValue: string) => void;
   onAddPalletDraftLine: (srNumber: string, line: NewPalletDraftLine) => void;
   onRemovePalletDraftLine: (srNumber: string, itemIndex: number) => void;
+  onPalletCommodityChange: (srNumber: string, itemIndex: number, value: string) => void;
   payloadInspection: TeamshipPayloadInspectionResult | null;
   payloadInspectionError: string | null;
 }) {
@@ -1964,7 +1978,7 @@ function ShipmentWorkspaceDetails({
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-mutedForeground">Mismatch editor</p>
               <h3 className="mt-1 text-base font-semibold text-foreground">Review Teamship fields before the bot draft</h3>
               <p className="mt-1 text-sm text-mutedForeground">
-                Matches stay read-only. Missing or mismatched values show the Garland PDF value the bot will propose.
+                Edit the bot action when the CSR wants Teamship changed, even if the PDF and Teamship currently match.
               </p>
             </div>
             <span className={shipmentStatusPillClass(orderReview.status)}>
@@ -2002,6 +2016,7 @@ function ShipmentWorkspaceDetails({
           onDimensionChange={onProductDimensionChange}
           onAddPalletDraftLine={onAddPalletDraftLine}
           onRemovePalletDraftLine={onRemovePalletDraftLine}
+          onPalletCommodityChange={onPalletCommodityChange}
         />
       </div>
     );
@@ -2203,23 +2218,29 @@ function ProposedFieldUpdateCard({
   srNumber: string;
   onChange: (srNumber: string, fieldKey: string, value: string) => void;
 }) {
-  const isEditable = field.status !== "MATCH" && field.status !== "INFO";
-
-  if (!isEditable) {
-    return <ValuePreviewCard label="Bot action" value="No update needed" />;
-  }
+  const proposedValue = field.proposedValue ?? (field.status === "MATCH" || field.status === "INFO" ? "" : field.pdfValue ?? "");
+  const isCustomOverride = Boolean(field.proposedValue?.trim());
+  const helpText =
+    field.status === "MATCH" || field.status === "INFO"
+      ? "Leave blank for no bot update. Enter a value only if the CSR wants Teamship changed anyway."
+      : "Edit this if the Garland PDF value needs a CSR override before creating the Teamship bot draft.";
 
   return (
     <label className="rounded-xl border border-primary/25 bg-primary/5 p-3">
-      <span className="text-xs font-bold uppercase tracking-wide text-mutedForeground">Proposed bot value</span>
+      <span className="flex flex-wrap items-center justify-between gap-2 text-xs font-bold uppercase tracking-wide text-mutedForeground">
+        <span>Bot action</span>
+        <span className={isCustomOverride ? "rounded-full bg-primary/10 px-2 py-0.5 text-primary" : "rounded-full bg-background px-2 py-0.5"}>
+          {isCustomOverride ? "CSR override" : field.status === "MATCH" || field.status === "INFO" ? "No update unless edited" : "Bot will propose"}
+        </span>
+      </span>
       <textarea
-        value={field.pdfValue ?? ""}
+        value={proposedValue}
         onChange={(event) => onChange(srNumber, field.key, event.target.value)}
         className="mt-2 min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-semibold text-foreground"
         placeholder="Leave blank to skip this field update"
       />
       <span className="mt-2 block text-xs text-mutedForeground">
-        Edit this if the Garland PDF value needs a CSR override before creating the Teamship bot draft.
+        {helpText}
       </span>
     </label>
   );
@@ -2317,7 +2338,8 @@ function ProductDimensionsTable({
   srNumber,
   onDimensionChange,
   onAddPalletDraftLine,
-  onRemovePalletDraftLine
+  onRemovePalletDraftLine,
+  onPalletCommodityChange
 }: {
   dimensions: GarlandTeamshipOrderReview["productDimensions"];
   items: GarlandPdfShippingOrder["items"];
@@ -2325,6 +2347,7 @@ function ProductDimensionsTable({
   onDimensionChange: (srNumber: string, sku: string, field: ProductDimensionEditField, rawValue: string) => void;
   onAddPalletDraftLine: (srNumber: string, line: NewPalletDraftLine) => void;
   onRemovePalletDraftLine: (srNumber: string, itemIndex: number) => void;
+  onPalletCommodityChange: (srNumber: string, itemIndex: number, value: string) => void;
 }) {
   const rows = buildEditablePalletRows(dimensions, items);
   const readyCount = rows.filter((row) => row.dimension && hasCompleteDimensionValues(row.dimension)).length;
@@ -2460,12 +2483,23 @@ function ProductDimensionsTable({
 
                   <div className="rounded-xl border border-border bg-muted/20 p-3">
                     <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-bold uppercase tracking-wide text-mutedForeground">Commodity text for Teamship</p>
-                        <pre className="mt-2 whitespace-pre-wrap text-sm font-semibold text-foreground">{buildCommodityPreview(row.item)}</pre>
+                      <div className="min-w-0 flex-1">
+                        <label className="text-xs font-bold uppercase tracking-wide text-mutedForeground" htmlFor={`commodity-${srNumber}-${row.itemIndex}`}>
+                          Commodity text for Teamship
+                        </label>
+                        <textarea
+                          id={`commodity-${srNumber}-${row.itemIndex}`}
+                          value={row.item.commodityOverride ?? buildCommodityPreview(row.item)}
+                          onChange={(event) => onPalletCommodityChange(srNumber, row.itemIndex, event.target.value)}
+                          className="mt-2 min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm font-semibold text-foreground"
+                          placeholder="SKU: XXXXX SN: XXXXX"
+                        />
+                        <p className="mt-2 text-xs text-mutedForeground">
+                          Edit this before creating the bot draft if Teamship should receive different pallet commodity text.
+                        </p>
                       </div>
                       <span className="rounded-full bg-background px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-mutedForeground">
-                        Bot will add
+                        {row.item.commodityOverride?.trim() ? "CSR edited" : "Bot will add"}
                       </span>
                     </div>
                   </div>

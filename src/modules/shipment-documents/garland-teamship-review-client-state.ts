@@ -152,6 +152,56 @@ export function removePalletDraftLineFromReviewState({
   };
 }
 
+export function updatePalletCommodityOverrideInReviewState({
+  orders,
+  review,
+  srNumber,
+  itemIndex,
+  value
+}: {
+  orders: GarlandPdfShippingOrder[];
+  review: GarlandTeamshipReviewResponse | null;
+  srNumber: string;
+  itemIndex: number;
+  value: string;
+}) {
+  const normalizedSrNumber = normalizeIdentifier(srNumber);
+  const nextValue = value.trim().length > 0 ? value : null;
+
+  if (!normalizedSrNumber || itemIndex < 0) {
+    return { orders, review };
+  }
+
+  const updateOrder = (order: GarlandPdfShippingOrder) =>
+    normalizeIdentifier(order.srNumber) === normalizedSrNumber
+      ? {
+          ...order,
+          items: order.items.map((item, index) =>
+            index === itemIndex
+              ? {
+                  ...item,
+                  commodityOverride: nextValue
+                }
+              : item
+          )
+        }
+      : order;
+
+  const nextOrders = orders.map(updateOrder);
+
+  if (!review) {
+    return { orders: nextOrders, review };
+  }
+
+  return {
+    orders: nextOrders,
+    review: {
+      ...review,
+      pdfOrders: review.pdfOrders.map(updateOrder)
+    }
+  };
+}
+
 export function updateReviewFieldProposedValueInReviewState({
   review,
   srNumber,
@@ -182,7 +232,7 @@ export function updateReviewFieldProposedValueInReviewState({
               normalizeIdentifier(field.key) === normalizedFieldKey
                 ? {
                     ...field,
-                    pdfValue: nextValue
+                    proposedValue: nextValue
                   }
                 : field
             )
