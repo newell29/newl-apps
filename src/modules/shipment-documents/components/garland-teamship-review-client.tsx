@@ -154,6 +154,7 @@ type TeamshipReviewWorkflowStatus = "NEEDS_SETUP" | "READY_TO_PRINT" | "BOL_PRIN
 type ProductDimensionEditField = "quantity" | "lengthIn" | "widthIn" | "heightIn" | "weightLb";
 type WorkspaceQueueFilter = "ALL" | "ISSUES" | "APPROVED" | "PENDING" | "NO_PDF" | "NEEDS_SETUP" | "READY_TO_PRINT" | "BOL_PRINTED";
 type NewPalletDraftLine = GarlandTeamshipPalletDraftLine;
+type TeamshipProcessingPhase = "READ_PDF" | "SYNC_TEAMSHIP" | "RUN_REVIEW" | "RESCAN_TEAMSHIP";
 
 type ShipmentWorkspaceRow = {
   id: string;
@@ -218,6 +219,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [processingPhase, setProcessingPhase] = useState<TeamshipProcessingPhase | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [isUpdateJobLoading, setIsUpdateJobLoading] = useState(false);
@@ -252,6 +254,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     setDailySyncSummary(null);
     setError(null);
     setIsProcessing(true);
+    setProcessingPhase("READ_PDF");
     setStatus(`Reading embedded PDF text from ${files.length} Garland attachment${files.length === 1 ? "" : "s"}...`);
 
     try {
@@ -278,6 +281,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       setStatus("PDF extraction stopped before Teamship review.");
     } finally {
       setIsProcessing(false);
+      setProcessingPhase(null);
     }
   }
 
@@ -323,6 +327,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       }
 
       setIsProcessing(true);
+      setProcessingPhase(srNumber || rescan ? "RESCAN_TEAMSHIP" : "RUN_REVIEW");
       setStatus(srNumber ? `Rescanning Teamship details for ${srNumber}...` : "Fetching Teamship orders and comparing reviewed fields...");
 
       const response = await fetch("/api/shipment-documents/teamship-review/run", {
@@ -358,6 +363,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       setStatus("Teamship review stopped before results were created.");
     } finally {
       setIsProcessing(false);
+      setProcessingPhase(null);
     }
   }
 
@@ -575,6 +581,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     setDailySyncSummary(null);
     setDailyOrders([]);
     setIsProcessing(true);
+    setProcessingPhase("SYNC_TEAMSHIP");
     setStatus(`Pulling missing Garland Teamship orders from ${syncDateFrom} to ${syncDateTo}...`);
 
     try {
@@ -605,6 +612,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       setStatus("Teamship daily-order sync stopped.");
     } finally {
       setIsProcessing(false);
+      setProcessingPhase(null);
     }
   }
 
@@ -987,32 +995,36 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
           </div>
         ) : null}
 
-        <div className="flex flex-wrap items-center gap-3 border-t border-border px-5 py-4">
-          <button
-            type="button"
-            onClick={() => void runReview()}
-            disabled={isProcessing || pdfBatches.length === 0}
-            className="rounded-md bg-primary px-5 py-2.5 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Run Teamship review
-          </button>
-          <button
-            type="button"
-            onClick={() => void runReview({ rescan: true })}
-            disabled={isProcessing || pdfBatches.length === 0}
-            className="rounded-md border border-border px-5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Rescan Teamship details
-          </button>
-          <button
-            type="button"
-            onClick={() => void fetchDailyOrders()}
-            disabled={isProcessing}
-            className="rounded-md border border-border px-5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Pull missing Teamship orders
-          </button>
-          <p className="text-sm text-mutedForeground">{status}</p>
+        <div className="space-y-4 border-t border-border px-5 py-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void runReview()}
+              disabled={isProcessing || pdfBatches.length === 0}
+              className="rounded-md bg-primary px-5 py-2.5 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {processingPhase === "RUN_REVIEW" ? "Checking PDF vs Teamship..." : "Run Teamship review"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void runReview({ rescan: true })}
+              disabled={isProcessing || pdfBatches.length === 0}
+              className="rounded-md border border-border px-5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {processingPhase === "RESCAN_TEAMSHIP" ? "Rescanning Teamship..." : "Rescan Teamship details"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void fetchDailyOrders()}
+              disabled={isProcessing}
+              className="rounded-md border border-border px-5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {processingPhase === "SYNC_TEAMSHIP" ? "Pulling Teamship orders..." : "Pull missing Teamship orders"}
+            </button>
+            <p className="text-sm text-mutedForeground">{status}</p>
+          </div>
+
+          {isProcessing && processingPhase ? <TeamshipProcessingBanner phase={processingPhase} status={status} /> : null}
         </div>
 
         <div className="grid gap-4 border-t border-border bg-muted/20 p-5 md:grid-cols-2">
@@ -1663,6 +1675,62 @@ function ShipmentReviewWorkspace({
       </div>
     </section>
   );
+}
+
+function TeamshipProcessingBanner({ phase, status }: { phase: TeamshipProcessingPhase; status: string }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="rounded-2xl border border-primary/20 bg-primary/5 p-4 shadow-sm"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-foreground">{formatProcessingPhaseTitle(phase)}</p>
+          <p className="mt-1 text-xs text-mutedForeground">{formatProcessingPhaseDescription(phase)}</p>
+        </div>
+        <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-primary">
+          Working
+        </span>
+      </div>
+      <p className="mt-3 text-sm font-semibold text-foreground">{status}</p>
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-primary/10">
+        <div className="h-full w-full origin-left animate-pulse rounded-full bg-primary" />
+      </div>
+    </div>
+  );
+}
+
+function formatProcessingPhaseTitle(phase: TeamshipProcessingPhase) {
+  if (phase === "READ_PDF") {
+    return "Reading Garland PDFs";
+  }
+
+  if (phase === "SYNC_TEAMSHIP") {
+    return "Fetching Teamship orders";
+  }
+
+  if (phase === "RESCAN_TEAMSHIP") {
+    return "Refreshing Teamship details";
+  }
+
+  return "Checking PDF against Teamship";
+}
+
+function formatProcessingPhaseDescription(phase: TeamshipProcessingPhase) {
+  if (phase === "READ_PDF") {
+    return "Extracting PS, SR, SKU, serial, and shipment fields from the uploaded attachments.";
+  }
+
+  if (phase === "SYNC_TEAMSHIP") {
+    return "Pulling Garland orders for the selected date range and adding only missing records.";
+  }
+
+  if (phase === "RESCAN_TEAMSHIP") {
+    return "Reloading saved Teamship data without deleting existing matched PDF review results.";
+  }
+
+  return "Fetching matching Teamship orders and comparing them against the Garland PDF fields.";
 }
 
 function TeamshipUpdateJobsPanel({
