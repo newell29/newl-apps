@@ -3596,7 +3596,7 @@ function buildWorkspaceStats(rows: ShipmentWorkspaceRow[], updateJobs: TeamshipU
         stats.complete += 1;
       } else if (workflowStatus === "READY_TO_PRINT") {
         stats.readyToPrint += 1;
-      } else if (workflowStatus === "NO_PDF") {
+      } else if (isMissingGarlandPdf(row, workflowStatus)) {
         stats.noPdf += 1;
       } else if (
         row.status === "FAIL" ||
@@ -3849,6 +3849,10 @@ export function rowMatchesWorkspaceFilters({
   return searchText.includes(normalizedSearch) || compactSearchText(searchText).includes(compactSearchText(normalizedSearch));
 }
 
+function isMissingGarlandPdf(row: ShipmentWorkspaceRow, workflowStatus: TeamshipReviewWorkflowStatus) {
+  return workflowStatus === "NO_PDF" || row.status === "NO_PDF" || Boolean(row.teamshipOrder && !row.pdfOrder);
+}
+
 function rowMatchesWorkspaceStatusFilter(
   row: ShipmentWorkspaceRow,
   filter: WorkspaceQueueFilter,
@@ -3871,7 +3875,7 @@ function rowMatchesWorkspaceStatusFilter(
   }
 
   if (filter === "NO_PDF") {
-    return row.status === "NO_PDF" || workflowStatus === "NO_PDF";
+    return isMissingGarlandPdf(row, workflowStatus);
   }
 
   return workflowStatus === filter;
