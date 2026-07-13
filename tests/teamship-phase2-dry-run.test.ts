@@ -97,16 +97,16 @@ describe("Teamship Phase 2 dry-run planner", () => {
     });
   });
 
-  it("formats multiple serials as separate commodity lines", () => {
+  it("formats multiple serials under one SKU in the commodity line", () => {
     const review = sampleReview();
     review.pdfOrders[0]!.items[0]!.serialNumbers = ["2604816191908", "2604816191909"];
 
     const plan = buildTeamshipPhase2DryRunPlan(review);
 
     expect(plan.orders[0]?.plannedPalletRows[0]).toMatchObject({
-      commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908\nSKU: E1SGHMV6XHU3US SN: 2604816191909",
+      commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908, 2604816191909",
       teamshipFields: expect.objectContaining({
-        pallet_1_commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908\nSKU: E1SGHMV6XHU3US SN: 2604816191909"
+        pallet_1_commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908, 2604816191909"
       })
     });
   });

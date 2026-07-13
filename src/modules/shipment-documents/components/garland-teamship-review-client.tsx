@@ -4137,7 +4137,7 @@ function buildCommodityPreview(item: GarlandPdfShippingOrder["items"][number]) {
   const serialNumbers = uniqueClientStrings(item.serialNumbers);
 
   if (serialNumbers.length > 0) {
-    return serialNumbers.map((serialNumber) => `SKU: ${sku} SN: ${serialNumber}`).join("\n");
+    return `SKU: ${sku} SN: ${serialNumbers.join(", ")}`;
   }
 
   return `SKU: ${sku} QTY: ${quantity}`;

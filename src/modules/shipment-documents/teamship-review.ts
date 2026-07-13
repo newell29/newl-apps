@@ -1142,20 +1142,14 @@ function collectTeamshipSerialStrings(order: TeamshipShippingOrderDetail) {
 
 function extractSerialsFromText(value: string) {
   const serials: string[] = [];
-  const patterns = [
-    /\b(?:serial|serial\s*number|sn)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{5,})\b/gi,
-    /\bSN\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{5,})\b/gi
-  ];
+  const serialSectionPattern = /\b(?:serial|serial\s*number|sn)\s*[:#-]?\s*([^\n;]+)/gi;
 
-  for (const pattern of patterns) {
-    for (const match of value.matchAll(pattern)) {
-      if (match[1]) {
-        serials.push(match[1]);
-      }
-    }
+  for (const match of value.matchAll(serialSectionPattern)) {
+    const section = match[1] ?? "";
+    serials.push(...(section.match(/\b[A-Z0-9][A-Z0-9-]{5,}\b/gi) ?? []));
   }
 
-  return serials;
+  return uniqueStrings(serials.map((serial) => serial.trim()).filter(Boolean));
 }
 
 function isSerialLikeKey(key: string) {
