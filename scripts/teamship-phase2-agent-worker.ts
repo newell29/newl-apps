@@ -16,7 +16,7 @@ type WorkerOptions = {
   browserExecutablePath: string | null;
   browserHeaded: boolean;
   browserScreenshotRootDir: string | null;
-  browserAllowedHosts: string[];
+  browserAllowedHosts: string[] | undefined;
   loop: boolean;
   intervalMs: number;
 };
@@ -252,7 +252,7 @@ function readOptions(args: string[]): WorkerOptions {
   const browserHeaded = args.includes("--headed") || process.env.TEAMSHIP_BROWSER_HEADED === "true";
   const browserScreenshotRootDir =
     readStringOption(args, "--screenshot-dir") ?? process.env.TEAMSHIP_BROWSER_SCREENSHOT_DIR ?? null;
-  const browserAllowedHosts = readListOption(args, "--browser-allowed-host", process.env.TEAMSHIP_BROWSER_ALLOWED_HOSTS);
+  const browserAllowedHosts = readOptionalListOption(args, "--browser-allowed-host", process.env.TEAMSHIP_BROWSER_ALLOWED_HOSTS);
   const loop = args.includes("--loop") || process.env.TEAMSHIP_AGENT_LOOP === "true";
   const intervalMs = readPositiveNumber(readStringOption(args, "--interval-ms") ?? process.env.TEAMSHIP_AGENT_INTERVAL_MS, 30_000);
 
@@ -293,6 +293,11 @@ function readListOption(args: string[], name: string, fallback: string | undefin
     .flatMap((value) => value.split(","))
     .map((value) => value.trim())
     .filter(Boolean);
+}
+
+function readOptionalListOption(args: string[], name: string, fallback: string | undefined) {
+  const values = readListOption(args, name, fallback);
+  return values.length > 0 ? values : undefined;
 }
 
 function readMode(value: string): WorkerOptions["mode"] {
