@@ -1,12 +1,15 @@
 import { ModuleKey } from "@prisma/client";
 import { NextResponse } from "next/server";
 
-import { parseTeamshipAlertDigest } from "@/modules/shipment-documents/teamship-review";
+import { buildGarlandTeamshipReview, parseTeamshipAlertDigest } from "@/modules/shipment-documents/teamship-review";
 import {
   getTeamshipReviewHistory,
   saveTeamshipReviewRun
 } from "@/modules/shipment-documents/teamship-review-history";
-import type { GarlandTeamshipReviewResponse } from "@/modules/shipment-documents/teamship-review-types";
+import type {
+  GarlandTeamshipReviewResponse,
+  TeamshipShippingOrderDetail
+} from "@/modules/shipment-documents/teamship-review-types";
 import { requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
@@ -17,6 +20,7 @@ type SaveTeamshipReviewPayload = {
   shipmentDate?: unknown;
   sourcePdfFileName?: unknown;
   review?: unknown;
+  teamshipOrders?: unknown;
   alertDigest?: unknown;
 };
 
@@ -57,8 +61,9 @@ export async function POST(request: Request) {
     const shipmentDateInput = readRequiredString(body.shipmentDate, "shipmentDate");
     const shipmentDate = parseShipmentDate(shipmentDateInput);
     const sourcePdfFileName = readOptionalString(body.sourcePdfFileName);
-    const review = readReviewResponse(body.review);
     const alertDigest = readOptionalString(body.alertDigest) ?? "";
+    const teamshipAlerts = parseTeamshipAlertDigest(alertDigest);
+    const review = readReviewResponse(body.review) ?? buildTeamshipOnlyReview(body.teamshipOrders, teamshipAlerts);
 
     await saveTeamshipReviewRun({
       context,
@@ -66,7 +71,7 @@ export async function POST(request: Request) {
       shipmentDate,
       sourcePdfFileName,
       review,
-      alertDigestOrderCount: parseTeamshipAlertDigest(alertDigest).length
+      alertDigestOrderCount: teamshipAlerts.length
     });
 
     const history = await getTeamshipReviewHistory(context, {
@@ -109,7 +114,11 @@ function readOptionalString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-function readReviewResponse(value: unknown): GarlandTeamshipReviewResponse {
+function readReviewResponse(value: unknown): GarlandTeamshipReviewResponse | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
   if (
     !value ||
     typeof value !== "object" ||
@@ -123,4 +132,24 @@ function readReviewResponse(value: unknown): GarlandTeamshipReviewResponse {
   }
 
   return value as GarlandTeamshipReviewResponse;
+}
+
+function buildTeamshipOnlyReview(teamshipOrdersValue: unknown, teamshipAlerts: ReturnType<typeof parseTeamshipAlertDigest>) {
+  const teamshipOrders = readTeamshipOrders(teamshipOrdersValue);
+
+  if (teamshipOrders.length === 0) {
+    throw new Error("Run a Teamship sync or complete a Garland PDF review before saving.");
+  }
+
+  return buildGarlandTeamshipReview([], teamshipOrders, teamshipAlerts, {
+    includeUnmatchedTeamshipOrders: true
+  });
+}
+
+function readTeamshipOrders(value: unknown): TeamshipShippingOrderDetail[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((order): order is TeamshipShippingOrderDetail => Boolean(order && typeof order === "object"));
 }

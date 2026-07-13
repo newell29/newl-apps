@@ -413,6 +413,9 @@ export async function getReviewedTeamshipSrNumbers(context: AuthenticatedContext
       srNumber: {
         in: normalizedSrNumbers
       },
+      status: {
+        in: ["PASS", "FAIL"]
+      },
       run: {
         tenantId: context.tenantId,
         workflowKey: WORKFLOW_KEY,
