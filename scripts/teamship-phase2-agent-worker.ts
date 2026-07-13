@@ -17,6 +17,7 @@ type WorkerOptions = {
   browserHeaded: boolean;
   browserSlowMoMs: number;
   browserErrorPauseMs: number;
+  browserFieldUpdatesEnabled: boolean;
   browserBolCleanupEnabled: boolean;
   browserScreenshotRootDir: string | null;
   browserAllowedHosts: string[] | undefined;
@@ -141,6 +142,7 @@ async function executeJob({
         headed: options.browserHeaded,
         slowMoMs: options.browserSlowMoMs,
         errorPauseMs: options.browserErrorPauseMs,
+        fieldUpdatesEnabled: options.browserFieldUpdatesEnabled,
         bolCleanupEnabled: options.browserBolCleanupEnabled,
         screenshotRootDir: options.browserScreenshotRootDir,
         allowedHosts: options.browserAllowedHosts
@@ -266,6 +268,10 @@ function readOptions(args: string[]): WorkerOptions {
     readStringOption(args, "--browser-error-pause-ms") ?? process.env.TEAMSHIP_BROWSER_ERROR_PAUSE_MS,
     browserPauseOnError ? 600_000 : 0
   );
+  const browserFieldUpdatesEnabled =
+    args.includes("--field-updates") ||
+    process.env.TEAMSHIP_BROWSER_FIELD_UPDATES === "true" ||
+    process.env.TEAMSHIP_BROWSER_ENABLE_FIELD_UPDATES === "true";
   const browserBolCleanupEnabled =
     args.includes("--bol-cleanup") ||
     process.env.TEAMSHIP_BROWSER_BOL_CLEANUP === "true" ||
@@ -295,6 +301,7 @@ function readOptions(args: string[]): WorkerOptions {
     browserHeaded,
     browserSlowMoMs,
     browserErrorPauseMs,
+    browserFieldUpdatesEnabled,
     browserBolCleanupEnabled,
     browserScreenshotRootDir,
     browserAllowedHosts,
