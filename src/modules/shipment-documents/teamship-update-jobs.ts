@@ -671,7 +671,7 @@ function normalizeJobStatus(value: string): TeamshipUpdateJobStatus {
 }
 
 function normalizeAgentMode(value: TeamshipPhase2AgentMode | null | undefined): TeamshipPhase2AgentMode {
-  return value === "LIVE_API" ? "LIVE_API" : "DRY_RUN";
+  return value === "DRY_RUN" ? "DRY_RUN" : "LIVE_API";
 }
 
 function normalizeOrderStatus(value: string): TeamshipUpdateOrderStatus {

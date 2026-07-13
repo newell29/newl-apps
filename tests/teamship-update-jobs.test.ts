@@ -110,6 +110,43 @@ describe("Teamship update jobs", () => {
     });
   });
 
+  it("defaults new update drafts to live Teamship mode when no mode is provided", async () => {
+    const job = {
+      ...sampleCreatedJob(),
+      agentMode: "LIVE_API",
+      dryRun: false
+    };
+    prismaMock.teamshipUpdateJob.create.mockResolvedValue(job);
+
+    await createTeamshipUpdateJob(
+      {
+        tenantId: "tenant-1",
+        tenantSlug: "newl",
+        tenantName: "Newl",
+        userId: "user-1",
+        userEmail: "alex.newell@newl.ca",
+        userName: "Alex Newell",
+        role: "ADMIN"
+      },
+      {
+        documentLabel: "July 11, 2026",
+        shipmentDate: "2026-07-11",
+        sourcePdfFileName: "garland.pdf",
+        selectedSrNumbers: ["SR808478"],
+        review: sampleReviewWithCsrOverride()
+      }
+    );
+
+    expect(prismaMock.teamshipUpdateJob.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          agentMode: "LIVE_API",
+          dryRun: false
+        })
+      })
+    );
+  });
+
   it("records CSR-entered dimensions in the product directory when creating an update draft", async () => {
     const job = sampleCreatedJob();
     prismaMock.teamshipUpdateJob.create.mockResolvedValue(job);
