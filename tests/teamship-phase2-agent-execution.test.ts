@@ -79,7 +79,8 @@ PROPER NAME: UN1814`;
               status: "MATCH",
               pdfValue: messyInstructions,
               teamshipValue: messyInstructions,
-              message: "Values match."
+              message: "Values match.",
+              botActionEnabled: true
             }
           ]
         }
@@ -436,7 +437,8 @@ function sampleReview(): GarlandTeamshipReviewResponse {
             status: "MISSING",
             pdfValue: "PPADD-CD",
             teamshipValue: null,
-            message: "PDF has a value, but Teamship does not."
+            message: "PDF has a value, but Teamship does not.",
+            botActionEnabled: true
           }
         ],
         pdfItems: [
