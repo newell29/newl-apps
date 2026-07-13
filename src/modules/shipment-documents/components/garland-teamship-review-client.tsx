@@ -230,6 +230,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
 
   const parsedAlertCount = useMemo(() => parseTeamshipAlertDigest(alertDigest).length, [alertDigest]);
   const sourcePdfFileName = useMemo(() => formatSourcePdfFileNames(pdfBatches), [pdfBatches]);
+  const canSaveCurrentQueue = Boolean(review || dailyOrders.length > 0);
   const workspaceRows = useMemo(
     () => buildShipmentWorkspaceRows({ review, pdfOrders: orders, teamshipOrders: dailyOrders }),
     [review, orders, dailyOrders]
@@ -611,8 +612,8 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     setError(null);
     setSaveStatus(null);
 
-    if (!review) {
-      setError("Run the Teamship review before saving it to history.");
+    if (!canSaveCurrentQueue) {
+      setError("Pull Teamship orders or run the Garland PDF review before saving.");
       return;
     }
 
@@ -635,6 +636,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
           shipmentDate,
           sourcePdfFileName,
           review,
+          teamshipOrders: review ? undefined : dailyOrders,
           alertDigest
         })
       });
@@ -1071,6 +1073,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         teamshipOrderCount={dailyOrderCount ?? dailyOrders.length}
         syncSummary={dailySyncSummary}
         isSaving={isSaving}
+        canSave={canSaveCurrentQueue}
         saveStatus={saveStatus}
         onSave={() => void saveRunToHistory()}
         onDownloadSummary={() => void downloadReviewSummaryPdf()}
@@ -1172,6 +1175,7 @@ function ShipmentReviewWorkspace({
   teamshipOrderCount,
   syncSummary,
   isSaving,
+  canSave,
   saveStatus,
   onSave,
   onDownloadSummary,
@@ -1208,6 +1212,7 @@ function ShipmentReviewWorkspace({
   teamshipOrderCount: number;
   syncSummary: DailyOrdersResponse["sync"] | null;
   isSaving: boolean;
+  canSave: boolean;
   saveStatus: string | null;
   onSave: () => void;
   onDownloadSummary: () => void;
@@ -1320,65 +1325,66 @@ function ShipmentReviewWorkspace({
           <div>
             <h3 className="text-sm font-semibold text-foreground">Daily actions</h3>
             <p className="mt-1 max-w-2xl text-sm text-mutedForeground">
-              Saving the review records the current state only. Bot drafts are separate and only use the shipments you select here.
+              Save the Teamship queue as soon as orders are pulled, even if Garland PDFs arrive later. A later PDF review will match against
+              these saved Teamship orders without overwriting completed PDF-vs-Teamship checks.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setExpandedRowIds(new Set(visibleRows.map((row) => row.id)))}
-            disabled={visibleRows.length === 0}
-            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Expand visible
-          </button>
-          <button
-            type="button"
-            onClick={() => setExpandedRowIds(new Set())}
-            disabled={rows.length === 0}
-            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Collapse all
-          </button>
-          <button
-            type="button"
-            onClick={onDownloadSummary}
-            disabled={!review}
-            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Download summary PDF
-          </button>
-          <button
-            type="button"
-            onClick={onDownloadSkuDirectory}
-            disabled={!review}
-            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Download SKU directory CSV
-          </button>
-          <button
-            type="button"
-            onClick={onSave}
-            disabled={isSaving || !review}
-            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isSaving ? "Saving..." : "Save review run"}
-          </button>
+            <button
+              type="button"
+              onClick={() => setExpandedRowIds(new Set(visibleRows.map((row) => row.id)))}
+              disabled={visibleRows.length === 0}
+              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Expand visible
+            </button>
+            <button
+              type="button"
+              onClick={() => setExpandedRowIds(new Set())}
+              disabled={rows.length === 0}
+              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Collapse all
+            </button>
+            <button
+              type="button"
+              onClick={onDownloadSummary}
+              disabled={!review}
+              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Download summary PDF
+            </button>
+            <button
+              type="button"
+              onClick={onDownloadSkuDirectory}
+              disabled={!review}
+              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Download SKU directory CSV
+            </button>
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={isSaving || !canSave}
+              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSaving ? "Saving..." : review ? "Save review run" : "Save Teamship queue"}
+            </button>
           </div>
         </div>
       </div>
 
       <div className="border-b border-border bg-card p-5">
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),auto]">
-          <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr),220px,auto]">
+        <div className="space-y-4">
+          <div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr),220px,auto] lg:items-end">
             <input
               value={workspaceSearch}
               onChange={(event) => setWorkspaceSearch(event.target.value)}
               placeholder="Search PS, SR, Teamship order, recipient, carrier, city, SKU, serial, or status"
               className="min-w-0 rounded-xl border border-input bg-background px-4 py-3 text-sm shadow-sm"
             />
-            <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
-              Queue view
+            <label className="block text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+              <span className="mb-1 block">Queue view</span>
               <select
                 value={workspaceFilter}
                 onChange={(event) => setWorkspaceFilter(event.target.value as WorkspaceQueueFilter)}
@@ -1394,8 +1400,8 @@ function ShipmentReviewWorkspace({
                 <option value="BOL_PRINTED">BOL printed</option>
               </select>
             </label>
-            <div className="flex items-end gap-2">
-              <span className="rounded-full bg-muted px-3 py-3 text-xs font-bold uppercase tracking-wide text-mutedForeground">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-muted px-3 py-2 text-xs font-bold uppercase tracking-wide text-mutedForeground">
                 {visibleRows.length}/{rows.length} visible
               </span>
               <button
@@ -1412,47 +1418,47 @@ function ShipmentReviewWorkspace({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-end gap-2 xl:justify-end">
-          <button
-            type="button"
-            onClick={() => onReplaceUpdateSelection(visibleIssueSrNumbers)}
-            disabled={isUpdateJobLoading || visibleIssueSrNumbers.length === 0}
-            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Select visible issues ({visibleIssueSrNumbers.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => onReplaceUpdateSelection(visibleEligibleSrNumbers)}
-            disabled={isUpdateJobLoading || visibleEligibleSrNumbers.length === 0}
-            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Select visible drafts ({visibleEligibleSrNumbers.length})
-          </button>
-          <button
-            type="button"
-            onClick={onSelectIssueShipments}
-            disabled={isUpdateJobLoading || issueEligibleCount === 0}
-            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Select all issues ({issueEligibleCount})
-          </button>
-          <button
-            type="button"
-            onClick={onSelectAllEligibleShipments}
-            disabled={isUpdateJobLoading || eligibleCount === 0}
-            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Select all drafts ({eligibleCount})
-          </button>
-          <button
-            type="button"
-            onClick={onClearSelectedShipments}
-            disabled={isUpdateJobLoading || selectedCount === 0}
-            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Clear selection
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => onReplaceUpdateSelection(visibleIssueSrNumbers)}
+              disabled={isUpdateJobLoading || visibleIssueSrNumbers.length === 0}
+              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Select visible issues ({visibleIssueSrNumbers.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => onReplaceUpdateSelection(visibleEligibleSrNumbers)}
+              disabled={isUpdateJobLoading || visibleEligibleSrNumbers.length === 0}
+              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Select visible drafts ({visibleEligibleSrNumbers.length})
+            </button>
+            <button
+              type="button"
+              onClick={onSelectIssueShipments}
+              disabled={isUpdateJobLoading || issueEligibleCount === 0}
+              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Select all issues ({issueEligibleCount})
+            </button>
+            <button
+              type="button"
+              onClick={onSelectAllEligibleShipments}
+              disabled={isUpdateJobLoading || eligibleCount === 0}
+              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Select all drafts ({eligibleCount})
+            </button>
+            <button
+              type="button"
+              onClick={onClearSelectedShipments}
+              disabled={isUpdateJobLoading || selectedCount === 0}
+              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Clear selection
+            </button>
           </div>
         </div>
       </div>
@@ -1472,30 +1478,30 @@ function ShipmentReviewWorkspace({
             </select>
           </label>
           <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => onCreateUpdateJobForSrNumbers(visibleIssueSrNumbers)}
-            disabled={isUpdateJobLoading || !review || visibleIssueSrNumbers.length === 0}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Create visible issue draft ({visibleIssueSrNumbers.length})
-          </button>
-          <button
-            type="button"
-            onClick={onCreateIssueUpdateJob}
-            disabled={isUpdateJobLoading || !review || issueEligibleCount === 0}
-            className="rounded-md border border-primary/40 px-4 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Create draft for all issues ({issueEligibleCount})
-          </button>
-          <button
-            type="button"
-            onClick={onCreateUpdateJob}
-            disabled={isUpdateJobLoading || !review || selectedCount === 0}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Create selected draft ({selectedCount})
-          </button>
+            <button
+              type="button"
+              onClick={() => onCreateUpdateJobForSrNumbers(visibleIssueSrNumbers)}
+              disabled={isUpdateJobLoading || !review || visibleIssueSrNumbers.length === 0}
+              className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Create visible issue draft ({visibleIssueSrNumbers.length})
+            </button>
+            <button
+              type="button"
+              onClick={onCreateIssueUpdateJob}
+              disabled={isUpdateJobLoading || !review || issueEligibleCount === 0}
+              className="rounded-md border border-primary/40 px-4 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Create draft for all issues ({issueEligibleCount})
+            </button>
+            <button
+              type="button"
+              onClick={onCreateUpdateJob}
+              disabled={isUpdateJobLoading || !review || selectedCount === 0}
+              className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Create selected draft ({selectedCount})
+            </button>
           </div>
         </div>
         {updateJobMode === "LIVE_API" ? (

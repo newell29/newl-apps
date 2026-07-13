@@ -15,7 +15,10 @@ vi.mock("@/server/db", () => ({
   prisma: prismaMock
 }));
 
-import { getTeamshipReviewHistory } from "@/modules/shipment-documents/teamship-review-history";
+import {
+  getReviewedTeamshipSrNumbers,
+  getTeamshipReviewHistory
+} from "@/modules/shipment-documents/teamship-review-history";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 
 const context = {
@@ -106,6 +109,37 @@ describe("Teamship review history", () => {
       tenantId: "tenant-1",
       workflowKey: "GARLAND_TEAMSHIP_REVIEW",
       deletedAt: null
+    });
+  });
+
+  it("only treats completed PDF-vs-Teamship matches as already reviewed", async () => {
+    prismaMock.teamshipReviewOrder.findMany.mockResolvedValue([{ srNumber: "SR808478" }]);
+
+    const reviewed = await getReviewedTeamshipSrNumbers(context, new Date("2026-07-12T00:00:00.000Z"), [
+      "SR808478",
+      "SR811861"
+    ]);
+
+    expect(reviewed).toEqual(new Set(["SR808478"]));
+    expect(prismaMock.teamshipReviewOrder.findMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: "tenant-1",
+        srNumber: {
+          in: ["SR808478", "SR811861"]
+        },
+        status: {
+          in: ["PASS", "FAIL"]
+        },
+        run: {
+          tenantId: "tenant-1",
+          workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+          shipmentDate: new Date("2026-07-12T00:00:00.000Z"),
+          deletedAt: null
+        }
+      },
+      select: {
+        srNumber: true
+      }
     });
   });
 });
