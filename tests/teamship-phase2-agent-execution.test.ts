@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  buildDryRunEvidence,
   buildTeamshipUpdatePayload,
   executeTeamshipPhase2Job
 } from "@/modules/shipment-documents/teamship-phase2-agent-execution";
@@ -41,6 +42,33 @@ describe("Teamship Phase 2 agent execution", () => {
         height: 10,
         weight: 25,
         commodity: "SKU: 8030445 QTY: 4"
+      })
+    ]);
+  });
+
+  it("tells browser workers to click Add Another Pallet Size before filling row 2+", () => {
+    const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
+    const evidence = buildDryRunEvidence({
+      job: { id: "job_1" },
+      plan,
+      agentId: "agent"
+    });
+
+    expect(evidence.orders[0]?.palletActions).toEqual([
+      expect.objectContaining({
+        rowNumber: 1,
+        browserInstruction: expect.objectContaining({
+          actionBeforeFill: "FILL_EXISTING_PALLET_ROW",
+          addAnotherPalletSizeButtonText: null
+        })
+      }),
+      expect.objectContaining({
+        rowNumber: 2,
+        browserInstruction: expect.objectContaining({
+          actionBeforeFill: "CLICK_ADD_ANOTHER_PALLET_SIZE",
+          addAnotherPalletSizeButtonText: "Add Another Pallet Size",
+          targetRowNumber: 2
+        })
       })
     ]);
   });

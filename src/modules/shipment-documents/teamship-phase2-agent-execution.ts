@@ -52,6 +52,12 @@ export type TeamshipPhase2ExecutionOrderResult = {
     hasUsableDimensions: boolean;
     commodity: string;
     fields: Record<string, string | number>;
+    browserInstruction: {
+      targetRowNumber: number;
+      actionBeforeFill: "FILL_EXISTING_PALLET_ROW" | "CLICK_ADD_ANOTHER_PALLET_SIZE";
+      addAnotherPalletSizeButtonText: "Add Another Pallet Size" | null;
+      note: string;
+    };
   }>;
   validationIssues: string[];
   updatePayload?: Record<string, unknown>;
@@ -213,9 +219,28 @@ function mapPlannedOrder(order: TeamshipPhase2OrderPlan): TeamshipPhase2Executio
       quantity: row.quantity,
       hasUsableDimensions: row.hasUsableDimensions,
       commodity: row.commodity,
-      fields: row.teamshipFields
+      fields: row.teamshipFields,
+      browserInstruction: buildPalletBrowserInstruction(row.rowNumber)
     })),
     validationIssues: order.validationIssues
+  };
+}
+
+function buildPalletBrowserInstruction(rowNumber: number) {
+  if (rowNumber === 1) {
+    return {
+      targetRowNumber: rowNumber,
+      actionBeforeFill: "FILL_EXISTING_PALLET_ROW" as const,
+      addAnotherPalletSizeButtonText: null,
+      note: "Use the existing first pallet row in the Teamship BOL editor."
+    };
+  }
+
+  return {
+    targetRowNumber: rowNumber,
+    actionBeforeFill: "CLICK_ADD_ANOTHER_PALLET_SIZE" as const,
+    addAnotherPalletSizeButtonText: "Add Another Pallet Size" as const,
+    note: `Click "Add Another Pallet Size" until pallet row ${rowNumber} exists, then fill this row's fields.`
   };
 }
 
