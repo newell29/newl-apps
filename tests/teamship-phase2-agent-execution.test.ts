@@ -114,6 +114,62 @@ describe("Teamship Phase 2 agent execution", () => {
     });
   });
 
+  it("uses the configured Teamship test app URL for browser update instructions", async () => {
+    const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
+    const result = await executeTeamshipPhase2Job({
+      job: {
+        id: "job_1",
+        agentMode: "DRY_RUN",
+        dryRun: true
+      },
+      plan,
+      credentials: {
+        email: "teamship@example.com",
+        password: "secret",
+        apiBaseUrl: "https://teamship-test.example/api",
+        appBaseUrl: "https://teamship-test.example"
+      },
+      options: {
+        agentId: "agent",
+        allowLiveUpdates: false,
+        fetchImpl: vi.fn() as unknown as typeof fetch
+      }
+    });
+
+    expect(result.orders[0]?.fieldActions[0]?.browserInstruction.absoluteUrl).toBe(
+      "https://teamship-test.example/ship-inventories/30202"
+    );
+    expect(result.orders[0]?.palletActions[0]?.browserInstruction.absoluteUrl).toBe(
+      "https://teamship-test.example/ship-inventories/30202/bol-editor"
+    );
+  });
+
+  it("derives the Teamship browser host from the configured API URL when no app URL is set", async () => {
+    const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
+    const result = await executeTeamshipPhase2Job({
+      job: {
+        id: "job_1",
+        agentMode: "DRY_RUN",
+        dryRun: true
+      },
+      plan,
+      credentials: {
+        email: "teamship@example.com",
+        password: "secret",
+        apiBaseUrl: "https://teamship-test.example/api"
+      },
+      options: {
+        agentId: "agent",
+        allowLiveUpdates: false,
+        fetchImpl: vi.fn() as unknown as typeof fetch
+      }
+    });
+
+    expect(result.orders[0]?.palletActions[0]?.browserInstruction.absoluteUrl).toBe(
+      "https://teamship-test.example/ship-inventories/30202/bol-editor"
+    );
+  });
+
   it("blocks live jobs unless the VM worker explicitly allows live updates", async () => {
     const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
 

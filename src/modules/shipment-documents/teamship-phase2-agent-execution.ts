@@ -6,6 +6,7 @@ export type TeamshipPhase2AgentCredentials = {
   email: string;
   password: string;
   apiBaseUrl: string | null;
+  appBaseUrl?: string | null;
 };
 
 export type TeamshipPhase2WorkerJob = {
@@ -56,6 +57,7 @@ export type TeamshipPhase2ExecutionOrderResult = {
     browserInstruction: {
       targetPage: "TEAMSHIP_ORDER_PALLETS" | "TEAMSHIP_BOL_EDITOR";
       routeTemplate: "/ship-inventories/{teamshipOrderId}/bol-editor";
+      absoluteUrl: string | null;
       targetRowNumber: number;
       zeroBasedLineItemIndex: number;
       actionBeforeFill: "FILL_EXISTING_PALLET_ROW" | "CLICK_ADD_ANOTHER_PALLET_SIZE";
@@ -78,6 +80,7 @@ export type TeamshipPhase2ExecutionOrderResult = {
 };
 
 const DEFAULT_TEAMSHIP_API_BASE_URL = "https://app.teamshipos.com/api";
+const DEFAULT_TEAMSHIP_APP_BASE_URL = "https://app.teamshipos.com";
 
 type TeamshipBrowserSaveInstruction = {
   action: "CLICK_SAVE_BUTTON_AFTER_EDIT" | "CONFIRM_INLINE_SAVE_OR_AUTOSAVE";
@@ -90,6 +93,7 @@ type TeamshipBrowserFieldInstruction = {
   preferredExecution: "TEAMSHIP_API";
   browserFallbackPage: "TEAMSHIP_SHIPPING_ORDER" | "TEAMSHIP_BOL_EDITOR";
   routeTemplate: "/ship-inventories/{teamshipOrderId}" | "/ship-inventories/{teamshipOrderId}/bol-editor";
+  absoluteUrl?: string | null;
   fieldLabel: string;
   primaryLocator: {
     strategy: "LABEL_OR_NAME" | "DATA_FIELD_CONTENT";
@@ -124,7 +128,12 @@ export async function executeTeamshipPhase2Job({
   options: TeamshipPhase2ExecutionOptions;
 }) {
   if (job.agentMode === "DRY_RUN" || job.dryRun) {
-    return buildDryRunEvidence({ job, plan, agentId: options.agentId });
+    return buildDryRunEvidence({
+      job,
+      plan,
+      agentId: options.agentId,
+      teamshipAppBaseUrl: resolveTeamshipAppBaseUrl(credentials)
+    });
   }
 
   if (!options.allowLiveUpdates) {
@@ -139,12 +148,16 @@ export async function executeTeamshipPhase2Job({
 export function buildDryRunEvidence({
   job,
   plan,
-  agentId
+  agentId,
+  teamshipAppBaseUrl
 }: {
   job: Pick<TeamshipPhase2WorkerJob, "id">;
   plan: TeamshipPhase2DryRunPlan;
   agentId: string;
+  teamshipAppBaseUrl?: string | null;
 }): TeamshipPhase2ExecutionResult {
+  const appBaseUrl = normalizeBaseUrl(teamshipAppBaseUrl) || DEFAULT_TEAMSHIP_APP_BASE_URL;
+
   return {
     mode: "DRY_RUN",
     dryRun: true,
@@ -153,7 +166,7 @@ export function buildDryRunEvidence({
     agentId,
     jobId: job.id,
     summary: plan.summary,
-    orders: plan.orders.map((order) => mapPlannedOrder(order)),
+    orders: plan.orders.map((order) => mapPlannedOrder(order, appBaseUrl)),
     hasFailures: false,
     notes: [
       "Dry-run worker did not call Teamship update endpoints and did not save changes.",
@@ -176,11 +189,12 @@ async function executeLiveApiUpdates({
 }): Promise<TeamshipPhase2ExecutionResult> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const apiBaseUrl = resolveTeamshipApiBaseUrl(credentials);
+  const appBaseUrl = resolveTeamshipAppBaseUrl(credentials, apiBaseUrl);
   const token = await loginToTeamship(fetchImpl, credentials, apiBaseUrl);
   const orders: TeamshipPhase2ExecutionOrderResult[] = [];
 
   for (const order of plan.orders) {
-    const mappedOrder = mapPlannedOrder(order);
+    const mappedOrder = mapPlannedOrder(order, appBaseUrl);
 
     if (order.status !== "READY" || !order.teamshipOrderId) {
       orders.push({
@@ -239,7 +253,10 @@ async function executeLiveApiUpdates({
   };
 }
 
-function mapPlannedOrder(order: TeamshipPhase2OrderPlan): TeamshipPhase2ExecutionOrderResult {
+function mapPlannedOrder(
+  order: TeamshipPhase2OrderPlan,
+  teamshipAppBaseUrl = DEFAULT_TEAMSHIP_APP_BASE_URL
+): TeamshipPhase2ExecutionOrderResult {
   return {
     psNumber: order.psNumber,
     srNumber: order.srNumber,
@@ -250,7 +267,7 @@ function mapPlannedOrder(order: TeamshipPhase2OrderPlan): TeamshipPhase2Executio
       from: field.currentValue,
       to: field.proposedValue,
       reason: field.reason,
-      browserInstruction: buildFieldBrowserInstruction(field.teamshipField)
+      browserInstruction: withBrowserUrl(buildFieldBrowserInstruction(field.teamshipField), order.teamshipOrderId, teamshipAppBaseUrl)
     })),
     palletActions: order.plannedPalletRows.map((row) => ({
       rowNumber: row.rowNumber,
@@ -259,11 +276,33 @@ function mapPlannedOrder(order: TeamshipPhase2OrderPlan): TeamshipPhase2Executio
       hasUsableDimensions: row.hasUsableDimensions,
       commodity: row.commodity,
       fields: row.teamshipFields,
-      browserInstruction: buildPalletBrowserInstruction(row.rowNumber)
+      browserInstruction: withBrowserUrl(buildPalletBrowserInstruction(row.rowNumber), order.teamshipOrderId, teamshipAppBaseUrl)
     })),
     saveInstruction: buildOrderCompletionSaveInstruction(),
     validationIssues: order.validationIssues
   };
+}
+
+function withBrowserUrl<T extends { routeTemplate: string }>(
+  instruction: T,
+  teamshipOrderId: string | null,
+  teamshipAppBaseUrl: string
+): T & { absoluteUrl: string | null } {
+  return {
+    ...instruction,
+    absoluteUrl: buildTeamshipBrowserUrl(instruction.routeTemplate, teamshipOrderId, teamshipAppBaseUrl)
+  };
+}
+
+function buildTeamshipBrowserUrl(routeTemplate: string, teamshipOrderId: string | null, teamshipAppBaseUrl: string) {
+  if (!teamshipOrderId) {
+    return null;
+  }
+
+  const route = routeTemplate.replace("{teamshipOrderId}", encodeURIComponent(teamshipOrderId));
+  const normalizedRoute = route.startsWith("/") ? route : `/${route}`;
+
+  return `${normalizeBaseUrl(teamshipAppBaseUrl) || DEFAULT_TEAMSHIP_APP_BASE_URL}${normalizedRoute}`;
 }
 
 function buildPalletBrowserInstruction(rowNumber: number) {
@@ -540,7 +579,32 @@ function buildTeamshipHeaders(token: string) {
 }
 
 function resolveTeamshipApiBaseUrl(credentials: TeamshipPhase2AgentCredentials) {
-  return (credentials.apiBaseUrl?.trim() || process.env.TEAMSHIP_API_BASE_URL?.trim() || DEFAULT_TEAMSHIP_API_BASE_URL).replace(/\/+$/, "");
+  return normalizeBaseUrl(credentials.apiBaseUrl) || normalizeBaseUrl(process.env.TEAMSHIP_API_BASE_URL) || DEFAULT_TEAMSHIP_API_BASE_URL;
+}
+
+function resolveTeamshipAppBaseUrl(credentials: TeamshipPhase2AgentCredentials, apiBaseUrl?: string) {
+  return (
+    normalizeBaseUrl(credentials.appBaseUrl) ||
+    normalizeBaseUrl(process.env.TEAMSHIP_APP_BASE_URL) ||
+    deriveTeamshipAppBaseUrl(apiBaseUrl ?? resolveTeamshipApiBaseUrl(credentials)) ||
+    DEFAULT_TEAMSHIP_APP_BASE_URL
+  );
+}
+
+function deriveTeamshipAppBaseUrl(apiBaseUrl: string | null | undefined) {
+  const normalizedApiBaseUrl = normalizeBaseUrl(apiBaseUrl);
+
+  if (!normalizedApiBaseUrl) {
+    return null;
+  }
+
+  return normalizedApiBaseUrl.replace(/\/api$/, "");
+}
+
+function normalizeBaseUrl(value: string | null | undefined) {
+  const normalizedValue = value?.trim().replace(/\/+$/, "");
+
+  return normalizedValue || null;
 }
 
 function normalizeIdentifier(value: string) {
