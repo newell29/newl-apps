@@ -208,6 +208,34 @@ describe("invoice automation QuickBooks posting mapping", () => {
     });
   });
 
+  it("posts taxable non-CAD customer invoices with a taxable line code when Canadian tax is present", () => {
+    const payload = buildQuickBooksSalesInvoicePayload(
+      invoiceRow({
+        invoiceType: "CUSTOMER",
+        quickBooksEntityId: "quickbooks:9130351993486396:CUSTOMER:shanghai-huafon",
+        quickBooksEntityDisplayName: "SHANGHAI HUAFON ALUMINIUM",
+        entityNameRaw: "SHANGHAI HUAFON ALUMINIUM",
+        invoiceNumber: "7538",
+        invoiceDate: "2026-07-10",
+        dueDate: "2026-08-09",
+        shipmentFileNumber: "TR1765N282",
+        currency: "USD",
+        subtotalAmount: 701,
+        taxAmount: 91.13,
+        totalAmount: 792.13,
+        productOrAccountName: "Trucking"
+      }),
+      mappings
+    );
+
+    expect(payload.GlobalTaxCalculation).toBe("TaxExcluded");
+    expect(payload.Line[0]?.Amount).toBe(701);
+    expect(payload.Line[0]?.SalesItemLineDetail.TaxCodeRef).toEqual({
+      value: "H",
+      name: "HST"
+    });
+  });
+
   it("uses the BC GST/PST tax code instead of HST when BC tax context is detected", () => {
     const payload = buildQuickBooksVendorBillPayload(
       invoiceRow({

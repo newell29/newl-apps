@@ -519,10 +519,6 @@ function getMappedRef(
 
 function getTaxCodeRef(invoice: InvoiceAutomationRow, mappings: QuickBooksPostingMappings, taxContextText?: string | null) {
   if (invoice.taxAmount && invoice.taxAmount > 0) {
-    if ((invoice.currency ?? "CAD").toUpperCase() !== "CAD") {
-      return mappings.taxCodes.exempt;
-    }
-
     const context = normalizeTaxContext([
       taxContextText,
       invoice.fileName,
