@@ -272,9 +272,8 @@ function validateOrderPlan({ palletItems, plannedPalletRows }: { palletItems: Ga
       return;
     }
 
-    if (!row.hasUsableDimensions) {
-      issues.push(`No usable dimension/weight recommendation found for SKU ${sku}.`);
-    } else if (
+    if (
+      row.hasUsableDimensions &&
       ![row.lengthIn, row.widthIn, row.heightIn, row.weightLb].every(
         (value) => typeof value === "number" && Number.isFinite(value) && value > 0
       )

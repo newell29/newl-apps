@@ -76,10 +76,10 @@ describe("Teamship Phase 2 dry-run planner", () => {
     const plan = buildTeamshipPhase2DryRunPlan(review);
 
     expect(plan.summary).toMatchObject({
-      readyCount: 0,
-      blockedCount: 1
+      readyCount: 1,
+      blockedCount: 0
     });
-    expect(plan.orders[0]?.validationIssues).toContain("No usable dimension/weight recommendation found for SKU 8030445.");
+    expect(plan.orders[0]?.validationIssues).not.toContain("No usable dimension/weight recommendation found for SKU 8030445.");
     expect(plan.orders[0]?.plannedPalletRows[1]).toMatchObject({
       rowNumber: 2,
       sku: "8030445",
@@ -148,7 +148,7 @@ describe("Teamship Phase 2 dry-run planner", () => {
       serialNumbers: ["CSR-SERIAL-1"]
     });
     expect(plan.summary.plannedPalletRowCount).toBe(3);
-    expect(plan.orders[0]?.validationIssues).toContain("No usable dimension/weight recommendation found for SKU C-CARE-P.");
+    expect(plan.orders[0]?.validationIssues).not.toContain("No usable dimension/weight recommendation found for SKU C-CARE-P.");
     expect(plan.orders[0]?.plannedPalletRows[2]).toMatchObject({
       rowNumber: 3,
       sku: "C-CARE-P",
