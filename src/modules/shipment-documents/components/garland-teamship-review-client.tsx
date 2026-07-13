@@ -146,6 +146,10 @@ type ShipmentWorkspaceStatus = GarlandTeamshipOrderReview["status"] | "TEAMSHIP_
 type TeamshipReviewWorkflowStatus = "NEEDS_SETUP" | "READY_TO_PRINT" | "BOL_PRINTED" | "NEEDS_REVIEW" | "NO_PDF" | "SKIPPED";
 type ProductDimensionEditField = "quantity" | "lengthIn" | "widthIn" | "heightIn" | "weightLb";
 type WorkspaceQueueFilter = "ALL" | "ISSUES" | "APPROVED" | "PENDING" | "NO_PDF" | "NEEDS_SETUP" | "READY_TO_PRINT" | "BOL_PRINTED";
+type NewPalletDraftLine = {
+  sku: string;
+  serialNumbers: string[];
+};
 
 type ShipmentWorkspaceRow = {
   id: string;
@@ -746,6 +750,132 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     });
   }
 
+  function addPalletDraftLine(srNumber: string, line: NewPalletDraftLine) {
+    const normalizedSrNumber = normalizeIdentifier(srNumber);
+    const normalizedSku = normalizeIdentifier(line.sku);
+    const nextItem = {
+      lineNumber: null,
+      sku: line.sku.trim().toUpperCase(),
+      description: "CSR-added Teamship pallet line",
+      quantity: 1,
+      dueShipDate: null,
+      serialNumbers: line.serialNumbers
+    };
+    const nextReviewItem = {
+      sku: nextItem.sku,
+      quantity: "1",
+      serialNumbers: nextItem.serialNumbers
+    };
+
+    if (!normalizedSrNumber || !normalizedSku) {
+      return;
+    }
+
+    setOrders((current) =>
+      current.map((order) =>
+        normalizeIdentifier(order.srNumber) === normalizedSrNumber
+          ? {
+              ...order,
+              items: [...order.items, nextItem]
+            }
+          : order
+      )
+    );
+
+    setReview((current) => {
+      if (!current) {
+        return current;
+      }
+
+      return {
+        ...current,
+        pdfOrders: current.pdfOrders.map((order) =>
+          normalizeIdentifier(order.srNumber) === normalizedSrNumber
+            ? {
+                ...order,
+                items: [...order.items, nextItem]
+              }
+            : order
+        ),
+        reviews: current.reviews.map((orderReview) => {
+          if (normalizeIdentifier(orderReview.srNumber) !== normalizedSrNumber) {
+            return orderReview;
+          }
+
+          const hasDimension = orderReview.productDimensions.some((dimension) => normalizeIdentifier(dimension.sku) === normalizedSku);
+
+          return {
+            ...orderReview,
+            pdfItems: [...orderReview.pdfItems, nextReviewItem],
+            productDimensions: hasDimension
+              ? orderReview.productDimensions
+              : [
+                  ...orderReview.productDimensions,
+                  {
+                    sku: nextItem.sku,
+                    source: "CSR_OVERRIDE" as const,
+                    productType: null,
+                    quantity: 1,
+                    lengthIn: null,
+                    widthIn: null,
+                    heightIn: null,
+                    weightLb: null,
+                    weightUnit: "lbs",
+                    confidence: "LOW" as const,
+                    note: "CSR-added pallet line. Enter dimensions if available; SKU/SN commodity text still goes to the bot draft."
+                  }
+                ]
+          };
+        })
+      };
+    });
+  }
+
+  function removePalletDraftLine(srNumber: string, itemIndex: number) {
+    const normalizedSrNumber = normalizeIdentifier(srNumber);
+
+    if (!normalizedSrNumber || itemIndex < 0) {
+      return;
+    }
+
+    setOrders((current) =>
+      current.map((order) =>
+        normalizeIdentifier(order.srNumber) === normalizedSrNumber
+          ? {
+              ...order,
+              items: order.items.filter((_, index) => index !== itemIndex)
+            }
+          : order
+      )
+    );
+
+    setReview((current) => {
+      if (!current) {
+        return current;
+      }
+
+      return {
+        ...current,
+        pdfOrders: current.pdfOrders.map((order) =>
+          normalizeIdentifier(order.srNumber) === normalizedSrNumber
+            ? {
+                ...order,
+                items: order.items.filter((_, index) => index !== itemIndex)
+              }
+            : order
+        ),
+        reviews: current.reviews.map((orderReview) =>
+          normalizeIdentifier(orderReview.srNumber) === normalizedSrNumber
+            ? {
+                ...orderReview,
+                pdfItems: orderReview.pdfItems.filter((_, index) => index !== itemIndex)
+              }
+            : orderReview
+        )
+      };
+    });
+  }
+
   async function fetchHistory(search: string, dateFrom: string, dateTo: string, allDates: boolean) {
     setHistoryError(null);
     setIsHistoryLoading(true);
@@ -846,8 +976,32 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
 
   return (
     <div className="space-y-6">
-      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
-        <div className="grid gap-4 lg:grid-cols-2">
+      <section className="overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
+        <div className="grid gap-5 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 p-5 text-white xl:grid-cols-[1fr,auto] xl:items-end">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-white/60">Today&apos;s review</p>
+            <h2 className="mt-2 text-2xl font-semibold tracking-tight">{documentLabel.trim() || formatDateLabel(shipmentDate)}</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-white/70">
+              Pull Teamship orders, add one or more Garland PDF attachments as they arrive, then run the comparison workspace.
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3">
+              <p className="text-2xl font-semibold">{dailyOrderCount ?? dailyOrders.length}</p>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-white/60">Teamship</p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3">
+              <p className="text-2xl font-semibold">{orders.length}</p>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-white/60">PDF orders</p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3">
+              <p className="text-2xl font-semibold">{pdfBatches.length}</p>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-white/60">Attachments</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 border-b border-border p-5 lg:grid-cols-2">
           <label className="space-y-2 text-sm font-semibold text-foreground">
             Review date
             <input
@@ -867,9 +1021,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
             />
           </label>
-        </div>
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-1">
           <label className="space-y-2 text-sm font-semibold text-foreground">
             Garland shipping-order PDFs
             <input
@@ -886,7 +1038,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         </div>
 
         {pdfBatches.length > 0 ? (
-          <div className="mt-4 rounded-md border border-border bg-muted/30 p-3">
+          <div className="m-5 rounded-2xl border border-border bg-muted/30 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold text-foreground">
@@ -930,7 +1082,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
           </div>
         ) : null}
 
-        <div className="mt-5 flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3 border-t border-border px-5 py-4">
           <button
             type="button"
             onClick={() => void runReview()}
@@ -958,7 +1110,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
           <p className="text-sm text-mutedForeground">{status}</p>
         </div>
 
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 border-t border-border bg-muted/20 p-5 md:grid-cols-2">
           <label className="space-y-2 text-sm font-semibold text-foreground">
             Manual sync from
             <input
@@ -980,7 +1132,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         </div>
 
         {error ? (
-          <div className="mt-4 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-sm font-medium text-danger">
+          <div className="mx-5 mb-5 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-sm font-medium text-danger">
             {error}
           </div>
         ) : null}
@@ -1048,6 +1200,8 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         onUpdateJobAction={(jobId, action) => void updateJobAction(jobId, action)}
         onRescanShipment={(srNumber) => void runReview({ rescan: true, srNumber })}
         onProductDimensionChange={updateProductDimensionOverride}
+        onAddPalletDraftLine={addPalletDraftLine}
+        onRemovePalletDraftLine={removePalletDraftLine}
         payloadInspections={payloadInspections}
         payloadInspectionErrors={payloadInspectionErrors}
         payloadInspectionLoadingSr={payloadInspectionLoadingSr}
@@ -1136,6 +1290,8 @@ function ShipmentReviewWorkspace({
   onUpdateJobAction,
   onRescanShipment,
   onProductDimensionChange,
+  onAddPalletDraftLine,
+  onRemovePalletDraftLine,
   payloadInspections,
   payloadInspectionErrors,
   payloadInspectionLoadingSr,
@@ -1169,6 +1325,8 @@ function ShipmentReviewWorkspace({
   onUpdateJobAction: (jobId: string, action: "approve" | "cancel" | "rescan") => void;
   onRescanShipment: (srNumber: string) => void;
   onProductDimensionChange: (srNumber: string, sku: string, field: ProductDimensionEditField, rawValue: string) => void;
+  onAddPalletDraftLine: (srNumber: string, line: NewPalletDraftLine) => void;
+  onRemovePalletDraftLine: (srNumber: string, itemIndex: number) => void;
   payloadInspections: Record<string, TeamshipPayloadInspectionResult>;
   payloadInspectionErrors: Record<string, string>;
   payloadInspectionLoadingSr: string | null;
@@ -1200,6 +1358,7 @@ function ShipmentReviewWorkspace({
     .filter((row) => row.review && row.srNumber && isUpdateEligibleReview(row.review))
     .map((row) => row.srNumber!)
     .filter(Boolean);
+  const workspaceStats = buildWorkspaceStats(rows, updateJobs);
 
   useEffect(() => {
     setExpandedRowIds(new Set(rows.filter((row) => row.review && row.status !== "PASS").map((row) => row.id)));
@@ -1220,37 +1379,45 @@ function ShipmentReviewWorkspace({
   }
 
   return (
-    <section className="rounded-lg border border-border bg-card shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border p-5">
-        <div>
-          <h2 className="text-base font-semibold text-foreground">Shipment review workspace</h2>
-          <p className="mt-1 text-sm text-mutedForeground">
-            Each shipment lives on one expandable line. The line changes color after review, and the details expand
-            underneath the shipment instead of running down the page.
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold uppercase tracking-wide">
-            <span className="rounded-full bg-muted px-3 py-1 text-mutedForeground">{teamshipOrderCount} Teamship</span>
-            <span className="rounded-full bg-muted px-3 py-1 text-mutedForeground">{pdfOrderCount} PDF</span>
-            {syncSummary ? (
-              <span className="rounded-full bg-muted px-3 py-1 text-mutedForeground">
-                {syncSummary.insertedCount} new / {syncSummary.skippedCount} skipped
-              </span>
-            ) : null}
-            {review ? (
-              <>
-                <span className="rounded-full bg-success/10 px-3 py-1 text-success">{review.summary.passedCount} green</span>
-                <span className="rounded-full bg-warning/15 px-3 py-1 text-warning">
-                  {review.summary.pendingTeamshipCount + review.summary.noPdfCount} amber
+    <section className="overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
+      <div className="border-b border-border bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 p-5 text-white">
+        <div className="flex flex-wrap items-start justify-between gap-5">
+          <div className="max-w-3xl">
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-white/60">Garland control tower</p>
+            <h2 className="mt-2 text-2xl font-semibold tracking-tight">Shipment queue</h2>
+            <p className="mt-2 text-sm leading-6 text-white/70">
+              Exceptions appear first, completed work stays collapsed, and every row shows whether the PDF was matched,
+              Teamship was checked, bot setup is needed, and the BOL is ready to print.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2 text-xs font-bold uppercase tracking-wide">
+              <span className="rounded-full bg-white/10 px-3 py-1 text-white/80">{teamshipOrderCount} Teamship</span>
+              <span className="rounded-full bg-white/10 px-3 py-1 text-white/80">{pdfOrderCount} PDF</span>
+              {syncSummary ? (
+                <span className="rounded-full bg-white/10 px-3 py-1 text-white/80">
+                  {syncSummary.insertedCount} new / {syncSummary.skippedCount} skipped
                 </span>
-                <span className="rounded-full bg-danger/10 px-3 py-1 text-danger">
-                  {review.summary.failedCount + review.summary.missingTeamshipCount} red
-                </span>
-              </>
-            ) : null}
+              ) : null}
+              {saveStatus ? <span className="rounded-full bg-white/10 px-3 py-1 text-white/80">{saveStatus}</span> : null}
+            </div>
           </div>
-          {saveStatus ? <p className="mt-2 text-sm font-medium text-mutedForeground">{saveStatus}</p> : null}
+          <div className="grid min-w-[260px] grid-cols-2 gap-2">
+            <WorkspaceStatCard label="Needs attention" value={workspaceStats.needsAttention} tone="danger" />
+            <WorkspaceStatCard label="Ready to print" value={workspaceStats.readyToPrint} tone="primary" />
+            <WorkspaceStatCard label="Complete" value={workspaceStats.complete} tone="success" />
+            <WorkspaceStatCard label="No PDF" value={workspaceStats.noPdf} tone="warning" />
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
+      </div>
+
+      <div className="border-b border-border bg-muted/20 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Daily actions</h3>
+            <p className="mt-1 max-w-2xl text-sm text-mutedForeground">
+              Saving the review records the current state only. Bot drafts are separate and only use the shipments you select here.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => setExpandedRowIds(new Set(visibleRows.map((row) => row.id)))}
@@ -1291,9 +1458,55 @@ function ShipmentReviewWorkspace({
           >
             {isSaving ? "Saving..." : "Save review run"}
           </button>
-          <p className="basis-full text-xs font-medium text-mutedForeground">
-            Saving the review does not run the bot. Select shipments below only when you want to create a separate Teamship update draft.
-          </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="border-b border-border bg-card p-5">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),auto]">
+          <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr),220px,auto]">
+            <input
+              value={workspaceSearch}
+              onChange={(event) => setWorkspaceSearch(event.target.value)}
+              placeholder="Search PS, SR, Teamship order, recipient, carrier, city, SKU, serial, or status"
+              className="min-w-0 rounded-xl border border-input bg-background px-4 py-3 text-sm shadow-sm"
+            />
+            <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+              Queue view
+              <select
+                value={workspaceFilter}
+                onChange={(event) => setWorkspaceFilter(event.target.value as WorkspaceQueueFilter)}
+                className="w-full rounded-xl border border-input bg-background px-3 py-3 text-sm font-semibold normal-case tracking-normal text-foreground shadow-sm"
+              >
+                <option value="ALL">All shipments</option>
+                <option value="ISSUES">Issues only</option>
+                <option value="APPROVED">Approved / matched</option>
+                <option value="PENDING">Pending Teamship</option>
+                <option value="NO_PDF">No PDF</option>
+                <option value="NEEDS_SETUP">Needs bot setup</option>
+                <option value="READY_TO_PRINT">Ready to print</option>
+                <option value="BOL_PRINTED">BOL printed</option>
+              </select>
+            </label>
+            <div className="flex items-end gap-2">
+              <span className="rounded-full bg-muted px-3 py-3 text-xs font-bold uppercase tracking-wide text-mutedForeground">
+                {visibleRows.length}/{rows.length} visible
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setWorkspaceSearch("");
+                  setWorkspaceFilter("ALL");
+                }}
+                disabled={!workspaceSearch && workspaceFilter === "ALL"}
+                className="rounded-xl border border-border px-3 py-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Clear filters
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-end gap-2 xl:justify-end">
           <button
             type="button"
             onClick={() => onReplaceUpdateSelection(visibleIssueSrNumbers)}
@@ -1334,6 +1547,12 @@ function ShipmentReviewWorkspace({
           >
             Clear selection
           </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="border-b border-border bg-muted/20 p-5">
+        <div className="flex flex-wrap items-end justify-between gap-4">
           <label className="min-w-56 space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
             Agent mode
             <select
@@ -1346,6 +1565,7 @@ function ShipmentReviewWorkspace({
               <option value="LIVE_API">Live Teamship update</option>
             </select>
           </label>
+          <div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => onCreateUpdateJobForSrNumbers(visibleIssueSrNumbers)}
@@ -1370,6 +1590,7 @@ function ShipmentReviewWorkspace({
           >
             Create selected draft ({selectedCount})
           </button>
+          </div>
         </div>
         {updateJobMode === "LIVE_API" ? (
           <p className="mt-3 max-w-3xl rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs font-semibold text-warning">
@@ -1377,47 +1598,6 @@ function ShipmentReviewWorkspace({
             selected orders you want the agent to write back to Teamship.
           </p>
         ) : null}
-      </div>
-      <div className="grid gap-3 border-b border-border bg-background px-5 py-4 xl:grid-cols-[minmax(0,1fr),220px,auto]">
-        <input
-          value={workspaceSearch}
-          onChange={(event) => setWorkspaceSearch(event.target.value)}
-          placeholder="Search PS, SR, Teamship order, recipient, carrier, city, SKU, or serial"
-          className="min-w-0 rounded-md border border-input bg-background px-3 py-2 text-sm"
-        />
-        <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
-          Queue view
-          <select
-            value={workspaceFilter}
-            onChange={(event) => setWorkspaceFilter(event.target.value as WorkspaceQueueFilter)}
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-semibold normal-case tracking-normal text-foreground"
-          >
-            <option value="ALL">All shipments</option>
-            <option value="ISSUES">Issues only</option>
-            <option value="APPROVED">Approved / matched</option>
-            <option value="PENDING">Pending Teamship</option>
-            <option value="NO_PDF">No PDF</option>
-            <option value="NEEDS_SETUP">Needs bot setup</option>
-            <option value="READY_TO_PRINT">Ready to print</option>
-            <option value="BOL_PRINTED">BOL printed</option>
-          </select>
-        </label>
-        <div className="flex items-end gap-2">
-          <span className="rounded-full bg-muted px-3 py-2 text-xs font-bold uppercase tracking-wide text-mutedForeground">
-            {visibleRows.length}/{rows.length} visible
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              setWorkspaceSearch("");
-              setWorkspaceFilter("ALL");
-            }}
-            disabled={!workspaceSearch && workspaceFilter === "ALL"}
-            className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Clear filters
-          </button>
-        </div>
       </div>
       <TeamshipUpdateJobsPanel
         jobs={updateJobs}
@@ -1451,11 +1631,11 @@ function ShipmentReviewWorkspace({
               open={isExpanded}
               onToggle={(event) => setRowOpen(row.id, event.currentTarget.open)}
             >
-              <summary className="grid cursor-pointer gap-3 px-5 py-4 lg:grid-cols-[1fr,1fr,auto] lg:items-center">
-                <div>
+              <summary className="grid cursor-pointer gap-4 px-5 py-5 xl:grid-cols-[minmax(0,1fr),auto] xl:items-center">
+                <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     {row.review && row.srNumber ? (
-                      <label className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1 text-xs font-semibold text-mutedForeground">
+                      <label className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs font-semibold text-mutedForeground shadow-sm">
                         <input
                           type="checkbox"
                           checked={selectedUpdateSrNumbers.has(row.srNumber)}
@@ -1463,37 +1643,34 @@ function ShipmentReviewWorkspace({
                           onClick={(event) => event.stopPropagation()}
                           onChange={(event) => onToggleUpdateSelection(row.srNumber!, event.target.checked)}
                         />
-                        Select for bot draft
+                        Agent update
                       </label>
                     ) : null}
-                    <span className="font-semibold text-foreground">{row.psNumber ?? "No PS"}</span>
-                    <span className="text-sm font-semibold text-mutedForeground">/ {row.srNumber ?? "No SR"}</span>
+                    <span className="text-lg font-semibold text-foreground">{row.psNumber ?? "No PS"} / {row.srNumber ?? "No SR"}</span>
                     <span className={shipmentStatusPillClass(row.status)}>{formatWorkspaceStatus(row.status, row.issueCount)}</span>
                     <span className={workflowStatusPillClass(workflowStatus)}>{formatWorkflowStatus(workflowStatus)}</span>
                   </div>
-                  <p className="mt-1 text-sm text-mutedForeground">
-                    {row.pdfPages.length > 0 ? `PDF page(s) ${row.pdfPages.join(", ")}` : "No PDF page uploaded"}
-                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-mutedForeground">
+                    <span className="font-medium text-foreground">{row.shipToName ?? "Missing ship-to"}</span>
+                    <span>{[row.carrier, row.cityState].filter(Boolean).join(" · ") || "Carrier/city missing"}</span>
+                    <span>{row.pdfPages.length > 0 ? `PDF page(s) ${row.pdfPages.join(", ")}` : "No PDF page uploaded"}</span>
+                  </div>
+                  <ShipmentStageLine row={row} workflowStatus={workflowStatus} />
                 </div>
 
-                <div className="text-sm text-mutedForeground">
-                  <p className="font-medium text-foreground">{row.shipToName ?? "Missing ship-to"}</p>
-                  <p>{[row.carrier, row.cityState].filter(Boolean).join(" · ") || "Carrier/city missing"}</p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                <div className="flex flex-wrap items-center gap-2 xl:justify-end">
                   {row.teamshipUrl ? (
                     <a
                       href={row.teamshipUrl}
                       target="_blank"
                       rel="noreferrer"
                       onClick={(event) => event.stopPropagation()}
-                      className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
+                      className="rounded-xl border border-border bg-background px-3 py-2 text-sm font-semibold text-foreground shadow-sm transition-colors hover:bg-muted"
                     >
-                      Open shipping order
+                      Shipping order
                     </a>
                   ) : (
-                    <span className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-mutedForeground">
+                    <span className="rounded-xl border border-border bg-background px-3 py-2 text-sm font-semibold text-mutedForeground shadow-sm">
                       No Teamship link
                     </span>
                   )}
@@ -1503,9 +1680,9 @@ function ShipmentReviewWorkspace({
                       target="_blank"
                       rel="noreferrer"
                       onClick={(event) => event.stopPropagation()}
-                      className="rounded-md border border-primary/30 px-3 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/10"
+                      className="rounded-xl border border-primary/30 bg-primary/5 px-3 py-2 text-sm font-semibold text-primary shadow-sm transition-colors hover:bg-primary/10"
                     >
-                      Open editable BOL
+                      Editable BOL
                     </a>
                   ) : null}
                   <button
@@ -1518,9 +1695,9 @@ function ShipmentReviewWorkspace({
                       }
                     }}
                     disabled={!row.srNumber || !row.pdfOrder}
-                    className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                    className="rounded-xl border border-border bg-background px-3 py-2 text-sm font-semibold text-foreground shadow-sm transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    Rescan this shipment
+                    Rescan
                   </button>
                   <button
                     type="button"
@@ -1536,9 +1713,9 @@ function ShipmentReviewWorkspace({
                       }
                     }}
                     disabled={!row.srNumber || isPayloadInspectionLoading || expectedSerials.length === 0}
-                    className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                    className="rounded-xl border border-border bg-background px-3 py-2 text-sm font-semibold text-foreground shadow-sm transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {isPayloadInspectionLoading ? "Inspecting..." : "Inspect payload"}
+                    {isPayloadInspectionLoading ? "Inspecting..." : "Payload"}
                   </button>
                   <button
                     type="button"
@@ -1550,11 +1727,11 @@ function ShipmentReviewWorkspace({
                       }
                     }}
                     disabled={!row.review || !row.srNumber || !isUpdateEligibleReview(row.review)}
-                    className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                    className="rounded-xl border border-primary/40 bg-primary px-3 py-2 text-sm font-semibold text-primaryForeground shadow-sm transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    Draft this one
+                    Draft
                   </button>
-                  <span className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-mutedForeground">
+                  <span className="rounded-xl border border-border bg-background px-3 py-2 text-sm font-semibold text-mutedForeground shadow-sm">
                     {isExpanded ? "Collapse" : "Expand"}
                   </span>
                 </div>
@@ -1562,6 +1739,8 @@ function ShipmentReviewWorkspace({
               <ShipmentWorkspaceDetails
                 row={row}
                 onProductDimensionChange={onProductDimensionChange}
+                onAddPalletDraftLine={onAddPalletDraftLine}
+                onRemovePalletDraftLine={onRemovePalletDraftLine}
                 payloadInspection={payloadInspection}
                 payloadInspectionError={payloadInspectionError}
               />
@@ -1778,50 +1957,66 @@ function TeamshipUpdateJobsPanel({
 function ShipmentWorkspaceDetails({
   row,
   onProductDimensionChange,
+  onAddPalletDraftLine,
+  onRemovePalletDraftLine,
   payloadInspection,
   payloadInspectionError
 }: {
   row: ShipmentWorkspaceRow;
   onProductDimensionChange: (srNumber: string, sku: string, field: ProductDimensionEditField, rawValue: string) => void;
+  onAddPalletDraftLine: (srNumber: string, line: NewPalletDraftLine) => void;
+  onRemovePalletDraftLine: (srNumber: string, itemIndex: number) => void;
   payloadInspection: TeamshipPayloadInspectionResult | null;
   payloadInspectionError: string | null;
 }) {
   if (row.review) {
     return (
-      <div className="space-y-4 px-5 pb-5">
+      <div className="space-y-5 border-t border-border bg-background/70 px-5 pb-5 pt-5">
         <TeamshipPayloadInspectionPanel inspection={payloadInspection} error={payloadInspectionError} />
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
-            <thead className="bg-muted/40 text-xs uppercase tracking-wide text-mutedForeground">
-              <tr>
-                <th className="px-3 py-2">Field</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2">Garland PDF</th>
-                <th className="px-3 py-2">Teamship</th>
-                <th className="px-3 py-2">Note</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {row.review.fields.map((field) => (
-                <tr key={field.key}>
-                  <td className="px-3 py-2 font-medium text-foreground">{field.label}</td>
-                  <td className="px-3 py-2">
+        <div className="rounded-2xl border border-border bg-card shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-mutedForeground">Mismatch editor</p>
+              <h3 className="mt-1 text-base font-semibold text-foreground">Review Teamship fields before the bot draft</h3>
+              <p className="mt-1 text-sm text-mutedForeground">
+                Matches stay read-only. Missing or mismatched values show the Garland PDF value the bot will propose.
+              </p>
+            </div>
+            <span className={shipmentStatusPillClass(row.review.status)}>
+              {formatWorkspaceStatus(row.review.status, row.review.issueCount)}
+            </span>
+          </div>
+          <div className="divide-y divide-border">
+            {row.review.fields.map((field) => (
+              <div key={field.key} className={fieldComparisonRowClass(field.status)}>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-foreground">{field.label}</span>
                     <span className={statusPillClass(field.status)}>{formatFieldStatus(field.status)}</span>
-                  </td>
-                  <td className="max-w-xs px-3 py-2 text-mutedForeground">{field.pdfValue ?? "Blank"}</td>
-                  <td className="max-w-xs px-3 py-2 text-mutedForeground">{field.teamshipValue ?? "Blank"}</td>
-                  <td className="px-3 py-2 text-mutedForeground">{field.message}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                  <p className="mt-1 text-xs text-mutedForeground">{field.message}</p>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1fr,1fr,1.2fr]">
+                  <ValuePreviewCard label="Garland PDF" value={field.pdfValue} emphasis={field.status !== "MATCH"} />
+                  <ValuePreviewCard label="Teamship current" value={field.teamshipValue} />
+                  <ValuePreviewCard
+                    label={field.status === "MATCH" || field.status === "INFO" ? "Bot action" : "Proposed bot value"}
+                    value={field.status === "MATCH" || field.status === "INFO" ? "No update needed" : field.pdfValue}
+                    emphasis={field.status !== "MATCH" && field.status !== "INFO"}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
         <ItemDetailsComparison review={row.review} />
         <ProductDimensionsTable
           dimensions={row.review.productDimensions}
-          items={row.review.pdfItems}
+          items={row.pdfOrder?.items ?? []}
           srNumber={row.review.srNumber}
           onDimensionChange={onProductDimensionChange}
+          onAddPalletDraftLine={onAddPalletDraftLine}
+          onRemovePalletDraftLine={onRemovePalletDraftLine}
         />
       </div>
     );
@@ -1922,6 +2117,98 @@ function TeamshipPayloadInspectionPanel({
   );
 }
 
+function WorkspaceStatCard({
+  label,
+  value,
+  tone
+}: {
+  label: string;
+  value: number;
+  tone: "danger" | "primary" | "success" | "warning";
+}) {
+  const toneClass =
+    tone === "danger"
+      ? "border-danger/30 bg-danger/15 text-danger"
+      : tone === "primary"
+        ? "border-primary/30 bg-primary/15 text-primary"
+        : tone === "success"
+          ? "border-success/30 bg-success/15 text-success"
+          : "border-warning/30 bg-warning/20 text-warning";
+
+  return (
+    <div className={`rounded-2xl border px-4 py-3 shadow-sm backdrop-blur ${toneClass}`}>
+      <p className="text-[11px] font-bold uppercase tracking-wide opacity-80">{label}</p>
+      <p className="mt-1 text-3xl font-semibold leading-none">{value}</p>
+    </div>
+  );
+}
+
+function ShipmentStageLine({ row, workflowStatus }: { row: ShipmentWorkspaceRow; workflowStatus: TeamshipReviewWorkflowStatus }) {
+  const stages = [
+    {
+      label: row.pdfOrder ? "PDF matched" : row.status === "NO_PDF" ? "PDF missing" : "PDF pending",
+      state: row.pdfOrder ? "done" : row.status === "NO_PDF" ? "current" : "pending"
+    },
+    {
+      label: row.teamshipOrderId ? "Teamship checked" : "Teamship pending",
+      state: row.teamshipOrderId ? "done" : "current"
+    },
+    {
+      label:
+        workflowStatus === "NEEDS_REVIEW"
+          ? "Approve changes"
+          : workflowStatus === "NEEDS_SETUP"
+            ? "Create bot draft"
+            : workflowStatus === "READY_TO_PRINT" || workflowStatus === "BOL_PRINTED"
+              ? "Data ready"
+              : "Setup pending",
+      state:
+        workflowStatus === "READY_TO_PRINT" || workflowStatus === "BOL_PRINTED"
+          ? "done"
+          : workflowStatus === "NEEDS_REVIEW" || workflowStatus === "NEEDS_SETUP"
+            ? "current"
+            : "pending"
+    },
+    {
+      label: workflowStatus === "BOL_PRINTED" ? "BOL printed" : workflowStatus === "READY_TO_PRINT" ? "Print BOL" : "BOL not printed",
+      state: workflowStatus === "BOL_PRINTED" ? "done" : workflowStatus === "READY_TO_PRINT" ? "current" : "pending"
+    }
+  ];
+
+  return (
+    <div className="mt-3 flex flex-wrap gap-2" aria-label="Shipment workflow stages">
+      {stages.map((stage) => (
+        <span key={stage.label} className={stagePillClass(stage.state)}>
+          {stage.state === "done" ? "✓" : stage.state === "current" ? "•" : "○"} {stage.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function stagePillClass(state: string) {
+  const base = "rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide";
+
+  if (state === "done") {
+    return `${base} bg-success/10 text-success`;
+  }
+
+  if (state === "current") {
+    return `${base} bg-warning/15 text-warning`;
+  }
+
+  return `${base} bg-muted text-mutedForeground`;
+}
+
+function ValuePreviewCard({ label, value, emphasis = false }: { label: string; value: string | null; emphasis?: boolean }) {
+  return (
+    <div className={emphasis ? "rounded-xl border border-primary/25 bg-primary/5 p-3" : "rounded-xl border border-border bg-background p-3"}>
+      <p className="text-xs font-bold uppercase tracking-wide text-mutedForeground">{label}</p>
+      <p className="mt-2 whitespace-pre-wrap text-sm font-semibold text-foreground">{value?.trim() || "Blank"}</p>
+    </div>
+  );
+}
+
 function PayloadInspectionMatchList({
   title,
   emptyText,
@@ -2012,92 +2299,168 @@ function ProductDimensionsTable({
   dimensions,
   items,
   srNumber,
-  onDimensionChange
+  onDimensionChange,
+  onAddPalletDraftLine,
+  onRemovePalletDraftLine
 }: {
   dimensions: GarlandTeamshipOrderReview["productDimensions"];
-  items: GarlandTeamshipOrderReview["pdfItems"];
+  items: GarlandPdfShippingOrder["items"];
   srNumber: string;
   onDimensionChange: (srNumber: string, sku: string, field: ProductDimensionEditField, rawValue: string) => void;
+  onAddPalletDraftLine: (srNumber: string, line: NewPalletDraftLine) => void;
+  onRemovePalletDraftLine: (srNumber: string, itemIndex: number) => void;
 }) {
-  const rows = buildEditableDimensionRows(dimensions, items);
+  const rows = buildEditablePalletRows(dimensions, items);
+  const readyCount = rows.filter((row) => row.dimension && hasCompleteDimensionValues(row.dimension)).length;
+  const missingCount = rows.length - readyCount;
+
+  function handleAddPalletLine() {
+    const sku = window.prompt("Enter the SKU for the new pallet/commodity line.");
+
+    if (!sku?.trim()) {
+      return;
+    }
+
+    const serialInput = window.prompt("Enter serial number(s), separated by commas. Leave blank if there is no serial.") ?? "";
+    const serialNumbers = serialInput
+      .split(",")
+      .map((serial) => serial.trim())
+      .filter((serial) => serial && !/^n\/?a$/i.test(serial));
+
+    onAddPalletDraftLine(srNumber, { sku: sku.trim(), serialNumbers });
+  }
 
   return (
-    <div className="rounded-md border border-border bg-background">
-      <div className="border-b border-border px-3 py-2">
-        <h3 className="text-sm font-semibold text-foreground">SKU dimensions for Teamship update bot</h3>
-        <p className="mt-1 text-xs text-mutedForeground">
-          CSR overrides are used first when creating the Teamship bot draft. Enter values here if the Garland sheet or learned
-          Teamship value needs a correction before the bot updates Teamship.
-        </p>
+    <div className="rounded-2xl border border-border bg-card shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-4">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-mutedForeground">Pallet plan</p>
+          <h3 className="mt-1 text-base font-semibold text-foreground">SKU dimensions and commodity lines for the Teamship bot</h3>
+          <p className="mt-1 text-sm text-mutedForeground">
+            Every Garland SKU/SN line becomes a Teamship pallet commodity row. Missing DIMs do not remove the SKU/SN commodity update.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-full bg-success/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-success">
+            {readyCount} DIM sets ready
+          </span>
+          <span className="rounded-full bg-warning/15 px-3 py-1 text-xs font-bold uppercase tracking-wide text-warning">
+            {missingCount} missing DIMs
+          </span>
+          <button
+            type="button"
+            onClick={handleAddPalletLine}
+            className="rounded-md border border-primary/40 px-3 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/10"
+          >
+            Add pallet/SKU line
+          </button>
+        </div>
       </div>
       {rows.length === 0 ? (
         <p className="px-3 py-3 text-sm text-mutedForeground">No SKU was parsed for this shipment.</p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
-            <thead className="bg-muted/40 text-xs uppercase tracking-wide text-mutedForeground">
-              <tr>
-                <th className="px-3 py-2">SKU</th>
-                <th className="px-3 py-2">Source</th>
-                <th className="px-3 py-2">Qty</th>
-                <th className="px-3 py-2">Dims</th>
-                <th className="px-3 py-2">Weight</th>
-                <th className="px-3 py-2">Confidence</th>
-                <th className="px-3 py-2">Note</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {rows.map((dimension, index) => (
-                <tr key={`${dimension.sku}-${dimension.source}-${index}`}>
-                  <td className="px-3 py-2 font-semibold text-foreground">{dimension.sku}</td>
-                  <td className="px-3 py-2 text-mutedForeground">{formatDimensionSource(dimension.source)}</td>
-                  <td className="px-3 py-2">
-                    <DimensionInput
-                      label={`Quantity for ${dimension.sku}`}
-                      value={dimension.quantity}
-                      onChange={(value) => onDimensionChange(srNumber, dimension.sku, "quantity", value)}
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex min-w-56 flex-wrap items-center gap-1">
-                      <DimensionInput
-                        label={`Length for ${dimension.sku}`}
-                        value={dimension.lengthIn}
-                        onChange={(value) => onDimensionChange(srNumber, dimension.sku, "lengthIn", value)}
-                      />
-                      <span className="text-mutedForeground">x</span>
-                      <DimensionInput
-                        label={`Width for ${dimension.sku}`}
-                        value={dimension.widthIn}
-                        onChange={(value) => onDimensionChange(srNumber, dimension.sku, "widthIn", value)}
-                      />
-                      <span className="text-mutedForeground">x</span>
-                      <DimensionInput
-                        label={`Height for ${dimension.sku}`}
-                        value={dimension.heightIn}
-                        onChange={(value) => onDimensionChange(srNumber, dimension.sku, "heightIn", value)}
-                      />
-                      <span className="text-xs text-mutedForeground">in</span>
+        <div className="divide-y divide-border">
+          {rows.map((row) => {
+            const dimension = row.dimension;
+            const hasDims = Boolean(dimension && hasCompleteDimensionValues(dimension));
+            const sku = row.item.sku.trim().toUpperCase();
+
+            return (
+              <div key={`${row.itemIndex}-${sku}`} className="grid gap-4 px-4 py-4 lg:grid-cols-[6px,minmax(0,1fr)]">
+                <span className={hasDims ? "rounded-full bg-success" : "rounded-full bg-warning"} aria-hidden="true" />
+                <div className="min-w-0 space-y-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.18em] text-mutedForeground">
+                        Pallet {row.itemIndex + 1} - {dimension ? formatDimensionSource(dimension.source) : "No DIM history"}
+                      </p>
+                      <h4 className="mt-1 text-lg font-semibold text-foreground">{sku}</h4>
+                      <p className="mt-1 text-sm text-mutedForeground">
+                        Qty {row.item.quantity ?? 1} · {formatSerialSummary(row.item.serialNumbers)} · {row.item.description || "No description"}
+                      </p>
                     </div>
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-1">
-                      <DimensionInput
-                        label={`Weight for ${dimension.sku}`}
-                        value={dimension.weightLb}
-                        onChange={(value) => onDimensionChange(srNumber, dimension.sku, "weightLb", value)}
-                      />
-                      <span className="text-xs text-mutedForeground">{dimension.weightUnit ?? "lbs"}</span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={hasDims ? dimensionConfidenceClass(dimension!.confidence) : "rounded-full bg-warning/15 px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-warning"}>
+                        {hasDims ? "DIMs + commodity ready" : "Commodity ready - DIMs missing"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onRemovePalletDraftLine(srNumber, row.itemIndex)}
+                        className="rounded-md border border-danger/30 px-3 py-2 text-xs font-semibold text-danger transition-colors hover:bg-danger/10"
+                      >
+                        Remove from bot draft
+                      </button>
                     </div>
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className={dimensionConfidenceClass(dimension.confidence)}>{dimension.confidence}</span>
-                  </td>
-                  <td className="max-w-sm px-3 py-2 text-mutedForeground">{dimension.note}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+                    <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+                      Qty
+                      <DimensionInput
+                        label={`Quantity for ${sku}`}
+                        value={dimension?.quantity ?? row.item.quantity}
+                        onChange={(value) => onDimensionChange(srNumber, sku, "quantity", value)}
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+                      Length
+                      <DimensionInput
+                        label={`Length for ${sku}`}
+                        value={dimension?.lengthIn ?? null}
+                        onChange={(value) => onDimensionChange(srNumber, sku, "lengthIn", value)}
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+                      Width
+                      <DimensionInput
+                        label={`Width for ${sku}`}
+                        value={dimension?.widthIn ?? null}
+                        onChange={(value) => onDimensionChange(srNumber, sku, "widthIn", value)}
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+                      Height
+                      <DimensionInput
+                        label={`Height for ${sku}`}
+                        value={dimension?.heightIn ?? null}
+                        onChange={(value) => onDimensionChange(srNumber, sku, "heightIn", value)}
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+                      Weight
+                      <DimensionInput
+                        label={`Weight for ${sku}`}
+                        value={dimension?.weightLb ?? null}
+                        onChange={(value) => onDimensionChange(srNumber, sku, "weightLb", value)}
+                      />
+                    </label>
+                    <div className="space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+                      Unit
+                      <div className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm font-semibold normal-case tracking-normal text-foreground">
+                        {dimension?.weightUnit ?? "lbs"}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-border bg-muted/20 p-3">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-bold uppercase tracking-wide text-mutedForeground">Commodity text for Teamship</p>
+                        <pre className="mt-2 whitespace-pre-wrap text-sm font-semibold text-foreground">{buildCommodityPreview(row.item)}</pre>
+                      </div>
+                      <span className="rounded-full bg-background px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-mutedForeground">
+                        Bot will add
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-mutedForeground">
+                    {dimension?.note ?? "No usable dimension/weight recommendation found yet. The bot draft still carries the SKU/SN commodity line."}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -2121,7 +2484,7 @@ function DimensionInput({
       step="0.01"
       value={value ?? ""}
       onChange={(event) => onChange(event.target.value)}
-      className="w-20 rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground"
+      className="w-full rounded-md border border-input bg-background px-2 py-2 text-sm text-foreground"
       placeholder="-"
     />
   );
@@ -2167,10 +2530,11 @@ function TeamshipReviewHistorySection({
   onOrderWorkflowAction: (runId: string, orderId: string, action: "markBolPrinted" | "clearBolPrinted") => void;
 }) {
   return (
-    <section className="rounded-lg border border-border bg-card shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border p-5">
+    <section className="overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border bg-gradient-to-br from-card to-muted/40 p-5">
         <div>
-          <h2 className="text-base font-semibold text-foreground">Saved Teamship review history</h2>
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-mutedForeground">Saved records</p>
+          <h2 className="mt-1 text-xl font-semibold text-foreground">Teamship review history</h2>
           <p className="mt-1 text-sm text-mutedForeground">
             Search by date label, source file, PS/SR number, Teamship order, recipient, carrier, city, PO, item, serial,
             alert text, or review status.
@@ -2181,12 +2545,12 @@ function TeamshipReviewHistorySection({
               : `Viewing shipment dates ${history.dateFrom} to ${history.dateTo}`}
           </p>
         </div>
-        <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary">
+        <span className="rounded-full bg-primary/10 px-4 py-2 text-xs font-bold text-primary">
           {history.totalCount} saved run{history.totalCount === 1 ? "" : "s"}
         </span>
       </div>
 
-      <div className="border-b border-border p-5">
+      <div className="border-b border-border bg-background/60 p-5">
         <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr),180px,180px,auto]">
           <input
             value={historySearch}
@@ -2197,7 +2561,7 @@ function TeamshipReviewHistorySection({
               }
             }}
             placeholder="Search date, source file, PS, SR, Teamship order, or status"
-            className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+            className="min-w-0 flex-1 rounded-xl border border-input bg-background px-4 py-3 text-sm shadow-sm"
           />
           <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
             From
@@ -2206,7 +2570,7 @@ function TeamshipReviewHistorySection({
               value={historyDateFrom}
               onChange={(event) => onDateFromChange(event.target.value)}
               disabled={historyAllDates}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-normal normal-case tracking-normal text-foreground disabled:opacity-60"
+              className="w-full rounded-xl border border-input bg-background px-3 py-3 text-sm font-normal normal-case tracking-normal text-foreground shadow-sm disabled:opacity-60"
             />
           </label>
           <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
@@ -2216,14 +2580,14 @@ function TeamshipReviewHistorySection({
               value={historyDateTo}
               onChange={(event) => onDateToChange(event.target.value)}
               disabled={historyAllDates}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-normal normal-case tracking-normal text-foreground disabled:opacity-60"
+              className="w-full rounded-xl border border-input bg-background px-3 py-3 text-sm font-normal normal-case tracking-normal text-foreground shadow-sm disabled:opacity-60"
             />
           </label>
           <button
             type="button"
             onClick={onSearch}
             disabled={isHistoryLoading}
-            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-xl border border-border bg-card px-4 py-3 text-sm font-semibold text-foreground shadow-sm transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isHistoryLoading ? "Searching..." : "Search history"}
           </button>
@@ -2275,11 +2639,11 @@ function TeamshipReviewHistorySection({
       ) : (
         <div className="divide-y divide-border">
           {history.runs.map((run) => (
-            <details key={run.id} className="group">
-              <summary className="grid cursor-pointer gap-4 px-5 py-4 lg:grid-cols-[1fr,1fr,auto] lg:items-start">
+            <details key={run.id} className="group border-l-[6px] border-primary/30 bg-card open:bg-primary/5">
+              <summary className="grid cursor-pointer gap-4 px-5 py-5 lg:grid-cols-[1fr,1fr,auto] lg:items-start">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-semibold text-foreground">{run.documentLabel}</span>
+                    <span className="text-lg font-semibold text-foreground">{run.documentLabel}</span>
                     <span className={historyRunPillClass(run)}>
                       {run.failedCount + run.missingTeamshipCount > 0
                         ? `${run.failedCount + run.missingTeamshipCount} need review`
@@ -2306,7 +2670,7 @@ function TeamshipReviewHistorySection({
                     {run.failedCount} discrepancies · {run.pendingTeamshipCount} pending · {run.missingTeamshipCount} missing
                     {run.noPdfCount > 0 ? ` · ${run.noPdfCount} no PDF` : ""}
                   </p>
-                  <p className="mt-1 break-words">SRs: {run.srNumbers.slice(0, 16).join(", ")}</p>
+                  <p className="mt-1 break-words">SRs: {run.srNumbers.slice(0, 12).join(", ")}{run.srNumbers.length > 12 ? ` + ${run.srNumbers.length - 12} more` : ""}</p>
                 </div>
 
                 <div className="flex flex-wrap gap-2 lg:justify-end">
@@ -2439,6 +2803,20 @@ function statusPillClass(status: string) {
   }
 
   return `${base} bg-danger/10 text-danger`;
+}
+
+function fieldComparisonRowClass(status: string) {
+  const base = "grid gap-4 px-4 py-4 xl:grid-cols-[minmax(180px,0.65fr),minmax(0,1.35fr)]";
+
+  if (status === "MATCH" || status === "INFO") {
+    return `${base} bg-card`;
+  }
+
+  if (status === "PENDING") {
+    return `${base} bg-warning/5`;
+  }
+
+  return `${base} bg-danger/5`;
 }
 
 function payloadInspectionPillClass(conclusion: TeamshipPayloadInspectionResult["conclusion"]) {
@@ -2897,8 +3275,34 @@ function buildTeamshipBolEditorUrl(orderId: string | null) {
   return orderId ? `https://app.teamshipos.com/ship-inventories/${encodeURIComponent(orderId)}/bol-editor` : null;
 }
 
+function buildWorkspaceStats(rows: ShipmentWorkspaceRow[], updateJobs: TeamshipUpdateJobSummary[]) {
+  return rows.reduce(
+    (stats, row) => {
+      const workflowStatus = getWorkspaceWorkflowStatus(row, updateJobs);
+
+      if (workflowStatus === "BOL_PRINTED") {
+        stats.complete += 1;
+      } else if (workflowStatus === "READY_TO_PRINT") {
+        stats.readyToPrint += 1;
+      } else if (workflowStatus === "NO_PDF") {
+        stats.noPdf += 1;
+      } else if (
+        row.status === "FAIL" ||
+        row.status === "MISSING_TEAMSHIP" ||
+        row.status === "PENDING_TEAMSHIP" ||
+        workflowStatus === "NEEDS_REVIEW"
+      ) {
+        stats.needsAttention += 1;
+      }
+
+      return stats;
+    },
+    { needsAttention: 0, readyToPrint: 0, complete: 0, noPdf: 0 }
+  );
+}
+
 function shipmentRowClass(status: ShipmentWorkspaceStatus, workflowStatus: TeamshipReviewWorkflowStatus) {
-  const base = "border-l-4";
+  const base = "relative border-l-[6px]";
 
   if (workflowStatus === "BOL_PRINTED") {
     return `${base} border-success bg-success/10`;
@@ -3280,53 +3684,52 @@ function formatGroupedSkuSerialItems(items: ItemDetail[]) {
   return `${skuText}${quantityText} | SN: ${serialText}`;
 }
 
-function buildEditableDimensionRows(
+function buildEditablePalletRows(
   dimensions: GarlandTeamshipOrderReview["productDimensions"],
-  items: GarlandTeamshipOrderReview["pdfItems"]
+  items: GarlandPdfShippingOrder["items"]
 ) {
-  const rows = new Map<string, GarlandTeamshipOrderReview["productDimensions"][number]>();
+  return items.map((item, itemIndex) => {
+    const skuKey = normalizeIdentifier(item.sku);
+    const dimension = skuKey
+      ? dimensions.find((candidate) => normalizeIdentifier(candidate.sku) === skuKey) ?? null
+      : null;
 
-  for (const dimension of dimensions) {
-    const skuKey = normalizeIdentifier(dimension.sku);
-
-    if (skuKey) {
-      rows.set(skuKey, dimension);
-    }
-  }
-
-  for (const item of items) {
-    const sku = item.sku?.trim();
-    const skuKey = normalizeIdentifier(sku ?? null);
-
-    if (!sku || !skuKey || rows.has(skuKey)) {
-      continue;
-    }
-
-    rows.set(skuKey, {
-      sku,
-      source: "CSR_OVERRIDE",
-      productType: null,
-      quantity: parseItemQuantity(item.quantity),
-      lengthIn: null,
-      widthIn: null,
-      heightIn: null,
-      weightLb: null,
-      weightUnit: "lbs",
-      confidence: "LOW",
-      note: "No dimension recommendation found yet. CSR can enter an override before creating the bot draft."
-    });
-  }
-
-  return Array.from(rows.values()).sort((left, right) => left.sku.localeCompare(right.sku, undefined, { numeric: true }));
+    return {
+      item,
+      itemIndex,
+      dimension
+    };
+  });
 }
 
-function parseItemQuantity(value: string | null) {
-  if (!value) {
-    return null;
+function hasCompleteDimensionValues(dimension: GarlandTeamshipOrderReview["productDimensions"][number]) {
+  return [dimension.lengthIn, dimension.widthIn, dimension.heightIn, dimension.weightLb].every(
+    (value) => typeof value === "number" && Number.isFinite(value) && value > 0
+  );
+}
+
+function formatSerialSummary(serialNumbers: string[]) {
+  if (serialNumbers.length === 0) {
+    return "SN: N/A";
   }
 
-  const parsed = Number(value.replace(/[^0-9.]/g, ""));
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  if (serialNumbers.length === 1) {
+    return `SN: ${serialNumbers[0]}`;
+  }
+
+  return `${serialNumbers.length} serials: ${serialNumbers.join(", ")}`;
+}
+
+function buildCommodityPreview(item: GarlandPdfShippingOrder["items"][number]) {
+  const sku = item.sku.trim().toUpperCase();
+  const quantity = item.quantity && Number.isFinite(item.quantity) && item.quantity > 0 ? item.quantity : 1;
+  const serialNumbers = uniqueClientStrings(item.serialNumbers);
+
+  if (serialNumbers.length > 0) {
+    return serialNumbers.map((serialNumber) => `SKU: ${sku} SN: ${serialNumber}`).join("\n");
+  }
+
+  return `SKU: ${sku} QTY: ${quantity}`;
 }
 
 function parseDimensionInput(value: string) {
