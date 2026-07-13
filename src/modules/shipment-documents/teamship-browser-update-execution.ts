@@ -176,7 +176,15 @@ export async function executeTeamshipPhase2BrowserJob({
         await waitForTeamshipIdle(page);
         await saveScreenshot(page, orderScreenshotDir, "01-before");
 
-        await fillOrderFieldUpdates(page, order);
+        const fieldUpdateErrors: string[] = [];
+
+        try {
+          await fillOrderFieldUpdates(page, order);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown Teamship field update failure.";
+          fieldUpdateErrors.push(message);
+          await saveScreenshot(page, orderScreenshotDir, "field-update-error").catch(() => undefined);
+        }
 
         if (order.plannedPalletRows.length > 0) {
           await page.getByText(/^Pallets$/i).first().scrollIntoViewIfNeeded();
@@ -206,19 +214,23 @@ export async function executeTeamshipPhase2BrowserJob({
           allowedHosts: options.allowedHosts
         });
 
+        const fieldUpdateError = fieldUpdateErrors.length > 0 ? `Field update failed, but remaining browser actions were attempted: ${fieldUpdateErrors.join(" ")}` : undefined;
+
         orders.push({
           ...mappedOrder,
-          status: "UPDATED",
+          status: fieldUpdateError ? "FAILED" : "UPDATED",
           updatePayload: {
             ...buildTeamshipUpdatePayload(order),
             browser: {
               teamshipUrl,
               screenshotDir: orderScreenshotDir,
               palletSnapshot,
-              bolEditorCleanup
+              bolEditorCleanup,
+              fieldUpdateErrors
             }
           },
-          responseStatus: 200
+          responseStatus: fieldUpdateError ? 207 : 200,
+          error: fieldUpdateError
         });
       } catch (error) {
         await saveScreenshot(page, orderScreenshotDir, "error").catch(() => undefined);
