@@ -162,10 +162,17 @@ async function claimNextJob(options: WorkerOptions): Promise<ClaimResponse> {
     method: "POST",
     headers: buildAgentHeaders(options)
   });
-  const json = (await response.json().catch(() => null)) as ClaimResponse | null;
+  const responseText = await response.text();
+  const json = parseJsonResponse<ClaimResponse>(responseText);
 
-  if (!response.ok || !json) {
+  if (!response.ok) {
     throw new Error(json?.error ?? `Unable to claim Teamship update job. HTTP ${response.status}.`);
+  }
+
+  if (!json) {
+    throw new Error(
+      `Unable to claim Teamship update job. Expected JSON but received HTTP ${response.status} ${describeResponseBody(responseText)}.`
+    );
   }
 
   return json;
@@ -190,13 +197,34 @@ async function completeJob({
     },
     body: JSON.stringify({ status, result })
   });
-  const json = (await response.json().catch(() => null)) as CompleteResponse | null;
+  const responseText = await response.text();
+  const json = parseJsonResponse<CompleteResponse>(responseText);
 
-  if (!response.ok || !json) {
+  if (!response.ok) {
     throw new Error(json?.error ?? `Unable to complete Teamship update job ${jobId}. HTTP ${response.status}.`);
   }
 
+  if (!json) {
+    throw new Error(
+      `Unable to complete Teamship update job ${jobId}. Expected JSON but received HTTP ${response.status} ${describeResponseBody(responseText)}.`
+    );
+  }
+
   return json;
+}
+
+function parseJsonResponse<T>(value: string) {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+}
+
+function describeResponseBody(value: string) {
+  const preview = value.replace(/\s+/g, " ").trim().slice(0, 120);
+
+  return preview ? `with body starting: ${JSON.stringify(preview)}` : "with an empty response body";
 }
 
 function buildAgentHeaders(options: WorkerOptions) {
