@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   getWorkspaceWorkflowStatus,
+  mergeTeamshipOrders,
   rowMatchesWorkspaceFilters
 } from "@/modules/shipment-documents/components/garland-teamship-review-client";
 import type {
   GarlandPdfShippingOrder,
-  GarlandTeamshipOrderReview
+  GarlandTeamshipOrderReview,
+  TeamshipShippingOrderDetail
 } from "@/modules/shipment-documents/teamship-review-types";
 
 describe("Garland Teamship review workspace client helpers", () => {
@@ -184,3 +186,18 @@ function baseWorkspaceRow() {
     teamshipOrder: null
   };
 }
+
+describe("Garland Teamship daily edit queue helpers", () => {
+  it("keeps previously fetched daily orders and replaces duplicates with refreshed records", () => {
+    const existing = [{ id: "30202", shipment_id: "SR808478", customer_name: "Old" }] as TeamshipShippingOrderDetail[];
+    const incoming = [
+      { id: "30202", shipment_id: "SR808478", customer_name: "Refreshed" },
+      { id: "30203", shipment_id: "SR808479", customer_name: "New" }
+    ] as TeamshipShippingOrderDetail[];
+
+    expect(mergeTeamshipOrders(existing, incoming)).toEqual([
+      { id: "30202", shipment_id: "SR808478", customer_name: "Refreshed" },
+      { id: "30203", shipment_id: "SR808479", customer_name: "New" }
+    ]);
+  });
+});

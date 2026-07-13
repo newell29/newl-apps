@@ -365,18 +365,11 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       const nextReview = srNumber && review ? mergePartialReview(review, json) : json;
       setReview(nextReview);
       setSelectedUpdateSrNumbers(new Set());
-      const autoSaveMessage = srNumber
-        ? ""
-        : await autoSaveReviewSnapshot({
-            reviewSnapshot: nextReview,
-            shipmentDateSnapshot: shipmentDate,
-            sourcePdfFileNameSnapshot: sourcePdfFileName
-          });
       setStatus(
         `${rescan || srNumber ? "Rescan complete" : "Review complete"}: ${nextReview.summary.passedCount} green, ${nextReview.summary.pendingTeamshipCount} pending Teamship creation, ${nextReview.summary.failedCount} with discrepancies, ${nextReview.summary.missingTeamshipCount} missing without an alert.`
           + (nextReview.summary.noPdfCount > 0 ? ` ${nextReview.summary.noPdfCount} Teamship order(s) had no uploaded PDF.` : "")
           + (nextReview.summary.skippedAlreadyReviewedCount > 0 ? ` ${nextReview.summary.skippedAlreadyReviewedCount} already-reviewed order(s) were skipped.` : "")
-          + autoSaveMessage
+          + " Review remains in the editing queue until you save the batch."
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to run the Teamship review.");
@@ -597,9 +590,8 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
 
   async function fetchDailyOrders() {
     setError(null);
-    setDailyOrderCount(null);
+    setDailyOrderCount(dailyOrders.length);
     setDailySyncSummary(null);
-    setDailyOrders([]);
     setIsProcessing(true);
     setProcessingPhase("SYNC_TEAMSHIP");
     setStatus(`Pulling missing Garland Teamship orders from ${syncDateFrom} to ${syncDateTo}...`);
@@ -619,10 +611,11 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         throw new Error(json?.error ?? "Unable to fetch Teamship daily orders.");
       }
 
-      setDailyOrderCount(json.totalCount ?? json.orders?.length ?? 0);
       setDailySyncSummary(json.sync ?? null);
       const fetchedOrders = json.orders ?? [];
-      setDailyOrders(fetchedOrders);
+      const nextDailyOrders = mergeTeamshipOrders(dailyOrders, fetchedOrders);
+      setDailyOrderCount(nextDailyOrders.length);
+      setDailyOrders(nextDailyOrders);
       const syncedDateFrom = json.sync?.dateFrom ?? syncDateFrom;
       const syncedDateTo = json.sync?.dateTo ?? syncDateTo;
 
@@ -630,23 +623,11 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         handleShipmentDateChange(syncedDateFrom);
       }
 
-      const autoSaveMessage =
-        json.sync &&
-        syncedDateFrom === syncedDateTo &&
-        fetchedOrders.length > 0 &&
-        ((json.sync.insertedCount ?? 0) > 0 || (json.sync.updatedCount ?? 0) > 0)
-          ? await autoSaveReviewSnapshot({
-              reviewSnapshot: null,
-              teamshipOrdersSnapshot: fetchedOrders,
-              shipmentDateSnapshot: syncedDateFrom,
-              sourcePdfFileNameSnapshot: null
-            })
-          : "";
-
       setStatus(
         (json.sync
           ? `Pulled ${json.sync.insertedCount} new Teamship Garland order(s) from ${json.sync.dateFrom ?? syncDateFrom} to ${json.sync.dateTo ?? syncDateTo}; ${json.sync.skippedCount} already existed or could not be keyed.`
-          : `Fetched ${json.totalCount ?? json.orders?.length ?? 0} Teamship Garland order(s) for ${shipmentDate}.`) + autoSaveMessage
+          : `Fetched ${json.totalCount ?? json.orders?.length ?? 0} Teamship Garland order(s) for ${shipmentDate}.`) +
+          ` Editing queue now has ${nextDailyOrders.length} Teamship order(s). Save the batch when the day is complete.`
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to sync Teamship daily orders.");
@@ -689,45 +670,6 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       const message = caught instanceof Error ? caught.message : "Unable to save Teamship review run.";
       setError(message);
       setSaveStatus(null);
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  async function autoSaveReviewSnapshot({
-    reviewSnapshot,
-    teamshipOrdersSnapshot = dailyOrders,
-    shipmentDateSnapshot,
-    sourcePdfFileNameSnapshot
-  }: {
-    reviewSnapshot: GarlandTeamshipReviewResponse | null;
-    teamshipOrdersSnapshot?: TeamshipShippingOrderDetail[];
-    shipmentDateSnapshot: string;
-    sourcePdfFileNameSnapshot: string | null;
-  }) {
-    setIsSaving(true);
-    setSaveStatus("Auto-saving Teamship review history...");
-
-    try {
-      const json = await postRunToHistory({
-        reviewSnapshot,
-        teamshipOrdersSnapshot,
-        shipmentDateSnapshot,
-        sourcePdfFileNameSnapshot
-      });
-
-      setHistory(json);
-      setHistorySearch(json.search);
-      setHistoryDateFrom(json.dateFrom);
-      setHistoryDateTo(json.dateTo);
-      setHistoryAllDates(json.allDates);
-      setSaveStatus(`Auto-saved to history. Showing ${json.totalCount} saved run${json.totalCount === 1 ? "" : "s"} for ${formatHistoryRange(json)}.`);
-      return " Auto-saved to history.";
-    } catch (caught) {
-      const message = caught instanceof Error ? caught.message : "Unable to auto-save Teamship review run.";
-      setSaveStatus(null);
-      setError(message);
-      return ` Auto-save failed: ${message}`;
     } finally {
       setIsSaving(false);
     }
@@ -3308,6 +3250,34 @@ function summarizeReviewRows(
     noPdfCount: reviews.filter((row) => row.status === "NO_PDF").length,
     skippedAlreadyReviewedCount: reviews.filter((row) => row.status === "SKIPPED_ALREADY_REVIEWED").length
   };
+}
+
+export function mergeTeamshipOrders(
+  current: TeamshipShippingOrderDetail[],
+  incoming: TeamshipShippingOrderDetail[]
+): TeamshipShippingOrderDetail[] {
+  const merged = new Map<string, TeamshipShippingOrderDetail>();
+
+  for (const order of current) {
+    merged.set(getTeamshipOrderMergeKey(order), order);
+  }
+
+  for (const order of incoming) {
+    merged.set(getTeamshipOrderMergeKey(order), order);
+  }
+
+  return Array.from(merged.values());
+}
+
+function getTeamshipOrderMergeKey(order: TeamshipShippingOrderDetail) {
+  return (
+    normalizeIdentifier(order.id == null ? null : String(order.id)) ||
+    normalizeIdentifier(order.order_id == null ? null : String(order.order_id)) ||
+    normalizeIdentifier(order.shipment_id ?? null) ||
+    normalizeIdentifier(order.amazon_shipment_id1 ?? null) ||
+    normalizeIdentifier(order.edi_field_1 == null ? null : String(order.edi_field_1)) ||
+    JSON.stringify(order)
+  );
 }
 
 function mergeTeamshipAlerts(
