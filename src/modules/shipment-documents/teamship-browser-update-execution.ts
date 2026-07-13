@@ -172,8 +172,10 @@ export async function executeTeamshipPhase2BrowserJob({
 
         fs.mkdirSync(orderScreenshotDir, { recursive: true });
         const teamshipUrl = resolveOrderUrl({ order, appBaseUrl, allowedHosts: options.allowedHosts });
+        logBrowserStage(order, `opening ${teamshipUrl}`);
         await page.goto(teamshipUrl, { waitUntil: "domcontentloaded" });
         await maybeLogin(page, credentials);
+        logBrowserStage(order, "loading shipping order after login check");
         await page.goto(teamshipUrl, { waitUntil: "domcontentloaded" });
         await waitForTeamshipIdle(page);
         await saveScreenshot(page, orderScreenshotDir, "01-before");
@@ -182,6 +184,7 @@ export async function executeTeamshipPhase2BrowserJob({
         const fieldUpdatesSkipped = !options.fieldUpdatesEnabled && order.plannedFieldUpdates.length > 0;
 
         if (options.fieldUpdatesEnabled) {
+          logBrowserStage(order, `applying ${order.plannedFieldUpdates.length} top-level field update(s)`);
           try {
             await fillOrderFieldUpdates(page, order);
           } catch (error) {
@@ -189,19 +192,26 @@ export async function executeTeamshipPhase2BrowserJob({
             fieldUpdateErrors.push(message);
             await saveScreenshot(page, orderScreenshotDir, "field-update-error").catch(() => undefined);
           }
+        } else if (order.plannedFieldUpdates.length > 0) {
+          logBrowserStage(order, `skipping ${order.plannedFieldUpdates.length} top-level field update(s)`);
         }
 
         if (order.plannedPalletRows.length > 0) {
+          logBrowserStage(order, `scrolling to Pallets for ${order.plannedPalletRows.length} planned row(s)`);
           await scrollToPalletSection(page);
           await saveScreenshot(page, orderScreenshotDir, "02-pallet-section-before-fill");
+          logBrowserStage(order, "ensuring Teamship pallet row count");
           await ensurePalletRowCount(page, order.plannedPalletRows.length);
+          logBrowserStage(order, "filling Teamship pallet rows");
           await fillPalletRows(page, order);
           await saveScreenshot(page, orderScreenshotDir, "03-filled-before-save");
         }
 
+        logBrowserStage(order, "clicking Teamship save");
         await clickSave(page);
         await waitForTeamshipIdle(page);
         await saveScreenshot(page, orderScreenshotDir, "04-after-save");
+        logBrowserStage(order, "reloading Teamship order to verify saved values");
         await page.reload({ waitUntil: "domcontentloaded" });
         await waitForTeamshipIdle(page);
 
@@ -210,6 +220,7 @@ export async function executeTeamshipPhase2BrowserJob({
         }
 
         await saveScreenshot(page, orderScreenshotDir, "05-after-reload");
+        logBrowserStage(order, "reading pallet snapshot after reload");
         const palletSnapshot = order.plannedPalletRows.length > 0 ? await readPalletSnapshot(page) : null;
         const bolEditorCleanup = options.bolCleanupEnabled
           ? await openBolEditorAndApplyCleanup({
@@ -284,6 +295,10 @@ export async function executeTeamshipPhase2BrowserJob({
       "Newl Apps will rescan Teamship after this completion response is accepted."
     ]
   };
+}
+
+function logBrowserStage(order: TeamshipPhase2OrderPlan, message: string) {
+  console.log(`[Teamship browser] ${order.srNumber || order.teamshipOrderId || "unknown order"}: ${message}`);
 }
 
 async function launchBrowser(
