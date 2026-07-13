@@ -55,14 +55,13 @@ export type TeamshipPhase2ExecutionOrderResult = {
     commodity: string;
     fields: Record<string, string | number>;
     browserInstruction: {
-      targetPage: "TEAMSHIP_ORDER_PALLETS" | "TEAMSHIP_BOL_EDITOR";
-      routeTemplate: "/ship-inventories/{teamshipOrderId}/bol-editor";
+      targetPage: "TEAMSHIP_ORDER_PALLETS";
+      routeTemplate: "/ship-inventories/{teamshipOrderId}";
       absoluteUrl: string | null;
       targetRowNumber: number;
       zeroBasedLineItemIndex: number;
       actionBeforeFill: "FILL_EXISTING_PALLET_ROW" | "CLICK_ADD_ANOTHER_PALLET_SIZE";
       addAnotherPalletSizeButtonText: "Add Another Pallet Size" | null;
-      bolEditorAddLineItemButtonText: "+ Add Line Item" | null;
       fieldSelectors: {
         packages: string;
         commodity: string;
@@ -315,32 +314,29 @@ function buildPalletBrowserInstruction(rowNumber: number) {
 
   if (rowNumber === 1) {
     return {
-      targetPage: "TEAMSHIP_BOL_EDITOR" as const,
-      routeTemplate: "/ship-inventories/{teamshipOrderId}/bol-editor" as const,
+      targetPage: "TEAMSHIP_ORDER_PALLETS" as const,
+      routeTemplate: "/ship-inventories/{teamshipOrderId}" as const,
       targetRowNumber: rowNumber,
       zeroBasedLineItemIndex: lineItemIndex,
       actionBeforeFill: "FILL_EXISTING_PALLET_ROW" as const,
       addAnotherPalletSizeButtonText: null,
-      bolEditorAddLineItemButtonText: null,
       fieldSelectors,
-      saveInstruction: buildInlineBolEditorSaveInstruction(),
-      note: "Use the existing first pallet row in the Teamship BOL editor."
+      saveInstruction: buildShippingOrderSaveInstruction(),
+      note: "Use the existing first pallet row in the Pallets section on the Teamship shipping order page."
     };
   }
 
   return {
-    targetPage: "TEAMSHIP_BOL_EDITOR" as const,
-    routeTemplate: "/ship-inventories/{teamshipOrderId}/bol-editor" as const,
+    targetPage: "TEAMSHIP_ORDER_PALLETS" as const,
+    routeTemplate: "/ship-inventories/{teamshipOrderId}" as const,
     targetRowNumber: rowNumber,
     zeroBasedLineItemIndex: lineItemIndex,
     actionBeforeFill: "CLICK_ADD_ANOTHER_PALLET_SIZE" as const,
     addAnotherPalletSizeButtonText: "Add Another Pallet Size" as const,
-    bolEditorAddLineItemButtonText: "+ Add Line Item" as const,
     fieldSelectors,
-    saveInstruction: buildInlineBolEditorSaveInstruction(),
+    saveInstruction: buildShippingOrderSaveInstruction(),
     note:
-      `If editing Teamship shipment pallet rows, click "Add Another Pallet Size" until pallet row ${rowNumber} exists. ` +
-      `If editing the BOL editor, click "+ Add Line Item" until line item ${rowNumber} exists, then fill this row's fields.`
+      `On the Teamship shipping order page, click "Add Another Pallet Size" until pallet row ${rowNumber} exists, then fill this row's fields.`
   };
 }
 

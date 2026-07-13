@@ -58,7 +58,8 @@ describe("Teamship Phase 2 agent execution", () => {
       expect.objectContaining({
         rowNumber: 1,
         browserInstruction: expect.objectContaining({
-          routeTemplate: "/ship-inventories/{teamshipOrderId}/bol-editor",
+          targetPage: "TEAMSHIP_ORDER_PALLETS",
+          routeTemplate: "/ship-inventories/{teamshipOrderId}",
           actionBeforeFill: "FILL_EXISTING_PALLET_ROW",
           addAnotherPalletSizeButtonText: null,
           fieldSelectors: expect.objectContaining({
@@ -73,7 +74,6 @@ describe("Teamship Phase 2 agent execution", () => {
         browserInstruction: expect.objectContaining({
           actionBeforeFill: "CLICK_ADD_ANOTHER_PALLET_SIZE",
           addAnotherPalletSizeButtonText: "Add Another Pallet Size",
-          bolEditorAddLineItemButtonText: "+ Add Line Item",
           targetRowNumber: 2
         })
       })
@@ -140,7 +140,7 @@ describe("Teamship Phase 2 agent execution", () => {
       "https://teamship-test.example/ship-inventories/30202"
     );
     expect(result.orders[0]?.palletActions[0]?.browserInstruction.absoluteUrl).toBe(
-      "https://teamship-test.example/ship-inventories/30202/bol-editor"
+      "https://teamship-test.example/ship-inventories/30202"
     );
   });
 
@@ -166,7 +166,7 @@ describe("Teamship Phase 2 agent execution", () => {
     });
 
     expect(result.orders[0]?.palletActions[0]?.browserInstruction.absoluteUrl).toBe(
-      "https://teamship-test.example/ship-inventories/30202/bol-editor"
+      "https://teamship-test.example/ship-inventories/30202"
     );
   });
 
