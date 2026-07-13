@@ -3776,6 +3776,10 @@ export function getWorkspaceWorkflowStatus(row: ShipmentWorkspaceRow, updateJobs
     return "NEEDS_REVIEW";
   }
 
+  if (isTeamshipShipmentComplete(row.teamshipOrder)) {
+    return "BOL_PRINTED";
+  }
+
   const latestUpdateOrder = findLatestUpdateOrder(row.srNumber, updateJobs);
 
   if (latestUpdateOrder?.status === "SUCCESS") {
@@ -3787,6 +3791,36 @@ export function getWorkspaceWorkflowStatus(row: ShipmentWorkspaceRow, updateJobs
   }
 
   return "NEEDS_SETUP";
+}
+
+function isTeamshipShipmentComplete(order: TeamshipShippingOrderDetail | null) {
+  if (!order) {
+    return false;
+  }
+
+  if (readFirstString(order.completed_at, order.completedAt)) {
+    return true;
+  }
+
+  const status = readFirstString(order.shipment_status, order.shipmentStatus, order.status, order.state);
+
+  return Boolean(status && ["COMPLETE", "COMPLETED"].includes(normalizeStatusToken(status)));
+}
+
+function readFirstString(...values: unknown[]) {
+  for (const value of values) {
+    const stringValue = stringifyValue(value)?.trim();
+
+    if (stringValue) {
+      return stringValue;
+    }
+  }
+
+  return null;
+}
+
+function normalizeStatusToken(value: string) {
+  return value.trim().replace(/[^A-Z0-9]+/gi, "_").replace(/^_+|_+$/g, "").toUpperCase();
 }
 
 export function rowMatchesWorkspaceFilters({
