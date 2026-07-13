@@ -543,24 +543,40 @@ async function fillPalletControl(page: Page, index: number, value: string) {
   }
 
   await locator.scrollIntoViewIfNeeded();
-  const tagName = await locator.evaluate((element) => element.tagName.toLowerCase());
+  await locator.evaluate(
+    (element, nextValue) => {
+      const dispatch = (name: string) => element.dispatchEvent(new Event(name, { bubbles: true }));
 
-  if (tagName === "select") {
-    await locator.selectOption({ label: value }).catch(async () => {
-      await locator.selectOption(value);
-    });
-  } else {
-    await locator.click({ clickCount: 3 });
-    await locator.fill(value);
-  }
+      if (element instanceof HTMLSelectElement) {
+        const normalizedNextValue = nextValue.trim().toLowerCase();
+        const option = Array.from(element.options).find((candidate) => {
+          const normalizedValue = candidate.value.trim().toLowerCase();
+          const normalizedText = (candidate.textContent || "").trim().toLowerCase();
 
-  await locator.evaluate((element) => {
-    element.dispatchEvent(new Event("input", { bubbles: true }));
-    element.dispatchEvent(new Event("change", { bubbles: true }));
-    element.dispatchEvent(new Event("blur", { bubbles: true }));
-  });
+          return normalizedValue === normalizedNextValue || normalizedText === normalizedNextValue;
+        });
+        element.value = option ? option.value : nextValue;
+      } else if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+        const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
+
+        element.focus();
+
+        if (descriptor?.set) {
+          descriptor.set.call(element, nextValue);
+        } else {
+          element.value = nextValue;
+        }
+      }
+
+      dispatch("input");
+      dispatch("change");
+      dispatch("blur");
+    },
+    value
+  );
   await page.keyboard.press("Tab").catch(() => undefined);
-  await page.waitForTimeout(150);
+  await page.waitForTimeout(200);
 }
 
 async function assertPalletRowsFilled(
