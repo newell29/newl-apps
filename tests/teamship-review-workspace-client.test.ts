@@ -9,6 +9,8 @@ import type {
   GarlandTeamshipOrderReview
 } from "@/modules/shipment-documents/teamship-review-types";
 
+type WorkspaceRow = Parameters<typeof getWorkspaceWorkflowStatus>[0];
+
 describe("Garland Teamship review workspace client helpers", () => {
   it("searches visible rows by shipment, recipient, SKU, serial, and dimension text", () => {
     const row = sampleWorkspaceRow();
@@ -64,10 +66,14 @@ describe("Garland Teamship review workspace client helpers", () => {
               srNumber: "SR808478",
               psNumber: "PS210206",
               teamshipOrderId: "30202",
+              teamshipUrl: "https://app.teamshipos.com/ship-inventories/30202",
               status: "SUCCESS",
+              sourceReviewStatus: "PASS",
               plannedFieldUpdateCount: 0,
               plannedPalletRowCount: 1,
-              error: null
+              validationIssues: [],
+              errorMessage: null,
+              agentEvidence: null
             }
           ],
           createdAt: "2026-07-12T12:00:00.000Z",
@@ -79,16 +85,30 @@ describe("Garland Teamship review workspace client helpers", () => {
       ])
     ).toBe("READY_TO_PRINT");
   });
+
+  it("treats Teamship-completed shipments as BOL printed in the workspace", () => {
+    const completedRow = sampleWorkspaceRow({
+      status: "PASS",
+      issueCount: 0,
+      teamshipOrder: {
+        id: "30202",
+        shipment_id: "SR808478",
+        shipment_status: "Complete"
+      }
+    });
+
+    expect(getWorkspaceWorkflowStatus(completedRow, [])).toBe("BOL_PRINTED");
+  });
 });
 
-function sampleWorkspaceRow(overrides: Partial<ReturnType<typeof baseWorkspaceRow>> = {}) {
+function sampleWorkspaceRow(overrides: Partial<WorkspaceRow> = {}): WorkspaceRow {
   return {
     ...baseWorkspaceRow(),
     ...overrides
   };
 }
 
-function baseWorkspaceRow() {
+function baseWorkspaceRow(): WorkspaceRow {
   const pdfOrder: GarlandPdfShippingOrder = {
     pageNumbers: [1],
     psNumber: "PS210206",

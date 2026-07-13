@@ -83,6 +83,12 @@ export type TeamshipShippingOrderDetail = {
   order_number?: string | null;
   shipment_id?: string | null;
   record_no?: string | null;
+  status?: string | null;
+  shipment_status?: string | null;
+  shipmentStatus?: string | null;
+  state?: string | null;
+  completed_at?: string | null;
+  completedAt?: string | null;
   carrier?: string | null;
   ship_method?: string | null;
   shipping_carrier?: string | null;
