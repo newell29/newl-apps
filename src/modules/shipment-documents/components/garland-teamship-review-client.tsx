@@ -3970,8 +3970,8 @@ function buildItemComparisonRows(review: GarlandTeamshipOrderReview): ItemCompar
   const rows = new Map<string, ItemComparisonRow>();
 
   const addItems = (items: ItemDetail[], side: "pdfItems" | "teamshipItems") => {
-    items.forEach((item, index) => {
-      const key = buildItemComparisonKey(item, index);
+    items.forEach((item) => {
+      const key = buildItemComparisonKey(item);
 
       if (!key) {
         return;
@@ -3995,7 +3995,7 @@ function buildItemComparisonRows(review: GarlandTeamshipOrderReview): ItemCompar
   return Array.from(rows.values()).sort((left, right) => left.label.localeCompare(right.label, undefined, { numeric: true }));
 }
 
-function buildItemComparisonKey(item: ItemDetail, index: number) {
+function buildItemComparisonKey(item: ItemDetail) {
   const sku = item.sku?.trim();
 
   if (sku) {
@@ -4011,13 +4011,6 @@ function buildItemComparisonKey(item: ItemDetail, index: number) {
     return {
       value: `serial:${serials.join("|")}`,
       label: "Serial-only"
-    };
-  }
-
-  if (item.quantity) {
-    return {
-      value: `quantity:${item.quantity}:${index}`,
-      label: "Quantity-only"
     };
   }
 
