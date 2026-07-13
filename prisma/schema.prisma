@@ -499,8 +499,8 @@ model User {
   shipmentDocumentRuns        ShipmentDocumentRun[]
   shipmentCarrierManifestRuns ShipmentCarrierManifestRun[]
   teamshipReviewRuns          TeamshipReviewRun[]
-  teamshipUpdateJobsCreated   TeamshipUpdateJob[] @relation("TeamshipUpdateJobCreatedBy")
-  teamshipUpdateJobsApproved  TeamshipUpdateJob[] @relation("TeamshipUpdateJobApprovedBy")
+  teamshipUpdateJobsCreated   TeamshipUpdateJob[]          @relation("TeamshipUpdateJobCreatedBy")
+  teamshipUpdateJobsApproved  TeamshipUpdateJob[]          @relation("TeamshipUpdateJobApprovedBy")
 }
 
 // Auth.js (NextAuth) adapter models. Account links an external identity
@@ -861,28 +861,30 @@ model TeamshipReviewRun {
 }
 
 model TeamshipReviewOrder {
-  id                 String    @id @default(cuid())
-  tenantId           String
-  runId              String
-  psNumber           String
-  srNumber           String
-  status             String
-  teamshipOrderId    String?
-  teamshipUrl        String?
-  carrier            String?
-  shipToName         String?
-  city               String?
-  state              String?
-  shipToPo           String?
-  pageNumbers        Json
-  pdfOrder           Json
-  review             Json
-  mismatchCount      Int       @default(0)
-  workflowStatus     String    @default("NEEDS_SETUP")
-  bolPrintedAt       DateTime?
-  bolPrintedByUserId String?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  id                     String    @id @default(cuid())
+  tenantId               String
+  runId                  String
+  psNumber               String
+  srNumber               String
+  status                 String
+  teamshipOrderId        String?
+  teamshipUrl            String?
+  carrier                String?
+  shipToName             String?
+  city                   String?
+  state                  String?
+  shipToPo               String?
+  pageNumbers            Json
+  pdfOrder               Json
+  review                 Json
+  mismatchCount          Int       @default(0)
+  workflowStatus         String    @default("NEEDS_SETUP")
+  bolPrintedAt           DateTime?
+  bolPrintedByUserId     String?
+  orderCompletedAt       DateTime?
+  orderCompletedByUserId String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
   tenant Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   run    TeamshipReviewRun @relation(fields: [runId], references: [id], onDelete: Cascade)
@@ -892,6 +894,7 @@ model TeamshipReviewOrder {
   @@index([tenantId, psNumber])
   @@index([tenantId, status])
   @@index([tenantId, workflowStatus])
+  @@index([tenantId, orderCompletedAt])
 }
 
 model TeamshipDailySyncRun {
@@ -973,34 +976,34 @@ model GarlandProductDimensionObservation {
 }
 
 model TeamshipUpdateJob {
-  id                    String    @id @default(cuid())
-  tenantId              String
-  workflowKey           String    @default("GARLAND_TEAMSHIP_PHASE2_UPDATE")
-  documentLabel         String
-  shipmentDate          DateTime
-  sourcePdfFileName     String?
-  status                String    @default("DRAFT")
-  agentMode             String    @default("DRY_RUN")
-  dryRun                Boolean   @default(true)
-  selectedSrNumbers     Json
-  summary               Json
-  sourceReviewResponse  Json
-  sourcePdfOrders       Json
-  plan                  Json
-  searchText            String
-  errorMessage          String?
-  agentId               String?
-  agentClaimedAt        DateTime?
-  agentStartedAt        DateTime?
-  agentFinishedAt       DateTime?
-  approvedByUserId      String?
-  approvedAt            DateTime?
-  createdByUserId       String?
-  lastVerificationAt    DateTime?
-  verificationResponse  Json?
-  agentResult           Json?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  id                   String    @id @default(cuid())
+  tenantId             String
+  workflowKey          String    @default("GARLAND_TEAMSHIP_PHASE2_UPDATE")
+  documentLabel        String
+  shipmentDate         DateTime
+  sourcePdfFileName    String?
+  status               String    @default("DRAFT")
+  agentMode            String    @default("DRY_RUN")
+  dryRun               Boolean   @default(true)
+  selectedSrNumbers    Json
+  summary              Json
+  sourceReviewResponse Json
+  sourcePdfOrders      Json
+  plan                 Json
+  searchText           String
+  errorMessage         String?
+  agentId              String?
+  agentClaimedAt       DateTime?
+  agentStartedAt       DateTime?
+  agentFinishedAt      DateTime?
+  approvedByUserId     String?
+  approvedAt           DateTime?
+  createdByUserId      String?
+  lastVerificationAt   DateTime?
+  verificationResponse Json?
+  agentResult          Json?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   tenant     Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdBy  User?                 @relation("TeamshipUpdateJobCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction)
@@ -1014,14 +1017,14 @@ model TeamshipUpdateJob {
 }
 
 model TeamshipUpdateOrder {
-  id                  String    @id @default(cuid())
+  id                  String   @id @default(cuid())
   tenantId            String
   jobId               String
   psNumber            String
   srNumber            String
   teamshipOrderId     String?
   teamshipUrl         String?
-  status              String    @default("PENDING")
+  status              String   @default("PENDING")
   sourceReviewStatus  String
   plannedFieldUpdates Json
   plannedPalletRows   Json
@@ -1029,10 +1032,10 @@ model TeamshipUpdateOrder {
   agentResult         Json?
   verificationReview  Json?
   errorMessage        String?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
-  tenant Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   job    TeamshipUpdateJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, jobId])

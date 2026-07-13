@@ -35,6 +35,9 @@ describe("Garland Teamship review workspace client helpers", () => {
     expect(rowMatchesWorkspaceFilters({ row: passedRow, search: "", filter: "ISSUES", workflowStatus: "NEEDS_SETUP" })).toBe(false);
     expect(rowMatchesWorkspaceFilters({ row: passedRow, search: "", filter: "READY_TO_PRINT", workflowStatus: "READY_TO_PRINT" })).toBe(true);
     expect(rowMatchesWorkspaceFilters({ row: passedRow, search: "", filter: "BOL_PRINTED", workflowStatus: "BOL_PRINTED" })).toBe(true);
+    expect(rowMatchesWorkspaceFilters({ row: passedRow, search: "", filter: "ORDER_COMPLETE", workflowStatus: "ORDER_COMPLETE" })).toBe(true);
+    expect(rowMatchesWorkspaceFilters({ row: passedRow, search: "", filter: "NOT_COMPLETE", workflowStatus: "BOL_PRINTED" })).toBe(true);
+    expect(rowMatchesWorkspaceFilters({ row: passedRow, search: "", filter: "NOT_COMPLETE", workflowStatus: "ORDER_COMPLETE" })).toBe(false);
   });
 
   it("derives workflow status from update job order state", () => {

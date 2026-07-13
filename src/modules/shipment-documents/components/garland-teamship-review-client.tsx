@@ -59,6 +59,7 @@ type TeamshipReviewHistoryOrder = {
   mismatchCount: number;
   workflowStatus: TeamshipReviewWorkflowStatus;
   bolPrintedAt: string | null;
+  orderCompletedAt: string | null;
 };
 
 type TeamshipReviewHistoryRun = {
@@ -162,9 +163,9 @@ type TeamshipUpdateAgentMode = "DRY_RUN" | "LIVE_API";
 type PayloadInspectionResponse = TeamshipPayloadInspectionResult | { error: string };
 
 type ShipmentWorkspaceStatus = GarlandTeamshipOrderReview["status"] | "TEAMSHIP_PULLED" | "PDF_READY";
-type TeamshipReviewWorkflowStatus = "NEEDS_SETUP" | "READY_TO_PRINT" | "BOL_PRINTED" | "NEEDS_REVIEW" | "NO_PDF" | "SKIPPED";
+type TeamshipReviewWorkflowStatus = "NEEDS_SETUP" | "READY_TO_PRINT" | "BOL_PRINTED" | "ORDER_COMPLETE" | "NEEDS_REVIEW" | "NO_PDF" | "SKIPPED";
 type ProductDimensionEditField = "quantity" | "lengthIn" | "widthIn" | "heightIn" | "weightLb";
-type WorkspaceQueueFilter = "ALL" | "ISSUES" | "APPROVED" | "PENDING" | "NO_PDF" | "NEEDS_SETUP" | "READY_TO_PRINT" | "BOL_PRINTED";
+type WorkspaceQueueFilter = "ALL" | "NOT_COMPLETE" | "ISSUES" | "APPROVED" | "PENDING" | "NO_PDF" | "NEEDS_SETUP" | "READY_TO_PRINT" | "BOL_PRINTED" | "ORDER_COMPLETE";
 type NewPalletDraftLine = GarlandTeamshipPalletDraftLine;
 type TeamshipProcessingPhase = "READ_PDF" | "SYNC_TEAMSHIP" | "RUN_REVIEW" | "RESCAN_TEAMSHIP";
 
@@ -1037,7 +1038,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     }
   }
 
-  async function updateSavedOrderWorkflow(runId: string, orderId: string, action: "markBolPrinted" | "clearBolPrinted") {
+  async function updateSavedOrderWorkflow(runId: string, orderId: string, action: "markBolPrinted" | "clearBolPrinted" | "markOrderComplete" | "clearOrderComplete") {
     setHistoryError(null);
     setIsHistoryLoading(true);
 
@@ -1610,6 +1611,7 @@ function ShipmentReviewWorkspace({
                 className="w-full rounded-xl border border-input bg-background px-3 py-3 text-sm font-semibold normal-case tracking-normal text-foreground shadow-sm"
               >
                 <option value="ALL">All shipments</option>
+                <option value="NOT_COMPLETE">Not complete</option>
                 <option value="ISSUES">Issues only</option>
                 <option value="APPROVED">Approved / matched</option>
                 <option value="PENDING">Pending Teamship</option>
@@ -1617,6 +1619,7 @@ function ShipmentReviewWorkspace({
                 <option value="NEEDS_SETUP">Needs bot setup</option>
                 <option value="READY_TO_PRINT">Ready to print</option>
                 <option value="BOL_PRINTED">BOL printed</option>
+                <option value="ORDER_COMPLETE">Order complete</option>
               </select>
             </label>
             <div className="flex flex-wrap items-center gap-2">
@@ -2396,19 +2399,19 @@ function ShipmentStageLine({ row, workflowStatus }: { row: ShipmentWorkspaceRow;
           ? "Approve changes"
           : workflowStatus === "NEEDS_SETUP"
             ? "Create bot draft"
-            : workflowStatus === "READY_TO_PRINT" || workflowStatus === "BOL_PRINTED"
+            : workflowStatus === "READY_TO_PRINT" || workflowStatus === "BOL_PRINTED" || workflowStatus === "ORDER_COMPLETE"
               ? "Data ready"
               : "Setup pending",
       state:
-        workflowStatus === "READY_TO_PRINT" || workflowStatus === "BOL_PRINTED"
+        workflowStatus === "READY_TO_PRINT" || workflowStatus === "BOL_PRINTED" || workflowStatus === "ORDER_COMPLETE"
           ? "done"
           : workflowStatus === "NEEDS_REVIEW" || workflowStatus === "NEEDS_SETUP"
             ? "current"
             : "pending"
     },
     {
-      label: workflowStatus === "BOL_PRINTED" ? "BOL printed" : workflowStatus === "READY_TO_PRINT" ? "Print BOL" : "BOL not printed",
-      state: workflowStatus === "BOL_PRINTED" ? "done" : workflowStatus === "READY_TO_PRINT" ? "current" : "pending"
+      label: workflowStatus === "ORDER_COMPLETE" ? "Order complete" : workflowStatus === "BOL_PRINTED" ? "BOL / pick / labels" : workflowStatus === "READY_TO_PRINT" ? "Print packet" : "Print packet pending",
+      state: workflowStatus === "ORDER_COMPLETE" || workflowStatus === "BOL_PRINTED" ? "done" : workflowStatus === "READY_TO_PRINT" ? "current" : "pending"
     }
   ];
 
@@ -2857,7 +2860,7 @@ function TeamshipReviewHistorySection({
   onSearch: () => void;
   onDelete: (runId: string) => void;
   onLoadForEditing: (runId: string) => void;
-  onOrderWorkflowAction: (runId: string, orderId: string, action: "markBolPrinted" | "clearBolPrinted") => void;
+  onOrderWorkflowAction: (runId: string, orderId: string, action: "markBolPrinted" | "clearBolPrinted" | "markOrderComplete" | "clearOrderComplete") => void;
 }) {
   return (
     <section className="overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
@@ -3067,6 +3070,9 @@ function TeamshipReviewHistorySection({
                             {order.bolPrintedAt ? (
                               <p className="text-xs text-mutedForeground">Printed {formatDateTime(order.bolPrintedAt)}</p>
                             ) : null}
+                            {order.orderCompletedAt ? (
+                              <p className="text-xs font-semibold text-success">✓ Complete {formatDateTime(order.orderCompletedAt)}</p>
+                            ) : null}
                           </div>
                         </td>
                         <td className="px-3 py-2 text-mutedForeground">
@@ -3095,25 +3101,46 @@ function TeamshipReviewHistorySection({
                           )}
                         </td>
                         <td className="px-3 py-2">
-                          {order.workflowStatus === "BOL_PRINTED" ? (
-                            <button
-                              type="button"
-                              onClick={() => onOrderWorkflowAction(run.id, order.id, "clearBolPrinted")}
-                              disabled={isHistoryLoading}
-                              className="rounded-md border border-border px-2 py-1 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              Mark not printed
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => onOrderWorkflowAction(run.id, order.id, "markBolPrinted")}
-                              disabled={isHistoryLoading || order.workflowStatus === "NO_PDF" || order.workflowStatus === "SKIPPED"}
-                              className="rounded-md border border-border px-2 py-1 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              Mark BOL printed
-                            </button>
-                          )}
+                          <div className="flex flex-wrap gap-2">
+                            {order.workflowStatus === "ORDER_COMPLETE" ? (
+                              <button
+                                type="button"
+                                onClick={() => onOrderWorkflowAction(run.id, order.id, "clearOrderComplete")}
+                                disabled={isHistoryLoading}
+                                className="rounded-md border border-success/30 bg-success/10 px-2 py-1 text-xs font-semibold text-success transition-colors hover:bg-success/15 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                ✓ Complete
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => onOrderWorkflowAction(run.id, order.id, "markOrderComplete")}
+                                disabled={isHistoryLoading || order.workflowStatus === "NO_PDF" || order.workflowStatus === "SKIPPED"}
+                                className="rounded-md border border-success/30 px-2 py-1 text-xs font-semibold text-success transition-colors hover:bg-success/10 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Mark order complete
+                              </button>
+                            )}
+                            {order.workflowStatus === "BOL_PRINTED" ? (
+                              <button
+                                type="button"
+                                onClick={() => onOrderWorkflowAction(run.id, order.id, "clearBolPrinted")}
+                                disabled={isHistoryLoading}
+                                className="rounded-md border border-border px-2 py-1 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Mark not printed
+                              </button>
+                            ) : order.workflowStatus !== "ORDER_COMPLETE" ? (
+                              <button
+                                type="button"
+                                onClick={() => onOrderWorkflowAction(run.id, order.id, "markBolPrinted")}
+                                disabled={isHistoryLoading || order.workflowStatus === "NO_PDF" || order.workflowStatus === "SKIPPED"}
+                                className="rounded-md border border-border px-2 py-1 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Mark printed
+                              </button>
+                            ) : null}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -3649,7 +3676,7 @@ function buildWorkspaceStats(rows: ShipmentWorkspaceRow[], updateJobs: TeamshipU
     (stats, row) => {
       const workflowStatus = getWorkspaceWorkflowStatus(row, updateJobs);
 
-      if (workflowStatus === "BOL_PRINTED") {
+      if (workflowStatus === "ORDER_COMPLETE") {
         stats.complete += 1;
       } else if (workflowStatus === "READY_TO_PRINT") {
         stats.readyToPrint += 1;
@@ -3673,8 +3700,12 @@ function buildWorkspaceStats(rows: ShipmentWorkspaceRow[], updateJobs: TeamshipU
 function shipmentRowClass(status: ShipmentWorkspaceStatus, workflowStatus: TeamshipReviewWorkflowStatus) {
   const base = "relative border-l-[6px]";
 
-  if (workflowStatus === "BOL_PRINTED") {
+  if (workflowStatus === "ORDER_COMPLETE") {
     return `${base} border-success bg-success/10`;
+  }
+
+  if (workflowStatus === "BOL_PRINTED") {
+    return `${base} border-success bg-success/5`;
   }
 
   if (workflowStatus === "READY_TO_PRINT") {
@@ -3777,6 +3808,10 @@ function formatDimensionSource(source: GarlandTeamshipOrderReview["productDimens
 function workflowStatusPillClass(status: TeamshipReviewWorkflowStatus) {
   const base = "rounded-full px-2.5 py-1 text-xs font-bold uppercase tracking-wide";
 
+  if (status === "ORDER_COMPLETE") {
+    return `${base} bg-success/20 text-success`;
+  }
+
   if (status === "BOL_PRINTED") {
     return `${base} bg-success/10 text-success`;
   }
@@ -3797,8 +3832,12 @@ function workflowStatusPillClass(status: TeamshipReviewWorkflowStatus) {
 }
 
 function formatWorkflowStatus(status: TeamshipReviewWorkflowStatus) {
+  if (status === "ORDER_COMPLETE") {
+    return "✓ Order complete";
+  }
+
   if (status === "BOL_PRINTED") {
-    return "BOL printed";
+    return "BOL/pick/labels printed";
   }
 
   if (status === "READY_TO_PRINT") {
@@ -3917,6 +3956,10 @@ function rowMatchesWorkspaceStatusFilter(
 ) {
   if (filter === "ALL") {
     return true;
+  }
+
+  if (filter === "NOT_COMPLETE") {
+    return workflowStatus !== "ORDER_COMPLETE";
   }
 
   if (filter === "ISSUES") {

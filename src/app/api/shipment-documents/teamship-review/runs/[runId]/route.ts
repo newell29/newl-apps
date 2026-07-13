@@ -5,7 +5,7 @@ import {
   deleteTeamshipReviewRun,
   getTeamshipReviewHistory,
   getTeamshipReviewRunWorkspace,
-  markTeamshipReviewOrderBolPrinted
+  updateTeamshipReviewOrderWorkflow
 } from "@/modules/shipment-documents/teamship-review-history";
 import { requireAdmin, requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -62,15 +62,17 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ru
       return NextResponse.json({ error: "Select a saved Teamship review order to update." }, { status: 400 });
     }
 
-    if (body?.action !== "markBolPrinted" && body?.action !== "clearBolPrinted") {
+    const action = body?.action;
+
+    if (action !== "markBolPrinted" && action !== "clearBolPrinted" && action !== "markOrderComplete" && action !== "clearOrderComplete") {
       return NextResponse.json({ error: "Unsupported Teamship review history action." }, { status: 400 });
     }
 
-    await markTeamshipReviewOrderBolPrinted({
+    await updateTeamshipReviewOrderWorkflow({
       context,
       runId,
       orderId,
-      printed: body.action === "markBolPrinted"
+      action
     });
 
     const history = await getTeamshipReviewHistory(context);
