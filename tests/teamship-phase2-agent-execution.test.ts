@@ -58,8 +58,14 @@ describe("Teamship Phase 2 agent execution", () => {
       expect.objectContaining({
         rowNumber: 1,
         browserInstruction: expect.objectContaining({
+          routeTemplate: "/ship-inventories/{teamshipOrderId}/bol-editor",
           actionBeforeFill: "FILL_EXISTING_PALLET_ROW",
-          addAnotherPalletSizeButtonText: null
+          addAnotherPalletSizeButtonText: null,
+          fieldSelectors: expect.objectContaining({
+            packages: '[data-field-content="line_item_0_packages"]',
+            commodity: '[data-field-content="line_item_0_commodity"]',
+            dimensions: '[data-field-content="line_item_0_dimensions"]'
+          })
         })
       }),
       expect.objectContaining({
@@ -67,10 +73,45 @@ describe("Teamship Phase 2 agent execution", () => {
         browserInstruction: expect.objectContaining({
           actionBeforeFill: "CLICK_ADD_ANOTHER_PALLET_SIZE",
           addAnotherPalletSizeButtonText: "Add Another Pallet Size",
+          bolEditorAddLineItemButtonText: "+ Add Line Item",
           targetRowNumber: 2
         })
       })
     ]);
+  });
+
+  it("gives browser workers exact order-field locations and save instructions", () => {
+    const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
+    const evidence = buildDryRunEvidence({
+      job: { id: "job_1" },
+      plan,
+      agentId: "agent"
+    });
+
+    expect(evidence.orders[0]?.fieldActions[0]).toMatchObject({
+      teamshipField: "edi_field_3",
+      browserInstruction: {
+        preferredExecution: "TEAMSHIP_API",
+        browserFallbackPage: "TEAMSHIP_SHIPPING_ORDER",
+        routeTemplate: "/ship-inventories/{teamshipOrderId}",
+        fieldLabel: "Freight Terms Code",
+        primaryLocator: {
+          strategy: "LABEL_OR_NAME",
+          label: "Freight Terms Code"
+        },
+        bolEditorFallback: {
+          selector: '[data-field-content="instructions"]'
+        },
+        saveInstruction: {
+          action: "CLICK_SAVE_BUTTON_AFTER_EDIT",
+          buttonNames: ["Save", "Update", "Save Changes"]
+        }
+      }
+    });
+    expect(evidence.orders[0]?.saveInstruction).toMatchObject({
+      action: "CLICK_SAVE_BUTTON_AFTER_EDIT",
+      buttonNames: ["Save", "Update", "Save Changes"]
+    });
   });
 
   it("blocks live jobs unless the VM worker explicitly allows live updates", async () => {
