@@ -80,6 +80,32 @@ describe("Garland product dimension directory", () => {
     });
   });
 
+  it("does not save CSR placeholder dimensions as product directory observations", async () => {
+    const result = await recordGarlandCsrProductDimensionOverrides({
+      tenantId: "tenant-1",
+      documentLabel: "July 11, 2026",
+      pdfOrders: [samplePdfOrder()],
+      dimensions: [
+        {
+          sku: "NO-DIM-SKU",
+          source: "CSR_OVERRIDE",
+          productType: null,
+          quantity: 1,
+          lengthIn: 1,
+          widthIn: 1,
+          heightIn: 1,
+          weightLb: 1,
+          weightUnit: "lbs",
+          confidence: "LOW",
+          note: "Missing DIM placeholder for Teamship bot draft."
+        }
+      ]
+    });
+
+    expect(result).toEqual({ observedCount: 0, insertedCount: 0 });
+    expect(prismaMock.garlandProductDimensionObservation.createMany).not.toHaveBeenCalled();
+  });
+
   it("returns CSR learned recommendations when CSR overrides exist in the directory", async () => {
     prismaMock.garlandProductDimensionObservation.findMany.mockResolvedValue([
       {
