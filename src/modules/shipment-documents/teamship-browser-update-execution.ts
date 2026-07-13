@@ -24,6 +24,7 @@ export type TeamshipBrowserExecutionOptions = {
   headed?: boolean;
   slowMoMs?: number;
   errorPauseMs?: number;
+  bolCleanupEnabled?: boolean;
   screenshotRootDir?: string | null;
   allowedHosts?: string[];
 };
@@ -205,14 +206,16 @@ export async function executeTeamshipPhase2BrowserJob({
 
         await saveScreenshot(page, orderScreenshotDir, "04-after-reload");
         const palletSnapshot = order.plannedPalletRows.length > 0 ? await readPalletSnapshot(page) : null;
-        const bolEditorCleanup = await openBolEditorAndApplyCleanup({
-          page,
-          order,
-          orderUrl: teamshipUrl,
-          appBaseUrl,
-          screenshotDir: orderScreenshotDir,
-          allowedHosts: options.allowedHosts
-        });
+        const bolEditorCleanup = options.bolCleanupEnabled
+          ? await openBolEditorAndApplyCleanup({
+              page,
+              order,
+              orderUrl: teamshipUrl,
+              appBaseUrl,
+              screenshotDir: orderScreenshotDir,
+              allowedHosts: options.allowedHosts
+            })
+          : null;
 
         const fieldUpdateError = fieldUpdateErrors.length > 0 ? `Field update failed, but remaining browser actions were attempted: ${fieldUpdateErrors.join(" ")}` : undefined;
 
@@ -226,6 +229,7 @@ export async function executeTeamshipPhase2BrowserJob({
               screenshotDir: orderScreenshotDir,
               palletSnapshot,
               bolEditorCleanup,
+              bolEditorCleanupSkipped: !options.bolCleanupEnabled,
               fieldUpdateErrors
             }
           },
