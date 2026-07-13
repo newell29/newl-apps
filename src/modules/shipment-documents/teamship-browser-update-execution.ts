@@ -28,6 +28,7 @@ export type TeamshipBrowserExecutionOptions = {
 
 type PalletControlSnapshot = {
   rowCount: number;
+  controlsPerRow: number;
   controls: Array<{
     index: number;
     tagName: string;
@@ -35,6 +36,12 @@ type PalletControlSnapshot = {
     value: string;
     text: string;
   }>;
+};
+
+type TaggedPalletControls = {
+  rowCount: number;
+  controlsPerRow: number;
+  controlCount: number;
 };
 
 type EditableBolFieldSnapshot = {
@@ -403,40 +410,127 @@ async function fillPalletRows(page: Page, order: TeamshipPhase2OrderPlan) {
     weightUnit: row.weightUnit || "lbs",
     commodity: row.commodity.trim() || `SKU: ${row.sku.trim().toUpperCase()}`
   }));
-  const serializedRows = JSON.stringify(rows);
+  const controls = await tagPalletControls(page, rows.length);
 
-  await page.evaluate(String.raw`
-    (() => {
-      const rows = ${serializedRows};
-      ${PALLET_DOM_HELPERS}
-      const controls = collectPalletControls();
-      const controlsPerRow = controls.length >= rows.length * 7 ? 7 : controls.length >= rows.length * 6 ? 6 : 0;
+  for (const [index, row] of rows.entries()) {
+    const offset = index * controls.controlsPerRow;
+    await fillPalletControl(page, offset, String(row.quantity));
+    await fillPalletControl(page, offset + 1, String(row.lengthIn));
+    await fillPalletControl(page, offset + 2, String(row.widthIn));
+    await fillPalletControl(page, offset + 3, String(row.heightIn));
+    await fillPalletControl(page, offset + 4, String(row.weightLb));
 
-      if (!controlsPerRow) {
-        throw new Error("Not enough visible pallet controls. Found " + controls.length + ", expected at least " + rows.length * 6 + ".");
-      }
+    if (controls.controlsPerRow === 7) {
+      await fillPalletControl(page, offset + 5, row.weightUnit || "lbs");
+      await fillPalletControl(page, offset + 6, row.commodity);
+    } else {
+      await fillPalletControl(page, offset + 5, row.commodity);
+    }
+  }
 
-      for (const [index, row] of rows.entries()) {
-        const offset = index * controlsPerRow;
-        setElementValue(controls[offset], String(row.quantity));
-        setElementValue(controls[offset + 1], String(row.lengthIn));
-        setElementValue(controls[offset + 2], String(row.widthIn));
-        setElementValue(controls[offset + 3], String(row.heightIn));
-        setElementValue(controls[offset + 4], String(row.weightLb));
-
-        if (controlsPerRow === 7) {
-          setElementValue(controls[offset + 5], row.weightUnit || "lbs");
-          setElementValue(controls[offset + 6], row.commodity);
-        } else {
-          setElementValue(controls[offset + 5], row.commodity);
-        }
-      }
-    })()
-  `);
+  await assertPalletRowsFilled(page, rows, controls.controlsPerRow);
 }
 
 function normalizePositiveNumber(value: number | null | undefined, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+async function tagPalletControls(page: Page, expectedRows: number): Promise<TaggedPalletControls> {
+  return page.evaluate(
+    String.raw`
+      ((expectedRows) => {
+        ${PALLET_DOM_HELPERS}
+        const controls = collectPalletControls();
+        const controlsPerRow = controls.length >= expectedRows * 7 ? 7 : controls.length >= expectedRows * 6 ? 6 : 0;
+
+        if (!controlsPerRow) {
+          throw new Error("Not enough visible pallet controls. Found " + controls.length + ", expected at least " + expectedRows * 6 + ".");
+        }
+
+        controls.forEach((element, index) => {
+          element.setAttribute("data-newl-pallet-control-index", String(index));
+        });
+
+        return {
+          rowCount: Math.floor(controls.length / controlsPerRow),
+          controlsPerRow,
+          controlCount: controls.length
+        };
+      })
+    `,
+    expectedRows
+  );
+}
+
+async function fillPalletControl(page: Page, index: number, value: string) {
+  const locator = page.locator(`[data-newl-pallet-control-index="${index}"]`).first();
+
+  if ((await locator.count()) === 0) {
+    throw new Error(`Could not find Teamship pallet control ${index + 1}.`);
+  }
+
+  await locator.scrollIntoViewIfNeeded();
+  const tagName = await locator.evaluate((element) => element.tagName.toLowerCase());
+
+  if (tagName === "select") {
+    await locator.selectOption({ label: value }).catch(async () => {
+      await locator.selectOption(value);
+    });
+  } else {
+    await locator.click({ clickCount: 3 });
+    await locator.fill(value);
+  }
+
+  await locator.evaluate((element) => {
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+    element.dispatchEvent(new Event("blur", { bubbles: true }));
+  });
+  await page.keyboard.press("Tab").catch(() => undefined);
+  await page.waitForTimeout(150);
+}
+
+async function assertPalletRowsFilled(
+  page: Page,
+  rows: Array<{
+    quantity: number;
+    lengthIn: number;
+    widthIn: number;
+    heightIn: number;
+    weightLb: number;
+    commodity: string;
+  }>,
+  controlsPerRow: number
+) {
+  const snapshot = await readPalletSnapshot(page);
+
+  for (const [index, row] of rows.entries()) {
+    const offset = index * controlsPerRow;
+    const expected = [
+      String(row.quantity),
+      String(row.lengthIn),
+      String(row.widthIn),
+      String(row.heightIn),
+      String(row.weightLb),
+      row.commodity
+    ];
+    const actual = [
+      snapshot.controls[offset]?.value,
+      snapshot.controls[offset + 1]?.value,
+      snapshot.controls[offset + 2]?.value,
+      snapshot.controls[offset + 3]?.value,
+      snapshot.controls[offset + 4]?.value,
+      snapshot.controls[offset + (controlsPerRow === 7 ? 6 : 5)]?.value
+    ];
+
+    for (const [fieldIndex, expectedValue] of expected.entries()) {
+      if ((actual[fieldIndex] ?? "").trim() !== expectedValue.trim()) {
+        throw new Error(
+          `Teamship pallet row ${index + 1} did not accept field ${fieldIndex + 1}. Expected ${JSON.stringify(expectedValue)}, saw ${JSON.stringify(actual[fieldIndex] ?? "")}.`
+        );
+      }
+    }
+  }
 }
 
 async function clickSave(page: Page) {
@@ -758,10 +852,12 @@ async function readPalletSnapshot(page: Page): Promise<PalletControlSnapshot> {
     (() => {
       ${PALLET_DOM_HELPERS}
       const controls = collectPalletControls();
-      const controlsPerRow = 7;
+      const selectCount = controls.filter((element) => element instanceof HTMLSelectElement).length;
+      const controlsPerRow = selectCount > 0 && controls.length % 7 === 0 ? 7 : 6;
 
       return {
         rowCount: Math.floor(controls.length / controlsPerRow),
+        controlsPerRow,
         controls: controls.map((element, index) => ({
           index,
           tagName: element.tagName.toLowerCase(),
