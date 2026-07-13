@@ -1,0 +1,11 @@
+[Unit]
+Description=Update Newl Apps VM checkout and restart Teamship worker when main changes
+Documentation=See docs/teamship-phase2-vm-services.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/newl-apps
+EnvironmentFile=%h/newl-apps/.env.teamship-phase2-worker
+ExecStart=%h/newl-apps/scripts/teamship-phase2-vm-update.sh
