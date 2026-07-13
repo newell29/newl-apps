@@ -67,7 +67,7 @@ describe("Teamship Phase 2 dry-run planner", () => {
     ]);
   });
 
-  it("still prepares commodity text when a SKU has no usable dimensions", () => {
+  it("uses Teamship placeholder dimensions when a SKU has no usable dimensions", () => {
     const review = sampleReview();
     review.reviews[0]!.productDimensions = review.reviews[0]!.productDimensions.filter(
       (dimension) => dimension.sku !== "8030445"
@@ -86,13 +86,18 @@ describe("Teamship Phase 2 dry-run planner", () => {
       commodity: "SKU: 8030445 QTY: 4",
       hasUsableDimensions: false,
       dimensionSource: "MISSING",
-      lengthIn: null,
-      widthIn: null,
-      heightIn: null,
-      weightLb: null,
+      lengthIn: 1,
+      widthIn: 1,
+      heightIn: 1,
+      weightLb: 1,
       teamshipFields: {
         pallets_count: 2,
         pallet_2: 4,
+        pallet_2_length: 1,
+        pallet_2_width: 1,
+        pallet_2_height: 1,
+        pallet_2_weight: 1,
+        pallet_2_weight_unit: "lbs",
         pallet_2_commodity: "SKU: 8030445 QTY: 4"
       }
     });
@@ -158,6 +163,11 @@ describe("Teamship Phase 2 dry-run planner", () => {
       teamshipFields: {
         pallets_count: 3,
         pallet_3: 1,
+        pallet_3_length: 1,
+        pallet_3_width: 1,
+        pallet_3_height: 1,
+        pallet_3_weight: 1,
+        pallet_3_weight_unit: "lbs",
         pallet_3_commodity: "SKU: C-CARE-P SN: CSR-SERIAL-1"
       }
     });

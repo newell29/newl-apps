@@ -69,6 +69,14 @@ const FIELD_UPDATE_DESTINATIONS: Record<string, string> = {
   shipping_instructions: "edi_field_4"
 };
 
+const PLACEHOLDER_PALLET_DIMENSIONS = {
+  lengthIn: 1,
+  widthIn: 1,
+  heightIn: 1,
+  weightLb: 1,
+  weightUnit: "lbs"
+} as const;
+
 export function buildTeamshipPhase2DryRunPlan(review: GarlandTeamshipReviewResponse): TeamshipPhase2DryRunPlan {
   const pdfOrdersByKey = new Map(review.pdfOrders.map((order) => [buildOrderKey(order.psNumber, order.srNumber), order]));
   const orders = review.reviews.map((orderReview) =>
@@ -200,16 +208,25 @@ function buildPalletRowPlan({
   const quantity = readItemQuantity(item);
   const commodity = item.commodityOverride?.trim() || buildCommodity(item, quantity);
   const hasUsableDimensions = Boolean(dimensions);
-  const weightUnit = dimensions?.weightUnit?.trim() || "lbs";
+  const plannedDimensions = dimensions
+    ? {
+        lengthIn: dimensions.lengthIn,
+        widthIn: dimensions.widthIn,
+        heightIn: dimensions.heightIn,
+        weightLb: dimensions.weightLb,
+        weightUnit: dimensions.weightUnit?.trim() || "lbs"
+      }
+    : PLACEHOLDER_PALLET_DIMENSIONS;
+  const weightUnit = plannedDimensions.weightUnit;
 
   return {
     rowNumber,
     sku: item.sku.trim().toUpperCase(),
     quantity,
-    lengthIn: dimensions?.lengthIn ?? null,
-    widthIn: dimensions?.widthIn ?? null,
-    heightIn: dimensions?.heightIn ?? null,
-    weightLb: dimensions?.weightLb ?? null,
+    lengthIn: plannedDimensions.lengthIn,
+    widthIn: plannedDimensions.widthIn,
+    heightIn: plannedDimensions.heightIn,
+    weightLb: plannedDimensions.weightLb,
     weightUnit,
     commodity,
     hasUsableDimensions,
@@ -219,11 +236,11 @@ function buildPalletRowPlan({
       ? isUpsGarlandOrder({ pdfOrder, teamshipOrder: null })
         ? "UPS order placeholder rule."
         : dimensions.note
-      : "No usable dimension/weight recommendation found; commodity text can still be prepared.",
+      : "No usable dimension/weight recommendation found; using Teamship placeholder 1 x 1 x 1 and 1 lb until warehouse updates the real values.",
     teamshipFields: buildTeamshipPalletFields({
       rowNumber,
       quantity,
-      dimensions,
+      dimensions: plannedDimensions,
       weightUnit,
       commodity
     })
@@ -239,7 +256,12 @@ function buildTeamshipPalletFields({
 }: {
   rowNumber: number;
   quantity: number;
-  dimensions: GarlandProductDimensionRecommendation | null;
+  dimensions: {
+    lengthIn: number | null;
+    widthIn: number | null;
+    heightIn: number | null;
+    weightLb: number | null;
+  };
   weightUnit: string;
   commodity: string;
 }) {
@@ -249,13 +271,11 @@ function buildTeamshipPalletFields({
     [`pallet_${rowNumber}_commodity`]: commodity
   };
 
-  if (dimensions) {
-    fields[`pallet_${rowNumber}_length`] = dimensions.lengthIn ?? 0;
-    fields[`pallet_${rowNumber}_width`] = dimensions.widthIn ?? 0;
-    fields[`pallet_${rowNumber}_height`] = dimensions.heightIn ?? 0;
-    fields[`pallet_${rowNumber}_weight`] = dimensions.weightLb ?? 0;
-    fields[`pallet_${rowNumber}_weight_unit`] = weightUnit;
-  }
+  fields[`pallet_${rowNumber}_length`] = dimensions.lengthIn ?? 0;
+  fields[`pallet_${rowNumber}_width`] = dimensions.widthIn ?? 0;
+  fields[`pallet_${rowNumber}_height`] = dimensions.heightIn ?? 0;
+  fields[`pallet_${rowNumber}_weight`] = dimensions.weightLb ?? 0;
+  fields[`pallet_${rowNumber}_weight_unit`] = weightUnit;
 
   return fields;
 }

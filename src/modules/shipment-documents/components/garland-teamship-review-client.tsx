@@ -2578,7 +2578,7 @@ function ProductDimensionsTable({
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-mutedForeground">Pallet plan</p>
           <h3 className="mt-1 text-sm font-semibold text-foreground">SKU dimensions and commodity lines for the Teamship bot</h3>
           <p className="mt-1 text-xs text-mutedForeground">
-            Choose which Garland SKU/SN rows the bot should add to Teamship. Missing DIMs do not remove an included SKU/SN commodity update.
+            Choose which Garland SKU/SN rows the bot should add to Teamship. Missing DIMs use 1 x 1 x 1 and 1 lb in Teamship until the warehouse adds real values.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -2720,7 +2720,8 @@ function ProductDimensionsTable({
                   </div>
 
                   <p className="text-xs text-mutedForeground">
-                    {dimension?.note ?? "No usable dimension/weight recommendation found yet. The bot draft still carries the SKU/SN commodity line."}
+                    {dimension?.note ??
+                      "No usable dimension/weight recommendation found yet. The bot draft will use 1 x 1 x 1 and 1 lb, but this placeholder is not saved to the product directory."}
                   </p>
                 </div>
               </div>
