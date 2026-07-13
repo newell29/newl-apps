@@ -499,9 +499,17 @@ async function fillPalletRows(page: Page, order: TeamshipPhase2OrderPlan) {
     commodity: row.commodity.trim() || `SKU: ${row.sku.trim().toUpperCase()}`
   }));
   const controls = await tagPalletControls(page, rows.length);
+  const orderLabel = order.srNumber || order.teamshipOrderId || "unknown order";
+
+  console.log(
+    `[Teamship browser] ${orderLabel}: found ${controls.rowCount} pallet row(s), ${controls.controlCount} pallet controls, ${controls.controlsPerRow} control(s) per row.`
+  );
 
   for (const [index, row] of rows.entries()) {
     const offset = index * controls.controlsPerRow;
+    console.log(
+      `[Teamship browser] ${orderLabel}: filling pallet row ${index + 1} with ${row.quantity} @ ${row.lengthIn}x${row.widthIn}x${row.heightIn}, ${row.weightLb} ${row.weightUnit || "lbs"}, commodity ${JSON.stringify(row.commodity)}.`
+    );
     await fillPalletControl(page, offset, String(row.quantity));
     await fillPalletControl(page, offset + 1, String(row.lengthIn));
     await fillPalletControl(page, offset + 2, String(row.widthIn));
@@ -516,7 +524,7 @@ async function fillPalletRows(page: Page, order: TeamshipPhase2OrderPlan) {
     }
   }
 
-  await assertPalletRowsFilled(page, rows, controls.controlsPerRow);
+  await assertPalletRowsFilled(page, rows, controls.controlsPerRow, orderLabel);
 }
 
 function normalizePositiveNumber(value: number | null | undefined, fallback: number) {
@@ -612,9 +620,14 @@ async function assertPalletRowsFilled(
     weightLb: number;
     commodity: string;
   }>,
-  controlsPerRow: number
+  controlsPerRow: number,
+  orderLabel: string
 ) {
   const snapshot = await readPalletSnapshot(page);
+
+  console.log(
+    `[Teamship browser] ${orderLabel}: read back ${snapshot.rowCount} pallet row(s), ${snapshot.controls.length} controls, ${snapshot.controlsPerRow} control(s) per row before save.`
+  );
 
   for (const [index, row] of rows.entries()) {
     const offset = index * controlsPerRow;
@@ -634,6 +647,10 @@ async function assertPalletRowsFilled(
       snapshot.controls[offset + 4]?.value,
       snapshot.controls[offset + (controlsPerRow === 7 ? 6 : 5)]?.value
     ];
+
+    console.log(
+      `[Teamship browser] ${orderLabel}: pallet row ${index + 1} readback values ${JSON.stringify(actual)}.`
+    );
 
     for (const [fieldIndex, expectedValue] of expected.entries()) {
       if ((actual[fieldIndex] ?? "").trim() !== expectedValue.trim()) {
