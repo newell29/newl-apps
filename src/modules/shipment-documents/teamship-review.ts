@@ -800,7 +800,7 @@ function readTeamshipItemsFromArray(items: unknown): GarlandTeamshipItemDetail[]
         serialNumbers
       };
     })
-    .filter((item) => item.sku || item.quantity || item.serialNumbers.length > 0);
+    .filter((item) => item.sku || item.serialNumbers.length > 0);
 }
 
 function readTeamshipItemsFromPallets(pallets: unknown): GarlandTeamshipItemDetail[] {
@@ -821,7 +821,7 @@ function readTeamshipItemsFromPallets(pallets: unknown): GarlandTeamshipItemDeta
         serialNumbers
       };
     })
-    .filter((item) => item.sku || item.quantity || item.serialNumbers.length > 0);
+    .filter((item) => item.sku || item.serialNumbers.length > 0);
 }
 
 function readNestedValue(value: unknown, keys: string[]) {
