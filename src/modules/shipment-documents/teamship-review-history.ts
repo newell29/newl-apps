@@ -58,6 +58,14 @@ export type TeamshipReviewHistoryResponse = {
   allDates: boolean;
 };
 
+export type TeamshipReviewRunWorkspace = {
+  id: string;
+  documentLabel: string;
+  shipmentDate: string;
+  sourcePdfFileName: string | null;
+  review: GarlandTeamshipReviewResponse;
+};
+
 type SaveTeamshipReviewRunInput = {
   context: AuthenticatedContext;
   documentLabel: string;
@@ -77,6 +85,10 @@ type TeamshipReviewRunQueryClient = typeof prisma & {
     }): Promise<TeamshipReviewRunRecord[]>;
     count(args: { where: Record<string, unknown> }): Promise<number>;
     create(args: { data: Record<string, unknown> }): Promise<unknown>;
+    findFirst(args: {
+      where: Record<string, unknown>;
+      select: Record<string, unknown>;
+    }): Promise<TeamshipReviewWorkspaceRecord | null>;
     updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<{ count: number }>;
   };
   teamshipReviewOrder: {
@@ -107,6 +119,14 @@ type TeamshipReviewRunRecord = {
     email: string;
   } | null;
   orders: TeamshipReviewOrderRecord[];
+};
+
+type TeamshipReviewWorkspaceRecord = {
+  id: string;
+  documentLabel: string;
+  shipmentDate: Date;
+  sourcePdfFileName: string | null;
+  reviewResponse: unknown;
 };
 
 type TeamshipReviewOrderRecord = {
@@ -296,6 +316,44 @@ export async function saveTeamshipReviewRun(input: SaveTeamshipReviewRunInput) {
       }
     }
   });
+}
+
+export async function getTeamshipReviewRunWorkspace(
+  context: AuthenticatedContext,
+  runId: string
+): Promise<TeamshipReviewRunWorkspace> {
+  const client = prisma as TeamshipReviewRunQueryClient;
+  const record = await client.teamshipReviewRun.findFirst({
+    where: {
+      id: runId,
+      tenantId: context.tenantId,
+      workflowKey: WORKFLOW_KEY,
+      deletedAt: null
+    },
+    select: {
+      id: true,
+      documentLabel: true,
+      shipmentDate: true,
+      sourcePdfFileName: true,
+      reviewResponse: true
+    }
+  });
+
+  if (!record) {
+    throw new Error("Teamship review run was not found or was already deleted.");
+  }
+
+  if (!isReviewResponse(record.reviewResponse)) {
+    throw new Error("Saved Teamship review run cannot be loaded for editing.");
+  }
+
+  return {
+    id: record.id,
+    documentLabel: record.documentLabel,
+    shipmentDate: record.shipmentDate.toISOString().slice(0, 10),
+    sourcePdfFileName: record.sourcePdfFileName,
+    review: record.reviewResponse
+  };
 }
 
 export async function deleteTeamshipReviewRun(context: AuthenticatedContext, runId: string) {
@@ -503,6 +561,18 @@ function normalizeReviewStatus(status: string): GarlandTeamshipOrderReview["stat
   return ["PASS", "FAIL", "MISSING_TEAMSHIP", "PENDING_TEAMSHIP", "NO_PDF", "SKIPPED_ALREADY_REVIEWED"].includes(status)
     ? (status as GarlandTeamshipOrderReview["status"])
     : "FAIL";
+}
+
+function isReviewResponse(value: unknown): value is GarlandTeamshipReviewResponse {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "summary" in value &&
+      "pdfOrders" in value &&
+      Array.isArray((value as GarlandTeamshipReviewResponse).pdfOrders) &&
+      "reviews" in value &&
+      Array.isArray((value as GarlandTeamshipReviewResponse).reviews)
+  );
 }
 
 function buildOrderKey(psNumber: string, srNumber: string) {
