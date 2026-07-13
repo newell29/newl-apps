@@ -22,6 +22,8 @@ export type TeamshipBrowserExecutionOptions = {
   liveAllowlistSrNumbers?: string[];
   browserExecutablePath?: string | null;
   headed?: boolean;
+  slowMoMs?: number;
+  errorPauseMs?: number;
   screenshotRootDir?: string | null;
   allowedHosts?: string[];
 };
@@ -220,11 +222,18 @@ export async function executeTeamshipPhase2BrowserJob({
         });
       } catch (error) {
         await saveScreenshot(page, orderScreenshotDir, "error").catch(() => undefined);
+        const errorMessage = error instanceof Error ? error.message : "Unknown Teamship browser update failure.";
+        await pauseForBrowserDebug({
+          page,
+          options,
+          errorMessage,
+          orderLabel: order.srNumber || order.teamshipOrderId || `order ${index + 1}`
+        });
         orders.push({
           ...mappedOrder,
           status: "FAILED",
           updatePayload: buildTeamshipUpdatePayload(order),
-          error: error instanceof Error ? error.message : "Unknown Teamship browser update failure."
+          error: errorMessage
         });
       }
     }
@@ -254,7 +263,9 @@ export async function executeTeamshipPhase2BrowserJob({
   };
 }
 
-async function launchBrowser(options: Pick<TeamshipBrowserExecutionOptions, "browserExecutablePath" | "headed">): Promise<Browser> {
+async function launchBrowser(
+  options: Pick<TeamshipBrowserExecutionOptions, "browserExecutablePath" | "headed" | "slowMoMs">
+): Promise<Browser> {
   const executablePath = options.browserExecutablePath?.trim() || process.env.TEAMSHIP_BROWSER_EXECUTABLE_PATH?.trim() || findDefaultBrowserExecutablePath();
 
   if (!executablePath) {
@@ -265,8 +276,31 @@ async function launchBrowser(options: Pick<TeamshipBrowserExecutionOptions, "bro
 
   return chromium.launch({
     executablePath,
-    headless: !options.headed
+    headless: !options.headed,
+    slowMo: options.slowMoMs && options.slowMoMs > 0 ? options.slowMoMs : undefined
   });
+}
+
+async function pauseForBrowserDebug({
+  page,
+  options,
+  errorMessage,
+  orderLabel
+}: {
+  page: Page;
+  options: TeamshipBrowserExecutionOptions;
+  errorMessage: string;
+  orderLabel: string;
+}) {
+  const pauseMs = options.errorPauseMs ?? 0;
+
+  if (!options.headed || pauseMs <= 0) {
+    return;
+  }
+
+  console.error(`Pausing Teamship browser for ${orderLabel} after failure: ${errorMessage}`);
+  console.error(`Browser will stay open for ${Math.round(pauseMs / 1000)} second(s) so the failed page can be inspected.`);
+  await page.waitForTimeout(pauseMs).catch(() => undefined);
 }
 
 async function maybeLogin(page: Page, credentials: TeamshipPhase2AgentCredentials) {

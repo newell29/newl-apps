@@ -15,6 +15,8 @@ type WorkerOptions = {
   liveAllowlistSrNumbers: string[];
   browserExecutablePath: string | null;
   browserHeaded: boolean;
+  browserSlowMoMs: number;
+  browserErrorPauseMs: number;
   browserScreenshotRootDir: string | null;
   browserAllowedHosts: string[] | undefined;
   loop: boolean;
@@ -78,6 +80,7 @@ async function runOnce(options: WorkerOptions) {
   try {
     assertTeamshipCredentials(claimed);
     const result = await executeJob({ options, claimed });
+    logExecutionFailures(result);
     await completeJob({
       options,
       jobId: claimed.job.id,
@@ -135,6 +138,8 @@ async function executeJob({
         liveAllowlistSrNumbers: options.liveAllowlistSrNumbers,
         browserExecutablePath: options.browserExecutablePath,
         headed: options.browserHeaded,
+        slowMoMs: options.browserSlowMoMs,
+        errorPauseMs: options.browserErrorPauseMs,
         screenshotRootDir: options.browserScreenshotRootDir,
         allowedHosts: options.browserAllowedHosts
       }
@@ -250,6 +255,15 @@ function readOptions(args: string[]): WorkerOptions {
   const browserExecutablePath =
     readStringOption(args, "--browser-executable-path") ?? process.env.TEAMSHIP_BROWSER_EXECUTABLE_PATH ?? null;
   const browserHeaded = args.includes("--headed") || process.env.TEAMSHIP_BROWSER_HEADED === "true";
+  const browserSlowMoMs = readPositiveNumber(
+    readStringOption(args, "--browser-slow-mo-ms") ?? process.env.TEAMSHIP_BROWSER_SLOW_MO_MS,
+    0
+  );
+  const browserPauseOnError = args.includes("--pause-on-error") || process.env.TEAMSHIP_BROWSER_PAUSE_ON_ERROR === "true";
+  const browserErrorPauseMs = readPositiveNumber(
+    readStringOption(args, "--browser-error-pause-ms") ?? process.env.TEAMSHIP_BROWSER_ERROR_PAUSE_MS,
+    browserPauseOnError ? 600_000 : 0
+  );
   const browserScreenshotRootDir =
     readStringOption(args, "--screenshot-dir") ?? process.env.TEAMSHIP_BROWSER_SCREENSHOT_DIR ?? null;
   const browserAllowedHosts = readOptionalListOption(args, "--browser-allowed-host", process.env.TEAMSHIP_BROWSER_ALLOWED_HOSTS);
@@ -273,6 +287,8 @@ function readOptions(args: string[]): WorkerOptions {
     liveAllowlistSrNumbers,
     browserExecutablePath,
     browserHeaded,
+    browserSlowMoMs,
+    browserErrorPauseMs,
     browserScreenshotRootDir,
     browserAllowedHosts,
     loop,
@@ -311,6 +327,20 @@ function readMode(value: string): WorkerOptions["mode"] {
 function readPositiveNumber(value: string | undefined | null, fallback: number) {
   const parsed = value ? Number(value) : fallback;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function logExecutionFailures(result: TeamshipPhase2ExecutionResult) {
+  const failedOrders = result.orders.filter((order) => order.status === "FAILED");
+
+  if (failedOrders.length === 0) {
+    return;
+  }
+
+  console.error(`Teamship Phase 2 worker completed with ${failedOrders.length} failed order(s).`);
+
+  for (const order of failedOrders) {
+    console.error(`- ${order.srNumber || order.teamshipOrderId || "unknown order"}: ${order.error ?? "Unknown failure."}`);
+  }
 }
 
 function sleep(ms: number) {
