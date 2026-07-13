@@ -82,7 +82,7 @@ async function runOnce(options: WorkerOptions) {
   try {
     assertTeamshipCredentials(claimed);
     const result = await executeJob({ options, claimed });
-    logExecutionFailures(result);
+    logExecutionSummary(result);
     await completeJob({
       options,
       jobId: claimed.job.id,
@@ -343,7 +343,34 @@ function readPositiveNumber(value: string | undefined | null, fallback: number) 
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function logExecutionFailures(result: TeamshipPhase2ExecutionResult) {
+function logExecutionSummary(result: TeamshipPhase2ExecutionResult) {
+  console.log(`Teamship Phase 2 ${result.mode} finished with ${result.hasFailures ? "issues" : "success"}.`);
+
+  for (const order of result.orders) {
+    const orderLabel = order.srNumber || order.teamshipOrderId || "unknown order";
+    const browser = readRecord(order.updatePayload?.browser);
+    const screenshotDir = readString(browser?.screenshotDir);
+    const fieldUpdatesSkipped = readBoolean(browser?.fieldUpdatesSkipped);
+    const skippedFieldUpdateCount = readNumber(browser?.skippedFieldUpdateCount);
+    const palletSnapshot = readRecord(browser?.palletSnapshot);
+    const palletRowCount = readNumber(palletSnapshot?.rowCount);
+    const palletControlCount = readArray(palletSnapshot?.controls)?.length;
+
+    console.log(
+      [
+        `- ${orderLabel}: ${order.status}`,
+        order.responseStatus ? `response ${order.responseStatus}` : null,
+        order.error ? `error ${order.error}` : null,
+        screenshotDir ? `screenshots ${screenshotDir}` : null,
+        fieldUpdatesSkipped ? `field updates skipped ${skippedFieldUpdateCount ?? 0}` : null,
+        typeof palletRowCount === "number" ? `pallet rows ${palletRowCount}` : null,
+        typeof palletControlCount === "number" ? `pallet controls ${palletControlCount}` : null
+      ]
+        .filter(Boolean)
+        .join(" | ")
+    );
+  }
+
   const failedOrders = result.orders.filter((order) => order.status === "FAILED");
 
   if (failedOrders.length === 0) {
@@ -355,6 +382,26 @@ function logExecutionFailures(result: TeamshipPhase2ExecutionResult) {
   for (const order of failedOrders) {
     console.error(`- ${order.srNumber || order.teamshipOrderId || "unknown order"}: ${order.error ?? "Unknown failure."}`);
   }
+}
+
+function readRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function readArray(value: unknown) {
+  return Array.isArray(value) ? value : null;
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function readBoolean(value: unknown) {
+  return typeof value === "boolean" ? value : null;
+}
+
+function readNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function sleep(ms: number) {
