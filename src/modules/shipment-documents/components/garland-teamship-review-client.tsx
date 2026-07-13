@@ -4,6 +4,11 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import type { PDFPageProxy } from "pdfjs-dist/types/src/display/api";
 import { useEffect, useMemo, useState } from "react";
 
+import {
+  addPalletDraftLineToReviewState,
+  removePalletDraftLineFromReviewState,
+  type GarlandTeamshipPalletDraftLine
+} from "@/modules/shipment-documents/garland-teamship-review-client-state";
 import { parseGarlandShippingOrderPages, parseTeamshipAlertDigest } from "@/modules/shipment-documents/teamship-review";
 import type {
   GarlandPdfShippingOrder,
@@ -146,10 +151,7 @@ type ShipmentWorkspaceStatus = GarlandTeamshipOrderReview["status"] | "TEAMSHIP_
 type TeamshipReviewWorkflowStatus = "NEEDS_SETUP" | "READY_TO_PRINT" | "BOL_PRINTED" | "NEEDS_REVIEW" | "NO_PDF" | "SKIPPED";
 type ProductDimensionEditField = "quantity" | "lengthIn" | "widthIn" | "heightIn" | "weightLb";
 type WorkspaceQueueFilter = "ALL" | "ISSUES" | "APPROVED" | "PENDING" | "NO_PDF" | "NEEDS_SETUP" | "READY_TO_PRINT" | "BOL_PRINTED";
-type NewPalletDraftLine = {
-  sku: string;
-  serialNumbers: string[];
-};
+type NewPalletDraftLine = GarlandTeamshipPalletDraftLine;
 
 type ShipmentWorkspaceRow = {
   id: string;
@@ -751,129 +753,17 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
   }
 
   function addPalletDraftLine(srNumber: string, line: NewPalletDraftLine) {
-    const normalizedSrNumber = normalizeIdentifier(srNumber);
-    const normalizedSku = normalizeIdentifier(line.sku);
-    const nextItem = {
-      lineNumber: null,
-      sku: line.sku.trim().toUpperCase(),
-      description: "CSR-added Teamship pallet line",
-      quantity: 1,
-      dueShipDate: null,
-      serialNumbers: line.serialNumbers
-    };
-    const nextReviewItem = {
-      sku: nextItem.sku,
-      quantity: "1",
-      serialNumbers: nextItem.serialNumbers
-    };
+    const nextState = addPalletDraftLineToReviewState({ orders, review, srNumber, line });
 
-    if (!normalizedSrNumber || !normalizedSku) {
-      return;
-    }
-
-    setOrders((current) =>
-      current.map((order) =>
-        normalizeIdentifier(order.srNumber) === normalizedSrNumber
-          ? {
-              ...order,
-              items: [...order.items, nextItem]
-            }
-          : order
-      )
-    );
-
-    setReview((current) => {
-      if (!current) {
-        return current;
-      }
-
-      return {
-        ...current,
-        pdfOrders: current.pdfOrders.map((order) =>
-          normalizeIdentifier(order.srNumber) === normalizedSrNumber
-            ? {
-                ...order,
-                items: [...order.items, nextItem]
-              }
-            : order
-        ),
-        reviews: current.reviews.map((orderReview) => {
-          if (normalizeIdentifier(orderReview.srNumber) !== normalizedSrNumber) {
-            return orderReview;
-          }
-
-          const hasDimension = orderReview.productDimensions.some((dimension) => normalizeIdentifier(dimension.sku) === normalizedSku);
-
-          return {
-            ...orderReview,
-            pdfItems: [...orderReview.pdfItems, nextReviewItem],
-            productDimensions: hasDimension
-              ? orderReview.productDimensions
-              : [
-                  ...orderReview.productDimensions,
-                  {
-                    sku: nextItem.sku,
-                    source: "CSR_OVERRIDE" as const,
-                    productType: null,
-                    quantity: 1,
-                    lengthIn: null,
-                    widthIn: null,
-                    heightIn: null,
-                    weightLb: null,
-                    weightUnit: "lbs",
-                    confidence: "LOW" as const,
-                    note: "CSR-added pallet line. Enter dimensions if available; SKU/SN commodity text still goes to the bot draft."
-                  }
-                ]
-          };
-        })
-      };
-    });
+    setOrders(nextState.orders);
+    setReview(nextState.review);
   }
 
   function removePalletDraftLine(srNumber: string, itemIndex: number) {
-    const normalizedSrNumber = normalizeIdentifier(srNumber);
+    const nextState = removePalletDraftLineFromReviewState({ orders, review, srNumber, itemIndex });
 
-    if (!normalizedSrNumber || itemIndex < 0) {
-      return;
-    }
-
-    setOrders((current) =>
-      current.map((order) =>
-        normalizeIdentifier(order.srNumber) === normalizedSrNumber
-          ? {
-              ...order,
-              items: order.items.filter((_, index) => index !== itemIndex)
-            }
-          : order
-      )
-    );
-
-    setReview((current) => {
-      if (!current) {
-        return current;
-      }
-
-      return {
-        ...current,
-        pdfOrders: current.pdfOrders.map((order) =>
-          normalizeIdentifier(order.srNumber) === normalizedSrNumber
-            ? {
-                ...order,
-                items: order.items.filter((_, index) => index !== itemIndex)
-              }
-            : order
-        ),
-        reviews: current.reviews.map((orderReview) =>
-          normalizeIdentifier(orderReview.srNumber) === normalizedSrNumber
-            ? {
-                ...orderReview,
-                pdfItems: orderReview.pdfItems.filter((_, index) => index !== itemIndex)
-              }
-            : orderReview
-        )
-      };
-    });
+    setOrders(nextState.orders);
+    setReview(nextState.review);
   }
 
   async function fetchHistory(search: string, dateFrom: string, dateTo: string, allDates: boolean) {

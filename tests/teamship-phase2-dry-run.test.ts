@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import {
+  addPalletDraftLineToReviewState,
+  removePalletDraftLineFromReviewState
+} from "@/modules/shipment-documents/garland-teamship-review-client-state";
 import { buildTeamshipPhase2DryRunPlan } from "@/modules/shipment-documents/teamship-phase2-dry-run";
 import type { GarlandTeamshipReviewResponse } from "@/modules/shipment-documents/teamship-review-types";
 
@@ -116,6 +120,78 @@ describe("Teamship Phase 2 dry-run planner", () => {
       plannedFieldUpdates: [],
       plannedPalletRows: []
     });
+  });
+
+  it("includes CSR-added pallet/SKU draft lines in the dry-run payload", () => {
+    const review = sampleReview();
+    const nextState = addPalletDraftLineToReviewState({
+      orders: review.pdfOrders,
+      review,
+      srNumber: "SR808478",
+      line: {
+        sku: "C-CARE-P",
+        serialNumbers: ["CSR-SERIAL-1"]
+      }
+    });
+
+    const plan = buildTeamshipPhase2DryRunPlan(nextState.review!);
+
+    expect(nextState.orders[0]?.items).toHaveLength(3);
+    expect(nextState.review?.pdfOrders[0]?.items).toHaveLength(3);
+    expect(nextState.review?.reviews[0]?.pdfItems[2]).toEqual({
+      sku: "C-CARE-P",
+      quantity: "1",
+      serialNumbers: ["CSR-SERIAL-1"]
+    });
+    expect(plan.summary.plannedPalletRowCount).toBe(3);
+    expect(plan.orders[0]?.validationIssues).toContain("No usable dimension/weight recommendation found for SKU C-CARE-P.");
+    expect(plan.orders[0]?.plannedPalletRows[2]).toMatchObject({
+      rowNumber: 3,
+      sku: "C-CARE-P",
+      commodity: "SKU: C-CARE-P SN: CSR-SERIAL-1",
+      hasUsableDimensions: false,
+      dimensionSource: "MISSING",
+      teamshipFields: {
+        pallets_count: 3,
+        pallet_3: 1,
+        pallet_3_commodity: "SKU: C-CARE-P SN: CSR-SERIAL-1"
+      }
+    });
+  });
+
+  it("removes CSR-excluded pallet/SKU lines from the dry-run payload", () => {
+    const review = sampleReview();
+    const nextState = removePalletDraftLineFromReviewState({
+      orders: review.pdfOrders,
+      review,
+      srNumber: "SR808478",
+      itemIndex: 0
+    });
+
+    const plan = buildTeamshipPhase2DryRunPlan(nextState.review!);
+
+    expect(nextState.orders[0]?.items).toHaveLength(1);
+    expect(nextState.review?.pdfOrders[0]?.items).toHaveLength(1);
+    expect(nextState.review?.reviews[0]?.pdfItems).toEqual([
+      {
+        sku: "8030445",
+        quantity: "4",
+        serialNumbers: []
+      }
+    ]);
+    expect(plan.summary.plannedPalletRowCount).toBe(1);
+    expect(plan.orders[0]?.plannedPalletRows).toEqual([
+      expect.objectContaining({
+        rowNumber: 1,
+        sku: "8030445",
+        commodity: "SKU: 8030445 QTY: 4",
+        teamshipFields: expect.objectContaining({
+          pallets_count: 1,
+          pallet_1: 4,
+          pallet_1_commodity: "SKU: 8030445 QTY: 4"
+        })
+      })
+    ]);
   });
 });
 
