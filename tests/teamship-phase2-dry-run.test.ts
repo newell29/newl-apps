@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   addPalletDraftLineToReviewState,
-  removePalletDraftLineFromReviewState
+  removePalletDraftLineFromReviewState,
+  updateReviewFieldProposedValueInReviewState
 } from "@/modules/shipment-documents/garland-teamship-review-client-state";
 import { buildTeamshipPhase2DryRunPlan } from "@/modules/shipment-documents/teamship-phase2-dry-run";
 import type { GarlandTeamshipReviewResponse } from "@/modules/shipment-documents/teamship-review-types";
@@ -190,6 +191,27 @@ describe("Teamship Phase 2 dry-run planner", () => {
           pallet_1: 4,
           pallet_1_commodity: "SKU: 8030445 QTY: 4"
         })
+      })
+    ]);
+  });
+
+  it("uses CSR-edited proposed shipment field values in the dry-run payload", () => {
+    const review = sampleReview();
+    const nextReview = updateReviewFieldProposedValueInReviewState({
+      review,
+      srNumber: "SR808478",
+      fieldKey: "freight_terms",
+      value: "COLLECT"
+    });
+
+    const plan = buildTeamshipPhase2DryRunPlan(nextReview!);
+
+    expect(nextReview?.reviews[0]?.fields[0]?.pdfValue).toBe("COLLECT");
+    expect(plan.orders[0]?.plannedFieldUpdates).toEqual([
+      expect.objectContaining({
+        reviewFieldKey: "freight_terms",
+        teamshipField: "edi_field_3",
+        proposedValue: "COLLECT"
       })
     ]);
   });

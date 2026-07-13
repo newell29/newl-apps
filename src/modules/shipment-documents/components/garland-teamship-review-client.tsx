@@ -7,12 +7,14 @@ import { useEffect, useMemo, useState } from "react";
 import {
   addPalletDraftLineToReviewState,
   removePalletDraftLineFromReviewState,
+  updateReviewFieldProposedValueInReviewState,
   type GarlandTeamshipPalletDraftLine
 } from "@/modules/shipment-documents/garland-teamship-review-client-state";
 import { parseGarlandShippingOrderPages, parseTeamshipAlertDigest } from "@/modules/shipment-documents/teamship-review";
 import type {
   GarlandPdfShippingOrder,
   GarlandTeamshipOrderReview,
+  GarlandTeamshipReviewField,
   GarlandTeamshipReviewResponse,
   TeamshipPayloadInspectionMatch,
   TeamshipPayloadInspectionResult,
@@ -766,6 +768,17 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     setReview(nextState.review);
   }
 
+  function updateReviewFieldProposedValue(srNumber: string, fieldKey: string, value: string) {
+    setReview((current) =>
+      updateReviewFieldProposedValueInReviewState({
+        review: current,
+        srNumber,
+        fieldKey,
+        value
+      })
+    );
+  }
+
   async function fetchHistory(search: string, dateFrom: string, dateTo: string, allDates: boolean) {
     setHistoryError(null);
     setIsHistoryLoading(true);
@@ -1089,6 +1102,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         onCreateSingleUpdateJob={(srNumber) => void createUpdateJob([srNumber])}
         onUpdateJobAction={(jobId, action) => void updateJobAction(jobId, action)}
         onRescanShipment={(srNumber) => void runReview({ rescan: true, srNumber })}
+        onFieldProposedValueChange={updateReviewFieldProposedValue}
         onProductDimensionChange={updateProductDimensionOverride}
         onAddPalletDraftLine={addPalletDraftLine}
         onRemovePalletDraftLine={removePalletDraftLine}
@@ -1179,6 +1193,7 @@ function ShipmentReviewWorkspace({
   onCreateSingleUpdateJob,
   onUpdateJobAction,
   onRescanShipment,
+  onFieldProposedValueChange,
   onProductDimensionChange,
   onAddPalletDraftLine,
   onRemovePalletDraftLine,
@@ -1214,6 +1229,7 @@ function ShipmentReviewWorkspace({
   onCreateSingleUpdateJob: (srNumber: string) => void;
   onUpdateJobAction: (jobId: string, action: "approve" | "cancel" | "rescan") => void;
   onRescanShipment: (srNumber: string) => void;
+  onFieldProposedValueChange: (srNumber: string, fieldKey: string, value: string) => void;
   onProductDimensionChange: (srNumber: string, sku: string, field: ProductDimensionEditField, rawValue: string) => void;
   onAddPalletDraftLine: (srNumber: string, line: NewPalletDraftLine) => void;
   onRemovePalletDraftLine: (srNumber: string, itemIndex: number) => void;
@@ -1628,6 +1644,7 @@ function ShipmentReviewWorkspace({
               </summary>
               <ShipmentWorkspaceDetails
                 row={row}
+                onFieldProposedValueChange={onFieldProposedValueChange}
                 onProductDimensionChange={onProductDimensionChange}
                 onAddPalletDraftLine={onAddPalletDraftLine}
                 onRemovePalletDraftLine={onRemovePalletDraftLine}
@@ -1846,6 +1863,7 @@ function TeamshipUpdateJobsPanel({
 
 function ShipmentWorkspaceDetails({
   row,
+  onFieldProposedValueChange,
   onProductDimensionChange,
   onAddPalletDraftLine,
   onRemovePalletDraftLine,
@@ -1853,6 +1871,7 @@ function ShipmentWorkspaceDetails({
   payloadInspectionError
 }: {
   row: ShipmentWorkspaceRow;
+  onFieldProposedValueChange: (srNumber: string, fieldKey: string, value: string) => void;
   onProductDimensionChange: (srNumber: string, sku: string, field: ProductDimensionEditField, rawValue: string) => void;
   onAddPalletDraftLine: (srNumber: string, line: NewPalletDraftLine) => void;
   onRemovePalletDraftLine: (srNumber: string, itemIndex: number) => void;
@@ -1860,6 +1879,8 @@ function ShipmentWorkspaceDetails({
   payloadInspectionError: string | null;
 }) {
   if (row.review) {
+    const orderReview = row.review;
+
     return (
       <div className="space-y-5 border-t border-border bg-background/70 px-5 pb-5 pt-5">
         <TeamshipPayloadInspectionPanel inspection={payloadInspection} error={payloadInspectionError} />
@@ -1872,12 +1893,12 @@ function ShipmentWorkspaceDetails({
                 Matches stay read-only. Missing or mismatched values show the Garland PDF value the bot will propose.
               </p>
             </div>
-            <span className={shipmentStatusPillClass(row.review.status)}>
-              {formatWorkspaceStatus(row.review.status, row.review.issueCount)}
+            <span className={shipmentStatusPillClass(orderReview.status)}>
+              {formatWorkspaceStatus(orderReview.status, orderReview.issueCount)}
             </span>
           </div>
           <div className="divide-y divide-border">
-            {row.review.fields.map((field) => (
+            {orderReview.fields.map((field) => (
               <div key={field.key} className={fieldComparisonRowClass(field.status)}>
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
@@ -1889,21 +1910,21 @@ function ShipmentWorkspaceDetails({
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1fr,1fr,1.2fr]">
                   <ValuePreviewCard label="Garland PDF" value={field.pdfValue} emphasis={field.status !== "MATCH"} />
                   <ValuePreviewCard label="Teamship current" value={field.teamshipValue} />
-                  <ValuePreviewCard
-                    label={field.status === "MATCH" || field.status === "INFO" ? "Bot action" : "Proposed bot value"}
-                    value={field.status === "MATCH" || field.status === "INFO" ? "No update needed" : field.pdfValue}
-                    emphasis={field.status !== "MATCH" && field.status !== "INFO"}
+                  <ProposedFieldUpdateCard
+                    field={field}
+                    srNumber={orderReview.srNumber}
+                    onChange={onFieldProposedValueChange}
                   />
                 </div>
               </div>
             ))}
           </div>
         </div>
-        <ItemDetailsComparison review={row.review} />
+        <ItemDetailsComparison review={orderReview} />
         <ProductDimensionsTable
-          dimensions={row.review.productDimensions}
+          dimensions={orderReview.productDimensions}
           items={row.pdfOrder?.items ?? []}
-          srNumber={row.review.srNumber}
+          srNumber={orderReview.srNumber}
           onDimensionChange={onProductDimensionChange}
           onAddPalletDraftLine={onAddPalletDraftLine}
           onRemovePalletDraftLine={onRemovePalletDraftLine}
@@ -2096,6 +2117,37 @@ function ValuePreviewCard({ label, value, emphasis = false }: { label: string; v
       <p className="text-xs font-bold uppercase tracking-wide text-mutedForeground">{label}</p>
       <p className="mt-2 whitespace-pre-wrap text-sm font-semibold text-foreground">{value?.trim() || "Blank"}</p>
     </div>
+  );
+}
+
+function ProposedFieldUpdateCard({
+  field,
+  srNumber,
+  onChange
+}: {
+  field: GarlandTeamshipReviewField;
+  srNumber: string;
+  onChange: (srNumber: string, fieldKey: string, value: string) => void;
+}) {
+  const isEditable = field.status !== "MATCH" && field.status !== "INFO";
+
+  if (!isEditable) {
+    return <ValuePreviewCard label="Bot action" value="No update needed" />;
+  }
+
+  return (
+    <label className="rounded-xl border border-primary/25 bg-primary/5 p-3">
+      <span className="text-xs font-bold uppercase tracking-wide text-mutedForeground">Proposed bot value</span>
+      <textarea
+        value={field.pdfValue ?? ""}
+        onChange={(event) => onChange(srNumber, field.key, event.target.value)}
+        className="mt-2 min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-semibold text-foreground"
+        placeholder="Leave blank to skip this field update"
+      />
+      <span className="mt-2 block text-xs text-mutedForeground">
+        Edit this if the Garland PDF value needs a CSR override before creating the Teamship bot draft.
+      </span>
+    </label>
   );
 }
 

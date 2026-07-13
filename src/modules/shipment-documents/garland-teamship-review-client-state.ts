@@ -152,6 +152,46 @@ export function removePalletDraftLineFromReviewState({
   };
 }
 
+export function updateReviewFieldProposedValueInReviewState({
+  review,
+  srNumber,
+  fieldKey,
+  value
+}: {
+  review: GarlandTeamshipReviewResponse | null;
+  srNumber: string;
+  fieldKey: string;
+  value: string;
+}) {
+  const normalizedSrNumber = normalizeIdentifier(srNumber);
+  const normalizedFieldKey = normalizeIdentifier(fieldKey);
+
+  if (!review || !normalizedSrNumber || !normalizedFieldKey) {
+    return review;
+  }
+
+  const nextValue = value.trim().length > 0 ? value : null;
+
+  return {
+    ...review,
+    reviews: review.reviews.map((orderReview) =>
+      normalizeIdentifier(orderReview.srNumber) === normalizedSrNumber
+        ? {
+            ...orderReview,
+            fields: orderReview.fields.map((field) =>
+              normalizeIdentifier(field.key) === normalizedFieldKey
+                ? {
+                    ...field,
+                    pdfValue: nextValue
+                  }
+                : field
+            )
+          }
+        : orderReview
+    )
+  };
+}
+
 function normalizeIdentifier(value: string | null) {
   return value?.replace(/[^A-Z0-9]/gi, "").toUpperCase() ?? "";
 }
