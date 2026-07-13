@@ -558,38 +558,48 @@ async function fillPalletControl(page: Page, index: number, value: string) {
   }
 
   await locator.scrollIntoViewIfNeeded();
-  await locator.evaluate(
-    (element, nextValue) => {
-      const dispatch = (name: string) => element.dispatchEvent(new Event(name, { bubbles: true }));
+  await page.evaluate(String.raw`
+    (() => {
+      const element = document.querySelector(${JSON.stringify(`[data-newl-pallet-control-index="${index}"]`)});
+      const nextValue = ${JSON.stringify(value)};
+
+      if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement)) {
+        throw new Error("Could not find editable Teamship pallet control " + ${JSON.stringify(index + 1)} + ".");
+      }
 
       if (element instanceof HTMLSelectElement) {
         const normalizedNextValue = nextValue.trim().toLowerCase();
-        const option = Array.from(element.options).find((candidate) => {
-          const normalizedValue = candidate.value.trim().toLowerCase();
-          const normalizedText = (candidate.textContent || "").trim().toLowerCase();
+        let matchedValue = nextValue;
 
-          return normalizedValue === normalizedNextValue || normalizedText === normalizedNextValue;
-        });
-        element.value = option ? option.value : nextValue;
-      } else if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+        for (const option of Array.from(element.options)) {
+          const normalizedValue = option.value.trim().toLowerCase();
+          const normalizedText = (option.textContent || "").trim().toLowerCase();
+
+          if (normalizedValue === normalizedNextValue || normalizedText === normalizedNextValue) {
+            matchedValue = option.value;
+            break;
+          }
+        }
+
+        element.value = matchedValue;
+      } else {
         const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
         const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
 
         element.focus();
 
-        if (descriptor?.set) {
+        if (descriptor && descriptor.set) {
           descriptor.set.call(element, nextValue);
         } else {
           element.value = nextValue;
         }
       }
 
-      dispatch("input");
-      dispatch("change");
-      dispatch("blur");
-    },
-    value
-  );
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+      element.dispatchEvent(new Event("blur", { bubbles: true }));
+    })()
+  `);
   await page.keyboard.press("Tab").catch(() => undefined);
   await page.waitForTimeout(200);
 }
