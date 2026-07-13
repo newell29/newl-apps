@@ -24,11 +24,14 @@ describe("Garland Teamship review workspace client helpers", () => {
     const failedRow = sampleWorkspaceRow({ status: "FAIL", issueCount: 2 });
     const passedRow = sampleWorkspaceRow({ status: "PASS", issueCount: 0 });
     const noPdfRow = sampleWorkspaceRow({ status: "NO_PDF", pdfOrder: null });
+    const pulledTeamshipRow = sampleWorkspaceRow({ status: "TEAMSHIP_PULLED", review: null, pdfOrder: null, teamshipOrder: {} });
 
     expect(rowMatchesWorkspaceFilters({ row: failedRow, search: "", filter: "ISSUES", workflowStatus: "NEEDS_REVIEW" })).toBe(true);
     expect(rowMatchesWorkspaceFilters({ row: passedRow, search: "", filter: "APPROVED", workflowStatus: "NEEDS_SETUP" })).toBe(true);
     expect(rowMatchesWorkspaceFilters({ row: noPdfRow, search: "", filter: "NO_PDF", workflowStatus: "NO_PDF" })).toBe(true);
+    expect(rowMatchesWorkspaceFilters({ row: pulledTeamshipRow, search: "", filter: "NO_PDF", workflowStatus: "NEEDS_REVIEW" })).toBe(true);
     expect(rowMatchesWorkspaceFilters({ row: passedRow, search: "", filter: "ISSUES", workflowStatus: "NEEDS_SETUP" })).toBe(false);
+    expect(rowMatchesWorkspaceFilters({ row: passedRow, search: "", filter: "NO_PDF", workflowStatus: "NEEDS_SETUP" })).toBe(false);
     expect(rowMatchesWorkspaceFilters({ row: passedRow, search: "", filter: "READY_TO_PRINT", workflowStatus: "READY_TO_PRINT" })).toBe(true);
     expect(rowMatchesWorkspaceFilters({ row: passedRow, search: "", filter: "BOL_PRINTED", workflowStatus: "BOL_PRINTED" })).toBe(true);
   });
@@ -43,9 +46,9 @@ describe("Garland Teamship review workspace client helpers", () => {
       getWorkspaceWorkflowStatus(passedRow, [
         {
           id: "job-1",
-          tenantId: "tenant-1",
           shipmentDate: "2026-07-12T00:00:00.000Z",
           documentLabel: "July 12, 2026",
+          sourcePdfFileName: "garland.pdf",
           dryRun: true,
           agentMode: "DRY_RUN",
           status: "SUCCESS",
@@ -58,30 +61,39 @@ describe("Garland Teamship review workspace client helpers", () => {
             plannedFieldUpdateCount: 0,
             plannedPalletRowCount: 1
           },
+          errorMessage: null,
+          agentId: null,
           orders: [
             {
               id: "order-1",
               srNumber: "SR808478",
               psNumber: "PS210206",
               teamshipOrderId: "30202",
+              teamshipUrl: "https://app.teamshipos.com/ship-inventories/30202",
               status: "SUCCESS",
+              sourceReviewStatus: "PASS",
               plannedFieldUpdateCount: 0,
               plannedPalletRowCount: 1,
-              error: null
+              validationIssues: [],
+              errorMessage: null,
+              agentEvidence: null
             }
           ],
           createdAt: "2026-07-12T12:00:00.000Z",
           approvedAt: null,
-          cancelledAt: null,
+          agentClaimedAt: null,
           agentStartedAt: null,
-          agentFinishedAt: null
+          agentFinishedAt: null,
+          lastVerificationAt: null,
+          createdByName: null,
+          approvedByName: null
         }
       ])
     ).toBe("READY_TO_PRINT");
   });
 });
 
-function sampleWorkspaceRow(overrides: Partial<ReturnType<typeof baseWorkspaceRow>> = {}) {
+function sampleWorkspaceRow(overrides: Record<string, unknown> = {}) {
   return {
     ...baseWorkspaceRow(),
     ...overrides

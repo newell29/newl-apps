@@ -1539,7 +1539,7 @@ function ShipmentReviewWorkspace({
             <WorkspaceStatCard label="Needs attention" value={workspaceStats.needsAttention} tone="danger" />
             <WorkspaceStatCard label="Ready to print" value={workspaceStats.readyToPrint} tone="primary" />
             <WorkspaceStatCard label="Complete" value={workspaceStats.complete} tone="success" />
-            <WorkspaceStatCard label="No PDF" value={workspaceStats.noPdf} tone="warning" />
+            <WorkspaceStatCard label="Missing PDF" value={workspaceStats.noPdf} tone="warning" />
           </div>
         </div>
       </div>
@@ -1618,7 +1618,7 @@ function ShipmentReviewWorkspace({
                 <option value="ISSUES">Issues only</option>
                 <option value="APPROVED">Approved / matched</option>
                 <option value="PENDING">Pending Teamship</option>
-                <option value="NO_PDF">No PDF</option>
+                <option value="NO_PDF">Missing Garland PDF</option>
                 <option value="NEEDS_SETUP">Needs bot setup</option>
                 <option value="READY_TO_PRINT">Ready to print</option>
                 <option value="BOL_PRINTED">BOL printed</option>
@@ -3628,7 +3628,7 @@ function buildWorkspaceStats(rows: ShipmentWorkspaceRow[], updateJobs: TeamshipU
         stats.complete += 1;
       } else if (workflowStatus === "READY_TO_PRINT") {
         stats.readyToPrint += 1;
-      } else if (workflowStatus === "NO_PDF") {
+      } else if (isMissingGarlandPdf(row, workflowStatus)) {
         stats.noPdf += 1;
       } else if (
         row.status === "FAIL" ||
@@ -3847,6 +3847,10 @@ export function rowMatchesWorkspaceFilters({
   return searchText.includes(normalizedSearch) || compactSearchText(searchText).includes(compactSearchText(normalizedSearch));
 }
 
+function isMissingGarlandPdf(row: ShipmentWorkspaceRow, workflowStatus: TeamshipReviewWorkflowStatus) {
+  return workflowStatus === "NO_PDF" || row.status === "NO_PDF" || Boolean(row.teamshipOrder && !row.pdfOrder);
+}
+
 function rowMatchesWorkspaceStatusFilter(
   row: ShipmentWorkspaceRow,
   filter: WorkspaceQueueFilter,
@@ -3869,7 +3873,7 @@ function rowMatchesWorkspaceStatusFilter(
   }
 
   if (filter === "NO_PDF") {
-    return row.status === "NO_PDF" || workflowStatus === "NO_PDF";
+    return isMissingGarlandPdf(row, workflowStatus);
   }
 
   return workflowStatus === filter;
