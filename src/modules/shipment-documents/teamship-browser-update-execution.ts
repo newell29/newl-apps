@@ -192,23 +192,24 @@ export async function executeTeamshipPhase2BrowserJob({
         }
 
         if (order.plannedPalletRows.length > 0) {
-          await page.getByText(/^Pallets$/i).first().scrollIntoViewIfNeeded();
+          await scrollToPalletSection(page);
+          await saveScreenshot(page, orderScreenshotDir, "02-pallet-section-before-fill");
           await ensurePalletRowCount(page, order.plannedPalletRows.length);
           await fillPalletRows(page, order);
-          await saveScreenshot(page, orderScreenshotDir, "02-filled-before-save");
+          await saveScreenshot(page, orderScreenshotDir, "03-filled-before-save");
         }
 
         await clickSave(page);
         await waitForTeamshipIdle(page);
-        await saveScreenshot(page, orderScreenshotDir, "03-after-save");
+        await saveScreenshot(page, orderScreenshotDir, "04-after-save");
         await page.reload({ waitUntil: "domcontentloaded" });
         await waitForTeamshipIdle(page);
 
         if (order.plannedPalletRows.length > 0) {
-          await page.getByText(/^Pallets$/i).first().scrollIntoViewIfNeeded();
+          await scrollToPalletSection(page);
         }
 
-        await saveScreenshot(page, orderScreenshotDir, "04-after-reload");
+        await saveScreenshot(page, orderScreenshotDir, "05-after-reload");
         const palletSnapshot = order.plannedPalletRows.length > 0 ? await readPalletSnapshot(page) : null;
         const bolEditorCleanup = options.bolCleanupEnabled
           ? await openBolEditorAndApplyCleanup({
@@ -443,6 +444,22 @@ async function ensurePalletRowCount(page: Page, expectedRows: number) {
 
   const snapshot = await readPalletSnapshot(page);
   throw new Error(`Expected ${expectedRows} pallet row(s), but only found ${snapshot.rowCount}.`);
+}
+
+async function scrollToPalletSection(page: Page) {
+  await page.evaluate(String.raw`
+    (() => {
+      ${PALLET_DOM_HELPERS}
+      const heading = findTextElement("Pallets");
+
+      if (!heading) {
+        throw new Error('Could not find "Pallets" heading.');
+      }
+
+      heading.scrollIntoView({ block: "center", inline: "nearest" });
+    })()
+  `);
+  await page.waitForTimeout(250);
 }
 
 async function clickAddAnotherPalletSize(page: Page) {
