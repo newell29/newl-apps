@@ -13,7 +13,7 @@ import {
   updateReviewFieldProposedValueInReviewState,
   type GarlandTeamshipPalletDraftLine
 } from "@/modules/shipment-documents/garland-teamship-review-client-state";
-import { parseGarlandShippingOrderPages, parseTeamshipAlertDigest } from "@/modules/shipment-documents/teamship-review";
+import { buildGarlandTeamshipReview, parseGarlandShippingOrderPages, parseTeamshipAlertDigest } from "@/modules/shipment-documents/teamship-review";
 import type {
   GarlandPdfShippingOrder,
   GarlandTeamshipOrderReview,
@@ -194,6 +194,9 @@ type UploadedPdfBatch = {
   orders: GarlandPdfShippingOrder[];
 };
 
+const ACTIVE_TEAMSHIP_REVIEW_RUN_STORAGE_KEY = "newl.garlandTeamshipReview.activeRunId";
+const EXPANDED_TEAMSHIP_REVIEW_ROWS_STORAGE_KEY = "newl.garlandTeamshipReview.expandedRows";
+
 let pdfJsLoader: Promise<PdfJsModule> | null = null;
 
 
@@ -340,6 +343,11 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     const today = getTodayInputValue();
     void fetchHistory("", today, today, false);
     void fetchUpdateJobs();
+    const activeRunId = readStoredValue(ACTIVE_TEAMSHIP_REVIEW_RUN_STORAGE_KEY);
+    if (activeRunId) {
+      void loadRunForEditing(activeRunId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Restore the last working run once on mount; subsequent edits are handled by autosave.
   }, []);
 
   useEffect(() => {
@@ -362,6 +370,15 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     () => buildShipmentWorkspaceRows({ review, pdfOrders: orders, teamshipOrders: dailyOrders }),
     [review, orders, dailyOrders]
   );
+  const activeHistoryRun = useMemo(
+    () => history.runs.find((run) => run.id === editingRunId) ?? null,
+    [history.runs, editingRunId]
+  );
+
+  function setActiveEditingRunId(runId: string | null) {
+    setEditingRunId(runId);
+    writeStoredValue(ACTIVE_TEAMSHIP_REVIEW_RUN_STORAGE_KEY, runId);
+  }
 
   function scheduleSavedReviewAutosave(nextReview: GarlandTeamshipReviewResponse | null) {
     const runId = editingRunIdRef.current;
@@ -403,6 +420,50 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     }
   }
 
+  async function saveOrAutosaveWorkingReview({
+    reviewSnapshot,
+    teamshipOrdersSnapshot,
+    shipmentDateSnapshot,
+    sourcePdfFileNameSnapshot,
+    statusMessage
+  }: {
+    reviewSnapshot: GarlandTeamshipReviewResponse;
+    teamshipOrdersSnapshot: TeamshipShippingOrderDetail[];
+    shipmentDateSnapshot: string;
+    sourcePdfFileNameSnapshot: string | null;
+    statusMessage: string;
+  }) {
+    const activeRunId = editingRunIdRef.current;
+
+    if (activeRunId) {
+      await autosaveSavedReviewRun(activeRunId, reviewSnapshot);
+      setSaveStatus(statusMessage);
+      return activeRunId;
+    }
+
+    setSaveStatus("Saving today's Teamship working queue...");
+    const json = await postRunToHistory({
+      reviewSnapshot,
+      teamshipOrdersSnapshot,
+      shipmentDateSnapshot,
+      sourcePdfFileNameSnapshot
+    });
+
+    setHistory(json);
+    setHistorySearch(json.search);
+    setHistoryDateFrom(json.dateFrom);
+    setHistoryDateTo(json.dateTo);
+    setHistoryAllDates(json.allDates);
+
+    if (json.savedRunId) {
+      setActiveEditingRunId(json.savedRunId);
+    }
+
+    setSaveStatus(statusMessage);
+
+    return json.savedRunId ?? null;
+  }
+
   async function handlePdfSelection(fileList: FileList | null) {
     const files = Array.from(fileList ?? []).filter((file) => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"));
 
@@ -415,7 +476,6 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     }
 
     setReview(null);
-    setEditingRunId(null);
     setDailyOrderCount(null);
     setDailySyncSummary(null);
     setError(null);
@@ -458,7 +518,6 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     setPdfBatches(nextBatches);
     setOrders(mergedOrders);
     setReview(null);
-    setEditingRunId(null);
     setError(null);
     setStatus(nextBatches.length > 0 ? buildPdfUploadStatus(nextBatches, mergedOrders.length) : "Upload one or more Garland shipping-order PDFs to begin.");
   }
@@ -467,7 +526,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     setPdfBatches([]);
     setOrders([]);
     setReview(null);
-    setEditingRunId(null);
+    setActiveEditingRunId(null);
     setError(null);
     setStatus("Upload one or more Garland shipping-order PDFs to begin.");
   }
@@ -477,7 +536,6 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     setUpdateJobStatus(null);
     if (!srNumber) {
       setReview(null);
-      setEditingRunId(null);
     }
 
     const extractedOrders = orders;
@@ -522,11 +580,18 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       const nextReview = srNumber && review ? mergePartialReview(review, json) : json;
       setReview(nextReview);
       setSelectedUpdateSrNumbers(new Set());
+      await saveOrAutosaveWorkingReview({
+        reviewSnapshot: nextReview,
+        teamshipOrdersSnapshot: dailyOrders,
+        shipmentDateSnapshot: shipmentDate,
+        sourcePdfFileNameSnapshot: sourcePdfFileName,
+        statusMessage: "Teamship review saved automatically."
+      });
       setStatus(
         `${rescan || srNumber ? "Rescan complete" : "Review complete"}: ${nextReview.summary.passedCount} green, ${nextReview.summary.pendingTeamshipCount} pending Teamship creation, ${nextReview.summary.failedCount} with discrepancies, ${nextReview.summary.missingTeamshipCount} missing without an alert.`
           + (nextReview.summary.noPdfCount > 0 ? ` ${nextReview.summary.noPdfCount} Teamship order(s) had no uploaded PDF.` : "")
           + (nextReview.summary.skippedAlreadyReviewedCount > 0 ? ` ${nextReview.summary.skippedAlreadyReviewedCount} already-reviewed order(s) were skipped.` : "")
-          + " Review remains in the editing queue until you save the batch."
+          + " Review is saved in the editing queue automatically."
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to run the Teamship review.");
@@ -738,20 +803,35 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       setDailySyncSummary(json.sync ?? null);
       const fetchedOrders = json.orders ?? [];
       const nextDailyOrders = mergeTeamshipOrders(dailyOrders, fetchedOrders);
+      const teamshipOnlyReview = buildGarlandTeamshipReview([], nextDailyOrders, parseTeamshipAlertDigest(alertDigest), {
+        includeUnmatchedTeamshipOrders: true
+      });
       setDailyOrderCount(nextDailyOrders.length);
       setDailyOrders(nextDailyOrders);
+      setReview(teamshipOnlyReview);
       const syncedDateFrom = json.sync?.dateFrom ?? syncDateFrom;
       const syncedDateTo = json.sync?.dateTo ?? syncDateTo;
+      const saveShipmentDate = syncedDateFrom && syncedDateFrom === syncedDateTo ? syncedDateFrom : shipmentDate;
 
       if (!review && pdfBatches.length === 0 && syncedDateFrom === syncedDateTo && syncedDateFrom !== shipmentDate) {
         handleShipmentDateChange(syncedDateFrom);
+      }
+
+      if (nextDailyOrders.length > 0) {
+        await saveOrAutosaveWorkingReview({
+          reviewSnapshot: teamshipOnlyReview,
+          teamshipOrdersSnapshot: nextDailyOrders,
+          shipmentDateSnapshot: saveShipmentDate,
+          sourcePdfFileNameSnapshot: sourcePdfFileName,
+          statusMessage: "Teamship working queue saved automatically."
+        });
       }
 
       setStatus(
         (json.sync
           ? `Pulled ${json.sync.insertedCount} new Teamship Garland order(s) from ${json.sync.dateFrom ?? syncDateFrom} to ${json.sync.dateTo ?? syncDateTo}; ${json.sync.skippedCount} already existed or could not be keyed.`
           : `Fetched ${json.totalCount ?? json.orders?.length ?? 0} Teamship Garland order(s) for ${shipmentDate}.`) +
-          ` Editing queue now has ${nextDailyOrders.length} Teamship order(s). Save the batch when the day is complete.`
+          ` Editing queue now has ${nextDailyOrders.length} Teamship order(s) and is saved automatically.`
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to sync Teamship daily orders.");
@@ -788,7 +868,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       setHistoryDateTo(json.dateTo);
       setHistoryAllDates(json.allDates);
       if (json.savedRunId) {
-        setEditingRunId(json.savedRunId);
+        setActiveEditingRunId(json.savedRunId);
       }
       setSaveStatus(
         `Teamship review run saved to history. Showing ${json.totalCount} saved run${json.totalCount === 1 ? "" : "s"} for ${formatHistoryRange(json)}.`
@@ -1084,7 +1164,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       setSyncDateTo(json.shipmentDate);
       setDocumentLabel(json.documentLabel || formatDateLabel(json.shipmentDate));
       setReview(json.review);
-      setEditingRunId(json.id);
+      setActiveEditingRunId(json.id);
       setOrders(restoredOrders);
       setDailyOrders([]);
       setDailyOrderCount(json.review.summary.teamshipMatchedCount);
@@ -1349,6 +1429,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       <ShipmentReviewWorkspace
         rows={workspaceRows}
         review={review}
+        activeRun={activeHistoryRun}
         pdfOrderCount={orders.length}
         teamshipOrderCount={dailyOrderCount ?? dailyOrders.length}
         syncSummary={dailySyncSummary}
@@ -1393,6 +1474,8 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         payloadInspectionErrors={payloadInspectionErrors}
         payloadInspectionLoadingSr={payloadInspectionLoadingSr}
         onInspectPayload={(input) => void inspectTeamshipPayload(input)}
+        isHistoryLoading={isHistoryLoading}
+        onOrderWorkflowAction={(runId, orderId, action) => void updateSavedOrderWorkflow(runId, orderId, action)}
       />
       <TeamshipReviewHistorySection
         history={history}
@@ -1452,6 +1535,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
 function ShipmentReviewWorkspace({
   rows,
   review,
+  activeRun,
   pdfOrderCount,
   teamshipOrderCount,
   syncSummary,
@@ -1485,10 +1569,13 @@ function ShipmentReviewWorkspace({
   payloadInspections,
   payloadInspectionErrors,
   payloadInspectionLoadingSr,
-  onInspectPayload
+  onInspectPayload,
+  isHistoryLoading,
+  onOrderWorkflowAction
 }: {
   rows: ShipmentWorkspaceRow[];
   review: GarlandTeamshipReviewResponse | null;
+  activeRun: TeamshipReviewHistoryRun | null;
   pdfOrderCount: number;
   teamshipOrderCount: number;
   syncSummary: DailyOrdersResponse["sync"] | null;
@@ -1523,14 +1610,26 @@ function ShipmentReviewWorkspace({
   payloadInspectionErrors: Record<string, string>;
   payloadInspectionLoadingSr: string | null;
   onInspectPayload: (input: { srNumber: string; expectedSerials: string[]; expectedSkus: string[] }) => void;
+  isHistoryLoading: boolean;
+  onOrderWorkflowAction: (runId: string, orderId: string, action: "markBolPrinted" | "clearBolPrinted" | "markOrderComplete" | "clearOrderComplete") => void;
 }) {
-  const [expandedRowIds, setExpandedRowIds] = useState<Set<string>>(new Set());
+  const [expandedRowIds, setExpandedRowIds] = useState<Set<string>>(() => new Set(readStoredStringArray(EXPANDED_TEAMSHIP_REVIEW_ROWS_STORAGE_KEY)));
   const [workspaceSearch, setWorkspaceSearch] = useState("");
   const [workspaceFilter, setWorkspaceFilter] = useState<WorkspaceQueueFilter>("ALL");
   const autoExpandedRowIdsRef = useRef<Set<string>>(new Set());
   const selectedCount = selectedUpdateSrNumbers.size;
   const issueEligibleCount = review?.reviews.filter(isIssueUpdateEligibleReview).length ?? 0;
   const eligibleCount = review?.reviews.filter(isUpdateEligibleReview).length ?? 0;
+  const savedOrderByKey = useMemo(() => {
+    const byKey = new Map<string, TeamshipReviewHistoryOrder>();
+
+    for (const order of activeRun?.orders ?? []) {
+      byKey.set(buildWorkspaceOrderKey(order.srNumber, order.psNumber), order);
+    }
+
+    return byKey;
+  }, [activeRun]);
+  const getSavedOrderForRow = (row: ShipmentWorkspaceRow) => savedOrderByKey.get(buildWorkspaceOrderKey(row.srNumber, row.psNumber)) ?? null;
   const visibleRows = useMemo(
     () =>
       rows.filter((row) =>
@@ -1538,10 +1637,10 @@ function ShipmentReviewWorkspace({
           row,
           search: workspaceSearch,
           filter: workspaceFilter,
-          workflowStatus: getWorkspaceWorkflowStatus(row, updateJobs)
+          workflowStatus: savedOrderByKey.get(buildWorkspaceOrderKey(row.srNumber, row.psNumber))?.workflowStatus ?? getWorkspaceWorkflowStatus(row, updateJobs)
         })
       ),
-    [rows, workspaceSearch, workspaceFilter, updateJobs]
+    [rows, workspaceSearch, workspaceFilter, updateJobs, savedOrderByKey]
   );
   const visibleIssueSrNumbers = visibleRows
     .filter((row) => row.review && row.srNumber && isIssueUpdateEligibleReview(row.review))
@@ -1551,7 +1650,7 @@ function ShipmentReviewWorkspace({
     .filter((row) => row.review && row.srNumber && isUpdateEligibleReview(row.review))
     .map((row) => row.srNumber!)
     .filter(Boolean);
-  const workspaceStats = buildWorkspaceStats(rows, updateJobs);
+  const workspaceStats = buildWorkspaceStats(rows, updateJobs, getSavedOrderForRow);
 
   useEffect(() => {
     const currentRowIds = new Set(rows.map((row) => row.id));
@@ -1565,6 +1664,7 @@ function ShipmentReviewWorkspace({
         }
       }
 
+      writeStoredStringArray(EXPANDED_TEAMSHIP_REVIEW_ROWS_STORAGE_KEY, Array.from(next));
       return next;
     });
     autoExpandedRowIdsRef.current = currentRowIds;
@@ -1580,6 +1680,7 @@ function ShipmentReviewWorkspace({
         next.delete(rowId);
       }
 
+      writeStoredStringArray(EXPANDED_TEAMSHIP_REVIEW_ROWS_STORAGE_KEY, Array.from(next));
       return next;
     });
   }
@@ -1620,7 +1721,11 @@ function ShipmentReviewWorkspace({
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => setExpandedRowIds(new Set(visibleRows.map((row) => row.id)))}
+              onClick={() => {
+                const next = new Set(visibleRows.map((row) => row.id));
+                writeStoredStringArray(EXPANDED_TEAMSHIP_REVIEW_ROWS_STORAGE_KEY, Array.from(next));
+                setExpandedRowIds(next);
+              }}
               disabled={visibleRows.length === 0}
               className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -1628,7 +1733,10 @@ function ShipmentReviewWorkspace({
             </button>
             <button
               type="button"
-              onClick={() => setExpandedRowIds(new Set())}
+              onClick={() => {
+                writeStoredStringArray(EXPANDED_TEAMSHIP_REVIEW_ROWS_STORAGE_KEY, []);
+                setExpandedRowIds(new Set());
+              }}
               disabled={rows.length === 0}
               className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -1821,13 +1929,14 @@ function ShipmentReviewWorkspace({
         ) : null}
         {visibleRows.map((row) => {
           const isExpanded = expandedRowIds.has(row.id);
+          const savedOrder = getSavedOrderForRow(row);
           const srKey = normalizeIdentifier(row.srNumber);
           const payloadInspection = srKey ? payloadInspections[srKey] ?? null : null;
           const payloadInspectionError = srKey ? payloadInspectionErrors[srKey] ?? null : null;
           const isPayloadInspectionLoading = Boolean(srKey && payloadInspectionLoadingSr === srKey);
           const expectedSerials = row.review ? collectReviewPdfSerials(row.review) : row.pdfOrder ? collectPdfOrderSerials(row.pdfOrder) : [];
           const expectedSkus = row.review ? collectReviewPdfSkus(row.review) : row.pdfOrder ? collectPdfOrderSkus(row.pdfOrder) : [];
-          const workflowStatus = getWorkspaceWorkflowStatus(row, updateJobs);
+          const workflowStatus = savedOrder?.workflowStatus ?? getWorkspaceWorkflowStatus(row, updateJobs);
 
           return (
             <details
@@ -1936,6 +2045,35 @@ function ShipmentReviewWorkspace({
                   >
                     Create draft
                   </button>
+                  {activeRun && savedOrder ? (
+                    savedOrder.workflowStatus === "ORDER_COMPLETE" ? (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onOrderWorkflowAction(activeRun.id, savedOrder.id, "clearOrderComplete");
+                        }}
+                        disabled={isHistoryLoading}
+                        className="rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-sm font-semibold text-success shadow-sm transition-colors hover:bg-success/15 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        ✓ Complete
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onOrderWorkflowAction(activeRun.id, savedOrder.id, "markOrderComplete");
+                        }}
+                        disabled={isHistoryLoading || savedOrder.workflowStatus === "NO_PDF" || savedOrder.workflowStatus === "SKIPPED"}
+                        className="rounded-xl border border-success/30 bg-background px-3 py-2 text-sm font-semibold text-success shadow-sm transition-colors hover:bg-success/10 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Mark complete
+                      </button>
+                    )
+                  ) : null}
                   <span className="rounded-xl border border-border bg-background px-3 py-2 text-sm font-semibold text-mutedForeground shadow-sm">
                     {isExpanded ? "Collapse" : "Expand"}
                   </span>
@@ -3706,6 +3844,50 @@ function normalizeIdentifier(value: string | null) {
   return value?.replace(/[^A-Z0-9]/gi, "").toUpperCase() ?? "";
 }
 
+function readStoredValue(key: string) {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return window.localStorage.getItem(key);
+}
+
+function writeStoredValue(key: string, value: string | null) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (value) {
+    window.localStorage.setItem(key, value);
+  } else {
+    window.localStorage.removeItem(key);
+  }
+}
+
+function readStoredStringArray(key: string) {
+  const rawValue = readStoredValue(key);
+
+  if (!rawValue) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue) as unknown;
+
+    return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredStringArray(key: string, value: string[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(key, JSON.stringify(value));
+}
+
 function readTeamshipUrl(order: TeamshipShippingOrderDetail | null) {
   return stringifyValue(order?.url) ?? buildTeamshipOrderUrl(order ? readTeamshipOrderId(order) : null);
 }
@@ -3718,10 +3900,14 @@ function buildTeamshipBolEditorUrl(orderId: string | null) {
   return orderId ? `https://app.teamshipos.com/ship-inventories/${encodeURIComponent(orderId)}/bol-editor` : null;
 }
 
-function buildWorkspaceStats(rows: ShipmentWorkspaceRow[], updateJobs: TeamshipUpdateJobSummary[]) {
+function buildWorkspaceStats(
+  rows: ShipmentWorkspaceRow[],
+  updateJobs: TeamshipUpdateJobSummary[],
+  getSavedOrderForRow: (row: ShipmentWorkspaceRow) => TeamshipReviewHistoryOrder | null = () => null
+) {
   return rows.reduce(
     (stats, row) => {
-      const workflowStatus = getWorkspaceWorkflowStatus(row, updateJobs);
+      const workflowStatus = getSavedOrderForRow(row)?.workflowStatus ?? getWorkspaceWorkflowStatus(row, updateJobs);
 
       if (workflowStatus === "ORDER_COMPLETE") {
         stats.complete += 1;
@@ -3742,6 +3928,10 @@ function buildWorkspaceStats(rows: ShipmentWorkspaceRow[], updateJobs: TeamshipU
     },
     { needsAttention: 0, readyToPrint: 0, complete: 0, noPdf: 0 }
   );
+}
+
+function buildWorkspaceOrderKey(srNumber: string | null, psNumber: string | null) {
+  return `${normalizeIdentifier(srNumber)}:${normalizeIdentifier(psNumber)}`;
 }
 
 function shipmentRowClass(status: ShipmentWorkspaceStatus, workflowStatus: TeamshipReviewWorkflowStatus) {
