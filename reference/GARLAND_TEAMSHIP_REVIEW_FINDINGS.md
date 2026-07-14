@@ -68,13 +68,15 @@ Recommended flow:
 2. Newl Apps classifies candidate Garland messages using deterministic signals first: Garland sender domain, PS range in subject, `orders/pages` wording, and PDF attachments.
 3. Newl Apps stores tenant-scoped email and attachment metadata in `GarlandSourceEmail` and `GarlandSourceAttachment`.
 4. Exact Graph message/attachment IDs are upserted, not inserted blindly, so re-running intake does not duplicate the same email attachment.
-5. The existing Garland PDF extraction pipeline remains the source of truth for order details once the PDF file is processed.
-6. Later, an AI triage step can review ambiguous email threads before extraction, but AI should not override deterministic dedupe or PDF parsing.
+5. Candidate emails are grouped into one visible batch by shipment day, PS start/end range, order count, and page count. Follow-up emails in the same batch stay visible inside the grouped record instead of becoming duplicate work items.
+6. The existing Garland PDF extraction pipeline remains the source of truth for order details once the PDF file is processed.
+7. Later, an AI triage step can review ambiguous email threads before extraction, but AI should not override deterministic dedupe or PDF parsing.
 
 UI impact:
 
-- The Teamship Review page now has a `Garland email intake` card before the alert digest.
-- CSR/admin users can manually sync recent Garland emails, search detected messages, see parsed PS ranges, and inspect stored attachment metadata.
+- Email intake now lives on `/shipment-documents/teamship-review/email-intake` as a separate Teamship Review subpage so the inbox queue can grow without cluttering daily shipment review.
+- CSR/admin users can search detected messages, see grouped duplicate/follow-up counts, see parsed PS ranges, and inspect stored attachment metadata.
+- The Email Intake page auto-scans the configured mailbox when opened if the latest scan is stale. `Scan now` remains available as a fallback, but the normal CSR flow should not require manually refreshing email.
 - This is metadata-only in the first PR. It does not automatically download/store PDF files or run the PDF review yet.
 - The next UI step is a `Create review from email attachments` action once attachment binary storage is added.
 

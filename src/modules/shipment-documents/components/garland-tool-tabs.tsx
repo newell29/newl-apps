@@ -4,18 +4,24 @@ const tabs = [
   { href: "/shipment-documents", label: "BOL Consolidation" },
   { href: "/shipment-documents/carrier-manifests", label: "Carrier Manifests" },
   { href: "/shipment-documents/teamship-review", label: "Teamship Review" },
+  { href: "/shipment-documents/teamship-review/email-intake", label: "Email Intake" },
   { href: "/shipment-documents/teamship-review/bot-runs", label: "Bot Runs" }
 ];
 
-export function GarlandToolTabs({ active }: { active: "bol" | "carrier-manifests" | "teamship-review" | "teamship-bot-runs" }) {
+export function GarlandToolTabs({
+  active
+}: {
+  active: "bol" | "carrier-manifests" | "teamship-review" | "teamship-email-intake" | "teamship-bot-runs";
+}) {
   return (
     <div className="flex flex-wrap gap-2 rounded-lg border border-border bg-card p-2 shadow-sm">
       {tabs.map((tab) => {
         const isActive =
-          (active === "bol" && tab.href === "/shipment-documents") ||
-          (active === "carrier-manifests" && tab.href.includes("carrier-manifests")) ||
-          (active === "teamship-review" && tab.href === "/shipment-documents/teamship-review") ||
-          (active === "teamship-bot-runs" && tab.href.includes("bot-runs"));
+              (active === "bol" && tab.href === "/shipment-documents") ||
+              (active === "carrier-manifests" && tab.href.includes("carrier-manifests")) ||
+              (active === "teamship-review" && tab.href === "/shipment-documents/teamship-review") ||
+              (active === "teamship-email-intake" && tab.href.includes("email-intake")) ||
+              (active === "teamship-bot-runs" && tab.href.includes("bot-runs"));
 
         return (
           <Link

@@ -36,6 +36,38 @@ export type GarlandEmailDetection = {
   hasPdfAttachment: boolean;
 };
 
+type GarlandSourceEmailWithAttachments = Prisma.GarlandSourceEmailGetPayload<{
+  include: {
+    attachments: {
+      select: {
+        id: true;
+        fileName: true;
+        contentType: true;
+        sizeBytes: true;
+        contentHash: true;
+        intakeStatus: true;
+        pageCount: true;
+        createdAt: true;
+      };
+    };
+  };
+}>;
+
+export type GarlandEmailIntakeGroup = {
+  id: string;
+  batchKey: string;
+  primaryEmail: GarlandSourceEmailWithAttachments;
+  emails: GarlandSourceEmailWithAttachments[];
+  emailCount: number;
+  duplicateCount: number;
+  hasPdfAttachment: boolean;
+  expectedOrderCount: number | null;
+  expectedPageCount: number | null;
+  expectedPsStart: string | null;
+  expectedPsEnd: string | null;
+  classification: GarlandEmailClassification;
+};
+
 type AttachmentFetcher = (
   message: MicrosoftGraphMailMessage,
   sourceEmail: { id: string; mailboxAddress: string }
@@ -369,11 +401,11 @@ export async function listGarlandEmailIntake(tenantId: string, options?: { searc
       : {})
   };
 
-  const [emails, totalCount, latestRun] = await Promise.all([
+  const [emails, rawEmailCount, latestRun] = await Promise.all([
     prisma.garlandSourceEmail.findMany({
       where,
       orderBy: [{ receivedAt: "desc" }, { createdAt: "desc" }],
-      take,
+      take: Math.min(500, take * 5),
       include: {
         attachments: {
           orderBy: [{ fileName: "asc" }],
@@ -413,7 +445,41 @@ export async function listGarlandEmailIntake(tenantId: string, options?: { searc
     })
   ]);
 
-  return { emails, totalCount, latestRun };
+  const groups = groupGarlandEmailIntake(emails).slice(0, take);
+
+  return { emails, groups, totalCount: groups.length, rawEmailCount, latestRun };
+}
+
+export function groupGarlandEmailIntake(emails: GarlandSourceEmailWithAttachments[]): GarlandEmailIntakeGroup[] {
+  const groupsByKey = new Map<string, GarlandSourceEmailWithAttachments[]>();
+
+  for (const email of emails) {
+    const key = buildGarlandEmailBatchKey(email);
+    groupsByKey.set(key, [...(groupsByKey.get(key) ?? []), email]);
+  }
+
+  return Array.from(groupsByKey.entries())
+    .map(([batchKey, groupEmails]) => {
+      const sortedEmails = [...groupEmails].sort(compareGarlandEmailPriority);
+      const primaryEmail = sortedEmails[0];
+      const classification = chooseGroupClassification(sortedEmails);
+
+      return {
+        id: batchKey,
+        batchKey,
+        primaryEmail,
+        emails: sortedEmails,
+        emailCount: sortedEmails.length,
+        duplicateCount: Math.max(0, sortedEmails.length - 1),
+        hasPdfAttachment: sortedEmails.some((email) => email.hasPdfAttachment || email.attachments.some(isStoredPdfAttachment)),
+        expectedOrderCount: primaryEmail.expectedOrderCount,
+        expectedPageCount: primaryEmail.expectedPageCount,
+        expectedPsStart: primaryEmail.expectedPsStart,
+        expectedPsEnd: primaryEmail.expectedPsEnd,
+        classification
+      };
+    })
+    .sort((a, b) => b.primaryEmail.receivedAt.getTime() - a.primaryEmail.receivedAt.getTime());
 }
 
 async function upsertGarlandSourceAttachment(
@@ -543,6 +609,63 @@ function parseGarlandSubjectRange(subject: string) {
   };
 }
 
+function buildGarlandEmailBatchKey(email: Pick<GarlandSourceEmailWithAttachments, "expectedPsStart" | "expectedPsEnd" | "expectedOrderCount" | "expectedPageCount" | "receivedAt" | "conversationId" | "subject">) {
+  const receivedDay = email.receivedAt.toISOString().slice(0, 10);
+  if (email.expectedPsStart && email.expectedPsEnd) {
+    return [
+      "ps-range",
+      receivedDay,
+      email.expectedPsStart,
+      email.expectedPsEnd,
+      email.expectedOrderCount ?? "?",
+      email.expectedPageCount ?? "?"
+    ].join(":");
+  }
+
+  return [
+    "conversation",
+    receivedDay,
+    email.conversationId || normalizeSubjectForBatchKey(email.subject)
+  ].join(":");
+}
+
+function compareGarlandEmailPriority(a: GarlandSourceEmailWithAttachments, b: GarlandSourceEmailWithAttachments) {
+  const aHasPdf = a.hasPdfAttachment || a.attachments.some(isStoredPdfAttachment);
+  const bHasPdf = b.hasPdfAttachment || b.attachments.some(isStoredPdfAttachment);
+  if (aHasPdf !== bHasPdf) return aHasPdf ? -1 : 1;
+
+  const aCorrection = a.classification === "GARLAND_DOCUMENT_CORRECTION";
+  const bCorrection = b.classification === "GARLAND_DOCUMENT_CORRECTION";
+  if (aCorrection !== bCorrection) return aCorrection ? -1 : 1;
+
+  if (a.candidateScore !== b.candidateScore) return b.candidateScore - a.candidateScore;
+
+  return b.receivedAt.getTime() - a.receivedAt.getTime();
+}
+
+function chooseGroupClassification(emails: GarlandSourceEmailWithAttachments[]): GarlandEmailClassification {
+  if (emails.some((email) => email.classification === "GARLAND_DOCUMENT_CORRECTION")) {
+    return "GARLAND_DOCUMENT_CORRECTION";
+  }
+  if (emails.some((email) => email.classification === "GARLAND_DOCUMENT_BATCH")) {
+    return "GARLAND_DOCUMENT_BATCH";
+  }
+  if (emails.some((email) => email.classification === "GARLAND_FOLLOW_UP")) {
+    return "GARLAND_FOLLOW_UP";
+  }
+
+  return "IGNORED";
+}
+
+function normalizeSubjectForBatchKey(subject: string) {
+  return subject
+    .toLowerCase()
+    .replace(/\bre\s*:\s*/g, "")
+    .replace(/\bfw\s*:\s*/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function serializeRecipients(recipients?: MicrosoftGraphMailRecipient[] | null) {
   const values = (recipients ?? [])
     .map((recipient) => ({
@@ -563,6 +686,12 @@ function isPdfAttachment(attachment: { name?: string | null; contentType?: strin
   const name = attachment.name?.trim().toLowerCase() ?? "";
   const contentType = attachment.contentType?.trim().toLowerCase() ?? "";
   return name.endsWith(".pdf") || contentType === "application/pdf";
+}
+
+function isStoredPdfAttachment(attachment: { fileName?: string | null; contentType?: string | null }) {
+  const fileName = attachment.fileName?.trim().toLowerCase() ?? "";
+  const contentType = attachment.contentType?.trim().toLowerCase() ?? "";
+  return fileName.endsWith(".pdf") || contentType === "application/pdf";
 }
 
 function parseDate(value?: string | null) {
