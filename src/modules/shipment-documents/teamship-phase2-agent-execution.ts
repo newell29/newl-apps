@@ -480,7 +480,13 @@ export function buildTeamshipUpdatePayload(order: TeamshipPhase2OrderPlan): Reco
 }
 
 function assertLiveAllowlist(plan: TeamshipPhase2DryRunPlan, allowlistSrNumbers: string[] | undefined) {
-  const allowlist = new Set((allowlistSrNumbers ?? []).map(normalizeIdentifier).filter(Boolean));
+  const allowlistValues = allowlistSrNumbers ?? [];
+
+  if (allowlistValues.some((value) => value.trim() === "*")) {
+    return;
+  }
+
+  const allowlist = new Set(allowlistValues.map(normalizeIdentifier).filter(Boolean));
 
   if (allowlist.size === 0) {
     throw new Error("Live Teamship updates require TEAMSHIP_LIVE_ALLOWLIST_SR_NUMBERS or --allow-sr for rollout safety.");
