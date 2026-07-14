@@ -30,6 +30,13 @@ export type OpportunityCandidate = {
   evidence: Record<string, unknown>;
 };
 
+export type OpportunityQualificationResult = {
+  qualified: OpportunityCandidate[];
+  rawCount: number;
+  clusterCount: number;
+  skippedCount: number;
+};
+
 const serviceTerms = [
   "warehouse",
   "warehousing",
@@ -41,11 +48,49 @@ const serviceTerms = [
   "cross border",
   "ocean freight",
   "air freight",
+  "local trucking",
+  "gta trucking",
+  "freight",
+  "transportation",
   "inventory",
-  "wms"
+  "wms",
+  "teamship",
+  "mississauga",
+  "charlotte",
+  "canada",
+  "u.s.",
+  "automotive",
+  "retail",
+  "wholesale",
+  "amazon"
 ];
 
 const informationalTerms = ["what is", "meaning", "definition", "guide", "how to", "demurrage", "ddp"];
+const brandedTerms = ["newl", "newell", "newells", "newell's", "teamship"];
+const keywordStopWords = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "at",
+  "best",
+  "by",
+  "canada",
+  "company",
+  "companies",
+  "for",
+  "from",
+  "in",
+  "near",
+  "of",
+  "service",
+  "services",
+  "the",
+  "to",
+  "us",
+  "usa",
+  "with"
+]);
 
 export function buildOpportunityCandidate(input: OpportunityInput): OpportunityCandidate {
   const topic = cleanTopic(input.topic);
@@ -121,6 +166,77 @@ export function buildCandidatesFromMetricRows(rows: CsvRow[], source: string): O
     .filter((candidate): candidate is OpportunityCandidate => Boolean(candidate));
 }
 
+export function qualifyOpportunityCandidates(candidates: OpportunityCandidate[]): OpportunityQualificationResult {
+  const clusters = new Map<string, OpportunityCandidate[]>();
+
+  for (const candidate of candidates) {
+    const key = getClusterKey(candidate);
+    const existing = clusters.get(key) ?? [];
+    existing.push(candidate);
+    clusters.set(key, existing);
+  }
+
+  const qualified: OpportunityCandidate[] = [];
+
+  for (const cluster of clusters.values()) {
+    const candidate = mergeCandidateCluster(cluster);
+
+    if (isQualifiedOpportunity(candidate)) {
+      qualified.push(candidate);
+    }
+  }
+
+  qualified.sort((a, b) => b.score - a.score || Number(b.evidence.impressions ?? 0) - Number(a.evidence.impressions ?? 0));
+
+  return {
+    qualified,
+    rawCount: candidates.length,
+    clusterCount: clusters.size,
+    skippedCount: clusters.size - qualified.length
+  };
+}
+
+export function isQualifiedOpportunity(candidate: OpportunityCandidate) {
+  const impressions = Number(candidate.evidence.impressions ?? 0);
+  const clicks = Number(candidate.evidence.clicks ?? 0);
+  const leadCount = Number(candidate.evidence.leadCount ?? 0);
+  const position = typeof candidate.evidence.position === "number" ? candidate.evidence.position : null;
+  const topic = candidate.topic.toLowerCase();
+  const hasServiceIntent = serviceTerms.some((term) => topic.includes(term));
+  const hasInformationalIntent = informationalTerms.some((term) => topic.includes(term));
+  const isMostlyBranded = brandedTerms.some((term) => topic.includes(term)) && !hasServiceIntent;
+
+  if (candidate.action === WebsiteGrowthAction.IGNORE) {
+    return false;
+  }
+
+  if (leadCount > 0) {
+    return true;
+  }
+
+  if (isMostlyBranded && impressions < 250) {
+    return false;
+  }
+
+  if (candidate.score >= 55) {
+    return true;
+  }
+
+  if (hasServiceIntent && impressions >= 20 && position !== null && position > 3 && position <= 50) {
+    return true;
+  }
+
+  if (hasServiceIntent && impressions >= 75 && clicks === 0) {
+    return true;
+  }
+
+  if (hasInformationalIntent && impressions >= 100 && position !== null && position <= 40) {
+    return true;
+  }
+
+  return false;
+}
+
 export function scoreOpportunity({
   topic,
   impressions,
@@ -188,6 +304,102 @@ function chooseAction({
   }
 
   return targetPage ? WebsiteGrowthAction.ADD_INTERNAL_LINKS : WebsiteGrowthAction.CREATE_RESOURCE_ARTICLE;
+}
+
+function mergeCandidateCluster(cluster: OpportunityCandidate[]) {
+  const sorted = [...cluster].sort((a, b) => b.score - a.score);
+  const best = sorted[0];
+  const impressions = sumEvidenceNumber(cluster, "impressions");
+  const clicks = sumEvidenceNumber(cluster, "clicks");
+  const leadCount = sumEvidenceNumber(cluster, "leadCount");
+  const weightedPosition = weightedAveragePosition(cluster);
+  const supportingKeywords = Array.from(
+    new Set(cluster.flatMap((candidate) => candidate.supportingKeywords).filter(Boolean))
+  ).slice(0, 12);
+  const merged = buildOpportunityCandidate({
+    topic: best.topic,
+    primaryKeyword: best.primaryKeyword,
+    targetPage: best.targetPage,
+    sourcePage: best.sourcePage,
+    impressions,
+    clicks,
+    position: weightedPosition,
+    leadCount,
+    source: String(best.evidence.source ?? "clustered"),
+    evidence: {
+      clusterSize: cluster.length,
+      clusterKey: getClusterKey(best),
+      supportingKeywords,
+      sourceRows: cluster.slice(0, 10).map((candidate) => ({
+        topic: candidate.topic,
+        keyword: candidate.primaryKeyword,
+        page: candidate.targetPage,
+        score: candidate.score,
+        impressions: candidate.evidence.impressions,
+        clicks: candidate.evidence.clicks,
+        position: candidate.evidence.position
+      }))
+    }
+  });
+
+  return {
+    ...merged,
+    supportingKeywords,
+    evidence: {
+      ...merged.evidence,
+      clusterSize: cluster.length,
+      clusterKey: getClusterKey(best),
+      supportingKeywords
+    }
+  };
+}
+
+function getClusterKey(candidate: OpportunityCandidate) {
+  const pageKey = candidate.targetPage ? normalizePageKey(candidate.targetPage) : "no-page";
+  const intentKey = normalizeKeywordIntent(candidate.primaryKeyword ?? candidate.topic);
+
+  return `${candidate.action}:${pageKey}:${intentKey}`;
+}
+
+function normalizePageKey(value: string) {
+  try {
+    const parsed = new URL(value);
+    return parsed.pathname.replace(/\/+$/g, "") || "/";
+  } catch {
+    return value.replace(/^https?:\/\/[^/]+/i, "").replace(/\/+$/g, "") || value;
+  }
+}
+
+function normalizeKeywordIntent(value: string) {
+  const words = cleanTopic(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 1 && !keywordStopWords.has(word))
+    .map((word) => word.replace(/ies$/, "y").replace(/s$/, ""));
+
+  return words.sort().slice(0, 5).join(" ") || cleanTopic(value).toLowerCase();
+}
+
+function sumEvidenceNumber(candidates: OpportunityCandidate[], key: "impressions" | "clicks" | "leadCount") {
+  return candidates.reduce((total, candidate) => total + Number(candidate.evidence[key] ?? 0), 0);
+}
+
+function weightedAveragePosition(candidates: OpportunityCandidate[]) {
+  let weightedTotal = 0;
+  let weight = 0;
+
+  for (const candidate of candidates) {
+    const position = typeof candidate.evidence.position === "number" ? candidate.evidence.position : null;
+    const impressions = Math.max(1, Number(candidate.evidence.impressions ?? 0));
+
+    if (position !== null) {
+      weightedTotal += position * impressions;
+      weight += impressions;
+    }
+  }
+
+  return weight > 0 ? weightedTotal / weight : null;
 }
 
 function buildReason({

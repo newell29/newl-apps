@@ -14,6 +14,8 @@ import { fetchSearchConsoleRows, getWebsiteGrowthIntegrationStatus } from "@/mod
 import {
   buildCandidatesFromMetricRows,
   buildOpportunityCandidate,
+  isQualifiedOpportunity,
+  qualifyOpportunityCandidates,
   type OpportunityCandidate
 } from "@/modules/website-growth/opportunities";
 import { parseWebsiteGrowthDataSource } from "@/modules/website-growth/queries";
@@ -71,10 +73,8 @@ export async function importWebsiteGrowthMetricsAction(formData: FormData) {
       });
     }
 
-    await createMissingOpportunities(
-      context.tenantId,
-      buildCandidatesFromMetricRows(rows, source)
-    );
+    const qualification = qualifyOpportunityCandidates(buildCandidatesFromMetricRows(rows, source));
+    const opportunitySummary = await createMissingOpportunities(context.tenantId, qualification.qualified);
 
     await prisma.websiteGrowthDataImport.update({
       where: { id: importRecord.id },
@@ -84,7 +84,13 @@ export async function importWebsiteGrowthMetricsAction(formData: FormData) {
         completedAt: new Date(),
         summary: {
           rows: rows.length,
-          source
+          source,
+          rawCandidates: qualification.rawCount,
+          clusters: qualification.clusterCount,
+          qualifiedOpportunities: qualification.qualified.length,
+          skippedClusters: qualification.skippedCount,
+          opportunitiesCreated: opportunitySummary.createdCount,
+          existingMatches: opportunitySummary.existingCount
         }
       }
     });
@@ -151,9 +157,7 @@ export async function syncSearchConsoleAction() {
       await prisma.websiteGrowthMetric.createMany({ data: metricRows });
     }
 
-    await createMissingOpportunities(
-      context.tenantId,
-      rows.map((row) =>
+    const candidates = rows.map((row) =>
         buildOpportunityCandidate({
           topic: row.keys?.[0] ?? row.keys?.[1] ?? "Search Console opportunity",
           primaryKeyword: row.keys?.[0] ?? null,
@@ -165,8 +169,9 @@ export async function syncSearchConsoleAction() {
           source: "google_search_console_api",
           evidence: row
         })
-      )
-    );
+      );
+    const qualification = qualifyOpportunityCandidates(candidates);
+    const opportunitySummary = await createMissingOpportunities(context.tenantId, qualification.qualified);
 
     await prisma.websiteGrowthDataImport.update({
       where: { id: importRecord.id },
@@ -176,7 +181,13 @@ export async function syncSearchConsoleAction() {
         completedAt: new Date(),
         summary: {
           rows: rows.length,
-          dateRange: "last_28_days"
+          dateRange: "last_28_days",
+          rawCandidates: qualification.rawCount,
+          clusters: qualification.clusterCount,
+          qualifiedOpportunities: qualification.qualified.length,
+          skippedClusters: qualification.skippedCount,
+          opportunitiesCreated: opportunitySummary.createdCount,
+          existingMatches: opportunitySummary.existingCount
         }
       }
     });
@@ -263,7 +274,8 @@ export async function generateWebsiteGrowthOpportunitiesAction() {
       )
     ];
 
-    const createdCount = await createMissingOpportunities(context.tenantId, candidates);
+    const qualification = qualifyOpportunityCandidates(candidates);
+    const opportunitySummary = await createMissingOpportunities(context.tenantId, qualification.qualified);
 
     await prisma.websiteGrowthDataImport.update({
       where: { id: importRecord.id },
@@ -277,7 +289,12 @@ export async function generateWebsiteGrowthOpportunitiesAction() {
           contacts,
           pipelineRecords: leads,
           creditChecks,
-          opportunitiesCreated: createdCount
+          rawCandidates: qualification.rawCount,
+          clusters: qualification.clusterCount,
+          qualifiedOpportunities: qualification.qualified.length,
+          skippedClusters: qualification.skippedCount,
+          opportunitiesCreated: opportunitySummary.createdCount,
+          existingMatches: opportunitySummary.existingCount
         }
       }
     });
@@ -291,6 +308,56 @@ export async function generateWebsiteGrowthOpportunitiesAction() {
       }
     });
     throw error;
+  }
+
+  revalidatePath("/website-growth");
+}
+
+export async function organizeWebsiteGrowthQueueAction() {
+  const context = await getAuthenticatedContext();
+  await requireModule(context, ModuleKey.WEBSITE_GROWTH);
+  await requireMutationAccess(context);
+
+  const opportunities = await prisma.websiteGrowthOpportunity.findMany({
+    where: {
+      tenantId: context.tenantId,
+      status: WebsiteGrowthOpportunityStatus.NEW
+    },
+    take: 10000,
+    orderBy: {
+      updatedAt: "desc"
+    }
+  });
+
+  const lowSignalIds = opportunities
+    .filter((opportunity) => !isQualifiedOpportunity({
+      action: opportunity.action,
+      topic: opportunity.topic,
+      primaryKeyword: opportunity.primaryKeyword,
+      targetPage: opportunity.targetPage,
+      sourcePage: opportunity.sourcePage,
+      score: opportunity.score,
+      confidence: opportunity.confidence ?? "Low",
+      reason: opportunity.reason,
+      recommendation: opportunity.recommendation,
+      supportingKeywords: Array.isArray(opportunity.supportingKeywords) ? opportunity.supportingKeywords.filter((value): value is string => typeof value === "string") : [],
+      evidence: isRecord(opportunity.evidence) ? opportunity.evidence : {}
+    }))
+    .map((opportunity) => opportunity.id);
+
+  if (lowSignalIds.length > 0) {
+    await prisma.websiteGrowthOpportunity.updateMany({
+      where: {
+        tenantId: context.tenantId,
+        id: {
+          in: lowSignalIds
+        }
+      },
+      data: {
+        status: WebsiteGrowthOpportunityStatus.MONITORING,
+        notes: "Moved to monitoring by the SEO qualification engine because the signal was low or duplicated."
+      }
+    });
   }
 
   revalidatePath("/website-growth");
@@ -331,6 +398,7 @@ export async function updateWebsiteGrowthOpportunityAction(formData: FormData) {
 
 async function createMissingOpportunities(tenantId: string, candidates: OpportunityCandidate[]) {
   let createdCount = 0;
+  let existingCount = 0;
 
   for (const candidate of candidates) {
     if (!candidate.topic) {
@@ -350,6 +418,7 @@ async function createMissingOpportunities(tenantId: string, candidates: Opportun
     });
 
     if (existing) {
+      existingCount += 1;
       continue;
     }
 
@@ -372,7 +441,11 @@ async function createMissingOpportunities(tenantId: string, candidates: Opportun
     createdCount += 1;
   }
 
-  return createdCount;
+  return { createdCount, existingCount };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function parseOpportunityStatus(value: FormDataEntryValue | null) {

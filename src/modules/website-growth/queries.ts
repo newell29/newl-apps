@@ -27,8 +27,10 @@ export async function getWebsiteGrowthShell(
   const [
     opportunities,
     totalCount,
+    reviewQueueCount,
     approvedCount,
     publishedCount,
+    monitoringCount,
     recentImports,
     latestMetrics,
     inboundCount,
@@ -50,6 +52,17 @@ export async function getWebsiteGrowthShell(
         tenantId: context.tenantId,
         status: {
           in: [
+            WebsiteGrowthOpportunityStatus.NEW,
+            WebsiteGrowthOpportunityStatus.REVIEWING
+          ]
+        }
+      }
+    }),
+    prisma.websiteGrowthOpportunity.count({
+      where: {
+        tenantId: context.tenantId,
+        status: {
+          in: [
             WebsiteGrowthOpportunityStatus.APPROVED,
             WebsiteGrowthOpportunityStatus.IN_PROGRESS
           ]
@@ -60,6 +73,12 @@ export async function getWebsiteGrowthShell(
       where: {
         tenantId: context.tenantId,
         status: WebsiteGrowthOpportunityStatus.PUBLISHED
+      }
+    }),
+    prisma.websiteGrowthOpportunity.count({
+      where: {
+        tenantId: context.tenantId,
+        status: WebsiteGrowthOpportunityStatus.MONITORING
       }
     }),
     prisma.websiteGrowthDataImport.findMany({
@@ -124,8 +143,10 @@ export async function getWebsiteGrowthShell(
     integrations: getWebsiteGrowthIntegrationStatus(),
     metrics: {
       totalCount,
+      reviewQueueCount,
       approvedCount,
       publishedCount,
+      monitoringCount,
       visibleCount: opportunities.length,
       inboundCount,
       companyCount,

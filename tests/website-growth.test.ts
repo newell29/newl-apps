@@ -9,7 +9,7 @@ import {
   getWebsiteGrowthIntegrationStatus,
   normalizeSearchConsoleSiteUrl
 } from "@/modules/website-growth/integrations";
-import { buildOpportunityCandidate } from "@/modules/website-growth/opportunities";
+import { buildOpportunityCandidate, qualifyOpportunityCandidates } from "@/modules/website-growth/opportunities";
 
 describe("website growth CSV parsing", () => {
   it("normalizes Search Console export rows", () => {
@@ -51,6 +51,50 @@ describe("website growth opportunity scoring", () => {
 
     expect(candidate.action).toBe(WebsiteGrowthAction.CREATE_RESOURCE_ARTICLE);
     expect(candidate.recommendation).toContain("resource article");
+  });
+
+  it("filters weak Search Console rows out of the qualified queue", () => {
+    const result = qualifyOpportunityCandidates([
+      buildOpportunityCandidate({
+        topic: "random tracking number",
+        impressions: 3,
+        clicks: 0,
+        position: 71,
+        source: "google_search_console_api"
+      })
+    ]);
+
+    expect(result.rawCount).toBe(1);
+    expect(result.qualified).toHaveLength(0);
+    expect(result.skippedCount).toBe(1);
+  });
+
+  it("clusters related Search Console rows into one qualified opportunity", () => {
+    const result = qualifyOpportunityCandidates([
+      buildOpportunityCandidate({
+        topic: "gta local trucking",
+        primaryKeyword: "gta local trucking",
+        targetPage: "https://www.newlgroup.com/freight/gta-local-trucking",
+        impressions: 90,
+        clicks: 2,
+        position: 14,
+        source: "google_search_console_api"
+      }),
+      buildOpportunityCandidate({
+        topic: "local trucking gta",
+        primaryKeyword: "local trucking gta",
+        targetPage: "https://www.newlgroup.com/freight/gta-local-trucking",
+        impressions: 70,
+        clicks: 1,
+        position: 18,
+        source: "google_search_console_api"
+      })
+    ]);
+
+    expect(result.rawCount).toBe(2);
+    expect(result.qualified).toHaveLength(1);
+    expect(result.qualified[0]?.evidence.impressions).toBe(160);
+    expect(result.qualified[0]?.supportingKeywords).toEqual(["gta local trucking", "local trucking gta"]);
   });
 });
 

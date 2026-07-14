@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/page-header";
 import {
   generateWebsiteGrowthOpportunitiesAction,
   importWebsiteGrowthMetricsAction,
+  organizeWebsiteGrowthQueueAction,
   syncSearchConsoleAction,
   updateWebsiteGrowthOpportunityAction
 } from "@/modules/website-growth/actions";
@@ -49,7 +50,7 @@ export default async function WebsiteGrowthPage({
       />
 
       <section className="grid gap-4 md:grid-cols-4">
-        <MetricCard label="Opportunities" value={shell.metrics.totalCount} caption="Total generated" />
+        <MetricCard label="Review queue" value={shell.metrics.reviewQueueCount} caption="Qualified items to triage" />
         <MetricCard label="Approved / active" value={shell.metrics.approvedCount} caption="Ready for execution" />
         <MetricCard label="Published" value={shell.metrics.publishedCount} caption="Marked live" />
         <MetricCard label="Inbound leads" value={shell.metrics.inboundCount} caption="Last 30 days" />
@@ -104,6 +105,14 @@ export default async function WebsiteGrowthPage({
             <button className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
               Generate from Newl Apps data
             </button>
+          </form>
+          <form action={organizeWebsiteGrowthQueueAction} className="mt-3">
+            <button className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
+              Organize current queue
+            </button>
+            <p className="mt-2 text-xs leading-5 text-mutedForeground">
+              Moves weak existing signals into Monitoring without deleting raw metrics or approved work.
+            </p>
           </form>
         </div>
 
@@ -192,6 +201,9 @@ export default async function WebsiteGrowthPage({
                 <p className="mt-1 text-sm text-mutedForeground">
                   {entry.errorMessage ?? `${entry.rowCount.toLocaleString("en-US")} rows processed`}
                 </p>
+                {entry.summary ? (
+                  <RunSummary summary={entry.summary} />
+                ) : null}
               </div>
             ))}
           </div>
@@ -266,7 +278,7 @@ export default async function WebsiteGrowthPage({
           <div>
             <h2 className="text-base font-semibold text-foreground">Content opportunity queue</h2>
             <p className="mt-1 text-sm leading-6 text-mutedForeground">
-              Showing the top 200 items by score and freshness.
+              Showing the top 200 items by score and freshness. Total stored: {shell.metrics.totalCount.toLocaleString("en-US")}; monitoring: {shell.metrics.monitoringCount.toLocaleString("en-US")}.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -404,6 +416,37 @@ function SummaryRow({ label, value }: { label: string; value?: string | null }) 
       <dt className="font-medium text-mutedForeground">{label}</dt>
       <dd className="break-words text-foreground">{value}</dd>
     </div>
+  );
+}
+
+function RunSummary({ summary }: { summary: unknown }) {
+  if (!summary || typeof summary !== "object" || Array.isArray(summary)) {
+    return null;
+  }
+
+  const record = summary as Record<string, unknown>;
+  const items = [
+    ["Raw candidates", record.rawCandidates],
+    ["Clusters", record.clusters],
+    ["Qualified", record.qualifiedOpportunities],
+    ["Created", record.opportunitiesCreated],
+    ["Existing", record.existingMatches],
+    ["Skipped", record.skippedClusters]
+  ].filter((item): item is [string, number] => typeof item[1] === "number");
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <dl className="mt-3 grid gap-2 sm:grid-cols-3">
+      {items.map(([label, value]) => (
+        <div key={label} className="rounded-md border border-border bg-background px-3 py-2">
+          <dt className="text-[0.65rem] font-semibold uppercase tracking-wide text-mutedForeground">{label}</dt>
+          <dd className="mt-1 text-sm font-semibold text-foreground">{Number(value).toLocaleString("en-US")}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
