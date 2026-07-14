@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 
 import { getWebsiteGrowthIntegrationStatus } from "@/modules/website-growth/integrations";
+import { weeklyContentRecommendations } from "@/modules/website-growth/opportunities";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 import { prisma } from "@/server/db";
 
@@ -136,6 +137,24 @@ export async function getWebsiteGrowthShell(
     })
   ]);
 
+  const weeklyLaneCounts = await Promise.all(
+    weeklyContentRecommendations.map(async (lane) => ({
+      lane: lane.lane,
+      label: lane.label,
+      description: lane.description,
+      publishLimit: lane.publishLimit,
+      count: await prisma.websiteGrowthOpportunity.count({
+        where: {
+          tenantId: context.tenantId,
+          status: WebsiteGrowthOpportunityStatus.REVIEWING,
+          action: {
+            in: lane.actions
+          }
+        }
+      })
+    }))
+  );
+
   return {
     opportunities,
     recentImports,
@@ -163,7 +182,8 @@ export async function getWebsiteGrowthShell(
     statusCounts: statusCounts.map((entry) => ({
       status: entry.status,
       count: entry._count._all
-    }))
+    })),
+    weeklyLaneCounts
   };
 }
 

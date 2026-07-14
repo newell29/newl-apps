@@ -19,6 +19,7 @@ import {
   type OpportunityCandidate
 } from "@/modules/website-growth/opportunities";
 import { parseWebsiteGrowthDataSource } from "@/modules/website-growth/queries";
+import { createWeeklyWebsiteGrowthPlanForTenant } from "@/modules/website-growth/weekly-plan";
 import { prisma } from "@/server/db";
 import { requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -359,6 +360,19 @@ export async function organizeWebsiteGrowthQueueAction() {
       }
     });
   }
+
+  revalidatePath("/website-growth");
+}
+
+export async function createWeeklyWebsiteGrowthPlanAction() {
+  const context = await getAuthenticatedContext();
+  await requireModule(context, ModuleKey.WEBSITE_GROWTH);
+  await requireMutationAccess(context);
+
+  await createWeeklyWebsiteGrowthPlanForTenant(context.tenantId, {
+    createdBy: context.userId,
+    source: "manual"
+  });
 
   revalidatePath("/website-growth");
 }

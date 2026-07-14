@@ -10,6 +10,7 @@ import Link from "next/link";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import {
+  createWeeklyWebsiteGrowthPlanAction,
   generateWebsiteGrowthOpportunitiesAction,
   importWebsiteGrowthMetricsAction,
   organizeWebsiteGrowthQueueAction,
@@ -54,6 +55,38 @@ export default async function WebsiteGrowthPage({
         <MetricCard label="Approved / active" value={shell.metrics.approvedCount} caption="Ready for execution" />
         <MetricCard label="Published" value={shell.metrics.publishedCount} caption="Marked live" />
         <MetricCard label="Inbound leads" value={shell.metrics.inboundCount} caption="Last 30 days" />
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Weekly SEO approval plan</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-mutedForeground">
+              Each weekly run prepares a balanced slate for approval: core commercial page work, supporting articles or glossary content, and quick optimization tasks. The planner never publishes automatically.
+            </p>
+          </div>
+          <form action={createWeeklyWebsiteGrowthPlanAction}>
+            <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
+              Prepare this week&apos;s approval plan
+            </button>
+          </form>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          {shell.weeklyLaneCounts.map((lane) => (
+            <div key={lane.lane} className="rounded-md border border-border bg-muted/30 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <h3 className="text-sm font-semibold text-foreground">{lane.label}</h3>
+                <span className="rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-xs font-semibold text-primary">
+                  {lane.count} ready
+                </span>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-mutedForeground">{lane.description}</p>
+              <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+                Weekly publish guide: up to {lane.publishLimit}
+              </p>
+            </div>
+          ))}
+        </div>
       </section>
 
       <section className="grid gap-4 xl:grid-cols-[1.1fr,0.9fr]">

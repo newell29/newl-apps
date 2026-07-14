@@ -37,6 +37,44 @@ export type OpportunityQualificationResult = {
   skippedCount: number;
 };
 
+export type WeeklyContentLane = "CORE_PAGE" | "SUPPORTING_CONTENT" | "QUICK_OPTIMIZATION";
+
+export type WeeklyContentRecommendation = {
+  lane: WeeklyContentLane;
+  label: string;
+  description: string;
+  publishLimit: number;
+  actions: WebsiteGrowthAction[];
+};
+
+export const weeklyContentRecommendations: WeeklyContentRecommendation[] = [
+  {
+    lane: "CORE_PAGE",
+    label: "Core service or location page",
+    description: "Major commercial pages or meaningful updates to existing money pages.",
+    publishLimit: 2,
+    actions: [WebsiteGrowthAction.CREATE_PAGE, WebsiteGrowthAction.IMPROVE_EXISTING_PAGE]
+  },
+  {
+    lane: "SUPPORTING_CONTENT",
+    label: "Blog, glossary, or support content",
+    description: "Educational articles that support a commercial page and build topical authority.",
+    publishLimit: 4,
+    actions: [WebsiteGrowthAction.CREATE_RESOURCE_ARTICLE]
+  },
+  {
+    lane: "QUICK_OPTIMIZATION",
+    label: "Quick page optimization",
+    description: "Page sections, internal links, redirects, FAQs, and smaller improvements.",
+    publishLimit: 6,
+    actions: [
+      WebsiteGrowthAction.ADD_SECTION,
+      WebsiteGrowthAction.ADD_INTERNAL_LINKS,
+      WebsiteGrowthAction.UPDATE_REDIRECT
+    ]
+  }
+];
+
 const serviceTerms = [
   "warehouse",
   "warehousing",

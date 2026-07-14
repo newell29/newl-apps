@@ -9,7 +9,11 @@ import {
   getWebsiteGrowthIntegrationStatus,
   normalizeSearchConsoleSiteUrl
 } from "@/modules/website-growth/integrations";
-import { buildOpportunityCandidate, qualifyOpportunityCandidates } from "@/modules/website-growth/opportunities";
+import {
+  buildOpportunityCandidate,
+  qualifyOpportunityCandidates,
+  weeklyContentRecommendations
+} from "@/modules/website-growth/opportunities";
 
 describe("website growth CSV parsing", () => {
   it("normalizes Search Console export rows", () => {
@@ -95,6 +99,32 @@ describe("website growth opportunity scoring", () => {
     expect(result.qualified).toHaveLength(1);
     expect(result.qualified[0]?.evidence.impressions).toBe(160);
     expect(result.qualified[0]?.supportingKeywords).toEqual(["gta local trucking", "local trucking gta"]);
+  });
+});
+
+describe("website growth weekly planning lanes", () => {
+  it("offers a balanced weekly approval slate across the three content types", () => {
+    expect(weeklyContentRecommendations).toHaveLength(3);
+    expect(weeklyContentRecommendations.map((lane) => lane.lane)).toEqual([
+      "CORE_PAGE",
+      "SUPPORTING_CONTENT",
+      "QUICK_OPTIMIZATION"
+    ]);
+    expect(weeklyContentRecommendations.map((lane) => lane.publishLimit)).toEqual([2, 4, 6]);
+  });
+
+  it("routes each Website Growth action into no more than one weekly lane", () => {
+    const actionCounts = new Map<WebsiteGrowthAction, number>();
+
+    for (const lane of weeklyContentRecommendations) {
+      for (const action of lane.actions) {
+        actionCounts.set(action, (actionCounts.get(action) ?? 0) + 1);
+      }
+    }
+
+    for (const count of actionCounts.values()) {
+      expect(count).toBe(1);
+    }
   });
 });
 

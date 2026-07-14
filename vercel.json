@@ -1,3 +1,9 @@
 {
-  "buildCommand": "npm run vercel-build"
+  "buildCommand": "npm run vercel-build",
+  "crons": [
+    {
+      "path": "/api/website-growth/weekly-plan",
+      "schedule": "0 13 * * 1"
+    }
+  ]
 }
