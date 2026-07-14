@@ -43,6 +43,51 @@ type Tier1DraftResult = {
   rawResponse: Record<string, unknown>;
 };
 
+export type WebsiteGrowthDraftContext = {
+  model: string;
+  opportunity: {
+    action: string;
+    topic: string;
+    primaryKeyword: string | null;
+    targetPage: string | null;
+    sourcePage: string | null;
+    score: number;
+    confidence: string | null;
+    reason: string;
+    recommendation: string;
+    supportingKeywords: string[];
+    evidence: Record<string, unknown>;
+  };
+};
+
+export type WebsiteGrowthDraftResult = {
+  title: string;
+  summary: string;
+  contentType: string;
+  proposedPath: string | null;
+  targetKeyword: string;
+  searchIntent: string;
+  sections: Array<{
+    heading: string;
+    purpose: string;
+    draftCopy: string;
+  }>;
+  metaTitle: string;
+  metaDescription: string;
+  faqs: Array<{
+    question: string;
+    answer: string;
+  }>;
+  internalLinks: Array<{
+    label: string;
+    url: string;
+    reason: string;
+  }>;
+  implementationNotes: string[];
+  reviewChecklist: string[];
+  rawResponse: Record<string, unknown>;
+};
+
 export type ApolloCompanySuggestionContext = {
   model: string;
   companyName: string;
@@ -125,6 +170,57 @@ export async function generateTier1SequenceDraft(context: Tier1DraftContext): Pr
   };
 }
 
+export async function generateWebsiteGrowthContentDraft(
+  context: WebsiteGrowthDraftContext
+): Promise<WebsiteGrowthDraftResult> {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+
+  if (!apiKey || apiKey === "OPENAI_API_KEY_PLACEHOLDER") {
+    throw new Error("OPENAI_API_KEY is not configured. Add it to enable live Website Growth draft generation.");
+  }
+
+  const response = await fetch(`${OPENAI_API_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: context.model,
+      temperature: 0.35,
+      response_format: {
+        type: "json_object"
+      },
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a B2B logistics SEO strategist for Newl Group. Create practical content proposals that help Newl earn inbound leads for warehousing, fulfillment, freight, distribution, Teamship WMS, and Canada-U.S. logistics. Return JSON only with keys title, summary, contentType, proposedPath, targetKeyword, searchIntent, sections, metaTitle, metaDescription, faqs, internalLinks, implementationNotes, reviewChecklist. Do not fabricate customer names, certifications, carrier relationships, locations, or metrics beyond the supplied opportunity. Keep the proposal implementation-ready but not over-written."
+        },
+        {
+          role: "user",
+          content: buildWebsiteGrowthDraftPrompt(context)
+        }
+      ]
+    }),
+    cache: "no-store"
+  });
+
+  const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+
+  if (!response.ok || !json) {
+    throw new Error(extractOpenAiError(json) ?? `OpenAI Website Growth draft generation failed with status ${response.status}.`);
+  }
+
+  const content = readAssistantContent(json);
+  const parsed = parseWebsiteGrowthDraftPayload(content);
+
+  return {
+    ...parsed,
+    rawResponse: json
+  };
+}
+
 export async function generateApolloCompanyNameSuggestion(
   context: ApolloCompanySuggestionContext
 ): Promise<ApolloCompanySuggestionResult> {
@@ -179,6 +275,31 @@ export async function generateApolloCompanyNameSuggestion(
     source: "ai",
     rawResponse: json
   };
+}
+
+function buildWebsiteGrowthDraftPrompt(context: WebsiteGrowthDraftContext) {
+  return JSON.stringify(
+    {
+      objective:
+        "Create a review-ready SEO draft proposal for the Website Growth module. It may be a new page, an existing page improvement, a resource article, a page section, an internal linking plan, or a redirect/content mapping plan.",
+      newlPositioning: [
+        "Newl is a warehousing-led logistics partner.",
+        "Core strengths include warehousing, fulfillment, Amazon FBA support, B2B wholesale and retail fulfillment, cross-docking, Teamship WMS visibility, GTA local trucking, ground distribution, cross-border logistics, ocean freight, and air freight.",
+        "Newl has Mississauga and Charlotte warehouse hubs and can coordinate trusted partner warehouse coverage across Canada and the U.S.",
+        "The content should drive practical inbound conversations, not generic blog traffic."
+      ],
+      writingRules: [
+        "Keep the recommendation specific to the opportunity.",
+        "Do not say a page is published or live.",
+        "If an existing target page is supplied, propose improvements to that page instead of inventing a duplicate URL.",
+        "Use FAQs and internal links to support conversion and topical authority.",
+        "Include a review checklist for a human approver before anything is posted."
+      ],
+      opportunity: context.opportunity
+    },
+    null,
+    2
+  );
 }
 
 function buildTier1DraftPrompt(context: Tier1DraftContext) {
@@ -242,6 +363,73 @@ function readAssistantContent(payload: Record<string, unknown>) {
   }
 
   return content;
+}
+
+function parseWebsiteGrowthDraftPayload(content: string) {
+  let parsed: Record<string, unknown>;
+
+  try {
+    parsed = JSON.parse(content) as Record<string, unknown>;
+  } catch {
+    throw new Error("OpenAI returned a Website Growth draft response that was not valid JSON.");
+  }
+
+  const title = readNonEmptyString(parsed.title);
+  const summary = readNonEmptyString(parsed.summary);
+  const contentType = readNonEmptyString(parsed.contentType);
+  const targetKeyword = readNonEmptyString(parsed.targetKeyword);
+  const searchIntent = readNonEmptyString(parsed.searchIntent);
+  const metaTitle = readNonEmptyString(parsed.metaTitle);
+  const metaDescription = readNonEmptyString(parsed.metaDescription);
+  const proposedPath = typeof parsed.proposedPath === "string" && parsed.proposedPath.trim().length > 0
+    ? parsed.proposedPath.trim()
+    : null;
+  const sections = readObjectArray(parsed.sections)
+    .map((section) => ({
+      heading: readNonEmptyString(section.heading) ?? "",
+      purpose: readNonEmptyString(section.purpose) ?? "",
+      draftCopy: readNonEmptyString(section.draftCopy) ?? ""
+    }))
+    .filter((section) => section.heading && section.purpose && section.draftCopy);
+  const faqs = readObjectArray(parsed.faqs)
+    .map((faq) => ({
+      question: readNonEmptyString(faq.question) ?? "",
+      answer: readNonEmptyString(faq.answer) ?? ""
+    }))
+    .filter((faq) => faq.question && faq.answer);
+  const internalLinks = readObjectArray(parsed.internalLinks)
+    .map((link) => ({
+      label: readNonEmptyString(link.label) ?? "",
+      url: readNonEmptyString(link.url) ?? "",
+      reason: readNonEmptyString(link.reason) ?? ""
+    }))
+    .filter((link) => link.label && link.url && link.reason);
+  const implementationNotes = readStringArray(parsed.implementationNotes);
+  const reviewChecklist = readStringArray(parsed.reviewChecklist);
+
+  if (!title || !summary || !contentType || !targetKeyword || !searchIntent || !metaTitle || !metaDescription) {
+    throw new Error("OpenAI returned an incomplete Website Growth draft payload.");
+  }
+
+  if (sections.length === 0 || implementationNotes.length === 0 || reviewChecklist.length === 0) {
+    throw new Error("OpenAI returned a Website Growth draft without enough implementation detail.");
+  }
+
+  return {
+    title,
+    summary,
+    contentType,
+    proposedPath,
+    targetKeyword,
+    searchIntent,
+    sections,
+    metaTitle,
+    metaDescription,
+    faqs,
+    internalLinks,
+    implementationNotes,
+    reviewChecklist
+  };
 }
 
 function parseDraftPayload(content: string) {
@@ -310,6 +498,14 @@ function extractOpenAiError(payload: Record<string, unknown> | null) {
 
 function readNonEmptyString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readStringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()) : [];
+}
+
+function readObjectArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item))) : [];
 }
 
 function readConfidenceValue(value: unknown): ApolloCompanySuggestionResult["confidence"] | null {

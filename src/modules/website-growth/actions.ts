@@ -2,6 +2,7 @@
 
 import {
   ModuleKey,
+  WebsiteGrowthContentDraftStatus,
   WebsiteGrowthDataSource,
   WebsiteGrowthImportStatus,
   WebsiteGrowthOpportunityStatus,
@@ -10,6 +11,7 @@ import {
 import { revalidatePath } from "next/cache";
 
 import { parseDelimitedRows, readNumber, readString } from "@/modules/website-growth/csv";
+import { createWebsiteGrowthContentDraftPayload } from "@/modules/website-growth/content-drafts";
 import { fetchSearchConsoleRows, getWebsiteGrowthIntegrationStatus } from "@/modules/website-growth/integrations";
 import {
   buildCandidatesFromMetricRows,
@@ -410,6 +412,101 @@ export async function updateWebsiteGrowthOpportunityAction(formData: FormData) {
   revalidatePath("/website-growth");
 }
 
+export async function generateWebsiteGrowthDraftAction(formData: FormData) {
+  const context = await getAuthenticatedContext();
+  await requireModule(context, ModuleKey.WEBSITE_GROWTH);
+  await requireMutationAccess(context);
+
+  const opportunityId = String(formData.get("opportunityId") ?? "");
+
+  if (!opportunityId) {
+    throw new Error("Missing opportunity ID.");
+  }
+
+  const opportunity = await prisma.websiteGrowthOpportunity.findFirst({
+    where: {
+      id: opportunityId,
+      tenantId: context.tenantId
+    }
+  });
+
+  if (!opportunity) {
+    throw new Error("Opportunity was not found.");
+  }
+
+  const draft = await createWebsiteGrowthContentDraftPayload(opportunity);
+
+  await prisma.websiteGrowthContentDraft.create({
+    data: {
+      tenantId: context.tenantId,
+      opportunityId: opportunity.id,
+      source: draft.source,
+      title: draft.title,
+      summary: draft.summary,
+      contentType: draft.contentType,
+      proposedPath: draft.proposedPath,
+      targetPage: opportunity.targetPage,
+      draftJson: draft as Prisma.InputJsonValue,
+      rawResponse: draft.rawResponse ? draft.rawResponse as Prisma.InputJsonValue : undefined
+    }
+  });
+
+  revalidatePath("/website-growth");
+}
+
+export async function updateWebsiteGrowthDraftAction(formData: FormData) {
+  const context = await getAuthenticatedContext();
+  await requireModule(context, ModuleKey.WEBSITE_GROWTH);
+  await requireMutationAccess(context);
+
+  const draftId = String(formData.get("draftId") ?? "");
+  const status = parseContentDraftStatus(formData.get("status"));
+
+  if (!draftId) {
+    throw new Error("Missing draft ID.");
+  }
+
+  await prisma.websiteGrowthContentDraft.updateMany({
+    where: {
+      id: draftId,
+      tenantId: context.tenantId
+    },
+    data: {
+      status,
+      approvedByUserId: status === WebsiteGrowthContentDraftStatus.APPROVED ? context.userId : undefined,
+      approvedAt: status === WebsiteGrowthContentDraftStatus.APPROVED ? new Date() : undefined,
+      publishedAt: status === WebsiteGrowthContentDraftStatus.PUBLISHED ? new Date() : undefined
+    }
+  });
+
+  if (status === WebsiteGrowthContentDraftStatus.APPROVED) {
+    const draft = await prisma.websiteGrowthContentDraft.findFirst({
+      where: {
+        id: draftId,
+        tenantId: context.tenantId
+      },
+      select: {
+        opportunityId: true
+      }
+    });
+
+    if (draft) {
+      await prisma.websiteGrowthOpportunity.updateMany({
+        where: {
+          id: draft.opportunityId,
+          tenantId: context.tenantId
+        },
+        data: {
+          status: WebsiteGrowthOpportunityStatus.APPROVED,
+          approvedByUserId: context.userId
+        }
+      });
+    }
+  }
+
+  revalidatePath("/website-growth");
+}
+
 async function createMissingOpportunities(tenantId: string, candidates: OpportunityCandidate[]) {
   let createdCount = 0;
   let existingCount = 0;
@@ -468,6 +565,14 @@ function parseOpportunityStatus(value: FormDataEntryValue | null) {
   }
 
   return value as WebsiteGrowthOpportunityStatus;
+}
+
+function parseContentDraftStatus(value: FormDataEntryValue | null) {
+  if (typeof value !== "string" || !(value in WebsiteGrowthContentDraftStatus)) {
+    throw new Error("Invalid content draft status.");
+  }
+
+  return value as WebsiteGrowthContentDraftStatus;
 }
 
 function normalizeRate(value: number | null) {

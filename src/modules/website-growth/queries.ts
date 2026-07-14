@@ -46,7 +46,15 @@ export async function getWebsiteGrowthShell(
     prisma.websiteGrowthOpportunity.findMany({
       where,
       orderBy: [{ score: "desc" }, { updatedAt: "desc" }],
-      take: 200
+      take: 200,
+      include: {
+        contentDrafts: {
+          orderBy: {
+            createdAt: "desc"
+          },
+          take: 1
+        }
+      }
     }),
     prisma.websiteGrowthOpportunity.count({ where: { tenantId: context.tenantId } }),
     prisma.websiteGrowthOpportunity.count({
@@ -140,6 +148,14 @@ export async function getWebsiteGrowthShell(
       where: {
         tenantId: context.tenantId,
         status: WebsiteGrowthOpportunityStatus.REVIEWING
+      },
+      include: {
+        contentDrafts: {
+          orderBy: {
+            createdAt: "desc"
+          },
+          take: 1
+        }
       },
       orderBy: [{ updatedAt: "desc" }, { score: "desc" }],
       take: 50

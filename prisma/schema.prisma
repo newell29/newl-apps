@@ -78,6 +78,19 @@ enum WebsiteGrowthImportStatus {
   ERROR
 }
 
+enum WebsiteGrowthContentDraftStatus {
+  DRAFT
+  APPROVED
+  REJECTED
+  BUILT
+  PUBLISHED
+}
+
+enum WebsiteGrowthContentDraftSource {
+  AI
+  TEMPLATE
+}
+
 enum CreditCheckStatus {
   NEW
   IN_REVIEW
@@ -432,6 +445,7 @@ model Tenant {
   assistantMessages                   AssistantChatMessage[]
   websiteInboundSubmissions           WebsiteInboundSubmission[]
   websiteGrowthOpportunities          WebsiteGrowthOpportunity[]
+  websiteGrowthContentDrafts          WebsiteGrowthContentDraft[]
   websiteGrowthDataImports            WebsiteGrowthDataImport[]
   websiteGrowthMetrics                WebsiteGrowthMetric[]
   creditChecks                        CreditCheck[]
@@ -665,12 +679,42 @@ model WebsiteGrowthOpportunity {
   approvedByUserId   String?
   publishedAt        DateTime?
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant        Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contentDrafts WebsiteGrowthContentDraft[]
 
   @@index([tenantId, status])
   @@index([tenantId, action])
   @@index([tenantId, score])
   @@index([tenantId, updatedAt])
+}
+
+model WebsiteGrowthContentDraft {
+  id               String                           @id @default(cuid())
+  tenantId         String
+  opportunityId    String
+  createdAt        DateTime                         @default(now())
+  updatedAt        DateTime                         @updatedAt
+  status           WebsiteGrowthContentDraftStatus  @default(DRAFT)
+  source           WebsiteGrowthContentDraftSource  @default(TEMPLATE)
+  title            String
+  summary          String
+  contentType      String
+  proposedPath     String?
+  targetPage       String?
+  draftJson        Json
+  rawResponse      Json?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  builtUrl         String?
+  pullRequestUrl   String?
+  publishedAt      DateTime?
+
+  tenant      Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  opportunity WebsiteGrowthOpportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+  @@index([tenantId, opportunityId])
+  @@index([tenantId, createdAt])
 }
 
 model WebsiteGrowthDataImport {

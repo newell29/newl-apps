@@ -1,6 +1,8 @@
 import {
   ModuleKey,
   WebsiteGrowthAction,
+  WebsiteGrowthContentDraftSource,
+  WebsiteGrowthContentDraftStatus,
   WebsiteGrowthDataSource,
   WebsiteGrowthImportStatus,
   WebsiteGrowthOpportunityStatus
@@ -11,10 +13,12 @@ import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import {
   createWeeklyWebsiteGrowthPlanAction,
+  generateWebsiteGrowthDraftAction,
   generateWebsiteGrowthOpportunitiesAction,
   importWebsiteGrowthMetricsAction,
   organizeWebsiteGrowthQueueAction,
   syncSearchConsoleAction,
+  updateWebsiteGrowthDraftAction,
   updateWebsiteGrowthOpportunityAction
 } from "@/modules/website-growth/actions";
 import {
@@ -94,7 +98,7 @@ export default async function WebsiteGrowthPage({
           <div>
             <h2 className="text-base font-semibold text-foreground">Prepared for approval</h2>
             <p className="mt-1 max-w-3xl text-sm leading-6 text-mutedForeground">
-              These are the weekly recommendations selected for your review. They are not published, and they are not AI-drafted yet. Use the page links to inspect the current live page before approving the next action.
+              These are the weekly recommendations selected for your review. Generate a draft package to review the proposed URL, structure, SEO copy, FAQs, internal links, and build checklist before anything is posted.
             </p>
           </div>
           <Link
@@ -471,6 +475,9 @@ function PreparedOpportunityCard({
 }: {
   opportunity: Awaited<ReturnType<typeof getWebsiteGrowthShell>>["preparedOpportunities"][number];
 }) {
+  const draft = opportunity.contentDrafts[0] ?? null;
+  const draftPayload = draft ? readDraftPayload(draft.draftJson) : null;
+
   return (
     <article className="flex h-full flex-col rounded-md border border-border bg-background p-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -480,6 +487,11 @@ function PreparedOpportunityCard({
         <span className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs font-semibold text-mutedForeground">
           Score {opportunity.score}
         </span>
+        {draft ? (
+          <span className={draft.source === WebsiteGrowthContentDraftSource.AI ? "rounded-full border border-success/25 bg-success/10 px-2.5 py-1 text-xs font-semibold text-success" : "rounded-full border border-warning/25 bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning"}>
+            {draft.source === WebsiteGrowthContentDraftSource.AI ? "AI draft ready" : "Template draft ready"}
+          </span>
+        ) : null}
       </div>
       <h3 className="mt-3 text-base font-semibold text-foreground">{opportunity.topic}</h3>
       <p className="mt-2 text-sm leading-6 text-mutedForeground">{formatStatusLike(opportunity.action)}</p>
@@ -491,6 +503,72 @@ function PreparedOpportunityCard({
         <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Approval note</p>
         <p className="mt-2 text-sm leading-6 text-foreground">{opportunity.recommendation}</p>
       </div>
+      {draft ? (
+        <div className="mt-4 rounded-md border border-border bg-card p-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Draft package</p>
+              <h4 className="mt-2 text-sm font-semibold text-foreground">{draft.title}</h4>
+            </div>
+            <span className={contentDraftBadgeClassName(draft.status)}>
+              {formatStatusLike(draft.status)}
+            </span>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-mutedForeground">{draft.summary}</p>
+          <dl className="mt-3 grid gap-2 text-sm">
+            <SummaryRow label="Content type" value={draft.contentType} />
+            <SummaryRow label="Proposed URL" value={draft.proposedPath} />
+            <SummaryRow label="Target keyword" value={draftPayload?.targetKeyword} />
+            <SummaryRow label="Search intent" value={draftPayload?.searchIntent} />
+          </dl>
+          {draft.proposedPath ? (
+            <Link
+              href={draft.proposedPath}
+              className="mt-3 inline-flex text-sm font-semibold text-primary transition-colors hover:text-primaryHover"
+            >
+              Review destination path
+            </Link>
+          ) : null}
+          {draftPayload ? (
+            <details className="mt-3">
+              <summary className="cursor-pointer text-sm font-semibold text-primary">Review draft details</summary>
+              <div className="mt-3 space-y-3">
+                <DraftList title="Sections" items={draftPayload.sections.map((section) => `${section.heading}: ${section.purpose}`)} />
+                <DraftList title="FAQs" items={draftPayload.faqs.map((faq) => faq.question)} />
+                <DraftList title="Internal links" items={draftPayload.internalLinks.map((link) => `${link.label} -> ${link.url}`)} />
+                <DraftList title="Build checklist" items={draftPayload.reviewChecklist} />
+              </div>
+            </details>
+          ) : null}
+          <form action={updateWebsiteGrowthDraftAction} className="mt-4 grid gap-2 sm:grid-cols-[1fr,auto]">
+            <input type="hidden" name="draftId" value={draft.id} />
+            <select
+              name="status"
+              defaultValue={draft.status}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            >
+              <option value={WebsiteGrowthContentDraftStatus.DRAFT}>Keep as draft</option>
+              <option value={WebsiteGrowthContentDraftStatus.APPROVED}>Approve draft for build</option>
+              <option value={WebsiteGrowthContentDraftStatus.REJECTED}>Reject draft</option>
+              <option value={WebsiteGrowthContentDraftStatus.BUILT}>Mark built</option>
+              <option value={WebsiteGrowthContentDraftStatus.PUBLISHED}>Mark published</option>
+            </select>
+            <button className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
+              Save draft
+            </button>
+          </form>
+        </div>
+      ) : (
+        <form action={generateWebsiteGrowthDraftAction} className="mt-4">
+          <input type="hidden" name="opportunityId" value={opportunity.id} />
+          <button className="w-full rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
+            Generate review draft
+          </button>
+          <p className="mt-2 text-xs leading-5 text-mutedForeground">
+            Creates a saved proposal for review. This does not publish or modify the website.
+          </p>
+        </form>
+      )}
       <form action={updateWebsiteGrowthOpportunityAction} className="mt-auto pt-4">
         <input type="hidden" name="opportunityId" value={opportunity.id} />
         <input type="hidden" name="notes" value={opportunity.notes ?? ""} />
@@ -511,6 +589,23 @@ function PreparedOpportunityCard({
         </div>
       </form>
     </article>
+  );
+}
+
+function DraftList({ title, items }: { title: string; items: string[] }) {
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-md border border-border bg-muted/30 p-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{title}</p>
+      <ul className="mt-2 space-y-1 text-sm leading-6 text-foreground">
+        {items.slice(0, 6).map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -551,6 +646,43 @@ function SummaryRow({ label, value }: { label: string; value?: string | null }) 
       <dd className="break-words text-foreground">{value}</dd>
     </div>
   );
+}
+
+function readDraftPayload(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  return {
+    targetKeyword: typeof record.targetKeyword === "string" ? record.targetKeyword : null,
+    searchIntent: typeof record.searchIntent === "string" ? record.searchIntent : null,
+    sections: readDraftObjectArray(record.sections).map((section) => ({
+      heading: readDraftString(section.heading),
+      purpose: readDraftString(section.purpose)
+    })).filter((section) => section.heading && section.purpose),
+    faqs: readDraftObjectArray(record.faqs).map((faq) => ({
+      question: readDraftString(faq.question)
+    })).filter((faq) => faq.question),
+    internalLinks: readDraftObjectArray(record.internalLinks).map((link) => ({
+      label: readDraftString(link.label),
+      url: readDraftString(link.url)
+    })).filter((link) => link.label && link.url),
+    reviewChecklist: readDraftStringArray(record.reviewChecklist)
+  };
+}
+
+function readDraftObjectArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item))) : [];
+}
+
+function readDraftStringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
+}
+
+function readDraftString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : "";
 }
 
 function RunSummary({ summary }: { summary: unknown }) {
@@ -654,4 +786,22 @@ function opportunityBadgeClassName(status: WebsiteGrowthOpportunityStatus) {
   }
 
   return `${base} border-accentBorder bg-accentSoft text-primary`;
+}
+
+function contentDraftBadgeClassName(status: WebsiteGrowthContentDraftStatus) {
+  const base = "rounded-full border px-2.5 py-1 text-xs font-semibold";
+
+  if (
+    status === WebsiteGrowthContentDraftStatus.APPROVED ||
+    status === WebsiteGrowthContentDraftStatus.BUILT ||
+    status === WebsiteGrowthContentDraftStatus.PUBLISHED
+  ) {
+    return `${base} border-success/25 bg-success/10 text-success`;
+  }
+
+  if (status === WebsiteGrowthContentDraftStatus.REJECTED) {
+    return `${base} border-danger/25 bg-danger/10 text-danger`;
+  }
+
+  return `${base} border-warning/25 bg-warning/10 text-warning`;
 }

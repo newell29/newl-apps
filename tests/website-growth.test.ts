@@ -4,6 +4,7 @@ import { WebsiteGrowthAction } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import { parseDelimitedRows, readNumber, readString } from "@/modules/website-growth/csv";
+import { buildTemplateWebsiteGrowthContentDraft } from "@/modules/website-growth/content-drafts";
 import {
   fetchSearchConsoleRows,
   getWebsiteGrowthIntegrationStatus,
@@ -125,6 +126,55 @@ describe("website growth weekly planning lanes", () => {
     for (const count of actionCounts.values()) {
       expect(count).toBe(1);
     }
+  });
+});
+
+describe("website growth content draft packages", () => {
+  it("builds a resource article proposal for informational opportunities", () => {
+    const draft = buildTemplateWebsiteGrowthContentDraft({
+      action: WebsiteGrowthAction.CREATE_RESOURCE_ARTICLE,
+      topic: "what is demurrage",
+      primaryKeyword: "what is demurrage",
+      targetPage: null,
+      sourcePage: null,
+      score: 65,
+      confidence: "Medium",
+      reason: "300 impressions, 0 clicks, average position 18.0",
+      recommendation: "Create a resource article or glossary page for what is demurrage and link it to commercial pages.",
+      supportingKeywords: ["demurrage meaning", "demurrage charges"],
+      evidence: {
+        impressions: 300,
+        clicks: 0,
+        position: 18
+      }
+    });
+
+    expect(draft.contentType).toBe("Resource article");
+    expect(draft.proposedPath).toBe("/resources/what-is-demurrage");
+    expect(draft.sections.length).toBeGreaterThanOrEqual(3);
+    expect(draft.reviewChecklist).toContain("Does the title match the search intent?");
+  });
+
+  it("keeps existing page improvement proposals attached to the current URL", () => {
+    const draft = buildTemplateWebsiteGrowthContentDraft({
+      action: WebsiteGrowthAction.IMPROVE_EXISTING_PAGE,
+      topic: "gta local trucking",
+      primaryKeyword: "gta local trucking",
+      targetPage: "https://www.newlgroup.com/freight/gta-local-trucking",
+      sourcePage: "https://www.newlgroup.com/freight/gta-local-trucking",
+      score: 70,
+      confidence: "High",
+      reason: "90 impressions, 2 clicks, 1 related leads, mapped to https://www.newlgroup.com/freight/gta-local-trucking",
+      recommendation: "Improve the existing page with stronger copy, FAQs, internal links, and clearer conversion path.",
+      supportingKeywords: [],
+      evidence: {
+        leadCount: 1
+      }
+    });
+
+    expect(draft.contentType).toBe("Existing page improvement");
+    expect(draft.proposedPath).toBe("/freight/gta-local-trucking");
+    expect(draft.implementationNotes[0]).toContain("/freight/gta-local-trucking");
   });
 });
 
