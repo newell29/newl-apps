@@ -83,10 +83,11 @@ type PersistInput = {
 
 type SyncInput = {
   tenantId: string;
-  userId: string;
+  userId?: string | null;
   mailboxAddress?: string | null;
   lookbackDays?: number | null;
   maxMessagesPerMailbox?: number | null;
+  triggerSource?: string | null;
 };
 
 const GARLAND_DOMAIN = "garland-group.com";
@@ -180,7 +181,27 @@ export async function syncGarlandEmailIntake(ctx: AuthenticatedContext, input: S
   await requireModule(ctx, ModuleKey.SHIPMENT_DOCUMENTS);
   await requireMutationAccess(ctx);
 
-  const settings = await getGarlandGraphSettings(ctx.tenantId);
+  return performGarlandEmailIntakeSync({
+    ...input,
+    tenantId: ctx.tenantId,
+    userId: ctx.userId,
+    triggerSource: input.triggerSource ?? GARLAND_EMAIL_SYNC_TRIGGER_MANUAL
+  });
+}
+
+export async function syncGarlandEmailIntakeForTenant(input: SyncInput) {
+  if (!(await tenantHasShipmentDocumentsAccess(input.tenantId))) {
+    throw new Error("Shipment Documents is not enabled for this tenant.");
+  }
+
+  return performGarlandEmailIntakeSync({
+    ...input,
+    triggerSource: input.triggerSource ?? "N8N"
+  });
+}
+
+async function performGarlandEmailIntakeSync(input: SyncInput) {
+  const settings = await getGarlandGraphSettings(input.tenantId);
   if (!settings.mailSyncEnabled) {
     throw new Error("Microsoft 365 mail sync is disabled for this tenant.");
   }
@@ -193,19 +214,19 @@ export async function syncGarlandEmailIntake(ctx: AuthenticatedContext, input: S
   const accessToken = await getMicrosoftGraphApplicationAccessToken();
   const run = await prisma.garlandEmailSyncRun.create({
     data: {
-      tenantId: ctx.tenantId,
+      tenantId: input.tenantId,
       mailboxAddress: mailboxes.join(", "),
-      triggerSource: GARLAND_EMAIL_SYNC_TRIGGER_MANUAL,
+      triggerSource: input.triggerSource ?? GARLAND_EMAIL_SYNC_TRIGGER_MANUAL,
       status: "RUNNING",
-      createdByUserId: ctx.userId
+      createdByUserId: input.userId ?? null
     }
   });
 
   try {
     const mailboxResults = await fetchSelectedMailboxMessages(accessToken, mailboxes, fetchOptions);
     const persistResult = await persistGarlandSourceEmails({
-      tenantId: ctx.tenantId,
-      actorUserId: ctx.userId,
+      tenantId: input.tenantId,
+      actorUserId: input.userId ?? null,
       mailboxes,
       messages: mailboxResults.messages,
       attachmentFetcher: async (message, sourceEmail) =>
@@ -236,7 +257,7 @@ export async function syncGarlandEmailIntake(ctx: AuthenticatedContext, input: S
         finishedAt: new Date()
       }
     });
-    await writeAudit(ctx, "garland.email-intake.synced", "GarlandEmailSyncRun", run.id, {
+    await writeAudit({ tenantId: input.tenantId, userId: input.userId ?? null }, "garland.email-intake.synced", "GarlandEmailSyncRun", run.id, {
       ...persistResult,
       failures: mailboxResults.failures
     });
@@ -252,7 +273,7 @@ export async function syncGarlandEmailIntake(ctx: AuthenticatedContext, input: S
       where: { id: run.id },
       data: { status: GARLAND_EMAIL_SYNC_STATUS_FAILED, errorMessage: message, finishedAt: new Date() }
     });
-    await writeAudit(ctx, "garland.email-intake.failed", "GarlandEmailSyncRun", run.id, { error: message });
+    await writeAudit({ tenantId: input.tenantId, userId: input.userId ?? null }, "garland.email-intake.failed", "GarlandEmailSyncRun", run.id, { error: message });
     throw error;
   }
 }
@@ -536,6 +557,21 @@ async function getGarlandGraphSettings(tenantId: string) {
   });
 
   return parseMicrosoftGraphSettings(credential);
+}
+
+async function tenantHasShipmentDocumentsAccess(tenantId: string) {
+  const access = await prisma.tenantModuleAccess.findFirst({
+    where: {
+      tenantId,
+      enabled: true,
+      module: {
+        key: ModuleKey.SHIPMENT_DOCUMENTS
+      }
+    },
+    select: { id: true }
+  });
+
+  return Boolean(access);
 }
 
 function resolveGarlandMailboxes(configuredMailboxes: string[], requestedMailbox?: string | null) {

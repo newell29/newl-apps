@@ -77,6 +77,7 @@ UI impact:
 - Email intake now lives on `/shipment-documents/teamship-review/email-intake` as a separate Teamship Review subpage so the inbox queue can grow without cluttering daily shipment review.
 - CSR/admin users can search detected messages, see grouped duplicate/follow-up counts, see parsed PS ranges, and inspect stored attachment metadata.
 - The Email Intake page auto-scans the configured mailbox when opened if the latest scan is stale. `Scan now` remains available as a fallback, but the normal CSR flow should not require manually refreshing email.
+- n8n can run unattended scans by importing `ops/n8n/garland-email-intake-sync.workflow.json`. It calls the machine-authenticated scheduled endpoint every 15 minutes using `INGESTION_API_TOKEN`.
 - This is metadata-only in the first PR. It does not automatically download/store PDF files or run the PDF review yet.
 - The next UI step is a `Create review from email attachments` action once attachment binary storage is added.
 
@@ -97,6 +98,15 @@ Missing pieces for full automation:
 - A small AI classifier for ambiguous chains such as missing-shipment follow-ups, customer replies, or non-Garland messages copied to the shared inbox.
 - Background scheduling, likely through Vercel Pro cron or the existing VM/n8n environment.
 - Email-agent summary output so CSRs see what was found, skipped, duplicated, reviewed, and still missing in Teamship.
+
+Teamship update API validation plan:
+
+1. Create a disposable shipping order in Teamship dev/staging.
+2. Add a Newl Apps smoke script that uses the documented Teamship update endpoint against that test order only.
+3. Test each update class independently before combining them: freight terms, special instructions, carrier/ship-via if supported, pallet rows, DIMS/weight, and commodity text.
+4. Compare Teamship readback/API response against the submitted payload after each update.
+5. Keep production bot jobs behind CSR/admin approval. Once the API is proven, the VM worker can prefer API writes and keep browser automation as fallback only for fields the API cannot update.
+6. Store screenshots/readback payloads for the first several test runs so CSR-visible status explains exactly what changed.
 
 Customer-service agent reuse assessment:
 

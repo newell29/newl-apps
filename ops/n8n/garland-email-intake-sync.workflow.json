@@ -1,0 +1,79 @@
+{
+  "name": "Newl Apps - Garland Email Intake Sync",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "c7b1d7a2-f30f-4dc8-bdd0-6321c29509d1",
+      "name": "Every 15 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.NEWL_APPS_BASE_URL || 'https://newl-apps.vercel.app'}}/api/shipment-documents/teamship-review/email-intake/scheduled",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.INGESTION_API_TOKEN}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"lookbackDays\": Number($env.GARLAND_EMAIL_LOOKBACK_DAYS || 7),\n  \"maxMessagesPerMailbox\": Number($env.GARLAND_EMAIL_MAX_MESSAGES || 100)\n}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "f81858da-e5d1-4190-975d-1400f86e2ddf",
+      "name": "Sync Garland email intake",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Every 15 minutes": {
+      "main": [
+        [
+          {
+            "node": "Sync Garland email intake",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2026-07-14T00:00:00.000Z",
+  "versionId": "garland-email-intake-sync-v1"
+}
