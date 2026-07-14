@@ -1,6 +1,11 @@
 import { ModuleKey } from "@prisma/client";
 import { NextResponse } from "next/server";
 
+import {
+  choosePreferredManifestSkids,
+  resolveManifestSkids,
+  type ManifestSkidEvidence
+} from "@/modules/shipment-documents/carrier-manifest-extraction";
 import type { GarlandCarrierKey, GarlandCarrierManifestRow } from "@/modules/shipment-documents/carrier-manifest-types";
 import { extractPsNumberFromText, normalizePsNumber } from "@/modules/shipment-documents/ps-number";
 import { requireModule } from "@/server/auth/authorization";
@@ -15,6 +20,11 @@ type ExtractionRequest = {
     pageNumber: number;
     imageDataUrl: string;
   }>;
+};
+
+type NormalizedManifestRow = {
+  row: GarlandCarrierManifestRow;
+  skidEvidence: ManifestSkidEvidence;
 };
 
 export async function POST(request: Request) {
@@ -37,7 +47,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Provide at least one BOL page image." }, { status: 400 });
   }
 
-  let primaryRows: GarlandCarrierManifestRow[];
+  let primaryRows: NormalizedManifestRow[];
   let primaryParsedRows: unknown[] = [];
 
   try {
@@ -68,7 +78,7 @@ export async function POST(request: Request) {
     );
   }
 
-  let fallbackRows: GarlandCarrierManifestRow[] = [];
+  let fallbackRows: NormalizedManifestRow[] = [];
   let fallbackError: string | null = null;
 
   if (shouldRunFallback(primaryRows, primaryParsedRows)) {
@@ -97,7 +107,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const responseRows = fallbackRows.length > 0 ? [...primaryRows, ...fallbackRows] : primaryRows;
+  const responseRows = reconcileExtractionRows(primaryRows, fallbackRows).map((entry) => entry.row);
 
   return NextResponse.json({
     model: fallbackRows.length > 0 ? `${DEFAULT_VISION_MODEL}+${FALLBACK_VISION_MODEL}` : DEFAULT_VISION_MODEL,
@@ -154,7 +164,7 @@ function buildPrompt(pageNumbers: number[]) {
   return [
     "Each attached image is a labeled crop sheet made from one scanned Garland BOL page.",
     `Page numbers: ${pageNumbers.join(", ")}.`,
-    "Every crop sheet is compact: Header overview and Package totals and skid count are full-width panels, while Carrier box, References and shipment id, and Consignee city/province are separate red-bordered field panels.",
+    "Every crop sheet is compact: Header overview and Package rows and authoritative Total: N PALLETS line are full-width panels, while Carrier box, References and shipment id, and Consignee city/province are separate red-bordered field panels.",
     "Read each labeled panel independently. Do not assume text is missing just because the full header overview is sparse.",
     "Return exactly one OCR entry per attached image. Do not skip non-target carriers. Do not decide whether the app needs the row.",
     "Set isNewBolPage true only when the Header overview shows a new BILL OF LADING header with printed CARRIER, REFERENCES, and SHIPMENT ID fields.",
@@ -163,10 +173,11 @@ function buildPrompt(pageNumbers: number[]) {
     "Read psNumber from References and shipment id. The PS value is before the first dash, for example PS209872 from PS209872-SR810664 - SR810664.",
     "Read srNumber from Shipment ID in References and shipment id. Use digits only, for example 810664 from SR810664.",
     "Read cityProvince from Consignee city/province. Use only city and province/state, for example OTTAWA, ON or CALGARY, AB. Do not include postal code or country.",
-    "Read skids from Package totals and skid count. Prefer a Total: N PALLETS line when present. If no Total line is visible, count the printed PALLETS/package lines for that BOL. Pallets count as skids.",
+    "Read skids from Package rows and authoritative Total: N PALLETS line. The literal Total: N PALLETS line is authoritative and must override any individual package row, SKU quantity, piece count, serial count, dimension, weight, or customer-order package count.",
+    "Copy the entire printed total line into packageTotalText, for example Total: 13 PALLETS. Also return packageLineCounts as the numbers from each printed PALLETS or SKIDS package row. If no Total line is visible, set packageTotalText to an empty string and set skids to the sum of packageLineCounts.",
     "Use empty strings for unknown text fields and null for unknown skids. Do not use N/A.",
     "Use HIGH confidence when the printed crop labels are clear, MEDIUM when one value is uncertain, and LOW when most fields are blank.",
-    "Return JSON exactly like: {\"rows\":[{\"pageNumber\":1,\"isNewBolPage\":true,\"carrier\":\"SURETRACK STANDARD\",\"srNumber\":\"810036\",\"psNumber\":\"PS209606\",\"cityProvince\":\"CALGARY, AB\",\"skids\":2,\"confidence\":\"HIGH\",\"notes\":\"literal OCR from crop sheet\"}]}"
+    "Return JSON exactly like: {\"rows\":[{\"pageNumber\":1,\"isNewBolPage\":true,\"carrier\":\"SURETRACK STANDARD\",\"srNumber\":\"810036\",\"psNumber\":\"PS209606\",\"cityProvince\":\"CALGARY, AB\",\"packageTotalText\":\"Total: 2 PALLETS\",\"packageLineCounts\":[2],\"skids\":2,\"confidence\":\"HIGH\",\"notes\":\"literal OCR from crop sheet\"}]}"
   ].join(" ");
 }
 
@@ -176,9 +187,10 @@ function buildFallbackPrompt(pageNumbers: number[]) {
     `Page numbers: ${pageNumbers.join(", ")}.`,
     "The field panels are red-bordered and arranged in a compact sheet so the small printed text remains readable.",
     "Return one OCR entry for every image. Do not filter by carrier.",
-    "Read these literal fields from the labels: Carrier box, References and shipment id, Consignee city/province, and Package totals and skid count.",
+    "Read these literal fields from the labels: Carrier box, References and shipment id, Consignee city/province, and Package rows and authoritative Total: N PALLETS line.",
+    "The Total: N PALLETS line overrides every individual package row and every SKU quantity or piece count. Copy that line into packageTotalText and copy only printed PALLETS or SKIDS row counts into packageLineCounts.",
     "Set isNewBolPage true only for a new BOL header page. Set it false for continuation/footer/signature pages.",
-    "Output exactly this JSON shape: {\"rows\":[{\"pageNumber\":1,\"isNewBolPage\":true,\"carrier\":\"SURETRACK STANDARD\",\"srNumber\":\"810036\",\"psNumber\":\"PS209606\",\"cityProvince\":\"CALGARY, AB\",\"skids\":2,\"confidence\":\"HIGH\",\"notes\":\"fallback OCR from crop sheet\"}]}."
+    "Output exactly this JSON shape: {\"rows\":[{\"pageNumber\":1,\"isNewBolPage\":true,\"carrier\":\"SURETRACK STANDARD\",\"srNumber\":\"810036\",\"psNumber\":\"PS209606\",\"cityProvince\":\"CALGARY, AB\",\"packageTotalText\":\"Total: 2 PALLETS\",\"packageLineCounts\":[2],\"skids\":2,\"confidence\":\"HIGH\",\"notes\":\"fallback OCR from crop sheet\"}]}."
   ].join(" ");
 }
 
@@ -259,7 +271,7 @@ async function runOpenAiExtraction({
   }
 }
 
-function normalizeRows(value: unknown, pageNumbers: number[]): GarlandCarrierManifestRow[] {
+function normalizeRows(value: unknown, pageNumbers: number[]): NormalizedManifestRow[] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -307,9 +319,8 @@ function normalizeRows(value: unknown, pageNumbers: number[]): GarlandCarrierMan
         "shipToCityProvince"
       ])
     );
-    const skids = normalizeSkids(
-      readFirstValue(record, ["skids", "pallets", "pallet", "palletCount", "totalPallets", "totalSkids", "packageTotal"])
-    );
+    const skidResolution = resolveManifestSkids(record);
+    const skids = skidResolution.skids;
     const srNumber = normalizeDigits(
       readFirstValue(record, ["srNumber", "sr", "shipmentId", "shipmentID", "shipment", "orderNumber"])
     );
@@ -324,26 +335,32 @@ function normalizeRows(value: unknown, pageNumbers: number[]): GarlandCarrierMan
 
     return [
       {
-        carrier,
-        pageNumber,
-        srNumber,
-        psNumber: psNumber ?? "",
-        cityProvince,
-        skids,
-        confidence: normalizeConfidence(record.confidence, {
+        row: {
+          carrier,
+          pageNumber,
+          srNumber,
           psNumber: psNumber ?? "",
           cityProvince,
-          skids
-        }),
-        notes: normalizeNullableText(record.notes)
+          skids,
+          confidence: normalizeConfidence(record.confidence, {
+            psNumber: psNumber ?? "",
+            cityProvince,
+            skids
+          }),
+          notes: normalizeNullableText(record.notes)
+        },
+        skidEvidence: skidResolution.evidence
       }
     ];
   });
 }
 
-function shouldRunFallback(primaryRows: GarlandCarrierManifestRow[], parsedRows: unknown[]) {
+function shouldRunFallback(primaryRows: NormalizedManifestRow[], parsedRows: unknown[]) {
   if (primaryRows.length > 0) {
-    return primaryRows.some((row) => !hasStrongManifestRow(row));
+    return (
+      primaryRows.some(({ row }) => !hasStrongManifestRow(row)) ||
+      parsedRows.some(needsAuthoritativeSkidFallback)
+    );
   }
 
   if (parsedRows.length === 0) {
@@ -380,12 +397,31 @@ function shouldRunFallback(primaryRows: GarlandCarrierManifestRow[], parsedRows:
         "shipToCityProvince"
       ])
     );
-    const skids = normalizeSkids(
-      readFirstValue(record, ["skids", "pallets", "pallet", "palletCount", "totalPallets", "totalSkids", "packageTotal"])
-    );
+    const skids = resolveManifestSkids(record).skids;
 
     return !carrierText || (isNewBolPage === false && hasStrongBolFields({ psNumber, srNumber, cityProvince, skids }));
   });
+}
+
+function needsAuthoritativeSkidFallback(entry: unknown) {
+  if (!entry || typeof entry !== "object") {
+    return true;
+  }
+
+  const record = entry as Record<string, unknown>;
+  const isNewBolPage = readBooleanLike(
+    readFirstValue(record, ["isNewBolPage", "isNewBol", "newBol", "newBolPage", "headerPresent", "newBillOfLading"])
+  );
+  const carrier = normalizeCarrier(
+    readFirstValue(record, ["carrier", "carrierName", "carrierText", "carrierRaw", "carrierBox", "carrierValue"])
+  );
+  const skidResolution = resolveManifestSkids(record);
+
+  return Boolean(
+    carrier &&
+      isNewBolPage !== false &&
+      (skidResolution.evidence === "GENERIC" || skidResolution.evidence === "NONE")
+  );
 }
 
 function hasStrongManifestRow(row: GarlandCarrierManifestRow) {
@@ -395,6 +431,54 @@ function hasStrongManifestRow(row: GarlandCarrierManifestRow) {
     cityProvince: row.cityProvince,
     skids: row.skids
   });
+}
+
+function reconcileExtractionRows(
+  primaryRows: NormalizedManifestRow[],
+  fallbackRows: NormalizedManifestRow[]
+) {
+  const reconciled = primaryRows.map((entry) => ({
+    row: { ...entry.row },
+    skidEvidence: entry.skidEvidence
+  }));
+
+  for (const candidate of fallbackRows) {
+    const existing = reconciled.find((entry) => isSameManifestRow(entry.row, candidate.row));
+
+    if (!existing) {
+      reconciled.push(candidate);
+      continue;
+    }
+
+    const preferredSkids = choosePreferredManifestSkids(
+      { skids: existing.row.skids, evidence: existing.skidEvidence },
+      { skids: candidate.row.skids, evidence: candidate.skidEvidence }
+    );
+
+    existing.row.srNumber = existing.row.srNumber || candidate.row.srNumber;
+    existing.row.psNumber = existing.row.psNumber || candidate.row.psNumber;
+    existing.row.cityProvince = existing.row.cityProvince || candidate.row.cityProvince;
+    existing.row.skids = preferredSkids.skids;
+    existing.skidEvidence = preferredSkids.evidence;
+  }
+
+  return reconciled;
+}
+
+function isSameManifestRow(left: GarlandCarrierManifestRow, right: GarlandCarrierManifestRow) {
+  if (left.carrier !== right.carrier) {
+    return false;
+  }
+
+  if (left.psNumber && right.psNumber) {
+    return left.psNumber === right.psNumber;
+  }
+
+  if (left.srNumber && right.srNumber) {
+    return left.srNumber === right.srNumber;
+  }
+
+  return left.pageNumber === right.pageNumber;
 }
 
 function buildRowDiagnostics(rows: unknown[]) {
@@ -422,9 +506,8 @@ function buildRowDiagnostics(rows: unknown[]) {
         "shipToCityProvince"
       ])
     );
-    const skids = normalizeSkids(
-      readFirstValue(record, ["skids", "pallets", "pallet", "palletCount", "totalPallets", "totalSkids", "packageTotal"])
-    );
+    const skidResolution = resolveManifestSkids(record);
+    const skids = skidResolution.skids;
     const isNewBolPage = readBooleanLike(
       readFirstValue(record, ["isNewBolPage", "isNewBol", "newBol", "newBolPage", "headerPresent", "newBillOfLading"])
     );
@@ -439,6 +522,7 @@ function buildRowDiagnostics(rows: unknown[]) {
       hasSr: Boolean(srNumber),
       hasCity: cityProvince.length > 0,
       hasSkids: skids !== null,
+      skidEvidence: skidResolution.evidence,
       hasStrongBolFields: hasStrongBolFields({ psNumber, srNumber, cityProvince, skids })
     };
   });
@@ -564,19 +648,6 @@ function normalizeText(value: unknown) {
 function normalizeNullableText(value: unknown) {
   const text = normalizeText(value);
   return text.length > 0 ? text : null;
-}
-
-function normalizeSkids(value: unknown) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return Math.max(0, Math.round(value));
-  }
-
-  if (typeof value === "string") {
-    const match = value.match(/\d+/);
-    return match ? Number(match[0]) : null;
-  }
-
-  return null;
 }
 
 function normalizeConfidence(

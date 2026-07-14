@@ -8,6 +8,8 @@ import type {
   GarlandCarrierManifestHistoryResponse,
   GarlandCarrierManifestRow
 } from "@/modules/shipment-documents/carrier-manifest-types";
+import { MANIFEST_CROP_BOXES } from "@/modules/shipment-documents/carrier-manifest-extraction";
+import { buildCarrierManifestWorkbookHtml } from "@/modules/shipment-documents/carrier-manifest-workbook";
 import { formatHumanDateFromIso } from "@/modules/shipment-documents/ps-number";
 
 type PdfJsModule = typeof import("pdfjs-dist");
@@ -39,14 +41,6 @@ const MANIFEST_CROP_IMAGE_JPEG_QUALITY = 0.9;
 const MANIFEST_CROP_SHEET_PADDING = 24;
 const MANIFEST_CROP_LABEL_HEIGHT = 34;
 const MANIFEST_CROP_GAP = 18;
-const MANIFEST_CROP_BOXES = [
-  { label: "Header overview", x: 0, y: 0, width: 1, height: 0.18, layout: "full" },
-  { label: "Package totals and skid count", x: 0, y: 0.52, width: 1, height: 0.24, layout: "full" },
-  { label: "Carrier box", x: 0.02, y: 0.105, width: 0.42, height: 0.085, layout: "half" },
-  { label: "References and shipment id", x: 0.6, y: 0.065, width: 0.38, height: 0.13, layout: "half" },
-  { label: "Consignee city/province", x: 0.48, y: 0.23, width: 0.48, height: 0.13, layout: "half" }
-];
-
 let pdfJsLoader: Promise<PdfJsModule> | null = null;
 
 function getTodayIsoDate() {
@@ -614,7 +608,14 @@ function buildWorkbook(carrier: GarlandCarrierKey, documentLabel: string, shipme
   const sortedRows = sortManifestRows(rows);
   const rowCount = Math.max(sortedRows.length, 16);
   const palletCount = sortedRows.reduce((total, row) => total + (row.skids ?? 0), 0);
-  const html = buildWorkbookHtml(carrierLabel, documentLabel, shipmentDate, sortedRows, rowCount, palletCount);
+  const html = buildCarrierManifestWorkbookHtml({
+    carrierLabel,
+    documentLabel,
+    shipmentDate,
+    rows: sortedRows,
+    rowCount,
+    palletCount
+  });
   const bytes = new TextEncoder().encode(html);
   const blob = new Blob([bytes], { type: "application/vnd.ms-excel" });
 
@@ -633,49 +634,6 @@ function buildWorkbooksForRows(rows: GarlandCarrierManifestRow[], documentLabel:
     const carrierRows = rows.filter((row) => row.carrier === carrier.key);
     return carrierRows.length > 0 ? [buildWorkbook(carrier.key, documentLabel, shipmentDate, carrierRows)] : [];
   });
-}
-
-function buildWorkbookHtml(
-  carrierLabel: string,
-  documentLabel: string,
-  shipmentDate: string,
-  rows: GarlandCarrierManifestRow[],
-  rowCount: number,
-  palletCount: number
-) {
-  const bodyRows = Array.from({ length: rowCount }, (_, index) => {
-    const row = rows[index];
-    return [
-      '<tr class="manifest-row">',
-      `<td class="row-number">${index + 1}</td>`,
-      `<td>${escapeHtml(row?.srNumber ?? "")}</td>`,
-      `<td>${escapeHtml(row?.psNumber.replace(/^PS/i, "") ?? "")}</td>`,
-      `<td>${escapeHtml(row?.cityProvince ?? "")}</td>`,
-      `<td class="skids">${row?.skids ?? ""}</td>`,
-      "</tr>"
-    ].join("");
-  }).join("");
-
-  return [
-    "<!doctype html>",
-    "<html>",
-    "<head>",
-    '<meta charset="utf-8" />',
-    "<style>",
-    "@page{size:letter landscape;margin:0.25in;}body{font-family:Arial,sans-serif;margin:0;}table{border-collapse:collapse;width:100%;table-layout:fixed;page-break-inside:avoid;}td,th{border:1px solid #111;padding:4px 8px;font-size:14px;line-height:1.15;}th{font-size:16px;text-align:center;font-weight:700;} .title{font-size:22px;font-weight:700;text-align:center;} .row-number{width:36px;text-align:right;} .sr{width:38%;}.ps{width:15%;}.city{width:34%;}.skids{text-align:right;width:80px;} .manifest-row td{height:24px;} .signature{height:44px;font-weight:700;} .summary{font-weight:700;background:#f2f2f2;}",
-    "</style>",
-    "</head>",
-    "<body>",
-    "<table>",
-    `<tr><td class="title" colspan="5">${escapeHtml(`${carrierLabel} Manifest ${documentLabel}`)}</td></tr>`,
-    '<tr><th></th><th class="sr">SR#</th><th class="ps">PS#</th><th class="city">City / Prov</th><th class="skids">Pallets</th></tr>',
-    bodyRows,
-    `<tr class="summary"><td colspan="4">Total pallets</td><td class="skids">${palletCount}</td></tr>`,
-    `<tr><td class="signature" colspan="2">Driver signature</td><td colspan="2"></td><td>${escapeHtml(shipmentDate)}</td></tr>`,
-    "</table>",
-    "</body>",
-    "</html>"
-  ].join("");
 }
 
 async function readFileAsUint8Array(file: File) {
@@ -948,12 +906,4 @@ function bytesToBase64(bytes: Uint8Array) {
 
 function sanitizeFilename(value: string) {
   return value.replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ").trim();
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
