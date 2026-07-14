@@ -328,7 +328,7 @@ function readListOption(args: string[], name: string, fallback: string | undefin
 function readLiveAllowlistOption(args: string[], name: string, fallback: string | undefined) {
   const values = readListOption(args, name, fallback);
 
-  if (values.length === 0 && fallback !== undefined && fallback.trim() === "") {
+  if (values.length === 0) {
     return ["*"];
   }
 

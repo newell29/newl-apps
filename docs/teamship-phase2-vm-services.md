@@ -36,7 +36,7 @@ Use `ops/teamship-phase2-vm/teamship-phase2-worker.env.example` as the template.
 - `NEWL_AGENT_TOKEN`: production ingestion token from Vercel.
 - `NEWL_APPS_BASE_URL`: usually `https://newl-apps.vercel.app`.
 - `TEAMSHIP_BROWSER_EXECUTABLE_PATH`: usually `/usr/bin/google-chrome`.
-- `TEAMSHIP_LIVE_ALLOWLIST_SR_NUMBERS`: keep set during rollout with comma-separated SRs. Set it to a blank value only after broad approval to let the VM process every approved Newl Apps job. If it is unset entirely, live jobs remain blocked.
+- `TEAMSHIP_LIVE_ALLOWLIST_SR_NUMBERS`: optional comma-separated SR list for limited rollout testing. Leave it unset/blank, or set it to `*`, to let the VM process every approved Newl Apps job.
 
 Use `DISPLAY=:0` or `DISPLAY=:1` if headed Chrome needs the VNC display. The installer tries to copy the current shell's `DISPLAY` into the env file automatically.
 
