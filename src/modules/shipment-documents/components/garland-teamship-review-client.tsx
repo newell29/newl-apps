@@ -1081,33 +1081,30 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <section className="overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
-        <div className="grid gap-5 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 p-5 text-white xl:grid-cols-[1fr,auto] xl:items-end">
+        <div className="grid gap-3 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 px-4 py-3 text-white xl:grid-cols-[1fr,auto] xl:items-center">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.22em] text-white/60">Today&apos;s review</p>
-            <h2 className="mt-2 text-2xl font-semibold tracking-tight">{documentLabel.trim() || formatDateLabel(shipmentDate)}</h2>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-white/70">
-              Pull Teamship orders, add one or more Garland PDF attachments as they arrive, then run the comparison workspace.
-            </p>
+            <h2 className="mt-1 text-xl font-semibold tracking-tight">{documentLabel.trim() || formatDateLabel(shipmentDate)}</h2>
           </div>
           <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3">
-              <p className="text-2xl font-semibold">{dailyOrderCount ?? dailyOrders.length}</p>
+            <div className="rounded-xl border border-white/10 bg-white/10 px-3 py-2">
+              <p className="text-xl font-semibold">{dailyOrderCount ?? dailyOrders.length}</p>
               <p className="text-[11px] font-bold uppercase tracking-wide text-white/60">Teamship</p>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3">
-              <p className="text-2xl font-semibold">{orders.length}</p>
+            <div className="rounded-xl border border-white/10 bg-white/10 px-3 py-2">
+              <p className="text-xl font-semibold">{orders.length}</p>
               <p className="text-[11px] font-bold uppercase tracking-wide text-white/60">PDF orders</p>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3">
-              <p className="text-2xl font-semibold">{pdfBatches.length}</p>
+            <div className="rounded-xl border border-white/10 bg-white/10 px-3 py-2">
+              <p className="text-xl font-semibold">{pdfBatches.length}</p>
               <p className="text-[11px] font-bold uppercase tracking-wide text-white/60">Attachments</p>
             </div>
           </div>
         </div>
 
-        <div className="grid gap-4 border-b border-border p-5 lg:grid-cols-2">
+        <div className="grid gap-3 border-b border-border px-4 py-3 lg:grid-cols-[180px,minmax(220px,1fr),minmax(280px,1.4fr)]">
           <label className="space-y-2 text-sm font-semibold text-foreground">
             Review date
             <input
@@ -1144,7 +1141,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         </div>
 
         {pdfBatches.length > 0 ? (
-          <div className="m-5 rounded-2xl border border-border bg-muted/30 p-4">
+          <div className="m-4 rounded-2xl border border-border bg-muted/30 p-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold text-foreground">
@@ -1188,13 +1185,13 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
           </div>
         ) : null}
 
-        <div className="space-y-4 border-t border-border px-5 py-4">
+        <div className="space-y-3 border-t border-border px-4 py-3">
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
               onClick={() => void runReview()}
               disabled={isProcessing || pdfBatches.length === 0}
-              className="rounded-md bg-primary px-5 py-2.5 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
             >
               {processingPhase === "RUN_REVIEW" ? "Checking PDF vs Teamship..." : "Run Teamship review"}
             </button>
@@ -1202,7 +1199,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
               type="button"
               onClick={() => void runReview({ rescan: true })}
               disabled={isProcessing || pdfBatches.length === 0}
-              className="rounded-md border border-border px-5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
             >
               {processingPhase === "RESCAN_TEAMSHIP" ? "Rescanning Teamship..." : "Rescan Teamship details"}
             </button>
@@ -1210,7 +1207,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
               type="button"
               onClick={() => void fetchDailyOrders()}
               disabled={isProcessing}
-              className="rounded-md border border-border px-5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
             >
               {processingPhase === "SYNC_TEAMSHIP" ? "Pulling Teamship orders..." : "Pull missing Teamship orders"}
             </button>
@@ -1220,23 +1217,23 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
           {isProcessing && processingPhase ? <TeamshipProcessingBanner phase={processingPhase} status={status} /> : null}
         </div>
 
-        <div className="grid gap-4 border-t border-border bg-muted/20 p-5 md:grid-cols-2">
-          <label className="space-y-2 text-sm font-semibold text-foreground">
+        <div className="grid gap-3 border-t border-border bg-muted/20 px-4 py-3 md:grid-cols-2">
+          <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
             Manual sync from
             <input
               type="date"
               value={syncDateFrom}
               onChange={(event) => setSyncDateFrom(event.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-semibold normal-case tracking-normal text-foreground"
             />
           </label>
-          <label className="space-y-2 text-sm font-semibold text-foreground">
+          <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
             Manual sync to
             <input
               type="date"
               value={syncDateTo}
               onChange={(event) => setSyncDateTo(event.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-semibold normal-case tracking-normal text-foreground"
             />
           </label>
         </div>
@@ -1248,11 +1245,11 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         ) : null}
       </section>
 
-      <details className="rounded-lg border border-border bg-card p-5 shadow-sm">
+      <details className="rounded-lg border border-border bg-card px-4 py-3 shadow-sm">
         <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-foreground">Teamship alert digest</h2>
-            <p className="mt-1 text-sm text-mutedForeground">
+            <p className="mt-1 text-xs text-mutedForeground">
               Optional. Paste only when Teamship says orders are blocked or out of stock.
             </p>
           </div>
@@ -1511,27 +1508,23 @@ function ShipmentReviewWorkspace({
 
   return (
     <section className="overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
-      <div className="border-b border-border bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 p-5 text-white">
-        <div className="flex flex-wrap items-start justify-between gap-5">
+      <div className="border-b border-border bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 px-4 py-3 text-white">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="max-w-3xl">
             <p className="text-xs font-bold uppercase tracking-[0.22em] text-white/60">Garland control tower</p>
-            <h2 className="mt-2 text-2xl font-semibold tracking-tight">Shipment queue</h2>
-            <p className="mt-2 text-sm leading-6 text-white/70">
-              Exceptions appear first, completed work stays collapsed, and every row shows whether the PDF was matched,
-              Teamship was checked, bot setup is needed, and the BOL is ready to print.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2 text-xs font-bold uppercase tracking-wide">
-              <span className="rounded-full bg-white/10 px-3 py-1 text-white/80">{teamshipOrderCount} Teamship</span>
-              <span className="rounded-full bg-white/10 px-3 py-1 text-white/80">{pdfOrderCount} PDF</span>
+            <h2 className="mt-1 text-xl font-semibold tracking-tight">Shipment queue</h2>
+            <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold uppercase tracking-wide">
+              <span className="rounded-full bg-white/10 px-2.5 py-1 text-white/80">{teamshipOrderCount} Teamship</span>
+              <span className="rounded-full bg-white/10 px-2.5 py-1 text-white/80">{pdfOrderCount} PDF</span>
               {syncSummary ? (
-                <span className="rounded-full bg-white/10 px-3 py-1 text-white/80">
+                <span className="rounded-full bg-white/10 px-2.5 py-1 text-white/80">
                   {syncSummary.insertedCount} new / {syncSummary.skippedCount} skipped
                 </span>
               ) : null}
-              {saveStatus ? <span className="rounded-full bg-white/10 px-3 py-1 text-white/80">{saveStatus}</span> : null}
+              {saveStatus ? <span className="rounded-full bg-white/10 px-2.5 py-1 text-white/80">{saveStatus}</span> : null}
             </div>
           </div>
-          <div className="grid min-w-[260px] grid-cols-2 gap-2">
+          <div className="grid min-w-[240px] grid-cols-2 gap-2">
             <WorkspaceStatCard label="Needs attention" value={workspaceStats.needsAttention} tone="danger" />
             <WorkspaceStatCard label="Ready to print" value={workspaceStats.readyToPrint} tone="primary" />
             <WorkspaceStatCard label="Complete" value={workspaceStats.complete} tone="success" />
@@ -1540,21 +1533,18 @@ function ShipmentReviewWorkspace({
         </div>
       </div>
 
-      <div className="border-b border-border bg-muted/20 p-4">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h3 className="text-sm font-semibold text-foreground">Daily actions</h3>
-            <p className="mt-1 max-w-2xl text-sm text-mutedForeground">
-              Save the Teamship queue as soon as orders are pulled, even if Garland PDFs arrive later. A later PDF review will match against
-              these saved Teamship orders without overwriting completed PDF-vs-Teamship checks.
-            </p>
+      <div className="border-b border-border bg-muted/20 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="text-xs text-mutedForeground">
+            <span className="font-semibold text-foreground">Actions</span>
+            <span className="ml-2">Save, export, expand, or collapse the current queue.</span>
           </div>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => setExpandedRowIds(new Set(visibleRows.map((row) => row.id)))}
               disabled={visibleRows.length === 0}
-              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
             >
               Expand visible
             </button>
@@ -1562,7 +1552,7 @@ function ShipmentReviewWorkspace({
               type="button"
               onClick={() => setExpandedRowIds(new Set())}
               disabled={rows.length === 0}
-              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
             >
               Collapse all
             </button>
@@ -1570,7 +1560,7 @@ function ShipmentReviewWorkspace({
               type="button"
               onClick={onDownloadSummary}
               disabled={!review}
-              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
             >
               Download summary PDF
             </button>
@@ -1578,7 +1568,7 @@ function ShipmentReviewWorkspace({
               type="button"
               onClick={onDownloadSkuDirectory}
               disabled={!review}
-              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
             >
               Download SKU directory CSV
             </button>
@@ -1586,7 +1576,7 @@ function ShipmentReviewWorkspace({
               type="button"
               onClick={onSave}
               disabled={isSaving || !canSave}
-              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSaving ? "Saving..." : review ? "Save review run" : "Save Teamship queue"}
             </button>
@@ -1594,21 +1584,21 @@ function ShipmentReviewWorkspace({
         </div>
       </div>
 
-      <div className="border-b border-border bg-card p-4">
+      <div className="border-b border-border bg-card px-4 py-3">
         <div className="space-y-3">
           <div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr),220px,auto] lg:items-end">
             <input
               value={workspaceSearch}
               onChange={(event) => setWorkspaceSearch(event.target.value)}
               placeholder="Search PS, SR, Teamship order, recipient, carrier, city, SKU, serial, or status"
-              className="min-w-0 rounded-xl border border-input bg-background px-4 py-3 text-sm shadow-sm"
+              className="min-w-0 rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm"
             />
             <label className="block text-xs font-semibold uppercase tracking-wide text-mutedForeground">
               <span className="mb-1 block">Queue view</span>
               <select
                 value={workspaceFilter}
                 onChange={(event) => setWorkspaceFilter(event.target.value as WorkspaceQueueFilter)}
-                className="w-full rounded-xl border border-input bg-background px-3 py-3 text-sm font-semibold normal-case tracking-normal text-foreground shadow-sm"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-semibold normal-case tracking-normal text-foreground shadow-sm"
               >
                 <option value="ALL">All shipments</option>
                 <option value="NOT_COMPLETE">Not complete</option>
@@ -1623,14 +1613,14 @@ function ShipmentReviewWorkspace({
               </select>
             </label>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full bg-muted px-3 py-2 text-xs font-bold uppercase tracking-wide text-mutedForeground">
+              <span className="rounded-full bg-muted px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-mutedForeground">
                 {visibleRows.length}/{rows.length} visible
               </span>
               <button
                 type="button"
                 onClick={() => setWorkspaceFilter("NO_PDF")}
                 disabled={workspaceStats.noPdf === 0}
-                className={`rounded-xl border px-3 py-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                   workspaceFilter === "NO_PDF"
                     ? "border-warning bg-warning/15 text-warning"
                     : "border-border text-foreground hover:bg-muted"
@@ -1645,7 +1635,7 @@ function ShipmentReviewWorkspace({
                   setWorkspaceFilter("ALL");
                 }}
                 disabled={!workspaceSearch && workspaceFilter === "ALL"}
-                className="rounded-xl border border-border px-3 py-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Clear filters
               </button>
@@ -1657,7 +1647,7 @@ function ShipmentReviewWorkspace({
               type="button"
               onClick={() => onReplaceUpdateSelection(visibleIssueSrNumbers)}
               disabled={isUpdateJobLoading || visibleIssueSrNumbers.length === 0}
-              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
             >
               Select visible issues ({visibleIssueSrNumbers.length})
             </button>
@@ -1665,7 +1655,7 @@ function ShipmentReviewWorkspace({
               type="button"
               onClick={() => onReplaceUpdateSelection(visibleEligibleSrNumbers)}
               disabled={isUpdateJobLoading || visibleEligibleSrNumbers.length === 0}
-              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
             >
               Select visible drafts ({visibleEligibleSrNumbers.length})
             </button>
@@ -1673,7 +1663,7 @@ function ShipmentReviewWorkspace({
               type="button"
               onClick={onSelectIssueShipments}
               disabled={isUpdateJobLoading || issueEligibleCount === 0}
-              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
             >
               Select all issues ({issueEligibleCount})
             </button>
@@ -1681,7 +1671,7 @@ function ShipmentReviewWorkspace({
               type="button"
               onClick={onSelectAllEligibleShipments}
               disabled={isUpdateJobLoading || eligibleCount === 0}
-              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
             >
               Select all drafts ({eligibleCount})
             </button>
@@ -1689,7 +1679,7 @@ function ShipmentReviewWorkspace({
               type="button"
               onClick={onClearSelectedShipments}
               disabled={isUpdateJobLoading || selectedCount === 0}
-              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
             >
               Clear selection
             </button>
@@ -1697,72 +1687,51 @@ function ShipmentReviewWorkspace({
         </div>
       </div>
 
-      <div className="border-b border-border bg-muted/20 p-4">
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),auto] xl:items-end">
-          <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Run the Teamship bot</p>
-                <h3 className="mt-1 text-base font-semibold text-foreground">Create a draft, then approve it for the VM agent</h3>
-                <p className="mt-1 max-w-3xl text-sm text-mutedForeground">
-                  Select shipments and individual bot changes inside each expanded row. Creating a draft does not update Teamship.
-                  The actual bot run starts when an admin approves the draft in the jobs section below.
-                </p>
-              </div>
-              <span className="rounded-full bg-background px-3 py-1 text-xs font-bold uppercase tracking-wide text-mutedForeground">
-                {selectedCount} selected
-              </span>
-            </div>
-            <div className="mt-3 grid gap-2 text-xs font-semibold text-mutedForeground md:grid-cols-3">
-              <span className="rounded-xl border border-border bg-background px-3 py-2">1. Select shipments / bot changes</span>
-              <span className="rounded-xl border border-border bg-background px-3 py-2">2. Create a bot draft</span>
-              <span className="rounded-xl border border-border bg-background px-3 py-2">3. Approve / run the agent below</span>
-            </div>
+      <details className="border-b border-border bg-muted/20">
+        <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-3 px-4 py-2.5 text-sm">
+          <div>
+            <span className="font-semibold text-foreground">Bot drafts</span>
+            <span className="ml-2 text-xs text-mutedForeground">
+              Create drafts for selected rows; approvals live on the Bot Runs page.
+            </span>
           </div>
-          <div className="space-y-3">
-            <div className="block min-w-60 space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
-              Agent mode
-              <div className="w-full rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-sm font-semibold normal-case tracking-normal text-primary">
-                Live Teamship update
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2 xl:justify-end">
-              <button
-                type="button"
-                onClick={() => onCreateUpdateJobForSrNumbers(visibleIssueSrNumbers)}
-                disabled={isUpdateJobLoading || !review || visibleIssueSrNumbers.length === 0}
-                className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Create visible issue draft ({visibleIssueSrNumbers.length})
-              </button>
-              <button
-                type="button"
-                onClick={onCreateIssueUpdateJob}
-                disabled={isUpdateJobLoading || !review || issueEligibleCount === 0}
-                className="rounded-md border border-primary/40 px-4 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Create all issue draft ({issueEligibleCount})
-              </button>
-              <button
-                type="button"
-                onClick={onCreateUpdateJob}
-                disabled={isUpdateJobLoading || !review || selectedCount === 0}
-                className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Create selected bot draft ({selectedCount})
-              </button>
-            </div>
+          <span className="rounded-full bg-background px-3 py-1 text-xs font-bold uppercase tracking-wide text-mutedForeground">
+            {selectedCount} selected
+          </span>
+        </summary>
+        <div className="grid gap-3 border-t border-border px-4 py-3 xl:grid-cols-[auto,minmax(0,1fr)] xl:items-center">
+          <div className="rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-xs font-semibold text-primary">
+            Agent mode: Live Teamship update
           </div>
+          <div className="flex flex-wrap gap-2 xl:justify-end">
+            <button
+              type="button"
+              onClick={() => onCreateUpdateJobForSrNumbers(visibleIssueSrNumbers)}
+              disabled={isUpdateJobLoading || !review || visibleIssueSrNumbers.length === 0}
+              className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Create visible issue draft ({visibleIssueSrNumbers.length})
+            </button>
+            <button
+              type="button"
+              onClick={onCreateIssueUpdateJob}
+              disabled={isUpdateJobLoading || !review || issueEligibleCount === 0}
+              className="rounded-md border border-primary/40 px-3 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Create all issue draft ({issueEligibleCount})
+            </button>
+            <button
+              type="button"
+              onClick={onCreateUpdateJob}
+              disabled={isUpdateJobLoading || !review || selectedCount === 0}
+              className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Create selected bot draft ({selectedCount})
+            </button>
+          </div>
+          {updateJobStatus ? <p className="text-xs font-semibold text-mutedForeground xl:col-span-2">{updateJobStatus}</p> : null}
         </div>
-        <p className="mt-3 max-w-3xl rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs font-semibold text-warning">
-          Live mode still requires approving the draft below and running the VM worker with live updates enabled. Use this only for
-          selected orders you want the agent to write back to Teamship.
-        </p>
-      </div>
-      <div className="border-b border-border bg-muted/20 px-5 py-4 text-sm text-mutedForeground">
-        Bot draft summaries and approval controls now live on the Bot Runs page so the shipment queue stays focused on orders.
-        {updateJobStatus ? <p className="mt-2 text-xs font-semibold">{updateJobStatus}</p> : null}
-      </div>
+      </details>
       <div className="divide-y divide-border">
         {rows.length === 0 ? (
           <p className="p-5 text-sm text-mutedForeground">
