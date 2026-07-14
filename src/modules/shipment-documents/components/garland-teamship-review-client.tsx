@@ -44,6 +44,73 @@ type DailyOrdersResponse = {
   error?: string;
 };
 
+type GarlandEmailIntakeAttachment = {
+  id: string;
+  fileName: string;
+  contentType: string | null;
+  sizeBytes: number | null;
+  contentHash: string | null;
+  intakeStatus: string | null;
+  pageCount: number | null;
+  createdAt: string;
+};
+
+type GarlandEmailIntakeEmail = {
+  id: string;
+  mailboxAddress: string;
+  subject: string;
+  fromName: string | null;
+  fromAddress: string | null;
+  receivedAt: string;
+  webLink: string | null;
+  classification: string;
+  classificationReason: string | null;
+  candidateScore: number;
+  hasPdfAttachment: boolean;
+  expectedOrderCount: number | null;
+  expectedPageCount: number | null;
+  expectedPsStart: string | null;
+  expectedPsEnd: string | null;
+  attachments: GarlandEmailIntakeAttachment[];
+};
+
+type GarlandEmailIntakeResponse = {
+  emails?: GarlandEmailIntakeEmail[];
+  totalCount?: number;
+  latestRun?: {
+    id: string;
+    mailboxAddress: string;
+    status: string;
+    messageCount: number;
+    candidateMessageCount: number;
+    storedEmailCount: number;
+    createdEmailCount: number;
+    updatedEmailCount: number;
+    attachmentCount: number;
+    storedAttachmentCount: number;
+    duplicateAttachmentCount: number;
+    errorMessage: string | null;
+    startedAt: string;
+    finishedAt: string | null;
+  } | null;
+  sync?: {
+    runId: string;
+    status: string;
+    mailboxAddress: string;
+    messageCount: number;
+    candidateMessageCount: number;
+    storedEmailCount: number;
+    createdEmailCount: number;
+    updatedEmailCount: number;
+    attachmentCount: number;
+    storedAttachmentCount: number;
+    duplicateAttachmentCount: number;
+    attachmentErrors: number;
+    failures: Array<{ mailbox: string; reason: string }>;
+  };
+  error?: string;
+};
+
 type TeamshipReviewHistoryOrder = {
   id: string;
   psNumber: string;
@@ -168,7 +235,7 @@ type TeamshipReviewWorkflowStatus = "NEEDS_SETUP" | "READY_TO_PRINT" | "BOL_PRIN
 type ProductDimensionEditField = "quantity" | "lengthIn" | "widthIn" | "heightIn" | "weightLb";
 type WorkspaceQueueFilter = "ALL" | "NOT_COMPLETE" | "ISSUES" | "APPROVED" | "PENDING" | "NO_PDF" | "NEEDS_SETUP" | "READY_TO_PRINT" | "BOL_PRINTED" | "ORDER_COMPLETE";
 type NewPalletDraftLine = GarlandTeamshipPalletDraftLine;
-type TeamshipProcessingPhase = "READ_PDF" | "SYNC_TEAMSHIP" | "RUN_REVIEW" | "RESCAN_TEAMSHIP";
+type TeamshipProcessingPhase = "READ_PDF" | "SYNC_TEAMSHIP" | "SYNC_EMAIL" | "RUN_REVIEW" | "RESCAN_TEAMSHIP";
 
 type ShipmentWorkspaceRow = {
   id: string;
@@ -306,6 +373,8 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
   const [dailyOrders, setDailyOrders] = useState<TeamshipShippingOrderDetail[]>([]);
   const [dailyOrderCount, setDailyOrderCount] = useState<number | null>(null);
   const [dailySyncSummary, setDailySyncSummary] = useState<DailyOrdersResponse["sync"] | null>(null);
+  const [emailIntake, setEmailIntake] = useState<GarlandEmailIntakeResponse>({ emails: [], totalCount: 0 });
+  const [emailIntakeSearch, setEmailIntakeSearch] = useState("");
   const [alertDigest, setAlertDigest] = useState("");
   const [history, setHistory] = useState<TeamshipReviewHistoryResponse>({
     runs: [],
@@ -343,6 +412,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     const today = getTodayInputValue();
     void fetchHistory("", today, today, false);
     void fetchUpdateJobs();
+    void fetchEmailIntake();
     const activeRunId = readStoredValue(ACTIVE_TEAMSHIP_REVIEW_RUN_STORAGE_KEY);
     if (activeRunId) {
       void loadRunForEditing(activeRunId);
@@ -836,6 +906,63 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to sync Teamship daily orders.");
       setStatus("Teamship daily-order sync stopped.");
+    } finally {
+      setIsProcessing(false);
+      setProcessingPhase(null);
+    }
+  }
+
+  async function fetchEmailIntake(searchValue = emailIntakeSearch) {
+    try {
+      const params = new URLSearchParams();
+      if (searchValue.trim()) {
+        params.set("search", searchValue.trim());
+      }
+      params.set("limit", "25");
+      const response = await fetch(`/api/shipment-documents/teamship-review/email-intake?${params.toString()}`);
+      const json = (await response.json().catch(() => null)) as GarlandEmailIntakeResponse | null;
+
+      if (!response.ok || !json || isErrorResponse(json)) {
+        throw new Error(isErrorResponse(json) ? json.error : "Unable to load Garland email intake.");
+      }
+
+      setEmailIntake(json);
+    } catch (caught) {
+      setEmailIntake((current) => ({
+        ...current,
+        error: caught instanceof Error ? caught.message : "Unable to load Garland email intake."
+      }));
+    }
+  }
+
+  async function syncGarlandEmailIntake() {
+    setError(null);
+    setIsProcessing(true);
+    setProcessingPhase("SYNC_EMAIL");
+    setStatus("Scanning the configured Microsoft 365 mailbox for Garland PDF emails...");
+
+    try {
+      const response = await fetch("/api/shipment-documents/teamship-review/email-intake", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ lookbackDays: 7, maxMessagesPerMailbox: 100 })
+      });
+      const json = (await response.json().catch(() => null)) as GarlandEmailIntakeResponse | null;
+
+      if (!response.ok || !json || isErrorResponse(json)) {
+        throw new Error(isErrorResponse(json) ? json.error : "Unable to sync Garland email intake.");
+      }
+
+      setEmailIntake(json);
+      setStatus(
+        json.sync
+          ? `Garland email scan found ${json.sync.candidateMessageCount} likely Garland email(s), stored ${json.sync.storedAttachmentCount} attachment record(s), and skipped ${json.sync.duplicateAttachmentCount} duplicate attachment(s).`
+          : "Garland email scan finished."
+      );
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "Unable to sync Garland email intake.";
+      setError(message);
+      setStatus("Garland email intake sync stopped.");
     } finally {
       setIsProcessing(false);
       setProcessingPhase(null);
@@ -1402,6 +1529,120 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
           </div>
         ) : null}
       </section>
+
+      <details className="rounded-lg border border-border bg-card px-4 py-3 shadow-sm">
+        <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Garland email intake</h2>
+            <p className="mt-1 text-xs text-mutedForeground">
+              Scan configured Microsoft 365 mailboxes for Garland PDF batches, store metadata, and avoid duplicate email attachments.
+            </p>
+          </div>
+          <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-primary">
+            {emailIntake.totalCount ?? 0} detected
+          </span>
+        </summary>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-[1fr,auto,auto]">
+          <input
+            type="search"
+            value={emailIntakeSearch}
+            onChange={(event) => setEmailIntakeSearch(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                void fetchEmailIntake();
+              }
+            }}
+            placeholder="Search subject, sender, PS range, or attachment"
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          />
+          <button
+            type="button"
+            onClick={() => void fetchEmailIntake()}
+            className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
+          >
+            Search intake
+          </button>
+          <button
+            type="button"
+            onClick={() => void syncGarlandEmailIntake()}
+            disabled={isProcessing}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {processingPhase === "SYNC_EMAIL" ? "Scanning mailbox..." : "Sync Garland emails"}
+          </button>
+        </div>
+
+        {emailIntake.latestRun ? (
+          <p className="mt-3 text-xs text-mutedForeground">
+            Last scan: {emailIntake.latestRun.status.toLowerCase()} · {emailIntake.latestRun.candidateMessageCount} candidate email(s) · {emailIntake.latestRun.storedAttachmentCount} attachment record(s)
+            {emailIntake.latestRun.errorMessage ? ` · ${emailIntake.latestRun.errorMessage}` : ""}
+          </p>
+        ) : null}
+
+        {emailIntake.error ? (
+          <div className="mt-3 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-sm font-medium text-danger">
+            {emailIntake.error}
+          </div>
+        ) : null}
+
+        <div className="mt-4 overflow-hidden rounded-2xl border border-border">
+          {(emailIntake.emails ?? []).length > 0 ? (
+            <div className="divide-y divide-border">
+              {(emailIntake.emails ?? []).map((email) => (
+                <div key={email.id} className="grid gap-3 bg-background px-4 py-3 lg:grid-cols-[minmax(0,1.4fr),minmax(220px,0.8fr),minmax(220px,0.8fr)]">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-emerald-700">
+                        {formatEmailClassification(email.classification)}
+                      </span>
+                      <span className="text-xs font-semibold text-mutedForeground">Score {email.candidateScore}</span>
+                    </div>
+                    <p className="mt-2 text-sm font-semibold text-foreground">{email.subject}</p>
+                    <p className="mt-1 text-xs text-mutedForeground">
+                      {email.fromName || email.fromAddress || "Unknown sender"} · {formatDateTime(email.receivedAt)}
+                    </p>
+                    {email.webLink ? (
+                      <a href={email.webLink} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-xs font-semibold text-primary hover:text-primaryHover">
+                        Open email
+                      </a>
+                    ) : null}
+                  </div>
+                  <div className="text-sm text-foreground">
+                    <p className="text-xs font-bold uppercase tracking-wide text-mutedForeground">Expected batch</p>
+                    <p className="mt-1 font-semibold">
+                      {email.expectedPsStart && email.expectedPsEnd
+                        ? `${email.expectedPsStart} -> ${email.expectedPsEnd}`
+                        : "No PS range parsed"}
+                    </p>
+                    <p className="mt-1 text-xs text-mutedForeground">
+                      {email.expectedOrderCount ?? "?"} order(s) · {email.expectedPageCount ?? "?"} page(s)
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wide text-mutedForeground">Attachments</p>
+                    {email.attachments.length > 0 ? (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {email.attachments.map((attachment) => (
+                          <span key={attachment.id} className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-foreground">
+                            {attachment.fileName}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-1 text-sm text-mutedForeground">No attachment metadata stored yet.</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="bg-muted/30 px-4 py-6 text-sm text-mutedForeground">
+              No Garland email batches have been detected yet. Run a mailbox sync after Microsoft Graph mailbox access is configured.
+            </div>
+          )}
+        </div>
+      </details>
 
       <details className="rounded-lg border border-border bg-card px-4 py-3 shadow-sm">
         <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-3">
@@ -2132,6 +2373,10 @@ function formatProcessingPhaseTitle(phase: TeamshipProcessingPhase) {
     return "Fetching Teamship orders";
   }
 
+  if (phase === "SYNC_EMAIL") {
+    return "Scanning Garland emails";
+  }
+
   if (phase === "RESCAN_TEAMSHIP") {
     return "Refreshing Teamship details";
   }
@@ -2146,6 +2391,10 @@ function formatProcessingPhaseDescription(phase: TeamshipProcessingPhase) {
 
   if (phase === "SYNC_TEAMSHIP") {
     return "Pulling Garland orders for the selected date range and adding only missing records.";
+  }
+
+  if (phase === "SYNC_EMAIL") {
+    return "Reading Microsoft 365 message metadata and storing only likely Garland PDF batches.";
   }
 
   if (phase === "RESCAN_TEAMSHIP") {
@@ -4667,6 +4916,14 @@ function downloadBlob(blob: Blob, fileName: string) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+function formatEmailClassification(value: string) {
+  return value
+    .replace(/^GARLAND_/, "")
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function formatDateLabel(dateValue: string) {

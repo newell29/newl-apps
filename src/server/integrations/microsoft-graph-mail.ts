@@ -21,6 +21,7 @@ export type MicrosoftGraphMailMessage = {
   internetMessageId?: string | null;
   conversationId?: string | null;
   receivedDateTime?: string | null;
+  hasAttachments?: boolean | null;
   toRecipients?: MicrosoftGraphMailRecipient[] | null;
   ccRecipients?: MicrosoftGraphMailRecipient[] | null;
   from?: {
@@ -150,7 +151,7 @@ async function fetchMailboxMessagesPage(accessToken: string, mailbox: string, ur
 }
 
 function buildMailboxMessagesUrl(path: string, since: Date, maxMessages: number) {
-  const select = "id,subject,bodyPreview,body,webLink,internetMessageId,conversationId,receivedDateTime,from,toRecipients,ccRecipients";
+  const select = "id,subject,bodyPreview,body,webLink,internetMessageId,conversationId,receivedDateTime,hasAttachments,from,toRecipients,ccRecipients";
   const top = Math.min(MICROSOFT_GRAPH_MAIL_PAGE_SIZE, maxMessages);
   const filter = encodeURIComponent(`receivedDateTime ge ${since.toISOString()}`);
 

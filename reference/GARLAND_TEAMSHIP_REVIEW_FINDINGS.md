@@ -58,6 +58,50 @@ Latest verification on 2026-07-11:
 - If no saved Teamship orders exist for the selected date, the review route can still fall back to the read-only Teamship fetch by uploaded SR/shipment ID.
 - The 15-minute Vercel cron schedule is intentionally disabled for now because Hobby plans only allow daily cron. The protected GET route still exists for a future Vercel Pro upgrade or external scheduler.
 
+## Email-Driven Garland Intake Plan
+
+Garland currently sends shipping-order PDF batches to `warehouse@newl.ca` and copies CSR users. The shared inbox also receives unrelated customer emails and follow-up messages on the same chains, so email intake must be conservative and auditable.
+
+Recommended flow:
+
+1. Microsoft Graph reads the configured shared mailbox targets.
+2. Newl Apps classifies candidate Garland messages using deterministic signals first: Garland sender domain, PS range in subject, `orders/pages` wording, and PDF attachments.
+3. Newl Apps stores tenant-scoped email and attachment metadata in `GarlandSourceEmail` and `GarlandSourceAttachment`.
+4. Exact Graph message/attachment IDs are upserted, not inserted blindly, so re-running intake does not duplicate the same email attachment.
+5. The existing Garland PDF extraction pipeline remains the source of truth for order details once the PDF file is processed.
+6. Later, an AI triage step can review ambiguous email threads before extraction, but AI should not override deterministic dedupe or PDF parsing.
+
+UI impact:
+
+- The Teamship Review page now has a `Garland email intake` card before the alert digest.
+- CSR/admin users can manually sync recent Garland emails, search detected messages, see parsed PS ranges, and inspect stored attachment metadata.
+- This is metadata-only in the first PR. It does not automatically download/store PDF files or run the PDF review yet.
+- The next UI step is a `Create review from email attachments` action once attachment binary storage is added.
+
+Reusable pieces already in Newl Apps:
+
+- Microsoft Graph mailbox settings and application-token helpers.
+- Tenant-scoped auth/module gates.
+- Existing Garland PDF parsing and Teamship comparison logic.
+- Teamship synced-order cache and saved review history.
+- Phase 2 bot/update job control tower model.
+- Audit logging and Prisma migration conventions.
+
+Missing pieces for full automation:
+
+- Attachment binary storage with content hashes and retention rules.
+- An email-to-PDF handoff that can create or append to a Teamship review run.
+- Safe correction handling when Garland sends a revised PDF on the same conversation.
+- A small AI classifier for ambiguous chains such as missing-shipment follow-ups, customer replies, or non-Garland messages copied to the shared inbox.
+- Background scheduling, likely through Vercel Pro cron or the existing VM/n8n environment.
+- Email-agent summary output so CSRs see what was found, skipped, duplicated, reviewed, and still missing in Teamship.
+
+Customer-service agent reuse assessment:
+
+- This is the first reusable `customer service agent` style workflow in Newl Apps.
+- The reusable pattern should be: intake source -> deterministic classification -> tenant-scoped source records -> human-visible queue -> existing domain processor -> approved external updates.
+- Garland email intake should not be hardcoded as a one-off agent. Future agents can reuse the same mailbox sync, source-message records, dedupe strategy, and review queue pattern with customer-specific classifiers.
+
 ## Current CSR Workflow
 
 1. Open `/shipment-documents/teamship-review`.
