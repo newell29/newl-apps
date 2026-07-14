@@ -89,6 +89,33 @@ export default async function WebsiteGrowthPage({
         </div>
       </section>
 
+      <section className="rounded-lg border border-border bg-card shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border p-5">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Prepared for approval</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-mutedForeground">
+              These are the weekly recommendations selected for your review. They are not published, and they are not AI-drafted yet. Use the page links to inspect the current live page before approving the next action.
+            </p>
+          </div>
+          <Link
+            href="/website-growth?status=REVIEWING"
+            className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
+          >
+            Open reviewing view
+          </Link>
+        </div>
+        <div className="grid gap-4 p-5 xl:grid-cols-3">
+          {shell.preparedOpportunities.length === 0 ? (
+            <div className="rounded-md border border-dashed border-border bg-muted/20 p-4 text-sm leading-6 text-mutedForeground xl:col-span-3">
+              No weekly approval items are waiting. Run the weekly planner to prepare core pages, support content, and quick optimizations.
+            </div>
+          ) : null}
+          {shell.preparedOpportunities.map((opportunity) => (
+            <PreparedOpportunityCard key={opportunity.id} opportunity={opportunity} />
+          ))}
+        </div>
+      </section>
+
       <section className="grid gap-4 xl:grid-cols-[1.1fr,0.9fr]">
         <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -435,6 +462,80 @@ function Signal({ label, value }: { label: string; value: number }) {
     <div className="rounded-md border border-border bg-muted/30 p-3">
       <dt className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</dt>
       <dd className="mt-2 text-2xl font-semibold text-foreground">{value.toLocaleString("en-US")}</dd>
+    </div>
+  );
+}
+
+function PreparedOpportunityCard({
+  opportunity
+}: {
+  opportunity: Awaited<ReturnType<typeof getWebsiteGrowthShell>>["preparedOpportunities"][number];
+}) {
+  return (
+    <article className="flex h-full flex-col rounded-md border border-border bg-background p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-xs font-semibold text-primary">
+          Prepared
+        </span>
+        <span className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs font-semibold text-mutedForeground">
+          Score {opportunity.score}
+        </span>
+      </div>
+      <h3 className="mt-3 text-base font-semibold text-foreground">{opportunity.topic}</h3>
+      <p className="mt-2 text-sm leading-6 text-mutedForeground">{formatStatusLike(opportunity.action)}</p>
+      <div className="mt-4 space-y-2 text-sm">
+        <PageReviewLink label="Target page" value={opportunity.targetPage} />
+        <PageReviewLink label="Source page" value={opportunity.sourcePage} />
+      </div>
+      <div className="mt-4 rounded-md border border-border bg-muted/30 p-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Approval note</p>
+        <p className="mt-2 text-sm leading-6 text-foreground">{opportunity.recommendation}</p>
+      </div>
+      <form action={updateWebsiteGrowthOpportunityAction} className="mt-auto pt-4">
+        <input type="hidden" name="opportunityId" value={opportunity.id} />
+        <input type="hidden" name="notes" value={opportunity.notes ?? ""} />
+        <div className="grid gap-2 sm:grid-cols-[1fr,auto]">
+          <select
+            name="status"
+            defaultValue={opportunity.status}
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+          >
+            <option value={WebsiteGrowthOpportunityStatus.REVIEWING}>Keep reviewing</option>
+            <option value={WebsiteGrowthOpportunityStatus.APPROVED}>Approve for build</option>
+            <option value={WebsiteGrowthOpportunityStatus.REJECTED}>Reject</option>
+            <option value={WebsiteGrowthOpportunityStatus.MONITORING}>Monitor only</option>
+          </select>
+          <button className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
+            Save
+          </button>
+        </div>
+      </form>
+    </article>
+  );
+}
+
+function PageReviewLink({ label, value }: { label: string; value?: string | null }) {
+  if (!value) {
+    return (
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</p>
+        <p className="mt-1 text-mutedForeground">Not attached yet</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</p>
+      <a
+        href={value}
+        target="_blank"
+        rel="noreferrer"
+        className="mt-1 block break-all font-semibold text-primary transition-colors hover:text-primaryHover"
+      >
+        Review page
+      </a>
+      <p className="mt-1 break-all text-xs text-mutedForeground">{value}</p>
     </div>
   );
 }

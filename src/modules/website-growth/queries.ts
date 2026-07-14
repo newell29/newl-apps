@@ -40,7 +40,8 @@ export async function getWebsiteGrowthShell(
     contactCount,
     pipelineCount,
     creditCheckCount,
-    statusCounts
+    statusCounts,
+    preparedOpportunities
   ] = await Promise.all([
     prisma.websiteGrowthOpportunity.findMany({
       where,
@@ -134,6 +135,14 @@ export async function getWebsiteGrowthShell(
       _count: {
         _all: true
       }
+    }),
+    prisma.websiteGrowthOpportunity.findMany({
+      where: {
+        tenantId: context.tenantId,
+        status: WebsiteGrowthOpportunityStatus.REVIEWING
+      },
+      orderBy: [{ updatedAt: "desc" }, { score: "desc" }],
+      take: 50
     })
   ]);
 
@@ -183,7 +192,8 @@ export async function getWebsiteGrowthShell(
       status: entry.status,
       count: entry._count._all
     })),
-    weeklyLaneCounts
+    weeklyLaneCounts,
+    preparedOpportunities
   };
 }
 
