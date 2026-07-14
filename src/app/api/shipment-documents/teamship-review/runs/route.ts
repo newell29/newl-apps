@@ -65,7 +65,7 @@ export async function POST(request: Request) {
     const teamshipAlerts = parseTeamshipAlertDigest(alertDigest);
     const review = readReviewResponse(body.review) ?? buildTeamshipOnlyReview(body.teamshipOrders, teamshipAlerts);
 
-    await saveTeamshipReviewRun({
+    const savedRunId = await saveTeamshipReviewRun({
       context,
       documentLabel,
       shipmentDate,
@@ -78,7 +78,7 @@ export async function POST(request: Request) {
       dateFrom: shipmentDateInput,
       dateTo: shipmentDateInput
     });
-    return NextResponse.json(history, { status: 201 });
+    return NextResponse.json({ ...history, savedRunId }, { status: 201 });
   } catch (error) {
     console.error(error);
     return NextResponse.json(

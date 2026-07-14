@@ -76,6 +76,31 @@ type SaveTeamshipReviewRunInput = {
   alertDigestOrderCount: number;
 };
 
+type UpdateTeamshipReviewRunReviewInput = {
+  context: AuthenticatedContext;
+  runId: string;
+  review: GarlandTeamshipReviewResponse;
+};
+
+type TeamshipReviewOrderSaveRow = {
+  tenantId: string;
+  psNumber: string;
+  srNumber: string;
+  status: GarlandTeamshipOrderReview["status"];
+  teamshipOrderId: string | null;
+  teamshipUrl: string | null;
+  carrier: string | null;
+  shipToName: string | null;
+  city: string | null;
+  state: string | null;
+  shipToPo: string | null;
+  pageNumbers: Prisma.InputJsonValue;
+  pdfOrder: Prisma.InputJsonValue;
+  review: Prisma.InputJsonValue;
+  mismatchCount: number;
+  workflowStatus: TeamshipReviewWorkflowStatus;
+};
+
 type TeamshipReviewRunQueryClient = typeof prisma & {
   teamshipReviewRun: {
     findMany(args: {
@@ -91,6 +116,7 @@ type TeamshipReviewRunQueryClient = typeof prisma & {
       select: Record<string, unknown>;
     }): Promise<TeamshipReviewWorkspaceRecord | null>;
     updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<{ count: number }>;
+    update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<unknown>;
   };
   teamshipReviewOrder: {
     findMany(args: {
@@ -98,6 +124,7 @@ type TeamshipReviewRunQueryClient = typeof prisma & {
       select: { srNumber: true };
     }): Promise<Array<{ srNumber: string }>>;
     updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<{ count: number }>;
+    create(args: { data: Record<string, unknown> }): Promise<unknown>;
   };
 };
 
@@ -267,34 +294,12 @@ export async function getTeamshipReviewHistory(
 
 export async function saveTeamshipReviewRun(input: SaveTeamshipReviewRunInput) {
   const { context, review } = input;
-  const pdfOrdersByKey = new Map(review.pdfOrders.map((order) => [buildOrderKey(order.psNumber, order.srNumber), order]));
-  const orderRows = review.reviews.map((orderReview) => {
-    const pdfOrder = pdfOrdersByKey.get(buildOrderKey(orderReview.psNumber, orderReview.srNumber));
-
-    return {
-      tenantId: context.tenantId,
-      psNumber: orderReview.psNumber,
-      srNumber: orderReview.srNumber,
-      status: orderReview.status,
-      teamshipOrderId: orderReview.teamshipOrderId,
-      teamshipUrl: orderReview.teamshipUrl,
-      carrier: readFieldValue(orderReview, "shipVia") ?? readFieldValue(orderReview, "carrier", "teamship") ?? pdfOrder?.shipVia ?? null,
-      shipToName: pdfOrder?.shipToName ?? readFieldValue(orderReview, "ship_to_name", "teamship") ?? null,
-      city: pdfOrder?.shipToCity ?? readFieldValue(orderReview, "ship_to_city", "teamship") ?? null,
-      state: pdfOrder?.shipToState ?? readFieldValue(orderReview, "ship_to_state", "teamship") ?? null,
-      shipToPo: pdfOrder?.shipToPo ?? null,
-      pageNumbers: orderReview.pageNumbers as Prisma.InputJsonValue,
-      pdfOrder: (pdfOrder ?? null) as Prisma.InputJsonValue,
-      review: orderReview as Prisma.InputJsonValue,
-      mismatchCount: orderReview.issueCount,
-      workflowStatus: getInitialWorkflowStatus(orderReview)
-    };
-  });
+  const orderRows = buildOrderRows(context.tenantId, review);
 
   const searchText = buildSearchText(input, orderRows);
   const client = prisma as TeamshipReviewRunQueryClient;
 
-  await client.teamshipReviewRun.create({
+  const created = await client.teamshipReviewRun.create({
     data: {
       tenantId: context.tenantId,
       workflowKey: WORKFLOW_KEY,
@@ -316,6 +321,98 @@ export async function saveTeamshipReviewRun(input: SaveTeamshipReviewRunInput) {
       createdByUserId: context.userId,
       orders: {
         create: orderRows
+      }
+    }
+  });
+
+  return (created as { id?: string }).id ?? null;
+}
+
+export async function updateTeamshipReviewRunReview(input: UpdateTeamshipReviewRunReviewInput) {
+  const { context, runId, review } = input;
+  const client = prisma as TeamshipReviewRunQueryClient;
+  const existingRun = await client.teamshipReviewRun.findFirst({
+    where: {
+      id: runId,
+      tenantId: context.tenantId,
+      workflowKey: WORKFLOW_KEY,
+      deletedAt: null
+    },
+    select: {
+      id: true,
+      documentLabel: true,
+      shipmentDate: true,
+      sourcePdfFileName: true
+    }
+  });
+
+  if (!existingRun) {
+    throw new Error("Teamship review run was not found or was already deleted.");
+  }
+
+  const orderRows = buildOrderRows(context.tenantId, review);
+  const searchText = buildSearchText(
+    {
+      context,
+      documentLabel: existingRun.documentLabel,
+      shipmentDate: existingRun.shipmentDate,
+      sourcePdfFileName: existingRun.sourcePdfFileName,
+      review,
+      alertDigestOrderCount: review.teamshipAlerts.length
+    },
+    orderRows
+  );
+
+  await prisma.$transaction(async (tx) => {
+    await tx.teamshipReviewRun.update({
+      where: { id: existingRun.id },
+      data: {
+        pdfOrderCount: review.summary.pdfOrderCount,
+        teamshipMatchedCount: review.summary.teamshipMatchedCount,
+        passedCount: review.summary.passedCount,
+        failedCount: review.summary.failedCount,
+        missingTeamshipCount: review.summary.missingTeamshipCount,
+        pendingTeamshipCount: review.summary.pendingTeamshipCount,
+        noPdfCount: review.summary.noPdfCount,
+        alertDigestOrderCount: review.teamshipAlerts.length,
+        summary: review.summary as Prisma.InputJsonValue,
+        extractedOrders: review.pdfOrders as Prisma.InputJsonValue,
+        reviewResponse: review as Prisma.InputJsonValue,
+        searchText
+      }
+    });
+
+    for (const row of orderRows) {
+      const result = await tx.teamshipReviewOrder.updateMany({
+        where: {
+          tenantId: context.tenantId,
+          runId: existingRun.id,
+          psNumber: row.psNumber,
+          srNumber: row.srNumber
+        },
+        data: {
+          status: row.status,
+          teamshipOrderId: row.teamshipOrderId,
+          teamshipUrl: row.teamshipUrl,
+          carrier: row.carrier,
+          shipToName: row.shipToName,
+          city: row.city,
+          state: row.state,
+          shipToPo: row.shipToPo,
+          pageNumbers: row.pageNumbers,
+          pdfOrder: row.pdfOrder,
+          review: row.review,
+          mismatchCount: row.mismatchCount
+        }
+      });
+
+      if (result.count === 0) {
+        await tx.teamshipReviewOrder.create({
+          data: {
+            ...row,
+            runId: existingRun.id
+          }
+        });
       }
     }
   });
@@ -569,6 +666,33 @@ function mapTeamshipReviewOrder(record: TeamshipReviewOrderRecord): TeamshipRevi
   };
 }
 
+function buildOrderRows(tenantId: string, review: GarlandTeamshipReviewResponse): TeamshipReviewOrderSaveRow[] {
+  const pdfOrdersByKey = new Map(review.pdfOrders.map((order) => [buildOrderKey(order.psNumber, order.srNumber), order]));
+
+  return review.reviews.map((orderReview) => {
+    const pdfOrder = pdfOrdersByKey.get(buildOrderKey(orderReview.psNumber, orderReview.srNumber));
+
+    return {
+      tenantId,
+      psNumber: orderReview.psNumber,
+      srNumber: orderReview.srNumber,
+      status: orderReview.status,
+      teamshipOrderId: orderReview.teamshipOrderId,
+      teamshipUrl: orderReview.teamshipUrl,
+      carrier: readFieldValue(orderReview, "shipVia") ?? readFieldValue(orderReview, "carrier", "teamship") ?? pdfOrder?.shipVia ?? null,
+      shipToName: pdfOrder?.shipToName ?? readFieldValue(orderReview, "ship_to_name", "teamship") ?? null,
+      city: pdfOrder?.shipToCity ?? readFieldValue(orderReview, "ship_to_city", "teamship") ?? null,
+      state: pdfOrder?.shipToState ?? readFieldValue(orderReview, "ship_to_state", "teamship") ?? null,
+      shipToPo: pdfOrder?.shipToPo ?? null,
+      pageNumbers: orderReview.pageNumbers as Prisma.InputJsonValue,
+      pdfOrder: (pdfOrder ?? null) as Prisma.InputJsonValue,
+      review: orderReview as Prisma.InputJsonValue,
+      mismatchCount: orderReview.issueCount,
+      workflowStatus: getInitialWorkflowStatus(orderReview)
+    };
+  });
+}
+
 function getInitialWorkflowStatus(orderReview: GarlandTeamshipOrderReview): TeamshipReviewWorkflowStatus {
   if (orderReview.status === "NO_PDF") {
     return "NO_PDF";
@@ -619,7 +743,7 @@ function readFieldValue(orderReview: GarlandTeamshipOrderReview, fieldKey: strin
   return value?.trim() || null;
 }
 
-function buildSearchText(input: SaveTeamshipReviewRunInput, orderRows: Array<Record<string, unknown>>) {
+function buildSearchText(input: SaveTeamshipReviewRunInput, orderRows: TeamshipReviewOrderSaveRow[]) {
   const values = [
     input.documentLabel,
     input.sourcePdfFileName,
