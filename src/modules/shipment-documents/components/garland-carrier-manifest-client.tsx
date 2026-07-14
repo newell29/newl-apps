@@ -8,6 +8,7 @@ import type {
   GarlandCarrierManifestHistoryResponse,
   GarlandCarrierManifestRow
 } from "@/modules/shipment-documents/carrier-manifest-types";
+import { MANIFEST_CROP_BOXES } from "@/modules/shipment-documents/carrier-manifest-extraction";
 import { formatHumanDateFromIso } from "@/modules/shipment-documents/ps-number";
 
 type PdfJsModule = typeof import("pdfjs-dist");
@@ -39,14 +40,6 @@ const MANIFEST_CROP_IMAGE_JPEG_QUALITY = 0.9;
 const MANIFEST_CROP_SHEET_PADDING = 24;
 const MANIFEST_CROP_LABEL_HEIGHT = 34;
 const MANIFEST_CROP_GAP = 18;
-const MANIFEST_CROP_BOXES = [
-  { label: "Header overview", x: 0, y: 0, width: 1, height: 0.18, layout: "full" },
-  { label: "Package totals and skid count", x: 0, y: 0.52, width: 1, height: 0.24, layout: "full" },
-  { label: "Carrier box", x: 0.02, y: 0.105, width: 0.42, height: 0.085, layout: "half" },
-  { label: "References and shipment id", x: 0.6, y: 0.065, width: 0.38, height: 0.13, layout: "half" },
-  { label: "Consignee city/province", x: 0.48, y: 0.23, width: 0.48, height: 0.13, layout: "half" }
-];
-
 let pdfJsLoader: Promise<PdfJsModule> | null = null;
 
 function getTodayIsoDate() {
