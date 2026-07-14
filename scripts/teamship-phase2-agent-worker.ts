@@ -255,7 +255,7 @@ function readOptions(args: string[]): WorkerOptions {
   const agentId = readStringOption(args, "--agent-id") ?? process.env.NEWL_AGENT_ID ?? "teamship-vm-agent";
   const mode = readMode(readStringOption(args, "--mode") ?? process.env.TEAMSHIP_AGENT_MODE ?? "dry-run");
   const allowLiveUpdates = args.includes("--allow-live-updates") || process.env.TEAMSHIP_ALLOW_LIVE_UPDATES === "true";
-  const liveAllowlistSrNumbers = readListOption(args, "--allow-sr", process.env.TEAMSHIP_LIVE_ALLOWLIST_SR_NUMBERS);
+  const liveAllowlistSrNumbers = readLiveAllowlistOption(args, "--allow-sr", process.env.TEAMSHIP_LIVE_ALLOWLIST_SR_NUMBERS);
   const browserExecutablePath =
     readStringOption(args, "--browser-executable-path") ?? process.env.TEAMSHIP_BROWSER_EXECUTABLE_PATH ?? null;
   const browserHeaded = args.includes("--headed") || process.env.TEAMSHIP_BROWSER_HEADED === "true";
@@ -325,10 +325,21 @@ function readListOption(args: string[], name: string, fallback: string | undefin
     .filter(Boolean);
 }
 
+function readLiveAllowlistOption(args: string[], name: string, fallback: string | undefined) {
+  const values = readListOption(args, name, fallback);
+
+  if (values.length === 0 && fallback !== undefined && fallback.trim() === "") {
+    return ["*"];
+  }
+
+  return values;
+}
+
 function readOptionalListOption(args: string[], name: string, fallback: string | undefined) {
   const values = readListOption(args, name, fallback);
   return values.length > 0 ? values : undefined;
 }
+
 
 function readMode(value: string): WorkerOptions["mode"] {
   if (value === "dry-run" || value === "live-api" || value === "live-browser") {

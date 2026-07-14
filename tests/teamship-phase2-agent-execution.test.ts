@@ -276,6 +276,37 @@ PROPER NAME: UN1814`;
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("allows live jobs when the VM allowlist is explicitly opened for all SRs", async () => {
+    const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ data: { token: "token_123" } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 30202 } }, 200));
+
+    const result = await executeTeamshipPhase2Job({
+      job: {
+        id: "job_1",
+        agentMode: "LIVE_API",
+        dryRun: false
+      },
+      plan,
+      credentials: {
+        email: "teamship@example.com",
+        password: "secret",
+        apiBaseUrl: "https://teamship.example/api"
+      },
+      options: {
+        agentId: "agent",
+        allowLiveUpdates: true,
+        liveAllowlistSrNumbers: ["*"],
+        fetchImpl: fetchImpl as unknown as typeof fetch
+      }
+    });
+
+    expect(result.hasFailures).toBe(false);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it("logs in and submits a live PATCH for each ready order when allowed", async () => {
     const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
     const fetchImpl = vi
