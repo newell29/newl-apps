@@ -75,6 +75,7 @@ export type TeamshipPhase2ExecutionOrderResult = {
   saveInstruction: TeamshipBrowserSaveInstruction;
   validationIssues: string[];
   updatePayload?: Record<string, unknown>;
+  apiUnsupportedActions?: string[];
   responseStatus?: number;
   error?: string;
 };
@@ -205,7 +206,19 @@ async function executeLiveApiUpdates({
       continue;
     }
 
-    const updatePayload = buildTeamshipUpdatePayload(order);
+    const { payload: updatePayload, unsupportedActions } = buildTeamshipDocumentedUpdatePayload(order);
+
+    if (Object.keys(updatePayload).length === 0) {
+      orders.push({
+        ...mappedOrder,
+        status: "FAILED",
+        updatePayload,
+        apiUnsupportedActions: unsupportedActions,
+        error:
+          "No documented Teamship shipping-order API fields were planned. Pallet DIMS/weight/commodity rows still require the live-browser worker or a Teamship pallet update endpoint."
+      });
+      continue;
+    }
 
     try {
       const responseStatus = await updateTeamshipShippingOrder({
@@ -220,6 +233,7 @@ async function executeLiveApiUpdates({
         ...mappedOrder,
         status: "UPDATED",
         updatePayload,
+        apiUnsupportedActions: unsupportedActions,
         responseStatus
       });
     } catch (error) {
@@ -227,6 +241,7 @@ async function executeLiveApiUpdates({
         ...mappedOrder,
         status: "FAILED",
         updatePayload,
+        apiUnsupportedActions: unsupportedActions,
         error: error instanceof Error ? error.message : "Unknown Teamship update failure."
       });
     }
@@ -479,6 +494,61 @@ export function buildTeamshipUpdatePayload(order: TeamshipPhase2OrderPlan): Reco
   };
 }
 
+export function buildTeamshipDocumentedUpdatePayload(order: TeamshipPhase2OrderPlan): {
+  payload: Record<string, unknown>;
+  unsupportedActions: string[];
+} {
+  const payload: Record<string, unknown> = {};
+  const unsupportedActions: string[] = [];
+
+  for (const field of order.plannedFieldUpdates) {
+    const apiField = mapDocumentedTeamshipApiField(field.teamshipField);
+
+    if (!apiField) {
+      unsupportedActions.push(`Field ${field.teamshipField} is not documented for PUT /v1/ship-inventories/{id}.`);
+      continue;
+    }
+
+    payload[apiField] = field.proposedValue;
+  }
+
+  if (order.plannedPalletRows.length > 0) {
+    unsupportedActions.push(
+      `${order.plannedPalletRows.length} pallet DIMS/weight/commodity row(s) are browser-only until Teamship documents a pallet update endpoint.`
+    );
+  }
+
+  return { payload, unsupportedActions };
+}
+
+function mapDocumentedTeamshipApiField(teamshipField: string) {
+  if (/^edi_field_\d+$/.test(teamshipField)) {
+    return teamshipField;
+  }
+
+  const documentedFieldAliases: Record<string, string> = {
+    shippingMethod: "shippingMethod",
+    shippingServiceLevel: "shippingServiceLevel",
+    pickETA_date: "pickETA_date",
+    carrier: "carrier",
+    carrier_value: "carrier",
+    proNumber: "proNumber",
+    poNumber: "poNumber",
+    supplier: "supplier",
+    ship_first_name: "ship_first_name",
+    ship_last_name: "ship_last_name",
+    ship_address: "ship_address",
+    ship_city: "ship_city",
+    ship_state: "ship_state",
+    ship_zip: "ship_zip",
+    ship_country: "ship_country",
+    ship_phone_number: "ship_phone_number",
+    ship_email: "ship_email"
+  };
+
+  return documentedFieldAliases[teamshipField] ?? null;
+}
+
 function assertLiveAllowlist(plan: TeamshipPhase2DryRunPlan, allowlistSrNumbers: string[] | undefined) {
   const allowlistValues = allowlistSrNumbers ?? [];
 
@@ -545,7 +615,7 @@ async function updateTeamshipShippingOrder({
 }) {
   const url = `${apiBaseUrl}/v1/ship-inventories/${encodeURIComponent(teamshipOrderId)}`;
   const response = await fetchImpl(url, {
-    method: "PATCH",
+    method: "PUT",
     headers: buildTeamshipHeaders(token),
     body: JSON.stringify(updatePayload),
     cache: "no-store"
@@ -553,21 +623,6 @@ async function updateTeamshipShippingOrder({
 
   if (response.ok) {
     return response.status;
-  }
-
-  if (response.status === 404 || response.status === 405) {
-    const putResponse = await fetchImpl(url, {
-      method: "PUT",
-      headers: buildTeamshipHeaders(token),
-      body: JSON.stringify(updatePayload),
-      cache: "no-store"
-    });
-
-    if (putResponse.ok) {
-      return putResponse.status;
-    }
-
-    throw new Error(`Teamship update failed with status ${putResponse.status}.`);
   }
 
   throw new Error(`Teamship update failed with status ${response.status}.`);

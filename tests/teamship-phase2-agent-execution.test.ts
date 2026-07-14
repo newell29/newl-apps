@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   buildDryRunEvidence,
+  buildTeamshipDocumentedUpdatePayload,
   buildTeamshipUpdatePayload,
   executeTeamshipPhase2Job
 } from "@/modules/shipment-documents/teamship-phase2-agent-execution";
@@ -43,6 +44,18 @@ describe("Teamship Phase 2 agent execution", () => {
         weight: 25,
         commodity: "SKU: 8030445 QTY: 4"
       })
+    ]);
+  });
+
+  it("builds a documented Teamship API payload without browser-only pallet rows", () => {
+    const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
+    const { payload, unsupportedActions } = buildTeamshipDocumentedUpdatePayload(plan.orders[0]!);
+
+    expect(payload).toEqual({
+      edi_field_3: "PPADD-CD"
+    });
+    expect(unsupportedActions).toEqual([
+      "2 pallet DIMS/weight/commodity row(s) are browser-only until Teamship documents a pallet update endpoint."
     ]);
   });
 
@@ -307,7 +320,7 @@ PROPER NAME: UN1814`;
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it("logs in and submits a live PATCH for each ready order when allowed", async () => {
+  it("logs in and submits a documented live PUT for each ready order when allowed", async () => {
     const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
     const fetchImpl = vi
       .fn()
@@ -343,7 +356,7 @@ PROPER NAME: UN1814`;
       2,
       "https://teamship.example/api/v1/ship-inventories/30202",
       expect.objectContaining({
-        method: "PATCH",
+        method: "PUT",
         headers: expect.objectContaining({
           authorization: "Bearer token_123"
         }),
@@ -388,6 +401,50 @@ PROPER NAME: UN1814`;
         edi_field_3: "PPADD-CD"
       })
     });
+  });
+
+  it("fails live API orders that only contain browser-only pallet actions", async () => {
+    const plan = {
+      ...buildTeamshipPhase2DryRunPlan(sampleReview()),
+      orders: [
+        {
+          ...buildTeamshipPhase2DryRunPlan(sampleReview()).orders[0]!,
+          plannedFieldUpdates: []
+        }
+      ]
+    };
+    const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse({ data: { token: "token_123" } }));
+
+    const result = await executeTeamshipPhase2Job({
+      job: {
+        id: "job_1",
+        agentMode: "LIVE_API",
+        dryRun: false
+      },
+      plan,
+      credentials: {
+        email: "teamship@example.com",
+        password: "secret",
+        apiBaseUrl: "https://teamship.example/api"
+      },
+      options: {
+        agentId: "agent",
+        allowLiveUpdates: true,
+        liveAllowlistSrNumbers: ["SR808478"],
+        fetchImpl: fetchImpl as unknown as typeof fetch
+      }
+    });
+
+    expect(result.hasFailures).toBe(true);
+    expect(result.orders[0]).toMatchObject({
+      status: "FAILED",
+      updatePayload: {},
+      apiUnsupportedActions: [
+        "2 pallet DIMS/weight/commodity row(s) are browser-only until Teamship documents a pallet update endpoint."
+      ],
+      error: expect.stringContaining("No documented Teamship shipping-order API fields")
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
 

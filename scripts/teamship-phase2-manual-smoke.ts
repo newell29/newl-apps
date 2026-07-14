@@ -69,6 +69,8 @@ async function main() {
           status: order.status,
           responseStatus: order.responseStatus,
           error: order.error,
+          updatePayload: order.updatePayload,
+          apiUnsupportedActions: order.apiUnsupportedActions,
           fieldActions: order.fieldActions,
           palletActions: order.palletActions.map((action) => ({
             rowNumber: action.rowNumber,
@@ -226,8 +228,13 @@ function assertSafeLiveOptions(options: ManualSmokeOptions) {
     return;
   }
 
-  if (!options.appBaseUrl.includes("staging.teamshipos.com") || !options.apiBaseUrl.includes("staging.teamshipos.com")) {
-    throw new Error("Manual live smoke tests are restricted to staging.teamshipos.com.");
+  const allowedLiveHosts = ["staging.teamshipos.com", "dev.teamshipos.com"];
+  const isAllowedHost = allowedLiveHosts.some(
+    (host) => options.appBaseUrl.includes(host) && options.apiBaseUrl.includes(host)
+  );
+
+  if (!isAllowedHost) {
+    throw new Error("Manual live smoke tests are restricted to staging.teamshipos.com or dev.teamshipos.com.");
   }
 
   if (!options.allowLiveUpdates) {

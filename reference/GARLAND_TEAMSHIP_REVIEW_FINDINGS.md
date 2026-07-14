@@ -10,7 +10,7 @@ This file captures the current Stage 1 Teamship review findings so future Garlan
 - The test PDF is `/Users/alexnewell/Downloads/12 ORDERS 13 PAGES - PS210206 - PS210217.pdf`.
 - The Newl app page is `/shipment-documents/teamship-review`.
 - The Teamship UI page used for validation is `https://members.fulfillit.io/ship-inventories`.
-- The Teamship API docs page reviewed for this module is `https://app.teamshipos.com/api-docs#tag/Authentication/operation/login`.
+- The Teamship API docs page reviewed for this module is `https://dev.teamshipos.com/api-docs`.
 
 ## Repeatable Checks
 
@@ -103,10 +103,17 @@ Teamship update API validation plan:
 
 1. Create a disposable shipping order in Teamship dev/staging.
 2. Add a Newl Apps smoke script that uses the documented Teamship update endpoint against that test order only.
-3. Test each update class independently before combining them: freight terms, special instructions, carrier/ship-via if supported, pallet rows, DIMS/weight, and commodity text.
+3. Test each documented update class independently before combining them: freight terms/custom EDI fields, special instructions/custom EDI fields, carrier/ship-via if supported, PO, PRO, supplier, pickup ETA, and ship-to fields.
 4. Compare Teamship readback/API response against the submitted payload after each update.
 5. Keep production bot jobs behind CSR/admin approval. Once the API is proven, the VM worker can prefer API writes and keep browser automation as fallback only for fields the API cannot update.
 6. Store screenshots/readback payloads for the first several test runs so CSR-visible status explains exactly what changed.
+
+Teamship dev API finding on 2026-07-14:
+
+- Existing shipping-order updates are documented as `PUT /v1/ship-inventories/{id}` with Bearer auth from `POST /v1/login`.
+- Documented update fields include `shippingMethod`, `shippingServiceLevel`, `pickETA_date`, `carrier`, `proNumber`, `poNumber`, `supplier`, ship-to fields, and editable `edi_field_*` custom fields.
+- The docs do not currently list Teamship order-page pallet row fields such as quantity, length, width, height, weight, unit, or commodity. Until Teamship confirms a pallet update endpoint or request schema, Newl Apps treats pallet DIMS/weight/SKU/serial commodity rows as browser-only work.
+- `carrier_value` is used in some Teamship create payloads, but the existing-order update docs use `carrier`. Newl Apps maps approved `carrier_value` updates to `carrier` for API writes.
 
 Customer-service agent reuse assessment:
 
@@ -309,7 +316,7 @@ Dry-run payload rules:
 - Missing Teamship, pending Teamship, no-PDF, and already-reviewed rows are `SKIPPED`.
 - Missing SKU dimensions block the dimension/weight update with a validation issue instead of guessing, but they do not block the commodity/comment plan.
 - Planned field updates are limited to mapped review fields for now: `po_number -> poNumber`, `freight_terms -> edi_field_3`, `carrier -> carrier_value`, and `shipping_instructions -> edi_field_4`.
-- Planned pallet rows use the documented Teamship field names, including `pallets_count`, `pallet_1_length`, `pallet_1_weight`, and `pallet_1_commodity`.
+- Planned pallet rows use the browser-worker field names, including `pallet_1_length`, `pallet_1_weight`, and `pallet_1_commodity`. These are not yet documented for the Teamship `PUT /v1/ship-inventories/{id}` API.
 - Serialized items use one commodity/comment line per SKU and list all serials after `SN:`, for example `SKU: <sku> SN: <serial>, <serial>`.
 - Non-serialized items use commodity text `SKU: <sku> QTY: <quantity>`.
 - UPS orders use the UPS rule dimensions: `1 x 1 x 1`, `1 lbs`.
@@ -329,7 +336,7 @@ Newl Apps now has the production control-tower layer for Phase 2:
 - When the agent reports `SUCCESS` or `NEEDS_REVIEW`, Newl Apps automatically performs a Teamship rescan using the stored PDF order snapshot and tenant Teamship credentials, then stores the verification response on the job. `NEEDS_REVIEW` is included because partial live updates may successfully change some orders while another order fails.
 - Users can also manually rescan a Phase 2 job from the UI, and can force a page-level Teamship rescan from the main review controls so already-reviewed SRs are checked again.
 
-The VM worker implementation supports both dry-run evidence and guarded live API execution:
+The VM worker implementation supports dry-run evidence, guarded live API execution for documented shipping-order fields, and guarded live-browser execution for pallet row/DIMS/weight/commodity work:
 
 ```bash
 NEWL_APPS_BASE_URL="https://newl-apps.vercel.app" \
@@ -359,7 +366,7 @@ TEAMSHIP_AGENT_LOOP="true" \
 npm run worker:teamship-phase2
 ```
 
-Live mode logs into Teamship using the tenant Settings credentials, submits the approved order-level fields and pallet rows to `/v1/ship-inventories/:id`, reports evidence back to Newl Apps, and triggers the automatic Teamship rescan. The worker blocks live updates before Teamship login unless every READY SR in the job is explicitly listed in `TEAMSHIP_LIVE_ALLOWLIST_SR_NUMBERS` or passed with `--allow-sr`. Keep `MAX_CONCURRENCY=1` operationally on the VM, and initially release one field group at a time with allowlisted orders: commodity/comment first, then pallet dimensions/weight, then mapped order-level fields.
+Live API mode logs into Teamship using the tenant Settings credentials and submits only documented shipping-order fields to `PUT /v1/ship-inventories/:id`. Pallet rows, DIMS/weight, and commodity text still require the live-browser worker until Teamship provides a documented pallet update endpoint. The worker blocks live updates before Teamship login unless every READY SR in the job is explicitly listed in `TEAMSHIP_LIVE_ALLOWLIST_SR_NUMBERS`, `*`, or passed with `--allow-sr`. Keep `MAX_CONCURRENCY=1` operationally on the VM, and initially release one field group at a time.
 
 If any individual Teamship order update fails, the worker must preserve the per-order evidence and report the job as `NEEDS_REVIEW` instead of discarding the partial result. Successful rows stay traceable as updated evidence, failed rows show the Teamship/API error, and Newl Apps immediately rescans Teamship so the Phase 2 panel has post-agent verification evidence. The CSR/admin can also rescan or correct manually from the Phase 2 update jobs panel.
 
