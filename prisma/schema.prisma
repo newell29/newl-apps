@@ -452,6 +452,9 @@ model Tenant {
   teamshipUpdateJobs                  TeamshipUpdateJob[]
   teamshipUpdateOrders                TeamshipUpdateOrder[]
   garlandProductDimensionObservations GarlandProductDimensionObservation[]
+  garlandSourceEmails                 GarlandSourceEmail[]
+  garlandSourceAttachments            GarlandSourceAttachment[]
+  garlandEmailSyncRuns                GarlandEmailSyncRun[]
   cashflowCustomers                   CashflowCustomer[]
   cashflowCustomerAliases             CashflowCustomerAlias[]
   cashflowFiles                       CashflowFile[]
@@ -946,6 +949,102 @@ model TeamshipSyncedOrder {
   @@index([tenantId, srNumber])
   @@index([tenantId, teamshipOrderId])
   @@index([tenantId, lastSyncedAt])
+}
+
+model GarlandEmailSyncRun {
+  id                       String    @id @default(cuid())
+  tenantId                 String
+  mailboxAddress           String
+  triggerSource            String
+  status                   String
+  messageCount             Int       @default(0)
+  candidateMessageCount    Int       @default(0)
+  storedEmailCount         Int       @default(0)
+  createdEmailCount        Int       @default(0)
+  updatedEmailCount        Int       @default(0)
+  attachmentCount          Int       @default(0)
+  storedAttachmentCount    Int       @default(0)
+  duplicateAttachmentCount Int       @default(0)
+  errorMessage             String?
+  startedAt                DateTime  @default(now())
+  finishedAt               DateTime?
+  createdByUserId          String?
+  createdAt                DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, mailboxAddress, startedAt])
+  @@index([tenantId, status])
+}
+
+model GarlandSourceEmail {
+  id                   String    @id @default(cuid())
+  tenantId             String
+  mailboxAddress       String
+  graphMessageId       String
+  internetMessageId    String?
+  conversationId       String?
+  subject              String
+  fromName             String?
+  fromAddress          String?
+  toRecipients         Json?
+  ccRecipients         Json?
+  receivedAt           DateTime
+  webLink              String?
+  bodyPreview          String?
+  normalizedBodyText   String?
+  bodyContentHash      String?
+  classification       String    @default("UNCLASSIFIED")
+  classificationReason String?
+  candidateScore       Int       @default(0)
+  hasPdfAttachment     Boolean   @default(false)
+  expectedOrderCount   Int?
+  expectedPageCount    Int?
+  expectedPsStart      String?
+  expectedPsEnd        String?
+  processedAt          DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  tenant      Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  attachments GarlandSourceAttachment[]
+
+  @@unique([tenantId, mailboxAddress, graphMessageId])
+  @@unique([tenantId, id])
+  @@index([tenantId, receivedAt])
+  @@index([tenantId, fromAddress])
+  @@index([tenantId, classification])
+  @@index([tenantId, conversationId])
+}
+
+model GarlandSourceAttachment {
+  id                      String   @id @default(cuid())
+  tenantId                String
+  sourceEmailId           String
+  graphAttachmentId       String
+  fileName                String
+  contentType             String?
+  sizeBytes               Int?
+  contentHash             String?
+  pageCount               Int?
+  extractedPsNumbers      Json?
+  extractedSrNumbers      Json?
+  extractionFingerprint   String?
+  intakeStatus            String   @default("METADATA_ONLY")
+  duplicateOfAttachmentId String?
+  storageRef              String?
+  parseError              String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sourceEmail GarlandSourceEmail @relation(fields: [tenantId, sourceEmailId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, sourceEmailId, graphAttachmentId])
+  @@unique([tenantId, id])
+  @@index([tenantId, sourceEmailId])
+  @@index([tenantId, contentHash])
+  @@index([tenantId, intakeStatus])
 }
 
 model GarlandProductDimensionObservation {
