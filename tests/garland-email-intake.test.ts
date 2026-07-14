@@ -15,6 +15,7 @@ vi.mock("@/server/db", () => ({ prisma: prismaMock }));
 
 import {
   classifyGarlandEmail,
+  groupGarlandEmailIntake,
   persistGarlandSourceEmails
 } from "@/modules/shipment-documents/garland-email-intake";
 
@@ -108,5 +109,63 @@ describe("Garland email intake", () => {
       fileName: "12 ORDERS 13 PAGES - PS210235 - PS210246.pdf",
       intakeStatus: "PDF_METADATA_READY"
     });
+  });
+
+  it("groups duplicate Garland follow-up emails by shipment batch instead of showing separate work items", () => {
+    const baseEmail = {
+      tenantId: "tenant-a",
+      mailboxAddress: "warehouse@newl.ca",
+      graphMessageId: "graph-1",
+      internetMessageId: null,
+      conversationId: "conversation-a",
+      subject: "RE: 6 ORDERS 6 PAGES - PS210249 - PS210254",
+      fromName: "Lily Morales",
+      fromAddress: "lily.morales@newl.ca",
+      toRecipients: [],
+      ccRecipients: [],
+      receivedAt: new Date("2026-07-14T14:09:00Z"),
+      webLink: "https://outlook.example/email/1",
+      bodyPreview: "Forwarding Garland docs.",
+      normalizedBodyText: "Forwarding Garland docs.",
+      bodyContentHash: null,
+      classification: "GARLAND_FOLLOW_UP",
+      classificationReason: "subject includes a PS range",
+      candidateScore: 65,
+      hasPdfAttachment: false,
+      expectedOrderCount: 6,
+      expectedPageCount: 6,
+      expectedPsStart: "PS210249",
+      expectedPsEnd: "PS210254",
+      processedAt: new Date("2026-07-14T14:09:05Z"),
+      id: "email-1",
+      createdAt: new Date("2026-07-14T14:09:05Z"),
+      updatedAt: new Date("2026-07-14T14:09:05Z"),
+      attachments: []
+    };
+
+    const groups = groupGarlandEmailIntake([
+      baseEmail,
+      {
+        ...baseEmail,
+        id: "email-2",
+        graphMessageId: "graph-2",
+        fromName: "Suzy Boreham",
+        fromAddress: "suzy.boreham@newlgroup.com",
+        candidateScore: 60,
+        receivedAt: new Date("2026-07-14T14:10:00Z"),
+        webLink: "https://outlook.example/email/2"
+      }
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({
+      emailCount: 2,
+      duplicateCount: 1,
+      expectedPsStart: "PS210249",
+      expectedPsEnd: "PS210254",
+      expectedOrderCount: 6,
+      expectedPageCount: 6
+    });
+    expect(groups[0].primaryEmail.id).toBe("email-1");
   });
 });

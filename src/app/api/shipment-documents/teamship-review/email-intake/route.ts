@@ -23,34 +23,10 @@ export async function GET(request: Request) {
   const result = await listGarlandEmailIntake(context.tenantId, { search, limit });
 
   return NextResponse.json({
-    emails: result.emails.map((email) => ({
-      id: email.id,
-      mailboxAddress: email.mailboxAddress,
-      subject: email.subject,
-      fromName: email.fromName,
-      fromAddress: email.fromAddress,
-      receivedAt: email.receivedAt.toISOString(),
-      webLink: email.webLink,
-      classification: email.classification,
-      classificationReason: email.classificationReason,
-      candidateScore: email.candidateScore,
-      hasPdfAttachment: email.hasPdfAttachment,
-      expectedOrderCount: email.expectedOrderCount,
-      expectedPageCount: email.expectedPageCount,
-      expectedPsStart: email.expectedPsStart,
-      expectedPsEnd: email.expectedPsEnd,
-      attachments: email.attachments.map((attachment) => ({
-        id: attachment.id,
-        fileName: attachment.fileName,
-        contentType: attachment.contentType,
-        sizeBytes: attachment.sizeBytes,
-        contentHash: attachment.contentHash,
-        intakeStatus: attachment.intakeStatus,
-        pageCount: attachment.pageCount,
-        createdAt: attachment.createdAt.toISOString()
-      }))
-    })),
+    groups: result.groups.map(serializeEmailGroup),
+    emails: result.emails.map(serializeEmail),
     totalCount: result.totalCount,
+    rawEmailCount: result.rawEmailCount,
     latestRun: result.latestRun
       ? {
           ...result.latestRun,
@@ -94,34 +70,10 @@ export async function POST(request: Request) {
         attachmentErrors: sync.attachmentErrors,
         failures: sync.failures
       },
-      emails: list.emails.map((email) => ({
-        id: email.id,
-        mailboxAddress: email.mailboxAddress,
-        subject: email.subject,
-        fromName: email.fromName,
-        fromAddress: email.fromAddress,
-        receivedAt: email.receivedAt.toISOString(),
-        webLink: email.webLink,
-        classification: email.classification,
-        classificationReason: email.classificationReason,
-        candidateScore: email.candidateScore,
-        hasPdfAttachment: email.hasPdfAttachment,
-        expectedOrderCount: email.expectedOrderCount,
-        expectedPageCount: email.expectedPageCount,
-        expectedPsStart: email.expectedPsStart,
-        expectedPsEnd: email.expectedPsEnd,
-        attachments: email.attachments.map((attachment) => ({
-          id: attachment.id,
-          fileName: attachment.fileName,
-          contentType: attachment.contentType,
-          sizeBytes: attachment.sizeBytes,
-          contentHash: attachment.contentHash,
-          intakeStatus: attachment.intakeStatus,
-          pageCount: attachment.pageCount,
-          createdAt: attachment.createdAt.toISOString()
-        }))
-      })),
-      totalCount: list.totalCount
+      groups: list.groups.map(serializeEmailGroup),
+      emails: list.emails.map(serializeEmail),
+      totalCount: list.totalCount,
+      rawEmailCount: list.rawEmailCount
     });
   } catch (error) {
     return NextResponse.json(
@@ -129,4 +81,51 @@ export async function POST(request: Request) {
       { status: 502 }
     );
   }
+}
+
+function serializeEmailGroup(group: Awaited<ReturnType<typeof listGarlandEmailIntake>>["groups"][number]) {
+  return {
+    id: group.id,
+    batchKey: group.batchKey,
+    classification: group.classification,
+    emailCount: group.emailCount,
+    duplicateCount: group.duplicateCount,
+    hasPdfAttachment: group.hasPdfAttachment,
+    expectedOrderCount: group.expectedOrderCount,
+    expectedPageCount: group.expectedPageCount,
+    expectedPsStart: group.expectedPsStart,
+    expectedPsEnd: group.expectedPsEnd,
+    primaryEmail: serializeEmail(group.primaryEmail),
+    emails: group.emails.map(serializeEmail)
+  };
+}
+
+function serializeEmail(email: Awaited<ReturnType<typeof listGarlandEmailIntake>>["emails"][number]) {
+  return {
+    id: email.id,
+    mailboxAddress: email.mailboxAddress,
+    subject: email.subject,
+    fromName: email.fromName,
+    fromAddress: email.fromAddress,
+    receivedAt: email.receivedAt.toISOString(),
+    webLink: email.webLink,
+    classification: email.classification,
+    classificationReason: email.classificationReason,
+    candidateScore: email.candidateScore,
+    hasPdfAttachment: email.hasPdfAttachment,
+    expectedOrderCount: email.expectedOrderCount,
+    expectedPageCount: email.expectedPageCount,
+    expectedPsStart: email.expectedPsStart,
+    expectedPsEnd: email.expectedPsEnd,
+    attachments: email.attachments.map((attachment) => ({
+      id: attachment.id,
+      fileName: attachment.fileName,
+      contentType: attachment.contentType,
+      sizeBytes: attachment.sizeBytes,
+      contentHash: attachment.contentHash,
+      intakeStatus: attachment.intakeStatus,
+      pageCount: attachment.pageCount,
+      createdAt: attachment.createdAt.toISOString()
+    }))
+  };
 }
