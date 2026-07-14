@@ -4,7 +4,11 @@ import { WebsiteGrowthAction } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import { parseDelimitedRows, readNumber, readString } from "@/modules/website-growth/csv";
-import { fetchSearchConsoleRows, getWebsiteGrowthIntegrationStatus } from "@/modules/website-growth/integrations";
+import {
+  fetchSearchConsoleRows,
+  getWebsiteGrowthIntegrationStatus,
+  normalizeSearchConsoleSiteUrl
+} from "@/modules/website-growth/integrations";
 import { buildOpportunityCandidate } from "@/modules/website-growth/opportunities";
 
 describe("website growth CSV parsing", () => {
@@ -69,6 +73,28 @@ describe("website growth integrations", () => {
 
     expect(status.googleSearchConsole.configured).toBe(true);
     expect(status.googleSearchConsole.mode).toBe("oauth");
+  });
+
+  it("normalizes bare Search Console domains to domain properties", () => {
+    expect(normalizeSearchConsoleSiteUrl("newlgroup.com")).toBe("sc-domain:newlgroup.com");
+    expect(normalizeSearchConsoleSiteUrl("www.newlgroup.com")).toBe("sc-domain:newlgroup.com");
+    expect(normalizeSearchConsoleSiteUrl("sc-domain:newlgroup.com")).toBe("sc-domain:newlgroup.com");
+    expect(normalizeSearchConsoleSiteUrl("https://www.newlgroup.com/")).toBe("https://www.newlgroup.com/");
+  });
+
+  it("prefers Search Console service-account credentials when both credential sets exist", () => {
+    const status = getWebsiteGrowthIntegrationStatus({
+      GOOGLE_SEARCH_CONSOLE_CLIENT_ID: "client",
+      GOOGLE_SEARCH_CONSOLE_CLIENT_SECRET: "secret",
+      GOOGLE_SEARCH_CONSOLE_REFRESH_TOKEN: "refresh",
+      GOOGLE_SEARCH_CONSOLE_SERVICE_ACCOUNT_EMAIL: "service-account@example.iam.gserviceaccount.com",
+      GOOGLE_SEARCH_CONSOLE_PRIVATE_KEY: "private-key",
+      GOOGLE_SEARCH_CONSOLE_SITE_URL: "newlgroup.com"
+    });
+
+    expect(status.googleSearchConsole.configured).toBe(true);
+    expect(status.googleSearchConsole.mode).toBe("service_account");
+    expect(status.googleSearchConsole.siteUrl).toBe("sc-domain:newlgroup.com");
   });
 
   it("reports only missing service-account fields once service-account setup has started", () => {
@@ -144,6 +170,44 @@ describe("website growth integrations", () => {
     });
 
     expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(String(fetcher.mock.calls[1]?.[0])).toContain("sc-domain%3Anewlgroup.com");
     expect(rows[0]?.keys?.[0]).toBe("warehouse logistics");
+  });
+
+  it("fetches Search Console rows with a bare domain value", async () => {
+    const { privateKey } = generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      privateKeyEncoding: {
+        format: "pem",
+        type: "pkcs8"
+      },
+      publicKeyEncoding: {
+        format: "pem",
+        type: "spki"
+      }
+    });
+    const fetcher = vi.fn(async (url: string | URL | Request) => {
+      const target = String(url);
+
+      if (target.includes("oauth2.googleapis.com/token")) {
+        return new Response(JSON.stringify({ access_token: "access-token" }), { status: 200 });
+      }
+
+      return new Response(JSON.stringify({ rows: [] }), { status: 200 });
+    });
+
+    await fetchSearchConsoleRows({
+      env: {
+        GOOGLE_SEARCH_CONSOLE_SERVICE_ACCOUNT_EMAIL: "service-account@example.iam.gserviceaccount.com",
+        GOOGLE_SEARCH_CONSOLE_PRIVATE_KEY: privateKey,
+        GOOGLE_SEARCH_CONSOLE_SITE_URL: "newlgroup.com"
+      },
+      fetcher: fetcher as unknown as typeof fetch,
+      startDate: "2026-07-01",
+      endDate: "2026-07-09",
+      dimensions: ["query", "page"]
+    });
+
+    expect(String(fetcher.mock.calls[1]?.[0])).toContain("sc-domain%3Anewlgroup.com");
   });
 });

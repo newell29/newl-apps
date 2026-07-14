@@ -30,19 +30,22 @@ export function getWebsiteGrowthIntegrationStatus(env: Env = process.env): Websi
   ];
   const missingOauth = missingFields(env, gscOauthFields);
   const missingServiceAccount = missingFields(env, gscServiceAccountFields);
-  const gscConfigured = missingOauth.length === 0 || missingServiceAccount.length === 0;
+  const hasOauthCredentials = missingOauth.length === 0;
+  const hasServiceAccountCredentials = missingServiceAccount.length === 0;
+  const gscConfigured = hasOauthCredentials || hasServiceAccountCredentials;
   const gscMode =
-    missingOauth.length === 0
-      ? "oauth"
-      : missingServiceAccount.length === 0
+    hasServiceAccountCredentials
         ? "service_account"
-        : "not_configured";
+        : hasOauthCredentials
+          ? "oauth"
+          : "not_configured";
+  const searchConsoleSiteUrl = normalizeSearchConsoleSiteUrl(env.GOOGLE_SEARCH_CONSOLE_SITE_URL);
 
   return {
     googleSearchConsole: {
       configured: gscConfigured,
       missing: gscConfigured ? [] : getMissingSearchConsoleFields(env, missingOauth, missingServiceAccount),
-      siteUrl: env.GOOGLE_SEARCH_CONSOLE_SITE_URL ?? null,
+      siteUrl: searchConsoleSiteUrl,
       mode: gscMode
     },
     ga4: {
@@ -81,7 +84,13 @@ export async function fetchSearchConsoleRows({
     status.googleSearchConsole.mode === "service_account"
       ? await fetchGoogleServiceAccountAccessToken({ env, fetcher })
       : await fetchGoogleOauthAccessToken({ env, fetcher });
-  const siteUrl = encodeURIComponent(env.GOOGLE_SEARCH_CONSOLE_SITE_URL ?? "");
+  const normalizedSiteUrl = normalizeSearchConsoleSiteUrl(env.GOOGLE_SEARCH_CONSOLE_SITE_URL);
+
+  if (!normalizedSiteUrl) {
+    throw new Error("Google Search Console site URL is required.");
+  }
+
+  const siteUrl = encodeURIComponent(normalizedSiteUrl);
   const response = await fetcher(
     `https://searchconsole.googleapis.com/webmasters/v3/sites/${siteUrl}/searchAnalytics/query`,
     {
@@ -200,6 +209,22 @@ function createServiceAccountJwt(env: Env) {
 
 function base64Url(value: string | Buffer) {
   return Buffer.from(value).toString("base64").replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/g, "");
+}
+
+export function normalizeSearchConsoleSiteUrl(value?: string | null) {
+  const trimmed = value?.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  if (trimmed.startsWith("sc-domain:") || /^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+
+  const domain = trimmed.split("/")[0]?.replace(/^www\./i, "").toLowerCase();
+
+  return domain ? `sc-domain:${domain}` : null;
 }
 
 function missingFields(env: Env, keys: string[]) {
