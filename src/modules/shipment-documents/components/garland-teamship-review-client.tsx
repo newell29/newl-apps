@@ -89,6 +89,7 @@ type TeamshipReviewHistoryResponse = {
   dateFrom: string;
   dateTo: string;
   allDates: boolean;
+  savedRunId?: string | null;
   error?: string;
 };
 
@@ -326,17 +327,33 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
   const [error, setError] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const [editingRunId, setEditingRunId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingPhase, setProcessingPhase] = useState<TeamshipProcessingPhase | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [isUpdateJobLoading, setIsUpdateJobLoading] = useState(false);
+  const editingRunIdRef = useRef<string | null>(null);
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const today = getTodayInputValue();
     void fetchHistory("", today, today, false);
     void fetchUpdateJobs();
   }, []);
+
+  useEffect(() => {
+    editingRunIdRef.current = editingRunId;
+  }, [editingRunId]);
+
+  useEffect(
+    () => () => {
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+      }
+    },
+    []
+  );
 
   const parsedAlertCount = useMemo(() => parseTeamshipAlertDigest(alertDigest).length, [alertDigest]);
   const sourcePdfFileName = useMemo(() => formatSourcePdfFileNames(pdfBatches), [pdfBatches]);
@@ -345,6 +362,46 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     () => buildShipmentWorkspaceRows({ review, pdfOrders: orders, teamshipOrders: dailyOrders }),
     [review, orders, dailyOrders]
   );
+
+  function scheduleSavedReviewAutosave(nextReview: GarlandTeamshipReviewResponse | null) {
+    const runId = editingRunIdRef.current;
+
+    if (!runId || !nextReview) {
+      return;
+    }
+
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+    }
+
+    setSaveStatus("Saving shipment edits...");
+    autosaveTimerRef.current = setTimeout(() => {
+      void autosaveSavedReviewRun(runId, nextReview);
+    }, 700);
+  }
+
+  async function autosaveSavedReviewRun(runId: string, reviewSnapshot: GarlandTeamshipReviewResponse) {
+    try {
+      const response = await fetch(`/api/shipment-documents/teamship-review/runs/${runId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "updateReview",
+          review: reviewSnapshot
+        })
+      });
+      const json = (await response.json().catch(() => null)) as { error?: string } | null;
+
+      if (!response.ok || !json || isErrorResponse(json)) {
+        throw new Error(isErrorResponse(json) ? json.error : "Unable to autosave shipment edits.");
+      }
+
+      setSaveStatus("Shipment edits saved automatically.");
+    } catch (caught) {
+      setSaveStatus(null);
+      setError(caught instanceof Error ? caught.message : "Unable to autosave shipment edits.");
+    }
+  }
 
   async function handlePdfSelection(fileList: FileList | null) {
     const files = Array.from(fileList ?? []).filter((file) => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"));
@@ -358,6 +415,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     }
 
     setReview(null);
+    setEditingRunId(null);
     setDailyOrderCount(null);
     setDailySyncSummary(null);
     setError(null);
@@ -400,6 +458,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     setPdfBatches(nextBatches);
     setOrders(mergedOrders);
     setReview(null);
+    setEditingRunId(null);
     setError(null);
     setStatus(nextBatches.length > 0 ? buildPdfUploadStatus(nextBatches, mergedOrders.length) : "Upload one or more Garland shipping-order PDFs to begin.");
   }
@@ -408,6 +467,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     setPdfBatches([]);
     setOrders([]);
     setReview(null);
+    setEditingRunId(null);
     setError(null);
     setStatus("Upload one or more Garland shipping-order PDFs to begin.");
   }
@@ -417,6 +477,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     setUpdateJobStatus(null);
     if (!srNumber) {
       setReview(null);
+      setEditingRunId(null);
     }
 
     const extractedOrders = orders;
@@ -726,6 +787,9 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       setHistoryDateFrom(json.dateFrom);
       setHistoryDateTo(json.dateTo);
       setHistoryAllDates(json.allDates);
+      if (json.savedRunId) {
+        setEditingRunId(json.savedRunId);
+      }
       setSaveStatus(
         `Teamship review run saved to history. Showing ${json.totalCount} saved run${json.totalCount === 1 ? "" : "s"} for ${formatHistoryRange(json)}.`
       );
@@ -819,7 +883,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         return current;
       }
 
-      return {
+      const nextReview = {
         ...current,
         reviews: current.reviews.map((orderReview) => {
           if (normalizeIdentifier(orderReview.srNumber) !== normalizedSrNumber) {
@@ -863,6 +927,9 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
           };
         })
       };
+
+      scheduleSavedReviewAutosave(nextReview);
+      return nextReview;
     });
   }
 
@@ -871,6 +938,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
 
     setOrders(nextState.orders);
     setReview(nextState.review);
+    scheduleSavedReviewAutosave(nextState.review);
   }
 
   function removePalletDraftLine(srNumber: string, itemIndex: number) {
@@ -878,6 +946,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
 
     setOrders(nextState.orders);
     setReview(nextState.review);
+    scheduleSavedReviewAutosave(nextState.review);
   }
 
   function updatePalletCommodityOverride(srNumber: string, itemIndex: number, value: string) {
@@ -885,6 +954,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
 
     setOrders(nextState.orders);
     setReview(nextState.review);
+    scheduleSavedReviewAutosave(nextState.review);
   }
 
   function updatePalletBotActionEnabled(srNumber: string, itemIndex: number, enabled: boolean) {
@@ -892,28 +962,35 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
 
     setOrders(nextState.orders);
     setReview(nextState.review);
+    scheduleSavedReviewAutosave(nextState.review);
   }
 
   function updateReviewFieldProposedValue(srNumber: string, fieldKey: string, value: string) {
-    setReview((current) =>
-      updateReviewFieldProposedValueInReviewState({
+    setReview((current) => {
+      const nextReview = updateReviewFieldProposedValueInReviewState({
         review: current,
         srNumber,
         fieldKey,
         value
-      })
-    );
+      });
+
+      scheduleSavedReviewAutosave(nextReview);
+      return nextReview;
+    });
   }
 
   function updateReviewFieldBotActionEnabled(srNumber: string, fieldKey: string, enabled: boolean) {
-    setReview((current) =>
-      updateReviewFieldBotActionEnabledInReviewState({
+    setReview((current) => {
+      const nextReview = updateReviewFieldBotActionEnabledInReviewState({
         review: current,
         srNumber,
         fieldKey,
         enabled
-      })
-    );
+      });
+
+      scheduleSavedReviewAutosave(nextReview);
+      return nextReview;
+    });
   }
 
   async function fetchHistory(search: string, dateFrom: string, dateTo: string, allDates: boolean) {
@@ -1007,6 +1084,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       setSyncDateTo(json.shipmentDate);
       setDocumentLabel(json.documentLabel || formatDateLabel(json.shipmentDate));
       setReview(json.review);
+      setEditingRunId(json.id);
       setOrders(restoredOrders);
       setDailyOrders([]);
       setDailyOrderCount(json.review.summary.teamshipMatchedCount);

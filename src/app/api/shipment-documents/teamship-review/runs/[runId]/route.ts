@@ -5,8 +5,10 @@ import {
   deleteTeamshipReviewRun,
   getTeamshipReviewHistory,
   getTeamshipReviewRunWorkspace,
-  updateTeamshipReviewOrderWorkflow
+  updateTeamshipReviewOrderWorkflow,
+  updateTeamshipReviewRunReview
 } from "@/modules/shipment-documents/teamship-review-history";
+import type { GarlandTeamshipReviewResponse } from "@/modules/shipment-documents/teamship-review-types";
 import { requireAdmin, requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
@@ -55,14 +57,26 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ru
     await requireModule(context, ModuleKey.SHIPMENT_DOCUMENTS);
     requireMutationAccess(context);
     const { runId } = await params;
-    const body = (await request.json().catch(() => null)) as { action?: string; orderId?: string } | null;
+    const body = (await request.json().catch(() => null)) as { action?: string; orderId?: string; review?: unknown } | null;
+    const action = body?.action;
+
+    if (action === "updateReview") {
+      const review = readReviewResponse(body?.review);
+
+      await updateTeamshipReviewRunReview({
+        context,
+        runId,
+        review
+      });
+
+      return NextResponse.json({ ok: true });
+    }
+
     const orderId = body?.orderId?.trim();
 
     if (!orderId) {
       return NextResponse.json({ error: "Select a saved Teamship review order to update." }, { status: 400 });
     }
-
-    const action = body?.action;
 
     if (action !== "markBolPrinted" && action !== "clearBolPrinted" && action !== "markOrderComplete" && action !== "clearOrderComplete") {
       return NextResponse.json({ error: "Unsupported Teamship review history action." }, { status: 400 });
@@ -84,4 +98,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ru
       { status: 500 }
     );
   }
+}
+
+function readReviewResponse(value: unknown): GarlandTeamshipReviewResponse {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    !("summary" in value) ||
+    !("pdfOrders" in value) ||
+    !Array.isArray((value as GarlandTeamshipReviewResponse).pdfOrders) ||
+    !("reviews" in value) ||
+    !Array.isArray((value as GarlandTeamshipReviewResponse).reviews)
+  ) {
+    throw new Error("A completed Teamship review response is required before autosaving edits.");
+  }
+
+  return value as GarlandTeamshipReviewResponse;
 }
