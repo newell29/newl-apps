@@ -405,7 +405,7 @@ July 15, 2026 Dev result:
 - `PUT /api/v1/ship-inventories/15320` returned `200` with `Order updated successfully`.
 - Confirmed in API readback and browser UI: shipping method, service level, carrier, PRO, PO, supplier, ship-to name/address/city/state/zip/country/phone/email, EDI fields `5` through `8`, both pallet rows, pallet quantity, length, width, height, weight, and commodity.
 - `pallets[].weight_unit` was visible in the browser as `lbs`, but the public API readback exposed it only in the hidden page state / `pallets` payload, not in the simplified `pallet_dims` readback used by the script.
-- `pickETA_date` accepted both `07/31/2026` and `07-31-2026` with status `200`, but readback stayed `pickup_eta: "0000-00-00"` and the UI showed `11/30/-0001`; this should be raised with Teamship before relying on API pickup ETA updates.
+- `pickETA_date` must be sent as `yyyy-mm-dd`. Formats like `07/31/2026` and `07-31-2026` returned `200` but did not persist correctly; `2026-07-31` read back as `pickup_eta: "2026-07-31"`.
 - `add_items` and `remove_items` were not executed by default because they change the line composition. The optional item-op smoke safely exercises `update_items` by resubmitting the current item quantity.
 
 If any individual Teamship order update fails, the worker must preserve the per-order evidence and report the job as `NEEDS_REVIEW` instead of discarding the partial result. Successful rows stay traceable as updated evidence, failed rows show the Teamship/API error, and Newl Apps immediately rescans Teamship so the Phase 2 panel has post-agent verification evidence. The CSR/admin can also rescan or correct manually from the Phase 2 update jobs panel.

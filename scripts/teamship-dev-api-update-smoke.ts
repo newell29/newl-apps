@@ -118,7 +118,7 @@ function buildUpdatePayload({
   const payload: Record<string, unknown> = {
     shippingMethod: "ltl",
     shippingServiceLevel: `Svc ${marker}`,
-    pickETA_date: "07/31/2026",
+    pickETA_date: "2026-07-31",
     carrier: `Carrier ${marker}`,
     proNumber: `PRO-${compactMarker}`,
     poNumber: `PO-${compactMarker}`,
