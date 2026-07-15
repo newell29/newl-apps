@@ -1,4 +1,4 @@
-import { IntegrationProvider, IntegrationStatus, InvoiceAutomationStatus, ModuleKey, PlatformRole, type InvoiceAutomationType, type Prisma } from "@prisma/client";
+import { IntegrationProvider, IntegrationStatus, InvoiceAutomationStatus, ModuleKey, PlatformRole, Prisma, type InvoiceAutomationType } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { formatInvoicePostingBlocker, getInvoicePostingBlockingIssues, InvoiceApprovalError } from "@/modules/invoice-automation/approval";
@@ -403,6 +403,7 @@ async function markInvoicePostedToQuickBooks({
   attachmentId: string | null;
   postedDetail: QuickBooksPostedTransactionDetail | null;
 }) {
+  const quickBooksTxnNumber = postedDetail?.docNumber ?? transaction.docNumber;
   await prisma.invoiceAutomationInvoice.update({
     where: {
       tenantId_id: {
@@ -415,7 +416,7 @@ async function markInvoicePostedToQuickBooks({
       postedByUserId: userId,
       postedAt: new Date(),
       quickBooksTxnId: transaction.id,
-      quickBooksTxnNumber: postedDetail?.docNumber ?? transaction.docNumber,
+      quickBooksTxnNumber,
       quickBooksExchangeRate: postedDetail?.exchangeRate ?? null,
       quickBooksHomeCurrency: postedDetail ? QUICKBOOKS_HOME_CURRENCY : null,
       quickBooksSubtotalHomeAmount: postedDetail?.homeSubtotalAmount ?? null,
@@ -425,6 +426,15 @@ async function markInvoicePostedToQuickBooks({
       quickBooksFxCapturedAt: postedDetail ? new Date() : null,
       quickBooksPostingError: null
     }
+  });
+
+  await cacheQuickBooksTransactionReadback({
+    tenantId,
+    row,
+    connection,
+    transactionId: transaction.id,
+    transactionNumber: quickBooksTxnNumber,
+    postedDetail
   });
 
   await prisma.auditLog.create({
@@ -438,7 +448,7 @@ async function markInvoicePostedToQuickBooks({
         invoiceType: row.invoiceType,
         invoiceNumber: row.invoiceNumber,
         quickBooksTxnId: transaction.id,
-        quickBooksTxnNumber: postedDetail?.docNumber ?? transaction.docNumber,
+        quickBooksTxnNumber,
         quickBooksAttachmentId: attachmentId,
         quickBooksExchangeRate: postedDetail?.exchangeRate ?? null,
         quickBooksHomeCurrency: postedDetail ? QUICKBOOKS_HOME_CURRENCY : null,
@@ -449,6 +459,99 @@ async function markInvoicePostedToQuickBooks({
       }
     }
   });
+}
+
+async function cacheQuickBooksTransactionReadback({
+  tenantId,
+  row,
+  connection,
+  transactionId,
+  transactionNumber,
+  postedDetail
+}: {
+  tenantId: string;
+  row: ReturnType<typeof toInvoiceAutomationRow>;
+  connection: QuickBooksConnection;
+  transactionId: string;
+  transactionNumber: string | null;
+  postedDetail: QuickBooksPostedTransactionDetail | null;
+}) {
+  const observedAt = new Date();
+  const quickBooksEntityId = readQuickBooksEntityIdFromRow(row);
+  await prisma.invoiceAutomationQuickBooksTransaction.upsert({
+    where: {
+      tenantId_realmId_invoiceType_quickBooksTxnId: {
+        tenantId,
+        realmId: connection.realmId,
+        invoiceType: row.invoiceType,
+        quickBooksTxnId: transactionId
+      }
+    },
+    create: {
+      tenantId,
+      invoiceAutomationInvoiceId: row.id,
+      realmId: connection.realmId,
+      invoiceType: row.invoiceType,
+      quickBooksTxnId: transactionId,
+      quickBooksTxnNumber: transactionNumber,
+      shipmentFileNumber: row.shipmentFileNumber,
+      shipmentType: row.shipmentType,
+      entityName: row.quickBooksEntityDisplayName ?? row.entityNameRaw,
+      quickBooksEntityId,
+      currency: row.currency,
+      transactionDate: parseDateOrNull(row.invoiceDate),
+      subtotalAmount: decimalOrNull(row.subtotalAmount),
+      taxAmount: decimalOrNull(row.taxAmount),
+      totalAmount: decimalOrNull(row.totalAmount),
+      quickBooksExchangeRate: decimalOrNull(postedDetail?.exchangeRate ?? null),
+      quickBooksHomeCurrency: postedDetail ? QUICKBOOKS_HOME_CURRENCY : null,
+      quickBooksSubtotalHomeAmount: decimalOrNull(postedDetail?.homeSubtotalAmount ?? null),
+      quickBooksTaxHomeAmount: decimalOrNull(postedDetail?.homeTaxAmount ?? null),
+      quickBooksTotalHomeAmount: decimalOrNull(postedDetail?.homeTotalAmount ?? null),
+      source: postedDetail ? QUICKBOOKS_FX_SOURCE : "POSTED_TRANSACTION_READBACK_FAILED",
+      observedAt
+    },
+    update: {
+      invoiceAutomationInvoiceId: row.id,
+      quickBooksTxnNumber: transactionNumber,
+      shipmentFileNumber: row.shipmentFileNumber,
+      shipmentType: row.shipmentType,
+      entityName: row.quickBooksEntityDisplayName ?? row.entityNameRaw,
+      quickBooksEntityId,
+      currency: row.currency,
+      transactionDate: parseDateOrNull(row.invoiceDate),
+      subtotalAmount: decimalOrNull(row.subtotalAmount),
+      taxAmount: decimalOrNull(row.taxAmount),
+      totalAmount: decimalOrNull(row.totalAmount),
+      quickBooksExchangeRate: decimalOrNull(postedDetail?.exchangeRate ?? null),
+      quickBooksHomeCurrency: postedDetail ? QUICKBOOKS_HOME_CURRENCY : null,
+      quickBooksSubtotalHomeAmount: decimalOrNull(postedDetail?.homeSubtotalAmount ?? null),
+      quickBooksTaxHomeAmount: decimalOrNull(postedDetail?.homeTaxAmount ?? null),
+      quickBooksTotalHomeAmount: decimalOrNull(postedDetail?.homeTotalAmount ?? null),
+      source: postedDetail ? QUICKBOOKS_FX_SOURCE : "POSTED_TRANSACTION_READBACK_FAILED",
+      observedAt
+    }
+  });
+}
+
+function readQuickBooksEntityIdFromRow(row: ReturnType<typeof toInvoiceAutomationRow>) {
+  try {
+    return parseQuickBooksEntityOptionId(row.quickBooksEntityId, row.invoiceType)?.quickBooksId ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function parseDateOrNull(value: string | null) {
+  if (!value) {
+    return null;
+  }
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function decimalOrNull(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? new Prisma.Decimal(value) : null;
 }
 
 async function safelyFetchPostedTransactionDetail({

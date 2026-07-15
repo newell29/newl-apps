@@ -490,6 +490,7 @@ model Tenant {
   invoiceAutomationBatches            InvoiceAutomationBatch[]
   invoiceAutomationInvoices           InvoiceAutomationInvoice[]
   invoiceAutomationQuickBooksEntities InvoiceAutomationQuickBooksEntity[]
+  invoiceAutomationQuickBooksTransactions InvoiceAutomationQuickBooksTransaction[]
   invoiceAutomationEntityAliases      InvoiceAutomationEntityAlias[]
   invoiceAutomationCorrectionMemories InvoiceAutomationCorrectionMemory[]
 }
@@ -2051,6 +2052,42 @@ model InvoiceAutomationQuickBooksEntity {
   @@index([tenantId, entityType, currency])
   @@index([tenantId, realmId])
   @@index([tenantId, active])
+}
+
+model InvoiceAutomationQuickBooksTransaction {
+  id                           String                @id @default(cuid())
+  tenantId                     String
+  invoiceAutomationInvoiceId   String?
+  realmId                      String
+  invoiceType                  InvoiceAutomationType
+  quickBooksTxnId              String
+  quickBooksTxnNumber          String?
+  shipmentFileNumber           String?
+  shipmentType                 String?
+  entityName                   String?
+  quickBooksEntityId           String?
+  currency                     String?
+  transactionDate              DateTime?
+  subtotalAmount               Decimal?              @db.Decimal(14, 2)
+  taxAmount                    Decimal?              @db.Decimal(14, 2)
+  totalAmount                  Decimal?              @db.Decimal(14, 2)
+  quickBooksExchangeRate       Decimal?              @db.Decimal(18, 8)
+  quickBooksHomeCurrency       String?
+  quickBooksSubtotalHomeAmount Decimal?              @db.Decimal(14, 2)
+  quickBooksTaxHomeAmount      Decimal?              @db.Decimal(14, 2)
+  quickBooksTotalHomeAmount    Decimal?              @db.Decimal(14, 2)
+  source                       String                @default("POSTED_TRANSACTION_READBACK")
+  observedAt                   DateTime              @default(now())
+  createdAt                    DateTime              @default(now())
+  updatedAt                    DateTime              @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade, map: "iaqbt_tenant_fkey")
+
+  @@unique([tenantId, realmId, invoiceType, quickBooksTxnId], map: "iaqbt_tenant_realm_type_txn_key")
+  @@index([tenantId, shipmentFileNumber], map: "iaqbt_tenant_file_idx")
+  @@index([tenantId, invoiceAutomationInvoiceId], map: "iaqbt_tenant_invoice_idx")
+  @@index([tenantId, invoiceType], map: "iaqbt_tenant_type_idx")
+  @@index([tenantId, observedAt], map: "iaqbt_tenant_observed_idx")
 }
 
 model InvoiceAutomationEntityAlias {
