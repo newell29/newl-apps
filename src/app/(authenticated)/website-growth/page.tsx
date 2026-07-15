@@ -520,6 +520,7 @@ function PreparedOpportunityCard({
             <SummaryRow label="Proposed URL" value={draft.proposedPath} />
             <SummaryRow label="Target keyword" value={draftPayload?.targetKeyword} />
             <SummaryRow label="Search intent" value={draftPayload?.searchIntent} />
+            <SummaryRow label="Newl pattern" value={draftPayload?.websitePageType} />
           </dl>
           <Link
             href={`/website-growth/drafts/${draft.id}`}
@@ -534,6 +535,7 @@ function PreparedOpportunityCard({
                 <DraftList title="Sections" items={draftPayload.sections.map((section) => `${section.heading}: ${section.purpose}`)} />
                 <DraftList title="FAQs" items={draftPayload.faqs.map((faq) => faq.question)} />
                 <DraftList title="Internal links" items={draftPayload.internalLinks.map((link) => `${link.label} -> ${link.url}`)} />
+                <DraftList title="Layout components" items={draftPayload.layoutComponents} />
                 <DraftList title="Build checklist" items={draftPayload.reviewChecklist} />
               </div>
             </details>
@@ -656,6 +658,7 @@ function readDraftPayload(value: unknown) {
   return {
     targetKeyword: typeof record.targetKeyword === "string" ? record.targetKeyword : null,
     searchIntent: typeof record.searchIntent === "string" ? record.searchIntent : null,
+    websitePageType: typeof record.websitePageType === "string" ? record.websitePageType : null,
     sections: readDraftObjectArray(record.sections).map((section) => ({
       heading: readDraftString(section.heading),
       purpose: readDraftString(section.purpose)
@@ -667,6 +670,7 @@ function readDraftPayload(value: unknown) {
       label: readDraftString(link.label),
       url: readDraftString(link.url)
     })).filter((link) => link.label && link.url),
+    layoutComponents: readDraftStringArray(record.layoutComponents),
     reviewChecklist: readDraftStringArray(record.reviewChecklist)
   };
 }

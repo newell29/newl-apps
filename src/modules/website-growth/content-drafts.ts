@@ -1,5 +1,9 @@
 import { WebsiteGrowthAction, WebsiteGrowthContentDraftSource } from "@prisma/client";
 
+import {
+  getNewlWebsitePatternForOpportunity,
+  newlWebsiteContext
+} from "@/modules/website-growth/newl-website-context";
 import { generateWebsiteGrowthContentDraft, isOpenAiDraftGenerationConfigured } from "@/server/integrations/openai";
 
 export type WebsiteGrowthDraftOpportunity = {
@@ -36,6 +40,10 @@ export type WebsiteGrowthContentDraftPayload = {
   internalLinks: Array<{ label: string; url: string; reason: string }>;
   implementationNotes: string[];
   reviewChecklist: string[];
+  websitePageType: string;
+  websiteTemplate: string;
+  layoutComponents: string[];
+  designSystemNotes: string[];
 };
 
 export type WebsiteGrowthContentDraftResult = WebsiteGrowthContentDraftPayload & {
@@ -50,7 +58,9 @@ export async function createWebsiteGrowthContentDraftPayload(
     try {
       const generated = await generateWebsiteGrowthContentDraft({
         model: process.env.OPENAI_WEBSITE_GROWTH_MODEL?.trim() || "gpt-5-mini",
-        opportunity: serializeOpportunity(opportunity)
+        opportunity: serializeOpportunity(opportunity),
+        websiteContext: newlWebsiteContext,
+        pagePattern: getNewlWebsitePatternForOpportunity(opportunity.action, opportunity.targetPage, buildProposedPath(opportunity))
       });
 
       return {
@@ -81,6 +91,7 @@ export function buildTemplateWebsiteGrowthContentDraft(
   const proposedPath = buildProposedPath(opportunity);
   const targetUrl = opportunity.targetPage || proposedPath || "/resources/logistics-insights";
   const supportingKeywords = readStringArray(opportunity.supportingKeywords);
+  const pagePattern = getNewlWebsitePatternForOpportunity(opportunity.action, opportunity.targetPage, proposedPath);
 
   return {
     title: buildTitle(opportunity),
@@ -126,6 +137,8 @@ export function buildTemplateWebsiteGrowthContentDraft(
     ],
     implementationNotes: [
       `Primary review page: ${targetUrl}`,
+      `Use Newl website pattern: ${pagePattern.pageType} (${pagePattern.sourceTemplate}).`,
+      `Recommended component sequence: ${pagePattern.componentSequence.join(" -> ")}.`,
       `Recommended queue action: ${formatAction(opportunity.action)}`,
       "Keep claims specific to known Newl capabilities and avoid unsupported guarantees.",
       "After approval, build or update the website page, verify internal links, then resubmit the sitemap in Search Console if a new URL is created."
@@ -135,8 +148,13 @@ export function buildTemplateWebsiteGrowthContentDraft(
       "Does the page clearly connect warehousing, fulfillment, freight, or Teamship where relevant?",
       "Are customer proof points or examples available for this topic?",
       "Is there a clear CTA and internal link path to a commercial page?",
-      "Does the proposed URL avoid duplicating an existing page?"
-    ]
+      "Does the proposed URL avoid duplicating an existing page?",
+      `Does the draft follow the ${pagePattern.pageType} component pattern?`
+    ],
+    websitePageType: pagePattern.pageType,
+    websiteTemplate: pagePattern.sourceTemplate,
+    layoutComponents: pagePattern.componentSequence,
+    designSystemNotes: pagePattern.designNotes
   };
 }
 

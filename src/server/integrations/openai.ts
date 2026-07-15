@@ -58,6 +58,8 @@ export type WebsiteGrowthDraftContext = {
     supportingKeywords: string[];
     evidence: Record<string, unknown>;
   };
+  websiteContext: Record<string, unknown>;
+  pagePattern: Record<string, unknown>;
 };
 
 export type WebsiteGrowthDraftResult = {
@@ -85,6 +87,10 @@ export type WebsiteGrowthDraftResult = {
   }>;
   implementationNotes: string[];
   reviewChecklist: string[];
+  websitePageType: string;
+  websiteTemplate: string;
+  layoutComponents: string[];
+  designSystemNotes: string[];
   rawResponse: Record<string, unknown>;
 };
 
@@ -195,7 +201,7 @@ export async function generateWebsiteGrowthContentDraft(
         {
           role: "system",
           content:
-            "You are a B2B logistics SEO strategist for Newl Group. Create practical content proposals that help Newl earn inbound leads for warehousing, fulfillment, freight, distribution, Teamship WMS, and Canada-U.S. logistics. Return JSON only with keys title, summary, contentType, proposedPath, targetKeyword, searchIntent, sections, metaTitle, metaDescription, faqs, internalLinks, implementationNotes, reviewChecklist. Do not fabricate customer names, certifications, carrier relationships, locations, or metrics beyond the supplied opportunity. Keep the proposal implementation-ready but not over-written."
+            "You are a B2B logistics SEO strategist and web producer for Newl Group. Create practical content proposals that help Newl earn inbound leads for warehousing, fulfillment, freight, distribution, Teamship WMS, and Canada-U.S. logistics. Return JSON only with keys title, summary, contentType, proposedPath, targetKeyword, searchIntent, sections, metaTitle, metaDescription, faqs, internalLinks, implementationNotes, reviewChecklist, websitePageType, websiteTemplate, layoutComponents, designSystemNotes. Do not fabricate customer names, certifications, carrier relationships, locations, or metrics beyond the supplied opportunity. Keep the proposal implementation-ready but not over-written, and make it match the supplied Newl website page pattern."
         },
         {
           role: "user",
@@ -292,9 +298,13 @@ function buildWebsiteGrowthDraftPrompt(context: WebsiteGrowthDraftContext) {
         "Keep the recommendation specific to the opportunity.",
         "Do not say a page is published or live.",
         "If an existing target page is supplied, propose improvements to that page instead of inventing a duplicate URL.",
+        "Follow the supplied Newl page pattern and component sequence. The draft should feel like it belongs in the existing Newl website, not as a generic SEO page.",
+        "Reference existing page components by name when giving implementation notes.",
         "Use FAQs and internal links to support conversion and topical authority.",
         "Include a review checklist for a human approver before anything is posted."
       ],
+      websiteContext: context.websiteContext,
+      selectedPagePattern: context.pagePattern,
       opportunity: context.opportunity
     },
     null,
@@ -406,12 +416,16 @@ function parseWebsiteGrowthDraftPayload(content: string) {
     .filter((link) => link.label && link.url && link.reason);
   const implementationNotes = readStringArray(parsed.implementationNotes);
   const reviewChecklist = readStringArray(parsed.reviewChecklist);
+  const websitePageType = readNonEmptyString(parsed.websitePageType);
+  const websiteTemplate = readNonEmptyString(parsed.websiteTemplate);
+  const layoutComponents = readStringArray(parsed.layoutComponents);
+  const designSystemNotes = readStringArray(parsed.designSystemNotes);
 
-  if (!title || !summary || !contentType || !targetKeyword || !searchIntent || !metaTitle || !metaDescription) {
+  if (!title || !summary || !contentType || !targetKeyword || !searchIntent || !metaTitle || !metaDescription || !websitePageType || !websiteTemplate) {
     throw new Error("OpenAI returned an incomplete Website Growth draft payload.");
   }
 
-  if (sections.length === 0 || implementationNotes.length === 0 || reviewChecklist.length === 0) {
+  if (sections.length === 0 || implementationNotes.length === 0 || reviewChecklist.length === 0 || layoutComponents.length === 0 || designSystemNotes.length === 0) {
     throw new Error("OpenAI returned a Website Growth draft without enough implementation detail.");
   }
 
@@ -428,7 +442,11 @@ function parseWebsiteGrowthDraftPayload(content: string) {
     faqs,
     internalLinks,
     implementationNotes,
-    reviewChecklist
+    reviewChecklist,
+    websitePageType,
+    websiteTemplate,
+    layoutComponents,
+    designSystemNotes
   };
 }
 

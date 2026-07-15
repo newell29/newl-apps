@@ -67,6 +67,8 @@ export default async function WebsiteGrowthDraftPreviewPage({ params }: PageProp
           <SummaryRow label="Target page" value={draft.targetPage} />
           <SummaryRow label="Target keyword" value={payload.targetKeyword} />
           <SummaryRow label="Search intent" value={payload.searchIntent} />
+          <SummaryRow label="Newl page pattern" value={payload.websitePageType} />
+          <SummaryRow label="Website template" value={payload.websiteTemplate} />
           <SummaryRow label="Opportunity" value={draft.opportunity.topic} />
           <SummaryRow label="Recommendation" value={draft.opportunity.recommendation} />
         </dl>
@@ -122,6 +124,8 @@ export default async function WebsiteGrowthDraftPreviewPage({ params }: PageProp
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2">
+        <ReviewPanel title="Newl website layout" items={payload.layoutComponents} />
+        <ReviewPanel title="Design system notes" items={payload.designSystemNotes} />
         <ReviewPanel title="Internal links" items={payload.internalLinks.map((link) => `${link.label} -> ${link.url}: ${link.reason}`)} />
         <ReviewPanel title="Build checklist" items={payload.reviewChecklist} />
         <ReviewPanel title="Implementation notes" items={payload.implementationNotes} />
@@ -194,7 +198,11 @@ function readDraftPayload(value: unknown) {
       }))
       .filter((link) => link.label && link.url),
     implementationNotes: readStringArray(record.implementationNotes),
-    reviewChecklist: readStringArray(record.reviewChecklist)
+    reviewChecklist: readStringArray(record.reviewChecklist),
+    websitePageType: readString(record.websitePageType),
+    websiteTemplate: readString(record.websiteTemplate),
+    layoutComponents: readStringArray(record.layoutComponents),
+    designSystemNotes: readStringArray(record.designSystemNotes)
   };
 }
 
