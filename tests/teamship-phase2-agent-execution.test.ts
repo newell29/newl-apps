@@ -14,19 +14,9 @@ describe("Teamship Phase 2 agent execution", () => {
     const payload = buildTeamshipUpdatePayload(plan.orders[0]!);
 
     expect(payload).toMatchObject({
-      edi_field_3: "PPADD-CD",
-      pallets_count: 2,
-      pallet_1: 1,
-      pallet_1_length: 48,
-      pallet_1_width: 40,
-      pallet_1_height: 50,
-      pallet_1_weight: 500,
-      pallet_1_weight_unit: "lbs",
-      pallet_1_commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908",
-      pallet_2: 4,
-      pallet_2_commodity: "SKU: 8030445 QTY: 4"
+      edi_field_3: "PPADD-CD"
     });
-    expect(payload.pallet_dims).toEqual([
+    expect(payload.pallets).toEqual([
       expect.objectContaining({
         quantity: 1,
         length: 48,
@@ -307,7 +297,7 @@ PROPER NAME: UN1814`;
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it("logs in and submits a live PATCH for each ready order when allowed", async () => {
+  it("logs in and submits a live PUT for each ready order when allowed", async () => {
     const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
     const fetchImpl = vi
       .fn()
@@ -343,7 +333,7 @@ PROPER NAME: UN1814`;
       2,
       "https://teamship.example/api/v1/ship-inventories/30202",
       expect.objectContaining({
-        method: "PATCH",
+        method: "PUT",
         headers: expect.objectContaining({
           authorization: "Bearer token_123"
         }),

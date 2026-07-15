@@ -385,6 +385,29 @@ For multiple pallet/SKU rows, pass multiple `--item` values. The first item upda
 
 This smoke test deliberately leaves BOL editor cleanup disabled. It validates the Teamship shipping-order page only, which is the required path for pallet DIMS/weight/SKU/serial updates.
 
+Dev-only API update smoke test:
+
+Use this once Teamship Dev exposes an update endpoint that supports shipping-order fields and `pallets`. This test writes only to `dev.teamshipos.com`, requires an explicit confirmation flag, resolves display shipping-order numbers to the internal API ID when needed, updates all documented scalar shipping fields, editable EDI fields, pallet rows, and optional no-op `update_items`, then reads the order back and stores redacted evidence under `tmp/teamship-dev-api-smoke/...`.
+
+```bash
+TEAMSHIP_EMAIL="dev-user@example.com" \
+TEAMSHIP_PASSWORD="..." \
+npm run smoke:teamship-dev-api-update -- \
+  --teamship-url "https://dev.teamshipos.com/ship-inventories/105" \
+  --user-id "562" \
+  --confirm-dev-write \
+  --include-item-ops
+```
+
+July 15, 2026 Dev result:
+
+- Display shipping order `105` resolved to API order ID `15320`; direct API/UI access to `/ship-inventories/105` returned 403 because Teamship uses the display number separately from the internal ID.
+- `PUT /api/v1/ship-inventories/15320` returned `200` with `Order updated successfully`.
+- Confirmed in API readback and browser UI: shipping method, service level, carrier, PRO, PO, supplier, ship-to name/address/city/state/zip/country/phone/email, EDI fields `5` through `8`, both pallet rows, pallet quantity, length, width, height, weight, and commodity.
+- `pallets[].weight_unit` was visible in the browser as `lbs`, but the public API readback exposed it only in the hidden page state / `pallets` payload, not in the simplified `pallet_dims` readback used by the script.
+- `pickETA_date` accepted both `07/31/2026` and `07-31-2026` with status `200`, but readback stayed `pickup_eta: "0000-00-00"` and the UI showed `11/30/-0001`; this should be raised with Teamship before relying on API pickup ETA updates.
+- `add_items` and `remove_items` were not executed by default because they change the line composition. The optional item-op smoke safely exercises `update_items` by resubmitting the current item quantity.
+
 If any individual Teamship order update fails, the worker must preserve the per-order evidence and report the job as `NEEDS_REVIEW` instead of discarding the partial result. Successful rows stay traceable as updated evidence, failed rows show the Teamship/API error, and Newl Apps immediately rescans Teamship so the Phase 2 panel has post-agent verification evidence. The CSR/admin can also rescan or correct manually from the Phase 2 update jobs panel.
 
 `NEEDS_REVIEW` jobs must not be re-approved for the agent because the stored execution plan may include rows that already succeeded. After review, rescan Teamship details or create a new update draft for the exact follow-up SRs.
