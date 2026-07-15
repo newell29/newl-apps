@@ -17,6 +17,7 @@ export function InvoiceAutomationTableControls({
   currencyFilter,
   currencyOptions,
   onCurrencyFilterChange,
+  hideCurrencyFilter = false,
   pageSize,
   onPageSizeChange,
   filteredCount,
@@ -34,6 +35,7 @@ export function InvoiceAutomationTableControls({
   currencyFilter: string;
   currencyOptions: string[];
   onCurrencyFilterChange: (value: string) => void;
+  hideCurrencyFilter?: boolean;
   pageSize: InvoiceAutomationTablePageSize;
   onPageSizeChange: (value: InvoiceAutomationTablePageSize) => void;
   filteredCount: number;
@@ -80,21 +82,23 @@ export function InvoiceAutomationTableControls({
             </select>
           </label>
         )}
-        <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
-          Currency
-          <select
-            value={currencyFilter}
-            onChange={(event) => onCurrencyFilterChange(event.target.value)}
-            className="min-h-10 rounded-md border border-input bg-background px-3 py-2 text-sm font-normal normal-case tracking-normal text-foreground"
-          >
-            <option value="ALL">All</option>
-            {currencyOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
+        {hideCurrencyFilter ? null : (
+          <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+            Currency
+            <select
+              value={currencyFilter}
+              onChange={(event) => onCurrencyFilterChange(event.target.value)}
+              className="min-h-10 rounded-md border border-input bg-background px-3 py-2 text-sm font-normal normal-case tracking-normal text-foreground"
+            >
+              <option value="ALL">All</option>
+              {currencyOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
       <div className="flex flex-wrap items-end gap-3">
         <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">

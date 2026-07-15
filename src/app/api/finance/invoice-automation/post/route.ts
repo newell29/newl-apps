@@ -235,12 +235,13 @@ export async function POST(request: Request) {
           realmId: connection.realmId,
           accessToken: connection.accessToken,
           invoiceType: row.invoiceType,
-          docNumber: row.invoiceNumber
+          docNumber: row.invoiceNumber,
+          quickBooksEntityId: parsedEntity?.quickBooksId ?? null
         });
 
         if (existingTransaction?.Id) {
           throw new QuickBooksPostingMappingError(
-            `QuickBooks already has a ${row.invoiceType === "CUSTOMER" ? "customer invoice" : "vendor bill"} with document number ${row.invoiceNumber}.`
+            `QuickBooks already has a ${row.invoiceType === "CUSTOMER" ? "customer invoice" : "vendor bill"} for ${row.quickBooksEntityDisplayName ?? row.entityNameRaw ?? "the selected QuickBooks profile"} with document number ${row.invoiceNumber}.`
           );
         }
 
@@ -675,4 +676,5 @@ function revalidateInvoiceAutomation() {
   revalidatePath("/finance/invoice-automation");
   revalidatePath("/finance/invoice-automation/accounting");
   revalidatePath("/finance/invoice-automation/posted");
+  revalidatePath("/finance/invoice-automation/reconciliation");
 }

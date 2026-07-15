@@ -111,6 +111,7 @@ export async function POST(request: Request) {
 
     revalidatePath("/finance/invoice-automation");
     revalidatePath("/finance/invoice-automation/accounting");
+    revalidatePath("/finance/invoice-automation/reconciliation");
 
     return NextResponse.json({ ok: true });
   } catch (error) {

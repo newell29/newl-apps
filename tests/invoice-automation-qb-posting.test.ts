@@ -631,7 +631,10 @@ describe("invoice automation QuickBooks posting mapping", () => {
           Invoice: [
             {
               Id: "qb-invoice-1",
-              DocNumber: "7488"
+              DocNumber: "7488",
+              CustomerRef: {
+                value: "customer-1"
+              }
             }
           ]
         }
@@ -644,11 +647,75 @@ describe("invoice automation QuickBooks posting mapping", () => {
         realmId: "realm-1",
         accessToken: "token-1",
         invoiceType: "CUSTOMER",
-        docNumber: "7488"
+        docNumber: "7488",
+        quickBooksEntityId: "customer-1"
       })
     ).resolves.toEqual({
       Id: "qb-invoice-1",
-      DocNumber: "7488"
+      DocNumber: "7488",
+      CustomerRef: {
+        value: "customer-1"
+      }
+    });
+  });
+
+  it("does not treat the same vendor bill number on a different vendor as a duplicate", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      QueryResponse: {
+        Bill: [
+          {
+            Id: "bill-other-vendor",
+            DocNumber: "17519",
+            VendorRef: {
+              value: "vendor-other"
+            }
+          }
+        ]
+      }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      findExistingQuickBooksTransaction({
+        realmId: "realm-1",
+        accessToken: "token-1",
+        invoiceType: "VENDOR",
+        docNumber: "17519",
+        quickBooksEntityId: "vendor-canadian-logistics"
+      })
+    ).resolves.toBeNull();
+  });
+
+  it("treats the same vendor bill number on the selected vendor as a duplicate", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      QueryResponse: {
+        Bill: [
+          {
+            Id: "bill-selected-vendor",
+            DocNumber: "17519",
+            VendorRef: {
+              value: "vendor-canadian-logistics"
+            }
+          }
+        ]
+      }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      findExistingQuickBooksTransaction({
+        realmId: "realm-1",
+        accessToken: "token-1",
+        invoiceType: "VENDOR",
+        docNumber: "17519",
+        quickBooksEntityId: "vendor-canadian-logistics"
+      })
+    ).resolves.toEqual({
+      Id: "bill-selected-vendor",
+      DocNumber: "17519",
+      VendorRef: {
+        value: "vendor-canadian-logistics"
+      }
     });
   });
 
