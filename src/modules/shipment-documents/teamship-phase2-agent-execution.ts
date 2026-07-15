@@ -459,15 +459,14 @@ function buildOrderCompletionSaveInstruction(): TeamshipBrowserSaveInstruction {
 }
 
 export function buildTeamshipUpdatePayload(order: TeamshipPhase2OrderPlan): Record<string, unknown> {
-  const flatFields = Object.assign(
+  const fieldUpdates = Object.assign(
     {},
-    ...order.plannedFieldUpdates.map((field) => ({ [field.teamshipField]: field.proposedValue })),
-    ...order.plannedPalletRows.map((row) => row.teamshipFields)
+    ...order.plannedFieldUpdates.map((field) => ({ [mapTeamshipApiFieldName(field.teamshipField)]: field.proposedValue }))
   );
 
   return {
-    ...flatFields,
-    pallet_dims: order.plannedPalletRows.map((row) => ({
+    ...fieldUpdates,
+    pallets: order.plannedPalletRows.map((row) => ({
       quantity: row.quantity,
       length: row.lengthIn,
       width: row.widthIn,
@@ -477,6 +476,14 @@ export function buildTeamshipUpdatePayload(order: TeamshipPhase2OrderPlan): Reco
       commodity: row.commodity
     }))
   };
+}
+
+function mapTeamshipApiFieldName(teamshipField: string) {
+  if (teamshipField === "carrier_value") {
+    return "carrier";
+  }
+
+  return teamshipField;
 }
 
 function assertLiveAllowlist(plan: TeamshipPhase2DryRunPlan, allowlistSrNumbers: string[] | undefined) {
@@ -545,7 +552,7 @@ async function updateTeamshipShippingOrder({
 }) {
   const url = `${apiBaseUrl}/v1/ship-inventories/${encodeURIComponent(teamshipOrderId)}`;
   const response = await fetchImpl(url, {
-    method: "PATCH",
+    method: "PUT",
     headers: buildTeamshipHeaders(token),
     body: JSON.stringify(updatePayload),
     cache: "no-store"
@@ -553,21 +560,6 @@ async function updateTeamshipShippingOrder({
 
   if (response.ok) {
     return response.status;
-  }
-
-  if (response.status === 404 || response.status === 405) {
-    const putResponse = await fetchImpl(url, {
-      method: "PUT",
-      headers: buildTeamshipHeaders(token),
-      body: JSON.stringify(updatePayload),
-      cache: "no-store"
-    });
-
-    if (putResponse.ok) {
-      return putResponse.status;
-    }
-
-    throw new Error(`Teamship update failed with status ${putResponse.status}.`);
   }
 
   throw new Error(`Teamship update failed with status ${response.status}.`);

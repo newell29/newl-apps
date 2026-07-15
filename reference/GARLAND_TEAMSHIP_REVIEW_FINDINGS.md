@@ -351,6 +351,68 @@ npm run worker:teamship-phase2
 
 Live mode logs into Teamship using the tenant Settings credentials, submits the approved order-level fields and pallet rows to `/v1/ship-inventories/:id`, reports evidence back to Newl Apps, and triggers the automatic Teamship rescan. The worker blocks live updates before Teamship login unless every READY SR in the job is explicitly listed in `TEAMSHIP_LIVE_ALLOWLIST_SR_NUMBERS` or passed with `--allow-sr`. Keep `MAX_CONCURRENCY=1` operationally on the VM, and initially release one field group at a time with allowlisted orders: commodity/comment first, then pallet dimensions/weight, then mapped order-level fields.
 
+Dev-only browser smoke test:
+
+Use this before any production rollout when Teamship Dev has a test shipping order ready. This test runs from the local computer, opens the Dev Teamship order in a real browser, updates only the explicitly supplied shipping-order fields and pallet rows, clicks Teamship Save, reloads the order, and stores screenshots under `tmp/teamship-browser-smoke/...`.
+
+The smoke runner is restricted to non-production Teamship hosts (`dev.teamshipos.com` and `staging.teamshipos.com`) and requires `--confirm-live-write`. For Garland Phase 2 validation, use the Dev host only.
+
+```bash
+TEAMSHIP_EMAIL="dev-user@example.com" \
+TEAMSHIP_PASSWORD="..." \
+npm run smoke:teamship-phase2-browser -- \
+  --teamship-url "https://dev.teamshipos.com/ship-inventories/5800" \
+  --sr "SR809918" \
+  --confirm-live-write \
+  --headed \
+  --slow-mo-ms 350 \
+  --field "edi_field_3=PPADD-CD" \
+  --field "edi_field_4=ATTN:RECEIVING FREIGHT QUOTE" \
+  --item "KGLT2020,12345678,1,36,22,48,187" \
+  --item "KGLT2020,123456789,1,36,22,48,187"
+```
+
+Supported field smoke-test keys are:
+
+| Key | Teamship UI field |
+| --- | --- |
+| `poNumber` | PO Number |
+| `edi_field_3` | Freight Terms Code |
+| `edi_field_4` | Special Instructions |
+| `carrier_value` | Carrier |
+
+For multiple pallet/SKU rows, pass multiple `--item` values. The first item updates the existing first pallet row. Additional items require the browser worker to click `Add Another Pallet Size` until the row exists, then fill quantity, length, width, height, weight, unit, and commodity. The commodity format is `SKU: <sku> SN: <serial>` when a serial is present, otherwise `SKU: <sku> QTY: <quantity>`.
+
+This smoke test deliberately leaves BOL editor cleanup disabled. It validates the Teamship shipping-order page only, which is the required path for pallet DIMS/weight/SKU/serial updates.
+
+Dev-only API update smoke test:
+
+Use this once Teamship Dev exposes an update endpoint that supports shipping-order fields and `pallets`. This test writes only to `dev.teamshipos.com`, requires an explicit confirmation flag, resolves display shipping-order numbers to the internal API ID when needed, updates all documented scalar shipping fields, editable EDI fields, pallet rows, and optional no-op `update_items`, then reads the order back and stores redacted evidence under `tmp/teamship-dev-api-smoke/...`.
+
+```bash
+TEAMSHIP_EMAIL="dev-user@example.com" \
+TEAMSHIP_PASSWORD="..." \
+npm run smoke:teamship-dev-api-update -- \
+  --teamship-url "https://dev.teamshipos.com/ship-inventories/105" \
+  --user-id "562" \
+  --confirm-dev-write \
+  --include-item-ops
+```
+
+July 15, 2026 Dev result:
+
+- Display shipping order `105` resolved to API order ID `15320`; direct API/UI access to `/ship-inventories/105` returned 403 because Teamship uses the display number separately from the internal ID.
+- `PUT /api/v1/ship-inventories/15320` returned `200` with `Order updated successfully`.
+- Confirmed in API readback and browser UI: shipping method, service level, carrier, PRO, PO, supplier, ship-to name/address/city/state/zip/country/phone/email, EDI fields `5` through `8`, both pallet rows, pallet quantity, length, width, height, weight, and commodity.
+- `pallets[].weight_unit` was visible in the browser as `lbs`, but the public API readback exposed it only in the hidden page state / `pallets` payload, not in the simplified `pallet_dims` readback used by the script.
+- `pickETA_date` must be sent as `yyyy-mm-dd`. Formats like `07/31/2026` and `07-31-2026` returned `200` but did not persist correctly; `2026-07-31` read back as `pickup_eta: "2026-07-31"`.
+- Item operations were tested against the Dev order with customer/user `562` and warehouse/location `105`. `search-products` returned in-stock SKU `XMK00167` with stock rows `16593` and `17462`.
+- `add_items` requires `inventory_stock_id` to use the search result's `stock_id`, not the product `id`. Adding a stock row that already exists on the order returns `422` with `Product already exists in this order`.
+- `update_items` worked using the order item row ID from the order response. Updating item `59099` from quantity `1` to `2` returned `200` and read back quantity `2`.
+- `remove_items` worked using the order item row ID. Removing item `59099` returned `200` and the row disappeared from readback.
+- After removal, `add_items: [{ inventory_stock_id: 16593, quantity: 1 }]` returned `200`, `items_added: 1`, and created replacement item row `59101`.
+- An insufficient-stock add was rejected correctly. Requesting quantity `1016` from stock row `16593` returned `422` with a not-enough-stock validation message and did not add/change order rows.
+
 If any individual Teamship order update fails, the worker must preserve the per-order evidence and report the job as `NEEDS_REVIEW` instead of discarding the partial result. Successful rows stay traceable as updated evidence, failed rows show the Teamship/API error, and Newl Apps immediately rescans Teamship so the Phase 2 panel has post-agent verification evidence. The CSR/admin can also rescan or correct manually from the Phase 2 update jobs panel.
 
 `NEEDS_REVIEW` jobs must not be re-approved for the agent because the stored execution plan may include rows that already succeeded. After review, rescan Teamship details or create a new update draft for the exact follow-up SRs.
