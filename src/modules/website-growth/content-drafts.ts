@@ -2,8 +2,10 @@ import { WebsiteGrowthAction, WebsiteGrowthContentDraftSource } from "@prisma/cl
 
 import {
   getNewlWebsitePatternForOpportunity,
-  newlWebsiteContext
+  newlWebsiteContext,
+  type NewlWebsiteContext
 } from "@/modules/website-growth/newl-website-context";
+import { resolveNewlWebsiteContext } from "@/modules/website-growth/newl-website-context-scanner";
 import { generateWebsiteGrowthContentDraft, isOpenAiDraftGenerationConfigured } from "@/server/integrations/openai";
 
 export type WebsiteGrowthDraftOpportunity = {
@@ -54,13 +56,17 @@ export type WebsiteGrowthContentDraftResult = WebsiteGrowthContentDraftPayload &
 export async function createWebsiteGrowthContentDraftPayload(
   opportunity: WebsiteGrowthDraftOpportunity
 ): Promise<WebsiteGrowthContentDraftResult> {
+  const websiteContext = await resolveNewlWebsiteContext();
+  const proposedPath = buildProposedPath(opportunity);
+  const pagePattern = getNewlWebsitePatternForOpportunity(opportunity.action, opportunity.targetPage, proposedPath, websiteContext);
+
   if (isOpenAiDraftGenerationConfigured()) {
     try {
       const generated = await generateWebsiteGrowthContentDraft({
         model: process.env.OPENAI_WEBSITE_GROWTH_MODEL?.trim() || "gpt-5-mini",
         opportunity: serializeOpportunity(opportunity),
-        websiteContext: newlWebsiteContext,
-        pagePattern: getNewlWebsitePatternForOpportunity(opportunity.action, opportunity.targetPage, buildProposedPath(opportunity))
+        websiteContext,
+        pagePattern
       });
 
       return {
@@ -69,7 +75,7 @@ export async function createWebsiteGrowthContentDraftPayload(
       };
     } catch {
       return {
-        ...buildTemplateWebsiteGrowthContentDraft(opportunity),
+        ...buildTemplateWebsiteGrowthContentDraft(opportunity, websiteContext),
         source: WebsiteGrowthContentDraftSource.TEMPLATE,
         rawResponse: null
       };
@@ -77,21 +83,22 @@ export async function createWebsiteGrowthContentDraftPayload(
   }
 
   return {
-    ...buildTemplateWebsiteGrowthContentDraft(opportunity),
+    ...buildTemplateWebsiteGrowthContentDraft(opportunity, websiteContext),
     source: WebsiteGrowthContentDraftSource.TEMPLATE,
     rawResponse: null
   };
 }
 
 export function buildTemplateWebsiteGrowthContentDraft(
-  opportunity: WebsiteGrowthDraftOpportunity
+  opportunity: WebsiteGrowthDraftOpportunity,
+  websiteContext = newlWebsiteContext
 ): WebsiteGrowthContentDraftPayload {
   const keyword = opportunity.primaryKeyword || opportunity.topic;
   const contentType = getContentType(opportunity.action);
   const proposedPath = buildProposedPath(opportunity);
   const targetUrl = opportunity.targetPage || proposedPath || "/resources/logistics-insights";
   const supportingKeywords = readStringArray(opportunity.supportingKeywords);
-  const pagePattern = getNewlWebsitePatternForOpportunity(opportunity.action, opportunity.targetPage, proposedPath);
+  const pagePattern = getNewlWebsitePatternForOpportunity(opportunity.action, opportunity.targetPage, proposedPath, websiteContext);
 
   return {
     title: buildTitle(opportunity),
@@ -139,6 +146,7 @@ export function buildTemplateWebsiteGrowthContentDraft(
       `Primary review page: ${targetUrl}`,
       `Use Newl website pattern: ${pagePattern.pageType} (${pagePattern.sourceTemplate}).`,
       `Recommended component sequence: ${pagePattern.componentSequence.join(" -> ")}.`,
+      buildSiteInventoryNote(websiteContext),
       `Recommended queue action: ${formatAction(opportunity.action)}`,
       "Keep claims specific to known Newl capabilities and avoid unsupported guarantees.",
       "After approval, build or update the website page, verify internal links, then resubmit the sitemap in Search Console if a new URL is created."
@@ -156,6 +164,16 @@ export function buildTemplateWebsiteGrowthContentDraft(
     layoutComponents: pagePattern.componentSequence,
     designSystemNotes: pagePattern.designNotes
   };
+}
+
+function buildSiteInventoryNote(websiteContext: NewlWebsiteContext) {
+  const inventory = websiteContext.siteInventory;
+
+  if (!inventory || inventory.source !== "repo-scan") {
+    return "Site context source: built-in Newl website pattern library.";
+  }
+
+  return `Site context source: repo scan at ${inventory.scannedAt}; ${inventory.routes.length} routes, ${inventory.templates.length} templates, ${inventory.internalLinks.length} internal links sampled.`;
 }
 
 function serializeOpportunity(opportunity: WebsiteGrowthDraftOpportunity) {

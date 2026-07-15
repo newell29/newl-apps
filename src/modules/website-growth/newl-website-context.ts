@@ -18,6 +18,16 @@ export type NewlWebsiteContext = {
   copyRules: string[];
   seoRules: string[];
   internalLinkRules: string[];
+  siteInventory?: {
+    source: "static" | "repo-scan";
+    scannedAt: string | null;
+    repoPath: string | null;
+    routes: Array<{ path: string; type: string }>;
+    templates: Array<{ file: string; components: string[] }>;
+    contactFormFields: string[];
+    faqSignals: Array<{ file: string; count: number }>;
+    internalLinks: string[];
+  };
 };
 
 export const newlWebsiteContext: NewlWebsiteContext = {
@@ -228,33 +238,48 @@ export const newlWebsiteContext: NewlWebsiteContext = {
     "Freight links should point to /freight/ground-distribution, /freight/gta-local-trucking, /freight/cross-border-logistics, /freight/ocean-freight, and /freight/air-freight where relevant.",
     "Location links should include /locations/mississauga-warehousing, /locations/charlotte-warehousing, or /locations/canada-us-distribution-network where relevant.",
     "Conversion links should include /resources/contact or the page's assessment form anchor."
-  ]
+  ],
+  siteInventory: {
+    source: "static",
+    scannedAt: null,
+    repoPath: null,
+    routes: [],
+    templates: [],
+    contactFormFields: [],
+    faqSignals: [],
+    internalLinks: []
+  }
 };
 
-export function getNewlWebsitePatternForOpportunity(action: WebsiteGrowthAction, targetPage: string | null, proposedPath: string | null) {
+export function getNewlWebsitePatternForOpportunity(
+  action: WebsiteGrowthAction,
+  targetPage: string | null,
+  proposedPath: string | null,
+  context: NewlWebsiteContext = newlWebsiteContext
+) {
   const path = normalizePath(targetPage) ?? normalizePath(proposedPath) ?? "";
 
   if (path.startsWith("/industries/")) {
-    return getPattern("Industry page");
+    return getPattern("Industry page", context);
   }
 
   if (path.startsWith("/locations/")) {
-    return getPattern("Location page");
+    return getPattern("Location page", context);
   }
 
   if (path.startsWith("/freight/")) {
-    return getPattern("Freight page");
+    return getPattern("Freight page", context);
   }
 
   if (path.startsWith("/resources/") || action === WebsiteGrowthAction.CREATE_RESOURCE_ARTICLE) {
-    return getPattern("Resource article");
+    return getPattern("Resource article", context);
   }
 
-  return getPattern("Service page");
+  return getPattern("Service page", context);
 }
 
-function getPattern(pageType: string) {
-  return newlWebsiteContext.pagePatterns.find((pattern) => pattern.pageType === pageType) ?? newlWebsiteContext.pagePatterns[0];
+function getPattern(pageType: string, context: NewlWebsiteContext) {
+  return context.pagePatterns.find((pattern) => pattern.pageType === pageType) ?? context.pagePatterns[0];
 }
 
 function normalizePath(value: string | null) {
