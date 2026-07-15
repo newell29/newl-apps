@@ -97,35 +97,63 @@ export async function getInvoiceAutomationPostedShell(tenant: TenantContext, fil
 }
 
 export async function getInvoiceAutomationReconciliationShell(tenant: TenantContext) {
-  const invoices = await prisma.invoiceAutomationInvoice.findMany({
-    where: {
-      tenantId: tenant.tenantId,
-      shipmentFileNumber: {
-        not: null
+  const [invoices, quickBooksTransactions] = await Promise.all([
+    prisma.invoiceAutomationInvoice.findMany({
+      where: {
+        tenantId: tenant.tenantId,
+        shipmentFileNumber: {
+          not: null
+        },
+        status: {
+          not: InvoiceAutomationStatus.REJECTED
+        }
       },
-      status: {
-        not: InvoiceAutomationStatus.REJECTED
+      orderBy: [{ updatedAt: "desc" }],
+      take: 2500,
+      select: {
+        id: true,
+        invoiceType: true,
+        status: true,
+        shipmentFileNumber: true,
+        shipmentType: true,
+        entityNameRaw: true,
+        quickBooksEntityDisplayName: true,
+        invoiceNumber: true,
+        invoiceDate: true,
+        currency: true,
+        subtotalAmount: true,
+        quickBooksSubtotalHomeAmount: true
       }
-    },
-    orderBy: [{ updatedAt: "desc" }],
-    take: 2500,
-    select: {
-      id: true,
-      invoiceType: true,
-      status: true,
-      shipmentFileNumber: true,
-      shipmentType: true,
-      entityNameRaw: true,
-      quickBooksEntityDisplayName: true,
-      invoiceNumber: true,
-      invoiceDate: true,
-      currency: true,
-      subtotalAmount: true,
-      quickBooksSubtotalHomeAmount: true
-    }
-  });
+    }),
+    prisma.invoiceAutomationQuickBooksTransaction.findMany({
+      where: {
+        tenantId: tenant.tenantId,
+        invoiceAutomationInvoiceId: null,
+        shipmentFileNumber: {
+          not: null
+        }
+      },
+      orderBy: [{ observedAt: "desc" }],
+      take: 2500,
+      select: {
+        id: true,
+        invoiceType: true,
+        shipmentFileNumber: true,
+        shipmentType: true,
+        entityName: true,
+        quickBooksTxnNumber: true,
+        transactionDate: true,
+        currency: true,
+        subtotalAmount: true,
+        quickBooksSubtotalHomeAmount: true
+      }
+    })
+  ]);
 
-  const rows = buildShipmentReconciliationRows(invoices);
+  const rows = buildShipmentReconciliationRows([
+    ...invoices,
+    ...quickBooksTransactions.map(toQuickBooksReconciliationRecord)
+  ]);
 
   return {
     rows,
@@ -258,6 +286,34 @@ type ReconciliationInvoiceRecord = {
   subtotalAmount: { toString(): string } | number | null;
   quickBooksSubtotalHomeAmount: { toString(): string } | number | null;
 };
+
+function toQuickBooksReconciliationRecord(record: {
+  id: string;
+  invoiceType: InvoiceAutomationType;
+  shipmentFileNumber: string | null;
+  shipmentType: string | null;
+  entityName: string | null;
+  quickBooksTxnNumber: string | null;
+  transactionDate: Date | null;
+  currency: string | null;
+  subtotalAmount: Prisma.Decimal | null;
+  quickBooksSubtotalHomeAmount: Prisma.Decimal | null;
+}): ReconciliationInvoiceRecord {
+  return {
+    id: `quickbooks:${record.id}`,
+    invoiceType: record.invoiceType,
+    status: InvoiceAutomationStatus.POSTED,
+    shipmentFileNumber: record.shipmentFileNumber,
+    shipmentType: record.shipmentType,
+    entityNameRaw: record.entityName,
+    quickBooksEntityDisplayName: record.entityName,
+    invoiceNumber: record.quickBooksTxnNumber,
+    invoiceDate: record.transactionDate,
+    currency: record.currency,
+    subtotalAmount: record.subtotalAmount,
+    quickBooksSubtotalHomeAmount: record.quickBooksSubtotalHomeAmount
+  };
+}
 
 function buildShipmentReconciliationRows(records: ReconciliationInvoiceRecord[]): InvoiceAutomationReconciliationRow[] {
   const groups = new Map<string, ReconciliationInvoiceRecord[]>();
