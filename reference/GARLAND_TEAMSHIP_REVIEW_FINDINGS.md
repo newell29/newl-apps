@@ -406,7 +406,12 @@ July 15, 2026 Dev result:
 - Confirmed in API readback and browser UI: shipping method, service level, carrier, PRO, PO, supplier, ship-to name/address/city/state/zip/country/phone/email, EDI fields `5` through `8`, both pallet rows, pallet quantity, length, width, height, weight, and commodity.
 - `pallets[].weight_unit` was visible in the browser as `lbs`, but the public API readback exposed it only in the hidden page state / `pallets` payload, not in the simplified `pallet_dims` readback used by the script.
 - `pickETA_date` must be sent as `yyyy-mm-dd`. Formats like `07/31/2026` and `07-31-2026` returned `200` but did not persist correctly; `2026-07-31` read back as `pickup_eta: "2026-07-31"`.
-- `add_items` and `remove_items` were not executed by default because they change the line composition. The optional item-op smoke safely exercises `update_items` by resubmitting the current item quantity.
+- Item operations were tested against the Dev order with customer/user `562` and warehouse/location `105`. `search-products` returned in-stock SKU `XMK00167` with stock rows `16593` and `17462`.
+- `add_items` requires `inventory_stock_id` to use the search result's `stock_id`, not the product `id`. Adding a stock row that already exists on the order returns `422` with `Product already exists in this order`.
+- `update_items` worked using the order item row ID from the order response. Updating item `59099` from quantity `1` to `2` returned `200` and read back quantity `2`.
+- `remove_items` worked using the order item row ID. Removing item `59099` returned `200` and the row disappeared from readback.
+- After removal, `add_items: [{ inventory_stock_id: 16593, quantity: 1 }]` returned `200`, `items_added: 1`, and created replacement item row `59101`.
+- An insufficient-stock add was rejected correctly. Requesting quantity `1016` from stock row `16593` returned `422` with a not-enough-stock validation message and did not add/change order rows.
 
 If any individual Teamship order update fails, the worker must preserve the per-order evidence and report the job as `NEEDS_REVIEW` instead of discarding the partial result. Successful rows stay traceable as updated evidence, failed rows show the Teamship/API error, and Newl Apps immediately rescans Teamship so the Phase 2 panel has post-agent verification evidence. The CSR/admin can also rescan or correct manually from the Phase 2 update jobs panel.
 
