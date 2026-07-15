@@ -1,6 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
 
-import { WebsiteGrowthAction } from "@prisma/client";
+import { WebsiteGrowthAction, type WebsiteGrowthOpportunity } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import { parseDelimitedRows, readNumber, readString } from "@/modules/website-growth/csv";
@@ -15,6 +15,7 @@ import {
   qualifyOpportunityCandidates,
   weeklyContentRecommendations
 } from "@/modules/website-growth/opportunities";
+import { selectWeeklyWebsiteGrowthCandidates } from "@/modules/website-growth/weekly-plan";
 
 describe("website growth CSV parsing", () => {
   it("normalizes Search Console export rows", () => {
@@ -127,7 +128,62 @@ describe("website growth weekly planning lanes", () => {
       expect(count).toBe(1);
     }
   });
+
+  it("selects only one prepared item per target page and weekly lane", () => {
+    const candidates = [
+      weeklyCandidate({
+        id: "nationwide",
+        action: WebsiteGrowthAction.ADD_SECTION,
+        topic: "nationwide 3pl companies",
+        targetPage: "https://www.newlgroup.com/top-3pl-companies-in-usa/",
+        score: 42
+      }),
+      weeklyCandidate({
+        id: "top-provider",
+        action: WebsiteGrowthAction.ADD_SECTION,
+        topic: "top 3pl provider",
+        targetPage: "https://www.newlgroup.com/top-3pl-companies-in-usa/",
+        score: 42
+      }),
+      weeklyCandidate({
+        id: "resource",
+        action: WebsiteGrowthAction.CREATE_RESOURCE_ARTICLE,
+        topic: "what is demurrage",
+        targetPage: null,
+        score: 60
+      })
+    ];
+
+    const result = selectWeeklyWebsiteGrowthCandidates(candidates);
+
+    expect(result.selected.map((candidate) => candidate.id)).toEqual(["resource", "nationwide"]);
+    expect(result.laneCounts.QUICK_OPTIMIZATION).toBe(1);
+  });
 });
+
+function weeklyCandidate({
+  id,
+  action,
+  topic,
+  targetPage,
+  score
+}: {
+  id: string;
+  action: WebsiteGrowthAction;
+  topic: string;
+  targetPage: string | null;
+  score: number;
+}) {
+  return {
+    id,
+    action,
+    topic,
+    targetPage,
+    sourcePage: targetPage,
+    score,
+    updatedAt: new Date("2026-07-15T12:00:00Z")
+  } as WebsiteGrowthOpportunity;
+}
 
 describe("website growth content draft packages", () => {
   it("builds a resource article proposal for informational opportunities", () => {

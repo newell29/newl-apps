@@ -209,8 +209,64 @@ export async function getWebsiteGrowthShell(
       count: entry._count._all
     })),
     weeklyLaneCounts,
-    preparedOpportunities
+    preparedOpportunities: collapsePreparedOpportunities(preparedOpportunities)
   };
+}
+
+function collapsePreparedOpportunities<T extends {
+  action: WebsiteGrowthAction;
+  targetPage: string | null;
+  sourcePage: string | null;
+  topic: string;
+  score: number;
+  updatedAt: Date;
+  contentDrafts: unknown[];
+}>(opportunities: T[]) {
+  const grouped = new Map<string, T>();
+
+  for (const opportunity of opportunities) {
+    const key = `${getReviewLane(opportunity.action)}:${normalizeReviewPage(opportunity.targetPage ?? opportunity.sourcePage ?? opportunity.topic)}`;
+    const existing = grouped.get(key);
+
+    if (!existing || comparePreparedOpportunity(opportunity, existing) < 0) {
+      grouped.set(key, opportunity);
+    }
+  }
+
+  return Array.from(grouped.values()).sort(comparePreparedOpportunity);
+}
+
+function comparePreparedOpportunity(a: { score: number; updatedAt: Date; contentDrafts: unknown[] }, b: { score: number; updatedAt: Date; contentDrafts: unknown[] }) {
+  const draftDelta = Number(b.contentDrafts.length > 0) - Number(a.contentDrafts.length > 0);
+
+  if (draftDelta !== 0) {
+    return draftDelta;
+  }
+
+  const scoreDelta = b.score - a.score;
+
+  if (scoreDelta !== 0) {
+    return scoreDelta;
+  }
+
+  return b.updatedAt.getTime() - a.updatedAt.getTime();
+}
+
+function getReviewLane(action: WebsiteGrowthAction) {
+  return weeklyContentRecommendations.find((lane) => lane.actions.includes(action))?.lane ?? action;
+}
+
+function normalizeReviewPage(value: string) {
+  try {
+    const parsed = new URL(value);
+    return parsed.pathname.replace(/\/+$/g, "") || "/";
+  } catch {
+    return value
+      .toLowerCase()
+      .replace(/^https?:\/\/[^/]+/i, "")
+      .replace(/\/+$/g, "")
+      .trim();
+  }
 }
 
 export function buildOpportunityWhere(

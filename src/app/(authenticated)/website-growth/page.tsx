@@ -521,14 +521,12 @@ function PreparedOpportunityCard({
             <SummaryRow label="Target keyword" value={draftPayload?.targetKeyword} />
             <SummaryRow label="Search intent" value={draftPayload?.searchIntent} />
           </dl>
-          {draft.proposedPath ? (
-            <Link
-              href={draft.proposedPath}
-              className="mt-3 inline-flex text-sm font-semibold text-primary transition-colors hover:text-primaryHover"
-            >
-              Review destination path
-            </Link>
-          ) : null}
+          <Link
+            href={`/website-growth/drafts/${draft.id}`}
+            className="mt-3 inline-flex text-sm font-semibold text-primary transition-colors hover:text-primaryHover"
+          >
+            View draft page preview
+          </Link>
           {draftPayload ? (
             <details className="mt-3">
               <summary className="cursor-pointer text-sm font-semibold text-primary">Review draft details</summary>

@@ -34,24 +34,7 @@ export async function createWeeklyWebsiteGrowthPlanForTenant(
     take: 500
   });
 
-  const selected: Array<WebsiteGrowthOpportunity & { weeklyLane: WeeklyContentLane; weeklyLabel: string }> = [];
-  const laneCounts = emptyLaneCounts();
-
-  for (const lane of weeklyContentRecommendations) {
-    const laneCandidates = candidates
-      .filter((candidate) => lane.actions.includes(candidate.action))
-      .filter((candidate) => !selected.some((selectedCandidate) => selectedCandidate.id === candidate.id))
-      .slice(0, lane.publishLimit);
-
-    for (const candidate of laneCandidates) {
-      selected.push({
-        ...candidate,
-        weeklyLane: lane.lane,
-        weeklyLabel: lane.label
-      });
-      laneCounts[lane.lane] += 1;
-    }
-  }
+  const { selected, laneCounts } = selectWeeklyWebsiteGrowthCandidates(candidates);
 
   for (const opportunity of selected) {
     const planNote = [
@@ -99,6 +82,43 @@ export async function createWeeklyWebsiteGrowthPlanForTenant(
   };
 }
 
+export function selectWeeklyWebsiteGrowthCandidates(candidates: WebsiteGrowthOpportunity[]) {
+  const selected: Array<WebsiteGrowthOpportunity & { weeklyLane: WeeklyContentLane; weeklyLabel: string }> = [];
+  const laneCounts = emptyLaneCounts();
+  const selectedKeys = new Set<string>();
+
+  for (const lane of weeklyContentRecommendations) {
+    const laneCandidates = candidates
+      .filter((candidate) => lane.actions.includes(candidate.action))
+      .filter((candidate) => !selected.some((selectedCandidate) => selectedCandidate.id === candidate.id));
+
+    for (const candidate of laneCandidates) {
+      const key = getWeeklySelectionKey(candidate, lane.lane);
+
+      if (selectedKeys.has(key)) {
+        continue;
+      }
+
+      selected.push({
+        ...candidate,
+        weeklyLane: lane.lane,
+        weeklyLabel: lane.label
+      });
+      selectedKeys.add(key);
+      laneCounts[lane.lane] += 1;
+
+      if (laneCounts[lane.lane] >= lane.publishLimit) {
+        break;
+      }
+    }
+  }
+
+  return {
+    selected,
+    laneCounts
+  };
+}
+
 export async function createWeeklyWebsiteGrowthPlansForEnabledTenants() {
   const tenantAccess = await prisma.tenantModuleAccess.findMany({
     where: {
@@ -119,6 +139,23 @@ export async function createWeeklyWebsiteGrowthPlansForEnabledTenants() {
   }
 
   return results;
+}
+
+function getWeeklySelectionKey(candidate: WebsiteGrowthOpportunity, lane: WeeklyContentLane) {
+  return `${lane}:${normalizeReviewPage(candidate.targetPage ?? candidate.sourcePage ?? candidate.topic)}`;
+}
+
+function normalizeReviewPage(value: string) {
+  try {
+    const parsed = new URL(value);
+    return parsed.pathname.replace(/\/+$/g, "") || "/";
+  } catch {
+    return value
+      .toLowerCase()
+      .replace(/^https?:\/\/[^/]+/i, "")
+      .replace(/\/+$/g, "")
+      .trim();
+  }
 }
 
 function emptyLaneCounts(): Record<WeeklyContentLane, number> {
