@@ -1,6 +1,6 @@
 # Garland Teamship Review Findings
 
-Last updated: 2026-07-11
+Last updated: 2026-07-14
 
 This file captures the current Stage 1 Teamship review findings so future Garland testing does not depend on chat history.
 
@@ -62,17 +62,33 @@ Latest verification on 2026-07-11:
 
 Garland currently sends shipping-order PDF batches to `warehouse@newl.ca` and copies CSR users. The shared inbox also receives unrelated customer emails and follow-up messages on the same chains, so email intake must be conservative and auditable.
 
-Recommended flow:
+The email subject often carries useful batch metadata, for example `12 ORDERS 13 PAGES - PS210235 - PS210246`, but the attached PDFs remain the source of truth for operational data. Replies in the same thread may include missing-shipment follow-ups, customer questions, replacement/correction attachments, or repeated attachments, so the mailbox workflow must be conservative and dedupe-heavy.
 
-1. Microsoft Graph reads the configured shared mailbox targets.
-2. Newl Apps classifies candidate Garland messages using deterministic signals first: Garland sender domain, PS range in subject, `orders/pages` wording, and PDF attachments.
-3. Newl Apps stores tenant-scoped email and attachment metadata in `GarlandSourceEmail` and `GarlandSourceAttachment`.
-4. Exact Graph message/attachment IDs are upserted, not inserted blindly, so re-running intake does not duplicate the same email attachment.
-5. Candidate emails are grouped into one visible batch by shipment day, PS start/end range, order count, and page count. Follow-up emails in the same batch stay visible inside the grouped record instead of becoming duplicate work items.
-6. The existing Garland PDF extraction pipeline remains the source of truth for order details once the PDF file is processed.
-7. Later, an AI triage step can review ambiguous email threads before extraction, but AI should not override deterministic dedupe or PDF parsing.
+Target flow:
 
-UI impact:
+1. Microsoft Graph reads only configured tenant mailboxes such as `warehouse@newl.ca`.
+2. A strict Garland pre-filter runs before AI: sender domain/contact allowlist, PDF attachment presence, subject/body shipment clues, and existing Garland conversation tracking.
+3. A low-cost AI classifier may classify filtered messages as `NEW_DOCUMENT_BATCH`, `ADDITIONAL_ATTACHMENT`, `REPLACEMENT_OR_CORRECTION`, `MISSING_SHIPMENT_FOLLOWUP`, `CUSTOMER_STATUS_FOLLOWUP`, or `IGNORE_NO_ACTION`.
+4. Newl Apps stores the email metadata, conversation/thread id, recipients, body preview, attachment metadata, attachment hash, and any classifier result.
+5. Exact Microsoft Graph message/attachment IDs are upserted, not inserted blindly, so re-running intake does not duplicate the same email attachment.
+6. Candidate emails are grouped into one visible batch by shipment day, PS start/end range, order count, and page count. Follow-up emails in the same batch stay visible inside the grouped record instead of becoming duplicate work items.
+7. New PDF attachments feed the existing Garland PDF extraction path. Email subject values such as order count, page count, and PS range are used as expectations, not as source-of-truth shipment records.
+8. Extracted PDF orders are merged into the current Garland Teamship review workspace for the shipment date/conversation, then compared against saved or freshly fetched Teamship orders.
+9. The run summary shows what came from email, what was extracted from PDF, what matched Teamship, what needs review, and which orders could not be found in Teamship.
+10. Until Teamship write APIs are available in production, approved updates can continue through the existing Phase 2 update-job and VM worker path. Once update APIs exist, the same update-job contract should execute by API first, with browser automation reserved as fallback.
+
+Required duplicate and revision controls:
+
+- Store Microsoft Graph `messageId`, `internetMessageId`, `conversationId`, and mailbox address.
+- Store each attachment's Graph attachment id, filename, content type, size, content hash, page count, extracted PS/SR list, and extraction fingerprint.
+- Same attachment hash means duplicate; do not reprocess.
+- Same PS/SR set with the same extracted values means duplicate; do not create duplicate shipment rows.
+- Same PS/SR set with changed extracted values means create a new revision or correction flag and keep before/after evidence.
+- New PS/SR values in an existing Garland conversation should append to the active daily review workspace instead of overwriting matched rows.
+- A follow-up email with no new PDFs should be stored as a note/alert on the related run, not as a new review run.
+- Resyncs must not delete existing Teamship-synced orders, saved Garland review rows, CSR DIMS edits, workflow statuses, or completed PDF/Teamship matches unless the source document actually changed and a revision is recorded.
+
+### UI Impact
 
 - Email intake now lives on `/shipment-documents/teamship-review/email-intake` as a separate Teamship Review subpage so the inbox queue can grow without cluttering daily shipment review.
 - CSR/admin users can search detected messages, see grouped duplicate/follow-up counts, see parsed PS ranges, and inspect stored attachment metadata.
@@ -80,7 +96,67 @@ UI impact:
 - This is metadata-only in the first PR. It does not automatically download/store PDF files or run the PDF review yet.
 - The next UI step is a `Create review from email attachments` action once attachment binary storage is added.
 
-Reusable pieces already in Newl Apps:
+The current Teamship Review page should become a Garland control tower with two intake paths:
+
+- `Email intake` for automatically detected Garland email batches and attachments.
+- `Manual upload` for current drag/upload testing, exceptions, or emails that were not captured automatically.
+
+The top of the page should be tightened so the CSR can get to the shipment queue quickly:
+
+- A compact `Today / date range / source` header.
+- Status chips for `Email batches`, `PDF attachments`, `PDF orders`, `Teamship orders`, `Needs review`, `Ready for update`, and `Complete`.
+- A primary action such as `Process latest Garland emails` or `Sync Garland inbox`.
+- A secondary manual upload control for adding more PDFs to the active workspace.
+- A collapsible `Email evidence` panel showing sender, subject, received time, attachments, conversation id, classifier result, and dedupe/revision status.
+
+The shipment queue itself can remain the core UI:
+
+- Keep the expandable per-shipment rows.
+- Keep row color/status behavior for green/pass, red/issues, amber/pending Teamship, amber/no PDF, and completed states.
+- Add source badges such as `Email PDF`, `Manual PDF`, `Replacement`, `Duplicate ignored`, or `Follow-up note`.
+- Add a batch-level warning when the email subject expected more orders/pages than the PDFs produced.
+- Add a batch-level warning when PDFs contain Garland SRs that are not in Teamship.
+- Keep the existing `Load/edit`, `Search history`, date filters, and admin delete controls.
+- Keep the per-shipment workflow controls for `BOL printed` and `Order complete`.
+
+Once email intake is live, the `Teamship alert digest` box should become a fallback/manual override. If Teamship alert digest emails can also be ingested through Microsoft Graph later, the alert parser can be reused to attach pending-Teamship reasons automatically.
+
+### CSR Agent Report And Outbound Email
+
+After a Garland Teamship review run is saved, Newl Apps can generate a CSR-facing agent report from the saved run, matching update jobs, and optional Teamship inventory lookup. This report is meant to be the operational handoff after the bot/API update stage, not a replacement for the saved searchable run.
+
+The report should include:
+
+- Orders successfully updated in Teamship, including PS/SR references and Teamship links where available.
+- Orders that still need CSR review because the PDF and Teamship values disagree, the update agent failed, or an update was blocked.
+- Garland PDF orders that were not found in Teamship.
+- Pending Teamship orders identified from alert digest data.
+- Teamship orders from the date range that had no matching Garland PDF.
+- Inventory lookup notes for missing/pending orders when configured, including whether the requested SKU/serial appears available, whether the SKU exists but the requested serial is missing, and any alternative serials returned by Teamship inventory search.
+
+Outbound email should start simple:
+
+- Use Resend for outbound sending.
+- Configure `GARLAND_CSR_AGENT_REPORT_TO` with the CSR distribution list or shared inbox recipients.
+- Configure `GARLAND_CSR_AGENT_EMAIL_FROM` with a verified sender such as `Garland CSR Agent <agent@newl.ca>` or a verified Newl notifications sender.
+- Configure `GARLAND_CSR_AGENT_REPLY_TO` to `warehouse@newl.ca` or the CSR shared inbox so replies stay with the operations team.
+- If Resend, recipients, or a verified sender are not configured, the app should still generate the report and mark email as skipped rather than failing the saved run.
+
+Making the agent a real mailbox is the longer-term goal, but it is not required for the first production flow. The target end state is a Garland CSR agent identity that can receive replies, preserve customer-service thread history, understand follow-up emails in the same conversation, draft or send approved replies, and manage exception conversations around missing Teamship orders, stock issues, replacement PDFs, customer follow-ups, and corrected shipment details.
+
+Recommended progression:
+
+1. Start with Resend outbound summaries and `Reply-To: warehouse@newl.ca`.
+2. Add read-only thread monitoring so replies to agent reports are linked back to the saved Garland run.
+3. Add reply classification such as `CSR_ACKNOWLEDGED`, `CUSTOMER_FOLLOWUP`, `MISSING_ORDER_FIXED`, `REPLACEMENT_PDF_SENT`, `STOCK_ISSUE_STILL_OPEN`, or `IGNORE`.
+4. Add AI-drafted replies that require CSR approval before sending.
+5. Only after enough testing, allow the agent to send low-risk operational replies automatically within strict templates and audit logging.
+
+Until that later phase, Microsoft Graph should remain the inbound reader for `warehouse@newl.ca`, while Resend handles outbound summaries.
+
+### Reusable Newl Apps Pieces
+
+Already-built pieces that should be reused:
 
 - Microsoft Graph mailbox settings and application-token helpers.
 - Tenant-scoped auth/module gates.
@@ -88,8 +164,19 @@ Reusable pieces already in Newl Apps:
 - Teamship synced-order cache and saved review history.
 - Phase 2 bot/update job control tower model.
 - Audit logging and Prisma migration conventions.
+- `GarlandTeamshipReviewClient` page state, queue view, filtering, expandable shipment rows, saved history, and autosave behavior.
+- Multiple PDF attachment upload and merge behavior in the current client.
+- Garland PDF parsing and multi-page PDF grouping in `parseGarlandShippingOrderPages`.
+- Teamship comparison in `buildGarlandTeamshipReview`.
+- Teamship daily sync/cache models: `TeamshipDailySyncRun` and `TeamshipSyncedOrder`.
+- Saved run and saved order models: `TeamshipReviewRun` and `TeamshipReviewOrder`.
+- Phase 2 update-job models: `TeamshipUpdateJob` and `TeamshipUpdateOrder`.
+- Garland product dimension directory: `GarlandProductDimensionObservation`.
+- Existing Microsoft Graph mailbox helpers in `src/server/integrations/microsoft-graph-mail.ts`.
+- Existing mailbox sync state pattern: `AssistantMailboxSyncState`.
+- Existing email and attachment persistence pattern from the ocean-freight workflow: `OceanFreightSourceEmail` and `OceanFreightSourceAttachment`. Garland should get its own domain models or a shared generalized source-email model rather than reusing ocean-freight table names directly.
 
-Missing pieces for full automation:
+### Missing Pieces
 
 - Attachment binary storage with content hashes and retention rules.
 - An email-to-PDF handoff that can create or append to a Teamship review run.
@@ -97,12 +184,71 @@ Missing pieces for full automation:
 - A small AI classifier for ambiguous chains such as missing-shipment follow-ups, customer replies, or non-Garland messages copied to the shared inbox.
 - Background scheduling, likely through Vercel Pro cron or the existing VM/n8n environment.
 - Email-agent summary output so CSRs see what was found, skipped, duplicated, reviewed, and still missing in Teamship.
+- Garland-specific mailbox configuration in Settings: enabled flag, mailbox target such as `warehouse@newl.ca`, sender allowlist, optional CC watcher list, lookback days, max messages, and whether AI classification is enabled.
+- Garland source email and attachment tables, or a generalized tenant-scoped source-email table that can support both Garland and future workflows without ocean-freight naming.
+- Attachment binary/file storage for PDF content. Store metadata and hashes in the database; store the file bytes in the chosen file store.
+- A Garland email ingestion route/job that uses Microsoft Graph application permissions for the configured shared mailbox.
+- A deterministic pre-filter before AI so unrelated `warehouse@newl.ca` customer emails are ignored.
+- A cheap AI classifier abstraction for Garland email triage. The classifier should never decide operational updates; it should only classify the email/thread.
+- A PDF extraction worker step that can process stored attachments without requiring a browser upload.
+- A run/linking model that connects source email attachments to `TeamshipReviewRun` and `TeamshipReviewOrder`.
+- Revision tracking for corrected/replacement PDFs.
+- UI for email batch review: inbox sync status, detected batches, duplicate/ignored attachments, correction flags, and thread notes.
+- Tests for duplicate attachment hashes, duplicate PS/SR fingerprints, replacement documents, follow-up emails with no PDFs, and unrelated shared-mailbox emails.
 
-Customer-service agent reuse assessment:
+### Recommended MVP Sequence
 
-- This is the first reusable `customer service agent` style workflow in Newl Apps.
-- The reusable pattern should be: intake source -> deterministic classification -> tenant-scoped source records -> human-visible queue -> existing domain processor -> approved external updates.
-- Garland email intake should not be hardcoded as a one-off agent. Future agents can reuse the same mailbox sync, source-message records, dedupe strategy, and review queue pattern with customer-specific classifiers.
+1. Add Garland email-intake documentation and data model design.
+2. Add read-only Microsoft Graph ingestion for `warehouse@newl.ca` with strict Garland filtering and metadata-only persistence.
+3. Add attachment hash/dedupe storage and show detected Garland email batches in the Teamship Review page.
+4. Connect stored PDF attachments to the existing extraction/review pipeline.
+5. Add email evidence and duplicate/revision status to the saved run UI.
+6. Add AI classifier only after deterministic filtering and dedupe are in place.
+7. When Teamship update APIs are ready, execute existing approved update jobs through API first and keep browser automation as fallback.
+
+### Customer Service Agent Reuse Assessment
+
+This Garland workflow should be treated as Newl Apps' first customer-service-agent pattern, but the current implementation is only partially reusable.
+
+Reusable pattern already proven:
+
+- Intake from a business source: manual upload today, Microsoft Graph email intake next.
+- Deterministic extraction first, AI fallback/classification second.
+- Tenant-scoped source records, extracted business objects, comparison results, and saved run history.
+- A human-readable operations queue with searchable, expandable records.
+- Statuses that separate `PASS`, `FAIL`, `PENDING`, `NO_PDF`, `NEEDS_REVIEW`, `APPROVED`, `RUNNING`, `SUCCESS`, and `FAILED`.
+- Structured update jobs that Newl Apps approves and a worker/agent executes.
+- Execution evidence: agent id, timestamps, before/after verification, screenshots/logs where applicable.
+- Guardrails: no duplicate processing, no source-data deletion on resync, and no external writes unless a job is approved.
+
+Reusable platform pieces already exist:
+
+- Tenant-scoped integrations and credentials.
+- Microsoft Graph mailbox settings and helper functions.
+- `AssistantMailboxSyncState` for resumable mailbox sync tracking.
+- `AutomationJobRun` for general job-run logging.
+- `TeamshipReviewRun` / `TeamshipReviewOrder` as a proven run-and-row review model.
+- `TeamshipUpdateJob` / `TeamshipUpdateOrder` as a proven approved-agent-job model.
+- The VM worker claim/complete pattern using the ingestion bearer token and `x-newl-agent-id`.
+
+What is not reusable enough yet:
+
+- The job tables are named for Teamship instead of a generic agent workflow.
+- The worker script is Teamship-specific.
+- The UI is still a Garland Teamship Review screen, not a generic customer-service-agent console.
+- Email source records should not be tied to an unrelated workflow name such as ocean freight.
+- Agent actions are stored as Teamship field/pallet plans instead of a generic action schema with domain-specific action types.
+
+Recommended reusable abstraction before building the next customer-service agent:
+
+- `AgentWorkflowDefinition`: tenant/module scoped configuration such as `GARLAND_TEAMSHIP_CUSTOMER_SERVICE`.
+- `AgentSourceMessage` and `AgentSourceAttachment`: generalized email/file intake records with message ids, conversation ids, attachment hashes, source type, classifier result, and storage refs.
+- `AgentReviewRun` and `AgentReviewItem`: generalized run summary and per-record review rows, with a domain payload for Garland/Teamship-specific fields.
+- `AgentActionJob` and `AgentActionItem`: generalized approved action jobs with statuses, selected records, planned actions, result evidence, approved by, and executed by.
+- `AgentActionType`: domain-specific action names such as `TEAMSHIP_UPDATE_PALLETS`, `TEAMSHIP_UPDATE_FIELDS`, `TEAMSHIP_BOL_CLEANUP`, or future actions like `SEND_CUSTOMER_REPLY`.
+- `AgentConsole`: a shared UI pattern with intake status, queue filters, review rows, action drafts, execution history, and exception handling.
+
+For now, do not pause Garland work to build a full generic framework. Use Garland Teamship as the pilot, but keep new email-intake and update-job code shaped so the next customer service agent can reuse the same primitives instead of copying the Teamship-specific implementation.
 
 ## Current CSR Workflow
 
