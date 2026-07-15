@@ -19,7 +19,8 @@ export function InvoiceAutomationTabs() {
   const links = [
     { href: "/finance/invoice-automation", label: "Operations Upload" },
     { href: "/finance/invoice-automation/accounting", label: "Accounting Queue" },
-    { href: "/finance/invoice-automation/posted", label: "Posted" }
+    { href: "/finance/invoice-automation/posted", label: "Posted" },
+    { href: "/finance/invoice-automation/reconciliation", label: "Reconciliation" }
   ];
 
   return (

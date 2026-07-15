@@ -243,6 +243,7 @@ export async function POST(request: Request) {
 
     revalidatePath("/finance/invoice-automation");
     revalidatePath("/finance/invoice-automation/accounting");
+    revalidatePath("/finance/invoice-automation/reconciliation");
 
     const response: InvoiceAutomationUploadResponse = {
       batchId: created.batch.id,

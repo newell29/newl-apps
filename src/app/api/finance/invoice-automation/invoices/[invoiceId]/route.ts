@@ -413,6 +413,7 @@ function revalidateInvoiceAutomation() {
   revalidatePath("/finance/invoice-automation");
   revalidatePath("/finance/invoice-automation/accounting");
   revalidatePath("/finance/invoice-automation/posted");
+  revalidatePath("/finance/invoice-automation/reconciliation");
 }
 
 function getInvoiceEntityLabel(invoiceType: "CUSTOMER" | "VENDOR") {

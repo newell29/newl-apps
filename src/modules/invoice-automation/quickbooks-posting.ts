@@ -41,6 +41,8 @@ type QuickBooksTransactionEntityName = "Invoice" | "Bill";
 type QuickBooksPostedTransactionEntity = {
   Id?: string;
   DocNumber?: string;
+  CustomerRef?: QuickBooksRef;
+  VendorRef?: QuickBooksRef;
   CurrencyRef?: QuickBooksRef;
   ExchangeRate?: number | string;
   TotalAmt?: number | string;
@@ -248,18 +250,30 @@ export async function findExistingQuickBooksTransaction({
   realmId,
   accessToken,
   invoiceType,
-  docNumber
+  docNumber,
+  quickBooksEntityId
 }: {
   realmId: string;
   accessToken: string;
   invoiceType: InvoiceAutomationType;
   docNumber: string;
+  quickBooksEntityId?: string | null;
 }) {
   const entityName = invoiceType === "CUSTOMER" ? "Invoice" : "Bill";
-  const query = `select * from ${entityName} where DocNumber = '${escapeQuickBooksQueryValue(docNumber)}' maxresults 1`;
+  const query = `select * from ${entityName} where DocNumber = '${escapeQuickBooksQueryValue(docNumber)}' maxresults 100`;
   const response = await queryQuickBooks({ realmId, accessToken, query });
-  const rows = invoiceType === "CUSTOMER" ? response.QueryResponse?.Invoice : response.QueryResponse?.Bill;
-  return Array.isArray(rows) ? rows[0] ?? null : null;
+  const rows = (invoiceType === "CUSTOMER" ? response.QueryResponse?.Invoice : response.QueryResponse?.Bill) as
+    | QuickBooksPostedTransactionEntity[]
+    | undefined;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return null;
+  }
+
+  if (!quickBooksEntityId) {
+    return rows[0] ?? null;
+  }
+
+  return rows.find((row) => getTransactionEntityRef(row, invoiceType)?.value === quickBooksEntityId) ?? null;
 }
 
 export async function fetchQuickBooksExchangeRate({
@@ -628,6 +642,10 @@ function getLineAmount(invoice: InvoiceAutomationRow) {
 
 function buildCurrencyRef(currency: string | null) {
   return currency ? { value: currency.toUpperCase() } : undefined;
+}
+
+function getTransactionEntityRef(transaction: QuickBooksPostedTransactionEntity, invoiceType: InvoiceAutomationType) {
+  return invoiceType === "CUSTOMER" ? transaction.CustomerRef : transaction.VendorRef;
 }
 
 function normalizeMappingKey(value: string) {
