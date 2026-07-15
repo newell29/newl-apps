@@ -102,6 +102,18 @@ type TeamshipReviewRunWorkspaceResponse = {
   error?: string;
 };
 
+type TeamshipCsrReportEmailResponse = {
+  email?: {
+    sent: boolean;
+    skipped?: boolean;
+    error?: string;
+  };
+  report?: {
+    subject: string;
+  };
+  error?: string;
+};
+
 type TeamshipUpdateOrderSummary = {
   id: string;
   psNumber: string;
@@ -329,6 +341,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
   const [status, setStatus] = useState("Upload the Garland daily shipping-order PDF to begin.");
   const [error, setError] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [csrReportStatus, setCsrReportStatus] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [editingRunId, setEditingRunId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -1220,6 +1233,38 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     }
   }
 
+  async function emailCsrAgentReport(runId: string) {
+    setHistoryError(null);
+    setCsrReportStatus(null);
+    setIsHistoryLoading(true);
+
+    try {
+      const response = await fetch(`/api/shipment-documents/teamship-review/runs/${runId}/csr-report`, {
+        method: "POST",
+        headers: { "content-type": "application/json" }
+      });
+      const json = (await response.json().catch(() => null)) as TeamshipCsrReportEmailResponse | null;
+
+      if (!response.ok || !json || isErrorResponse(json)) {
+        throw new Error(isErrorResponse(json) ? json.error : "Unable to email Garland CSR agent report.");
+      }
+
+      if (json.email?.sent) {
+        setCsrReportStatus(`CSR agent report emailed: ${json.report?.subject ?? "Garland Teamship Review"}`);
+      } else if (json.email?.skipped) {
+        setCsrReportStatus(
+          "CSR agent report was generated, but email was skipped because Resend sender/recipients are not configured."
+        );
+      } else {
+        throw new Error(json.email?.error || "Resend did not confirm the CSR agent report was sent.");
+      }
+    } catch (caught) {
+      setHistoryError(caught instanceof Error ? caught.message : "Unable to email Garland CSR agent report.");
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  }
+
   function handleShipmentDateChange(nextDate: string) {
     setDocumentLabel((currentLabel) =>
       currentLabel.trim() === formatDateLabel(shipmentDate) ? formatDateLabel(nextDate) : currentLabel
@@ -1484,6 +1529,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         historyDateTo={historyDateTo}
         historyAllDates={historyAllDates}
         historyError={historyError}
+        csrReportStatus={csrReportStatus}
         isHistoryLoading={isHistoryLoading}
         canDeleteRuns={canDeleteRuns}
         onSearchChange={setHistorySearch}
@@ -1526,6 +1572,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         onSearch={() => void fetchHistory(historySearch, historyDateFrom, historyDateTo, historyAllDates)}
         onDelete={(runId) => void deleteRun(runId)}
         onLoadForEditing={(runId) => void loadRunForEditing(runId)}
+        onEmailCsrReport={(runId) => void emailCsrAgentReport(runId)}
         onOrderWorkflowAction={(runId, orderId, action) => void updateSavedOrderWorkflow(runId, orderId, action)}
       />
     </div>
@@ -3013,6 +3060,7 @@ function TeamshipReviewHistorySection({
   historyDateTo,
   historyAllDates,
   historyError,
+  csrReportStatus,
   isHistoryLoading,
   canDeleteRuns,
   onSearchChange,
@@ -3025,6 +3073,7 @@ function TeamshipReviewHistorySection({
   onSearch,
   onDelete,
   onLoadForEditing,
+  onEmailCsrReport,
   onOrderWorkflowAction
 }: {
   history: TeamshipReviewHistoryResponse;
@@ -3033,6 +3082,7 @@ function TeamshipReviewHistorySection({
   historyDateTo: string;
   historyAllDates: boolean;
   historyError: string | null;
+  csrReportStatus: string | null;
   isHistoryLoading: boolean;
   canDeleteRuns: boolean;
   onSearchChange: (value: string) => void;
@@ -3045,6 +3095,7 @@ function TeamshipReviewHistorySection({
   onSearch: () => void;
   onDelete: (runId: string) => void;
   onLoadForEditing: (runId: string) => void;
+  onEmailCsrReport: (runId: string) => void;
   onOrderWorkflowAction: (runId: string, orderId: string, action: "markBolPrinted" | "clearBolPrinted" | "markOrderComplete" | "clearOrderComplete") => void;
 }) {
   return (
@@ -3150,6 +3201,12 @@ function TeamshipReviewHistorySection({
             {historyError}
           </div>
         ) : null}
+
+        {csrReportStatus ? (
+          <div className="mt-4 rounded-md border border-success/30 bg-success/10 px-4 py-3 text-sm font-medium text-success">
+            {csrReportStatus}
+          </div>
+        ) : null}
       </div>
 
       {history.runs.length === 0 ? (
@@ -3202,6 +3259,17 @@ function TeamshipReviewHistorySection({
                     className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Load/edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      onEmailCsrReport(run.id);
+                    }}
+                    disabled={isHistoryLoading}
+                    className="rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/15 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Email CSR report
                   </button>
                   {canDeleteRuns ? (
                     <button

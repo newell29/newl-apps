@@ -37,6 +37,36 @@ type TeamshipDetailResponse = {
   data?: TeamshipShippingOrderDetail;
 };
 
+export type TeamshipShippingProductSearchRow = {
+  id?: number | string | null;
+  product_id?: number | string | null;
+  inventory_stock_id?: number | string | null;
+  stock_id?: number | string | null;
+  inventory_id?: number | string | null;
+  sku?: string | null;
+  product_sku?: string | null;
+  name?: string | null;
+  title?: string | null;
+  product_name?: string | null;
+  quantity?: number | string | null;
+  available?: number | string | null;
+  available_quantity?: number | string | null;
+  is_quarantine?: boolean | number | string | null;
+  is_quarantine_stock?: boolean | number | string | null;
+  custom_attributes?: Array<{
+    id?: number | string | null;
+    name?: string | null;
+    value?: string | number | boolean | null;
+    type?: string | null;
+  }> | null;
+  customAttributes?: TeamshipShippingProductSearchRow["custom_attributes"];
+};
+
+type TeamshipProductSearchResponse = {
+  data?: TeamshipShippingProductSearchRow[];
+  products?: TeamshipShippingProductSearchRow[];
+};
+
 export async function isTeamshipConfigured(tenantId?: string | null) {
   const status = await getTeamshipConfigurationStatus(tenantId);
   return status.configured;
@@ -136,6 +166,51 @@ export async function fetchTeamshipShippingOrdersForReview({
   }
 
   return Array.from(details.values());
+}
+
+export async function searchTeamshipProductsForShipping({
+  tenantId,
+  userId,
+  locationId,
+  search,
+  credentials = null,
+  fetchImpl = fetch
+}: {
+  tenantId?: string | null;
+  userId: number | string;
+  locationId: number | string;
+  search: string;
+  credentials?: TeamshipRuntimeCredentials | null;
+  fetchImpl?: typeof fetch;
+}): Promise<TeamshipShippingProductSearchRow[]> {
+  const resolvedCredentials = credentials ?? (await resolveTenantTeamshipCredentials(tenantId ? { tenantId } : null));
+  const apiBaseUrl = resolveTeamshipApiBaseUrl(resolvedCredentials);
+  const token = await loginToTeamship(fetchImpl, resolvedCredentials, apiBaseUrl);
+  const response = await fetchImpl(`${apiBaseUrl}/v1/ship-inventories/search-products`, {
+    method: "POST",
+    headers: buildTeamshipHeaders(token),
+    body: JSON.stringify({
+      user_id: userId,
+      location_id: locationId,
+      search
+    }),
+    cache: "no-store"
+  });
+  const json = (await response.json().catch(() => null)) as TeamshipProductSearchResponse | null;
+
+  if (!response.ok || !json) {
+    throw new Error(`Unable to search Teamship inventory for ${search}. Teamship returned status ${response.status}.`);
+  }
+
+  if (Array.isArray(json.data)) {
+    return json.data;
+  }
+
+  if (Array.isArray(json.products)) {
+    return json.products;
+  }
+
+  return [];
 }
 
 function mergeTeamshipDetailWithSummary(
