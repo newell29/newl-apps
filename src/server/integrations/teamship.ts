@@ -132,8 +132,12 @@ export async function fetchTeamshipShippingOrdersForReview({
 
       const detail = await getTeamshipShippingOrder({ apiBaseUrl, token, id: String(orderId), fetchImpl });
       let mergedDetail = mergeTeamshipDetailWithSummary(detail, row);
+      mergedDetail = {
+        ...mergedDetail,
+        url: mergedDetail.url ?? buildTeamshipOrderUrl(webBaseUrl, String(orderId))
+      };
 
-      if (shouldEnrichFromUiPage) {
+      if (shouldEnrichFromUiPage && !hasTeamshipSerialEvidence(mergedDetail)) {
         if (webCookieHeader === undefined) {
           webCookieHeader = await loginToTeamshipWeb(fetchImpl, resolvedCredentials, webBaseUrl).catch(() => null);
         }
@@ -237,6 +241,62 @@ function mergeTeamshipDetailWithSummary(
     shipment_date: detail.shipment_date ?? summary.shipment_date,
     url: detail.url ?? summary.url
   };
+}
+
+function hasTeamshipSerialEvidence(value: unknown) {
+  const visited = new Set<object>();
+
+  const visit = (current: unknown, key = ""): boolean => {
+    if (current === null || current === undefined) {
+      return false;
+    }
+
+    if (typeof current === "string" || typeof current === "number") {
+      const text = String(current).trim();
+
+      if (!text || /^(?:n\/?a|none|null|blank|not available)$/i.test(text)) {
+        return false;
+      }
+
+      return isSerialEvidenceKey(key) || /\b(?:serial|serial\s*number|sn)\s*[:#-]?\s*[A-Z0-9][A-Z0-9-]{5,}\b/i.test(text);
+    }
+
+    if (Array.isArray(current)) {
+      return current.some((item) => visit(item, key));
+    }
+
+    if (typeof current === "object") {
+      if (visited.has(current)) {
+        return false;
+      }
+
+      visited.add(current);
+
+      return Object.entries(current).some(([childKey, childValue]) => {
+        if (isSensitiveTeamshipKey(childKey)) {
+          return false;
+        }
+
+        return visit(childValue, childKey);
+      });
+    }
+
+    return false;
+  };
+
+  return visit(value);
+}
+
+function isSerialEvidenceKey(key: string) {
+  const normalized = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
+
+  return normalized.includes("serial") || normalized === "sn";
+}
+
+function isSensitiveTeamshipKey(key: string) {
+  const normalized = key.toLowerCase();
+
+  return normalized.includes("password") || normalized.includes("token") || normalized.includes("secret");
 }
 
 export function parseTeamshipShippingOrderUiPage(html: string): Partial<TeamshipShippingOrderDetail> {
@@ -428,8 +488,12 @@ async function getTeamshipShippingOrderUiDetail({
 
   return {
     ...parsed,
-    url: `${webBaseUrl}/ship-inventories/${encodeURIComponent(id)}`
+    url: buildTeamshipOrderUrl(webBaseUrl, id)
   };
+}
+
+function buildTeamshipOrderUrl(webBaseUrl: string, id: string) {
+  return `${webBaseUrl}/ship-inventories/${encodeURIComponent(id)}`;
 }
 
 function mergeTeamshipUiDetail(

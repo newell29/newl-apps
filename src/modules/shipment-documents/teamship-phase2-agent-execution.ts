@@ -65,7 +65,7 @@ export type TeamshipPhase2ExecutionOrderResult = {
     };
     apiInstruction: {
       preferredExecution: "TEAMSHIP_API";
-      endpoint: "PATCH /api/ship-inventories/{teamshipOrderId}";
+      endpoint: "PUT /api/v1/ship-inventories/{teamshipOrderId}";
       payloadPath: "pallets[]";
       note: string;
     };
@@ -350,7 +350,7 @@ function buildPalletApiPayload(row: TeamshipPhase2OrderPlan["plannedPalletRows"]
 function buildPalletApiInstruction() {
   return {
     preferredExecution: "TEAMSHIP_API" as const,
-    endpoint: "PATCH /api/ship-inventories/{teamshipOrderId}" as const,
+    endpoint: "PUT /api/v1/ship-inventories/{teamshipOrderId}" as const,
     payloadPath: "pallets[]" as const,
     note:
       "Send this pallet row in the Teamship shipping-order update API payload. Do not use browser automation or the BOL editor for pallet rows."

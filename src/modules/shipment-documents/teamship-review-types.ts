@@ -52,18 +52,54 @@ export type TeamshipCustomField = {
 
 export type TeamshipShippingOrderItem = {
   sku?: string | null;
+  item_number?: string | null;
+  itemNumber?: string | null;
+  product_sku?: string | null;
+  productSku?: string | null;
   inventory_count?: number | string | null;
   quantity?: number | string | null;
   qty?: number | string | null;
   serial?: string | null;
   serial_number?: string | null;
   serialNumber?: string | null;
+  serial_numbers?: string | string[] | null;
+  serialNumbers?: string | string[] | null;
   product?: {
+    sku?: string | null;
+    item_number?: string | null;
+    itemNumber?: string | null;
+    serial?: string | null;
+    serial_number?: string | null;
+    serialNumber?: string | null;
+    serial_numbers?: string | string[] | null;
+    serialNumbers?: string | string[] | null;
+  } | null;
+  inventory_stock?: {
     sku?: string | null;
     serial?: string | null;
     serial_number?: string | null;
     serialNumber?: string | null;
+    serial_numbers?: string | string[] | null;
+    serialNumbers?: string | string[] | null;
   } | null;
+  inventoryStock?: {
+    sku?: string | null;
+    serial?: string | null;
+    serial_number?: string | null;
+    serialNumber?: string | null;
+    serial_numbers?: string | string[] | null;
+    serialNumbers?: string | string[] | null;
+  } | null;
+  stock?: {
+    sku?: string | null;
+    serial?: string | null;
+    serial_number?: string | null;
+    serialNumber?: string | null;
+    serial_numbers?: string | string[] | null;
+    serialNumbers?: string | string[] | null;
+  } | null;
+  custom_attributes?: Array<{ name?: string | null; value?: string | number | boolean | null }> | null;
+  customAttributes?: Array<{ name?: string | null; value?: string | number | boolean | null }> | null;
 };
 
 export type TeamshipPalletDim = {
