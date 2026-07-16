@@ -3102,25 +3102,37 @@ function TeamshipReviewHistorySection({
   onEmailCsrReport: (runId: string) => void;
   onOrderWorkflowAction: (runId: string, orderId: string, action: "markBolPrinted" | "clearBolPrinted" | "markOrderComplete" | "clearOrderComplete") => void;
 }) {
+  const historyTotals = buildHistoryTotals(history);
+  const groupedRuns = groupHistoryRunsByShipmentDate(history.runs);
+
   return (
     <section className="overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border bg-gradient-to-br from-card to-muted/40 p-5">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-mutedForeground">Saved records</p>
-          <h2 className="mt-1 text-xl font-semibold text-foreground">Teamship review history</h2>
-          <p className="mt-1 text-sm text-mutedForeground">
-            Search by date label, source file, PS/SR number, Teamship order, recipient, carrier, city, PO, item, serial,
-            alert text, or review status.
-          </p>
-          <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
-            {history.allDates
-              ? "Viewing all dates"
-              : `Viewing shipment dates ${history.dateFrom} to ${history.dateTo}`}
-          </p>
+      <div className="border-b border-border bg-gradient-to-br from-card via-card to-muted/40 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-mutedForeground">Garland batch history</p>
+            <h2 className="mt-1 text-2xl font-semibold text-foreground">Daily review runs</h2>
+            <p className="mt-1 max-w-3xl text-sm text-mutedForeground">
+              One compact place to confirm which Garland PDF batches were processed, which orders need CSR review, and
+              which records are ready to open, email, or mark complete.
+            </p>
+            <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+              {history.allDates
+                ? "Viewing all dates"
+                : `Viewing shipment dates ${history.dateFrom} to ${history.dateTo}`}
+            </p>
+          </div>
+          <span className="rounded-full bg-primary/10 px-4 py-2 text-xs font-bold text-primary">
+            {history.totalCount} saved run{history.totalCount === 1 ? "" : "s"}
+          </span>
         </div>
-        <span className="rounded-full bg-primary/10 px-4 py-2 text-xs font-bold text-primary">
-          {history.totalCount} saved run{history.totalCount === 1 ? "" : "s"}
-        </span>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <HistoryMetricCard label="PDF orders reviewed" value={historyTotals.pdfOrders} tone="neutral" />
+          <HistoryMetricCard label="Green / matched" value={historyTotals.greenOrders} tone="success" />
+          <HistoryMetricCard label="CSR review needed" value={historyTotals.reviewOrders} tone="danger" />
+          <HistoryMetricCard label="No PDF or pending" value={historyTotals.pendingOrders} tone="warning" />
+        </div>
       </div>
 
       <div className="border-b border-border bg-background/60 p-5">
@@ -3133,7 +3145,7 @@ function TeamshipReviewHistorySection({
                 onSearch();
               }
             }}
-            placeholder="Search date, source file, PS, SR, Teamship order, or status"
+            placeholder="Search SR, PS, Teamship order, source file, carrier, city, serial, or status"
             className="min-w-0 flex-1 rounded-xl border border-input bg-background px-4 py-3 text-sm shadow-sm"
           />
           <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
@@ -3216,200 +3228,434 @@ function TeamshipReviewHistorySection({
       {history.runs.length === 0 ? (
         <p className="p-5 text-sm text-mutedForeground">No saved Teamship review runs match this search yet.</p>
       ) : (
-        <div className="divide-y divide-border">
-          {history.runs.map((run) => (
-            <details key={run.id} className="group border-l-[6px] border-primary/30 bg-card open:bg-primary/5">
-              <summary className="grid cursor-pointer gap-4 px-5 py-5 lg:grid-cols-[1fr,1fr,auto] lg:items-start">
+        <div className="space-y-4 bg-muted/30 p-4">
+          {groupedRuns.map((group) => (
+            <div key={group.date} className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 px-1">
                 <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-lg font-semibold text-foreground">{run.documentLabel}</span>
-                    <span className={historyRunPillClass(run)}>
-                      {run.failedCount + run.missingTeamshipCount > 0
-                        ? `${run.failedCount + run.missingTeamshipCount} need review`
-                        : run.noPdfCount > 0
-                          ? `${run.noPdfCount} no PDF`
-                        : run.pendingTeamshipCount > 0
-                          ? `${run.pendingTeamshipCount} pending`
-                          : "Approved"}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-sm text-mutedForeground">
-                    Shipment date {formatDisplayDate(run.shipmentDate)} · Saved {formatDateTime(run.createdAt)}
-                  </p>
-                  <p className="mt-1 text-sm text-mutedForeground">
-                    {run.sourcePdfFileName ?? "No source file saved"} · Saved by {run.createdByName ?? "Unknown user"}
-                  </p>
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-mutedForeground">Shipment day</p>
+                  <h3 className="text-lg font-semibold text-foreground">{group.label}</h3>
                 </div>
-
-                <div className="text-sm text-mutedForeground">
-                  <p className="font-medium text-foreground">
-                    {run.passedCount}/{run.pdfOrderCount} green · {run.teamshipMatchedCount} matched in Teamship
-                  </p>
-                  <p className="mt-1">
-                    {run.failedCount} discrepancies · {run.pendingTeamshipCount} pending · {run.missingTeamshipCount} missing
-                    {run.noPdfCount > 0 ? ` · ${run.noPdfCount} no PDF` : ""}
-                  </p>
-                  <p className="mt-1 break-words">SRs: {run.srNumbers.slice(0, 12).join(", ")}{run.srNumbers.length > 12 ? ` + ${run.srNumbers.length - 12} more` : ""}</p>
-                </div>
-
-                <div className="flex flex-wrap gap-2 lg:justify-end">
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      onLoadForEditing(run.id);
-                    }}
-                    disabled={isHistoryLoading}
-                    className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    Load/edit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      onEmailCsrReport(run.id);
-                    }}
-                    disabled={isHistoryLoading}
-                    className="rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/15 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    Email CSR report
-                  </button>
-                  {canDeleteRuns ? (
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        onDelete(run.id);
-                      }}
-                      className="rounded-md border border-danger/30 px-3 py-2 text-sm font-semibold text-danger transition-colors hover:bg-danger/10"
-                    >
-                      Delete
-                    </button>
-                  ) : null}
-                  <span className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-mutedForeground">
-                    Expand
-                  </span>
-                </div>
-              </summary>
-
-              <div className="overflow-x-auto px-5 pb-5">
-                <table className="min-w-full text-left text-sm">
-                  <thead className="bg-muted/40 text-xs uppercase tracking-wide text-mutedForeground">
-                    <tr>
-                      <th className="px-3 py-2">Pages</th>
-                      <th className="px-3 py-2">PS</th>
-                      <th className="px-3 py-2">SR</th>
-                      <th className="px-3 py-2">Status</th>
-                      <th className="px-3 py-2">Workflow</th>
-                      <th className="px-3 py-2">Ship to</th>
-                      <th className="px-3 py-2">Carrier</th>
-                      <th className="px-3 py-2">Teamship</th>
-                      <th className="px-3 py-2">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {run.orders.map((order) => (
-                      <tr key={order.id}>
-                        <td className="px-3 py-2 text-mutedForeground">{order.pageNumbers.join(", ") || "N/A"}</td>
-                        <td className="px-3 py-2 font-semibold text-foreground">{order.psNumber}</td>
-                        <td className="px-3 py-2 font-semibold text-foreground">{order.srNumber}</td>
-                        <td className="px-3 py-2">
-                          <span className={reviewStatusPillClass(order.status)}>
-                            {formatReviewStatus(order.status, order.mismatchCount)}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2">
-                          <div className="space-y-1">
-                            <span className={workflowStatusPillClass(order.workflowStatus)}>
-                              {formatWorkflowStatus(order.workflowStatus)}
-                            </span>
-                            {order.bolPrintedAt ? (
-                              <p className="text-xs text-mutedForeground">Printed {formatDateTime(order.bolPrintedAt)}</p>
-                            ) : null}
-                            {order.orderCompletedAt ? (
-                              <p className="text-xs font-semibold text-success">✓ Complete {formatDateTime(order.orderCompletedAt)}</p>
-                            ) : null}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 text-mutedForeground">
-                          {[order.shipToName, order.city, order.state].filter(Boolean).join(", ") || "Missing"}
-                        </td>
-                        <td className="px-3 py-2 text-mutedForeground">{order.carrier ?? "Missing"}</td>
-                        <td className="px-3 py-2 text-mutedForeground">
-                          {order.teamshipUrl ? (
-                            <div className="space-y-1">
-                              <a href={order.teamshipUrl} target="_blank" rel="noreferrer" className="block font-semibold text-primary hover:underline">
-                                {order.teamshipOrderId ?? "Open"}
-                              </a>
-                              {buildTeamshipBolEditorUrl(order.teamshipOrderId) ? (
-                                <a
-                                  href={buildTeamshipBolEditorUrl(order.teamshipOrderId) ?? undefined}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="block text-xs font-semibold text-primary hover:underline"
-                                >
-                                  Open editable BOL
-                                </a>
-                              ) : null}
-                            </div>
-                          ) : (
-                            order.teamshipOrderId ?? "Not matched"
-                          )}
-                        </td>
-                        <td className="px-3 py-2">
-                          <div className="flex flex-wrap gap-2">
-                            {order.workflowStatus === "ORDER_COMPLETE" ? (
-                              <button
-                                type="button"
-                                onClick={() => onOrderWorkflowAction(run.id, order.id, "clearOrderComplete")}
-                                disabled={isHistoryLoading}
-                                className="rounded-md border border-success/30 bg-success/10 px-2 py-1 text-xs font-semibold text-success transition-colors hover:bg-success/15 disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                ✓ Complete
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => onOrderWorkflowAction(run.id, order.id, "markOrderComplete")}
-                                disabled={isHistoryLoading || order.workflowStatus === "NO_PDF" || order.workflowStatus === "SKIPPED"}
-                                className="rounded-md border border-success/30 px-2 py-1 text-xs font-semibold text-success transition-colors hover:bg-success/10 disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                Mark order complete
-                              </button>
-                            )}
-                            {order.workflowStatus === "BOL_PRINTED" ? (
-                              <button
-                                type="button"
-                                onClick={() => onOrderWorkflowAction(run.id, order.id, "clearBolPrinted")}
-                                disabled={isHistoryLoading}
-                                className="rounded-md border border-border px-2 py-1 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                Mark not printed
-                              </button>
-                            ) : order.workflowStatus !== "ORDER_COMPLETE" ? (
-                              <button
-                                type="button"
-                                onClick={() => onOrderWorkflowAction(run.id, order.id, "markBolPrinted")}
-                                disabled={isHistoryLoading || order.workflowStatus === "NO_PDF" || order.workflowStatus === "SKIPPED"}
-                                className="rounded-md border border-border px-2 py-1 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                Mark printed
-                              </button>
-                            ) : null}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <span className="rounded-full bg-card px-3 py-1 text-xs font-bold text-mutedForeground shadow-sm">
+                  {group.runs.length} batch{group.runs.length === 1 ? "" : "es"}
+                </span>
               </div>
-            </details>
+
+              {group.runs.map((run) => (
+                <details key={run.id} className={`group overflow-hidden rounded-2xl border bg-card shadow-sm ${historyRunBorderClass(run)}`}>
+                  <summary className="grid cursor-pointer gap-4 p-4 lg:grid-cols-[minmax(220px,0.8fr),minmax(280px,1.2fr),auto] lg:items-center">
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-lg font-semibold text-foreground">{run.documentLabel}</span>
+                        <span className={historyRunPillClass(run)}>{historyRunStatusLabel(run)}</span>
+                      </div>
+                      <p className="text-sm text-mutedForeground">
+                        {run.sourcePdfFileName ?? "No source file saved"}
+                      </p>
+                      <p className="text-xs text-mutedForeground">
+                        Saved {formatDateTime(run.createdAt)} by {run.createdByName ?? "Unknown user"}
+                      </p>
+                    </div>
+
+                    <div className="grid gap-2 text-sm text-mutedForeground md:grid-cols-3">
+                      <div className="rounded-xl bg-muted/50 px-3 py-2">
+                        <p className="text-xs font-bold uppercase tracking-wide">Reviewed</p>
+                        <p className="mt-1 font-semibold text-foreground">{run.pdfOrderCount} PDF order{run.pdfOrderCount === 1 ? "" : "s"}</p>
+                      </div>
+                      <div className="rounded-xl bg-success/10 px-3 py-2">
+                        <p className="text-xs font-bold uppercase tracking-wide text-success">Green</p>
+                        <p className="mt-1 font-semibold text-success">{run.passedCount} matched</p>
+                      </div>
+                      <div className="rounded-xl bg-danger/10 px-3 py-2">
+                        <p className="text-xs font-bold uppercase tracking-wide text-danger">CSR review</p>
+                        <p className="mt-1 font-semibold text-danger">
+                          {run.failedCount + run.missingTeamshipCount} need review
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 lg:justify-end">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          onLoadForEditing(run.id);
+                        }}
+                        disabled={isHistoryLoading}
+                        className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Load/edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          onEmailCsrReport(run.id);
+                        }}
+                        disabled={isHistoryLoading}
+                        className="rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/15 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Email report
+                      </button>
+                      {canDeleteRuns ? (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            onDelete(run.id);
+                          }}
+                          className="rounded-md border border-danger/30 px-3 py-2 text-sm font-semibold text-danger transition-colors hover:bg-danger/10"
+                        >
+                          Delete
+                        </button>
+                      ) : null}
+                      <span className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-mutedForeground group-open:hidden">
+                        Expand
+                      </span>
+                      <span className="hidden rounded-md border border-border px-3 py-2 text-sm font-semibold text-mutedForeground group-open:inline-flex">
+                        Collapse
+                      </span>
+                    </div>
+                  </summary>
+
+                  <div className="border-t border-border bg-background/70 p-4">
+                    <div className="grid gap-3 lg:grid-cols-4">
+                      <HistoryRunInsightCard label="Bot-ready summary" value={buildHistoryRunChangeSummary(run)} tone="success" />
+                      <HistoryRunInsightCard label="CSR needs to review" value={buildHistoryRunReviewSummary(run)} tone="danger" />
+                      <HistoryRunInsightCard label="Teamship coverage" value={buildHistoryRunTeamshipSummary(run)} tone="neutral" />
+                      <HistoryRunInsightCard label="Next step" value={buildHistoryRunNextStep(run)} tone="warning" />
+                    </div>
+
+                    <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
+                      <table className="min-w-full text-left text-sm">
+                        <thead className="bg-muted/50 text-xs uppercase tracking-wide text-mutedForeground">
+                          <tr>
+                            <th className="px-3 py-2">Order</th>
+                            <th className="px-3 py-2">Review</th>
+                            <th className="px-3 py-2">Result</th>
+                            <th className="px-3 py-2">Teamship</th>
+                            <th className="px-3 py-2">Workflow</th>
+                            <th className="px-3 py-2">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border bg-card">
+                          {run.orders.map((order) => (
+                            <tr key={order.id} className={historyOrderRowClass(order)}>
+                              <td className="px-3 py-2 align-top">
+                                <p className="font-semibold text-foreground">{order.psNumber}</p>
+                                <p className="text-xs font-semibold text-mutedForeground">{order.srNumber}</p>
+                                <p className="text-xs text-mutedForeground">
+                                  Page{order.pageNumbers.length === 1 ? "" : "s"} {order.pageNumbers.join(", ") || "N/A"}
+                                </p>
+                              </td>
+                              <td className="px-3 py-2 align-top">
+                                <span className={reviewStatusPillClass(order.status)}>
+                                  {formatReviewStatus(order.status, order.mismatchCount)}
+                                </span>
+                              </td>
+                              <td className="max-w-md px-3 py-2 align-top text-mutedForeground">
+                                <p>{buildHistoryOrderResultText(order)}</p>
+                                <p className="mt-1 text-xs">
+                                  {[order.shipToName, order.city, order.state].filter(Boolean).join(", ") || "No ship-to saved"}
+                                  {order.carrier ? ` · ${order.carrier}` : ""}
+                                </p>
+                              </td>
+                              <td className="px-3 py-2 align-top text-mutedForeground">
+                                {order.teamshipUrl ? (
+                                  <div className="space-y-1">
+                                    <a
+                                      href={order.teamshipUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="block font-semibold text-primary hover:underline"
+                                    >
+                                      {order.teamshipOrderId ?? "Open order"}
+                                    </a>
+                                    {buildTeamshipBolEditorUrl(order.teamshipOrderId) ? (
+                                      <a
+                                        href={buildTeamshipBolEditorUrl(order.teamshipOrderId) ?? undefined}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="block text-xs font-semibold text-primary hover:underline"
+                                      >
+                                        Editable BOL
+                                      </a>
+                                    ) : null}
+                                  </div>
+                                ) : (
+                                  <span>{order.teamshipOrderId ?? "Not matched"}</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 align-top">
+                                <div className="space-y-1">
+                                  <span className={workflowStatusPillClass(order.workflowStatus)}>
+                                    {formatWorkflowStatus(order.workflowStatus)}
+                                  </span>
+                                  {order.bolPrintedAt ? (
+                                    <p className="text-xs text-mutedForeground">Printed {formatDateTime(order.bolPrintedAt)}</p>
+                                  ) : null}
+                                  {order.orderCompletedAt ? (
+                                    <p className="text-xs font-semibold text-success">Complete {formatDateTime(order.orderCompletedAt)}</p>
+                                  ) : null}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2 align-top">
+                                <div className="flex flex-wrap gap-2">
+                                  {order.workflowStatus === "ORDER_COMPLETE" ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => onOrderWorkflowAction(run.id, order.id, "clearOrderComplete")}
+                                      disabled={isHistoryLoading}
+                                      className="rounded-md border border-success/30 bg-success/10 px-2 py-1 text-xs font-semibold text-success transition-colors hover:bg-success/15 disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                      Complete
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => onOrderWorkflowAction(run.id, order.id, "markOrderComplete")}
+                                      disabled={isHistoryLoading || order.workflowStatus === "NO_PDF" || order.workflowStatus === "SKIPPED"}
+                                      className="rounded-md border border-success/30 px-2 py-1 text-xs font-semibold text-success transition-colors hover:bg-success/10 disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                      Mark complete
+                                    </button>
+                                  )}
+                                  {order.workflowStatus === "BOL_PRINTED" ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => onOrderWorkflowAction(run.id, order.id, "clearBolPrinted")}
+                                      disabled={isHistoryLoading}
+                                      className="rounded-md border border-border px-2 py-1 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                      Not printed
+                                    </button>
+                                  ) : order.workflowStatus !== "ORDER_COMPLETE" ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => onOrderWorkflowAction(run.id, order.id, "markBolPrinted")}
+                                      disabled={isHistoryLoading || order.workflowStatus === "NO_PDF" || order.workflowStatus === "SKIPPED"}
+                                      className="rounded-md border border-border px-2 py-1 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                      Mark printed
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </details>
+              ))}
+            </div>
           ))}
         </div>
       )}
     </section>
   );
+}
+
+function HistoryMetricCard({
+  label,
+  value,
+  tone
+}: {
+  label: string;
+  value: number;
+  tone: "neutral" | "success" | "danger" | "warning";
+}) {
+  const toneClass =
+    tone === "success"
+      ? "border-success/20 bg-success/10 text-success"
+      : tone === "danger"
+        ? "border-danger/20 bg-danger/10 text-danger"
+        : tone === "warning"
+          ? "border-warning/20 bg-warning/10 text-warning"
+          : "border-border bg-background text-foreground";
+
+  return (
+    <div className={`rounded-2xl border px-4 py-3 shadow-sm ${toneClass}`}>
+      <p className="text-xs font-bold uppercase tracking-wide opacity-80">{label}</p>
+      <p className="mt-2 text-2xl font-semibold">{value}</p>
+    </div>
+  );
+}
+
+function HistoryRunInsightCard({
+  label,
+  value,
+  tone
+}: {
+  label: string;
+  value: string;
+  tone: "neutral" | "success" | "danger" | "warning";
+}) {
+  const toneClass =
+    tone === "success"
+      ? "bg-success/10 text-success"
+      : tone === "danger"
+        ? "bg-danger/10 text-danger"
+        : tone === "warning"
+          ? "bg-warning/10 text-warning"
+          : "bg-muted/50 text-foreground";
+
+  return (
+    <div className={`rounded-2xl px-4 py-3 ${toneClass}`}>
+      <p className="text-xs font-bold uppercase tracking-wide opacity-80">{label}</p>
+      <p className="mt-2 text-sm font-semibold leading-5">{value}</p>
+    </div>
+  );
+}
+
+function buildHistoryTotals(history: TeamshipReviewHistoryResponse) {
+  return history.runs.reduce(
+    (totals, run) => ({
+      pdfOrders: totals.pdfOrders + run.pdfOrderCount,
+      greenOrders: totals.greenOrders + run.passedCount,
+      reviewOrders: totals.reviewOrders + run.failedCount + run.missingTeamshipCount,
+      pendingOrders: totals.pendingOrders + run.pendingTeamshipCount + run.noPdfCount
+    }),
+    { pdfOrders: 0, greenOrders: 0, reviewOrders: 0, pendingOrders: 0 }
+  );
+}
+
+function groupHistoryRunsByShipmentDate(runs: TeamshipReviewHistoryRun[]) {
+  const grouped = new Map<string, TeamshipReviewHistoryRun[]>();
+
+  for (const run of runs) {
+    const group = grouped.get(run.shipmentDate);
+    if (group) {
+      group.push(run);
+    } else {
+      grouped.set(run.shipmentDate, [run]);
+    }
+  }
+
+  return Array.from(grouped.entries()).map(([date, groupRuns]) => ({
+    date,
+    label: formatDisplayDate(date),
+    runs: groupRuns
+  }));
+}
+
+function historyRunStatusLabel(run: TeamshipReviewHistoryRun) {
+  if (run.failedCount + run.missingTeamshipCount > 0) {
+    return `${run.failedCount + run.missingTeamshipCount} need review`;
+  }
+
+  if (run.noPdfCount > 0) {
+    return `${run.noPdfCount} no PDF`;
+  }
+
+  if (run.pendingTeamshipCount > 0) {
+    return `${run.pendingTeamshipCount} pending`;
+  }
+
+  return "Green";
+}
+
+function historyRunBorderClass(run: TeamshipReviewHistoryRun) {
+  if (run.failedCount + run.missingTeamshipCount > 0) {
+    return "border-l-[6px] border-l-danger/50";
+  }
+
+  if (run.noPdfCount > 0 || run.pendingTeamshipCount > 0) {
+    return "border-l-[6px] border-l-warning/50";
+  }
+
+  return "border-l-[6px] border-l-success/50";
+}
+
+function buildHistoryRunChangeSummary(run: TeamshipReviewHistoryRun) {
+  if (run.passedCount > 0) {
+    return `${run.passedCount} order${run.passedCount === 1 ? "" : "s"} matched or ready after review.`;
+  }
+
+  if (run.pdfOrderCount === 0) {
+    return "No Garland PDF orders were saved in this run.";
+  }
+
+  return "No fully green orders yet.";
+}
+
+function buildHistoryRunReviewSummary(run: TeamshipReviewHistoryRun) {
+  const reviewCount = run.failedCount + run.missingTeamshipCount;
+
+  if (reviewCount > 0) {
+    return `${reviewCount} order${reviewCount === 1 ? "" : "s"} need CSR attention before completion.`;
+  }
+
+  if (run.pendingTeamshipCount > 0) {
+    return `${run.pendingTeamshipCount} order${run.pendingTeamshipCount === 1 ? "" : "s"} waiting for Teamship.`;
+  }
+
+  return "No CSR review blockers saved.";
+}
+
+function buildHistoryRunTeamshipSummary(run: TeamshipReviewHistoryRun) {
+  if (run.missingTeamshipCount > 0) {
+    return `${run.missingTeamshipCount} PDF order${run.missingTeamshipCount === 1 ? "" : "s"} not found in Teamship.`;
+  }
+
+  return `${run.teamshipMatchedCount} order${run.teamshipMatchedCount === 1 ? "" : "s"} matched in Teamship.`;
+}
+
+function buildHistoryRunNextStep(run: TeamshipReviewHistoryRun) {
+  if (run.failedCount + run.missingTeamshipCount > 0) {
+    return "Review red rows, then resend the CSR report if needed.";
+  }
+
+  if (run.noPdfCount > 0) {
+    return "Upload the Garland PDFs when they arrive.";
+  }
+
+  if (run.pendingTeamshipCount > 0) {
+    return "Resync Teamship and rerun the Garland review.";
+  }
+
+  return "Mark BOLs printed and orders complete as the warehouse finishes.";
+}
+
+function buildHistoryOrderResultText(order: TeamshipReviewHistoryOrder) {
+  if (order.status === "PASS") {
+    return "Matched in Teamship. Use the saved report or loaded edit view for field-level detail.";
+  }
+
+  if (order.status === "FAIL") {
+    return `${order.mismatchCount} mismatch${order.mismatchCount === 1 ? "" : "es"} found between Garland PDF and Teamship.`;
+  }
+
+  if (order.status === "MISSING_TEAMSHIP") {
+    return "Garland PDF order was not found in Teamship.";
+  }
+
+  if (order.status === "PENDING_TEAMSHIP") {
+    return "PDF order is waiting for a matching Teamship order.";
+  }
+
+  if (order.status === "NO_PDF") {
+    return "Teamship order is saved, but no Garland PDF has been matched yet.";
+  }
+
+  return "Already reviewed earlier and skipped in this run.";
+}
+
+function historyOrderRowClass(order: TeamshipReviewHistoryOrder) {
+  if (order.status === "PASS") {
+    return "bg-success/5";
+  }
+
+  if (order.status === "FAIL" || order.status === "MISSING_TEAMSHIP") {
+    return "bg-danger/5";
+  }
+
+  if (order.status === "PENDING_TEAMSHIP" || order.status === "NO_PDF") {
+    return "bg-warning/5";
+  }
+
+  return "bg-card";
 }
 
 function statusPillClass(status: string) {
