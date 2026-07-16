@@ -503,9 +503,9 @@ async function upsertGarlandSourceAttachment(
   const contentHash = createHash("sha256").update(stableHashInput).digest("hex");
   const before = await prisma.garlandSourceAttachment.findUnique({
     where: { tenantId_sourceEmailId_graphAttachmentId: { tenantId, sourceEmailId, graphAttachmentId: attachment.id } },
-    select: { id: true }
+    select: { id: true, intakeStatus: true }
   });
-  const data = {
+  const createData = {
     tenantId,
     sourceEmailId,
     graphAttachmentId: attachment.id,
@@ -516,11 +516,19 @@ async function upsertGarlandSourceAttachment(
     intakeStatus: isPdfAttachment(attachment) ? "PDF_METADATA_READY" : "METADATA_ONLY",
     parseError: null
   } satisfies Prisma.GarlandSourceAttachmentUncheckedCreateInput;
+  const updateData: Prisma.GarlandSourceAttachmentUncheckedUpdateInput =
+    before && ["PDF_PARSED", "PDF_DUPLICATE"].includes(before.intakeStatus)
+      ? {
+          fileName,
+          contentType,
+          sizeBytes
+        }
+      : createData;
 
   await prisma.garlandSourceAttachment.upsert({
     where: { tenantId_sourceEmailId_graphAttachmentId: { tenantId, sourceEmailId, graphAttachmentId: attachment.id } },
-    create: data,
-    update: data
+    create: createData,
+    update: updateData
   });
 
   return Boolean(before);
