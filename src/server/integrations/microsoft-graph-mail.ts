@@ -98,7 +98,7 @@ export async function fetchMicrosoftGraphMessageAttachmentContent(
   attachmentId: string
 ) {
   const messagePath = mailbox === "me" ? "me/messages" : await resolveMicrosoftGraphMailboxMessagesPath(accessToken, mailbox);
-  const select = "id,name,contentType,size,isInline,contentId,lastModifiedDateTime,contentBytes";
+  const select = "id,name,contentType,size,isInline,lastModifiedDateTime,contentBytes";
   const url = `https://graph.microsoft.com/v1.0/${messagePath}/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(
     attachmentId
   )}?$select=${select}`;
