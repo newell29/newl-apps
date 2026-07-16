@@ -5,6 +5,7 @@ import {
   type WebsiteGrowthOpportunity
 } from "@prisma/client";
 
+import { getOpportunityReviewKey } from "@/modules/website-growth/legacy-rebuilds";
 import { weeklyContentRecommendations, type WeeklyContentLane } from "@/modules/website-growth/opportunities";
 import { prisma } from "@/server/db";
 
@@ -142,6 +143,12 @@ export async function createWeeklyWebsiteGrowthPlansForEnabledTenants() {
 }
 
 function getWeeklySelectionKey(candidate: WebsiteGrowthOpportunity, lane: WeeklyContentLane) {
+  const reviewKey = getOpportunityReviewKey(candidate);
+
+  if (reviewKey.startsWith("legacy-rebuild:")) {
+    return reviewKey;
+  }
+
   return `${lane}:${normalizeReviewPage(candidate.targetPage ?? candidate.sourcePage ?? candidate.topic)}`;
 }
 

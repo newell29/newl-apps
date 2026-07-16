@@ -6,6 +6,15 @@ import {
 } from "@prisma/client";
 
 import { getWebsiteGrowthIntegrationStatus } from "@/modules/website-growth/integrations";
+import {
+  buildLegacyRebuildEvidence,
+  buildLegacyRebuildReason,
+  buildLegacyRebuildRecommendation,
+  getOpportunityReviewKey,
+  legacyPageRebuilds,
+  resolveLegacyPageRebuild,
+  toNewlUrl
+} from "@/modules/website-growth/legacy-rebuilds";
 import { weeklyContentRecommendations } from "@/modules/website-growth/opportunities";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 import { prisma } from "@/server/db";
@@ -21,6 +30,8 @@ export async function getWebsiteGrowthShell(
     search?: string;
   } = {}
 ) {
+  await normalizeLegacyRebuildOpportunities(context.tenantId);
+
   const where = buildOpportunityWhere(context.tenantId, filters);
   const last30Days = new Date();
   last30Days.setDate(last30Days.getDate() - 30);
@@ -168,7 +179,7 @@ export async function getWebsiteGrowthShell(
       label: lane.label,
       description: lane.description,
       publishLimit: lane.publishLimit,
-      count: await prisma.websiteGrowthOpportunity.count({
+    count: await prisma.websiteGrowthOpportunity.count({
         where: {
           tenantId: context.tenantId,
           status: WebsiteGrowthOpportunityStatus.REVIEWING,
@@ -225,7 +236,10 @@ function collapsePreparedOpportunities<T extends {
   const grouped = new Map<string, T>();
 
   for (const opportunity of opportunities) {
-    const key = `${getReviewLane(opportunity.action)}:${normalizeReviewPage(opportunity.targetPage ?? opportunity.sourcePage ?? opportunity.topic)}`;
+    const reviewKey = getOpportunityReviewKey(opportunity);
+    const key = reviewKey.startsWith("legacy-rebuild:")
+      ? reviewKey
+      : `${getReviewLane(opportunity.action)}:${normalizeReviewPage(opportunity.targetPage ?? opportunity.sourcePage ?? opportunity.topic)}`;
     const existing = grouped.get(key);
 
     if (!existing || comparePreparedOpportunity(opportunity, existing) < 0) {
@@ -234,6 +248,96 @@ function collapsePreparedOpportunities<T extends {
   }
 
   return Array.from(grouped.values()).sort(comparePreparedOpportunity);
+}
+
+async function normalizeLegacyRebuildOpportunities(tenantId: string) {
+  const opportunities = await prisma.websiteGrowthOpportunity.findMany({
+    where: {
+      tenantId,
+      OR: [
+        ...legacyPageRebuilds.flatMap((rebuild) => [
+          { targetPage: { contains: rebuild.legacyPath } },
+          { sourcePage: { contains: rebuild.legacyPath } },
+          { targetPage: { contains: rebuild.currentRedirectPath } },
+          { sourcePage: { contains: rebuild.currentRedirectPath } }
+        ]),
+        { topic: { contains: "3pl" } },
+        { topic: { contains: "3PL" } },
+        { primaryKeyword: { contains: "3pl" } },
+        { primaryKeyword: { contains: "3PL" } }
+      ]
+    },
+    take: 500
+  });
+
+  for (const opportunity of opportunities) {
+    const rebuild = resolveLegacyPageRebuild(opportunity);
+
+    if (!rebuild) {
+      continue;
+    }
+
+    const evidence = readRecord(opportunity.evidence);
+    const mergedEvidence = {
+      impressions: readNumber(evidence?.impressions),
+      clicks: readNumber(evidence?.clicks),
+      position: readNullableNumber(evidence?.position),
+      leadCount: readNumber(evidence?.leadCount),
+      source: evidence?.source ?? "legacy_rebuild_normalization",
+      ...buildLegacyRebuildEvidence(rebuild, {
+        targetPage: opportunity.targetPage,
+        sourcePage: opportunity.sourcePage,
+        evidence
+      })
+    };
+    const targetPage = toNewlUrl(rebuild.proposedPath);
+    const recommendation = buildLegacyRebuildRecommendation(rebuild);
+    const reason = buildLegacyRebuildReason({
+      rebuild,
+      impressions: readNumber(mergedEvidence.impressions),
+      clicks: readNumber(mergedEvidence.clicks),
+      position: readNullableNumber(mergedEvidence.position),
+      leadCount: readNumber(mergedEvidence.leadCount)
+    });
+
+    if (
+      opportunity.action === WebsiteGrowthAction.CREATE_PAGE &&
+      opportunity.targetPage === targetPage &&
+      evidence?.legacyRebuild === true &&
+      opportunity.recommendation === recommendation
+    ) {
+      continue;
+    }
+
+    await prisma.websiteGrowthOpportunity.update({
+      where: { id: opportunity.id },
+      data: {
+        action: WebsiteGrowthAction.CREATE_PAGE,
+        targetPage,
+        sourcePage: opportunity.sourcePage ?? opportunity.targetPage ?? toNewlUrl(rebuild.currentRedirectPath),
+        recommendation,
+        reason,
+        supportingKeywords: Array.from(new Set([
+          opportunity.primaryKeyword,
+          rebuild.primaryKeyword,
+          ...rebuild.aliases
+        ].filter(Boolean))) as Prisma.InputJsonValue,
+        evidence: mergedEvidence as Prisma.InputJsonValue
+      }
+    });
+  }
+}
+
+function readRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function readNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function readNullableNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function comparePreparedOpportunity(a: { score: number; updatedAt: Date; contentDrafts: unknown[] }, b: { score: number; updatedAt: Date; contentDrafts: unknown[] }) {

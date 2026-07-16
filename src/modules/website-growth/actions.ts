@@ -14,6 +14,10 @@ import { parseDelimitedRows, readNumber, readString } from "@/modules/website-gr
 import { createWebsiteGrowthContentDraftPayload } from "@/modules/website-growth/content-drafts";
 import { fetchSearchConsoleRows, getWebsiteGrowthIntegrationStatus } from "@/modules/website-growth/integrations";
 import {
+  getOpportunityReviewKey,
+  resolveLegacyPageRebuild
+} from "@/modules/website-growth/legacy-rebuilds";
+import {
   buildCandidatesFromMetricRows,
   buildOpportunityCandidate,
   isQualifiedOpportunity,
@@ -516,7 +520,10 @@ async function createMissingOpportunities(tenantId: string, candidates: Opportun
       continue;
     }
 
-    const existing = await prisma.websiteGrowthOpportunity.findFirst({
+    const legacyRebuild = resolveLegacyPageRebuild(candidate);
+    const existing = legacyRebuild
+      ? await findExistingLegacyRebuildOpportunity(tenantId, candidate)
+      : await prisma.websiteGrowthOpportunity.findFirst({
       where: {
         tenantId,
         topic: candidate.topic,
@@ -524,11 +531,30 @@ async function createMissingOpportunities(tenantId: string, candidates: Opportun
         action: candidate.action
       },
       select: {
-        id: true
+        id: true,
+        score: true
       }
     });
 
     if (existing) {
+      if (legacyRebuild) {
+        await prisma.websiteGrowthOpportunity.update({
+          where: { id: existing.id },
+          data: {
+            action: candidate.action,
+            topic: candidate.topic,
+            primaryKeyword: candidate.primaryKeyword,
+            targetPage: candidate.targetPage,
+            sourcePage: candidate.sourcePage,
+            score: Math.max(candidate.score, existing.score ?? 0),
+            confidence: candidate.confidence,
+            reason: candidate.reason,
+            recommendation: candidate.recommendation,
+            supportingKeywords: candidate.supportingKeywords,
+            evidence: candidate.evidence as Prisma.InputJsonValue
+          }
+        });
+      }
       existingCount += 1;
       continue;
     }
@@ -553,6 +579,44 @@ async function createMissingOpportunities(tenantId: string, candidates: Opportun
   }
 
   return { createdCount, existingCount };
+}
+
+async function findExistingLegacyRebuildOpportunity(tenantId: string, candidate: OpportunityCandidate) {
+  const reviewKey = getOpportunityReviewKey(candidate);
+  const rebuild = resolveLegacyPageRebuild(candidate);
+
+  if (!rebuild) {
+    return null;
+  }
+
+  const candidates = await prisma.websiteGrowthOpportunity.findMany({
+    where: {
+      tenantId,
+      OR: [
+        { targetPage: candidate.targetPage },
+        { sourcePage: candidate.targetPage },
+        { targetPage: { contains: rebuild.legacyPath } },
+        { sourcePage: { contains: rebuild.legacyPath } },
+        { targetPage: { contains: rebuild.currentRedirectPath } },
+        { sourcePage: { contains: rebuild.currentRedirectPath } },
+        { topic: { contains: "3pl" } },
+        { primaryKeyword: { contains: "3pl" } }
+      ]
+    },
+    select: {
+      id: true,
+      score: true,
+      action: true,
+      topic: true,
+      primaryKeyword: true,
+      targetPage: true,
+      sourcePage: true,
+      evidence: true
+    },
+    take: 50
+  });
+
+  return candidates.find((opportunity) => getOpportunityReviewKey(opportunity) === reviewKey) ?? null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

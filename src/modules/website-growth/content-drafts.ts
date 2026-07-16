@@ -6,6 +6,7 @@ import {
   type NewlWebsiteContext
 } from "@/modules/website-growth/newl-website-context";
 import { resolveNewlWebsiteContext } from "@/modules/website-growth/newl-website-context-scanner";
+import { resolveLegacyPageRebuild } from "@/modules/website-growth/legacy-rebuilds";
 import { generateWebsiteGrowthContentDraft, isOpenAiDraftGenerationConfigured } from "@/server/integrations/openai";
 
 export type WebsiteGrowthDraftOpportunity = {
@@ -94,6 +95,7 @@ export function buildTemplateWebsiteGrowthContentDraft(
   websiteContext = newlWebsiteContext
 ): WebsiteGrowthContentDraftPayload {
   const keyword = opportunity.primaryKeyword || opportunity.topic;
+  const legacyRebuild = resolveLegacyPageRebuild(opportunity);
   const contentType = getContentType(opportunity.action);
   const proposedPath = buildProposedPath(opportunity);
   const targetUrl = opportunity.targetPage || proposedPath || "/resources/logistics-insights";
@@ -144,13 +146,16 @@ export function buildTemplateWebsiteGrowthContentDraft(
     ],
     implementationNotes: [
       `Primary review page: ${targetUrl}`,
+      legacyRebuild
+        ? `Legacy rebuild: ${legacyRebuild.proposedPath} currently redirects to ${legacyRebuild.currentRedirectPath}; review this private draft before replacing the redirect.`
+        : null,
       `Use Newl website pattern: ${pagePattern.pageType} (${pagePattern.sourceTemplate}).`,
       `Recommended component sequence: ${pagePattern.componentSequence.join(" -> ")}.`,
       buildSiteInventoryNote(websiteContext),
       `Recommended queue action: ${formatAction(opportunity.action)}`,
       "Keep claims specific to known Newl capabilities and avoid unsupported guarantees.",
       "After approval, build or update the website page, verify internal links, then resubmit the sitemap in Search Console if a new URL is created."
-    ],
+    ].filter((note): note is string => Boolean(note)),
     reviewChecklist: [
       "Does the title match the search intent?",
       "Does the page clearly connect warehousing, fulfillment, freight, or Teamship where relevant?",
@@ -228,6 +233,12 @@ function buildTitle(opportunity: WebsiteGrowthDraftOpportunity) {
 }
 
 function buildProposedPath(opportunity: WebsiteGrowthDraftOpportunity) {
+  const legacyRebuild = resolveLegacyPageRebuild(opportunity);
+
+  if (legacyRebuild) {
+    return legacyRebuild.proposedPath;
+  }
+
   if (opportunity.action === WebsiteGrowthAction.IMPROVE_EXISTING_PAGE || opportunity.action === WebsiteGrowthAction.ADD_SECTION) {
     return normalizePath(opportunity.targetPage);
   }

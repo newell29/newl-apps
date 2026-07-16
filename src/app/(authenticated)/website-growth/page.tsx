@@ -26,6 +26,10 @@ import {
   type WebsiteGrowthActionFilter,
   type WebsiteGrowthStatusFilter
 } from "@/modules/website-growth/queries";
+import {
+  resolveLegacyPageRebuild,
+  toNewlUrl
+} from "@/modules/website-growth/legacy-rebuilds";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
@@ -477,6 +481,7 @@ function PreparedOpportunityCard({
 }) {
   const draft = opportunity.contentDrafts[0] ?? null;
   const draftPayload = draft ? readDraftPayload(draft.draftJson) : null;
+  const legacyRebuild = resolveLegacyPageRebuild(opportunity);
 
   return (
     <article className="flex h-full flex-col rounded-md border border-border bg-background p-4">
@@ -484,6 +489,11 @@ function PreparedOpportunityCard({
         <span className="rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-xs font-semibold text-primary">
           Prepared
         </span>
+        {legacyRebuild ? (
+          <span className="rounded-full border border-warning/25 bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning">
+            Rebuild legacy URL
+          </span>
+        ) : null}
         <span className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs font-semibold text-mutedForeground">
           Score {opportunity.score}
         </span>
@@ -496,9 +506,27 @@ function PreparedOpportunityCard({
       <h3 className="mt-3 text-base font-semibold text-foreground">{opportunity.topic}</h3>
       <p className="mt-2 text-sm leading-6 text-mutedForeground">{formatStatusLike(opportunity.action)}</p>
       <div className="mt-4 space-y-2 text-sm">
-        <PageReviewLink label="Target page" value={opportunity.targetPage} />
-        <PageReviewLink label="Source page" value={opportunity.sourcePage} />
+        {legacyRebuild ? (
+          <>
+            <PageReference label="Draft target" value={toNewlUrl(legacyRebuild.proposedPath)} />
+            <PageReviewLink label="Current live redirect" value={toNewlUrl(legacyRebuild.currentRedirectPath)} linkText="Open redirect target" />
+            <PageReference label="Original signal" value={opportunity.sourcePage ?? opportunity.targetPage} />
+          </>
+        ) : (
+          <>
+            <PageReviewLink label="Target page" value={opportunity.targetPage} />
+            <PageReviewLink label="Source page" value={opportunity.sourcePage} />
+          </>
+        )}
       </div>
+      {legacyRebuild ? (
+        <div className="mt-4 rounded-md border border-warning/25 bg-warning/10 p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-warning">Draft-first rebuild</p>
+          <p className="mt-2 text-sm leading-6 text-foreground">
+            The legacy URL currently redirects to {legacyRebuild.currentRedirectPath}. Review the draft preview before approving a rebuilt page at {legacyRebuild.proposedPath}.
+          </p>
+        </div>
+      ) : null}
       <div className="mt-4 rounded-md border border-border bg-muted/30 p-3">
         <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Approval note</p>
         <p className="mt-2 text-sm leading-6 text-foreground">{opportunity.recommendation}</p>
@@ -609,7 +637,33 @@ function DraftList({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-function PageReviewLink({ label, value }: { label: string; value?: string | null }) {
+function PageReference({ label, value }: { label: string; value?: string | null }) {
+  if (!value) {
+    return (
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</p>
+        <p className="mt-1 text-mutedForeground">Not attached yet</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</p>
+      <p className="mt-1 break-all font-semibold text-foreground">{value}</p>
+    </div>
+  );
+}
+
+function PageReviewLink({
+  label,
+  value,
+  linkText = "Open live page"
+}: {
+  label: string;
+  value?: string | null;
+  linkText?: string;
+}) {
   if (!value) {
     return (
       <div>
@@ -628,7 +682,7 @@ function PageReviewLink({ label, value }: { label: string; value?: string | null
         rel="noreferrer"
         className="mt-1 block break-all font-semibold text-primary transition-colors hover:text-primaryHover"
       >
-        Review page
+        {linkText}
       </a>
       <p className="mt-1 break-all text-xs text-mutedForeground">{value}</p>
     </div>

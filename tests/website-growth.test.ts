@@ -102,6 +102,24 @@ describe("website growth opportunity scoring", () => {
     expect(result.qualified[0]?.evidence.impressions).toBe(160);
     expect(result.qualified[0]?.supportingKeywords).toEqual(["gta local trucking", "local trucking gta"]);
   });
+
+  it("classifies legacy redirected 3PL URLs as draft-first page rebuilds", () => {
+    const candidate = buildOpportunityCandidate({
+      topic: "nationwide 3pl companies",
+      primaryKeyword: "nationwide 3pl companies",
+      targetPage: "https://www.newlgroup.com/top-3pl-companies-in-usa/",
+      sourcePage: "https://www.newlgroup.com/top-3pl-companies-in-usa/",
+      impressions: 100,
+      clicks: 0,
+      position: 12,
+      source: "google_search_console_api"
+    });
+
+    expect(candidate.action).toBe(WebsiteGrowthAction.CREATE_PAGE);
+    expect(candidate.targetPage).toBe("https://www.newlgroup.com/top-3pl-companies-in-usa");
+    expect(candidate.evidence.legacyRebuild).toBe(true);
+    expect(candidate.recommendation).toContain("dedicated draft page");
+  });
 });
 
 describe("website growth weekly planning lanes", () => {
@@ -133,14 +151,14 @@ describe("website growth weekly planning lanes", () => {
     const candidates = [
       weeklyCandidate({
         id: "nationwide",
-        action: WebsiteGrowthAction.ADD_SECTION,
+        action: WebsiteGrowthAction.CREATE_PAGE,
         topic: "nationwide 3pl companies",
         targetPage: "https://www.newlgroup.com/top-3pl-companies-in-usa/",
         score: 42
       }),
       weeklyCandidate({
         id: "top-provider",
-        action: WebsiteGrowthAction.ADD_SECTION,
+        action: WebsiteGrowthAction.CREATE_PAGE,
         topic: "top 3pl provider",
         targetPage: "https://www.newlgroup.com/top-3pl-companies-in-usa/",
         score: 42
@@ -156,8 +174,8 @@ describe("website growth weekly planning lanes", () => {
 
     const result = selectWeeklyWebsiteGrowthCandidates(candidates);
 
-    expect(result.selected.map((candidate) => candidate.id)).toEqual(["resource", "nationwide"]);
-    expect(result.laneCounts.QUICK_OPTIMIZATION).toBe(1);
+    expect(result.selected.map((candidate) => candidate.id)).toEqual(["nationwide", "resource"]);
+    expect(result.laneCounts.CORE_PAGE).toBe(1);
   });
 });
 
@@ -231,6 +249,29 @@ describe("website growth content draft packages", () => {
     expect(draft.contentType).toBe("Existing page improvement");
     expect(draft.proposedPath).toBe("/freight/gta-local-trucking");
     expect(draft.implementationNotes[0]).toContain("/freight/gta-local-trucking");
+  });
+
+  it("keeps legacy rebuild draft packages on the proposed legacy URL", () => {
+    const draft = buildTemplateWebsiteGrowthContentDraft({
+      action: WebsiteGrowthAction.CREATE_PAGE,
+      topic: "top 3PL companies in the USA",
+      primaryKeyword: "top 3pl companies in usa",
+      targetPage: "https://www.newlgroup.com/top-3pl-companies-in-usa",
+      sourcePage: "https://www.newlgroup.com/locations/charlotte-warehousing",
+      score: 70,
+      confidence: "Medium",
+      reason: "100 impressions, 0 clicks, average position 12.0, legacy URL /top-3pl-companies-in-usa currently redirects to /locations/charlotte-warehousing",
+      recommendation: "Build a dedicated draft page for top 3PL companies in the USA at /top-3pl-companies-in-usa.",
+      supportingKeywords: ["top 3pl companies in usa", "nationwide 3pl companies"],
+      evidence: {
+        legacyRebuild: true,
+        legacyRebuildKey: "top-3pl-companies-in-usa"
+      }
+    });
+
+    expect(draft.contentType).toBe("New commercial page");
+    expect(draft.proposedPath).toBe("/top-3pl-companies-in-usa");
+    expect(draft.implementationNotes.some((note) => note.includes("currently redirects"))).toBe(true);
   });
 });
 

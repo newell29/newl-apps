@@ -2,6 +2,14 @@ import { WebsiteGrowthAction } from "@prisma/client";
 
 import type { CsvRow } from "@/modules/website-growth/csv";
 import { readNumber, readString } from "@/modules/website-growth/csv";
+import {
+  buildLegacyRebuildEvidence,
+  buildLegacyRebuildReason,
+  buildLegacyRebuildRecommendation,
+  getOpportunityReviewKey,
+  resolveLegacyPageRebuild,
+  toNewlUrl
+} from "@/modules/website-growth/legacy-rebuilds";
 
 export type OpportunityInput = {
   topic: string;
@@ -137,6 +145,52 @@ export function buildOpportunityCandidate(input: OpportunityInput): OpportunityC
   const clicks = input.clicks ?? 0;
   const position = input.position ?? null;
   const leadCount = input.leadCount ?? 0;
+  const legacyRebuild = resolveLegacyPageRebuild({
+    topic,
+    primaryKeyword,
+    targetPage: input.targetPage,
+    sourcePage: input.sourcePage,
+    evidence: input.evidence
+  });
+
+  if (legacyRebuild) {
+    const legacyEvidence = buildLegacyRebuildEvidence(legacyRebuild, {
+      targetPage: input.targetPage,
+      sourcePage: input.sourcePage,
+      evidence: input.evidence
+    });
+    const score = Math.max(42, scoreOpportunity({
+      topic,
+      impressions,
+      clicks,
+      position,
+      leadCount,
+      targetPage: toNewlUrl(legacyRebuild.proposedPath)
+    }));
+    const confidence = score >= 75 ? "High" : score >= 45 ? "Medium" : "Low";
+
+    return {
+      action: WebsiteGrowthAction.CREATE_PAGE,
+      topic,
+      primaryKeyword,
+      targetPage: toNewlUrl(legacyRebuild.proposedPath),
+      sourcePage: input.sourcePage ?? input.targetPage ?? toNewlUrl(legacyRebuild.currentRedirectPath),
+      score,
+      confidence,
+      reason: buildLegacyRebuildReason({ rebuild: legacyRebuild, impressions, clicks, position, leadCount }),
+      recommendation: buildLegacyRebuildRecommendation(legacyRebuild),
+      supportingKeywords: Array.from(new Set([primaryKeyword, legacyRebuild.primaryKeyword, ...legacyRebuild.aliases].filter(Boolean))),
+      evidence: {
+        impressions,
+        clicks,
+        position,
+        leadCount,
+        source: input.source ?? "manual",
+        ...legacyEvidence
+      }
+    };
+  }
+
   const action = chooseAction({
     topic,
     targetPage: input.targetPage,
@@ -393,6 +447,12 @@ function mergeCandidateCluster(cluster: OpportunityCandidate[]) {
 }
 
 function getClusterKey(candidate: OpportunityCandidate) {
+  const reviewKey = getOpportunityReviewKey(candidate);
+
+  if (reviewKey.startsWith("legacy-rebuild:")) {
+    return `${WebsiteGrowthAction.CREATE_PAGE}:${reviewKey}`;
+  }
+
   const pageKey = candidate.targetPage ? normalizePageKey(candidate.targetPage) : "no-page";
   const intentKey = normalizeKeywordIntent(candidate.primaryKeyword ?? candidate.topic);
 
