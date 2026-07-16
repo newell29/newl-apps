@@ -543,7 +543,8 @@ function summarizePlanOrders(orders: TeamshipPhase2OrderPlan[]): TeamshipPhase2D
     blockedCount: orders.filter((order) => order.status === "BLOCKED").length,
     skippedCount: orders.filter((order) => order.status === "SKIPPED").length,
     plannedFieldUpdateCount: orders.reduce((sum, order) => sum + order.plannedFieldUpdates.length, 0),
-    plannedPalletRowCount: orders.reduce((sum, order) => sum + order.plannedPalletRows.length, 0)
+    plannedPalletRowCount: orders.reduce((sum, order) => sum + order.plannedPalletRows.length, 0),
+    plannedBolCleanupCount: orders.filter((order) => order.plannedBolCleanup?.removeCustomerOrderWeights).length
   };
 }
 
@@ -689,7 +690,8 @@ function readSummary(value: unknown): TeamshipPhase2DryRunPlan["summary"] {
     blockedCount: readNumber(summary?.blockedCount),
     skippedCount: readNumber(summary?.skippedCount),
     plannedFieldUpdateCount: readNumber(summary?.plannedFieldUpdateCount),
-    plannedPalletRowCount: readNumber(summary?.plannedPalletRowCount)
+    plannedPalletRowCount: readNumber(summary?.plannedPalletRowCount),
+    plannedBolCleanupCount: readNumber(summary?.plannedBolCleanupCount)
   };
 }
 

@@ -19,7 +19,7 @@ const child = spawn(
     stdio: "inherit",
     env: {
       ...process.env,
-      TEAMSHIP_AGENT_MODE: "live-browser",
+      TEAMSHIP_AGENT_MODE: "live-api",
       TEAMSHIP_ALLOW_LIVE_UPDATES: "true",
       TEAMSHIP_BROWSER_HEADED: "true",
       TEAMSHIP_BROWSER_SLOW_MO_MS: process.env.TEAMSHIP_BROWSER_SLOW_MO_MS || "350",

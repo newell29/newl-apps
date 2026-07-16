@@ -75,8 +75,8 @@ async function main() {
             sku: action.sku,
             quantity: action.quantity,
             commodity: action.commodity,
-            fields: action.fields,
-            browserInstruction: action.browserInstruction
+            apiPayload: action.apiPayload,
+            apiInstruction: action.apiInstruction
           }))
         }))
       },
@@ -100,7 +100,8 @@ function buildManualPlan(options: ManualSmokeOptions): TeamshipPhase2DryRunPlan 
       blockedCount: 0,
       skippedCount: 0,
       plannedFieldUpdateCount: 0,
-      plannedPalletRowCount: plannedPalletRows.length
+      plannedPalletRowCount: plannedPalletRows.length,
+      plannedBolCleanupCount: 1
     },
     orders: [
       {
@@ -112,6 +113,11 @@ function buildManualPlan(options: ManualSmokeOptions): TeamshipPhase2DryRunPlan 
         sourceReviewStatus: "FAIL",
         plannedFieldUpdates: [],
         plannedPalletRows,
+        plannedBolCleanup: {
+          removeCustomerOrderWeights: true,
+          compactSpecialInstructions: false,
+          reason: "Manual smoke test should mirror production API flow by clearing BOL customer-order weights after updates."
+        },
         validationIssues: []
       }
     ]

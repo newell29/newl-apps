@@ -24,8 +24,13 @@ describe("Teamship Phase 2 dry-run planner", () => {
         readyCount: 1,
         blockedCount: 0,
         plannedFieldUpdateCount: 0,
-        plannedPalletRowCount: 2
+        plannedPalletRowCount: 2,
+        plannedBolCleanupCount: 1
       }
+    });
+    expect(plan.orders[0]?.plannedBolCleanup).toMatchObject({
+      removeCustomerOrderWeights: true,
+      compactSpecialInstructions: false
     });
     expect(plan.orders[0]?.plannedFieldUpdates).toEqual([]);
     expect(plan.orders[0]?.plannedPalletRows).toEqual([
@@ -121,7 +126,8 @@ describe("Teamship Phase 2 dry-run planner", () => {
     expect(plan.orders[0]).toMatchObject({
       status: "SKIPPED",
       plannedFieldUpdates: [],
-      plannedPalletRows: []
+      plannedPalletRows: [],
+      plannedBolCleanup: null
     });
   });
 

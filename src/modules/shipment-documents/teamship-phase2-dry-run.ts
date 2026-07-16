@@ -20,6 +20,7 @@ export type TeamshipPhase2DryRunPlan = {
     skippedCount: number;
     plannedFieldUpdateCount: number;
     plannedPalletRowCount: number;
+    plannedBolCleanupCount: number;
   };
   orders: TeamshipPhase2OrderPlan[];
 };
@@ -33,7 +34,14 @@ export type TeamshipPhase2OrderPlan = {
   sourceReviewStatus: GarlandTeamshipOrderReview["status"];
   plannedFieldUpdates: TeamshipPhase2FieldUpdate[];
   plannedPalletRows: TeamshipPhase2PalletRowPlan[];
+  plannedBolCleanup: TeamshipPhase2BolCleanupPlan | null;
   validationIssues: string[];
+};
+
+export type TeamshipPhase2BolCleanupPlan = {
+  removeCustomerOrderWeights: boolean;
+  compactSpecialInstructions: boolean;
+  reason: string;
 };
 
 export type TeamshipPhase2FieldUpdate = {
@@ -97,7 +105,8 @@ export function buildTeamshipPhase2DryRunPlan(review: GarlandTeamshipReviewRespo
       blockedCount: orders.filter((order) => order.status === "BLOCKED").length,
       skippedCount: orders.filter((order) => order.status === "SKIPPED").length,
       plannedFieldUpdateCount: orders.reduce((sum, order) => sum + order.plannedFieldUpdates.length, 0),
-      plannedPalletRowCount: orders.reduce((sum, order) => sum + order.plannedPalletRows.length, 0)
+      plannedPalletRowCount: orders.reduce((sum, order) => sum + order.plannedPalletRows.length, 0),
+      plannedBolCleanupCount: orders.filter((order) => order.plannedBolCleanup?.removeCustomerOrderWeights).length
     },
     orders
   };
@@ -120,6 +129,7 @@ function buildOrderPlan({
       sourceReviewStatus: orderReview.status,
       plannedFieldUpdates: [],
       plannedPalletRows: [],
+      plannedBolCleanup: null,
       validationIssues: ["No matched Teamship order is available for a safe Phase 2 dry run."]
     };
   }
@@ -134,6 +144,7 @@ function buildOrderPlan({
       sourceReviewStatus: orderReview.status,
       plannedFieldUpdates: [],
       plannedPalletRows: [],
+      plannedBolCleanup: null,
       validationIssues: [`Review status ${orderReview.status} is not eligible for Phase 2 pallet planning.`]
     };
   }
@@ -150,6 +161,7 @@ function buildOrderPlan({
   );
   const validationIssues = validateOrderPlan({ palletItems: includedPalletItems, plannedPalletRows });
   const status = validationIssues.length === 0 ? "READY" : "BLOCKED";
+  const plannedBolCleanup = buildBolCleanupPlan({ plannedFieldUpdates });
 
   return {
     psNumber: orderReview.psNumber,
@@ -160,7 +172,19 @@ function buildOrderPlan({
     sourceReviewStatus: orderReview.status,
     plannedFieldUpdates,
     plannedPalletRows,
+    plannedBolCleanup,
     validationIssues
+  };
+}
+
+function buildBolCleanupPlan({ plannedFieldUpdates }: { plannedFieldUpdates: TeamshipPhase2FieldUpdate[] }): TeamshipPhase2BolCleanupPlan {
+  return {
+    removeCustomerOrderWeights: true,
+    compactSpecialInstructions: plannedFieldUpdates.some(
+      (field) => field.reviewFieldKey === "shipping_instructions" || field.teamshipField === "edi_field_4"
+    ),
+    reason:
+      "After Teamship API updates, open the editable BOL and remove Teamship-generated Customer Order Information weight values."
   };
 }
 

@@ -54,24 +54,35 @@ export type TeamshipPhase2ExecutionOrderResult = {
     quantity: number;
     hasUsableDimensions: boolean;
     commodity: string;
-    fields: Record<string, string | number>;
-    browserInstruction: {
-      targetPage: "TEAMSHIP_ORDER_PALLETS";
-      routeTemplate: "/ship-inventories/{teamshipOrderId}";
-      absoluteUrl: string | null;
-      targetRowNumber: number;
-      zeroBasedLineItemIndex: number;
-      actionBeforeFill: "FILL_EXISTING_PALLET_ROW" | "CLICK_ADD_ANOTHER_PALLET_SIZE";
-      addAnotherPalletSizeButtonText: "Add Another Pallet Size" | null;
-      fieldSelectors: {
-        packages: string;
-        commodity: string;
-        dimensions: string;
-      };
-      saveInstruction: TeamshipBrowserSaveInstruction;
+    apiPayload: {
+      quantity: number;
+      length: number | null;
+      width: number | null;
+      height: number | null;
+      weight: number | null;
+      weight_unit: string;
+      commodity: string;
+    };
+    apiInstruction: {
+      preferredExecution: "TEAMSHIP_API";
+      endpoint: "PATCH /api/ship-inventories/{teamshipOrderId}";
+      payloadPath: "pallets[]";
       note: string;
     };
   }>;
+  bolCleanupAction: {
+    removeCustomerOrderWeights: boolean;
+    compactSpecialInstructions: boolean;
+    reason: string;
+    browserInstruction: {
+      targetPage: "TEAMSHIP_BOL_EDITOR";
+      routeTemplate: "/ship-inventories/{teamshipOrderId}/bol-editor";
+      absoluteUrl: string | null;
+      fieldPattern: "customer_order_{index}_weight";
+      saveInstruction: TeamshipBrowserSaveInstruction;
+      note: string;
+    };
+  } | null;
   saveInstruction: TeamshipBrowserSaveInstruction;
   validationIssues: string[];
   updatePayload?: Record<string, unknown>;
@@ -170,7 +181,7 @@ export function buildDryRunEvidence({
     hasFailures: false,
     notes: [
       "Dry-run worker did not call Teamship update endpoints and did not save changes.",
-      "The returned fieldActions and palletActions are the exact approved instructions a live adapter must execute.",
+      "The returned fieldActions and palletActions are the exact approved API instructions a live adapter must execute.",
       "Newl Apps will rescan Teamship after this completion response is accepted."
     ]
   };
@@ -275,9 +286,17 @@ function mapPlannedOrder(
       quantity: row.quantity,
       hasUsableDimensions: row.hasUsableDimensions,
       commodity: row.commodity,
-      fields: row.teamshipFields,
-      browserInstruction: withBrowserUrl(buildPalletBrowserInstruction(row.rowNumber), order.teamshipOrderId, teamshipAppBaseUrl)
+      apiPayload: buildPalletApiPayload(row),
+      apiInstruction: buildPalletApiInstruction()
     })),
+    bolCleanupAction: order.plannedBolCleanup
+      ? {
+          removeCustomerOrderWeights: order.plannedBolCleanup.removeCustomerOrderWeights,
+          compactSpecialInstructions: order.plannedBolCleanup.compactSpecialInstructions,
+          reason: order.plannedBolCleanup.reason,
+          browserInstruction: withBrowserUrl(buildBolCleanupBrowserInstruction(), order.teamshipOrderId, teamshipAppBaseUrl)
+        }
+      : null,
     saveInstruction: buildOrderCompletionSaveInstruction(),
     validationIssues: order.validationIssues
   };
@@ -305,39 +324,36 @@ function buildTeamshipBrowserUrl(routeTemplate: string, teamshipOrderId: string 
   return `${normalizeBaseUrl(teamshipAppBaseUrl) || DEFAULT_TEAMSHIP_APP_BASE_URL}${normalizedRoute}`;
 }
 
-function buildPalletBrowserInstruction(rowNumber: number) {
-  const lineItemIndex = rowNumber - 1;
-  const fieldSelectors = {
-    packages: `[data-field-content="line_item_${lineItemIndex}_packages"]`,
-    commodity: `[data-field-content="line_item_${lineItemIndex}_commodity"]`,
-    dimensions: `[data-field-content="line_item_${lineItemIndex}_dimensions"]`
-  };
-
-  if (rowNumber === 1) {
-    return {
-      targetPage: "TEAMSHIP_ORDER_PALLETS" as const,
-      routeTemplate: "/ship-inventories/{teamshipOrderId}" as const,
-      targetRowNumber: rowNumber,
-      zeroBasedLineItemIndex: lineItemIndex,
-      actionBeforeFill: "FILL_EXISTING_PALLET_ROW" as const,
-      addAnotherPalletSizeButtonText: null,
-      fieldSelectors,
-      saveInstruction: buildShippingOrderSaveInstruction(),
-      note: "Use the existing first pallet row in the Pallets section on the Teamship shipping order page."
-    };
-  }
-
+function buildBolCleanupBrowserInstruction() {
   return {
-    targetPage: "TEAMSHIP_ORDER_PALLETS" as const,
-    routeTemplate: "/ship-inventories/{teamshipOrderId}" as const,
-    targetRowNumber: rowNumber,
-    zeroBasedLineItemIndex: lineItemIndex,
-    actionBeforeFill: "CLICK_ADD_ANOTHER_PALLET_SIZE" as const,
-    addAnotherPalletSizeButtonText: "Add Another Pallet Size" as const,
-    fieldSelectors,
-    saveInstruction: buildShippingOrderSaveInstruction(),
+    targetPage: "TEAMSHIP_BOL_EDITOR" as const,
+    routeTemplate: "/ship-inventories/{teamshipOrderId}/bol-editor" as const,
+    fieldPattern: "customer_order_{index}_weight" as const,
+    saveInstruction: buildInlineBolEditorSaveInstruction(),
     note:
-      `On the Teamship shipping order page, click "Add Another Pallet Size" until pallet row ${rowNumber} exists, then fill this row's fields.`
+      "Open the editable BOL after the Teamship API update, clear every Customer Order Information WEIGHT field, then confirm autosave/readback."
+  };
+}
+
+function buildPalletApiPayload(row: TeamshipPhase2OrderPlan["plannedPalletRows"][number]) {
+  return {
+    quantity: row.quantity,
+    length: row.lengthIn,
+    width: row.widthIn,
+    height: row.heightIn,
+    weight: row.weightLb,
+    weight_unit: row.weightUnit,
+    commodity: row.commodity
+  };
+}
+
+function buildPalletApiInstruction() {
+  return {
+    preferredExecution: "TEAMSHIP_API" as const,
+    endpoint: "PATCH /api/ship-inventories/{teamshipOrderId}" as const,
+    payloadPath: "pallets[]" as const,
+    note:
+      "Send this pallet row in the Teamship shipping-order update API payload. Do not use browser automation or the BOL editor for pallet rows."
   };
 }
 

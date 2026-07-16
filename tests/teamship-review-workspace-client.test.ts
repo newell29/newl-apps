@@ -63,7 +63,8 @@ describe("Garland Teamship review workspace client helpers", () => {
             blockedCount: 0,
             skippedCount: 0,
             plannedFieldUpdateCount: 0,
-            plannedPalletRowCount: 1
+            plannedPalletRowCount: 1,
+            plannedBolCleanupCount: 0
           },
           orders: [
             {
