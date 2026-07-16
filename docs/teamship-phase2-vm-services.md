@@ -36,13 +36,13 @@ Use `ops/teamship-phase2-vm/teamship-phase2-worker.env.example` as the template.
 - `NEWL_AGENT_TOKEN`: production ingestion token from Vercel.
 - `NEWL_APPS_BASE_URL`: usually `https://newl-apps.vercel.app`.
 - `TEAMSHIP_BROWSER_EXECUTABLE_PATH`: usually `/usr/bin/google-chrome`.
-- `TEAMSHIP_LIVE_ALLOWLIST_SR_NUMBERS`: optional comma-separated SR list for limited rollout testing. Leave it unset/blank, or set it to `*`, to let the VM process every approved Newl Apps job.
+- `TEAMSHIP_LIVE_ALLOWLIST_SR_NUMBERS`: optional comma-separated SR list for limited rollout testing. Set it to `*` only when the VM should process every approved Newl Apps job. Leave it unset/blank to block live jobs until an explicit rollout choice is made.
 
 Use `DISPLAY=:0` or `DISPLAY=:1` if headed Chrome needs the VNC display. The installer tries to copy the current shell's `DISPLAY` into the env file automatically.
 
 ## API Plus BOL Cleanup Flow
 
-For `TEAMSHIP_AGENT_MODE=live-api`, the worker runs the Teamship API update first, including approved field updates and `pallets[]` rows for pallet quantity, DIMS, weight, unit, and commodity text. Browser automation is no longer used for pallet rows.
+For `TEAMSHIP_AGENT_MODE=live-api`, the worker runs the Teamship API update first, including approved field updates and `pallets[]` rows for pallet quantity, DIMS, weight, unit, and commodity text. Browser automation is no longer used for pallet rows. When one SKU has multiple serials, the commodity line is grouped as `SKU: <sku> SN: <serial>, <serial>, <serial>`; non-serialized lines use `SKU: <sku> QTY: <quantity>`.
 
 After each successful API update, the worker automatically opens the editable BOL in the VM browser for every successfully updated order that has planned BOL cleanup. The cleanup removes Teamship-generated weight values from the Customer Order Information weight column and records screenshots/readback evidence with the job.
 
