@@ -22,6 +22,7 @@ type PdfJsLegacyModule = {
 
 export async function extractGarlandShippingOrdersFromPdfBytes(fileBytes: Uint8Array) {
   await ensurePdfJsNodeGeometryGlobals();
+  await ensurePdfJsNodeWorkerGlobal();
   const pdfjs = (await import("pdfjs-dist/legacy/build/pdf.mjs")) as PdfJsLegacyModule;
   const pdf = await pdfjs.getDocument({ data: cloneBytes(fileBytes), disableWorker: true }).promise;
   const pages: Array<{ pageNumber: number; text: string }> = [];
@@ -97,6 +98,20 @@ async function ensurePdfJsNodeGeometryGlobals() {
   globals.DOMMatrix = PdfJsDomMatrixShim as unknown as typeof globalThis.DOMMatrix;
   globals.DOMPoint = PdfJsDomPointShim as unknown as typeof globalThis.DOMPoint;
   globals.DOMRect = PdfJsDomRectShim as unknown as typeof globalThis.DOMRect;
+}
+
+async function ensurePdfJsNodeWorkerGlobal() {
+  const globals = globalThis as typeof globalThis & {
+    pdfjsWorker?: { WorkerMessageHandler?: unknown };
+  };
+
+  if (globals.pdfjsWorker?.WorkerMessageHandler) {
+    return;
+  }
+
+  globals.pdfjsWorker = (await import("pdfjs-dist/legacy/build/pdf.worker.mjs")) as {
+    WorkerMessageHandler?: unknown;
+  };
 }
 
 class PdfJsDomMatrixShim {

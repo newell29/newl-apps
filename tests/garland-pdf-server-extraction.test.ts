@@ -7,17 +7,24 @@ describe("Garland server PDF extraction", () => {
   const originalDomMatrix = globalThis.DOMMatrix;
   const originalDomPoint = globalThis.DOMPoint;
   const originalDomRect = globalThis.DOMRect;
+  const originalPdfJsWorker = (
+    globalThis as typeof globalThis & { pdfjsWorker?: { WorkerMessageHandler?: unknown } }
+  ).pdfjsWorker;
 
   afterEach(() => {
     globalThis.DOMMatrix = originalDomMatrix;
     globalThis.DOMPoint = originalDomPoint;
     globalThis.DOMRect = originalDomRect;
+    (globalThis as typeof globalThis & { pdfjsWorker?: { WorkerMessageHandler?: unknown } }).pdfjsWorker =
+      originalPdfJsWorker;
   });
 
-  it("installs Node geometry globals before parsing PDFs", async () => {
+  it("installs Node PDF.js globals before parsing PDFs", async () => {
     globalThis.DOMMatrix = undefined as unknown as typeof globalThis.DOMMatrix;
     globalThis.DOMPoint = undefined as unknown as typeof globalThis.DOMPoint;
     globalThis.DOMRect = undefined as unknown as typeof globalThis.DOMRect;
+    (globalThis as typeof globalThis & { pdfjsWorker?: { WorkerMessageHandler?: unknown } }).pdfjsWorker =
+      undefined;
 
     const pdf = await PDFDocument.create();
     const page = pdf.addPage([300, 150]);
@@ -28,5 +35,9 @@ describe("Garland server PDF extraction", () => {
 
     expect(extraction.pageCount).toBe(1);
     expect(globalThis.DOMMatrix).toBeDefined();
+    expect(
+      (globalThis as typeof globalThis & { pdfjsWorker?: { WorkerMessageHandler?: unknown } }).pdfjsWorker
+        ?.WorkerMessageHandler
+    ).toBeDefined();
   });
 });
