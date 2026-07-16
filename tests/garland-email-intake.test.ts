@@ -111,6 +111,44 @@ describe("Garland email intake", () => {
     });
   });
 
+  it("does not requeue an already parsed PDF attachment during a later mailbox sync", async () => {
+    prismaMock.garlandSourceEmail.findUnique.mockResolvedValue({ id: "existing-email" });
+    prismaMock.garlandSourceAttachment.findUnique.mockResolvedValue({
+      id: "existing-attachment",
+      intakeStatus: "PDF_PARSED"
+    });
+
+    const message = {
+      id: "graph-1",
+      mailboxAddress: "Warehouse@Newl.ca",
+      subject: "11 ORDERS 14 PAGES - PS210346 - PS210356",
+      body: { content: "Pls see attached." },
+      receivedDateTime: "2026-07-16T18:15:00Z",
+      hasAttachments: true,
+      from: { emailAddress: { name: "Ruqsonna Alvi", address: "Ruqsonna.Alvi@garland-group.com" } }
+    };
+
+    await persistGarlandSourceEmails({
+      tenantId: "tenant-a",
+      actorUserId: "user-a",
+      mailboxes: ["warehouse@newl.ca"],
+      messages: [message],
+      attachmentFetcher: async () => [
+        { id: "att-1", name: "11 ORDERS 14 PAGES - PS210346 - PS210356.pdf", contentType: "application/pdf", size: 131_000 }
+      ]
+    });
+
+    const attachmentUpdate = prismaMock.garlandSourceAttachment.upsert.mock.calls[0]?.[0]?.update;
+    expect(attachmentUpdate).toEqual({
+      fileName: "11 ORDERS 14 PAGES - PS210346 - PS210356.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 131_000
+    });
+    expect(attachmentUpdate).not.toHaveProperty("intakeStatus");
+    expect(attachmentUpdate).not.toHaveProperty("contentHash");
+    expect(attachmentUpdate).not.toHaveProperty("parseError");
+  });
+
   it("groups duplicate Garland follow-up emails by shipment batch instead of showing separate work items", () => {
     const baseEmail = {
       tenantId: "tenant-a",

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 const authenticateIngestionRequestMock = vi.hoisted(() => vi.fn());
 const syncGarlandEmailIntakeMock = vi.hoisted(() => vi.fn());
+const processGarlandEmailAgentReadyAttachmentsMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/server/ingestion-auth", async () => {
   const actual = await vi.importActual<typeof import("@/server/ingestion-auth")>("@/server/ingestion-auth");
@@ -22,6 +23,10 @@ vi.mock("@/modules/shipment-documents/garland-email-intake", async () => {
     syncGarlandEmailIntake: syncGarlandEmailIntakeMock
   };
 });
+
+vi.mock("@/modules/shipment-documents/garland-email-agent-automation", () => ({
+  processGarlandEmailAgentReadyAttachments: processGarlandEmailAgentReadyAttachmentsMock
+}));
 
 import { POST } from "@/app/api/shipment-documents/teamship-review/email-intake/scheduled/route";
 
@@ -49,6 +54,16 @@ describe("scheduled Garland email intake route", () => {
       duplicateAttachmentCount: 1,
       attachmentErrors: 0,
       failures: []
+    });
+    processGarlandEmailAgentReadyAttachmentsMock.mockResolvedValue({
+      processedAttachmentCount: 1,
+      parsedAttachmentCount: 1,
+      duplicateAttachmentCount: 0,
+      failedAttachmentCount: 0,
+      createdReviewRunIds: ["review-run-1"],
+      createdUpdateJobIds: ["update-job-1"],
+      approvedUpdateJobIds: ["update-job-1"],
+      skippedReasons: []
     });
 
     const response = await POST(
@@ -81,6 +96,16 @@ describe("scheduled Garland email intake route", () => {
         triggerSource: "SCHEDULED"
       })
     );
+    expect(processGarlandEmailAgentReadyAttachmentsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: "tenant-1",
+        userId: "system:garland-email-intake",
+        role: "ADMIN"
+      }),
+      expect.objectContaining({
+        maxAttachments: 100
+      })
+    );
 
     await expect(response.json()).resolves.toMatchObject({
       data: {
@@ -93,6 +118,10 @@ describe("scheduled Garland email intake route", () => {
           triggerSource: "SCHEDULED",
           storedAttachmentCount: 4,
           duplicateAttachmentCount: 1
+        },
+        automation: {
+          processedAttachmentCount: 1,
+          createdReviewRunIds: ["review-run-1"]
         }
       }
     });
