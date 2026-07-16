@@ -16,6 +16,7 @@ import { parseMicrosoftGraphSettings } from "@/server/integrations/microsoft-gra
 import type { AuthenticatedContext } from "@/server/tenant-context";
 
 export const GARLAND_EMAIL_SYNC_TRIGGER_MANUAL = "MANUAL";
+export const GARLAND_EMAIL_SYNC_TRIGGER_SCHEDULED = "SCHEDULED";
 export const GARLAND_EMAIL_SYNC_STATUS_SUCCESS = "SUCCESS";
 export const GARLAND_EMAIL_SYNC_STATUS_FAILED = "FAILED";
 
@@ -83,10 +84,11 @@ type PersistInput = {
 
 type SyncInput = {
   tenantId: string;
-  userId: string;
+  userId: string | null;
   mailboxAddress?: string | null;
   lookbackDays?: number | null;
   maxMessagesPerMailbox?: number | null;
+  triggerSource?: string | null;
 };
 
 const GARLAND_DOMAIN = "garland-group.com";
@@ -195,9 +197,9 @@ export async function syncGarlandEmailIntake(ctx: AuthenticatedContext, input: S
     data: {
       tenantId: ctx.tenantId,
       mailboxAddress: mailboxes.join(", "),
-      triggerSource: GARLAND_EMAIL_SYNC_TRIGGER_MANUAL,
+      triggerSource: input.triggerSource?.trim() || GARLAND_EMAIL_SYNC_TRIGGER_MANUAL,
       status: "RUNNING",
-      createdByUserId: ctx.userId
+      createdByUserId: input.userId
     }
   });
 

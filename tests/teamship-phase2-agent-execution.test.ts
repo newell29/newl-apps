@@ -110,7 +110,7 @@ PROPER NAME: UN1814`;
         }),
         apiInstruction: expect.objectContaining({
           preferredExecution: "TEAMSHIP_API",
-          endpoint: "PATCH /api/ship-inventories/{teamshipOrderId}",
+          endpoint: "PUT /api/v1/ship-inventories/{teamshipOrderId}",
           payloadPath: "pallets[]"
         })
       }),
@@ -221,7 +221,7 @@ PROPER NAME: UN1814`;
     );
     expect(result.orders[0]?.palletActions[0]?.apiInstruction).toMatchObject({
       preferredExecution: "TEAMSHIP_API",
-      endpoint: "PATCH /api/ship-inventories/{teamshipOrderId}",
+      endpoint: "PUT /api/v1/ship-inventories/{teamshipOrderId}",
       payloadPath: "pallets[]"
     });
   });
