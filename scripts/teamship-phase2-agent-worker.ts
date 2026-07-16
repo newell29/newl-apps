@@ -1,6 +1,5 @@
 import {
   executeTeamshipPhase2BolCleanupJob,
-  executeTeamshipPhase2BrowserJob,
   type TeamshipBolCleanupJobResult
 } from "@/modules/shipment-documents/teamship-browser-update-execution";
 import {
@@ -14,7 +13,7 @@ type WorkerOptions = {
   baseUrl: string;
   token: string;
   agentId: string;
-  mode: "dry-run" | "live-api" | "live-browser";
+  mode: "dry-run" | "live-api";
   allowLiveUpdates: boolean;
   liveAllowlistSrNumbers: string[];
   browserExecutablePath: string | null;
@@ -103,7 +102,7 @@ async function runOnce(options: WorkerOptions) {
       jobId: claimed.job.id,
       status: "FAILED",
       result: {
-        mode: options.mode === "dry-run" ? "DRY_RUN" : options.mode === "live-browser" ? "LIVE_BROWSER" : "LIVE_API",
+        mode: options.mode === "dry-run" ? "DRY_RUN" : "LIVE_API",
         dryRun: options.mode === "dry-run",
         wouldUpdateTeamship: options.mode !== "dry-run",
         executedAt: new Date().toISOString(),
@@ -127,31 +126,6 @@ async function executeJob({
 }): Promise<TeamshipPhase2ExecutionResult> {
   if (claimed.job.agentMode === "LIVE_API" && options.mode === "dry-run") {
     throw new Error("This approved job requires live mode, but the VM worker is running in dry-run mode.");
-  }
-
-  if (claimed.job.agentMode === "LIVE_API" && options.mode === "live-browser") {
-    return executeTeamshipPhase2BrowserJob({
-      job: {
-        id: claimed.job.id,
-        agentMode: claimed.job.agentMode,
-        dryRun: claimed.job.dryRun
-      },
-      plan: claimed.executionPayload,
-      credentials: claimed.teamshipCredentials!,
-      options: {
-        agentId: options.agentId,
-        allowLiveUpdates: options.allowLiveUpdates,
-        liveAllowlistSrNumbers: options.liveAllowlistSrNumbers,
-        browserExecutablePath: options.browserExecutablePath,
-        headed: options.browserHeaded,
-        slowMoMs: options.browserSlowMoMs,
-        errorPauseMs: options.browserErrorPauseMs,
-        fieldUpdatesEnabled: options.browserFieldUpdatesEnabled,
-        bolCleanupEnabled: options.browserBolCleanupEnabled,
-        screenshotRootDir: options.browserScreenshotRootDir,
-        allowedHosts: options.browserAllowedHosts
-      }
-    });
   }
 
   const result = await executeTeamshipPhase2Job({
@@ -446,11 +420,17 @@ function readOptionalListOption(args: string[], name: string, fallback: string |
 }
 
 function readMode(value: string): WorkerOptions["mode"] {
-  if (value === "dry-run" || value === "live-api" || value === "live-browser") {
+  if (value === "dry-run" || value === "live-api") {
     return value;
   }
 
-  throw new Error("TEAMSHIP_AGENT_MODE must be dry-run, live-api, or live-browser.");
+  if (value === "live-browser") {
+    throw new Error(
+      "TEAMSHIP_AGENT_MODE=live-browser has been retired for pallet updates. Use live-api; browser automation now only runs after API updates for BOL cleanup."
+    );
+  }
+
+  throw new Error("TEAMSHIP_AGENT_MODE must be dry-run or live-api.");
 }
 
 function readPositiveNumber(value: string | undefined | null, fallback: number) {

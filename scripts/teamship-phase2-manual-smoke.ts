@@ -75,8 +75,8 @@ async function main() {
             sku: action.sku,
             quantity: action.quantity,
             commodity: action.commodity,
-            fields: action.fields,
-            browserInstruction: action.browserInstruction
+            apiPayload: action.apiPayload,
+            apiInstruction: action.apiInstruction
           }))
         }))
       },

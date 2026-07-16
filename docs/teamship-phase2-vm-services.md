@@ -1,10 +1,10 @@
 # Teamship Phase 2 VM Services
 
-This VM setup keeps the Garland Teamship browser worker running and keeps the VM checkout updated from GitHub `main`.
+This VM setup keeps the Garland Teamship Phase 2 worker running and keeps the VM checkout updated from GitHub `main`.
 
 ## What It Installs
 
-- `newl-teamship-phase2-worker.service`: always-running worker that polls Newl Apps for approved Teamship Phase 2 jobs.
+- `newl-teamship-phase2-worker.service`: always-running `live-api` worker that polls Newl Apps for approved Teamship Phase 2 jobs.
 - `newl-apps-auto-update.timer`: checks GitHub `main` every 5 minutes.
 - `newl-apps-auto-update.service`: fast-forwards the VM repo when safe, runs `npm install` if dependencies changed, and restarts the worker.
 
@@ -42,7 +42,9 @@ Use `DISPLAY=:0` or `DISPLAY=:1` if headed Chrome needs the VNC display. The ins
 
 ## API Plus BOL Cleanup Flow
 
-For `TEAMSHIP_AGENT_MODE=live-api`, the worker now runs the Teamship API update first and then automatically opens the editable BOL in the VM browser for every successfully updated order that has planned BOL cleanup. The cleanup removes Teamship-generated weight values from the Customer Order Information weight column and records screenshots/readback evidence with the job.
+For `TEAMSHIP_AGENT_MODE=live-api`, the worker runs the Teamship API update first, including approved field updates and `pallets[]` rows for pallet quantity, DIMS, weight, unit, and commodity text. Browser automation is no longer used for pallet rows.
+
+After each successful API update, the worker automatically opens the editable BOL in the VM browser for every successfully updated order that has planned BOL cleanup. The cleanup removes Teamship-generated weight values from the Customer Order Information weight column and records screenshots/readback evidence with the job.
 
 To temporarily turn off the browser cleanup while keeping API updates enabled, set one of:
 
@@ -50,6 +52,8 @@ To temporarily turn off the browser cleanup while keeping API updates enabled, s
 TEAMSHIP_BROWSER_BOL_CLEANUP=false
 TEAMSHIP_BROWSER_DISABLE_BOL_CLEANUP=true
 ```
+
+Do not set `TEAMSHIP_AGENT_MODE=live-browser` for production pallet updates. That legacy pallet-browser path was retired after the Teamship shipping-order API was validated.
 
 ## Operations
 

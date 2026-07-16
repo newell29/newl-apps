@@ -158,6 +158,12 @@ export async function executeTeamshipPhase2BrowserJob({
   credentials: TeamshipPhase2AgentCredentials;
   options: TeamshipBrowserExecutionOptions;
 }): Promise<TeamshipPhase2ExecutionResult> {
+  if (isBrowserPalletExecutionRetired()) {
+    throw new Error(
+      "Browser pallet updates are retired. Use TEAMSHIP_AGENT_MODE=live-api so field and pallet rows are updated through the Teamship API; browser automation is only for post-API BOL cleanup."
+    );
+  }
+
   if (!options.allowLiveUpdates) {
     throw new Error("Live Teamship browser updates require TEAMSHIP_ALLOW_LIVE_UPDATES=true or --allow-live-updates on the VM worker.");
   }
@@ -312,6 +318,10 @@ export async function executeTeamshipPhase2BrowserJob({
       "Newl Apps will rescan Teamship after this completion response is accepted."
     ]
   };
+}
+
+function isBrowserPalletExecutionRetired() {
+  return true;
 }
 
 export async function executeTeamshipPhase2BolCleanupJob({

@@ -88,7 +88,7 @@ PROPER NAME: UN1814`;
     ]);
   });
 
-  it("tells browser workers to click Add Another Pallet Size before filling row 2+", () => {
+  it("describes pallet updates as Teamship API payloads instead of browser pallet instructions", () => {
     const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
     const evidence = buildDryRunEvidence({
       job: { id: "job_1" },
@@ -99,27 +99,39 @@ PROPER NAME: UN1814`;
     expect(evidence.orders[0]?.palletActions).toEqual([
       expect.objectContaining({
         rowNumber: 1,
-        browserInstruction: expect.objectContaining({
-          targetPage: "TEAMSHIP_ORDER_PALLETS",
-          routeTemplate: "/ship-inventories/{teamshipOrderId}",
-          actionBeforeFill: "FILL_EXISTING_PALLET_ROW",
-          addAnotherPalletSizeButtonText: null,
-          fieldSelectors: expect.objectContaining({
-            packages: '[data-field-content="line_item_0_packages"]',
-            commodity: '[data-field-content="line_item_0_commodity"]',
-            dimensions: '[data-field-content="line_item_0_dimensions"]'
-          })
+        apiPayload: expect.objectContaining({
+          quantity: 1,
+          length: 48,
+          width: 40,
+          height: 50,
+          weight: 500,
+          weight_unit: "lbs",
+          commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908"
+        }),
+        apiInstruction: expect.objectContaining({
+          preferredExecution: "TEAMSHIP_API",
+          endpoint: "PATCH /api/ship-inventories/{teamshipOrderId}",
+          payloadPath: "pallets[]"
         })
       }),
       expect.objectContaining({
         rowNumber: 2,
-        browserInstruction: expect.objectContaining({
-          actionBeforeFill: "CLICK_ADD_ANOTHER_PALLET_SIZE",
-          addAnotherPalletSizeButtonText: "Add Another Pallet Size",
-          targetRowNumber: 2
+        apiPayload: expect.objectContaining({
+          quantity: 4,
+          length: 10,
+          width: 10,
+          height: 10,
+          weight: 25,
+          weight_unit: "lbs",
+          commodity: "SKU: 8030445 QTY: 4"
+        }),
+        apiInstruction: expect.objectContaining({
+          preferredExecution: "TEAMSHIP_API"
         })
       })
     ]);
+    expect(JSON.stringify(evidence.orders[0]?.palletActions)).not.toContain("Add Another Pallet Size");
+    expect(JSON.stringify(evidence.orders[0]?.palletActions)).not.toContain("TEAMSHIP_ORDER_PALLETS");
   });
 
   it("includes a BOL editor weight-cleanup instruction for ready orders", () => {
@@ -179,7 +191,7 @@ PROPER NAME: UN1814`;
     });
   });
 
-  it("uses the configured Teamship test app URL for browser update instructions", async () => {
+  it("uses the configured Teamship test app URL for field fallbacks and BOL cleanup only", async () => {
     const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
     const result = await executeTeamshipPhase2Job({
       job: {
@@ -204,12 +216,17 @@ PROPER NAME: UN1814`;
     expect(result.orders[0]?.fieldActions[0]?.browserInstruction.absoluteUrl).toBe(
       "https://teamship-test.example/ship-inventories/30202"
     );
-    expect(result.orders[0]?.palletActions[0]?.browserInstruction.absoluteUrl).toBe(
-      "https://teamship-test.example/ship-inventories/30202"
+    expect(result.orders[0]?.bolCleanupAction?.browserInstruction.absoluteUrl).toBe(
+      "https://teamship-test.example/ship-inventories/30202/bol-editor"
     );
+    expect(result.orders[0]?.palletActions[0]?.apiInstruction).toMatchObject({
+      preferredExecution: "TEAMSHIP_API",
+      endpoint: "PATCH /api/ship-inventories/{teamshipOrderId}",
+      payloadPath: "pallets[]"
+    });
   });
 
-  it("derives the Teamship browser host from the configured API URL when no app URL is set", async () => {
+  it("derives the Teamship BOL cleanup browser host from the configured API URL when no app URL is set", async () => {
     const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
     const result = await executeTeamshipPhase2Job({
       job: {
@@ -230,8 +247,8 @@ PROPER NAME: UN1814`;
       }
     });
 
-    expect(result.orders[0]?.palletActions[0]?.browserInstruction.absoluteUrl).toBe(
-      "https://teamship-test.example/ship-inventories/30202"
+    expect(result.orders[0]?.bolCleanupAction?.browserInstruction.absoluteUrl).toBe(
+      "https://teamship-test.example/ship-inventories/30202/bol-editor"
     );
   });
 

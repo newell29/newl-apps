@@ -8,7 +8,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=%h/newl-apps
 EnvironmentFile=%h/newl-apps/.env.teamship-phase2-worker
-Environment=TEAMSHIP_AGENT_MODE=live-browser
+Environment=TEAMSHIP_AGENT_MODE=live-api
 Environment=TEAMSHIP_ALLOW_LIVE_UPDATES=true
 Environment=TEAMSHIP_BROWSER_HEADED=true
 Environment=TEAMSHIP_BROWSER_SLOW_MO_MS=350
