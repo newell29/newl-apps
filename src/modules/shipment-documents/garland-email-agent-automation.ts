@@ -45,12 +45,13 @@ type GarlandAttachmentForProcessing = Prisma.GarlandSourceAttachmentGetPayload<{
 
 export async function processGarlandEmailAgentReadyAttachments(
   context: AuthenticatedContext,
-  options: { maxAttachments?: number | null } = {}
+  options: { maxAttachments?: number | null; receivedAfter?: Date | string | null } = {}
 ): Promise<GarlandEmailAgentAutomationResult> {
   await requireModule(context, ModuleKey.SHIPMENT_DOCUMENTS);
   await requireMutationAccess(context);
 
   const maxAttachments = Math.min(25, Math.max(1, options.maxAttachments ?? DEFAULT_MAX_ATTACHMENTS));
+  const receivedAfter = parseOptionalDate(options.receivedAfter) ?? parseOptionalDate(process.env.GARLAND_EMAIL_AGENT_START_AT);
   const settings = await getGarlandGraphSettings(context.tenantId);
   if (!settings.mailSyncEnabled || !settings.crossMailboxReady) {
     return emptyResult([settings.runtimeNotes || "Microsoft Graph mail sync is not ready."]);
@@ -62,7 +63,8 @@ export async function processGarlandEmailAgentReadyAttachments(
       intakeStatus: { in: [...READY_ATTACHMENT_STATUSES] },
       sourceEmail: {
         is: {
-          classification: { in: ["GARLAND_DOCUMENT_BATCH", "GARLAND_DOCUMENT_CORRECTION"] }
+          classification: { in: ["GARLAND_DOCUMENT_BATCH", "GARLAND_DOCUMENT_CORRECTION"] },
+          ...(receivedAfter ? { receivedAt: { gte: receivedAfter } } : {})
         }
       }
     },
@@ -82,7 +84,8 @@ export async function processGarlandEmailAgentReadyAttachments(
   });
 
   if (attachments.length === 0) {
-    return emptyResult(["No Garland PDF attachments are waiting for automated processing."]);
+    const cutoffNote = receivedAfter ? ` after ${receivedAfter.toISOString()}` : "";
+    return emptyResult([`No Garland PDF attachments are waiting for automated processing${cutoffNote}.`]);
   }
 
   const accessToken = await getMicrosoftGraphApplicationAccessToken();
@@ -293,6 +296,14 @@ function formatInputDate(date: Date) {
 
 function parseInputDate(value: string) {
   return new Date(`${value}T00:00:00.000Z`);
+}
+
+function parseOptionalDate(value: Date | string | null | undefined) {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 function formatDisplayDate(date: Date) {

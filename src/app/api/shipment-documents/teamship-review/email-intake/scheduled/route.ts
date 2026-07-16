@@ -13,6 +13,7 @@ type ScheduledEmailIntakeRequest = {
   mailboxAddress?: string;
   lookbackDays?: number;
   maxMessagesPerMailbox?: number;
+  automationReceivedAfter?: string;
 };
 
 export const dynamic = "force-dynamic";
@@ -38,7 +39,8 @@ export async function POST(request: Request) {
       triggerSource: GARLAND_EMAIL_SYNC_TRIGGER_SCHEDULED
     });
     const automation = await processGarlandEmailAgentReadyAttachments(context, {
-      maxAttachments: body?.maxMessagesPerMailbox
+      maxAttachments: body?.maxMessagesPerMailbox,
+      receivedAfter: body?.automationReceivedAfter
     });
 
     return NextResponse.json({
