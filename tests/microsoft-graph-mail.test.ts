@@ -8,25 +8,20 @@ describe("Microsoft Graph mail attachment downloads", () => {
     vi.unstubAllGlobals();
   });
 
-  it("casts attachment downloads to fileAttachment before selecting contentBytes", async () => {
+  it("downloads attachment content through the raw value endpoint", async () => {
+    const pdfBytes = Buffer.from("%PDF-1.7");
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({
-        id: "attachment-1",
-        name: "orders.pdf",
-        contentBytes: "JVBERi0x"
-      })
+      arrayBuffer: async () => pdfBytes.buffer.slice(pdfBytes.byteOffset, pdfBytes.byteOffset + pdfBytes.byteLength)
     });
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchMicrosoftGraphMessageAttachmentContent("token", "me", "message-1", "attachment-1")).resolves.toMatchObject({
       id: "attachment-1",
-      contentBytes: "JVBERi0x"
+      contentBytes: pdfBytes.toString("base64")
     });
 
     const [url] = fetchMock.mock.calls[0] ?? [];
-    expect(url).toBe(
-      "https://graph.microsoft.com/v1.0/me/messages/message-1/attachments/attachment-1/microsoft.graph.fileAttachment?$select=id,name,contentType,size,isInline,lastModifiedDateTime,contentBytes"
-    );
+    expect(url).toBe("https://graph.microsoft.com/v1.0/me/messages/message-1/attachments/attachment-1/$value");
   });
 });

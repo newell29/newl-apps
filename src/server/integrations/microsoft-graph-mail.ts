@@ -98,10 +98,9 @@ export async function fetchMicrosoftGraphMessageAttachmentContent(
   attachmentId: string
 ) {
   const messagePath = mailbox === "me" ? "me/messages" : await resolveMicrosoftGraphMailboxMessagesPath(accessToken, mailbox);
-  const select = "id,name,contentType,size,isInline,lastModifiedDateTime,contentBytes";
   const url = `https://graph.microsoft.com/v1.0/${messagePath}/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(
     attachmentId
-  )}/microsoft.graph.fileAttachment?$select=${select}`;
+  )}/$value`;
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
@@ -115,7 +114,10 @@ export async function fetchMicrosoftGraphMessageAttachmentContent(
     );
   }
 
-  return (await response.json()) as MicrosoftGraphMailFileAttachment;
+  return {
+    id: attachmentId,
+    contentBytes: Buffer.from(await response.arrayBuffer()).toString("base64")
+  } satisfies MicrosoftGraphMailFileAttachment;
 }
 
 export async function resolveMicrosoftGraphMailboxMessagesPath(accessToken: string, mailbox: string) {
