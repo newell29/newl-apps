@@ -63,6 +63,7 @@ export async function POST(request: Request) {
           storedAttachmentCount: sync.attachmentsStored,
           duplicateAttachmentCount: sync.duplicateAttachmentCount,
           attachmentErrors: sync.attachmentErrors,
+          attachmentErrorDetails: sync.attachmentErrorDetails,
           failures: sync.failures
         },
         automation: {

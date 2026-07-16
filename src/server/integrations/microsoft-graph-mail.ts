@@ -73,7 +73,7 @@ export async function fetchMicrosoftGraphMailboxMessages(
 
 export async function fetchMicrosoftGraphMessageAttachments(accessToken: string, mailbox: string, messageId: string) {
   const messagePath = mailbox === "me" ? "me/messages" : await resolveMicrosoftGraphMailboxMessagesPath(accessToken, mailbox);
-  const url = `https://graph.microsoft.com/v1.0/${messagePath}/${encodeURIComponent(messageId)}/attachments?$select=id,name,contentType,size,isInline,contentId,lastModifiedDateTime`;
+  const url = `https://graph.microsoft.com/v1.0/${messagePath}/${encodeURIComponent(messageId)}/attachments?$select=id,name,contentType,size,isInline,lastModifiedDateTime`;
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
