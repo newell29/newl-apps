@@ -5,6 +5,7 @@ import {
   GARLAND_EMAIL_SYNC_TRIGGER_SCHEDULED,
   syncGarlandEmailIntake
 } from "@/modules/shipment-documents/garland-email-intake";
+import { processGarlandEmailAgentReadyAttachments } from "@/modules/shipment-documents/garland-email-agent-automation";
 import { authenticateIngestionRequest, IngestionAuthError } from "@/server/ingestion-auth";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 
@@ -36,6 +37,9 @@ export async function POST(request: Request) {
       maxMessagesPerMailbox: body?.maxMessagesPerMailbox,
       triggerSource: GARLAND_EMAIL_SYNC_TRIGGER_SCHEDULED
     });
+    const automation = await processGarlandEmailAgentReadyAttachments(context, {
+      maxAttachments: body?.maxMessagesPerMailbox
+    });
 
     return NextResponse.json({
       data: {
@@ -58,6 +62,16 @@ export async function POST(request: Request) {
           duplicateAttachmentCount: sync.duplicateAttachmentCount,
           attachmentErrors: sync.attachmentErrors,
           failures: sync.failures
+        },
+        automation: {
+          processedAttachmentCount: automation.processedAttachmentCount,
+          parsedAttachmentCount: automation.parsedAttachmentCount,
+          duplicateAttachmentCount: automation.duplicateAttachmentCount,
+          failedAttachmentCount: automation.failedAttachmentCount,
+          createdReviewRunIds: automation.createdReviewRunIds,
+          createdUpdateJobIds: automation.createdUpdateJobIds,
+          approvedUpdateJobIds: automation.approvedUpdateJobIds,
+          skippedReasons: automation.skippedReasons
         }
       }
     });

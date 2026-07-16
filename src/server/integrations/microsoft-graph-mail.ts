@@ -42,6 +42,11 @@ export type MicrosoftGraphMailAttachment = {
   lastModifiedDateTime?: string | null;
 };
 
+export type MicrosoftGraphMailFileAttachment = MicrosoftGraphMailAttachment & {
+  "@odata.type"?: string | null;
+  contentBytes?: string | null;
+};
+
 export type MicrosoftGraphMailFetchOptions = {
   lookbackDays: number;
   maxMessagesPerMailbox: number;
@@ -84,6 +89,33 @@ export async function fetchMicrosoftGraphMessageAttachments(accessToken: string,
 
   const json = (await response.json()) as { value?: MicrosoftGraphMailAttachment[] };
   return Array.isArray(json.value) ? json.value : [];
+}
+
+export async function fetchMicrosoftGraphMessageAttachmentContent(
+  accessToken: string,
+  mailbox: string,
+  messageId: string,
+  attachmentId: string
+) {
+  const messagePath = mailbox === "me" ? "me/messages" : await resolveMicrosoftGraphMailboxMessagesPath(accessToken, mailbox);
+  const select = "id,name,contentType,size,isInline,contentId,lastModifiedDateTime,contentBytes";
+  const url = `https://graph.microsoft.com/v1.0/${messagePath}/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(
+    attachmentId
+  )}?$select=${select}`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+    signal: AbortSignal.timeout(MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS)
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      (await extractMicrosoftGraphResponseError(response)) ??
+        `Microsoft Graph attachment download failed for ${mailbox} message ${messageId} attachment ${attachmentId} with status ${response.status}.`
+    );
+  }
+
+  return (await response.json()) as MicrosoftGraphMailFileAttachment;
 }
 
 export async function resolveMicrosoftGraphMailboxMessagesPath(accessToken: string, mailbox: string) {

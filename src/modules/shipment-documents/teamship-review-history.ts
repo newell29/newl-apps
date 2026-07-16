@@ -318,7 +318,7 @@ export async function saveTeamshipReviewRun(input: SaveTeamshipReviewRunInput) {
       extractedOrders: review.pdfOrders as Prisma.InputJsonValue,
       reviewResponse: review as Prisma.InputJsonValue,
       searchText,
-      createdByUserId: context.userId,
+      createdByUserId: persistableUserId(context.userId),
       orders: {
         create: orderRows
       }
@@ -326,6 +326,10 @@ export async function saveTeamshipReviewRun(input: SaveTeamshipReviewRunInput) {
   });
 
   return (created as { id?: string }).id ?? null;
+}
+
+function persistableUserId(userId: string | null | undefined) {
+  return userId && !userId.startsWith("system:") ? userId : null;
 }
 
 export async function updateTeamshipReviewRunReview(input: UpdateTeamshipReviewRunReviewInput) {
