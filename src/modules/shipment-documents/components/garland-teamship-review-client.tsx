@@ -209,6 +209,7 @@ type UploadedPdfBatch = {
 
 const ACTIVE_TEAMSHIP_REVIEW_RUN_STORAGE_KEY = "newl.garlandTeamshipReview.activeRunId";
 const EXPANDED_TEAMSHIP_REVIEW_ROWS_STORAGE_KEY = "newl.garlandTeamshipReview.expandedRows";
+const SHOW_LEGACY_SHIPMENT_QUEUE = false;
 
 let pdfJsLoader: Promise<PdfJsModule> | null = null;
 
@@ -388,6 +389,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     () => history.runs.find((run) => run.id === editingRunId) ?? null,
     [history.runs, editingRunId]
   );
+  const reviewIssueSummaries = useMemo(() => buildReviewIssueSummaries(review), [review]);
 
   function setActiveEditingRunId(runId: string | null) {
     setEditingRunId(runId);
@@ -605,6 +607,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         `${rescan || srNumber ? "Rescan complete" : "Review complete"}: ${nextReview.summary.passedCount} green, ${nextReview.summary.pendingTeamshipCount} pending Teamship creation, ${nextReview.summary.failedCount} with discrepancies, ${nextReview.summary.missingTeamshipCount} missing without an alert.`
           + (nextReview.summary.noPdfCount > 0 ? ` ${nextReview.summary.noPdfCount} Teamship order(s) had no uploaded PDF.` : "")
           + (nextReview.summary.skippedAlreadyReviewedCount > 0 ? ` ${nextReview.summary.skippedAlreadyReviewedCount} already-reviewed order(s) were skipped.` : "")
+          + (buildReviewIssueSummaries(nextReview).length > 0 ? " Review the issue details below." : "")
           + " Review is saved in the editing queue automatically."
       );
     } catch (caught) {
@@ -1200,6 +1203,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       );
       setStatus(
         `Loaded ${json.documentLabel || formatDateLabel(json.shipmentDate)} for editing: ${json.review.summary.passedCount} green, ${json.review.summary.failedCount} with discrepancies, ${json.review.summary.noPdfCount} no PDF.`
+          + (buildReviewIssueSummaries(json.review).length > 0 ? " Review the issue details below." : "")
       );
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Unable to load Teamship review run.";
@@ -1472,57 +1476,61 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         </label>
       </details>
 
-      <ShipmentReviewWorkspace
-        rows={workspaceRows}
-        review={review}
-        activeRun={activeHistoryRun}
-        pdfOrderCount={orders.length}
-        teamshipOrderCount={dailyOrderCount ?? dailyOrders.length}
-        syncSummary={dailySyncSummary}
-        isSaving={isSaving}
-        canSave={canSaveCurrentQueue}
-        saveStatus={saveStatus}
-        onSave={() => void saveRunToHistory()}
-        onDownloadSummary={() => void downloadReviewSummaryPdf()}
-        onDownloadSkuDirectory={() => void downloadSkuDirectoryCsv()}
-        selectedUpdateSrNumbers={selectedUpdateSrNumbers}
-        updateJobs={updateJobs}
-        updateJobStatus={updateJobStatus}
-        isUpdateJobLoading={isUpdateJobLoading}
-        onSelectIssueShipments={selectIssueShipments}
-        onSelectAllEligibleShipments={selectAllEligibleShipments}
-        onClearSelectedShipments={clearSelectedShipments}
-        onReplaceUpdateSelection={replaceSelectedShipments}
-        onToggleUpdateSelection={(srNumber, selected) => {
-          setSelectedUpdateSrNumbers((current) => {
-            const next = new Set(current);
-            if (selected) {
-              next.add(srNumber);
-            } else {
-              next.delete(srNumber);
-            }
-            return next;
-          });
-        }}
-        onCreateUpdateJob={() => void createUpdateJob()}
-        onCreateIssueUpdateJob={() => void createUpdateJobForIssueShipments()}
-        onCreateUpdateJobForSrNumbers={(srNumbers) => void createUpdateJobForSrNumbers(srNumbers)}
-        onCreateSingleUpdateJob={(srNumber) => void createUpdateJob([srNumber])}
-        onRescanShipment={(srNumber) => void runReview({ rescan: true, srNumber })}
-        onFieldProposedValueChange={updateReviewFieldProposedValue}
-        onFieldBotActionEnabledChange={updateReviewFieldBotActionEnabled}
-        onProductDimensionChange={updateProductDimensionOverride}
-        onAddPalletDraftLine={addPalletDraftLine}
-        onRemovePalletDraftLine={removePalletDraftLine}
-        onPalletCommodityChange={updatePalletCommodityOverride}
-        onPalletBotActionEnabledChange={updatePalletBotActionEnabled}
-        payloadInspections={payloadInspections}
-        payloadInspectionErrors={payloadInspectionErrors}
-        payloadInspectionLoadingSr={payloadInspectionLoadingSr}
-        onInspectPayload={(input) => void inspectTeamshipPayload(input)}
-        isHistoryLoading={isHistoryLoading}
-        onOrderWorkflowAction={(runId, orderId, action) => void updateSavedOrderWorkflow(runId, orderId, action)}
-      />
+      <TeamshipReviewIssueSummary items={reviewIssueSummaries} />
+
+      {SHOW_LEGACY_SHIPMENT_QUEUE ? (
+        <ShipmentReviewWorkspace
+          rows={workspaceRows}
+          review={review}
+          activeRun={activeHistoryRun}
+          pdfOrderCount={orders.length}
+          teamshipOrderCount={dailyOrderCount ?? dailyOrders.length}
+          syncSummary={dailySyncSummary}
+          isSaving={isSaving}
+          canSave={canSaveCurrentQueue}
+          saveStatus={saveStatus}
+          onSave={() => void saveRunToHistory()}
+          onDownloadSummary={() => void downloadReviewSummaryPdf()}
+          onDownloadSkuDirectory={() => void downloadSkuDirectoryCsv()}
+          selectedUpdateSrNumbers={selectedUpdateSrNumbers}
+          updateJobs={updateJobs}
+          updateJobStatus={updateJobStatus}
+          isUpdateJobLoading={isUpdateJobLoading}
+          onSelectIssueShipments={selectIssueShipments}
+          onSelectAllEligibleShipments={selectAllEligibleShipments}
+          onClearSelectedShipments={clearSelectedShipments}
+          onReplaceUpdateSelection={replaceSelectedShipments}
+          onToggleUpdateSelection={(srNumber, selected) => {
+            setSelectedUpdateSrNumbers((current) => {
+              const next = new Set(current);
+              if (selected) {
+                next.add(srNumber);
+              } else {
+                next.delete(srNumber);
+              }
+              return next;
+            });
+          }}
+          onCreateUpdateJob={() => void createUpdateJob()}
+          onCreateIssueUpdateJob={() => void createUpdateJobForIssueShipments()}
+          onCreateUpdateJobForSrNumbers={(srNumbers) => void createUpdateJobForSrNumbers(srNumbers)}
+          onCreateSingleUpdateJob={(srNumber) => void createUpdateJob([srNumber])}
+          onRescanShipment={(srNumber) => void runReview({ rescan: true, srNumber })}
+          onFieldProposedValueChange={updateReviewFieldProposedValue}
+          onFieldBotActionEnabledChange={updateReviewFieldBotActionEnabled}
+          onProductDimensionChange={updateProductDimensionOverride}
+          onAddPalletDraftLine={addPalletDraftLine}
+          onRemovePalletDraftLine={removePalletDraftLine}
+          onPalletCommodityChange={updatePalletCommodityOverride}
+          onPalletBotActionEnabledChange={updatePalletBotActionEnabled}
+          payloadInspections={payloadInspections}
+          payloadInspectionErrors={payloadInspectionErrors}
+          payloadInspectionLoadingSr={payloadInspectionLoadingSr}
+          onInspectPayload={(input) => void inspectTeamshipPayload(input)}
+          isHistoryLoading={isHistoryLoading}
+          onOrderWorkflowAction={(runId, orderId, action) => void updateSavedOrderWorkflow(runId, orderId, action)}
+        />
+      ) : null}
       <TeamshipReviewHistorySection
         history={history}
         historySearch={historySearch}
@@ -1577,6 +1585,77 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         onOrderWorkflowAction={(runId, orderId, action) => void updateSavedOrderWorkflow(runId, orderId, action)}
       />
     </div>
+  );
+}
+
+function TeamshipReviewIssueSummary({
+  items
+}: {
+  items: Array<{
+    id: string;
+    title: string;
+    status: GarlandTeamshipOrderReview["status"];
+    pages: number[];
+    details: string[];
+    overflowCount: number;
+  }>;
+}) {
+  if (items.length === 0) {
+    return null;
+  }
+
+  const hiddenIssueCount = items.reduce((total, item) => total + item.overflowCount, 0);
+
+  return (
+    <section className="rounded-2xl border border-danger/20 bg-danger/5 p-4 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.22em] text-danger">Needs review</p>
+          <h2 className="mt-1 text-base font-semibold text-foreground">Issue details from the latest Garland check</h2>
+          <p className="mt-1 text-sm text-mutedForeground">
+            These are the orders that did not pass cleanly, with the specific field or Teamship issue called out.
+          </p>
+        </div>
+        <span className="rounded-full bg-danger/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-danger">
+          {items.length} order{items.length === 1 ? "" : "s"}
+        </span>
+      </div>
+
+      <div className="mt-3 grid gap-2 lg:grid-cols-2">
+        {items.map((item) => (
+          <article key={item.id} className="rounded-xl border border-danger/20 bg-card p-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold text-foreground">{item.title}</p>
+                <p className="mt-0.5 text-xs text-mutedForeground">
+                  {formatReviewStatus(item.status, item.details.length)}
+                  {item.pages.length > 0 ? ` · PDF page${item.pages.length === 1 ? "" : "s"} ${item.pages.join(", ")}` : ""}
+                </p>
+              </div>
+              <span className={reviewStatusPillClass(item.status)}>{formatReviewStatus(item.status, item.details.length)}</span>
+            </div>
+            <ul className="mt-2 space-y-1 text-sm text-mutedForeground">
+              {item.details.map((detail, index) => (
+                <li key={`${item.id}-${index}-${detail}`} className="rounded-md bg-danger/5 px-2 py-1">
+                  {detail}
+                </li>
+              ))}
+              {item.overflowCount > 0 ? (
+                <li className="rounded-md bg-muted px-2 py-1 text-xs font-semibold uppercase tracking-wide">
+                  + {item.overflowCount} more issue{item.overflowCount === 1 ? "" : "s"} in this order
+                </li>
+              ) : null}
+            </ul>
+          </article>
+        ))}
+      </div>
+
+      {hiddenIssueCount > 0 ? (
+        <p className="mt-3 text-xs font-semibold text-mutedForeground">
+          Showing the most important issues first; expand the saved run in history for the full field-by-field detail.
+        </p>
+      ) : null}
+    </section>
   );
 }
 
@@ -3730,6 +3809,79 @@ function formatFieldStatus(status: string) {
         : status === "PENDING"
           ? "Pending"
           : "Issue";
+}
+
+function buildReviewIssueSummaries(review: GarlandTeamshipReviewResponse | null) {
+  if (!review) {
+    return [];
+  }
+
+  return review.reviews
+    .filter((orderReview) => shouldShowReviewIssueSummary(orderReview))
+    .map((orderReview) => {
+      const fieldDetails = orderReview.fields
+        .filter((field) => field.status !== "MATCH" && field.status !== "INFO")
+        .map((field) => formatReviewFieldIssue(field));
+      const fallbackDetails = buildReviewStatusIssueDetails(orderReview);
+      const details = fieldDetails.length > 0 ? fieldDetails : fallbackDetails;
+
+      return {
+        id: `${orderReview.psNumber || "NO_PS"}-${orderReview.srNumber || "NO_SR"}`,
+        title: `${orderReview.psNumber || "No PS"} / ${orderReview.srNumber || "No SR"}`,
+        status: orderReview.status,
+        pages: orderReview.pageNumbers,
+        details: details.slice(0, 4),
+        overflowCount: Math.max(0, details.length - 4)
+      };
+    });
+}
+
+function shouldShowReviewIssueSummary(orderReview: GarlandTeamshipOrderReview) {
+  if (orderReview.status === "PASS" || orderReview.status === "SKIPPED_ALREADY_REVIEWED") {
+    return orderReview.fields.some((field) => field.status !== "MATCH" && field.status !== "INFO");
+  }
+
+  return true;
+}
+
+function buildReviewStatusIssueDetails(orderReview: GarlandTeamshipOrderReview) {
+  if (orderReview.status === "MISSING_TEAMSHIP") {
+    const alertNote = orderReview.alert
+      ? `Teamship alert says ${orderReview.alert.reason.toLowerCase()}; check stock or order blocks before retrying.`
+      : "Garland PDF order was not found in Teamship and there was no alert digest match.";
+
+    return [alertNote];
+  }
+
+  if (orderReview.status === "PENDING_TEAMSHIP") {
+    return ["Garland PDF order is waiting for a matching Teamship order to be created or synced."];
+  }
+
+  if (orderReview.status === "NO_PDF") {
+    return ["Teamship order exists, but no matching Garland PDF order has been uploaded yet."];
+  }
+
+  if (orderReview.status === "FAIL") {
+    return [`${orderReview.issueCount} field issue${orderReview.issueCount === 1 ? "" : "s"} found between Garland PDF and Teamship.`];
+  }
+
+  return ["This shipment needs review before it can be treated as complete."];
+}
+
+function formatReviewFieldIssue(field: GarlandTeamshipReviewField) {
+  const valueParts = [
+    field.pdfValue ? `PDF: ${shortenIssueValue(field.pdfValue)}` : null,
+    field.teamshipValue ? `Teamship: ${shortenIssueValue(field.teamshipValue)}` : null
+  ].filter(Boolean);
+  const valueSummary = valueParts.length > 0 ? ` (${valueParts.join(" · ")})` : "";
+
+  return `${field.label}: ${field.message || formatFieldStatus(field.status)}${valueSummary}`;
+}
+
+function shortenIssueValue(value: string) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+
+  return normalized.length > 80 ? `${normalized.slice(0, 77)}...` : normalized;
 }
 
 function historyRunPillClass(run: TeamshipReviewHistoryRun) {
