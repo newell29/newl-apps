@@ -8,6 +8,9 @@ const prismaMock = vi.hoisted(() => ({
   },
   teamshipUpdateOrder: {
     updateMany: vi.fn()
+  },
+  teamshipReviewRun: {
+    findFirst: vi.fn()
   }
 }));
 const fetchTeamshipShippingOrdersForReviewMock = vi.hoisted(() => vi.fn());
@@ -15,6 +18,8 @@ const getGarlandLearnedProductDimensionRecommendationsMock = vi.hoisted(() => vi
 const recordGarlandCsrProductDimensionOverridesMock = vi.hoisted(() => vi.fn());
 const collectGarlandProductDimensionSkusMock = vi.hoisted(() => vi.fn());
 const buildGarlandTeamshipReviewMock = vi.hoisted(() => vi.fn());
+const markTeamshipReviewOrdersReadyToPrintMock = vi.hoisted(() => vi.fn());
+const sendGarlandCsrAgentReportEmailMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/server/db", () => ({
   prisma: prismaMock
@@ -36,6 +41,14 @@ vi.mock("@/modules/shipment-documents/garland-product-dimensions", () => ({
 
 vi.mock("@/modules/shipment-documents/teamship-review", () => ({
   buildGarlandTeamshipReview: buildGarlandTeamshipReviewMock
+}));
+
+vi.mock("@/modules/shipment-documents/teamship-review-history", () => ({
+  markTeamshipReviewOrdersReadyToPrint: markTeamshipReviewOrdersReadyToPrintMock
+}));
+
+vi.mock("@/modules/shipment-documents/teamship-csr-agent-report", () => ({
+  sendGarlandCsrAgentReportEmail: sendGarlandCsrAgentReportEmailMock
 }));
 
 import { completeTeamshipUpdateJobFromAgent, createTeamshipUpdateJob } from "@/modules/shipment-documents/teamship-update-jobs";
@@ -62,6 +75,12 @@ describe("Teamship update jobs", () => {
         skippedAlreadyReviewedCount: 0
       }
     });
+    markTeamshipReviewOrdersReadyToPrintMock.mockResolvedValue(undefined);
+    sendGarlandCsrAgentReportEmailMock.mockResolvedValue({
+      report: { subject: "Garland Teamship Review - July 11, 2026" },
+      email: { sent: true }
+    });
+    prismaMock.teamshipReviewRun.findFirst.mockResolvedValue(null);
   });
 
   it("rescans Teamship after a partial live agent completion that needs review", async () => {
@@ -108,6 +127,80 @@ describe("Teamship update jobs", () => {
       status: "NEEDS_REVIEW",
       lastVerificationAt: expect.any(String)
     });
+  });
+
+  it("emails the CSR agent report after a live job completes and records the send result", async () => {
+    const job = sampleJob();
+    prismaMock.teamshipReviewRun.findFirst.mockResolvedValue({ id: "run-1" });
+    prismaMock.teamshipUpdateJob.findFirst.mockResolvedValue(job);
+    prismaMock.teamshipUpdateJob.update.mockImplementation(async ({ data }) => ({
+      ...job,
+      ...data,
+      errorMessage: data.errorMessage ?? null,
+      lastVerificationAt: data.lastVerificationAt ?? null,
+      agentResult: data.agentResult ?? null,
+      orders: job.orders.map((order) => ({ ...order, status: "SUCCESS" }))
+    }));
+    prismaMock.teamshipUpdateOrder.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await completeTeamshipUpdateJobFromAgent({
+      context: { tenantId: "tenant-1", tenantSlug: "newl", tenantName: "Newl" },
+      jobId: "job-1",
+      status: "SUCCESS",
+      agentResult: {
+        mode: "LIVE_API",
+        orders: [{ srNumber: "SR808478", status: "UPDATED", responseStatus: 200 }]
+      }
+    });
+
+    expect(sendGarlandCsrAgentReportEmailMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: "tenant-1",
+        userName: "Jane, Garland CSR agent"
+      }),
+      "run-1"
+    );
+    expect(prismaMock.teamshipUpdateJob.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          agentResult: expect.objectContaining({
+            csrAgentReportEmail: expect.objectContaining({
+              runId: "run-1",
+              sent: true,
+              subject: "Garland Teamship Review - July 11, 2026"
+            })
+          })
+        })
+      })
+    );
+    expect(result.status).toBe("SUCCESS");
+  });
+
+  it("does not send a duplicate CSR agent report for a terminal job that already emailed one", async () => {
+    prismaMock.teamshipUpdateJob.findFirst.mockResolvedValue({
+      ...sampleJob(),
+      status: "SUCCESS",
+      agentResult: {
+        csrAgentReportEmail: {
+          sent: true,
+          runId: "run-1"
+        }
+      }
+    });
+
+    const result = await completeTeamshipUpdateJobFromAgent({
+      context: { tenantId: "tenant-1", tenantSlug: "newl", tenantName: "Newl" },
+      jobId: "job-1",
+      status: "SUCCESS",
+      agentResult: {
+        mode: "LIVE_API",
+        orders: [{ srNumber: "SR808478", status: "UPDATED", responseStatus: 200 }]
+      }
+    });
+
+    expect(sendGarlandCsrAgentReportEmailMock).not.toHaveBeenCalled();
+    expect(prismaMock.teamshipUpdateOrder.updateMany).not.toHaveBeenCalled();
+    expect(result.status).toBe("SUCCESS");
   });
 
   it("defaults new update drafts to live Teamship mode when no mode is provided", async () => {
@@ -218,6 +311,7 @@ function sampleJob() {
     agentFinishedAt: null,
     approvedAt: new Date("2026-07-11T11:59:00.000Z"),
     lastVerificationAt: null,
+    agentResult: null,
     createdAt: new Date("2026-07-11T11:55:00.000Z"),
     createdBy: { name: "Alex Newell", email: "alex.newell@newl.ca" },
     approvedBy: { name: "Alex Newell", email: "alex.newell@newl.ca" },

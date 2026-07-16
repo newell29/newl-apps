@@ -5,6 +5,7 @@ import {
   recordGarlandCsrProductDimensionOverrides
 } from "@/modules/shipment-documents/garland-product-dimension-directory";
 import { collectGarlandProductDimensionSkus } from "@/modules/shipment-documents/garland-product-dimensions";
+import { sendGarlandCsrAgentReportEmail } from "@/modules/shipment-documents/teamship-csr-agent-report";
 import type { TeamshipPhase2AgentMode } from "@/modules/shipment-documents/teamship-phase2-agent-execution";
 import {
   buildTeamshipPhase2DryRunPlan,
@@ -22,6 +23,8 @@ import { fetchTeamshipShippingOrdersForReview } from "@/server/integrations/team
 import type { AuthenticatedContext, TenantContext } from "@/server/tenant-context";
 
 const WORKFLOW_KEY = "GARLAND_TEAMSHIP_PHASE2_UPDATE";
+const REVIEW_WORKFLOW_KEY = "GARLAND_TEAMSHIP_REVIEW";
+const AUTO_REPORT_AGENT_NAME = "Jane, Garland CSR agent";
 
 export type TeamshipUpdateJobStatus =
   | "DRAFT"
@@ -119,6 +122,13 @@ type TeamshipUpdateJobClient = typeof prisma & {
     updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<{ count: number }>;
     findMany(args: { where: Record<string, unknown>; select: { srNumber: true; status: true } }): Promise<Array<{ srNumber: string; status: string }>>;
   };
+  teamshipReviewRun: {
+    findFirst(args: {
+      where: Record<string, unknown>;
+      orderBy: Array<Record<string, "asc" | "desc">>;
+      select: { id: true };
+    }): Promise<{ id: string } | null>;
+  };
 };
 
 type TeamshipUpdateJobInclude = {
@@ -147,6 +157,7 @@ type TeamshipUpdateJobRecord = {
   agentFinishedAt: Date | null;
   approvedAt: Date | null;
   lastVerificationAt: Date | null;
+  agentResult: unknown;
   createdAt: Date;
   createdBy: { name: string | null; email: string } | null;
   approvedBy: { name: string | null; email: string } | null;
@@ -414,6 +425,12 @@ export async function completeTeamshipUpdateJobFromAgent({
   agentResult: unknown;
 }) {
   const job = await findTenantJob(context, jobId);
+
+  if (isTerminalJobStatus(job.status)) {
+    await maybeSendCsrReportForCompletedJob(context, job);
+    return mapUpdateJob(job);
+  }
+
   let verification: GarlandTeamshipReviewResponse | null = null;
   let verificationError: string | null = null;
 
@@ -479,7 +496,108 @@ export async function completeTeamshipUpdateJobFromAgent({
     });
   }
 
+  await maybeSendCsrReportForCompletedJob(context, updated);
+
   return mapUpdateJob(updated);
+}
+
+async function maybeSendCsrReportForCompletedJob(context: TenantContext, job: TeamshipUpdateJobRecord) {
+  if (job.dryRun || !isTerminalJobStatus(job.status) || readCsrReportEmailResult(job.agentResult)?.sent) {
+    return;
+  }
+
+  const run = await findRelatedTeamshipReviewRun(context, job);
+
+  if (!run) {
+    await recordCsrReportEmailResult(job, {
+      attemptedAt: new Date().toISOString(),
+      sent: false,
+      skipped: true,
+      reason: "No matching Garland Teamship review run was found for this completed update job."
+    });
+    return;
+  }
+
+  try {
+    const result = await sendGarlandCsrAgentReportEmail(
+      {
+        ...context,
+        userName: AUTO_REPORT_AGENT_NAME,
+        userEmail: null
+      },
+      run.id
+    );
+
+    await recordCsrReportEmailResult(job, {
+      attemptedAt: new Date().toISOString(),
+      runId: run.id,
+      subject: result.report.subject,
+      sent: result.email.sent,
+      skipped: Boolean(result.email.skipped),
+      error: result.email.error ?? null
+    });
+  } catch (error) {
+    await recordCsrReportEmailResult(job, {
+      attemptedAt: new Date().toISOString(),
+      runId: run.id,
+      sent: false,
+      skipped: false,
+      error: error instanceof Error ? error.message : "Unable to email Garland CSR agent report."
+    });
+  }
+}
+
+async function findRelatedTeamshipReviewRun(context: Pick<TenantContext, "tenantId">, job: TeamshipUpdateJobRecord) {
+  const orConditions: Array<Record<string, unknown>> = [];
+
+  if (job.sourcePdfFileName) {
+    orConditions.push({ sourcePdfFileName: job.sourcePdfFileName });
+  }
+
+  if (job.documentLabel) {
+    orConditions.push({ documentLabel: job.documentLabel });
+  }
+
+  if (orConditions.length === 0) {
+    return null;
+  }
+
+  const client = prisma as TeamshipUpdateJobClient;
+  const start = new Date(job.shipmentDate);
+  const end = new Date(job.shipmentDate);
+  start.setUTCHours(0, 0, 0, 0);
+  end.setUTCHours(23, 59, 59, 999);
+
+  return client.teamshipReviewRun.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      workflowKey: REVIEW_WORKFLOW_KEY,
+      deletedAt: null,
+      shipmentDate: {
+        gte: start,
+        lte: end
+      },
+      OR: orConditions
+    },
+    orderBy: [{ createdAt: "desc" }],
+    select: { id: true }
+  });
+}
+
+async function recordCsrReportEmailResult(job: TeamshipUpdateJobRecord, result: Record<string, unknown>) {
+  const client = prisma as TeamshipUpdateJobClient;
+  const agentResult = {
+    ...readJsonObject(job.agentResult),
+    csrAgentReportEmail: result
+  };
+
+  await client.teamshipUpdateJob.update({
+    where: { id: job.id },
+    data: {
+      agentResult: agentResult as Prisma.InputJsonValue
+    },
+    include: includeJobDetails
+  });
 }
 
 async function findTenantJob(context: Pick<TenantContext, "tenantId">, jobId: string) {
@@ -671,6 +789,10 @@ function normalizeJobStatus(value: string): TeamshipUpdateJobStatus {
     : "NEEDS_REVIEW";
 }
 
+function isTerminalJobStatus(value: string) {
+  return value === "SUCCESS" || value === "FAILED" || value === "NEEDS_REVIEW" || value === "CANCELLED";
+}
+
 function persistableUserId(userId: string | null | undefined) {
   return userId && !userId.startsWith("system:") ? userId : null;
 }
@@ -705,6 +827,17 @@ function readNumber(value: unknown) {
 
 function readJsonArray<T = unknown>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function readJsonObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function readCsrReportEmailResult(value: unknown) {
+  const result = readJsonObject(readJsonObject(value).csrAgentReportEmail);
+  return {
+    sent: result.sent === true
+  };
 }
 
 function readStringArray(value: unknown) {

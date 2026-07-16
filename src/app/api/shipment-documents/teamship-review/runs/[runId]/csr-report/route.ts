@@ -1,9 +1,11 @@
 import { ModuleKey } from "@prisma/client";
 import { NextResponse } from "next/server";
 
-import { buildGarlandCsrAgentReport } from "@/modules/shipment-documents/teamship-csr-agent-report";
+import {
+  buildGarlandCsrAgentReport,
+  sendGarlandCsrAgentReportEmail
+} from "@/modules/shipment-documents/teamship-csr-agent-report";
 import { requireModule, requireMutationAccess } from "@/server/auth/authorization";
-import { parseEmailRecipients, sendResendEmail } from "@/server/email/resend";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
@@ -36,16 +38,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ run
     requireMutationAccess(context);
     const { runId } = await params;
     const body = (await request.json().catch(() => null)) as ReportEmailRequestBody | null;
-    const report = await buildGarlandCsrAgentReport(context, runId);
-    const recipients = resolveRecipients(body?.to);
-    const email = await sendResendEmail({
-      from: resolveEmailFrom(),
-      to: recipients,
-      replyTo: resolveReplyTo(),
-      subject: report.subject,
-      text: report.text,
-      html: report.html
-    });
+    const { report, email } = await sendGarlandCsrAgentReportEmail(context, runId, { to: body?.to });
 
     return NextResponse.json({ report, email });
   } catch (error) {
@@ -55,25 +48,4 @@ export async function POST(request: Request, { params }: { params: Promise<{ run
       { status: 500 }
     );
   }
-}
-
-function resolveRecipients(value?: string | string[]) {
-  if (Array.isArray(value)) {
-    return value.map((recipient) => recipient.trim()).filter(Boolean);
-  }
-
-  return parseEmailRecipients(value || process.env.GARLAND_CSR_AGENT_REPORT_TO);
-}
-
-function resolveEmailFrom() {
-  return process.env.GARLAND_CSR_AGENT_EMAIL_FROM?.trim() || process.env.RESEND_FROM_EMAIL?.trim() || "";
-}
-
-function resolveReplyTo() {
-  return (
-    process.env.GARLAND_CSR_AGENT_REPLY_TO?.trim() ||
-    process.env.TEAMSHIP_REVIEW_REPLY_TO?.trim() ||
-    process.env.GARLAND_CSR_AGENT_EMAIL_FROM?.trim() ||
-    null
-  );
 }
