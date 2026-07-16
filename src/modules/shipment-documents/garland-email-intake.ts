@@ -526,7 +526,7 @@ async function upsertGarlandSourceAttachment(
   return Boolean(before);
 }
 
-async function getGarlandGraphSettings(tenantId: string) {
+export async function getGarlandGraphSettings(tenantId: string) {
   const credential = await prisma.integrationCredential.findFirst({
     where: {
       tenantId,

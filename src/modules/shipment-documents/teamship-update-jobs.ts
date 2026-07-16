@@ -262,7 +262,7 @@ export async function createTeamshipUpdateJob(context: AuthenticatedContext, inp
         sourcePdfFileName: input.sourcePdfFileName,
         selectedOrders
       }),
-      createdByUserId: context.userId,
+      createdByUserId: persistableUserId(context.userId),
       orders: {
         create: selectedOrders.map((order) => ({
           tenantId: context.tenantId,
@@ -321,7 +321,7 @@ export async function approveTeamshipUpdateJob(context: AuthenticatedContext, jo
     where: { id: jobId },
     data: {
       status: "APPROVED",
-      approvedByUserId: context.userId,
+      approvedByUserId: persistableUserId(context.userId),
       approvedAt: new Date()
     },
     include: includeJobDetails
@@ -669,6 +669,10 @@ function normalizeJobStatus(value: string): TeamshipUpdateJobStatus {
   return ["DRAFT", "APPROVED", "RUNNING", "SUCCESS", "FAILED", "NEEDS_REVIEW", "CANCELLED"].includes(value)
     ? (value as TeamshipUpdateJobStatus)
     : "NEEDS_REVIEW";
+}
+
+function persistableUserId(userId: string | null | undefined) {
+  return userId && !userId.startsWith("system:") ? userId : null;
 }
 
 function normalizeAgentMode(value: TeamshipPhase2AgentMode | null | undefined): TeamshipPhase2AgentMode {
