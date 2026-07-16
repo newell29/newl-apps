@@ -885,12 +885,13 @@ NEWLS 2604816191908 1.00 ( )`
       fetchImpl: fetchMock as unknown as typeof fetch
     });
 
-    expect(orders).toEqual([
+    expect(orders).toMatchObject([
       {
         id: 10,
         shipment_id: "SR808478",
         record_no: "PS210206",
-        customer: { company: "Garland Canada Distribution" }
+        customer: { company: "Garland Canada Distribution" },
+        url: "https://teamship.test/ship-inventories/10"
       }
     ]);
     expect(fetchMock).toHaveBeenCalledTimes(4);
@@ -1028,6 +1029,77 @@ NEWLS 2604816191908 1.00 ( )`
         })
       ]
     });
+  });
+
+  it("uses Teamship API detail serials without falling back to the UI page", async () => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://app.teamshipos.com/api";
+    process.env.TEAMSHIP_MAX_LIST_PAGES = "1";
+
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/v1/login")) {
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/api/v1/ship-inventories?")) {
+        return Response.json({
+          data: [{ id: 30202, shipment_id: "SR808478", customer: { company: "Garland Canada Distribution" } }]
+        });
+      }
+
+      if (url.endsWith("/api/v1/ship-inventories/30202")) {
+        return Response.json({
+          data: {
+            id: 30202,
+            shipment_id: "SR808478",
+            edi_field_2: "PS210206-SR808478",
+            items: [
+              {
+                sku: "E1SGHMV6XHU3US",
+                quantity: 1,
+                inventory_stock: {
+                  serial_number: "2604816191908"
+                }
+              }
+            ]
+          }
+        });
+      }
+
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      srNumbers: ["SR808478"],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+    const pdfOrder = samplePdfOrder({
+      psNumber: "PS210206",
+      srNumber: "SR808478",
+      pageNumbers: [1],
+      shipVia: "MIDLAND",
+      shipToName: "MATCHING CUSTOMER",
+      shipToPo: "PO-1",
+      freightTerms: "PPADD-CD",
+      itemSkus: ["E1SGHMV6XHU3US"],
+      serialNumbers: ["2604816191908"]
+    });
+    const review = buildGarlandTeamshipReview([pdfOrder], orders);
+    const serialReview = review.reviews[0]?.fields.find((field) => field.key === "serialNumbers");
+
+    expect(serialReview).toMatchObject({
+      status: "MATCH",
+      pdfValue: "2604816191908",
+      teamshipValue: expect.stringContaining("2604816191908")
+    });
+    expect(orders[0]?.url).toBe("https://app.teamshipos.com/ship-inventories/30202");
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "https://app.teamshipos.com/login")).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "https://app.teamshipos.com/ship-inventories/30202")).toBe(
+      false
+    );
   });
 
   it("matches PDF serials after Teamship UI enrichment adds inventory serials", () => {
