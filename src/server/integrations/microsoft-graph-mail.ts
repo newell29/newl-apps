@@ -101,7 +101,7 @@ export async function fetchMicrosoftGraphMessageAttachmentContent(
   const select = "id,name,contentType,size,isInline,lastModifiedDateTime,contentBytes";
   const url = `https://graph.microsoft.com/v1.0/${messagePath}/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(
     attachmentId
-  )}?$select=${select}`;
+  )}/microsoft.graph.fileAttachment?$select=${select}`;
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
