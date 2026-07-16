@@ -151,6 +151,7 @@ type TeamshipUpdateJobSummary = {
     skippedCount: number;
     plannedFieldUpdateCount: number;
     plannedPalletRowCount: number;
+    plannedBolCleanupCount: number;
   };
   errorMessage: string | null;
   agentId: string | null;
@@ -2256,6 +2257,9 @@ function TeamshipUpdateJobsPanel({
                   <p>
                     {job.summary.plannedFieldUpdateCount} field updates · {job.summary.plannedPalletRowCount} pallet/comment rows
                   </p>
+                  {job.summary.plannedBolCleanupCount > 0 ? (
+                    <p>{job.summary.plannedBolCleanupCount} BOL weight cleanup{job.summary.plannedBolCleanupCount === 1 ? "" : "s"}</p>
+                  ) : null}
                   <p>Agent mode: {job.agentMode === "LIVE_API" ? "Live Teamship update" : "Dry-run evidence"}</p>
                   {job.agentId ? <p>Agent: {job.agentId}</p> : null}
                   {job.lastVerificationAt ? <p>Last rescan {formatDateTime(job.lastVerificationAt)}</p> : null}

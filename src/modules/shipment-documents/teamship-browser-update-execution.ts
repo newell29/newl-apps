@@ -55,7 +55,7 @@ type EditableBolFieldSnapshot = {
   updated: boolean;
 };
 
-type BolEditorCleanupSnapshot = {
+export type BolEditorCleanupSnapshot = {
   bolEditorUrl: string;
   generatedBol: boolean;
   instructions: EditableBolFieldSnapshot | null;
@@ -69,8 +69,25 @@ type BolEditorCleanupSnapshot = {
   }>;
 };
 
+export type TeamshipBolCleanupOrderResult = {
+  psNumber: string;
+  srNumber: string;
+  teamshipOrderId: string | null;
+  status: "UPDATED" | "FAILED" | "SKIPPED";
+  screenshotDir?: string;
+  bolEditorCleanup?: BolEditorCleanupSnapshot;
+  error?: string;
+};
+
+export type TeamshipBolCleanupJobResult = {
+  screenshotRootDir: string;
+  orders: TeamshipBolCleanupOrderResult[];
+  hasFailures: boolean;
+  notes: string[];
+};
+
 const DEFAULT_TEAMSHIP_APP_BASE_URL = "https://app.teamshipos.com";
-const DEFAULT_ALLOWED_HOSTS = ["app.teamshipos.com", "members.fulfillit.io", "staging.teamshipos.com"];
+const DEFAULT_ALLOWED_HOSTS = ["app.teamshipos.com", "members.fulfillit.io", "staging.teamshipos.com", "dev.teamshipos.com"];
 
 const PALLET_DOM_HELPERS = String.raw`
   function collectPalletControls() {
@@ -222,7 +239,7 @@ export async function executeTeamshipPhase2BrowserJob({
         await saveScreenshot(page, orderScreenshotDir, "05-after-reload");
         logBrowserStage(order, "reading pallet snapshot after reload");
         const palletSnapshot = order.plannedPalletRows.length > 0 ? await readPalletSnapshot(page) : null;
-        const bolEditorCleanup = options.bolCleanupEnabled
+        const bolEditorCleanup = options.bolCleanupEnabled && order.plannedBolCleanup?.removeCustomerOrderWeights
           ? await openBolEditorAndApplyCleanup({
               page,
               order,
@@ -245,7 +262,7 @@ export async function executeTeamshipPhase2BrowserJob({
               screenshotDir: orderScreenshotDir,
               palletSnapshot,
               bolEditorCleanup,
-              bolEditorCleanupSkipped: !options.bolCleanupEnabled,
+              bolEditorCleanupSkipped: !options.bolCleanupEnabled || !order.plannedBolCleanup?.removeCustomerOrderWeights,
               fieldUpdatesSkipped,
               skippedFieldUpdateCount: fieldUpdatesSkipped ? order.plannedFieldUpdates.length : 0,
               fieldUpdateErrors
@@ -293,6 +310,117 @@ export async function executeTeamshipPhase2BrowserJob({
         : "Live browser worker updated approved Teamship order fields and pallet rows.",
       `Browser evidence screenshots were written under ${screenshotRootDir}.`,
       "Newl Apps will rescan Teamship after this completion response is accepted."
+    ]
+  };
+}
+
+export async function executeTeamshipPhase2BolCleanupJob({
+  job,
+  plan,
+  credentials,
+  options,
+  eligibleSrNumbers
+}: {
+  job: Pick<TeamshipPhase2WorkerJob, "id">;
+  plan: TeamshipPhase2DryRunPlan;
+  credentials: TeamshipPhase2AgentCredentials;
+  options: Pick<
+    TeamshipBrowserExecutionOptions,
+    "browserExecutablePath" | "headed" | "slowMoMs" | "errorPauseMs" | "screenshotRootDir" | "allowedHosts"
+  >;
+  eligibleSrNumbers?: string[];
+}): Promise<TeamshipBolCleanupJobResult> {
+  const appBaseUrl = resolveTeamshipAppBaseUrl(credentials);
+  const screenshotRootDir = options.screenshotRootDir?.trim() || path.join("tmp", "teamship-browser-agent", job.id);
+  const eligible = eligibleSrNumbers ? new Set(eligibleSrNumbers.map(normalizeIdentifier).filter(Boolean)) : null;
+  const ordersToClean = plan.orders.filter(
+    (order) =>
+      order.status === "READY" &&
+      Boolean(order.teamshipOrderId) &&
+      order.plannedBolCleanup?.removeCustomerOrderWeights &&
+      (!eligible || eligible.has(normalizeIdentifier(order.srNumber)))
+  );
+
+  if (ordersToClean.length === 0) {
+    return {
+      screenshotRootDir,
+      orders: [],
+      hasFailures: false,
+      notes: ["No successful API-updated orders had planned BOL weight cleanup."]
+    };
+  }
+
+  const browser = await launchBrowser(options);
+  const orders: TeamshipBolCleanupOrderResult[] = [];
+
+  try {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
+
+    for (const [index, order] of ordersToClean.entries()) {
+      const orderScreenshotDir = path.join(screenshotRootDir, sanitizePathSegment(order.srNumber || order.teamshipOrderId || `bol-cleanup-${index + 1}`));
+
+      try {
+        fs.mkdirSync(orderScreenshotDir, { recursive: true });
+        const teamshipUrl = resolveOrderUrl({ order, appBaseUrl, allowedHosts: options.allowedHosts });
+        logBrowserStage(order, `opening ${teamshipUrl} for post-API BOL cleanup`);
+        await page.goto(teamshipUrl, { waitUntil: "domcontentloaded" });
+        await maybeLogin(page, credentials);
+        const bolEditorCleanup = await openBolEditorAndApplyCleanup({
+          page,
+          order,
+          orderUrl: teamshipUrl,
+          appBaseUrl,
+          screenshotDir: orderScreenshotDir,
+          allowedHosts: options.allowedHosts
+        });
+
+        orders.push({
+          psNumber: order.psNumber,
+          srNumber: order.srNumber,
+          teamshipOrderId: order.teamshipOrderId,
+          status: "UPDATED",
+          screenshotDir: orderScreenshotDir,
+          bolEditorCleanup
+        });
+      } catch (error) {
+        await saveScreenshot(page, orderScreenshotDir, "bol-cleanup-error").catch(() => undefined);
+        const errorMessage = error instanceof Error ? error.message : "Unknown Teamship BOL cleanup failure.";
+        await pauseForBrowserDebug({
+          page,
+          options: {
+            agentId: "bol-cleanup",
+            allowLiveUpdates: true,
+            headed: options.headed,
+            errorPauseMs: options.errorPauseMs
+          },
+          errorMessage,
+          orderLabel: order.srNumber || order.teamshipOrderId || `order ${index + 1}`
+        });
+        orders.push({
+          psNumber: order.psNumber,
+          srNumber: order.srNumber,
+          teamshipOrderId: order.teamshipOrderId,
+          status: "FAILED",
+          screenshotDir: orderScreenshotDir,
+          error: errorMessage
+        });
+      }
+    }
+  } finally {
+    await browser.close();
+  }
+
+  const failedOrders = orders.filter((order) => order.status === "FAILED");
+
+  return {
+    screenshotRootDir,
+    orders,
+    hasFailures: failedOrders.length > 0,
+    notes: [
+      failedOrders.length > 0
+        ? `Post-API BOL cleanup completed with ${failedOrders.length} failed order(s): ${failedOrders.map((order) => order.srNumber).join(", ")}.`
+        : `Post-API BOL cleanup removed generated weight values for ${orders.length} order(s).`,
+      `BOL cleanup screenshots were written under ${screenshotRootDir}.`
     ]
   };
 }

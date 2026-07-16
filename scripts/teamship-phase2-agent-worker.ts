@@ -1,4 +1,8 @@
-import { executeTeamshipPhase2BrowserJob } from "@/modules/shipment-documents/teamship-browser-update-execution";
+import {
+  executeTeamshipPhase2BolCleanupJob,
+  executeTeamshipPhase2BrowserJob,
+  type TeamshipBolCleanupJobResult
+} from "@/modules/shipment-documents/teamship-browser-update-execution";
 import {
   executeTeamshipPhase2Job,
   type TeamshipPhase2AgentMode,
@@ -150,7 +154,7 @@ async function executeJob({
     });
   }
 
-  return executeTeamshipPhase2Job({
+  const result = await executeTeamshipPhase2Job({
     job: {
       id: claimed.job.id,
       agentMode: claimed.job.agentMode,
@@ -164,6 +168,101 @@ async function executeJob({
       liveAllowlistSrNumbers: options.liveAllowlistSrNumbers
     }
   });
+
+  if (claimed.job.agentMode === "LIVE_API" && options.mode === "live-api" && options.browserBolCleanupEnabled) {
+    return runPostApiBolCleanup({ options, claimed, result });
+  }
+
+  return result;
+}
+
+async function runPostApiBolCleanup({
+  options,
+  claimed,
+  result
+}: {
+  options: WorkerOptions;
+  claimed: ClaimResponse & { job: TeamshipUpdateJobSummary; executionPayload: TeamshipPhase2DryRunPlan };
+  result: TeamshipPhase2ExecutionResult;
+}): Promise<TeamshipPhase2ExecutionResult> {
+  const successfulSrNumbers = result.orders
+    .filter((order) => order.status === "UPDATED")
+    .map((order) => normalizeIdentifier(order.srNumber))
+    .filter(Boolean);
+
+  if (successfulSrNumbers.length === 0) {
+    return result;
+  }
+
+  const cleanupResult = await executeTeamshipPhase2BolCleanupJob({
+    job: { id: claimed.job.id },
+    plan: claimed.executionPayload,
+    credentials: claimed.teamshipCredentials!,
+    eligibleSrNumbers: successfulSrNumbers,
+    options: {
+      browserExecutablePath: options.browserExecutablePath,
+      headed: options.browserHeaded,
+      slowMoMs: options.browserSlowMoMs,
+      errorPauseMs: options.browserErrorPauseMs,
+      screenshotRootDir: options.browserScreenshotRootDir,
+      allowedHosts: options.browserAllowedHosts
+    }
+  });
+
+  return mergeBolCleanupResult(result, cleanupResult);
+}
+
+function mergeBolCleanupResult(result: TeamshipPhase2ExecutionResult, cleanupResult: TeamshipBolCleanupJobResult): TeamshipPhase2ExecutionResult {
+  if (cleanupResult.orders.length === 0) {
+    return {
+      ...result,
+      notes: [...result.notes, ...cleanupResult.notes]
+    };
+  }
+
+  const cleanupBySr = new Map(cleanupResult.orders.map((order) => [normalizeIdentifier(order.srNumber), order]));
+  const orders = result.orders.map((order) => {
+    const cleanup = cleanupBySr.get(normalizeIdentifier(order.srNumber));
+
+    if (!cleanup) {
+      return order;
+    }
+
+    const existingPayload = readRecord(order.updatePayload) ?? {};
+    const existingBrowser = readRecord(existingPayload.browser) ?? {};
+    const updatePayload = {
+      ...existingPayload,
+      browser: {
+        ...existingBrowser,
+        bolCleanupStatus: cleanup.status,
+        bolEditorCleanup: cleanup.bolEditorCleanup ?? null,
+        bolCleanupScreenshotDir: cleanup.screenshotDir ?? null,
+        bolCleanupError: cleanup.error ?? null
+      }
+    };
+
+    if (cleanup.status === "FAILED") {
+      return {
+        ...order,
+        status: "FAILED" as const,
+        responseStatus: order.responseStatus ?? 207,
+        updatePayload,
+        error: `Teamship API update succeeded, but BOL weight cleanup failed: ${cleanup.error ?? "Unknown failure."}`
+      };
+    }
+
+    return {
+      ...order,
+      updatePayload
+    };
+  });
+
+  return {
+    ...result,
+    orders,
+    hasFailures: result.hasFailures || cleanupResult.hasFailures,
+    notes: [...result.notes, ...cleanupResult.notes]
+  };
 }
 
 async function claimNextJob(options: WorkerOptions): Promise<ClaimResponse> {
@@ -272,10 +371,16 @@ function readOptions(args: string[]): WorkerOptions {
     args.includes("--field-updates") ||
     process.env.TEAMSHIP_BROWSER_FIELD_UPDATES === "true" ||
     process.env.TEAMSHIP_BROWSER_ENABLE_FIELD_UPDATES === "true";
+  const browserBolCleanupDisabled =
+    args.includes("--no-bol-cleanup") ||
+    process.env.TEAMSHIP_BROWSER_BOL_CLEANUP === "false" ||
+    process.env.TEAMSHIP_BROWSER_DISABLE_BOL_CLEANUP === "true";
   const browserBolCleanupEnabled =
-    args.includes("--bol-cleanup") ||
-    process.env.TEAMSHIP_BROWSER_BOL_CLEANUP === "true" ||
-    process.env.TEAMSHIP_BROWSER_ENABLE_BOL_CLEANUP === "true";
+    !browserBolCleanupDisabled &&
+    (mode === "live-api" ||
+      args.includes("--bol-cleanup") ||
+      process.env.TEAMSHIP_BROWSER_BOL_CLEANUP === "true" ||
+      process.env.TEAMSHIP_BROWSER_ENABLE_BOL_CLEANUP === "true");
   const browserScreenshotRootDir =
     readStringOption(args, "--screenshot-dir") ?? process.env.TEAMSHIP_BROWSER_SCREENSHOT_DIR ?? null;
   const browserAllowedHosts = readOptionalListOption(args, "--browser-allowed-host", process.env.TEAMSHIP_BROWSER_ALLOWED_HOSTS);
@@ -340,7 +445,6 @@ function readOptionalListOption(args: string[], name: string, fallback: string |
   return values.length > 0 ? values : undefined;
 }
 
-
 function readMode(value: string): WorkerOptions["mode"] {
   if (value === "dry-run" || value === "live-api" || value === "live-browser") {
     return value;
@@ -366,6 +470,11 @@ function logExecutionSummary(result: TeamshipPhase2ExecutionResult) {
     const palletSnapshot = readRecord(browser?.palletSnapshot);
     const palletRowCount = readNumber(palletSnapshot?.rowCount);
     const palletControlCount = readArray(palletSnapshot?.controls)?.length;
+    const bolEditorCleanup = readRecord(browser?.bolEditorCleanup);
+    const bolCleanupStatus = readString(browser?.bolCleanupStatus);
+    const bolCleanupClearedWeightCount = readNumber(bolEditorCleanup?.clearedWeightFieldCount);
+    const bolCleanupWeightCount = readNumber(bolEditorCleanup?.weightFieldCount);
+    const bolCleanupScreenshotDir = readString(browser?.bolCleanupScreenshotDir);
 
     console.log(
       [
@@ -375,7 +484,12 @@ function logExecutionSummary(result: TeamshipPhase2ExecutionResult) {
         screenshotDir ? `screenshots ${screenshotDir}` : null,
         fieldUpdatesSkipped ? `field updates skipped ${skippedFieldUpdateCount ?? 0}` : null,
         typeof palletRowCount === "number" ? `pallet rows ${palletRowCount}` : null,
-        typeof palletControlCount === "number" ? `pallet controls ${palletControlCount}` : null
+        typeof palletControlCount === "number" ? `pallet controls ${palletControlCount}` : null,
+        bolCleanupStatus ? `BOL cleanup ${bolCleanupStatus}` : null,
+        typeof bolCleanupClearedWeightCount === "number" && typeof bolCleanupWeightCount === "number"
+          ? `BOL weights cleared ${bolCleanupClearedWeightCount}/${bolCleanupWeightCount}`
+          : null,
+        bolCleanupScreenshotDir ? `BOL screenshots ${bolCleanupScreenshotDir}` : null
       ]
         .filter(Boolean)
         .join(" | ")
@@ -413,6 +527,10 @@ function readBoolean(value: unknown) {
 
 function readNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizeIdentifier(value: string | null | undefined) {
+  return value?.trim().toUpperCase() ?? "";
 }
 
 function sleep(ms: number) {

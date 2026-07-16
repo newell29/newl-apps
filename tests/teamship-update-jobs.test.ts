@@ -205,7 +205,8 @@ function sampleJob() {
       blockedCount: 0,
       skippedCount: 0,
       plannedFieldUpdateCount: 1,
-      plannedPalletRowCount: 1
+      plannedPalletRowCount: 1,
+      plannedBolCleanupCount: 1
     },
     sourceReviewResponse: {},
     sourcePdfOrders: [samplePdfOrder()],

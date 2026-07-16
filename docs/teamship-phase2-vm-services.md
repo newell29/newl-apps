@@ -40,6 +40,17 @@ Use `ops/teamship-phase2-vm/teamship-phase2-worker.env.example` as the template.
 
 Use `DISPLAY=:0` or `DISPLAY=:1` if headed Chrome needs the VNC display. The installer tries to copy the current shell's `DISPLAY` into the env file automatically.
 
+## API Plus BOL Cleanup Flow
+
+For `TEAMSHIP_AGENT_MODE=live-api`, the worker now runs the Teamship API update first and then automatically opens the editable BOL in the VM browser for every successfully updated order that has planned BOL cleanup. The cleanup removes Teamship-generated weight values from the Customer Order Information weight column and records screenshots/readback evidence with the job.
+
+To temporarily turn off the browser cleanup while keeping API updates enabled, set one of:
+
+```bash
+TEAMSHIP_BROWSER_BOL_CLEANUP=false
+TEAMSHIP_BROWSER_DISABLE_BOL_CLEANUP=true
+```
+
 ## Operations
 
 Check worker status:

@@ -72,6 +72,19 @@ export type TeamshipPhase2ExecutionOrderResult = {
       note: string;
     };
   }>;
+  bolCleanupAction: {
+    removeCustomerOrderWeights: boolean;
+    compactSpecialInstructions: boolean;
+    reason: string;
+    browserInstruction: {
+      targetPage: "TEAMSHIP_BOL_EDITOR";
+      routeTemplate: "/ship-inventories/{teamshipOrderId}/bol-editor";
+      absoluteUrl: string | null;
+      fieldPattern: "customer_order_{index}_weight";
+      saveInstruction: TeamshipBrowserSaveInstruction;
+      note: string;
+    };
+  } | null;
   saveInstruction: TeamshipBrowserSaveInstruction;
   validationIssues: string[];
   updatePayload?: Record<string, unknown>;
@@ -278,6 +291,14 @@ function mapPlannedOrder(
       fields: row.teamshipFields,
       browserInstruction: withBrowserUrl(buildPalletBrowserInstruction(row.rowNumber), order.teamshipOrderId, teamshipAppBaseUrl)
     })),
+    bolCleanupAction: order.plannedBolCleanup
+      ? {
+          removeCustomerOrderWeights: order.plannedBolCleanup.removeCustomerOrderWeights,
+          compactSpecialInstructions: order.plannedBolCleanup.compactSpecialInstructions,
+          reason: order.plannedBolCleanup.reason,
+          browserInstruction: withBrowserUrl(buildBolCleanupBrowserInstruction(), order.teamshipOrderId, teamshipAppBaseUrl)
+        }
+      : null,
     saveInstruction: buildOrderCompletionSaveInstruction(),
     validationIssues: order.validationIssues
   };
@@ -338,6 +359,17 @@ function buildPalletBrowserInstruction(rowNumber: number) {
     saveInstruction: buildShippingOrderSaveInstruction(),
     note:
       `On the Teamship shipping order page, click "Add Another Pallet Size" until pallet row ${rowNumber} exists, then fill this row's fields.`
+  };
+}
+
+function buildBolCleanupBrowserInstruction() {
+  return {
+    targetPage: "TEAMSHIP_BOL_EDITOR" as const,
+    routeTemplate: "/ship-inventories/{teamshipOrderId}/bol-editor" as const,
+    fieldPattern: "customer_order_{index}_weight" as const,
+    saveInstruction: buildInlineBolEditorSaveInstruction(),
+    note:
+      "Open the editable BOL after the Teamship API update, clear every Customer Order Information WEIGHT field, then confirm autosave/readback."
   };
 }
 

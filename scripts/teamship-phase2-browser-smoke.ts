@@ -109,7 +109,8 @@ function buildManualPlan(options: BrowserSmokeOptions): TeamshipPhase2DryRunPlan
       blockedCount: 0,
       skippedCount: 0,
       plannedFieldUpdateCount: options.fields.length,
-      plannedPalletRowCount: plannedPalletRows.length
+      plannedPalletRowCount: plannedPalletRows.length,
+      plannedBolCleanupCount: 1
     },
     orders: [
       {
@@ -121,6 +122,11 @@ function buildManualPlan(options: BrowserSmokeOptions): TeamshipPhase2DryRunPlan
         sourceReviewStatus: "FAIL",
         plannedFieldUpdates: options.fields,
         plannedPalletRows,
+        plannedBolCleanup: {
+          removeCustomerOrderWeights: true,
+          compactSpecialInstructions: options.fields.some((field) => field.reviewFieldKey === "shipping_instructions"),
+          reason: "Browser smoke test should mirror production API flow by clearing BOL customer-order weights after updates."
+        },
         validationIssues: []
       }
     ]

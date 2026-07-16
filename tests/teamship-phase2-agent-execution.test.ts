@@ -122,6 +122,29 @@ PROPER NAME: UN1814`;
     ]);
   });
 
+  it("includes a BOL editor weight-cleanup instruction for ready orders", () => {
+    const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
+    const evidence = buildDryRunEvidence({
+      job: { id: "job_1" },
+      plan,
+      agentId: "agent"
+    });
+
+    expect(evidence.summary.plannedBolCleanupCount).toBe(1);
+    expect(evidence.orders[0]?.bolCleanupAction).toMatchObject({
+      removeCustomerOrderWeights: true,
+      compactSpecialInstructions: false,
+      browserInstruction: {
+        targetPage: "TEAMSHIP_BOL_EDITOR",
+        routeTemplate: "/ship-inventories/{teamshipOrderId}/bol-editor",
+        fieldPattern: "customer_order_{index}_weight",
+        saveInstruction: {
+          action: "CONFIRM_INLINE_SAVE_OR_AUTOSAVE"
+        }
+      }
+    });
+  });
+
   it("gives browser workers exact order-field locations and save instructions", () => {
     const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
     const evidence = buildDryRunEvidence({
