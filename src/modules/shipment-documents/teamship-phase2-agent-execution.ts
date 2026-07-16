@@ -56,10 +56,10 @@ export type TeamshipPhase2ExecutionOrderResult = {
     commodity: string;
     apiPayload: {
       quantity: number;
-      length: number;
-      width: number;
-      height: number;
-      weight: number;
+      length: number | null;
+      width: number | null;
+      height: number | null;
+      weight: number | null;
       weight_unit: string;
       commodity: string;
     };
