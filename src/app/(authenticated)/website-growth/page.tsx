@@ -32,6 +32,7 @@ import {
   resolveLegacyPageRebuild,
   toNewlUrl
 } from "@/modules/website-growth/legacy-rebuilds";
+import type { WebsiteGrowthPageChangePreview } from "@/modules/website-growth/content-drafts";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
@@ -553,11 +554,14 @@ function PreparedOpportunityCard({
             <SummaryRow label="Search intent" value={draftPayload?.searchIntent} />
             <SummaryRow label="Newl pattern" value={draftPayload?.websitePageType} />
           </dl>
+          {draftPayload?.pageChangePreview ? (
+            <DraftChangeSummary preview={draftPayload.pageChangePreview} />
+          ) : null}
           <Link
             href={`/website-growth/drafts/${draft.id}`}
             className="mt-3 inline-flex text-sm font-semibold text-primary transition-colors hover:text-primaryHover"
           >
-            View draft page preview
+            Review current page + proposed changes
           </Link>
           {buildPackage ? (
             <div className="mt-3 rounded-md border border-success/25 bg-success/10 p-3">
@@ -656,6 +660,36 @@ function PreparedOpportunityCard({
         </div>
       </form>
     </article>
+  );
+}
+
+function DraftChangeSummary({ preview }: { preview: WebsiteGrowthPageChangePreview }) {
+  const changes = preview.proposedChanges.slice(0, 3);
+
+  return (
+    <div className="mt-3 rounded-md border border-primary/20 bg-primary/5 p-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-primary">What this draft would change</p>
+      <dl className="mt-3 grid gap-2 text-sm">
+        <SummaryRow label="Current page" value={`${preview.currentPage.path} (${preview.currentPage.pageType})`} />
+        <SummaryRow label="Page role" value={preview.currentPage.role} />
+      </dl>
+      <div className="mt-3 grid gap-2">
+        {changes.map((change, index) => (
+          <div key={`${change.changeType}-${change.location}-${index}`} className="rounded-md border border-border bg-background p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-accentBorder bg-accentSoft px-2 py-0.5 text-[0.68rem] font-semibold text-primary">
+                {formatStatusLike(change.changeType)}
+              </span>
+              <p className="text-sm font-semibold text-foreground">{change.location}</p>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-mutedForeground">{change.proposedState}</p>
+          </div>
+        ))}
+      </div>
+      {preview.approvalSummary ? (
+        <p className="mt-3 text-xs leading-5 text-mutedForeground">{preview.approvalSummary}</p>
+      ) : null}
+    </div>
   );
 }
 
@@ -764,8 +798,53 @@ function readDraftPayload(value: unknown) {
       url: readDraftString(link.url)
     })).filter((link) => link.label && link.url),
     layoutComponents: readDraftStringArray(record.layoutComponents),
-    reviewChecklist: readDraftStringArray(record.reviewChecklist)
+    reviewChecklist: readDraftStringArray(record.reviewChecklist),
+    pageChangePreview: readPageChangePreview(record.pageChangePreview)
   };
+}
+
+function readPageChangePreview(value: unknown): WebsiteGrowthPageChangePreview | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const currentPage = record.currentPage && typeof record.currentPage === "object" && !Array.isArray(record.currentPage)
+    ? (record.currentPage as Record<string, unknown>)
+    : {};
+  const proposedChanges = readDraftObjectArray(record.proposedChanges)
+    .map((change) => ({
+      changeType: readChangeType(change.changeType),
+      location: readDraftString(change.location),
+      currentState: readDraftString(change.currentState),
+      proposedState: readDraftString(change.proposedState),
+      exactDraftCopy: readDraftString(change.exactDraftCopy) || undefined,
+      reason: readDraftString(change.reason),
+      impact: readDraftString(change.impact)
+    }))
+    .filter((change) => change.location && change.proposedState);
+
+  return {
+    currentPage: {
+      path: readDraftString(currentPage.path) || "/",
+      pageType: readDraftString(currentPage.pageType) || "Newl website page",
+      role: readDraftString(currentPage.role),
+      likelySourceFiles: readDraftStringArray(currentPage.likelySourceFiles),
+      existingComponents: readDraftStringArray(currentPage.existingComponents),
+      currentFocus: readDraftString(currentPage.currentFocus)
+    },
+    proposedChanges,
+    visualReviewNotes: readDraftStringArray(record.visualReviewNotes),
+    approvalSummary: readDraftString(record.approvalSummary)
+  };
+}
+
+function readChangeType(value: unknown): WebsiteGrowthPageChangePreview["proposedChanges"][number]["changeType"] {
+  const allowed = ["meta", "hero", "section", "faq", "internal_links", "cta", "redirect", "technical"];
+
+  return typeof value === "string" && allowed.includes(value)
+    ? (value as WebsiteGrowthPageChangePreview["proposedChanges"][number]["changeType"])
+    : "section";
 }
 
 function readDraftObjectArray(value: unknown) {

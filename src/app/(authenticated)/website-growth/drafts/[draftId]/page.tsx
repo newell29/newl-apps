@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 
 import { readWebsiteGrowthBuildPackage } from "@/modules/website-growth/build-package";
 import { createWebsiteGrowthDraftPullRequestAction } from "@/modules/website-growth/actions";
+import type { WebsiteGrowthPageChangePreview } from "@/modules/website-growth/content-drafts";
 import { requireModule } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -76,6 +77,8 @@ export default async function WebsiteGrowthDraftPreviewPage({ params }: PageProp
           <SummaryRow label="Recommendation" value={draft.opportunity.recommendation} />
         </dl>
       </section>
+
+      <ExistingPageChangePreview preview={payload.pageChangePreview} />
 
       <WebsiteStylePreview
         contentType={draft.contentType}
@@ -168,6 +171,103 @@ function ReviewPanel({ title, items }: { title: string; items: string[] }) {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+function ExistingPageChangePreview({ preview }: { preview: WebsiteGrowthPageChangePreview | null }) {
+  if (!preview) {
+    return (
+      <section className="rounded-lg border border-warning/25 bg-warning/10 p-5">
+        <p className="text-xs font-semibold uppercase tracking-wide text-warning">Current page preview not available</p>
+        <h2 className="mt-2 text-xl font-semibold text-foreground">Regenerate this draft to see exact page-change guidance.</h2>
+        <p className="mt-2 text-sm leading-6 text-mutedForeground">
+          Older drafts may only include proposal notes. New drafts include current page context, likely source files, and exact proposed changes before approval.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-border bg-card">
+      <div className="border-b border-border bg-muted/30 p-5">
+        <p className="text-xs font-semibold uppercase tracking-wide text-primary">Current page and proposed changes</p>
+        <h2 className="mt-2 text-2xl font-semibold text-foreground">Review what would actually change before approval.</h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-mutedForeground">
+          This is the implementation preview: it maps the SEO recommendation to the current page, existing Newl components, likely files, and the specific content changes the build step should make.
+        </p>
+      </div>
+      <div className="grid gap-0 lg:grid-cols-[0.78fr_1.22fr]">
+        <aside className="border-b border-border p-5 lg:border-b-0 lg:border-r">
+          <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Current page</p>
+          <dl className="mt-4 grid gap-4">
+            <SummaryRow label="Path" value={preview.currentPage.path} />
+            <SummaryRow label="Page type" value={preview.currentPage.pageType} />
+            <SummaryRow label="Role" value={preview.currentPage.role} />
+            <SummaryRow label="Focus" value={preview.currentPage.currentFocus} />
+          </dl>
+          <div className="mt-5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Likely source files</p>
+            <ul className="mt-3 space-y-2 text-sm leading-6 text-foreground">
+              {preview.currentPage.likelySourceFiles.map((file) => (
+                <li key={file} className="break-words rounded-md border border-border bg-background px-3 py-2">{file}</li>
+              ))}
+            </ul>
+          </div>
+          <div className="mt-5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Existing component pattern</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {preview.currentPage.existingComponents.slice(0, 10).map((component) => (
+                <span key={component} className="rounded-full border border-border bg-background px-2.5 py-1 text-xs font-semibold text-mutedForeground">
+                  {component}
+                </span>
+              ))}
+            </div>
+          </div>
+        </aside>
+        <div className="p-5">
+          <div className="grid gap-4">
+            {preview.proposedChanges.map((change, index) => (
+              <article key={`${change.changeType}-${change.location}-${index}`} className="rounded-md border border-border bg-background p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge className="border-accentBorder bg-accentSoft text-primary">{formatStatusLike(change.changeType)}</Badge>
+                  <p className="text-sm font-semibold text-foreground">{change.location}</p>
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <ChangeBox label="Current state" value={change.currentState} />
+                  <ChangeBox label="Proposed state" value={change.proposedState} highlight />
+                </div>
+                {change.exactDraftCopy ? (
+                  <div className="mt-3 rounded-md border border-primary/20 bg-primary/5 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-primary">Draft copy to place on page</p>
+                    <p className="mt-2 text-sm leading-6 text-foreground">{change.exactDraftCopy}</p>
+                  </div>
+                ) : null}
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <ChangeBox label="Why" value={change.reason} />
+                  <ChangeBox label="Expected impact" value={change.impact} />
+                </div>
+              </article>
+            ))}
+          </div>
+          <div className="mt-5 rounded-md border border-success/25 bg-success/10 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-success">Approval summary</p>
+            <p className="mt-2 text-sm leading-6 text-foreground">{preview.approvalSummary}</p>
+          </div>
+          {preview.visualReviewNotes.length > 0 ? (
+            <ReviewPanel title="Visual review notes" items={preview.visualReviewNotes} />
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ChangeBox({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div className={highlight ? "rounded-md border border-primary/25 bg-primary/5 p-3" : "rounded-md border border-border bg-muted/20 p-3"}>
+      <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</p>
+      <p className="mt-2 text-sm leading-6 text-foreground">{value || "Not specified"}</p>
     </div>
   );
 }
@@ -397,8 +497,52 @@ function readDraftPayload(value: unknown) {
     websitePageType: readString(record.websitePageType),
     websiteTemplate: readString(record.websiteTemplate),
     layoutComponents: readStringArray(record.layoutComponents),
-    designSystemNotes: readStringArray(record.designSystemNotes)
+    designSystemNotes: readStringArray(record.designSystemNotes),
+    pageChangePreview: readPageChangePreview(record.pageChangePreview)
   };
+}
+
+function readPageChangePreview(value: unknown): WebsiteGrowthPageChangePreview | null {
+  const record = isRecord(value) ? value : null;
+
+  if (!record) {
+    return null;
+  }
+
+  const currentPage = isRecord(record.currentPage) ? record.currentPage : {};
+  const proposedChanges = readObjectArray(record.proposedChanges)
+    .map((change) => ({
+      changeType: readChangeType(change.changeType),
+      location: readString(change.location),
+      currentState: readString(change.currentState),
+      proposedState: readString(change.proposedState),
+      exactDraftCopy: readString(change.exactDraftCopy) || undefined,
+      reason: readString(change.reason),
+      impact: readString(change.impact)
+    }))
+    .filter((change) => change.location && change.proposedState);
+
+  return {
+    currentPage: {
+      path: readString(currentPage.path) || "/",
+      pageType: readString(currentPage.pageType) || "Newl website page",
+      role: readString(currentPage.role),
+      likelySourceFiles: readStringArray(currentPage.likelySourceFiles),
+      existingComponents: readStringArray(currentPage.existingComponents),
+      currentFocus: readString(currentPage.currentFocus)
+    },
+    proposedChanges,
+    visualReviewNotes: readStringArray(record.visualReviewNotes),
+    approvalSummary: readString(record.approvalSummary)
+  };
+}
+
+function readChangeType(value: unknown): WebsiteGrowthPageChangePreview["proposedChanges"][number]["changeType"] {
+  const allowed = ["meta", "hero", "section", "faq", "internal_links", "cta", "redirect", "technical"];
+
+  return typeof value === "string" && allowed.includes(value)
+    ? (value as WebsiteGrowthPageChangePreview["proposedChanges"][number]["changeType"])
+    : "section";
 }
 
 function readObjectArray(value: unknown) {

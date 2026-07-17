@@ -1,5 +1,7 @@
 import { WebsiteGrowthAction, type Prisma } from "@prisma/client";
 
+import type { WebsiteGrowthPageChangePreview } from "@/modules/website-growth/content-drafts";
+
 export type WebsiteGrowthBuildPackage = {
   version: 1;
   status: "READY_FOR_PR";
@@ -26,6 +28,7 @@ export type WebsiteGrowthBuildPackage = {
   implementation: {
     routeAction: string;
     filePlan: string[];
+    pageChangePreview: WebsiteGrowthPageChangePreview | null;
     sections: Array<{
       heading: string;
       purpose: string;
@@ -93,7 +96,8 @@ export function buildWebsiteGrowthBuildPackage(draft: DraftForBuildPackage): Web
     },
     implementation: {
       routeAction: buildRouteAction(mode, routePath),
-      filePlan: buildFilePlan(mode, routePath),
+      filePlan: buildFilePlan(mode, routePath, payload.pageChangePreview),
+      pageChangePreview: payload.pageChangePreview,
       sections: payload.sections,
       faqs: payload.faqs,
       internalLinks: payload.internalLinks,
@@ -169,30 +173,43 @@ function buildRouteAction(mode: WebsiteGrowthBuildPackage["mode"], routePath: st
   return `Create or rebuild the page at ${routePath}.`;
 }
 
-function buildFilePlan(mode: WebsiteGrowthBuildPackage["mode"], routePath: string) {
+function buildFilePlan(
+  mode: WebsiteGrowthBuildPackage["mode"],
+  routePath: string,
+  pageChangePreview: WebsiteGrowthPageChangePreview | null
+) {
   const routeFile = `Newl website route for ${routePath}`;
+  const sourceFileNotes = pageChangePreview?.currentPage.likelySourceFiles.map((file) => `Review likely source file: ${file}`) ?? [];
+  const changeNotes =
+    pageChangePreview?.proposedChanges.slice(0, 6).map((change) => `Apply ${change.changeType} change at ${change.location}: ${change.proposedState}`) ?? [];
 
   if (mode === "ADD_INTERNAL_LINKS") {
     return [
+      ...sourceFileNotes,
       "Review the source and target website routes identified in the draft.",
       "Add contextual links using existing Newl link/button/card components.",
-      "Verify the linked routes resolve and make sense for the reader."
+      "Verify the linked routes resolve and make sense for the reader.",
+      ...changeNotes
     ];
   }
 
   if (mode === "ADD_TO_EXISTING_PAGE" || mode === "UPDATE_EXISTING_PAGE") {
     return [
+      ...sourceFileNotes,
       routeFile,
       "Existing metadata and sitemap route config if the title/description changes.",
-      "Related navigation or internal-link components if the page needs stronger discovery."
+      "Related navigation or internal-link components if the page needs stronger discovery.",
+      ...changeNotes
     ];
   }
 
   return [
+    ...sourceFileNotes,
     routeFile,
     "Metadata entry for title, description, canonical URL, and sitemap inclusion.",
     "Internal links from relevant service, resource, location, or industry pages.",
-    "FAQ schema or FAQ component when the draft includes questions."
+    "FAQ schema or FAQ component when the draft includes questions.",
+    ...changeNotes
   ];
 }
 
@@ -238,6 +255,7 @@ function readDraftPayload(value: unknown) {
     layoutComponents: readStringArray(record.layoutComponents),
     designSystemNotes: readStringArray(record.designSystemNotes),
     reviewChecklist: readStringArray(record.reviewChecklist),
+    pageChangePreview: readPageChangePreview(record.pageChangePreview),
     sections: readObjectArray(record.sections)
       .map((section) => ({
         heading: readString(section.heading),
@@ -259,6 +277,49 @@ function readDraftPayload(value: unknown) {
       }))
       .filter((link) => link.label && link.url)
   };
+}
+
+function readPageChangePreview(value: unknown): WebsiteGrowthPageChangePreview | null {
+  const record = isRecord(value) ? value : null;
+
+  if (!record) {
+    return null;
+  }
+
+  const currentPage = isRecord(record.currentPage) ? record.currentPage : {};
+  const proposedChanges = readObjectArray(record.proposedChanges)
+    .map((change) => ({
+      changeType: readChangeType(change.changeType),
+      location: readString(change.location),
+      currentState: readString(change.currentState),
+      proposedState: readString(change.proposedState),
+      exactDraftCopy: readString(change.exactDraftCopy) || undefined,
+      reason: readString(change.reason),
+      impact: readString(change.impact)
+    }))
+    .filter((change) => change.location && change.proposedState);
+
+  return {
+    currentPage: {
+      path: readString(currentPage.path) || "/",
+      pageType: readString(currentPage.pageType) || "Newl website page",
+      role: readString(currentPage.role),
+      likelySourceFiles: readStringArray(currentPage.likelySourceFiles),
+      existingComponents: readStringArray(currentPage.existingComponents),
+      currentFocus: readString(currentPage.currentFocus)
+    },
+    proposedChanges,
+    visualReviewNotes: readStringArray(record.visualReviewNotes),
+    approvalSummary: readString(record.approvalSummary)
+  };
+}
+
+function readChangeType(value: unknown): WebsiteGrowthPageChangePreview["proposedChanges"][number]["changeType"] {
+  const allowed = ["meta", "hero", "section", "faq", "internal_links", "cta", "redirect", "technical"];
+
+  return typeof value === "string" && allowed.includes(value)
+    ? (value as WebsiteGrowthPageChangePreview["proposedChanges"][number]["changeType"])
+    : "section";
 }
 
 function readObjectArray(value: unknown) {
