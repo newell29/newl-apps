@@ -61,53 +61,29 @@ export async function maybeRunAssistantShipmentDocumentsRequest(
   }
 
   const shipmentDate = parseShipmentDate(request.dateLabel);
-  const [shipmentCount, latestSyncRun] = await Promise.all([
-    prisma.teamshipSyncedOrder.count({
-      where: {
-        tenantId: context.tenantId,
-        shipmentDate
-      }
-    }),
-    prisma.teamshipDailySyncRun.findFirst({
-      where: {
-        tenantId: context.tenantId,
-        shipmentDate
-      },
-      orderBy: [{ startedAt: "desc" }, { createdAt: "desc" }],
-      select: {
-        id: true,
-        status: true,
-        fetchedCount: true,
-        insertedCount: true,
-        updatedCount: true,
-        skippedCount: true,
-        startedAt: true,
-        finishedAt: true,
-        errorMessage: true
-      }
-    })
-  ]);
+  const shipmentCount = await prisma.teamshipSyncedOrder.count({
+    where: {
+      tenantId: context.tenantId,
+      shipmentDate
+    }
+  });
 
   const datePhrase = request.label === "today" || request.label === "yesterday"
     ? `${request.label} (${request.dateLabel}, ${request.timezone})`
     : `on ${request.dateLabel} (${request.timezone})`;
-  const syncNote = latestSyncRun
-    ? ` Latest Teamship daily sync status: ${latestSyncRun.status}; fetched ${latestSyncRun.fetchedCount}, inserted ${latestSyncRun.insertedCount}, updated ${latestSyncRun.updatedCount}, skipped ${latestSyncRun.skippedCount}${latestSyncRun.errorMessage ? `; error: ${latestSyncRun.errorMessage}` : ""}.`
-    : " I do not see a Teamship daily sync run for that date yet, so this count only reflects orders already stored in Newl Apps.";
-
   return {
-    answer: `Garland has ${shipmentCount} Teamship shipment${shipmentCount === 1 ? "" : "s"} stored for ${datePhrase}.${syncNote}`,
+    answer: `Garland has ${shipmentCount} Teamship shipment${shipmentCount === 1 ? "" : "s"} from automatically processed Garland emails for ${datePhrase}.`,
     sources: [
       {
         sourceKind: AssistantSourceKind.OTHER,
-        sourceId: `teamship-synced-orders:${request.dateLabel}`,
-        title: "Garland Teamship synced shipment count",
-        excerpt: `${shipmentCount} stored Teamship synced orders for ${request.dateLabel}.`,
+        sourceId: `garland-email-orders:${request.dateLabel}`,
+        title: "Garland email order count",
+        excerpt: `${shipmentCount} Teamship orders from automatically processed Garland emails for ${request.dateLabel}.`,
         metadata: {
           module: "SHIPMENT_DOCUMENTS",
           tenantId: context.tenantId,
           shipmentDate: request.dateLabel,
-          latestSyncRunId: latestSyncRun?.id ?? null
+          source: "garland-email-intake"
         }
       }
     ],
@@ -129,7 +105,7 @@ export async function maybeRunAssistantShipmentDocumentsRequest(
       toolIntent: "garland-shipment-count",
       shipmentDate: request.dateLabel,
       shipmentCount,
-      latestSyncStatus: latestSyncRun?.status ?? null
+      source: "garland-email-intake"
     }
   };
 }
