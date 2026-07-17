@@ -10,6 +10,21 @@ Run Ollama on the same machine as Newl Apps and confirm the endpoint:
 curl -sS http://127.0.0.1:11434/v1/models
 ```
 
+After this PR is merged, update the Mac mini checkout from `main`:
+
+```bash
+git switch main
+npm run sync:main
+```
+
+For normal local startup, use this command so the checkout is updated before the app starts:
+
+```bash
+npm run dev:fresh
+```
+
+The sync command only updates a clean `main` checkout. If you are on a feature branch or have uncommitted changes, it stops and tells you what to fix instead of changing your work in place.
+
 In tenant Settings > Assistant AI, save:
 
 - Provider: `Local LLM`
