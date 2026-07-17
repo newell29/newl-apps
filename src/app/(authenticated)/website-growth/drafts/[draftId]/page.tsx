@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
+import { readWebsiteGrowthBuildPackage } from "@/modules/website-growth/build-package";
 import { requireModule } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -33,6 +34,7 @@ export default async function WebsiteGrowthDraftPreviewPage({ params }: PageProp
   }
 
   const payload = readDraftPayload(draft.draftJson);
+  const buildPackage = readWebsiteGrowthBuildPackage(draft.draftJson);
 
   return (
     <div className="space-y-6">
@@ -83,6 +85,29 @@ export default async function WebsiteGrowthDraftPreviewPage({ params }: PageProp
       />
 
       <section className="grid gap-4 lg:grid-cols-2">
+        {buildPackage ? (
+          <div className="rounded-lg border border-success/25 bg-success/10 p-5 lg:col-span-2">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-success">Build package ready</p>
+                <h2 className="mt-2 text-xl font-semibold text-foreground">Approval created a PR-ready implementation package.</h2>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-mutedForeground">
+                  This is the handoff object the website executor can use to create a GitHub branch, build the Newl website route, open a PR, and wait for the Vercel preview before anything goes live.
+                </p>
+              </div>
+              <Badge className="border-success/25 bg-background text-success">{formatStatusLike(buildPackage.mode)}</Badge>
+            </div>
+            <dl className="mt-5 grid gap-4 md:grid-cols-3">
+              <SummaryRow label="Route" value={buildPackage.routePath} />
+              <SummaryRow label="Branch" value={buildPackage.branchName} />
+              <SummaryRow label="Target repo" value={buildPackage.targetRepo} />
+            </dl>
+            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+              <ReviewPanel title="Build flow" items={buildPackage.approvalFlow} />
+              <ReviewPanel title="Implementation file plan" items={buildPackage.implementation.filePlan} />
+            </div>
+          </div>
+        ) : null}
         <ReviewPanel title="Newl website layout" items={payload.layoutComponents} />
         <ReviewPanel title="Design system notes" items={payload.designSystemNotes} />
         <ReviewPanel title="Internal links" items={payload.internalLinks.map((link) => `${link.label} -> ${link.url}: ${link.reason}`)} />

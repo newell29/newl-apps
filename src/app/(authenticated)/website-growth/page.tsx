@@ -11,6 +11,7 @@ import Link from "next/link";
 
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
+import { readWebsiteGrowthBuildPackage } from "@/modules/website-growth/build-package";
 import {
   createWeeklyWebsiteGrowthPlanAction,
   generateWebsiteGrowthDraftAction,
@@ -481,6 +482,7 @@ function PreparedOpportunityCard({
 }) {
   const draft = opportunity.contentDrafts[0] ?? null;
   const draftPayload = draft ? readDraftPayload(draft.draftJson) : null;
+  const buildPackage = draft ? readWebsiteGrowthBuildPackage(draft.draftJson) : null;
   const legacyRebuild = resolveLegacyPageRebuild(opportunity);
 
   return (
@@ -556,6 +558,24 @@ function PreparedOpportunityCard({
           >
             View draft page preview
           </Link>
+          {buildPackage ? (
+            <div className="mt-3 rounded-md border border-success/25 bg-success/10 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-success">Build package ready</p>
+                <span className="rounded-full border border-success/25 bg-background px-2.5 py-1 text-xs font-semibold text-success">
+                  {formatStatusLike(buildPackage.mode)}
+                </span>
+              </div>
+              <dl className="mt-3 grid gap-2 text-sm">
+                <SummaryRow label="Route" value={buildPackage.routePath} />
+                <SummaryRow label="Branch" value={buildPackage.branchName} />
+                <SummaryRow label="Repo" value={buildPackage.targetRepo} />
+              </dl>
+              <p className="mt-2 text-xs leading-5 text-mutedForeground">
+                Approval prepared the implementation package. The next automation step can use this to open a GitHub PR and Vercel preview without publishing directly.
+              </p>
+            </div>
+          ) : null}
           {draftPayload ? (
             <details className="mt-3">
               <summary className="cursor-pointer text-sm font-semibold text-primary">Review draft details</summary>

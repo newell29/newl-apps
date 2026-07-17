@@ -11,6 +11,10 @@ import {
 import { revalidatePath } from "next/cache";
 
 import { parseDelimitedRows, readNumber, readString } from "@/modules/website-growth/csv";
+import {
+  buildWebsiteGrowthBuildPackage,
+  mergeBuildPackageIntoDraftJson
+} from "@/modules/website-growth/build-package";
 import { createWebsiteGrowthContentDraftPayload } from "@/modules/website-growth/content-drafts";
 import { fetchSearchConsoleRows, getWebsiteGrowthIntegrationStatus } from "@/modules/website-growth/integrations";
 import {
@@ -210,6 +214,7 @@ export async function syncSearchConsoleAction() {
   }
 
   revalidatePath("/website-growth");
+  revalidatePath(`/website-growth/drafts/${draftId}`);
 }
 
 export async function generateWebsiteGrowthOpportunitiesAction() {
@@ -489,12 +494,26 @@ export async function updateWebsiteGrowthDraftAction(formData: FormData) {
         id: draftId,
         tenantId: context.tenantId
       },
-      select: {
-        opportunityId: true
+      include: {
+        opportunity: true
       }
     });
 
     if (draft) {
+      const buildPackage = buildWebsiteGrowthBuildPackage(draft);
+
+      await prisma.websiteGrowthContentDraft.updateMany({
+        where: {
+          id: draftId,
+          tenantId: context.tenantId
+        },
+        data: {
+          draftJson: mergeBuildPackageIntoDraftJson(draft.draftJson, buildPackage),
+          pullRequestUrl: null,
+          builtUrl: null
+        }
+      });
+
       await prisma.websiteGrowthOpportunity.updateMany({
         where: {
           id: draft.opportunityId,

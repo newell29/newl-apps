@@ -1,8 +1,13 @@
 import { generateKeyPairSync } from "node:crypto";
 
-import { WebsiteGrowthAction, type WebsiteGrowthOpportunity } from "@prisma/client";
+import { WebsiteGrowthAction, type Prisma, type WebsiteGrowthOpportunity } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
+import {
+  buildWebsiteGrowthBuildPackage,
+  mergeBuildPackageIntoDraftJson,
+  readWebsiteGrowthBuildPackage
+} from "@/modules/website-growth/build-package";
 import { parseDelimitedRows, readNumber, readString } from "@/modules/website-growth/csv";
 import { buildTemplateWebsiteGrowthContentDraft } from "@/modules/website-growth/content-drafts";
 import {
@@ -272,6 +277,51 @@ describe("website growth content draft packages", () => {
     expect(draft.contentType).toBe("New commercial page");
     expect(draft.proposedPath).toBe("/top-3pl-companies-in-usa");
     expect(draft.implementationNotes.some((note) => note.includes("currently redirects"))).toBe(true);
+  });
+
+  it("turns an approved legacy rebuild draft into a PR-ready build package", () => {
+    const draft = buildTemplateWebsiteGrowthContentDraft({
+      action: WebsiteGrowthAction.CREATE_PAGE,
+      topic: "top 3PL companies in the USA",
+      primaryKeyword: "top 3pl companies in usa",
+      targetPage: "https://www.newlgroup.com/top-3pl-companies-in-usa",
+      sourcePage: "https://www.newlgroup.com/locations/charlotte-warehousing",
+      score: 70,
+      confidence: "Medium",
+      reason:
+        "100 impressions, 0 clicks, average position 12.0, legacy URL /top-3pl-companies-in-usa currently redirects to /locations/charlotte-warehousing",
+      recommendation: "Build a dedicated draft page for top 3PL companies in the USA at /top-3pl-companies-in-usa.",
+      supportingKeywords: ["top 3pl companies in usa", "nationwide 3pl companies"],
+      evidence: {
+        legacyRebuild: true,
+        legacyRebuildKey: "top-3pl-companies-in-usa"
+      }
+    });
+
+    const buildPackage = buildWebsiteGrowthBuildPackage({
+      id: "draft_1",
+      opportunityId: "opportunity_1",
+      title: draft.title,
+      contentType: draft.contentType,
+      proposedPath: draft.proposedPath,
+      targetPage: "https://www.newlgroup.com/top-3pl-companies-in-usa",
+      draftJson: draft as unknown as Prisma.JsonValue,
+      opportunity: {
+        action: WebsiteGrowthAction.CREATE_PAGE,
+        topic: "top 3PL companies in the USA",
+        targetPage: "https://www.newlgroup.com/top-3pl-companies-in-usa",
+        sourcePage: "https://www.newlgroup.com/locations/charlotte-warehousing"
+      }
+    });
+    const merged = mergeBuildPackageIntoDraftJson(draft as unknown as Prisma.JsonValue, buildPackage);
+    const savedPackage = readWebsiteGrowthBuildPackage(merged);
+
+    expect(buildPackage.status).toBe("READY_FOR_PR");
+    expect(buildPackage.mode).toBe("CREATE_NEW_PAGE");
+    expect(buildPackage.routePath).toBe("/top-3pl-companies-in-usa");
+    expect(buildPackage.branchName).toBe("website-growth/top-3pl-companies-in-usa");
+    expect(buildPackage.approvalFlow).toContain("A GitHub pull request is opened for review.");
+    expect(savedPackage?.routePath).toBe("/top-3pl-companies-in-usa");
   });
 });
 
