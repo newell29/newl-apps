@@ -167,6 +167,53 @@ describe("assistant provider model normalization", () => {
     expect(fetchMock.mock.calls[0][1]?.headers).toMatchObject({
       authorization: "Bearer local-relay-token"
     });
+    const messages = requestBody.messages as Array<{ role: string; content: string }>;
+    expect(messages[0]?.content).toContain("Do not include hidden reasoning");
+    expect(messages[1]?.content).toMatch(/^\/no_think\n/);
+  });
+
+  it("strips local model think blocks from visible assistant content", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: "I should reason this out first.\n</think>\n\n103"
+            }
+          }
+        ]
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const reply = await generateAssistantReply(
+      {
+        tenantName: "Newl Group",
+        prompt: "What is 53+50",
+        intent: "GENERAL_INSIGHT",
+        conversationHistory: [],
+        memorySnapshot: [],
+        sources: [],
+        settings: {
+          provider: "LOCAL_LLM",
+          liveResponsesEnabled: true,
+          defaultModel: "qwen3:30b",
+          fallbackModel: null,
+          temperature: 0.2,
+          maxTokens: 1200,
+          endpointUrl: "http://127.0.0.1:11434/v1",
+          reasoningEffort: "none",
+          apiKeyConfigured: true,
+          status: IntegrationStatus.ACTIVE,
+          runtimeReady: true,
+          runtimeNotes: "ready"
+        }
+      },
+      { apiKey: "local-relay-token" }
+    );
+
+    expect(reply.content).toBe("103");
   });
 
   it("encrypts tenant-scoped local provider bearer tokens", () => {

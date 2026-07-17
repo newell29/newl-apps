@@ -345,12 +345,11 @@ function buildChatCompletionPayload({
     messages: [
       {
         role: "system",
-        content:
-          "You are Newl's company assistant. Answer using only the provided tenant-scoped source excerpts, memory snapshot, and prior conversation turns. Be concise, operationally useful, and explicit when required facts are missing. If the user asks for a rate, collect missing shipment details instead of inventing a quote. Do not fabricate customer history, service capabilities, pricing, tool outputs, or conversation memory."
+        content: buildSystemPrompt(request)
       },
       {
         role: "user",
-        content: buildAssistantPrompt(request)
+        content: buildUserPrompt(request)
       }
     ]
   };
@@ -535,7 +534,8 @@ function buildAssistantPrompt(request: AssistantReplyRequest) {
         excerpt: source.excerpt
       })),
       answerRules: [
-        "Use the source excerpts as the factual boundary.",
+        "Use the source excerpts as the factual boundary for tenant, customer, shipment, pricing, email, sales, and operational facts.",
+        "For general knowledge, arithmetic, or harmless reasoning that does not require tenant facts, answer directly without pretending the source excerpts must contain the calculation.",
         "Use the conversation history to preserve continuity and resolve follow-up questions.",
         "Use the memory snapshot to understand the business context, but do not claim anything that is not present in the supplied memory or excerpts.",
         "If the prompt asks for a rate, explain what details are missing and point to existing rate tools when appropriate.",
@@ -548,20 +548,52 @@ function buildAssistantPrompt(request: AssistantReplyRequest) {
   );
 }
 
+function buildSystemPrompt(request: AssistantReplyRequest) {
+  const basePrompt =
+    "You are Newl's company assistant. Be concise, operationally useful, and explicit when required facts are missing. Use only the provided tenant-scoped source excerpts, memory snapshot, and prior conversation turns for tenant, customer, shipment, pricing, email, sales, and operational facts. You may answer simple arithmetic and general non-tenant questions directly. If the user asks for a rate, collect missing shipment details instead of inventing a quote. Do not fabricate customer history, service capabilities, pricing, tool outputs, or conversation memory.";
+
+  if (request.settings.provider === IntegrationProvider.LOCAL_LLM) {
+    return `${basePrompt} Do not include hidden reasoning, chain-of-thought, scratchpad analysis, <think> blocks, or commentary about checking the instructions. Return only the final user-facing answer.`;
+  }
+
+  return basePrompt;
+}
+
+function buildUserPrompt(request: AssistantReplyRequest) {
+  const prompt = buildAssistantPrompt(request);
+  return request.settings.provider === IntegrationProvider.LOCAL_LLM
+    ? `/no_think\n${prompt}`
+    : prompt;
+}
+
 function readAssistantContent(payload: Record<string, unknown>) {
   const choices = Array.isArray(payload.choices) ? payload.choices : [];
   const firstChoice = choices[0] && typeof choices[0] === "object" ? choices[0] as Record<string, unknown> : null;
   const message = firstChoice?.message;
   const content = message && typeof message === "object" ? (message as Record<string, unknown>).content : null;
+  const cleanedContent = typeof content === "string" ? stripHiddenReasoning(content) : "";
 
-  if (typeof content !== "string" || content.trim().length === 0) {
+  if (cleanedContent.length === 0) {
     if (firstChoice?.finish_reason === "length") {
       throw new Error("Assistant provider reached the max token limit before producing a visible answer.");
     }
     throw new Error("Assistant provider returned an empty response.");
   }
 
-  return content.trim();
+  return cleanedContent;
+}
+
+function stripHiddenReasoning(content: string) {
+  let cleaned = content
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .trim();
+
+  const danglingCloseIndex = cleaned.toLowerCase().lastIndexOf("</think>");
+  if (danglingCloseIndex >= 0) {
+    cleaned = cleaned.slice(danglingCloseIndex + "</think>".length).trim();
+  }
+
+  return cleaned;
 }
 
 function extractProviderError(payload: Record<string, unknown> | null) {
