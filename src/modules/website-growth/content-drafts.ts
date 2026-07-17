@@ -51,6 +51,44 @@ export type WebsiteGrowthPageChangePreview = {
   approvalSummary: string;
 };
 
+export type WebsiteGrowthRenderedPagePreview = {
+  mode: "new_page" | "existing_page_update" | "legacy_redirect_rebuild" | "internal_link_update";
+  eyebrow: string;
+  heroTitle: string;
+  heroCopy: string;
+  heroBullets: string[];
+  primaryCta: string;
+  secondaryCta: string;
+  proofCards: Array<{
+    label: string;
+    value: string;
+    body: string;
+  }>;
+  sections: Array<{
+    eyebrow: string;
+    heading: string;
+    body: string;
+    cards: Array<{
+      title: string;
+      body: string;
+    }>;
+  }>;
+  faqs: Array<{
+    question: string;
+    answer: string;
+  }>;
+  internalLinks: Array<{
+    label: string;
+    url: string;
+    reason: string;
+  }>;
+  finalCta: {
+    heading: string;
+    body: string;
+    buttonLabel: string;
+  };
+};
+
 export type WebsiteGrowthContentDraftPayload = {
   title: string;
   summary: string;
@@ -70,6 +108,7 @@ export type WebsiteGrowthContentDraftPayload = {
   layoutComponents: string[];
   designSystemNotes: string[];
   pageChangePreview: WebsiteGrowthPageChangePreview;
+  pagePreview: WebsiteGrowthRenderedPagePreview;
 };
 
 export type WebsiteGrowthContentDraftResult = WebsiteGrowthContentDraftPayload & {
@@ -93,13 +132,21 @@ export async function createWebsiteGrowthContentDraftPayload(
         pagePattern
       });
       const legacyRebuild = resolveLegacyPageRebuild(opportunity);
-      const targetUrl = opportunity.targetPage || generated.proposedPath || proposedPath || "/resources/logistics-insights";
+      const generatedProposedPath = generated.proposedPath ?? proposedPath;
+      const targetUrl = resolveDraftTargetUrl(opportunity, generatedProposedPath, legacyRebuild);
+      const pagePreview = generated.pagePreview ?? buildRenderedPagePreview({
+        opportunity,
+        sections: generated.sections,
+        faqs: generated.faqs,
+        internalLinks: generated.internalLinks,
+        legacyRebuild
+      });
 
       return {
         ...generated,
         pageChangePreview: buildPageChangePreview({
           opportunity,
-          proposedPath: generated.proposedPath ?? proposedPath,
+          proposedPath: generatedProposedPath,
           targetUrl,
           pagePattern,
           websiteContext,
@@ -108,6 +155,7 @@ export async function createWebsiteGrowthContentDraftPayload(
           metaDescription: generated.metaDescription,
           legacyRebuild
         }),
+        pagePreview,
         source: WebsiteGrowthContentDraftSource.AI
       };
     } catch {
@@ -132,9 +180,9 @@ export function buildTemplateWebsiteGrowthContentDraft(
 ): WebsiteGrowthContentDraftPayload {
   const keyword = opportunity.primaryKeyword || opportunity.topic;
   const legacyRebuild = resolveLegacyPageRebuild(opportunity);
-  const contentType = getContentType(opportunity.action);
+  const contentType = getContentType(opportunity.action, legacyRebuild, opportunity.targetPage);
   const proposedPath = buildProposedPath(opportunity);
-  const targetUrl = opportunity.targetPage || proposedPath || "/resources/logistics-insights";
+  const targetUrl = resolveDraftTargetUrl(opportunity, proposedPath, legacyRebuild);
   const supportingKeywords = readStringArray(opportunity.supportingKeywords);
   const pagePattern = getNewlWebsitePatternForOpportunity(opportunity.action, opportunity.targetPage, proposedPath, websiteContext);
   const sections = buildSections(opportunity, supportingKeywords);
@@ -145,8 +193,8 @@ export function buildTemplateWebsiteGrowthContentDraft(
   );
 
   return {
-    title: buildTitle(opportunity),
-    summary: `Prepared SEO proposal for ${opportunity.topic}. This draft uses Search Console, lead, and queue evidence to outline what should be built or improved before anything is published.`,
+    title: buildTitle(opportunity, legacyRebuild),
+    summary: `Drafted a Newl website page direction for ${opportunity.topic}. Review the rendered page preview, then use the implementation notes only as the build handoff.`,
     contentType,
     proposedPath,
     targetKeyword: keyword,
@@ -217,8 +265,50 @@ export function buildTemplateWebsiteGrowthContentDraft(
       metaTitle,
       metaDescription,
       legacyRebuild
+    }),
+    pagePreview: buildRenderedPagePreview({
+      opportunity,
+      sections,
+      faqs: [
+        {
+          question: `How does Newl support ${opportunity.topic.toLowerCase()}?`,
+          answer:
+            "Newl connects warehousing, fulfillment, inventory visibility, and freight coordination so customers can manage the operating model through one logistics partner."
+        },
+        {
+          question: "When should this be handled as a warehouse-led program?",
+          answer:
+            "It should be reviewed as a warehouse-led program when inventory placement, order flow, compliance, reporting, or carrier handoffs affect service levels."
+        }
+      ],
+      internalLinks: [
+        {
+          label: "Warehousing services",
+          url: "/services/warehousing-services",
+          reason: "Connects the topic back to the core commercial warehousing page."
+        },
+        {
+          label: "Warehouse inventory management",
+          url: "/services/warehouse-inventory-management",
+          reason: "Supports Teamship WMS and visibility claims."
+        },
+        {
+          label: "Contact Newl",
+          url: "/resources/contact",
+          reason: "Gives the reader a clear conversion path."
+        }
+      ],
+      legacyRebuild
     })
   };
+}
+
+function resolveDraftTargetUrl(
+  opportunity: WebsiteGrowthDraftOpportunity,
+  proposedPath: string | null,
+  legacyRebuild: ReturnType<typeof resolveLegacyPageRebuild>
+) {
+  return legacyRebuild?.proposedPath || opportunity.targetPage || proposedPath || "/resources/logistics-insights";
 }
 
 function buildSiteInventoryNote(websiteContext: NewlWebsiteContext) {
@@ -254,10 +344,8 @@ function buildPageChangePreview({
 }): WebsiteGrowthPageChangePreview {
   const currentPath = normalizePath(opportunity.targetPage) ?? normalizePath(opportunity.sourcePage) ?? proposedPath ?? "/";
   const sourceFiles = inferLikelySourceFiles(currentPath, pagePattern.sourceTemplate);
-  const isExistingPageWork =
-    opportunity.action === WebsiteGrowthAction.IMPROVE_EXISTING_PAGE ||
-    opportunity.action === WebsiteGrowthAction.ADD_SECTION ||
-    opportunity.action === WebsiteGrowthAction.ADD_INTERNAL_LINKS;
+  const pageMode = resolveRenderedPageMode(opportunity, legacyRebuild);
+  const isExistingPageWork = pageMode === "existing_page_update" || pageMode === "internal_link_update";
   const routeMatch = websiteContext.siteInventory?.routes.find((route) => normalizePath(route.path) === currentPath);
   const primarySection = sections[0];
   const secondarySection = sections[1];
@@ -436,6 +524,110 @@ function inferCurrentFocus(path: string, pageType: string) {
   return `${pageType} content that should follow Newl's existing page structure and conversion path.`;
 }
 
+function buildRenderedPagePreview({
+  opportunity,
+  sections,
+  faqs,
+  internalLinks,
+  legacyRebuild
+}: {
+  opportunity: WebsiteGrowthDraftOpportunity;
+  sections: WebsiteGrowthDraftSection[];
+  faqs: WebsiteGrowthRenderedPagePreview["faqs"];
+  internalLinks: WebsiteGrowthRenderedPagePreview["internalLinks"];
+  legacyRebuild: ReturnType<typeof resolveLegacyPageRebuild>;
+}): WebsiteGrowthRenderedPagePreview {
+  const topic = titleCase(opportunity.topic);
+  const keyword = opportunity.primaryKeyword || opportunity.topic;
+  const mode = resolveRenderedPageMode(opportunity, legacyRebuild);
+  const pageSections = sections.length > 0 ? sections : buildSections(opportunity, []);
+  const heroTitle =
+    mode === "internal_link_update"
+      ? `Connect ${topic.toLowerCase()} into Newl's warehouse-led logistics model.`
+      : `${topic} with warehousing, visibility, and freight execution.`;
+  const heroCopy =
+    legacyRebuild
+      ? `Newl can rebuild ${legacyRebuild.proposedPath} into a focused page for customers comparing ${keyword.toLowerCase()} options, showing how warehousing, fulfillment, Teamship WMS visibility, and freight handoffs work as one operating model.`
+      : `Newl helps importers, manufacturers, distributors, and growing brands handle ${keyword.toLowerCase()} through warehouse-controlled inventory, Teamship WMS visibility, and coordinated freight execution across Canada and the U.S.`;
+
+  return {
+    mode,
+    eyebrow: "WAREHOUSE-LED LOGISTICS",
+    heroTitle,
+    heroCopy,
+    heroBullets: [
+      "Warehouse-led operating model",
+      "Teamship WMS visibility",
+      "Canada + U.S. distribution support"
+    ],
+    primaryCta: "Request Logistics Review",
+    secondaryCta: "Talk to Newl",
+    proofCards: [
+      {
+        label: "Visibility",
+        value: "Teamship WMS",
+        body: "Inventory, inbound activity, order status, exceptions, and reporting stay visible through Newl's proprietary WMS."
+      },
+      {
+        label: "Network",
+        value: "2 owned hubs",
+        body: "Mississauga and Charlotte warehouse operations connect to regional, cross-border, and partner coverage."
+      },
+      {
+        label: "Execution",
+        value: "Warehouse + freight",
+        body: "Storage, fulfillment, routing, ground distribution, ocean, air, and cross-border handoffs are planned together."
+      }
+    ],
+    sections: pageSections.slice(0, 4).map((section, index) => ({
+      eyebrow: index === 0 ? "OPERATING FIT" : "NEWL CAPABILITY",
+      heading: section.heading,
+      body: section.draftCopy,
+      cards: [
+        {
+          title: "Where this matters",
+          body: section.purpose || "This page explains the operational fit between the search topic, inventory placement, workflow, visibility, and freight handoffs."
+        },
+        {
+          title: "How Newl supports it",
+          body: "Newl connects owned warehouse hubs, Teamship WMS visibility, and freight coordination so customers can manage the work through one logistics partner."
+        }
+      ]
+    })),
+    faqs,
+    internalLinks,
+    finalCta: {
+      heading: `Review ${topic.toLowerCase()} with Newl.`,
+      body: `Share your inventory profile, service requirements, locations, and timeline so Newl can recommend the right warehouse-led logistics plan.`,
+      buttonLabel: "Request Assessment"
+    }
+  };
+}
+
+function resolveRenderedPageMode(
+  opportunity: WebsiteGrowthDraftOpportunity,
+  legacyRebuild: ReturnType<typeof resolveLegacyPageRebuild>
+): WebsiteGrowthRenderedPagePreview["mode"] {
+  if (legacyRebuild) {
+    return "legacy_redirect_rebuild";
+  }
+
+  if (opportunity.action === WebsiteGrowthAction.ADD_INTERNAL_LINKS) {
+    return "internal_link_update";
+  }
+
+  if (
+    opportunity.action === WebsiteGrowthAction.CREATE_PAGE ||
+    opportunity.action === WebsiteGrowthAction.CREATE_RESOURCE_ARTICLE ||
+    opportunity.action === WebsiteGrowthAction.UPDATE_REDIRECT ||
+    (opportunity.action === WebsiteGrowthAction.ADD_SECTION && !opportunity.targetPage)
+  ) {
+    return "new_page";
+  }
+
+  return "existing_page_update";
+}
+
 function serializeOpportunity(opportunity: WebsiteGrowthDraftOpportunity) {
   return {
     action: opportunity.action,
@@ -452,14 +644,22 @@ function serializeOpportunity(opportunity: WebsiteGrowthDraftOpportunity) {
   };
 }
 
-function getContentType(action: WebsiteGrowthAction) {
+function getContentType(
+  action: WebsiteGrowthAction,
+  legacyRebuild?: ReturnType<typeof resolveLegacyPageRebuild>,
+  targetPage?: string | null
+) {
+  if (legacyRebuild) {
+    return "Legacy redirect rebuild";
+  }
+
   switch (action) {
     case WebsiteGrowthAction.CREATE_PAGE:
       return "New commercial page";
     case WebsiteGrowthAction.IMPROVE_EXISTING_PAGE:
       return "Existing page improvement";
     case WebsiteGrowthAction.ADD_SECTION:
-      return "New page section";
+      return targetPage ? "Existing page section" : "Dedicated page draft";
     case WebsiteGrowthAction.ADD_INTERNAL_LINKS:
       return "Internal linking update";
     case WebsiteGrowthAction.CREATE_RESOURCE_ARTICLE:
@@ -471,13 +671,21 @@ function getContentType(action: WebsiteGrowthAction) {
   }
 }
 
-function buildTitle(opportunity: WebsiteGrowthDraftOpportunity) {
+function buildTitle(opportunity: WebsiteGrowthDraftOpportunity, legacyRebuild?: ReturnType<typeof resolveLegacyPageRebuild>) {
+  if (legacyRebuild) {
+    return `${titleCase(opportunity.topic)} Page Draft`;
+  }
+
   if (opportunity.action === WebsiteGrowthAction.CREATE_RESOURCE_ARTICLE) {
     return `${titleCase(opportunity.topic)} Guide`;
   }
 
-  if (opportunity.action === WebsiteGrowthAction.ADD_SECTION) {
+  if (opportunity.action === WebsiteGrowthAction.ADD_SECTION && opportunity.targetPage) {
     return `Add ${titleCase(opportunity.topic)} Section`;
+  }
+
+  if (opportunity.action === WebsiteGrowthAction.ADD_SECTION) {
+    return `${titleCase(opportunity.topic)} Page Draft`;
   }
 
   if (opportunity.action === WebsiteGrowthAction.ADD_INTERNAL_LINKS) {
@@ -494,7 +702,11 @@ function buildProposedPath(opportunity: WebsiteGrowthDraftOpportunity) {
     return legacyRebuild.proposedPath;
   }
 
-  if (opportunity.action === WebsiteGrowthAction.IMPROVE_EXISTING_PAGE || opportunity.action === WebsiteGrowthAction.ADD_SECTION) {
+  if (
+    (opportunity.action === WebsiteGrowthAction.IMPROVE_EXISTING_PAGE ||
+      opportunity.action === WebsiteGrowthAction.ADD_SECTION) &&
+    opportunity.targetPage
+  ) {
     return normalizePath(opportunity.targetPage);
   }
 
@@ -510,6 +722,10 @@ function buildProposedPath(opportunity: WebsiteGrowthDraftOpportunity) {
 
   if (opportunity.action === WebsiteGrowthAction.CREATE_PAGE) {
     return `/services/${slug}`;
+  }
+
+  if (opportunity.action === WebsiteGrowthAction.ADD_SECTION) {
+    return `/${slug}`;
   }
 
   return normalizePath(opportunity.targetPage);

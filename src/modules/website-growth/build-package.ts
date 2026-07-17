@@ -1,6 +1,9 @@
 import { WebsiteGrowthAction, type Prisma } from "@prisma/client";
 
-import type { WebsiteGrowthPageChangePreview } from "@/modules/website-growth/content-drafts";
+import type {
+  WebsiteGrowthPageChangePreview,
+  WebsiteGrowthRenderedPagePreview
+} from "@/modules/website-growth/content-drafts";
 
 export type WebsiteGrowthBuildPackage = {
   version: 1;
@@ -29,6 +32,7 @@ export type WebsiteGrowthBuildPackage = {
     routeAction: string;
     filePlan: string[];
     pageChangePreview: WebsiteGrowthPageChangePreview | null;
+    pagePreview: WebsiteGrowthRenderedPagePreview | null;
     sections: Array<{
       heading: string;
       purpose: string;
@@ -68,7 +72,7 @@ type DraftForBuildPackage = {
 export function buildWebsiteGrowthBuildPackage(draft: DraftForBuildPackage): WebsiteGrowthBuildPackage {
   const payload = readDraftPayload(draft.draftJson);
   const routePath = resolveRoutePath(draft.proposedPath ?? draft.targetPage ?? draft.opportunity.targetPage, draft.opportunity.topic);
-  const mode = resolveBuildMode(draft.opportunity.action);
+  const mode = resolveBuildMode(draft.opportunity.action, payload.pagePreview?.mode, draft.contentType);
   const branchName = `website-growth/${slugify(routePath) || slugify(draft.opportunity.topic) || draft.id.slice(-8)}`;
 
   return {
@@ -96,8 +100,9 @@ export function buildWebsiteGrowthBuildPackage(draft: DraftForBuildPackage): Web
     },
     implementation: {
       routeAction: buildRouteAction(mode, routePath),
-      filePlan: buildFilePlan(mode, routePath, payload.pageChangePreview),
+      filePlan: buildFilePlan(mode, routePath, payload.pageChangePreview, payload.pagePreview),
       pageChangePreview: payload.pageChangePreview,
+      pagePreview: payload.pagePreview,
       sections: payload.sections,
       faqs: payload.faqs,
       internalLinks: payload.internalLinks,
@@ -144,7 +149,27 @@ export function readWebsiteGrowthBuildPackage(value: unknown): WebsiteGrowthBuil
   return buildPackage as WebsiteGrowthBuildPackage;
 }
 
-function resolveBuildMode(action: WebsiteGrowthAction): WebsiteGrowthBuildPackage["mode"] {
+function resolveBuildMode(
+  action: WebsiteGrowthAction,
+  pageMode?: WebsiteGrowthRenderedPagePreview["mode"] | null,
+  contentType = ""
+): WebsiteGrowthBuildPackage["mode"] {
+  if (pageMode === "new_page" || pageMode === "legacy_redirect_rebuild") {
+    return "CREATE_NEW_PAGE";
+  }
+
+  if (pageMode === "existing_page_update") {
+    return "UPDATE_EXISTING_PAGE";
+  }
+
+  if (pageMode === "internal_link_update") {
+    return "ADD_INTERNAL_LINKS";
+  }
+
+  if (/legacy|dedicated page|new commercial page|resource article/i.test(contentType)) {
+    return "CREATE_NEW_PAGE";
+  }
+
   switch (action) {
     case WebsiteGrowthAction.IMPROVE_EXISTING_PAGE:
       return "UPDATE_EXISTING_PAGE";
@@ -176,12 +201,19 @@ function buildRouteAction(mode: WebsiteGrowthBuildPackage["mode"], routePath: st
 function buildFilePlan(
   mode: WebsiteGrowthBuildPackage["mode"],
   routePath: string,
-  pageChangePreview: WebsiteGrowthPageChangePreview | null
+  pageChangePreview: WebsiteGrowthPageChangePreview | null,
+  pagePreview: WebsiteGrowthRenderedPagePreview | null
 ) {
   const routeFile = `Newl website route for ${routePath}`;
   const sourceFileNotes = pageChangePreview?.currentPage.likelySourceFiles.map((file) => `Review likely source file: ${file}`) ?? [];
   const changeNotes =
     pageChangePreview?.proposedChanges.slice(0, 6).map((change) => `Apply ${change.changeType} change at ${change.location}: ${change.proposedState}`) ?? [];
+  const renderedPreviewNotes = pagePreview
+    ? [
+        `Build the approved rendered page preview with hero "${pagePreview.heroTitle}".`,
+        `Use the visitor-facing pagePreview content: ${pagePreview.sections.length} sections, ${pagePreview.faqs.length} FAQs, and final CTA "${pagePreview.finalCta.buttonLabel}".`
+      ]
+    : [];
 
   if (mode === "ADD_INTERNAL_LINKS") {
     return [
@@ -189,6 +221,7 @@ function buildFilePlan(
       "Review the source and target website routes identified in the draft.",
       "Add contextual links using existing Newl link/button/card components.",
       "Verify the linked routes resolve and make sense for the reader.",
+      ...renderedPreviewNotes,
       ...changeNotes
     ];
   }
@@ -199,6 +232,7 @@ function buildFilePlan(
       routeFile,
       "Existing metadata and sitemap route config if the title/description changes.",
       "Related navigation or internal-link components if the page needs stronger discovery.",
+      ...renderedPreviewNotes,
       ...changeNotes
     ];
   }
@@ -209,6 +243,7 @@ function buildFilePlan(
     "Metadata entry for title, description, canonical URL, and sitemap inclusion.",
     "Internal links from relevant service, resource, location, or industry pages.",
     "FAQ schema or FAQ component when the draft includes questions.",
+    ...renderedPreviewNotes,
     ...changeNotes
   ];
 }
@@ -256,6 +291,7 @@ function readDraftPayload(value: unknown) {
     designSystemNotes: readStringArray(record.designSystemNotes),
     reviewChecklist: readStringArray(record.reviewChecklist),
     pageChangePreview: readPageChangePreview(record.pageChangePreview),
+    pagePreview: readRenderedPagePreview(record.pagePreview),
     sections: readObjectArray(record.sections)
       .map((section) => ({
         heading: readString(section.heading),
@@ -277,6 +313,77 @@ function readDraftPayload(value: unknown) {
       }))
       .filter((link) => link.label && link.url)
   };
+}
+
+function readRenderedPagePreview(value: unknown): WebsiteGrowthRenderedPagePreview | null {
+  const record = isRecord(value) ? value : null;
+
+  if (!record) {
+    return null;
+  }
+
+  const finalCta = isRecord(record.finalCta) ? record.finalCta : {};
+
+  return {
+    mode: readPreviewMode(record.mode),
+    eyebrow: readString(record.eyebrow),
+    heroTitle: readString(record.heroTitle),
+    heroCopy: readString(record.heroCopy),
+    heroBullets: readStringArray(record.heroBullets),
+    primaryCta: readString(record.primaryCta),
+    secondaryCta: readString(record.secondaryCta),
+    proofCards: readObjectArray(record.proofCards)
+      .map((card) => ({
+        label: readString(card.label),
+        value: readString(card.value),
+        body: readString(card.body)
+      }))
+      .filter((card) => card.label && card.value && card.body),
+    sections: readObjectArray(record.sections)
+      .map((section) => ({
+        eyebrow: readString(section.eyebrow),
+        heading: readString(section.heading),
+        body: readString(section.body),
+        cards: readObjectArray(section.cards)
+          .map((card) => ({
+            title: readString(card.title),
+            body: readString(card.body)
+          }))
+          .filter((card) => card.title && card.body)
+      }))
+      .filter((section) => section.heading && section.body),
+    faqs: readObjectArray(record.faqs)
+      .map((faq) => ({
+        question: readString(faq.question),
+        answer: readString(faq.answer)
+      }))
+      .filter((faq) => faq.question && faq.answer),
+    internalLinks: readObjectArray(record.internalLinks)
+      .map((link) => ({
+        label: readString(link.label),
+        url: readString(link.url),
+        reason: readString(link.reason)
+      }))
+      .filter((link) => link.label && link.url),
+    finalCta: {
+      heading: readString(finalCta.heading),
+      body: readString(finalCta.body),
+      buttonLabel: readString(finalCta.buttonLabel)
+    }
+  };
+}
+
+function readPreviewMode(value: unknown): WebsiteGrowthRenderedPagePreview["mode"] {
+  const allowed: WebsiteGrowthRenderedPagePreview["mode"][] = [
+    "new_page",
+    "existing_page_update",
+    "legacy_redirect_rebuild",
+    "internal_link_update"
+  ];
+
+  return typeof value === "string" && allowed.includes(value as WebsiteGrowthRenderedPagePreview["mode"])
+    ? (value as WebsiteGrowthRenderedPagePreview["mode"])
+    : "new_page";
 }
 
 function readPageChangePreview(value: unknown): WebsiteGrowthPageChangePreview | null {
