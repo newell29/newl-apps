@@ -8,6 +8,7 @@ import {
   updateReviewFieldBotActionEnabledInReviewState,
   updateReviewFieldProposedValueInReviewState
 } from "@/modules/shipment-documents/garland-teamship-review-client-state";
+import { prepareReviewForAutomatedTeamshipUpdates } from "@/modules/shipment-documents/garland-email-agent-automation";
 import { buildTeamshipPhase2DryRunPlan } from "@/modules/shipment-documents/teamship-phase2-dry-run";
 import type { GarlandTeamshipReviewResponse } from "@/modules/shipment-documents/teamship-review-types";
 
@@ -232,6 +233,58 @@ describe("Teamship Phase 2 dry-run planner", () => {
         reviewFieldKey: "freight_terms",
         teamshipField: "edi_field_3",
         proposedValue: "COLLECT"
+      })
+    ]);
+  });
+
+  it("plans approved ship-to address fixes through the Teamship ship_address API field", () => {
+    const review = sampleReview();
+    review.reviews[0]!.fields = [
+      {
+        key: "ship_to_address_1",
+        label: "Ship-to address",
+        status: "DISCREPANCY",
+        pdfValue: "C-883 JANE STREET, JANE PARK PLAZA",
+        teamshipValue: "JANE PARK PLAZA",
+        message: "PDF and Teamship values do not match.",
+        botActionEnabled: true
+      }
+    ];
+
+    const plan = buildTeamshipPhase2DryRunPlan(review);
+
+    expect(plan.orders[0]?.plannedFieldUpdates).toEqual([
+      expect.objectContaining({
+        reviewFieldKey: "ship_to_address_1",
+        teamshipField: "ship_address",
+        currentValue: "JANE PARK PLAZA",
+        proposedValue: "C-883 JANE STREET, JANE PARK PLAZA"
+      })
+    ]);
+  });
+
+  it("auto-enables email-agent ship-to address updates before creating an approved job", () => {
+    const review = sampleReview();
+    review.reviews[0]!.fields = [
+      {
+        key: "ship_to_address_1",
+        label: "Ship-to address",
+        status: "DISCREPANCY",
+        pdfValue: "C-883 JANE STREET, JANE PARK PLAZA",
+        teamshipValue: "JANE PARK PLAZA",
+        message: "PDF and Teamship values do not match."
+      }
+    ];
+
+    const preparedReview = prepareReviewForAutomatedTeamshipUpdates(review);
+    const plan = buildTeamshipPhase2DryRunPlan(preparedReview);
+
+    expect(preparedReview.reviews[0]?.fields[0]?.botActionEnabled).toBe(true);
+    expect(plan.orders[0]?.plannedFieldUpdates).toEqual([
+      expect.objectContaining({
+        reviewFieldKey: "ship_to_address_1",
+        teamshipField: "ship_address",
+        proposedValue: "C-883 JANE STREET, JANE PARK PLAZA"
       })
     ]);
   });

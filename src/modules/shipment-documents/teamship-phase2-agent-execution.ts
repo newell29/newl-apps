@@ -425,6 +425,18 @@ const FIELD_BROWSER_INSTRUCTIONS: Record<string, TeamshipBrowserFieldInstruction
     editInstruction: "Open the editable BOL, click the CARRIER field, replace it with the approved Newl Apps carrier value, and confirm the inline save.",
     saveInstruction: buildInlineBolEditorSaveInstruction()
   },
+  ship_address: {
+    preferredExecution: "TEAMSHIP_API",
+    browserFallbackPage: "TEAMSHIP_SHIPPING_ORDER",
+    routeTemplate: "/ship-inventories/{teamshipOrderId}",
+    fieldLabel: "Address",
+    primaryLocator: {
+      strategy: "LABEL_OR_NAME",
+      label: "Address"
+    },
+    editInstruction: "Open the Teamship shipping order, find Ship To Address, replace it with the approved Newl Apps value, then save.",
+    saveInstruction: buildShippingOrderSaveInstruction()
+  },
   edi_field_4: {
     preferredExecution: "TEAMSHIP_API",
     browserFallbackPage: "TEAMSHIP_SHIPPING_ORDER",

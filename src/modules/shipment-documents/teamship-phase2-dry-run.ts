@@ -74,6 +74,7 @@ const FIELD_UPDATE_DESTINATIONS: Record<string, string> = {
   po_number: "poNumber",
   freight_terms: "edi_field_3",
   carrier: "carrier_value",
+  ship_to_address_1: "ship_address",
   shipping_instructions: "edi_field_4"
 };
 
