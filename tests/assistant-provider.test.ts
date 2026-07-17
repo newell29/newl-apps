@@ -3,8 +3,12 @@ import { IntegrationProvider, IntegrationStatus } from "@prisma/client";
 
 import {
   buildAssistantProviderConfig,
+  encryptAssistantProviderSecret,
   generateAssistantReply,
-  parseAssistantProviderSettings
+  parseAssistantProviderAuth,
+  parseAssistantProviderSettings,
+  testAssistantProviderConnection,
+  validateAssistantEndpointUrl
 } from "@/server/integrations/assistant-provider";
 
 afterEach(() => {
@@ -35,7 +39,8 @@ describe("assistant provider model normalization", () => {
       fallbackModel: "gpt-5.4-nano",
       temperature: 0.2,
       maxTokens: 900,
-      endpointUrl: null
+      endpointUrl: null,
+      reasoningEffort: null
     });
 
     expect(config.defaultModel).toBe("gpt-5-mini");
@@ -96,6 +101,8 @@ describe("assistant provider model normalization", () => {
         temperature: 0.2,
         maxTokens: 900,
         endpointUrl: null,
+        reasoningEffort: null,
+        apiKeyConfigured: false,
         status: IntegrationStatus.ACTIVE,
         runtimeReady: true,
         runtimeNotes: "ready"
@@ -126,30 +133,103 @@ describe("assistant provider model normalization", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await generateAssistantReply({
-      tenantName: "Newl Group",
-      prompt: "Hello",
-      intent: "GENERAL_INSIGHT",
-      conversationHistory: [],
-      memorySnapshot: [],
-      sources: [],
-      settings: {
-        provider: "LOCAL_LLM",
-        liveResponsesEnabled: true,
-        defaultModel: "gpt-5-mini",
-        fallbackModel: null,
-        temperature: 0.2,
-        maxTokens: 900,
-        endpointUrl: "http://assistant-internal:8000/v1",
-        status: IntegrationStatus.ACTIVE,
-        runtimeReady: true,
-        runtimeNotes: "ready"
-      }
-    });
+    await generateAssistantReply(
+      {
+        tenantName: "Newl Group",
+        prompt: "Hello",
+        intent: "GENERAL_INSIGHT",
+        conversationHistory: [],
+        memorySnapshot: [],
+        sources: [],
+        settings: {
+          provider: "LOCAL_LLM",
+          liveResponsesEnabled: true,
+          defaultModel: "qwen3:30b",
+          fallbackModel: null,
+          temperature: 0.2,
+          maxTokens: 1200,
+          endpointUrl: "http://127.0.0.1:11434/v1",
+          reasoningEffort: "none",
+          apiKeyConfigured: true,
+          status: IntegrationStatus.ACTIVE,
+          runtimeReady: true,
+          runtimeNotes: "ready"
+        }
+      },
+      { apiKey: "local-relay-token" }
+    );
 
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as Record<string, unknown>;
-    expect(requestBody.max_tokens).toBe(900);
+    expect(requestBody.max_tokens).toBe(1200);
     expect(requestBody.temperature).toBe(0.2);
+    expect(requestBody.reasoning_effort).toBe("none");
     expect(requestBody.max_completion_tokens).toBeUndefined();
+    expect(fetchMock.mock.calls[0][1]?.headers).toMatchObject({
+      authorization: "Bearer local-relay-token"
+    });
+  });
+
+  it("encrypts tenant-scoped local provider bearer tokens", () => {
+    vi.stubEnv("AUTH_SECRET", "assistant-provider-test-secret");
+
+    const secretRef = encryptAssistantProviderSecret({ apiKey: "local-relay-token" });
+
+    expect(secretRef).not.toContain("local-relay-token");
+    expect(parseAssistantProviderAuth(secretRef)).toEqual({ apiKey: "local-relay-token" });
+  });
+
+  it("requires an allowlisted HTTPS hostname in production", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("ASSISTANT_LOCAL_LLM_ALLOWED_HOSTS", "llm.newlgroup.com");
+
+    expect(validateAssistantEndpointUrl("https://llm.newlgroup.com/v1")).toBe("https://llm.newlgroup.com/v1");
+    expect(() => validateAssistantEndpointUrl("https://untrusted.example/v1")).toThrow(/not in ASSISTANT_LOCAL_LLM_ALLOWED_HOSTS/);
+    expect(() => validateAssistantEndpointUrl("http://127.0.0.1:11434/v1")).toThrow(/must use HTTPS/);
+  });
+
+  it("discovers the configured model and runs a connection test", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          object: "list",
+          data: [{ id: "qwen3:30b" }, { id: "gpt-oss:20b" }]
+        })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: "NEWL LOCAL MODEL OK" }, finish_reason: "stop" }]
+        })
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await testAssistantProviderConnection({
+      settings: {
+        provider: "LOCAL_LLM",
+        liveResponsesEnabled: false,
+        defaultModel: "qwen3:30b",
+        fallbackModel: "gpt-oss:20b",
+        temperature: 0.2,
+        maxTokens: 1200,
+        endpointUrl: "http://127.0.0.1:11434/v1",
+        reasoningEffort: "none",
+        apiKeyConfigured: true,
+        status: IntegrationStatus.DISABLED,
+        runtimeReady: true,
+        runtimeNotes: "ready"
+      },
+      auth: { apiKey: "local-relay-token" }
+    });
+
+    expect(result.model).toBe("qwen3:30b");
+    expect(result.reply).toBe("NEWL LOCAL MODEL OK");
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:11434/v1/models",
+      expect.objectContaining({
+        headers: { authorization: "Bearer local-relay-token" }
+      })
+    );
   });
 });

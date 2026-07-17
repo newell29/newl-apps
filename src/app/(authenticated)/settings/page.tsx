@@ -2,6 +2,7 @@ import { PageHeader } from "@/components/page-header";
 import { InfoHint } from "@/components/info-hint";
 import { PlatformRole } from "@prisma/client";
 import { SearchProfileCadenceManager } from "@/modules/settings/components/search-profile-cadence-manager";
+import { AssistantProviderTest } from "@/modules/settings/components/assistant-provider-test";
 import { formatPlatformRole } from "@/modules/settings/access-control";
 import {
   saveMicrosoftGraphSettingsAction,
@@ -221,6 +222,23 @@ export default async function SettingsPage() {
               placeholder="http://assistant-internal:8000/v1"
               info="Used for the long-term local model path. Leave blank when OpenAI is active."
             />
+            <label className="space-y-1 text-sm font-medium text-foreground">
+              <FieldLabel
+                label="Local endpoint bearer token"
+                info={
+                  settings.assistantProvider.apiKeyConfigured
+                    ? "Leave blank to keep the saved encrypted token. Local Ollama development does not require one."
+                    : "Optional for localhost. Required later when the endpoint is placed behind an authenticated HTTPS relay."
+                }
+              />
+              <input
+                name="assistantApiKey"
+                type="password"
+                autoComplete="new-password"
+                placeholder={settings.assistantProvider.apiKeyConfigured ? "Saved token will be kept" : "Optional bearer token"}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+              />
+            </label>
             <Field
               label="Default model"
               name="assistantDefaultModel"
@@ -233,6 +251,18 @@ export default async function SettingsPage() {
               defaultValue={settings.assistantProvider.fallbackModel ?? ""}
               placeholder="gpt-5-nano"
               info="Used when the default model request fails."
+            />
+            <SelectField
+              label="Reasoning effort"
+              name="assistantReasoningEffort"
+              defaultValue={settings.assistantProvider.reasoningEffort ?? "default"}
+              options={[
+                { value: "default", label: "Provider default" },
+                { value: "none", label: "None / fastest" },
+                { value: "low", label: "Low" },
+                { value: "medium", label: "Medium" },
+                { value: "high", label: "High" }
+              ]}
             />
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground" htmlFor="assistantTemperature">
@@ -258,7 +288,7 @@ export default async function SettingsPage() {
               defaultValue={settings.assistantProvider.maxTokens}
               min={100}
               max={4000}
-              info="Caps reply size and cost."
+              info="Caps reasoning plus reply length. Start around 1,200 for Qwen and raise it only for tasks that truncate."
             />
           </div>
 
@@ -294,6 +324,9 @@ export default async function SettingsPage() {
             Save assistant settings
           </button>
         </form>
+        <div className="mt-4">
+          <AssistantProviderTest />
+        </div>
       </section>
 
       <section id="teamship" className="rounded-lg border border-border bg-card p-5 shadow-sm">
