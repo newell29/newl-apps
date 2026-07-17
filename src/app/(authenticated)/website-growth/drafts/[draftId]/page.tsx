@@ -79,6 +79,13 @@ export default async function WebsiteGrowthDraftPreviewPage({ params }: PageProp
       </section>
 
       <ExistingPageChangePreview preview={payload.pageChangePreview} />
+      <AppliedExistingPagePreview
+        contentType={draft.contentType}
+        proposedPath={draft.proposedPath}
+        summary={draft.summary}
+        title={draft.title}
+        payload={payload}
+      />
 
       <WebsiteStylePreview
         contentType={draft.contentType}
@@ -269,6 +276,176 @@ function ChangeBox({ label, value, highlight = false }: { label: string; value: 
       <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</p>
       <p className="mt-2 text-sm leading-6 text-foreground">{value || "Not specified"}</p>
     </div>
+  );
+}
+
+function AppliedExistingPagePreview({
+  contentType,
+  proposedPath,
+  summary,
+  title,
+  payload
+}: {
+  contentType: string;
+  proposedPath: string | null;
+  summary: string;
+  title: string;
+  payload: ReturnType<typeof readDraftPayload>;
+}) {
+  const preview = payload.pageChangePreview;
+
+  if (!preview) {
+    return null;
+  }
+
+  const contentChanges = preview.proposedChanges.filter((change) =>
+    ["hero", "section", "faq", "internal_links", "cta"].includes(change.changeType)
+  );
+  const sectionChanges = contentChanges.filter((change) => change.changeType === "section").slice(0, 4);
+  const faqChange = contentChanges.find((change) => change.changeType === "faq");
+  const internalLinkChange = contentChanges.find((change) => change.changeType === "internal_links");
+  const heroChange = contentChanges.find((change) => change.changeType === "hero");
+  const proofChips = buildPreviewProofChips(payload);
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-border bg-white shadow-sm">
+      <div className="flex flex-col gap-2 border-b border-border bg-muted/40 px-5 py-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary">Applied page preview</p>
+          <p className="mt-1 text-sm text-mutedForeground">
+            This shows the existing page direction with the recommended changes applied in Newl website style.
+          </p>
+        </div>
+        <span className="rounded-full border border-border bg-white px-3 py-1 text-xs font-semibold text-mutedForeground">
+          Existing route: {preview.currentPage.path}
+        </span>
+      </div>
+
+      <div className="bg-[#172235] text-white">
+        <div className="mx-auto grid max-w-7xl gap-10 px-5 py-16 lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.75fr)] lg:items-center">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#ffb5c7]">
+              {payload.websitePageType || contentType}
+            </p>
+            <h1 className="mt-5 max-w-4xl text-4xl font-bold leading-tight tracking-tight md:text-6xl">
+              {heroChange?.proposedState || title}
+            </h1>
+            <p className="mt-6 max-w-3xl text-lg leading-8 text-[#cbd7e8]">{summary}</p>
+            <div className="mt-7 flex flex-wrap gap-3">
+              {proofChips.map((chip) => (
+                <span key={chip} className="rounded-md border border-white/15 bg-white/8 px-4 py-3 text-sm font-semibold text-white">
+                  {chip}
+                </span>
+              ))}
+            </div>
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <span className="inline-flex min-h-11 items-center justify-center rounded-md bg-primary px-5 py-3 text-sm font-bold text-white shadow-sm">
+                Request Logistics Review
+              </span>
+              <span className="inline-flex min-h-11 items-center justify-center rounded-md border border-white/25 px-5 py-3 text-sm font-bold text-white">
+                Review Fit
+              </span>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-white/15 bg-[#20314c] p-5 shadow-2xl shadow-black/20">
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#ffb5c7]">What changes on this page</p>
+            <div className="mt-5 grid gap-3">
+              {preview.proposedChanges.slice(0, 5).map((change, index) => (
+                <div key={`${change.changeType}-${change.location}-${index}`} className="rounded-md border border-white/10 bg-white/8 p-4">
+                  <div className="flex items-center gap-3">
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-white">
+                      {index + 1}
+                    </span>
+                    <p className="text-sm font-bold text-white">{formatStatusLike(change.changeType)}</p>
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-[#cbd7e8]">{change.location}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <section className="border-b border-border bg-[#f6f8fc] px-5 py-16">
+        <div className="mx-auto max-w-7xl">
+          <div className="max-w-3xl">
+            <p className="text-xs font-bold uppercase tracking-wide text-primary">Existing page foundation</p>
+            <h2 className="mt-3 text-3xl font-bold tracking-tight text-foreground">Keep the current page structure, then add the approved improvements.</h2>
+            <p className="mt-4 text-base leading-7 text-mutedForeground">{preview.currentPage.currentFocus}</p>
+          </div>
+          <div className="mt-8 grid gap-4 lg:grid-cols-3">
+            <article className="rounded-md border border-border bg-white p-5 shadow-sm">
+              <p className="text-xs font-bold uppercase tracking-wide text-primary">Current role</p>
+              <p className="mt-3 text-sm leading-6 text-mutedForeground">{preview.currentPage.role}</p>
+            </article>
+            <article className="rounded-md border border-border bg-white p-5 shadow-sm">
+              <p className="text-xs font-bold uppercase tracking-wide text-primary">Page pattern</p>
+              <p className="mt-3 text-sm leading-6 text-mutedForeground">{preview.currentPage.pageType}</p>
+            </article>
+            <article className="rounded-md border border-border bg-white p-5 shadow-sm">
+              <p className="text-xs font-bold uppercase tracking-wide text-primary">Proposed URL</p>
+              <p className="mt-3 break-words text-sm leading-6 text-mutedForeground">{proposedPath || preview.currentPage.path}</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      {sectionChanges.length > 0 ? (
+        <section className="border-b border-border bg-white px-5 py-16">
+          <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-[0.7fr_1fr] lg:items-start">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-primary">Recommended content insertions</p>
+              <h2 className="mt-3 text-3xl font-bold tracking-tight text-foreground">Sections to add or revise on the page.</h2>
+              <p className="mt-4 text-base leading-7 text-mutedForeground">
+                These are the proposed on-page additions, placed using the same band, card, FAQ, and CTA structure the Newl site already uses.
+              </p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              {sectionChanges.map((change, index) => (
+                <article key={`${change.location}-${index}`} className="rounded-md border border-border bg-[#f6f8fc] p-5 shadow-sm transition-colors hover:border-primary hover:bg-accentSoft">
+                  <p className="text-xs font-bold uppercase tracking-wide text-primary">{change.location}</p>
+                  <h3 className="mt-3 text-xl font-bold text-foreground">{change.proposedState}</h3>
+                  <p className="mt-3 text-sm leading-6 text-mutedForeground">{change.exactDraftCopy || change.reason}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      <section className="border-b border-border bg-[#f6f8fc] px-5 py-16">
+        <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-2">
+          <div className="rounded-md border border-border bg-white p-5 shadow-sm">
+            <p className="text-xs font-bold uppercase tracking-wide text-primary">Internal links and routing</p>
+            <h2 className="mt-3 text-2xl font-bold text-foreground">Where this page should connect next.</h2>
+            <p className="mt-3 text-sm leading-6 text-mutedForeground">
+              {internalLinkChange?.proposedState || "Add the recommended internal links using existing Newl related-service and contextual link patterns."}
+            </p>
+          </div>
+          <div className="rounded-md border border-border bg-white p-5 shadow-sm">
+            <p className="text-xs font-bold uppercase tracking-wide text-primary">FAQ treatment</p>
+            <h2 className="mt-3 text-2xl font-bold text-foreground">Questions to answer before the final CTA.</h2>
+            <p className="mt-3 text-sm leading-6 text-mutedForeground">
+              {faqChange?.proposedState || "Use the existing FAQ component pattern so the page captures long-tail search intent without crowding the main copy."}
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-[#172235] px-5 py-12 text-white">
+        <div className="mx-auto flex max-w-7xl flex-col gap-5 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#ffb5c7]">Approval checkpoint</p>
+            <h2 className="mt-3 text-3xl font-bold">Approve this only if the applied page direction feels right.</h2>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-[#cbd7e8]">{preview.approvalSummary}</p>
+          </div>
+          <span className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-md bg-primary px-5 py-3 text-sm font-bold text-white">
+            Ready for PR build
+          </span>
+        </div>
+      </section>
+    </section>
   );
 }
 
