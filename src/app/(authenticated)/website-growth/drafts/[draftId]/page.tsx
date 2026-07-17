@@ -414,19 +414,47 @@ function WebsiteStylePreview({
         </section>
       ) : null}
 
-      <section className="bg-[#172235] px-5 py-12 text-white">
-        <div className="mx-auto flex max-w-7xl flex-col gap-5 md:flex-row md:items-center md:justify-between">
+      <section className="bg-[#172235] px-5 py-16 text-white">
+        <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-[0.9fr_0.75fr] lg:items-start">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#ffb5c7]">Work with Newl</p>
-            <h2 className="mt-3 text-3xl font-bold">{preview.finalCta.heading || "Build the right logistics plan."}</h2>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-[#cbd7e8]">{preview.finalCta.body}</p>
+            <h2 className="mt-3 text-3xl font-bold md:text-4xl">{preview.finalCta.heading || "Build the right logistics plan."}</h2>
+            <p className="mt-4 max-w-3xl text-base leading-7 text-[#cbd7e8]">{preview.finalCta.body}</p>
+            <div className="mt-6 grid gap-3 text-sm font-semibold text-[#e7eefb] sm:grid-cols-2">
+              <span>35+ years experience</span>
+              <span>Canada + U.S. operations</span>
+              <span>Teamship WMS visibility</span>
+              <span>No obligation assessment</span>
+            </div>
           </div>
-          <span className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-md bg-primary px-5 py-3 text-sm font-bold text-white">
-            {preview.finalCta.buttonLabel || "Request Assessment"}
-          </span>
+          <div className="rounded-lg border border-white/10 bg-white p-5 text-[#1f2937] shadow-2xl">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <PreviewFormField label="Name" placeholder="Name" />
+              <PreviewFormField label="Email" placeholder="Email" />
+              <PreviewFormField label="Company" placeholder="Company" />
+              <PreviewFormField label="Primary Need" placeholder="Select primary need" />
+            </div>
+            <p className="mt-4 text-center text-sm leading-6 text-[#475569]">
+              Your information is reviewed by a Newl logistics specialist.
+            </p>
+            <span className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-md bg-primary px-5 py-3 text-sm font-bold text-white">
+              {preview.finalCta.buttonLabel || "Request Assessment"}
+            </span>
+          </div>
         </div>
       </section>
     </section>
+  );
+}
+
+function PreviewFormField({ label, placeholder }: { label: string; placeholder: string }) {
+  return (
+    <label className="block">
+      <span className="text-sm font-bold text-[#1f2937]">{label}</span>
+      <span className="mt-2 flex min-h-11 items-center rounded-md border border-[#cbd5e1] bg-[#f8fafc] px-3 text-sm font-semibold text-[#94a3b8]">
+        {placeholder}
+      </span>
+    </label>
   );
 }
 

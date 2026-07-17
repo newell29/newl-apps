@@ -134,13 +134,17 @@ export async function createWebsiteGrowthContentDraftPayload(
       const legacyRebuild = resolveLegacyPageRebuild(opportunity);
       const generatedProposedPath = generated.proposedPath ?? proposedPath;
       const targetUrl = resolveDraftTargetUrl(opportunity, generatedProposedPath, legacyRebuild);
-      const pagePreview = generated.pagePreview ?? buildRenderedPagePreview({
+      const fallbackPagePreview = buildRenderedPagePreview({
         opportunity,
         sections: generated.sections,
         faqs: generated.faqs,
         internalLinks: generated.internalLinks,
         legacyRebuild
       });
+      const pagePreview =
+        generated.pagePreview && !shouldReplaceGeneratedPagePreview(opportunity, generated.pagePreview)
+          ? generated.pagePreview
+          : fallbackPagePreview;
 
       return {
         ...generated,
@@ -185,52 +189,68 @@ export function buildTemplateWebsiteGrowthContentDraft(
   const targetUrl = resolveDraftTargetUrl(opportunity, proposedPath, legacyRebuild);
   const supportingKeywords = readStringArray(opportunity.supportingKeywords);
   const pagePattern = getNewlWebsitePatternForOpportunity(opportunity.action, opportunity.targetPage, proposedPath, websiteContext);
+  const glossaryTerm = isGlossaryIntent(opportunity) ? getGlossaryTerm(opportunity) : null;
   const sections = buildSections(opportunity, supportingKeywords);
-  const metaTitle = trimForMeta(`${titleCase(opportunity.topic)} | Newl Logistics`, 60);
-  const metaDescription = trimForMeta(
-    `Review Newl's approach to ${opportunity.topic.toLowerCase()} with warehousing, fulfillment, freight, WMS visibility, and Canada-U.S. distribution support.`,
-    155
-  );
+  const metaTitle = glossaryTerm
+    ? trimForMeta(`${buildGlossaryQuestion(glossaryTerm)} | Newl`, 60)
+    : trimForMeta(`${titleCase(opportunity.topic)} | Newl Logistics`, 60);
+  const metaDescription = glossaryTerm
+    ? trimForMeta(
+        `Learn what ${glossaryTerm.toLowerCase()} means in warehouse operations, why it matters for inventory visibility and workflow, and when to review warehouse setup with Newl.`,
+        155
+      )
+    : trimForMeta(
+        `Review Newl's approach to ${opportunity.topic.toLowerCase()} with warehousing, fulfillment, freight, WMS visibility, and Canada-U.S. distribution support.`,
+        155
+      );
+  const faqs = glossaryTerm
+    ? buildGlossaryFaqs(glossaryTerm)
+    : [
+        {
+          question: `How does Newl support ${opportunity.topic.toLowerCase()}?`,
+          answer:
+            "Newl connects warehousing, fulfillment, inventory visibility, and freight coordination so customers can manage the operating model through one logistics partner."
+        },
+        {
+          question: "When should this be handled as a warehouse-led program?",
+          answer:
+            "It should be reviewed as a warehouse-led program when inventory placement, order flow, compliance, reporting, or carrier handoffs affect service levels."
+        }
+      ];
+  const internalLinks = glossaryTerm
+    ? buildGlossaryInternalLinks()
+    : [
+        {
+          label: "Warehousing services",
+          url: "/services/warehousing-services",
+          reason: "Connects the topic back to the core commercial warehousing page."
+        },
+        {
+          label: "Warehouse inventory management",
+          url: "/services/warehouse-inventory-management",
+          reason: "Supports Teamship WMS and visibility claims."
+        },
+        {
+          label: "Contact Newl",
+          url: "/resources/contact",
+          reason: "Gives the reader a clear conversion path."
+        }
+      ];
 
   return {
     title: buildTitle(opportunity, legacyRebuild),
-    summary: `Drafted a Newl website page direction for ${opportunity.topic}. Review the rendered page preview, then use the implementation notes only as the build handoff.`,
-    contentType,
+    summary: glossaryTerm
+      ? `Drafted a supporting glossary/resource page for ${glossaryTerm}. It answers the term plainly first, then connects the concept to warehouse layout, inventory visibility, and Newl's assessment path.`
+      : `Drafted a Newl website page direction for ${opportunity.topic}. Review the rendered page preview, then use the implementation notes only as the build handoff.`,
+    contentType: glossaryTerm ? "Glossary resource" : contentType,
     proposedPath,
     targetKeyword: keyword,
     searchIntent: inferSearchIntent(opportunity),
     sections,
     metaTitle,
     metaDescription,
-    faqs: [
-      {
-        question: `How does Newl support ${opportunity.topic.toLowerCase()}?`,
-        answer:
-          "Newl connects warehousing, fulfillment, inventory visibility, and freight coordination so customers can manage the operating model through one logistics partner."
-      },
-      {
-        question: "When should this be handled as a warehouse-led program?",
-        answer:
-          "It should be reviewed as a warehouse-led program when inventory placement, order flow, compliance, reporting, or carrier handoffs affect service levels."
-      }
-    ],
-    internalLinks: [
-      {
-        label: "Warehousing services",
-        url: "/services/warehousing-services",
-        reason: "Connects the topic back to the core commercial warehousing page."
-      },
-      {
-        label: "Warehouse inventory management",
-        url: "/services/warehouse-inventory-management",
-        reason: "Supports Teamship WMS and visibility claims."
-      },
-      {
-        label: "Contact Newl",
-        url: "/resources/contact",
-        reason: "Gives the reader a clear conversion path."
-      }
-    ],
+    faqs,
+    internalLinks,
     implementationNotes: [
       `Primary review page: ${targetUrl}`,
       legacyRebuild
@@ -240,6 +260,10 @@ export function buildTemplateWebsiteGrowthContentDraft(
       `Recommended component sequence: ${pagePattern.componentSequence.join(" -> ")}.`,
       buildSiteInventoryNote(websiteContext),
       `Recommended queue action: ${formatAction(opportunity.action)}`,
+      glossaryTerm ? "Treat this as supporting glossary/resource content, not a core service page." : null,
+      glossaryTerm ? "Answer the definition plainly before Newl positioning." : null,
+      glossaryTerm ? "Do not force exact-match keyword wording into H1/body if it reads unnaturally." : null,
+      glossaryTerm ? "If the keyword is too broad or weak, fold it into a glossary/FAQ section instead of publishing a standalone page." : null,
       "Keep claims specific to known Newl capabilities and avoid unsupported guarantees.",
       "After approval, build or update the website page, verify internal links, then resubmit the sitemap in Search Console if a new URL is created."
     ].filter((note): note is string => Boolean(note)),
@@ -249,8 +273,10 @@ export function buildTemplateWebsiteGrowthContentDraft(
       "Are customer proof points or examples available for this topic?",
       "Is there a clear CTA and internal link path to a commercial page?",
       "Does the proposed URL avoid duplicating an existing page?",
+      glossaryTerm ? "Does this deserve a standalone resource page, or should it become a glossary/FAQ section?" : null,
+      glossaryTerm ? "Does the H1 read naturally instead of repeating the raw keyword?" : null,
       `Does the draft follow the ${pagePattern.pageType} component pattern?`
-    ],
+    ].filter((item): item is string => Boolean(item)),
     websitePageType: pagePattern.pageType,
     websiteTemplate: pagePattern.sourceTemplate,
     layoutComponents: pagePattern.componentSequence,
@@ -269,35 +295,8 @@ export function buildTemplateWebsiteGrowthContentDraft(
     pagePreview: buildRenderedPagePreview({
       opportunity,
       sections,
-      faqs: [
-        {
-          question: `How does Newl support ${opportunity.topic.toLowerCase()}?`,
-          answer:
-            "Newl connects warehousing, fulfillment, inventory visibility, and freight coordination so customers can manage the operating model through one logistics partner."
-        },
-        {
-          question: "When should this be handled as a warehouse-led program?",
-          answer:
-            "It should be reviewed as a warehouse-led program when inventory placement, order flow, compliance, reporting, or carrier handoffs affect service levels."
-        }
-      ],
-      internalLinks: [
-        {
-          label: "Warehousing services",
-          url: "/services/warehousing-services",
-          reason: "Connects the topic back to the core commercial warehousing page."
-        },
-        {
-          label: "Warehouse inventory management",
-          url: "/services/warehouse-inventory-management",
-          reason: "Supports Teamship WMS and visibility claims."
-        },
-        {
-          label: "Contact Newl",
-          url: "/resources/contact",
-          reason: "Gives the reader a clear conversion path."
-        }
-      ],
+      faqs,
+      internalLinks,
       legacyRebuild
     })
   };
@@ -537,6 +536,16 @@ function buildRenderedPagePreview({
   internalLinks: WebsiteGrowthRenderedPagePreview["internalLinks"];
   legacyRebuild: ReturnType<typeof resolveLegacyPageRebuild>;
 }): WebsiteGrowthRenderedPagePreview {
+  if (isGlossaryIntent(opportunity)) {
+    return buildGlossaryRenderedPagePreview({
+      opportunity,
+      sections,
+      faqs,
+      internalLinks,
+      legacyRebuild
+    });
+  }
+
   const topic = titleCase(opportunity.topic);
   const keyword = opportunity.primaryKeyword || opportunity.topic;
   const mode = resolveRenderedPageMode(opportunity, legacyRebuild);
@@ -602,6 +611,115 @@ function buildRenderedPagePreview({
       buttonLabel: "Request Assessment"
     }
   };
+}
+
+function buildGlossaryRenderedPagePreview({
+  opportunity,
+  sections,
+  faqs,
+  internalLinks,
+  legacyRebuild
+}: {
+  opportunity: WebsiteGrowthDraftOpportunity;
+  sections: WebsiteGrowthDraftSection[];
+  faqs: WebsiteGrowthRenderedPagePreview["faqs"];
+  internalLinks: WebsiteGrowthRenderedPagePreview["internalLinks"];
+  legacyRebuild: ReturnType<typeof resolveLegacyPageRebuild>;
+}): WebsiteGrowthRenderedPagePreview {
+  const term = getGlossaryTerm(opportunity);
+  const lowerTerm = term.toLowerCase();
+  const definition = buildGlossaryDefinition(term);
+  const mode = resolveRenderedPageMode(opportunity, legacyRebuild);
+  const pageSections = sections.length > 0 ? sections : buildGlossarySections(opportunity);
+
+  return {
+    mode,
+    eyebrow: "WAREHOUSE GLOSSARY",
+    heroTitle: buildGlossaryQuestion(term),
+    heroCopy: `${definition} Newl connects warehouse layout, location control, Teamship WMS visibility, and freight-ready workflows so operational details translate into better inventory control.`,
+    heroBullets: ["Plain-language definition", "Warehouse layout context", "Inventory visibility connection"],
+    primaryCta: "Review Warehouse Setup",
+    secondaryCta: "Talk to Newl",
+    proofCards: [
+      {
+        label: "Definition",
+        value: term,
+        body: definition
+      },
+      {
+        label: "Why it matters",
+        value: "Flow + accuracy",
+        body: `${term} details can affect travel paths, pick accuracy, replenishment, staging, and safe movement through the facility.`
+      },
+      {
+        label: "Newl lens",
+        value: "Visibility",
+        body: "Warehouse terms become useful when they connect to WMS locations, operating rules, exception reporting, and customer-facing visibility."
+      }
+    ],
+    sections: pageSections.slice(0, 4).map((section, index) => ({
+      eyebrow: index === 0 ? "WAREHOUSE BASICS" : "NEWL LENS",
+      heading: section.heading,
+      body: section.draftCopy,
+      cards: [
+        {
+          title: "Operational takeaway",
+          body: section.purpose || `Understand how ${lowerTerm} affects warehouse flow, storage, picking, and inventory control.`
+        },
+        {
+          title: "Newl connection",
+          body: "Newl ties warehouse layout, location records, Teamship WMS visibility, and freight handoffs into one operating model."
+        }
+      ]
+    })),
+    faqs: faqs.length > 0 ? faqs : buildGlossaryFaqs(term),
+    internalLinks: internalLinks.length > 0 ? internalLinks : buildGlossaryInternalLinks(),
+    finalCta: {
+      heading: "Need a warehouse layout and inventory visibility review?",
+      body: "Share your inventory profile, storage constraints, order channels, and service requirements so Newl can review whether the warehouse setup supports the work.",
+      buttonLabel: "Request Assessment"
+    }
+  };
+}
+
+function shouldReplaceGeneratedPagePreview(
+  opportunity: WebsiteGrowthDraftOpportunity,
+  preview: WebsiteGrowthRenderedPagePreview
+) {
+  if (!isGlossaryIntent(opportunity)) {
+    return false;
+  }
+
+  const keyword = (opportunity.primaryKeyword || opportunity.topic).toLowerCase();
+  const topic = opportunity.topic.toLowerCase();
+  const content = [
+    preview.heroTitle,
+    preview.heroCopy,
+    ...preview.heroBullets,
+    ...preview.proofCards.flatMap((card) => [card.label, card.value, card.body]),
+    ...preview.sections.flatMap((section) => [
+      section.eyebrow,
+      section.heading,
+      section.body,
+      ...section.cards.flatMap((card) => [card.title, card.body])
+    ]),
+    ...preview.faqs.flatMap((faq) => [faq.question, faq.answer]),
+    preview.finalCta.heading,
+    preview.finalCta.body
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  const badPhrases = [
+    `handle ${keyword}`,
+    `supports ${keyword}`,
+    `${topic} with warehousing`,
+    `${keyword} with warehousing`,
+    `helps customers handle ${keyword}`,
+    `helps importers, manufacturers, distributors, and growing brands handle ${keyword}`
+  ];
+
+  return badPhrases.some((phrase) => content.includes(phrase)) || (!content.includes("mean") && !content.includes("definition"));
 }
 
 function resolveRenderedPageMode(
@@ -671,7 +789,131 @@ function getContentType(
   }
 }
 
+function isGlossaryIntent(opportunity: WebsiteGrowthDraftOpportunity) {
+  const phrase = `${opportunity.topic} ${opportunity.primaryKeyword ?? ""}`.toLowerCase();
+
+  return ["meaning", "definition", "what is", "what does", "glossary", "how to"].some((term) => phrase.includes(term));
+}
+
+function getGlossaryTerm(opportunity: WebsiteGrowthDraftOpportunity) {
+  const base = (opportunity.primaryKeyword || opportunity.topic).toLowerCase();
+  const cleaned = base
+    .replace(/\?/g, "")
+    .replace(/\bwhat\s+is\b/g, "")
+    .replace(/\bwhat\s+does\b/g, "")
+    .replace(/\bdefinition\s+of\b/g, "")
+    .replace(/\bmeaning\s+of\b/g, "")
+    .replace(/\bmeaning\s+in\s+a?\s*warehouse\b/g, "")
+    .replace(/\bwarehouse\s+meaning\b/g, "")
+    .replace(/\bin\s+a?\s*warehouse\b/g, "")
+    .replace(/\bwarehouse\b/g, "")
+    .replace(/\bdefinition\b/g, "")
+    .replace(/\bmeaning\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return titleCase(cleaned || base);
+}
+
+function buildGlossaryQuestion(term: string) {
+  return `What does ${term.toLowerCase()} mean in a warehouse?`;
+}
+
+function indefiniteArticleFor(value: string) {
+  return /^[aeiou]/i.test(value.trim()) ? "an" : "a";
+}
+
+function buildGlossaryDefinition(term: string) {
+  const lowerTerm = term.toLowerCase();
+
+  if (lowerTerm === "aisle") {
+    return "In warehouse operations, an aisle is the open path between racks, shelving, pallets, dock lanes, or work zones. It gives workers and equipment room to travel, pick, replenish, inspect, and move inventory.";
+  }
+
+  return `In warehouse operations, ${indefiniteArticleFor(term)} ${lowerTerm} is a term used to describe a warehouse location, workflow, document, or handling concept. The useful answer is not just the definition; it is how the term affects inventory control, service levels, and day-to-day warehouse execution.`;
+}
+
+function buildGlossarySections(opportunity: WebsiteGrowthDraftOpportunity) {
+  const term = getGlossaryTerm(opportunity);
+  const lowerTerm = term.toLowerCase();
+
+  return [
+    {
+      heading: `Warehouse ${lowerTerm} definition`,
+      purpose: "Answer the glossary term plainly before introducing Newl.",
+      draftCopy: buildGlossaryDefinition(term)
+    },
+    {
+      heading: `Why ${lowerTerm} matters in warehouse operations`,
+      purpose: "Explain the operational relevance without pretending the glossary term is a service.",
+      draftCopy: `${term} details can affect travel paths, pick accuracy, replenishment, staging, safety, and how quickly inventory moves through a facility. A simple term can point to a real workflow or layout issue when it starts causing delays, mis-picks, congestion, or poor visibility.`
+    },
+    {
+      heading: `How ${lowerTerm} connects to inventory visibility`,
+      purpose: "Tie the educational topic back to Teamship and location control.",
+      draftCopy:
+        "The term becomes useful when it is connected to location records, WMS rules, cycle counts, inbound workflows, order picking, and exception reporting. Teamship gives customers a practical view of inventory, inbound activity, orders, and reporting so warehouse details are not managed only through spreadsheets or status emails."
+    },
+    {
+      heading: "When to review the warehouse setup",
+      purpose: "Create a natural conversion path from definition to assessment.",
+      draftCopy:
+        "A warehouse review is worth considering when layout, storage rules, order flow, receiving, replenishment, or freight handoffs are creating service issues. Newl can review the operating model across warehousing, fulfillment, WMS visibility, and distribution before recommending changes."
+    }
+  ];
+}
+
+function buildGlossaryFaqs(term: string) {
+  const lowerTerm = term.toLowerCase();
+
+  return [
+    {
+      question: buildGlossaryQuestion(term),
+      answer: buildGlossaryDefinition(term)
+    },
+    {
+      question: `Why does ${lowerTerm} matter for warehouse operations?`,
+      answer:
+        "It matters because warehouse terminology often connects to physical layout, inventory location control, picking paths, receiving flow, safety, and service levels. When the operating rules are unclear, small issues can turn into delays or accuracy problems."
+    },
+    {
+      question: "When should a company review its warehouse layout or workflow?",
+      answer:
+        "Review the setup when inventory is hard to locate, order flow is slowing down, teams are relying on spreadsheets, pick paths are inefficient, or carrier and warehouse handoffs are creating delays."
+    }
+  ];
+}
+
+function buildGlossaryInternalLinks() {
+  return [
+    {
+      label: "Warehousing services",
+      url: "/services/warehousing-services",
+      reason: "Connects the glossary explanation to Newl's core warehouse operations page."
+    },
+    {
+      label: "Warehouse inventory management",
+      url: "/services/warehouse-inventory-management",
+      reason: "Supports the Teamship WMS and inventory visibility connection."
+    },
+    {
+      label: "Warehouse assessment",
+      url: "/services/warehouse-assessment",
+      reason: "Gives readers a natural next step when the definition points to a workflow or layout issue."
+    },
+    {
+      label: "Contact Newl",
+      url: "/resources/contact",
+      reason: "Gives the reader a clear conversion path."
+    }
+  ];
+}
+
 function buildTitle(opportunity: WebsiteGrowthDraftOpportunity, legacyRebuild?: ReturnType<typeof resolveLegacyPageRebuild>) {
+  if (isGlossaryIntent(opportunity)) {
+    return buildGlossaryQuestion(getGlossaryTerm(opportunity));
+  }
+
   if (legacyRebuild) {
     return `${titleCase(opportunity.topic)} Page Draft`;
   }
@@ -700,6 +942,11 @@ function buildProposedPath(opportunity: WebsiteGrowthDraftOpportunity) {
 
   if (legacyRebuild) {
     return legacyRebuild.proposedPath;
+  }
+
+  if (isGlossaryIntent(opportunity)) {
+    const termSlug = slugify(getGlossaryTerm(opportunity));
+    return termSlug ? `/resources/glossary/${termSlug}` : null;
   }
 
   if (
@@ -733,6 +980,10 @@ function buildProposedPath(opportunity: WebsiteGrowthDraftOpportunity) {
 
 function buildSections(opportunity: WebsiteGrowthDraftOpportunity, supportingKeywords: string[]) {
   const keywordList = supportingKeywords.length > 0 ? supportingKeywords.join(", ") : opportunity.primaryKeyword ?? opportunity.topic;
+
+  if (isGlossaryIntent(opportunity)) {
+    return buildGlossarySections(opportunity);
+  }
 
   if (opportunity.action === WebsiteGrowthAction.ADD_INTERNAL_LINKS) {
     return [
@@ -778,7 +1029,7 @@ function buildSections(opportunity: WebsiteGrowthDraftOpportunity, supportingKey
 function inferSearchIntent(opportunity: WebsiteGrowthDraftOpportunity) {
   const topic = opportunity.topic.toLowerCase();
 
-  if (topic.includes("what is") || topic.includes("how to") || topic.includes("definition")) {
+  if (isGlossaryIntent(opportunity) || topic.includes("what is") || topic.includes("how to") || topic.includes("definition")) {
     return "Informational";
   }
 

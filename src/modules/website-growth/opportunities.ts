@@ -370,9 +370,14 @@ function chooseAction({
   leadCount: number;
 }) {
   const lowerTopic = topic.toLowerCase();
+  const hasInformationalIntent = informationalTerms.some((term) => lowerTopic.includes(term));
 
   if (targetPage && leadCount > 0) {
     return WebsiteGrowthAction.IMPROVE_EXISTING_PAGE;
+  }
+
+  if (hasInformationalIntent) {
+    return WebsiteGrowthAction.CREATE_RESOURCE_ARTICLE;
   }
 
   if (targetPage && impressions >= 200 && clicks / Math.max(impressions, 1) < 0.01) {
@@ -381,10 +386,6 @@ function chooseAction({
 
   if (targetPage && position && position > 8 && position <= 30) {
     return WebsiteGrowthAction.ADD_SECTION;
-  }
-
-  if (informationalTerms.some((term) => lowerTopic.includes(term))) {
-    return WebsiteGrowthAction.CREATE_RESOURCE_ARTICLE;
   }
 
   if (!targetPage && serviceTerms.some((term) => lowerTopic.includes(term))) {
