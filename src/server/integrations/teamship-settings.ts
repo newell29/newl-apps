@@ -24,6 +24,8 @@ export type TeamshipSettings = {
   passwordConfigured: boolean;
   syncEnabled: boolean;
   syncCadenceMinutes: number;
+  garlandInventoryUserId: string | null;
+  garlandInventoryLocationId: string | null;
   updatedAt: string | null;
 };
 
@@ -48,6 +50,8 @@ export function parseTeamshipSettings(credential?: TeamshipCredentialRecord | nu
     passwordConfigured: Boolean(credential?.secretRef),
     syncEnabled: config.syncEnabled === true,
     syncCadenceMinutes: readSyncCadenceMinutes(config.syncCadenceMinutes),
+    garlandInventoryUserId: readOptionalConfigString(config.garlandInventoryUserId),
+    garlandInventoryLocationId: readOptionalConfigString(config.garlandInventoryLocationId),
     updatedAt:
       typeof config.updatedAt === "string" && config.updatedAt.trim().length > 0 ? config.updatedAt.trim() : null
   };
@@ -145,6 +149,8 @@ export function buildTeamshipCredentialRecord({
       apiBaseUrl: apiBaseUrl?.trim() || null,
       syncEnabled: false,
       syncCadenceMinutes: 15,
+      garlandInventoryUserId: null,
+      garlandInventoryLocationId: null,
       updatedAt: new Date().toISOString()
     },
     secretRef: encryptTeamshipSecret({ password })
@@ -195,4 +201,8 @@ function getTeamshipEncryptionSecret() {
 function readSyncCadenceMinutes(value: unknown) {
   const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : 15;
   return [15, 30, 60, 120].includes(parsed) ? parsed : 15;
+}
+
+function readOptionalConfigString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }

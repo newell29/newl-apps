@@ -583,6 +583,8 @@ export async function saveTeamshipSettingsAction(formData: FormData) {
   const status = parseIntegrationStatus(formData.get("teamshipStatus"));
   const syncEnabled = formData.get("teamshipSyncEnabled") === "true";
   const syncCadenceMinutes = readTeamshipSyncCadenceMinutes(formData.get("teamshipSyncCadenceMinutes"));
+  const garlandInventoryUserId = readOptional(formData, "teamshipGarlandInventoryUserId") ?? null;
+  const garlandInventoryLocationId = readOptional(formData, "teamshipGarlandInventoryLocationId") ?? null;
 
   const existing = await prisma.integrationCredential.findFirst({
     where: {
@@ -609,6 +611,8 @@ export async function saveTeamshipSettingsAction(formData: FormData) {
       apiBaseUrl,
       syncEnabled,
       syncCadenceMinutes,
+      garlandInventoryUserId,
+      garlandInventoryLocationId,
       updatedAt: new Date().toISOString()
     },
     secretRef: password ? encryptTeamshipSecret({ password }) : existing?.secretRef ?? null
