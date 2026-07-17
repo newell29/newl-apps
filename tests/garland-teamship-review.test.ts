@@ -172,6 +172,44 @@ X16 TOP PANINI GRILL PLATE
     });
   });
 
+  it("extracts alphanumeric lot/serial values without treating site locations as serials", () => {
+    const orders = parseGarlandShippingOrderPages([
+      {
+        pageNumber: 1,
+        text: `Ship-To Pre-Shipper Print Date
+11906259 PS210360 7/17/2026
+Pre-Shipper
+MR SUB - STORE #MRS0615
+C-883 JANE STREET
+TORONTO, ON M6N 4C4
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Order Number SR811617 Ship To PO 00525892 Frt Terms PPADD-CD
+Order Date 7/7/2026 Ship Via SPEEDY
+Ln Item Number T Site
+Location
+Lot/Serial
+Ref Ship Qty Qty Open UM Due
+ Shipped
+3 GF1400626 891210
+GF14SD, NAT GAS. W/CSA RATING
+PLATE, 4 LEGS/4 CASTERS IN ACC
+PACK. S/S POT, DOOR & ALUM
+CAB.
+2.00 EA 7/9/2026
+MACKIE 2603FM0240 1.00 (              )
+MACKIE 2603FM0241 1.00 (              )`
+      }
+    ]);
+
+    expect(orders[0]?.items[0]).toMatchObject({
+      sku: "GF1400626",
+      quantity: 2,
+      serialNumbers: ["2603FM0240", "2603FM0241"]
+    });
+    expect(orders[0]?.items[0]?.serialNumbers).not.toContain("MACKIE");
+  });
+
   it("parses Teamship alert digest orders and item details", () => {
     const alerts = parseTeamshipAlertDigest(alertDigest);
 
