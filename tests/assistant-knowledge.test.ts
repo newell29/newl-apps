@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const findKnowledgeChunks = vi.fn();
+const findTenantModuleAccess = vi.fn();
 
 vi.mock("@/server/db", () => ({
   prisma: {
     assistantKnowledgeChunk: {
       findMany: (...args: unknown[]) => findKnowledgeChunks(...args)
+    },
+    tenantModuleAccess: {
+      findMany: (...args: unknown[]) => findTenantModuleAccess(...args)
     }
   }
 }));
@@ -37,6 +41,12 @@ describe("createKnowledgeChunks", () => {
 describe("searchAssistantKnowledge", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    findTenantModuleAccess.mockResolvedValue([
+      { module: { key: "LEAD_GEN" } },
+      { module: { key: "INVOICE_VERIFICATION" } },
+      { module: { key: "QUICKBOOKS_POSTING" } },
+      { module: { key: "SHIPMENT_DOCUMENTS" } }
+    ]);
   });
 
   it("ranks indexed chunks by prompt overlap and returns assistant sources", async () => {
@@ -80,7 +90,6 @@ describe("searchAssistantKnowledge", () => {
         tenantId: "tenant-1",
         tenantSlug: "newl-group",
         tenantName: "Newl Group",
-        userId: "user-1",
         role: "ADMIN"
       },
       "Need Dallas furniture context for Acme"
@@ -96,6 +105,78 @@ describe("searchAssistantKnowledge", () => {
       priorityScore: 87,
       contactCount: 4,
       sourceSystem: "NEWL_COMPANY"
+    });
+  });
+
+  it("filters module-tagged assistant sources by the user's role and tenant entitlements", async () => {
+    findKnowledgeChunks.mockResolvedValue([
+      {
+        id: "chunk-finance",
+        documentId: "doc-finance",
+        chunkIndex: 0,
+        contentText: "Acme invoice has a QuickBooks posting error that needs finance review.",
+        contentSummary: "Acme QuickBooks posting error.",
+        metadata: {
+          assistantContext: {
+            adapterKey: "invoice-automation",
+            moduleKeys: ["INVOICE_VERIFICATION", "QUICKBOOKS_POSTING"]
+          }
+        },
+        document: {
+          id: "doc-finance",
+          sourceKind: "OTHER",
+          externalId: "invoice-summary",
+          title: "Invoice automation assistant summary",
+          sourceSystem: "NEWL_INVOICE_AUTOMATION",
+          metadata: null
+        }
+      },
+      {
+        id: "chunk-lead",
+        documentId: "doc-lead",
+        chunkIndex: 0,
+        contentText: "Acme lead has Dallas shipment history and needs sales follow-up.",
+        contentSummary: "Acme lead follow-up.",
+        metadata: {
+          assistantContext: {
+            adapterKey: "lead-gen",
+            moduleKeys: ["LEAD_GEN"]
+          }
+        },
+        document: {
+          id: "doc-lead",
+          sourceKind: "LEAD",
+          externalId: "lead-summary",
+          title: "Lead generation assistant summary",
+          sourceSystem: "NEWL_LEAD_GEN",
+          metadata: null
+        }
+      }
+    ]);
+
+    const sources = await searchAssistantKnowledge(
+      {
+        tenantId: "tenant-1",
+        tenantSlug: "newl-group",
+        tenantName: "Newl Group",
+        role: "SALES"
+      },
+      "Acme review"
+    );
+
+    expect(sources.map((source) => source.title)).toEqual(["Lead generation assistant summary"]);
+    expect(findTenantModuleAccess).toHaveBeenCalledWith({
+      where: {
+        tenantId: "tenant-1",
+        enabled: true
+      },
+      select: {
+        module: {
+          select: {
+            key: true
+          }
+        }
+      }
     });
   });
 });
