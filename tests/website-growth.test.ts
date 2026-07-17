@@ -11,6 +11,10 @@ import {
 import { parseDelimitedRows, readNumber, readString } from "@/modules/website-growth/csv";
 import { buildTemplateWebsiteGrowthContentDraft } from "@/modules/website-growth/content-drafts";
 import {
+  createWebsiteGrowthPullRequestPackage,
+  getWebsiteGrowthGitHubPrStatus
+} from "@/modules/website-growth/github-pr";
+import {
   fetchSearchConsoleRows,
   getWebsiteGrowthIntegrationStatus,
   normalizeSearchConsoleSiteUrl
@@ -322,6 +326,104 @@ describe("website growth content draft packages", () => {
     expect(buildPackage.branchName).toBe("website-growth/top-3pl-companies-in-usa");
     expect(buildPackage.approvalFlow).toContain("A GitHub pull request is opened for review.");
     expect(savedPackage?.routePath).toBe("/top-3pl-companies-in-usa");
+  });
+});
+
+describe("website growth GitHub pull request packages", () => {
+  it("reports missing GitHub pull request configuration", () => {
+    const status = getWebsiteGrowthGitHubPrStatus({});
+
+    expect(status.configured).toBe(false);
+    expect(status.missing).toEqual(["WEBSITE_GROWTH_GITHUB_TOKEN", "NEWL_WEBSITE_GITHUB_REPO"]);
+  });
+
+  it("creates a review package branch, files, and pull request", async () => {
+    const buildPackage = buildWebsiteGrowthBuildPackage({
+      id: "draft_1",
+      opportunityId: "opportunity_1",
+      title: "Nationwide 3pl Companies",
+      contentType: "New commercial page",
+      proposedPath: "/top-3pl-companies-in-usa",
+      targetPage: "https://www.newlgroup.com/top-3pl-companies-in-usa",
+      draftJson: buildTemplateWebsiteGrowthContentDraft({
+        action: WebsiteGrowthAction.CREATE_PAGE,
+        topic: "nationwide 3pl companies",
+        primaryKeyword: "nationwide 3pl companies",
+        targetPage: "https://www.newlgroup.com/top-3pl-companies-in-usa",
+        sourcePage: "https://www.newlgroup.com/locations/charlotte-warehousing",
+        score: 70,
+        confidence: "Medium",
+        reason: "100 impressions, 0 clicks, average position 12.0",
+        recommendation: "Build a dedicated draft page for nationwide 3PL companies.",
+        supportingKeywords: ["top 3pl companies in usa"],
+        evidence: {
+          legacyRebuild: true
+        }
+      }) as unknown as Prisma.JsonValue,
+      opportunity: {
+        action: WebsiteGrowthAction.CREATE_PAGE,
+        topic: "nationwide 3pl companies",
+        targetPage: "https://www.newlgroup.com/top-3pl-companies-in-usa",
+        sourcePage: "https://www.newlgroup.com/locations/charlotte-warehousing"
+      }
+    });
+    const calls: Array<{ init?: RequestInit; url: string }> = [];
+    const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const target = String(url);
+      calls.push({ init, url: target });
+
+      if (target.includes("/git/ref/heads/main")) {
+        return new Response(JSON.stringify({ object: { sha: "base_sha" } }), { status: 200 });
+      }
+
+      if (target.endsWith("/git/refs")) {
+        return new Response(JSON.stringify({ ref: `refs/heads/${buildPackage.branchName}` }), { status: 201 });
+      }
+
+      if (target.includes("/contents/") && (!init?.method || init.method === "GET")) {
+        return new Response(JSON.stringify({ message: "Not Found" }), { status: 404 });
+      }
+
+      if (target.includes("/contents/") && init?.method === "PUT") {
+        return new Response(JSON.stringify({ content: { path: "package" } }), { status: 200 });
+      }
+
+      if (target.includes("/pulls?")) {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+
+      if (target.endsWith("/pulls") && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            html_url: "https://github.com/newell29/Newl-website/pull/123",
+            number: 123
+          }),
+          { status: 201 }
+        );
+      }
+
+      return new Response(JSON.stringify({ message: "Unexpected test URL" }), { status: 500 });
+    });
+
+    const result = await createWebsiteGrowthPullRequestPackage({
+      buildPackage,
+      env: {
+        NEWL_WEBSITE_BASE_BRANCH: "main",
+        NEWL_WEBSITE_GITHUB_REPO: "newell29/Newl-website",
+        WEBSITE_GROWTH_GITHUB_TOKEN: "token"
+      },
+      fetcher: fetcher as unknown as typeof fetch
+    });
+
+    expect(result.status).toBe("PR_OPENED");
+    expect(result.pullRequestUrl).toBe("https://github.com/newell29/Newl-website/pull/123");
+    expect(result.files).toEqual([
+      ".website-growth/build-packages/top-3pl-companies-in-usa.json",
+      ".website-growth/build-packages/top-3pl-companies-in-usa.md"
+    ]);
+    expect(calls.some((call) => call.url.endsWith("/git/refs"))).toBe(true);
+    expect(calls.filter((call) => call.url.includes("/contents/") && call.init?.method === "PUT")).toHaveLength(2);
+    expect(calls.some((call) => call.url.endsWith("/pulls") && call.init?.method === "POST")).toBe(true);
   });
 });
 

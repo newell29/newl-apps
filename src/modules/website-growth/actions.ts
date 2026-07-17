@@ -17,6 +17,7 @@ import {
 } from "@/modules/website-growth/build-package";
 import { createWebsiteGrowthContentDraftPayload } from "@/modules/website-growth/content-drafts";
 import { fetchSearchConsoleRows, getWebsiteGrowthIntegrationStatus } from "@/modules/website-growth/integrations";
+import { createWebsiteGrowthPullRequestPackage } from "@/modules/website-growth/github-pr";
 import {
   getOpportunityReviewKey,
   resolveLegacyPageRebuild
@@ -214,7 +215,6 @@ export async function syncSearchConsoleAction() {
   }
 
   revalidatePath("/website-growth");
-  revalidatePath(`/website-growth/drafts/${draftId}`);
 }
 
 export async function generateWebsiteGrowthOpportunitiesAction() {
@@ -528,6 +528,64 @@ export async function updateWebsiteGrowthDraftAction(formData: FormData) {
   }
 
   revalidatePath("/website-growth");
+  revalidatePath(`/website-growth/drafts/${draftId}`);
+}
+
+export async function createWebsiteGrowthDraftPullRequestAction(formData: FormData) {
+  const context = await getAuthenticatedContext();
+  await requireModule(context, ModuleKey.WEBSITE_GROWTH);
+  await requireMutationAccess(context);
+
+  const draftId = String(formData.get("draftId") ?? "");
+
+  if (!draftId) {
+    throw new Error("Missing draft ID.");
+  }
+
+  const draft = await prisma.websiteGrowthContentDraft.findFirst({
+    where: {
+      id: draftId,
+      tenantId: context.tenantId
+    },
+    include: {
+      opportunity: true
+    }
+  });
+
+  if (!draft) {
+    throw new Error("Draft was not found.");
+  }
+
+  const buildPackage = buildWebsiteGrowthBuildPackage(draft);
+  const draftJsonWithPackage = mergeBuildPackageIntoDraftJson(draft.draftJson, buildPackage);
+  const pullRequest = await createWebsiteGrowthPullRequestPackage({ buildPackage });
+
+  await prisma.websiteGrowthContentDraft.updateMany({
+    where: {
+      id: draftId,
+      tenantId: context.tenantId
+    },
+    data: {
+      status: WebsiteGrowthContentDraftStatus.BUILT,
+      draftJson: mergePullRequestIntoDraftJson(draftJsonWithPackage, pullRequest),
+      pullRequestUrl: pullRequest.pullRequestUrl,
+      builtUrl: null
+    }
+  });
+
+  await prisma.websiteGrowthOpportunity.updateMany({
+    where: {
+      id: draft.opportunityId,
+      tenantId: context.tenantId
+    },
+    data: {
+      status: WebsiteGrowthOpportunityStatus.IN_PROGRESS,
+      approvedByUserId: context.userId
+    }
+  });
+
+  revalidatePath("/website-growth");
+  revalidatePath(`/website-growth/drafts/${draftId}`);
 }
 
 async function createMissingOpportunities(tenantId: string, candidates: OpportunityCandidate[]) {
@@ -656,6 +714,18 @@ function parseContentDraftStatus(value: FormDataEntryValue | null) {
   }
 
   return value as WebsiteGrowthContentDraftStatus;
+}
+
+function mergePullRequestIntoDraftJson(
+  draftJson: Prisma.JsonValue | Prisma.InputJsonValue,
+  pullRequest: unknown
+): Prisma.InputJsonValue {
+  const record = isRecord(draftJson) ? draftJson : {};
+
+  return {
+    ...record,
+    pullRequestPackage: pullRequest as Prisma.InputJsonValue
+  } as Prisma.InputJsonValue;
 }
 
 function normalizeRate(value: number | null) {

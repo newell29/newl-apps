@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { readWebsiteGrowthBuildPackage } from "@/modules/website-growth/build-package";
+import { createWebsiteGrowthDraftPullRequestAction } from "@/modules/website-growth/actions";
 import { requireModule } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -106,6 +107,24 @@ export default async function WebsiteGrowthDraftPreviewPage({ params }: PageProp
               <ReviewPanel title="Build flow" items={buildPackage.approvalFlow} />
               <ReviewPanel title="Implementation file plan" items={buildPackage.implementation.filePlan} />
             </div>
+            {draft.pullRequestUrl ? (
+              <Link
+                href={draft.pullRequestUrl}
+                className="mt-5 inline-flex rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover"
+              >
+                View GitHub PR
+              </Link>
+            ) : (
+              <form action={createWebsiteGrowthDraftPullRequestAction} className="mt-5">
+                <input type="hidden" name="draftId" value={draft.id} />
+                <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
+                  Create GitHub PR
+                </button>
+                <p className="mt-2 max-w-2xl text-xs leading-5 text-mutedForeground">
+                  This creates or updates a website branch, writes the approved Website Growth package, opens a GitHub PR, and stores the PR link on this draft.
+                </p>
+              </form>
+            )}
           </div>
         ) : null}
         <ReviewPanel title="Newl website layout" items={payload.layoutComponents} />

@@ -14,6 +14,7 @@ import { PageHeader } from "@/components/page-header";
 import { readWebsiteGrowthBuildPackage } from "@/modules/website-growth/build-package";
 import {
   createWeeklyWebsiteGrowthPlanAction,
+  createWebsiteGrowthDraftPullRequestAction,
   generateWebsiteGrowthDraftAction,
   generateWebsiteGrowthOpportunitiesAction,
   importWebsiteGrowthMetricsAction,
@@ -574,6 +575,24 @@ function PreparedOpportunityCard({
               <p className="mt-2 text-xs leading-5 text-mutedForeground">
                 Approval prepared the implementation package. The next automation step can use this to open a GitHub PR and Vercel preview without publishing directly.
               </p>
+              {draft.pullRequestUrl ? (
+                <Link
+                  href={draft.pullRequestUrl}
+                  className="mt-3 inline-flex text-sm font-semibold text-success transition-colors hover:text-success/80"
+                >
+                  View GitHub PR
+                </Link>
+              ) : (
+                <form action={createWebsiteGrowthDraftPullRequestAction} className="mt-3">
+                  <input type="hidden" name="draftId" value={draft.id} />
+                  <button className="w-full rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
+                    Create GitHub PR
+                  </button>
+                  <p className="mt-2 text-xs leading-5 text-mutedForeground">
+                    Creates or updates a website branch, writes the build package, opens a PR, and saves the PR link here.
+                  </p>
+                </form>
+              )}
             </div>
           ) : null}
           {draftPayload ? (
