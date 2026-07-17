@@ -42,6 +42,53 @@ Select **Test local model** after saving. A successful test discovers the config
 
 A deployed Newl Apps server cannot call the Mac mini through `127.0.0.1`. Before enabling live replies in production, put the model behind an authenticated HTTPS relay or tunnel.
 
+## Basic Mac mini relay with ngrok
+
+Run the relay on the Mac mini. It binds to `127.0.0.1` and requires a bearer token before forwarding the limited OpenAI-compatible routes to Ollama:
+
+```bash
+cd ~/Developer/newl-apps
+export LOCAL_LLM_RELAY_TOKEN="$(openssl rand -hex 32)"
+echo "$LOCAL_LLM_RELAY_TOKEN"
+npm run relay:local-llm
+```
+
+In a second terminal, expose the relay over HTTPS with ngrok:
+
+```bash
+brew install ngrok
+ngrok config add-authtoken YOUR_NGROK_AUTHTOKEN
+ngrok http 41134
+```
+
+Use the ngrok `https://...ngrok.app` forwarding URL as the Vercel endpoint, with `/v1` appended. For example:
+
+```bash
+https://your-ngrok-host.ngrok.app/v1
+```
+
+In Vercel, add the host without protocol or path:
+
+```bash
+ASSISTANT_LOCAL_LLM_ALLOWED_HOSTS=your-ngrok-host.ngrok.app
+```
+
+Redeploy Vercel after saving the environment variable.
+
+In deployed Newl Apps Settings > Assistant AI, save:
+
+- Provider: `Local LLM`
+- Endpoint: `https://your-ngrok-host.ngrok.app/v1`
+- Default model: `qwen3:30b`
+- Fallback model: `gpt-oss:20b`
+- Reasoning effort: `None / fastest`
+- Temperature: `0.2`
+- Max tokens: `1200`
+- Bearer token: the `LOCAL_LLM_RELAY_TOKEN` value printed by the Mac mini
+- Live assistant replies: enabled
+
+Select **Test local model**. If the test passes, the deployed app can reach the Mac mini through the authenticated tunnel.
+
 Production safeguards require:
 
 1. An HTTPS endpoint ending in `/v1`.

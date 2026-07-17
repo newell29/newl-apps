@@ -8,6 +8,7 @@
     "build": "next build",
     "build:canonical-trademining-reference": "tsx scripts/build-canonical-trademining-reference.ts",
     "smoke:trademining": "tsx scripts/smoke-test-trademining.ts",
+    "relay:local-llm": "tsx scripts/local-llm-relay.ts",
     "sync:main": "bash scripts/sync-main.sh",
     "vercel-build": "tsx scripts/vercel-build.ts",
     "lint": "eslint . --max-warnings=0",
