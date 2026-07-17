@@ -3,6 +3,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
+import { readWebsiteGrowthBuildPackage } from "@/modules/website-growth/build-package";
+import { createWebsiteGrowthDraftPullRequestAction } from "@/modules/website-growth/actions";
+import type { WebsiteGrowthPageChangePreview } from "@/modules/website-growth/content-drafts";
 import { requireModule } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -33,6 +36,7 @@ export default async function WebsiteGrowthDraftPreviewPage({ params }: PageProp
   }
 
   const payload = readDraftPayload(draft.draftJson);
+  const buildPackage = readWebsiteGrowthBuildPackage(draft.draftJson);
 
   return (
     <div className="space-y-6">
@@ -74,56 +78,65 @@ export default async function WebsiteGrowthDraftPreviewPage({ params }: PageProp
         </dl>
       </section>
 
-      <section className="overflow-hidden rounded-lg border border-border bg-white">
-        <div className="border-b border-border bg-muted/40 px-5 py-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-primary">Draft page preview</p>
-          <p className="mt-1 text-sm text-mutedForeground">
-            This is a private preview in Newl Apps. It is not live, indexed, or posted to Git.
-          </p>
-        </div>
-        <article className="mx-auto max-w-5xl px-5 py-10">
-          <p className="text-sm font-bold uppercase tracking-wide text-primary">{draft.contentType}</p>
-          <h1 className="mt-3 max-w-4xl text-4xl font-bold tracking-tight text-foreground md:text-5xl">
-            {draft.title}
-          </h1>
-          <p className="mt-5 max-w-3xl text-lg leading-8 text-mutedForeground">{draft.summary}</p>
+      <ExistingPageChangePreview preview={payload.pageChangePreview} />
+      <AppliedExistingPagePreview
+        contentType={draft.contentType}
+        proposedPath={draft.proposedPath}
+        summary={draft.summary}
+        title={draft.title}
+        payload={payload}
+      />
 
-          <div className="mt-8 rounded-md border border-border bg-muted/30 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">SEO metadata</p>
-            <dl className="mt-3 grid gap-3">
-              <SummaryRow label="Meta title" value={payload.metaTitle} />
-              <SummaryRow label="Meta description" value={payload.metaDescription} />
-            </dl>
-          </div>
-
-          <div className="mt-10 space-y-8">
-            {payload.sections.map((section) => (
-              <section key={section.heading}>
-                <p className="text-xs font-semibold uppercase tracking-wide text-primary">{section.purpose}</p>
-                <h2 className="mt-2 text-2xl font-bold text-foreground">{section.heading}</h2>
-                <p className="mt-3 text-base leading-7 text-mutedForeground">{section.draftCopy}</p>
-              </section>
-            ))}
-          </div>
-
-          {payload.faqs.length > 0 ? (
-            <section className="mt-12 border-t border-border pt-8">
-              <p className="text-xs font-semibold uppercase tracking-wide text-primary">FAQ</p>
-              <h2 className="mt-2 text-2xl font-bold text-foreground">Questions this page should answer</h2>
-              <div className="mt-5 grid gap-3">
-                {payload.faqs.map((faq) => (
-                  <div key={faq.question} className="rounded-md border border-border p-4">
-                    <h3 className="font-semibold text-foreground">{faq.question}</h3>
-                    <p className="mt-2 text-sm leading-6 text-mutedForeground">{faq.answer}</p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ) : null}
-        </article>
-      </section>
+      <WebsiteStylePreview
+        contentType={draft.contentType}
+        proposedPath={draft.proposedPath}
+        summary={draft.summary}
+        title={draft.title}
+        payload={payload}
+      />
 
       <section className="grid gap-4 lg:grid-cols-2">
+        {buildPackage ? (
+          <div className="rounded-lg border border-success/25 bg-success/10 p-5 lg:col-span-2">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-success">Build package ready</p>
+                <h2 className="mt-2 text-xl font-semibold text-foreground">Approval created a PR-ready implementation package.</h2>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-mutedForeground">
+                  This is the handoff object the website executor can use to create a GitHub branch, build the Newl website route, open a PR, and wait for the Vercel preview before anything goes live.
+                </p>
+              </div>
+              <Badge className="border-success/25 bg-background text-success">{formatStatusLike(buildPackage.mode)}</Badge>
+            </div>
+            <dl className="mt-5 grid gap-4 md:grid-cols-3">
+              <SummaryRow label="Route" value={buildPackage.routePath} />
+              <SummaryRow label="Branch" value={buildPackage.branchName} />
+              <SummaryRow label="Target repo" value={buildPackage.targetRepo} />
+            </dl>
+            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+              <ReviewPanel title="Build flow" items={buildPackage.approvalFlow} />
+              <ReviewPanel title="Implementation file plan" items={buildPackage.implementation.filePlan} />
+            </div>
+            {draft.pullRequestUrl ? (
+              <Link
+                href={draft.pullRequestUrl}
+                className="mt-5 inline-flex rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover"
+              >
+                View GitHub PR
+              </Link>
+            ) : (
+              <form action={createWebsiteGrowthDraftPullRequestAction} className="mt-5">
+                <input type="hidden" name="draftId" value={draft.id} />
+                <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
+                  Create GitHub PR
+                </button>
+                <p className="mt-2 max-w-2xl text-xs leading-5 text-mutedForeground">
+                  This creates or updates a website branch, writes the approved Website Growth package, opens a GitHub PR, and stores the PR link on this draft.
+                </p>
+              </form>
+            )}
+          </div>
+        ) : null}
         <ReviewPanel title="Newl website layout" items={payload.layoutComponents} />
         <ReviewPanel title="Design system notes" items={payload.designSystemNotes} />
         <ReviewPanel title="Internal links" items={payload.internalLinks.map((link) => `${link.label} -> ${link.url}: ${link.reason}`)} />
@@ -169,6 +182,465 @@ function ReviewPanel({ title, items }: { title: string; items: string[] }) {
   );
 }
 
+function ExistingPageChangePreview({ preview }: { preview: WebsiteGrowthPageChangePreview | null }) {
+  if (!preview) {
+    return (
+      <section className="rounded-lg border border-warning/25 bg-warning/10 p-5">
+        <p className="text-xs font-semibold uppercase tracking-wide text-warning">Current page preview not available</p>
+        <h2 className="mt-2 text-xl font-semibold text-foreground">Regenerate this draft to see exact page-change guidance.</h2>
+        <p className="mt-2 text-sm leading-6 text-mutedForeground">
+          Older drafts may only include proposal notes. New drafts include current page context, likely source files, and exact proposed changes before approval.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-border bg-card">
+      <div className="border-b border-border bg-muted/30 p-5">
+        <p className="text-xs font-semibold uppercase tracking-wide text-primary">Current page and proposed changes</p>
+        <h2 className="mt-2 text-2xl font-semibold text-foreground">Review what would actually change before approval.</h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-mutedForeground">
+          This is the implementation preview: it maps the SEO recommendation to the current page, existing Newl components, likely files, and the specific content changes the build step should make.
+        </p>
+      </div>
+      <div className="grid gap-0 lg:grid-cols-[0.78fr_1.22fr]">
+        <aside className="border-b border-border p-5 lg:border-b-0 lg:border-r">
+          <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Current page</p>
+          <dl className="mt-4 grid gap-4">
+            <SummaryRow label="Path" value={preview.currentPage.path} />
+            <SummaryRow label="Page type" value={preview.currentPage.pageType} />
+            <SummaryRow label="Role" value={preview.currentPage.role} />
+            <SummaryRow label="Focus" value={preview.currentPage.currentFocus} />
+          </dl>
+          <div className="mt-5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Likely source files</p>
+            <ul className="mt-3 space-y-2 text-sm leading-6 text-foreground">
+              {preview.currentPage.likelySourceFiles.map((file) => (
+                <li key={file} className="break-words rounded-md border border-border bg-background px-3 py-2">{file}</li>
+              ))}
+            </ul>
+          </div>
+          <div className="mt-5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Existing component pattern</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {preview.currentPage.existingComponents.slice(0, 10).map((component) => (
+                <span key={component} className="rounded-full border border-border bg-background px-2.5 py-1 text-xs font-semibold text-mutedForeground">
+                  {component}
+                </span>
+              ))}
+            </div>
+          </div>
+        </aside>
+        <div className="p-5">
+          <div className="grid gap-4">
+            {preview.proposedChanges.map((change, index) => (
+              <article key={`${change.changeType}-${change.location}-${index}`} className="rounded-md border border-border bg-background p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge className="border-accentBorder bg-accentSoft text-primary">{formatStatusLike(change.changeType)}</Badge>
+                  <p className="text-sm font-semibold text-foreground">{change.location}</p>
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <ChangeBox label="Current state" value={change.currentState} />
+                  <ChangeBox label="Proposed state" value={change.proposedState} highlight />
+                </div>
+                {change.exactDraftCopy ? (
+                  <div className="mt-3 rounded-md border border-primary/20 bg-primary/5 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-primary">Draft copy to place on page</p>
+                    <p className="mt-2 text-sm leading-6 text-foreground">{change.exactDraftCopy}</p>
+                  </div>
+                ) : null}
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <ChangeBox label="Why" value={change.reason} />
+                  <ChangeBox label="Expected impact" value={change.impact} />
+                </div>
+              </article>
+            ))}
+          </div>
+          <div className="mt-5 rounded-md border border-success/25 bg-success/10 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-success">Approval summary</p>
+            <p className="mt-2 text-sm leading-6 text-foreground">{preview.approvalSummary}</p>
+          </div>
+          {preview.visualReviewNotes.length > 0 ? (
+            <ReviewPanel title="Visual review notes" items={preview.visualReviewNotes} />
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ChangeBox({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div className={highlight ? "rounded-md border border-primary/25 bg-primary/5 p-3" : "rounded-md border border-border bg-muted/20 p-3"}>
+      <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</p>
+      <p className="mt-2 text-sm leading-6 text-foreground">{value || "Not specified"}</p>
+    </div>
+  );
+}
+
+function AppliedExistingPagePreview({
+  contentType,
+  proposedPath,
+  summary,
+  title,
+  payload
+}: {
+  contentType: string;
+  proposedPath: string | null;
+  summary: string;
+  title: string;
+  payload: ReturnType<typeof readDraftPayload>;
+}) {
+  const preview = payload.pageChangePreview;
+
+  if (!preview) {
+    return null;
+  }
+
+  const contentChanges = preview.proposedChanges.filter((change) =>
+    ["hero", "section", "faq", "internal_links", "cta"].includes(change.changeType)
+  );
+  const sectionChanges = contentChanges.filter((change) => change.changeType === "section").slice(0, 4);
+  const faqChange = contentChanges.find((change) => change.changeType === "faq");
+  const internalLinkChange = contentChanges.find((change) => change.changeType === "internal_links");
+  const heroChange = contentChanges.find((change) => change.changeType === "hero");
+  const proofChips = buildPreviewProofChips(payload);
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-border bg-white shadow-sm">
+      <div className="flex flex-col gap-2 border-b border-border bg-muted/40 px-5 py-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary">Applied page preview</p>
+          <p className="mt-1 text-sm text-mutedForeground">
+            This shows the existing page direction with the recommended changes applied in Newl website style.
+          </p>
+        </div>
+        <span className="rounded-full border border-border bg-white px-3 py-1 text-xs font-semibold text-mutedForeground">
+          Existing route: {preview.currentPage.path}
+        </span>
+      </div>
+
+      <div className="bg-[#172235] text-white">
+        <div className="mx-auto grid max-w-7xl gap-10 px-5 py-16 lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.75fr)] lg:items-center">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#ffb5c7]">
+              {payload.websitePageType || contentType}
+            </p>
+            <h1 className="mt-5 max-w-4xl text-4xl font-bold leading-tight tracking-tight md:text-6xl">
+              {heroChange?.proposedState || title}
+            </h1>
+            <p className="mt-6 max-w-3xl text-lg leading-8 text-[#cbd7e8]">{summary}</p>
+            <div className="mt-7 flex flex-wrap gap-3">
+              {proofChips.map((chip) => (
+                <span key={chip} className="rounded-md border border-white/15 bg-white/8 px-4 py-3 text-sm font-semibold text-white">
+                  {chip}
+                </span>
+              ))}
+            </div>
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <span className="inline-flex min-h-11 items-center justify-center rounded-md bg-primary px-5 py-3 text-sm font-bold text-white shadow-sm">
+                Request Logistics Review
+              </span>
+              <span className="inline-flex min-h-11 items-center justify-center rounded-md border border-white/25 px-5 py-3 text-sm font-bold text-white">
+                Review Fit
+              </span>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-white/15 bg-[#20314c] p-5 shadow-2xl shadow-black/20">
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#ffb5c7]">What changes on this page</p>
+            <div className="mt-5 grid gap-3">
+              {preview.proposedChanges.slice(0, 5).map((change, index) => (
+                <div key={`${change.changeType}-${change.location}-${index}`} className="rounded-md border border-white/10 bg-white/8 p-4">
+                  <div className="flex items-center gap-3">
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-white">
+                      {index + 1}
+                    </span>
+                    <p className="text-sm font-bold text-white">{formatStatusLike(change.changeType)}</p>
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-[#cbd7e8]">{change.location}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <section className="border-b border-border bg-[#f6f8fc] px-5 py-16">
+        <div className="mx-auto max-w-7xl">
+          <div className="max-w-3xl">
+            <p className="text-xs font-bold uppercase tracking-wide text-primary">Existing page foundation</p>
+            <h2 className="mt-3 text-3xl font-bold tracking-tight text-foreground">Keep the current page structure, then add the approved improvements.</h2>
+            <p className="mt-4 text-base leading-7 text-mutedForeground">{preview.currentPage.currentFocus}</p>
+          </div>
+          <div className="mt-8 grid gap-4 lg:grid-cols-3">
+            <article className="rounded-md border border-border bg-white p-5 shadow-sm">
+              <p className="text-xs font-bold uppercase tracking-wide text-primary">Current role</p>
+              <p className="mt-3 text-sm leading-6 text-mutedForeground">{preview.currentPage.role}</p>
+            </article>
+            <article className="rounded-md border border-border bg-white p-5 shadow-sm">
+              <p className="text-xs font-bold uppercase tracking-wide text-primary">Page pattern</p>
+              <p className="mt-3 text-sm leading-6 text-mutedForeground">{preview.currentPage.pageType}</p>
+            </article>
+            <article className="rounded-md border border-border bg-white p-5 shadow-sm">
+              <p className="text-xs font-bold uppercase tracking-wide text-primary">Proposed URL</p>
+              <p className="mt-3 break-words text-sm leading-6 text-mutedForeground">{proposedPath || preview.currentPage.path}</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      {sectionChanges.length > 0 ? (
+        <section className="border-b border-border bg-white px-5 py-16">
+          <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-[0.7fr_1fr] lg:items-start">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-primary">Recommended content insertions</p>
+              <h2 className="mt-3 text-3xl font-bold tracking-tight text-foreground">Sections to add or revise on the page.</h2>
+              <p className="mt-4 text-base leading-7 text-mutedForeground">
+                These are the proposed on-page additions, placed using the same band, card, FAQ, and CTA structure the Newl site already uses.
+              </p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              {sectionChanges.map((change, index) => (
+                <article key={`${change.location}-${index}`} className="rounded-md border border-border bg-[#f6f8fc] p-5 shadow-sm transition-colors hover:border-primary hover:bg-accentSoft">
+                  <p className="text-xs font-bold uppercase tracking-wide text-primary">{change.location}</p>
+                  <h3 className="mt-3 text-xl font-bold text-foreground">{change.proposedState}</h3>
+                  <p className="mt-3 text-sm leading-6 text-mutedForeground">{change.exactDraftCopy || change.reason}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      <section className="border-b border-border bg-[#f6f8fc] px-5 py-16">
+        <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-2">
+          <div className="rounded-md border border-border bg-white p-5 shadow-sm">
+            <p className="text-xs font-bold uppercase tracking-wide text-primary">Internal links and routing</p>
+            <h2 className="mt-3 text-2xl font-bold text-foreground">Where this page should connect next.</h2>
+            <p className="mt-3 text-sm leading-6 text-mutedForeground">
+              {internalLinkChange?.proposedState || "Add the recommended internal links using existing Newl related-service and contextual link patterns."}
+            </p>
+          </div>
+          <div className="rounded-md border border-border bg-white p-5 shadow-sm">
+            <p className="text-xs font-bold uppercase tracking-wide text-primary">FAQ treatment</p>
+            <h2 className="mt-3 text-2xl font-bold text-foreground">Questions to answer before the final CTA.</h2>
+            <p className="mt-3 text-sm leading-6 text-mutedForeground">
+              {faqChange?.proposedState || "Use the existing FAQ component pattern so the page captures long-tail search intent without crowding the main copy."}
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-[#172235] px-5 py-12 text-white">
+        <div className="mx-auto flex max-w-7xl flex-col gap-5 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#ffb5c7]">Approval checkpoint</p>
+            <h2 className="mt-3 text-3xl font-bold">Approve this only if the applied page direction feels right.</h2>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-[#cbd7e8]">{preview.approvalSummary}</p>
+          </div>
+          <span className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-md bg-primary px-5 py-3 text-sm font-bold text-white">
+            Ready for PR build
+          </span>
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function WebsiteStylePreview({
+  contentType,
+  proposedPath,
+  summary,
+  title,
+  payload
+}: {
+  contentType: string;
+  proposedPath: string | null;
+  summary: string;
+  title: string;
+  payload: ReturnType<typeof readDraftPayload>;
+}) {
+  const sections = payload.sections.length > 0 ? payload.sections : [{
+    heading: title,
+    purpose: "Page content",
+    draftCopy: summary
+  }];
+  const primarySection = sections[0];
+  const secondarySections = sections.slice(1, 4);
+  const proofChips = buildPreviewProofChips(payload);
+  const relatedLinks = payload.internalLinks.slice(0, 4);
+  const pathLabel = proposedPath || "Draft URL not assigned";
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-border bg-white shadow-sm">
+      <div className="flex flex-col gap-2 border-b border-border bg-muted/40 px-5 py-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary">Private website-style preview</p>
+          <p className="mt-1 text-sm text-mutedForeground">
+            This mockup uses Newl website patterns so you can review the page feel before any Git or Vercel publishing work.
+          </p>
+        </div>
+        <span className="rounded-full border border-border bg-white px-3 py-1 text-xs font-semibold text-mutedForeground">
+          Not live or indexed
+        </span>
+      </div>
+
+      <div className="bg-[#172235] text-white">
+        <div className="mx-auto grid max-w-7xl gap-10 px-5 py-16 lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.78fr)] lg:items-center">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#ffb5c7]">
+              {payload.websitePageType || contentType}
+            </p>
+            <h1 className="mt-5 max-w-4xl text-4xl font-bold leading-tight tracking-tight md:text-6xl">
+              {title}
+            </h1>
+            <p className="mt-6 max-w-3xl text-lg leading-8 text-[#cbd7e8]">{summary}</p>
+            <div className="mt-7 flex flex-wrap gap-3">
+              {proofChips.map((chip) => (
+                <span key={chip} className="rounded-md border border-white/15 bg-white/8 px-4 py-3 text-sm font-semibold text-white">
+                  {chip}
+                </span>
+              ))}
+            </div>
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <span className="inline-flex min-h-11 items-center justify-center rounded-md bg-primary px-5 py-3 text-sm font-bold text-white shadow-sm">
+                Request Logistics Review
+              </span>
+              <span className="inline-flex min-h-11 items-center justify-center rounded-md border border-white/25 px-5 py-3 text-sm font-bold text-white">
+                Review Fit
+              </span>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-white/15 bg-[#20314c] p-5 shadow-2xl shadow-black/20">
+            <div className="rounded-md border border-white/10 bg-[#263b5c] p-5">
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#ffb5c7]">Draft target</p>
+              <p className="mt-3 break-words text-lg font-bold text-white">{pathLabel}</p>
+              <div className="mt-5 grid gap-3">
+                {payload.layoutComponents.slice(0, 5).map((component, index) => (
+                  <div key={`${component}-${index}`} className="flex items-center gap-3 rounded-md border border-white/10 bg-white/8 px-3 py-3">
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-white">
+                      {index + 1}
+                    </span>
+                    <span className="text-sm font-semibold text-[#e8eef8]">{component}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <section className="border-b border-border bg-[#f6f8fc] px-5 py-16">
+        <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-[0.85fr_1fr] lg:items-start">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wide text-primary">{primarySection.purpose || "Why this page matters"}</p>
+            <h2 className="mt-3 text-3xl font-bold tracking-tight text-foreground md:text-4xl">{primarySection.heading}</h2>
+            <p className="mt-4 text-base leading-7 text-mutedForeground">{primarySection.draftCopy}</p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            {secondarySections.map((section, index) => (
+              <article
+                key={`${section.heading}-${index}`}
+                className="rounded-md border border-border bg-white p-5 shadow-sm transition-colors hover:border-primary hover:bg-accentSoft"
+              >
+                <p className="text-xs font-bold uppercase tracking-wide text-primary">{section.purpose || "Page section"}</p>
+                <h3 className="mt-3 text-xl font-bold text-foreground">{section.heading}</h3>
+                <p className="mt-3 text-sm leading-6 text-mutedForeground">{section.draftCopy}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="border-b border-border bg-white px-5 py-16">
+        <div className="mx-auto max-w-7xl">
+          <div className="max-w-3xl">
+            <p className="text-xs font-bold uppercase tracking-wide text-primary">SEO and internal linking</p>
+            <h2 className="mt-3 text-3xl font-bold tracking-tight text-foreground">How this draft would connect into the site.</h2>
+          </div>
+          <div className="mt-8 grid gap-4 lg:grid-cols-[1fr_0.8fr]">
+            <div className="rounded-md border border-border bg-muted/20 p-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Search metadata</p>
+              <dl className="mt-4 grid gap-4">
+                <SummaryRow label="Meta title" value={payload.metaTitle} />
+                <SummaryRow label="Meta description" value={payload.metaDescription} />
+                <SummaryRow label="Target keyword" value={payload.targetKeyword} />
+                <SummaryRow label="Search intent" value={payload.searchIntent} />
+              </dl>
+            </div>
+            <div className="rounded-md border border-border bg-muted/20 p-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Related links</p>
+              {relatedLinks.length > 0 ? (
+                <div className="mt-4 space-y-3">
+                  {relatedLinks.map((link) => (
+                    <div key={`${link.label}-${link.url}`} className="rounded-md border border-border bg-white p-4">
+                      <p className="font-semibold text-foreground">{link.label}</p>
+                      <p className="mt-1 break-words text-sm text-primary">{link.url}</p>
+                      <p className="mt-2 text-sm leading-6 text-mutedForeground">{link.reason}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-4 text-sm text-mutedForeground">No internal links proposed yet.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {payload.faqs.length > 0 ? (
+        <section className="border-b border-border bg-[#f6f8fc] px-5 py-16">
+          <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-[0.7fr_1fr]">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-primary">FAQ</p>
+              <h2 className="mt-3 text-3xl font-bold tracking-tight text-foreground">Questions this page should answer.</h2>
+            </div>
+            <div className="grid gap-3">
+              {payload.faqs.map((faq) => (
+                <article key={faq.question} className="rounded-md border border-border bg-white p-5 shadow-sm">
+                  <h3 className="font-bold text-foreground">{faq.question}</h3>
+                  <p className="mt-2 text-sm leading-6 text-mutedForeground">{faq.answer}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      <section className="bg-[#172235] px-5 py-12 text-white">
+        <div className="mx-auto flex max-w-7xl flex-col gap-5 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#ffb5c7]">Draft approval path</p>
+            <h2 className="mt-3 text-3xl font-bold">Approve only after the page preview feels right.</h2>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-[#cbd7e8]">
+              After approval, the build step should create or update the actual Newl website route, refresh sitemap coverage, and prepare the change for review.
+            </p>
+          </div>
+          <span className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-md bg-primary px-5 py-3 text-sm font-bold text-white">
+            Ready for approval review
+          </span>
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function buildPreviewProofChips(payload: ReturnType<typeof readDraftPayload>) {
+  const baseChips = [
+    "Warehouse-led strategy",
+    "Teamship WMS visibility",
+    "Canada + U.S. coverage"
+  ];
+  const componentChips = payload.layoutComponents
+    .filter((component) => /faq|warehouse|contact|cta|internal|teamship/i.test(component))
+    .slice(0, 2);
+
+  return [...componentChips, ...baseChips].slice(0, 4);
+}
+
 function readDraftPayload(value: unknown) {
   const record = isRecord(value) ? value : {};
 
@@ -202,8 +674,52 @@ function readDraftPayload(value: unknown) {
     websitePageType: readString(record.websitePageType),
     websiteTemplate: readString(record.websiteTemplate),
     layoutComponents: readStringArray(record.layoutComponents),
-    designSystemNotes: readStringArray(record.designSystemNotes)
+    designSystemNotes: readStringArray(record.designSystemNotes),
+    pageChangePreview: readPageChangePreview(record.pageChangePreview)
   };
+}
+
+function readPageChangePreview(value: unknown): WebsiteGrowthPageChangePreview | null {
+  const record = isRecord(value) ? value : null;
+
+  if (!record) {
+    return null;
+  }
+
+  const currentPage = isRecord(record.currentPage) ? record.currentPage : {};
+  const proposedChanges = readObjectArray(record.proposedChanges)
+    .map((change) => ({
+      changeType: readChangeType(change.changeType),
+      location: readString(change.location),
+      currentState: readString(change.currentState),
+      proposedState: readString(change.proposedState),
+      exactDraftCopy: readString(change.exactDraftCopy) || undefined,
+      reason: readString(change.reason),
+      impact: readString(change.impact)
+    }))
+    .filter((change) => change.location && change.proposedState);
+
+  return {
+    currentPage: {
+      path: readString(currentPage.path) || "/",
+      pageType: readString(currentPage.pageType) || "Newl website page",
+      role: readString(currentPage.role),
+      likelySourceFiles: readStringArray(currentPage.likelySourceFiles),
+      existingComponents: readStringArray(currentPage.existingComponents),
+      currentFocus: readString(currentPage.currentFocus)
+    },
+    proposedChanges,
+    visualReviewNotes: readStringArray(record.visualReviewNotes),
+    approvalSummary: readString(record.approvalSummary)
+  };
+}
+
+function readChangeType(value: unknown): WebsiteGrowthPageChangePreview["proposedChanges"][number]["changeType"] {
+  const allowed = ["meta", "hero", "section", "faq", "internal_links", "cta", "redirect", "technical"];
+
+  return typeof value === "string" && allowed.includes(value)
+    ? (value as WebsiteGrowthPageChangePreview["proposedChanges"][number]["changeType"])
+    : "section";
 }
 
 function readObjectArray(value: unknown) {

@@ -11,8 +11,10 @@ import Link from "next/link";
 
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
+import { readWebsiteGrowthBuildPackage } from "@/modules/website-growth/build-package";
 import {
   createWeeklyWebsiteGrowthPlanAction,
+  createWebsiteGrowthDraftPullRequestAction,
   generateWebsiteGrowthDraftAction,
   generateWebsiteGrowthOpportunitiesAction,
   importWebsiteGrowthMetricsAction,
@@ -26,6 +28,11 @@ import {
   type WebsiteGrowthActionFilter,
   type WebsiteGrowthStatusFilter
 } from "@/modules/website-growth/queries";
+import {
+  resolveLegacyPageRebuild,
+  toNewlUrl
+} from "@/modules/website-growth/legacy-rebuilds";
+import type { WebsiteGrowthPageChangePreview } from "@/modules/website-growth/content-drafts";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
@@ -477,6 +484,8 @@ function PreparedOpportunityCard({
 }) {
   const draft = opportunity.contentDrafts[0] ?? null;
   const draftPayload = draft ? readDraftPayload(draft.draftJson) : null;
+  const buildPackage = draft ? readWebsiteGrowthBuildPackage(draft.draftJson) : null;
+  const legacyRebuild = resolveLegacyPageRebuild(opportunity);
 
   return (
     <article className="flex h-full flex-col rounded-md border border-border bg-background p-4">
@@ -484,6 +493,11 @@ function PreparedOpportunityCard({
         <span className="rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-xs font-semibold text-primary">
           Prepared
         </span>
+        {legacyRebuild ? (
+          <span className="rounded-full border border-warning/25 bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning">
+            Rebuild legacy URL
+          </span>
+        ) : null}
         <span className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs font-semibold text-mutedForeground">
           Score {opportunity.score}
         </span>
@@ -496,9 +510,27 @@ function PreparedOpportunityCard({
       <h3 className="mt-3 text-base font-semibold text-foreground">{opportunity.topic}</h3>
       <p className="mt-2 text-sm leading-6 text-mutedForeground">{formatStatusLike(opportunity.action)}</p>
       <div className="mt-4 space-y-2 text-sm">
-        <PageReviewLink label="Target page" value={opportunity.targetPage} />
-        <PageReviewLink label="Source page" value={opportunity.sourcePage} />
+        {legacyRebuild ? (
+          <>
+            <PageReference label="Draft target" value={toNewlUrl(legacyRebuild.proposedPath)} />
+            <PageReviewLink label="Current live redirect" value={toNewlUrl(legacyRebuild.currentRedirectPath)} linkText="Open redirect target" />
+            <PageReference label="Original signal" value={opportunity.sourcePage ?? opportunity.targetPage} />
+          </>
+        ) : (
+          <>
+            <PageReviewLink label="Target page" value={opportunity.targetPage} />
+            <PageReviewLink label="Source page" value={opportunity.sourcePage} />
+          </>
+        )}
       </div>
+      {legacyRebuild ? (
+        <div className="mt-4 rounded-md border border-warning/25 bg-warning/10 p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-warning">Draft-first rebuild</p>
+          <p className="mt-2 text-sm leading-6 text-foreground">
+            The legacy URL currently redirects to {legacyRebuild.currentRedirectPath}. Review the draft preview before approving a rebuilt page at {legacyRebuild.proposedPath}.
+          </p>
+        </div>
+      ) : null}
       <div className="mt-4 rounded-md border border-border bg-muted/30 p-3">
         <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Approval note</p>
         <p className="mt-2 text-sm leading-6 text-foreground">{opportunity.recommendation}</p>
@@ -522,12 +554,51 @@ function PreparedOpportunityCard({
             <SummaryRow label="Search intent" value={draftPayload?.searchIntent} />
             <SummaryRow label="Newl pattern" value={draftPayload?.websitePageType} />
           </dl>
+          {draftPayload?.pageChangePreview ? (
+            <DraftChangeSummary preview={draftPayload.pageChangePreview} />
+          ) : null}
           <Link
             href={`/website-growth/drafts/${draft.id}`}
             className="mt-3 inline-flex text-sm font-semibold text-primary transition-colors hover:text-primaryHover"
           >
-            View draft page preview
+            Review current page + proposed changes
           </Link>
+          {buildPackage ? (
+            <div className="mt-3 rounded-md border border-success/25 bg-success/10 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-success">Build package ready</p>
+                <span className="rounded-full border border-success/25 bg-background px-2.5 py-1 text-xs font-semibold text-success">
+                  {formatStatusLike(buildPackage.mode)}
+                </span>
+              </div>
+              <dl className="mt-3 grid gap-2 text-sm">
+                <SummaryRow label="Route" value={buildPackage.routePath} />
+                <SummaryRow label="Branch" value={buildPackage.branchName} />
+                <SummaryRow label="Repo" value={buildPackage.targetRepo} />
+              </dl>
+              <p className="mt-2 text-xs leading-5 text-mutedForeground">
+                Approval prepared the implementation package. The next automation step can use this to open a GitHub PR and Vercel preview without publishing directly.
+              </p>
+              {draft.pullRequestUrl ? (
+                <Link
+                  href={draft.pullRequestUrl}
+                  className="mt-3 inline-flex text-sm font-semibold text-success transition-colors hover:text-success/80"
+                >
+                  View GitHub PR
+                </Link>
+              ) : (
+                <form action={createWebsiteGrowthDraftPullRequestAction} className="mt-3">
+                  <input type="hidden" name="draftId" value={draft.id} />
+                  <button className="w-full rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
+                    Create GitHub PR
+                  </button>
+                  <p className="mt-2 text-xs leading-5 text-mutedForeground">
+                    Creates or updates a website branch, writes the build package, opens a PR, and saves the PR link here.
+                  </p>
+                </form>
+              )}
+            </div>
+          ) : null}
           {draftPayload ? (
             <details className="mt-3">
               <summary className="cursor-pointer text-sm font-semibold text-primary">Review draft details</summary>
@@ -592,6 +663,36 @@ function PreparedOpportunityCard({
   );
 }
 
+function DraftChangeSummary({ preview }: { preview: WebsiteGrowthPageChangePreview }) {
+  const changes = preview.proposedChanges.slice(0, 3);
+
+  return (
+    <div className="mt-3 rounded-md border border-primary/20 bg-primary/5 p-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-primary">What this draft would change</p>
+      <dl className="mt-3 grid gap-2 text-sm">
+        <SummaryRow label="Current page" value={`${preview.currentPage.path} (${preview.currentPage.pageType})`} />
+        <SummaryRow label="Page role" value={preview.currentPage.role} />
+      </dl>
+      <div className="mt-3 grid gap-2">
+        {changes.map((change, index) => (
+          <div key={`${change.changeType}-${change.location}-${index}`} className="rounded-md border border-border bg-background p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-accentBorder bg-accentSoft px-2 py-0.5 text-[0.68rem] font-semibold text-primary">
+                {formatStatusLike(change.changeType)}
+              </span>
+              <p className="text-sm font-semibold text-foreground">{change.location}</p>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-mutedForeground">{change.proposedState}</p>
+          </div>
+        ))}
+      </div>
+      {preview.approvalSummary ? (
+        <p className="mt-3 text-xs leading-5 text-mutedForeground">{preview.approvalSummary}</p>
+      ) : null}
+    </div>
+  );
+}
+
 function DraftList({ title, items }: { title: string; items: string[] }) {
   if (items.length === 0) {
     return null;
@@ -609,7 +710,33 @@ function DraftList({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-function PageReviewLink({ label, value }: { label: string; value?: string | null }) {
+function PageReference({ label, value }: { label: string; value?: string | null }) {
+  if (!value) {
+    return (
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</p>
+        <p className="mt-1 text-mutedForeground">Not attached yet</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</p>
+      <p className="mt-1 break-all font-semibold text-foreground">{value}</p>
+    </div>
+  );
+}
+
+function PageReviewLink({
+  label,
+  value,
+  linkText = "Open live page"
+}: {
+  label: string;
+  value?: string | null;
+  linkText?: string;
+}) {
   if (!value) {
     return (
       <div>
@@ -628,7 +755,7 @@ function PageReviewLink({ label, value }: { label: string; value?: string | null
         rel="noreferrer"
         className="mt-1 block break-all font-semibold text-primary transition-colors hover:text-primaryHover"
       >
-        Review page
+        {linkText}
       </a>
       <p className="mt-1 break-all text-xs text-mutedForeground">{value}</p>
     </div>
@@ -671,8 +798,53 @@ function readDraftPayload(value: unknown) {
       url: readDraftString(link.url)
     })).filter((link) => link.label && link.url),
     layoutComponents: readDraftStringArray(record.layoutComponents),
-    reviewChecklist: readDraftStringArray(record.reviewChecklist)
+    reviewChecklist: readDraftStringArray(record.reviewChecklist),
+    pageChangePreview: readPageChangePreview(record.pageChangePreview)
   };
+}
+
+function readPageChangePreview(value: unknown): WebsiteGrowthPageChangePreview | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const currentPage = record.currentPage && typeof record.currentPage === "object" && !Array.isArray(record.currentPage)
+    ? (record.currentPage as Record<string, unknown>)
+    : {};
+  const proposedChanges = readDraftObjectArray(record.proposedChanges)
+    .map((change) => ({
+      changeType: readChangeType(change.changeType),
+      location: readDraftString(change.location),
+      currentState: readDraftString(change.currentState),
+      proposedState: readDraftString(change.proposedState),
+      exactDraftCopy: readDraftString(change.exactDraftCopy) || undefined,
+      reason: readDraftString(change.reason),
+      impact: readDraftString(change.impact)
+    }))
+    .filter((change) => change.location && change.proposedState);
+
+  return {
+    currentPage: {
+      path: readDraftString(currentPage.path) || "/",
+      pageType: readDraftString(currentPage.pageType) || "Newl website page",
+      role: readDraftString(currentPage.role),
+      likelySourceFiles: readDraftStringArray(currentPage.likelySourceFiles),
+      existingComponents: readDraftStringArray(currentPage.existingComponents),
+      currentFocus: readDraftString(currentPage.currentFocus)
+    },
+    proposedChanges,
+    visualReviewNotes: readDraftStringArray(record.visualReviewNotes),
+    approvalSummary: readDraftString(record.approvalSummary)
+  };
+}
+
+function readChangeType(value: unknown): WebsiteGrowthPageChangePreview["proposedChanges"][number]["changeType"] {
+  const allowed = ["meta", "hero", "section", "faq", "internal_links", "cta", "redirect", "technical"];
+
+  return typeof value === "string" && allowed.includes(value)
+    ? (value as WebsiteGrowthPageChangePreview["proposedChanges"][number]["changeType"])
+    : "section";
 }
 
 function readDraftObjectArray(value: unknown) {

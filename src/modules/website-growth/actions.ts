@@ -11,8 +11,17 @@ import {
 import { revalidatePath } from "next/cache";
 
 import { parseDelimitedRows, readNumber, readString } from "@/modules/website-growth/csv";
+import {
+  buildWebsiteGrowthBuildPackage,
+  mergeBuildPackageIntoDraftJson
+} from "@/modules/website-growth/build-package";
 import { createWebsiteGrowthContentDraftPayload } from "@/modules/website-growth/content-drafts";
 import { fetchSearchConsoleRows, getWebsiteGrowthIntegrationStatus } from "@/modules/website-growth/integrations";
+import { createWebsiteGrowthPullRequestPackage } from "@/modules/website-growth/github-pr";
+import {
+  getOpportunityReviewKey,
+  resolveLegacyPageRebuild
+} from "@/modules/website-growth/legacy-rebuilds";
 import {
   buildCandidatesFromMetricRows,
   buildOpportunityCandidate,
@@ -485,12 +494,26 @@ export async function updateWebsiteGrowthDraftAction(formData: FormData) {
         id: draftId,
         tenantId: context.tenantId
       },
-      select: {
-        opportunityId: true
+      include: {
+        opportunity: true
       }
     });
 
     if (draft) {
+      const buildPackage = buildWebsiteGrowthBuildPackage(draft);
+
+      await prisma.websiteGrowthContentDraft.updateMany({
+        where: {
+          id: draftId,
+          tenantId: context.tenantId
+        },
+        data: {
+          draftJson: mergeBuildPackageIntoDraftJson(draft.draftJson, buildPackage),
+          pullRequestUrl: null,
+          builtUrl: null
+        }
+      });
+
       await prisma.websiteGrowthOpportunity.updateMany({
         where: {
           id: draft.opportunityId,
@@ -505,6 +528,64 @@ export async function updateWebsiteGrowthDraftAction(formData: FormData) {
   }
 
   revalidatePath("/website-growth");
+  revalidatePath(`/website-growth/drafts/${draftId}`);
+}
+
+export async function createWebsiteGrowthDraftPullRequestAction(formData: FormData) {
+  const context = await getAuthenticatedContext();
+  await requireModule(context, ModuleKey.WEBSITE_GROWTH);
+  await requireMutationAccess(context);
+
+  const draftId = String(formData.get("draftId") ?? "");
+
+  if (!draftId) {
+    throw new Error("Missing draft ID.");
+  }
+
+  const draft = await prisma.websiteGrowthContentDraft.findFirst({
+    where: {
+      id: draftId,
+      tenantId: context.tenantId
+    },
+    include: {
+      opportunity: true
+    }
+  });
+
+  if (!draft) {
+    throw new Error("Draft was not found.");
+  }
+
+  const buildPackage = buildWebsiteGrowthBuildPackage(draft);
+  const draftJsonWithPackage = mergeBuildPackageIntoDraftJson(draft.draftJson, buildPackage);
+  const pullRequest = await createWebsiteGrowthPullRequestPackage({ buildPackage });
+
+  await prisma.websiteGrowthContentDraft.updateMany({
+    where: {
+      id: draftId,
+      tenantId: context.tenantId
+    },
+    data: {
+      status: WebsiteGrowthContentDraftStatus.BUILT,
+      draftJson: mergePullRequestIntoDraftJson(draftJsonWithPackage, pullRequest),
+      pullRequestUrl: pullRequest.pullRequestUrl,
+      builtUrl: null
+    }
+  });
+
+  await prisma.websiteGrowthOpportunity.updateMany({
+    where: {
+      id: draft.opportunityId,
+      tenantId: context.tenantId
+    },
+    data: {
+      status: WebsiteGrowthOpportunityStatus.IN_PROGRESS,
+      approvedByUserId: context.userId
+    }
+  });
+
+  revalidatePath("/website-growth");
+  revalidatePath(`/website-growth/drafts/${draftId}`);
 }
 
 async function createMissingOpportunities(tenantId: string, candidates: OpportunityCandidate[]) {
@@ -516,7 +597,10 @@ async function createMissingOpportunities(tenantId: string, candidates: Opportun
       continue;
     }
 
-    const existing = await prisma.websiteGrowthOpportunity.findFirst({
+    const legacyRebuild = resolveLegacyPageRebuild(candidate);
+    const existing = legacyRebuild
+      ? await findExistingLegacyRebuildOpportunity(tenantId, candidate)
+      : await prisma.websiteGrowthOpportunity.findFirst({
       where: {
         tenantId,
         topic: candidate.topic,
@@ -524,11 +608,30 @@ async function createMissingOpportunities(tenantId: string, candidates: Opportun
         action: candidate.action
       },
       select: {
-        id: true
+        id: true,
+        score: true
       }
     });
 
     if (existing) {
+      if (legacyRebuild) {
+        await prisma.websiteGrowthOpportunity.update({
+          where: { id: existing.id },
+          data: {
+            action: candidate.action,
+            topic: candidate.topic,
+            primaryKeyword: candidate.primaryKeyword,
+            targetPage: candidate.targetPage,
+            sourcePage: candidate.sourcePage,
+            score: Math.max(candidate.score, existing.score ?? 0),
+            confidence: candidate.confidence,
+            reason: candidate.reason,
+            recommendation: candidate.recommendation,
+            supportingKeywords: candidate.supportingKeywords,
+            evidence: candidate.evidence as Prisma.InputJsonValue
+          }
+        });
+      }
       existingCount += 1;
       continue;
     }
@@ -555,6 +658,44 @@ async function createMissingOpportunities(tenantId: string, candidates: Opportun
   return { createdCount, existingCount };
 }
 
+async function findExistingLegacyRebuildOpportunity(tenantId: string, candidate: OpportunityCandidate) {
+  const reviewKey = getOpportunityReviewKey(candidate);
+  const rebuild = resolveLegacyPageRebuild(candidate);
+
+  if (!rebuild) {
+    return null;
+  }
+
+  const candidates = await prisma.websiteGrowthOpportunity.findMany({
+    where: {
+      tenantId,
+      OR: [
+        { targetPage: candidate.targetPage },
+        { sourcePage: candidate.targetPage },
+        { targetPage: { contains: rebuild.legacyPath } },
+        { sourcePage: { contains: rebuild.legacyPath } },
+        { targetPage: { contains: rebuild.currentRedirectPath } },
+        { sourcePage: { contains: rebuild.currentRedirectPath } },
+        { topic: { contains: "3pl" } },
+        { primaryKeyword: { contains: "3pl" } }
+      ]
+    },
+    select: {
+      id: true,
+      score: true,
+      action: true,
+      topic: true,
+      primaryKeyword: true,
+      targetPage: true,
+      sourcePage: true,
+      evidence: true
+    },
+    take: 50
+  });
+
+  return candidates.find((opportunity) => getOpportunityReviewKey(opportunity) === reviewKey) ?? null;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -573,6 +714,18 @@ function parseContentDraftStatus(value: FormDataEntryValue | null) {
   }
 
   return value as WebsiteGrowthContentDraftStatus;
+}
+
+function mergePullRequestIntoDraftJson(
+  draftJson: Prisma.JsonValue | Prisma.InputJsonValue,
+  pullRequest: unknown
+): Prisma.InputJsonValue {
+  const record = isRecord(draftJson) ? draftJson : {};
+
+  return {
+    ...record,
+    pullRequestPackage: pullRequest as Prisma.InputJsonValue
+  } as Prisma.InputJsonValue;
 }
 
 function normalizeRate(value: number | null) {

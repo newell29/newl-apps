@@ -66,6 +66,36 @@ export const newlWebsiteContext: NewlWebsiteContext = {
   ],
   pagePatterns: [
     {
+      pageType: "Homepage",
+      routeFamily: "/",
+      sourceTemplate: "app/page.tsx or app/homepage-prototype/page.tsx",
+      componentSequence: [
+        "HomepageHero",
+        "ProofStats",
+        "CoreServiceBands",
+        "Teamship or operating model visual",
+        "IndustriesSection",
+        "CustomerProof or CaseStudiesSection",
+        "PlaybookLeadCapture",
+        "FAQ or trust section",
+        "CTASection with ContactForm"
+      ],
+      requiredElements: [
+        "Clear warehouse-led positioning",
+        "Operational hero visual",
+        "Core services",
+        "Teamship/WMS visibility",
+        "Industry and customer proof",
+        "Assessment or playbook CTA"
+      ],
+      designNotes: [
+        "Homepage changes should strengthen the first impression without turning the page into a blog.",
+        "Use existing homepage dark hero, proof chips, service bands, and lead capture patterns.",
+        "Keep changes focused on positioning, proof, and conversion clarity."
+      ],
+      conversionPattern: "Request assessment or download the distribution strategy playbook."
+    },
+    {
       pageType: "Service page",
       routeFamily: "/services/[slug]",
       sourceTemplate: "components/templates/ServicePageTemplate.tsx",
@@ -258,6 +288,10 @@ export function getNewlWebsitePatternForOpportunity(
   context: NewlWebsiteContext = newlWebsiteContext
 ) {
   const path = normalizePath(targetPage) ?? normalizePath(proposedPath) ?? "";
+
+  if (path === "/") {
+    return getPattern("Homepage", context);
+  }
 
   if (path.startsWith("/industries/")) {
     return getPattern("Industry page", context);
