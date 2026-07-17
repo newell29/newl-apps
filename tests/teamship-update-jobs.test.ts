@@ -156,7 +156,7 @@ describe("Teamship update jobs", () => {
     expect(sendGarlandCsrAgentReportEmailMock).toHaveBeenCalledWith(
       expect.objectContaining({
         tenantId: "tenant-1",
-        userName: "Jane, Garland CSR agent"
+        userName: "Nemo, Garland CSR agent"
       }),
       "run-1"
     );

@@ -88,11 +88,11 @@ describe("Garland CSR agent report", () => {
     ]);
   });
 
-  it("renders the Jane intro, summary badges, color-coded order table, and inventory guidance", async () => {
+  it("renders the Nemo intro, summary badges, color-coded order table, and inventory guidance", async () => {
     const report = await buildGarlandCsrAgentReport(context, "run-1");
 
     expect(report.subject).toBe("Garland Teamship Review - July 14, 2026 - 1 updated, 2 need review");
-    expect(report.text).toContain("Hello, Jane reporting for duty.");
+    expect(report.text).toContain("Hello, Nemo reporting for duty.");
     expect(report.text).toContain("[Complete] PS PS210235 / SR SR810263 / Teamship 30385");
     expect(report.text).toContain("Pallet row 1: SKU MJ14000053, qty 2, 36 x 22 x 48, 187 lbs");
     expect(report.text).toContain("Freight terms: PDF has PPADD-CD but Teamship has 3PTYG.");
@@ -103,7 +103,7 @@ describe("Garland CSR agent report", () => {
     expect(report.html).toContain("background:#f6fef9");
     expect(report.html).toContain("background:#fffbfa");
     expect(report.html).toContain("background:#f9fafb");
-    expect(report.html).toContain("What Jane needs from you");
+    expect(report.html).toContain("What Nemo needs from you");
     expect(report.orderTable).toHaveLength(3);
     expect(report.orderTable.map((row) => row.tone)).toEqual(["green", "red", "gray"]);
   });

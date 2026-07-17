@@ -24,7 +24,7 @@ import type { AuthenticatedContext, TenantContext } from "@/server/tenant-contex
 
 const WORKFLOW_KEY = "GARLAND_TEAMSHIP_PHASE2_UPDATE";
 const REVIEW_WORKFLOW_KEY = "GARLAND_TEAMSHIP_REVIEW";
-const AUTO_REPORT_AGENT_NAME = "Jane, Garland CSR agent";
+const AUTO_REPORT_AGENT_NAME = "Nemo, Garland CSR agent";
 
 export type TeamshipUpdateJobStatus =
   | "DRAFT"
