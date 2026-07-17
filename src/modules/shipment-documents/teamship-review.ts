@@ -128,6 +128,7 @@ function parseGarlandShippingOrderPage(page: TextPage): GarlandPdfShippingOrder 
   const shipToCode = headerLine?.match(/\b(\d{5,10})\b/)?.[1] ?? null;
   const shipToName = extractShipToName(lines);
   const addressLines = extractAddressLines(lines);
+  const shipToAddress1 = buildShipToAddress1(addressLines, shipToName);
   const cityStatePostal = parseCityStatePostal(addressLines);
   const orderLine = lines.find((line) => /(?:Order Number|Sales Order)\s+SR\d+/i.test(line)) ?? "";
   const orderDateShipViaLine = lines.find((line) => /Order Date\b/i.test(line) && /Ship Via\b/i.test(line)) ?? "";
@@ -139,7 +140,7 @@ function parseGarlandShippingOrderPage(page: TextPage): GarlandPdfShippingOrder 
     srNumber: srNumber ?? "",
     shipToCode,
     shipToName,
-    shipToAddress1: addressLines.find((line) => !parseCityStatePostal([line]) && !isCountryLine(line)) ?? null,
+    shipToAddress1,
     shipToCity: cityStatePostal?.city ?? null,
     shipToState: cityStatePostal?.state ?? null,
     shipToPostalCode: cityStatePostal?.postalCode ?? null,
@@ -228,6 +229,46 @@ function parseCityStatePostal(lines: string[]) {
 
 function isCountryLine(line: string) {
   return /^(Canada|United States(?: of America)?|USA|US)$/i.test(line.trim());
+}
+
+function buildShipToAddress1(addressLines: string[], shipToName: string | null) {
+  const normalizedShipToName = normalizeAddressLineForComparison(shipToName);
+  const candidates = uniqueStrings(
+    addressLines
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .filter((line) => normalizeAddressLineForComparison(line) !== normalizedShipToName)
+      .filter((line) => !parseCityStatePostal([line]))
+      .filter((line) => !isCountryLine(line))
+  );
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const streetLines = candidates.filter(isStreetAddressLine);
+  const secondaryLines = candidates.filter((line) => !isStreetAddressLine(line));
+  return [...streetLines, ...secondaryLines].join(", ");
+}
+
+function isStreetAddressLine(line: string) {
+  const normalized = line.trim().toUpperCase();
+
+  if (/^(?:P\.?\s*O\.?\s*)?BOX\s+\d+/i.test(normalized)) {
+    return true;
+  }
+
+  if (/^(?:[A-Z]-)?\d+[A-Z]?(?:-\d+[A-Z]?)?\s+/.test(normalized)) {
+    return true;
+  }
+
+  return /\b(?:STREET|ST\.?|AVENUE|AVE\.?|ROAD|RD\.?|DRIVE|DR\.?|BOULEVARD|BLVD\.?|HIGHWAY|HWY\.?|LANE|LN\.?|COURT|CRT\.?|CRESCENT|CRES\.?|WAY|PARKWAY|PKWY\.?|TERRACE|TRAIL|PLACE|PL\.?)\b/.test(
+    normalized
+  );
+}
+
+function normalizeAddressLineForComparison(line: string | null | undefined) {
+  return line?.replace(/[^\dA-Z]+/gi, " ").replace(/\s+/g, " ").trim().toUpperCase() ?? "";
 }
 
 function extractShipToPo(line: string) {

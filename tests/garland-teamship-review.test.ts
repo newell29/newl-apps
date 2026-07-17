@@ -133,6 +133,45 @@ describe("Garland Teamship review", () => {
     expect(orders[0]?.items.map((item) => item.sku)).toEqual(["C-CARE-P", "C-CLEAN-FORTE", "TUBE KIT - MIXED"]);
   });
 
+  it("normalizes multi-line ship-to addresses with the street line first", () => {
+    const orders = parseGarlandShippingOrderPages([
+      {
+        pageNumber: 1,
+        text: `Ship-To Pre-Shipper Print Date
+11906259 PS210360 7/17/2026
+Pre-Shipper
+MR SUB - STORE #MRS0615
+JANE PARK PLAZA
+C-883 JANE STREET
+TORONTO, ON M6N 4C4
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Order Number SR812840 Ship To PO 130692 Frt Terms PPDG
+Order Date 7/17/2026 Ship Via UPS CD STD
+ATTENTION RECEIVING C/O BAHRAM YUSEFI-KORDESTANI - TEL:416-767-0883
+Ln Item Number T Site
+Location
+Lot/Serial
+Ref Ship Qty Qty Open UM Due
+ Shipped
+1 SF335CER 891210
+X16 TOP PANINI GRILL PLATE
+1.00 EA 7/17/2026`
+      }
+    ]);
+
+    expect(orders[0]).toMatchObject({
+      psNumber: "PS210360",
+      srNumber: "SR812840",
+      shipToName: "MR SUB - STORE #MRS0615",
+      shipToAddress1: "C-883 JANE STREET, JANE PARK PLAZA",
+      shipToCity: "TORONTO",
+      shipToState: "ON",
+      shipToPostalCode: "M6N 4C4",
+      shipToCountry: "Canada"
+    });
+  });
+
   it("parses Teamship alert digest orders and item details", () => {
     const alerts = parseTeamshipAlertDigest(alertDigest);
 

@@ -14,9 +14,17 @@ import { getMicrosoftGraphApplicationAccessToken } from "@/server/integrations/m
 import { fetchMicrosoftGraphMessageAttachmentContent } from "@/server/integrations/microsoft-graph-mail";
 import { fetchTeamshipShippingOrdersForReview } from "@/server/integrations/teamship";
 import type { AuthenticatedContext } from "@/server/tenant-context";
+import type { GarlandTeamshipReviewResponse } from "@/modules/shipment-documents/teamship-review-types";
 
 const READY_ATTACHMENT_STATUSES = ["PDF_METADATA_READY", "PDF_PARSE_FAILED"] as const;
 const DEFAULT_MAX_ATTACHMENTS = 8;
+const AUTOMATED_TEAMSHIP_FIELD_UPDATE_KEYS = new Set([
+  "po_number",
+  "freight_terms",
+  "carrier",
+  "ship_to_address_1",
+  "shipping_instructions"
+]);
 
 export type GarlandEmailAgentAutomationResult = {
   processedAttachmentCount: number;
@@ -161,11 +169,13 @@ export async function processGarlandEmailAgentReadyAttachments(
       });
       result.parsedAttachmentCount += 1;
 
-      const review = await buildAutomatedReview(context, {
-        attachment,
-        shipmentDateInput: formatInputDate(attachment.sourceEmail.receivedAt),
-        orders: extraction.orders
-      });
+      const review = prepareReviewForAutomatedTeamshipUpdates(
+        await buildAutomatedReview(context, {
+          attachment,
+          shipmentDateInput: formatInputDate(attachment.sourceEmail.receivedAt),
+          orders: extraction.orders
+        })
+      );
       const reviewRunId = await saveTeamshipReviewRun({
         context,
         documentLabel: buildDocumentLabel(attachment, extraction.psNumbers),
@@ -251,6 +261,25 @@ async function buildAutomatedReview(
   return buildGarlandTeamshipReview(input.orders, teamshipOrders, [], {
     learnedProductDimensions
   });
+}
+
+export function prepareReviewForAutomatedTeamshipUpdates(
+  review: GarlandTeamshipReviewResponse
+): GarlandTeamshipReviewResponse {
+  return {
+    ...review,
+    reviews: review.reviews.map((orderReview) => ({
+      ...orderReview,
+      fields: orderReview.fields.map((field) =>
+        AUTOMATED_TEAMSHIP_FIELD_UPDATE_KEYS.has(field.key) && field.pdfValue?.trim()
+          ? {
+              ...field,
+              botActionEnabled: true
+            }
+          : field
+      )
+    }))
+  };
 }
 
 async function findDuplicateParsedAttachment({
