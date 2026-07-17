@@ -346,10 +346,26 @@ function extractItems(lines: string[], itemHeaderIndex: number): GarlandShipping
 }
 
 function extractSerialNumbers(lines: string[]) {
-  return lines.flatMap((line) => {
-    const matches = line.match(/\b\d{10,16}\b/g) ?? [];
-    return matches.map((match) => match.trim());
-  });
+  return uniqueStrings(
+    lines.flatMap((line) => {
+      const matches = line.match(/\b[A-Z0-9][A-Z0-9-]{5,}\b/gi) ?? [];
+      return matches.map((match) => match.trim()).filter(isGarlandLotSerialToken);
+    })
+  );
+}
+
+function isGarlandLotSerialToken(value: string) {
+  const normalized = value.trim().toUpperCase();
+
+  if (!normalized || normalized === "MACKIE" || normalized === "NEWLS" || /^N\/?A$/.test(normalized)) {
+    return false;
+  }
+
+  if (/^\d+$/.test(normalized)) {
+    return normalized.length >= 10 && normalized.length <= 16;
+  }
+
+  return /\d/.test(normalized);
 }
 
 function matchFirst(text: string, patterns: RegExp[]) {
