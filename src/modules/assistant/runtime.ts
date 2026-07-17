@@ -61,6 +61,11 @@ export async function runAssistantPrompt(
     return finalizeAssistantResponse(workspace, prompt, toolRateReply);
   }
 
+  const directComputationReply = maybeBuildDirectComputationResponse(prompt);
+  if (directComputationReply) {
+    return finalizeAssistantResponse(workspace, prompt, directComputationReply);
+  }
+
   const guidanceReply = maybeBuildAssistantGuidanceResponse(workspace, prompt);
   if (guidanceReply) {
     return finalizeAssistantResponse(workspace, prompt, guidanceReply);
@@ -230,6 +235,94 @@ export async function runAssistantPrompt(
     runMetadata,
     sources
   });
+}
+
+function maybeBuildDirectComputationResponse(prompt: string) {
+  const normalized = prompt.trim().toLowerCase();
+  const match = normalized.match(
+    /^(?:what(?:'s| is)?|calculate|compute)?\s*(-?\d+(?:\.\d+)?)\s*([+\-*/x×÷])\s*(-?\d+(?:\.\d+)?)\s*\??$/
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  const left = Number(match[1]);
+  const operator = match[2];
+  const right = Number(match[3]);
+
+  if (!Number.isFinite(left) || !Number.isFinite(right)) {
+    return null;
+  }
+
+  if ((operator === "/" || operator === "÷") && right === 0) {
+    return {
+      answer: "That calculation is undefined because it divides by zero.",
+      intent: "GENERAL_INSIGHT",
+      provider: "NEWL_DIRECT",
+      model: "assistant-direct-v1",
+      messageMetadata: {
+        deterministic: true,
+        intent: "GENERAL_INSIGHT",
+        directComputation: true
+      },
+      runMetadata: {
+        deterministic: true,
+        intent: "GENERAL_INSIGHT",
+        directComputation: true
+      },
+      sources: []
+    };
+  }
+
+  const result = calculateSimpleBinaryExpression(left, operator, right);
+  if (result === null) {
+    return null;
+  }
+
+  return {
+    answer: formatNumber(result),
+    intent: "GENERAL_INSIGHT",
+    provider: "NEWL_DIRECT",
+    model: "assistant-direct-v1",
+    messageMetadata: {
+      deterministic: true,
+      intent: "GENERAL_INSIGHT",
+      directComputation: true
+    },
+    runMetadata: {
+      deterministic: true,
+      intent: "GENERAL_INSIGHT",
+      directComputation: true
+    },
+    sources: []
+  };
+}
+
+function calculateSimpleBinaryExpression(left: number, operator: string, right: number) {
+  switch (operator) {
+    case "+":
+      return left + right;
+    case "-":
+      return left - right;
+    case "*":
+    case "x":
+    case "×":
+      return left * right;
+    case "/":
+    case "÷":
+      return left / right;
+    default:
+      return null;
+  }
+}
+
+function formatNumber(value: number) {
+  if (Number.isInteger(value)) {
+    return String(value);
+  }
+
+  return String(Number(value.toFixed(10)));
 }
 
 function maybeBuildAssistantGuidanceResponse(
