@@ -4,9 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev",
+    "dev:fresh": "npm run sync:main && npm run dev",
     "build": "next build",
     "build:canonical-trademining-reference": "tsx scripts/build-canonical-trademining-reference.ts",
     "smoke:trademining": "tsx scripts/smoke-test-trademining.ts",
+    "sync:main": "bash scripts/sync-main.sh",
     "vercel-build": "tsx scripts/vercel-build.ts",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",

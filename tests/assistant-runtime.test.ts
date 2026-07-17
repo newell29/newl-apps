@@ -145,7 +145,8 @@ describe("runAssistantPrompt", () => {
       select: {
         provider: true,
         status: true,
-        publicConfig: true
+        publicConfig: true,
+        secretRef: true
       }
     });
     expect(result.provider).toBe("OPENAI");
@@ -159,7 +160,8 @@ describe("runAssistantPrompt", () => {
           contactCount: 20,
           topCompanyNames: ["ABC IMPORTS INC"]
         })
-      })
+      }),
+      { apiKey: null }
     );
   });
 
