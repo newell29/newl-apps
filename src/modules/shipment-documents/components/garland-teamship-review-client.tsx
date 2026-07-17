@@ -1,7 +1,6 @@
 "use client";
 
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import type { PDFPageProxy } from "pdfjs-dist/types/src/display/api";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -13,7 +12,6 @@ import {
   updateReviewFieldProposedValueInReviewState,
   type GarlandTeamshipPalletDraftLine
 } from "@/modules/shipment-documents/garland-teamship-review-client-state";
-import { buildGarlandTeamshipReview, parseGarlandShippingOrderPages, parseTeamshipAlertDigest } from "@/modules/shipment-documents/teamship-review";
 import type {
   GarlandPdfShippingOrder,
   GarlandTeamshipOrderReview,
@@ -23,8 +21,6 @@ import type {
   TeamshipPayloadInspectionResult,
   TeamshipShippingOrderDetail
 } from "@/modules/shipment-documents/teamship-review-types";
-
-type PdfJsModule = typeof import("pdfjs-dist");
 
 type DailyOrdersResponse = {
   orders?: TeamshipShippingOrderDetail[];
@@ -211,8 +207,6 @@ const ACTIVE_TEAMSHIP_REVIEW_RUN_STORAGE_KEY = "newl.garlandTeamshipReview.activ
 const EXPANDED_TEAMSHIP_REVIEW_ROWS_STORAGE_KEY = "newl.garlandTeamshipReview.expandedRows";
 const SHOW_LEGACY_SHIPMENT_QUEUE = false;
 
-let pdfJsLoader: Promise<PdfJsModule> | null = null;
-
 
 export function GarlandTeamshipBotRunsClient() {
   const [updateJobs, setUpdateJobs] = useState<TeamshipUpdateJobSummary[]>([]);
@@ -320,7 +314,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
   const [dailyOrders, setDailyOrders] = useState<TeamshipShippingOrderDetail[]>([]);
   const [dailyOrderCount, setDailyOrderCount] = useState<number | null>(null);
   const [dailySyncSummary, setDailySyncSummary] = useState<DailyOrdersResponse["sync"] | null>(null);
-  const [alertDigest, setAlertDigest] = useState("");
+  const [alertDigest] = useState("");
   const [history, setHistory] = useState<TeamshipReviewHistoryResponse>({
     runs: [],
     totalCount: 0,
@@ -340,14 +334,14 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
   const [historyDateFrom, setHistoryDateFrom] = useState(todayInputValue);
   const [historyDateTo, setHistoryDateTo] = useState(todayInputValue);
   const [historyAllDates, setHistoryAllDates] = useState(false);
-  const [status, setStatus] = useState("Upload the Garland daily shipping-order PDF to begin.");
-  const [error, setError] = useState<string | null>(null);
+  const [, setStatus] = useState("Upload the Garland daily shipping-order PDF to begin.");
+  const [, setError] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [csrReportStatus, setCsrReportStatus] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [editingRunId, setEditingRunId] = useState<string | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [processingPhase, setProcessingPhase] = useState<TeamshipProcessingPhase | null>(null);
+  const [, setIsProcessing] = useState(false);
+  const [, setProcessingPhase] = useState<TeamshipProcessingPhase | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [isUpdateJobLoading, setIsUpdateJobLoading] = useState(false);
@@ -378,7 +372,6 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     []
   );
 
-  const parsedAlertCount = useMemo(() => parseTeamshipAlertDigest(alertDigest).length, [alertDigest]);
   const sourcePdfFileName = useMemo(() => formatSourcePdfFileNames(pdfBatches), [pdfBatches]);
   const canSaveCurrentQueue = Boolean(review || dailyOrders.length > 0);
   const workspaceRows = useMemo(
@@ -478,73 +471,6 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     setSaveStatus(statusMessage);
 
     return json.savedRunId ?? null;
-  }
-
-  async function handlePdfSelection(fileList: FileList | null) {
-    const files = Array.from(fileList ?? []).filter((file) => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"));
-
-    if (files.length === 0) {
-      if (pdfBatches.length === 0) {
-        setStatus("Upload one or more Garland shipping-order PDFs to begin.");
-      }
-
-      return;
-    }
-
-    setReview(null);
-    setDailyOrderCount(null);
-    setDailySyncSummary(null);
-    setError(null);
-    setIsProcessing(true);
-    setProcessingPhase("READ_PDF");
-    setStatus(`Reading embedded PDF text from ${files.length} Garland attachment${files.length === 1 ? "" : "s"}...`);
-
-    try {
-      const batches: UploadedPdfBatch[] = [];
-
-      for (const file of files) {
-        const parsedOrders = await extractOrdersFromPdf(file);
-        batches.push({
-          id: `${Date.now()}-${batches.length}-${file.name}`,
-          fileName: file.name,
-          orderCount: parsedOrders.length,
-          orders: parsedOrders
-        });
-      }
-
-      const nextBatches = [...pdfBatches, ...batches];
-      const mergedOrders = mergeUploadedPdfOrders(nextBatches.flatMap((batch) => batch.orders));
-
-      setPdfBatches(nextBatches);
-      setOrders(mergedOrders);
-      setStatus(buildPdfUploadStatus(nextBatches, mergedOrders.length));
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to read the Garland PDF.");
-      setStatus("PDF extraction stopped before Teamship review.");
-    } finally {
-      setIsProcessing(false);
-      setProcessingPhase(null);
-    }
-  }
-
-  function removePdfBatch(batchId: string) {
-    const nextBatches = pdfBatches.filter((batch) => batch.id !== batchId);
-    const mergedOrders = mergeUploadedPdfOrders(nextBatches.flatMap((batch) => batch.orders));
-
-    setPdfBatches(nextBatches);
-    setOrders(mergedOrders);
-    setReview(null);
-    setError(null);
-    setStatus(nextBatches.length > 0 ? buildPdfUploadStatus(nextBatches, mergedOrders.length) : "Upload one or more Garland shipping-order PDFs to begin.");
-  }
-
-  function clearPdfBatches() {
-    setPdfBatches([]);
-    setOrders([]);
-    setReview(null);
-    setActiveEditingRunId(null);
-    setError(null);
-    setStatus("Upload one or more Garland shipping-order PDFs to begin.");
   }
 
   async function runReview({ rescan = false, srNumber = null }: { rescan?: boolean; srNumber?: string | null } = {}) {
@@ -791,71 +717,6 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
       setStatus("Teamship payload inspection stopped before results were created.");
     } finally {
       setPayloadInspectionLoadingSr(null);
-    }
-  }
-
-  async function fetchDailyOrders() {
-    setError(null);
-    setDailyOrderCount(dailyOrders.length);
-    setDailySyncSummary(null);
-    setIsProcessing(true);
-    setProcessingPhase("SYNC_TEAMSHIP");
-    setStatus(`Pulling missing Garland Teamship orders from ${syncDateFrom} to ${syncDateTo}...`);
-
-    try {
-      const response = await fetch("/api/shipment-documents/teamship-review/daily-orders", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          shipmentDateFrom: syncDateFrom,
-          shipmentDateTo: syncDateTo
-        })
-      });
-      const json = (await response.json().catch(() => null)) as DailyOrdersResponse | null;
-
-      if (!response.ok || !json) {
-        throw new Error(json?.error ?? "Unable to fetch Teamship daily orders.");
-      }
-
-      setDailySyncSummary(json.sync ?? null);
-      const fetchedOrders = json.orders ?? [];
-      const nextDailyOrders = mergeTeamshipOrders(dailyOrders, fetchedOrders);
-      const teamshipOnlyReview = buildGarlandTeamshipReview([], nextDailyOrders, parseTeamshipAlertDigest(alertDigest), {
-        includeUnmatchedTeamshipOrders: true
-      });
-      setDailyOrderCount(nextDailyOrders.length);
-      setDailyOrders(nextDailyOrders);
-      setReview(teamshipOnlyReview);
-      const syncedDateFrom = json.sync?.dateFrom ?? syncDateFrom;
-      const syncedDateTo = json.sync?.dateTo ?? syncDateTo;
-      const saveShipmentDate = syncedDateFrom && syncedDateFrom === syncedDateTo ? syncedDateFrom : shipmentDate;
-
-      if (!review && pdfBatches.length === 0 && syncedDateFrom === syncedDateTo && syncedDateFrom !== shipmentDate) {
-        handleShipmentDateChange(syncedDateFrom);
-      }
-
-      if (nextDailyOrders.length > 0) {
-        await saveOrAutosaveWorkingReview({
-          reviewSnapshot: teamshipOnlyReview,
-          teamshipOrdersSnapshot: nextDailyOrders,
-          shipmentDateSnapshot: saveShipmentDate,
-          sourcePdfFileNameSnapshot: sourcePdfFileName,
-          statusMessage: "Teamship working queue saved automatically."
-        });
-      }
-
-      setStatus(
-        (json.sync
-          ? `Pulled ${json.sync.insertedCount} new Teamship Garland order(s) from ${json.sync.dateFrom ?? syncDateFrom} to ${json.sync.dateTo ?? syncDateTo}; ${json.sync.skippedCount} already existed or could not be keyed.`
-          : `Fetched ${json.totalCount ?? json.orders?.length ?? 0} Teamship Garland order(s) for ${shipmentDate}.`) +
-          ` Editing queue now has ${nextDailyOrders.length} Teamship order(s) and is saved automatically.`
-      );
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to sync Teamship daily orders.");
-      setStatus("Teamship daily-order sync stopped.");
-    } finally {
-      setIsProcessing(false);
-      setProcessingPhase(null);
     }
   }
 
@@ -1270,13 +1131,6 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     }
   }
 
-  function handleShipmentDateChange(nextDate: string) {
-    setDocumentLabel((currentLabel) =>
-      currentLabel.trim() === formatDateLabel(shipmentDate) ? formatDateLabel(nextDate) : currentLabel
-    );
-    setShipmentDate(nextDate);
-  }
-
   function getSaveShipmentDate() {
     if (review) {
       return shipmentDate;
@@ -1290,192 +1144,6 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
 
   return (
     <div className="space-y-4">
-      <section className="overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
-        <div className="grid gap-3 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 px-4 py-3 text-white xl:grid-cols-[1fr,auto] xl:items-center">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.22em] text-white/60">Today&apos;s review</p>
-            <h2 className="mt-1 text-xl font-semibold tracking-tight">{documentLabel.trim() || formatDateLabel(shipmentDate)}</h2>
-          </div>
-          <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="rounded-xl border border-white/10 bg-white/10 px-3 py-2">
-              <p className="text-xl font-semibold">{dailyOrderCount ?? dailyOrders.length}</p>
-              <p className="text-[11px] font-bold uppercase tracking-wide text-white/60">Teamship</p>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-white/10 px-3 py-2">
-              <p className="text-xl font-semibold">{orders.length}</p>
-              <p className="text-[11px] font-bold uppercase tracking-wide text-white/60">PDF orders</p>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-white/10 px-3 py-2">
-              <p className="text-xl font-semibold">{pdfBatches.length}</p>
-              <p className="text-[11px] font-bold uppercase tracking-wide text-white/60">Attachments</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid gap-3 border-b border-border px-4 py-3 lg:grid-cols-[180px,minmax(220px,1fr),minmax(280px,1.4fr)]">
-          <label className="space-y-2 text-sm font-semibold text-foreground">
-            Review date
-            <input
-              type="date"
-              value={shipmentDate}
-              onChange={(event) => handleShipmentDateChange(event.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            />
-          </label>
-          <label className="space-y-2 text-sm font-semibold text-foreground">
-            Document label
-            <input
-              type="text"
-              value={documentLabel}
-              onChange={(event) => setDocumentLabel(event.target.value)}
-              placeholder="July 7, 2026"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            />
-          </label>
-
-          <label className="space-y-2 text-sm font-semibold text-foreground">
-            Garland shipping-order PDFs
-            <input
-              type="file"
-              accept="application/pdf"
-              multiple
-              onChange={(event) => {
-                void handlePdfSelection(event.target.files);
-                event.currentTarget.value = "";
-              }}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            />
-          </label>
-        </div>
-
-        {pdfBatches.length > 0 ? (
-          <div className="m-4 rounded-2xl border border-border bg-muted/30 p-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-foreground">
-                  Uploaded Garland attachments
-                </p>
-                <p className="text-xs text-mutedForeground">
-                  Add more PDFs as Garland sends them. Duplicate PS/SR orders are merged before review.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={clearPdfBatches}
-                disabled={isProcessing}
-                className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-background disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Clear PDFs
-              </button>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {pdfBatches.map((batch) => (
-                <span
-                  key={batch.id}
-                  className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground"
-                >
-                  <span className="font-semibold">{batch.fileName}</span>
-                  <span className="text-mutedForeground">
-                    {batch.orderCount} order{batch.orderCount === 1 ? "" : "s"}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => removePdfBatch(batch.id)}
-                    disabled={isProcessing}
-                    className="font-semibold text-primary hover:text-primaryHover disabled:cursor-not-allowed disabled:opacity-50"
-                    aria-label={`Remove ${batch.fileName}`}
-                  >
-                    Remove
-                  </button>
-                </span>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        <div className="space-y-3 border-t border-border px-4 py-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={() => void runReview()}
-              disabled={isProcessing || pdfBatches.length === 0}
-              className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {processingPhase === "RUN_REVIEW" ? "Checking PDF vs Teamship..." : "Run Teamship review"}
-            </button>
-            <button
-              type="button"
-              onClick={() => void runReview({ rescan: true })}
-              disabled={isProcessing || pdfBatches.length === 0}
-              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {processingPhase === "RESCAN_TEAMSHIP" ? "Rescanning Teamship..." : "Rescan Teamship details"}
-            </button>
-            <button
-              type="button"
-              onClick={() => void fetchDailyOrders()}
-              disabled={isProcessing}
-              className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {processingPhase === "SYNC_TEAMSHIP" ? "Pulling Teamship orders..." : "Pull missing Teamship orders"}
-            </button>
-            <p className="text-sm text-mutedForeground">{status}</p>
-          </div>
-
-          {isProcessing && processingPhase ? <TeamshipProcessingBanner phase={processingPhase} status={status} /> : null}
-        </div>
-
-        <div className="grid gap-3 border-t border-border bg-muted/20 px-4 py-3 md:grid-cols-2">
-          <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
-            Manual sync from
-            <input
-              type="date"
-              value={syncDateFrom}
-              onChange={(event) => setSyncDateFrom(event.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-semibold normal-case tracking-normal text-foreground"
-            />
-          </label>
-          <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
-            Manual sync to
-            <input
-              type="date"
-              value={syncDateTo}
-              onChange={(event) => setSyncDateTo(event.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-semibold normal-case tracking-normal text-foreground"
-            />
-          </label>
-        </div>
-
-        {error ? (
-          <div className="mx-5 mb-5 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-sm font-medium text-danger">
-            {error}
-          </div>
-        ) : null}
-      </section>
-
-      <details className="rounded-lg border border-border bg-card px-4 py-3 shadow-sm">
-        <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-base font-semibold text-foreground">Teamship alert digest</h2>
-            <p className="mt-1 text-xs text-mutedForeground">
-              Optional. Paste only when Teamship says orders are blocked or out of stock.
-            </p>
-          </div>
-          <span className="rounded-full bg-muted px-3 py-1 text-xs font-bold uppercase tracking-wide text-mutedForeground">
-            {parsedAlertCount} alert order{parsedAlertCount === 1 ? "" : "s"}
-          </span>
-        </summary>
-        <label className="mt-4 block space-y-2 text-sm font-semibold text-foreground">
-          Paste alert email text
-          <textarea
-            value={alertDigest}
-            onChange={(event) => setAlertDigest(event.target.value)}
-            placeholder="Teamship Alert Digest&#10;&#10;Shipping Orders — Out of Stock (4)&#10;&#10;Order SR811861..."
-            className="min-h-44 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-          />
-        </label>
-      </details>
-
       <TeamshipReviewIssueSummary items={reviewIssueSummaries} />
 
       {SHOW_LEGACY_SHIPMENT_QUEUE ? (
@@ -2224,62 +1892,6 @@ function ShipmentReviewWorkspace({
       </div>
     </section>
   );
-}
-
-function TeamshipProcessingBanner({ phase, status }: { phase: TeamshipProcessingPhase; status: string }) {
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      className="rounded-2xl border border-primary/20 bg-primary/5 p-4 shadow-sm"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p className="text-sm font-semibold text-foreground">{formatProcessingPhaseTitle(phase)}</p>
-          <p className="mt-1 text-xs text-mutedForeground">{formatProcessingPhaseDescription(phase)}</p>
-        </div>
-        <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-primary">
-          Working
-        </span>
-      </div>
-      <p className="mt-3 text-sm font-semibold text-foreground">{status}</p>
-      <div className="mt-3 h-2 overflow-hidden rounded-full bg-primary/10">
-        <div className="h-full w-full origin-left animate-pulse rounded-full bg-primary" />
-      </div>
-    </div>
-  );
-}
-
-function formatProcessingPhaseTitle(phase: TeamshipProcessingPhase) {
-  if (phase === "READ_PDF") {
-    return "Reading Garland PDFs";
-  }
-
-  if (phase === "SYNC_TEAMSHIP") {
-    return "Fetching Teamship orders";
-  }
-
-  if (phase === "RESCAN_TEAMSHIP") {
-    return "Refreshing Teamship details";
-  }
-
-  return "Checking PDF against Teamship";
-}
-
-function formatProcessingPhaseDescription(phase: TeamshipProcessingPhase) {
-  if (phase === "READ_PDF") {
-    return "Extracting PS, SR, SKU, serial, and shipment fields from the uploaded attachments.";
-  }
-
-  if (phase === "SYNC_TEAMSHIP") {
-    return "Pulling Garland orders for the selected date range and adding only missing records.";
-  }
-
-  if (phase === "RESCAN_TEAMSHIP") {
-    return "Reloading saved Teamship data without deleting existing matched PDF review results.";
-  }
-
-  return "Fetching matching Teamship orders and comparing them against the Garland PDF fields.";
 }
 
 function TeamshipUpdateJobsPanel({
@@ -5272,96 +4884,6 @@ function buildPdfOrderKey(order: GarlandPdfShippingOrder) {
 function formatSourcePdfFileNames(batches: UploadedPdfBatch[]) {
   const fileNames = Array.from(new Set(batches.map((batch) => batch.fileName.trim()).filter(Boolean)));
   return fileNames.length > 0 ? fileNames.join(", ") : null;
-}
-
-function buildPdfUploadStatus(batches: UploadedPdfBatch[], mergedOrderCount: number) {
-  const attachmentCount = batches.length;
-  const extractedOrderCount = batches.reduce((total, batch) => total + batch.orderCount, 0);
-
-  if (mergedOrderCount === 0) {
-    return `${attachmentCount} PDF attachment${attachmentCount === 1 ? "" : "s"} uploaded, but no Garland PS/SR orders were found yet.`;
-  }
-
-  const duplicateCount = Math.max(0, extractedOrderCount - mergedOrderCount);
-
-  return `Ready to review ${mergedOrderCount} Garland order${mergedOrderCount === 1 ? "" : "s"} from ${attachmentCount} PDF attachment${attachmentCount === 1 ? "" : "s"}${duplicateCount > 0 ? ` (${duplicateCount} duplicate PS/SR ${duplicateCount === 1 ? "order was" : "orders were"} merged).` : "."}`;
-}
-
-async function extractOrdersFromPdf(file: File) {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const pdf = await loadPdf(bytes);
-  const pages: Array<{ pageNumber: number; text: string }> = [];
-
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    pages.push({
-      pageNumber,
-      text: await extractPageText(page)
-    });
-  }
-
-  return parseGarlandShippingOrderPages(pages);
-}
-
-async function loadPdf(fileBytes: Uint8Array) {
-  const pdfjs = await loadPdfJs();
-  const bytes = new Uint8Array(fileBytes.byteLength);
-  bytes.set(fileBytes);
-
-  return pdfjs.getDocument({
-    data: bytes,
-    cMapPacked: true,
-    cMapUrl: "/pdfjs/cmaps/",
-    standardFontDataUrl: "/pdfjs/standard_fonts/",
-    wasmUrl: "/pdfjs/wasm/"
-  }).promise;
-}
-
-async function loadPdfJs() {
-  if (!pdfJsLoader) {
-    pdfJsLoader = import("pdfjs-dist").then((module) => {
-      module.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
-      return module;
-    });
-  }
-
-  return pdfJsLoader;
-}
-
-async function extractPageText(page: PDFPageProxy) {
-  const textContent = await page.getTextContent();
-  const items = textContent.items
-    .map((item) => {
-      if (!("str" in item) || !item.str.trim()) {
-        return null;
-      }
-
-      const transform = "transform" in item && Array.isArray(item.transform) ? item.transform : [];
-      return {
-        text: item.str,
-        x: Number(transform[4] ?? 0),
-        y: Number(transform[5] ?? 0)
-      };
-    })
-    .filter((item): item is { text: string; x: number; y: number } => Boolean(item))
-    .sort((left, right) => {
-      const yDiff = right.y - left.y;
-      return Math.abs(yDiff) > 3 ? yDiff : left.x - right.x;
-    });
-  const lines: Array<{ y: number; parts: string[] }> = [];
-
-  for (const item of items) {
-    const line = lines.find((candidate) => Math.abs(candidate.y - item.y) <= 3);
-
-    if (line) {
-      line.parts.push(item.text);
-      continue;
-    }
-
-    lines.push({ y: item.y, parts: [item.text] });
-  }
-
-  return lines.map((line) => line.parts.join(" ").replace(/\s+/g, " ").trim()).join("\n");
 }
 
 function getTodayInputValue() {
