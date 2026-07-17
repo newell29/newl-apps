@@ -9,6 +9,7 @@ import {
   searchTeamshipProductsForShipping,
   type TeamshipShippingProductSearchRow
 } from "@/server/integrations/teamship";
+import { getTenantTeamshipSettings } from "@/server/integrations/teamship-settings";
 import { parseEmailRecipients, sendResendEmail } from "@/server/email/resend";
 import type { TenantContext } from "@/server/tenant-context";
 
@@ -53,6 +54,11 @@ export type GarlandCsrAgentReportContext = Pick<TenantContext, "tenantId"> & {
 
 type SendGarlandCsrAgentReportEmailInput = {
   to?: string | string[];
+};
+
+type InventoryLookupConfig = {
+  userId: string;
+  locationId: string;
 };
 
 export type SendGarlandCsrAgentReportEmailResult = {
@@ -166,12 +172,12 @@ export async function buildGarlandCsrAgentReport(
   const review = readReviewResponse(run.reviewResponse);
   const updateJobs = await loadRelatedUpdateJobs(context.tenantId, run);
   const updateOrdersBySr = indexUpdateOrdersBySr(updateJobs);
-  const inventoryConfig = readInventoryLookupConfig();
+  const inventoryConfig = await readInventoryLookupConfig(context);
   const inventoryLookup = {
     checked: Boolean(inventoryConfig),
     skippedReason: inventoryConfig
       ? null
-      : "Inventory lookup skipped because GARLAND_TEAMSHIP_INVENTORY_USER_ID and GARLAND_TEAMSHIP_INVENTORY_LOCATION_ID are not configured."
+      : "Inventory lookup skipped because Garland inventory customer and warehouse/location IDs are not configured in Teamship WMS settings."
   };
 
   const missingReviews = review.reviews.filter((order) => order.status === "MISSING_TEAMSHIP" || order.status === "PENDING_TEAMSHIP");
@@ -310,7 +316,7 @@ async function buildMissingOrderLine(
   context: GarlandCsrAgentReportContext,
   order: GarlandTeamshipOrderReview,
   pdfOrders: GarlandPdfShippingOrder[],
-  inventoryConfig: ReturnType<typeof readInventoryLookupConfig>
+  inventoryConfig: InventoryLookupConfig | null
 ): Promise<GarlandCsrAgentMissingOrder> {
   const pdfOrder = pdfOrders.find((candidate) => normalizeIdentifier(candidate.srNumber) === normalizeIdentifier(order.srNumber));
   const inventoryItems = inventoryConfig
@@ -333,7 +339,7 @@ async function buildMissingOrderLine(
 async function lookupInventoryItem(
   context: GarlandCsrAgentReportContext,
   item: GarlandShippingOrderItem,
-  inventoryConfig: { userId: string; locationId: string }
+  inventoryConfig: InventoryLookupConfig
 ): Promise<GarlandCsrAgentInventoryItem> {
   try {
     const rows = await searchTeamshipProductsForShipping({
@@ -608,10 +614,16 @@ function readReviewResponse(value: unknown): GarlandTeamshipReviewResponse {
   return value as GarlandTeamshipReviewResponse;
 }
 
-function readInventoryLookupConfig() {
-  const userId = process.env.GARLAND_TEAMSHIP_INVENTORY_USER_ID?.trim() || process.env.TEAMSHIP_GARLAND_USER_ID?.trim();
+async function readInventoryLookupConfig(context: Pick<TenantContext, "tenantId">): Promise<InventoryLookupConfig | null> {
+  const settings = await getTenantTeamshipSettings(context);
+  const userId =
+    settings.garlandInventoryUserId?.trim() ||
+    process.env.GARLAND_TEAMSHIP_INVENTORY_USER_ID?.trim() ||
+    process.env.TEAMSHIP_GARLAND_USER_ID?.trim();
   const locationId =
-    process.env.GARLAND_TEAMSHIP_INVENTORY_LOCATION_ID?.trim() || process.env.TEAMSHIP_GARLAND_LOCATION_ID?.trim();
+    settings.garlandInventoryLocationId?.trim() ||
+    process.env.GARLAND_TEAMSHIP_INVENTORY_LOCATION_ID?.trim() ||
+    process.env.TEAMSHIP_GARLAND_LOCATION_ID?.trim();
 
   return userId && locationId ? { userId, locationId } : null;
 }

@@ -371,6 +371,20 @@ export default async function SettingsPage() {
                 { value: "120", label: "Every 2 hours" }
               ]}
             />
+            <OptionalField
+              label="Garland inventory customer ID"
+              name="teamshipGarlandInventoryUserId"
+              defaultValue={settings.teamship.garlandInventoryUserId ?? ""}
+              placeholder="420"
+              info="Used by Nemo to check Garland inventory when a PDF order is not yet in Teamship."
+            />
+            <OptionalField
+              label="Garland inventory warehouse/location ID"
+              name="teamshipGarlandInventoryLocationId"
+              defaultValue={settings.teamship.garlandInventoryLocationId ?? ""}
+              placeholder="102"
+              info="Usually the Annagem Teamship location ID for Garland inventory lookups."
+            />
           </div>
 
           <label className="flex items-start gap-3 rounded-md border border-border bg-muted/30 p-4 text-sm text-foreground">

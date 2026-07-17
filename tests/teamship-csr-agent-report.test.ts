@@ -10,6 +10,7 @@ const prismaMock = vi.hoisted(() => ({
 }));
 
 const searchTeamshipProductsForShippingMock = vi.hoisted(() => vi.fn());
+const getTenantTeamshipSettingsMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/server/db", () => ({
   prisma: prismaMock
@@ -17,6 +18,10 @@ vi.mock("@/server/db", () => ({
 
 vi.mock("@/server/integrations/teamship", () => ({
   searchTeamshipProductsForShipping: searchTeamshipProductsForShippingMock
+}));
+
+vi.mock("@/server/integrations/teamship-settings", () => ({
+  getTenantTeamshipSettings: getTenantTeamshipSettingsMock
 }));
 
 import { buildGarlandCsrAgentReport } from "@/modules/shipment-documents/teamship-csr-agent-report";
@@ -38,6 +43,10 @@ describe("Garland CSR agent report", () => {
     vi.clearAllMocks();
     process.env.GARLAND_TEAMSHIP_INVENTORY_USER_ID = "562";
     process.env.GARLAND_TEAMSHIP_INVENTORY_LOCATION_ID = "101";
+    getTenantTeamshipSettingsMock.mockResolvedValue({
+      garlandInventoryUserId: "420",
+      garlandInventoryLocationId: "102"
+    });
     prismaMock.teamshipReviewRun.findFirst.mockResolvedValue({
       id: "run-1",
       documentLabel: "July 14, 2026",
@@ -106,6 +115,14 @@ describe("Garland CSR agent report", () => {
     expect(report.html).toContain("What Nemo needs from you");
     expect(report.orderTable).toHaveLength(3);
     expect(report.orderTable.map((row) => row.tone)).toEqual(["green", "red", "gray"]);
+    expect(searchTeamshipProductsForShippingMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: "tenant-1",
+        userId: "420",
+        locationId: "102",
+        search: "C-CLEAN-FORTE"
+      })
+    );
   });
 });
 
