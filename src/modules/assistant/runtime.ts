@@ -3,6 +3,7 @@ import { AssistantSourceKind, JobStatus, PlatformRole, type Prisma } from "@pris
 import { maybeRunAssistantApolloActivityRequest } from "@/modules/assistant/apollo-workflow";
 import { searchAssistantKnowledge } from "@/modules/assistant/knowledge";
 import { maybeRunAssistantRateRequest } from "@/modules/assistant/rate-tools";
+import { maybeRunAssistantShipmentDocumentsRequest } from "@/modules/assistant/shipment-documents-workflow";
 import {
   computeNextAssistantAutomationRunAt,
   summarizeAutomationResult,
@@ -59,6 +60,11 @@ export async function runAssistantPrompt(
   const toolRateReply = await maybeRunAssistantRateRequest(context, prompt, threadPromptContext);
   if (toolRateReply) {
     return finalizeAssistantResponse(workspace, prompt, toolRateReply);
+  }
+
+  const shipmentDocumentsReply = await maybeRunAssistantShipmentDocumentsRequest(context, prompt);
+  if (shipmentDocumentsReply) {
+    return finalizeAssistantResponse(workspace, prompt, shipmentDocumentsReply);
   }
 
   const directComputationReply = maybeBuildDirectComputationResponse(prompt);
