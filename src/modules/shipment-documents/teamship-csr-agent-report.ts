@@ -9,7 +9,8 @@ import {
   searchTeamshipProductsForShipping,
   type TeamshipShippingProductSearchRow
 } from "@/server/integrations/teamship";
-import type { AuthenticatedContext } from "@/server/tenant-context";
+import { parseEmailRecipients, sendResendEmail } from "@/server/email/resend";
+import type { TenantContext } from "@/server/tenant-context";
 
 const REVIEW_WORKFLOW_KEY = "GARLAND_TEAMSHIP_REVIEW";
 const UPDATE_WORKFLOW_KEY = "GARLAND_TEAMSHIP_PHASE2_UPDATE";
@@ -43,6 +44,20 @@ export type GarlandCsrAgentReport = {
   subject: string;
   text: string;
   html: string;
+};
+
+export type GarlandCsrAgentReportContext = Pick<TenantContext, "tenantId"> & {
+  userName?: string | null;
+  userEmail?: string | null;
+};
+
+type SendGarlandCsrAgentReportEmailInput = {
+  to?: string | string[];
+};
+
+export type SendGarlandCsrAgentReportEmailResult = {
+  report: GarlandCsrAgentReport;
+  email: Awaited<ReturnType<typeof sendResendEmail>>;
 };
 
 type GarlandCsrAgentOrderLine = {
@@ -118,7 +133,10 @@ type ReviewRunForReport = {
   reviewResponse: unknown;
 };
 
-export async function buildGarlandCsrAgentReport(context: AuthenticatedContext, runId: string): Promise<GarlandCsrAgentReport> {
+export async function buildGarlandCsrAgentReport(
+  context: GarlandCsrAgentReportContext,
+  runId: string
+): Promise<GarlandCsrAgentReport> {
   const run = await prisma.teamshipReviewRun.findFirst({
     where: {
       id: runId,
@@ -217,6 +235,24 @@ export async function buildGarlandCsrAgentReport(context: AuthenticatedContext, 
   };
 }
 
+export async function sendGarlandCsrAgentReportEmail(
+  context: GarlandCsrAgentReportContext,
+  runId: string,
+  input: SendGarlandCsrAgentReportEmailInput = {}
+): Promise<SendGarlandCsrAgentReportEmailResult> {
+  const report = await buildGarlandCsrAgentReport(context, runId);
+  const email = await sendResendEmail({
+    from: resolveEmailFrom(),
+    to: resolveRecipients(input.to),
+    replyTo: resolveReplyTo(),
+    subject: report.subject,
+    text: report.text,
+    html: report.html
+  });
+
+  return { report, email };
+}
+
 async function loadRelatedUpdateJobs(tenantId: string, run: ReviewRunForReport): Promise<UpdateJobForReport[]> {
   const start = new Date(run.shipmentDate);
   const end = new Date(run.shipmentDate);
@@ -271,7 +307,7 @@ function indexUpdateOrdersBySr(updateJobs: UpdateJobForReport[]) {
 }
 
 async function buildMissingOrderLine(
-  context: AuthenticatedContext,
+  context: GarlandCsrAgentReportContext,
   order: GarlandTeamshipOrderReview,
   pdfOrders: GarlandPdfShippingOrder[],
   inventoryConfig: ReturnType<typeof readInventoryLookupConfig>
@@ -295,7 +331,7 @@ async function buildMissingOrderLine(
 }
 
 async function lookupInventoryItem(
-  context: AuthenticatedContext,
+  context: GarlandCsrAgentReportContext,
   item: GarlandShippingOrderItem,
   inventoryConfig: { userId: string; locationId: string }
 ): Promise<GarlandCsrAgentInventoryItem> {
@@ -850,6 +886,27 @@ function normalizeIdentifier(value: unknown) {
   return String(value ?? "")
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, "");
+}
+
+function resolveRecipients(value?: string | string[]) {
+  if (Array.isArray(value)) {
+    return value.map((recipient) => recipient.trim()).filter(Boolean);
+  }
+
+  return parseEmailRecipients(value || process.env.GARLAND_CSR_AGENT_REPORT_TO);
+}
+
+function resolveEmailFrom() {
+  return process.env.GARLAND_CSR_AGENT_EMAIL_FROM?.trim() || process.env.RESEND_FROM_EMAIL?.trim() || "";
+}
+
+function resolveReplyTo() {
+  return (
+    process.env.GARLAND_CSR_AGENT_REPLY_TO?.trim() ||
+    process.env.TEAMSHIP_REVIEW_REPLY_TO?.trim() ||
+    process.env.GARLAND_CSR_AGENT_EMAIL_FROM?.trim() ||
+    null
+  );
 }
 
 function escapeHtml(value: string) {
