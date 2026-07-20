@@ -532,7 +532,17 @@ async function main() {
     {
       key: ModuleKey.WEBSITE_INBOUND,
       name: "Website Inbound",
-      description: "Website form submissions, account setup requests, and inbound lead review"
+      description: "Website form submissions, playbook downloads, and inbound lead review"
+    },
+    {
+      key: ModuleKey.WEBSITE_GROWTH,
+      name: "Website Growth",
+      description: "SEO content opportunity queue, Search Console sync, analytics context, and website growth planning"
+    },
+    {
+      key: ModuleKey.OCEAN_FREIGHT_PRICING,
+      name: "Ocean Freight Pricing",
+      description: "Manual ocean freight rate management, agent directory, and pricing review workspace"
     }
   ];
 
@@ -627,6 +637,14 @@ async function main() {
     where: { key: ModuleKey.CUSTOMER_CASHFLOW }
   });
 
+  const invoiceVerificationModule = await prisma.module.findUniqueOrThrow({
+    where: { key: ModuleKey.INVOICE_VERIFICATION }
+  });
+
+  const quickBooksPostingModule = await prisma.module.findUniqueOrThrow({
+    where: { key: ModuleKey.QUICKBOOKS_POSTING }
+  });
+
   await prisma.tenantModuleAccess.upsert({
     where: {
       tenantId_moduleId: {
@@ -642,8 +660,42 @@ async function main() {
     }
   });
 
+  await prisma.tenantModuleAccess.upsert({
+    where: {
+      tenantId_moduleId: {
+        tenantId: tenant.id,
+        moduleId: invoiceVerificationModule.id
+      }
+    },
+    update: { enabled: true },
+    create: {
+      tenantId: tenant.id,
+      moduleId: invoiceVerificationModule.id,
+      enabled: true
+    }
+  });
+
+  await prisma.tenantModuleAccess.upsert({
+    where: {
+      tenantId_moduleId: {
+        tenantId: tenant.id,
+        moduleId: quickBooksPostingModule.id
+      }
+    },
+    update: { enabled: true },
+    create: {
+      tenantId: tenant.id,
+      moduleId: quickBooksPostingModule.id,
+      enabled: true
+    }
+  });
+
   const websiteInboundModule = await prisma.module.findUniqueOrThrow({
     where: { key: ModuleKey.WEBSITE_INBOUND }
+  });
+
+  const websiteGrowthModule = await prisma.module.findUniqueOrThrow({
+    where: { key: ModuleKey.WEBSITE_GROWTH }
   });
 
   await prisma.tenantModuleAccess.upsert({
@@ -657,6 +709,21 @@ async function main() {
     create: {
       tenantId: tenant.id,
       moduleId: websiteInboundModule.id,
+      enabled: true
+    }
+  });
+
+  await prisma.tenantModuleAccess.upsert({
+    where: {
+      tenantId_moduleId: {
+        tenantId: tenant.id,
+        moduleId: websiteGrowthModule.id
+      }
+    },
+    update: { enabled: true },
+    create: {
+      tenantId: tenant.id,
+      moduleId: websiteGrowthModule.id,
       enabled: true
     }
   });
@@ -691,6 +758,25 @@ async function main() {
     create: {
       tenantId: tenant.id,
       moduleId: upsModule.id,
+      enabled: true
+    }
+  });
+
+  const oceanFreightPricingModule = await prisma.module.findUniqueOrThrow({
+    where: { key: ModuleKey.OCEAN_FREIGHT_PRICING }
+  });
+
+  await prisma.tenantModuleAccess.upsert({
+    where: {
+      tenantId_moduleId: {
+        tenantId: tenant.id,
+        moduleId: oceanFreightPricingModule.id
+      }
+    },
+    update: { enabled: true },
+    create: {
+      tenantId: tenant.id,
+      moduleId: oceanFreightPricingModule.id,
       enabled: true
     }
   });

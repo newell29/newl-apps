@@ -38,13 +38,12 @@ export default async function WebsiteInboundPage({
       <PageHeader
         eyebrow="Website Inbound"
         title="Website form submissions"
-        description="Review website assessment requests, playbook downloads, contact submissions, and account setup forms captured from Newl's public website."
+        description="Review website assessment requests, playbook downloads, and contact submissions captured from Newl's public website. Account setup submissions route to Finance credit checks."
       />
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 md:grid-cols-3">
         <MetricCard label="Total submissions" value={shell.metrics.totalCount} caption="All website forms" />
         <MetricCard label="New submissions" value={shell.metrics.newCount} caption="Needs first review" />
-        <MetricCard label="Account setup" value={shell.metrics.accountSetupCount} caption="Customer onboarding" />
         <MetricCard label="Visible now" value={shell.metrics.visibleCount} caption="Current filtered view" />
       </section>
 

@@ -35,8 +35,22 @@ type QuickBooksTokenResponse = {
   realmId?: string;
 };
 
+export type QuickBooksRefreshTokenResponse = {
+  accessToken: string;
+  refreshToken: string;
+  accessTokenExpiresAt: string;
+  refreshTokenExpiresAt: string;
+  tokenType: string;
+};
+
 export function getQuickBooksEnvironment(): QuickBooksEnvironment {
   return process.env.QUICKBOOKS_ENVIRONMENT === "sandbox" ? "sandbox" : "production";
+}
+
+export function getQuickBooksApiBaseUrl() {
+  return getQuickBooksEnvironment() === "sandbox"
+    ? "https://sandbox-quickbooks.api.intuit.com"
+    : "https://quickbooks.api.intuit.com";
 }
 
 export function getQuickBooksRedirectUri() {
@@ -73,6 +87,10 @@ function getQuickBooksEncryptionSecret() {
   }
 
   return value;
+}
+
+function getQuickBooksStateSecret() {
+  return process.env.QUICKBOOKS_STATE_SECRET?.trim() || getQuickBooksEncryptionSecret();
 }
 
 export function getQuickBooksConnectionName(legalEntity: QuickBooksLegalEntity) {
@@ -143,6 +161,36 @@ export async function exchangeQuickBooksAuthorizationCode({
   };
 }
 
+export async function refreshQuickBooksAccessToken({ refreshToken }: { refreshToken: string }): Promise<QuickBooksRefreshTokenResponse> {
+  const credentials = Buffer.from(`${getQuickBooksClientId()}:${getQuickBooksClientSecret()}`).toString("base64");
+  const response = await fetch("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${credentials}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json"
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken
+    })
+  });
+
+  if (!response.ok) {
+    const message = await readQuickBooksError(response);
+    throw new Error(message ?? `QuickBooks token refresh failed with status ${response.status}.`);
+  }
+
+  const json = (await response.json()) as QuickBooksTokenResponse;
+  return {
+    accessToken: json.access_token,
+    refreshToken: json.refresh_token,
+    accessTokenExpiresAt: new Date(Date.now() + json.expires_in * 1000).toISOString(),
+    refreshTokenExpiresAt: new Date(Date.now() + json.x_refresh_token_expires_in * 1000).toISOString(),
+    tokenType: json.token_type
+  };
+}
+
 export async function fetchQuickBooksCompanyInfo({
   realmId,
   accessToken
@@ -150,10 +198,7 @@ export async function fetchQuickBooksCompanyInfo({
   realmId: string;
   accessToken: string;
 }) {
-  const baseUrl =
-    getQuickBooksEnvironment() === "sandbox"
-      ? "https://sandbox-quickbooks.api.intuit.com"
-      : "https://quickbooks.api.intuit.com";
+  const baseUrl = getQuickBooksApiBaseUrl();
   const response = await fetch(`${baseUrl}/v3/company/${realmId}/companyinfo/${realmId}`, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -242,7 +287,7 @@ export function parseQuickBooksState(state: string): QuickBooksStatePayload {
     throw new Error("QuickBooks OAuth state is invalid.");
   }
 
-  const expectedSignature = createHmac("sha256", getQuickBooksEncryptionSecret()).update(encoded).digest("base64url");
+  const expectedSignature = createHmac("sha256", getQuickBooksStateSecret()).update(encoded).digest("base64url");
   if (signature !== expectedSignature) {
     throw new Error("QuickBooks OAuth state signature is invalid.");
   }
@@ -252,7 +297,7 @@ export function parseQuickBooksState(state: string): QuickBooksStatePayload {
 
 function signQuickBooksState(payload: QuickBooksStatePayload) {
   const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
-  const signature = createHmac("sha256", getQuickBooksEncryptionSecret()).update(encoded).digest("base64url");
+  const signature = createHmac("sha256", getQuickBooksStateSecret()).update(encoded).digest("base64url");
   return `${QUICKBOOKS_STATE_VERSION}.${encoded}.${signature}`;
 }
 

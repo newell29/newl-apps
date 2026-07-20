@@ -1,0 +1,456 @@
+import { isUpsGarlandOrder } from "@/modules/shipment-documents/garland-product-dimensions";
+import type {
+  GarlandPdfShippingOrder,
+  GarlandProductDimensionRecommendation,
+  GarlandTeamshipOrderReview,
+  GarlandTeamshipReviewField,
+  GarlandTeamshipReviewResponse,
+  GarlandShippingOrderItem
+} from "@/modules/shipment-documents/teamship-review-types";
+
+export type TeamshipPhase2DryRunPlan = {
+  mode: "DRY_RUN";
+  dryRun: true;
+  wouldUpdateTeamship: false;
+  generatedAt: string;
+  summary: {
+    orderCount: number;
+    readyCount: number;
+    blockedCount: number;
+    skippedCount: number;
+    plannedFieldUpdateCount: number;
+    plannedPalletRowCount: number;
+    plannedBolCleanupCount: number;
+  };
+  orders: TeamshipPhase2OrderPlan[];
+};
+
+export type TeamshipPhase2OrderPlan = {
+  psNumber: string;
+  srNumber: string;
+  teamshipOrderId: string | null;
+  teamshipUrl: string | null;
+  status: "READY" | "BLOCKED" | "SKIPPED";
+  sourceReviewStatus: GarlandTeamshipOrderReview["status"];
+  plannedFieldUpdates: TeamshipPhase2FieldUpdate[];
+  plannedPalletRows: TeamshipPhase2PalletRowPlan[];
+  plannedBolCleanup: TeamshipPhase2BolCleanupPlan | null;
+  validationIssues: string[];
+};
+
+export type TeamshipPhase2BolCleanupPlan = {
+  removeCustomerOrderWeights: boolean;
+  compactSpecialInstructions: boolean;
+  reason: string;
+};
+
+export type TeamshipPhase2FieldUpdate = {
+  reviewFieldKey: string;
+  label: string;
+  teamshipField: string;
+  currentValue: string | null;
+  proposedValue: string;
+  reason: string;
+};
+
+export type TeamshipPhase2PalletRowPlan = {
+  rowNumber: number;
+  sku: string;
+  quantity: number;
+  lengthIn: number | null;
+  widthIn: number | null;
+  heightIn: number | null;
+  weightLb: number | null;
+  weightUnit: string;
+  commodity: string;
+  hasUsableDimensions: boolean;
+  dimensionSource: GarlandProductDimensionRecommendation["source"] | "MISSING";
+  dimensionConfidence: GarlandProductDimensionRecommendation["confidence"] | "LOW";
+  sourceNote: string;
+  teamshipFields: Record<string, string | number>;
+};
+
+const FIELD_UPDATE_DESTINATIONS: Record<string, string> = {
+  po_number: "poNumber",
+  freight_terms: "edi_field_3",
+  carrier: "carrier_value",
+  ship_to_address_1: "ship_address",
+  shipping_instructions: "edi_field_4"
+};
+
+const PLACEHOLDER_PALLET_DIMENSIONS = {
+  lengthIn: 1,
+  widthIn: 1,
+  heightIn: 1,
+  weightLb: 1,
+  weightUnit: "lbs"
+} as const;
+
+export function buildTeamshipPhase2DryRunPlan(review: GarlandTeamshipReviewResponse): TeamshipPhase2DryRunPlan {
+  const pdfOrdersByKey = new Map(review.pdfOrders.map((order) => [buildOrderKey(order.psNumber, order.srNumber), order]));
+  const orders = review.reviews.map((orderReview) =>
+    buildOrderPlan({
+      orderReview,
+      pdfOrder: pdfOrdersByKey.get(buildOrderKey(orderReview.psNumber, orderReview.srNumber)) ?? null
+    })
+  );
+
+  return {
+    mode: "DRY_RUN",
+    dryRun: true,
+    wouldUpdateTeamship: false,
+    generatedAt: new Date().toISOString(),
+    summary: {
+      orderCount: orders.length,
+      readyCount: orders.filter((order) => order.status === "READY").length,
+      blockedCount: orders.filter((order) => order.status === "BLOCKED").length,
+      skippedCount: orders.filter((order) => order.status === "SKIPPED").length,
+      plannedFieldUpdateCount: orders.reduce((sum, order) => sum + order.plannedFieldUpdates.length, 0),
+      plannedPalletRowCount: orders.reduce((sum, order) => sum + order.plannedPalletRows.length, 0),
+      plannedBolCleanupCount: orders.filter((order) => order.plannedBolCleanup?.removeCustomerOrderWeights).length
+    },
+    orders
+  };
+}
+
+function buildOrderPlan({
+  orderReview,
+  pdfOrder
+}: {
+  orderReview: GarlandTeamshipOrderReview;
+  pdfOrder: GarlandPdfShippingOrder | null;
+}): TeamshipPhase2OrderPlan {
+  if (!pdfOrder || !orderReview.teamshipOrderId || orderReview.status === "MISSING_TEAMSHIP" || orderReview.status === "PENDING_TEAMSHIP") {
+    return {
+      psNumber: orderReview.psNumber,
+      srNumber: orderReview.srNumber,
+      teamshipOrderId: orderReview.teamshipOrderId,
+      teamshipUrl: orderReview.teamshipUrl,
+      status: "SKIPPED",
+      sourceReviewStatus: orderReview.status,
+      plannedFieldUpdates: [],
+      plannedPalletRows: [],
+      plannedBolCleanup: null,
+      validationIssues: ["No matched Teamship order is available for a safe Phase 2 dry run."]
+    };
+  }
+
+  if (orderReview.status === "NO_PDF" || orderReview.status === "SKIPPED_ALREADY_REVIEWED") {
+    return {
+      psNumber: orderReview.psNumber,
+      srNumber: orderReview.srNumber,
+      teamshipOrderId: orderReview.teamshipOrderId,
+      teamshipUrl: orderReview.teamshipUrl,
+      status: "SKIPPED",
+      sourceReviewStatus: orderReview.status,
+      plannedFieldUpdates: [],
+      plannedPalletRows: [],
+      plannedBolCleanup: null,
+      validationIssues: [`Review status ${orderReview.status} is not eligible for Phase 2 pallet planning.`]
+    };
+  }
+
+  const plannedFieldUpdates = buildFieldUpdates(orderReview.fields);
+  const includedPalletItems = pdfOrder.items.filter((item) => item.botActionEnabled !== false);
+  const plannedPalletRows = includedPalletItems.map((item, index) =>
+    buildPalletRowPlan({
+      rowNumber: index + 1,
+      item,
+      dimensions: selectDimensionForSku(orderReview.productDimensions, item.sku),
+      pdfOrder
+    })
+  );
+  const validationIssues = validateOrderPlan({ palletItems: includedPalletItems, plannedPalletRows });
+  const status = validationIssues.length === 0 ? "READY" : "BLOCKED";
+  const plannedBolCleanup = buildBolCleanupPlan({ plannedFieldUpdates });
+
+  return {
+    psNumber: orderReview.psNumber,
+    srNumber: orderReview.srNumber,
+    teamshipOrderId: orderReview.teamshipOrderId,
+    teamshipUrl: orderReview.teamshipUrl,
+    status,
+    sourceReviewStatus: orderReview.status,
+    plannedFieldUpdates,
+    plannedPalletRows,
+    plannedBolCleanup,
+    validationIssues
+  };
+}
+
+function buildBolCleanupPlan({ plannedFieldUpdates }: { plannedFieldUpdates: TeamshipPhase2FieldUpdate[] }): TeamshipPhase2BolCleanupPlan {
+  return {
+    removeCustomerOrderWeights: true,
+    compactSpecialInstructions: plannedFieldUpdates.some(
+      (field) => field.reviewFieldKey === "shipping_instructions" || field.teamshipField === "edi_field_4"
+    ),
+    reason:
+      "After Teamship API updates, open the editable BOL and remove Teamship-generated Customer Order Information weight values."
+  };
+}
+
+function buildFieldUpdates(fields: GarlandTeamshipReviewField[]) {
+  const updates: TeamshipPhase2FieldUpdate[] = [];
+
+  for (const field of fields) {
+    const teamshipField = FIELD_UPDATE_DESTINATIONS[field.key];
+    const rawProposedValue = (field.proposedValue ?? field.pdfValue)?.trim();
+    const proposedValue = normalizeProposedFieldValue(field.key, rawProposedValue);
+    const currentValue = field.teamshipValue?.trim() ?? "";
+    const hasCsrOverride = Boolean(field.proposedValue?.trim());
+    const hasSpecialInstructionsCompaction =
+      field.key === "shipping_instructions" &&
+      Boolean(proposedValue) &&
+      currentValue !== proposedValue &&
+      (hasGarlandInstructionNoise(rawProposedValue) || hasGarlandInstructionNoise(currentValue));
+
+    if (
+      field.botActionEnabled !== true ||
+      !teamshipField ||
+      !proposedValue ||
+      (!hasCsrOverride && field.status !== "DISCREPANCY" && field.status !== "MISSING" && !hasSpecialInstructionsCompaction)
+    ) {
+      continue;
+    }
+
+    updates.push({
+      reviewFieldKey: field.key,
+      label: field.label,
+      teamshipField,
+      currentValue: field.teamshipValue,
+      proposedValue,
+      reason: buildFieldUpdateReason({ field, hasCsrOverride, hasSpecialInstructionsCompaction })
+    });
+  }
+
+  return updates;
+}
+
+function normalizeProposedFieldValue(fieldKey: GarlandTeamshipReviewField["key"], value: string | null | undefined) {
+  if (fieldKey === "shipping_instructions") {
+    return compactGarlandSpecialInstructions(value);
+  }
+
+  return value?.trim() ?? "";
+}
+
+export function compactGarlandSpecialInstructions(value: string | null | undefined) {
+  return (
+    value
+      ?.replace(/\*{3,}/g, " ")
+      .replace(/\*/g, "")
+      .replace(/\s*\r?\n+\s*/g, " ")
+      .replace(/\s{2,}/g, " ")
+      .trim() ?? ""
+  );
+}
+
+function hasGarlandInstructionNoise(value: string | null | undefined) {
+  return Boolean(value && (/\*{3,}/.test(value) || /\r?\n/.test(value)));
+}
+
+function buildFieldUpdateReason({
+  field,
+  hasCsrOverride,
+  hasSpecialInstructionsCompaction
+}: {
+  field: GarlandTeamshipReviewField;
+  hasCsrOverride: boolean;
+  hasSpecialInstructionsCompaction: boolean;
+}) {
+  if (hasCsrOverride) {
+    return `CSR override entered in Newl Apps. ${field.message}`;
+  }
+
+  if (hasSpecialInstructionsCompaction) {
+    return "Garland special instructions were compacted for BOL space: removed star separators and collapsed line breaks into spaces.";
+  }
+
+  return field.message;
+}
+
+function buildPalletRowPlan({
+  rowNumber,
+  item,
+  dimensions,
+  pdfOrder
+}: {
+  rowNumber: number;
+  item: GarlandShippingOrderItem;
+  dimensions: GarlandProductDimensionRecommendation | null;
+  pdfOrder: GarlandPdfShippingOrder;
+}): TeamshipPhase2PalletRowPlan {
+  const quantity = readItemQuantity(item);
+  const commodity = item.commodityOverride?.trim() || buildCommodity(item, quantity);
+  const hasUsableDimensions = Boolean(dimensions);
+  const plannedDimensions = dimensions
+    ? {
+        lengthIn: dimensions.lengthIn,
+        widthIn: dimensions.widthIn,
+        heightIn: dimensions.heightIn,
+        weightLb: dimensions.weightLb,
+        weightUnit: dimensions.weightUnit?.trim() || "lbs"
+      }
+    : PLACEHOLDER_PALLET_DIMENSIONS;
+  const weightUnit = plannedDimensions.weightUnit;
+
+  return {
+    rowNumber,
+    sku: item.sku.trim().toUpperCase(),
+    quantity,
+    lengthIn: plannedDimensions.lengthIn,
+    widthIn: plannedDimensions.widthIn,
+    heightIn: plannedDimensions.heightIn,
+    weightLb: plannedDimensions.weightLb,
+    weightUnit,
+    commodity,
+    hasUsableDimensions,
+    dimensionSource: dimensions?.source ?? "MISSING",
+    dimensionConfidence: dimensions?.confidence ?? "LOW",
+    sourceNote: dimensions
+      ? isUpsGarlandOrder({ pdfOrder, teamshipOrder: null })
+        ? "UPS order placeholder rule."
+        : dimensions.note
+      : "No usable dimension/weight recommendation found; using Teamship placeholder 1 x 1 x 1 and 1 lb until warehouse updates the real values.",
+    teamshipFields: buildTeamshipPalletFields({
+      rowNumber,
+      quantity,
+      dimensions: plannedDimensions,
+      weightUnit,
+      commodity
+    })
+  };
+}
+
+function buildTeamshipPalletFields({
+  rowNumber,
+  quantity,
+  dimensions,
+  weightUnit,
+  commodity
+}: {
+  rowNumber: number;
+  quantity: number;
+  dimensions: {
+    lengthIn: number | null;
+    widthIn: number | null;
+    heightIn: number | null;
+    weightLb: number | null;
+  };
+  weightUnit: string;
+  commodity: string;
+}) {
+  const fields: Record<string, string | number> = {
+    pallets_count: rowNumber,
+    [`pallet_${rowNumber}`]: quantity,
+    [`pallet_${rowNumber}_commodity`]: commodity
+  };
+
+  fields[`pallet_${rowNumber}_length`] = dimensions.lengthIn ?? 0;
+  fields[`pallet_${rowNumber}_width`] = dimensions.widthIn ?? 0;
+  fields[`pallet_${rowNumber}_height`] = dimensions.heightIn ?? 0;
+  fields[`pallet_${rowNumber}_weight`] = dimensions.weightLb ?? 0;
+  fields[`pallet_${rowNumber}_weight_unit`] = weightUnit;
+
+  return fields;
+}
+
+function validateOrderPlan({ palletItems, plannedPalletRows }: { palletItems: GarlandShippingOrderItem[]; plannedPalletRows: TeamshipPhase2PalletRowPlan[] }) {
+  const issues: string[] = [];
+
+  palletItems.forEach((item, index) => {
+    const row = plannedPalletRows[index];
+    const sku = item.sku.trim().toUpperCase();
+
+    if (!row) {
+      issues.push(`No bot pallet row was prepared for SKU ${sku}.`);
+      return;
+    }
+
+    if (
+      row.hasUsableDimensions &&
+      ![row.lengthIn, row.widthIn, row.heightIn, row.weightLb].every(
+        (value) => typeof value === "number" && Number.isFinite(value) && value > 0
+      )
+    ) {
+      issues.push(`SKU ${sku} has invalid dimensions or weight.`);
+    }
+
+    if (!row.commodity.includes(sku)) {
+      issues.push(`SKU ${sku} commodity text does not include the SKU.`);
+    }
+
+    for (const serialNumber of item.serialNumbers) {
+      if (!row.commodity.includes(serialNumber.trim())) {
+        issues.push(`SKU ${sku} commodity text is missing serial ${serialNumber}.`);
+      }
+    }
+  });
+
+  return issues;
+}
+
+function selectDimensionForSku(recommendations: GarlandProductDimensionRecommendation[], sku: string) {
+  const normalizedSku = sku.trim().toUpperCase();
+  const candidates = recommendations
+    .filter((recommendation) => recommendation.sku.trim().toUpperCase() === normalizedSku)
+    .filter(hasCompleteDimensions)
+    .filter((recommendation) => recommendation.source !== "TEAMSHIP_PALLET" || recommendation.confidence !== "LOW")
+    .sort((left, right) => dimensionSourceRank(left) - dimensionSourceRank(right));
+
+  return candidates[0] ?? null;
+}
+
+function hasCompleteDimensions(recommendation: GarlandProductDimensionRecommendation) {
+  return [recommendation.lengthIn, recommendation.widthIn, recommendation.heightIn, recommendation.weightLb].every(
+    (value) => typeof value === "number" && Number.isFinite(value) && value > 0
+  );
+}
+
+function dimensionSourceRank(recommendation: GarlandProductDimensionRecommendation) {
+  if (recommendation.source === "CSR_OVERRIDE") {
+    return 0;
+  }
+
+  if (recommendation.source === "UPS_RULE") {
+    return 1;
+  }
+
+  if (recommendation.source === "CSR_LEARNED") {
+    return 2;
+  }
+
+  if (recommendation.source === "TEAMSHIP_PALLET") {
+    return 3;
+  }
+
+  if (recommendation.source === "TEAMSHIP_LEARNED") {
+    return 4;
+  }
+
+  return 5;
+}
+
+function buildCommodity(item: GarlandShippingOrderItem, quantity: number) {
+  const sku = item.sku.trim().toUpperCase();
+
+  const serialNumbers = Array.from(new Set(item.serialNumbers.map((serialNumber) => serialNumber.trim()).filter(Boolean)));
+
+  if (serialNumbers.length > 0) {
+    return `SKU: ${sku} SN: ${serialNumbers.join(", ")}`;
+  }
+
+  return `SKU: ${sku} QTY: ${quantity}`;
+}
+
+function readItemQuantity(item: GarlandShippingOrderItem) {
+  if (typeof item.quantity === "number" && Number.isFinite(item.quantity) && item.quantity > 0) {
+    return item.quantity;
+  }
+
+  return Math.max(1, item.serialNumbers.length);
+}
+
+function buildOrderKey(psNumber: string, srNumber: string) {
+  return `${psNumber.trim().toUpperCase()}::${srNumber.trim().toUpperCase()}`;
+}

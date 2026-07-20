@@ -145,7 +145,8 @@ describe("runAssistantPrompt", () => {
       select: {
         provider: true,
         status: true,
-        publicConfig: true
+        publicConfig: true,
+        secretRef: true
       }
     });
     expect(result.provider).toBe("OPENAI");
@@ -159,7 +160,8 @@ describe("runAssistantPrompt", () => {
           contactCount: 20,
           topCompanyNames: ["ABC IMPORTS INC"]
         })
-      })
+      }),
+      { apiKey: null }
     );
   });
 
@@ -186,6 +188,35 @@ describe("runAssistantPrompt", () => {
       liveReplyAttempted: true,
       liveReplyError: "Model request failed."
     });
+  });
+
+  it("answers simple arithmetic directly without invoking the live model or retrieval sources", async () => {
+    integrationCredentialFindFirst.mockResolvedValue({
+      provider: IntegrationProvider.LOCAL_LLM,
+      status: IntegrationStatus.ACTIVE,
+      publicConfig: {
+        liveResponsesEnabled: true,
+        defaultModel: "qwen3:30b",
+        fallbackModel: "gpt-oss:20b",
+        temperature: 0.2,
+        maxTokens: 1200,
+        endpointUrl: "https://llm.example.com/v1",
+        reasoningEffort: "none"
+      },
+      secretRef: null
+    });
+
+    const result = await runAssistantPrompt(context, "What is 53+50");
+
+    expect(result.provider).toBe("NEWL_DIRECT");
+    expect(result.answer).toBe("103");
+    expect(result.sources).toEqual([]);
+    expect(result.runMetadata).toMatchObject({
+      deterministic: true,
+      directComputation: true
+    });
+    expect(searchAssistantKnowledge).not.toHaveBeenCalled();
+    expect(generateAssistantReply).not.toHaveBeenCalled();
   });
 
   it("falls back when the live provider returns an empty response", async () => {

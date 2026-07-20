@@ -32,13 +32,23 @@ import {
 import {
   ASSISTANT_PROVIDER_CREDENTIAL_NAME,
   buildAssistantProviderConfig,
-  isAssistantProvider
+  encryptAssistantProviderSecret,
+  isAssistantProvider,
+  parseAssistantProviderAuth,
+  parseAssistantProviderSettings,
+  testAssistantProviderConnection,
+  validateAssistantEndpointUrl,
+  type AssistantReasoningEffort
 } from "@/server/integrations/assistant-provider";
 import {
   buildMicrosoftGraphConfig,
   DEFAULT_MICROSOFT_GRAPH_SCOPES,
   MICROSOFT_GRAPH_CREDENTIAL_NAME
 } from "@/server/integrations/microsoft-graph";
+import {
+  encryptTeamshipSecret,
+  TEAMSHIP_CREDENTIAL_NAME
+} from "@/server/integrations/teamship-settings";
 
 type TradeMiningScoringConfigMutationClient = typeof prisma & {
   tradeMiningScoringConfig?: {
@@ -400,9 +410,15 @@ export async function saveAssistantProviderSettingsAction(formData: FormData) {
   const temperature = readRequiredFloat(formData, "assistantTemperature", 0, 2);
   const maxTokens = readRequiredInteger(formData, "assistantMaxTokens", 100, 4000);
   const endpointUrl = readOptional(formData, "assistantEndpointUrl") ?? null;
+  const apiKey = readOptional(formData, "assistantApiKey") ?? null;
+  const reasoningEffort = readAssistantReasoningEffort(formData.get("assistantReasoningEffort"));
 
   if (provider === IntegrationProvider.LOCAL_LLM && !endpointUrl) {
     throw new Error("Local LLM provider settings require an endpoint URL.");
+  }
+
+  if (provider === IntegrationProvider.LOCAL_LLM && endpointUrl) {
+    validateAssistantEndpointUrl(endpointUrl);
   }
 
   const existing = await prisma.integrationCredential.findMany({
@@ -412,7 +428,8 @@ export async function saveAssistantProviderSettingsAction(formData: FormData) {
     },
     orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
     select: {
-      id: true
+      id: true,
+      secretRef: true
     }
   });
 
@@ -427,8 +444,12 @@ export async function saveAssistantProviderSettingsAction(formData: FormData) {
       fallbackModel,
       temperature,
       maxTokens,
-      endpointUrl
-    })
+      endpointUrl,
+      reasoningEffort
+    }),
+    secretRef: apiKey
+      ? encryptAssistantProviderSecret({ apiKey })
+      : existing[0]?.secretRef ?? null
   };
 
   const primaryExisting = existing[0];
@@ -459,6 +480,55 @@ export async function saveAssistantProviderSettingsAction(formData: FormData) {
 
   revalidateSettingsSurfaces();
   revalidatePath("/assistant");
+}
+
+export type AssistantProviderConnectionTestState = {
+  status: "idle" | "success" | "error";
+  message: string;
+};
+
+export async function testAssistantProviderConnectionAction(
+  previousState: AssistantProviderConnectionTestState
+): Promise<AssistantProviderConnectionTestState> {
+  void previousState;
+  const context = await authorizeSettingsMutation();
+  const credential = await prisma.integrationCredential.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      name: ASSISTANT_PROVIDER_CREDENTIAL_NAME
+    },
+    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    select: {
+      provider: true,
+      status: true,
+      publicConfig: true,
+      secretRef: true
+    }
+  });
+
+  if (!credential) {
+    return {
+      status: "error",
+      message: "Save the local model settings before testing the connection."
+    };
+  }
+
+  try {
+    const result = await testAssistantProviderConnection({
+      settings: parseAssistantProviderSettings(credential),
+      auth: parseAssistantProviderAuth(credential.secretRef)
+    });
+
+    return {
+      status: "success",
+      message: `Connected to ${result.model} in ${(result.latencyMs / 1000).toFixed(1)} seconds. Reply: ${result.reply}`
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : "The local model connection test failed."
+    };
+  }
 }
 
 export async function saveMicrosoftGraphSettingsAction(formData: FormData) {
@@ -569,6 +639,74 @@ export async function saveTenantUserAccessAction(formData: FormData) {
   });
 
   revalidateSettingsSurfaces();
+}
+
+export async function saveTeamshipSettingsAction(formData: FormData) {
+  const context = await authorizeSettingsMutation();
+  const email = readRequired(formData, "teamshipEmail").toLowerCase();
+  const password = readOptional(formData, "teamshipPassword");
+  const apiBaseUrl = readOptional(formData, "teamshipApiBaseUrl") ?? null;
+  const status = parseIntegrationStatus(formData.get("teamshipStatus"));
+  const syncEnabled = formData.get("teamshipSyncEnabled") === "true";
+  const syncCadenceMinutes = readTeamshipSyncCadenceMinutes(formData.get("teamshipSyncCadenceMinutes"));
+  const garlandInventoryUserId = readOptional(formData, "teamshipGarlandInventoryUserId") ?? null;
+  const garlandInventoryLocationId = readOptional(formData, "teamshipGarlandInventoryLocationId") ?? null;
+
+  const existing = await prisma.integrationCredential.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      provider: IntegrationProvider.TEAMSHIP,
+      name: TEAMSHIP_CREDENTIAL_NAME
+    },
+    select: {
+      id: true,
+      secretRef: true
+    }
+  });
+
+  if (status === IntegrationStatus.ACTIVE && !password && !existing?.secretRef) {
+    throw new Error("Enter the Teamship password before saving Teamship as active.");
+  }
+
+  const data = {
+    provider: IntegrationProvider.TEAMSHIP,
+    name: TEAMSHIP_CREDENTIAL_NAME,
+    status,
+    publicConfig: {
+      email,
+      apiBaseUrl,
+      syncEnabled,
+      syncCadenceMinutes,
+      garlandInventoryUserId,
+      garlandInventoryLocationId,
+      updatedAt: new Date().toISOString()
+    },
+    secretRef: password ? encryptTeamshipSecret({ password }) : existing?.secretRef ?? null
+  };
+
+  if (existing) {
+    await prisma.integrationCredential.update({
+      where: {
+        id: existing.id
+      },
+      data
+    });
+  } else {
+    await prisma.integrationCredential.create({
+      data: {
+        tenantId: context.tenantId,
+        ...data
+      }
+    });
+  }
+
+  revalidateSettingsSurfaces();
+  revalidatePath("/shipment-documents/teamship-review");
+}
+
+function readTeamshipSyncCadenceMinutes(value: FormDataEntryValue | null) {
+  const parsed = typeof value === "string" ? Number(value) : 15;
+  return [15, 30, 60, 120].includes(parsed) ? parsed : 15;
 }
 
 export async function removeTenantUserAccessAction(formData: FormData) {
@@ -1152,6 +1290,12 @@ function readMicrosoftMailboxAccessMode(value: FormDataEntryValue | null) {
   }
 
   return "SIGNED_IN_USER" as const;
+}
+
+function readAssistantReasoningEffort(value: FormDataEntryValue | null): AssistantReasoningEffort | null {
+  return value === "none" || value === "low" || value === "medium" || value === "high"
+    ? value
+    : null;
 }
 
 function isMissingTradeMiningScoringSchemaError(error: unknown) {

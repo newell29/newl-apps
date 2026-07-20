@@ -48,6 +48,7 @@ import {
   parseMicrosoftGraphDelegatedConnection
 } from "@/server/integrations/microsoft-graph-account";
 import { getOpenAiDraftRuntimeNotes, isOpenAiDraftGenerationConfigured } from "@/server/integrations/openai";
+import { parseTeamshipSettings, TEAMSHIP_CREDENTIAL_NAME } from "@/server/integrations/teamship-settings";
 
 type SettingsUpsAccount = UpsAccountConfig & {
   toolTargets: QuoteToolTarget[];
@@ -183,7 +184,8 @@ export async function getSettingsShell(tenant: TenantContext & { userId?: string
             IntegrationProvider.QUICKBOOKS,
             IntegrationProvider.MICROSOFT_GRAPH,
             IntegrationProvider.OPENAI,
-            IntegrationProvider.LOCAL_LLM
+            IntegrationProvider.LOCAL_LLM,
+            IntegrationProvider.TEAMSHIP
           ]
         }
       }),
@@ -276,6 +278,9 @@ export async function getSettingsShell(tenant: TenantContext & { userId?: string
       credential.provider === IntegrationProvider.MICROSOFT_GRAPH &&
       credential.name === MICROSOFT_GRAPH_CREDENTIAL_NAME
   );
+  const teamshipCredential = typedIntegrationCredentials.find(
+    (credential) => credential.provider === IntegrationProvider.TEAMSHIP && credential.name === TEAMSHIP_CREDENTIAL_NAME
+  );
   const apolloCredential = typedIntegrationCredentials.find((credential) => credential.provider === IntegrationProvider.APOLLO);
   const quickbooksConnections = typedIntegrationCredentials
     .filter((credential) => credential.provider === IntegrationProvider.QUICKBOOKS)
@@ -331,6 +336,7 @@ export async function getSettingsShell(tenant: TenantContext & { userId?: string
       overrides: roleModuleOverrides
     }),
     assistantProvider: parseAssistantProviderSettings(assistantCredential as IntegrationCredentialRecord | null),
+    teamship: parseTeamshipSettings(teamshipCredential as IntegrationCredentialRecord | null),
     microsoftGraph: parseMicrosoftGraphSettings(microsoftGraphCredential as IntegrationCredentialRecord | null),
     microsoftGraphUserConnection: parseMicrosoftGraphDelegatedConnection(
       microsoftAccount as MicrosoftAccountRecord | null

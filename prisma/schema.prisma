@@ -27,6 +27,8 @@ enum ModuleKey {
   QUICKBOOKS_POSTING
   CUSTOMER_CASHFLOW
   WEBSITE_INBOUND
+  WEBSITE_GROWTH
+  OCEAN_FREIGHT_PRICING
 }
 
 enum WebsiteInboundStatus {
@@ -36,6 +38,66 @@ enum WebsiteInboundStatus {
   QUALIFIED
   CONVERTED
   CLOSED
+}
+
+enum WebsiteGrowthOpportunityStatus {
+  NEW
+  REVIEWING
+  APPROVED
+  IN_PROGRESS
+  PUBLISHED
+  MONITORING
+  REJECTED
+}
+
+enum WebsiteGrowthAction {
+  CREATE_PAGE
+  IMPROVE_EXISTING_PAGE
+  ADD_SECTION
+  ADD_INTERNAL_LINKS
+  CREATE_RESOURCE_ARTICLE
+  UPDATE_REDIRECT
+  IGNORE
+  MONITOR
+}
+
+enum WebsiteGrowthDataSource {
+  GOOGLE_SEARCH_CONSOLE_API
+  GOOGLE_SEARCH_CONSOLE_UPLOAD
+  GA4_API
+  GA4_UPLOAD
+  SEMRUSH_UPLOAD
+  INTERNAL_APP_DATA
+  MANUAL
+}
+
+enum WebsiteGrowthImportStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  ERROR
+}
+
+enum WebsiteGrowthContentDraftStatus {
+  DRAFT
+  APPROVED
+  REJECTED
+  BUILT
+  PUBLISHED
+}
+
+enum WebsiteGrowthContentDraftSource {
+  AI
+  TEMPLATE
+}
+
+enum CreditCheckStatus {
+  NEW
+  IN_REVIEW
+  REFERENCES_CONTACTED
+  APPROVED
+  DECLINED
+  MORE_INFO_NEEDED
 }
 
 enum IntegrationProvider {
@@ -48,6 +110,7 @@ enum IntegrationProvider {
   SEVEN_L
   TMS
   WMS
+  TEAMSHIP
   OPENCLAW
   OPENAI
   LOCAL_LLM
@@ -157,6 +220,37 @@ enum ContactOutreachDraftSource {
   MANUAL
   TEMPLATE
   UNKNOWN
+}
+
+enum OceanRateSourceType {
+  EMAIL_BODY
+  ATTACHMENT
+  MANUAL_ENTRY
+  AGENT_PORTAL
+}
+
+enum OceanRateStatus {
+  ACTIVE
+  EXPIRED
+  INACTIVE
+  SUPERSEDED
+}
+
+enum OceanExtractionStatus {
+  NEW
+  NEEDS_REVIEW
+  APPROVED
+  REJECTED
+  ERROR
+}
+
+enum OceanEquipmentType {
+  TWENTY_FT
+  FORTY_FT
+  FORTY_HQ
+  FORTY_FIVE_HQ
+  LCL
+  OTHER
 }
 
 enum AssistantMessageRole {
@@ -304,6 +398,26 @@ enum CashflowBusinessLine {
   OTHER
 }
 
+enum InvoiceAutomationType {
+  CUSTOMER
+  VENDOR
+}
+
+enum InvoiceAutomationStatus {
+  OPERATIONS_REVIEW
+  ACCOUNTING_REVIEW
+  APPROVED_FOR_POSTING
+  POSTED
+  POSTING_ERROR
+  REJECTED
+}
+
+enum InvoiceAutomationBatchStatus {
+  OPERATIONS_REVIEW
+  ACCOUNTING_REVIEW
+  COMPLETED
+}
+
 model Tenant {
   id        String   @id @default(cuid())
   name      String
@@ -311,44 +425,74 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships                 Membership[]
-  moduleAccess                TenantModuleAccess[]
-  rolePolicies                TenantRolePolicy[]
-  roleModuleAccess            TenantRoleModuleAccess[]
-  integrationCredentials      IntegrationCredential[]
-  auditLogs                   AuditLog[]
-  jobRuns                     AutomationJobRun[]
-  companies                   Company[]
-  importRecords               TradeMiningImportRecord[]
-  searchProfiles              TradeMiningSearchProfile[]
-  tradeMiningScoringConfig    TradeMiningScoringConfig?
-  contacts                    Contact[]
-  leads                       Lead[]
-  contactOutreachDrafts       ContactOutreachDraft[]
-  apolloCompanyMatches        ApolloCompanyMatch[]
-  ltlBatchQuoteLanes          LtlBatchQuoteLane[]
-  assistantThreads            AssistantChatThread[]
-  assistantMessages           AssistantChatMessage[]
-  websiteInboundSubmissions   WebsiteInboundSubmission[]
-  assistantRuns               AssistantRun[]
-  assistantRetrievedSources   AssistantRetrievedSource[]
-  assistantKnowledgeDocuments AssistantKnowledgeDocument[]
-  assistantKnowledgeChunks    AssistantKnowledgeChunk[]
-  assistantMemories           AssistantMemory[]
-  assistantMailboxSyncStates  AssistantMailboxSyncState[]
-  assistantAutomations        AssistantAutomation[]
-  assistantAutomationRuns     AssistantAutomationRun[]
-  shipmentDocumentRuns        ShipmentDocumentRun[]
-  cashflowCustomers           CashflowCustomer[]
-  cashflowCustomerAliases     CashflowCustomerAlias[]
-  cashflowFiles               CashflowFile[]
-  cashflowCustomerInvoices    CashflowCustomerInvoice[]
-  cashflowVendorBills         CashflowVendorBill[]
-  cashflowSnapshots           CashflowCustomerSnapshot[]
-  cashflowAlerts              CashflowAlert[]
-  cashflowFollowUps           CashflowFollowUp[]
-  cashflowAccountingLines     CashflowAccountingLine[]
-  cashflowSettings            CashflowSettings?
+  memberships                         Membership[]
+  moduleAccess                        TenantModuleAccess[]
+  rolePolicies                        TenantRolePolicy[]
+  roleModuleAccess                    TenantRoleModuleAccess[]
+  integrationCredentials              IntegrationCredential[]
+  auditLogs                           AuditLog[]
+  jobRuns                             AutomationJobRun[]
+  companies                           Company[]
+  importRecords                       TradeMiningImportRecord[]
+  searchProfiles                      TradeMiningSearchProfile[]
+  tradeMiningScoringConfig            TradeMiningScoringConfig?
+  contacts                            Contact[]
+  leads                               Lead[]
+  contactOutreachDrafts               ContactOutreachDraft[]
+  apolloCompanyMatches                ApolloCompanyMatch[]
+  ltlBatchQuoteLanes                  LtlBatchQuoteLane[]
+  assistantThreads                    AssistantChatThread[]
+  assistantMessages                   AssistantChatMessage[]
+  websiteInboundSubmissions           WebsiteInboundSubmission[]
+  websiteGrowthOpportunities          WebsiteGrowthOpportunity[]
+  websiteGrowthContentDrafts          WebsiteGrowthContentDraft[]
+  websiteGrowthDataImports            WebsiteGrowthDataImport[]
+  websiteGrowthMetrics                WebsiteGrowthMetric[]
+  creditChecks                        CreditCheck[]
+  assistantRuns                       AssistantRun[]
+  assistantRetrievedSources           AssistantRetrievedSource[]
+  assistantKnowledgeDocuments         AssistantKnowledgeDocument[]
+  assistantKnowledgeChunks            AssistantKnowledgeChunk[]
+  assistantMemories                   AssistantMemory[]
+  assistantMailboxSyncStates          AssistantMailboxSyncState[]
+  assistantAutomations                AssistantAutomation[]
+  assistantAutomationRuns             AssistantAutomationRun[]
+  shipmentDocumentRuns                ShipmentDocumentRun[]
+  shipmentCarrierManifestRuns         ShipmentCarrierManifestRun[]
+  teamshipReviewRuns                  TeamshipReviewRun[]
+  teamshipReviewOrders                TeamshipReviewOrder[]
+  teamshipDailySyncRuns               TeamshipDailySyncRun[]
+  teamshipSyncedOrders                TeamshipSyncedOrder[]
+  teamshipUpdateJobs                  TeamshipUpdateJob[]
+  teamshipUpdateOrders                TeamshipUpdateOrder[]
+  garlandProductDimensionObservations GarlandProductDimensionObservation[]
+  garlandSourceEmails                 GarlandSourceEmail[]
+  garlandSourceAttachments            GarlandSourceAttachment[]
+  garlandEmailSyncRuns                GarlandEmailSyncRun[]
+  cashflowCustomers                   CashflowCustomer[]
+  cashflowCustomerAliases             CashflowCustomerAlias[]
+  cashflowFiles                       CashflowFile[]
+  cashflowCustomerInvoices            CashflowCustomerInvoice[]
+  cashflowVendorBills                 CashflowVendorBill[]
+  cashflowSnapshots                   CashflowCustomerSnapshot[]
+  cashflowAlerts                      CashflowAlert[]
+  cashflowFollowUps                   CashflowFollowUp[]
+  cashflowAccountingLines             CashflowAccountingLine[]
+  cashflowSettings                    CashflowSettings?
+  oceanFreightAgents                  OceanFreightAgent[]
+  oceanFreightAgentBranches           OceanFreightAgentBranch[]
+  oceanFreightAgentContacts           OceanFreightAgentContact[]
+  oceanFreightSourceEmails            OceanFreightSourceEmail[]
+  oceanFreightSourceAttachments       OceanFreightSourceAttachment[]
+  oceanFreightRateCandidates          OceanFreightRateCandidate[]
+  oceanFreightRates                   OceanFreightRate[]
+  invoiceAutomationDocuments          InvoiceAutomationDocument[]
+  invoiceAutomationBatches            InvoiceAutomationBatch[]
+  invoiceAutomationInvoices           InvoiceAutomationInvoice[]
+  invoiceAutomationQuickBooksEntities InvoiceAutomationQuickBooksEntity[]
+  invoiceAutomationQuickBooksTransactions InvoiceAutomationQuickBooksTransaction[]
+  invoiceAutomationEntityAliases      InvoiceAutomationEntityAlias[]
+  invoiceAutomationCorrectionMemories InvoiceAutomationCorrectionMemory[]
 }
 
 model User {
@@ -363,14 +507,18 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  memberships             Membership[]
-  accounts                Account[]
-  sessions                Session[]
-  assistantThreads        AssistantChatThread[]
-  assistantRuns           AssistantRun[]
-  assistantAutomations    AssistantAutomation[]
-  assistantAutomationRuns AssistantAutomationRun[]
-  shipmentDocumentRuns    ShipmentDocumentRun[]
+  memberships                 Membership[]
+  accounts                    Account[]
+  sessions                    Session[]
+  assistantThreads            AssistantChatThread[]
+  assistantRuns               AssistantRun[]
+  assistantAutomations        AssistantAutomation[]
+  assistantAutomationRuns     AssistantAutomationRun[]
+  shipmentDocumentRuns        ShipmentDocumentRun[]
+  shipmentCarrierManifestRuns ShipmentCarrierManifestRun[]
+  teamshipReviewRuns          TeamshipReviewRun[]
+  teamshipUpdateJobsCreated   TeamshipUpdateJob[]          @relation("TeamshipUpdateJobCreatedBy")
+  teamshipUpdateJobsApproved  TeamshipUpdateJob[]          @relation("TeamshipUpdateJobApprovedBy")
 }
 
 // Auth.js (NextAuth) adapter models. Account links an external identity
@@ -511,10 +659,155 @@ model WebsiteInboundSubmission {
   @@index([tenantId, formType])
 }
 
+model WebsiteGrowthOpportunity {
+  id                 String                         @id @default(cuid())
+  tenantId           String
+  createdAt          DateTime                       @default(now())
+  updatedAt          DateTime                       @updatedAt
+  status             WebsiteGrowthOpportunityStatus @default(NEW)
+  action             WebsiteGrowthAction
+  topic              String
+  primaryKeyword     String?
+  targetPage         String?
+  sourcePage         String?
+  score              Int                            @default(0)
+  confidence         String?
+  reason             String
+  recommendation     String
+  supportingKeywords Json?
+  evidence           Json?
+  notes              String?
+  approvedByUserId   String?
+  publishedAt        DateTime?
+
+  tenant        Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contentDrafts WebsiteGrowthContentDraft[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, action])
+  @@index([tenantId, score])
+  @@index([tenantId, updatedAt])
+}
+
+model WebsiteGrowthContentDraft {
+  id               String                           @id @default(cuid())
+  tenantId         String
+  opportunityId    String
+  createdAt        DateTime                         @default(now())
+  updatedAt        DateTime                         @updatedAt
+  status           WebsiteGrowthContentDraftStatus  @default(DRAFT)
+  source           WebsiteGrowthContentDraftSource  @default(TEMPLATE)
+  title            String
+  summary          String
+  contentType      String
+  proposedPath     String?
+  targetPage       String?
+  draftJson        Json
+  rawResponse      Json?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  builtUrl         String?
+  pullRequestUrl   String?
+  publishedAt      DateTime?
+
+  tenant      Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  opportunity WebsiteGrowthOpportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+  @@index([tenantId, opportunityId])
+  @@index([tenantId, createdAt])
+}
+
+model WebsiteGrowthDataImport {
+  id           String                    @id @default(cuid())
+  tenantId     String
+  createdAt    DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+  source       WebsiteGrowthDataSource
+  status       WebsiteGrowthImportStatus @default(PENDING)
+  fileName     String?
+  rowCount     Int                       @default(0)
+  summary      Json?
+  errorMessage String?
+  startedAt    DateTime?
+  completedAt  DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, source])
+  @@index([tenantId, status])
+  @@index([tenantId, createdAt])
+}
+
+model WebsiteGrowthMetric {
+  id              String                  @id @default(cuid())
+  tenantId        String
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  source          WebsiteGrowthDataSource
+  page            String?
+  query           String?
+  country         String?
+  device          String?
+  dateRangeStart  DateTime?
+  dateRangeEnd    DateTime?
+  clicks          Int                     @default(0)
+  impressions     Int                     @default(0)
+  ctr             Float?
+  position        Float?
+  sessions        Int?
+  engagedSessions Int?
+  engagementRate  Float?
+  eventCount      Int?
+  leadCount       Int                     @default(0)
+  raw             Json?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, source])
+  @@index([tenantId, page])
+  @@index([tenantId, query])
+  @@index([tenantId, dateRangeStart])
+}
+
+model CreditCheck {
+  id                   String            @id @default(cuid())
+  tenantId             String
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  status               CreditCheckStatus @default(NEW)
+  source               String?
+  pageUrl              String?
+  legalCompanyName     String?
+  operatingName        String?
+  company              String?
+  mainPhone            String?
+  primaryContactName   String?
+  primaryContactEmail  String?
+  accountsPayableEmail String?
+  requestedCreditLimit String?
+  approvedCreditLimit  String?
+  services             Json?
+  tradeReferences      Json?
+  fields               Json
+  referencesContacted  Boolean           @default(false)
+  referenceNotes       String?
+  internalNotes        String?
+  reviewedByUserId     String?
+  approvedByUserId     String?
+  approvedAt           DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, status])
+  @@index([tenantId, company])
+}
+
 model ShipmentDocumentRun {
-  id                       String   @id @default(cuid())
+  id                       String    @id @default(cuid())
   tenantId                 String
-  workflowKey              String   @default("GARLAND_CANADA")
+  workflowKey              String    @default("GARLAND_CANADA")
   documentLabel            String
   shipmentDate             DateTime
   recipientEmail           String?
@@ -524,23 +817,375 @@ model ShipmentDocumentRun {
   outputPickTicketFileName String
   bolPageCount             Int
   pickTicketPageCount      Int
-  bolAiFallbackPageCount   Int      @default(0)
-  pickAiFallbackPageCount  Int      @default(0)
+  bolAiFallbackPageCount   Int       @default(0)
+  pickAiFallbackPageCount  Int       @default(0)
   bolPsNumbers             Json
   pickPsNumbers            Json
   searchText               String
   bolPdfBytes              Bytes
   pickTicketPdfBytes       Bytes
+  bolPdfUploadComplete     Boolean   @default(true)
+  pickPdfUploadComplete    Boolean   @default(true)
   createdByUserId          String?
-  createdAt                DateTime @default(now())
-  updatedAt                DateTime @updatedAt
+  deletedAt                DateTime?
+  deletedByUserId          String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
-  tenant     Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  createdBy  User?  @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy User?  @relation(fields: [createdByUserId], references: [id], onDelete: NoAction)
+
+  @@index([tenantId, workflowKey, shipmentDate])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, deletedAt])
+}
+
+model ShipmentCarrierManifestRun {
+  id                     String    @id @default(cuid())
+  tenantId               String
+  workflowKey            String    @default("GARLAND_CARRIER_MANIFEST")
+  documentLabel          String
+  shipmentDate           DateTime
+  sourceBolFileName      String?
+  carrierCounts          Json
+  manifestRows           Json
+  midlandFileName        String?
+  midlandWorkbookBytes   Bytes?
+  speedyFileName         String?
+  speedyWorkbookBytes    Bytes?
+  suretrackFileName      String?
+  suretrackWorkbookBytes Bytes?
+  signedCopyFileName     String?
+  signedCopyContentType  String?
+  signedCopyBytes        Bytes?
+  signedCopyUploadedAt   DateTime?
+  createdByUserId        String?
+  deletedAt              DateTime?
+  deletedByUserId        String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy User?  @relation(fields: [createdByUserId], references: [id], onDelete: NoAction)
+
+  @@index([tenantId, workflowKey, shipmentDate])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, deletedAt])
+}
+
+model TeamshipReviewRun {
+  id                    String    @id @default(cuid())
+  tenantId              String
+  workflowKey           String    @default("GARLAND_TEAMSHIP_REVIEW")
+  documentLabel         String
+  shipmentDate          DateTime
+  sourcePdfFileName     String?
+  pdfOrderCount         Int
+  teamshipMatchedCount  Int
+  passedCount           Int
+  failedCount           Int
+  missingTeamshipCount  Int
+  pendingTeamshipCount  Int
+  noPdfCount            Int       @default(0)
+  alertDigestOrderCount Int       @default(0)
+  summary               Json
+  extractedOrders       Json
+  reviewResponse        Json
+  searchText            String
+  createdByUserId       String?
+  deletedAt             DateTime?
+  deletedByUserId       String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  tenant    Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy User?                 @relation(fields: [createdByUserId], references: [id], onDelete: NoAction)
+  orders    TeamshipReviewOrder[]
 
   @@index([tenantId, workflowKey, shipmentDate])
   @@index([tenantId, createdAt])
   @@index([tenantId, searchText])
+  @@index([tenantId, deletedAt])
+}
+
+model TeamshipReviewOrder {
+  id                     String    @id @default(cuid())
+  tenantId               String
+  runId                  String
+  psNumber               String
+  srNumber               String
+  status                 String
+  teamshipOrderId        String?
+  teamshipUrl            String?
+  carrier                String?
+  shipToName             String?
+  city                   String?
+  state                  String?
+  shipToPo               String?
+  pageNumbers            Json
+  pdfOrder               Json
+  review                 Json
+  mismatchCount          Int       @default(0)
+  workflowStatus         String    @default("NEEDS_SETUP")
+  bolPrintedAt           DateTime?
+  bolPrintedByUserId     String?
+  orderCompletedAt       DateTime?
+  orderCompletedByUserId String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  tenant Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  run    TeamshipReviewRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, runId])
+  @@index([tenantId, srNumber])
+  @@index([tenantId, psNumber])
+  @@index([tenantId, status])
+  @@index([tenantId, workflowStatus])
+  @@index([tenantId, orderCompletedAt])
+}
+
+model TeamshipDailySyncRun {
+  id              String    @id @default(cuid())
+  tenantId        String
+  shipmentDate    DateTime
+  triggerSource   String
+  status          String
+  fetchedCount    Int       @default(0)
+  insertedCount   Int       @default(0)
+  updatedCount    Int       @default(0)
+  skippedCount    Int       @default(0)
+  errorMessage    String?
+  createdByUserId String?
+  startedAt       DateTime  @default(now())
+  finishedAt      DateTime?
+  createdAt       DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, shipmentDate])
+  @@index([tenantId, triggerSource, startedAt])
+  @@index([tenantId, status])
+}
+
+model TeamshipSyncedOrder {
+  id              String   @id @default(cuid())
+  tenantId        String
+  syncKey         String
+  shipmentDate    DateTime
+  srNumber        String?
+  teamshipOrderId String?
+  teamshipUrl     String?
+  carrier         String?
+  shipToName      String?
+  city            String?
+  state           String?
+  rawOrder        Json
+  firstSyncedAt   DateTime @default(now())
+  lastSyncedAt    DateTime @default(now())
+  syncCount       Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, syncKey])
+  @@index([tenantId, shipmentDate])
+  @@index([tenantId, srNumber])
+  @@index([tenantId, teamshipOrderId])
+  @@index([tenantId, lastSyncedAt])
+}
+
+model GarlandEmailSyncRun {
+  id                       String    @id @default(cuid())
+  tenantId                 String
+  mailboxAddress           String
+  triggerSource            String
+  status                   String
+  messageCount             Int       @default(0)
+  candidateMessageCount    Int       @default(0)
+  storedEmailCount         Int       @default(0)
+  createdEmailCount        Int       @default(0)
+  updatedEmailCount        Int       @default(0)
+  attachmentCount          Int       @default(0)
+  storedAttachmentCount    Int       @default(0)
+  duplicateAttachmentCount Int       @default(0)
+  errorMessage             String?
+  startedAt                DateTime  @default(now())
+  finishedAt               DateTime?
+  createdByUserId          String?
+  createdAt                DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, mailboxAddress, startedAt])
+  @@index([tenantId, status])
+}
+
+model GarlandSourceEmail {
+  id                   String    @id @default(cuid())
+  tenantId             String
+  mailboxAddress       String
+  graphMessageId       String
+  internetMessageId    String?
+  conversationId       String?
+  subject              String
+  fromName             String?
+  fromAddress          String?
+  toRecipients         Json?
+  ccRecipients         Json?
+  receivedAt           DateTime
+  webLink              String?
+  bodyPreview          String?
+  normalizedBodyText   String?
+  bodyContentHash      String?
+  classification       String    @default("UNCLASSIFIED")
+  classificationReason String?
+  candidateScore       Int       @default(0)
+  hasPdfAttachment     Boolean   @default(false)
+  expectedOrderCount   Int?
+  expectedPageCount    Int?
+  expectedPsStart      String?
+  expectedPsEnd        String?
+  processedAt          DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  tenant      Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  attachments GarlandSourceAttachment[]
+
+  @@unique([tenantId, mailboxAddress, graphMessageId])
+  @@unique([tenantId, id])
+  @@index([tenantId, receivedAt])
+  @@index([tenantId, fromAddress])
+  @@index([tenantId, classification])
+  @@index([tenantId, conversationId])
+}
+
+model GarlandSourceAttachment {
+  id                      String   @id @default(cuid())
+  tenantId                String
+  sourceEmailId           String
+  graphAttachmentId       String
+  fileName                String
+  contentType             String?
+  sizeBytes               Int?
+  contentHash             String?
+  pageCount               Int?
+  extractedPsNumbers      Json?
+  extractedSrNumbers      Json?
+  extractionFingerprint   String?
+  intakeStatus            String   @default("METADATA_ONLY")
+  duplicateOfAttachmentId String?
+  storageRef              String?
+  parseError              String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sourceEmail GarlandSourceEmail @relation(fields: [tenantId, sourceEmailId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, sourceEmailId, graphAttachmentId])
+  @@unique([tenantId, id])
+  @@index([tenantId, sourceEmailId])
+  @@index([tenantId, contentHash])
+  @@index([tenantId, intakeStatus])
+}
+
+model GarlandProductDimensionObservation {
+  id                    String   @id @default(cuid())
+  tenantId              String
+  observationKey        String
+  sku                   String
+  source                String   @default("TEAMSHIP_PALLET")
+  sourceTeamshipOrderId String?
+  sourceSrNumber        String?
+  carrier               String?
+  commodity             String?
+  quantity              Float?
+  lengthIn              Float
+  widthIn               Float
+  heightIn              Float
+  weightLb              Float
+  weightUnit            String?  @default("lbs")
+  observedAt            DateTime @default(now())
+  createdAt             DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, observationKey])
+  @@index([tenantId, sku])
+  @@index([tenantId, sourceSrNumber])
+  @@index([tenantId, observedAt])
+}
+
+model TeamshipUpdateJob {
+  id                   String    @id @default(cuid())
+  tenantId             String
+  workflowKey          String    @default("GARLAND_TEAMSHIP_PHASE2_UPDATE")
+  documentLabel        String
+  shipmentDate         DateTime
+  sourcePdfFileName    String?
+  status               String    @default("DRAFT")
+  agentMode            String    @default("DRY_RUN")
+  dryRun               Boolean   @default(true)
+  selectedSrNumbers    Json
+  summary              Json
+  sourceReviewResponse Json
+  sourcePdfOrders      Json
+  plan                 Json
+  searchText           String
+  errorMessage         String?
+  agentId              String?
+  agentClaimedAt       DateTime?
+  agentStartedAt       DateTime?
+  agentFinishedAt      DateTime?
+  approvedByUserId     String?
+  approvedAt           DateTime?
+  createdByUserId      String?
+  lastVerificationAt   DateTime?
+  verificationResponse Json?
+  agentResult          Json?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  tenant     Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy  User?                 @relation("TeamshipUpdateJobCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction)
+  approvedBy User?                 @relation("TeamshipUpdateJobApprovedBy", fields: [approvedByUserId], references: [id], onDelete: NoAction)
+  orders     TeamshipUpdateOrder[]
+
+  @@index([tenantId, workflowKey, shipmentDate])
+  @@index([tenantId, status])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, searchText])
+}
+
+model TeamshipUpdateOrder {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  jobId               String
+  psNumber            String
+  srNumber            String
+  teamshipOrderId     String?
+  teamshipUrl         String?
+  status              String   @default("PENDING")
+  sourceReviewStatus  String
+  plannedFieldUpdates Json
+  plannedPalletRows   Json
+  validationIssues    Json
+  agentResult         Json?
+  verificationReview  Json?
+  errorMessage        String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  tenant Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  job    TeamshipUpdateJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, jobId])
+  @@index([tenantId, srNumber])
+  @@index([tenantId, psNumber])
+  @@index([tenantId, status])
 }
 
 model IntegrationCredential {
@@ -1279,6 +1924,223 @@ model CashflowSettings {
   @@index([tenantId])
 }
 
+model InvoiceAutomationDocument {
+  id               String   @id @default(cuid())
+  tenantId         String
+  fileName         String
+  contentType      String
+  sizeBytes        Int
+  sha256           String
+  extractedText    String?
+  pdfBytes         Bytes
+  uploadedByUserId String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenant   Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoices InvoiceAutomationInvoice[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, sha256])
+  @@index([tenantId, createdAt])
+}
+
+model InvoiceAutomationBatch {
+  id                   String                       @id @default(cuid())
+  tenantId             String
+  batchNumber          String
+  invoiceType          InvoiceAutomationType
+  status               InvoiceAutomationBatchStatus @default(OPERATIONS_REVIEW)
+  uploadedByUserId     String?
+  sentToAccountingById String?
+  sentToAccountingAt   DateTime?
+  notes                String?
+  createdAt            DateTime                     @default(now())
+  updatedAt            DateTime                     @updatedAt
+
+  tenant   Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoices InvoiceAutomationInvoice[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, batchNumber])
+  @@index([tenantId, invoiceType, createdAt])
+  @@index([tenantId, status])
+}
+
+model InvoiceAutomationInvoice {
+  id                           String                  @id @default(cuid())
+  tenantId                     String
+  batchId                      String
+  documentId                   String
+  invoiceType                  InvoiceAutomationType
+  status                       InvoiceAutomationStatus @default(OPERATIONS_REVIEW)
+  fileName                     String
+  shipmentFileNumber           String?
+  shipmentType                 String?
+  businessLine                 CashflowBusinessLine    @default(OTHER)
+  entityNameRaw                String?
+  quickBooksEntityId           String?
+  quickBooksEntityDisplayName  String?
+  quickBooksMatchConfidence    Int?
+  invoiceNumber                String?
+  vendorInvoiceDuplicateKey    String?
+  invoiceDate                  DateTime?
+  dueDate                      DateTime?
+  currency                     String?
+  subtotalAmount               Decimal?                @db.Decimal(14, 2)
+  taxAmount                    Decimal?                @db.Decimal(14, 2)
+  totalAmount                  Decimal?                @db.Decimal(14, 2)
+  productOrAccountName         String?
+  issueCodes                   Json?
+  extractionJson               Json?
+  reviewNotes                  String?
+  uploadedByUserId             String?
+  sentToAccountingById         String?
+  sentToAccountingAt           DateTime?
+  approvedByUserId             String?
+  approvedAt                   DateTime?
+  postedByUserId               String?
+  postedAt                     DateTime?
+  quickBooksTxnId              String?
+  quickBooksTxnNumber          String?
+  quickBooksExchangeRate       Decimal?                @db.Decimal(18, 8)
+  quickBooksHomeCurrency       String?
+  quickBooksSubtotalHomeAmount Decimal?                @db.Decimal(14, 2)
+  quickBooksTaxHomeAmount      Decimal?                @db.Decimal(14, 2)
+  quickBooksTotalHomeAmount    Decimal?                @db.Decimal(14, 2)
+  quickBooksFxSource           String?
+  quickBooksFxCapturedAt       DateTime?
+  quickBooksPostingError       String?
+  createdAt                    DateTime                @default(now())
+  updatedAt                    DateTime                @updatedAt
+
+  tenant   Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  batch    InvoiceAutomationBatch    @relation(fields: [tenantId, batchId], references: [tenantId, id], onDelete: Cascade)
+  document InvoiceAutomationDocument @relation(fields: [tenantId, documentId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, invoiceType, vendorInvoiceDuplicateKey])
+  @@index([tenantId, invoiceType, status])
+  @@index([tenantId, batchId])
+  @@index([tenantId, documentId])
+  @@index([tenantId, shipmentFileNumber])
+  @@index([tenantId, invoiceNumber])
+  @@index([tenantId, entityNameRaw])
+  @@index([tenantId, createdAt])
+}
+
+model InvoiceAutomationQuickBooksEntity {
+  id             String                @id @default(cuid())
+  tenantId       String
+  entityType     InvoiceAutomationType
+  quickBooksId   String
+  displayName    String
+  normalizedName String
+  currency       String?
+  legalEntity    String?
+  realmId        String
+  active         Boolean               @default(true)
+  rawJson        Json?
+  syncedAt       DateTime              @default(now())
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, entityType, realmId, quickBooksId])
+  @@index([tenantId, entityType, normalizedName])
+  @@index([tenantId, entityType, currency])
+  @@index([tenantId, realmId])
+  @@index([tenantId, active])
+}
+
+model InvoiceAutomationQuickBooksTransaction {
+  id                           String                @id @default(cuid())
+  tenantId                     String
+  invoiceAutomationInvoiceId   String?
+  realmId                      String
+  invoiceType                  InvoiceAutomationType
+  quickBooksTxnId              String
+  quickBooksTxnNumber          String?
+  shipmentFileNumber           String?
+  shipmentType                 String?
+  entityName                   String?
+  quickBooksEntityId           String?
+  currency                     String?
+  transactionDate              DateTime?
+  subtotalAmount               Decimal?              @db.Decimal(14, 2)
+  taxAmount                    Decimal?              @db.Decimal(14, 2)
+  totalAmount                  Decimal?              @db.Decimal(14, 2)
+  quickBooksExchangeRate       Decimal?              @db.Decimal(18, 8)
+  quickBooksHomeCurrency       String?
+  quickBooksSubtotalHomeAmount Decimal?              @db.Decimal(14, 2)
+  quickBooksTaxHomeAmount      Decimal?              @db.Decimal(14, 2)
+  quickBooksTotalHomeAmount    Decimal?              @db.Decimal(14, 2)
+  source                       String                @default("POSTED_TRANSACTION_READBACK")
+  observedAt                   DateTime              @default(now())
+  createdAt                    DateTime              @default(now())
+  updatedAt                    DateTime              @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade, map: "iaqbt_tenant_fkey")
+
+  @@unique([tenantId, realmId, invoiceType, quickBooksTxnId], map: "iaqbt_tenant_realm_type_txn_key")
+  @@index([tenantId, shipmentFileNumber], map: "iaqbt_tenant_file_idx")
+  @@index([tenantId, invoiceAutomationInvoiceId], map: "iaqbt_tenant_invoice_idx")
+  @@index([tenantId, invoiceType], map: "iaqbt_tenant_type_idx")
+  @@index([tenantId, observedAt], map: "iaqbt_tenant_observed_idx")
+}
+
+model InvoiceAutomationEntityAlias {
+  id                          String                @id @default(cuid())
+  tenantId                    String
+  invoiceType                 InvoiceAutomationType
+  aliasRawName                String
+  normalizedAlias             String
+  quickBooksEntityId          String
+  quickBooksEntityDisplayName String
+  currency                    String?
+  createdByUserId             String?
+  lastUsedAt                  DateTime              @default(now())
+  usageCount                  Int                   @default(1)
+  createdAt                   DateTime              @default(now())
+  updatedAt                   DateTime              @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, invoiceType, normalizedAlias])
+  @@index([tenantId, invoiceType])
+  @@index([tenantId, quickBooksEntityId])
+  @@index([tenantId, lastUsedAt])
+}
+
+model InvoiceAutomationCorrectionMemory {
+  id                          String                @id @default(cuid())
+  memoryKey                   String                @unique
+  tenantId                    String
+  invoiceType                 InvoiceAutomationType
+  fieldName                   String
+  normalizedEntityName        String?
+  quickBooksEntityId          String?
+  quickBooksEntityDisplayName String?
+  shipmentPrefix              String?
+  currency                    String?
+  learnedValue                String
+  sourceValue                 String?
+  createdByUserId             String?
+  lastUsedAt                  DateTime              @default(now())
+  usageCount                  Int                   @default(1)
+  createdAt                   DateTime              @default(now())
+  updatedAt                   DateTime              @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, invoiceType])
+  @@index([tenantId, fieldName])
+  @@index([tenantId, quickBooksEntityId])
+  @@index([tenantId, normalizedEntityName])
+  @@index([tenantId, lastUsedAt])
+}
+
 model AssistantChatThread {
   id            String    @id @default(cuid())
   tenantId      String
@@ -1290,13 +2152,271 @@ model AssistantChatThread {
   lastMessageAt DateTime?
 
   tenant   Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user     User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user     User?                  @relation(fields: [userId], references: [id], onDelete: NoAction)
   messages AssistantChatMessage[]
   runs     AssistantRun[]
 
   @@unique([tenantId, id])
   @@index([tenantId, userId, updatedAt])
   @@index([tenantId, status, updatedAt])
+}
+
+model OceanFreightAgent {
+  id                  String    @id @default(cuid())
+  tenantId            String
+  name                String
+  normalizedName      String
+  website             String?
+  primaryEmailDomain  String?
+  primaryCountry      String?
+  countriesServed     Json?
+  portsServed         Json?
+  lanesServed         Json?
+  internalRating      Int?
+  reliabilityNotes    String?
+  serviceNotes        String?
+  internalNotes       String?
+  lastRateReceivedAt  DateTime?
+  activeRateCount     Int       @default(0)
+  historicalRateCount Int       @default(0)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  tenant     Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branches   OceanFreightAgentBranch[]
+  contacts   OceanFreightAgentContact[]
+  candidates OceanFreightRateCandidate[]
+  rates      OceanFreightRate[]
+
+  @@unique([tenantId, normalizedName])
+  @@unique([tenantId, id])
+  @@index([tenantId, primaryCountry])
+  @@index([tenantId, internalRating])
+  @@index([tenantId, lastRateReceivedAt])
+}
+
+model OceanFreightAgentBranch {
+  id        String   @id @default(cuid())
+  tenantId  String
+  agentId   String
+  name      String
+  country   String
+  region    String?
+  city      String?
+  port      String?
+  address   String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  agent  OceanFreightAgent @relation(fields: [tenantId, agentId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, agentId])
+  @@index([tenantId, country])
+  @@index([tenantId, city])
+  @@index([tenantId, port])
+}
+
+model OceanFreightAgentContact {
+  id                 String    @id @default(cuid())
+  tenantId           String
+  agentId            String
+  fullName           String
+  email              String
+  phone              String?
+  title              String?
+  sourceEmailAddress String?
+  lastObservedAt     DateTime?
+  notes              String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  tenant     Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  agent      OceanFreightAgent           @relation(fields: [tenantId, agentId], references: [tenantId, id], onDelete: Cascade)
+  candidates OceanFreightRateCandidate[]
+  rates      OceanFreightRate[]
+
+  @@unique([tenantId, agentId, email])
+  @@unique([tenantId, id])
+  @@index([tenantId, email])
+  @@index([tenantId, agentId])
+}
+
+model OceanFreightSourceEmail {
+  id                 String    @id @default(cuid())
+  tenantId           String
+  mailboxAddress     String
+  graphMessageId     String
+  internetMessageId  String?
+  conversationId     String?
+  subject            String
+  fromName           String?
+  fromAddress        String?
+  toRecipients       Json?
+  ccRecipients       Json?
+  receivedAt         DateTime
+  webLink            String?
+  bodyPreview        String?
+  normalizedBodyText String?
+  bodyContentHash    String?
+  rateDetected       Boolean   @default(false)
+  detectionReason    String?
+  processedAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  tenant      Tenant                         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  attachments OceanFreightSourceAttachment[]
+  candidates  OceanFreightRateCandidate[]
+  rates       OceanFreightRate[]
+
+  @@unique([tenantId, mailboxAddress, graphMessageId])
+  @@unique([tenantId, id])
+  @@index([tenantId, receivedAt])
+  @@index([tenantId, fromAddress])
+  @@index([tenantId, rateDetected])
+}
+
+model OceanFreightSourceAttachment {
+  id                String   @id @default(cuid())
+  tenantId          String
+  sourceEmailId     String
+  graphAttachmentId String
+  fileName          String
+  contentType       String?
+  sizeBytes         Int?
+  contentHash       String?
+  storageRef        String?
+  extractedText     String?
+  extractedRowsJson Json?
+  parseStatus       String?
+  parseError        String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  tenant      Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sourceEmail OceanFreightSourceEmail     @relation(fields: [tenantId, sourceEmailId], references: [tenantId, id], onDelete: Cascade)
+  candidates  OceanFreightRateCandidate[]
+  rates       OceanFreightRate[]
+
+  @@unique([tenantId, sourceEmailId, graphAttachmentId])
+  @@unique([tenantId, id])
+  @@index([tenantId, sourceEmailId])
+  @@index([tenantId, contentHash])
+}
+
+model OceanFreightRateCandidate {
+  id                      String                @id @default(cuid())
+  tenantId                String
+  sourceType              OceanRateSourceType
+  sourceEmailId           String?
+  sourceAttachmentId      String?
+  agentId                 String?
+  agentContactId          String?
+  status                  OceanExtractionStatus @default(NEW)
+  originPort              String?
+  originCountry           String?
+  originRegion            String?
+  destinationPort         String?
+  destinationCountry      String?
+  destinationRegion       String?
+  equipmentType           OceanEquipmentType?
+  equipmentLabelRaw       String?
+  rateAmount              Decimal?              @db.Decimal(12, 2)
+  currency                String?
+  agentCompanyNameRaw     String?
+  agentContactNameRaw     String?
+  agentContactEmailRaw    String?
+  shippingLine            String?
+  validityStartDate       DateTime?
+  validityEndDate         DateTime?
+  freeTimeNotes           String?
+  detentionDemurrageNotes String?
+  transitTimeDays         Int?
+  transitTimeNotes        String?
+  scheduleNotes           String?
+  notes                   String?
+  confidence              Int                   @default(0)
+  extractionModel         String?
+  extractionPromptVersion String?
+  rawExtractionJson       Json?
+  reviewedAt              DateTime?
+  reviewedByUserId        String?
+  rejectionReason         String?
+  approvedRateId          String?
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
+
+  tenant           Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sourceEmail      OceanFreightSourceEmail?      @relation(fields: [tenantId, sourceEmailId], references: [tenantId, id], onDelete: NoAction)
+  sourceAttachment OceanFreightSourceAttachment? @relation(fields: [tenantId, sourceAttachmentId], references: [tenantId, id], onDelete: NoAction)
+  agent            OceanFreightAgent?            @relation(fields: [tenantId, agentId], references: [tenantId, id], onDelete: NoAction)
+  agentContact     OceanFreightAgentContact?     @relation(fields: [tenantId, agentContactId], references: [tenantId, id], onDelete: NoAction)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, originPort, destinationPort])
+  @@index([tenantId, agentId])
+  @@index([tenantId, validityEndDate])
+}
+
+model OceanFreightRate {
+  id                      String              @id @default(cuid())
+  tenantId                String
+  agentId                 String
+  agentContactId          String?
+  sourceType              OceanRateSourceType @default(MANUAL_ENTRY)
+  sourceEmailId           String?
+  sourceAttachmentId      String?
+  sourceCandidateId       String?
+  originPort              String
+  originCountry           String?
+  originRegion            String?
+  destinationPort         String
+  destinationCountry      String?
+  destinationRegion       String?
+  equipmentType           OceanEquipmentType
+  equipmentLabel          String
+  rateAmount              Decimal             @db.Decimal(12, 2)
+  currency                String
+  shippingLine            String?
+  validityStartDate       DateTime?
+  validityEndDate         DateTime?
+  status                  OceanRateStatus     @default(ACTIVE)
+  freeTimeNotes           String?
+  detentionDemurrageNotes String?
+  transitTimeDays         Int?
+  transitTimeNotes        String?
+  scheduleNotes           String?
+  notes                   String?
+  correctionNotes         String?
+  createdByUserId         String?
+  updatedByUserId         String?
+  approvedByUserId        String?
+  approvedAt              DateTime?
+  inactiveAt              DateTime?
+  inactiveByUserId        String?
+  inactiveReason          String?
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+
+  tenant           Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  agent            OceanFreightAgent             @relation(fields: [tenantId, agentId], references: [tenantId, id], onDelete: Restrict)
+  agentContact     OceanFreightAgentContact?     @relation(fields: [tenantId, agentContactId], references: [tenantId, id], onDelete: NoAction)
+  sourceEmail      OceanFreightSourceEmail?      @relation(fields: [tenantId, sourceEmailId], references: [tenantId, id], onDelete: NoAction)
+  sourceAttachment OceanFreightSourceAttachment? @relation(fields: [tenantId, sourceAttachmentId], references: [tenantId, id], onDelete: NoAction)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, status, validityEndDate])
+  @@index([tenantId, originPort, destinationPort])
+  @@index([tenantId, originCountry, destinationCountry])
+  @@index([tenantId, equipmentType])
+  @@index([tenantId, agentId])
+  @@index([tenantId, shippingLine])
+  @@index([tenantId, currency, rateAmount])
+  @@index([tenantId, createdAt])
 }
 
 model AssistantChatMessage {
@@ -1337,8 +2457,8 @@ model AssistantRun {
 
   tenant           Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   thread           AssistantChatThread?       @relation(fields: [tenantId, threadId], references: [tenantId, id], onDelete: Cascade)
-  message          AssistantChatMessage?      @relation(fields: [messageId], references: [id], onDelete: SetNull)
-  user             User?                      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  message          AssistantChatMessage?      @relation(fields: [messageId], references: [id], onDelete: NoAction)
+  user             User?                      @relation(fields: [userId], references: [id], onDelete: NoAction)
   retrievedSources AssistantRetrievedSource[]
   memories         AssistantMemory[]
 
@@ -1439,23 +2559,23 @@ model AssistantMemory {
 }
 
 model AssistantMailboxSyncState {
-  id                       String    @id @default(cuid())
-  tenantId                 String
-  mailboxAddress           String
-  sourceSystem             String    @default("MICROSOFT_GRAPH_MAIL")
-  status                   JobStatus @default(QUEUED)
-  lastStartedAt            DateTime?
-  lastFinishedAt           DateTime?
-  lastSuccessfulSyncAt     DateTime?
-  lastSuccessfulReceivedAt DateTime?
+  id                        String    @id @default(cuid())
+  tenantId                  String
+  mailboxAddress            String
+  sourceSystem              String    @default("MICROSOFT_GRAPH_MAIL")
+  status                    JobStatus @default(QUEUED)
+  lastStartedAt             DateTime?
+  lastFinishedAt            DateTime?
+  lastSuccessfulSyncAt      DateTime?
+  lastSuccessfulReceivedAt  DateTime?
   lastAttemptedLookbackDays Int?
-  lastAttemptedMaxMessages Int?
-  lastMessageCount         Int       @default(0)
-  totalMessageCount        Int       @default(0)
-  lastError                String?
-  metadata                 Json?
-  createdAt                DateTime  @default(now())
-  updatedAt                DateTime  @updatedAt
+  lastAttemptedMaxMessages  Int?
+  lastMessageCount          Int       @default(0)
+  totalMessageCount         Int       @default(0)
+  lastError                 String?
+  metadata                  Json?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 

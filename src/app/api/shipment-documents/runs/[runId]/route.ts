@@ -18,8 +18,10 @@ type ShipmentDocumentRunRouteClient = typeof prisma & {
       outputPickTicketFileName?: string;
       bolPdfBytes?: Uint8Array;
       pickTicketPdfBytes?: Uint8Array;
+      bolPdfUploadComplete?: boolean;
+      pickPdfUploadComplete?: boolean;
     } | null>;
-    delete(args: { where: { id: string } }): Promise<unknown>;
+    update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<unknown>;
   };
 };
 
@@ -43,13 +45,16 @@ export async function GET(
     const run = await client.shipmentDocumentRun.findFirst({
       where: {
         id: runId,
-        tenantId: context.tenantId
+        tenantId: context.tenantId,
+        deletedAt: null
       },
       select: {
         outputBolFileName: true,
         outputPickTicketFileName: true,
         bolPdfBytes: true,
-        pickTicketPdfBytes: true
+        pickTicketPdfBytes: true,
+        bolPdfUploadComplete: true,
+        pickPdfUploadComplete: true
       }
     });
 
@@ -59,8 +64,9 @@ export async function GET(
 
     const bytes = documentType === "bol" ? run.bolPdfBytes : run.pickTicketPdfBytes;
     const fileName = documentType === "bol" ? run.outputBolFileName : run.outputPickTicketFileName;
+    const uploadComplete = documentType === "bol" ? run.bolPdfUploadComplete : run.pickPdfUploadComplete;
 
-    if (!bytes || !fileName) {
+    if (!uploadComplete || !bytes || !fileName) {
       return NextResponse.json({ error: "The requested shipment document file is unavailable." }, { status: 404 });
     }
 
@@ -95,7 +101,8 @@ export async function DELETE(
     const existing = await client.shipmentDocumentRun.findFirst({
       where: {
         id: runId,
-        tenantId: context.tenantId
+        tenantId: context.tenantId,
+        deletedAt: null
       },
       select: {
         id: true
@@ -106,9 +113,13 @@ export async function DELETE(
       return NextResponse.json({ error: "Shipment document run not found." }, { status: 404 });
     }
 
-    await client.shipmentDocumentRun.delete({
+    await client.shipmentDocumentRun.update({
       where: {
         id: runId
+      },
+      data: {
+        deletedAt: new Date(),
+        deletedByUserId: context.userId
       }
     });
 

@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/server/db";
+import { createCreditCheckFromAccountSetup } from "@/modules/credit-checks/create";
+import {
+  isLikelySpamWebsiteInboundSubmission,
+  stripWebsiteInboundSystemFields
+} from "@/modules/website-inbound/spam";
 import { summarizeWebsiteInboundFields } from "@/modules/website-inbound/summary";
 import type { WebsiteInboundSubmissionInput } from "@/modules/website-inbound/types";
 
@@ -74,7 +79,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Inbound tenant is not configured." }, { status: 500 });
   }
 
-  const fields = sanitizeFields(payload.fields as Record<string, string | string[]>);
+  const sanitizedFields = sanitizeFields(payload.fields as Record<string, string | string[]>);
+
+  if (isLikelySpamWebsiteInboundSubmission(sanitizedFields)) {
+    return NextResponse.json({ accepted: true, filtered: true }, { status: 201 });
+  }
+
+  const fields = stripWebsiteInboundSystemFields(sanitizedFields);
+
+  if (payload.formType === "account_setup") {
+    const result = await createCreditCheckFromAccountSetup({
+      tenantId: tenant.id,
+      formType: payload.formType,
+      source: payload.source ?? "website",
+      pageUrl: payload.pageUrl,
+      fields
+    });
+
+    return NextResponse.json(result, { status: 201 });
+  }
+
   const summary = summarizeWebsiteInboundFields(fields);
   const submission = await prisma.websiteInboundSubmission.create({
     data: {

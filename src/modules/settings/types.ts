@@ -154,6 +154,8 @@ export type AssistantProviderSettings = {
   temperature: number;
   maxTokens: number;
   endpointUrl: string | null;
+  reasoningEffort: "none" | "low" | "medium" | "high" | null;
+  apiKeyConfigured: boolean;
   status: IntegrationStatus;
   runtimeReady: boolean;
   runtimeNotes: string;

@@ -40,10 +40,14 @@ export const config = {
    * Run on everything except:
    *  - /api/auth/*                       (Auth.js + dev login)
    *  - /api/integrations/trademining/*   (machine-to-machine ingestion auth)
+   *  - /api/shipment-documents/teamship-review/update-jobs/agent/*
+   *                                      (VM Teamship worker ingestion auth)
+   *  - /api/shipment-documents/teamship-review/email-intake/scheduled
+   *                                      (n8n Garland email intake ingestion auth)
    *  - /api/website-inbound              (website form ingestion auth)
    *  - Next.js internals and static files
    */
   matcher: [
-    "/((?!api/auth|api/integrations/trademining|api/website-inbound|_next/static|_next/image|favicon.ico|.*\\..*).*)"
+    "/((?!api/auth|api/integrations/trademining|api/shipment-documents/teamship-review/update-jobs/agent|api/shipment-documents/teamship-review/email-intake/scheduled|api/website-inbound|_next/static|_next/image|favicon.ico|.*\\..*).*)"
   ]
 };

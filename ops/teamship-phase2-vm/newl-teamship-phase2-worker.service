@@ -1,0 +1,25 @@
+[Unit]
+Description=Newl Apps Teamship Phase 2 VM worker
+Documentation=See docs/teamship-phase2-vm-services.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/newl-apps
+EnvironmentFile=%h/newl-apps/.env.teamship-phase2-worker
+Environment=TEAMSHIP_AGENT_MODE=live-api
+Environment=TEAMSHIP_ALLOW_LIVE_UPDATES=true
+Environment=TEAMSHIP_BROWSER_HEADED=true
+Environment=TEAMSHIP_BROWSER_SLOW_MO_MS=350
+Environment=TEAMSHIP_BROWSER_PAUSE_ON_ERROR=true
+Environment=TEAMSHIP_BROWSER_EXECUTABLE_PATH=/usr/bin/google-chrome
+Environment=NEWL_APPS_BASE_URL=https://newl-apps.vercel.app
+ExecStart=/usr/bin/npm run worker:teamship-phase2 -- --loop
+Restart=always
+RestartSec=20
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Install]
+WantedBy=default.target

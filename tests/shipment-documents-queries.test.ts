@@ -67,6 +67,9 @@ describe("shipment document queries", () => {
         where: expect.objectContaining({
           tenantId: "tenant-1",
           workflowKey: "GARLAND_CANADA",
+          deletedAt: null,
+          bolPdfUploadComplete: true,
+          pickPdfUploadComplete: true,
           OR: expect.any(Array)
         })
       })
@@ -75,6 +78,9 @@ describe("shipment document queries", () => {
       where: expect.objectContaining({
         tenantId: "tenant-1",
         workflowKey: "GARLAND_CANADA",
+        deletedAt: null,
+        bolPdfUploadComplete: true,
+        pickPdfUploadComplete: true,
         OR: expect.any(Array)
       })
     });

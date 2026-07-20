@@ -1,0 +1,48 @@
+name: Run Production Prisma Migrations
+
+on:
+  workflow_dispatch:
+
+jobs:
+  migrate:
+    name: Deploy production database migrations
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+      DATABASE_ENVIRONMENT: production
+      PRODUCTION_DATABASE_SIGNATURE: ${{ secrets.PRODUCTION_DATABASE_SIGNATURE }}
+      VERCEL_ENV: production
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check database network reachability
+        run: npm run db:network-check
+
+      - name: Run production migrations
+        run: |
+          for attempt in 1 2 3; do
+            echo "Production migration attempt ${attempt}/3"
+            if npm run db:migrate:production; then
+              exit 0
+            fi
+
+            if [ "$attempt" -lt 3 ]; then
+              sleep $((attempt * 20))
+            fi
+          done
+
+          exit 1

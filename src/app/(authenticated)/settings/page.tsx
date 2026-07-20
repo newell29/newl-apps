@@ -2,6 +2,7 @@ import { PageHeader } from "@/components/page-header";
 import { InfoHint } from "@/components/info-hint";
 import { PlatformRole } from "@prisma/client";
 import { SearchProfileCadenceManager } from "@/modules/settings/components/search-profile-cadence-manager";
+import { AssistantProviderTest } from "@/modules/settings/components/assistant-provider-test";
 import { formatPlatformRole } from "@/modules/settings/access-control";
 import {
   saveMicrosoftGraphSettingsAction,
@@ -13,6 +14,7 @@ import {
   saveApolloSequenceMappingAction,
   saveRoleModuleAccessAction,
   saveTenantUserAccessAction,
+  saveTeamshipSettingsAction,
   saveTradeMiningScoringSettingsAction,
   syncApolloRepMappingAction,
   syncApolloSequenceMappingAction,
@@ -60,6 +62,7 @@ export default async function SettingsPage() {
               { href: "#platform-controls", label: "Platform controls" },
               { href: "#quickbooks", label: "QuickBooks" },
               { href: "#assistant-ai", label: "Assistant AI" },
+              { href: "#teamship", label: "Teamship" },
               { href: "#microsoft-365", label: "Microsoft 365" },
               { href: "#user-access", label: "User access" },
               { href: "#lead-generation-settings", label: "Lead generation" },
@@ -219,6 +222,23 @@ export default async function SettingsPage() {
               placeholder="http://assistant-internal:8000/v1"
               info="Used for the long-term local model path. Leave blank when OpenAI is active."
             />
+            <label className="space-y-1 text-sm font-medium text-foreground">
+              <FieldLabel
+                label="Local endpoint bearer token"
+                info={
+                  settings.assistantProvider.apiKeyConfigured
+                    ? "Leave blank to keep the saved encrypted token. Local Ollama development does not require one."
+                    : "Optional for localhost. Required later when the endpoint is placed behind an authenticated HTTPS relay."
+                }
+              />
+              <input
+                name="assistantApiKey"
+                type="password"
+                autoComplete="new-password"
+                placeholder={settings.assistantProvider.apiKeyConfigured ? "Saved token will be kept" : "Optional bearer token"}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+              />
+            </label>
             <Field
               label="Default model"
               name="assistantDefaultModel"
@@ -231,6 +251,18 @@ export default async function SettingsPage() {
               defaultValue={settings.assistantProvider.fallbackModel ?? ""}
               placeholder="gpt-5-nano"
               info="Used when the default model request fails."
+            />
+            <SelectField
+              label="Reasoning effort"
+              name="assistantReasoningEffort"
+              defaultValue={settings.assistantProvider.reasoningEffort ?? "default"}
+              options={[
+                { value: "default", label: "Provider default" },
+                { value: "none", label: "None / fastest" },
+                { value: "low", label: "Low" },
+                { value: "medium", label: "Medium" },
+                { value: "high", label: "High" }
+              ]}
             />
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground" htmlFor="assistantTemperature">
@@ -256,7 +288,7 @@ export default async function SettingsPage() {
               defaultValue={settings.assistantProvider.maxTokens}
               min={100}
               max={4000}
-              info="Caps reply size and cost."
+              info="Caps reasoning plus reply length. Start around 1,200 for Qwen and raise it only for tasks that truncate."
             />
           </div>
 
@@ -290,6 +322,139 @@ export default async function SettingsPage() {
 
           <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
             Save assistant settings
+          </button>
+        </form>
+        <div className="mt-4">
+          <AssistantProviderTest />
+        </div>
+      </section>
+
+      <section id="teamship" className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Teamship WMS</h2>
+            <p className="mt-1 text-sm leading-6 text-mutedForeground">
+              Save the tenant Teamship login used by Garland Teamship Review. The password is encrypted and never
+              shown after saving.
+            </p>
+          </div>
+          <span
+            className={[
+              "rounded-full px-2.5 py-1 text-xs font-semibold",
+              settings.teamship.status === "ACTIVE" && settings.teamship.passwordConfigured
+                ? "border border-success/25 bg-success/10 text-success"
+                : "border border-warning/25 bg-warning/10 text-warning"
+            ].join(" ")}
+          >
+            {settings.teamship.status === "ACTIVE" && settings.teamship.passwordConfigured
+              ? "Configured"
+              : "Needs setup"}
+          </span>
+        </div>
+
+        <form action={saveTeamshipSettingsAction} className="mt-4 space-y-4">
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Field
+              label="Teamship email"
+              name="teamshipEmail"
+              defaultValue={settings.teamship.email ?? ""}
+              placeholder="name@example.com"
+            />
+            <label className="space-y-1 text-sm font-medium text-foreground">
+              <FieldLabel
+                label="Teamship password"
+                info={
+                  settings.teamship.passwordConfigured
+                    ? "Leave blank to keep the currently saved encrypted password."
+                    : "Required before Teamship Review can run live comparisons."
+                }
+              />
+              <input
+                name="teamshipPassword"
+                type="password"
+                autoComplete="new-password"
+                placeholder={settings.teamship.passwordConfigured ? "Saved password will be kept" : "Enter Teamship password"}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+              />
+            </label>
+            <OptionalField
+              label="API base URL"
+              name="teamshipApiBaseUrl"
+              defaultValue={settings.teamship.apiBaseUrl ?? ""}
+              placeholder="https://app.teamshipos.com/api"
+              info="Leave blank unless Teamship gives us a different API base URL."
+            />
+            <SelectField
+              label="Status"
+              name="teamshipStatus"
+              defaultValue={settings.teamship.status}
+              options={[
+                { value: "ACTIVE", label: "Active" },
+                { value: "DISABLED", label: "Disabled" }
+              ]}
+            />
+            <SelectField
+              label="Cron sync cadence"
+              name="teamshipSyncCadenceMinutes"
+              defaultValue={String(settings.teamship.syncCadenceMinutes)}
+              options={[
+                { value: "15", label: "Every 15 minutes" },
+                { value: "30", label: "Every 30 minutes" },
+                { value: "60", label: "Hourly" },
+                { value: "120", label: "Every 2 hours" }
+              ]}
+            />
+            <OptionalField
+              label="Garland inventory customer ID"
+              name="teamshipGarlandInventoryUserId"
+              defaultValue={settings.teamship.garlandInventoryUserId ?? ""}
+              placeholder="420"
+              info="Used by Nemo to check Garland inventory when a PDF order is not yet in Teamship."
+            />
+            <OptionalField
+              label="Garland inventory warehouse/location ID"
+              name="teamshipGarlandInventoryLocationId"
+              defaultValue={settings.teamship.garlandInventoryLocationId ?? ""}
+              placeholder="102"
+              info="Usually the Annagem Teamship location ID for Garland inventory lookups."
+            />
+          </div>
+
+          <label className="flex items-start gap-3 rounded-md border border-border bg-muted/30 p-4 text-sm text-foreground">
+            <input
+              type="checkbox"
+              name="teamshipSyncEnabled"
+              value="true"
+              defaultChecked={settings.teamship.syncEnabled}
+              className="mt-1"
+            />
+            <span>
+              <span className="block font-semibold">Enable scheduled Teamship daily-order sync</span>
+              <span className="mt-1 block leading-6 text-mutedForeground">
+                When enabled, the cron runner stores Garland Teamship orders for the current day. Repeated syncs update
+                the same SR/order records instead of adding duplicates.
+              </span>
+            </span>
+          </label>
+
+          <div className="rounded-md border border-border bg-muted/30 p-4">
+            <p className="text-sm font-medium text-foreground">Saved credential status</p>
+            <p className="mt-2 text-sm text-mutedForeground">
+              {settings.teamship.passwordConfigured
+                ? "A Teamship password is saved. Enter a new password only when you want to replace it."
+                : "No Teamship password is saved yet."}
+            </p>
+            <p className="mt-1 text-xs text-mutedForeground">
+              Scheduled sync is {settings.teamship.syncEnabled ? "enabled" : "disabled"} at a{" "}
+              {settings.teamship.syncCadenceMinutes}-minute cadence.
+            </p>
+            {settings.teamship.updatedAt ? (
+              <p className="mt-1 text-xs text-mutedForeground">Last updated {formatDateTime(settings.teamship.updatedAt)}.</p>
+            ) : null}
+          </div>
+
+          <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
+            Save Teamship settings
           </button>
         </form>
       </section>
@@ -2002,6 +2167,16 @@ function buildApolloRepRows(
   }>
 ) {
   return entries;
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(value));
 }
 
 function SelectField({

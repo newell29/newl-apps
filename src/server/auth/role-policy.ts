@@ -15,7 +15,9 @@ export const DEFAULT_ROLE_MATRIX: Record<PlatformRole, RolePolicy> = {
       ModuleKey.ASSISTANT,
       ModuleKey.LEAD_GEN,
       ModuleKey.CUSTOMER_CASHFLOW,
-      ModuleKey.WEBSITE_INBOUND
+      ModuleKey.WEBSITE_INBOUND,
+      ModuleKey.WEBSITE_GROWTH,
+      ModuleKey.OCEAN_FREIGHT_PRICING
     ],
     canMutate: true
   },
@@ -27,7 +29,10 @@ export const DEFAULT_ROLE_MATRIX: Record<PlatformRole, RolePolicy> = {
       ModuleKey.LTL_RATE_PORTAL,
       ModuleKey.TRANSIT_LOOKUP,
       ModuleKey.SHIPMENT_DOCUMENTS,
-      ModuleKey.CUSTOMER_CASHFLOW
+      ModuleKey.INVOICE_VERIFICATION,
+      ModuleKey.CUSTOMER_CASHFLOW,
+      ModuleKey.WEBSITE_GROWTH,
+      ModuleKey.OCEAN_FREIGHT_PRICING
     ],
     canMutate: true
   },
@@ -59,14 +64,14 @@ export const ROLE_DESCRIPTIONS: Record<
   },
   [PlatformRole.SALES]: {
     label: "Sales",
-    description: "Focused on lead generation, company review, pipeline progression, and contact workflows.",
-    visibilitySummary: "Starts with Assistant and Lead Generation unless you expand it below."
+    description: "Focused on lead generation, company review, pipeline progression, contact workflows, and ocean pricing visibility.",
+    visibilitySummary: "Starts with Assistant, Lead Generation, Website Inbound, Customer Cashflow, and Ocean Freight Pricing unless you expand it below."
   },
   [PlatformRole.OPERATIONS]: {
     label: "Operations",
-    description: "Supports lead-gen operations plus shipment, document packaging, quoting, and transit workflows.",
+    description: "Supports lead-gen operations plus shipment, document packaging, quoting, invoice intake, and transit workflows.",
     visibilitySummary:
-      "Starts with Assistant, Lead Generation, Shipment Documents, UPS Tools, LTL Rate Portal, and Transit Lookup."
+      "Starts with Assistant, Lead Generation, Shipment Documents, Invoice Verification, UPS Tools, LTL Rate Portal, Ocean Freight Pricing, and Transit Lookup."
   },
   [PlatformRole.FINANCE]: {
     label: "Finance",

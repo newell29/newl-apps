@@ -4,14 +4,18 @@ import {
   AssistantMemoryKind,
   AssistantSourceKind,
   ModuleKey,
+  type PlatformRole,
   type Prisma
 } from "@prisma/client";
 
 import {
+  getEnabledAssistantCapabilityManifest,
   getEnabledAssistantKnowledgeAdapters,
+  type AssistantKnowledgeAdapter,
   type AssistantKnowledgeDocumentSeed,
   type AssistantMemorySeed
 } from "@/modules/assistant/knowledge-registry";
+import { roleHasModuleAccess } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
 import type { TenantContext } from "@/server/tenant-context";
 import { tenantWhere } from "@/server/tenant-query";
@@ -25,6 +29,10 @@ type AssistantRetrievedKnowledgeSource = {
   title: string;
   excerpt: string;
   metadata?: Record<string, unknown>;
+};
+
+type AssistantSearchContext = TenantContext & {
+  role?: PlatformRole;
 };
 
 export type AssistantKnowledgeDocumentInput = {
@@ -74,11 +82,20 @@ export async function syncAssistantKnowledge(tenant: TenantContext) {
     ...enabledModuleRows.map((row) => row.module.key)
   ]);
 
+  const enabledAdapters = getEnabledAssistantKnowledgeAdapters(enabledModules);
   const adapterResults = await Promise.all(
-    getEnabledAssistantKnowledgeAdapters(enabledModules).map((adapter) => adapter.collect(tenant))
+    enabledAdapters.map(async (adapter) => ({
+      adapter,
+      result: await adapter.collect(tenant)
+    }))
   );
-  const documents: AssistantKnowledgeDocumentInput[] = adapterResults.flatMap((result) => result.documents);
-  const generatedMemories = adapterResults.flatMap((result) => result.memories ?? []);
+  const documents: AssistantKnowledgeDocumentInput[] = [
+    buildAssistantCapabilityManifestDocument(tenant, enabledModules),
+    ...adapterResults.flatMap(({ adapter, result }) =>
+      result.documents.map((document) => tagAssistantDocumentWithAdapter(document, adapter))
+    )
+  ];
+  const generatedMemories = adapterResults.flatMap(({ result }) => result.memories ?? []);
   const preparedDocuments = prepareAssistantKnowledgeDocuments(documents);
   const now = new Date();
 
@@ -142,6 +159,53 @@ export async function syncAssistantKnowledge(tenant: TenantContext) {
   };
 }
 
+function tagAssistantDocumentWithAdapter(
+  document: AssistantKnowledgeDocumentSeed,
+  adapter: AssistantKnowledgeAdapter
+): AssistantKnowledgeDocumentInput {
+  return {
+    ...document,
+    metadata: {
+      ...document.metadata,
+      assistantContext: {
+        adapterKey: adapter.key,
+        moduleKeys: adapter.moduleKeys
+      }
+    }
+  };
+}
+
+function buildAssistantCapabilityManifestDocument(
+  tenant: TenantContext,
+  enabledModules: Set<ModuleKey>
+): AssistantKnowledgeDocumentInput {
+  const manifest = getEnabledAssistantCapabilityManifest(enabledModules);
+
+  return {
+    sourceKind: AssistantSourceKind.OTHER,
+    sourceSystem: "NEWL_ASSISTANT_CONTEXT_REGISTRY",
+    externalId: "assistant-context-capability-manifest",
+    title: "Assistant context capability manifest",
+    sourceUpdatedAt: new Date(),
+    metadata: {
+      module: "ASSISTANT",
+      capabilityCount: manifest.length,
+      tenantId: tenant.tenantId
+    },
+    content: [
+      "Assistant Context Registry capability manifest. The assistant should use these enabled module context sources before assuming it lacks access to an operational area.",
+      ...manifest.map((capability) =>
+        [
+          `Capability: ${capability.label} (${capability.key})`,
+          `Summary: ${capability.summary}`,
+          `Context types: ${capability.contextTypes.join(", ")}`,
+          `Sample questions: ${capability.sampleQuestions.join("; ")}`
+        ].join("\n")
+      )
+    ].join("\n\n")
+  };
+}
+
 export async function persistAssistantKnowledgeDocuments(
   tx: AssistantKnowledgePersistenceClient,
   tenant: TenantContext,
@@ -202,7 +266,7 @@ export function prepareAssistantKnowledgeDocuments(documents: AssistantKnowledge
 }
 
 export async function searchAssistantKnowledge(
-  tenant: TenantContext,
+  tenant: AssistantSearchContext,
   prompt: string
 ): Promise<AssistantRetrievedKnowledgeSource[]> {
   const normalizedTerms = tokenizeForSearch(prompt);
@@ -210,27 +274,30 @@ export async function searchAssistantKnowledge(
     return [];
   }
 
-  const chunks = await prisma.assistantKnowledgeChunk.findMany({
-    where: tenantWhere(tenant),
-    select: {
-      id: true,
-      documentId: true,
-      chunkIndex: true,
-      contentText: true,
-      contentSummary: true,
-      metadata: true,
-      document: {
-        select: {
-          id: true,
-          sourceKind: true,
-          externalId: true,
-          title: true,
-          sourceSystem: true,
-          metadata: true
+  const [chunks, accessibleModuleKeys] = await Promise.all([
+    prisma.assistantKnowledgeChunk.findMany({
+      where: tenantWhere(tenant),
+      select: {
+        id: true,
+        documentId: true,
+        chunkIndex: true,
+        contentText: true,
+        contentSummary: true,
+        metadata: true,
+        document: {
+          select: {
+            id: true,
+            sourceKind: true,
+            externalId: true,
+            title: true,
+            sourceSystem: true,
+            metadata: true
+          }
         }
       }
-    }
-  });
+    }),
+    getAssistantSearchAccessibleModuleKeys(tenant)
+  ]);
 
   return chunks
     .map((chunk) => {
@@ -254,10 +321,71 @@ export async function searchAssistantKnowledge(
         }
       };
     })
-    .filter((item) => item.score > 0)
+    .filter((item) => item.score > 0 && canReadAssistantSource(item.source.metadata, accessibleModuleKeys))
     .sort((left, right) => right.score - left.score)
     .slice(0, KNOWLEDGE_RESULT_LIMIT)
     .map((item) => item.source);
+}
+
+async function getAssistantSearchAccessibleModuleKeys(tenant: AssistantSearchContext) {
+  if (!tenant.role) {
+    return null;
+  }
+  const role = tenant.role;
+
+  const tenantEnabledModules = await prisma.tenantModuleAccess.findMany({
+    where: {
+      tenantId: tenant.tenantId,
+      enabled: true
+    },
+    select: {
+      module: {
+        select: {
+          key: true
+        }
+      }
+    }
+  });
+  const enabledModuleKeys = new Set<ModuleKey>([
+    ModuleKey.ASSISTANT,
+    ...tenantEnabledModules.map((row) => row.module.key)
+  ]);
+
+  return new Set(
+    [...enabledModuleKeys].filter((moduleKey) => roleHasModuleAccess(role, moduleKey))
+  );
+}
+
+function canReadAssistantSource(
+  metadata: Record<string, unknown> | undefined,
+  accessibleModuleKeys: Set<ModuleKey> | null
+) {
+  if (!accessibleModuleKeys) {
+    return true;
+  }
+
+  const moduleKeys = readAssistantContextModuleKeys(metadata);
+  if (moduleKeys.length === 0) {
+    return true;
+  }
+
+  return moduleKeys.some((moduleKey) => accessibleModuleKeys.has(moduleKey));
+}
+
+function readAssistantContextModuleKeys(metadata: Record<string, unknown> | undefined): ModuleKey[] {
+  const assistantContext = metadata?.assistantContext;
+  if (!assistantContext || typeof assistantContext !== "object") {
+    return [];
+  }
+
+  const moduleKeys = (assistantContext as Record<string, unknown>).moduleKeys;
+  if (!Array.isArray(moduleKeys)) {
+    return [];
+  }
+
+  return moduleKeys.filter((moduleKey): moduleKey is ModuleKey =>
+    typeof moduleKey === "string" && Object.values(ModuleKey).includes(moduleKey as ModuleKey)
+  );
 }
 
 export function createKnowledgeChunks(content: string) {

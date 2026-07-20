@@ -3,6 +3,7 @@ import { AssistantSourceKind, JobStatus, PlatformRole, type Prisma } from "@pris
 import { maybeRunAssistantApolloActivityRequest } from "@/modules/assistant/apollo-workflow";
 import { searchAssistantKnowledge } from "@/modules/assistant/knowledge";
 import { maybeRunAssistantRateRequest } from "@/modules/assistant/rate-tools";
+import { maybeRunAssistantShipmentDocumentsRequest } from "@/modules/assistant/shipment-documents-workflow";
 import {
   computeNextAssistantAutomationRunAt,
   summarizeAutomationResult,
@@ -17,6 +18,7 @@ import { prisma } from "@/server/db";
 import {
   ASSISTANT_PROVIDER_CREDENTIAL_NAME,
   generateAssistantReply,
+  parseAssistantProviderAuth,
   parseAssistantProviderSettings,
   type AssistantConversationTurn
 } from "@/server/integrations/assistant-provider";
@@ -60,6 +62,16 @@ export async function runAssistantPrompt(
     return finalizeAssistantResponse(workspace, prompt, toolRateReply);
   }
 
+  const shipmentDocumentsReply = await maybeRunAssistantShipmentDocumentsRequest(context, prompt);
+  if (shipmentDocumentsReply) {
+    return finalizeAssistantResponse(workspace, prompt, shipmentDocumentsReply);
+  }
+
+  const directComputationReply = maybeBuildDirectComputationResponse(prompt);
+  if (directComputationReply) {
+    return finalizeAssistantResponse(workspace, prompt, directComputationReply);
+  }
+
   const guidanceReply = maybeBuildAssistantGuidanceResponse(workspace, prompt);
   if (guidanceReply) {
     return finalizeAssistantResponse(workspace, prompt, guidanceReply);
@@ -76,7 +88,8 @@ export async function runAssistantPrompt(
     select: {
       provider: true,
       status: true,
-      publicConfig: true
+      publicConfig: true,
+      secretRef: true
     }
   });
   const providerSettings = parseAssistantProviderSettings(providerCredential);
@@ -133,26 +146,30 @@ export async function runAssistantPrompt(
 
   if (providerSettings.liveResponsesEnabled && providerSettings.runtimeReady) {
     try {
-      const liveReply = await generateAssistantReply({
-        tenantName: context.tenantName,
-        prompt,
-        intent: deterministic.intent,
-        sources: sources.map((source) => ({
-          title: source.title,
-          excerpt: source.excerpt
-        })),
-        conversationHistory,
-        memorySnapshot,
-        workspaceSnapshot: {
-          companyCount: workspace.stats.companyCount,
-          contactCount: workspace.stats.contactCount,
-          knowledgeDocumentCount: workspace.stats.knowledgeDocumentCount,
-          memoryCount: workspace.stats.memoryCount,
-          topCompanyNames: workspace.topCompanies.slice(0, 5).map((company) => company.name)
+      const providerAuth = parseAssistantProviderAuth(providerCredential?.secretRef);
+      const liveReply = await generateAssistantReply(
+        {
+          tenantName: context.tenantName,
+          prompt,
+          intent: deterministic.intent,
+          sources: sources.map((source) => ({
+            title: source.title,
+            excerpt: source.excerpt
+          })),
+          conversationHistory,
+          memorySnapshot,
+          workspaceSnapshot: {
+            companyCount: workspace.stats.companyCount,
+            contactCount: workspace.stats.contactCount,
+            knowledgeDocumentCount: workspace.stats.knowledgeDocumentCount,
+            memoryCount: workspace.stats.memoryCount,
+            topCompanyNames: workspace.topCompanies.slice(0, 5).map((company) => company.name)
+          },
+          conversationSummary: priorConversationSummary,
+          settings: providerSettings
         },
-        conversationSummary: priorConversationSummary,
-        settings: providerSettings
-      });
+        providerAuth
+      );
 
       if (!liveReply.content || !liveReply.content.trim()) {
         throw new Error("Assistant provider returned an empty response.");
@@ -224,6 +241,94 @@ export async function runAssistantPrompt(
     runMetadata,
     sources
   });
+}
+
+function maybeBuildDirectComputationResponse(prompt: string) {
+  const normalized = prompt.trim().toLowerCase();
+  const match = normalized.match(
+    /^(?:what(?:'s| is)?|calculate|compute)?\s*(-?\d+(?:\.\d+)?)\s*([+\-*/x×÷])\s*(-?\d+(?:\.\d+)?)\s*\??$/
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  const left = Number(match[1]);
+  const operator = match[2];
+  const right = Number(match[3]);
+
+  if (!Number.isFinite(left) || !Number.isFinite(right)) {
+    return null;
+  }
+
+  if ((operator === "/" || operator === "÷") && right === 0) {
+    return {
+      answer: "That calculation is undefined because it divides by zero.",
+      intent: "GENERAL_INSIGHT",
+      provider: "NEWL_DIRECT",
+      model: "assistant-direct-v1",
+      messageMetadata: {
+        deterministic: true,
+        intent: "GENERAL_INSIGHT",
+        directComputation: true
+      },
+      runMetadata: {
+        deterministic: true,
+        intent: "GENERAL_INSIGHT",
+        directComputation: true
+      },
+      sources: []
+    };
+  }
+
+  const result = calculateSimpleBinaryExpression(left, operator, right);
+  if (result === null) {
+    return null;
+  }
+
+  return {
+    answer: formatNumber(result),
+    intent: "GENERAL_INSIGHT",
+    provider: "NEWL_DIRECT",
+    model: "assistant-direct-v1",
+    messageMetadata: {
+      deterministic: true,
+      intent: "GENERAL_INSIGHT",
+      directComputation: true
+    },
+    runMetadata: {
+      deterministic: true,
+      intent: "GENERAL_INSIGHT",
+      directComputation: true
+    },
+    sources: []
+  };
+}
+
+function calculateSimpleBinaryExpression(left: number, operator: string, right: number) {
+  switch (operator) {
+    case "+":
+      return left + right;
+    case "-":
+      return left - right;
+    case "*":
+    case "x":
+    case "×":
+      return left * right;
+    case "/":
+    case "÷":
+      return left / right;
+    default:
+      return null;
+  }
+}
+
+function formatNumber(value: number) {
+  if (Number.isInteger(value)) {
+    return String(value);
+  }
+
+  return String(Number(value.toFixed(10)));
 }
 
 function maybeBuildAssistantGuidanceResponse(

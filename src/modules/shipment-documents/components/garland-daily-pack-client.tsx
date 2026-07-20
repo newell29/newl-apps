@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { PDFDocument } from "pdf-lib";
 import type { PDFPageProxy } from "pdfjs-dist/types/src/display/api";
 
@@ -69,6 +69,7 @@ type PdfJsModule = typeof import("pdfjs-dist");
 const AI_BATCH_SIZE = 2;
 const AI_IMAGE_MAX_WIDTH = 1800;
 const AI_IMAGE_JPEG_QUALITY = 0.82;
+const PDF_SAVE_BASE64_CHUNK_SIZE = 600_000;
 
 const CROP_BOXES: Record<ShipmentDocumentType, { x: number; y: number; width: number; height: number }> = {
   BOL: { x: 0, y: 0, width: 1, height: 0.5 },
@@ -104,6 +105,7 @@ export function GarlandDailyPackClient({
   const [historySearch, setHistorySearch] = useState(initialHistory.search);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [expandedHistoryRunIds, setExpandedHistoryRunIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (!labelManuallyEdited) {
@@ -291,17 +293,16 @@ export function GarlandDailyPackClient({
           recipientEmail,
           sourceBolFileName: bolFile.name,
           sourcePickTicketFileName: pickTicketFile.name,
+          deferPdfUpload: true,
           bol: {
             fileName: result.bol.fileName,
             pageCount: result.bol.pageCount,
-            pages: result.bol.pages,
-            pdfBase64: result.bol.pdfBase64
+            pages: result.bol.pages
           },
           pickTickets: {
             fileName: result.pickTickets.fileName,
             pageCount: result.pickTickets.pageCount,
-            pages: result.pickTickets.pages,
-            pdfBase64: result.pickTickets.pdfBase64
+            pages: result.pickTickets.pages
           }
         })
       });
@@ -313,6 +314,10 @@ export function GarlandDailyPackClient({
       if (!response.ok || !json?.run) {
         throw new Error(json?.error ?? "Unable to save this shipment document run.");
       }
+
+      setStatus("Uploading saved PDFs to history...");
+      await uploadSavedPdfChunks(json.run.id, "bol", result.bol.pdfBase64);
+      await uploadSavedPdfChunks(json.run.id, "pick", result.pickTickets.pdfBase64);
 
       setSavedRunId(json.run.id);
       setStatus("Sorted PDFs are ready and the run has been saved to history.");
@@ -393,6 +398,12 @@ export function GarlandDailyPackClient({
             : currentDraft.pickTickets
       };
     });
+  }
+
+  function toggleHistoryRun(runId: string) {
+    setExpandedHistoryRunIds((current) =>
+      current.includes(runId) ? current.filter((id) => id !== runId) : [...current, runId]
+    );
   }
 
   function handleResultPsEdit(documentType: ShipmentDocumentType, documentGroupId: string, value: string) {
@@ -681,60 +692,90 @@ export function GarlandDailyPackClient({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {history.runs.map((run) => (
-                    <tr key={run.id}>
-                      <td className="px-3 py-3 align-top">
-                        <p className="font-medium text-foreground">{run.documentLabel}</p>
-                        <p className="mt-1 text-xs text-mutedForeground">
-                          Shipment date {formatDate(run.shipmentDate)} · Saved {formatDateTime(run.createdAt)}
-                        </p>
-                        <p className="mt-1 text-xs text-mutedForeground">
-                          {run.createdByName ? `Saved by ${run.createdByName}` : "Saved run"}
-                        </p>
-                      </td>
-                      <td className="px-3 py-3 align-top text-mutedForeground">
-                        <p>{run.recipientEmail ?? "No recipient saved"}</p>
-                        <p className="mt-1 text-xs">{run.sourceBolFileName ?? "No source BOL name"}</p>
-                        <p className="text-xs">{run.sourcePickTicketFileName ?? "No source pick name"}</p>
-                      </td>
-                      <td className="px-3 py-3 align-top text-mutedForeground">
-                        <p>{run.bolPageCount} BOL pages</p>
-                        <p>{run.pickTicketPageCount} pick pages</p>
-                        <p className="mt-1 text-xs">
-                          AI fallback: {run.bolAiFallbackPageCount} / {run.pickAiFallbackPageCount}
-                        </p>
-                      </td>
-                      <td className="px-3 py-3 align-top text-mutedForeground">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">BOL</p>
-                        <p className="mt-1 text-sm">{formatPsSequence(run.bolPsNumbers)}</p>
-                        <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-mutedForeground">Pick</p>
-                        <p className="mt-1 text-sm">{formatPsSequence(run.pickPsNumbers)}</p>
-                      </td>
-                      <td className="px-3 py-3 align-top">
-                        <div className="flex flex-wrap gap-2">
-                          <a
-                            href={`/api/shipment-documents/runs/${run.id}?documentType=bol`}
-                            className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted"
-                          >
-                            Download BOL
-                          </a>
-                          <a
-                            href={`/api/shipment-documents/runs/${run.id}?documentType=pick`}
-                            className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted"
-                          >
-                            Download Pick
-                          </a>
-                          <button
-                            type="button"
-                            onClick={() => void handleDeleteRun(run.id)}
-                            className="rounded-md border border-danger/30 px-3 py-1.5 text-xs font-semibold text-danger transition-colors hover:bg-danger/10"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {history.runs.map((run) => {
+                    const isExpanded = expandedHistoryRunIds.includes(run.id);
+
+                    return (
+                      <Fragment key={run.id}>
+                        <tr>
+                          <td className="px-3 py-3 align-top">
+                            <p className="font-medium text-foreground">{run.documentLabel}</p>
+                            <p className="mt-1 text-xs text-mutedForeground">
+                              Shipment date {formatDate(run.shipmentDate)} · Saved {formatDateTime(run.createdAt)}
+                            </p>
+                            <p className="mt-1 text-xs text-mutedForeground">
+                              {run.createdByName ? `Saved by ${run.createdByName}` : "Saved run"}
+                            </p>
+                          </td>
+                          <td className="px-3 py-3 align-top text-mutedForeground">
+                            <p>{run.recipientEmail ?? "No recipient saved"}</p>
+                            <p className="mt-1 text-xs">{run.sourceBolFileName ?? "No source BOL name"}</p>
+                            <p className="text-xs">{run.sourcePickTicketFileName ?? "No source pick name"}</p>
+                          </td>
+                          <td className="px-3 py-3 align-top text-mutedForeground">
+                            <p>{run.bolPageCount} BOL pages</p>
+                            <p>{run.pickTicketPageCount} pick pages</p>
+                            <p className="mt-1 text-xs">
+                              AI fallback: {run.bolAiFallbackPageCount} / {run.pickAiFallbackPageCount}
+                            </p>
+                          </td>
+                          <td className="px-3 py-3 align-top text-mutedForeground">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">BOL</p>
+                            <p className="mt-1 text-sm">{formatPsSummary(run.bolPsNumbers)}</p>
+                            <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-mutedForeground">Pick</p>
+                            <p className="mt-1 text-sm">{formatPsSummary(run.pickPsNumbers)}</p>
+                          </td>
+                          <td className="px-3 py-3 align-top">
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => toggleHistoryRun(run.id)}
+                                aria-expanded={isExpanded}
+                                className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted"
+                              >
+                                {isExpanded ? "Hide details" : "Show details"}
+                              </button>
+                              <a
+                                href={`/api/shipment-documents/runs/${run.id}?documentType=bol`}
+                                className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted"
+                              >
+                                Download BOL
+                              </a>
+                              <a
+                                href={`/api/shipment-documents/runs/${run.id}?documentType=pick`}
+                                className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted"
+                              >
+                                Download Pick
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => void handleDeleteRun(run.id)}
+                                className="rounded-md border border-danger/30 px-3 py-1.5 text-xs font-semibold text-danger transition-colors hover:bg-danger/10"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                        {isExpanded ? (
+                          <tr className="bg-muted/20">
+                            <td colSpan={5} className="px-3 py-4">
+                              <div className="grid gap-4 lg:grid-cols-2">
+                                <div className="rounded-md border border-border bg-background p-4">
+                                  <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">BOL PS order</p>
+                                  <p className="mt-2 text-sm leading-6 text-mutedForeground">{formatPsSequence(run.bolPsNumbers)}</p>
+                                </div>
+                                <div className="rounded-md border border-border bg-background p-4">
+                                  <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Pick PS order</p>
+                                  <p className="mt-2 text-sm leading-6 text-mutedForeground">{formatPsSequence(run.pickPsNumbers)}</p>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -925,6 +966,22 @@ function formatPsSequence(psNumbers: string[]) {
   return psNumbers.join(" -> ");
 }
 
+function formatPsSummary(psNumbers: string[]) {
+  if (psNumbers.length === 0) {
+    return "No PS numbers saved";
+  }
+
+  const uniquePsNumbers = [...new Set(psNumbers)];
+  const firstPsNumber = uniquePsNumbers[0];
+  const lastPsNumber = uniquePsNumbers.at(-1);
+
+  if (uniquePsNumbers.length === 1) {
+    return `${firstPsNumber} only`;
+  }
+
+  return `${uniquePsNumbers.length} PS numbers · ${firstPsNumber} to ${lastPsNumber}`;
+}
+
 async function analyzeDocument({
   fileBytes,
   sourceFileName,
@@ -1077,6 +1134,32 @@ async function createDocumentResult(fileName: string, fileBytes: Uint8Array, sor
     pdfBase64: bytesToBase64(sortedPdfBytes),
     sourceBytes
   };
+}
+
+async function uploadSavedPdfChunks(runId: string, documentType: "bol" | "pick", pdfBase64: string) {
+  const totalChunks = Math.ceil(pdfBase64.length / PDF_SAVE_BASE64_CHUNK_SIZE);
+
+  for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+    const start = chunkIndex * PDF_SAVE_BASE64_CHUNK_SIZE;
+    const chunkBase64 = pdfBase64.slice(start, start + PDF_SAVE_BASE64_CHUNK_SIZE);
+    const response = await fetch(`/api/shipment-documents/runs/${runId}/pdf-chunks`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        documentType,
+        chunkBase64,
+        chunkIndex,
+        isLast: chunkIndex === totalChunks - 1
+      })
+    });
+    const json = (await response.json().catch(() => null)) as { error?: string } | null;
+
+    if (!response.ok) {
+      throw new Error(json?.error ?? "Unable to upload the saved PDF chunks.");
+    }
+  }
 }
 
 async function loadPdfJs() {

@@ -1,98 +1,29 @@
 # AGENTS.md - Newl Apps
 
-This repository is the source of truth for the Newl Apps platform.
+This repository is the source of truth for the Newl Apps platform. Future agents must treat the app as an internal-first, SaaS-ready, multi-tenant platform.
 
-## Project Strategy
+## Required agent workflow
 
-When building Newl Apps, treat it first and foremost as an internal Newl Group app platform for employees. It should host operational tools such as Apollo + TradeMining lead generation, UPS calculators, transit time lookup, invoice verification and QuickBooks posting, and future sales, finance, and operations tools.
+1. Read the nearest relevant `docs/modules/<module>/` documentation before changing code.
+2. Inspect the existing implementation pattern before adding abstractions.
+3. Trace every behaviour change through UI, API route, server action, service layer, database schema, permissions, tests, and documentation.
+4. Preserve tenant and organization filtering. Every shared data path must carry `tenantId` from an authenticated or ingestion context.
+5. Never expose secret values, tokens, passwords, private keys, service-account JSON, session cookies, or live customer data.
+6. Never use production write credentials from Codex, OpenClaw, browser automation, scripts, or tests.
+7. Never deploy directly to production.
+8. Never merge to `main` automatically.
+9. Work only on a feature branch or isolated worktree.
+10. Add regression tests for confirmed failures.
+11. Update relevant documentation when behaviour changes.
+12. Mark inferred business behaviour as requiring confirmation; never present it as approved.
+13. Use Vercel Preview for browser validation when web-app behaviour changes.
+14. Require explicit human approval for financial posting, Teamship writes, printing, shipping/releasing orders, customer communications, permission changes, database migrations, and production deployment.
+15. Final reports must include root cause, files changed, tests added, commands run, preview URL, known limitations, and business questions requiring review.
 
-Design internal-first, SaaS-ready. The architecture must allow individual apps/modules to later be sold to other logistics companies as SaaS products without rewriting the platform foundation.
+## Human approval boundaries
 
-Core architecture rules:
+OpenClaw may coordinate and prepare actions, but Newl Apps must enforce authentication, permission checks, validation, approval records, and audit logging. Deterministic code must perform exact comparisons, calculations, Teamship field updates, and printing. Codex changes code only through branches and reviewed pull requests.
 
-- Use multi-tenant architecture from day one.
-- Every major business table must include `tenantId`.
-- Users must belong to a tenant/company.
-- App/module access must be configurable per tenant.
-- Integration credentials must be stored per tenant.
-- Do not hardcode Newl Group in business logic.
-- Treat Newl Group as the first seeded tenant, not a special-case platform assumption.
-- Keep modules separated so one tenant can use only lead generation, another can use UPS tools, and another can use invoice verification.
-- Billing can remain a placeholder initially, but the data model must not block future billing, subscriptions, plans, entitlements, or usage metering.
-- Permissions must support `Admin`, `Manager`, `Sales`, `Operations`, `Finance`, and `Read Only` roles.
-- All queries must be tenant-safe to prevent cross-company data access.
+## Reference documentation
 
-Implementation expectations:
-
-- Read `reference/PRODUCT_OPERATING_BRIEF.md` before product or lead-gen implementation work.
-- Make `tenantId` part of service-layer inputs, database constraints, indexes, authorization checks, and test fixtures.
-- Prefer tenant-scoped integration configuration over global env-only credentials for production app behavior.
-- Keep lead generation, UPS tools, transit lookup, invoice verification, QuickBooks posting, and future tools as separate modules with explicit entitlements.
-- Use shared platform primitives for auth, tenants, roles, audit logs, jobs, integrations, files, and billing placeholders.
-- Add tests or review checks for tenant isolation on every shared data path.
-
-## Development Workflow
-
-- Work in small-to-medium PRs, not massive rewrites.
-- Before coding, summarize the intended implementation plan.
-- After coding, run lint, typecheck, build, and relevant Prisma checks.
-- Never push directly to main.
-- Always create a PR.
-- Include a PR summary with:
-  1. What changed
-  2. Why it changed
-  3. Files changed
-  4. How to test locally
-  5. Screens/pages affected
-  6. Tenant-safety considerations
-  7. Any known limitations
-- Do not ask the user for minor implementation decisions.
-- Make practical assumptions consistent with AGENTS.md.
-- Ask only when a decision affects product direction, security, data model, or external integrations.
-
-## Security
-
-- Never commit secrets, API keys, service account JSON, private keys, refresh tokens, passwords, or webhook tokens.
-- Use placeholders in committed examples, such as `APOLLO_API_KEY`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHEETS_ID`, and `OPENCLAW_TOKEN`.
-- Store production credentials in a managed secret store or tenant-scoped encrypted integration credential storage.
-
-## Authentication & Tenant Context
-
-Production authentication uses **Auth.js v5** with **Microsoft Entra ID SSO** and database-backed sessions. Users must be **admin-provisioned** (`User` + `Membership` rows) before they can sign in. There is **no self-signup**; the `signIn` callback rejects emails with no membership.
-
-For local development only, set `AUTH_DEV_BYPASS=true` (with `NODE_ENV` not `production`) to enable the dev email/password login form and seeded credentials. Never enable dev bypass in production; `isDevLoginEnabled()` enforces this.
-
-**Tenant resolution:** use `getAuthenticatedContext()` in user-facing server code (pages, server actions, route handlers that serve the app UI). `getCurrentTenantContext()` is a thin wrapper that returns only the tenant subset for existing tenant-scoped query helpers. Role and tenant are **always re-validated from the database** via `Membership` on every call — never trust tenant or role claims from the session alone.
-
-**Authorization helpers** live in `src/server/auth/authorization.ts`:
-
-- `requireModule(ctx, moduleKey)` — role may access the module **and** the tenant has it enabled
-- `requireMutationAccess(ctx)` — blocks `READ_ONLY` from writes
-- `requireRole(ctx, allowedRoles)` — role must be in the allowed list
-- `requireAdmin(ctx)` — shorthand for `ADMIN` only
-
-High-level **ROLE_MATRIX** (six roles):
-
-| Role | Module access | May mutate |
-|------|---------------|------------|
-| `ADMIN` | All modules | Yes |
-| `MANAGER` | All modules | Yes |
-| `SALES` | `LEAD_GEN` | Yes |
-| `OPERATIONS` | `LEAD_GEN`, `UPS_TOOLS`, `TRANSIT_LOOKUP` | Yes |
-| `FINANCE` | `INVOICE_VERIFICATION`, `QUICKBOOKS_POSTING` | Yes |
-| `READ_ONLY` | All modules (read) | No |
-
-**Route architecture:** `(public)` holds `/login`; `(authenticated)` holds all app pages. Middleware performs a lightweight session-cookie gate; the `(authenticated)` layout calls `getAuthenticatedContext()` for authoritative DB validation. Unauthenticated visitors are redirected to `/login`. Place new protected pages under `src/app/(authenticated)/`.
-
-**Testing:** run `npm test` (Vitest, hermetic unit tests) and `npm run verify:auth` (live DB checks against a seeded database).
-
-**Ingestion auth is separate:** machine-to-machine TradeMining ingestion uses `INGESTION_API_TOKEN` (Bearer or `x-newl-ingestion-key` header), not user sessions. See `src/server/ingestion-auth.ts` and `reference/OPENCLAW_N8N_INGESTION_API.md`.
-
-Full architecture, env vars, Entra setup, and file index: `reference/AUTH_AND_TENANT_CONTEXT.md`.
-
-## Reference
-
-- Product operating brief and PR milestones: `reference/PRODUCT_OPERATING_BRIEF.md`
-- Lead generation rebuild source of truth: `reference/OPENCLAW_LEAD_GEN_SPEC.md`
-- Auth and tenant context (detailed): `reference/AUTH_AND_TENANT_CONTEXT.md`
-- Initial migration plan: `reference/MIGRATION_PLAN.md`
+Start with `docs/README.md`, `docs/architecture/overview.md`, `docs/modules/README.md`, and the relevant module folder. For product or lead-gen implementation work, also read `reference/PRODUCT_OPERATING_BRIEF.md` and `reference/OPENCLAW_LEAD_GEN_SPEC.md`.

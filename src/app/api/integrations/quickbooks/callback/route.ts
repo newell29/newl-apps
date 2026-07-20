@@ -10,6 +10,21 @@ import {
   parseQuickBooksState
 } from "@/server/integrations/quickbooks";
 
+function buildSettingsQuickBooksRedirect(
+  callbackBase: string,
+  params: Record<string, string>,
+  returnTo = "/settings"
+) {
+  const url = new URL(returnTo, callbackBase);
+
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, value);
+  }
+
+  url.hash = "quickbooks";
+  return url;
+}
+
 export async function GET(request: Request) {
   const callbackBase = process.env.AUTH_URL ?? new URL(request.url).origin;
 
@@ -25,20 +40,29 @@ export async function GET(request: Request) {
 
     if (oauthError) {
       return NextResponse.redirect(
-        new URL(`/settings?quickbooks=error&reason=${encodeURIComponent(oauthError)}#quickbooks`, callbackBase)
+        buildSettingsQuickBooksRedirect(callbackBase, {
+          quickbooks: "error",
+          reason: oauthError
+        })
       );
     }
 
     if (!code || !realmId || !state) {
       return NextResponse.redirect(
-        new URL("/settings?quickbooks=error&reason=missing-callback-params#quickbooks", callbackBase)
+        buildSettingsQuickBooksRedirect(callbackBase, {
+          quickbooks: "error",
+          reason: "missing-callback-params"
+        })
       );
     }
 
     const parsedState = parseQuickBooksState(state);
     if (parsedState.tenantId !== context.tenantId) {
       return NextResponse.redirect(
-        new URL("/settings?quickbooks=error&reason=tenant-mismatch#quickbooks", callbackBase)
+        buildSettingsQuickBooksRedirect(callbackBase, {
+          quickbooks: "error",
+          reason: "tenant-mismatch"
+        })
       );
     }
 
@@ -99,17 +123,21 @@ export async function GET(request: Request) {
     }
 
     return NextResponse.redirect(
-      new URL(
-        `${parsedState.returnTo}?quickbooks=connected&entity=${encodeURIComponent(parsedState.legalEntity)}#quickbooks`,
-        callbackBase
+      buildSettingsQuickBooksRedirect(
+        callbackBase,
+        {
+          quickbooks: "connected",
+          entity: parsedState.legalEntity
+        },
+        parsedState.returnTo
       )
     );
   } catch (error) {
     return NextResponse.redirect(
-      new URL(
-        `/settings?quickbooks=error&reason=${encodeURIComponent(error instanceof Error ? error.message : "callback-failed")}#quickbooks`,
-        callbackBase
-      )
+      buildSettingsQuickBooksRedirect(callbackBase, {
+        quickbooks: "error",
+        reason: error instanceof Error ? error.message : "callback-failed"
+      })
     );
   }
 }

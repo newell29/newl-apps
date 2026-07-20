@@ -1,6 +1,6 @@
 import type { TenantContext } from "@/server/tenant-context";
 
-export function tenantWhere<T extends object>(tenant: TenantContext, where?: T): T & { tenantId: string } {
+export function tenantWhere<T extends object>(tenant: Pick<TenantContext, "tenantId">, where?: T): T & { tenantId: string } {
   return {
     ...(where ?? {}),
     tenantId: tenant.tenantId

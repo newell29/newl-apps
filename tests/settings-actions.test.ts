@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const upsertTradeMiningScoringConfig = vi.fn();
 const findIntegrationCredential = vi.fn();
@@ -79,6 +79,10 @@ describe("saveTradeMiningScoringSettingsAction", () => {
     updateTradeMiningSearchProfile.mockResolvedValue({});
     fetchApolloRepDirectory.mockResolvedValue([]);
     fetchApolloSequenceDirectory.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("upserts scoring settings and revalidates dependent surfaces", async () => {
@@ -203,6 +207,36 @@ describe("saveTradeMiningScoringSettingsAction", () => {
       endpointUrl: null
     });
     expect(revalidatePath).toHaveBeenCalledWith("/assistant");
+  });
+
+  it("encrypts a local model bearer token without placing it in public config", async () => {
+    vi.stubEnv("AUTH_SECRET", "settings-action-assistant-secret");
+    findIntegrationCredential.mockResolvedValueOnce([]);
+    const formData = new FormData();
+    formData.set("assistantProvider", "LOCAL_LLM");
+    formData.set("assistantEndpointUrl", "http://127.0.0.1:11434/v1");
+    formData.set("assistantApiKey", "local-relay-token");
+    formData.set("assistantDefaultModel", "qwen3:30b");
+    formData.set("assistantFallbackModel", "gpt-oss:20b");
+    formData.set("assistantReasoningEffort", "none");
+    formData.set("assistantTemperature", "0.2");
+    formData.set("assistantMaxTokens", "1200");
+
+    await saveAssistantProviderSettingsAction(formData);
+
+    const args = createIntegrationCredential.mock.calls[0][0];
+    expect(args.data.tenantId).toBe("tenant-1");
+    expect(args.data.provider).toBe("LOCAL_LLM");
+    expect(args.data.publicConfig).toMatchObject({
+      endpointUrl: "http://127.0.0.1:11434/v1",
+      defaultModel: "qwen3:30b",
+      fallbackModel: "gpt-oss:20b",
+      reasoningEffort: "none",
+      maxTokens: 1200
+    });
+    expect(args.data.publicConfig).not.toHaveProperty("apiKey");
+    expect(args.data.secretRef).toMatch(/^assistant-provider:enc:v1:/);
+    expect(args.data.secretRef).not.toContain("local-relay-token");
   });
 
   it("deduplicates older assistant provider rows when saving settings", async () => {

@@ -43,6 +43,96 @@ type Tier1DraftResult = {
   rawResponse: Record<string, unknown>;
 };
 
+export type WebsiteGrowthDraftContext = {
+  model: string;
+  opportunity: {
+    action: string;
+    topic: string;
+    primaryKeyword: string | null;
+    targetPage: string | null;
+    sourcePage: string | null;
+    score: number;
+    confidence: string | null;
+    reason: string;
+    recommendation: string;
+    supportingKeywords: string[];
+    evidence: Record<string, unknown>;
+  };
+  websiteContext: Record<string, unknown>;
+  pagePattern: Record<string, unknown>;
+};
+
+export type WebsiteGrowthDraftResult = {
+  title: string;
+  summary: string;
+  contentType: string;
+  proposedPath: string | null;
+  targetKeyword: string;
+  searchIntent: string;
+  sections: Array<{
+    heading: string;
+    purpose: string;
+    draftCopy: string;
+  }>;
+  metaTitle: string;
+  metaDescription: string;
+  faqs: Array<{
+    question: string;
+    answer: string;
+  }>;
+  internalLinks: Array<{
+    label: string;
+    url: string;
+    reason: string;
+  }>;
+  implementationNotes: string[];
+  reviewChecklist: string[];
+  websitePageType: string;
+  websiteTemplate: string;
+  layoutComponents: string[];
+  designSystemNotes: string[];
+  pagePreview: WebsiteGrowthDraftPagePreview | null;
+  rawResponse: Record<string, unknown>;
+};
+
+export type WebsiteGrowthDraftPagePreview = {
+  mode: "new_page" | "existing_page_update" | "legacy_redirect_rebuild" | "internal_link_update";
+  eyebrow: string;
+  heroTitle: string;
+  heroCopy: string;
+  heroBullets: string[];
+  primaryCta: string;
+  secondaryCta: string;
+  proofCards: Array<{
+    label: string;
+    value: string;
+    body: string;
+  }>;
+  sections: Array<{
+    eyebrow: string;
+    heading: string;
+    body: string;
+    cards: Array<{
+      title: string;
+      body: string;
+    }>;
+  }>;
+  faqs: Array<{
+    question: string;
+    answer: string;
+  }>;
+  internalLinks: Array<{
+    label: string;
+    url: string;
+    reason: string;
+  }>;
+  finalCta: {
+    heading: string;
+    body: string;
+    buttonLabel: string;
+  };
+};
+
 export type ApolloCompanySuggestionContext = {
   model: string;
   companyName: string;
@@ -125,6 +215,57 @@ export async function generateTier1SequenceDraft(context: Tier1DraftContext): Pr
   };
 }
 
+export async function generateWebsiteGrowthContentDraft(
+  context: WebsiteGrowthDraftContext
+): Promise<WebsiteGrowthDraftResult> {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+
+  if (!apiKey || apiKey === "OPENAI_API_KEY_PLACEHOLDER") {
+    throw new Error("OPENAI_API_KEY is not configured. Add it to enable live Website Growth draft generation.");
+  }
+
+  const response = await fetch(`${OPENAI_API_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: context.model,
+      temperature: 0.35,
+      response_format: {
+        type: "json_object"
+      },
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a B2B logistics SEO strategist and senior web producer for Newl Group. Generate implementation-ready SEO content that can be reviewed visually before publication. Return JSON only with keys title, summary, contentType, proposedPath, targetKeyword, searchIntent, sections, metaTitle, metaDescription, faqs, internalLinks, implementationNotes, reviewChecklist, websitePageType, websiteTemplate, layoutComponents, designSystemNotes, pagePreview. pagePreview must be a visitor-facing Newl website page experience, not a proposal, not instructions, and not a checklist. For a new page or legacy redirect rebuild, pagePreview should show the complete proposed page. For an existing page improvement, pagePreview should show how the improved page should read after the change. Do not use words like proposal, draft, approve, implementation, or should inside pagePreview copy. Do not fabricate customer names, certifications, carrier relationships, locations, or metrics beyond the supplied opportunity. Match the supplied Newl website pattern, component sequence, tone, CTAs, FAQ style, and internal linking behavior."
+        },
+        {
+          role: "user",
+          content: buildWebsiteGrowthDraftPrompt(context)
+        }
+      ]
+    }),
+    cache: "no-store"
+  });
+
+  const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+
+  if (!response.ok || !json) {
+    throw new Error(extractOpenAiError(json) ?? `OpenAI Website Growth draft generation failed with status ${response.status}.`);
+  }
+
+  const content = readAssistantContent(json);
+  const parsed = parseWebsiteGrowthDraftPayload(content);
+
+  return {
+    ...parsed,
+    rawResponse: json
+  };
+}
+
 export async function generateApolloCompanyNameSuggestion(
   context: ApolloCompanySuggestionContext
 ): Promise<ApolloCompanySuggestionResult> {
@@ -179,6 +320,40 @@ export async function generateApolloCompanyNameSuggestion(
     source: "ai",
     rawResponse: json
   };
+}
+
+function buildWebsiteGrowthDraftPrompt(context: WebsiteGrowthDraftContext) {
+  return JSON.stringify(
+    {
+      objective:
+        "Generate a review-ready Website Growth draft with two layers: a visitor-facing pagePreview that renders like a Newl website page, and implementation/review metadata for the app. It may be a new page, an existing page improvement, a resource article, a page section, an internal linking plan, or a redirect/content mapping plan.",
+      newlPositioning: [
+        "Newl is a warehousing-led logistics partner.",
+        "Core strengths include warehousing, fulfillment, Amazon FBA support, B2B wholesale and retail fulfillment, cross-docking, Teamship WMS visibility, GTA local trucking, ground distribution, cross-border logistics, ocean freight, and air freight.",
+        "Newl has Mississauga and Charlotte warehouse hubs and can coordinate trusted partner warehouse coverage across Canada and the U.S.",
+        "The content should drive practical inbound conversations, not generic blog traffic."
+      ],
+      writingRules: [
+        "Keep the recommendation specific to the opportunity.",
+        "Do not say a page is published or live.",
+        "If an existing target page is supplied, propose improvements to that page instead of inventing a duplicate URL.",
+        "Follow the supplied Newl page pattern and component sequence. The draft should feel like it belongs in the existing Newl website, not as a generic SEO page.",
+        "The pagePreview must be real visitor-facing page copy in Newl website style, not task instructions.",
+        "For a new page or legacy redirect rebuild, produce a complete pagePreview for the proposed URL.",
+        "For an existing page improvement, produce the pagePreview as the page would read after the recommended change.",
+        "Do not use words like proposal, draft, approve, implementation, checklist, or should inside pagePreview.",
+        "Use the websiteContext and selectedPagePattern to mirror Newl hero, proof card, section, FAQ, internal link, and CTA patterns.",
+        "Reference existing page components by name when giving implementation notes.",
+        "Use FAQs and internal links to support conversion and topical authority.",
+        "Include a review checklist for a human approver before anything is posted."
+      ],
+      websiteContext: context.websiteContext,
+      selectedPagePattern: context.pagePattern,
+      opportunity: context.opportunity
+    },
+    null,
+    2
+  );
 }
 
 function buildTier1DraftPrompt(context: Tier1DraftContext) {
@@ -242,6 +417,169 @@ function readAssistantContent(payload: Record<string, unknown>) {
   }
 
   return content;
+}
+
+function parseWebsiteGrowthDraftPayload(content: string) {
+  let parsed: Record<string, unknown>;
+
+  try {
+    parsed = JSON.parse(content) as Record<string, unknown>;
+  } catch {
+    throw new Error("OpenAI returned a Website Growth draft response that was not valid JSON.");
+  }
+
+  const title = readNonEmptyString(parsed.title);
+  const summary = readNonEmptyString(parsed.summary);
+  const contentType = readNonEmptyString(parsed.contentType);
+  const targetKeyword = readNonEmptyString(parsed.targetKeyword);
+  const searchIntent = readNonEmptyString(parsed.searchIntent);
+  const metaTitle = readNonEmptyString(parsed.metaTitle);
+  const metaDescription = readNonEmptyString(parsed.metaDescription);
+  const proposedPath = typeof parsed.proposedPath === "string" && parsed.proposedPath.trim().length > 0
+    ? parsed.proposedPath.trim()
+    : null;
+  const sections = readObjectArray(parsed.sections)
+    .map((section) => ({
+      heading: readNonEmptyString(section.heading) ?? "",
+      purpose: readNonEmptyString(section.purpose) ?? "",
+      draftCopy: readNonEmptyString(section.draftCopy) ?? ""
+    }))
+    .filter((section) => section.heading && section.purpose && section.draftCopy);
+  const faqs = readObjectArray(parsed.faqs)
+    .map((faq) => ({
+      question: readNonEmptyString(faq.question) ?? "",
+      answer: readNonEmptyString(faq.answer) ?? ""
+    }))
+    .filter((faq) => faq.question && faq.answer);
+  const internalLinks = readObjectArray(parsed.internalLinks)
+    .map((link) => ({
+      label: readNonEmptyString(link.label) ?? "",
+      url: readNonEmptyString(link.url) ?? "",
+      reason: readNonEmptyString(link.reason) ?? ""
+    }))
+    .filter((link) => link.label && link.url && link.reason);
+  const implementationNotes = readStringArray(parsed.implementationNotes);
+  const reviewChecklist = readStringArray(parsed.reviewChecklist);
+  const websitePageType = readNonEmptyString(parsed.websitePageType);
+  const websiteTemplate = readNonEmptyString(parsed.websiteTemplate);
+  const layoutComponents = readStringArray(parsed.layoutComponents);
+  const designSystemNotes = readStringArray(parsed.designSystemNotes);
+  const pagePreview = readWebsiteGrowthPagePreview(parsed.pagePreview);
+
+  if (!title || !summary || !contentType || !targetKeyword || !searchIntent || !metaTitle || !metaDescription || !websitePageType || !websiteTemplate) {
+    throw new Error("OpenAI returned an incomplete Website Growth draft payload.");
+  }
+
+  if (sections.length === 0 || implementationNotes.length === 0 || reviewChecklist.length === 0 || layoutComponents.length === 0 || designSystemNotes.length === 0) {
+    throw new Error("OpenAI returned a Website Growth draft without enough implementation detail.");
+  }
+
+  return {
+    title,
+    summary,
+    contentType,
+    proposedPath,
+    targetKeyword,
+    searchIntent,
+    sections,
+    metaTitle,
+    metaDescription,
+    faqs,
+    internalLinks,
+    implementationNotes,
+    reviewChecklist,
+    websitePageType,
+    websiteTemplate,
+    layoutComponents,
+    designSystemNotes,
+    pagePreview
+  };
+}
+
+function readWebsiteGrowthPagePreview(value: unknown): WebsiteGrowthDraftPagePreview | null {
+  const record = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+
+  if (!record) {
+    return null;
+  }
+
+  const heroTitle = readNonEmptyString(record.heroTitle);
+  const heroCopy = readNonEmptyString(record.heroCopy);
+  const sections = readObjectArray(record.sections)
+    .map((section) => ({
+      eyebrow: readNonEmptyString(section.eyebrow) ?? "NEED TO KNOW",
+      heading: readNonEmptyString(section.heading) ?? "",
+      body: readNonEmptyString(section.body) ?? "",
+      cards: readObjectArray(section.cards)
+        .map((card) => ({
+          title: readNonEmptyString(card.title) ?? "",
+          body: readNonEmptyString(card.body) ?? ""
+        }))
+        .filter((card) => card.title && card.body)
+        .slice(0, 6)
+    }))
+    .filter((section) => section.heading && section.body)
+    .slice(0, 8);
+
+  if (!heroTitle || !heroCopy || sections.length === 0) {
+    return null;
+  }
+
+  const finalCta = value && typeof record.finalCta === "object" && !Array.isArray(record.finalCta)
+    ? (record.finalCta as Record<string, unknown>)
+    : {};
+
+  return {
+    mode: readPreviewMode(record.mode),
+    eyebrow: readNonEmptyString(record.eyebrow) ?? "WAREHOUSE-LED LOGISTICS",
+    heroTitle,
+    heroCopy,
+    heroBullets: readStringArray(record.heroBullets).slice(0, 6),
+    primaryCta: readNonEmptyString(record.primaryCta) ?? "Request Logistics Review",
+    secondaryCta: readNonEmptyString(record.secondaryCta) ?? "Talk to Newl",
+    proofCards: readObjectArray(record.proofCards)
+      .map((card) => ({
+        label: readNonEmptyString(card.label) ?? "",
+        value: readNonEmptyString(card.value) ?? "",
+        body: readNonEmptyString(card.body) ?? ""
+      }))
+      .filter((card) => card.label && card.value && card.body)
+      .slice(0, 6),
+    sections,
+    faqs: readObjectArray(record.faqs)
+      .map((faq) => ({
+        question: readNonEmptyString(faq.question) ?? "",
+        answer: readNonEmptyString(faq.answer) ?? ""
+      }))
+      .filter((faq) => faq.question && faq.answer)
+      .slice(0, 8),
+    internalLinks: readObjectArray(record.internalLinks)
+      .map((link) => ({
+        label: readNonEmptyString(link.label) ?? "",
+        url: readNonEmptyString(link.url) ?? "",
+        reason: readNonEmptyString(link.reason) ?? ""
+      }))
+      .filter((link) => link.label && link.url && link.reason)
+      .slice(0, 8),
+    finalCta: {
+      heading: readNonEmptyString(finalCta.heading) ?? "Talk to Newl about the right logistics setup.",
+      body: readNonEmptyString(finalCta.body) ?? "Share your inventory, service, and freight requirements and Newl will review the best operating path.",
+      buttonLabel: readNonEmptyString(finalCta.buttonLabel) ?? "Request Logistics Review"
+    }
+  };
+}
+
+function readPreviewMode(value: unknown): WebsiteGrowthDraftPagePreview["mode"] {
+  const allowed: WebsiteGrowthDraftPagePreview["mode"][] = [
+    "new_page",
+    "existing_page_update",
+    "legacy_redirect_rebuild",
+    "internal_link_update"
+  ];
+
+  return typeof value === "string" && allowed.includes(value as WebsiteGrowthDraftPagePreview["mode"])
+    ? (value as WebsiteGrowthDraftPagePreview["mode"])
+    : "new_page";
 }
 
 function parseDraftPayload(content: string) {
@@ -310,6 +648,14 @@ function extractOpenAiError(payload: Record<string, unknown> | null) {
 
 function readNonEmptyString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readStringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()) : [];
+}
+
+function readObjectArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item))) : [];
 }
 
 function readConfidenceValue(value: unknown): ApolloCompanySuggestionResult["confidence"] | null {
