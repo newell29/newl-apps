@@ -677,6 +677,67 @@ NEWLS 2604816191908 1.00 ( )`
     ]);
   });
 
+  it("uses the Garland PS number to choose the correct Teamship order when an SR is reused", () => {
+    const pdfOrder = samplePdfOrder({
+      psNumber: "PS210346",
+      srNumber: "SR809791",
+      pageNumbers: [1],
+      shipVia: "MIDLAND",
+      shipToName: "MATCHING CUSTOMER",
+      shipToPo: "PO-CURRENT",
+      freightTerms: "PPADD-CD",
+      itemSkus: ["SKU-CURRENT"],
+      serialNumbers: []
+    });
+    const previousTeamshipOrder = {
+      ...sampleTeamshipOrder("SR809791", "PS209999", "MIDLAND", "OLD CUSTOMER", "PO-OLD", "PPADD-CD", ["SKU: SKU-OLD"]),
+      id: 30562
+    };
+    const currentTeamshipOrder = {
+      ...sampleTeamshipOrder("SR809791", "PS210346", "MIDLAND", "MATCHING CUSTOMER", "PO-CURRENT", "PPADD-CD", [
+        "SKU: SKU-CURRENT"
+      ]),
+      id: 30939
+    };
+
+    const review = buildGarlandTeamshipReview([pdfOrder], [previousTeamshipOrder, currentTeamshipOrder]);
+
+    expect(review.reviews).toHaveLength(1);
+    expect(review.reviews[0]).toMatchObject({
+      psNumber: "PS210346",
+      srNumber: "SR809791",
+      teamshipOrderId: "30939",
+      status: "PASS"
+    });
+  });
+
+  it("does not accept an SR-only match when the duplicated Teamship order has a different PS number", () => {
+    const pdfOrder = samplePdfOrder({
+      psNumber: "PS210346",
+      srNumber: "SR809791",
+      pageNumbers: [1],
+      shipVia: "MIDLAND",
+      shipToName: "MATCHING CUSTOMER",
+      shipToPo: "PO-CURRENT",
+      freightTerms: "PPADD-CD",
+      itemSkus: ["SKU-CURRENT"],
+      serialNumbers: []
+    });
+    const differentPsTeamshipOrder = {
+      ...sampleTeamshipOrder("SR809791", "PS209999", "MIDLAND", "OLD CUSTOMER", "PO-OLD", "PPADD-CD", ["SKU: SKU-OLD"]),
+      id: 30562
+    };
+
+    const review = buildGarlandTeamshipReview([pdfOrder], [differentPsTeamshipOrder], [], {
+      includeUnmatchedTeamshipOrders: true
+    });
+
+    expect(review.reviews.map((order) => [order.psNumber, order.srNumber, order.status, order.teamshipOrderId])).toEqual([
+      ["PS210346", "SR809791", "MISSING_TEAMSHIP", null],
+      ["PS209999", "SR809791", "NO_PDF", "30562"]
+    ]);
+  });
+
   it("compares Teamship UI-style field names and commodity SKU values", () => {
     const [pdfOrder] = parseGarlandShippingOrderPages([{ pageNumber: 1, text: pageOne }]);
     const teamshipOrder: TeamshipShippingOrderDetail = {

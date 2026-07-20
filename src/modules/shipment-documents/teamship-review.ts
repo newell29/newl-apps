@@ -487,20 +487,23 @@ export function buildGarlandTeamshipReview(
   const alertByShipmentId = new Map(
     teamshipAlerts.map((alert) => [normalizeIdentifier(alert.srNumber), alert] as const).filter(([shipmentId]) => shipmentId.length > 0)
   );
-  const teamshipByShipmentId = groupTeamshipOrdersByShipmentId(teamshipOrders);
+  const teamshipOrderIndex = indexTeamshipOrders(teamshipOrders);
+  const matchedTeamshipOrders = new Set<TeamshipShippingOrderDetail>();
   const reviews = pdfOrders.map((pdfOrder) => {
-    const teamshipOrder = teamshipByShipmentId.get(normalizeIdentifier(pdfOrder.srNumber)) ?? null;
+    const teamshipOrder = findTeamshipOrderForPdf(pdfOrder, teamshipOrderIndex);
+    if (teamshipOrder) {
+      matchedTeamshipOrders.add(teamshipOrder);
+    }
     const alert = alertByShipmentId.get(normalizeIdentifier(pdfOrder.srNumber)) ?? null;
     return buildOrderReview(pdfOrder, teamshipOrder, alert, options.learnedProductDimensions ?? []);
   });
   const skippedAlreadyReviewedReviews = (options.skippedAlreadyReviewedOrders ?? []).map(buildSkippedAlreadyReviewedReview);
-  const skippedShipmentIds = new Set(skippedAlreadyReviewedReviews.map((review) => normalizeIdentifier(review.srNumber)));
+  const skippedReviewKeys = new Set(skippedAlreadyReviewedReviews.map((review) => buildReviewIdentityKey(review.psNumber, review.srNumber)));
 
   if (options.includeUnmatchedTeamshipOrders) {
-    const matchedPdfShipmentIds = new Set(pdfOrders.map((order) => normalizeIdentifier(order.srNumber)));
-
-    for (const [shipmentId, teamshipOrder] of teamshipByShipmentId) {
-      if (!shipmentId || matchedPdfShipmentIds.has(shipmentId) || skippedShipmentIds.has(shipmentId)) {
+    for (const teamshipOrder of teamshipOrders) {
+      const teamshipKey = buildTeamshipIdentityKey(teamshipOrder);
+      if (matchedTeamshipOrders.has(teamshipOrder) || !teamshipKey || skippedReviewKeys.has(teamshipKey)) {
         continue;
       }
 
@@ -519,20 +522,90 @@ export function buildGarlandTeamshipReview(
   };
 }
 
-function groupTeamshipOrdersByShipmentId(teamshipOrders: TeamshipShippingOrderDetail[]) {
-  const teamshipByShipmentId = new Map<string, TeamshipShippingOrderDetail>();
+type TeamshipOrderIndex = {
+  byPsNumber: Map<string, TeamshipShippingOrderDetail[]>;
+  byShipmentId: Map<string, TeamshipShippingOrderDetail[]>;
+};
+
+function indexTeamshipOrders(teamshipOrders: TeamshipShippingOrderDetail[]): TeamshipOrderIndex {
+  const byPsNumber = new Map<string, TeamshipShippingOrderDetail[]>();
+  const byShipmentId = new Map<string, TeamshipShippingOrderDetail[]>();
 
   for (const order of teamshipOrders) {
+    const psNumber = normalizeIdentifier(readTeamshipPsNumber(order));
     const shipmentId = normalizeIdentifier(readTeamshipShipmentId(order));
 
-    if (!shipmentId || teamshipByShipmentId.has(shipmentId)) {
-      continue;
+    if (psNumber) {
+      appendIndexedTeamshipOrder(byPsNumber, psNumber, order);
     }
 
-    teamshipByShipmentId.set(shipmentId, order);
+    if (shipmentId) {
+      appendIndexedTeamshipOrder(byShipmentId, shipmentId, order);
+    }
   }
 
-  return teamshipByShipmentId;
+  return { byPsNumber, byShipmentId };
+}
+
+function appendIndexedTeamshipOrder(
+  index: Map<string, TeamshipShippingOrderDetail[]>,
+  key: string,
+  order: TeamshipShippingOrderDetail
+) {
+  const orders = index.get(key) ?? [];
+  orders.push(order);
+  index.set(key, orders);
+}
+
+function findTeamshipOrderForPdf(pdfOrder: GarlandPdfShippingOrder, index: TeamshipOrderIndex) {
+  const pdfPsNumber = normalizeIdentifier(pdfOrder.psNumber);
+  const pdfSrNumber = normalizeIdentifier(pdfOrder.srNumber);
+
+  if (pdfPsNumber) {
+    const psMatches = index.byPsNumber.get(pdfPsNumber) ?? [];
+    if (psMatches.length > 0) {
+      return findSrMatch(pdfSrNumber, psMatches) ?? psMatches[0] ?? null;
+    }
+  }
+
+  if (!pdfSrNumber) {
+    return null;
+  }
+
+  const srMatches = index.byShipmentId.get(pdfSrNumber) ?? [];
+
+  if (!pdfPsNumber) {
+    return srMatches[0] ?? null;
+  }
+
+  const nonConflictingSrMatches = srMatches.filter((order) => {
+    const teamshipPsNumber = normalizeIdentifier(readTeamshipPsNumber(order));
+    return !teamshipPsNumber || teamshipPsNumber === pdfPsNumber;
+  });
+
+  return nonConflictingSrMatches.length === 1 ? nonConflictingSrMatches[0] : null;
+}
+
+function findSrMatch(pdfSrNumber: string, orders: TeamshipShippingOrderDetail[]) {
+  if (!pdfSrNumber) {
+    return null;
+  }
+
+  return orders.find((order) => normalizeIdentifier(readTeamshipShipmentId(order)) === pdfSrNumber) ?? null;
+}
+
+function buildReviewIdentityKey(psNumber: string | null, srNumber: string | null) {
+  const normalizedPs = normalizeIdentifier(psNumber);
+  if (normalizedPs) {
+    return `ps:${normalizedPs}`;
+  }
+
+  const normalizedSr = normalizeIdentifier(srNumber);
+  return normalizedSr ? `sr:${normalizedSr}` : "";
+}
+
+function buildTeamshipIdentityKey(order: TeamshipShippingOrderDetail) {
+  return buildReviewIdentityKey(readTeamshipPsNumber(order), readTeamshipShipmentId(order));
 }
 
 function buildOrderReview(
