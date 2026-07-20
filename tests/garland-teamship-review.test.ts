@@ -210,6 +210,103 @@ MACKIE 2603FM0241 1.00 (              )`
     expect(orders[0]?.items[0]?.serialNumbers).not.toContain("MACKIE");
   });
 
+  it("extracts numeric serial rows when Garland splits the site and lot columns across lines", () => {
+    const orders = parseGarlandShippingOrderPages([
+      {
+        pageNumber: 1,
+        text: `Ship-To Pre-Shipper Print Date
+11906259 PS210361 7/17/2026
+Pre-Shipper
+MCDONALDS STORE
+TORONTO, ON M6N 4C4
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Order Number SR812900 Ship To PO 00525893 Frt Terms PPADD-CD
+Order Date 7/17/2026 Ship Via SPEEDY
+FQ#96790
+Ln Item Number T
+Site
+Location
+Lot/Serial
+Ref
+Ship Qty Qty Open UM Due
+Shipped
+1 MCOE5LMD-CD2081
+McDONALDS 1/2 SIZE CONV. OVEN,208V,1PH
+891210
+5.00 EA 7/17/2026
+NEWLS
+2606891101481 1.00 (              )
+NEWLS
+2606891101482 1.00 (              )
+NEWLS
+2606891101483 1.00 (              )
+NEWLS
+2606891101484 1.00 (              )
+NEWLS
+2606891101485 1.00 (              )`
+      }
+    ]);
+
+    expect(orders[0]?.instructions).toBe("FQ#96790");
+    expect(orders[0]?.items[0]).toMatchObject({
+      sku: "MCOE5LMD-CD2081",
+      quantity: 5,
+      serialNumbers: [
+        "2606891101481",
+        "2606891101482",
+        "2606891101483",
+        "2606891101484",
+        "2606891101485"
+      ]
+    });
+    expect(orders[0]?.items[0]?.serialNumbers).not.toContain("891210");
+    expect(orders[0]?.items[0]?.serialNumbers).not.toContain("NEWLS");
+  });
+
+  it("does not leak split Garland item table headers into special instructions", () => {
+    const orders = parseGarlandShippingOrderPages([
+      {
+        pageNumber: 1,
+        text: `Ship-To Pre-Shipper Print Date
+11906259 PS210362 7/17/2026
+Pre-Shipper
+CENTRE DE DISTRIBUTION #2 DORION
+877 BOUL. JEAN-PAUL VINCENT
+LONGUEUIL, QC J4G 1R3
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Order Number SR810469 Ship To PO 149205 Frt Terms PPADD-CD
+Order Date 6/23/2026 Ship Via SPEEDY
+* * DELIVERY MUST BE BEFORE NOON PLEASE * * *
+APPOINTMENT NEEDED - CALL 450-462-5555 ext. 1199
+cdl.reception@doyondespres.com FOR DELIVERY
+FREIGHT QUOTE #97859
+TAG: RESIDENCE LE CHATEAU DU BEL AGE
+Ln Item Number T
+Site
+Location
+Lot/Serial
+Ref
+Ship Qty Qty Open UM Due
+Shipped
+1 G60-4G36RR-5032 891210
+DESCRIPTION
+1.00 EA 6/25/2026`
+      }
+    ]);
+
+    expect(orders[0]?.instructions).toBe(
+      [
+        "* * DELIVERY MUST BE BEFORE NOON PLEASE * * *",
+        "APPOINTMENT NEEDED - CALL 450-462-5555 ext. 1199",
+        "cdl.reception@doyondespres.com FOR DELIVERY",
+        "FREIGHT QUOTE #97859",
+        "TAG: RESIDENCE LE CHATEAU DU BEL AGE"
+      ].join("\n")
+    );
+  });
+
   it("parses Teamship alert digest orders and item details", () => {
     const alerts = parseTeamshipAlertDigest(alertDigest);
 
