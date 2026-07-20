@@ -45,7 +45,7 @@ const quoteRequest: LtlQuoteRequest = {
   destinationCountry: "US",
   pickupDate: "2026-06-20",
   uom: "US",
-  accessorialCodes: ["APPT", "HAZ", "INSIDE"],
+  accessorialCodes: ["APD", "HAZ"],
   pieces: [
     {
       qty: 2,
@@ -132,12 +132,12 @@ describe("LTL rate portal dry-run engine", () => {
       quoteNumber: "SEFL-REF12DRY-1",
       linehaulCharge: 581.2,
       fuelCharge: 92.99,
-      accessorialCharge: 100,
-      total: 774.19,
+      accessorialCharge: 82,
+      total: 756.19,
       mode: "dry-run",
       rateRemarks: [
         "Dry-run estimate for Southeastern Freight.",
-        "Includes APPT, HAZ, INSIDE accessorial pricing.",
+        "Includes APD, HAZ accessorial pricing.",
         "Hazmat surcharge simulated from 7L-style freight profile."
       ]
     });
@@ -148,8 +148,8 @@ describe("LTL rate portal dry-run engine", () => {
       quoteNumber: "ODFL-REF12DRY-2",
       linehaulCharge: 592.2,
       fuelCharge: 100.67,
-      accessorialCharge: 100,
-      total: 792.87,
+      accessorialCharge: 82,
+      total: 774.87,
       mode: "dry-run"
     });
   });

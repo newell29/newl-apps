@@ -10,7 +10,7 @@ vi.mock("node:fs/promises", () => ({
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
 
-import { getLtlQuotes, resetSevenLRuntimeCacheForTests } from "@/server/integrations/seven-l";
+import { fetchSevenLAvailableCarriers, getLtlQuotes, resetSevenLRuntimeCacheForTests } from "@/server/integrations/seven-l";
 
 const liveAccount: SevenLAccountConfig = {
   id: "account-live",
@@ -63,7 +63,7 @@ const lane: LtlQuoteRequest = {
   destinationCountry: "US",
   pickupDate: "2026-06-20",
   uom: "US",
-  accessorialCodes: ["APPT", "LFTG"],
+  accessorialCodes: ["APD", "LFD"],
   pieces: [
     {
       qty: 1,
@@ -162,6 +162,52 @@ describe("7L client integration", () => {
     expect(response.errors).toEqual([]);
   });
 
+  it("keeps live carriers that have a hash, name, and code even when SCAC is missing", async () => {
+    process.env.SEVEN_L_RUNTIME_ACCOUNTS_JSON = JSON.stringify([
+      {
+        name: "7L Live Preferred Carriers",
+        username: "env-demo",
+        password: "env-secret",
+        baseUrl: "https://restapi.my7l.com"
+      }
+    ]);
+
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            accessToken: "token-123",
+            exp: Math.floor(Date.now() / 1000) + 3600
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            results: [
+              {
+                CarrierHash: "frontline-hash",
+                Name: "Frontline Freight",
+                Code: "FF",
+                Defaulted: true
+              }
+            ]
+          }
+        })
+      );
+
+    await expect(fetchSevenLAvailableCarriers(liveAccount)).resolves.toEqual([
+      {
+        carrierHash: "frontline-hash",
+        name: "Frontline Freight",
+        code: "FF",
+        scac: undefined,
+        defaulted: true,
+        enabled: true
+      }
+    ]);
+  });
+
   it("logs in, resolves zipcodes, and rates only the configured preferred carriers", async () => {
     process.env.SEVEN_L_DEV_ACCOUNTS_FILE = "/tmp/seven-l.json";
     readFile.mockResolvedValue(
@@ -246,7 +292,7 @@ describe("7L client integration", () => {
     expect(firstRateUrl.searchParams.get("carrierHash")).toBe("carrier-hash-1");
     expect(firstRateUrl.searchParams.get("originCity")).toBe("CHARLOTTE");
     expect(firstRateUrl.searchParams.get("destinationState")).toBe("TX");
-    expect(firstRateUrl.searchParams.getAll("accessorialsList[]")).toEqual(["APPT", "LFTG"]);
+    expect(firstRateUrl.searchParams.getAll("accessorialsList[]")).toEqual(["APD", "LFD"]);
     expect(firstRateUrl.searchParams.get("strictResult")).toBe("true");
     expect(firstRateUrl.searchParams.get("harmonizedCharges")).toBe("true");
 

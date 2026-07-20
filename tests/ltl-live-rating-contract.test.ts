@@ -45,7 +45,7 @@ const request: LtlQuoteRequest = {
   destinationCountry: "US",
   pickupDate: "2026-06-21",
   uom: "US",
-  accessorialCodes: ["appt", "haz", " liftg "].map((code) => code.trim().toUpperCase()),
+  accessorialCodes: ["apd", "haz", " lfd "].map((code) => code.trim().toUpperCase()),
   pieces: [
     {
       qty: 1,
@@ -124,7 +124,7 @@ describe("LTL live rating contract", () => {
     expect(params.get("UOM")).toBe("US");
     expect(params.get("strictResult")).toBe("true");
     expect(params.get("harmonizedCharges")).toBe("true");
-    expect(params.getAll("accessorialsList[]")).toEqual(["APPT", "HAZ", "LIFTG"]);
+    expect(params.getAll("accessorialsList[]")).toEqual(["APD", "HAZ", "LFD"]);
     expect(params.get("freightInfo")).toBe(serializeFreightInfo(request.pieces));
   });
 });

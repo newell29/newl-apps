@@ -143,8 +143,50 @@ describe("7L server integration account loading", () => {
         scac: "ODFL",
         defaulted: false,
         enabled: false
+      },
+      {
+        carrierHash: "missing-scac",
+        name: "Broken Carrier",
+        code: "BRK",
+        scac: undefined,
+        defaulted: true,
+        enabled: true
       }
     ]);
+  });
+
+  it("keeps a live 7L account visible before carriers are synced", async () => {
+    findModuleAccess.mockResolvedValue({ id: "module-access-1" });
+    findCredentials.mockResolvedValue([
+      {
+        id: "cred-live-empty",
+        name: "7L Live Core LTL",
+        status: IntegrationStatus.ACTIVE,
+        secretRef: "runtime/env",
+        publicConfig: {
+          baseUrl: "https://restapi.my7l.com",
+          defaultUom: "US",
+          strictResult: false,
+          harmonizedCharges: true,
+          dryRun: false,
+          carrierMode: "TENANT_SELECTED",
+          carriers: []
+        }
+      }
+    ]);
+
+    const shell = await getLtlRatePortalShell(tenant);
+
+    expect(shell.accounts).toHaveLength(1);
+    expect(shell.accounts[0]).toMatchObject({
+      id: "cred-live-empty",
+      name: "7L Live Core LTL",
+      status: IntegrationStatus.ACTIVE,
+      dryRun: false,
+      secretConfigured: true,
+      carrierMode: "TENANT_SELECTED"
+    });
+    expect(shell.accounts[0].carriers).toEqual([]);
   });
 
   it("defaults seeded tenant fallback accounts to dry-run mode with the core carrier set", async () => {

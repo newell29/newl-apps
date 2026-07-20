@@ -1587,7 +1587,7 @@ export default async function SettingsPage() {
                       <span>
                         <span className="font-medium text-foreground">{carrier.name}</span>
                         <span className="block text-xs text-mutedForeground">
-                          {carrier.code} • {carrier.scac} {carrier.defaulted ? "• default account carrier" : ""}
+                          {carrier.code} • {carrier.scac || "SCAC unavailable"} {carrier.defaulted ? "• default account carrier" : ""}
                         </span>
                       </span>
                     </label>

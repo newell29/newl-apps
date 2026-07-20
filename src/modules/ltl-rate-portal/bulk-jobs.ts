@@ -328,8 +328,8 @@ export async function exportLtlBulkQuoteJobCsv(tenant: TenantContext, jobRunId: 
   const detail = await getLtlBulkQuoteJobDetail(tenant, jobRunId);
   const rows = detail.lanes.map((lane) => {
     const carrierCells = Object.fromEntries([
-      ...lane.quotes.map((quote) => [`${quote.carrierName} (${quote.scac})`, quote.total.toFixed(2)]),
-      ...lane.errors.map((error) => [`${error.carrierName} (${error.scac})`, error.errorMessage])
+      ...lane.quotes.map((quote) => [formatCarrierLabel(quote.carrierName, quote.scac), quote.total.toFixed(2)]),
+      ...lane.errors.map((error) => [formatCarrierLabel(error.carrierName, error.scac), error.errorMessage])
     ]);
     const cheapestQuote = lane.quotes.reduce<LtlQuoteResult | null>(
       (current, quote) => (!current || quote.total < current.total ? quote : current),
@@ -352,7 +352,7 @@ export async function exportLtlBulkQuoteJobCsv(tenant: TenantContext, jobRunId: 
       ),
       totalWeight: `${lane.request.pieces.reduce((sum, piece) => sum + piece.qty * piece.weight, 0).toLocaleString("en-US")} lb`,
       ...carrierCells,
-      cheapestCarrier: cheapestQuote ? `${cheapestQuote.carrierName} (${cheapestQuote.scac})` : "",
+      cheapestCarrier: cheapestQuote ? formatCarrierLabel(cheapestQuote.carrierName, cheapestQuote.scac) : "",
       cheapestRate: cheapestQuote ? cheapestQuote.total.toFixed(2) : ""
     };
   });
@@ -450,6 +450,10 @@ function asCarrierErrors(value: Prisma.JsonValue | null) {
 function formatLaneLabel(city: string, state: string, zipcode: string, country: string) {
   const cityState = [city, state].filter(Boolean).join(", ");
   return cityState ? `${cityState} ${zipcode}`.trim() : `${zipcode} ${country}`.trim();
+}
+
+function formatCarrierLabel(name: string, scac?: string) {
+  return scac ? `${name} (${scac})` : `${name} (SCAC unavailable)`;
 }
 
 async function mapWithConcurrency<T>(

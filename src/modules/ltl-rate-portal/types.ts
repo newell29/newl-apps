@@ -2,7 +2,7 @@ export type SevenLCarrierConfig = {
   carrierHash: string;
   name: string;
   code: string;
-  scac: string;
+  scac?: string;
   defaulted: boolean;
   enabled: boolean;
 };
@@ -61,7 +61,7 @@ export type LtlQuoteResult = LtlQuoteRequest & {
   carrierHash: string;
   carrierName: string;
   carrierCode: string;
-  scac: string;
+  scac?: string;
   serviceLevel: string;
   transitDays: number;
   quoteNumber: string;
@@ -77,7 +77,7 @@ export type LtlCarrierErrorResult = LtlQuoteRequest & {
   carrierHash: string;
   carrierName: string;
   carrierCode: string;
-  scac: string;
+  scac?: string;
   errorMessage: string;
   mode: "dry-run" | "live";
 };

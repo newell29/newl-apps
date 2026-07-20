@@ -126,9 +126,9 @@ function mapSevenLAccount(credential: {
           const carrierHash = typeof item.carrierHash === "string" ? item.carrierHash : null;
           const name = typeof item.name === "string" ? item.name : null;
           const code = typeof item.code === "string" ? item.code : null;
-          const scac = typeof item.scac === "string" ? item.scac : null;
+          const scac = typeof item.scac === "string" ? item.scac : undefined;
 
-          if (!carrierHash || !name || !code || !scac) {
+          if (!carrierHash || !name || !code) {
             return null;
           }
 
@@ -143,8 +143,9 @@ function mapSevenLAccount(credential: {
       })
       .filter(isCarrier)
     : [];
+  const dryRun = config.dryRun === false ? false : true;
 
-  if (carriers.length === 0) {
+  if (carriers.length === 0 && dryRun) {
     return null;
   }
 
@@ -156,7 +157,7 @@ function mapSevenLAccount(credential: {
     defaultUom,
     strictResult: config.strictResult === true,
     harmonizedCharges: config.harmonizedCharges === false ? false : true,
-    dryRun: config.dryRun === false ? false : true,
+    dryRun,
     carrierMode,
     carriers,
     secretConfigured: Boolean(credential.secretRef) || localAccountNames.has(credential.name)

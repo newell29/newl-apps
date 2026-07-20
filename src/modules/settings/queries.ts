@@ -630,9 +630,9 @@ function mapSevenLAccount(credential: {
         const carrierHash = typeof item.carrierHash === "string" ? item.carrierHash : null;
         const name = typeof item.name === "string" ? item.name : null;
         const code = typeof item.code === "string" ? item.code : null;
-        const scac = typeof item.scac === "string" ? item.scac : null;
+        const scac = typeof item.scac === "string" ? item.scac : undefined;
 
-        if (!carrierHash || !name || !code || !scac) {
+        if (!carrierHash || !name || !code) {
           return null;
         }
 

@@ -21,7 +21,7 @@ describe("LTL rate portal CSV parsing", () => {
         destinationZipcode: "77001",
         pickupDate: "2026-06-20",
         uom: "US",
-        accessorialCodes: ["LFTG", "APPT"],
+        accessorialCodes: ["LFO", "APD"],
         pieces: [
           expect.objectContaining({
             qty: 1,
@@ -64,7 +64,7 @@ describe("LTL rate portal CSV parsing", () => {
       destinationCountry: "ca",
       pickupDate: "",
       uom: "mixed",
-      accessorialCodes: "haz, appt| inside ",
+      accessorialCodes: "haz, apd| ind ",
       piece1Weight: "500",
       piece1WeightType: "TOTAL",
       piece1DimType: "plt",
@@ -97,7 +97,7 @@ describe("LTL rate portal CSV parsing", () => {
       destinationCountry: "CA",
       pickupDate: "Not scheduled",
       uom: "MIXED",
-      accessorialCodes: ["HAZ", "APPT", "INSIDE"],
+      accessorialCodes: ["HAZ", "APD", "IND"],
       pieces: [
         {
           qty: 1,

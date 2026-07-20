@@ -32,8 +32,8 @@ export const LTL_TEMPLATE_HEADERS = [
 ] as const;
 
 export const LTL_SAMPLE_CSV = `${LTL_TEMPLATE_HEADERS.join(",")}
-RFQ-1001,,,28273,US,,,77001,US,2026-06-20,US,LFTG|APPT,1,1200,each,,,,PLT,125,false,,,true,2,Floor loaded paper
-RFQ-1002,,,M5H2N2,CA,,,60601,US,2026-06-21,US,RESD,,450,each,,,,PLT,92.5,false,,,false,,Retail fixtures
+RFQ-1001,,,28273,US,,,77001,US,2026-06-20,US,LFO|APD,1,1200,each,,,,PLT,125,false,,,true,2,Floor loaded paper
+RFQ-1002,,,M5H2N2,CA,,,60601,US,2026-06-21,US,RSD,,450,each,,,,PLT,92.5,false,,,false,,Retail fixtures
 `;
 
 export const LTL_FREIGHT_CLASS_OPTIONS = [
@@ -60,9 +60,20 @@ export const LTL_FREIGHT_CLASS_OPTIONS = [
 export const LTL_DIM_TYPE_OPTIONS = ["CTN", "PLT", "CRT", "CON", "CYL", "DRM", "ENV", "BOX", "BDL"] as const;
 
 export const LTL_ACCESSORIAL_LEGEND = [
-  { code: "APPT", label: "Appointment delivery or pickup" },
-  { code: "RESD", label: "Residential delivery" },
-  { code: "LFTG", label: "Liftgate service" },
+  { code: "APO", label: "Origin appointment" },
+  { code: "APD", label: "Destination appointment" },
+  { code: "CSO", label: "Origin construction site" },
+  { code: "CSD", label: "Destination construction site" },
+  { code: "EXO", label: "Origin exhibition" },
+  { code: "EXD", label: "Destination exhibition" },
+  { code: "INO", label: "Origin inside" },
+  { code: "IND", label: "Destination inside" },
+  { code: "LFO", label: "Origin liftgate" },
+  { code: "LFD", label: "Destination liftgate" },
+  { code: "RSO", label: "Origin residential" },
+  { code: "RSD", label: "Destination residential" },
+  { code: "SCO", label: "Origin school" },
+  { code: "SCD", label: "Destination school" },
   { code: "HAZ", label: "Hazmat shipment" },
-  { code: "INSIDE", label: "Inside pickup or delivery" }
+  { code: "INB", label: "In-bond shipment" },
 ] as const;

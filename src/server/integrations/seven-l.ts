@@ -209,7 +209,7 @@ export async function fetchSevenLAvailableCarriers(account: SevenLAccountConfig)
       const code = carrier.Code?.trim();
       const scac = carrier.SCAC?.trim();
 
-      if (!carrierHash || !name || !code || !scac) {
+      if (!carrierHash || !name || !code) {
         return null;
       }
 

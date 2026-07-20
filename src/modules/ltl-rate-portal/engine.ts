@@ -7,12 +7,22 @@ import type {
 } from "@/modules/ltl-rate-portal/types";
 
 const ACCESSORIAL_CHARGE_MAP: Record<string, number> = {
-  APPT: 34,
-  APO: 28,
-  APD: 28,
-  RESD: 42,
-  LFTG: 55,
-  HAZ: 48
+  APO: 34,
+  APD: 34,
+  CSO: 18,
+  CSD: 18,
+  EXO: 18,
+  EXD: 18,
+  INO: 18,
+  IND: 18,
+  LFO: 55,
+  LFD: 55,
+  RSO: 42,
+  RSD: 42,
+  SCO: 18,
+  SCD: 18,
+  HAZ: 48,
+  INB: 18
 };
 
 export function estimateLtlQuotes(account: SevenLAccountConfig, request: LtlQuoteRequest): LtlQuoteResult[] {

@@ -513,7 +513,7 @@ export function LtlRatePortalClient({
                   <span>
                     <span className="font-medium text-foreground">{carrier.name}</span>
                     <span className="block text-xs text-mutedForeground">
-                      {carrier.code} • {carrier.scac}
+                          {carrier.code} • {carrier.scac || "SCAC unavailable"}
                       {carrier.defaulted ? " • default" : ""}
                       {carrier.enabled ? "" : " • disabled in settings"}
                     </span>
@@ -718,7 +718,7 @@ function TemplateReference() {
         <div className="rounded-md border border-border bg-background p-4">
           <h3 className="text-sm font-semibold text-foreground">Accessorial legend</h3>
           <p className="mt-1 text-sm leading-6 text-mutedForeground">
-            Enter multiple accessorial codes in `accessorialCodes` with `|` or commas, like `APPT|LFTG`.
+            Enter multiple accessorial codes in `accessorialCodes` with `|` or commas, like `APD|LFD`.
           </p>
           <div className="mt-3 space-y-2 text-sm">
             {LTL_ACCESSORIAL_LEGEND.map((item) => (
@@ -1043,7 +1043,7 @@ function CarrierIssuesPanel({ carrierErrors }: { carrierErrors: LtlCarrierErrorR
             className="rounded-md border border-danger/20 bg-danger/5 p-3"
           >
             <p className="text-sm font-medium text-foreground">
-              {error.customerReference} • {error.carrierName} ({error.scac})
+              {error.customerReference} • {formatCarrierLabel(error.carrierName, error.scac)}
             </p>
             <p className="mt-1 text-sm text-mutedForeground">
               {formatLaneLabel(error.originCity, error.originState, error.originZipcode, error.originCountry)} to{" "}
@@ -1073,7 +1073,7 @@ export function groupResults(results: LtlQuoteResult[], errors: LtlCarrierErrorR
       result.pieces.map((piece) => `${piece.qty}x${piece.weight}`).join("|")
     ].join("::");
 
-    const carrierLabel = `${result.carrierName} (${result.scac})`;
+    const carrierLabel = formatCarrierLabel(result.carrierName, result.scac);
     const current = grouped.get(key);
 
     if (!current) {
@@ -1108,7 +1108,7 @@ export function groupResults(results: LtlQuoteResult[], errors: LtlCarrierErrorR
       error.destinationZipcode,
       error.pieces.map((piece) => `${piece.qty}x${piece.weight}`).join("|")
     ].join("::");
-    const carrierLabel = `${error.carrierName} (${error.scac})`;
+    const carrierLabel = formatCarrierLabel(error.carrierName, error.scac);
     const current = grouped.get(key);
 
     if (!current) {
@@ -1144,6 +1144,10 @@ function formatLaneLabel(city: string, state: string, zipcode: string, country: 
   }
 
   return `${zipcode} ${country}`.trim();
+}
+
+function formatCarrierLabel(name: string, scac?: string) {
+  return scac ? `${name} (${scac})` : `${name} (SCAC unavailable)`;
 }
 
 function triggerCsvDownload(contents: string, fileName: string) {

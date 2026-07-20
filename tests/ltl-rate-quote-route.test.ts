@@ -73,7 +73,7 @@ const liveQuote: LtlQuoteResult = {
   destinationCountry: "US",
   pickupDate: "2026-06-20",
   uom: "US",
-  accessorialCodes: ["APPT"],
+  accessorialCodes: ["APD"],
   pieces: [
     {
       qty: 1,
@@ -115,7 +115,7 @@ const liveError: LtlCarrierErrorResult = {
   destinationCountry: "US",
   pickupDate: "2026-06-20",
   uom: "US",
-  accessorialCodes: ["APPT"],
+  accessorialCodes: ["APD"],
   pieces: liveQuote.pieces,
   carrierHash: "carrier-2",
   carrierName: "CSA - Cross Border",
@@ -195,7 +195,7 @@ describe("LTL rate quote route", () => {
             destinationCountry: "US",
             pickupDate: "2026-06-20",
             uom: "US",
-            accessorialCodes: ["APPT"],
+            accessorialCodes: ["APD"],
             pieces: liveQuote.pieces
           }
         ]

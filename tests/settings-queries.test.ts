@@ -132,13 +132,14 @@ describe("getSettingsShell 7L contract", () => {
             IntegrationProvider.SEVEN_L,
             IntegrationProvider.OPENCLAW,
             IntegrationProvider.APOLLO,
+            IntegrationProvider.QUICKBOOKS,
             IntegrationProvider.MICROSOFT_GRAPH,
             IntegrationProvider.OPENAI,
             IntegrationProvider.LOCAL_LLM
           ]
         }
       },
-      orderBy: [{ name: "asc" }, { updatedAt: "desc" }]
+      orderBy: { name: "asc" }
     });
 
     expect(settings.sevenLAccounts).toHaveLength(1);
@@ -164,6 +165,14 @@ describe("getSettingsShell 7L contract", () => {
         scac: "ODFL",
         defaulted: false,
         enabled: false
+      },
+      {
+        carrierHash: "broken-carrier",
+        name: "Broken",
+        code: "BRK",
+        scac: undefined,
+        defaulted: true,
+        enabled: true
       }
     ]);
     expect(settings.tradeMiningScoring.recentWindowDays).toBe(30);
@@ -203,7 +212,7 @@ describe("getSettingsShell 7L contract", () => {
       fileSyncEnabled: true,
       draftingEnabled: false,
       consentConfigured: true,
-      runtimeReady: false
+      runtimeReady: true
     });
     expect(settings.microsoftGraph.scopes).toContain("Mail.Read");
     expect(settings.microsoftGraphUserConnection).toMatchObject({

@@ -1,8 +1,9 @@
-import { LTL_DIM_TYPE_OPTIONS, LTL_FREIGHT_CLASS_OPTIONS, LTL_SAMPLE_CSV } from "@/modules/ltl-rate-portal/constants";
+import { LTL_ACCESSORIAL_LEGEND, LTL_DIM_TYPE_OPTIONS, LTL_FREIGHT_CLASS_OPTIONS, LTL_SAMPLE_CSV } from "@/modules/ltl-rate-portal/constants";
 import type { LtlFreightPiece, LtlQuoteRequest } from "@/modules/ltl-rate-portal/types";
 import { parseCsv, toCsv } from "@/modules/ups-tools/csv";
 
 const MAX_PIECES = 5;
+const SUPPORTED_ACCESSORIAL_CODES = new Set(LTL_ACCESSORIAL_LEGEND.map((item) => item.code));
 
 export type ParsedLtlRow = {
   errors: string[];
@@ -180,7 +181,7 @@ function parseAccessorialCodes(value: string) {
   return value
     .split(/[\|,]/)
     .map((item) => item.trim().toUpperCase())
-    .filter(Boolean);
+    .filter((item) => SUPPORTED_ACCESSORIAL_CODES.has(item as (typeof LTL_ACCESSORIAL_LEGEND)[number]["code"]));
 }
 
 function parseBoolean(value: string) {
