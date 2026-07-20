@@ -14,6 +14,7 @@ async function main() {
 
   const response = await fetch(`${baseUrl}/api/assistant/teamship/read`, {
     method: "POST",
+    redirect: "manual",
     headers: {
       authorization: `Bearer ${token}`,
       "content-type": "application/json",
@@ -21,16 +22,23 @@ async function main() {
     },
     body: JSON.stringify({ prompt })
   });
-  const body = await response.json() as {
+  const responseText = await response.text();
+  const body = parseResponseBody(responseText, response);
+  if (!body) {
+    process.exitCode = 1;
+    return;
+  }
+
+  const result = body as {
     data?: { answer?: string; sources?: Array<{ title?: string }> };
     error?: string;
   };
-  if (!response.ok || !body.data?.answer) {
-    console.error(body.error || `Newl Apps returned HTTP ${response.status}.`);
+  if (!response.ok || !result.data?.answer) {
+    console.error(result.error || `Newl Apps returned HTTP ${response.status}.`);
     process.exitCode = 1;
   } else {
-    console.log(body.data.answer);
-    const titles = (body.data.sources ?? []).map((source) => source.title).filter(Boolean);
+    console.log(result.data.answer);
+    const titles = (result.data.sources ?? []).map((source) => source.title).filter(Boolean);
     if (titles.length > 0) {
       console.log(`Sources: ${titles.join("; ")}`);
     }
@@ -41,6 +49,17 @@ void main().catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : "OpenClaw Teamship read failed.");
   process.exitCode = 1;
 });
+
+function parseResponseBody(responseText: string, response: Response) {
+  try {
+    return JSON.parse(responseText) as unknown;
+  } catch {
+    const redirectLocation = response.headers.get("location");
+    const detail = redirectLocation ? ` Redirected to ${redirectLocation}.` : "";
+    console.error(`Newl Apps returned HTTP ${response.status} with a non-JSON response.${detail}`);
+    return null;
+  }
+}
 
 function readArgument(name: string) {
   const index = process.argv.indexOf(name);
