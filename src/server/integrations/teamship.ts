@@ -16,6 +16,13 @@ type TeamshipFetchOptions = {
   fetchImpl?: typeof fetch;
 };
 
+type TeamshipShippingOrderSearchOptions = {
+  tenantId?: string | null;
+  orderIdentifier: string;
+  credentials?: TeamshipRuntimeCredentials | null;
+  fetchImpl?: typeof fetch;
+};
+
 export type TeamshipRuntimeCredentials = {
   email: string;
   password: string;
@@ -48,9 +55,26 @@ export type TeamshipShippingProductSearchRow = {
   name?: string | null;
   title?: string | null;
   product_name?: string | null;
+  customer_id?: number | string | null;
+  user_id?: number | string | null;
+  customer_name?: string | null;
+  company?: string | null;
+  warehouse_id?: number | string | null;
+  warehouse_name?: string | null;
+  location_id?: number | string | null;
+  location_name?: string | null;
+  lpn?: string | null;
+  lpn_id?: number | string | null;
+  lpn_name?: string | null;
+  serial?: string | null;
+  serial_number?: string | null;
   quantity?: number | string | null;
   available?: number | string | null;
   available_quantity?: number | string | null;
+  reserved?: number | string | null;
+  reserved_quantity?: number | string | null;
+  on_hand?: number | string | null;
+  on_hand_quantity?: number | string | null;
   is_quarantine?: boolean | number | string | null;
   is_quarantine_stock?: boolean | number | string | null;
   custom_attributes?: Array<{
@@ -215,6 +239,65 @@ export async function searchTeamshipProductsForShipping({
   }
 
   return [];
+}
+
+export async function findTeamshipShippingOrders({
+  tenantId,
+  orderIdentifier,
+  credentials = null,
+  fetchImpl = fetch
+}: TeamshipShippingOrderSearchOptions): Promise<TeamshipShippingOrderDetail[]> {
+  const resolvedCredentials = credentials ?? (await resolveTenantTeamshipCredentials(tenantId ? { tenantId } : null));
+  const apiBaseUrl = resolveTeamshipApiBaseUrl(resolvedCredentials);
+  const token = await loginToTeamship(fetchImpl, resolvedCredentials, apiBaseUrl);
+  const normalizedTarget = normalizeIdentifier(orderIdentifier);
+  const matches: TeamshipShippingOrderDetail[] = [];
+  const pageLimit = getTeamshipPageLimit();
+  const maxPages = getTeamshipMaxPages();
+
+  for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+    const rows = await listTeamshipShippingOrders({
+      apiBaseUrl,
+      token,
+      limit: pageLimit,
+      offset: pageIndex * pageLimit,
+      fetchImpl
+    });
+
+    for (const row of rows) {
+      if (!teamshipOrderIdentifiers(row).includes(normalizedTarget)) {
+        continue;
+      }
+
+      const id = row.id ?? row.order_id;
+      if (!id) {
+        continue;
+      }
+
+      const detail = await getTeamshipShippingOrder({ apiBaseUrl, token, id: String(id), fetchImpl });
+      matches.push(mergeTeamshipDetailWithSummary(detail, row));
+    }
+
+    if (rows.length < pageLimit) {
+      break;
+    }
+  }
+
+  return matches;
+}
+
+function teamshipOrderIdentifiers(order: TeamshipShippingOrderDetail) {
+  return [
+    order.id,
+    order.order_id,
+    order.display_id,
+    order.order_number,
+    order.shipment_id,
+    order.record_no
+  ].flatMap((value) => {
+    const normalized = normalizeIdentifier(value);
+    return normalized ? [normalized] : [];
+  });
 }
 
 function mergeTeamshipDetailWithSummary(

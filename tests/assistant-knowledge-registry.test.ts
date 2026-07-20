@@ -41,4 +41,14 @@ describe("getEnabledAssistantKnowledgeAdapters", () => {
       "QuickBooks posting"
     );
   });
+
+  it("includes curated Teamship knowledge only when Shipment Documents is enabled", () => {
+    const enabled = getEnabledAssistantKnowledgeAdapters(
+      new Set([ModuleKey.ASSISTANT, ModuleKey.SHIPMENT_DOCUMENTS])
+    );
+    const assistantOnly = getEnabledAssistantKnowledgeAdapters(new Set([ModuleKey.ASSISTANT]));
+
+    expect(enabled.map((adapter) => adapter.key)).toContain("teamship");
+    expect(assistantOnly.map((adapter) => adapter.key)).not.toContain("teamship");
+  });
 });

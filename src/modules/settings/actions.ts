@@ -47,7 +47,9 @@ import {
 } from "@/server/integrations/microsoft-graph";
 import {
   encryptTeamshipSecret,
-  TEAMSHIP_CREDENTIAL_NAME
+  parseTeamshipReadScopeUpload,
+  TEAMSHIP_CREDENTIAL_NAME,
+  type TeamshipReadScope
 } from "@/server/integrations/teamship-settings";
 
 type TradeMiningScoringConfigMutationClient = typeof prisma & {
@@ -651,6 +653,7 @@ export async function saveTeamshipSettingsAction(formData: FormData) {
   const syncCadenceMinutes = readTeamshipSyncCadenceMinutes(formData.get("teamshipSyncCadenceMinutes"));
   const garlandInventoryUserId = readOptional(formData, "teamshipGarlandInventoryUserId") ?? null;
   const garlandInventoryLocationId = readOptional(formData, "teamshipGarlandInventoryLocationId") ?? null;
+  const readOnlySearchEnabled = formData.get("teamshipReadOnlySearchEnabled") === "true";
 
   const existing = await prisma.integrationCredential.findFirst({
     where: {
@@ -660,7 +663,8 @@ export async function saveTeamshipSettingsAction(formData: FormData) {
     },
     select: {
       id: true,
-      secretRef: true
+      secretRef: true,
+      publicConfig: true
     }
   });
 
@@ -668,11 +672,23 @@ export async function saveTeamshipSettingsAction(formData: FormData) {
     throw new Error("Enter the Teamship password before saving Teamship as active.");
   }
 
+  const existingReadOnlyConfig = preserveTeamshipReadOnlyConfig(existing?.publicConfig);
+  const uploadedScopes = await readTeamshipScopeUpload(formData.get("teamshipReadOnlyScopesFile"));
+  const readOnlyScopes = uploadedScopes ?? existingReadOnlyConfig.readOnlyScopes;
+  if (readOnlySearchEnabled && status !== IntegrationStatus.ACTIVE) {
+    throw new Error("Teamship must be Active before read-only search can be enabled.");
+  }
+  if (readOnlySearchEnabled && readOnlyScopes.length === 0) {
+    throw new Error("Upload approved Teamship customer and warehouse scopes before enabling read-only search.");
+  }
+
   const data = {
     provider: IntegrationProvider.TEAMSHIP,
     name: TEAMSHIP_CREDENTIAL_NAME,
     status,
     publicConfig: {
+      readOnlySearchEnabled,
+      readOnlyScopes,
       email,
       apiBaseUrl,
       syncEnabled,
@@ -684,24 +700,79 @@ export async function saveTeamshipSettingsAction(formData: FormData) {
     secretRef: password ? encryptTeamshipSecret({ password }) : existing?.secretRef ?? null
   };
 
-  if (existing) {
-    await prisma.integrationCredential.update({
-      where: {
-        id: existing.id
-      },
-      data
-    });
-  } else {
-    await prisma.integrationCredential.create({
+  await prisma.$transaction(async (tx) => {
+    const savedCredential = existing
+      ? await tx.integrationCredential.update({
+        where: {
+          id: existing.id
+        },
+        data,
+        select: { id: true }
+      })
+      : await tx.integrationCredential.create({
+        data: {
+          tenantId: context.tenantId,
+          ...data
+        },
+        select: { id: true }
+      });
+
+    await tx.auditLog.create({
       data: {
         tenantId: context.tenantId,
-        ...data
+        actorUserId: context.userId,
+        action: "settings.teamship.read-only-config.updated",
+        entityType: "IntegrationCredential",
+        entityId: savedCredential.id,
+        before: {
+          readOnlySearchEnabled: existingReadOnlyConfig.readOnlySearchEnabled,
+          readOnlyScopeCount: existingReadOnlyConfig.readOnlyScopes.length
+        },
+        after: {
+          readOnlySearchEnabled,
+          readOnlyScopeCount: readOnlyScopes.length,
+          scopeFileUploaded: uploadedScopes !== null
+        }
       }
     });
-  }
+  });
 
   revalidateSettingsSurfaces();
   revalidatePath("/shipment-documents/teamship-review");
+}
+
+function preserveTeamshipReadOnlyConfig(value: unknown): {
+  readOnlySearchEnabled: boolean;
+  readOnlyScopes: TeamshipReadScope[];
+} {
+  if (!value || typeof value !== "object") {
+    return { readOnlySearchEnabled: false, readOnlyScopes: [] };
+  }
+
+  const config = value as Record<string, unknown>;
+  return {
+    readOnlySearchEnabled: config.readOnlySearchEnabled === true,
+    readOnlyScopes: Array.isArray(config.readOnlyScopes)
+      ? config.readOnlyScopes as TeamshipReadScope[]
+      : []
+  };
+}
+
+async function readTeamshipScopeUpload(value: FormDataEntryValue | null) {
+  if (!value || typeof value === "string" || value.size === 0) {
+    return null;
+  }
+  if (value.size > 256_000) {
+    throw new Error("The Teamship scope JSON file must be 256 KB or smaller.");
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await value.text());
+  } catch {
+    throw new Error("The Teamship scope file must contain valid JSON.");
+  }
+  return parseTeamshipReadScopeUpload(parsed);
 }
 
 function readTeamshipSyncCadenceMinutes(value: FormDataEntryValue | null) {

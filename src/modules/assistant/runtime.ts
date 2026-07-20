@@ -4,6 +4,7 @@ import { maybeRunAssistantApolloActivityRequest } from "@/modules/assistant/apol
 import { searchAssistantKnowledge } from "@/modules/assistant/knowledge";
 import { maybeRunAssistantRateRequest } from "@/modules/assistant/rate-tools";
 import { maybeRunAssistantShipmentDocumentsRequest } from "@/modules/assistant/shipment-documents-workflow";
+import { maybeRunAssistantTeamshipRequest } from "@/modules/assistant/teamship-workflow";
 import {
   computeNextAssistantAutomationRunAt,
   summarizeAutomationResult,
@@ -57,6 +58,10 @@ export async function runAssistantPrompt(
     title: memory.title,
     summary: memory.summary
   }));
+  const teamshipReply = await maybeRunAssistantTeamshipRequest(context, prompt);
+  if (teamshipReply) {
+    return finalizeAssistantResponse(workspace, prompt, teamshipReply);
+  }
   const toolRateReply = await maybeRunAssistantRateRequest(context, prompt, threadPromptContext);
   if (toolRateReply) {
     return finalizeAssistantResponse(workspace, prompt, toolRateReply);
@@ -471,20 +476,41 @@ function finalizeAssistantResponse(
     }>;
   }
 ) {
+  const answer = appendTeamshipSourceAttribution(response.answer, response.sources);
   const conversationSummary = buildConversationSummary({
     priorSummary: workspace.activeThread?.conversationSummary ?? null,
     recentMessages: workspace.activeThread?.messages ?? [],
     prompt,
-    answer: response.answer
+    answer
   });
 
   return {
     ...response,
+    answer,
     runMetadata: {
       ...response.runMetadata,
       conversationSummary
     }
   };
+}
+
+export function appendTeamshipSourceAttribution(
+  answer: string,
+  sources: Array<{ title: string; metadata?: Record<string, unknown> }>
+) {
+  const titles = Array.from(
+    new Set(
+      sources
+        .filter((source) => source.metadata?.sourceSystem === "NEWL_TEAMSHIP_DOCUMENTATION")
+        .map((source) => source.title)
+    )
+  );
+
+  if (titles.length === 0 || titles.every((title) => answer.includes(title))) {
+    return answer;
+  }
+
+  return `${answer.trim()}\n\nTeamship Draft sources: ${titles.join("; ")}`;
 }
 
 function buildConversationSummary({

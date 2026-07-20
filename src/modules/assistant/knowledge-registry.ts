@@ -6,6 +6,7 @@ import { getInvoiceAutomationAssistantKnowledge } from "@/modules/invoice-automa
 import { getLeadGenAssistantKnowledge } from "@/modules/lead-gen/assistant-knowledge";
 import { getShipmentDocumentsAssistantKnowledge } from "@/modules/shipment-documents/assistant-knowledge";
 import { getRateToolAssistantKnowledge } from "@/modules/assistant/rate-tool-knowledge";
+import { getTeamshipAssistantKnowledge } from "@/modules/assistant/teamship-knowledge";
 
 export type AssistantKnowledgeDocumentSeed = {
   sourceKind: import("@prisma/client").AssistantSourceKind;
@@ -109,6 +110,17 @@ const ASSISTANT_KNOWLEDGE_ADAPTERS: AssistantKnowledgeAdapter[] = [
     isEnabled: (enabledModules) =>
       enabledModules.has(ModuleKey.INVOICE_VERIFICATION) || enabledModules.has(ModuleKey.QUICKBOOKS_POSTING),
     collect: getInvoiceAutomationAssistantKnowledge
+  },
+  {
+    key: "teamship",
+    moduleKeys: [ModuleKey.SHIPMENT_DOCUMENTS],
+    capability: {
+      label: "Teamship WMS knowledge",
+      summary: "Draft Teamship navigation, inventory, order, and safety procedures plus scoped read-only record lookup.",
+      contextTypes: ["Teamship navigation", "inventory terminology", "order procedures", "safety guidance"],
+      sampleQuestions: ["Where is this SKU in Teamship?", "What does Available mean in Teamship?"]
+    },
+    collect: getTeamshipAssistantKnowledge
   }
 ];
 

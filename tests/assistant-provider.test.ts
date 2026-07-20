@@ -114,8 +114,10 @@ describe("assistant provider model normalization", () => {
     expect(requestBody.max_tokens).toBeUndefined();
     expect(requestBody.temperature).toBeUndefined();
     const messages = requestBody.messages as Array<{ role: string; content: string }>;
+    expect(messages[0]?.content).toContain("exact supporting Teamship Draft document title");
     expect(messages[1]?.content).toContain("\"conversationHistory\"");
     expect(messages[1]?.content).toContain("\"memorySnapshot\"");
+    expect(messages[1]?.content).toContain("For a Teamship procedural answer");
   });
 
   it("keeps OpenAI-compatible local model requests on max_tokens", async () => {

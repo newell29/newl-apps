@@ -1,0 +1,164 @@
+import { AssistantSourceKind } from "@prisma/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  inventory: vi.fn(),
+  inventoryAll: vi.fn(),
+  lpn: vi.fn(),
+  shipping: vi.fn(),
+  receiving: vi.fn(),
+  productHistory: vi.fn()
+}));
+
+vi.mock("@/modules/teamship/read-tools", () => ({
+  searchTeamshipInventory: (...args: unknown[]) => mocks.inventory(...args),
+  searchTeamshipInventoryAll: (...args: unknown[]) => mocks.inventoryAll(...args),
+  searchTeamshipLpn: (...args: unknown[]) => mocks.lpn(...args),
+  getTeamshipShippingOrder: (...args: unknown[]) => mocks.shipping(...args),
+  getTeamshipReceivingOrder: (...args: unknown[]) => mocks.receiving(...args),
+  getTeamshipProductHistory: (...args: unknown[]) => mocks.productHistory(...args)
+}));
+
+import { maybeRunAssistantTeamshipRequest } from "@/modules/assistant/teamship-workflow";
+
+const context = {
+  tenantId: "tenant-newl",
+  tenantSlug: "newl-group",
+  tenantName: "Newl Group",
+  userId: "employee-1",
+  userEmail: "employee@example.com",
+  userName: "Employee One",
+  role: "OPERATIONS" as const
+};
+
+describe("assistant Teamship workflow", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("leaves procedural questions for curated knowledge retrieval", async () => {
+    await expect(maybeRunAssistantTeamshipRequest(context, "What does LPN mean in Teamship?")).resolves.toBeNull();
+    expect(mocks.inventory).not.toHaveBeenCalled();
+  });
+
+  it("asks for missing exact scope without calling a tool", async () => {
+    const result = await maybeRunAssistantTeamshipRequest(context, "Where is SKU ABC-100?");
+
+    expect(result).toMatchObject({
+      intent: "TEAMSHIP_CLARIFICATION",
+      provider: "NEWL_TEAMSHIP_READ",
+      sources: []
+    });
+    expect(result?.answer).toContain("customer identifier");
+    expect(mocks.inventory).not.toHaveBeenCalled();
+  });
+
+  it("returns deterministic current inventory with WMS source evidence", async () => {
+    mocks.inventory.mockResolvedValue({
+      ok: true,
+      cardinality: "ONE",
+      resultCount: 1,
+      auditId: "audit-1",
+      data: [
+        {
+          inventoryId: "stock-1",
+          sku: "ABC-100",
+          productName: "Sample",
+          lpn: "PALLET-1",
+          serialNumber: null,
+          customer: { id: "420", name: "Garland" },
+          warehouse: { id: "102", name: "Annagem" },
+          location: { id: "BIN-1", name: "A-01" },
+          onHand: 12,
+          reserved: 4,
+          available: 8,
+          availableSource: "COMPUTED",
+          quarantined: false
+        }
+      ]
+    });
+
+    const result = await maybeRunAssistantTeamshipRequest(
+      context,
+      "Is SKU ABC-100 eligible to ship customer 420 warehouse 102?"
+    );
+
+    expect(result).toMatchObject({
+      intent: "TEAMSHIP_INVENTORY_READ",
+      sources: [{ sourceKind: AssistantSourceKind.WMS_RECORD, sourceId: "stock-1" }]
+    });
+    expect(result?.answer).toContain("available 8 (computed)");
+    expect(result?.runMetadata).toMatchObject({ auditId: "audit-1", resultCount: 1 });
+  });
+
+  it("keeps Inventory All quantities distinct from Ship by LPN quantities", async () => {
+    vi.stubEnv("TEAMSHIP_BROWSER_READ_RUNTIME_ENABLED", "true");
+    vi.stubEnv("TEAMSHIP_BROWSER_EXECUTABLE_PATH", "/usr/bin/google-chrome");
+    mocks.inventoryAll.mockResolvedValue({
+      ok: true,
+      cardinality: "ONE",
+      resultCount: 1,
+      auditId: "audit-all",
+      data: [{
+        inventoryId: "stock-1",
+        productId: "product-1",
+        productName: "Sample",
+        sku: "ABC-100",
+        customer: { id: "420", name: "Garland" },
+        warehouse: { id: "102", name: "Annagem" },
+        available: 7,
+        reserved: 3,
+        onHand: 10,
+        backordered: 0,
+        status: "Active",
+        quarantined: false,
+        sourceView: "INVENTORY_ALL"
+      }]
+    });
+
+    const result = await maybeRunAssistantTeamshipRequest(
+      context,
+      "How much SKU ABC-100 is on hand customer 420 warehouse 102?"
+    );
+
+    expect(result).toMatchObject({
+      intent: "TEAMSHIP_INVENTORY_ALL_READ",
+      sources: [{ sourceId: "stock-1" }]
+    });
+    expect(result?.answer).toContain("available 7, reserved 3, on hand 10");
+    expect(mocks.inventory).not.toHaveBeenCalled();
+    expect(mocks.lpn).not.toHaveBeenCalled();
+    expect(mocks.inventoryAll).toHaveBeenCalledWith(
+      context,
+      expect.objectContaining({ sku: "ABC-100", customerId: "420", warehouseId: "102" }),
+      { browserReader: expect.any(Object) }
+    );
+  });
+
+  it("surfaces normalized disabled/unavailable errors without provider data", async () => {
+    mocks.shipping.mockResolvedValue({
+      ok: false,
+      auditId: "audit-2",
+      error: {
+        code: "TOOL_DISABLED",
+        message: "Teamship read-only search is not enabled for this tenant.",
+        retryable: false
+      }
+    });
+
+    const result = await maybeRunAssistantTeamshipRequest(
+      context,
+      "What is shipping order SR812500 status customer 420 warehouse 102?"
+    );
+
+    expect(result).toMatchObject({
+      intent: "TEAMSHIP_READ_UNAVAILABLE",
+      sources: [],
+      runMetadata: { errorCode: "TOOL_DISABLED", auditId: "audit-2" }
+    });
+  });
+});
