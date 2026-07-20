@@ -31,6 +31,7 @@
     "smoke:teamship-dev-api-update": "tsx scripts/teamship-dev-api-update-smoke.ts",
     "smoke:teamship-dev-pdf-mapping": "tsx scripts/teamship-dev-pdf-mapping-smoke.ts",
     "worker:teamship-phase2": "tsx scripts/teamship-phase2-agent-worker.ts",
+    "openclaw:teamship-read": "tsx scripts/openclaw-teamship-read.ts",
     "worker:teamship-sr810465-vm": "tsx scripts/teamship-phase2-sr810465-vm.ts"
   },
   "dependencies": {

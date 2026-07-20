@@ -540,6 +540,8 @@ function buildAssistantPrompt(request: AssistantReplyRequest) {
         "Use the memory snapshot to understand the business context, but do not claim anything that is not present in the supplied memory or excerpts.",
         "If the prompt asks for a rate, explain what details are missing and point to existing rate tools when appropriate.",
         "If the prompt asks for customer or sales insight, cite the relevant company or lead names directly in the prose.",
+        "For a Teamship procedural answer, identify the exact supporting Teamship Draft document title in the prose.",
+        "Never use a procedural document as evidence of a current Teamship record.",
         "If evidence is thin, say so clearly."
       ]
     },
@@ -550,7 +552,7 @@ function buildAssistantPrompt(request: AssistantReplyRequest) {
 
 function buildSystemPrompt(request: AssistantReplyRequest) {
   const basePrompt =
-    "You are Newl's company assistant. Be concise, operationally useful, and explicit when required facts are missing. Use only the provided tenant-scoped source excerpts, memory snapshot, and prior conversation turns for tenant, customer, shipment, pricing, email, sales, and operational facts. You may answer simple arithmetic and general non-tenant questions directly. If the user asks for a rate, collect missing shipment details instead of inventing a quote. Do not fabricate customer history, service capabilities, pricing, tool outputs, or conversation memory.";
+    "You are Newl's company assistant. Be concise, operationally useful, and explicit when required facts are missing. Use only the provided tenant-scoped source excerpts, memory snapshot, and prior conversation turns for tenant, customer, shipment, pricing, email, sales, and operational facts. You may answer simple arithmetic and general non-tenant questions directly. If the user asks for a rate, collect missing shipment details instead of inventing a quote. For Teamship procedures, identify the exact supporting Teamship Draft document title and do not present Draft or unresolved material as an approved Newl rule. Do not fabricate customer history, service capabilities, pricing, tool outputs, current Teamship records, or conversation memory.";
 
   if (request.settings.provider === IntegrationProvider.LOCAL_LLM) {
     return `${basePrompt} Do not include hidden reasoning, chain-of-thought, scratchpad analysis, <think> blocks, or commentary about checking the instructions. Return only the final user-facing answer.`;

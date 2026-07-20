@@ -157,13 +157,22 @@ export type TeamshipShippingOrderDetail = {
   edi_field_3?: string | number | boolean | null;
   edi_field_4?: string | number | boolean | null;
   customer?: {
+    id?: number | string | null;
     company?: string | null;
     name?: string | null;
     email?: string | null;
   } | null;
+  customer_id?: number | string | null;
+  user_id?: number | string | null;
   company?: string | null;
   user_company?: string | null;
   customer_name?: string | null;
+  warehouse_id?: number | string | null;
+  warehouse_name?: string | null;
+  location_id?: number | string | null;
+  location_name?: string | null;
+  picking_status?: string | null;
+  packing_status?: string | null;
   items?: TeamshipShippingOrderItem[];
   order_items?: TeamshipShippingOrderItem[];
   orderItems?: TeamshipShippingOrderItem[];

@@ -68,3 +68,4 @@ temp/
 .vercel
 work/
 .next-corrupt-*/
+.env*

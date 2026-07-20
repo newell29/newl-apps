@@ -45,7 +45,22 @@ vi.mock("@/server/integrations/assistant-provider", async (importOriginal) => {
   };
 });
 
-import { runAssistantPrompt } from "@/modules/assistant/runtime";
+import { appendTeamshipSourceAttribution, runAssistantPrompt } from "@/modules/assistant/runtime";
+
+describe("appendTeamshipSourceAttribution", () => {
+  it("guarantees that procedural Teamship answers identify their Draft source", () => {
+    const title = "Teamship Inventory For Nemo (Draft) [docs/wms/teamship/nemo/inventory.md]";
+
+    expect(
+      appendTeamshipSourceAttribution("Available equals On Hand minus Reserved.", [
+        {
+          title,
+          metadata: { sourceSystem: "NEWL_TEAMSHIP_DOCUMENTATION" }
+        }
+      ])
+    ).toContain(`Teamship Draft sources: ${title}`);
+  });
+});
 
 const context = {
   tenantId: "tenant-1",
@@ -112,6 +127,19 @@ describe("runAssistantPrompt", () => {
     });
     maybeRunAssistantRateRequest.mockResolvedValue(null);
     maybeRunAssistantApolloActivityRequest.mockResolvedValue(null);
+  });
+
+  it("routes incomplete current Teamship questions to deterministic clarification before retrieval", async () => {
+    const result = await runAssistantPrompt(context, "Where is SKU ABC-100?");
+
+    expect(result).toMatchObject({
+      provider: "NEWL_TEAMSHIP_READ",
+      intent: "TEAMSHIP_CLARIFICATION",
+      sources: []
+    });
+    expect(result.answer).toContain("customer identifier");
+    expect(searchAssistantKnowledge).not.toHaveBeenCalled();
+    expect(integrationCredentialFindFirst).not.toHaveBeenCalled();
   });
 
   it("loads the newest assistant provider row deterministically", async () => {
