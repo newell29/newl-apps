@@ -1,14 +1,17 @@
-const baseUrl = process.env.NEWL_APPS_BASE_URL?.trim()?.replace(/\/+$/, "");
-const token = process.env.OPENCLAW_TEAMSHIP_READ_TOKEN?.trim();
-const userEmail = readArgument("--user-email") ?? process.env.NEWL_USER_EMAIL?.trim();
-const prompt = readPrompt();
+async function main() {
+  const baseUrl = process.env.NEWL_APPS_BASE_URL?.trim()?.replace(/\/+$/, "");
+  const token = process.env.OPENCLAW_TEAMSHIP_READ_TOKEN?.trim();
+  const userEmail = readArgument("--user-email") ?? process.env.NEWL_USER_EMAIL?.trim();
+  const prompt = readPrompt();
 
-if (!baseUrl || !token || !userEmail || !prompt) {
-  console.error(
-    "NEWL_APPS_BASE_URL, OPENCLAW_TEAMSHIP_READ_TOKEN, --user-email (or NEWL_USER_EMAIL), and a prompt are required."
-  );
-  process.exitCode = 1;
-} else {
+  if (!baseUrl || !token || !userEmail || !prompt) {
+    console.error(
+      "NEWL_APPS_BASE_URL, OPENCLAW_TEAMSHIP_READ_TOKEN, --user-email (or NEWL_USER_EMAIL), and a prompt are required."
+    );
+    process.exitCode = 1;
+    return;
+  }
+
   const response = await fetch(`${baseUrl}/api/assistant/teamship/read`, {
     method: "POST",
     headers: {
@@ -33,6 +36,11 @@ if (!baseUrl || !token || !userEmail || !prompt) {
     }
   }
 }
+
+void main().catch((error: unknown) => {
+  console.error(error instanceof Error ? error.message : "OpenClaw Teamship read failed.");
+  process.exitCode = 1;
+});
 
 function readArgument(name: string) {
   const index = process.argv.indexOf(name);
