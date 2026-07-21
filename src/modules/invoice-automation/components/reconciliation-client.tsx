@@ -35,6 +35,7 @@ export function InvoiceReconciliationClient({ rows }: { rows: InvoiceAutomationR
         row.shipmentFileNumber,
         row.shipmentType,
         row.customerNames.join(" "),
+        row.vendorNames.join(" "),
         row.customerInvoiceNumbers.join(" "),
         row.vendorInvoiceNumbers.join(" "),
         row.risks.join(" ")
@@ -85,13 +86,14 @@ export function InvoiceReconciliationClient({ rows }: { rows: InvoiceAutomationR
       />
 
       <div className="overflow-x-auto">
-        <table className="min-w-[1500px] divide-y divide-border text-sm">
+        <table className="min-w-[1650px] divide-y divide-border text-sm">
           <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-mutedForeground">
             <tr>
               <th className="px-3 py-3">Risk</th>
               <th className="px-3 py-3">File #</th>
               <th className="px-3 py-3">Service</th>
               <th className="px-3 py-3">Customer</th>
+              <th className="px-3 py-3">Vendor</th>
               <th className="px-3 py-3 text-right">Customer invoices</th>
               <th className="px-3 py-3 text-right">Vendor invoices</th>
               <th className="px-3 py-3 text-right">Revenue CAD</th>
@@ -114,6 +116,7 @@ export function InvoiceReconciliationClient({ rows }: { rows: InvoiceAutomationR
                 <td className="px-3 py-3 font-semibold text-foreground">{row.shipmentFileNumber}</td>
                 <td className="px-3 py-3">{row.shipmentType ?? "n/a"}</td>
                 <td className="px-3 py-3">{row.customerNames.length > 0 ? row.customerNames.join(", ") : "No customer invoice"}</td>
+                <td className="px-3 py-3">{row.vendorNames.length > 0 ? row.vendorNames.join(", ") : "No vendor invoice"}</td>
                 <td className="px-3 py-3 text-right">{formatCount(row.customerInvoiceCount, row.unknownCustomerRevenueCount)}</td>
                 <td className="px-3 py-3 text-right">{formatCount(row.vendorInvoiceCount, row.unknownVendorCostCount)}</td>
                 <td className="px-3 py-3 text-right font-medium">{formatInvoiceMoney(row.customerRevenueCad, "CAD")}</td>
