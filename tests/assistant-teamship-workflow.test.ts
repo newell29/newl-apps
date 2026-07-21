@@ -8,6 +8,17 @@ const mocks = vi.hoisted(() => ({
   shipping: vi.fn(),
   receiving: vi.fn(),
   productHistory: vi.fn(),
+  settings: {
+    readOnlyScopes: [] as Array<{
+      customerId: string;
+      customerName: string;
+      warehouseId: string;
+      warehouseName: string;
+      inventoryUserId: string;
+      inventoryLocationId: string;
+    }>,
+    readOnlySearchEnabled: true
+  },
   browserJobAdapter: { marker: "browser-job-adapter" }
 }));
 
@@ -22,6 +33,10 @@ vi.mock("@/modules/teamship/read-tools", () => ({
   getTeamshipShippingOrder: (...args: unknown[]) => mocks.shipping(...args),
   getTeamshipReceivingOrder: (...args: unknown[]) => mocks.receiving(...args),
   getTeamshipProductHistory: (...args: unknown[]) => mocks.productHistory(...args)
+}));
+
+vi.mock("@/server/integrations/teamship-settings", () => ({
+  getTenantTeamshipSettings: vi.fn(async () => mocks.settings)
 }));
 
 import { maybeRunAssistantTeamshipRequest } from "@/modules/assistant/teamship-workflow";
@@ -39,6 +54,7 @@ const context = {
 describe("assistant Teamship workflow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.settings.readOnlyScopes = [];
   });
 
   afterEach(() => {
@@ -58,7 +74,7 @@ describe("assistant Teamship workflow", () => {
       provider: "NEWL_TEAMSHIP_READ",
       sources: []
     });
-    expect(result?.answer).toContain("customer identifier");
+    expect(result?.answer).toContain("configured customer name");
     expect(mocks.inventory).not.toHaveBeenCalled();
   });
 
@@ -138,7 +154,33 @@ describe("assistant Teamship workflow", () => {
     expect(mocks.inventoryAll).toHaveBeenCalledWith(
       context,
       expect.objectContaining({ sku: "ABC-100", customerId: "420", warehouseId: "102" }),
-      { browserReader: mocks.browserJobAdapter }
+      { browserReader: mocks.browserJobAdapter, settings: mocks.settings }
+    );
+  });
+
+  it("uses the tenant scope reference so employees can ask with names only", async () => {
+    mocks.settings.readOnlyScopes = [{
+      customerId: "501",
+      customerName: "Northstar Lighting",
+      warehouseId: "1",
+      warehouseName: "Kestrel",
+      inventoryUserId: "501",
+      inventoryLocationId: "1"
+    }];
+    mocks.inventoryAll.mockResolvedValue({
+      ok: true,
+      cardinality: "ZERO",
+      resultCount: 0,
+      auditId: "audit-reference",
+      data: []
+    });
+
+    await maybeRunAssistantTeamshipRequest(context, "How much SKU ABC-100 is on hand for Northstar?");
+
+    expect(mocks.inventoryAll).toHaveBeenCalledWith(
+      context,
+      { sku: "ABC-100", customerId: "501", warehouseId: "1" },
+      { browserReader: mocks.browserJobAdapter, settings: mocks.settings }
     );
   });
 

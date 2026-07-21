@@ -43,6 +43,8 @@ The published Teamship API documentation and OpenAPI-rendered reference were ins
 
 `searchTeamshipInventory` accepts an exact SKU or LPN query plus exact customer and warehouse IDs. Its current API source is limited to shipping-eligible product search. It returns minimized matching records and `ZERO`, `ONE`, or `MULTIPLE` cardinality, but `ZERO` must not be translated as no inventory. General LPN search and complete On Hand/Reserved/quarantine coverage remain unconfirmed.
 
+Employees do not need to supply those internal IDs. For authenticated current-record requests, Newl Apps loads the tenant's parsed `readOnlyScopes` JSON and resolves a configured customer name plus an optional warehouse name before any Teamship read. A unique first-word customer alias is accepted only when it identifies exactly one configured customer. A customer assigned to exactly one configured warehouse defaults to that warehouse. Garland keeps the separately confirmed Annagem default. Multi-warehouse customers return only their configured warehouse-name choices and do not trigger a Teamship call until the employee selects one. OpenClaw does not receive, copy, or enumerate the full customer directory.
+
 `getTeamshipShippingOrder` accepts an exact shipping-order, customer, and warehouse ID. It uses API list/detail reads only. A record is withheld with `SCOPE_UNVERIFIED` unless returned customer and warehouse evidence exactly matches the trusted configured scope.
 
 `getTeamshipReceivingOrder` accepts the same exact scope and identifier contract and returns `CAPABILITY_UNAVAILABLE` when no supervised browser adapter is configured. This is intentional fail-closed behavior because no supported read API endpoint has been confirmed.
@@ -67,7 +69,7 @@ Normalized error codes are `INVALID_INPUT`, `ACCESS_DENIED`, `TOOL_DISABLED`, `S
 | Current total inventory, Reserved/On Hand, LPN, or location detail | Future guarded Playwright inventory reader; current live tool remains unavailable. |
 | Current shipping-order state or detail | `getTeamshipShippingOrder`. |
 | Current receiving/inventory-order state | `getTeamshipReceivingOrder`. |
-| Generic order or missing scope | Ask for order type and the missing exact order, SKU, LPN, customer, or warehouse identifier. |
+| Generic order or missing scope | Ask for the order type, exact record/SKU/LPN, or configured customer name. Resolve names from the tenant scope reference; ask for a warehouse name only when the customer has several configured warehouses. |
 
 The routing contract is integrated into the Nemo runtime, but generic SKU/LPN routing must be narrowed before live enablement so complete-inventory questions cannot invoke the shipping-eligible API. Procedural questions continue to curated retrieval, clarification routes make no Teamship call, and approved current-record routes invoke the appropriate read tool. Live calls still fail closed unless the tenant enable flag, exact scope, role/user access, entitlement, and tenant credentials are all configured.
 
@@ -79,7 +81,7 @@ Application code performs these checks before a Teamship call:
 2. `requireModule` enforces Newl role access and the tenant's Shipment Documents entitlement.
 3. The tenant integration must have `readOnlySearchEnabled: true`. It defaults to false.
 4. The caller must be Alex Newell, Faisal Haroon, Suzy Boreham, or Lily Morales, matched by exact canonical name or a known exact email address. These four internal employees may read information for every customer and warehouse. No Newl role, including Admin or Manager, bypasses this named-user policy.
-5. The requested customer and warehouse IDs must exactly match one `readOnlyScopes` entry in the tenant's Teamship integration settings. For the four approved employees, these entries are technical Teamship customer/warehouse mappings rather than permission limits.
+5. The resolved customer and warehouse IDs must exactly match one `readOnlyScopes` entry in the tenant's Teamship integration settings. Employee-supplied names never widen that list. For the four approved employees, these entries are technical Teamship customer/warehouse mappings rather than permission limits.
 6. Tenant-stored encrypted Teamship credentials are required. The tools do not fall back to global environment credentials.
 7. The API request uses the scope's configured Teamship inventory user and location IDs. Returned records are post-checked when scope evidence exists.
 8. Billing, charges, administrative data, and unrestricted raw payloads are excluded from the output.

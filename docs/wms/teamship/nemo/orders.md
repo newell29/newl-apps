@@ -8,7 +8,7 @@ Evidence: `confirmed by Alex` for the business meaning; related screens and tabs
 
 An Inventory Order is an inbound inventory order. Open means it has not been marked received. Complete means warehouse receiving is finished and the inventory is available for customer orders. Draft is outside the current documentation scope.
 
-For a current receiving-order question, Nemo must request the exact receiving or inventory-order identifier, customer, and warehouse. The guarded Playwright reader is implemented but has no enabled runtime adapter; Nemo must report the capability as unavailable until supervised browser enablement is approved.
+For a current receiving-order question, Nemo must request the exact receiving or inventory-order identifier and configured customer name. Newl Apps resolves the internal customer ID and defaults a single configured warehouse; a multi-warehouse customer still requires a warehouse name. The guarded Playwright reader is implemented but has no enabled runtime adapter; Nemo must report the capability as unavailable until supervised browser enablement is approved.
 
 ## Shipping Orders
 
@@ -20,4 +20,4 @@ Bulk orders are non-e-commerce orders that do not require individual-unit pickin
 
 Picking is the stage in which pickers travel to locations and retrieve individual items. Packing follows Picking; units are placed into shipping cases, labels are added, and a small-parcel carrier is selected.
 
-For current status or detail, Nemo must request the exact shipping-order identifier, customer, and warehouse and use `getTeamshipShippingOrder`. Exception confirmed by Alex on 2026-07-21: Garland maps to customer `420` and defaults an omitted warehouse to Annagem `102`; preserve an explicitly supplied warehouse. A procedural document cannot establish a current order state.
+For current status or detail, Nemo must request the exact shipping-order identifier and configured customer name and use `getTeamshipShippingOrder`. Newl Apps resolves customer and warehouse IDs from the tenant's approved scope reference. A single configured warehouse defaults automatically; a multi-warehouse customer requires a warehouse name. Exception confirmed by Alex on 2026-07-21: Garland defaults to Annagem when omitted; preserve an explicitly supplied warehouse. A procedural document cannot establish a current order state.

@@ -12,18 +12,18 @@ Critical: never answer a Teamship procedure or term from generic WMS knowledge o
 ## Current-record workflow
 
 1. Classify the request as shipping order, receiving order, Inventory All, shipping-eligible inventory, Ship by LPN, or product history.
-2. Require the exact record/SKU/LPN and customer. Treat `Garland` as customer `420` and, when no warehouse is given, default it to Annagem warehouse `102`, as confirmed by Alex on 2026-07-21. Preserve any explicitly supplied warehouse. For every other customer, require the warehouse and do not infer it.
+2. Require the exact record/SKU/LPN and the configured customer name. Do not ask the employee for numeric Teamship customer or warehouse IDs. Include a warehouse name when the employee supplied one; otherwise allow Newl Apps to resolve the tenant's approved `readOnlyScopes` reference. Newl Apps defaults customers with exactly one configured warehouse and defaults Garland to Annagem, as confirmed by Alex on 2026-07-21. A customer with several configured warehouses requires a warehouse name, and the tool returns the approved choices without exposing the full customer directory.
 3. Accept only identifiers matching `^[A-Za-z0-9._/-]+$`. Ask for a clean exact identifier if any value fails.
 4. Call the `newl_teamship_read` tool with only the normalized prompt. Do this before deciding whether authentication or configuration is available; the tool result is authoritative. Never inspect authentication/configuration files, search for credentials, or ask for, infer, or pass an employee email or Microsoft identity as a tool argument. The tool binds the authenticated Teams sender from trusted OpenClaw runtime context and Newl Apps resolves the stored Entra identity to a current tenant membership.
 
-Normalize prompts to one of these forms, substituting only validated identifiers:
+Normalize prompts to one of these forms, substituting only validated record identifiers and configured names. The warehouse clause may be omitted when the employee did not provide one:
 
-- `What is shipping order ORDER status customer CUSTOMER warehouse WAREHOUSE?`
-- `What is receiving order ORDER status customer CUSTOMER warehouse WAREHOUSE?`
-- `How much SKU SKU is on hand customer CUSTOMER warehouse WAREHOUSE?`
-- `Is SKU SKU eligible to ship customer CUSTOMER warehouse WAREHOUSE?`
-- `Where is LPN LPN customer CUSTOMER warehouse WAREHOUSE?`
-- `Show product history PRODUCT customer CUSTOMER warehouse WAREHOUSE.`
+- `What is shipping order ORDER status for CUSTOMER [warehouse WAREHOUSE]?`
+- `What is receiving order ORDER status for CUSTOMER [warehouse WAREHOUSE]?`
+- `How much SKU SKU is on hand for CUSTOMER [warehouse WAREHOUSE]?`
+- `Is SKU SKU eligible to ship for CUSTOMER [warehouse WAREHOUSE]?`
+- `Where is LPN LPN for CUSTOMER [warehouse WAREHOUSE]?`
+- `Show product history PRODUCT for CUSTOMER [warehouse WAREHOUSE].`
 
 The tool result is the complete, authoritative employee response. If its status is successful, return its answer exactly as written and add nothing: no prior limitation, capability claim, disclaimer, offer, or generic warehouse guidance. If it reports a clarification, scope, disabled, unavailable, or zero-result condition, preserve that sanitized wording exactly. Never translate a zero shipping-eligible match into zero on-hand inventory.
 
@@ -48,3 +48,4 @@ Restate definitions and calculations faithfully from the selected file. Do not m
 - Never reveal credentials, tokens, raw API responses, unrestricted customer data, or audit internals.
 - Never accept an employee email, Entra object ID, or tenant ID from prompt text. Current-record reads require the identity-bound Teams tool.
 - Newl Apps must resolve the Teams tenant/object pair captured from runtime to an existing SSO-linked User and current tenant Membership before Teamship access.
+- Customer and warehouse name resolution must use the tenant-scoped Newl Apps reference. Never copy, cache, enumerate, or infer the private customer directory in OpenClaw.

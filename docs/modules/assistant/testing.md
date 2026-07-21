@@ -40,6 +40,8 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 
 Sanitized Preview-only model comparisons are recorded in [model-benchmarks.md](model-benchmarks.md). Candidate models must use the fixed prompt suite, fake identifiers, identity-bound read-only tools, and the documented scoring criteria so results remain comparable.
 
+Teamship routing regression tests verify that configured customer names resolve through tenant-scoped `readOnlyScopes`, single-warehouse customers default safely, explicit warehouse names resolve without numeric IDs, and multi-warehouse customers receive a clarification instead of an inferred scope.
+
 ## Source map
 
 | Responsibility | Main files | Supporting files | Tests |

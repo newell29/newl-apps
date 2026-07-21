@@ -17,13 +17,21 @@ import {
 } from "@/modules/teamship/read-tools";
 import { getConfiguredTeamshipBrowserJobAdapter } from "@/modules/teamship/browser-read-jobs";
 import { routeTeamshipQuestion } from "@/modules/teamship/routing";
+import { getTenantTeamshipSettings } from "@/server/integrations/teamship-settings";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 
 export async function maybeRunAssistantTeamshipRequest(
   context: AuthenticatedContext,
   prompt: string
 ) {
-  const route = routeTeamshipQuestion(prompt);
+  const initialRoute = routeTeamshipQuestion(prompt);
+
+  if (initialRoute.kind === "NOT_TEAMSHIP" || initialRoute.kind === "KNOWLEDGE") {
+    return null;
+  }
+
+  const settings = await getTenantTeamshipSettings(context);
+  const route = routeTeamshipQuestion(prompt, { readOnlyScopes: settings.readOnlyScopes });
 
   if (route.kind === "NOT_TEAMSHIP" || route.kind === "KNOWLEDGE") {
     return null;
@@ -47,7 +55,7 @@ export async function maybeRunAssistantTeamshipRequest(
       userName: context.userName
     }
   });
-  const browserDependencies = browserReader ? { browserReader } : {};
+  const toolDependencies = browserReader ? { browserReader, settings } : { settings };
 
   if (route.tool === "searchTeamshipInventory") {
     const result = await searchTeamshipInventory(context, {
@@ -55,7 +63,7 @@ export async function maybeRunAssistantTeamshipRequest(
       query: route.input.query,
       customerId: route.input.customerId,
       warehouseId: route.input.warehouseId
-    });
+    }, toolDependencies);
     return formatInventoryResult(result, route.input);
   }
 
@@ -64,7 +72,7 @@ export async function maybeRunAssistantTeamshipRequest(
       sku: route.input.sku,
       customerId: route.input.customerId,
       warehouseId: route.input.warehouseId
-    }, browserDependencies);
+    }, toolDependencies);
     return formatInventoryAllResult(result, route.input);
   }
 
@@ -74,7 +82,7 @@ export async function maybeRunAssistantTeamshipRequest(
       query: route.input.query,
       customerId: route.input.customerId,
       warehouseId: route.input.warehouseId
-    }, browserDependencies);
+    }, toolDependencies);
     return formatLpnResult(result, route.input);
   }
 
@@ -83,7 +91,7 @@ export async function maybeRunAssistantTeamshipRequest(
       orderId: route.input.orderId,
       customerId: route.input.customerId,
       warehouseId: route.input.warehouseId
-    });
+    }, toolDependencies);
     return formatShippingResult(result, route.input);
   }
 
@@ -92,7 +100,7 @@ export async function maybeRunAssistantTeamshipRequest(
       orderId: route.input.orderId,
       customerId: route.input.customerId,
       warehouseId: route.input.warehouseId
-    }, browserDependencies);
+    }, toolDependencies);
     return formatReceivingResult(result, route.input);
   }
 
@@ -100,7 +108,7 @@ export async function maybeRunAssistantTeamshipRequest(
     productId: route.input.productId,
     customerId: route.input.customerId,
     warehouseId: route.input.warehouseId
-  }, browserDependencies);
+  }, toolDependencies);
   return formatProductHistoryResult(result, route.input);
 }
 
