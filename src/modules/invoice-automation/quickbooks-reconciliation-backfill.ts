@@ -1,4 +1,4 @@
-import { IntegrationProvider, IntegrationStatus, Prisma, type InvoiceAutomationType } from "@prisma/client";
+import { IntegrationProvider, IntegrationStatus, InvoiceAutomationStatus, Prisma, type InvoiceAutomationType } from "@prisma/client";
 import { getShipmentTypeFromInvoiceFileNumber } from "@/modules/invoice-automation/extraction";
 import {
   QuickBooksPostingMappingError,
@@ -16,6 +16,7 @@ import {
 const QUICKBOOKS_QUERY_PAGE_SIZE = 1000;
 const QUICKBOOKS_DEFAULT_MONTHS_BACK = 24;
 const QUICKBOOKS_MAX_TRANSACTIONS_PER_TYPE = 2000;
+const QUICKBOOKS_MAX_DETAIL_READS_PER_TYPE = 2000;
 const QUICKBOOKS_HOME_CURRENCY = "CAD";
 const QUICKBOOKS_BACKFILL_SOURCE = "QUICKBOOKS_RECONCILIATION_BACKFILL";
 const QUICKBOOKS_BACKFILL_MULTIFILE_SOURCE = "QUICKBOOKS_RECONCILIATION_BACKFILL_MULTI_FILE_SKIPPED";
@@ -64,7 +65,9 @@ export type QuickBooksReconciliationBackfillSummary = {
   scanned: number;
   importedOrUpdated: number;
   skippedWithoutFileNumber: number;
+  skippedNotTrackedInNewlApps: number;
   skippedMultipleFileNumbers: number;
+  detailTransactionsRead: number;
   warnings: string[];
 };
 
@@ -78,15 +81,22 @@ export async function backfillQuickBooksReconciliationTransactions({
   maxTransactionsPerType?: number;
 }): Promise<QuickBooksReconciliationBackfillSummary> {
   const credentials = await getQuickBooksCredentials(tenantId);
+  const knownShipmentFileNumbers = await getKnownNewlAppsShipmentFileNumbers(tenantId);
   const sinceDate = getIsoDateMonthsBack(clampNumber(monthsBack, 1, 84));
   const transactionLimit = clampNumber(maxTransactionsPerType, 1, QUICKBOOKS_MAX_TRANSACTIONS_PER_TYPE);
   const summary: QuickBooksReconciliationBackfillSummary = {
     scanned: 0,
     importedOrUpdated: 0,
     skippedWithoutFileNumber: 0,
+    skippedNotTrackedInNewlApps: 0,
     skippedMultipleFileNumbers: 0,
+    detailTransactionsRead: 0,
     warnings: []
   };
+
+  if (knownShipmentFileNumbers.size === 0) {
+    return summary;
+  }
 
   for (const credential of credentials) {
     try {
@@ -97,12 +107,15 @@ export async function backfillQuickBooksReconciliationTransactions({
           connection,
           entityName,
           sinceDate,
-          transactionLimit
+          transactionLimit,
+          knownShipmentFileNumbers
         });
         summary.scanned += result.scanned;
         summary.importedOrUpdated += result.importedOrUpdated;
         summary.skippedWithoutFileNumber += result.skippedWithoutFileNumber;
+        summary.skippedNotTrackedInNewlApps += result.skippedNotTrackedInNewlApps;
         summary.skippedMultipleFileNumbers += result.skippedMultipleFileNumbers;
+        summary.detailTransactionsRead += result.detailTransactionsRead;
       }
     } catch (error) {
       summary.warnings.push(formatQuickBooksBackfillWarning(credential, error));
@@ -121,20 +134,24 @@ async function backfillQuickBooksEntityTransactions({
   connection,
   entityName,
   sinceDate,
-  transactionLimit
+  transactionLimit,
+  knownShipmentFileNumbers
 }: {
   tenantId: string;
   connection: QuickBooksBackfillConnection;
   entityName: QuickBooksBackfillEntityName;
   sinceDate: string;
   transactionLimit: number;
+  knownShipmentFileNumbers: Set<string>;
 }) {
   const invoiceType: InvoiceAutomationType = entityName === "Invoice" ? "CUSTOMER" : "VENDOR";
   const result = {
     scanned: 0,
     importedOrUpdated: 0,
     skippedWithoutFileNumber: 0,
-    skippedMultipleFileNumbers: 0
+    skippedNotTrackedInNewlApps: 0,
+    skippedMultipleFileNumbers: 0,
+    detailTransactionsRead: 0
   };
   let startPosition = 1;
 
@@ -149,9 +166,24 @@ async function backfillQuickBooksEntityTransactions({
 
     for (const transaction of transactions) {
       result.scanned += 1;
-      const fileNumbers = extractShipmentFileNumbersFromQuickBooksTransaction(transaction);
+      const detailedTransaction = await maybeFetchDetailedTransactionForFileNumberSearch({
+        connection,
+        entityName,
+        transaction,
+        initialFileNumbers: extractShipmentFileNumbersFromQuickBooksTransaction(transaction),
+        detailReadsUsed: result.detailTransactionsRead
+      });
+      if (detailedTransaction !== transaction) {
+        result.detailTransactionsRead += 1;
+      }
+
+      const fileNumbers = extractShipmentFileNumbersFromQuickBooksTransaction(detailedTransaction);
       if (fileNumbers.length === 0) {
         result.skippedWithoutFileNumber += 1;
+        continue;
+      }
+      if (!fileNumbers.some((fileNumber) => knownShipmentFileNumbers.has(fileNumber))) {
+        result.skippedNotTrackedInNewlApps += 1;
         continue;
       }
       if (fileNumbers.length > 1) {
@@ -160,7 +192,7 @@ async function backfillQuickBooksEntityTransactions({
           tenantId,
           connection,
           invoiceType,
-          transaction,
+          transaction: detailedTransaction,
           fileNumbers
         });
         continue;
@@ -170,7 +202,7 @@ async function backfillQuickBooksEntityTransactions({
         tenantId,
         connection,
         invoiceType,
-        transaction,
+        transaction: detailedTransaction,
         shipmentFileNumber: fileNumbers[0]
       });
       if (upserted) {
@@ -185,6 +217,31 @@ async function backfillQuickBooksEntityTransactions({
   }
 
   return result;
+}
+
+async function maybeFetchDetailedTransactionForFileNumberSearch({
+  connection,
+  entityName,
+  transaction,
+  initialFileNumbers,
+  detailReadsUsed
+}: {
+  connection: QuickBooksBackfillConnection;
+  entityName: QuickBooksBackfillEntityName;
+  transaction: QuickBooksBackfillTransaction;
+  initialFileNumbers: string[];
+  detailReadsUsed: number;
+}) {
+  if (initialFileNumbers.length > 0 || entityName !== "Bill" || !transaction.Id || detailReadsUsed >= QUICKBOOKS_MAX_DETAIL_READS_PER_TYPE) {
+    return transaction;
+  }
+
+  return fetchQuickBooksTransactionDetail({
+    realmId: connection.realmId,
+    accessToken: connection.accessToken,
+    entityName,
+    transactionId: transaction.Id
+  });
 }
 
 export function extractShipmentFileNumbersFromQuickBooksTransaction(transaction: QuickBooksBackfillTransaction) {
@@ -356,6 +413,31 @@ async function getQuickBooksCredentials(tenantId: string) {
   return credentials;
 }
 
+async function getKnownNewlAppsShipmentFileNumbers(tenantId: string) {
+  const rows = await prisma.invoiceAutomationInvoice.findMany({
+    where: {
+      tenantId,
+      status: {
+        not: InvoiceAutomationStatus.REJECTED
+      },
+      shipmentFileNumber: {
+        not: null
+      }
+    },
+    distinct: ["shipmentFileNumber"],
+    take: 5000,
+    select: {
+      shipmentFileNumber: true
+    }
+  });
+
+  return new Set(
+    rows
+      .map((row) => row.shipmentFileNumber?.trim().toUpperCase())
+      .filter((value): value is string => Boolean(value))
+  );
+}
+
 async function getQuickBooksBackfillConnection(credential: QuickBooksCredentialRecord): Promise<QuickBooksBackfillConnection> {
   const config = readQuickBooksPublicConfig(credential.publicConfig);
   if (!config.realmId) {
@@ -440,6 +522,44 @@ async function queryQuickBooks({
 
   return (await response.json()) as {
     QueryResponse?: Partial<Record<QuickBooksBackfillEntityName, QuickBooksBackfillTransaction[]>>;
+  };
+}
+
+async function fetchQuickBooksTransactionDetail({
+  realmId,
+  accessToken,
+  entityName,
+  transactionId
+}: {
+  realmId: string;
+  accessToken: string;
+  entityName: QuickBooksBackfillEntityName;
+  transactionId: string;
+}) {
+  const entityPath = entityName === "Invoice" ? "invoice" : "bill";
+  const url = new URL(`${getQuickBooksApiBaseUrl()}/v3/company/${realmId}/${entityPath}/${transactionId}`);
+  url.searchParams.set("minorversion", "75");
+
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new QuickBooksPostingMappingError(`QuickBooks ${entityPath} read failed with status ${response.status}: ${text.slice(0, 500)}`);
+  }
+
+  const json = (await response.json()) as Partial<Record<QuickBooksBackfillEntityName, QuickBooksBackfillTransaction>>;
+  return json[entityName] ?? transactionFallback(entityName, transactionId);
+}
+
+function transactionFallback(entityName: QuickBooksBackfillEntityName, transactionId: string): QuickBooksBackfillTransaction {
+  return {
+    Id: transactionId,
+    DocNumber: `${entityName}-${transactionId}`
   };
 }
 
