@@ -18,6 +18,8 @@ Company Assistant / AI chat is documented because code, routes, schema, or tests
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.
 
+`OpenClawUnresolvedTurn` stores tenant- and user-scoped evidence for Microsoft Teams turns that Nemo failed to answer or deliver. A turn begins as `PENDING`, is deleted after a successful response, and is retained as `OPEN` for model, tool, or delivery failures. External Teams/session/tool-call identifiers are hashed, while prompt/response/error text is sanitized and bounded. See [OpenClaw unresolved-turn capture](../../ai/openclaw-unresolved-turns.md) for the complete contract.
+
 ```mermaid
 flowchart LR
   UI[Authenticated UI/API] --> Auth[Auth + module guard]
