@@ -34,6 +34,8 @@ Roles and defaults are in `src/server/auth/role-policy.ts`. Runtime checks are i
 
 Expected failures include missing tenant entitlement, read-only mutation attempts, validation errors, missing integration credentials, duplicate records, empty parser results, external API errors, timeouts, and partial job completion. Recovery should use module UI review screens, audit/job records, and documented dry-run scripts before live writes.
 
+For Nemo on Microsoft Teams, model/provider failures, failed tools, failed delivery, and turns with no observed response are captured through the [OpenClaw unresolved-turn workflow](../../ai/openclaw-unresolved-turns.md). The capture is best-effort and must never block an employee-facing answer. Semantic answer quality is not inferred from fluency and requires explicit feedback or deterministic verification.
+
 ## Testing
 
 Relevant tests are under `tests/` and generally named after the module. Recommended checks: `npm test`, `npm run lint`, `npm run typecheck`, and targeted route/service tests. Live integration scripts must not be run without explicit approval and safe credentials.

@@ -40,6 +40,8 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 
 Sanitized Preview-only model comparisons are recorded in [model-benchmarks.md](model-benchmarks.md). Candidate models must use the fixed prompt suite, fake identifiers, identity-bound read-only tools, and the documented scoring criteria so results remain comparable.
 
+Unresolved-turn tests verify that capture is tenant scoped, successful Teams turns are removed, failed turns retain sanitized evidence, external identifiers are hashed, stale pending turns are listed as `NO_RESPONSE`, only Admin users can list issues, and capture failures do not interrupt Nemo. The OpenClaw plugin tests cover model, tool, and delivery signals without retaining model reasoning or raw tool payloads.
+
 Teamship routing regression tests verify that configured customer names resolve through tenant-scoped `readOnlyScopes`, single-warehouse customers default safely, explicit warehouse names resolve without numeric IDs, and multi-warehouse customers receive a clarification instead of an inferred scope.
 
 Inventory browser-reader regression tests also verify that the initial Teamship grid is ready before the SKU is entered with paced keyboard events and the visible Search control is activated. The reader waits for the requested visible row through Teamship's slow asynchronous refresh and accepts a visible empty state only after that exact-row window expires; setting the input value directly, submitting with Enter, searching while the initial grid is loading, or reading a transient, stale, or hidden grid is not sufficient evidence that Teamship applied the search.

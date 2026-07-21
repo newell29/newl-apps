@@ -466,6 +466,7 @@ model Tenant {
   teamshipUpdateJobs                  TeamshipUpdateJob[]
   teamshipUpdateOrders                TeamshipUpdateOrder[]
   teamshipBrowserReadJobs             TeamshipBrowserReadJob[]
+  openClawUnresolvedTurns             OpenClawUnresolvedTurn[]
   garlandProductDimensionObservations GarlandProductDimensionObservation[]
   garlandSourceEmails                 GarlandSourceEmail[]
   garlandSourceAttachments            GarlandSourceAttachment[]
@@ -521,6 +522,7 @@ model User {
   assistantRuns               AssistantRun[]
   assistantAutomations        AssistantAutomation[]
   assistantAutomationRuns     AssistantAutomationRun[]
+  openClawUnresolvedTurns     OpenClawUnresolvedTurn[]
   shipmentDocumentRuns        ShipmentDocumentRun[]
   shipmentCarrierManifestRuns ShipmentCarrierManifestRun[]
   teamshipReviewRuns          TeamshipReviewRun[]
@@ -1221,6 +1223,40 @@ model TeamshipBrowserReadJob {
   @@index([tenantId, status, createdAt])
   @@index([tenantId, operation, createdAt])
   @@index([expiresAt])
+}
+
+model OpenClawUnresolvedTurn {
+  id                         String   @id @default(cuid())
+  tenantId                   String
+  userId                     String
+  runId                      String
+  channel                    String   @default("msteams")
+  status                     String   @default("PENDING")
+  failureKind                String?
+  promptText                 String
+  promptFingerprint          String
+  responseText               String?
+  provider                   String?
+  model                      String?
+  toolName                   String?
+  errorCode                  String?
+  errorMessage               String?
+  externalMessageIdHash      String?
+  externalConversationIdHash String?
+  sessionKeyHash             String?
+  toolCallIdHash             String?
+  detectedAt                 DateTime @default(now())
+  lastObservedAt             DateTime @default(now())
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, runId])
+  @@index([tenantId, status, detectedAt])
+  @@index([tenantId, promptFingerprint, detectedAt])
+  @@index([tenantId, userId, detectedAt])
 }
 
 model IntegrationCredential {
