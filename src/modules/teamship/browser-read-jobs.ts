@@ -233,7 +233,7 @@ async function enqueueAndWait({
   requestedBy,
   scope,
   jobInput,
-  timeoutMs = 60_000,
+  timeoutMs = 90_000,
   pollIntervalMs = 1_000
 }: RemoteAdapterOptions & {
   scope: TeamshipBrowserScope;

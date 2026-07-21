@@ -8,7 +8,8 @@ import {
   parseLpnTables,
   parseProductHistoryPage,
   parseReceivingOrderPage,
-  submitTeamshipInventorySearch
+  submitTeamshipInventorySearch,
+  waitForTeamshipInventorySearchResult
 } from "@/modules/teamship/browser-read-execution";
 import {
   assertTeamshipReadControlAllowed,
@@ -71,6 +72,55 @@ describe("Teamship browser read extraction", () => {
       quarantined: false
     }]);
     expect(JSON.stringify(rows)).not.toContain("999");
+  });
+
+  it("prefers the refreshed grid surface containing the requested SKU over a stale compatible grid", () => {
+    const headers = ["Product", "SKU", "Available", "Reserved", "On Hand", "Backordered", "Status", "Company Name", "Warehouse", "Quarantine"];
+    const rows = parseInventoryAllTables([{
+      headers,
+      rows: [[cell("Stale product"), cell("OLD-100"), cell("0"), cell("0"), cell("0"), cell("0"), cell("out of stock"), cell("Garland Canada Distribution"), cell("Annagem"), cell("No")]]
+    }, {
+      headers,
+      rows: [[cell("Current product"), cell("ABC-100"), cell("37"), cell("0"), cell("37"), cell("0"), cell("available"), cell("Garland Canada Distribution"), cell("Annagem"), cell("No")]]
+    }], "ABC-100");
+
+    expect(rows).toMatchObject([{
+      sku: "ABC-100",
+      available: 37,
+      reserved: 0,
+      onHand: 37,
+      warehouseName: "Annagem"
+    }]);
+  });
+
+  it("pairs refreshed headerless rows with Teamship's separate accessible header surface", () => {
+    const rows = parseInventoryAllTables([{
+      headers: [
+        "ProductPress Alt Down to open filter Menu. Press Enter to sort. Press Ctrl space to group",
+        "SKUPress Alt Down to open filter Menu. Press Enter to sort. Press Ctrl space to group",
+        "AvailablePress Enter to sort. Press Ctrl space to group",
+        "ReservedPress Alt Down to open filter Menu. Press Enter to sort. Press Ctrl space to group",
+        "On HandPress Alt Down to open filter Menu. Press Enter to sort. Press Ctrl space to group",
+        "BackorderedPress Alt Down to open filter Menu. Press Enter to sort. Press Ctrl space to group",
+        "StatusPress Ctrl space to group",
+        "Company NamePress Alt Down to open filter Menu. Press Enter to sort. Press Ctrl space to group",
+        "WarehousePress Alt Down to open filter Menu. Press Enter to sort. Press Ctrl space to group",
+        "QuarantinePress Alt Down to open filter Menu. Press Enter to sort. Press Ctrl space to group"
+      ],
+      rows: []
+    }, {
+      headers: [],
+      rows: [[cell("Current product"), cell("ABC-100"), cell("37"), cell("0"), cell("37"), cell("0"), cell("available"), cell("Garland Canada Distribution"), cell("Annagem"), cell("No")]]
+    }], "ABC-100");
+
+    expect(rows).toMatchObject([{
+      sku: "ABC-100",
+      available: 37,
+      reserved: 0,
+      onHand: 37,
+      customerName: "Garland Canada Distribution",
+      warehouseName: "Annagem"
+    }]);
   });
 
   it("normalizes LPN rows without equating their quantity to Inventory All Available", () => {
@@ -160,9 +210,10 @@ describe("Teamship browser read extraction", () => {
     }
   });
 
-  it("activates the live Teamship inventory Search control after filling the query", async () => {
+  it("types the query and activates the live Teamship inventory Search control", async () => {
     const input = {
-      fill: vi.fn().mockResolvedValue(undefined)
+      fill: vi.fn().mockResolvedValue(undefined),
+      type: vi.fn().mockResolvedValue(undefined)
     };
     const submit = {
       click: vi.fn().mockResolvedValue(undefined)
@@ -170,8 +221,35 @@ describe("Teamship browser read extraction", () => {
 
     await submitTeamshipInventorySearch(input, submit, "ABC-100");
 
-    expect(input.fill).toHaveBeenCalledWith("ABC-100");
+    expect(input.fill).toHaveBeenCalledWith("");
+    expect(input.type).toHaveBeenCalledWith("ABC-100", { delay: 25 });
     expect(submit.click).toHaveBeenCalledOnce();
+  });
+
+  it("waits for a visible requested inventory row or explicit Teamship empty state before extraction", async () => {
+    const table = { headers: ["SKU"], rows: [[cell("ABC-100")]] };
+    const page = {
+      evaluate: vi.fn().mockResolvedValue(JSON.stringify({ kind: "rows", tables: [table] }))
+    };
+
+    await expect(waitForTeamshipInventorySearchResult(page as never, "ABC-100", 45_000)).resolves.toEqual([table]);
+
+    expect(page.evaluate).toHaveBeenCalledOnce();
+    const captureExpression = page.evaluate.mock.calls[0]?.[0];
+    expect(captureExpression).toEqual(expect.any(String));
+    expect(captureExpression).toContain("document.querySelectorAll('table')");
+    expect(captureExpression).toContain("document.querySelectorAll('[role=\"grid\"]')");
+    expect(captureExpression).not.toContain("matchingRow.closest");
+  });
+
+  it("accepts an explicit visible empty state only after the exact-row wait expires", async () => {
+    const page = {
+      evaluate: vi.fn().mockResolvedValue(JSON.stringify({ kind: "empty" }))
+    };
+
+    await expect(waitForTeamshipInventorySearchResult(page as never, "ABC-100", 45_000)).resolves.toEqual([]);
+
+    expect(page.evaluate).toHaveBeenCalledOnce();
   });
 
   it("rejects non-HTTPS and non-allowlisted page hosts before browser reads continue", () => {

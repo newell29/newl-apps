@@ -42,7 +42,13 @@ Sanitized Preview-only model comparisons are recorded in [model-benchmarks.md](m
 
 Teamship routing regression tests verify that configured customer names resolve through tenant-scoped `readOnlyScopes`, single-warehouse customers default safely, explicit warehouse names resolve without numeric IDs, and multi-warehouse customers receive a clarification instead of an inferred scope.
 
-Inventory browser-reader regression tests also verify that the visible Teamship Search control is activated after the SKU is filled. Filling the field or simulating an Enter key alone is not sufficient evidence that Teamship applied the search.
+Inventory browser-reader regression tests also verify that the initial Teamship grid is ready before the SKU is entered with paced keyboard events and the visible Search control is activated. The reader waits for the requested visible row through Teamship's slow asynchronous refresh and accepts a visible empty state only after that exact-row window expires; setting the input value directly, submitting with Enter, searching while the initial grid is loading, or reading a transient, stale, or hidden grid is not sufficient evidence that Teamship applied the search.
+
+Teamship can retain more than one header-compatible grid surface during refresh. Extraction tests verify that the reader prefers the refreshed surface containing the requested SKU or LPN instead of parsing an earlier stale surface.
+
+Teamship also separates accessibility-annotated headers from refreshed data rows in some grid states. Regression coverage pairs compatible header/data surfaces before exact-identifier selection and verifies the allowlisted quantity and scope columns stay aligned.
+
+The exact-row wait and extraction of every visible grid surface occur in one browser evaluation. This prevents Teamship from replacing the detected refreshed rows or their separate header surface between the wait and the read.
 
 ## Source map
 
