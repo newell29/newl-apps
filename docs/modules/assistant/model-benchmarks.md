@@ -25,7 +25,13 @@ Scoring has eight equally weighted checks: reasoning hidden, concise greeting, i
 |---|---:|---:|---|---|---|---:|---|
 | Ollama `qwen3:30b-instruct` | 2026-07-21 | 5/8 | Tool routing worked after stronger templates, but it appended advice and initially omitted Annagem for an order | Read the correct file but invented an unsupported LPN expansion and additional claims | Inventory 21.9s; corrected order 55.7s; LPN 12.1s | Local/no token charge | Not suitable as the authoritative final-response model |
 | Ollama `gpt-oss:20b` | 2026-07-21 | 2/8 | Failed to return current-record results and exposed internal Teams/runtime metadata in final replies | Ignored the curated LPN workflow and echoed system context instead | Greeting 11.5s; inventory 31.8s; order 51.3s; LPN 17.7s | Local/no token charge | Rejected; removed from Nemo's allowed model list |
-| OpenAI `gpt-5.4-mini` | 2026-07-21 | 8/8 | Exact inventory and shipping-order tool results; correctly inferred customer `420` and warehouse `102` | Used only the supported handling-unit/pallet wording and exact Draft title | Greeting 3.6s; inventory 27.0s; order 54.4s; LPN 19.6s | About $0.0152 for four Teams tests; about $0.0244 including validation smoke | Leading candidate; continue broader Preview evaluation |
+| OpenAI `gpt-5.4-mini` | 2026-07-21 | 8/8 | Exact inventory and shipping-order tool results; correctly inferred customer `420` and warehouse `102` | Used only the supported handling-unit/pallet wording and exact Draft title | Greeting 3.6s; inventory 27.0s; order 54.4s; LPN 19.6s | About $0.0152 for four Teams tests; about $0.0244 including validation smoke | Selected as the Preview Nemo default; production remains gated |
+
+## Preview runtime decision
+
+Alex approved OpenAI `gpt-5.4-mini` as Nemo's active Mac Mini/OpenClaw default on 2026-07-21. The stored project-scoped OpenAI credential is selected explicitly, reasoning is off, and automatic model fallbacks are empty so an API failure cannot silently switch operational answers back to a lower-scoring local model. Qwen remains installed for deliberate manual use only. A private post-switch verification used the configured default, returned the exact requested sentence, and completed in 4.1 seconds. Estimated verification cost was $0.0092 at the recorded list rates.
+
+This is a Preview runtime decision, not a production deployment or approval of Teamship writes. The deterministic final-response requirement and existing production gates remain in force.
 
 ## Ollama GPT-OSS 20B evidence
 
@@ -53,7 +59,7 @@ Scoring has eight equally weighted checks: reasoning hidden, concise greeting, i
 
 GPT-5.4 mini materially outperformed both local models on the failures that matter most for operations: exact tool-result preservation, Garland/Annagem defaulting, curated-document fidelity, and protection of internal runtime context. GPT-OSS 20B's metadata disclosure is a disqualifying safety failure rather than a prompt-quality shortcoming. Teamship browser execution remains the main source of latency for successful order and inventory tests.
 
-This result does not remove the deterministic-response requirement. Exact current-record results should still bypass free-form model rewriting before production. Run additional adversarial, clarification, permission-denial, and unavailable-tool cases before making GPT-5.4 mini the production default.
+This result does not remove the deterministic-response requirement. Exact current-record results should still bypass free-form model rewriting before production. Run additional adversarial, clarification, permission-denial, and unavailable-tool cases before any production deployment.
 
 ## Next candidates
 
