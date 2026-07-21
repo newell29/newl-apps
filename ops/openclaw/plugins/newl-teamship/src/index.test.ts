@@ -1,15 +1,40 @@
-import { describe, expect, it } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getToolPluginMetadata } from "openclaw/plugin-sdk/tool-plugin";
 
 import plugin, {
   buildRequestHeaders,
+  createDevelopmentSuggestionDigestTool,
+  createGarlandExplainTool,
+  createGarlandPdfReviewTool,
   createTeamshipReadTool,
-  normalizeUuid
+  normalizeUuid,
+  registerTrustedTeamsMediaCapture
 } from "./index.js";
 
 describe("Newl Teamship OpenClaw plugin", () => {
-  it("declares only the identity-bound read tool", () => {
-    expect(getToolPluginMetadata(plugin)?.tools.map((tool) => tool.name)).toEqual(["newl_teamship_read"]);
+  const temporaryDirectories: string[] = [];
+
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    delete process.env.OPENCLAW_ASSISTANT_TOKEN;
+    delete process.env.OPENCLAW_TEAMSHIP_READ_TOKEN;
+    await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, {
+      recursive: true,
+      force: true
+    })));
+  });
+  it("declares identity-bound Teamship, Garland, feedback, and approval-queue tools", () => {
+    expect(getToolPluginMetadata(plugin)?.tools.map((tool) => tool.name)).toEqual([
+      "newl_teamship_read",
+      "newl_garland_pdf_review",
+      "newl_garland_explain",
+      "newl_operational_feedback",
+      "newl_development_suggestion_digest"
+    ]);
     const tool = createTeamshipReadTool({
       config: { baseUrl: "https://preview.example.com", tenantId: "11111111-1111-4111-8111-111111111111" },
       toolContext: {}
@@ -18,6 +43,16 @@ describe("Newl Teamship OpenClaw plugin", () => {
     expect(tool.description).toContain("do not ask them for numeric Teamship IDs");
     expect(tool.description).toContain("defaults Garland to Annagem");
     expect(tool.description).toContain("serial number");
+  });
+
+  it("keeps Garland explanations identity-bound too", async () => {
+    const tool = createGarlandExplainTool({
+      config: { baseUrl: "https://preview.example.com", tenantId: "11111111-1111-4111-8111-111111111111" },
+      toolContext: {}
+    });
+
+    await expect(tool.execute("call-2", { reference: "PS123456" }))
+      .resolves.toMatchObject({ details: { status: "unauthorized" } });
   });
 
   it("accepts only stable UUID-shaped Entra identities", () => {
@@ -50,4 +85,148 @@ describe("Newl Teamship OpenClaw plugin", () => {
     expect(buildRequestHeaders({ ...base, bypassToken: "preview-token" }))
       .toHaveProperty("x-vercel-protection-bypass", "preview-token");
   });
+
+  it("uses the configured admin identity only for a sender-less scheduled digest", async () => {
+    process.env.OPENCLAW_ASSISTANT_TOKEN = "assistant-token";
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { awaitingApproval: [] } }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const tool = createDevelopmentSuggestionDigestTool({
+      config: {
+        baseUrl: "https://preview.example.com",
+        tenantId: "11111111-1111-4111-8111-111111111111",
+        digestAdminObjectId: "22222222-2222-4222-8222-222222222222"
+      },
+      toolContext: { messageChannel: "msteams" }
+    });
+
+    await expect(tool.execute("call-3", {})).resolves.toMatchObject({ details: { status: "ok" } });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(URL),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "x-newl-teams-aad-object-id": "22222222-2222-4222-8222-222222222222"
+        })
+      })
+    );
+  });
+
+  it("never falls back to or reuses the Teamship read credential for Garland writes", async () => {
+    process.env.OPENCLAW_TEAMSHIP_READ_TOKEN = "read-token";
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const toolContext = {
+      messageChannel: "msteams",
+      requesterSenderId: "22222222-2222-4222-8222-222222222222"
+    };
+
+    const missingAssistantToken = createGarlandExplainTool({
+      config: {
+        baseUrl: "https://newl.example.com",
+        tenantId: "11111111-1111-4111-8111-111111111111"
+      },
+      toolContext
+    });
+    await expect(missingAssistantToken.execute("call-4", { reference: "PS123456" }))
+      .resolves.toMatchObject({ details: { status: "not_configured" } });
+
+    const sharedEnvironmentName = createGarlandExplainTool({
+      config: {
+        baseUrl: "https://newl.example.com",
+        tenantId: "11111111-1111-4111-8111-111111111111",
+        assistantTokenEnv: "OPENCLAW_TEAMSHIP_READ_TOKEN"
+      },
+      toolContext
+    });
+    await expect(sharedEnvironmentName.execute("call-5", { reference: "PS123456" }))
+      .resolves.toMatchObject({ details: { status: "not_configured" } });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("uploads only the PDF captured from the same trusted Teams session and consumes the capture", async () => {
+    process.env.OPENCLAW_ASSISTANT_TOKEN = "assistant-token";
+    process.env.OPENCLAW_TEAMSHIP_READ_TOKEN = "read-token";
+    const directory = await mkdtemp(join(tmpdir(), "newl-garland-plugin-"));
+    temporaryDirectories.push(directory);
+    const pdfPath = join(directory, "Garland order.pdf");
+    await writeFile(pdfPath, Buffer.from("%PDF-1.4\n%%EOF\n"));
+
+    let messageHandler: ((event: Record<string, unknown>, context: Record<string, unknown>) => void) | undefined;
+    registerTrustedTeamsMediaCapture({
+      on: vi.fn((eventName: string, handler: typeof messageHandler) => {
+        if (eventName === "message_received") messageHandler = handler;
+      })
+    } as never);
+    expect(messageHandler).toBeTypeOf("function");
+    messageHandler?.(
+      {
+        messageId: "teams-message-1",
+        metadata: { mediaPath: pdfPath }
+      },
+      {
+        channelId: "msteams",
+        senderId: "22222222-2222-4222-8222-222222222222",
+        sessionKey: "teams-session-1",
+        conversationId: "teams-conversation-1"
+      }
+    );
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        data: { id: "artifact-1", status: "UPLOADING" }
+      }, 201))
+      .mockResolvedValueOnce(jsonResponse({
+        data: { artifactId: "artifact-1", chunkIndex: 0 }
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        data: {
+          artifactId: "artifact-1",
+          reviewRunId: "review-1",
+          fileName: "Garland order.pdf",
+          extraction: { orderCount: 1 },
+          review: {
+            passedCount: 1,
+            failedCount: 0,
+            missingTeamshipCount: 0,
+            pendingTeamshipCount: 0
+          }
+        }
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const tool = createGarlandPdfReviewTool({
+      config: {
+        baseUrl: "https://newl.example.com",
+        tenantId: "11111111-1111-4111-8111-111111111111"
+      },
+      toolContext: {
+        messageChannel: "msteams",
+        requesterSenderId: "22222222-2222-4222-8222-222222222222",
+        sessionKey: "teams-session-1"
+      }
+    });
+
+    await expect(tool.execute("call-6", {})).resolves.toMatchObject({
+      details: { status: "ok" },
+      content: [{ text: expect.stringContaining("1 passed") }]
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/assistant/garland/artifacts");
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain("/chunks/0");
+    expect(String(fetchMock.mock.calls[2]?.[0])).toContain("/finalize");
+    await expect(tool.execute("call-7", {})).resolves.toMatchObject({
+      details: { status: "failed" },
+      content: [{ text: expect.stringContaining("attach it again") }]
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
 });
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" }
+  });
+}

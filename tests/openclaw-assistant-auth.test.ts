@@ -18,13 +18,17 @@ vi.mock("@/server/auth/authorization", () => ({
   requireModule: (...args: unknown[]) => mocks.requireModule(...args)
 }));
 
-import { authenticateOpenClawAssistantRequest } from "@/server/openclaw-assistant-auth";
+import {
+  authenticateOpenClawAssistantRequest,
+  OpenClawAssistantAuthError
+} from "@/server/openclaw-assistant-auth";
 
 describe("OpenClaw assistant authentication", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("OPENCLAW_ASSISTANT_TOKEN", "assistant-token");
     vi.stubEnv("OPENCLAW_ASSISTANT_TENANT_SLUG", "newl-group");
+    vi.stubEnv("OPENCLAW_TEAMSHIP_READ_TOKEN", "teamship-read-token");
     mocks.membershipFindFirst.mockResolvedValue({
       role: PlatformRole.ADMIN,
       tenant: { id: "tenant-1", slug: "newl-group", name: "Newl Group" },
@@ -49,7 +53,10 @@ describe("OpenClaw assistant authentication", () => {
         }
       }
     }));
-    expect(mocks.requireModule).toHaveBeenCalledWith(expect.objectContaining({ tenantId: "tenant-1" }), ModuleKey.ASSISTANT);
+    expect(mocks.requireModule).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: "tenant-1" }),
+      ModuleKey.ASSISTANT
+    );
   });
 
   it("rejects invalid tokens and malformed Teams identities before lookup", async () => {
@@ -60,10 +67,37 @@ describe("OpenClaw assistant authentication", () => {
     }))).rejects.toMatchObject({ status: 400 });
     expect(mocks.membershipFindFirst).not.toHaveBeenCalled();
   });
+
+  it("does not accept email headers in place of trusted Teams identity", async () => {
+    const request = new Request("https://newl.test/api/assistant/garland", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer assistant-token",
+        "x-newl-user-email": "employee@newl.ca"
+      }
+    });
+
+    await expect(authenticateOpenClawAssistantRequest(request)).rejects.toMatchObject({
+      status: 400
+    } satisfies Partial<OpenClawAssistantAuthError>);
+  });
+
+  it("never falls back to or reuses the Teamship read credential", async () => {
+    vi.stubEnv("OPENCLAW_ASSISTANT_TOKEN", "");
+    await expect(authenticateOpenClawAssistantRequest(buildRequest("teamship-read-token")))
+      .rejects.toMatchObject({ status: 503 });
+
+    vi.stubEnv("OPENCLAW_ASSISTANT_TOKEN", "same-token");
+    vi.stubEnv("OPENCLAW_TEAMSHIP_READ_TOKEN", "same-token");
+    await expect(authenticateOpenClawAssistantRequest(buildRequest("same-token")))
+      .rejects.toMatchObject({ status: 503 });
+    expect(mocks.membershipFindFirst).not.toHaveBeenCalled();
+  });
 });
 
 function buildRequest(token: string) {
-  return new Request("https://newl.test/api/assistant/openclaw/unresolved-turns", {
+  return new Request("https://newl.test/api/assistant/garland", {
+    method: "POST",
     headers: {
       authorization: `Bearer ${token}`,
       "x-newl-teams-tenant-id": "11111111-1111-4111-8111-111111111111",

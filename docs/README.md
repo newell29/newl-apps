@@ -10,6 +10,7 @@ This knowledge base is the approved repository-local starting point for OpenClaw
 - Repository map: `docs/architecture/repository-map.md`
 - Modules: `docs/modules/README.md`
 - AI and OpenClaw: `docs/ai/overview.md`
+- Nemo Garland production rollout: `docs/ai/nemo-garland-production-rollout.md`
 - Garland customer workflow: `docs/customers/garland/overview.md`
 - WMS / Teamship: `docs/wms/overview.md`
 - Memory rules: `docs/memory/overview.md`

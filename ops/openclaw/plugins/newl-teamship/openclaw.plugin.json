@@ -1,8 +1,8 @@
 {
   "id": "newl-teamship",
-  "name": "Newl Teamship",
-  "description": "Runs tenant-scoped, read-only Teamship lookups through Newl Apps using the authenticated Teams sender identity.",
-  "version": "0.1.0",
+  "name": "Newl Teamship and Garland",
+  "description": "Runs identity-bound Teamship reads and Garland review, explanation, feedback, and approval-queue workflows through Newl Apps.",
+  "version": "0.2.0",
   "configSchema": {
     "type": "object",
     "required": [
@@ -22,6 +22,14 @@
         "type": "string",
         "description": "Environment variable containing the Newl Apps Teamship read token."
       },
+      "assistantTokenEnv": {
+        "type": "string",
+        "description": "Environment variable containing the Newl Apps Garland assistant token; it must differ from the Teamship read-token environment."
+      },
+      "digestAdminObjectId": {
+        "type": "string",
+        "description": "Microsoft Entra object ID used only by a sender-less scheduled admin digest. Interactive calls always use the actual Teams sender."
+      },
       "vercelProtectionBypassEnv": {
         "type": "string",
         "description": "Optional environment variable containing a Vercel Preview automation bypass secret."
@@ -33,7 +41,11 @@
   },
   "contracts": {
     "tools": [
-      "newl_teamship_read"
+      "newl_teamship_read",
+      "newl_garland_pdf_review",
+      "newl_garland_explain",
+      "newl_operational_feedback",
+      "newl_development_suggestion_digest"
     ]
   }
 }
