@@ -42,6 +42,8 @@ Sanitized Preview-only model comparisons are recorded in [model-benchmarks.md](m
 
 Teamship routing regression tests verify that configured customer names resolve through tenant-scoped `readOnlyScopes`, single-warehouse customers default safely, explicit warehouse names resolve without numeric IDs, and multi-warehouse customers receive a clarification instead of an inferred scope.
 
+Inventory browser-reader regression tests also verify that the visible Teamship Search control is activated after the SKU is filled. Filling the field or simulating an Enter key alone is not sufficient evidence that Teamship applied the search.
+
 ## Source map
 
 | Responsibility | Main files | Supporting files | Tests |

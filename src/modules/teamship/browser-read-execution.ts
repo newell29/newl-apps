@@ -299,19 +299,26 @@ async function applyInventorySearch(page: Page, query: string) {
     page.getByPlaceholder("Search", { exact: true }),
     page.getByRole("textbox", { name: "Search", exact: true })
   ], "Teamship inventory Search field");
+  const submit = await requireUniqueLocator([
+    page.getByRole("button", { name: "Search", exact: true }),
+    input.locator("xpath=..").locator('.e-search-icon:visible'),
+    input.locator('xpath=following-sibling::*[contains(concat(" ", normalize-space(@class), " "), " e-search-icon ")][1]'),
+    input.locator('xpath=following-sibling::*[self::button or @role="button"][1]')
+  ], "Teamship inventory Search control");
   assertTeamshipReadControlAllowed("Search");
-  await submitTeamshipInventorySearch(input, query);
+  await submitTeamshipInventorySearch(input, submit, query);
   await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => undefined);
   await page.waitForTimeout(1_500);
   await assertNoUnexpectedDialog(page);
 }
 
 export async function submitTeamshipInventorySearch(
-  input: Pick<Locator, "fill" | "press">,
+  input: Pick<Locator, "fill">,
+  submit: Pick<Locator, "click">,
   query: string
 ) {
   await input.fill(query);
-  await input.press("Enter");
+  await submit.click();
 }
 
 async function requireUniqueLocator(candidates: Locator[], description: string) {

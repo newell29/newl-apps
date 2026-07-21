@@ -160,16 +160,18 @@ describe("Teamship browser read extraction", () => {
     }
   });
 
-  it("submits the live Teamship inventory search with Enter", async () => {
+  it("activates the live Teamship inventory Search control after filling the query", async () => {
     const input = {
-      fill: vi.fn().mockResolvedValue(undefined),
-      press: vi.fn().mockResolvedValue(undefined)
+      fill: vi.fn().mockResolvedValue(undefined)
+    };
+    const submit = {
+      click: vi.fn().mockResolvedValue(undefined)
     };
 
-    await submitTeamshipInventorySearch(input, "ABC-100");
+    await submitTeamshipInventorySearch(input, submit, "ABC-100");
 
     expect(input.fill).toHaveBeenCalledWith("ABC-100");
-    expect(input.press).toHaveBeenCalledWith("Enter");
+    expect(submit.click).toHaveBeenCalledOnce();
   });
 
   it("rejects non-HTTPS and non-allowlisted page hosts before browser reads continue", () => {

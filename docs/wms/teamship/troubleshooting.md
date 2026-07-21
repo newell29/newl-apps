@@ -12,6 +12,7 @@ Evidence: `confirmed by Alex` unless otherwise labeled.
 - Inventory Orders list search did not find a SKU in the walkthrough. To find inbound stock for a SKU, inspect each inbound order for the relevant customer.
 - Alternative serials may be suggested to Newl staff without separate approval. This does not approve customer-facing substitutions.
 - Inventory All is SKU-based; quarantine and serial attributes do not change its quantity calculation. Check handling-unit evidence before describing stock as shippable.
+- A filled inventory Search field does not prove that Teamship applied the query. The guarded reader must activate the visible Search control and only interpret the resulting table after it settles.
 - Picking List and Packing List download PDFs. BOL and outbound-label Print actions can send real jobs through the selected Teamship printer.
 - A number entered in Billing search may match a transaction number as well as Order No; verify the result against the Order No column. Evidence: narration/visual observation; billing meaning remains Draft.
 
