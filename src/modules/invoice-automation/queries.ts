@@ -31,6 +31,7 @@ export type InvoiceAutomationReconciliationRow = {
   shipmentFileNumber: string;
   shipmentType: string | null;
   customerNames: string[];
+  vendorNames: string[];
   customerInvoiceCount: number;
   vendorInvoiceCount: number;
   customerRevenueCad: number | null;
@@ -111,7 +112,7 @@ export async function getInvoiceAutomationReconciliationShell(tenant: TenantCont
         }
       },
       orderBy: [{ updatedAt: "desc" }],
-      take: 2500,
+      take: INVOICE_AUTOMATION_ROW_QUERY_LIMIT,
       select: {
         id: true,
         invoiceType: true,
@@ -136,7 +137,7 @@ export async function getInvoiceAutomationReconciliationShell(tenant: TenantCont
         }
       },
       orderBy: [{ observedAt: "desc" }],
-      take: 2500,
+      take: INVOICE_AUTOMATION_ROW_QUERY_LIMIT,
       select: {
         id: true,
         invoiceType: true,
@@ -367,6 +368,7 @@ function buildShipmentReconciliationRow(
     shipmentFileNumber,
     shipmentType: group.find((record) => record.shipmentType)?.shipmentType ?? shipmentFileNumber.slice(0, 2),
     customerNames: uniqueSorted(customerInvoices.map(readReconciliationEntityName)),
+    vendorNames: uniqueSorted(vendorInvoices.map(readReconciliationEntityName)),
     customerInvoiceCount: customerInvoices.length,
     vendorInvoiceCount: vendorInvoices.length,
     customerRevenueCad,
