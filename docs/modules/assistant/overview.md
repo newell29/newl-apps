@@ -13,10 +13,15 @@ Company Assistant / AI chat is documented because code, routes, schema, or tests
 - Data persistence uses tenant-scoped Prisma models where a database model exists.
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
+- Operational feedback is stored separately from approved assistant memory. Employee reports begin as `REPORTED` evidence and cannot affect Nemo explanations until an administrator confirms the feedback and explicitly creates an `ApprovedOperationalLesson`.
+- Development suggestions are approval-queue records only. Creating or approving one does not start Codex, create a branch or pull request, merge, deploy, update Teamship, or print.
+- Approved memory is database-backed and tenant-scoped, so it is available across Codex/OpenClaw chat threads. Chat history is useful context but is not the source of truth for Nemo's approved workflow understanding.
 
 ## Data model
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.
+
+Phase 1 operational-learning tables are `OperationalFeedback`, `ApprovedOperationalLesson`, and `DevelopmentSuggestion`. `WorkflowArtifact` and `WorkflowArtifactChunk` retain workflow evidence such as Teams PDFs.
 
 ```mermaid
 flowchart LR
@@ -51,3 +56,5 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Which status values map to employee-approved business language? Requires employee confirmation.
 - Which write actions should require two-person approval? Requires owner confirmation.
 - Which external integration credentials should be moved from env fallback to tenant-scoped settings first? Requires owner confirmation.
+- What time and Teams destination should run the daily admin development-suggestion digest? Requires Alex confirmation before creating the OpenClaw automation.
+- Should approved development suggestions require a second explicit approval when Codex presents its proposed scope? Recommended; requires Alex confirmation.

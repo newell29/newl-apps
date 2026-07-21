@@ -14,6 +14,14 @@ Shipment documents and Garland Teamship review is documented because code, route
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
 
+## Teams and OpenClaw Phase 1
+
+- Machine routes under `/api/assistant/garland` use an OpenClaw bearer token plus trusted Microsoft Teams tenant/object headers. Newl Apps resolves those Entra claims to an existing user and tenant membership before any data access.
+- `OPENCLAW_ASSISTANT_TOKEN` is preferred. `OPENCLAW_TEAMSHIP_READ_TOKEN` remains a temporary fallback so Preview rollout can be staged without breaking current Teamship reads.
+- The model never supplies an attachment path. The plugin captures media from the trusted `message_received` hook, keys it to the current session and sender for ten minutes, and uploads only PDF files from that capture.
+- PDFs are limited to 20 MB and sent as 3 MB chunks. Each chunk and final file have SHA-256 integrity checks. This stays below Vercel's per-request body limit while keeping object-storage migration possible later.
+- Binary storage is PostgreSQL `BYTEA` through Prisma/Postgres in Phase 1. Production migration and retention-policy changes still require explicit approval.
+
 ## Data model
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.

@@ -16,14 +16,24 @@ export class OpenClawAssistantAuthError extends Error {
   }
 }
 
+/**
+ * Resolves the trusted Teams sender to a normal Newl Apps membership. The
+ * assistant token authenticates OpenClaw itself; the Entra headers identify
+ * the employee. Module and mutation authorization still belongs to each route.
+ */
 export async function authenticateOpenClawAssistantRequest(
   request: Request
 ): Promise<AuthenticatedContext> {
-  const expectedToken =
-    process.env.OPENCLAW_ASSISTANT_TOKEN?.trim() ||
-    process.env.OPENCLAW_TEAMSHIP_READ_TOKEN?.trim();
+  const expectedToken = process.env.OPENCLAW_ASSISTANT_TOKEN?.trim();
   if (!expectedToken) {
     throw new OpenClawAssistantAuthError("OpenClaw assistant authentication is not configured.", 503);
+  }
+  const readToken = process.env.OPENCLAW_TEAMSHIP_READ_TOKEN?.trim();
+  if (readToken && safeTokenEquals(readToken, expectedToken)) {
+    throw new OpenClawAssistantAuthError(
+      "OpenClaw assistant authentication must use a credential distinct from the Teamship read token.",
+      503
+    );
   }
 
   const providedToken = getBearerToken(request);

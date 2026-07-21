@@ -75,6 +75,12 @@ const navEntries: NavNode[] = [
             href: "/shipment-documents/teamship-review",
             label: "Teamship Review",
             moduleKey: "SHIPMENT_DOCUMENTS" as ModuleKey
+          },
+          {
+            id: "garland-nemo-feedback",
+            href: "/shipment-documents/nemo-feedback",
+            label: "Nemo Feedback",
+            moduleKey: "SHIPMENT_DOCUMENTS" as ModuleKey
           }
         ]
       },

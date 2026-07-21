@@ -7,6 +7,10 @@ describe("middleware machine route exemptions", () => {
     expect(config.matcher[0]).toContain("api/assistant/teamship/read");
   });
 
+  it("lets the OpenClaw Garland endpoints enforce token and Teams identity auth", () => {
+    expect(config.matcher[0]).toContain("api/assistant/garland");
+  });
+
   it("lets the Mac Mini browser worker endpoints enforce their dedicated token auth", () => {
     expect(config.matcher[0]).toContain("api/assistant/teamship/browser-jobs");
   });
