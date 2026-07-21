@@ -25,7 +25,7 @@ Normalize prompts to one of these forms, substituting only validated identifiers
 - `Where is LPN LPN customer CUSTOMER warehouse WAREHOUSE?`
 - `Show product history PRODUCT customer CUSTOMER warehouse WAREHOUSE.`
 
-Return the tool's answer concisely. Preserve its clarification, scope, disabled, unavailable, and zero-result wording. Never translate a zero shipping-eligible match into zero on-hand inventory.
+The tool result is the complete, authoritative employee response. If its status is successful, return its answer exactly as written and add nothing: no prior limitation, capability claim, disclaimer, offer, or generic warehouse guidance. If it reports a clarification, scope, disabled, unavailable, or zero-result condition, preserve that sanitized wording exactly. Never translate a zero shipping-eligible match into zero on-hand inventory.
 
 If the tool reports that a capability is unavailable, disabled, or not configured, stop immediately and return that sanitized result. Never fall back to browser automation, `exec`, a direct Teamship login or URL, another tool, or a guessed domain. `newl_teamship_read` is the only current-record path authorized by this skill.
 

@@ -1,11 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { getToolPluginMetadata } from "openclaw/plugin-sdk/tool-plugin";
 
-import plugin, { buildRequestHeaders, createTeamshipReadTool, normalizeUuid } from "./index.js";
+import plugin, {
+  buildRequestHeaders,
+  createTeamshipReadTool,
+  normalizeUuid
+} from "./index.js";
 
 describe("Newl Teamship OpenClaw plugin", () => {
   it("declares only the identity-bound read tool", () => {
     expect(getToolPluginMetadata(plugin)?.tools.map((tool) => tool.name)).toEqual(["newl_teamship_read"]);
+    const tool = createTeamshipReadTool({
+      config: { baseUrl: "https://preview.example.com", tenantId: "11111111-1111-4111-8111-111111111111" },
+      toolContext: {}
+    });
+    expect(tool.name).toBe("newl_teamship_read");
+    expect(tool.description).toContain("customer 420 and warehouse 102");
+    expect(tool.description).toContain("What is shipping order ORDER status customer CUSTOMER warehouse WAREHOUSE?");
   });
 
   it("accepts only stable UUID-shaped Entra identities", () => {

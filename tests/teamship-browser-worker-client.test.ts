@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { buildTeamshipBrowserWorkerHeaders } from "@/modules/teamship/browser-worker-client";
+import {
+  buildTeamshipBrowserWorkerHeaders,
+  isTransientTeamshipBrowserWorkerClaimStatus
+} from "@/modules/teamship/browser-worker-client";
 
 describe("Teamship browser worker client", () => {
   it("sends the worker identity without a Preview bypass by default", () => {
@@ -23,5 +26,10 @@ describe("Teamship browser worker client", () => {
     })).toMatchObject({
       "x-vercel-protection-bypass": "preview-bypass"
     });
+  });
+
+  it("retries transient Preview claim failures without treating authorization errors as transient", () => {
+    expect([502, 503, 504].every(isTransientTeamshipBrowserWorkerClaimStatus)).toBe(true);
+    expect([400, 401, 403, 404, 500].some(isTransientTeamshipBrowserWorkerClaimStatus)).toBe(false);
   });
 });

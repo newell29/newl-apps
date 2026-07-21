@@ -1,5 +1,8 @@
 import { createTeamshipPlaywrightReadAdapter } from "@/modules/teamship/browser-read-execution";
-import { buildTeamshipBrowserWorkerHeaders } from "@/modules/teamship/browser-worker-client";
+import {
+  buildTeamshipBrowserWorkerHeaders,
+  isTransientTeamshipBrowserWorkerClaimStatus
+} from "@/modules/teamship/browser-worker-client";
 import type {
   ClaimedTeamshipBrowserJob,
   TeamshipBrowserJobResult
@@ -31,7 +34,17 @@ async function main() {
 
   console.log(`Teamship browser read worker ${options.workerId} started (${options.once ? "once" : "polling"}).`);
   do {
-    const job = await claimJob(options);
+    let job: ClaimedTeamshipBrowserJob | null;
+    try {
+      job = await claimJob(options);
+    } catch (error) {
+      if (!options.once && error instanceof TransientClaimError) {
+        console.warn(`${error.message} Retrying.`);
+        await sleep(options.pollIntervalMs);
+        continue;
+      }
+      throw error;
+    }
     if (!job) {
       if (options.once) {
         console.log("No Teamship browser read job is waiting.");
@@ -98,10 +111,15 @@ async function executeJob(
 
 async function claimJob(options: WorkerOptions) {
   const response = await workerFetch(options, "/api/assistant/teamship/browser-jobs/claim", { method: "POST" });
+  if (isTransientTeamshipBrowserWorkerClaimStatus(response.status)) {
+    throw new TransientClaimError(`Unable to claim Teamship browser job. Preview returned HTTP ${response.status}.`);
+  }
   const body = await readJson<ClaimResponse>(response, "claim Teamship browser job");
   if (!response.ok) throw new Error(body.error ?? `Unable to claim Teamship browser job. HTTP ${response.status}.`);
   return body.data?.job ?? null;
 }
+
+class TransientClaimError extends Error {}
 
 async function completeJob(options: WorkerOptions, jobId: string, result: TeamshipBrowserJobResult) {
   const response = await workerFetch(options, `/api/assistant/teamship/browser-jobs/${encodeURIComponent(jobId)}/complete`, {

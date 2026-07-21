@@ -16,6 +16,16 @@ type TeamshipToolContext = {
   requesterSenderId?: string;
 };
 
+const teamshipToolDescription = "Always call this tool for a current Teamship order, inventory, SKU, LPN, receiving order, warehouse, or product history question. For every Garland request with no user-supplied warehouse, include customer 420 and warehouse 102; never omit warehouse 102 or put 420 in the warehouse field. For on-hand inventory use exactly: How much SKU SKU is on hand customer CUSTOMER warehouse WAREHOUSE? For shipping order status use exactly: What is shipping order ORDER status customer CUSTOMER warehouse WAREHOUSE? Do not inspect authentication or configuration files first; the tool validates the authenticated Microsoft Teams sender, which cannot be supplied as a parameter. The plugin returns the sanitized tool answer as the authoritative result.";
+
+const teamshipToolParameters = Type.Object({
+  prompt: Type.String({
+    minLength: 1,
+    maxLength: 4000,
+    description: "A normalized, exact, read-only Teamship current-record question. On-hand inventory must use: How much SKU SKU is on hand customer CUSTOMER warehouse WAREHOUSE? Shipping order status must use: What is shipping order ORDER status customer CUSTOMER warehouse WAREHOUSE? Every Garland request without a user-supplied warehouse must include customer 420 warehouse 102."
+  })
+});
+
 const configSchema = Type.Object({
   baseUrl: Type.String({ description: "Newl Apps base URL." }),
   tenantId: Type.String({
@@ -38,14 +48,8 @@ export default defineToolPlugin({
     tool({
       name: "newl_teamship_read",
       label: "Newl Teamship Read",
-      description: "Always call this tool for a current Teamship order, inventory, SKU, LPN, receiving order, warehouse, or product history question. Do not inspect authentication or configuration files first; the tool validates the authenticated Microsoft Teams sender, which cannot be supplied as a parameter.",
-      parameters: Type.Object({
-        prompt: Type.String({
-          minLength: 1,
-          maxLength: 4000,
-          description: "A normalized, exact, read-only Teamship current-record question."
-        })
-      }),
+      description: teamshipToolDescription,
+      parameters: teamshipToolParameters,
       factory: createTeamshipReadTool
     })
   ]
@@ -61,10 +65,8 @@ export function createTeamshipReadTool({
   return {
     name: "newl_teamship_read",
     label: "Newl Teamship Read",
-    description: "Always call this tool for a current Teamship record question. Do not pre-judge authentication or inspect configuration files; this tool validates the trusted Microsoft Teams sender and returns the authoritative result.",
-    parameters: Type.Object({
-      prompt: Type.String({ minLength: 1, maxLength: 4000 })
-    }),
+    description: teamshipToolDescription,
+    parameters: teamshipToolParameters,
     async execute(_toolCallId: string, params: unknown, signal?: AbortSignal) {
       const senderId = normalizeUuid(toolContext.requesterSenderId);
       const tenantId = normalizeUuid(config.tenantId);

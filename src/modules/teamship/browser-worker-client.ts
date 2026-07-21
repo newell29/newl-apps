@@ -19,3 +19,7 @@ export function buildTeamshipBrowserWorkerHeaders(
 
   return headers;
 }
+
+export function isTransientTeamshipBrowserWorkerClaimStatus(status: number) {
+  return status === 502 || status === 503 || status === 504;
+}
