@@ -9,7 +9,8 @@ const skill = readFileSync(
 
 describe("OpenClaw Teamship skill routing", () => {
   it("preserves Ship by LPN SKU detail and serial-number intent", () => {
-    expect(skill).toContain("Which LPNs and locations contain SKU SKU");
+    expect(skill).toContain("Where is SKU SKU for CUSTOMER");
+    expect(skill).toContain("Return LPN, location, serial, quantity, quarantine, and total row count");
     expect(skill).toContain("Where is serial number SERIAL");
     expect(skill).toContain("Preserve whether a SKU question asks for Inventory All totals or Ship by LPN handling-unit detail");
   });

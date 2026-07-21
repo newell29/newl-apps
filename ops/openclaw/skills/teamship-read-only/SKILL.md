@@ -22,7 +22,7 @@ Normalize prompts to one of these forms, substituting only validated record iden
 - `What is receiving order ORDER status for CUSTOMER [warehouse WAREHOUSE]?`
 - `How much SKU SKU is on hand for CUSTOMER [warehouse WAREHOUSE]?`
 - `Is SKU SKU eligible to ship for CUSTOMER [warehouse WAREHOUSE]?`
-- `Which LPNs and locations contain SKU SKU for CUSTOMER [warehouse WAREHOUSE]?`
+- `Where is SKU SKU for CUSTOMER [warehouse WAREHOUSE]? Return LPN, location, serial, quantity, quarantine, and total row count.`
 - `Where is LPN LPN for CUSTOMER [warehouse WAREHOUSE]?`
 - `Where is serial number SERIAL for CUSTOMER [warehouse WAREHOUSE]?`
 - `Show product history PRODUCT for CUSTOMER [warehouse WAREHOUSE].`
