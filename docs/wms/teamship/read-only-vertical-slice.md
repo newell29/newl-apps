@@ -49,6 +49,11 @@ The published Teamship API documentation and OpenAPI-rendered reference were ins
 
 `searchTeamshipInventoryAll`, `searchTeamshipLpn`, `getTeamshipReceivingOrder`, and `getTeamshipProductHistory` now support a guarded `TeamshipBrowserReadAdapter`. Their Playwright implementation restricts navigation to allowlisted HTTPS Teamship hosts, asserts the expected route and heading, permits only Inventory `All`, `Ship by LPN`, and `Search` controls, minimizes visible tables, and rejects unverified scope evidence. No browser adapter is wired into the assistant runtime, so these operations remain unavailable by default.
 
+The Mac-hosted browser worker may set `VERCEL_AUTOMATION_BYPASS_SECRET` when its
+Newl Apps base URL is a protected Vercel Preview. The worker sends that value only
+as `x-vercel-protection-bypass`; it is optional and is never logged. Operators
+must leave it unset for an unprotected or production base URL.
+
 All three operations write a tenant- and user-scoped `AuditLog`. Successful data is withheld if the audit write fails. Outputs never include credentials, unrestricted raw API data, customer email, addresses, shipping instructions, billing, administrative fields, or write controls.
 
 Normalized error codes are `INVALID_INPUT`, `ACCESS_DENIED`, `TOOL_DISABLED`, `SCOPE_NOT_CONFIGURED`, `SCOPE_UNVERIFIED`, `CAPABILITY_UNAVAILABLE`, `CREDENTIALS_NOT_CONFIGURED`, `TEAMSHIP_UNAVAILABLE`, and `AUDIT_FAILED`.

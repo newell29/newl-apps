@@ -1,4 +1,5 @@
 import { createTeamshipPlaywrightReadAdapter } from "@/modules/teamship/browser-read-execution";
+import { buildTeamshipBrowserWorkerHeaders } from "@/modules/teamship/browser-worker-client";
 import type {
   ClaimedTeamshipBrowserJob,
   TeamshipBrowserJobResult
@@ -15,6 +16,7 @@ type WorkerOptions = {
   workerId: string;
   once: boolean;
   pollIntervalMs: number;
+  vercelProtectionBypass: string | null;
 };
 
 async function main() {
@@ -123,12 +125,7 @@ function workerFetch(options: WorkerOptions, path: string, init: RequestInit) {
   return fetch(new URL(path, options.baseUrl), {
     ...init,
     redirect: "manual",
-    headers: {
-      authorization: `Bearer ${options.token}`,
-      "content-type": "application/json",
-      "x-teamship-browser-worker-id": options.workerId,
-      ...init.headers
-    }
+    headers: buildTeamshipBrowserWorkerHeaders(options)
   });
 }
 
@@ -152,7 +149,8 @@ function readOptions(): WorkerOptions {
     token,
     workerId: process.env.TEAMSHIP_BROWSER_WORKER_ID?.trim() || "mac-mini-teamship-browser",
     once: process.argv.includes("--once"),
-    pollIntervalMs: readPositiveInteger(process.env.TEAMSHIP_BROWSER_WORKER_POLL_MS, 2_000)
+    pollIntervalMs: readPositiveInteger(process.env.TEAMSHIP_BROWSER_WORKER_POLL_MS, 2_000),
+    vercelProtectionBypass: process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim() || null
   };
 }
 
