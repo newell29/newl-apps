@@ -24,3 +24,5 @@ For a scheduled personal Teams digest, target the existing direct conversation a
 For a Vercel-protected Preview, set `vercelProtectionBypassEnv` to the name of an environment variable containing a dedicated Vercel Protection Bypass for Automation secret. The plugin adds that secret only as the `x-vercel-protection-bypass` request header. Leave this option unset for production or any unprotected host.
 
 After installing the plugin and `teamship-read-only` skill, append the repository's `ops/openclaw/AGENTS.teamship.md` fragment to the live OpenClaw workspace `AGENTS.md`. This makes Nemo load the skill for every Teamship question, call the read tool in the same turn for current records, and read the exact curated file for procedure questions.
+
+Follow `docs/ai/nemo-garland-production-rollout.md` for the reviewed production migration, deployment, plugin reload, supervised Teams PDF test, digest activation, and rollback order. The runbook does not itself authorize any live action.

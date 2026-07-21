@@ -13,7 +13,7 @@ Newl Apps redacts common secret shapes before storage. External Teams message, c
 
 ## Configuration
 
-The plugin entry requires `baseUrl`, the Teams `tenantId`, and a `developerObjectId` for a Newl Apps administrator. `assistantTokenEnv` defaults to `OPENCLAW_ASSISTANT_TOKEN`; the Newl Apps endpoint also accepts the existing `OPENCLAW_TEAMSHIP_READ_TOKEN` during rollout.
+The plugin entry requires `baseUrl`, the Teams `tenantId`, and a `developerObjectId` for a Newl Apps administrator. `assistantTokenEnv` defaults to `OPENCLAW_ASSISTANT_TOKEN`. Newl Apps requires this assistant credential to be present and rejects configurations where its value matches `OPENCLAW_TEAMSHIP_READ_TOKEN`; there is no read-token fallback.
 
 The optional `newl_unresolved_turns` tool loads only for `developerAgentId` (default `developer`) and must be enabled only for that developer agent. Do not add it to Nemo's employee-facing tool allowlist. The configured developer object ID is checked again by Newl Apps against the tenant membership and Admin role.
 

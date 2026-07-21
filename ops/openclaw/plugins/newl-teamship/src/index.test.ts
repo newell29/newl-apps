@@ -1,3 +1,7 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getToolPluginMetadata } from "openclaw/plugin-sdk/tool-plugin";
 
@@ -5,15 +9,23 @@ import plugin, {
   buildRequestHeaders,
   createDevelopmentSuggestionDigestTool,
   createGarlandExplainTool,
+  createGarlandPdfReviewTool,
   createTeamshipReadTool,
-  normalizeUuid
+  normalizeUuid,
+  registerTrustedTeamsMediaCapture
 } from "./index.js";
 
 describe("Newl Teamship OpenClaw plugin", () => {
-  afterEach(() => {
+  const temporaryDirectories: string[] = [];
+
+  afterEach(async () => {
     vi.unstubAllGlobals();
     delete process.env.OPENCLAW_ASSISTANT_TOKEN;
     delete process.env.OPENCLAW_TEAMSHIP_READ_TOKEN;
+    await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, {
+      recursive: true,
+      force: true
+    })));
   });
   it("declares identity-bound Teamship, Garland, feedback, and approval-queue tools", () => {
     expect(getToolPluginMetadata(plugin)?.tools.map((tool) => tool.name)).toEqual([
@@ -132,4 +144,89 @@ describe("Newl Teamship OpenClaw plugin", () => {
       .resolves.toMatchObject({ details: { status: "not_configured" } });
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("uploads only the PDF captured from the same trusted Teams session and consumes the capture", async () => {
+    process.env.OPENCLAW_ASSISTANT_TOKEN = "assistant-token";
+    process.env.OPENCLAW_TEAMSHIP_READ_TOKEN = "read-token";
+    const directory = await mkdtemp(join(tmpdir(), "newl-garland-plugin-"));
+    temporaryDirectories.push(directory);
+    const pdfPath = join(directory, "Garland order.pdf");
+    await writeFile(pdfPath, Buffer.from("%PDF-1.4\n%%EOF\n"));
+
+    let messageHandler: ((event: Record<string, unknown>, context: Record<string, unknown>) => void) | undefined;
+    registerTrustedTeamsMediaCapture({
+      on: vi.fn((eventName: string, handler: typeof messageHandler) => {
+        if (eventName === "message_received") messageHandler = handler;
+      })
+    } as never);
+    expect(messageHandler).toBeTypeOf("function");
+    messageHandler?.(
+      {
+        messageId: "teams-message-1",
+        metadata: { mediaPath: pdfPath }
+      },
+      {
+        channelId: "msteams",
+        senderId: "22222222-2222-4222-8222-222222222222",
+        sessionKey: "teams-session-1",
+        conversationId: "teams-conversation-1"
+      }
+    );
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        data: { id: "artifact-1", status: "UPLOADING" }
+      }, 201))
+      .mockResolvedValueOnce(jsonResponse({
+        data: { artifactId: "artifact-1", chunkIndex: 0 }
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        data: {
+          artifactId: "artifact-1",
+          reviewRunId: "review-1",
+          fileName: "Garland order.pdf",
+          extraction: { orderCount: 1 },
+          review: {
+            passedCount: 1,
+            failedCount: 0,
+            missingTeamshipCount: 0,
+            pendingTeamshipCount: 0
+          }
+        }
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const tool = createGarlandPdfReviewTool({
+      config: {
+        baseUrl: "https://newl.example.com",
+        tenantId: "11111111-1111-4111-8111-111111111111"
+      },
+      toolContext: {
+        messageChannel: "msteams",
+        requesterSenderId: "22222222-2222-4222-8222-222222222222",
+        sessionKey: "teams-session-1"
+      }
+    });
+
+    await expect(tool.execute("call-6", {})).resolves.toMatchObject({
+      details: { status: "ok" },
+      content: [{ text: expect.stringContaining("1 passed") }]
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/assistant/garland/artifacts");
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain("/chunks/0");
+    expect(String(fetchMock.mock.calls[2]?.[0])).toContain("/finalize");
+    await expect(tool.execute("call-7", {})).resolves.toMatchObject({
+      details: { status: "failed" },
+      content: [{ text: expect.stringContaining("attach it again") }]
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
 });
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" }
+  });
+}

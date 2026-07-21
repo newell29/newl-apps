@@ -25,6 +25,8 @@ For scheduled delivery, the plugin may use the configured administrator's Entra 
 
 Garland write-capable assistant tools require `OPENCLAW_ASSISTANT_TOKEN`. They must never fall back to, share, or be configured with the existing `OPENCLAW_TEAMSHIP_READ_TOKEN`. Direct Teams delivery must use an existing personal conversation target such as `user:<aad-object-id>`; a bare UUID can be misinterpreted as a team or group lookup.
 
+The reviewed production sequence, approval gates, supervised Teams PDF test, digest activation, and rollback steps are defined in [nemo-garland-production-rollout.md](nemo-garland-production-rollout.md).
+
 ## Tests and gaps
 
 Tests named `tests/assistant-*.test.ts`, `tests/openai-integration.test.ts`, and `tests/assistant-provider.test.ts` cover deterministic runtime, provider parsing, automations, knowledge, Microsoft sync, and module workflows. Missing coverage requiring confirmation includes employee-facing factuality evaluations, cost budgets, latency SLOs, and approved tool allowlists per tenant.
