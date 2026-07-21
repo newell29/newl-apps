@@ -11,6 +11,9 @@ const configSchema = Type.Object({
   }),
   readTokenEnv: Type.Optional(Type.String({
     description: "Environment variable containing the Newl Apps Teamship read token."
+  })),
+  vercelProtectionBypassEnv: Type.Optional(Type.String({
+    description: "Optional environment variable containing a Vercel Preview automation bypass secret."
   }))
 });
 
@@ -52,16 +55,17 @@ export default defineToolPlugin({
               return textResult("Newl Apps Teamship read authentication is not configured on this OpenClaw runtime.", "not_configured");
             }
 
+            const bypassEnv = config.vercelProtectionBypassEnv?.trim();
+            const bypassToken = bypassEnv ? process.env[bypassEnv]?.trim() : undefined;
+            if (bypassEnv && !bypassToken) {
+              return textResult("Newl Apps Preview protection authentication is not configured on this OpenClaw runtime.", "not_configured");
+            }
+
             const response = await fetch(new URL("/api/assistant/teamship/read", normalizeBaseUrl(config.baseUrl)), {
               method: "POST",
               redirect: "manual",
               signal,
-              headers: {
-                authorization: `Bearer ${token}`,
-                "content-type": "application/json",
-                "x-newl-teams-tenant-id": tenantId,
-                "x-newl-teams-aad-object-id": senderId
-              },
+              headers: buildRequestHeaders({ token, tenantId, senderId, bypassToken }),
               body: JSON.stringify({ prompt })
             });
             const body = await readResponseBody(response);
@@ -87,6 +91,26 @@ export function normalizeUuid(value: unknown) {
   if (typeof value !== "string") return null;
   const normalized = value.trim().toLowerCase();
   return UUID_PATTERN.test(normalized) ? normalized : null;
+}
+
+export function buildRequestHeaders({
+  token,
+  tenantId,
+  senderId,
+  bypassToken
+}: {
+  token: string;
+  tenantId: string;
+  senderId: string;
+  bypassToken?: string;
+}) {
+  return {
+    authorization: `Bearer ${token}`,
+    "content-type": "application/json",
+    "x-newl-teams-tenant-id": tenantId,
+    "x-newl-teams-aad-object-id": senderId,
+    ...(bypassToken ? { "x-vercel-protection-bypass": bypassToken } : {})
+  };
 }
 
 function normalizeBaseUrl(value: string) {

@@ -21,6 +21,10 @@
       "readTokenEnv": {
         "type": "string",
         "description": "Environment variable containing the Newl Apps Teamship read token."
+      },
+      "vercelProtectionBypassEnv": {
+        "type": "string",
+        "description": "Optional environment variable containing a Vercel Preview automation bypass secret."
       }
     }
   },

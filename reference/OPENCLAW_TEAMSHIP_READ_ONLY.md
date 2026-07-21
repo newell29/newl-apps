@@ -57,6 +57,8 @@ This wrapper is only for a supervised administrator diagnostic on the local mach
 
 Build, validate, and install the repository-owned plugin from `ops/openclaw/plugins/newl-teamship`, then install the repository-owned skill from `ops/openclaw/skills/teamship-read-only` into the OpenClaw workspace skill directory. Configure the plugin with the Newl Apps base URL, the Microsoft Entra tenant ID used by Teams, and the environment-variable name containing `OPENCLAW_TEAMSHIP_READ_TOKEN`. The skill requires every Teams current-record lookup to use `newl_teamship_read` and forbids direct Teamship browser or guessed-URL fallback when the tool reports that a capability is unavailable.
 
+When validating against a Vercel-protected Preview, configure `vercelProtectionBypassEnv` with the name of an environment variable containing a dedicated Vercel Protection Bypass for Automation secret. Never put the secret itself in OpenClaw JSON, plugin source, prompt text, or logs. Remove the Preview-only option when switching the plugin to an unprotected production host.
+
 For Microsoft Teams, disable both streaming layers so a reasoning-capable local model cannot expose partial reasoning before OpenClaw sanitizes its final answer:
 
 ```bash
