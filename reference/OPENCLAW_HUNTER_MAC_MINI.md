@@ -1,0 +1,138 @@
+# Hunter TradeMining Collector on the Mac Mini
+
+Draft operator guide for moving the existing TradeMining CSV collector from the VM to Alex's Mac Mini as the first dedicated sales agent, **Hunter**.
+
+## Current status
+
+- Newl Apps already owns tenant-scoped search profiles, ingestion, candidate review, Pipeline, contacts, cadence selection, job logs, and audit state.
+- TradeMining remains the external source and its browser session is human-authenticated.
+- The legacy collector source was copied from the VM without credentials, exports, logs, or OpenClaw runtime state and reviewed on July 21, 2026.
+- The local Newl Apps database can be migrated and seeded for synthetic end-to-end testing.
+- A Mac-compatible Hunter exporter, summary builder, Newl Apps ingestion adapter, run-request worker, `launchd` template, and installer now live under `ops/openclaw/` on the Hunter feature branch.
+
+## Ownership boundary
+
+Hunter is a replaceable collector, not the sales system of record.
+
+1. Hunter reads enabled search profiles from Newl Apps through the ingestion API.
+2. Hunter applies one profile to TradeMining, downloads the resulting CSV, normalizes rows, and posts a tenant-bound batch.
+3. Newl Apps validates the ingestion token and tenant slug, stores the raw record and normalized company evidence, and records a job run.
+4. Employees review Found Companies and approve accounts into Pipeline.
+5. Newl Apps owns Apollo contact selection, cadence mapping, approval, push, verification, and audit history.
+
+Hunter must not store Apollo credentials or enroll contacts directly.
+
+## Safe VM source transfer
+
+Run this from the Mac Mini, not from inside the VM shell:
+
+```bash
+mkdir -p /private/tmp/hunter-vm-source
+rsync -av \
+  --exclude='.env*' \
+  --exclude='.secrets/' \
+  --exclude='data/' \
+  --exclude='logs/' \
+  --exclude='openclaw.json' \
+  openclaw@100.120.250.105:/home/openclaw/.openclaw/workspace/n8n-workflows/newl-trade-mining-apollo/ \
+  /private/tmp/hunter-vm-source/
+```
+
+The reviewed VM source contained `trademining_phase0_runner.py`, `trademining_build_summary.py`, `sheet_control_worker.py`, Google Sheets upload helpers, Apollo helpers, and the VM Operations Control Center reporter.
+
+Only the TradeMining exporter and canonical summary logic were carried forward. Hunter does **not** include the legacy Google Sheets control plane, hard-coded spreadsheet ID, hard-coded Apollo cadence IDs, default rep, Apollo credentials, or VM Operations Control Center paths. Newl Apps replaces those responsibilities.
+
+## Mac Mini runtime design
+
+Follow the existing Teamship worker pattern:
+
+- separate OpenClaw identity named `hunter`;
+- dedicated workspace and logs, separate from Nemo;
+- outbound-only HTTPS to Newl Apps;
+- a dedicated ingestion token bound to the Newl Group tenant slug;
+- a `launchd` service with `RunAtLoad`, `KeepAlive`, throttling, and persistent sanitized logs;
+- TradeMining browser/session material stored outside the repository and never copied into OpenClaw memory;
+- CSV exports written to a Hunter runtime directory, deleted or archived according to an owner-approved retention policy;
+- no Apollo key and no direct customer communication capability.
+
+Recommended environment names:
+
+```dotenv
+NEWL_APPS_BASE_URL=https://the-reviewed-preview.vercel.app
+INGESTION_API_TOKEN=<dedicated Hunter token>
+INGESTION_TENANT_SLUG=newl-group
+HUNTER_WORKER_ID=alex-mac-mini-hunter
+HUNTER_COLLECTOR_PATH=/path/to/reviewed/collector
+HUNTER_EXPORT_DIRECTORY=/path/to/runtime/exports
+HUNTER_POLL_MS=60000
+```
+
+Do not reuse the Teamship worker token, Nemo's OpenClaw identity, or a production database credential.
+
+The checked-in template is `ops/openclaw/hunter/.env.example`. Store the real file at `~/.openclaw/agents/hunter/.env` with mode `600`; never commit it. `HUNTER_TRADEMINING_PORTS_JSON` contains TradeMining lookup IDs, not passwords, and should map the exact destination-port names returned by Newl Apps to their TradeMining IDs.
+
+## Checked-in runtime
+
+- `ops/openclaw/hunter/trademining_export.py`: login, form search, official XLSX export, CSV conversion, and sanitized manifest.
+- `ops/openclaw/hunter/trademining_summary.py`: canonical record conversion and deduplication.
+- `ops/openclaw/hunter/hunter_ingest.py`: tenant-bound job creation, batched ingestion, completion/failure reporting.
+- `ops/openclaw/hunter/hunter_worker.py`: active profile lookup, manual run-request polling, per-profile port planning, collection, and ingestion coordination.
+- `ops/openclaw/run-hunter-worker.sh`: allowlisted environment loader.
+- `ops/openclaw/install-hunter-worker.sh`: LaunchAgent renderer and installer.
+- `ops/openclaw/launchd/com.newl.hunter-worker.plist.template`: persistent Mac Mini service.
+
+Manual profile planning does not log in or export:
+
+```bash
+python3 ops/openclaw/hunter/hunter_worker.py \
+  --plan \
+  --profile-name "Charlotte Warehouse Leads"
+```
+
+Install only after the reviewed Preview URL, dedicated ingestion token, TradeMining credentials, runtime directories, and port map are in Hunter's local environment file:
+
+```bash
+ops/openclaw/install-hunter-worker.sh \
+  --base-url https://the-reviewed-preview.vercel.app
+```
+
+Verify it:
+
+```bash
+launchctl print gui/$(id -u)/com.newl.hunter-worker
+tail -n 20 ~/Library/Logs/newl-apps/hunter-worker.out.log
+tail -n 20 ~/Library/Logs/newl-apps/hunter-worker.err.log
+```
+
+## Cutover checklist
+
+1. Copy and review the VM collector source using the safe transfer above.
+2. Inventory Python/Node/browser dependencies and pin their versions.
+3. Replace embedded URLs, tenant identifiers, and filesystem paths with allowlisted environment variables.
+4. Point Hunter at a reviewed Vercel Preview and a dedicated preview ingestion token.
+5. Run one profile with a narrow date range and retain the job ID, record counts, and sanitized log output.
+6. Confirm the candidate in Found Companies, approve it into Pipeline, and advance one stage.
+7. Stop the VM scheduler but keep its files intact for rollback.
+8. Start the Mac `launchd` service and observe at least one scheduled run.
+9. Promote the service to the production Newl Apps URL only after human review.
+
+Do not run the VM and Mac schedulers concurrently against the same profile during cutover; ingestion keys are designed to deduplicate records, but duplicate exports and job noise would make verification ambiguous.
+
+## Validation performed on July 21, 2026
+
+- A live TradeMining keyword search returned current shipment results and exposed the expected Excel export action.
+- A synthetic local batch completed through the real ingestion routes, appeared in Found Companies, moved New → Reviewing → Approved, entered Pipeline, and advanced to Researching.
+- A human-approved contact push through Newl Apps was accepted by Apollo and independently verified as active in the selected cadence.
+- The same run exposed a Newl Apps sequence-status parsing defect for Apollo's `contact_campaign_statuses` response; a regression fix is prepared on the Hunter feature branch.
+- Hunter's new ingestion adapter posted a synthetic canonical CSV through the local tenant-bound routes: one record processed and created with no skips.
+- Hunter's profile planner resolves all three Charlotte destination ports and both Houston-profile ports. TradeMining identifies the Houston seaport as `1382` and Freeport, Texas as `1385`; the local profile label `Houston, Texas` is an explicit alias for the seaport ID.
+- A controlled one-day Charlotte run exported 1,163 shipment rows from the three configured ports. Hunter quarantined 66 rows that lacked every company identity field, submitted 1,097 valid rows to the local database, created 1,034 records, and counted 63 API-level duplicates/skips. The local job completed successfully.
+- The first live batch exposed a mismatch between the legacy summary output and Newl Apps validation: shipment-only rows without an importer, consignee, notify party, or shipper cannot become company candidates. Hunter now rejects and counts those rows before upload instead of failing the whole batch.
+- A controlled one-day Houston run exported 716 rows from Houston and zero from Freeport for the selected date. Hunter quarantined 68 identity-free rows, submitted 648 valid rows to the local database, created 627 records, and counted 21 API-level duplicates/skips. The local job completed successfully.
+
+## Business questions requiring confirmation
+
+- How long should Hunter retain downloaded TradeMining CSV files?
+- Should scheduled runs be daily, weekly, or only profile-triggered during the first rollout?
+- Which profile is the first production cutover candidate?
+- Who receives failure alerts when TradeMining login expires or an export returns no records?

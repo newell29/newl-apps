@@ -51,3 +51,18 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Which status values map to employee-approved business language? Requires employee confirmation.
 - Which write actions should require two-person approval? Requires owner confirmation.
 - Which external integration credentials should be moved from env fallback to tenant-scoped settings first? Requires owner confirmation.
+
+## TradeMining-to-Apollo smoke path
+
+Use synthetic data for ingestion and pipeline-state testing:
+
+1. run `npm run smoke:trademining` against a local server and local ingestion token;
+2. confirm the configured profile is returned and the ingestion job reaches `SUCCESS`;
+3. move the synthetic company from New to Reviewing to Approved for Pipeline;
+4. advance the approved account through at least one Pipeline stage;
+5. for a live Apollo test, require a named-contact confirmation that includes contact, cadence, sender, active/paused status, and contact count;
+6. after the Newl Apps job completes, verify Apollo membership independently and then sync status back into Newl Apps.
+
+Do not use a contact with active or finished sequence history unless the owner explicitly approves re-enrollment. Do not treat a job-level `SUCCESS` as proof of enrollment; compare enrolled, skipped, and failed counts and verify the contact's campaign status.
+
+For Hunter collector validation, include a canonical export containing both a valid company row and a shipment-only row. Confirm the adapter uploads the valid row, counts the identity-free row under `recordsRejectedBeforeUpload`, and does not fail the complete batch.

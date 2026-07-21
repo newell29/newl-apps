@@ -40,6 +40,7 @@ type CompanyRow = {
   priorityScore: number;
   candidateStatus?: string;
   doNotProspect?: boolean;
+  domain?: string | null;
   primaryIndustry?: string | null;
   secondaryIndustry?: string | null;
   industryConfidence?: number | null;
@@ -160,20 +161,28 @@ const mockDb = vi.hoisted(() => {
       })
     },
     company: {
-      findUnique: vi.fn(async ({ where, select }: { where: { tenantId_normalizedName: { tenantId: string; normalizedName: string } }; select?: { id?: boolean; priorityScore?: boolean; candidateStatus?: boolean; doNotProspect?: boolean } }) => {
-        const company = state.companies.get(tenantScopedKey(where.tenantId_normalizedName.tenantId, where.tenantId_normalizedName.normalizedName));
+      findUnique: vi.fn(async ({ where, select }: { where: { id?: string; tenantId_normalizedName?: { tenantId: string; normalizedName: string } }; select?: Record<string, boolean> }) => {
+        const company = where.id
+          ? [...state.companies.values()].find((candidate) => candidate.id === where.id) ?? null
+          : where.tenantId_normalizedName
+            ? state.companies.get(
+                tenantScopedKey(
+                  where.tenantId_normalizedName.tenantId,
+                  where.tenantId_normalizedName.normalizedName
+                )
+              ) ?? null
+            : null;
 
         if (!company) {
           return null;
         }
 
         if (select) {
-          return {
-            ...(select.id ? { id: company.id } : {}),
-            ...(select.priorityScore ? { priorityScore: company.priorityScore } : {}),
-            ...(select.candidateStatus ? { candidateStatus: company.candidateStatus ?? null } : {}),
-            ...(select.doNotProspect ? { doNotProspect: company.doNotProspect ?? false } : {})
-          };
+          return Object.fromEntries(
+            Object.entries(select)
+              .filter(([, include]) => include)
+              .map(([key]) => [key, company[key as keyof CompanyRow] ?? null])
+          );
         }
 
         return company;

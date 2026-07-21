@@ -171,6 +171,60 @@ describe("fetchApolloContactsForCompany", () => {
     ]);
   });
 
+  it("parses current sequence history from Apollo contact campaign statuses", async () => {
+    vi.spyOn(global, "fetch")
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          organizations: [{ id: "apollo-org-1", name: "Dormeo North America", primary_domain: "dormeo-na.com" }]
+        })
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          contacts: [
+            {
+              id: "apollo-contact-1",
+              first_name: "Marco",
+              last_name: "Paez Romero",
+              title: "Operations (Inventory)",
+              email: "marco@dormeo-na.com",
+              contact_campaign_statuses: [
+                {
+                  id: "finished-membership",
+                  emailer_campaign_id: "finished-sequence",
+                  status: "finished",
+                  added_at: "2026-06-01T12:00:00.000Z"
+                },
+                {
+                  id: "active-membership",
+                  emailer_campaign_id: "tier-2-sequence",
+                  status: "active",
+                  added_at: "2026-07-21T19:21:51.192Z"
+                }
+              ]
+            }
+          ]
+        })
+      } as unknown as Response);
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "Dormeo North America",
+      domain: "dormeo-na.com"
+    });
+
+    expect(result.contacts).toEqual([
+      expect.objectContaining({
+        apolloContactId: "apollo-contact-1",
+        fullName: "Marco Paez Romero",
+        sequenceStatus: SequenceStatus.ENROLLED,
+        sequenceId: "tier-2-sequence"
+      })
+    ]);
+  });
+
   it("falls back to people search when contacts search returns empty", async () => {
     vi.spyOn(global, "fetch")
       .mockResolvedValueOnce({

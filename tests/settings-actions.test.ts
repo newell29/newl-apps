@@ -11,6 +11,7 @@ const revalidatePath = vi.fn();
 const getAuthenticatedContext = vi.fn();
 const requireAdmin = vi.fn();
 const fetchApolloRepDirectory = vi.fn();
+const fetchApolloEmailAccountDirectory = vi.fn();
 const fetchApolloSequenceDirectory = vi.fn();
 
 vi.mock("@/server/db", () => ({
@@ -46,6 +47,7 @@ vi.mock("@/server/auth/authorization", () => ({
 
 vi.mock("@/server/integrations/apollo", () => ({
   fetchApolloRepDirectory: (...args: unknown[]) => fetchApolloRepDirectory(...args),
+  fetchApolloEmailAccountDirectory: (...args: unknown[]) => fetchApolloEmailAccountDirectory(...args),
   fetchApolloSequenceDirectory: (...args: unknown[]) => fetchApolloSequenceDirectory(...args)
 }));
 
@@ -78,6 +80,7 @@ describe("saveTradeMiningScoringSettingsAction", () => {
     });
     updateTradeMiningSearchProfile.mockResolvedValue({});
     fetchApolloRepDirectory.mockResolvedValue([]);
+    fetchApolloEmailAccountDirectory.mockResolvedValue([]);
     fetchApolloSequenceDirectory.mockResolvedValue([]);
   });
 

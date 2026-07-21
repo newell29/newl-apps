@@ -1,0 +1,19 @@
+{
+  "run_date": "2026-07-21",
+  "start_date": "2026-07-21",
+  "end_date": "2026-07-21",
+  "chunk_days": 0,
+  "ports": [
+    {
+      "port_key": "houston-smoke",
+      "port_name": "Houston, Texas",
+      "port_id": "test-only",
+      "window_start_date": "2026-07-21",
+      "window_end_date": "2026-07-21",
+      "search_log_id": "test-only",
+      "xlsx": "",
+      "csv": "ops/openclaw/hunter/fixtures/raw-trademining-smoke.csv",
+      "data_rows": 1
+    }
+  ]
+}
