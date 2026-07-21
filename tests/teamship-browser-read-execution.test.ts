@@ -308,6 +308,8 @@ describe("Teamship browser read extraction", () => {
     expect(captureExpression).toEqual(expect.any(String));
     expect(captureExpression).toContain("document.querySelectorAll('table')");
     expect(captureExpression).toContain("document.querySelectorAll('[role=\"grid\"]')");
+    expect(captureExpression).toContain("groups.every((group) => group.includes(normalizedQuery))");
+    expect(captureExpression).toContain(".e-groupcaption,.lpn-heading-style,input.lpn-checkbox");
     expect(captureExpression).not.toContain("matchingRow.closest");
   });
 

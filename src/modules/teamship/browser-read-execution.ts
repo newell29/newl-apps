@@ -433,15 +433,28 @@ export async function waitForTeamshipInventorySearchResult(
       resolve(JSON.stringify(payload));
     };
     const capture = () => {
-      const visibleRows = Array.from(document.querySelectorAll('tbody tr,[role="row"]')).filter(isVisible);
-      const hasExactRow = visibleRows.some((row) => Array.from(
-        row.querySelectorAll('th,td,[role="gridcell"],[role="rowheader"]')
-      ).some((cell) => normalize(cell.textContent) === normalizedQuery));
-      if (!hasExactRow) return false;
       const surfaces = [
         ...Array.from(document.querySelectorAll('table')).filter(isVisible),
         ...Array.from(document.querySelectorAll('[role="grid"]')).filter((element) => element.tagName !== 'TABLE' && isVisible(element))
       ];
+      const hasFilteredSurface = surfaces.some((surface) => {
+        const isTable = surface.tagName === 'TABLE';
+        const candidateRows = (isTable
+          ? Array.from(surface.querySelectorAll('tbody tr'))
+          : Array.from(surface.querySelectorAll('[role="row"]')).filter((row) => !row.querySelector('[role="columnheader"]'))
+        ).filter(isVisible);
+        const hasGroupedRows = candidateRows.some((row) => row.querySelector('.e-groupcaption,.lpn-heading-style,input.lpn-checkbox'));
+        const groups = [];
+        for (const row of candidateRows) {
+          const text = normalize(row.textContent);
+          if (!text) continue;
+          const isGroupCaption = Boolean(row.querySelector('.e-groupcaption,.lpn-heading-style,input.lpn-checkbox'));
+          if (!hasGroupedRows || isGroupCaption || groups.length === 0) groups.push(text);
+          else groups[groups.length - 1] = groups[groups.length - 1] + ' ' + text;
+        }
+        return groups.length > 0 && groups.every((group) => group.includes(normalizedQuery));
+      });
+      if (!hasFilteredSurface) return false;
       const tables = surfaces.map((surface) => {
         const isTable = surface.tagName === 'TABLE';
         const headerCells = isTable

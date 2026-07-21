@@ -82,8 +82,14 @@ function buildUniqueAliases(references: Array<{ id: string; name: string }>) {
 function referenceAliases(name: string) {
   const normalized = normalizeWords(name);
   if (!normalized) return [];
+  const corporateSuffixPattern = /\s+(?:inc|incorporated|llc|ltd|limited|corp|corporation|co|company)$/;
+  const baseName = normalized.replace(corporateSuffixPattern, "").trim();
   const firstWord = normalized.split(" ")[0] ?? "";
-  return [...new Set([normalized, firstWord.length >= 4 ? firstWord : ""].filter(Boolean))];
+  return [...new Set([
+    normalized,
+    baseName.length >= 4 ? baseName : "",
+    firstWord.length >= 4 ? firstWord : ""
+  ].filter(Boolean))];
 }
 
 function uniqueCustomers(scopes: readonly TeamshipReadScope[]) {
