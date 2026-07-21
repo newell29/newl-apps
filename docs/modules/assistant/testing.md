@@ -38,6 +38,8 @@ Expected failures include missing tenant entitlement, read-only mutation attempt
 
 Relevant tests are under `tests/` and generally named after the module. Recommended checks: `npm test`, `npm run lint`, `npm run typecheck`, and targeted route/service tests. Live integration scripts must not be run without explicit approval and safe credentials.
 
+Sanitized Preview-only model comparisons are recorded in [model-benchmarks.md](model-benchmarks.md). Candidate models must use the fixed prompt suite, fake identifiers, identity-bound read-only tools, and the documented scoring criteria so results remain comparable.
+
 ## Source map
 
 | Responsibility | Main files | Supporting files | Tests |
