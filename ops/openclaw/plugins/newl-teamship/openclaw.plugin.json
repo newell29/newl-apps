@@ -2,7 +2,7 @@
   "id": "newl-teamship",
   "name": "Newl Teamship and Garland",
   "description": "Runs identity-bound Teamship reads and Garland review, explanation, feedback, and approval-queue workflows through Newl Apps.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "configSchema": {
     "type": "object",
     "required": [

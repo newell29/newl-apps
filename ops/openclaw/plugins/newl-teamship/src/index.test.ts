@@ -185,7 +185,14 @@ describe("Newl Teamship OpenClaw plugin", () => {
           artifactId: "artifact-1",
           reviewRunId: "review-1",
           fileName: "Garland order.pdf",
-          extraction: { orderCount: 1 },
+          extraction: {
+            targetReference: "PS210235",
+            selectedPsNumber: "PS210235",
+            selectedSrNumber: "SR810263",
+            totalOrderCount: 2,
+            orderCount: 1,
+            ignoredOrderCount: 1
+          },
           review: {
             passedCount: 1,
             failedCount: 0,
@@ -208,15 +215,20 @@ describe("Newl Teamship OpenClaw plugin", () => {
       }
     });
 
-    await expect(tool.execute("call-6", {})).resolves.toMatchObject({
+    await expect(tool.execute("call-missing-reference", {}))
+      .rejects.toThrow("targetReference must be between 1 and 10 characters");
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(tool.execute("call-6", { targetReference: "PS210235" })).resolves.toMatchObject({
       details: { status: "ok" },
-      content: [{ text: expect.stringContaining("1 passed") }]
+      content: [{ text: expect.stringMatching(/checked only PS210235 \/ SR810263.*1 other order.*was ignored/) }]
     });
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/assistant/garland/artifacts");
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain("/chunks/0");
     expect(String(fetchMock.mock.calls[2]?.[0])).toContain("/finalize");
-    await expect(tool.execute("call-7", {})).resolves.toMatchObject({
+    const createRequest = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(createRequest.body))).toMatchObject({ targetReference: "PS210235" });
+    await expect(tool.execute("call-7", { targetReference: "PS210235" })).resolves.toMatchObject({
       details: { status: "failed" },
       content: [{ text: expect.stringContaining("attach it again") }]
     });

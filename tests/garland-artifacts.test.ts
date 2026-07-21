@@ -12,6 +12,7 @@ import {
   createGarlandArtifact,
   resolveGarlandReviewShipmentDate,
   saveGarlandArtifactChunk,
+  selectGarlandPdfOrderForReference,
   WORKFLOW_ARTIFACT_CHUNK_BYTES
 } from "@/modules/assistant/garland-artifacts";
 import type { AuthenticatedContext } from "@/server/tenant-context";
@@ -46,6 +47,7 @@ describe("Garland workflow artifacts", () => {
       sizeBytes: WORKFLOW_ARTIFACT_CHUNK_BYTES + 1,
       chunkCount: 2,
       contentHash: "a".repeat(64),
+      targetReference: "PS210235",
       sourceChannel: "TEAMS",
       externalMessageId: "message-1"
     });
@@ -57,7 +59,8 @@ describe("Garland workflow artifacts", () => {
           submittedByUserId: "user-1",
           chunkCount: 2,
           contentHash: "a".repeat(64),
-          sourceChannel: "TEAMS"
+          sourceChannel: "TEAMS",
+          extractionSummary: { targetReference: "PS210235" }
         })
       })
     );
@@ -79,6 +82,7 @@ describe("Garland workflow artifacts", () => {
       sizeBytes: 100,
       chunkCount: 1,
       contentHash: "b".repeat(64),
+      targetReference: "PS210235",
       sourceChannel: "TEAMS",
       externalMessageId: "message-1",
       externalConversationId: "conversation-1"
@@ -86,6 +90,28 @@ describe("Garland workflow artifacts", () => {
 
     expect(result).toMatchObject({ id: "artifact-existing", status: "REVIEWED" });
     expect(prismaMock.workflowArtifact.create).not.toHaveBeenCalled();
+  });
+
+  it("keeps upload retries scoped to the exact target reference", async () => {
+    const baseInput = {
+      fileName: "Garland orders.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      chunkCount: 1,
+      contentHash: "c".repeat(64),
+      sourceChannel: "TEAMS" as const,
+      externalMessageId: "message-1",
+      externalConversationId: "conversation-1"
+    };
+
+    await createGarlandArtifact(context, { ...baseInput, targetReference: "PS210235" });
+    await createGarlandArtifact(context, { ...baseInput, targetReference: "PS210236" });
+
+    const firstKey = prismaMock.workflowArtifact.create.mock.calls[0]?.[0].data.sourceIdempotencyKey;
+    const secondKey = prismaMock.workflowArtifact.create.mock.calls[1]?.[0].data.sourceIdempotencyKey;
+    expect(firstKey).toMatch(/^[a-f0-9]{64}$/);
+    expect(secondKey).toMatch(/^[a-f0-9]{64}$/);
+    expect(firstKey).not.toBe(secondKey);
   });
 
   it("stores each chunk with tenant scope and a content hash", async () => {
@@ -129,5 +155,45 @@ describe("Garland workflow artifacts", () => {
       { shipment_date: "2026-07-22" }
     ])).toThrow("more than one shipment date");
     expect(resolveGarlandReviewShipmentDate("2026-07-23", [pdfOrder], [])).toBe("2026-07-23");
+  });
+
+  it("selects only the exact PS requested from a multi-order PDF", () => {
+    const orders = [
+      { psNumber: "PS210235", srNumber: "SR810263" },
+      { psNumber: "PS210236", srNumber: "SR810264" }
+    ] as never;
+
+    const result = selectGarlandPdfOrderForReference(orders, "ps210236");
+
+    expect(result).toMatchObject({
+      targetReference: "PS210236",
+      ignoredOrderCount: 1,
+      order: { psNumber: "PS210236", srNumber: "SR810264" }
+    });
+  });
+
+  it("allows a unique SR but rejects an SR that identifies multiple PDF orders", () => {
+    const uniqueOrders = [
+      { psNumber: "PS210235", srNumber: "SR810263" },
+      { psNumber: "PS210236", srNumber: "SR810264" }
+    ] as never;
+    expect(selectGarlandPdfOrderForReference(uniqueOrders, "SR810263").order)
+      .toMatchObject({ psNumber: "PS210235" });
+
+    const repeatedSrOrders = [
+      { psNumber: "PS210235", srNumber: "SR810263" },
+      { psNumber: "PS210236", srNumber: "SR810263" }
+    ] as never;
+    expect(() => selectGarlandPdfOrderForReference(repeatedSrOrders, "SR810263"))
+      .toThrow("Ask the employee for the exact PS number");
+  });
+
+  it("does not guess when the requested reference is invalid or absent from the PDF", () => {
+    const orders = [{ psNumber: "PS210235", srNumber: "SR810263" }] as never;
+
+    expect(() => selectGarlandPdfOrderForReference(orders, "210235"))
+      .toThrow("exact Garland PS or SR number");
+    expect(() => selectGarlandPdfOrderForReference(orders, "PS999999"))
+      .toThrow("No Teamship check was run");
   });
 });

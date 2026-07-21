@@ -27,6 +27,7 @@ export async function POST(request: Request) {
       sizeBytes: readNumber(body.sizeBytes),
       chunkCount: readNumber(body.chunkCount),
       contentHash: readString(body.contentHash),
+      targetReference: readString(body.targetReference),
       sourceChannel: "TEAMS",
       externalMessageId: readOptionalString(body.externalMessageId),
       externalConversationId: readOptionalString(body.externalConversationId)
