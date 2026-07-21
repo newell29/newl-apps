@@ -87,13 +87,15 @@ export function createTeamshipPlaywrightReadAdapter(
       await openReadPage(page, baseUrl, "/inventory", input.credentials, options);
       await assertPageContext(page, "/inventory", ["Inventory"]);
       await activateInventoryView(page, "All");
-      return parseInventoryAllTables(await applyInventorySearch(page, input.sku), input.sku);
+      const tablePages = await applyInventorySearch(page, input.sku);
+      return tablePages.flatMap((tables) => parseInventoryAllTables(tables, input.sku));
     }),
     searchLpn: (input) => runBrowserRead(input.credentials, options, async (page, baseUrl) => {
       await openReadPage(page, baseUrl, "/inventory", input.credentials, options);
       await assertPageContext(page, "/inventory", ["Inventory"]);
       await activateInventoryView(page, "Ship by LPN");
-      return parseLpnTables(await applyInventorySearch(page, input.query), input.query);
+      const tablePages = await applyInventorySearch(page, input.query);
+      return tablePages.flatMap((tables) => parseLpnTables(tables, input.query));
     }),
     getReceivingOrder: (input) => runBrowserRead(input.credentials, options, async (page, baseUrl) => {
       const route = `/inventory-orders/inventoryOrder/${encodeURIComponent(input.orderId)}`;
@@ -305,9 +307,92 @@ async function applyInventorySearch(page: Page, query: string) {
   ], "Teamship inventory Search control");
   assertTeamshipReadControlAllowed("Search");
   await submitTeamshipInventorySearch(input, submit, query);
-  const tables = await waitForTeamshipInventorySearchResult(page, query, 45_000);
+  const firstPageTables = await waitForTeamshipInventorySearchResult(page, query, 45_000);
+  const tablePages = await collectTeamshipInventorySearchPages(page, query, firstPageTables);
   await assertNoUnexpectedDialog(page);
-  return tables;
+  return tablePages;
+}
+
+const MAX_TEAMSHIP_INVENTORY_SEARCH_PAGES = 25;
+
+export async function collectTeamshipInventorySearchPages(
+  page: Page,
+  query: string,
+  firstPageTables: RawTable[]
+) {
+  let tablePages = [firstPageTables];
+  const currentPage = page.locator('a.e-currentitem[aria-label^="Page "]:visible');
+  if (await currentPage.count() === 0) return tablePages;
+  if (await currentPage.count() !== 1) {
+    throw new Error("Teamship inventory pager was ambiguous.");
+  }
+
+  const pager = parseTeamshipInventoryPagerLabel(await currentPage.getAttribute("aria-label"));
+  if (!pager) throw new Error("Teamship inventory pager label was invalid.");
+  if (pager.totalPages > MAX_TEAMSHIP_INVENTORY_SEARCH_PAGES) {
+    throw new Error(`Teamship inventory search exceeded the ${MAX_TEAMSHIP_INVENTORY_SEARCH_PAGES}-page read limit.`);
+  }
+
+  const expandedTables = await expandTeamshipInventoryPageSize(page, query, pager.totalPages);
+  if (expandedTables) {
+    tablePages = [expandedTables];
+    const expandedCurrentPage = page.locator('a.e-currentitem[aria-label^="Page "]:visible');
+    if (await expandedCurrentPage.count() === 0) return tablePages;
+    if (await expandedCurrentPage.count() !== 1) throw new Error("Teamship inventory pager was ambiguous after expanding the page size.");
+    const expandedPager = parseTeamshipInventoryPagerLabel(await expandedCurrentPage.getAttribute("aria-label"));
+    if (!expandedPager) throw new Error("Teamship inventory pager label was invalid after expanding the page size.");
+    if (expandedPager.totalPages > MAX_TEAMSHIP_INVENTORY_SEARCH_PAGES) {
+      throw new Error(`Teamship inventory search exceeded the ${MAX_TEAMSHIP_INVENTORY_SEARCH_PAGES}-page read limit.`);
+    }
+    pager.currentPage = expandedPager.currentPage;
+    pager.totalPages = expandedPager.totalPages;
+  }
+
+  for (let pageNumber = pager.currentPage + 1; pageNumber <= pager.totalPages; pageNumber += 1) {
+    const label = `Page ${pageNumber} of ${pager.totalPages} Pages`;
+    const link = page.locator(`a[aria-label="${label}"]:visible`);
+    if (await link.count() !== 1) throw new Error(`Teamship inventory page ${pageNumber} link was missing or ambiguous.`);
+    await link.click();
+    await page.locator(`a.e-currentitem[aria-label="${label}"]:visible`).waitFor({ state: "visible", timeout: 15_000 });
+    tablePages.push(await waitForTeamshipInventorySearchResult(page, query, 15_000));
+  }
+
+  return tablePages;
+}
+
+async function expandTeamshipInventoryPageSize(page: Page, query: string, previousTotalPages: number) {
+  if (previousTotalPages <= 1) return null;
+  const input = page.locator('input[placeholder="Items per page"]:visible');
+  if (await input.count() !== 1 || await input.getAttribute("value") === "100") return null;
+
+  assertTeamshipReadControlAllowed("Items per page");
+  await input.locator("xpath=..").click();
+  const option = page.getByRole("option", { name: "100", exact: true });
+  if (await option.count() !== 1) throw new Error("Teamship 100-items page-size option was missing or ambiguous.");
+  await option.click();
+  await page.waitForFunction(({ previousPages }) => {
+    const size = document.querySelector<HTMLInputElement>('input[placeholder="Items per page"]');
+    const current = Array.from(document.querySelectorAll<HTMLAnchorElement>('a.e-currentitem[aria-label^="Page "]'))
+      .find((link) => {
+        const bounds = link.getBoundingClientRect();
+        return bounds.width > 0 && bounds.height > 0;
+      });
+    if (size?.value !== "100") return false;
+    if (!current) return true;
+    const match = current.getAttribute("aria-label")?.match(/^Page\s+\d+\s+of\s+(\d+)\s+Pages$/i);
+    return Number(match?.[1]) < previousPages;
+  }, { previousPages: previousTotalPages }, { timeout: 30_000 });
+  return waitForTeamshipInventorySearchResult(page, query, 45_000);
+}
+
+export function parseTeamshipInventoryPagerLabel(label: string | null) {
+  const match = label?.match(/^Page\s+(\d+)\s+of\s+(\d+)\s+Pages$/i);
+  const currentPage = Number(match?.[1]);
+  const totalPages = Number(match?.[2]);
+  if (!Number.isInteger(currentPage) || !Number.isInteger(totalPages) || currentPage < 1 || totalPages < currentPage) {
+    return null;
+  }
+  return { currentPage, totalPages };
 }
 
 async function waitForInventoryGridReady(page: Page) {
@@ -572,8 +657,9 @@ export function parseLpnTables(tables: RawTable[], requestedQuery?: string): Tea
   let group: { lpn: string | null; location: string | null } = { lpn: null, location: null };
   const records: TeamshipBrowserLpnRow[] = [];
   for (const row of table.rows) {
-    const groupText = row.length === 1 ? row[0]?.text ?? "" : "";
-    const groupMatch = groupText.match(/([^\s(]+)\s*\([^,]+,\s*LOC:\s*([^\)]+)\)/i);
+    const groupMatch = row
+      .map((cell) => cell.text.match(/([^\s(]+)\s*\([^,]+,\s*LOC:\s*([^\)]+)\)/i))
+      .find((match) => Boolean(match));
     if (groupMatch) {
       group = { lpn: groupMatch[1]?.trim() ?? null, location: groupMatch[2]?.trim() ?? null };
       continue;
@@ -673,9 +759,12 @@ function findTable(tables: RawTable[], requiredHeaders: string[], requestedIdent
     return requiredHeaders.every((required) => headers.includes(normalizeHeader(required)));
   });
   if (!requestedIdentifier) return matches[0] ?? null;
-  const normalizedIdentifier = normalizeHeader(requestedIdentifier);
+  const normalizedIdentifier = normalizeText(requestedIdentifier);
   return matches.find((table) => table.rows.some((row) =>
-    row.some((cell) => normalizeHeader(cell.text) === normalizedIdentifier)
+    row.some((cell) => {
+      const value = normalizeText(cell.text);
+      return value === normalizedIdentifier || value.startsWith(`${normalizedIdentifier} (`);
+    })
   )) ?? matches[0] ?? null;
 }
 

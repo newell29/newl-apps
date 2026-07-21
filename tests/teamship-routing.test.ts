@@ -66,6 +66,43 @@ describe("Teamship question routing", () => {
     });
   });
 
+  it("routes SKU LPN-list and serial-number questions to Ship by LPN", () => {
+    expect(routeTeamshipQuestion(
+      "Which LPNs and locations does Garland have for SKU SR114E00082?"
+    )).toEqual({
+      kind: "TOOL",
+      tool: "searchTeamshipLpn",
+      input: {
+        queryType: "SKU",
+        query: "SR114E00082",
+        customerId: "420",
+        warehouseId: "102"
+      }
+    });
+    expect(routeTeamshipQuestion(
+      "Where is Garland serial number 2512MF0134?"
+    )).toEqual({
+      kind: "TOOL",
+      tool: "searchTeamshipLpn",
+      input: {
+        queryType: "SERIAL",
+        query: "2512MF0134",
+        customerId: "420",
+        warehouseId: "102"
+      }
+    });
+  });
+
+  it("does not parse plural field labels as identifier values", () => {
+    expect(routeTeamshipQuestion(
+      "Which LPNs and serials does Garland have for SKU SR114E00082?"
+    )).toMatchObject({
+      kind: "TOOL",
+      tool: "searchTeamshipLpn",
+      input: { queryType: "SKU", query: "SR114E00082" }
+    });
+  });
+
   it("routes quantity questions to Inventory All and shipping-eligible questions to the API tool", () => {
     expect(routeTeamshipQuestion("How much SKU ABC-100 is on hand customer 420 warehouse 102?")).toMatchObject({
       kind: "TOOL",

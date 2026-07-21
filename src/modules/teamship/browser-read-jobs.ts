@@ -18,11 +18,14 @@ export const TEAMSHIP_BROWSER_JOB_OPERATIONS = [
   "getProductHistory"
 ] as const;
 
+const TEAMSHIP_BROWSER_JOB_WAIT_MS = 120_000;
+const TEAMSHIP_BROWSER_JOB_CLAIM_MS = 3 * 60_000;
+
 export type TeamshipBrowserJobOperation = typeof TEAMSHIP_BROWSER_JOB_OPERATIONS[number];
 
 export type TeamshipBrowserJobInput =
   | { operation: "searchInventoryAll"; sku: string }
-  | { operation: "searchLpn"; queryType: "SKU" | "LPN"; query: string }
+  | { operation: "searchLpn"; queryType: "SKU" | "LPN" | "SERIAL"; query: string }
   | { operation: "getReceivingOrder"; orderId: string }
   | { operation: "getProductHistory"; productId: string };
 
@@ -143,7 +146,7 @@ export async function claimNextTeamshipBrowserJob(
 ): Promise<ClaimedTeamshipBrowserJob | null> {
   await expireStaleJobs();
   const now = new Date();
-  const expiresAt = new Date(now.getTime() + 2 * 60_000);
+  const expiresAt = new Date(now.getTime() + TEAMSHIP_BROWSER_JOB_CLAIM_MS);
   const tenantId = await requireWorkerTenantId(tenantSlug);
 
   const pending = await prisma.teamshipBrowserReadJob.findFirst({
@@ -233,7 +236,7 @@ async function enqueueAndWait({
   requestedBy,
   scope,
   jobInput,
-  timeoutMs = 90_000,
+  timeoutMs = TEAMSHIP_BROWSER_JOB_WAIT_MS,
   pollIntervalMs = 1_000
 }: RemoteAdapterOptions & {
   scope: TeamshipBrowserScope;
@@ -290,7 +293,7 @@ function parseJobInput(value: unknown): TeamshipBrowserJobInput {
   if (operation === "searchInventoryAll") return { operation, sku: requireString(record.sku, "sku") };
   if (operation === "searchLpn") {
     const queryType = requireString(record.queryType, "queryType");
-    if (queryType !== "SKU" && queryType !== "LPN") throw new Error("queryType is invalid.");
+    if (queryType !== "SKU" && queryType !== "LPN" && queryType !== "SERIAL") throw new Error("queryType is invalid.");
     return { operation, queryType, query: requireString(record.query, "query") };
   }
   if (operation === "getReceivingOrder") return { operation, orderId: requireString(record.orderId, "orderId") };

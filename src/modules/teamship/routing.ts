@@ -52,8 +52,9 @@ export function routeTeamshipQuestion(
     options.readOnlyScopes
   ) ??
     (isGarland && !warehouseWasNamed ? "102" : null);
-  const sku = extractIdentifier(text, /\bsku\s*[:#]?\s*([A-Z0-9][A-Z0-9._/-]*)/i);
-  const lpn = extractIdentifier(text, /\blpn\s*[:#]?\s*([A-Z0-9][A-Z0-9._/-]*)/i);
+  const sku = extractIdentifier(text, /\bsku(?!s\b)\s*[:#]?\s*([A-Z0-9][A-Z0-9._/-]*)/i);
+  const lpn = extractIdentifier(text, /\blpn(?!s\b)(?:\s+(?:number|id))?\s*[:#]?\s*([A-Z0-9][A-Z0-9._/-]*)/i);
+  const serial = extractIdentifier(text, /\bserial(?!s\b)(?:\s+number)?\s*[:#]?\s*([A-Z0-9][A-Z0-9._/-]*)/i);
   const productId = extractIdentifier(text, /\bproduct\s+id\s*[:#]?\s*([A-Z0-9][A-Z0-9._/-]*)/i) ??
     extractIdentifier(text, /\bproduct\s*[:#]\s*([A-Z0-9][A-Z0-9._/-]*)/i);
   const receivingOrderId = extractIdentifier(
@@ -91,9 +92,10 @@ export function routeTeamshipQuestion(
     );
   }
 
-  if (lpn || /\bwhere is\b/i.test(text) && sku) {
-    const queryType = lpn ? "LPN" : "SKU";
-    const query = lpn ?? sku;
+  const requestsHandlingUnitDetail = /\b(?:lpns?|locations?|serials?|quarantin(?:e|ed))\b/i.test(text);
+  if (lpn || serial || (sku && (/\bwhere is\b/i.test(text) || requestsHandlingUnitDetail))) {
+    const queryType = lpn ? "LPN" : serial ? "SERIAL" : "SKU";
+    const query = lpn ?? serial ?? sku;
     return buildToolRoute(
       "searchTeamshipLpn",
       { queryType, ...(query ? { query } : {}), ...(customerId ? { customerId } : {}), ...(warehouseId ? { warehouseId } : {}) },
@@ -176,7 +178,7 @@ function referenceCompatibleIdentifier(value: string | null, scopes: readonly Te
 }
 
 function looksLikeTeamshipQuestion(text: string) {
-  return /\b(teamship|sku|lpn|inventory|product history|shipping order|receiving order|warehouse|picking|packing|on hand|reserved|order status)\b/.test(text) ||
+  return /\b(teamship|sku|lpn|serial|inventory|product history|shipping order|receiving order|warehouse|picking|packing|on hand|reserved|order status)\b/.test(text) ||
     /\border\b.*\b(?:cannot|can't|not)\s+proceed\b/.test(text);
 }
 

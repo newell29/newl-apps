@@ -417,6 +417,44 @@ describe("Teamship read-only tools", () => {
     expect(JSON.stringify(result)).not.toContain("privateContact");
   });
 
+  it("returns only the exact serial-number match from Ship by LPN", async () => {
+    mocks.searchLpn.mockResolvedValue([
+      {
+        sku: "SR114E00082",
+        lpn: "63991",
+        quantity: 1,
+        location: "0802A",
+        serialNumber: "2512MF0134",
+        customerName: "Garland Canada Distribution",
+        warehouseName: "Annagem",
+        quarantined: false
+      },
+      {
+        sku: "SR114E00082",
+        lpn: "63994",
+        quantity: 1,
+        location: "1202A",
+        serialNumber: "2512MF0126",
+        customerName: "Garland Canada Distribution",
+        warehouseName: "Annagem",
+        quarantined: false
+      }
+    ]);
+
+    const result = await searchTeamshipLpn(
+      context,
+      { queryType: "SERIAL", query: "2512MF0134", customerId: "420", warehouseId: "102" },
+      { browserReader }
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      cardinality: "ONE",
+      resultCount: 1,
+      data: [{ sku: "SR114E00082", lpn: "63991", serialNumber: "2512MF0134", location: "0802A" }]
+    });
+  });
+
   it("returns a scoped receiving order and never exposes unrestricted browser fields", async () => {
     mocks.getReceivingOrder.mockResolvedValue([
       {

@@ -50,6 +50,12 @@ Teamship also separates accessibility-annotated headers from refreshed data rows
 
 The exact-row wait and extraction of every visible grid surface occur in one browser evaluation. This prevents Teamship from replacing the detected refreshed rows or their separate header surface between the wait and the read.
 
+Ship by LPN regression tests cover exact LPN, SKU, and serial-number routing. Plural labels such as `LPNs` and `serials` are not accepted as identifier values. Teamship may render the LPN as a group caption instead of a normal cell, so the parser preserves a matching caption such as `63991 (Annagem, LOC:0802A)` and associates it with the following detail row.
+
+Inventory searches collect the complete filtered result before applying exact scope filters. The reader first uses Teamship's read-only 100-items page-size control, then follows any remaining pages. Tests cover both the one-page expansion of a 37-row result and pager fallback, and enforce a bounded 25-page maximum so a malformed pager cannot create an unbounded browser job.
+
+Remote browser jobs have a bounded two-minute caller wait and a three-minute worker claim. The longer claim prevents a valid result from being discarded at the exact caller deadline while still allowing stale jobs to fail closed.
+
 ## Source map
 
 | Responsibility | Main files | Supporting files | Tests |

@@ -2,12 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   assertTeamshipBrowserPageUrlAllowed,
+  collectTeamshipInventorySearchPages,
   getConfiguredTeamshipBrowserReadAdapter,
   getTeamshipBrowserReadRuntimeStatus,
   parseInventoryAllTables,
   parseLpnTables,
   parseProductHistoryPage,
   parseReceivingOrderPage,
+  parseTeamshipInventoryPagerLabel,
   submitTeamshipInventorySearch,
   waitForTeamshipInventorySearchResult
 } from "@/modules/teamship/browser-read-execution";
@@ -124,7 +126,7 @@ describe("Teamship browser read extraction", () => {
   });
 
   it("normalizes LPN rows without equating their quantity to Inventory All Available", () => {
-    const rows = parseLpnTables([{
+    const tables = [{
       headers: ["", "Product", "SKU", "Product Value", "Available", "UOM", "Quarantine", "Warehouse", "Company Name", "Customer", "Batch", "Serial", "Status", "Date"],
       rows: [
         [cell("63991 (Annagem, LOC:0802A)")],
@@ -145,7 +147,8 @@ describe("Teamship browser read extraction", () => {
           cell("")
         ]
       ]
-    }]);
+    }];
+    const rows = parseLpnTables(tables, "63991");
 
     expect(rows).toMatchObject([{
       productId: "product-1",
@@ -155,6 +158,71 @@ describe("Teamship browser read extraction", () => {
       location: "0802A"
     }]);
     expect(rows[0]).not.toHaveProperty("available");
+    expect(parseLpnTables(tables, "SERIAL-1")).toMatchObject([{ lpn: "63991", serialNumber: "SERIAL-1" }]);
+  });
+
+  it("collects every visible Teamship inventory result page with a bounded pager", async () => {
+    const firstPage = [{ headers: ["SKU"], rows: [[cell("ABC-100")]] }];
+    const secondPage = [{ headers: ["SKU"], rows: [[cell("ABC-100")]] }];
+    const thirdPage = [{ headers: ["SKU"], rows: [[cell("ABC-100")]] }];
+    const click = vi.fn().mockResolvedValue(undefined);
+    const waitFor = vi.fn().mockResolvedValue(undefined);
+    const currentPage = {
+      count: vi.fn().mockResolvedValue(1),
+      getAttribute: vi.fn().mockResolvedValue("Page 1 of 3 Pages")
+    };
+    const page = {
+      locator: vi.fn((selector: string) => selector === 'a.e-currentitem[aria-label^="Page "]:visible'
+        ? currentPage
+        : selector === 'input[placeholder="Items per page"]:visible'
+          ? { count: vi.fn().mockResolvedValue(0) }
+        : selector.startsWith('a[aria-label=')
+          ? { count: vi.fn().mockResolvedValue(1), click }
+          : { waitFor }),
+      evaluate: vi.fn()
+        .mockResolvedValueOnce(JSON.stringify({ kind: "rows", tables: secondPage }))
+        .mockResolvedValueOnce(JSON.stringify({ kind: "rows", tables: thirdPage }))
+    };
+
+    await expect(collectTeamshipInventorySearchPages(page as never, "ABC-100", firstPage))
+      .resolves.toEqual([firstPage, secondPage, thirdPage]);
+    expect(click).toHaveBeenCalledTimes(2);
+    expect(waitFor).toHaveBeenCalledTimes(2);
+    expect(parseTeamshipInventoryPagerLabel("Page 1 of 3 Pages")).toEqual({ currentPage: 1, totalPages: 3 });
+    expect(parseTeamshipInventoryPagerLabel("Page 4 of 3 Pages")).toBeNull();
+  });
+
+  it("expands filtered inventory results to 100 rows before falling back to pager clicks", async () => {
+    const firstPage = [{ headers: ["SKU"], rows: [[cell("ABC-100")]] }];
+    const expandedPage = [{ headers: ["SKU"], rows: Array.from({ length: 37 }, () => [cell("ABC-100")]) }];
+    const pageSizeClick = vi.fn().mockResolvedValue(undefined);
+    const optionClick = vi.fn().mockResolvedValue(undefined);
+    const currentPage = {
+      count: vi.fn().mockResolvedValue(1),
+      getAttribute: vi.fn()
+        .mockResolvedValueOnce("Page 1 of 3 Pages")
+        .mockResolvedValue("Page 1 of 1 Pages")
+    };
+    const page = {
+      locator: vi.fn((selector: string) => selector === 'a.e-currentitem[aria-label^="Page "]:visible'
+        ? currentPage
+        : selector === 'input[placeholder="Items per page"]:visible'
+          ? {
+              count: vi.fn().mockResolvedValue(1),
+              getAttribute: vi.fn().mockResolvedValue("15"),
+              locator: vi.fn().mockReturnValue({ click: pageSizeClick })
+            }
+          : { count: vi.fn().mockResolvedValue(0) }),
+      getByRole: vi.fn().mockReturnValue({ count: vi.fn().mockResolvedValue(1), click: optionClick }),
+      waitForFunction: vi.fn().mockResolvedValue(undefined),
+      evaluate: vi.fn().mockResolvedValue(JSON.stringify({ kind: "rows", tables: expandedPage }))
+    };
+
+    await expect(collectTeamshipInventorySearchPages(page as never, "ABC-100", firstPage))
+      .resolves.toEqual([expandedPage]);
+    expect(pageSizeClick).toHaveBeenCalledOnce();
+    expect(optionClick).toHaveBeenCalledOnce();
+    expect(page.waitForFunction).toHaveBeenCalledOnce();
   });
 
   it("extracts minimized receiving-order and product-history records", () => {
@@ -205,6 +273,7 @@ describe("Teamship browser read extraction", () => {
 
   it("rejects every known Teamship mutation control", () => {
     expect(() => assertTeamshipReadControlAllowed("Search")).not.toThrow();
+    expect(() => assertTeamshipReadControlAllowed("Items per page")).not.toThrow();
     for (const name of TEAMSHIP_BROWSER_BLOCKED_CONTROL_NAMES) {
       expect(() => assertTeamshipReadControlAllowed(name)).toThrow(/not allowlisted/i);
     }

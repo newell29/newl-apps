@@ -24,7 +24,7 @@ The published Teamship API documentation and OpenAPI-rendered reference were ins
 | Capability | Classification | Evidence classification and rationale |
 | --- | --- | --- |
 | Inventory search by SKU | already implemented with a critical scope limitation | Existing repository code calls `POST /v1/ship-inventories/search-products`. Teamship documents this as products available in inventory for shipping, and a supervised test returned zero for a SKU present on a requested shipping order. A zero result means no shipping-eligible match for that customer/location/query; it does not prove that the SKU is absent or that on-hand quantity is zero. |
-| Inventory search by LPN | implemented as a disabled-by-default browser reader | The published product search describes `search` as product-name or SKU search. `searchTeamshipLpn` now has typed, minimized, exact-scope browser output for LPN, location, quantity, quarantine, serial, and status. The runtime returns `CAPABILITY_UNAVAILABLE` unless a supervised browser adapter is supplied. |
+| Inventory search by LPN, SKU, or serial | implemented as a disabled-by-default browser reader | The published product search describes `search` as product-name or SKU search. `searchTeamshipLpn` now searches Ship by LPN using an exact LPN, SKU, or serial number and has typed, minimized, exact-scope browser output for LPN, location, quantity, warehouse, quarantine, serial, and status. It pairs group-caption LPN evidence with detail rows, expands the filtered grid to 100 items, and collects any remaining pages up to a fail-closed 25-page bound. The runtime returns `CAPABILITY_UNAVAILABLE` unless a supervised browser adapter is supplied. |
 | Customer filtering | supported by API and already implemented | The published product-search request requires `user_id`, documented as the customer/user ID. Newl Apps still requires an exact configured customer scope before the call. |
 | Warehouse filtering | supported by API and already implemented | The published product-search request requires `location_id`, documented as the warehouse location ID. The Teamship ID-to-Newl warehouse-label mapping remains configuration data. |
 | Location filtering | already implemented | The known product-search request includes the required warehouse `location_id`; exact results are post-filtered when response location evidence is present. |
@@ -49,7 +49,7 @@ Employees do not need to supply those internal IDs. For authenticated current-re
 
 `getTeamshipReceivingOrder` accepts the same exact scope and identifier contract and returns `CAPABILITY_UNAVAILABLE` when no supervised browser adapter is configured. This is intentional fail-closed behavior because no supported read API endpoint has been confirmed.
 
-`searchTeamshipInventoryAll`, `searchTeamshipLpn`, `getTeamshipReceivingOrder`, and `getTeamshipProductHistory` now support a guarded `TeamshipBrowserReadAdapter`. Their Playwright implementation restricts navigation to allowlisted HTTPS Teamship hosts, asserts the expected route and heading, permits only Inventory `All`, `Ship by LPN`, and `Search` controls, minimizes visible tables, and rejects unverified scope evidence. No browser adapter is wired into the assistant runtime, so these operations remain unavailable by default.
+`searchTeamshipInventoryAll`, `searchTeamshipLpn`, `getTeamshipReceivingOrder`, and `getTeamshipProductHistory` now support a guarded `TeamshipBrowserReadAdapter`. Their Playwright implementation restricts navigation to allowlisted HTTPS Teamship hosts, asserts the expected route and heading, permits only Inventory `All`, `Ship by LPN`, pager, and `Search` controls, minimizes visible tables, and rejects unverified scope evidence. No browser adapter is wired into the assistant runtime by default, so these operations remain unavailable unless the supervised worker is configured.
 
 The Mac-hosted browser worker may set `VERCEL_AUTOMATION_BYPASS_SECRET` when its
 Newl Apps base URL is a protected Vercel Preview. The worker sends that value only
@@ -66,7 +66,8 @@ Normalized error codes are `INVALID_INPUT`, `ACCESS_DENIED`, `TOOL_DISABLED`, `S
 | --- | --- |
 | Meaning, navigation, or procedure | Curated Teamship knowledge retrieval with Draft document attribution. |
 | Current shipping-eligible SKU match | `searchTeamshipInventory`, with zero described only as no shipping-eligible API match. |
-| Current total inventory, Reserved/On Hand, LPN, or location detail | Future guarded Playwright inventory reader; current live tool remains unavailable. |
+| Current total inventory or Reserved/On Hand | `searchTeamshipInventoryAll` through the guarded browser worker when configured. |
+| Current LPN, location, serial, quarantine, or handling-unit detail | `searchTeamshipLpn` through the guarded browser worker. A SKU plus a request for LPN/location detail uses this route; exact serial queries use `SERIAL`. |
 | Current shipping-order state or detail | `getTeamshipShippingOrder`. |
 | Current receiving/inventory-order state | `getTeamshipReceivingOrder`. |
 | Generic order or missing scope | Ask for the order type, exact record/SKU/LPN, or configured customer name. Resolve names from the tenant scope reference; ask for a warehouse name only when the customer has several configured warehouses. |
