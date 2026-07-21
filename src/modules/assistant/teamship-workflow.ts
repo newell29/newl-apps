@@ -15,7 +15,7 @@ import {
   type TeamshipReceivingOrderRecord,
   type TeamshipShippingOrderRecord
 } from "@/modules/teamship/read-tools";
-import { getConfiguredTeamshipBrowserReadAdapter } from "@/modules/teamship/browser-read-execution";
+import { getConfiguredTeamshipBrowserJobAdapter } from "@/modules/teamship/browser-read-jobs";
 import { routeTeamshipQuestion } from "@/modules/teamship/routing";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 
@@ -38,7 +38,15 @@ export async function maybeRunAssistantTeamshipRequest(
     });
   }
 
-  const browserReader = getConfiguredTeamshipBrowserReadAdapter();
+  const browserReader = getConfiguredTeamshipBrowserJobAdapter({
+    tenantId: context.tenantId,
+    tenantSlug: context.tenantSlug,
+    requestedBy: {
+      userId: context.userId,
+      userEmail: context.userEmail,
+      userName: context.userName
+    }
+  });
   const browserDependencies = browserReader ? { browserReader } : {};
 
   if (route.tool === "searchTeamshipInventory") {

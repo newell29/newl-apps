@@ -7,7 +7,12 @@ const mocks = vi.hoisted(() => ({
   lpn: vi.fn(),
   shipping: vi.fn(),
   receiving: vi.fn(),
-  productHistory: vi.fn()
+  productHistory: vi.fn(),
+  browserJobAdapter: { marker: "browser-job-adapter" }
+}));
+
+vi.mock("@/modules/teamship/browser-read-jobs", () => ({
+  getConfiguredTeamshipBrowserJobAdapter: vi.fn(() => mocks.browserJobAdapter)
 }));
 
 vi.mock("@/modules/teamship/read-tools", () => ({
@@ -96,8 +101,6 @@ describe("assistant Teamship workflow", () => {
   });
 
   it("keeps Inventory All quantities distinct from Ship by LPN quantities", async () => {
-    vi.stubEnv("TEAMSHIP_BROWSER_READ_RUNTIME_ENABLED", "true");
-    vi.stubEnv("TEAMSHIP_BROWSER_EXECUTABLE_PATH", "/usr/bin/google-chrome");
     mocks.inventoryAll.mockResolvedValue({
       ok: true,
       cardinality: "ONE",
@@ -135,7 +138,7 @@ describe("assistant Teamship workflow", () => {
     expect(mocks.inventoryAll).toHaveBeenCalledWith(
       context,
       expect.objectContaining({ sku: "ABC-100", customerId: "420", warehouseId: "102" }),
-      { browserReader: expect.any(Object) }
+      { browserReader: mocks.browserJobAdapter }
     );
   });
 

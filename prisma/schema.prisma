@@ -465,6 +465,7 @@ model Tenant {
   teamshipSyncedOrders                TeamshipSyncedOrder[]
   teamshipUpdateJobs                  TeamshipUpdateJob[]
   teamshipUpdateOrders                TeamshipUpdateOrder[]
+  teamshipBrowserReadJobs             TeamshipBrowserReadJob[]
   garlandProductDimensionObservations GarlandProductDimensionObservation[]
   garlandSourceEmails                 GarlandSourceEmail[]
   garlandSourceAttachments            GarlandSourceAttachment[]
@@ -1186,6 +1187,32 @@ model TeamshipUpdateOrder {
   @@index([tenantId, srNumber])
   @@index([tenantId, psNumber])
   @@index([tenantId, status])
+}
+
+model TeamshipBrowserReadJob {
+  id              String    @id @default(cuid())
+  tenantId        String
+  status          String    @default("PENDING")
+  operation       String
+  input           Json
+  scope           Json
+  requestedBy     Json
+  result          Json?
+  errorCode       String?
+  errorMessage    String?
+  workerId        String?
+  claimedAt       DateTime?
+  completedAt     DateTime?
+  failedAt        DateTime?
+  expiresAt       DateTime
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, operation, createdAt])
+  @@index([expiresAt])
 }
 
 model IntegrationCredential {
