@@ -48,12 +48,9 @@ const navEntries: NavNode[] = [
       { id: "website-growth", href: "/website-growth", label: "Website Growth", moduleKey: "WEBSITE_GROWTH" as ModuleKey }
     ]
   },
-<<<<<<< HEAD
-  { href: "/tms-bridge", label: "TMS Bridge" },
-  { href: "/ups-tools", label: "UPS Tools", moduleKey: "UPS_TOOLS" as ModuleKey },
-  { href: "/ltl-rate-portal", label: "LTL Rate Portal", moduleKey: "LTL_RATE_PORTAL" as ModuleKey },
-=======
->>>>>>> main
+  { id: "tms-bridge", href: "/tms-bridge", label: "TMS Bridge" },
+  { id: "ups-tools-root", href: "/ups-tools", label: "UPS Tools", moduleKey: "UPS_TOOLS" as ModuleKey },
+  { id: "ltl-rate-portal-root", href: "/ltl-rate-portal", label: "LTL Rate Portal", moduleKey: "LTL_RATE_PORTAL" as ModuleKey },
   {
     id: "operations",
     label: "Operations Tools",
@@ -86,6 +83,18 @@ const navEntries: NavNode[] = [
       },
       { id: "ups-tools", href: "/ups-tools", label: "UPS Tools", moduleKey: "UPS_TOOLS" as ModuleKey },
       { id: "ltl-rate-portal", href: "/ltl-rate-portal", label: "LTL Rate Portal", moduleKey: "LTL_RATE_PORTAL" as ModuleKey },
+      {
+        id: "vendor-invoice-approval",
+        href: "/operations/vendor-invoice-review",
+        label: "Vendor Invoice Approval",
+        moduleKey: "INVOICE_VERIFICATION" as ModuleKey
+      },
+      {
+        id: "customer-invoice-intake",
+        href: "/operations/customer-invoice-intake",
+        label: "Customer Invoice Intake",
+        moduleKey: "INVOICE_VERIFICATION" as ModuleKey
+      },
       {
         id: "ocean-freight-pricing",
         label: "Ocean Freight Pricing",

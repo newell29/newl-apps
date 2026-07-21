@@ -2,7 +2,7 @@ import { IntegrationProvider, IntegrationStatus, ModuleKey } from "@prisma/clien
 import { prisma } from "@/server/db";
 import { tenantWhere } from "@/server/tenant-query";
 import type { TenantContext } from "@/server/tenant-context";
-import type { SevenLAccountConfig } from "@/modules/ltl-rate-portal/types";
+import type { SevenLAccountConfig, SevenLCarrierConfig } from "@/modules/ltl-rate-portal/types";
 import { getLocalSevenLAccountNames } from "@/server/integrations/seven-l";
 import { getRecentLtlBulkQuoteJobs } from "@/modules/ltl-rate-portal/bulk-jobs";
 
@@ -15,12 +15,6 @@ type SevenLPublicConfig = {
   carrierMode?: unknown;
   carriers?: unknown;
 };
-
-function isCarrier(
-  value: SevenLAccountConfig["carriers"][number] | null
-): value is SevenLAccountConfig["carriers"][number] {
-  return value !== null;
-}
 
 export async function getLtlRatePortalShell(tenant: TenantContext) {
   const [moduleAccess, credentials, localAccountNames, recentBulkJobs] = await Promise.all([
@@ -115,11 +109,10 @@ function mapSevenLAccount(credential: {
   const defaultUom =
     config.defaultUom === "METRIC" || config.defaultUom === "MIXED" ? config.defaultUom : "US";
   const carrierMode = config.carrierMode === "ALL_DEFAULT" ? "ALL_DEFAULT" : "TENANT_SELECTED";
-  const carriers = Array.isArray(config.carriers)
-    ? config.carriers
-        .map((carrier) => {
+  const carriers: SevenLCarrierConfig[] = Array.isArray(config.carriers)
+    ? config.carriers.reduce<SevenLCarrierConfig[]>((items, carrier) => {
           if (!carrier || typeof carrier !== "object") {
-            return null;
+            return items;
           }
 
           const item = carrier as Record<string, unknown>;
@@ -129,19 +122,19 @@ function mapSevenLAccount(credential: {
           const scac = typeof item.scac === "string" ? item.scac : undefined;
 
           if (!carrierHash || !name || !code) {
-            return null;
+            return items;
           }
 
-        return {
-          carrierHash,
-          name,
-          code,
-          scac,
-          defaulted: item.defaulted === false ? false : true,
-          enabled: item.enabled === false ? false : true
-        };
-      })
-      .filter(isCarrier)
+          items.push({
+            carrierHash,
+            name,
+            code,
+            scac,
+            defaulted: item.defaulted === false ? false : true,
+            enabled: item.enabled === false ? false : true
+          });
+          return items;
+        }, [])
     : [];
   const dryRun = config.dryRun === false ? false : true;
 

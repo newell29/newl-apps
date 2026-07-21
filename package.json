@@ -3,12 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-<<<<<<< HEAD
     "dev": "cross-env NEXT_DIST_DIR=.next-dev next dev",
-=======
-    "dev": "NEXT_DIST_DIR=.next-dev next dev",
     "dev:fresh": "npm run sync:main && npm run dev",
->>>>>>> main
     "build": "next build",
     "build:canonical-trademining-reference": "tsx scripts/build-canonical-trademining-reference.ts",
     "smoke:trademining": "tsx scripts/smoke-test-trademining.ts",

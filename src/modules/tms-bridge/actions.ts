@@ -1,5 +1,3 @@
-"use server";
-
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { ImapFlow } from "imapflow";
 import { mkdir, readFile } from "node:fs/promises";
@@ -743,7 +741,7 @@ function buildLtlRatingEmailSection(result: LtlInquiryRatingResult) {
     ].join("\n");
   }
 
-  const estimatedClassNotice = buildLtlFreightClassEstimateNotice(result.adapter);
+  const estimatedClassNotice = result.adapter ? buildLtlFreightClassEstimateNotice(result.adapter) : "";
 
   if (result.status === "failed") {
     return [
@@ -903,10 +901,11 @@ function logisticsInquiryToDisplayRows(data: LogisticsInquiry): Array<[string, s
 function logisticsInquiryToLtlDisplayRows(data: LogisticsInquiry, ltlRating: LtlInquiryRatingResult): Array<[string, string]> {
   const origin = data.origin || data.originPostalCode;
   const destination = data.destination || data.destinationPostalCode;
+  const adapter = ltlRating.adapter;
   const accessorialNames =
-    ltlRating.adapter.detectedAccessorials.length > 0
-      ? formatLtlAccessorialsForEmail(ltlRating.adapter.detectedAccessorials.map((item) => item.code))
-      : formatLtlAccessorialsForEmail(ltlRating.adapter.request?.accessorialCodes);
+    adapter && adapter.detectedAccessorials.length > 0
+      ? formatLtlAccessorialsForEmail(adapter.detectedAccessorials.map((item) => item.code))
+      : formatLtlAccessorialsForEmail(adapter?.request?.accessorialCodes);
 
   return [
     ["Customer", data.customer],

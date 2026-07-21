@@ -2,10 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { PageHeader } from "@/components/page-header";
-import {
-  runTmsAutomationTestAction,
-  type TmsAutomationResult
-} from "@/modules/tms-bridge/actions";
+import { runTmsAutomationTestAction } from "@/modules/tms-bridge/server-actions";
+import type { TmsAutomationResult } from "@/modules/tms-bridge/actions";
 
 export const dynamic = "force-dynamic";
 

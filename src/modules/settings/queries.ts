@@ -1,6 +1,6 @@
 import { Prisma, IntegrationProvider, PlatformRole } from "@prisma/client";
 import { prisma } from "@/server/db";
-import type { SevenLAccountConfig } from "@/modules/ltl-rate-portal/types";
+import type { SevenLAccountConfig, SevenLCarrierConfig } from "@/modules/ltl-rate-portal/types";
 import { tenantWhere } from "@/server/tenant-query";
 import type { TenantContext } from "@/server/tenant-context";
 import type { UpsAccountConfig } from "@/modules/ups-tools/types";
@@ -136,12 +136,6 @@ type TradeMiningScoringClient = typeof prisma & {
     }): Promise<Array<{ role: PlatformRole; canMutate: boolean }>>;
   };
 };
-
-function isSevenLCarrier(
-  value: SevenLAccountConfig["carriers"][number] | null
-): value is SevenLAccountConfig["carriers"][number] {
-  return value !== null;
-}
 
 export async function getSettingsShell(tenant: TenantContext & { userId?: string | null }) {
   const tradeMiningScoringClient = prisma as TradeMiningScoringClient;
@@ -614,7 +608,33 @@ function mapSevenLAccount(credential: {
   }
 
   const config = credential.publicConfig as Record<string, unknown>;
-  const carriers = Array.isArray(config.carriers) ? config.carriers : [];
+  const carriers = Array.isArray(config.carriers)
+    ? config.carriers.reduce<SevenLCarrierConfig[]>((items, carrier) => {
+        if (!carrier || typeof carrier !== "object") {
+          return items;
+        }
+
+        const item = carrier as Record<string, unknown>;
+        const carrierHash = typeof item.carrierHash === "string" ? item.carrierHash : null;
+        const name = typeof item.name === "string" ? item.name : null;
+        const code = typeof item.code === "string" ? item.code : null;
+        const scac = typeof item.scac === "string" ? item.scac : undefined;
+
+        if (!carrierHash || !name || !code) {
+          return items;
+        }
+
+        items.push({
+          carrierHash,
+          name,
+          code,
+          scac,
+          defaulted: item.defaulted === false ? false : true,
+          enabled: item.enabled === false ? false : true
+        });
+        return items;
+      }, [])
+    : [];
 
   return {
     id: credential.id,
@@ -626,32 +646,7 @@ function mapSevenLAccount(credential: {
     harmonizedCharges: config.harmonizedCharges === false ? false : true,
     dryRun: config.dryRun === false ? false : true,
     carrierMode: config.carrierMode === "ALL_DEFAULT" ? "ALL_DEFAULT" : "TENANT_SELECTED",
-    carriers: carriers
-      .map((carrier) => {
-        if (!carrier || typeof carrier !== "object") {
-          return null;
-        }
-
-        const item = carrier as Record<string, unknown>;
-        const carrierHash = typeof item.carrierHash === "string" ? item.carrierHash : null;
-        const name = typeof item.name === "string" ? item.name : null;
-        const code = typeof item.code === "string" ? item.code : null;
-        const scac = typeof item.scac === "string" ? item.scac : undefined;
-
-        if (!carrierHash || !name || !code) {
-          return null;
-        }
-
-        return {
-          carrierHash,
-          name,
-          code,
-          scac,
-          defaulted: item.defaulted === false ? false : true,
-          enabled: item.enabled === false ? false : true
-        };
-      })
-      .filter(isSevenLCarrier),
+    carriers,
     secretConfigured: Boolean(credential.secretRef) || localAccountNames.has(credential.name)
   };
 }

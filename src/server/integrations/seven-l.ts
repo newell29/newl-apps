@@ -6,7 +6,8 @@ import type {
   LtlCountryCode,
   LtlQuoteRequest,
   LtlQuoteResult,
-  SevenLAccountConfig
+  SevenLAccountConfig,
+  SevenLCarrierConfig
 } from "@/modules/ltl-rate-portal/types";
 
 const DEFAULT_BASE_URL = "https://restapi.my7l.com";
@@ -176,7 +177,7 @@ export async function getLtlQuotes(
   return { data: results, errors };
 }
 
-export async function fetchSevenLAvailableCarriers(account: SevenLAccountConfig) {
+export async function fetchSevenLAvailableCarriers(account: SevenLAccountConfig): Promise<SevenLCarrierConfig[]> {
   const credential = await resolveRuntimeCredential(account);
   if (!credential) {
     throw new Error(`No 7L runtime credentials were found for account ${account.name}.`);
@@ -203,26 +204,26 @@ export async function fetchSevenLAvailableCarriers(account: SevenLAccountConfig)
   const carriers = Array.isArray(rawResults) ? rawResults : rawResults ? [rawResults] : [];
 
   return carriers
-    .map((carrier) => {
+    .reduce<SevenLCarrierConfig[]>((items, carrier) => {
       const carrierHash = carrier.CarrierHash?.trim();
       const name = carrier.Name?.trim();
       const code = carrier.Code?.trim();
       const scac = carrier.SCAC?.trim();
 
       if (!carrierHash || !name || !code) {
-        return null;
+        return items;
       }
 
-      return {
+      items.push({
         carrierHash,
         name,
         code,
         scac,
         defaulted: carrier.Defaulted === true,
         enabled: true
-      };
-    })
-    .filter((carrier): carrier is SevenLAccountConfig["carriers"][number] => carrier !== null)
+      });
+      return items;
+    }, [])
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 

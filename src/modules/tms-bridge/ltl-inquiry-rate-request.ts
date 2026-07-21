@@ -6,10 +6,9 @@ const UNSCHEDULED_PICKUP_DATE = "Not scheduled";
 
 const SUPPORTED_ACCESSORIAL_CODES = new Set(LTL_ACCESSORIAL_LEGEND.map((item) => item.code));
 
-const ACCESSORIAL_MAPPINGS: Array<{
-  code: (typeof LTL_ACCESSORIAL_LEGEND)[number]["code"];
-  patterns: RegExp[];
-}> = [
+type SupportedAccessorialCode = (typeof LTL_ACCESSORIAL_LEGEND)[number]["code"];
+
+const ACCESSORIAL_MAPPINGS = [
   {
     code: "APO",
     patterns: [/\b(?:origin|pickup|pick\s*up)\b.*\b(?:appointment|appt)\b/i, /\b(?:appointment|appt)\b.*\b(?:origin|pickup|pick\s*up)\b/i]
@@ -74,7 +73,12 @@ const ACCESSORIAL_MAPPINGS: Array<{
     code: "INB",
     patterns: [/\bin\s*bond\b/i, /\binbond\b/i]
   }
-].filter((mapping) => SUPPORTED_ACCESSORIAL_CODES.has(mapping.code));
+] satisfies Array<{
+  code: SupportedAccessorialCode;
+  patterns: RegExp[];
+}>;
+
+const SUPPORTED_ACCESSORIAL_MAPPINGS = ACCESSORIAL_MAPPINGS.filter((mapping) => SUPPORTED_ACCESSORIAL_CODES.has(mapping.code));
 
 const UNSUPPORTED_ACCESSORIAL_PATTERNS: Array<{ term: string; pattern: RegExp }> = [
   { term: "limited access", pattern: /\blimited\s+access\b/i },
@@ -304,7 +308,7 @@ function detectAccessorials(parsed: ParsedLtlInquiry) {
   const detected: Array<{ code: string; phrase: string }> = [];
   const codes: string[] = [];
 
-  for (const mapping of ACCESSORIAL_MAPPINGS) {
+  for (const mapping of SUPPORTED_ACCESSORIAL_MAPPINGS) {
     const phrase = phrases.find((candidate) => !isNegatedAccessorialPhrase(candidate) && mapping.patterns.some((pattern) => pattern.test(candidate)));
     const match = phrase ? mapping.patterns.map((pattern) => phrase.match(pattern)?.[0]).find(Boolean) : null;
     if (!phrase || !match) {
