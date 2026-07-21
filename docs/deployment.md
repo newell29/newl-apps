@@ -63,11 +63,20 @@ For Vercel Preview deployments only, the build also runs:
 ```bash
 npm run db:safety-check -- --require-preview-db
 npm run prisma:migrate:deploy
+npm run preview:provision-teamship-user
 ```
 
 Preview migrations run only after the safety check confirms
 `DATABASE_ENVIRONMENT=preview`. Production deployments do not run Prisma
 migrations automatically.
+
+`preview:provision-teamship-user` is a no-op unless
+`PREVIEW_TEAMSHIP_USER_EMAIL` is configured. When enabled, it requires
+`PREVIEW_TEAMSHIP_ENTRA_TENANT_ID` and `PREVIEW_TEAMSHIP_ENTRA_OBJECT_ID`, and it
+fails closed unless both `VERCEL_ENV` and `DATABASE_ENVIRONMENT` are `preview`.
+It upserts only that passwordless Preview user, stable Teams identity, and a
+least-privilege `READ_ONLY` membership when no membership exists. It never changes
+an existing membership role. Never configure these variables for Production.
 
 ## Production Migrations
 

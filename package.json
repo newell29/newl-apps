@@ -22,6 +22,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:seed": "tsx prisma/seed.ts",
+    "preview:provision-teamship-user": "tsx scripts/provision-preview-teamship-user.ts",
     "test": "vitest run",
     "verify:auth": "tsx scripts/verify-auth.ts",
     "verify:garland-teamship": "tsx scripts/verify-garland-teamship-review.ts",
