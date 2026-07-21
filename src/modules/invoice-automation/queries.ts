@@ -11,6 +11,8 @@ import {
 import { toInvoiceAutomationRow } from "@/modules/invoice-automation/row-mapper";
 import type { InvoiceAutomationEntityOption, InvoiceAutomationRow } from "@/modules/invoice-automation/types";
 
+const INVOICE_AUTOMATION_ROW_QUERY_LIMIT = 5000;
+
 export type InvoiceAutomationFilters = {
   q?: string;
   status?: string;
@@ -256,7 +258,7 @@ async function getInvoiceAutomationRows(
   const rows = await prisma.invoiceAutomationInvoice.findMany({
     where,
     orderBy: [{ createdAt: "desc" }],
-    take: 100,
+    take: INVOICE_AUTOMATION_ROW_QUERY_LIMIT,
     include: {
       batch: {
         select: {
