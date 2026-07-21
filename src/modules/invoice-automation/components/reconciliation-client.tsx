@@ -87,7 +87,9 @@ export function InvoiceReconciliationClient({ rows }: { rows: InvoiceAutomationR
         scanned?: number;
         importedOrUpdated?: number;
         skippedWithoutFileNumber?: number;
+        skippedNotTrackedInNewlApps?: number;
         skippedMultipleFileNumbers?: number;
+        detailTransactionsRead?: number;
         warnings?: string[];
         error?: string;
       };
@@ -97,7 +99,7 @@ export function InvoiceReconciliationClient({ rows }: { rows: InvoiceAutomationR
 
       const warnings = payload.warnings?.length ? ` Warnings: ${payload.warnings.join(" ")}` : "";
       setQuickBooksRefreshMessage(
-        `QuickBooks refresh scanned ${(payload.scanned ?? 0).toLocaleString("en-US")} transactions and updated ${(payload.importedOrUpdated ?? 0).toLocaleString("en-US")} reconciliation records.${warnings}`
+        `QuickBooks refresh scanned ${(payload.scanned ?? 0).toLocaleString("en-US")} transactions, read ${(payload.detailTransactionsRead ?? 0).toLocaleString("en-US")} detailed bills, and updated ${(payload.importedOrUpdated ?? 0).toLocaleString("en-US")} reconciliation records for Newl Apps shipment files.${warnings}`
       );
       router.refresh();
     } catch (error) {
