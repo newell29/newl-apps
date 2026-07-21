@@ -1,4 +1,8 @@
 import { createTeamshipPlaywrightReadAdapter } from "@/modules/teamship/browser-read-execution";
+import {
+  buildTeamshipBrowserWorkerHeaders,
+  isTransientTeamshipBrowserWorkerClaimStatus
+} from "@/modules/teamship/browser-worker-client";
 import type {
   ClaimedTeamshipBrowserJob,
   TeamshipBrowserJobResult
@@ -15,6 +19,7 @@ type WorkerOptions = {
   workerId: string;
   once: boolean;
   pollIntervalMs: number;
+  vercelProtectionBypass: string | null;
 };
 
 async function main() {
@@ -29,7 +34,17 @@ async function main() {
 
   console.log(`Teamship browser read worker ${options.workerId} started (${options.once ? "once" : "polling"}).`);
   do {
-    const job = await claimJob(options);
+    let job: ClaimedTeamshipBrowserJob | null;
+    try {
+      job = await claimJob(options);
+    } catch (error) {
+      if (!options.once && error instanceof TransientClaimError) {
+        console.warn(`${error.message} Retrying.`);
+        await sleep(options.pollIntervalMs);
+        continue;
+      }
+      throw error;
+    }
     if (!job) {
       if (options.once) {
         console.log("No Teamship browser read job is waiting.");
@@ -96,10 +111,15 @@ async function executeJob(
 
 async function claimJob(options: WorkerOptions) {
   const response = await workerFetch(options, "/api/assistant/teamship/browser-jobs/claim", { method: "POST" });
+  if (isTransientTeamshipBrowserWorkerClaimStatus(response.status)) {
+    throw new TransientClaimError(`Unable to claim Teamship browser job. Preview returned HTTP ${response.status}.`);
+  }
   const body = await readJson<ClaimResponse>(response, "claim Teamship browser job");
   if (!response.ok) throw new Error(body.error ?? `Unable to claim Teamship browser job. HTTP ${response.status}.`);
   return body.data?.job ?? null;
 }
+
+class TransientClaimError extends Error {}
 
 async function completeJob(options: WorkerOptions, jobId: string, result: TeamshipBrowserJobResult) {
   const response = await workerFetch(options, `/api/assistant/teamship/browser-jobs/${encodeURIComponent(jobId)}/complete`, {
@@ -123,12 +143,7 @@ function workerFetch(options: WorkerOptions, path: string, init: RequestInit) {
   return fetch(new URL(path, options.baseUrl), {
     ...init,
     redirect: "manual",
-    headers: {
-      authorization: `Bearer ${options.token}`,
-      "content-type": "application/json",
-      "x-teamship-browser-worker-id": options.workerId,
-      ...init.headers
-    }
+    headers: buildTeamshipBrowserWorkerHeaders(options)
   });
 }
 
@@ -152,7 +167,8 @@ function readOptions(): WorkerOptions {
     token,
     workerId: process.env.TEAMSHIP_BROWSER_WORKER_ID?.trim() || "mac-mini-teamship-browser",
     once: process.argv.includes("--once"),
-    pollIntervalMs: readPositiveInteger(process.env.TEAMSHIP_BROWSER_WORKER_POLL_MS, 2_000)
+    pollIntervalMs: readPositiveInteger(process.env.TEAMSHIP_BROWSER_WORKER_POLL_MS, 2_000),
+    vercelProtectionBypass: process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim() || null
   };
 }
 

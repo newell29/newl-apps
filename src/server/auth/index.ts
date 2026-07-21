@@ -3,6 +3,10 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 
 import { prisma } from "@/server/db";
 import { authConfig } from "@/server/auth/auth.config";
+import {
+  ensureMicrosoftEntraIdentityLink,
+  type MicrosoftEntraIdentity
+} from "@/server/auth/microsoft-entra-identity";
 
 /**
  * Full Auth.js server instance. This runs in the Node.js runtime (server
@@ -44,6 +48,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         },
         select: {
           id: true,
+          microsoftEntraTenantId: true,
+          microsoftEntraObjectId: true,
           memberships: {
             select: {
               id: true
@@ -56,6 +62,23 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (!provisionedUser || provisionedUser.memberships.length === 0) {
         console.warn(`[auth] Rejected sign-in for ${email}: no tenant membership provisioned.`);
         return false;
+      }
+
+      const identityResult = await ensureMicrosoftEntraIdentityLink({
+        provider: account?.provider ?? null,
+        profile,
+        user: provisionedUser,
+        store: {
+          findByIdentity: (identity) => findUserByMicrosoftEntraIdentity(identity),
+          linkIdentity: (userId, identity) => linkUserMicrosoftEntraIdentity(userId, identity)
+        }
+      });
+      if (identityResult === "conflict") {
+        console.warn(`[auth] Rejected sign-in for ${email}: Microsoft Entra identity conflicts with the provisioned user.`);
+        return false;
+      }
+      if (identityResult === "missing-claims") {
+        console.warn(`[auth] Microsoft sign-in for ${email} did not include stable tid/oid claims; Teams identity is not linked.`);
       }
 
       return true;
@@ -73,6 +96,26 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }
   }
 });
+
+async function findUserByMicrosoftEntraIdentity(identity: MicrosoftEntraIdentity) {
+  return prisma.user.findFirst({
+    where: {
+      microsoftEntraTenantId: identity.tenantId,
+      microsoftEntraObjectId: identity.objectId
+    },
+    select: { id: true }
+  });
+}
+
+async function linkUserMicrosoftEntraIdentity(userId: string, identity: MicrosoftEntraIdentity) {
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      microsoftEntraTenantId: identity.tenantId,
+      microsoftEntraObjectId: identity.objectId
+    }
+  });
+}
 
 function normalizeAuthEmail(value: string | null | undefined) {
   if (typeof value !== "string") {

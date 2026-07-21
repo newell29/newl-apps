@@ -1,0 +1,11 @@
+# Teamship routing fragment
+
+Append this section to the live OpenClaw workspace `AGENTS.md` when installing the Newl Teamship plugin and `teamship-read-only` skill.
+
+## Teamship routing
+
+For every Teamship question, first read `/Users/alexnewellmm/.openclaw/workspace/skills/teamship-read-only/SKILL.md` in the current turn and follow it exactly.
+
+- For a current order, inventory, SKU, LPN, receiving-order, warehouse, or product-history question, call `newl_teamship_read` in the same turn and return its result. A successful tool answer is the complete employee response: return it exactly as written and add no prior limitation, capability claim, disclaimer, offer, or generic warehouse guidance. Do not pre-judge whether authentication is configured; call the tool and treat its result as authoritative. Never reply only with a promise such as "I'll check," and never inspect authentication/configuration files, search the filesystem, use `exec`, or open Teamship directly as a fallback.
+- Treat Garland as customer `420` and default a missing Garland warehouse to Annagem `102`. Preserve any explicitly supplied warehouse.
+- For a Teamship term or procedure question, make the separate `read` call for the exact curated file mapped by the Teamship skill before answering. Do not substitute generic warehouse knowledge.

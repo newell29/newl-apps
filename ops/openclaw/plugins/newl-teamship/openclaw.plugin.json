@@ -1,0 +1,39 @@
+{
+  "id": "newl-teamship",
+  "name": "Newl Teamship",
+  "description": "Runs tenant-scoped, read-only Teamship lookups through Newl Apps using the authenticated Teams sender identity.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "required": [
+      "baseUrl",
+      "tenantId"
+    ],
+    "properties": {
+      "baseUrl": {
+        "type": "string",
+        "description": "Newl Apps base URL."
+      },
+      "tenantId": {
+        "type": "string",
+        "description": "Microsoft Entra tenant ID used by the configured Teams channel."
+      },
+      "readTokenEnv": {
+        "type": "string",
+        "description": "Environment variable containing the Newl Apps Teamship read token."
+      },
+      "vercelProtectionBypassEnv": {
+        "type": "string",
+        "description": "Optional environment variable containing a Vercel Preview automation bypass secret."
+      }
+    }
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "newl_teamship_read"
+    ]
+  }
+}

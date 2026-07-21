@@ -300,18 +300,18 @@ async function applyInventorySearch(page: Page, query: string) {
     page.getByRole("textbox", { name: "Search", exact: true })
   ], "Teamship inventory Search field");
   assertTeamshipReadControlAllowed("Search");
-  const submit = await requireUniqueLocator([
-    page.getByRole("search", { name: "Search", exact: true }),
-    page.getByRole("button", { name: "Search", exact: true }),
-    page.locator('button[type="submit"]:visible').filter({ hasText: "Search" })
-  ], "Teamship inventory Search button");
-
-  await input.fill(query);
-  await page.waitForTimeout(400);
-  await submit.click();
+  await submitTeamshipInventorySearch(input, query);
   await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => undefined);
   await page.waitForTimeout(1_500);
   await assertNoUnexpectedDialog(page);
+}
+
+export async function submitTeamshipInventorySearch(
+  input: Pick<Locator, "fill" | "press">,
+  query: string
+) {
+  await input.fill(query);
+  await input.press("Enter");
 }
 
 async function requireUniqueLocator(candidates: Locator[], description: string) {

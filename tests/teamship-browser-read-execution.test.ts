@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   assertTeamshipBrowserPageUrlAllowed,
@@ -7,7 +7,8 @@ import {
   parseInventoryAllTables,
   parseLpnTables,
   parseProductHistoryPage,
-  parseReceivingOrderPage
+  parseReceivingOrderPage,
+  submitTeamshipInventorySearch
 } from "@/modules/teamship/browser-read-execution";
 import {
   assertTeamshipReadControlAllowed,
@@ -157,6 +158,18 @@ describe("Teamship browser read extraction", () => {
     for (const name of TEAMSHIP_BROWSER_BLOCKED_CONTROL_NAMES) {
       expect(() => assertTeamshipReadControlAllowed(name)).toThrow(/not allowlisted/i);
     }
+  });
+
+  it("submits the live Teamship inventory search with Enter", async () => {
+    const input = {
+      fill: vi.fn().mockResolvedValue(undefined),
+      press: vi.fn().mockResolvedValue(undefined)
+    };
+
+    await submitTeamshipInventorySearch(input, "ABC-100");
+
+    expect(input.fill).toHaveBeenCalledWith("ABC-100");
+    expect(input.press).toHaveBeenCalledWith("Enter");
   });
 
   it("rejects non-HTTPS and non-allowlisted page hosts before browser reads continue", () => {

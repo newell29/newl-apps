@@ -46,6 +46,44 @@ describe("OpenClaw Teamship read authentication", () => {
     }));
   });
 
+  it("resolves a Teams sender through the stable Entra tenant and object identity", async () => {
+    const request = new Request("https://newl.test/api/assistant/teamship/read", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer test-teamship-token",
+        "x-newl-teams-tenant-id": "11111111-1111-4111-8111-111111111111",
+        "x-newl-teams-aad-object-id": "22222222-2222-4222-8222-222222222222"
+      }
+    });
+
+    await expect(authenticateOpenClawTeamshipRequest(request)).resolves.toMatchObject({
+      userId: "alex-user",
+      userEmail: "alex.newell@newl.ca"
+    });
+    expect(membershipFindFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        user: {
+          microsoftEntraTenantId: "11111111-1111-4111-8111-111111111111",
+          microsoftEntraObjectId: "22222222-2222-4222-8222-222222222222"
+        }
+      })
+    }));
+  });
+
+  it("rejects an incomplete or malformed Teams identity before membership lookup", async () => {
+    const request = new Request("https://newl.test/api/assistant/teamship/read", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer test-teamship-token",
+        "x-newl-teams-aad-object-id": "not-a-valid-object-id"
+      }
+    });
+
+    await expect(authenticateOpenClawTeamshipRequest(request))
+      .rejects.toMatchObject({ status: 400 } satisfies Partial<OpenClawTeamshipAuthError>);
+    expect(membershipFindFirst).not.toHaveBeenCalled();
+  });
+
   it("rejects invalid tokens before looking up a membership", async () => {
     await expect(authenticateOpenClawTeamshipRequest(buildRequest("wrong-token", "alex.newell@newl.ca")))
       .rejects.toMatchObject({ status: 401 } satisfies Partial<OpenClawTeamshipAuthError>);

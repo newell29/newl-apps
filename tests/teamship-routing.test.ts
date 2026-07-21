@@ -44,6 +44,36 @@ describe("Teamship question routing", () => {
     });
   });
 
+  it("defaults confirmed Garland requests to customer 420 and Annagem warehouse 102", () => {
+    expect(routeTeamshipQuestion("How much SKU ABC-100 is on hand for Garland?")).toEqual({
+      kind: "TOOL",
+      tool: "searchTeamshipInventoryAll",
+      input: { sku: "ABC-100", customerId: "420", warehouseId: "102" }
+    });
+    expect(routeTeamshipQuestion("What is shipping order SR812500 status for Garland?")).toEqual({
+      kind: "TOOL",
+      tool: "getTeamshipShippingOrder",
+      input: { orderId: "SR812500", customerId: "420", warehouseId: "102" }
+    });
+  });
+
+  it("preserves an explicit warehouse on a Garland request", () => {
+    expect(routeTeamshipQuestion("How much SKU ABC-100 is on hand for Garland warehouse 15?")).toMatchObject({
+      kind: "TOOL",
+      input: { customerId: "420", warehouseId: "15" }
+    });
+  });
+
+  it("uses parenthesized IDs when Nemo includes confirmed scope names", () => {
+    expect(routeTeamshipQuestion(
+      "inventory for SKU ABC-102 at warehouse Annagem (102) for customer Garland (420)"
+    )).toEqual({
+      kind: "TOOL",
+      tool: "searchTeamshipInventoryAll",
+      input: { sku: "ABC-102", customerId: "420", warehouseId: "102" }
+    });
+  });
+
   it("routes procedural questions to curated knowledge", () => {
     expect(routeTeamshipQuestion("What does LPN mean in Teamship?")).toEqual({
       kind: "KNOWLEDGE",

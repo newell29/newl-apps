@@ -497,9 +497,15 @@ model Tenant {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  name          String?
+  id                       String    @id @default(cuid())
+  email                    String    @unique
+  name                     String?
+  // Stable Microsoft Entra claims captured from a successful Newl Apps SSO
+  // login. Teams supplies this same tenant/object pair to the trusted
+  // OpenClaw tool, allowing server-side membership resolution without
+  // trusting an email or identity supplied in prompt text.
+  microsoftEntraTenantId   String?
+  microsoftEntraObjectId   String?
   // Used ONLY by the dev-only local credentials login path. Production logins
   // go through Microsoft Entra ID SSO and never set this field.
   passwordHash  String?
@@ -520,6 +526,8 @@ model User {
   teamshipReviewRuns          TeamshipReviewRun[]
   teamshipUpdateJobsCreated   TeamshipUpdateJob[]          @relation("TeamshipUpdateJobCreatedBy")
   teamshipUpdateJobsApproved  TeamshipUpdateJob[]          @relation("TeamshipUpdateJobApprovedBy")
+
+  @@unique([microsoftEntraTenantId, microsoftEntraObjectId])
 }
 
 // Auth.js (NextAuth) adapter models. Account links an external identity

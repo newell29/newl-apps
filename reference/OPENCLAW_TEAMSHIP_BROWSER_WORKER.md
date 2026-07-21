@@ -14,7 +14,7 @@ Flow:
 4. The Mac Mini worker polls Newl Apps over outbound HTTPS, claims one tenant-bound job, receives the tenant-scoped Teamship credentials only in the claim response, runs the guarded Playwright reader in Chrome, and completes or fails the job.
 5. Newl Apps normalizes the returned rows, records the existing Teamship read audit, and returns the answer to Nemo.
 
-The Mac Mini does not need an inbound public port.
+The Mac Mini does not need an inbound public port. It also does not need a separate local Teamship email or password: the authorized claim response supplies the active tenant's credentials from the encrypted `Teamship WMS` integration in Newl Apps. The local worker needs only its Newl Apps URL, dedicated worker token, worker ID, allowed hosts, and Chrome runtime settings.
 
 ## Vercel environment variables
 
@@ -68,6 +68,8 @@ Expected results:
 
 - If no browser job is waiting: `No Teamship browser read job is waiting.`
 - If a job is waiting: one claim, one Chrome read, then either completed or failed with a sanitized error.
+
+The live Teamship Inventory search is applied by pressing Enter in the search field. The visible search icon does not submit the current query reliably and must not be used by the worker.
 
 In another terminal, trigger a browser-backed query through the existing OpenClaw wrapper, such as Inventory All, LPN, Receiving Order, or Product History with exact customer and warehouse IDs.
 

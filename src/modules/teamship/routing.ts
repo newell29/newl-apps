@@ -33,8 +33,11 @@ export function routeTeamshipQuestion(prompt: string): TeamshipQuestionRoute {
     return { kind: "KNOWLEDGE", reason: "PROCEDURAL" };
   }
 
-  const customerId = extractIdentifier(text, /\bcustomer(?:\s+id)?\s*[:#]?\s*([A-Z0-9][A-Z0-9._/-]*)/i);
-  const warehouseId = extractIdentifier(text, /\bwarehouse(?:\s+id)?\s*[:#]?\s*([A-Z0-9][A-Z0-9._/-]*)/i);
+  const isGarland = /\bgarland\b/i.test(text);
+  const customerId = extractScopedIdentifier(text, "customer") ??
+    (isGarland ? "420" : null);
+  const warehouseId = extractScopedIdentifier(text, "warehouse") ??
+    (isGarland ? "102" : null);
   const sku = extractIdentifier(text, /\bsku\s*[:#]?\s*([A-Z0-9][A-Z0-9._/-]*)/i);
   const lpn = extractIdentifier(text, /\blpn\s*[:#]?\s*([A-Z0-9][A-Z0-9._/-]*)/i);
   const productId = extractIdentifier(text, /\bproduct\s+id\s*[:#]?\s*([A-Z0-9][A-Z0-9._/-]*)/i) ??
@@ -152,6 +155,22 @@ function looksProcedural(text: string) {
 
 function extractIdentifier(text: string, pattern: RegExp) {
   return text.match(pattern)?.[1]?.trim() ?? null;
+}
+
+function extractScopedIdentifier(text: string, field: "customer" | "warehouse") {
+  const parenthetical = extractIdentifier(
+    text,
+    new RegExp(`\\b${field}(?:\\s+id)?\\s*[:#]?\\s*[A-Z0-9 ._/-]{1,80}\\(\\s*([A-Z0-9][A-Z0-9._/-]*)\\s*\\)`, "i")
+  );
+  if (parenthetical) return parenthetical;
+
+  const identifier = extractIdentifier(
+    text,
+    new RegExp(`\\b${field}(?:\\s+id)?\\s*[:#]?\\s*([A-Z0-9][A-Z0-9._/-]*)`, "i")
+  );
+  if (field === "customer" && identifier?.toLowerCase() === "garland") return "420";
+  if (field === "warehouse" && identifier?.toLowerCase() === "annagem") return "102";
+  return identifier;
 }
 
 function formatMissingFields(fields: string[]) {
