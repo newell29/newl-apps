@@ -112,24 +112,43 @@ export async function createOperationalFeedback(
 
   await validateFeedbackReferences(context.tenantId, input);
 
-  return prisma.operationalFeedback.create({
-    data: {
-      tenantId: context.tenantId,
-      moduleKey: ModuleKey.SHIPMENT_DOCUMENTS,
-      workflowKey,
-      subjectType,
-      subjectId,
-      teamshipReviewRunId: normalizeOptionalText(input.teamshipReviewRunId, 100),
-      teamshipReviewOrderId: normalizeOptionalText(input.teamshipReviewOrderId, 100),
-      artifactId: normalizeOptionalText(input.artifactId, 100),
-      reporterUserId: context.userId,
-      reporterStatement: statement,
-      expectedOutcome: normalizeOptionalText(input.expectedOutcome, 100),
-      observedOutcome: normalizeOptionalText(input.observedOutcome, 100),
-      classification: normalizeClassification(input.classification),
-      evidence: input.evidence ?? Prisma.JsonNull
-    },
-    select: feedbackSelect
+  return prisma.$transaction(async (tx) => {
+    const feedback = await tx.operationalFeedback.create({
+      data: {
+        tenantId: context.tenantId,
+        moduleKey: ModuleKey.SHIPMENT_DOCUMENTS,
+        workflowKey,
+        subjectType,
+        subjectId,
+        teamshipReviewRunId: normalizeOptionalText(input.teamshipReviewRunId, 100),
+        teamshipReviewOrderId: normalizeOptionalText(input.teamshipReviewOrderId, 100),
+        artifactId: normalizeOptionalText(input.artifactId, 100),
+        reporterUserId: context.userId,
+        reporterStatement: statement,
+        expectedOutcome: normalizeOptionalText(input.expectedOutcome, 100),
+        observedOutcome: normalizeOptionalText(input.observedOutcome, 100),
+        classification: normalizeClassification(input.classification),
+        evidence: input.evidence ?? Prisma.JsonNull
+      },
+      select: feedbackSelect
+    });
+    await tx.auditLog.create({
+      data: {
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        action: "assistant.operational_feedback.create",
+        entityType: "OperationalFeedback",
+        entityId: feedback.id,
+        after: {
+          workflowKey,
+          subjectType,
+          subjectId,
+          classification: feedback.classification,
+          status: feedback.status
+        } satisfies Prisma.InputJsonValue
+      }
+    });
+    return feedback;
   });
 }
 
@@ -162,19 +181,37 @@ export async function reviewOperationalFeedback(
   }
   const existing = await prisma.operationalFeedback.findFirst({
     where: { tenantId: context.tenantId, id: feedbackId },
-    select: { id: true }
+    select: { id: true, status: true, resolutionNotes: true }
   });
   if (!existing) throw new OperationalMemoryError("Feedback was not found.", 404);
 
-  return prisma.operationalFeedback.update({
-    where: { tenantId_id: { tenantId: context.tenantId, id: feedbackId } },
-    data: {
-      status,
-      resolutionNotes: normalizeOptionalText(input.resolutionNotes, 4000),
-      reviewedByUserId: context.userId,
-      reviewedAt: new Date()
-    },
-    select: feedbackSelect
+  const resolutionNotes = normalizeOptionalText(input.resolutionNotes, 4000);
+  return prisma.$transaction(async (tx) => {
+    const feedback = await tx.operationalFeedback.update({
+      where: { tenantId_id: { tenantId: context.tenantId, id: feedbackId } },
+      data: {
+        status,
+        resolutionNotes,
+        reviewedByUserId: context.userId,
+        reviewedAt: new Date()
+      },
+      select: feedbackSelect
+    });
+    await tx.auditLog.create({
+      data: {
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        action: "assistant.operational_feedback.review",
+        entityType: "OperationalFeedback",
+        entityId: feedbackId,
+        before: {
+          status: existing.status,
+          resolutionNotes: existing.resolutionNotes
+        } satisfies Prisma.InputJsonValue,
+        after: { status, resolutionNotes } satisfies Prisma.InputJsonValue
+      }
+    });
+    return feedback;
   });
 }
 
@@ -242,6 +279,24 @@ export async function approveFeedbackAsLesson(
         resolutionNotes: "Promoted to an admin-approved operational lesson."
       }
     });
+    await tx.auditLog.create({
+      data: {
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        action: "assistant.operational_lesson.approve",
+        entityType: "ApprovedOperationalLesson",
+        entityId: lesson.id,
+        before: { feedbackStatus: feedback.status } satisfies Prisma.InputJsonValue,
+        after: {
+          sourceFeedbackId: feedback.id,
+          workflowKey: feedback.workflowKey,
+          subjectType: feedback.subjectType,
+          subjectId: feedback.subjectId,
+          confidence,
+          status: "ACTIVE"
+        } satisfies Prisma.InputJsonValue
+      }
+    });
     return lesson;
   });
 }
@@ -278,8 +333,8 @@ export async function generateDevelopmentSuggestions(context: AuthenticatedConte
   for (const items of groups.values()) {
     const first = items[0];
     const title = `${humanize(first.classification)} feedback for ${humanize(first.workflowKey)}`.slice(0, 240);
-    created.push(
-      await prisma.developmentSuggestion.create({
+    created.push(await prisma.$transaction(async (tx) => {
+      const suggestion = await tx.developmentSuggestion.create({
         data: {
           tenantId: context.tenantId,
           moduleKey: first.moduleKey,
@@ -296,8 +351,26 @@ export async function generateDevelopmentSuggestions(context: AuthenticatedConte
             forbiddenAutomaticActions: ["BUILD", "MERGE", "DEPLOY", "TEAMSHIP_WRITE", "PRINT"]
           }
         }
-      })
-    );
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          action: "assistant.development_suggestion.create",
+          entityType: "DevelopmentSuggestion",
+          entityId: suggestion.id,
+          after: {
+            workflowKey: first.workflowKey,
+            classification: first.classification,
+            status: "AWAITING_APPROVAL",
+            riskLevel: first.workflowKey === GARLAND_WORKFLOW_KEY ? "HIGH" : "MEDIUM",
+            feedbackCount: items.length,
+            sourceFeedbackIds: items.map((item) => item.id)
+          } satisfies Prisma.InputJsonValue
+        }
+      });
+      return suggestion;
+    }));
   }
   return created;
 }
@@ -328,14 +401,29 @@ export async function decideDevelopmentSuggestion(
     throw new OperationalMemoryError("This development suggestion already has a decision.", 409);
   }
 
-  return prisma.developmentSuggestion.update({
-    where: { tenantId_id: { tenantId: context.tenantId, id: suggestionId } },
-    data: {
-      status,
-      decisionByUserId: context.userId,
-      decisionAt: new Date(),
-      decisionNotes: normalizeOptionalText(input.decisionNotes, 4000)
-    }
+  const decisionNotes = normalizeOptionalText(input.decisionNotes, 4000);
+  return prisma.$transaction(async (tx) => {
+    const suggestion = await tx.developmentSuggestion.update({
+      where: { tenantId_id: { tenantId: context.tenantId, id: suggestionId } },
+      data: {
+        status,
+        decisionByUserId: context.userId,
+        decisionAt: new Date(),
+        decisionNotes
+      }
+    });
+    await tx.auditLog.create({
+      data: {
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        action: "assistant.development_suggestion.decide",
+        entityType: "DevelopmentSuggestion",
+        entityId: suggestionId,
+        before: { status: existing.status } satisfies Prisma.InputJsonValue,
+        after: { status, decisionNotes } satisfies Prisma.InputJsonValue
+      }
+    });
+    return suggestion;
   });
 }
 

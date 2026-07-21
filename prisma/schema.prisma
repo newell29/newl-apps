@@ -2711,6 +2711,7 @@ model WorkflowArtifact {
   tenantId               String
   workflowKey            String
   sourceChannel          String
+  sourceIdempotencyKey   String?
   externalMessageId      String?
   externalConversationId String?
   submittedByUserId      String?
@@ -2732,6 +2733,7 @@ model WorkflowArtifact {
   chunks WorkflowArtifactChunk[]
 
   @@unique([tenantId, id])
+  @@unique([tenantId, sourceIdempotencyKey])
   @@index([tenantId, workflowKey, createdAt])
   @@index([tenantId, contentHash])
   @@index([tenantId, externalMessageId])

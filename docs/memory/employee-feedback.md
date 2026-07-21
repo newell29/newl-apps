@@ -13,4 +13,5 @@ Implementation boundaries:
 - Only confirmed or resolved feedback may be promoted, and only an administrator may create an `ApprovedOperationalLesson`.
 - Nemo retrieval uses active approved lessons; it must not retrieve raw reports as business rules.
 - `DevelopmentSuggestion` is an approval queue. Approval does not itself start Codex or authorize merge, deployment, Teamship writes, printing, customer communication, or database migration.
-- The daily OpenClaw digest is intentionally not installed by code. Its schedule, destination, and administrator must be approved before runtime configuration changes.
+- Every feedback review, approved lesson, suggestion creation, and suggestion decision is recorded in the tenant audit log.
+- The daily OpenClaw digest is intentionally not installed by code. The approved plan is 10:00 AM `America/Toronto` to Alex's existing Teams direct conversation using a `user:<aad-object-id>` target. It remains disabled until the production migration, deployment, distinct assistant credential, and OpenClaw reload are separately approved and complete.

@@ -61,5 +61,5 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Which status values map to employee-approved business language? Requires employee confirmation.
 - Which write actions should require two-person approval? Requires owner confirmation.
 - Which external integration credentials should be moved from env fallback to tenant-scoped settings first? Requires owner confirmation.
-- If a CSR does not provide a shipment date with an older PDF, should Nemo use today's date, the Teams message date, or ask a clarifying question? Phase 1 defaults to today; business confirmation is required.
+- When no shipment date is supplied, the review uses a single unambiguous date found in the PDF or Teamship. If none or several are found, Nemo asks for `YYYY-MM-DD`; it never silently records today's date for an older order.
 - How long should original Teams PDF artifacts be retained? Phase 1 retains them until a tenant retention policy is approved.

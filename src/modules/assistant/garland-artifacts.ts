@@ -6,6 +6,10 @@ import { collectGarlandProductDimensionSkus } from "@/modules/shipment-documents
 import { extractGarlandShippingOrdersFromPdfBytes } from "@/modules/shipment-documents/garland-pdf-server-extraction";
 import { buildGarlandTeamshipReview } from "@/modules/shipment-documents/teamship-review";
 import { saveTeamshipReviewRun } from "@/modules/shipment-documents/teamship-review-history";
+import type {
+  GarlandPdfShippingOrder,
+  TeamshipShippingOrderDetail
+} from "@/modules/shipment-documents/teamship-review-types";
 import { prisma } from "@/server/db";
 import { fetchTeamshipShippingOrdersForReview } from "@/server/integrations/teamship";
 import type { AuthenticatedContext } from "@/server/tenant-context";
@@ -27,6 +31,19 @@ export class GarlandArtifactError extends Error {
   }
 }
 
+const workflowArtifactSelect = {
+  id: true,
+  fileName: true,
+  sizeBytes: true,
+  chunkCount: true,
+  contentHash: true,
+  status: true,
+  teamshipReviewRunId: true,
+  extractionSummary: true,
+  errorMessage: true,
+  createdAt: true
+} satisfies Prisma.WorkflowArtifactSelect;
+
 export async function createGarlandArtifact(
   context: AuthenticatedContext,
   input: {
@@ -34,6 +51,7 @@ export async function createGarlandArtifact(
     contentType: string;
     sizeBytes: number;
     chunkCount: number;
+    contentHash: string;
     sourceChannel: "TEAMS" | "NEWL_APPS";
     externalMessageId?: string | null;
     externalConversationId?: string | null;
@@ -55,29 +73,74 @@ export async function createGarlandArtifact(
   ) {
     throw new GarlandArtifactError(`chunkCount must be ${expectedChunks} for this file size.`);
   }
+  const contentHash = normalizeSha256(input.contentHash, "contentHash");
+  const externalMessageId = normalizeOptionalText(input.externalMessageId, 300);
+  const externalConversationId = normalizeOptionalText(input.externalConversationId, 300);
+  const sourceIdempotencyKey = externalMessageId
+    ? sha256(Buffer.from([
+        input.sourceChannel,
+        externalConversationId ?? "",
+        externalMessageId,
+        context.userId,
+        contentHash
+      ].join("\u0000")))
+    : null;
 
-  return prisma.workflowArtifact.create({
-    data: {
-      tenantId: context.tenantId,
-      workflowKey: GARLAND_WORKFLOW_KEY,
-      sourceChannel: input.sourceChannel,
-      externalMessageId: normalizeOptionalText(input.externalMessageId, 300),
-      externalConversationId: normalizeOptionalText(input.externalConversationId, 300),
-      submittedByUserId: context.userId,
-      fileName,
-      contentType: "application/pdf",
-      sizeBytes: input.sizeBytes,
-      chunkCount: input.chunkCount
-    },
-    select: {
-      id: true,
-      fileName: true,
-      sizeBytes: true,
-      chunkCount: true,
-      status: true,
-      createdAt: true
+  if (sourceIdempotencyKey) {
+    const existing = await prisma.workflowArtifact.findFirst({
+      where: { tenantId: context.tenantId, sourceIdempotencyKey },
+      select: workflowArtifactSelect
+    });
+    if (existing) return existing;
+  }
+
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const artifact = await tx.workflowArtifact.create({
+        data: {
+          tenantId: context.tenantId,
+          workflowKey: GARLAND_WORKFLOW_KEY,
+          sourceChannel: input.sourceChannel,
+          sourceIdempotencyKey,
+          externalMessageId,
+          externalConversationId,
+          submittedByUserId: context.userId,
+          fileName,
+          contentType: "application/pdf",
+          sizeBytes: input.sizeBytes,
+          contentHash,
+          chunkCount: input.chunkCount
+        },
+        select: workflowArtifactSelect
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          action: "assistant.garland_artifact.create",
+          entityType: "WorkflowArtifact",
+          entityId: artifact.id,
+          after: {
+            workflowKey: GARLAND_WORKFLOW_KEY,
+            sourceChannel: input.sourceChannel,
+            fileName,
+            sizeBytes: input.sizeBytes,
+            chunkCount: input.chunkCount
+          } satisfies Prisma.InputJsonValue
+        }
+      });
+      return artifact;
+    });
+  } catch (error) {
+    if (sourceIdempotencyKey && isUniqueConstraintError(error)) {
+      const existing = await prisma.workflowArtifact.findFirst({
+        where: { tenantId: context.tenantId, sourceIdempotencyKey },
+        select: workflowArtifactSelect
+      });
+      if (existing) return existing;
     }
-  });
+    throw error;
+  }
 }
 
 export async function saveGarlandArtifactChunk(
@@ -175,9 +238,12 @@ export async function finalizeGarlandArtifact(
     throw new GarlandArtifactError("The assembled PDF size does not match the declared file size.", 409);
   }
   const contentHash = sha256(bytes);
-  const shipmentDateInput = normalizeShipmentDate(input.shipmentDate);
+  const requestedShipmentDate = normalizeOptionalShipmentDate(input.shipmentDate);
 
   try {
+    if (artifact.contentHash && !safeHashEquals(contentHash, artifact.contentHash)) {
+      throw new GarlandArtifactError("The assembled PDF hash does not match the original upload.", 409);
+    }
     const extraction = await extractGarlandShippingOrdersFromPdfBytes(bytes);
     if (extraction.orders.length === 0) {
       throw new GarlandArtifactError("No Garland shipping orders were found in this PDF.");
@@ -185,9 +251,14 @@ export async function finalizeGarlandArtifact(
 
     const teamshipOrders = await fetchTeamshipShippingOrdersForReview({
       tenantId: context.tenantId,
-      shipmentDate: shipmentDateInput,
+      shipmentDate: requestedShipmentDate ?? "",
       srNumbers: extraction.orders.map((order) => order.srNumber)
     });
+    const shipmentDateInput = resolveGarlandReviewShipmentDate(
+      requestedShipmentDate,
+      extraction.orders,
+      teamshipOrders
+    );
     const learnedProductDimensions = await getGarlandLearnedProductDimensionRecommendations({
       tenantId: context.tenantId,
       skus: collectGarlandProductDimensionSkus({ pdfOrders: extraction.orders, teamshipOrders })
@@ -215,24 +286,42 @@ export async function finalizeGarlandArtifact(
       orderBy: { createdAt: "asc" }
     });
 
-    await prisma.workflowArtifact.update({
-      where: { tenantId_id: { tenantId: context.tenantId, id: artifact.id } },
-      data: {
-        contentHash,
-        status: "REVIEWED",
-        teamshipReviewRunId: reviewRunId,
-        duplicateOfArtifactId: duplicate?.id ?? null,
-        extractionSummary: {
-          shipmentDate: shipmentDateInput,
-          pageCount: extraction.pageCount,
-          orderCount: extraction.orders.length,
-          psNumbers: extraction.psNumbers,
-          srNumbers: extraction.srNumbers,
-          review: review.summary
-        } satisfies Prisma.InputJsonValue,
-        errorMessage: null,
-        completedAt: new Date()
-      }
+    await prisma.$transaction(async (tx) => {
+      await tx.workflowArtifact.update({
+        where: { tenantId_id: { tenantId: context.tenantId, id: artifact.id } },
+        data: {
+          contentHash,
+          status: "REVIEWED",
+          teamshipReviewRunId: reviewRunId,
+          duplicateOfArtifactId: duplicate?.id ?? null,
+          extractionSummary: {
+            shipmentDate: shipmentDateInput,
+            pageCount: extraction.pageCount,
+            orderCount: extraction.orders.length,
+            psNumbers: extraction.psNumbers,
+            srNumbers: extraction.srNumbers,
+            review: review.summary
+          } satisfies Prisma.InputJsonValue,
+          errorMessage: null,
+          completedAt: new Date()
+        }
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          action: "assistant.garland_artifact.review",
+          entityType: "WorkflowArtifact",
+          entityId: artifact.id,
+          after: {
+            status: "REVIEWED",
+            reviewRunId,
+            shipmentDate: shipmentDateInput,
+            orderCount: extraction.orders.length,
+            review: review.summary
+          } satisfies Prisma.InputJsonValue
+        }
+      });
     });
 
     return {
@@ -255,14 +344,27 @@ export async function finalizeGarlandArtifact(
       }))
     };
   } catch (error) {
-    await prisma.workflowArtifact.update({
-      where: { tenantId_id: { tenantId: context.tenantId, id: artifact.id } },
-      data: {
-        contentHash,
-        status: "FAILED",
-        errorMessage: error instanceof Error ? error.message.slice(0, 1000) : "Garland PDF review failed.",
-        completedAt: new Date()
-      }
+    const errorMessage = error instanceof Error ? error.message.slice(0, 1000) : "Garland PDF review failed.";
+    await prisma.$transaction(async (tx) => {
+      await tx.workflowArtifact.update({
+        where: { tenantId_id: { tenantId: context.tenantId, id: artifact.id } },
+        data: {
+          contentHash,
+          status: "FAILED",
+          errorMessage,
+          completedAt: new Date()
+        }
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          action: "assistant.garland_artifact.review_failed",
+          entityType: "WorkflowArtifact",
+          entityId: artifact.id,
+          after: { status: "FAILED", errorMessage } satisfies Prisma.InputJsonValue
+        }
+      });
     });
     throw error;
   }
@@ -276,12 +378,54 @@ function normalizePdfFileName(value: string) {
   return fileName;
 }
 
-function normalizeShipmentDate(value?: string | null) {
-  const candidate = value?.trim() || new Date().toISOString().slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(candidate) || Number.isNaN(Date.parse(`${candidate}T00:00:00Z`))) {
+function normalizeOptionalShipmentDate(value?: string | null) {
+  const candidate = value?.trim();
+  if (!candidate) return null;
+  if (!isIsoDate(candidate)) {
     throw new GarlandArtifactError("shipmentDate must use YYYY-MM-DD format.");
   }
   return candidate;
+}
+
+export function resolveGarlandReviewShipmentDate(
+  requested: string | null,
+  pdfOrders: GarlandPdfShippingOrder[],
+  teamshipOrders: TeamshipShippingOrderDetail[]
+) {
+  if (requested) return requested;
+  const candidates = new Set<string>();
+  for (const order of pdfOrders) {
+    for (const item of order.items) {
+      const normalized = normalizeDateCandidate(item.dueShipDate);
+      if (normalized) candidates.add(normalized);
+    }
+  }
+  for (const order of teamshipOrders) {
+    const normalized = normalizeDateCandidate(order.shipment_date);
+    if (normalized) candidates.add(normalized);
+  }
+  if (candidates.size === 1) return [...candidates][0] as string;
+  throw new GarlandArtifactError(
+    candidates.size === 0
+      ? "The shipment date could not be determined from the Garland PDF or Teamship. Ask the employee for YYYY-MM-DD and retry."
+      : "The Garland PDF or Teamship contains more than one shipment date. Ask the employee which YYYY-MM-DD date applies and retry."
+  );
+}
+
+function normalizeDateCandidate(value?: string | null) {
+  const candidate = value?.trim();
+  if (!candidate) return null;
+  if (isIsoDate(candidate)) return candidate;
+  const usDate = candidate.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!usDate) return null;
+  const normalized = `${usDate[3]}-${String(usDate[1]).padStart(2, "0")}-${String(usDate[2]).padStart(2, "0")}`;
+  return isIsoDate(normalized) ? normalized : null;
+}
+
+function isIsoDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value;
 }
 
 function buildDocumentLabel(shipmentDate: string, psNumbers: string[]) {
@@ -292,6 +436,18 @@ function buildDocumentLabel(shipmentDate: string, psNumbers: string[]) {
 function normalizeOptionalText(value: string | null | undefined, maxLength: number) {
   const text = value?.trim();
   return text ? text.slice(0, maxLength) : null;
+}
+
+function normalizeSha256(value: string, field: string) {
+  const normalized = value.trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(normalized)) {
+    throw new GarlandArtifactError(`${field} must be a SHA-256 hash.`);
+  }
+  return normalized;
+}
+
+function isUniqueConstraintError(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }
 
 function sha256(bytes: Uint8Array) {

@@ -88,7 +88,7 @@ const configSchema = Type.Object({
     description: "Environment variable containing the Newl Apps Teamship read token."
   })),
   assistantTokenEnv: Type.Optional(Type.String({
-    description: "Environment variable containing the Newl Apps Garland assistant token."
+    description: "Environment variable containing the Newl Apps Garland assistant token; it must differ from the Teamship read-token environment."
   })),
   digestAdminObjectId: Type.Optional(Type.String({
     description: "Microsoft Entra object ID used only by a sender-less scheduled admin digest. Interactive calls always use the actual Teams sender."
@@ -374,14 +374,28 @@ export function createGarlandPdfReviewTool({
             contentType: "application/pdf",
             sizeBytes: file.bytes.byteLength,
             chunkCount: Math.ceil(file.bytes.byteLength / PDF_CHUNK_BYTES),
+            contentHash: sha256(file.bytes),
             externalMessageId: captured.messageId,
             externalConversationId: captured.conversationId
           })
         });
         const createBody = await readGenericResponse(createResponse);
-        const artifactId = (createBody.data as Record<string, unknown> | undefined)?.id;
+        const artifactData = asRecord(createBody.data);
+        const artifactId = artifactData.id;
         if (!createResponse.ok || typeof artifactId !== "string") {
           return textResult(createBody.error || `Could not create storage for ${file.fileName}.`, "failed");
+        }
+        if (artifactData.status === "REVIEWED") {
+          completed.push(formatStoredArtifactResult(file.fileName, artifactData));
+          continue;
+        }
+        if (artifactData.status !== "UPLOADING") {
+          return textResult(
+            artifactData.errorMessage
+              ? `The prior upload of ${file.fileName} failed: ${String(artifactData.errorMessage)} Attach the PDF in a new Teams message to retry.`
+              : `The prior upload of ${file.fileName} cannot be resumed. Attach it in a new Teams message to retry.`,
+            "failed"
+          );
         }
 
         for (let offset = 0, chunkIndex = 0; offset < file.bytes.byteLength; offset += PDF_CHUNK_BYTES, chunkIndex += 1) {
@@ -552,11 +566,29 @@ function formatGarlandExplanation(data: Record<string, unknown>) {
   return [explanation, ...issueLines, ...lessonLines].join("\n");
 }
 
+function formatStoredArtifactResult(fileName: string, artifact: Record<string, unknown>) {
+  const summary = asRecord(artifact.extractionSummary);
+  return {
+    fileName,
+    artifactId: artifact.id,
+    reviewRunId: artifact.teamshipReviewRunId,
+    extraction: {
+      pageCount: summary.pageCount,
+      orderCount: summary.orderCount,
+      psNumbers: summary.psNumbers,
+      srNumbers: summary.srNumbers
+    },
+    review: asRecord(summary.review),
+    reused: true
+  };
+}
+
 function formatPdfReviewResults(results: Array<Record<string, unknown>>) {
   const lines = results.map((result) => {
     const review = asRecord(result.review);
     const extraction = asRecord(result.extraction);
-    return `${String(result.fileName ?? "Garland PDF")} was saved as artifact ${String(result.artifactId ?? "")}. Review ${String(result.reviewRunId ?? "")} checked ${String(extraction.orderCount ?? 0)} order(s): ${String(review.passedCount ?? 0)} passed, ${String(review.failedCount ?? 0)} failed, ${String(review.missingTeamshipCount ?? 0)} missing in Teamship, and ${String(review.pendingTeamshipCount ?? 0)} pending. No Teamship values were changed and nothing was printed.`;
+    const storageResult = result.reused === true ? "was already saved as" : "was saved as";
+    return `${String(result.fileName ?? "Garland PDF")} ${storageResult} artifact ${String(result.artifactId ?? "")}. Review ${String(result.reviewRunId ?? "")} checked ${String(extraction.orderCount ?? 0)} order(s): ${String(review.passedCount ?? 0)} passed, ${String(review.failedCount ?? 0)} failed, ${String(review.missingTeamshipCount ?? 0)} missing in Teamship, and ${String(review.pendingTeamshipCount ?? 0)} pending. No Teamship values were changed and nothing was printed.`;
   });
   return lines.join("\n");
 }

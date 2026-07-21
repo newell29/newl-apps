@@ -56,5 +56,5 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Which status values map to employee-approved business language? Requires employee confirmation.
 - Which write actions should require two-person approval? Requires owner confirmation.
 - Which external integration credentials should be moved from env fallback to tenant-scoped settings first? Requires owner confirmation.
-- What time and Teams destination should run the daily admin development-suggestion digest? Requires Alex confirmation before creating the OpenClaw automation.
+- The daily digest target is confirmed as Alex's Teams direct conversation at 10:00 AM `America/Toronto`; runtime enablement remains blocked on the reviewed production rollout.
 - Should approved development suggestions require a second explicit approval when Codex presents its proposed scope? Recommended; requires Alex confirmation.

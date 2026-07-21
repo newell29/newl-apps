@@ -24,7 +24,7 @@
       },
       "assistantTokenEnv": {
         "type": "string",
-        "description": "Environment variable containing the Newl Apps Garland assistant token."
+        "description": "Environment variable containing the Newl Apps Garland assistant token; it must differ from the Teamship read-token environment."
       },
       "digestAdminObjectId": {
         "type": "string",

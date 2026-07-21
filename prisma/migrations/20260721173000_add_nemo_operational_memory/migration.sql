@@ -5,6 +5,7 @@ CREATE TABLE "WorkflowArtifact" (
     "tenantId" TEXT NOT NULL,
     "workflowKey" TEXT NOT NULL,
     "sourceChannel" TEXT NOT NULL,
+    "sourceIdempotencyKey" TEXT,
     "externalMessageId" TEXT,
     "externalConversationId" TEXT,
     "submittedByUserId" TEXT,
@@ -113,6 +114,7 @@ CREATE TABLE "DevelopmentSuggestion" (
 );
 
 CREATE UNIQUE INDEX "WorkflowArtifact_tenantId_id_key" ON "WorkflowArtifact"("tenantId", "id");
+CREATE UNIQUE INDEX "WorkflowArtifact_tenantId_sourceIdempotencyKey_key" ON "WorkflowArtifact"("tenantId", "sourceIdempotencyKey");
 CREATE INDEX "WorkflowArtifact_tenantId_workflowKey_createdAt_idx" ON "WorkflowArtifact"("tenantId", "workflowKey", "createdAt");
 CREATE INDEX "WorkflowArtifact_tenantId_contentHash_idx" ON "WorkflowArtifact"("tenantId", "contentHash");
 CREATE INDEX "WorkflowArtifact_tenantId_externalMessageId_idx" ON "WorkflowArtifact"("tenantId", "externalMessageId");
