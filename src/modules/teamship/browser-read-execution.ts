@@ -87,15 +87,15 @@ export function createTeamshipPlaywrightReadAdapter(
       await openReadPage(page, baseUrl, "/inventory", input.credentials, options);
       await assertPageContext(page, "/inventory", ["Inventory"]);
       await activateInventoryView(page, "All");
-      await applyInventorySearch(page, input.sku);
-      return parseInventoryAllTables(await readVisibleTables(page));
+      const tablePages = await applyInventorySearch(page, input.sku);
+      return tablePages.flatMap((tables) => parseInventoryAllTables(tables, input.sku));
     }),
     searchLpn: (input) => runBrowserRead(input.credentials, options, async (page, baseUrl) => {
       await openReadPage(page, baseUrl, "/inventory", input.credentials, options);
       await assertPageContext(page, "/inventory", ["Inventory"]);
       await activateInventoryView(page, "Ship by LPN");
-      await applyInventorySearch(page, input.query);
-      return parseLpnTables(await readVisibleTables(page));
+      const tablePages = await applyInventorySearch(page, input.query);
+      return tablePages.flatMap((tables) => parseLpnTables(tables, input.query));
     }),
     getReceivingOrder: (input) => runBrowserRead(input.credentials, options, async (page, baseUrl) => {
       const route = `/inventory-orders/inventoryOrder/${encodeURIComponent(input.orderId)}`;
@@ -294,24 +294,205 @@ async function activateInventoryView(page: Page, name: "All" | "Ship by LPN") {
 }
 
 async function applyInventorySearch(page: Page, query: string) {
+  await waitForInventoryGridReady(page);
   const input = await requireUniqueLocator([
     page.getByRole("searchbox", { name: "Search", exact: true }),
     page.getByPlaceholder("Search", { exact: true }),
     page.getByRole("textbox", { name: "Search", exact: true })
   ], "Teamship inventory Search field");
+  const submit = await requireUniqueLocator([
+    page.locator("#Grid_searchbutton:visible"),
+    page.getByRole("search", { name: "Search", exact: true }),
+    input.locator("xpath=..").locator('[title="Search"]:visible')
+  ], "Teamship inventory Search control");
   assertTeamshipReadControlAllowed("Search");
-  await submitTeamshipInventorySearch(input, query);
-  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => undefined);
-  await page.waitForTimeout(1_500);
+  await submitTeamshipInventorySearch(input, submit, query);
+  const firstPageTables = await waitForTeamshipInventorySearchResult(page, query, 45_000);
+  const tablePages = await collectTeamshipInventorySearchPages(page, query, firstPageTables);
   await assertNoUnexpectedDialog(page);
+  return tablePages;
+}
+
+const MAX_TEAMSHIP_INVENTORY_SEARCH_PAGES = 25;
+
+export async function collectTeamshipInventorySearchPages(
+  page: Page,
+  query: string,
+  firstPageTables: RawTable[]
+) {
+  let tablePages = [firstPageTables];
+  const currentPage = page.locator('a.e-currentitem[aria-label^="Page "]:visible');
+  if (await currentPage.count() === 0) return tablePages;
+  if (await currentPage.count() !== 1) {
+    throw new Error("Teamship inventory pager was ambiguous.");
+  }
+
+  const pager = parseTeamshipInventoryPagerLabel(await currentPage.getAttribute("aria-label"));
+  if (!pager) throw new Error("Teamship inventory pager label was invalid.");
+  if (pager.totalPages > MAX_TEAMSHIP_INVENTORY_SEARCH_PAGES) {
+    throw new Error(`Teamship inventory search exceeded the ${MAX_TEAMSHIP_INVENTORY_SEARCH_PAGES}-page read limit.`);
+  }
+
+  const expandedTables = await expandTeamshipInventoryPageSize(page, query, pager.totalPages);
+  if (expandedTables) {
+    tablePages = [expandedTables];
+    const expandedCurrentPage = page.locator('a.e-currentitem[aria-label^="Page "]:visible');
+    if (await expandedCurrentPage.count() === 0) return tablePages;
+    if (await expandedCurrentPage.count() !== 1) throw new Error("Teamship inventory pager was ambiguous after expanding the page size.");
+    const expandedPager = parseTeamshipInventoryPagerLabel(await expandedCurrentPage.getAttribute("aria-label"));
+    if (!expandedPager) throw new Error("Teamship inventory pager label was invalid after expanding the page size.");
+    if (expandedPager.totalPages > MAX_TEAMSHIP_INVENTORY_SEARCH_PAGES) {
+      throw new Error(`Teamship inventory search exceeded the ${MAX_TEAMSHIP_INVENTORY_SEARCH_PAGES}-page read limit.`);
+    }
+    pager.currentPage = expandedPager.currentPage;
+    pager.totalPages = expandedPager.totalPages;
+  }
+
+  for (let pageNumber = pager.currentPage + 1; pageNumber <= pager.totalPages; pageNumber += 1) {
+    const label = `Page ${pageNumber} of ${pager.totalPages} Pages`;
+    const link = page.locator(`a[aria-label="${label}"]:visible`);
+    if (await link.count() !== 1) throw new Error(`Teamship inventory page ${pageNumber} link was missing or ambiguous.`);
+    await link.click();
+    await page.locator(`a.e-currentitem[aria-label="${label}"]:visible`).waitFor({ state: "visible", timeout: 15_000 });
+    tablePages.push(await waitForTeamshipInventorySearchResult(page, query, 15_000));
+  }
+
+  return tablePages;
+}
+
+async function expandTeamshipInventoryPageSize(page: Page, query: string, previousTotalPages: number) {
+  if (previousTotalPages <= 1) return null;
+  const input = page.locator('input[placeholder="Items per page"]:visible');
+  if (await input.count() !== 1 || await input.getAttribute("value") === "100") return null;
+
+  assertTeamshipReadControlAllowed("Items per page");
+  await input.locator("xpath=..").click();
+  const option = page.getByRole("option", { name: "100", exact: true });
+  if (await option.count() !== 1) throw new Error("Teamship 100-items page-size option was missing or ambiguous.");
+  await option.click();
+  await page.waitForFunction(({ previousPages }) => {
+    const size = document.querySelector<HTMLInputElement>('input[placeholder="Items per page"]');
+    const current = Array.from(document.querySelectorAll<HTMLAnchorElement>('a.e-currentitem[aria-label^="Page "]'))
+      .find((link) => {
+        const bounds = link.getBoundingClientRect();
+        return bounds.width > 0 && bounds.height > 0;
+      });
+    if (size?.value !== "100") return false;
+    if (!current) return true;
+    const match = current.getAttribute("aria-label")?.match(/^Page\s+\d+\s+of\s+(\d+)\s+Pages$/i);
+    return Number(match?.[1]) < previousPages;
+  }, { previousPages: previousTotalPages }, { timeout: 30_000 });
+  return waitForTeamshipInventorySearchResult(page, query, 45_000);
+}
+
+export function parseTeamshipInventoryPagerLabel(label: string | null) {
+  const match = label?.match(/^Page\s+(\d+)\s+of\s+(\d+)\s+Pages$/i);
+  const currentPage = Number(match?.[1]);
+  const totalPages = Number(match?.[2]);
+  if (!Number.isInteger(currentPage) || !Number.isInteger(totalPages) || currentPage < 1 || totalPages < currentPage) {
+    return null;
+  }
+  return { currentPage, totalPages };
+}
+
+async function waitForInventoryGridReady(page: Page) {
+  await page.locator('[role="grid"] [role="gridcell"]:visible').first().waitFor({
+    state: "visible",
+    timeout: 30_000
+  });
 }
 
 export async function submitTeamshipInventorySearch(
-  input: Pick<Locator, "fill" | "press">,
+  input: Pick<Locator, "fill" | "type">,
+  submit: Pick<Locator, "click">,
   query: string
 ) {
-  await input.fill(query);
-  await input.press("Enter");
+  await input.fill("");
+  await input.type(query, { delay: 25 });
+  await submit.click();
+}
+
+export async function waitForTeamshipInventorySearchResult(
+  page: Pick<Page, "evaluate">,
+  query: string,
+  timeoutMs: number
+) {
+  const captureVisibleGrid = `({ requestedQuery, timeoutMs }) => new Promise((resolve, reject) => {
+    const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim().toLowerCase();
+    const isVisible = (element) => {
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    const normalizedQuery = normalize(requestedQuery);
+    let timer;
+    let observer;
+    const finish = (payload) => {
+      if (timer) clearTimeout(timer);
+      if (observer) observer.disconnect();
+      resolve(JSON.stringify(payload));
+    };
+    const capture = () => {
+      const visibleRows = Array.from(document.querySelectorAll('tbody tr,[role="row"]')).filter(isVisible);
+      const hasExactRow = visibleRows.some((row) => Array.from(
+        row.querySelectorAll('th,td,[role="gridcell"],[role="rowheader"]')
+      ).some((cell) => normalize(cell.textContent) === normalizedQuery));
+      if (!hasExactRow) return false;
+      const surfaces = [
+        ...Array.from(document.querySelectorAll('table')).filter(isVisible),
+        ...Array.from(document.querySelectorAll('[role="grid"]')).filter((element) => element.tagName !== 'TABLE' && isVisible(element))
+      ];
+      const tables = surfaces.map((surface) => {
+        const isTable = surface.tagName === 'TABLE';
+        const headerCells = isTable
+          ? Array.from(surface.querySelectorAll('thead th, tr:first-child th'))
+          : Array.from(surface.querySelectorAll('[role="columnheader"]')).filter(isVisible);
+        const headers = headerCells.map((cell) => {
+          const label = isTable ? cell : cell.querySelector('.e-headertext') || cell;
+          return (label.textContent || "").replace(/\\s+/g, " ").trim();
+        });
+        const candidateRows = isTable
+          ? Array.from(surface.querySelectorAll('tbody tr'))
+          : Array.from(surface.querySelectorAll('[role="row"]')).filter((row) => !row.querySelector('[role="columnheader"]'));
+        const rows = candidateRows.map((row) => {
+          const cells = isTable
+            ? Array.from(row.querySelectorAll(':scope > th,:scope > td'))
+            : Array.from(row.children).filter((cell) => {
+                const role = cell.getAttribute('role');
+                return isVisible(cell) && (role === 'gridcell' || role === 'rowheader' || cell.classList.contains('e-groupcaption'));
+              });
+          return cells.map((cell) => ({
+            text: (cell.textContent || "").replace(/\\s+/g, " ").trim(),
+            links: Array.from(cell.querySelectorAll('a[href]')).map((link) => link.getAttribute('href') || "").filter(Boolean)
+          }));
+        }).filter((row) => row.length > 0);
+        return { headers, rows };
+      });
+      finish({ kind: "rows", tables });
+      return true;
+    };
+    observer = new MutationObserver(capture);
+    observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+    timer = setTimeout(() => {
+      observer.disconnect();
+      const rows = Array.from(document.querySelectorAll('tbody tr,[role="row"]')).filter(isVisible);
+      const emptyVisible = rows.some((row) => {
+        const text = normalize(row.textContent);
+        return text === "no records to display" || text === "no records found" || text === "no data";
+      });
+      if (emptyVisible) resolve(JSON.stringify({ kind: "empty" }));
+      else reject(new Error("Teamship inventory search did not settle."));
+    }, timeoutMs);
+    capture();
+  })`;
+
+  const captureExpression = `(${captureVisibleGrid})(${JSON.stringify({ requestedQuery: query, timeoutMs })})`;
+  const serialized = await page.evaluate(captureExpression);
+  if (typeof serialized !== "string") {
+    throw new Error("Teamship inventory grid snapshot was not serialized.");
+  }
+  const payload = JSON.parse(serialized) as { kind: "rows"; tables: RawTable[] } | { kind: "empty" };
+  return payload.kind === "rows" ? payload.tables : [];
 }
 
 async function requireUniqueLocator(candidates: Locator[], description: string) {
@@ -451,8 +632,8 @@ async function readReceivingItems(page: Page): Promise<TeamshipBrowserReceivingO
   }));
 }
 
-export function parseInventoryAllTables(tables: RawTable[]): TeamshipBrowserInventoryAllRow[] {
-  const table = findTable(tables, ["sku", "available", "reserved", "on hand"]);
+export function parseInventoryAllTables(tables: RawTable[], requestedSku?: string): TeamshipBrowserInventoryAllRow[] {
+  const table = findTable(tables, ["sku", "available", "reserved", "on hand"], requestedSku);
   if (!table) return [];
   return table.rows.map((row) => ({
     inventoryId: readCell(table, row, ["inventory id", "stock id", "id"]),
@@ -470,14 +651,15 @@ export function parseInventoryAllTables(tables: RawTable[]): TeamshipBrowserInve
   }));
 }
 
-export function parseLpnTables(tables: RawTable[]): TeamshipBrowserLpnRow[] {
-  const table = findTable(tables, ["sku", "available", "warehouse", "company name"]);
+export function parseLpnTables(tables: RawTable[], requestedQuery?: string): TeamshipBrowserLpnRow[] {
+  const table = findTable(tables, ["sku", "available", "warehouse", "company name"], requestedQuery);
   if (!table) return [];
   let group: { lpn: string | null; location: string | null } = { lpn: null, location: null };
   const records: TeamshipBrowserLpnRow[] = [];
   for (const row of table.rows) {
-    const groupText = row.length === 1 ? row[0]?.text ?? "" : "";
-    const groupMatch = groupText.match(/([^\s(]+)\s*\([^,]+,\s*LOC:\s*([^\)]+)\)/i);
+    const groupMatch = row
+      .map((cell) => cell.text.match(/([^\s(]+)\s*\([^,]+,\s*LOC:\s*([^\)]+)\)/i))
+      .find((match) => Boolean(match));
     if (groupMatch) {
       group = { lpn: groupMatch[1]?.trim() ?? null, location: groupMatch[2]?.trim() ?? null };
       continue;
@@ -570,11 +752,31 @@ export function parseProductHistoryPage({
   };
 }
 
-function findTable(tables: RawTable[], requiredHeaders: string[]) {
-  return tables.find((table) => {
+function findTable(tables: RawTable[], requiredHeaders: string[], requestedIdentifier?: string) {
+  const candidates = pairSplitGridSurfaces(tables);
+  const matches = candidates.filter((table) => {
     const headers = table.headers.map(normalizeHeader);
     return requiredHeaders.every((required) => headers.includes(normalizeHeader(required)));
-  }) ?? null;
+  });
+  if (!requestedIdentifier) return matches[0] ?? null;
+  const normalizedIdentifier = normalizeText(requestedIdentifier);
+  return matches.find((table) => table.rows.some((row) =>
+    row.some((cell) => {
+      const value = normalizeText(cell.text);
+      return value === normalizedIdentifier || value.startsWith(`${normalizedIdentifier} (`);
+    })
+  )) ?? matches[0] ?? null;
+}
+
+function pairSplitGridSurfaces(tables: RawTable[]) {
+  const headerSurfaces = tables.filter((table) => table.headers.length > 0);
+  const paired = tables.flatMap((dataSurface) => {
+    if (dataSurface.headers.length > 0 || dataSurface.rows.length === 0) return [];
+    return headerSurfaces
+      .filter((headerSurface) => dataSurface.rows.some((row) => row.length === headerSurface.headers.length))
+      .map((headerSurface) => ({ headers: headerSurface.headers, rows: dataSurface.rows }));
+  });
+  return [...tables, ...paired];
 }
 
 function readCell(table: RawTable, row: RawCell[], aliases: string[]) {
@@ -599,7 +801,10 @@ function readField(fields: Record<string, string>, aliases: string[]) {
 }
 
 function normalizeHeader(value: string) {
-  return normalizeText(value).replace(/[^a-z0-9]+/g, " ").trim();
+  return normalizeText(value)
+    .replace(/press (?:alt down|enter|ctrl space).*$/, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 function normalizeText(value: string) {

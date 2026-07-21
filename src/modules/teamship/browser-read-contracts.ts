@@ -83,7 +83,7 @@ type TeamshipBrowserRequest = {
 
 export type TeamshipBrowserReadAdapter = {
   searchInventoryAll(input: TeamshipBrowserRequest & { sku: string }): Promise<TeamshipBrowserInventoryAllRow[]>;
-  searchLpn(input: TeamshipBrowserRequest & { queryType: "SKU" | "LPN"; query: string }): Promise<TeamshipBrowserLpnRow[]>;
+  searchLpn(input: TeamshipBrowserRequest & { queryType: "SKU" | "LPN" | "SERIAL"; query: string }): Promise<TeamshipBrowserLpnRow[]>;
   getReceivingOrder(input: TeamshipBrowserRequest & { orderId: string }): Promise<TeamshipBrowserReceivingOrder[]>;
   getProductHistory(input: TeamshipBrowserRequest & { productId: string }): Promise<TeamshipBrowserProductHistory[]>;
 };
@@ -91,7 +91,8 @@ export type TeamshipBrowserReadAdapter = {
 export const TEAMSHIP_BROWSER_READ_ALLOWED_CONTROLS = [
   "All",
   "Ship by LPN",
-  "Search"
+  "Search",
+  "Items per page"
 ] as const;
 
 export const TEAMSHIP_BROWSER_BLOCKED_CONTROL_NAMES = [

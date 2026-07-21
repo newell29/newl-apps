@@ -78,7 +78,7 @@ export async function maybeRunAssistantTeamshipRequest(
 
   if (route.tool === "searchTeamshipLpn") {
     const result = await searchTeamshipLpn(context, {
-      queryType: route.input.queryType as "SKU" | "LPN",
+      queryType: route.input.queryType as "SKU" | "LPN" | "SERIAL",
       query: route.input.query,
       customerId: route.input.customerId,
       warehouseId: route.input.warehouseId
@@ -194,7 +194,8 @@ function formatLpnResult(
 
   const lines = result.data.map((record) => {
     const quarantine = record.quarantined === true ? ", quarantined" : record.quarantined === false ? ", not quarantined" : "";
-    return `${record.lpn ?? "LPN not returned"}: SKU ${record.sku ?? "not returned"}, quantity ${formatQuantity(record.quantity)}, location ${record.location ?? "not returned"}${record.serialNumber ? `, serial ${record.serialNumber}` : ""}${quarantine}.`;
+    const status = record.status ? `, status ${record.status}` : "";
+    return `${record.lpn ?? "LPN not returned"}: SKU ${record.sku ?? "not returned"}, quantity ${formatQuantity(record.quantity)}, location ${record.location ?? "not returned"}, warehouse ${record.warehouse.name}${record.serialNumber ? `, serial ${record.serialNumber}` : ""}${status}${quarantine}.`;
   });
   const answer = result.resultCount === 0
     ? `No exact ${input.queryType} ${input.query} row was visible in Ship by LPN for customer ${input.customerId} and warehouse ${input.warehouseId}.`

@@ -17,6 +17,7 @@ describe("Newl Teamship OpenClaw plugin", () => {
     expect(tool.name).toBe("newl_teamship_read");
     expect(tool.description).toContain("do not ask them for numeric Teamship IDs");
     expect(tool.description).toContain("defaults Garland to Annagem");
+    expect(tool.description).toContain("serial number");
   });
 
   it("accepts only stable UUID-shaped Entra identities", () => {

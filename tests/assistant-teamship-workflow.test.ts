@@ -158,6 +158,43 @@ describe("assistant Teamship workflow", () => {
     );
   });
 
+  it("routes SKU LPN-list questions to Ship by LPN and formats handling-unit evidence", async () => {
+    mocks.lpn.mockResolvedValue({
+      ok: true,
+      cardinality: "ONE",
+      resultCount: 1,
+      auditId: "audit-lpn",
+      data: [{
+        inventoryId: null,
+        productId: null,
+        sku: "SR114E00082",
+        lpn: "63991",
+        quantity: 1,
+        location: "0802A",
+        status: "GARCAN",
+        serialNumber: "2512MF0134",
+        customer: { id: "420", name: "Garland Canada Distribution" },
+        warehouse: { id: "102", name: "Annagem" },
+        quarantined: false,
+        sourceView: "SHIP_BY_LPN"
+      }]
+    });
+
+    const result = await maybeRunAssistantTeamshipRequest(
+      context,
+      "Which LPNs and locations does Garland have for SKU SR114E00082?"
+    );
+
+    expect(mocks.lpn).toHaveBeenCalledWith(
+      context,
+      { queryType: "SKU", query: "SR114E00082", customerId: "420", warehouseId: "102" },
+      { browserReader: mocks.browserJobAdapter, settings: mocks.settings }
+    );
+    expect(result?.answer).toContain("63991: SKU SR114E00082, quantity 1, location 0802A, warehouse Annagem");
+    expect(result?.answer).toContain("serial 2512MF0134");
+    expect(mocks.inventoryAll).not.toHaveBeenCalled();
+  });
+
   it("uses the tenant scope reference so employees can ask with names only", async () => {
     mocks.settings.readOnlyScopes = [{
       customerId: "501",

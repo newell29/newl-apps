@@ -72,7 +72,7 @@ export type SearchTeamshipInventoryAllInput = TeamshipScopedInput & {
 };
 
 export type SearchTeamshipLpnInput = TeamshipScopedInput & {
-  queryType: "SKU" | "LPN";
+  queryType: "SKU" | "LPN" | "SERIAL";
   query: string;
 };
 
@@ -304,8 +304,8 @@ export async function searchTeamshipLpn(
 
   try {
     const query = requireIdentifier(input.query, "query");
-    if (input.queryType !== "SKU" && input.queryType !== "LPN") {
-      return await auditedError(context, operation, input, "INVALID_INPUT", "queryType must be SKU or LPN.", false);
+    if (input.queryType !== "SKU" && input.queryType !== "LPN" && input.queryType !== "SERIAL") {
+      return await auditedError(context, operation, input, "INVALID_INPUT", "queryType must be SKU, LPN, or SERIAL.", false);
     }
     const scopeResult = await authorizeTeamshipScope(context, input, dependencies.settings);
     if (!scopeResult.ok) {
@@ -742,8 +742,8 @@ function browserInventoryRowMatchesScope(row: TeamshipBrowserInventoryAllRow, sc
   return exactBrowserScopeNamesMatch(row.customerName, row.warehouseName, scope);
 }
 
-function browserLpnRowMatchesQuery(row: TeamshipBrowserLpnRow, queryType: "SKU" | "LPN", query: string) {
-  const value = queryType === "SKU" ? row.sku : row.lpn;
+function browserLpnRowMatchesQuery(row: TeamshipBrowserLpnRow, queryType: "SKU" | "LPN" | "SERIAL", query: string) {
+  const value = queryType === "SKU" ? row.sku : queryType === "LPN" ? row.lpn : row.serialNumber;
   return normalizeIdentifier(value) === normalizeIdentifier(query);
 }
 
