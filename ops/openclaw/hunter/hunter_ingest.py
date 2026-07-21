@@ -172,6 +172,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--profile-id", required=True)
     parser.add_argument("--profile-name", default="")
+    parser.add_argument("--job-run-id", default="", help="Use a job run created by the coordinating worker.")
     parser.add_argument("--canonical-csv", required=True)
     parser.add_argument("--destination-market", default="")
     parser.add_argument("--batch-size", type=int, default=250)
@@ -188,27 +189,30 @@ def main() -> int:
     if not records:
         raise RuntimeError("canonical CSV does not contain any records with a company identity")
 
-    job_response = api_request(
-        base_url,
-        token,
-        "POST",
-        "/api/integrations/trademining/job-runs",
-        {
-            "source": "OPENCLAW",
-            "searchProfileId": args.profile_id,
-            "metadata": {
-                "workerId": os.environ.get("HUNTER_WORKER_ID", socket.gethostname()),
-                "agent": "Hunter",
-                "profileName": clean(args.profile_name),
-                "sourceFile": csv_path.name,
-                "sourceRecords": len(rows),
-                "recordsRejectedBeforeUpload": rejected_before_upload,
-            },
-        },
-    )
-    job_run_id = clean(job_response.get("data", {}).get("jobRunId") if isinstance(job_response.get("data"), dict) else None)
+    job_run_id = clean(args.job_run_id)
     if not job_run_id:
-        raise RuntimeError("Newl Apps did not return a job run ID")
+        job_response = api_request(
+            base_url,
+            token,
+            "POST",
+            "/api/integrations/trademining/job-runs",
+            {
+                "source": "OPENCLAW",
+                "searchProfileId": args.profile_id,
+                "metadata": {
+                    "workerId": os.environ.get("HUNTER_WORKER_ID", socket.gethostname()),
+                    "agent": "Hunter",
+                    "profileName": clean(args.profile_name),
+                    "sourceFile": csv_path.name,
+                    "sourceRecords": len(rows),
+                    "recordsRejectedBeforeUpload": rejected_before_upload,
+                },
+            },
+        )
+        data = job_response.get("data") if isinstance(job_response.get("data"), dict) else {}
+        job_run_id = clean(data.get("jobRunId"))
+        if not job_run_id:
+            raise RuntimeError("Newl Apps did not return a job run ID")
 
     processed = created = updated = skipped = 0
     try:

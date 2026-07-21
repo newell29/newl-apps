@@ -14,8 +14,8 @@ Draft operator guide for moving the existing TradeMining CSV collector from the 
 
 Hunter is a replaceable collector, not the sales system of record.
 
-1. Hunter reads enabled search profiles from Newl Apps through the ingestion API.
-2. Hunter applies one profile to TradeMining, downloads the resulting CSV, normalizes rows, and posts a tenant-bound batch.
+1. Hunter reads the current enabled search profiles from Newl Apps through the ingestion API on every worker cycle and rechecks a profile immediately before it starts. Deleted or disabled profiles are not searched.
+2. After the profile's configured local daily time, Hunter searches its full profile-level lookback window, downloads the resulting CSV, normalizes rows, and posts a tenant-bound batch. Large lookbacks are split into smaller TradeMining requests without shortening the requested window.
 3. Newl Apps validates the ingestion token and tenant slug, stores the raw record and normalized company evidence, and records a job run.
 4. Employees review Found Companies and approve accounts into Pipeline.
 5. Newl Apps owns Apollo contact selection, cadence mapping, approval, push, verification, and audit history.
@@ -64,6 +64,8 @@ INGESTION_TENANT_SLUG=newl-group
 HUNTER_WORKER_ID=alex-mac-mini-hunter
 HUNTER_COLLECTOR_PATH=/path/to/reviewed/collector
 HUNTER_EXPORT_DIRECTORY=/path/to/runtime/exports
+HUNTER_SEARCH_CHUNK_DAYS=7
+HUNTER_DAILY_RUN_TIME=07:00
 HUNTER_POLL_MS=60000
 ```
 
@@ -76,7 +78,7 @@ The checked-in template is `ops/openclaw/hunter/.env.example`. Store the real fi
 - `ops/openclaw/hunter/trademining_export.py`: login, form search, official XLSX export, CSV conversion, and sanitized manifest.
 - `ops/openclaw/hunter/trademining_summary.py`: canonical record conversion and deduplication.
 - `ops/openclaw/hunter/hunter_ingest.py`: tenant-bound job creation, batched ingestion, completion/failure reporting.
-- `ops/openclaw/hunter/hunter_worker.py`: active profile lookup, manual run-request polling, per-profile port planning, collection, and ingestion coordination.
+- `ops/openclaw/hunter/hunter_worker.py`: live active-profile lookup, manual run-request polling, once-daily eligibility, per-profile lookback/port planning, collection, and ingestion coordination.
 - `ops/openclaw/run-hunter-worker.sh`: allowlisted environment loader.
 - `ops/openclaw/install-hunter-worker.sh`: LaunchAgent renderer and installer.
 - `ops/openclaw/launchd/com.newl.hunter-worker.plist.template`: persistent Mac Mini service.
@@ -113,7 +115,7 @@ tail -n 20 ~/Library/Logs/newl-apps/hunter-worker.err.log
 5. Run one profile with a narrow date range and retain the job ID, record counts, and sanitized log output.
 6. Confirm the candidate in Found Companies, approve it into Pipeline, and advance one stage.
 7. Stop the VM scheduler but keep its files intact for rollback.
-8. Start the Mac `launchd` service and observe at least one scheduled run.
+8. Start the Mac `launchd` service and observe at least one daily run. Confirm that every enabled profile uses its own lookback and that a deleted test profile is not picked up on the next cycle.
 9. Promote the service to the production Newl Apps URL only after human review.
 
 Do not run the VM and Mac schedulers concurrently against the same profile during cutover; ingestion keys are designed to deduplicate records, but duplicate exports and job noise would make verification ambiguous.
@@ -129,10 +131,17 @@ Do not run the VM and Mac schedulers concurrently against the same profile durin
 - A controlled one-day Charlotte run exported 1,163 shipment rows from the three configured ports. Hunter quarantined 66 rows that lacked every company identity field, submitted 1,097 valid rows to the local database, created 1,034 records, and counted 63 API-level duplicates/skips. The local job completed successfully.
 - The first live batch exposed a mismatch between the legacy summary output and Newl Apps validation: shipment-only rows without an importer, consignee, notify party, or shipper cannot become company candidates. Hunter now rejects and counts those rows before upload instead of failing the whole batch.
 - A controlled one-day Houston run exported 716 rows from Houston and zero from Freeport for the selected date. Hunter quarantined 68 identity-free rows, submitted 648 valid rows to the local database, created 627 records, and counted 21 API-level duplicates/skips. The local job completed successfully.
+- The production Charlotte Warehouse Leads profile is enabled and saved as daily in `America/Toronto`, with a 120-day lookback, minimum shipment count 2, and Charleston, Wilmington, and Savannah coverage. The existing editor had stored each `City, State` port as two legacy values; the worker now recombines those pairs and the editor preserves canonical comma-bearing locations on future saves.
+
+## Confirmed daily profile rules
+
+- Every enabled profile is eligible once per local calendar day after 07:00 by default. `scheduleMetadata.preferredRunHourLocal` can override the hour for an existing profile, while `HUNTER_DAILY_RUN_TIME` controls the fallback.
+- The profile's `lookbackWindowDays` is the actual TradeMining date range. `HUNTER_SEARCH_CHUNK_DAYS` only divides that range into safer requests; it never caps it.
+- Found Companies counts shipment evidence from the matched profile inside that profile's lookback and excludes companies below its `minShipmentCount`.
+- New and edited profiles persist the legacy database frequency field as `daily` for compatibility, but frequency is no longer an operator option or a worker decision.
+- Deleting a profile cancels queued or running manual requests, and Hunter rechecks the live enabled list before a search. An HTTP export already in flight may finish its current request, but it cannot start a later daily run from cached profile data.
 
 ## Business questions requiring confirmation
 
 - How long should Hunter retain downloaded TradeMining CSV files?
-- Should scheduled runs be daily, weekly, or only profile-triggered during the first rollout?
-- Which profile is the first production cutover candidate?
 - Who receives failure alerts when TradeMining login expires or an export returns no records?

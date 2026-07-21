@@ -66,3 +66,9 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Cause: TradeMining can emit shipment rows with no importer, consignee, notify party, shipper, or master-party identity. Newl Apps intentionally rejects these because they cannot become company candidates.
 - Safe recovery: Hunter quarantines and counts the rows as `recordsRejectedBeforeUpload`, then uploads the valid remainder. It must not invent a company identity from other shipment fields.
 - Regression coverage: `tests/hunter-ingestion-adapter.test.ts` covers a mixed valid/identity-free export.
+
+## A deleted or disabled profile is still queued
+
+- Symptom: a manual run request exists after an operator removes or disables its search profile.
+- Safe behavior: the worker resolves profiles only from the current enabled-profile API and rechecks the profile immediately before collection. Profile deletion cancels queued and running manual requests. A request already being handled may finish its current external HTTP call, but no later daily search starts from cached profile data.
+- Regression coverage: search-profile action tests cover cancellation on deletion, and Hunter worker tests cover live profile resolution and once-daily eligibility.

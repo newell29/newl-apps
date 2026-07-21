@@ -29,6 +29,8 @@ type SearchProfileRow = {
   scheduleTimezone: string;
   scheduleMetadata: Record<string, unknown> | null;
   priorityWeight: number;
+  lastRunAt: Date | null;
+  lastRunStatus: string | null;
 };
 
 type CompanyRow = {
@@ -136,6 +138,14 @@ const mockDb = vi.hoisted(() => {
         const updated = { ...profile, ...data };
         state.searchProfiles.set(where.id, updated);
         return updated;
+      }),
+      updateMany: vi.fn(async ({ where, data }: { where: { id: string; tenantId: string }; data: Partial<SearchProfileRow> }) => {
+        const profile = state.searchProfiles.get(where.id);
+        if (!profile || profile.tenantId !== where.tenantId) {
+          return { count: 0 };
+        }
+        state.searchProfiles.set(where.id, { ...profile, ...data });
+        return { count: 1 };
       })
     },
     automationJobRun: {
@@ -371,7 +381,7 @@ describe("TradeMining ingestion", () => {
         enabled: true,
         priorityWeight: 80,
         destinationMarkets: ["Houston, TX | United States"],
-        destinationPorts: ["Houston, TX | United States"],
+        destinationPorts: ["Charleston", "South Carolina", "Savannah", "Georgia"],
         originCountries: ["China (CN)"]
       })
     );
@@ -385,11 +395,13 @@ describe("TradeMining ingestion", () => {
       id: "profile-a",
       name: "Houston Leads",
       destinationMarkets: ["Houston, TX"],
-      destinationPorts: ["Houston, TX"],
+      destinationPorts: ["Charleston, South Carolina", "Savannah, Georgia"],
       originCountries: ["China"],
       allowedCompanyIdentityRoles: ["consignee_name"],
       excludedCompanyKeywords: ["maersk"],
-      priorityWeight: 80
+      priorityWeight: 80,
+      lastRunAt: null,
+      lastRunStatus: null
     });
   });
 
@@ -741,6 +753,8 @@ function searchProfile(overrides: Partial<SearchProfileRow> = {}): SearchProfile
     scheduleTimezone: "America/Toronto",
     scheduleMetadata: { preferredRunHourLocal: 7 },
     priorityWeight: 80,
+    lastRunAt: null,
+    lastRunStatus: null,
     ...overrides
   };
 }

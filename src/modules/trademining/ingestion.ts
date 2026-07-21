@@ -43,11 +43,12 @@ type SearchProfileSummary = {
   minShipmentCount: number;
   minShipmentVolume: string | null;
   schedule: {
-    frequency: string;
     timezone: string;
     metadata: Prisma.JsonValue | null;
   };
   priorityWeight: number;
+  lastRunAt: string | null;
+  lastRunStatus: string | null;
 };
 
 type TradeMiningRecordInput = {
@@ -127,11 +128,12 @@ export async function getActiveTradeMiningProfilesForWorker(tenant: TenantContex
       minShipmentCount: profile.minShipmentCount,
       minShipmentVolume: profile.minShipmentVolume?.toString() ?? null,
       schedule: {
-        frequency: profile.scheduleFrequency,
         timezone: profile.scheduleTimezone,
         metadata: profile.scheduleMetadata
       },
-      priorityWeight: profile.priorityWeight
+      priorityWeight: profile.priorityWeight,
+      lastRunAt: profile.lastRunAt?.toISOString() ?? null,
+      lastRunStatus: profile.lastRunStatus
     })
   );
 }
@@ -140,9 +142,38 @@ function normalizeSearchProfileListForWorker(
   field: "destinationMarkets" | "destinationPorts" | "originPorts" | "shipFromPorts" | "originCountries",
   values: string[]
 ) {
-  return values
+  const compatibleValues = field === "destinationPorts" ? joinLegacyUsPortPairs(values) : values;
+
+  return compatibleValues
     .map((value) => normalizeSearchProfileValueForWorker(field, value))
     .filter((value, index, array) => value.length > 0 && array.indexOf(value) === index);
+}
+
+const usStateNames = new Set([
+  "alabama", "alaska", "arizona", "arkansas", "california", "colorado", "connecticut", "delaware",
+  "florida", "georgia", "hawaii", "idaho", "illinois", "indiana", "iowa", "kansas", "kentucky",
+  "louisiana", "maine", "maryland", "massachusetts", "michigan", "minnesota", "mississippi", "missouri",
+  "montana", "nebraska", "nevada", "new hampshire", "new jersey", "new mexico", "new york",
+  "north carolina", "north dakota", "ohio", "oklahoma", "oregon", "pennsylvania", "rhode island",
+  "south carolina", "south dakota", "tennessee", "texas", "utah", "vermont", "virginia", "washington",
+  "west virginia", "wisconsin", "wyoming"
+]);
+
+function joinLegacyUsPortPairs(values: string[]) {
+  const result: string[] = [];
+
+  for (let index = 0; index < values.length; index += 1) {
+    const city = values[index]?.trim() ?? "";
+    const possibleState = values[index + 1]?.trim() ?? "";
+    if (city && !city.includes(",") && usStateNames.has(possibleState.toLowerCase())) {
+      result.push(`${city}, ${possibleState}`);
+      index += 1;
+    } else if (city) {
+      result.push(city);
+    }
+  }
+
+  return result;
 }
 
 export async function createTradeMiningJobRun(tenant: TenantContext, payload: unknown) {
@@ -166,9 +197,10 @@ export async function createTradeMiningJobRun(tenant: TenantContext, payload: un
   });
 
   if (input.searchProfileId) {
-    await prisma.tradeMiningSearchProfile.update({
+    await prisma.tradeMiningSearchProfile.updateMany({
       where: {
-        id: input.searchProfileId
+        id: input.searchProfileId,
+        tenantId: tenant.tenantId
       },
       data: {
         lastRunAt: jobRun.startedAt,
@@ -551,9 +583,10 @@ export async function updateTradeMiningJobRunStatus(tenant: TenantContext, jobRu
   });
 
   if (searchProfileId) {
-    await prisma.tradeMiningSearchProfile.update({
+    await prisma.tradeMiningSearchProfile.updateMany({
       where: {
-        id: searchProfileId
+        id: searchProfileId,
+        tenantId: tenant.tenantId
       },
       data: {
         lastRunAt: jobRun.finishedAt ?? new Date(),

@@ -66,3 +66,5 @@ Use synthetic data for ingestion and pipeline-state testing:
 Do not use a contact with active or finished sequence history unless the owner explicitly approves re-enrollment. Do not treat a job-level `SUCCESS` as proof of enrollment; compare enrolled, skipped, and failed counts and verify the contact's campaign status.
 
 For Hunter collector validation, include a canonical export containing both a valid company row and a shipment-only row. Confirm the adapter uploads the valid row, counts the identity-free row under `recordsRejectedBeforeUpload`, and does not fail the complete batch.
+
+For daily profile rules, verify a worker plan reports the profile's exact lookback, not a global collection cap. Test before/after the configured local run time and with a `lastRunAt` on the same local date. Candidate scoring tests must also prove that records outside the profile lookback or belonging to a different profile do not count toward `minShipmentCount`.

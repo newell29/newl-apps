@@ -1,10 +1,57 @@
 import { CandidateStatus } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
-import { scoreCandidate, summarizeTradeMiningEvidence } from "@/modules/lead-gen/queries";
+import {
+  meetsSearchProfileMinimumShipmentCount,
+  scoreCandidate,
+  summarizeTradeMiningEvidence
+} from "@/modules/lead-gen/queries";
 import { DEFAULT_TRADEMINING_SCORING_SETTINGS } from "@/modules/settings/types";
 
 describe("lead-gen candidate scoring", () => {
+  it("counts only the matched profile's shipments inside its own lookback window", () => {
+    const now = Date.now();
+    const day = 86_400_000;
+    const record = (profileId: string, ageDays: number) => ({
+      rawJson: { searchProfileId: profileId, teu: 1 },
+      arrivalDate: new Date(now - ageDays * day),
+      sourcePort: "Shanghai",
+      destinationCity: "Charlotte",
+      destinationState: "NC",
+      originCountry: "Vietnam",
+      productDescription: "retail fixtures"
+    });
+    const profile = {
+      id: "profile-charlotte",
+      name: "Charlotte Warehouse Leads",
+      priorityWeight: 75,
+      destinationMarkets: ["Charlotte"],
+      destinationPorts: ["Charleston, South Carolina"],
+      originPorts: [],
+      shipFromPorts: [],
+      originCountries: ["Vietnam"],
+      productKeywords: ["retail fixtures"],
+      hsCodes: [],
+      contactCadenceConfig: null,
+      lookbackWindowDays: 30,
+      minShipmentCount: 2
+    };
+    const profiles = new Map([[profile.id, profile]]);
+    const belowMinimum = summarizeTradeMiningEvidence(
+      [record(profile.id, 2), record("profile-other", 3), record(profile.id, 45)],
+      profiles
+    );
+    const meetsMinimum = summarizeTradeMiningEvidence(
+      [record(profile.id, 2), record(profile.id, 10), record("profile-other", 3), record(profile.id, 45)],
+      profiles
+    );
+
+    expect(belowMinimum.shipmentCount).toBe(1);
+    expect(meetsSearchProfileMinimumShipmentCount(belowMinimum)).toBe(false);
+    expect(meetsMinimum.shipmentCount).toBe(2);
+    expect(meetsSearchProfileMinimumShipmentCount(meetsMinimum)).toBe(true);
+  });
+
   it("rewards profile-aligned destination, origin, product, and role signals", () => {
     const records = [
       {
@@ -23,7 +70,7 @@ describe("lead-gen candidate scoring", () => {
           teu: 5,
           weight: 28000
         },
-        arrivalDate: new Date("2026-06-12T00:00:00.000Z"),
+        arrivalDate: new Date(Date.now() - 5 * 86_400_000),
         sourcePort: "Shanghai",
         destinationCity: "Houston",
         destinationState: "TX",
@@ -45,7 +92,8 @@ describe("lead-gen candidate scoring", () => {
           shipFromPorts: ["Shanghai"],
           originCountries: ["China"],
           productKeywords: ["furniture"],
-          hsCodes: ["9403"]
+          hsCodes: ["9403"],
+          contactCadenceConfig: null
         }
       ]
     ]);

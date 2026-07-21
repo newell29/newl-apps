@@ -65,7 +65,7 @@ export default async function SearchProfilesPage() {
           <div>
             <h2 className="text-base font-semibold text-foreground">Existing profiles</h2>
             <p className="mt-1 text-sm text-mutedForeground">
-              Edit thresholds, destinations, origin preferences, schedules, and status for each active TradeMining pull target.
+              Edit thresholds, destinations, origin preferences, daily run timezone, and status for each TradeMining pull target.
             </p>
           </div>
           <span className="rounded-full border border-warning/25 bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning">
@@ -97,7 +97,7 @@ export default async function SearchProfilesPage() {
                           {profile.lookbackWindowDays}d lookback | min {profile.minShipmentCount} shipment
                           {profile.minShipmentCount === 1 ? "" : "s"}
                         </span>
-                        <span>{profile.scheduleFrequency} schedule</span>
+                        <span>Runs daily in {profile.scheduleTimezone}</span>
                       </div>
                       {profile.pendingRunRequestedAt ? (
                         <p className="mt-1 text-xs text-primary">
@@ -131,7 +131,6 @@ export default async function SearchProfilesPage() {
                         lookbackWindowDays: profile.lookbackWindowDays,
                         minShipmentCount: profile.minShipmentCount,
                         minShipmentVolume: profile.minShipmentVolume ?? "",
-                        scheduleFrequency: profile.scheduleFrequency,
                         scheduleTimezone: profile.scheduleTimezone,
                         priorityWeight: profile.priorityWeight
                       }}
@@ -230,7 +229,6 @@ function SearchProfileForm({
     lookbackWindowDays: number;
     minShipmentCount: number;
     minShipmentVolume: string;
-    scheduleFrequency: string;
     scheduleTimezone: string;
     priorityWeight: number;
   };
@@ -251,7 +249,7 @@ function SearchProfileForm({
           name="destinationMarkets"
           defaultValue={defaults?.destinationMarkets}
           suggestionField="destinationMarkets"
-          description="Required. One per line or comma-separated."
+          description="Required. Select canonical values or enter one per line."
         />
         <MultiValueSuggestField
           label="Destination ports"
@@ -313,21 +311,25 @@ function SearchProfileForm({
           defaultValue={defaults?.excludedCompanyKeywords}
           description="One per line or comma-separated. Matching company identities are skipped during ingestion."
         />
-        <NumberField label="Lookback window days" name="lookbackWindowDays" defaultValue={defaults?.lookbackWindowDays ?? 90} min={1} max={365} />
-        <NumberField label="Minimum shipment count" name="minShipmentCount" defaultValue={defaults?.minShipmentCount ?? 1} min={0} max={100000} />
+        <NumberField
+          label="Lookback window days"
+          name="lookbackWindowDays"
+          defaultValue={defaults?.lookbackWindowDays ?? 90}
+          min={1}
+          max={365}
+          description="Hunter searches this full trailing window on every daily run."
+        />
+        <NumberField
+          label="Minimum shipment count"
+          name="minShipmentCount"
+          defaultValue={defaults?.minShipmentCount ?? 1}
+          min={0}
+          max={100000}
+          description="A company must meet this count inside the profile lookback window to appear in Found Companies."
+        />
         <DecimalField label="Minimum shipment volume" name="minShipmentVolume" defaultValue={defaults?.minShipmentVolume} />
         <NumberField label="Priority weight" name="priorityWeight" defaultValue={defaults?.priorityWeight ?? 50} min={0} max={100} />
-        <SelectField
-          label="Schedule frequency"
-          name="scheduleFrequency"
-          defaultValue={defaults?.scheduleFrequency ?? "daily"}
-          options={[
-            { value: "daily", label: "Daily" },
-            { value: "weekly", label: "Weekly" },
-            { value: "manual", label: "Manual" }
-          ]}
-        />
-        <Field label="Schedule timezone" name="scheduleTimezone" defaultValue={defaults?.scheduleTimezone ?? "America/Toronto"} required />
+        <Field label="Daily run timezone" name="scheduleTimezone" defaultValue={defaults?.scheduleTimezone ?? "America/Toronto"} required />
       </div>
     </div>
   );
@@ -384,13 +386,15 @@ function NumberField({
   name,
   defaultValue,
   min,
-  max
+  max,
+  description
 }: {
   label: string;
   name: string;
   defaultValue?: number;
   min?: number;
   max?: number;
+  description?: string;
 }) {
   return (
     <label className="space-y-1 text-sm font-medium text-foreground">
@@ -404,6 +408,7 @@ function NumberField({
         required
         className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
       />
+      {description ? <span className="block text-xs font-normal text-mutedForeground">{description}</span> : null}
     </label>
   );
 }
@@ -472,35 +477,6 @@ function ToggleField({
     <label className="flex items-center gap-2 text-sm font-medium text-foreground">
       <input type="checkbox" name={name} value="true" defaultChecked={defaultChecked} />
       <span>{label}</span>
-    </label>
-  );
-}
-
-function SelectField({
-  label,
-  name,
-  defaultValue,
-  options
-}: {
-  label: string;
-  name: string;
-  defaultValue?: string;
-  options: Array<{ value: string; label: string }>;
-}) {
-  return (
-    <label className="space-y-1 text-sm font-medium text-foreground">
-      <span>{label}</span>
-      <select
-        name={name}
-        defaultValue={defaultValue}
-        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
     </label>
   );
 }
