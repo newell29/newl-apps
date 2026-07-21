@@ -54,7 +54,7 @@ Run only read-only health checks at this stage:
 - the existing identity-bound `newl_teamship_read` path still returns its deterministic response;
 - no Teamship, print, shipping, or customer-communication action is invoked.
 
-### 3. Install or reload OpenClaw plugin 0.2.0
+### 3. Install or reload OpenClaw plugin 0.2.1
 
 Requires explicit approval to change the live OpenClaw runtime.
 
@@ -68,11 +68,11 @@ Requires explicit approval because it stores a real PDF and performs a live read
 
 From the approved employee's normal Teams conversation:
 
-1. attach one known Garland order PDF;
-2. ask Nemo to check the order;
+1. attach one known Garland order PDF, preferably one containing multiple PS/SR records;
+2. ask Nemo to check one exact PS number from the PDF and explicitly say to ignore the other orders;
 3. confirm Nemo reports the saved artifact and review identifiers;
 4. confirm the saved review is visible in Newl Apps and its returned artifact identifier belongs to the correct tenant-scoped storage record;
-5. confirm the result contains deterministic pass/fail/missing/pending counts;
+5. confirm the result names only the requested PS/SR, reports how many other PDF orders were ignored, and contains deterministic pass/fail/missing/pending counts;
 6. ask why one saved result passed or failed;
 7. submit one clearly labelled test feedback statement and confirm it remains `REPORTED`, not approved memory.
 

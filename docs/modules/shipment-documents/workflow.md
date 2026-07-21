@@ -13,7 +13,8 @@ Shipment documents and Garland Teamship review is documented because code, route
 - Data persistence uses tenant-scoped Prisma models where a database model exists.
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
-- A Garland PDF attached through authenticated Teams is captured only from the trusted OpenClaw session, uploaded to Newl Apps in hashed chunks, parsed server-side, compared with a fresh read-only Teamship fetch, and saved as a normal `TeamshipReviewRun`.
+- A Garland PDF attached through authenticated Teams is captured only from the trusted OpenClaw session, uploaded to Newl Apps in hashed chunks, and parsed server-side. The CSR must name the exact PS or SR to review. Newl Apps filters to that order before a fresh read-only Teamship fetch and saves only that selected comparison as a normal `TeamshipReviewRun`.
+- PS is preferred because SR can repeat. A missing reference, a reference absent from the PDF, or an SR that matches multiple PDF orders stops without a Teamship query. Newl Apps never guesses or silently checks the remaining orders.
 - Phase 1 does not update Teamship or print. Existing update and print paths retain their separate approval requirements.
 - CSRs can ask why the latest saved PS/SR check failed. The explanation uses the saved deterministic per-field comparison and may additionally show active admin-approved lessons.
 - CSRs can report that a result should have passed or failed. The report is not treated as true until reviewed.
@@ -28,7 +29,8 @@ flowchart LR
   OpenClaw --> Auth[Newl auth + tenant + module guard]
   Auth --> Artifact[(Hashed PDF chunks)]
   Artifact --> Parse[Deterministic Garland parser]
-  Parse --> Read[Read-only Teamship fetch]
+  Parse --> Select[Exact CSR-supplied PS or unique SR]
+  Select --> Read[Read-only Teamship fetch for selected order]
   Read --> Review[(Saved review + field evidence)]
   Review --> Explain[Why did it fail?]
   Explain --> Feedback[(Reported employee feedback)]

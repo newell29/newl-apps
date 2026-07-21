@@ -52,6 +52,7 @@ export async function createGarlandArtifact(
     sizeBytes: number;
     chunkCount: number;
     contentHash: string;
+    targetReference: string;
     sourceChannel: "TEAMS" | "NEWL_APPS";
     externalMessageId?: string | null;
     externalConversationId?: string | null;
@@ -74,6 +75,7 @@ export async function createGarlandArtifact(
     throw new GarlandArtifactError(`chunkCount must be ${expectedChunks} for this file size.`);
   }
   const contentHash = normalizeSha256(input.contentHash, "contentHash");
+  const targetReference = normalizeGarlandTargetReference(input.targetReference);
   const externalMessageId = normalizeOptionalText(input.externalMessageId, 300);
   const externalConversationId = normalizeOptionalText(input.externalConversationId, 300);
   const sourceIdempotencyKey = externalMessageId
@@ -82,7 +84,8 @@ export async function createGarlandArtifact(
         externalConversationId ?? "",
         externalMessageId,
         context.userId,
-        contentHash
+        contentHash,
+        targetReference
       ].join("\u0000")))
     : null;
 
@@ -109,7 +112,8 @@ export async function createGarlandArtifact(
           contentType: "application/pdf",
           sizeBytes: input.sizeBytes,
           contentHash,
-          chunkCount: input.chunkCount
+          chunkCount: input.chunkCount,
+          extractionSummary: { targetReference }
         },
         select: workflowArtifactSelect
       });
@@ -125,7 +129,8 @@ export async function createGarlandArtifact(
             sourceChannel: input.sourceChannel,
             fileName,
             sizeBytes: input.sizeBytes,
-            chunkCount: input.chunkCount
+            chunkCount: input.chunkCount,
+            targetReference
           } satisfies Prisma.InputJsonValue
         }
       });
@@ -244,32 +249,35 @@ export async function finalizeGarlandArtifact(
     if (artifact.contentHash && !safeHashEquals(contentHash, artifact.contentHash)) {
       throw new GarlandArtifactError("The assembled PDF hash does not match the original upload.", 409);
     }
+    const targetReference = readArtifactTargetReference(artifact.extractionSummary);
     const extraction = await extractGarlandShippingOrdersFromPdfBytes(bytes);
     if (extraction.orders.length === 0) {
       throw new GarlandArtifactError("No Garland shipping orders were found in this PDF.");
     }
+    const selection = selectGarlandPdfOrderForReference(extraction.orders, targetReference);
+    const selectedOrders = [selection.order];
 
     const teamshipOrders = await fetchTeamshipShippingOrdersForReview({
       tenantId: context.tenantId,
       shipmentDate: requestedShipmentDate ?? "",
-      srNumbers: extraction.orders.map((order) => order.srNumber)
+      srNumbers: selectedOrders.map((order) => order.srNumber)
     });
     const shipmentDateInput = resolveGarlandReviewShipmentDate(
       requestedShipmentDate,
-      extraction.orders,
+      selectedOrders,
       teamshipOrders
     );
     const learnedProductDimensions = await getGarlandLearnedProductDimensionRecommendations({
       tenantId: context.tenantId,
-      skus: collectGarlandProductDimensionSkus({ pdfOrders: extraction.orders, teamshipOrders })
+      skus: collectGarlandProductDimensionSkus({ pdfOrders: selectedOrders, teamshipOrders })
     });
-    const review = buildGarlandTeamshipReview(extraction.orders, teamshipOrders, [], {
+    const review = buildGarlandTeamshipReview(selectedOrders, teamshipOrders, [], {
       learnedProductDimensions
     });
     const shipmentDate = new Date(`${shipmentDateInput}T00:00:00.000Z`);
     const reviewRunId = await saveTeamshipReviewRun({
       context,
-      documentLabel: buildDocumentLabel(shipmentDateInput, extraction.psNumbers),
+      documentLabel: buildDocumentLabel(shipmentDateInput, [selection.order.psNumber]),
       shipmentDate,
       sourcePdfFileName: artifact.fileName,
       review,
@@ -295,11 +303,16 @@ export async function finalizeGarlandArtifact(
           teamshipReviewRunId: reviewRunId,
           duplicateOfArtifactId: duplicate?.id ?? null,
           extractionSummary: {
+            targetReference,
+            selectedPsNumber: selection.order.psNumber,
+            selectedSrNumber: selection.order.srNumber,
             shipmentDate: shipmentDateInput,
             pageCount: extraction.pageCount,
-            orderCount: extraction.orders.length,
-            psNumbers: extraction.psNumbers,
-            srNumbers: extraction.srNumbers,
+            totalOrderCount: extraction.orders.length,
+            orderCount: selectedOrders.length,
+            ignoredOrderCount: selection.ignoredOrderCount,
+            psNumbers: [selection.order.psNumber],
+            srNumbers: [selection.order.srNumber],
             review: review.summary
           } satisfies Prisma.InputJsonValue,
           errorMessage: null,
@@ -316,8 +329,13 @@ export async function finalizeGarlandArtifact(
           after: {
             status: "REVIEWED",
             reviewRunId,
+            targetReference,
+            selectedPsNumber: selection.order.psNumber,
+            selectedSrNumber: selection.order.srNumber,
             shipmentDate: shipmentDateInput,
-            orderCount: extraction.orders.length,
+            totalOrderCount: extraction.orders.length,
+            orderCount: selectedOrders.length,
+            ignoredOrderCount: selection.ignoredOrderCount,
             review: review.summary
           } satisfies Prisma.InputJsonValue
         }
@@ -330,10 +348,15 @@ export async function finalizeGarlandArtifact(
       duplicateOfArtifactId: duplicate?.id ?? null,
       fileName: artifact.fileName,
       extraction: {
+        targetReference,
+        selectedPsNumber: selection.order.psNumber,
+        selectedSrNumber: selection.order.srNumber,
         pageCount: extraction.pageCount,
-        orderCount: extraction.orders.length,
-        psNumbers: extraction.psNumbers,
-        srNumbers: extraction.srNumbers
+        totalOrderCount: extraction.orders.length,
+        orderCount: selectedOrders.length,
+        ignoredOrderCount: selection.ignoredOrderCount,
+        psNumbers: [selection.order.psNumber],
+        srNumbers: [selection.order.srNumber]
       },
       review: review.summary,
       orders: review.reviews.map((order) => ({
@@ -385,6 +408,63 @@ function normalizeOptionalShipmentDate(value?: string | null) {
     throw new GarlandArtifactError("shipmentDate must use YYYY-MM-DD format.");
   }
   return candidate;
+}
+
+export function normalizeGarlandTargetReference(value: string) {
+  const normalized = value.trim().toUpperCase();
+  if (!/^(?:PS\d{6}|SR\d{5,8})$/.test(normalized)) {
+    throw new GarlandArtifactError(
+      "An exact Garland PS or SR number is required, such as PS210235 or SR810263."
+    );
+  }
+  return normalized;
+}
+
+export function selectGarlandPdfOrderForReference(
+  orders: GarlandPdfShippingOrder[],
+  targetReference: string
+) {
+  const normalized = normalizeGarlandTargetReference(targetReference);
+  const field = normalized.startsWith("PS") ? "psNumber" : "srNumber";
+  const matches = orders.filter((order) => normalizeOrderIdentifier(order[field]) === normalized);
+
+  if (matches.length === 0) {
+    throw new GarlandArtifactError(
+      `${normalized} was not found in the attached Garland PDF. No Teamship check was run.`
+    );
+  }
+  if (matches.length > 1) {
+    throw new GarlandArtifactError(
+      normalized.startsWith("SR")
+        ? `${normalized} matches more than one order in the attached Garland PDF. Ask the employee for the exact PS number; no Teamship check was run.`
+        : `${normalized} appears on more than one parsed order in the attached Garland PDF. No Teamship check was run.`
+    );
+  }
+
+  return {
+    targetReference: normalized,
+    order: matches[0] as GarlandPdfShippingOrder,
+    ignoredOrderCount: Math.max(0, orders.length - 1)
+  };
+}
+
+function readArtifactTargetReference(summary: unknown) {
+  if (!summary || typeof summary !== "object" || Array.isArray(summary)) {
+    throw new GarlandArtifactError(
+      "This upload does not have a selected Garland PS or SR number. Attach the PDF again and specify the exact reference."
+    );
+  }
+  const targetReference = (summary as Record<string, unknown>).targetReference;
+  if (typeof targetReference !== "string") {
+    throw new GarlandArtifactError(
+      "This upload does not have a selected Garland PS or SR number. Attach the PDF again and specify the exact reference."
+    );
+  }
+  return normalizeGarlandTargetReference(targetReference);
+}
+
+function normalizeOrderIdentifier(value: string) {
+  return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
 export function resolveGarlandReviewShipmentDate(

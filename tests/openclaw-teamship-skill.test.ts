@@ -18,4 +18,10 @@ describe("OpenClaw Teamship skill routing", () => {
   it("does not retry a failed read as a different Teamship operation", () => {
     expect(skill).toContain("Do not retry by changing a Ship by LPN request into Inventory All");
   });
+
+  it("requires an exact target and forbids all-order guessing for Garland PDFs", () => {
+    expect(skill).toContain("pass it as `targetReference` to `newl_garland_pdf_review`");
+    expect(skill).toContain("Prefer PS because SR can repeat");
+    expect(skill).toContain("Never infer a reference from the PDF or ask to check every order");
+  });
 });

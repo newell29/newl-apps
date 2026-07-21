@@ -6,7 +6,7 @@ The Teamship integration remains read-only. The Garland tools may save tenant-sc
 
 ## Garland tools
 
-- `newl_garland_pdf_review` uses only PDF paths captured by the plugin from the same trusted Teams session and sender. The model cannot supply a filesystem path. It uploads the PDF in 3 MB hashed chunks, up to 20 MB total, and runs a fresh read-only Teamship comparison.
+- `newl_garland_pdf_review` requires the exact PS or SR number named by the employee and uses only PDF paths captured by the plugin from the same trusted Teams session and sender. The model cannot supply a filesystem path. It uploads the PDF in 3 MB hashed chunks, up to 20 MB total, then filters the parsed PDF before Teamship is queried. PS is preferred because an SR can identify multiple PDF orders. Missing and ambiguous references stop without a Teamship query; successful reviews check only the selected order and report how many other PDF orders were ignored.
 - `newl_garland_explain` explains the latest saved deterministic check for a PS or SR number and labels any admin-approved lessons separately.
 - `newl_operational_feedback` saves an employee's statement as reported evidence. It never promotes the statement into a Nemo rule.
 - `newl_development_suggestion_digest` is admin-only at the Newl Apps boundary. It creates or reads an approval queue and does not start development.
@@ -17,7 +17,7 @@ Employees may ask with configured customer and warehouse names instead of Teamsh
 
 Configure the plugin with the Newl Apps base URL and the Teams channel's Entra tenant ID. `readTokenEnv` names the Teamship read token and `assistantTokenEnv` names the separate Garland assistant token. The assistant setting defaults to `OPENCLAW_ASSISTANT_TOKEN`; it never falls back to and must not name the same environment variable as `OPENCLAW_TEAMSHIP_READ_TOKEN`. `digestAdminObjectId` may hold the approved administrator's Entra object ID so a sender-less scheduled digest can authenticate; interactive calls always use the real Teams sender instead. Do not put tokens in the plugin source or manifest.
 
-Repeated execution for the same Teams message and PDF content reuses the tenant-scoped artifact instead of storing another copy. If the PDF or Teamship produces exactly one shipment date, Newl Apps records that date; otherwise Nemo must ask the employee for `YYYY-MM-DD` before saving a review with ambiguous history metadata.
+Repeated execution for the same Teams message, PDF content, and target reference reuses the tenant-scoped artifact instead of storing another copy. The complete source PDF remains stored as evidence, while the saved review contains only the selected order. If the selected PDF order or its Teamship result produces exactly one shipment date, Newl Apps records that date; otherwise Nemo must ask the employee for `YYYY-MM-DD` before saving a review with ambiguous history metadata.
 
 For a scheduled personal Teams digest, target the existing direct conversation as `user:<aad-object-id>`. A bare UUID may be treated as a team/group lookup by Microsoft Graph. Keep the digest disabled until the production assistant credential, database migration, and reviewed application deployment are complete.
 

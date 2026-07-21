@@ -71,6 +71,12 @@ const garlandFeedbackParameters = Type.Object({
 });
 
 const garlandPdfReviewParameters = Type.Object({
+  targetReference: Type.String({
+    minLength: 7,
+    maxLength: 10,
+    pattern: "^(?:[Pp][Ss]\\d{6}|[Ss][Rr]\\d{5,8})$",
+    description: "The exact Garland PS or SR number named by the employee. Prefer PS because an SR can identify more than one PDF order."
+  }),
   shipmentDate: Type.Optional(Type.String({
     pattern: "^\\d{4}-\\d{2}-\\d{2}$",
     description: "Shipment date in YYYY-MM-DD when the employee supplied one; otherwise omit it."
@@ -114,7 +120,7 @@ const plugin = defineToolPlugin({
     tool({
       name: "newl_garland_pdf_review",
       label: "Review Garland PDF",
-      description: "Always call this tool when an authenticated Microsoft Teams employee attaches a Garland order PDF and asks Nemo to check or review it. The tool uses only the PDF paths captured from that same trusted Teams session, saves the PDF in Newl Apps, performs a fresh read-only Teamship comparison, and returns the saved check. It never updates Teamship or prints.",
+      description: "Always call this tool when an authenticated Microsoft Teams employee attaches a Garland order PDF, supplies an exact PS or SR number, and asks Nemo to check or review it. The tool uses only the PDF paths captured from that same trusted Teams session, saves the PDF in Newl Apps, checks only the selected PDF order with a fresh read-only Teamship comparison, and returns the saved check. Prefer PS because an SR can identify more than one PDF order. It never updates Teamship or prints.",
       parameters: garlandPdfReviewParameters,
       factory: createGarlandPdfReviewTool
     }),
@@ -336,7 +342,7 @@ export function createGarlandPdfReviewTool({
   return {
     name: "newl_garland_pdf_review",
     label: "Review Garland PDF",
-    description: "Save and run a read-only Garland review for PDFs attached to the current trusted Teams message.",
+    description: "Save and run a read-only Garland review for exactly one PS or SR selected from a PDF attached to the current trusted Teams message.",
     parameters: garlandPdfReviewParameters,
     async execute(_toolCallId: string, params: unknown, signal?: AbortSignal) {
       const auth = resolveTrustedTeamsAuth(config, toolContext);
@@ -352,6 +358,7 @@ export function createGarlandPdfReviewTool({
         return textResult("No current Garland PDF is attached to this authenticated Teams message. Ask the employee to attach it again.", "failed");
       }
 
+      const targetReference = readParameterString(params, "targetReference", 10).toUpperCase();
       const shipmentDate = optionalParameterString(asRecord(params).shipmentDate, 10);
       const files = [];
       for (const candidatePath of captured.paths) {
@@ -375,6 +382,7 @@ export function createGarlandPdfReviewTool({
             sizeBytes: file.bytes.byteLength,
             chunkCount: Math.ceil(file.bytes.byteLength / PDF_CHUNK_BYTES),
             contentHash: sha256(file.bytes),
+            targetReference,
             externalMessageId: captured.messageId,
             externalConversationId: captured.conversationId
           })
@@ -573,8 +581,13 @@ function formatStoredArtifactResult(fileName: string, artifact: Record<string, u
     artifactId: artifact.id,
     reviewRunId: artifact.teamshipReviewRunId,
     extraction: {
+      targetReference: summary.targetReference,
+      selectedPsNumber: summary.selectedPsNumber,
+      selectedSrNumber: summary.selectedSrNumber,
       pageCount: summary.pageCount,
+      totalOrderCount: summary.totalOrderCount,
       orderCount: summary.orderCount,
+      ignoredOrderCount: summary.ignoredOrderCount,
       psNumbers: summary.psNumbers,
       srNumbers: summary.srNumbers
     },
@@ -588,7 +601,14 @@ function formatPdfReviewResults(results: Array<Record<string, unknown>>) {
     const review = asRecord(result.review);
     const extraction = asRecord(result.extraction);
     const storageResult = result.reused === true ? "was already saved as" : "was saved as";
-    return `${String(result.fileName ?? "Garland PDF")} ${storageResult} artifact ${String(result.artifactId ?? "")}. Review ${String(result.reviewRunId ?? "")} checked ${String(extraction.orderCount ?? 0)} order(s): ${String(review.passedCount ?? 0)} passed, ${String(review.failedCount ?? 0)} failed, ${String(review.missingTeamshipCount ?? 0)} missing in Teamship, and ${String(review.pendingTeamshipCount ?? 0)} pending. No Teamship values were changed and nothing was printed.`;
+    const selectedReference = [extraction.selectedPsNumber, extraction.selectedSrNumber]
+      .filter((value) => typeof value === "string" && value)
+      .join(" / ");
+    const ignoredOrderCount = Number(extraction.ignoredOrderCount ?? 0);
+    const ignoredText = ignoredOrderCount > 0
+      ? ` ${ignoredOrderCount} other order${ignoredOrderCount === 1 ? "" : "s"} in the PDF ${ignoredOrderCount === 1 ? "was" : "were"} ignored.`
+      : "";
+    return `${String(result.fileName ?? "Garland PDF")} ${storageResult} artifact ${String(result.artifactId ?? "")}. Review ${String(result.reviewRunId ?? "")} checked only ${selectedReference || String(extraction.targetReference ?? "the selected order")}: ${String(review.passedCount ?? 0)} passed, ${String(review.failedCount ?? 0)} failed, ${String(review.missingTeamshipCount ?? 0)} missing in Teamship, and ${String(review.pendingTeamshipCount ?? 0)} pending.${ignoredText} No Teamship values were changed and nothing was printed.`;
   });
   return lines.join("\n");
 }
