@@ -14,7 +14,7 @@ Critical: never answer a Teamship procedure or term from generic WMS knowledge o
 1. Classify the request as shipping order, receiving order, Inventory All, shipping-eligible inventory, Ship by LPN, or product history.
 2. Require the exact record/SKU/LPN and customer. Treat `Garland` as customer `420` and, when no warehouse is given, default it to Annagem warehouse `102`, as confirmed by Alex on 2026-07-21. Preserve any explicitly supplied warehouse. For every other customer, require the warehouse and do not infer it.
 3. Accept only identifiers matching `^[A-Za-z0-9._/-]+$`. Ask for a clean exact identifier if any value fails.
-4. Call the `newl_teamship_read` tool with only the normalized prompt. Never ask for, infer, or pass an employee email or Microsoft identity as a tool argument. The tool binds the authenticated Teams sender from trusted OpenClaw runtime context and Newl Apps resolves the stored Entra identity to a current tenant membership.
+4. Call the `newl_teamship_read` tool with only the normalized prompt. Do this before deciding whether authentication or configuration is available; the tool result is authoritative. Never inspect authentication/configuration files, search for credentials, or ask for, infer, or pass an employee email or Microsoft identity as a tool argument. The tool binds the authenticated Teams sender from trusted OpenClaw runtime context and Newl Apps resolves the stored Entra identity to a current tenant membership.
 
 Normalize prompts to one of these forms, substituting only validated identifiers:
 

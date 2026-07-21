@@ -4,6 +4,18 @@ import { defineToolPlugin } from "openclaw/plugin-sdk/tool-plugin";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEFAULT_TOKEN_ENV = "OPENCLAW_TEAMSHIP_READ_TOKEN";
 
+type TeamshipPluginConfig = {
+  baseUrl: string;
+  tenantId: string;
+  readTokenEnv?: string;
+  vercelProtectionBypassEnv?: string;
+};
+
+type TeamshipToolContext = {
+  messageChannel?: string;
+  requesterSenderId?: string;
+};
+
 const configSchema = Type.Object({
   baseUrl: Type.String({ description: "Newl Apps base URL." }),
   tenantId: Type.String({
@@ -26,7 +38,7 @@ export default defineToolPlugin({
     tool({
       name: "newl_teamship_read",
       label: "Newl Teamship Read",
-      description: "Read a current Teamship order, inventory, SKU, LPN, receiving order, or product history record through Newl Apps. The authenticated Microsoft Teams sender is bound by the runtime and cannot be supplied as a parameter.",
+      description: "Always call this tool for a current Teamship order, inventory, SKU, LPN, receiving order, warehouse, or product history question. Do not inspect authentication or configuration files first; the tool validates the authenticated Microsoft Teams sender, which cannot be supplied as a parameter.",
       parameters: Type.Object({
         prompt: Type.String({
           minLength: 1,
@@ -34,58 +46,69 @@ export default defineToolPlugin({
           description: "A normalized, exact, read-only Teamship current-record question."
         })
       }),
-      factory({ config, toolContext }) {
-        const senderId = normalizeUuid(toolContext.requesterSenderId);
-        const tenantId = normalizeUuid(config.tenantId);
-        if (toolContext.messageChannel !== "msteams" || !senderId || !tenantId) {
-          return null;
-        }
-
-        return {
-          name: "newl_teamship_read",
-          label: "Newl Teamship Read",
-          description: "Read a current Teamship record through Newl Apps for the authenticated Microsoft Teams sender.",
-          parameters: Type.Object({
-            prompt: Type.String({ minLength: 1, maxLength: 4000 })
-          }),
-          async execute(_toolCallId, params, signal) {
-            const prompt = readPrompt(params);
-            const token = process.env[config.readTokenEnv?.trim() || DEFAULT_TOKEN_ENV]?.trim();
-            if (!token) {
-              return textResult("Newl Apps Teamship read authentication is not configured on this OpenClaw runtime.", "not_configured");
-            }
-
-            const bypassEnv = config.vercelProtectionBypassEnv?.trim();
-            const bypassToken = bypassEnv ? process.env[bypassEnv]?.trim() : undefined;
-            if (bypassEnv && !bypassToken) {
-              return textResult("Newl Apps Preview protection authentication is not configured on this OpenClaw runtime.", "not_configured");
-            }
-
-            const response = await fetch(new URL("/api/assistant/teamship/read", normalizeBaseUrl(config.baseUrl)), {
-              method: "POST",
-              redirect: "manual",
-              signal,
-              headers: buildRequestHeaders({ token, tenantId, senderId, bypassToken }),
-              body: JSON.stringify({ prompt })
-            });
-            const body = await readResponseBody(response);
-            if (!response.ok || !body.data?.answer) {
-              return textResult(body.error || `Newl Apps Teamship read returned HTTP ${response.status}.`, "failed");
-            }
-
-            const sourceTitles = (body.data.sources ?? [])
-              .map((source) => source.title?.trim())
-              .filter((title): title is string => Boolean(title));
-            const text = sourceTitles.length > 0
-              ? `${body.data.answer}\nSources: ${sourceTitles.join("; ")}`
-              : body.data.answer;
-            return textResult(text, "ok");
-          }
-        };
-      }
+      factory: createTeamshipReadTool
     })
   ]
 });
+
+export function createTeamshipReadTool({
+  config,
+  toolContext
+}: {
+  config: TeamshipPluginConfig;
+  toolContext: TeamshipToolContext;
+}) {
+  return {
+    name: "newl_teamship_read",
+    label: "Newl Teamship Read",
+    description: "Always call this tool for a current Teamship record question. Do not pre-judge authentication or inspect configuration files; this tool validates the trusted Microsoft Teams sender and returns the authoritative result.",
+    parameters: Type.Object({
+      prompt: Type.String({ minLength: 1, maxLength: 4000 })
+    }),
+    async execute(_toolCallId: string, params: unknown, signal?: AbortSignal) {
+      const senderId = normalizeUuid(toolContext.requesterSenderId);
+      const tenantId = normalizeUuid(config.tenantId);
+      if (toolContext.messageChannel !== "msteams" || !senderId || !tenantId) {
+        return textResult(
+          "Newl Apps Teamship reads require an authenticated Microsoft Teams message with a valid Entra identity.",
+          "unauthorized"
+        );
+      }
+
+      const prompt = readPrompt(params);
+      const token = process.env[config.readTokenEnv?.trim() || DEFAULT_TOKEN_ENV]?.trim();
+      if (!token) {
+        return textResult("Newl Apps Teamship read authentication is not configured on this OpenClaw runtime.", "not_configured");
+      }
+
+      const bypassEnv = config.vercelProtectionBypassEnv?.trim();
+      const bypassToken = bypassEnv ? process.env[bypassEnv]?.trim() : undefined;
+      if (bypassEnv && !bypassToken) {
+        return textResult("Newl Apps Preview protection authentication is not configured on this OpenClaw runtime.", "not_configured");
+      }
+
+      const response = await fetch(new URL("/api/assistant/teamship/read", normalizeBaseUrl(config.baseUrl)), {
+        method: "POST",
+        redirect: "manual",
+        signal,
+        headers: buildRequestHeaders({ token, tenantId, senderId, bypassToken }),
+        body: JSON.stringify({ prompt })
+      });
+      const body = await readResponseBody(response);
+      if (!response.ok || !body.data?.answer) {
+        return textResult(body.error || `Newl Apps Teamship read returned HTTP ${response.status}.`, "failed");
+      }
+
+      const sourceTitles = (body.data.sources ?? [])
+        .map((source) => source.title?.trim())
+        .filter((title): title is string => Boolean(title));
+      const text = sourceTitles.length > 0
+        ? `${body.data.answer}\nSources: ${sourceTitles.join("; ")}`
+        : body.data.answer;
+      return textResult(text, "ok");
+    }
+  };
+}
 
 export function normalizeUuid(value: unknown) {
   if (typeof value !== "string") return null;
@@ -147,7 +170,7 @@ async function readResponseBody(response: Response) {
   return value ?? {};
 }
 
-function textResult(text: string, status: "ok" | "failed" | "not_configured") {
+function textResult(text: string, status: "ok" | "failed" | "not_configured" | "unauthorized") {
   return {
     content: [{ type: "text" as const, text }],
     details: { status }

@@ -64,6 +64,16 @@ describe("Teamship question routing", () => {
     });
   });
 
+  it("uses parenthesized IDs when Nemo includes confirmed scope names", () => {
+    expect(routeTeamshipQuestion(
+      "inventory for SKU ABC-102 at warehouse Annagem (102) for customer Garland (420)"
+    )).toEqual({
+      kind: "TOOL",
+      tool: "searchTeamshipInventoryAll",
+      input: { sku: "ABC-102", customerId: "420", warehouseId: "102" }
+    });
+  });
+
   it("routes procedural questions to curated knowledge", () => {
     expect(routeTeamshipQuestion("What does LPN mean in Teamship?")).toEqual({
       kind: "KNOWLEDGE",

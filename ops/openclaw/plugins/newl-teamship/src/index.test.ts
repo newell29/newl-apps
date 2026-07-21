@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getToolPluginMetadata } from "openclaw/plugin-sdk/tool-plugin";
 
-import plugin, { buildRequestHeaders, normalizeUuid } from "./index.js";
+import plugin, { buildRequestHeaders, createTeamshipReadTool, normalizeUuid } from "./index.js";
 
 describe("Newl Teamship OpenClaw plugin", () => {
   it("declares only the identity-bound read tool", () => {
@@ -11,6 +11,20 @@ describe("Newl Teamship OpenClaw plugin", () => {
   it("accepts only stable UUID-shaped Entra identities", () => {
     expect(normalizeUuid("22222222-2222-4222-8222-222222222222")).toBe("22222222-2222-4222-8222-222222222222");
     expect(normalizeUuid("alex.newell@newl.ca")).toBeNull();
+  });
+
+  it("keeps the tool discoverable while rejecting execution without trusted Teams identity", async () => {
+    const tool = createTeamshipReadTool({
+      config: {
+        baseUrl: "https://preview.example.com",
+        tenantId: "11111111-1111-4111-8111-111111111111"
+      },
+      toolContext: {}
+    });
+
+    expect(tool.name).toBe("newl_teamship_read");
+    await expect(tool.execute("call-1", { prompt: "Find order SR812500" }))
+      .resolves.toMatchObject({ details: { status: "unauthorized" } });
   });
 
   it("adds a Vercel Preview bypass only when one is explicitly configured", () => {
