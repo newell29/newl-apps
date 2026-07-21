@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
+import type { Prisma } from "@prisma/client";
 
 import { hasTeamshipInternalReadAccess } from "@/modules/teamship/access-policy";
+import { normalizeMicrosoftEntraId } from "@/server/auth/microsoft-entra-identity";
 import { prisma } from "@/server/db";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 
@@ -27,10 +29,7 @@ export async function authenticateOpenClawTeamshipRequest(
     throw new OpenClawTeamshipAuthError("Invalid OpenClaw Teamship read credentials.");
   }
 
-  const actorEmail = request.headers.get("x-newl-user-email")?.trim().toLowerCase();
-  if (!actorEmail) {
-    throw new OpenClawTeamshipAuthError("x-newl-user-email is required.", 400);
-  }
+  const actor = readActorIdentity(request);
 
   const tenantSlug =
     process.env.OPENCLAW_TEAMSHIP_TENANT_SLUG?.trim() ||
@@ -42,12 +41,7 @@ export async function authenticateOpenClawTeamshipRequest(
   const membership = await prisma.membership.findFirst({
     where: {
       tenant: { slug: tenantSlug },
-      user: {
-        email: {
-          equals: actorEmail,
-          mode: "insensitive"
-        }
-      }
+      user: actor.userWhere
     },
     select: {
       role: true,
@@ -77,6 +71,40 @@ export async function authenticateOpenClawTeamshipRequest(
   }
 
   return context;
+}
+
+function readActorIdentity(request: Request): { userWhere: Prisma.UserWhereInput } {
+  const teamsTenantHeader = request.headers.get("x-newl-teams-tenant-id");
+  const teamsObjectHeader = request.headers.get("x-newl-teams-aad-object-id");
+  if (teamsTenantHeader || teamsObjectHeader) {
+    const tenantId = normalizeMicrosoftEntraId(teamsTenantHeader);
+    const objectId = normalizeMicrosoftEntraId(teamsObjectHeader);
+    if (!tenantId || !objectId) {
+      throw new OpenClawTeamshipAuthError(
+        "A valid Microsoft Teams tenant and sender identity are required.",
+        400
+      );
+    }
+    return {
+      userWhere: {
+        microsoftEntraTenantId: tenantId,
+        microsoftEntraObjectId: objectId
+      }
+    };
+  }
+
+  const actorEmail = request.headers.get("x-newl-user-email")?.trim().toLowerCase();
+  if (!actorEmail) {
+    throw new OpenClawTeamshipAuthError("An authenticated Newl user identity is required.", 400);
+  }
+  return {
+    userWhere: {
+      email: {
+        equals: actorEmail,
+        mode: "insensitive"
+      }
+    }
+  };
 }
 
 function getBearerToken(request: Request) {

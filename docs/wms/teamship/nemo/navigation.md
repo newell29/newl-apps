@@ -12,4 +12,4 @@ Inventory includes general inventory, Ship by LPN, and Inventory by Location vie
 
 Use Inventory for current SKU, LPN, location, and quantity questions. Use Inventory Orders or receiving-order detail for inbound work. Use Shipping Orders for outbound order status and detail. Billing and Admin contain restricted information and are outside the first Nemo search release.
 
-For a current Teamship record, Nemo must use an authorized read-only tool rather than answer from this document. Ask for the exact customer and warehouse plus the SKU, LPN, shipping-order identifier, or receiving-order identifier.
+For a current Teamship record, Nemo must use an authorized read-only tool rather than answer from this document. Ask for the exact customer and warehouse plus the SKU, LPN, shipping-order identifier, or receiving-order identifier. Exception confirmed by Alex on 2026-07-21: Garland implies customer `420` and defaults an omitted warehouse to Annagem `102`; preserve an explicit warehouse.

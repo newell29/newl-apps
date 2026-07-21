@@ -4,7 +4,7 @@ Status: Draft rollout guide. This activates only scoped reads. It does not autho
 
 ## Architecture
 
-OpenClaw keeps the four curated Teamship documents in local agent context for procedural questions. Current-record questions call Newl Apps through `POST /api/assistant/teamship/read`. Newl Apps resolves the employee membership, applies the named internal-user policy, checks the tenant module and exact customer/warehouse scope, resolves encrypted Teamship credentials, runs the API or guarded browser reader, minimizes the response, and writes the access audit.
+OpenClaw keeps the four curated Teamship documents in local agent context for procedural questions. Current-record questions use the `newl_teamship_read` plugin tool to call Newl Apps through `POST /api/assistant/teamship/read`. The tool binds the Teams tenant and sender object ID from trusted OpenClaw runtime context rather than model-controlled arguments. Newl Apps resolves that pair to the SSO-linked employee and membership, applies the named internal-user policy, checks the tenant module and exact customer/warehouse scope, resolves encrypted Teamship credentials, runs the API or guarded browser reader, minimizes the response, and writes the access audit.
 
 OpenClaw must not hold the Teamship password. The password remains in the tenant Teamship integration credential in Newl Apps.
 
@@ -43,7 +43,7 @@ OPENCLAW_TEAMSHIP_READ_TOKEN='<same dedicated token>'
 
 The tenant switch and browser runtime gate are independent. Both must be enabled for Inventory All, LPN, Receiving Order, and Product History browser reads. The API-backed shipping-order and shipping-eligible inventory routes still require the tenant switch and exact scope.
 
-## OpenClaw Invocation
+## Supervised Local Diagnostic Invocation
 
 From the checked-out Newl Apps repository on the OpenClaw machine:
 
@@ -53,7 +53,18 @@ npm run openclaw:teamship-read -- \
   -- 'Where is LPN 63991 customer 420 warehouse 102?'
 ```
 
-The `x-newl-user-email` sent by the wrapper must come from the authenticated Teams/OpenClaw user, not from free-form prompt text. Newl Apps resolves that email to a current tenant membership before any Teamship access.
+This wrapper is only for a supervised administrator diagnostic on the local machine. Its `x-newl-user-email` value must be supplied by the administrator and must never come from free-form prompt text. Do not use this email-based path for normal or multi-user Teams traffic.
+
+Build, validate, and install the repository-owned plugin from `ops/openclaw/plugins/newl-teamship`, then install the repository-owned skill from `ops/openclaw/skills/teamship-read-only` into the OpenClaw workspace skill directory. Configure the plugin with the Newl Apps base URL, the Microsoft Entra tenant ID used by Teams, and the environment-variable name containing `OPENCLAW_TEAMSHIP_READ_TOKEN`. The skill requires every Teams current-record lookup to use `newl_teamship_read` and forbids direct Teamship browser or guessed-URL fallback when the tool reports that a capability is unavailable.
+
+For Microsoft Teams, disable both streaming layers so a reasoning-capable local model cannot expose partial reasoning before OpenClaw sanitizes its final answer:
+
+```bash
+openclaw config set channels.msteams.streaming '{"mode":"off","block":{"enabled":false},"preview":{"toolProgress":false}}' --strict-json
+openclaw gateway restart
+```
+
+Keep the model's default thinking setting off as a separate control. Teams `mode: "block"` is not final-only: it disables the native preview stream but still forwards each regular output block. Use `mode: "off"` together with `block.enabled: false` so only the finalized reply is delivered. Keep `preview.toolProgress: false` so tool progress is not posted as separate chat messages.
 
 ## Nemo Memory Contract
 
@@ -64,7 +75,9 @@ Use the curated files for procedural questions:
 - `docs/wms/teamship/nemo/orders.md`
 - `docs/wms/teamship/nemo/safety.md`
 
-For a current SKU, LPN, shipping order, receiving order, or product-history question, invoke `npm run openclaw:teamship-read` with the authenticated employee email. Preserve the returned answer and sources. If the endpoint requests a customer ID, warehouse ID, or record identifier, ask the employee for it. Never infer a current record from documentation and never invoke files under `docs/wms/teamship/review/` as normal knowledge.
+For a current SKU, LPN, shipping order, receiving order, or product-history question in Teams, invoke `newl_teamship_read`. The tool obtains the employee's stable Entra identity from trusted OpenClaw runtime context; it does not accept identity arguments from the model. Preserve the returned answer and sources. If the endpoint requests a customer ID, warehouse ID, or record identifier, ask the employee for it, except that confirmed Garland requests default to customer 420 and Annagem warehouse 102 when the warehouse is omitted. Never infer a current record from documentation and never invoke files under `docs/wms/teamship/review/` as normal knowledge.
+
+Newl Apps captures the stable Entra `tid` and `oid` claims when an admin-provisioned employee successfully signs in through Microsoft. The Teams tool supplies that same trusted pair to the read endpoint. A missing, malformed, unlinked, or conflicting identity fails closed. Email-based wrapper invocation remains only a supervised local diagnostic path and must not be used for multi-user Teams traffic.
 
 ## Supervised Rollout
 

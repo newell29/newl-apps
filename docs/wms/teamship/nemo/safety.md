@@ -15,7 +15,7 @@ Evidence: `confirmed by Alex` for Teamship's user, warehouse, and customer bound
 Evidence: `confirmed by Alex` on 2026-07-20 for the temporary first-release Newl internal-team policy.
 
 - Alex Newell, Faisal Haroon, Suzy Boreham, and Lily Morales may request read-only Teamship information for every customer and every warehouse.
-- Customer and warehouse identifiers are still required for deterministic searches and correct Teamship API mapping; they are not permission limits for these four employees.
+- Customer and warehouse identifiers are still required for deterministic searches and correct Teamship API mapping; they are not permission limits for these four employees. Exception confirmed by Alex on 2026-07-21: Garland maps to customer `420` and defaults an omitted warehouse to Annagem `102`; an explicit warehouse is never overwritten.
 - No other employee receives Teamship read access from this temporary policy.
 
 Billing, charges, administrative data, user-directory data, credentials, and unrestricted raw Teamship responses are excluded from the first read-only search release.

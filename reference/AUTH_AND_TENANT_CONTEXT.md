@@ -71,6 +71,7 @@ Production login uses the **Microsoft Entra ID** provider configured in `src/ser
 **Email linking**
 
 - Entra verifies the employee email. The app uses `allowDangerousEmailAccountLinking: true` so a new SSO `Account` links to an existing `User` row matched by email (admin-provisioned ahead of first login).
+- A successful Microsoft sign-in also captures the stable Entra tenant/object pair (`tid` + `oid`) on that existing `User`. A conflicting pair is rejected. Identity-bound Teams tools use this pair to resolve the authenticated Teams sender to the same current Newl membership without trusting prompt text or a caller-supplied email.
 
 **Session strategy**
 

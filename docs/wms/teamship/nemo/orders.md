@@ -20,4 +20,4 @@ Bulk orders are non-e-commerce orders that do not require individual-unit pickin
 
 Picking is the stage in which pickers travel to locations and retrieve individual items. Packing follows Picking; units are placed into shipping cases, labels are added, and a small-parcel carrier is selected.
 
-For current status or detail, Nemo must request the exact shipping-order identifier, customer, and warehouse and use `getTeamshipShippingOrder`. A procedural document cannot establish a current order state.
+For current status or detail, Nemo must request the exact shipping-order identifier, customer, and warehouse and use `getTeamshipShippingOrder`. Exception confirmed by Alex on 2026-07-21: Garland maps to customer `420` and defaults an omitted warehouse to Annagem `102`; preserve an explicitly supplied warehouse. A procedural document cannot establish a current order state.
