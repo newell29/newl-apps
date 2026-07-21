@@ -145,7 +145,8 @@ async function runBrowserRead<T>(
   read: (page: Page, baseUrl: URL) => Promise<T>
 ) {
   return withBrowserReadSlot(async () => {
-    const baseUrl = resolveBaseUrl(options);
+    const allowedHosts = resolveAllowedHosts(options);
+    const baseUrl = resolveBaseUrl(options, allowedHosts);
     const browser = await launchBrowser(options);
     try {
       const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
@@ -179,13 +180,24 @@ async function launchBrowser(options: TeamshipBrowserReadOptions): Promise<Brows
   });
 }
 
-function resolveBaseUrl(options: TeamshipBrowserReadOptions) {
+function resolveAllowedHosts(options: TeamshipBrowserReadOptions) {
+  return new Set((options.allowedHosts ?? DEFAULT_ALLOWED_HOSTS).map((host) => host.trim().toLowerCase()).filter(Boolean));
+}
+
+function resolveBaseUrl(options: TeamshipBrowserReadOptions, allowedHosts: Set<string>) {
   const baseUrl = new URL(options.appBaseUrl?.trim() || DEFAULT_APP_BASE_URL);
-  const allowedHosts = new Set(options.allowedHosts ?? DEFAULT_ALLOWED_HOSTS);
-  if (baseUrl.protocol !== "https:" || !allowedHosts.has(baseUrl.hostname)) {
-    throw new Error("Teamship browser reads require an allowlisted HTTPS application host.");
-  }
+  assertTeamshipBrowserPageUrlAllowed(baseUrl, allowedHosts);
   return baseUrl;
+}
+
+export function assertTeamshipBrowserPageUrlAllowed(
+  value: string | URL,
+  allowedHosts: ReadonlySet<string> = new Set(DEFAULT_ALLOWED_HOSTS)
+) {
+  const url = value instanceof URL ? value : new URL(value);
+  if (url.protocol !== "https:" || !allowedHosts.has(url.hostname.toLowerCase())) {
+    throw new Error("Teamship browser reads require an allowlisted HTTPS page host.");
+  }
 }
 
 async function openReadPage(
@@ -196,19 +208,31 @@ async function openReadPage(
   options: TeamshipBrowserReadOptions
 ) {
   const target = new URL(route, baseUrl);
+  const allowedHosts = resolveAllowedHosts(options);
   await page.goto(target.toString(), { waitUntil: "domcontentloaded", timeout: options.navigationTimeoutMs ?? 30_000 });
+  assertTeamshipBrowserPageUrlAllowed(page.url(), allowedHosts);
   if (isLoginPage(page)) {
-    await login(page, credentials);
+    await login(page, credentials, allowedHosts);
     await page.goto(target.toString(), { waitUntil: "domcontentloaded", timeout: options.navigationTimeoutMs ?? 30_000 });
+    assertTeamshipBrowserPageUrlAllowed(page.url(), allowedHosts);
   }
   await page.waitForLoadState("networkidle", { timeout: options.navigationTimeoutMs ?? 15_000 }).catch(() => undefined);
+  const finalUrl = new URL(page.url());
+  if (finalUrl.origin !== baseUrl.origin) {
+    throw new Error("Teamship browser read did not return to the configured application host.");
+  }
 }
 
 function isLoginPage(page: Page) {
   return /\/(?:login|sign-in)\b/i.test(new URL(page.url()).pathname);
 }
 
-async function login(page: Page, credentials: TeamshipStoredCredentials) {
+async function login(
+  page: Page,
+  credentials: TeamshipStoredCredentials,
+  allowedHosts: ReadonlySet<string>
+) {
+  assertTeamshipBrowserPageUrlAllowed(page.url(), allowedHosts);
   const email = await requireUniqueLocator([
     page.locator('#email:visible'),
     page.locator('input[name="email"]:visible'),
@@ -232,6 +256,7 @@ async function login(page: Page, credentials: TeamshipStoredCredentials) {
   await password.fill(credentials.password);
   await submit.click();
   await page.waitForLoadState("domcontentloaded");
+  assertTeamshipBrowserPageUrlAllowed(page.url(), allowedHosts);
 }
 
 async function assertPageContext(page: Page, expectedPath: string, headingCandidates: string[]) {

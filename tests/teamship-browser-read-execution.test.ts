@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  assertTeamshipBrowserPageUrlAllowed,
   getConfiguredTeamshipBrowserReadAdapter,
   getTeamshipBrowserReadRuntimeStatus,
   parseInventoryAllTables,
@@ -156,5 +157,13 @@ describe("Teamship browser read extraction", () => {
     for (const name of TEAMSHIP_BROWSER_BLOCKED_CONTROL_NAMES) {
       expect(() => assertTeamshipReadControlAllowed(name)).toThrow(/not allowlisted/i);
     }
+  });
+
+  it("rejects non-HTTPS and non-allowlisted page hosts before browser reads continue", () => {
+    const allowedHosts = new Set(["app.teamshipos.com", "members.fulfillit.io"]);
+    expect(() => assertTeamshipBrowserPageUrlAllowed("https://app.teamshipos.com/inventory", allowedHosts)).not.toThrow();
+    expect(() => assertTeamshipBrowserPageUrlAllowed("https://members.fulfillit.io/login", allowedHosts)).not.toThrow();
+    expect(() => assertTeamshipBrowserPageUrlAllowed("http://app.teamshipos.com/inventory", allowedHosts)).toThrow(/allowlisted HTTPS/i);
+    expect(() => assertTeamshipBrowserPageUrlAllowed("https://example.test/login", allowedHosts)).toThrow(/allowlisted HTTPS/i);
   });
 });
