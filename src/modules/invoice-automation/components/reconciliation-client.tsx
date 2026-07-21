@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { formatInvoiceMoney } from "@/modules/invoice-automation/components";
 import {
   InvoiceAutomationTableControls,
@@ -22,10 +23,14 @@ const RISK_OPTIONS: InvoiceAutomationReconciliationRisk[] = [
 ];
 
 export function InvoiceReconciliationClient({ rows }: { rows: InvoiceAutomationReconciliationRow[] }) {
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [riskFilter, setRiskFilter] = useState("ALL");
   const [pageSize, setPageSize] = useState<InvoiceAutomationTablePageSize>(25);
   const [page, setPage] = useState(1);
+  const [isRefreshingQuickBooks, setIsRefreshingQuickBooks] = useState(false);
+  const [quickBooksRefreshMessage, setQuickBooksRefreshMessage] = useState<string | null>(null);
+  const [quickBooksRefreshError, setQuickBooksRefreshError] = useState<string | null>(null);
 
   const filteredRows = useMemo(() => {
     const normalizedSearch = searchQuery.trim().toLowerCase();
@@ -63,8 +68,74 @@ export function InvoiceReconciliationClient({ rows }: { rows: InvoiceAutomationR
     setPage(1);
   }
 
+  async function refreshFromQuickBooks() {
+    setIsRefreshingQuickBooks(true);
+    setQuickBooksRefreshMessage(null);
+    setQuickBooksRefreshError(null);
+    try {
+      const response = await fetch("/api/finance/invoice-automation/reconciliation/backfill", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          monthsBack: 24,
+          maxTransactionsPerType: 2000
+        })
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        scanned?: number;
+        importedOrUpdated?: number;
+        skippedWithoutFileNumber?: number;
+        skippedMultipleFileNumbers?: number;
+        warnings?: string[];
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to refresh QuickBooks reconciliation records.");
+      }
+
+      const warnings = payload.warnings?.length ? ` Warnings: ${payload.warnings.join(" ")}` : "";
+      setQuickBooksRefreshMessage(
+        `QuickBooks refresh scanned ${(payload.scanned ?? 0).toLocaleString("en-US")} transactions and updated ${(payload.importedOrUpdated ?? 0).toLocaleString("en-US")} reconciliation records.${warnings}`
+      );
+      router.refresh();
+    } catch (error) {
+      setQuickBooksRefreshError(error instanceof Error ? error.message : "Unable to refresh QuickBooks reconciliation records.");
+    } finally {
+      setIsRefreshingQuickBooks(false);
+    }
+  }
+
   return (
     <div className="space-y-4 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-muted/30 p-3">
+        <div>
+          <p className="text-sm font-semibold text-foreground">QuickBooks reconciliation cache</p>
+          <p className="text-sm text-mutedForeground">
+            Refresh reads recent QuickBooks invoices and bills, extracts shipment file numbers from memo/description fields, and updates this local reconciliation view.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={refreshFromQuickBooks}
+          disabled={isRefreshingQuickBooks}
+          className="rounded-md border border-border bg-background px-4 py-2 text-sm font-semibold text-foreground shadow-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isRefreshingQuickBooks ? "Refreshing QuickBooks..." : "Refresh from QuickBooks"}
+        </button>
+      </div>
+      {quickBooksRefreshMessage ? (
+        <div className="rounded-md border border-success/25 bg-success/10 p-3 text-sm font-medium text-success">
+          {quickBooksRefreshMessage}
+        </div>
+      ) : null}
+      {quickBooksRefreshError ? (
+        <div className="rounded-md border border-danger/25 bg-danger/10 p-3 text-sm font-medium text-danger">
+          {quickBooksRefreshError}
+        </div>
+      ) : null}
+
       <InvoiceAutomationTableControls
         searchQuery={searchQuery}
         onSearchQueryChange={handleSearchChange}
