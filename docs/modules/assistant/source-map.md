@@ -44,6 +44,7 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 |---|---|---|---|
 | UI and routes | See evidence paths above | `src/components/app-shell.tsx` | module-named tests under `tests/` |
 | Services/actions/queries | `src/modules/assistant*` or evidence paths above | `src/server/*` | module-named tests |
+| Teamship customer/warehouse name reference | `src/modules/teamship/scope-reference.ts`, `src/modules/teamship/routing.ts` | Tenant `IntegrationCredential.publicConfig.readOnlyScopes` parsed by `src/server/integrations/teamship-settings.ts` | `tests/teamship-routing.test.ts`, `tests/assistant-teamship-workflow.test.ts` |
 | Schema | `prisma/schema.prisma` | `prisma/migrations/*` | schema-dependent unit tests |
 
 ## Open questions

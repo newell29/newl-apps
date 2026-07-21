@@ -2,6 +2,41 @@ import { describe, expect, it } from "vitest";
 
 import { routeTeamshipQuestion } from "@/modules/teamship/routing";
 
+const referenceScopes = [
+  {
+    customerId: "420",
+    customerName: "Garland Canada Distribution",
+    warehouseId: "102",
+    warehouseName: "Annagem",
+    inventoryUserId: "420",
+    inventoryLocationId: "102"
+  },
+  {
+    customerId: "501",
+    customerName: "Northstar Lighting",
+    warehouseId: "1",
+    warehouseName: "Kestrel",
+    inventoryUserId: "501",
+    inventoryLocationId: "1"
+  },
+  {
+    customerId: "601",
+    customerName: "Atlas Products",
+    warehouseId: "1",
+    warehouseName: "Kestrel",
+    inventoryUserId: "601",
+    inventoryLocationId: "1"
+  },
+  {
+    customerId: "601",
+    customerName: "Atlas Products",
+    warehouseId: "102",
+    warehouseName: "Annagem",
+    inventoryUserId: "601",
+    inventoryLocationId: "102"
+  }
+];
+
 describe("Teamship question routing", () => {
   it.each([
     ["Where is SKU ABC-100?", "searchTeamshipLpn", ["customerId", "warehouseId"]],
@@ -61,6 +96,60 @@ describe("Teamship question routing", () => {
     expect(routeTeamshipQuestion("How much SKU ABC-100 is on hand for Garland warehouse 15?")).toMatchObject({
       kind: "TOOL",
       input: { customerId: "420", warehouseId: "15" }
+    });
+  });
+
+  it("resolves a customer name and its only configured warehouse from the tenant reference", () => {
+    expect(routeTeamshipQuestion(
+      "How much SKU ABC-100 is on hand for Northstar?",
+      { readOnlyScopes: referenceScopes }
+    )).toEqual({
+      kind: "TOOL",
+      tool: "searchTeamshipInventoryAll",
+      input: { sku: "ABC-100", customerId: "501", warehouseId: "1" }
+    });
+  });
+
+  it("resolves configured customer and warehouse names without numeric IDs", () => {
+    expect(routeTeamshipQuestion(
+      "What is shipping order SR812500 status for customer Atlas Products warehouse Annagem?",
+      { readOnlyScopes: referenceScopes }
+    )).toEqual({
+      kind: "TOOL",
+      tool: "getTeamshipShippingOrder",
+      input: { orderId: "SR812500", customerId: "601", warehouseId: "102" }
+    });
+  });
+
+  it("asks for a warehouse name when the referenced customer has several configured warehouses", () => {
+    expect(routeTeamshipQuestion(
+      "How much SKU ABC-100 is on hand for Atlas?",
+      { readOnlyScopes: referenceScopes }
+    )).toEqual({
+      kind: "CLARIFICATION",
+      intendedTool: "searchTeamshipInventoryAll",
+      missingFields: ["warehouseId"],
+      message: "Specify the warehouse by name: Annagem or Kestrel."
+    });
+  });
+
+  it("does not replace an unrecognized explicit warehouse with a single-warehouse default", () => {
+    expect(routeTeamshipQuestion(
+      "How much SKU ABC-100 is on hand for Northstar warehouse Unknown?",
+      { readOnlyScopes: referenceScopes }
+    )).toMatchObject({
+      kind: "CLARIFICATION",
+      missingFields: ["warehouseId"]
+    });
+  });
+
+  it("does not treat an unrecognized customer name as a Teamship ID", () => {
+    expect(routeTeamshipQuestion(
+      "How much SKU ABC-100 is on hand for customer Unknown warehouse Kestrel?",
+      { readOnlyScopes: referenceScopes }
+    )).toMatchObject({
+      kind: "CLARIFICATION",
+      missingFields: ["customerId", "warehouseId"]
     });
   });
 

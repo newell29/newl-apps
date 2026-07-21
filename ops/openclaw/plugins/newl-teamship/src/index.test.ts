@@ -15,8 +15,8 @@ describe("Newl Teamship OpenClaw plugin", () => {
       toolContext: {}
     });
     expect(tool.name).toBe("newl_teamship_read");
-    expect(tool.description).toContain("customer 420 and warehouse 102");
-    expect(tool.description).toContain("What is shipping order ORDER status customer CUSTOMER warehouse WAREHOUSE?");
+    expect(tool.description).toContain("do not ask them for numeric Teamship IDs");
+    expect(tool.description).toContain("defaults Garland to Annagem");
   });
 
   it("accepts only stable UUID-shaped Entra identities", () => {

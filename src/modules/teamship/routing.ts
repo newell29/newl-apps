@@ -1,3 +1,6 @@
+import { resolveTeamshipScopeReference } from "@/modules/teamship/scope-reference";
+import type { TeamshipReadScope } from "@/server/integrations/teamship-settings";
+
 export type TeamshipToolName =
   | "searchTeamshipInventory"
   | "searchTeamshipInventoryAll"
@@ -21,7 +24,10 @@ export type TeamshipQuestionRoute =
       message: string;
     };
 
-export function routeTeamshipQuestion(prompt: string): TeamshipQuestionRoute {
+export function routeTeamshipQuestion(
+  prompt: string,
+  options: { readOnlyScopes?: readonly TeamshipReadScope[] } = {}
+): TeamshipQuestionRoute {
   const text = prompt.trim();
   const normalized = text.toLowerCase();
 
@@ -33,11 +39,19 @@ export function routeTeamshipQuestion(prompt: string): TeamshipQuestionRoute {
     return { kind: "KNOWLEDGE", reason: "PROCEDURAL" };
   }
 
+  const reference = resolveTeamshipScopeReference(text, options.readOnlyScopes ?? []);
   const isGarland = /\bgarland\b/i.test(text);
-  const customerId = extractScopedIdentifier(text, "customer") ??
+  const warehouseWasNamed = /\bwarehouse(?:\s+id)?\s*[:#]?\s*[A-Z0-9._/-]+/i.test(text);
+  const customerId = reference.customerId ?? referenceCompatibleIdentifier(
+    extractScopedIdentifier(text, "customer"),
+    options.readOnlyScopes
+  ) ??
     (isGarland ? "420" : null);
-  const warehouseId = extractScopedIdentifier(text, "warehouse") ??
-    (isGarland ? "102" : null);
+  const warehouseId = reference.warehouseId ?? referenceCompatibleIdentifier(
+    extractScopedIdentifier(text, "warehouse"),
+    options.readOnlyScopes
+  ) ??
+    (isGarland && !warehouseWasNamed ? "102" : null);
   const sku = extractIdentifier(text, /\bsku\s*[:#]?\s*([A-Z0-9][A-Z0-9._/-]*)/i);
   const lpn = extractIdentifier(text, /\blpn\s*[:#]?\s*([A-Z0-9][A-Z0-9._/-]*)/i);
   const productId = extractIdentifier(text, /\bproduct\s+id\s*[:#]?\s*([A-Z0-9][A-Z0-9._/-]*)/i) ??
@@ -59,7 +73,8 @@ export function routeTeamshipQuestion(prompt: string): TeamshipQuestionRoute {
         ...(customerId ? { customerId } : {}),
         ...(warehouseId ? { warehouseId } : {})
       },
-      [!productId ? "productId" : null, !customerId ? "customerId" : null, !warehouseId ? "warehouseId" : null]
+      [!productId ? "productId" : null, !customerId ? "customerId" : null, !warehouseId ? "warehouseId" : null],
+      reference.warehouseChoices
     );
   }
 
@@ -71,7 +86,8 @@ export function routeTeamshipQuestion(prompt: string): TeamshipQuestionRoute {
         ...(customerId ? { customerId } : {}),
         ...(warehouseId ? { warehouseId } : {})
       },
-      [!receivingOrderId ? "receivingOrderId" : null, !customerId ? "customerId" : null, !warehouseId ? "warehouseId" : null]
+      [!receivingOrderId ? "receivingOrderId" : null, !customerId ? "customerId" : null, !warehouseId ? "warehouseId" : null],
+      reference.warehouseChoices
     );
   }
 
@@ -81,7 +97,8 @@ export function routeTeamshipQuestion(prompt: string): TeamshipQuestionRoute {
     return buildToolRoute(
       "searchTeamshipLpn",
       { queryType, ...(query ? { query } : {}), ...(customerId ? { customerId } : {}), ...(warehouseId ? { warehouseId } : {}) },
-      [!query ? queryType.toLowerCase() : null, !customerId ? "customerId" : null, !warehouseId ? "warehouseId" : null]
+      [!query ? queryType.toLowerCase() : null, !customerId ? "customerId" : null, !warehouseId ? "warehouseId" : null],
+      reference.warehouseChoices
     );
   }
 
@@ -89,7 +106,8 @@ export function routeTeamshipQuestion(prompt: string): TeamshipQuestionRoute {
     return buildToolRoute(
       "searchTeamshipInventory",
       { queryType: "SKU", query: sku, ...(customerId ? { customerId } : {}), ...(warehouseId ? { warehouseId } : {}) },
-      [!customerId ? "customerId" : null, !warehouseId ? "warehouseId" : null]
+      [!customerId ? "customerId" : null, !warehouseId ? "warehouseId" : null],
+      reference.warehouseChoices
     );
   }
 
@@ -97,7 +115,8 @@ export function routeTeamshipQuestion(prompt: string): TeamshipQuestionRoute {
     return buildToolRoute(
       "searchTeamshipInventoryAll",
       { ...(sku ? { sku } : {}), ...(customerId ? { customerId } : {}), ...(warehouseId ? { warehouseId } : {}) },
-      [!sku ? "sku" : null, !customerId ? "customerId" : null, !warehouseId ? "warehouseId" : null]
+      [!sku ? "sku" : null, !customerId ? "customerId" : null, !warehouseId ? "warehouseId" : null],
+      reference.warehouseChoices
     );
   }
 
@@ -106,7 +125,7 @@ export function routeTeamshipQuestion(prompt: string): TeamshipQuestionRoute {
       kind: "CLARIFICATION",
       intendedTool: null,
       missingFields: ["orderType", "orderId", "customerId", "warehouseId"],
-      message: "Specify whether this is a shipping or receiving order, plus the exact order, customer, and warehouse identifiers."
+      message: "Specify whether this is a shipping or receiving order, plus the exact order and configured customer name. Include the warehouse name when that customer has more than one configured warehouse."
     };
   }
 
@@ -118,7 +137,8 @@ export function routeTeamshipQuestion(prompt: string): TeamshipQuestionRoute {
         ...(customerId ? { customerId } : {}),
         ...(warehouseId ? { warehouseId } : {})
       },
-      [!shippingOrderId ? "shippingOrderId" : null, !customerId ? "customerId" : null, !warehouseId ? "warehouseId" : null]
+      [!shippingOrderId ? "shippingOrderId" : null, !customerId ? "customerId" : null, !warehouseId ? "warehouseId" : null],
+      reference.warehouseChoices
     );
   }
 
@@ -128,7 +148,8 @@ export function routeTeamshipQuestion(prompt: string): TeamshipQuestionRoute {
 function buildToolRoute(
   tool: TeamshipToolName,
   input: Record<string, string>,
-  missing: Array<string | null>
+  missing: Array<string | null>,
+  warehouseChoices: string[] = []
 ): TeamshipQuestionRoute {
   const missingFields = missing.filter((field): field is string => Boolean(field));
   if (missingFields.length > 0) {
@@ -136,11 +157,22 @@ function buildToolRoute(
       kind: "CLARIFICATION",
       intendedTool: tool,
       missingFields,
-      message: `Provide the exact ${formatMissingFields(missingFields)} before Teamship can be searched.`
+      message: missingFields.length === 1 && missingFields[0] === "warehouseId" && warehouseChoices.length > 1
+        ? `Specify the warehouse by name: ${formatChoices(warehouseChoices)}.`
+        : `Provide the exact ${formatMissingFields(missingFields)} before Teamship can be searched.`
     };
   }
 
   return { kind: "TOOL", tool, input };
+}
+
+function formatChoices(choices: string[]) {
+  return choices.length === 2 ? choices.join(" or ") : `${choices.slice(0, -1).join(", ")}, or ${choices.at(-1)}`;
+}
+
+function referenceCompatibleIdentifier(value: string | null, scopes: readonly TeamshipReadScope[] | undefined) {
+  if (!value || !scopes || scopes.length === 0) return value;
+  return /^\d+$/.test(value) ? value : null;
 }
 
 function looksLikeTeamshipQuestion(text: string) {
@@ -175,8 +207,8 @@ function extractScopedIdentifier(text: string, field: "customer" | "warehouse") 
 
 function formatMissingFields(fields: string[]) {
   const labels = fields.map((field) => {
-    if (field === "customerId") return "customer identifier";
-    if (field === "warehouseId") return "warehouse identifier";
+    if (field === "customerId") return "configured customer name";
+    if (field === "warehouseId") return "configured warehouse name";
     if (field === "shippingOrderId") return "shipping-order identifier";
     if (field === "receivingOrderId") return "receiving-order identifier";
     if (field === "productId") return "Teamship product identifier";

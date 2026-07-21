@@ -43,7 +43,7 @@ Put these in the environment used by the worker process, for example `~/.opencla
 NEWL_APPS_BASE_URL=https://newl-apps.vercel.app
 TEAMSHIP_BROWSER_WORKER_TOKEN=<same Mac worker token from Vercel>
 TEAMSHIP_BROWSER_WORKER_ID=alex-mac-mini-teamship
-TEAMSHIP_BROWSER_EXECUTABLE_PATH=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+TEAMSHIP_BROWSER_EXECUTABLE_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 TEAMSHIP_BROWSER_READ_HEADED=false
 TEAMSHIP_BROWSER_READ_TIMEOUT_MS=30000
 TEAMSHIP_BROWSER_WORKER_POLL_MS=2000
@@ -75,46 +75,30 @@ In another terminal, trigger a browser-backed query through the existing OpenCla
 
 ## launchd service
 
-Create `~/Library/LaunchAgents/com.newl.teamship-browser-read-worker.plist`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>com.newl.teamship-browser-read-worker</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/bin/zsh</string>
-    <string>-lc</string>
-    <string>set -a; source ~/.openclaw/.env; set +a; cd "${TEAMSHIP_WORKER_REPO_PATH:-$HOME/Developer/newl-apps}"; npm run worker:teamship-browser-read</string>
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
-  <key>StandardOutPath</key>
-  <string>/tmp/newl-teamship-browser-read-worker.out.log</string>
-  <key>StandardErrorPath</key>
-  <string>/tmp/newl-teamship-browser-read-worker.err.log</string>
-</dict>
-</plist>
-```
-
-Load it:
+Install the checked-in LaunchAgent, align the worker with the same Preview URL used by Nemo, and start it:
 
 ```bash
-launchctl load ~/Library/LaunchAgents/com.newl.teamship-browser-read-worker.plist
-launchctl start com.newl.teamship-browser-read-worker
+ops/openclaw/install-teamship-browser-read-worker.sh \
+  --base-url https://the-reviewed-preview.vercel.app
+```
+
+The installer validates required environment names without printing values, renders `ops/openclaw/launchd/com.newl.teamship-browser-read-worker.plist.template`, writes persistent logs under `~/Library/Logs/newl-apps/`, and uses `RunAtLoad` plus `KeepAlive` so the worker returns after login, reboot, or an unexpected exit. The runner imports only the worker's allowlisted environment names and safely accepts quoted or unquoted paths containing spaces.
+
+Verify it:
+
+```bash
+launchctl print gui/$(id -u)/com.newl.teamship-browser-read-worker
+tail -n 20 ~/Library/Logs/newl-apps/teamship-browser-read-worker.out.log
+tail -n 20 ~/Library/Logs/newl-apps/teamship-browser-read-worker.err.log
 ```
 
 Stop it:
 
 ```bash
-launchctl stop com.newl.teamship-browser-read-worker
-launchctl unload ~/Library/LaunchAgents/com.newl.teamship-browser-read-worker.plist
+launchctl bootout gui/$(id -u)/com.newl.teamship-browser-read-worker
 ```
+
+If Inventory All waits about 60 seconds and returns `Teamship could not complete the read-only request`, first verify that this LaunchAgent is loaded and that the worker and Nemo use the same Newl Apps Preview URL. API-backed shipping-order reads do not use this worker.
 
 ## Safety limits
 

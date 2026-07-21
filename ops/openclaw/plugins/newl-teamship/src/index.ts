@@ -16,13 +16,13 @@ type TeamshipToolContext = {
   requesterSenderId?: string;
 };
 
-const teamshipToolDescription = "Always call this tool for a current Teamship order, inventory, SKU, LPN, receiving order, warehouse, or product history question. For every Garland request with no user-supplied warehouse, include customer 420 and warehouse 102; never omit warehouse 102 or put 420 in the warehouse field. For on-hand inventory use exactly: How much SKU SKU is on hand customer CUSTOMER warehouse WAREHOUSE? For shipping order status use exactly: What is shipping order ORDER status customer CUSTOMER warehouse WAREHOUSE? Do not inspect authentication or configuration files first; the tool validates the authenticated Microsoft Teams sender, which cannot be supplied as a parameter. The plugin returns the sanitized tool answer as the authoritative result.";
+const teamshipToolDescription = "Always call this tool for a current Teamship order, inventory, SKU, LPN, receiving order, warehouse, or product history question. Employees may use configured customer and warehouse names; do not ask them for numeric Teamship IDs. Newl Apps resolves names through the tenant's approved read-only scope reference, defaults a customer with one configured warehouse, and defaults Garland to Annagem when no warehouse is supplied. If a customer has several warehouses and none is supplied, preserve Newl Apps' warehouse clarification. Do not inspect authentication or configuration files first; the tool validates the authenticated Microsoft Teams sender, which cannot be supplied as a parameter. The plugin returns the sanitized tool answer as the authoritative result.";
 
 const teamshipToolParameters = Type.Object({
   prompt: Type.String({
     minLength: 1,
     maxLength: 4000,
-    description: "A normalized, exact, read-only Teamship current-record question. On-hand inventory must use: How much SKU SKU is on hand customer CUSTOMER warehouse WAREHOUSE? Shipping order status must use: What is shipping order ORDER status customer CUSTOMER warehouse WAREHOUSE? Every Garland request without a user-supplied warehouse must include customer 420 warehouse 102."
+    description: "A read-only Teamship current-record question containing the exact record/SKU/LPN and the configured customer name. Include the warehouse name when the employee supplied one. Numeric customer and warehouse IDs are not required; Newl Apps resolves approved names and safe defaults."
   })
 });
 
