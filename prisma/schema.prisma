@@ -457,6 +457,11 @@ model Tenant {
   assistantMailboxSyncStates          AssistantMailboxSyncState[]
   assistantAutomations                AssistantAutomation[]
   assistantAutomationRuns             AssistantAutomationRun[]
+  workflowArtifacts                   WorkflowArtifact[]
+  workflowArtifactChunks              WorkflowArtifactChunk[]
+  operationalFeedback                 OperationalFeedback[]
+  approvedOperationalLessons          ApprovedOperationalLesson[]
+  developmentSuggestions              DevelopmentSuggestion[]
   shipmentDocumentRuns                ShipmentDocumentRun[]
   shipmentCarrierManifestRuns         ShipmentCarrierManifestRun[]
   teamshipReviewRuns                  TeamshipReviewRun[]
@@ -2663,4 +2668,141 @@ model AssistantAutomationRun {
 
   @@index([tenantId, automationId, startedAt])
   @@index([tenantId, userId, startedAt])
+}
+
+model WorkflowArtifact {
+  id                     String    @id @default(cuid())
+  tenantId               String
+  workflowKey            String
+  sourceChannel          String
+  externalMessageId      String?
+  externalConversationId String?
+  submittedByUserId      String?
+  fileName               String
+  contentType            String
+  sizeBytes              Int
+  contentHash            String?
+  status                 String    @default("UPLOADING")
+  chunkCount             Int
+  teamshipReviewRunId    String?
+  duplicateOfArtifactId  String?
+  extractionSummary      Json?
+  errorMessage           String?
+  completedAt            DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  tenant Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  chunks WorkflowArtifactChunk[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, workflowKey, createdAt])
+  @@index([tenantId, contentHash])
+  @@index([tenantId, externalMessageId])
+  @@index([tenantId, status, updatedAt])
+}
+
+model WorkflowArtifactChunk {
+  id          String   @id @default(cuid())
+  tenantId    String
+  artifactId  String
+  chunkIndex  Int
+  sizeBytes   Int
+  contentHash String
+  bytes       Bytes
+  createdAt   DateTime @default(now())
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  artifact WorkflowArtifact @relation(fields: [tenantId, artifactId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, artifactId, chunkIndex])
+  @@index([tenantId, artifactId])
+}
+
+model OperationalFeedback {
+  id                    String    @id @default(cuid())
+  tenantId              String
+  moduleKey             ModuleKey
+  workflowKey           String
+  subjectType           String
+  subjectId             String?
+  teamshipReviewRunId   String?
+  teamshipReviewOrderId String?
+  artifactId            String?
+  reporterUserId        String
+  reporterStatement     String
+  expectedOutcome       String?
+  observedOutcome       String?
+  classification        String    @default("UNCLASSIFIED")
+  status                String    @default("REPORTED")
+  evidence              Json?
+  resolutionNotes       String?
+  reviewedByUserId      String?
+  reviewedAt            DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, workflowKey, status, createdAt])
+  @@index([tenantId, subjectType, subjectId])
+  @@index([tenantId, reporterUserId, createdAt])
+}
+
+model ApprovedOperationalLesson {
+  id               String    @id @default(cuid())
+  tenantId         String
+  moduleKey        ModuleKey
+  workflowKey      String
+  subjectType      String
+  subjectId        String?
+  classification   String
+  title            String
+  ruleText         String
+  confidence       Int       @default(100)
+  status           String    @default("ACTIVE")
+  sourceFeedbackId String
+  approvedByUserId String
+  approvedAt       DateTime  @default(now())
+  retiredByUserId  String?
+  retiredAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, sourceFeedbackId])
+  @@index([tenantId, workflowKey, status, updatedAt])
+  @@index([tenantId, subjectType, subjectId, status])
+}
+
+model DevelopmentSuggestion {
+  id                  String    @id @default(cuid())
+  tenantId            String
+  moduleKey           ModuleKey
+  workflowKey         String
+  title               String
+  summary             String
+  rationale           String
+  status              String    @default("AWAITING_APPROVAL")
+  riskLevel           String    @default("MEDIUM")
+  sourceFeedbackIds   Json
+  feedbackCount       Int
+  proposedScope       Json?
+  generatedAt         DateTime  @default(now())
+  decisionByUserId    String?
+  decisionAt          DateTime?
+  decisionNotes       String?
+  developmentThreadId String?
+  pullRequestUrl      String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, status, generatedAt])
+  @@index([tenantId, workflowKey, generatedAt])
 }

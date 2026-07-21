@@ -41,6 +41,7 @@ export const config = {
    *  - /api/auth/*                       (Auth.js + dev login)
    *  - /api/integrations/trademining/*   (machine-to-machine ingestion auth)
    *  - /api/assistant/teamship/read      (OpenClaw Teamship token auth)
+   *  - /api/assistant/garland/*          (OpenClaw assistant token + Teams identity auth)
    *  - /api/assistant/teamship/browser-jobs/*
    *                                      (Mac Mini Teamship browser worker token auth)
    *  - /api/shipment-documents/teamship-review/update-jobs/agent/*
@@ -51,6 +52,6 @@ export const config = {
    *  - Next.js internals and static files
    */
   matcher: [
-    "/((?!api/auth|api/integrations/trademining|api/assistant/teamship/read|api/assistant/teamship/browser-jobs|api/shipment-documents/teamship-review/update-jobs/agent|api/shipment-documents/teamship-review/email-intake/scheduled|api/website-inbound|_next/static|_next/image|favicon.ico|.*\\..*).*)"
+    "/((?!api/auth|api/integrations/trademining|api/assistant/teamship/read|api/assistant/teamship/browser-jobs|api/assistant/garland|api/shipment-documents/teamship-review/update-jobs/agent|api/shipment-documents/teamship-review/email-intake/scheduled|api/website-inbound|_next/static|_next/image|favicon.ico|.*\\..*).*)"
   ]
 };

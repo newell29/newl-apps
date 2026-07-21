@@ -13,6 +13,10 @@ Shipment documents and Garland Teamship review is documented because code, route
 - Data persistence uses tenant-scoped Prisma models where a database model exists.
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
+- A Garland PDF attached through authenticated Teams is captured only from the trusted OpenClaw session, uploaded to Newl Apps in hashed chunks, parsed server-side, compared with a fresh read-only Teamship fetch, and saved as a normal `TeamshipReviewRun`.
+- Phase 1 does not update Teamship or print. Existing update and print paths retain their separate approval requirements.
+- CSRs can ask why the latest saved PS/SR check failed. The explanation uses the saved deterministic per-field comparison and may additionally show active admin-approved lessons.
+- CSRs can report that a result should have passed or failed. The report is not treated as true until reviewed.
 
 ## Data model
 
@@ -20,10 +24,16 @@ Relevant tables and enums are in `prisma/schema.prisma`. Operationally important
 
 ```mermaid
 flowchart LR
-  UI[Authenticated UI/API] --> Auth[Auth + module guard]
-  Auth --> Service[Module service]
-  Service --> DB[(Tenant-scoped Prisma tables)]
-  Service --> Ext[External services when configured]
+  Teams[Teams PDF or question] --> OpenClaw[Identity-bound OpenClaw tool]
+  OpenClaw --> Auth[Newl auth + tenant + module guard]
+  Auth --> Artifact[(Hashed PDF chunks)]
+  Artifact --> Parse[Deterministic Garland parser]
+  Parse --> Read[Read-only Teamship fetch]
+  Read --> Review[(Saved review + field evidence)]
+  Review --> Explain[Why did it fail?]
+  Explain --> Feedback[(Reported employee feedback)]
+  Feedback --> Approval[Admin confirmation]
+  Approval --> Memory[(Approved operational lesson)]
 ```
 
 ## Permissions
@@ -51,3 +61,5 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Which status values map to employee-approved business language? Requires employee confirmation.
 - Which write actions should require two-person approval? Requires owner confirmation.
 - Which external integration credentials should be moved from env fallback to tenant-scoped settings first? Requires owner confirmation.
+- If a CSR does not provide a shipment date with an older PDF, should Nemo use today's date, the Teams message date, or ask a clarifying question? Phase 1 defaults to today; business confirmation is required.
+- How long should original Teams PDF artifacts be retained? Phase 1 retains them until a tenant retention policy is approved.
