@@ -11,6 +11,8 @@ import {
 import { toInvoiceAutomationRow } from "@/modules/invoice-automation/row-mapper";
 import type { InvoiceAutomationEntityOption, InvoiceAutomationRow } from "@/modules/invoice-automation/types";
 
+const INVOICE_AUTOMATION_ROW_QUERY_LIMIT = 5000;
+
 export type InvoiceAutomationFilters = {
   q?: string;
   status?: string;
@@ -29,6 +31,7 @@ export type InvoiceAutomationReconciliationRow = {
   shipmentFileNumber: string;
   shipmentType: string | null;
   customerNames: string[];
+  vendorNames: string[];
   customerInvoiceCount: number;
   vendorInvoiceCount: number;
   customerRevenueCad: number | null;
@@ -97,58 +100,59 @@ export async function getInvoiceAutomationPostedShell(tenant: TenantContext, fil
 }
 
 export async function getInvoiceAutomationReconciliationShell(tenant: TenantContext) {
-  const [invoices, quickBooksTransactions] = await Promise.all([
-    prisma.invoiceAutomationInvoice.findMany({
-      where: {
-        tenantId: tenant.tenantId,
-        shipmentFileNumber: {
-          not: null
+  const invoices = await prisma.invoiceAutomationInvoice.findMany({
+    where: {
+      tenantId: tenant.tenantId,
+      shipmentFileNumber: {
+        not: null
+      },
+      status: {
+        not: InvoiceAutomationStatus.REJECTED
+      }
+    },
+    orderBy: [{ updatedAt: "desc" }],
+    take: INVOICE_AUTOMATION_ROW_QUERY_LIMIT,
+    select: {
+      id: true,
+      invoiceType: true,
+      status: true,
+      shipmentFileNumber: true,
+      shipmentType: true,
+      entityNameRaw: true,
+      quickBooksEntityDisplayName: true,
+      invoiceNumber: true,
+      invoiceDate: true,
+      currency: true,
+      subtotalAmount: true,
+      quickBooksSubtotalHomeAmount: true
+    }
+  });
+  const newlShipmentFileNumbers = uniqueShipmentFileNumbers(invoices.map((invoice) => invoice.shipmentFileNumber));
+  const quickBooksTransactions = newlShipmentFileNumbers.length > 0
+    ? await prisma.invoiceAutomationQuickBooksTransaction.findMany({
+        where: {
+          tenantId: tenant.tenantId,
+          invoiceAutomationInvoiceId: null,
+          shipmentFileNumber: {
+            in: newlShipmentFileNumbers
+          }
         },
-        status: {
-          not: InvoiceAutomationStatus.REJECTED
+        orderBy: [{ observedAt: "desc" }],
+        take: INVOICE_AUTOMATION_ROW_QUERY_LIMIT,
+        select: {
+          id: true,
+          invoiceType: true,
+          shipmentFileNumber: true,
+          shipmentType: true,
+          entityName: true,
+          quickBooksTxnNumber: true,
+          transactionDate: true,
+          currency: true,
+          subtotalAmount: true,
+          quickBooksSubtotalHomeAmount: true
         }
-      },
-      orderBy: [{ updatedAt: "desc" }],
-      take: 2500,
-      select: {
-        id: true,
-        invoiceType: true,
-        status: true,
-        shipmentFileNumber: true,
-        shipmentType: true,
-        entityNameRaw: true,
-        quickBooksEntityDisplayName: true,
-        invoiceNumber: true,
-        invoiceDate: true,
-        currency: true,
-        subtotalAmount: true,
-        quickBooksSubtotalHomeAmount: true
-      }
-    }),
-    prisma.invoiceAutomationQuickBooksTransaction.findMany({
-      where: {
-        tenantId: tenant.tenantId,
-        invoiceAutomationInvoiceId: null,
-        shipmentFileNumber: {
-          not: null
-        }
-      },
-      orderBy: [{ observedAt: "desc" }],
-      take: 2500,
-      select: {
-        id: true,
-        invoiceType: true,
-        shipmentFileNumber: true,
-        shipmentType: true,
-        entityName: true,
-        quickBooksTxnNumber: true,
-        transactionDate: true,
-        currency: true,
-        subtotalAmount: true,
-        quickBooksSubtotalHomeAmount: true
-      }
-    })
-  ]);
+      })
+    : [];
 
   const rows = buildShipmentReconciliationRows([
     ...invoices,
@@ -166,6 +170,10 @@ export async function getInvoiceAutomationReconciliationShell(tenant: TenantCont
       fxMissing: rows.filter((row) => row.risks.includes("FX_MISSING")).length
     }
   };
+}
+
+function uniqueShipmentFileNumbers(values: Array<string | null>) {
+  return [...new Set(values.map((value) => value?.trim().toUpperCase()).filter((value): value is string => Boolean(value)))];
 }
 
 export async function getInvoiceAutomationEntityOptions(tenant: TenantContext): Promise<InvoiceAutomationEntityOption[]> {
@@ -256,7 +264,7 @@ async function getInvoiceAutomationRows(
   const rows = await prisma.invoiceAutomationInvoice.findMany({
     where,
     orderBy: [{ createdAt: "desc" }],
-    take: 100,
+    take: INVOICE_AUTOMATION_ROW_QUERY_LIMIT,
     include: {
       batch: {
         select: {
@@ -365,6 +373,7 @@ function buildShipmentReconciliationRow(
     shipmentFileNumber,
     shipmentType: group.find((record) => record.shipmentType)?.shipmentType ?? shipmentFileNumber.slice(0, 2),
     customerNames: uniqueSorted(customerInvoices.map(readReconciliationEntityName)),
+    vendorNames: uniqueSorted(vendorInvoices.map(readReconciliationEntityName)),
     customerInvoiceCount: customerInvoices.length,
     vendorInvoiceCount: vendorInvoices.length,
     customerRevenueCad,

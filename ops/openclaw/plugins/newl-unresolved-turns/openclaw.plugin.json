@@ -1,0 +1,53 @@
+{
+  "id": "newl-unresolved-turns",
+  "name": "Newl Unresolved Turns",
+  "description": "Captures failed or unanswered Microsoft Teams turns for tenant-scoped developer review.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "required": [
+      "baseUrl",
+      "tenantId",
+      "developerObjectId"
+    ],
+    "properties": {
+      "baseUrl": {
+        "type": "string",
+        "description": "Newl Apps base URL."
+      },
+      "tenantId": {
+        "type": "string",
+        "description": "Microsoft Entra tenant ID used by the configured Teams channel."
+      },
+      "developerObjectId": {
+        "type": "string",
+        "description": "Microsoft Entra object ID of the Newl Apps administrator used by the optional developer issue-list tool."
+      },
+      "developerAgentId": {
+        "type": "string",
+        "description": "OpenClaw agent ID allowed to load the optional issue-list tool. Defaults to developer."
+      },
+      "assistantTokenEnv": {
+        "type": "string",
+        "description": "Environment variable containing the Newl Apps OpenClaw assistant token."
+      },
+      "vercelProtectionBypassEnv": {
+        "type": "string",
+        "description": "Optional environment variable containing a Vercel Preview automation bypass secret."
+      }
+    }
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "newl_unresolved_turns"
+    ]
+  },
+  "toolMetadata": {
+    "newl_unresolved_turns": {
+      "optional": true
+    }
+  }
+}

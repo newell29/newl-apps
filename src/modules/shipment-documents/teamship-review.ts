@@ -277,11 +277,54 @@ function extractShipToPo(line: string) {
 
 function extractInstructions(lines: string[], itemHeaderIndex: number) {
   const startIndex = lines.findIndex((line) => /Order Date\b/i.test(line));
-  if (startIndex < 0 || itemHeaderIndex <= startIndex) {
+  const endIndex = findInstructionEndIndex(lines, startIndex, itemHeaderIndex);
+
+  if (startIndex < 0 || endIndex <= startIndex) {
     return "";
   }
 
-  return lines.slice(startIndex + 1, itemHeaderIndex).join("\n").trim();
+  return removeTrailingItemHeaderLines(lines.slice(startIndex + 1, endIndex)).join("\n").trim();
+}
+
+function findInstructionEndIndex(lines: string[], startIndex: number, itemHeaderIndex: number) {
+  if (startIndex < 0) {
+    return itemHeaderIndex;
+  }
+
+  const scanEndIndex = itemHeaderIndex > startIndex ? itemHeaderIndex : lines.length;
+  for (let index = startIndex + 1; index < scanEndIndex; index += 1) {
+    if (isItemTableHeaderCluster(lines, index)) {
+      return index;
+    }
+  }
+
+  return itemHeaderIndex;
+}
+
+function isItemTableHeaderCluster(lines: string[], index: number) {
+  if (!isItemTableHeaderFragment(lines[index] ?? "")) {
+    return false;
+  }
+
+  const window = lines.slice(index, index + 8).join(" ").toUpperCase();
+  return /\bLN\b/.test(window) && /\bITEM NUMBER\b/.test(window) && /\bSHIP QTY\b/.test(window);
+}
+
+function removeTrailingItemHeaderLines(lines: string[]) {
+  const output = [...lines];
+
+  while (output.length > 0 && isItemTableHeaderFragment(output[output.length - 1] ?? "")) {
+    output.pop();
+  }
+
+  return output;
+}
+
+function isItemTableHeaderFragment(line: string) {
+  const normalized = line.trim().toUpperCase();
+  return /^(?:LN|ITEM NUMBER|T|SITE|LOCATION|LOT\/SERIAL|REF|SHIP QTY|QTY OPEN|UM|DUE|SHIPPED|\s)+$/.test(
+    normalized
+  );
 }
 
 function extractItems(lines: string[], itemHeaderIndex: number): GarlandShippingOrderItem[] {
@@ -299,7 +342,7 @@ function extractItems(lines: string[], itemHeaderIndex: number): GarlandShipping
       break;
     }
 
-    const itemStart = line.match(/^(\d+)\s+(.+?)\s+(\d{6})(?:\s|$)/);
+    const itemStart = matchGarlandItemStart(line);
     if (itemStart) {
       if (current) {
         current.serialNumbers = extractSerialNumbers(serialCandidates);
@@ -307,8 +350,8 @@ function extractItems(lines: string[], itemHeaderIndex: number): GarlandShipping
       }
 
       current = {
-        lineNumber: Number.parseInt(itemStart[1] ?? "", 10),
-        sku: (itemStart[2] ?? "").trim(),
+        lineNumber: itemStart.lineNumber,
+        sku: itemStart.sku,
         description: "",
         quantity: null,
         dueShipDate: null,
@@ -329,7 +372,7 @@ function extractItems(lines: string[], itemHeaderIndex: number): GarlandShipping
       continue;
     }
 
-    if (/^(NEWLS|MACKIE)\b/i.test(line)) {
+    if (isGarlandSerialCandidateLine(line)) {
       serialCandidates.push(line);
       continue;
     }
@@ -343,6 +386,50 @@ function extractItems(lines: string[], itemHeaderIndex: number): GarlandShipping
   }
 
   return items;
+}
+
+function matchGarlandItemStart(line: string) {
+  const lineWithSite = line.match(/^(\d{1,3})\s+(.+?)\s+(\d{6})(?:\s|$)/);
+  if (lineWithSite) {
+    return {
+      lineNumber: Number.parseInt(lineWithSite[1] ?? "", 10),
+      sku: (lineWithSite[2] ?? "").trim()
+    };
+  }
+
+  const splitLine = line.match(/^(\d{1,3})\s+([A-Z0-9][A-Z0-9./-]{2,})(?:\s|$)/i);
+  if (!splitLine) {
+    return null;
+  }
+
+  const sku = (splitLine[2] ?? "").trim();
+  if (!isLikelyGarlandSku(sku)) {
+    return null;
+  }
+
+  return {
+    lineNumber: Number.parseInt(splitLine[1] ?? "", 10),
+    sku
+  };
+}
+
+function isLikelyGarlandSku(value: string) {
+  const normalized = value.trim().toUpperCase();
+  return /^[A-Z0-9][A-Z0-9./-]{2,}$/.test(normalized) && /\d/.test(normalized);
+}
+
+function isGarlandSerialCandidateLine(line: string) {
+  const trimmed = line.trim();
+
+  if (/^(NEWLS|MACKIE)\b/i.test(trimmed)) {
+    return true;
+  }
+
+  if (/^\d{10,16}$/.test(trimmed)) {
+    return true;
+  }
+
+  return extractSerialNumbers([trimmed]).length > 0 && /\b\d+(?:\.\d+)?\s*\(/.test(trimmed);
 }
 
 function extractSerialNumbers(lines: string[]) {
@@ -400,20 +487,23 @@ export function buildGarlandTeamshipReview(
   const alertByShipmentId = new Map(
     teamshipAlerts.map((alert) => [normalizeIdentifier(alert.srNumber), alert] as const).filter(([shipmentId]) => shipmentId.length > 0)
   );
-  const teamshipByShipmentId = groupTeamshipOrdersByShipmentId(teamshipOrders);
+  const teamshipOrderIndex = indexTeamshipOrders(teamshipOrders);
+  const matchedTeamshipOrders = new Set<TeamshipShippingOrderDetail>();
   const reviews = pdfOrders.map((pdfOrder) => {
-    const teamshipOrder = teamshipByShipmentId.get(normalizeIdentifier(pdfOrder.srNumber)) ?? null;
+    const teamshipOrder = findTeamshipOrderForPdf(pdfOrder, teamshipOrderIndex);
+    if (teamshipOrder) {
+      matchedTeamshipOrders.add(teamshipOrder);
+    }
     const alert = alertByShipmentId.get(normalizeIdentifier(pdfOrder.srNumber)) ?? null;
     return buildOrderReview(pdfOrder, teamshipOrder, alert, options.learnedProductDimensions ?? []);
   });
   const skippedAlreadyReviewedReviews = (options.skippedAlreadyReviewedOrders ?? []).map(buildSkippedAlreadyReviewedReview);
-  const skippedShipmentIds = new Set(skippedAlreadyReviewedReviews.map((review) => normalizeIdentifier(review.srNumber)));
+  const skippedReviewKeys = new Set(skippedAlreadyReviewedReviews.map((review) => buildReviewIdentityKey(review.psNumber, review.srNumber)));
 
   if (options.includeUnmatchedTeamshipOrders) {
-    const matchedPdfShipmentIds = new Set(pdfOrders.map((order) => normalizeIdentifier(order.srNumber)));
-
-    for (const [shipmentId, teamshipOrder] of teamshipByShipmentId) {
-      if (!shipmentId || matchedPdfShipmentIds.has(shipmentId) || skippedShipmentIds.has(shipmentId)) {
+    for (const teamshipOrder of teamshipOrders) {
+      const teamshipKey = buildTeamshipIdentityKey(teamshipOrder);
+      if (matchedTeamshipOrders.has(teamshipOrder) || !teamshipKey || skippedReviewKeys.has(teamshipKey)) {
         continue;
       }
 
@@ -432,20 +522,90 @@ export function buildGarlandTeamshipReview(
   };
 }
 
-function groupTeamshipOrdersByShipmentId(teamshipOrders: TeamshipShippingOrderDetail[]) {
-  const teamshipByShipmentId = new Map<string, TeamshipShippingOrderDetail>();
+type TeamshipOrderIndex = {
+  byPsNumber: Map<string, TeamshipShippingOrderDetail[]>;
+  byShipmentId: Map<string, TeamshipShippingOrderDetail[]>;
+};
+
+function indexTeamshipOrders(teamshipOrders: TeamshipShippingOrderDetail[]): TeamshipOrderIndex {
+  const byPsNumber = new Map<string, TeamshipShippingOrderDetail[]>();
+  const byShipmentId = new Map<string, TeamshipShippingOrderDetail[]>();
 
   for (const order of teamshipOrders) {
+    const psNumber = normalizeIdentifier(readTeamshipPsNumber(order));
     const shipmentId = normalizeIdentifier(readTeamshipShipmentId(order));
 
-    if (!shipmentId || teamshipByShipmentId.has(shipmentId)) {
-      continue;
+    if (psNumber) {
+      appendIndexedTeamshipOrder(byPsNumber, psNumber, order);
     }
 
-    teamshipByShipmentId.set(shipmentId, order);
+    if (shipmentId) {
+      appendIndexedTeamshipOrder(byShipmentId, shipmentId, order);
+    }
   }
 
-  return teamshipByShipmentId;
+  return { byPsNumber, byShipmentId };
+}
+
+function appendIndexedTeamshipOrder(
+  index: Map<string, TeamshipShippingOrderDetail[]>,
+  key: string,
+  order: TeamshipShippingOrderDetail
+) {
+  const orders = index.get(key) ?? [];
+  orders.push(order);
+  index.set(key, orders);
+}
+
+function findTeamshipOrderForPdf(pdfOrder: GarlandPdfShippingOrder, index: TeamshipOrderIndex) {
+  const pdfPsNumber = normalizeIdentifier(pdfOrder.psNumber);
+  const pdfSrNumber = normalizeIdentifier(pdfOrder.srNumber);
+
+  if (pdfPsNumber) {
+    const psMatches = index.byPsNumber.get(pdfPsNumber) ?? [];
+    if (psMatches.length > 0) {
+      return findSrMatch(pdfSrNumber, psMatches) ?? psMatches[0] ?? null;
+    }
+  }
+
+  if (!pdfSrNumber) {
+    return null;
+  }
+
+  const srMatches = index.byShipmentId.get(pdfSrNumber) ?? [];
+
+  if (!pdfPsNumber) {
+    return srMatches[0] ?? null;
+  }
+
+  const nonConflictingSrMatches = srMatches.filter((order) => {
+    const teamshipPsNumber = normalizeIdentifier(readTeamshipPsNumber(order));
+    return !teamshipPsNumber || teamshipPsNumber === pdfPsNumber;
+  });
+
+  return nonConflictingSrMatches.length === 1 ? nonConflictingSrMatches[0] : null;
+}
+
+function findSrMatch(pdfSrNumber: string, orders: TeamshipShippingOrderDetail[]) {
+  if (!pdfSrNumber) {
+    return null;
+  }
+
+  return orders.find((order) => normalizeIdentifier(readTeamshipShipmentId(order)) === pdfSrNumber) ?? null;
+}
+
+function buildReviewIdentityKey(psNumber: string | null, srNumber: string | null) {
+  const normalizedPs = normalizeIdentifier(psNumber);
+  if (normalizedPs) {
+    return `ps:${normalizedPs}`;
+  }
+
+  const normalizedSr = normalizeIdentifier(srNumber);
+  return normalizedSr ? `sr:${normalizedSr}` : "";
+}
+
+function buildTeamshipIdentityKey(order: TeamshipShippingOrderDetail) {
+  return buildReviewIdentityKey(readTeamshipPsNumber(order), readTeamshipShipmentId(order));
 }
 
 function buildOrderReview(

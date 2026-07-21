@@ -1,0 +1,4 @@
+interface:
+  display_name: "Teamship Read Only"
+  short_description: "Read scoped Teamship orders and inventory"
+  default_prompt: "Use $teamship-read-only to check a scoped Teamship order or inventory record."

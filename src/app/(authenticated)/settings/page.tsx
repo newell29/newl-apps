@@ -25,6 +25,7 @@ import { getSettingsShell } from "@/modules/settings/queries";
 import { connectMicrosoftGraphAction } from "@/server/auth/actions";
 import { requireAdmin } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
+import { getTeamshipBrowserReadRuntimeStatus } from "@/modules/teamship/browser-read-execution";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +40,7 @@ export default async function SettingsPage() {
   const context = await getAuthenticatedContext();
   requireAdmin(context);
   const settings = await getSettingsShell(context);
+  const teamshipBrowserRuntime = getTeamshipBrowserReadRuntimeStatus();
   const loginUrl = `${process.env.AUTH_URL ?? "https://newl-apps.vercel.app"}/login`;
 
   return (
@@ -419,6 +421,54 @@ export default async function SettingsPage() {
               info="Usually the Annagem Teamship location ID for Garland inventory lookups."
             />
           </div>
+
+          <div className="border-t border-border pt-4">
+            <h3 className="text-sm font-semibold text-foreground">Nemo read-only Teamship search</h3>
+            <p className="mt-1 text-sm leading-6 text-mutedForeground">
+              {settings.teamship.readOnlyScopes.length} approved customer and warehouse scope
+              {settings.teamship.readOnlyScopes.length === 1 ? " is" : "s are"} configured. Uploading a new JSON file
+              replaces the complete scope set after validation.
+            </p>
+            <div className="mt-4 grid gap-4 xl:grid-cols-2">
+              <label className="space-y-1 text-sm font-medium text-foreground">
+                <FieldLabel
+                  label="Approved read-only scopes"
+                  info="Use the reviewed Teamship scope JSON. Customer names and IDs remain in tenant-scoped integration configuration and are not added to assistant knowledge."
+                />
+                <input
+                  name="teamshipReadOnlyScopesFile"
+                  type="file"
+                  accept="application/json,.json"
+                  className="block w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground file:mr-3 file:border-0 file:bg-transparent file:text-sm file:font-semibold"
+                />
+              </label>
+              <div className="rounded-md border border-border bg-muted/30 p-4 text-sm">
+                <p className="font-medium text-foreground">Browser runtime</p>
+                <p className="mt-2 text-mutedForeground">
+                  {teamshipBrowserRuntime.configured
+                    ? "Ready. The guarded server runtime and Chrome path are configured."
+                    : `Not ready. ${teamshipBrowserRuntime.reason}`}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <label className="flex items-start gap-3 rounded-md border border-border bg-muted/30 p-4 text-sm text-foreground">
+            <input
+              type="checkbox"
+              name="teamshipReadOnlySearchEnabled"
+              value="true"
+              defaultChecked={settings.teamship.readOnlySearchEnabled}
+              className="mt-1"
+            />
+            <span>
+              <span className="block font-semibold">Enable Nemo read-only Teamship searches</span>
+              <span className="mt-1 block leading-6 text-mutedForeground">
+                Enables only the scoped read tools. It does not authorize Teamship changes, printing, receiving,
+                picking, packing, or administrative access.
+              </span>
+            </span>
+          </label>
 
           <label className="flex items-start gap-3 rounded-md border border-border bg-muted/30 p-4 text-sm text-foreground">
             <input

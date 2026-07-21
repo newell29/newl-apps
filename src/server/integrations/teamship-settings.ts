@@ -26,7 +26,18 @@ export type TeamshipSettings = {
   syncCadenceMinutes: number;
   garlandInventoryUserId: string | null;
   garlandInventoryLocationId: string | null;
+  readOnlySearchEnabled: boolean;
+  readOnlyScopes: TeamshipReadScope[];
   updatedAt: string | null;
+};
+
+export type TeamshipReadScope = {
+  customerId: string;
+  customerName: string;
+  warehouseId: string;
+  warehouseName: string;
+  inventoryUserId: string;
+  inventoryLocationId: string;
 };
 
 export type TeamshipStoredCredentials = {
@@ -52,9 +63,49 @@ export function parseTeamshipSettings(credential?: TeamshipCredentialRecord | nu
     syncCadenceMinutes: readSyncCadenceMinutes(config.syncCadenceMinutes),
     garlandInventoryUserId: readOptionalConfigString(config.garlandInventoryUserId),
     garlandInventoryLocationId: readOptionalConfigString(config.garlandInventoryLocationId),
+    readOnlySearchEnabled: config.readOnlySearchEnabled === true,
+    readOnlyScopes: parseTeamshipReadScopes(config.readOnlyScopes),
     updatedAt:
       typeof config.updatedAt === "string" && config.updatedAt.trim().length > 0 ? config.updatedAt.trim() : null
   };
+}
+
+export function parseTeamshipReadScopeUpload(value: unknown): TeamshipReadScope[] {
+  const candidates = Array.isArray(value)
+    ? value
+    : value && typeof value === "object" && Array.isArray((value as Record<string, unknown>).readOnlyScopes)
+      ? (value as Record<string, unknown>).readOnlyScopes as unknown[]
+      : null;
+
+  if (!candidates || candidates.length === 0) {
+    throw new Error("The Teamship scope file must contain a non-empty readOnlyScopes array.");
+  }
+  if (candidates.length > 500) {
+    throw new Error("The Teamship scope file cannot contain more than 500 entries.");
+  }
+
+  const seen = new Set<string>();
+  return candidates.map((candidate, index) => {
+    if (!candidate || typeof candidate !== "object") {
+      throw new Error(`Teamship scope entry ${index + 1} must be an object.`);
+    }
+
+    const record = candidate as Record<string, unknown>;
+    const scope = {
+      customerId: requireScopeUploadString(record.customerId, "customerId", index),
+      customerName: requireScopeUploadString(record.customerName, "customerName", index),
+      warehouseId: requireScopeUploadString(record.warehouseId, "warehouseId", index),
+      warehouseName: requireScopeUploadString(record.warehouseName, "warehouseName", index),
+      inventoryUserId: requireScopeUploadString(record.inventoryUserId, "inventoryUserId", index),
+      inventoryLocationId: requireScopeUploadString(record.inventoryLocationId, "inventoryLocationId", index)
+    };
+    const key = `${scope.customerId}::${scope.warehouseId}`;
+    if (seen.has(key)) {
+      throw new Error(`Teamship scope entry ${index + 1} duplicates customer ${scope.customerId} and warehouse ${scope.warehouseId}.`);
+    }
+    seen.add(key);
+    return scope;
+  });
 }
 
 export async function getTeamshipSyncEnabledCredentials() {
@@ -151,6 +202,8 @@ export function buildTeamshipCredentialRecord({
       syncCadenceMinutes: 15,
       garlandInventoryUserId: null,
       garlandInventoryLocationId: null,
+      readOnlySearchEnabled: false,
+      readOnlyScopes: [],
       updatedAt: new Date().toISOString()
     },
     secretRef: encryptTeamshipSecret({ password })
@@ -205,4 +258,51 @@ function readSyncCadenceMinutes(value: unknown) {
 
 function readOptionalConfigString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function requireScopeUploadString(value: unknown, field: string, index: number) {
+  const normalized = readOptionalConfigString(value);
+  if (!normalized || normalized.length > 200 || /[\u0000-\u001f\u007f]/.test(normalized)) {
+    throw new Error(`Teamship scope entry ${index + 1} has an invalid ${field}.`);
+  }
+  return normalized;
+}
+
+function parseTeamshipReadScopes(value: unknown): TeamshipReadScope[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== "object") {
+      return [];
+    }
+
+    const record = candidate as Record<string, unknown>;
+    const customerId = readOptionalConfigString(record.customerId);
+    const customerName = readOptionalConfigString(record.customerName);
+    const warehouseId = readOptionalConfigString(record.warehouseId);
+    const warehouseName = readOptionalConfigString(record.warehouseName);
+    const inventoryUserId = readOptionalConfigString(record.inventoryUserId);
+    const inventoryLocationId = readOptionalConfigString(record.inventoryLocationId);
+    if (
+      !customerId ||
+      !customerName ||
+      !warehouseId ||
+      !warehouseName ||
+      !inventoryUserId ||
+      !inventoryLocationId
+    ) {
+      return [];
+    }
+
+    return [{
+      customerId,
+      customerName,
+      warehouseId,
+      warehouseName,
+      inventoryUserId,
+      inventoryLocationId
+    }];
+  });
 }

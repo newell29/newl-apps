@@ -25,6 +25,7 @@ if (vercelEnv === "preview") {
   console.log("Preview deployment detected. Checking database identity before applying migrations.");
   run("npm", ["run", "db:safety-check", "--", "--require-preview-db"]);
   run("npm", ["run", "prisma:migrate:deploy"]);
+  run("npm", ["run", "preview:provision-teamship-user"]);
 } else {
   console.log(
     "Skipping prisma migrate deploy. Production migrations must be run intentionally; Preview migrations run only after the preview database safety check."

@@ -11,6 +11,10 @@ OpenClaw coordinates workflows and interprets employee intent. Newl Apps perform
 
 Approved data sources: this repository documentation, authenticated app APIs, tenant-scoped database queries through app code, approved employee feedback after confirmation, and live tools for current operational data. Prohibited tools: production write browser automation without approval, direct database writes, secrets extraction, unreviewed customer communications, financial posting, printing, Teamship writes, and deployment.
 
+## Unresolved Teams turns
+
+The optional `newl-unresolved-turns` OpenClaw plugin and tenant-scoped Newl Apps endpoint capture failed or unanswered Microsoft Teams turns for developer review. Successful turns are deleted; the capture does not retain model reasoning, full conversation history, tool parameters, or raw tool results. Detection, storage fields, developer discovery, privacy boundaries, and known limitations are defined in [openclaw-unresolved-turns.md](openclaw-unresolved-turns.md). The capture package does not include a scheduler.
+
 ## Tests and gaps
 
 Tests named `tests/assistant-*.test.ts`, `tests/openai-integration.test.ts`, and `tests/assistant-provider.test.ts` cover deterministic runtime, provider parsing, automations, knowledge, Microsoft sync, and module workflows. Missing coverage requiring confirmation includes employee-facing factuality evaluations, cost budgets, latency SLOs, and approved tool allowlists per tenant.

@@ -38,6 +38,26 @@ Expected failures include missing tenant entitlement, read-only mutation attempt
 
 Relevant tests are under `tests/` and generally named after the module. Recommended checks: `npm test`, `npm run lint`, `npm run typecheck`, and targeted route/service tests. Live integration scripts must not be run without explicit approval and safe credentials.
 
+Sanitized Preview-only model comparisons are recorded in [model-benchmarks.md](model-benchmarks.md). Candidate models must use the fixed prompt suite, fake identifiers, identity-bound read-only tools, and the documented scoring criteria so results remain comparable.
+
+Unresolved-turn tests verify that capture is tenant scoped, successful Teams turns are removed, failed turns retain sanitized evidence, external identifiers are hashed, stale pending turns are listed as `NO_RESPONSE`, only Admin users can list issues, and capture failures do not interrupt Nemo. The OpenClaw plugin tests cover model, tool, and delivery signals without retaining model reasoning or raw tool payloads.
+
+Teamship routing regression tests verify that configured customer names resolve through tenant-scoped `readOnlyScopes`, single-warehouse customers default safely, explicit warehouse names resolve without numeric IDs, and multi-warehouse customers receive a clarification instead of an inferred scope.
+
+Inventory browser-reader regression tests also verify that the initial Teamship grid is ready before the SKU is entered with paced keyboard events and the visible Search control is activated. The reader waits for the requested visible row through Teamship's slow asynchronous refresh and accepts a visible empty state only after that exact-row window expires; setting the input value directly, submitting with Enter, searching while the initial grid is loading, or reading a transient, stale, or hidden grid is not sufficient evidence that Teamship applied the search.
+
+Teamship can retain more than one header-compatible grid surface during refresh. Extraction tests verify that the reader prefers the refreshed surface containing the requested SKU or LPN instead of parsing an earlier stale surface.
+
+Teamship also separates accessibility-annotated headers from refreshed data rows in some grid states. Regression coverage pairs compatible header/data surfaces before exact-identifier selection and verifies the allowlisted quantity and scope columns stay aligned.
+
+The exact-row wait and extraction of every visible grid surface occur in one browser evaluation. This prevents Teamship from replacing the detected refreshed rows or their separate header surface between the wait and the read.
+
+Ship by LPN regression tests cover exact LPN, SKU, and serial-number routing. Plural labels such as `LPNs` and `serials` are not accepted as identifier values. Teamship may render the LPN as a group caption instead of a normal cell, so the parser preserves a matching caption such as `63991 (Annagem, LOC:0802A)` and associates it with the following detail row.
+
+Inventory searches collect the complete filtered result before applying exact scope filters. The reader first uses Teamship's read-only 100-items page-size control, then follows any remaining pages. Tests cover both the one-page expansion of a 37-row result and pager fallback, and enforce a bounded 25-page maximum so a malformed pager cannot create an unbounded browser job.
+
+Remote browser jobs have a bounded two-minute caller wait and a three-minute worker claim. The longer claim prevents a valid result from being discarded at the exact caller deadline while still allowing stale jobs to fail closed.
+
 ## Source map
 
 | Responsibility | Main files | Supporting files | Tests |

@@ -22,6 +22,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:seed": "tsx prisma/seed.ts",
+    "preview:provision-teamship-user": "tsx scripts/provision-preview-teamship-user.ts",
     "test": "vitest run",
     "verify:auth": "tsx scripts/verify-auth.ts",
     "verify:garland-teamship": "tsx scripts/verify-garland-teamship-review.ts",
@@ -31,7 +32,9 @@
     "smoke:teamship-dev-api-update": "tsx scripts/teamship-dev-api-update-smoke.ts",
     "smoke:teamship-dev-pdf-mapping": "tsx scripts/teamship-dev-pdf-mapping-smoke.ts",
     "worker:teamship-phase2": "tsx scripts/teamship-phase2-agent-worker.ts",
-    "worker:teamship-sr810465-vm": "tsx scripts/teamship-phase2-sr810465-vm.ts"
+    "openclaw:teamship-read": "tsx scripts/openclaw-teamship-read.ts",
+    "worker:teamship-sr810465-vm": "tsx scripts/teamship-phase2-sr810465-vm.ts",
+    "worker:teamship-browser-read": "tsx scripts/teamship-browser-read-worker.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.2",
