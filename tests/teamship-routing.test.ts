@@ -34,6 +34,14 @@ const referenceScopes = [
     warehouseName: "Annagem",
     inventoryUserId: "601",
     inventoryLocationId: "102"
+  },
+  {
+    customerId: "360",
+    customerName: "WE Cork Inc",
+    warehouseId: "18",
+    warehouseName: "Sandy Porter",
+    inventoryUserId: "360",
+    inventoryLocationId: "18"
   }
 ];
 
@@ -155,6 +163,44 @@ describe("Teamship question routing", () => {
       kind: "TOOL",
       tool: "getTeamshipShippingOrder",
       input: { orderId: "SR812500", customerId: "601", warehouseId: "102" }
+    });
+  });
+
+  it("resolves a unique customer name without its corporate suffix", () => {
+    expect(routeTeamshipQuestion(
+      "Where is LPN 10060 for WE Cork warehouse Sandy Porter?",
+      { readOnlyScopes: referenceScopes }
+    )).toEqual({
+      kind: "TOOL",
+      tool: "searchTeamshipLpn",
+      input: {
+        queryType: "LPN",
+        query: "10060",
+        customerId: "360",
+        warehouseId: "18"
+      }
+    });
+  });
+
+  it("fails closed when a corporate-suffix-free customer alias is shared", () => {
+    const ambiguousScopes = [
+      ...referenceScopes,
+      {
+        customerId: "361",
+        customerName: "WE Cork LLC",
+        warehouseId: "19",
+        warehouseName: "Overflow",
+        inventoryUserId: "361",
+        inventoryLocationId: "19"
+      }
+    ];
+
+    expect(routeTeamshipQuestion(
+      "Where is LPN 10060 for WE Cork?",
+      { readOnlyScopes: ambiguousScopes }
+    )).toMatchObject({
+      kind: "CLARIFICATION",
+      missingFields: ["customerId", "warehouseId"]
     });
   });
 
