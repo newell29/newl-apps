@@ -124,7 +124,10 @@ export async function getInvoiceAutomationReconciliationShell(tenant: TenantCont
       invoiceDate: true,
       currency: true,
       subtotalAmount: true,
-      quickBooksSubtotalHomeAmount: true
+      quickBooksSubtotalHomeAmount: true,
+      quickBooksEntityId: true,
+      quickBooksTxnId: true,
+      quickBooksTxnNumber: true
     }
   });
   const newlShipmentFileNumbers = uniqueShipmentFileNumbers(invoices.map((invoice) => invoice.shipmentFileNumber));
@@ -142,9 +145,11 @@ export async function getInvoiceAutomationReconciliationShell(tenant: TenantCont
         select: {
           id: true,
           invoiceType: true,
+          quickBooksTxnId: true,
           shipmentFileNumber: true,
           shipmentType: true,
           entityName: true,
+          quickBooksEntityId: true,
           quickBooksTxnNumber: true,
           transactionDate: true,
           currency: true,
@@ -153,10 +158,11 @@ export async function getInvoiceAutomationReconciliationShell(tenant: TenantCont
         }
       })
     : [];
+  const quickBooksOnlyTransactions = filterQuickBooksTransactionsForReconciliation(quickBooksTransactions, invoices);
 
   const rows = buildShipmentReconciliationRows([
     ...invoices,
-    ...quickBooksTransactions.map(toQuickBooksReconciliationRecord)
+    ...quickBooksOnlyTransactions.map(toQuickBooksReconciliationRecord)
   ]);
 
   return {
@@ -174,6 +180,93 @@ export async function getInvoiceAutomationReconciliationShell(tenant: TenantCont
 
 function uniqueShipmentFileNumbers(values: Array<string | null>) {
   return [...new Set(values.map((value) => value?.trim().toUpperCase()).filter((value): value is string => Boolean(value)))];
+}
+
+type ReconciliationNewlInvoiceIdentity = {
+  invoiceType: InvoiceAutomationType;
+  shipmentFileNumber: string | null;
+  invoiceNumber: string | null;
+  quickBooksEntityId: string | null;
+  quickBooksTxnId: string | null;
+  quickBooksTxnNumber: string | null;
+};
+
+type ReconciliationQuickBooksTransactionIdentity = {
+  invoiceType: InvoiceAutomationType;
+  quickBooksTxnId: string;
+  shipmentFileNumber: string | null;
+  quickBooksEntityId: string | null;
+  quickBooksTxnNumber: string | null;
+};
+
+export function filterQuickBooksTransactionsForReconciliation<TTransaction extends ReconciliationQuickBooksTransactionIdentity>(
+  quickBooksTransactions: TTransaction[],
+  invoices: ReconciliationNewlInvoiceIdentity[]
+) {
+  const representedKeys = new Set<string>();
+
+  for (const invoice of invoices) {
+    for (const key of buildReconciliationIdentityKeys({
+      invoiceType: invoice.invoiceType,
+      shipmentFileNumber: invoice.shipmentFileNumber,
+      quickBooksEntityId: invoice.quickBooksEntityId,
+      quickBooksTxnId: invoice.quickBooksTxnId,
+      invoiceNumbers: [invoice.invoiceNumber, invoice.quickBooksTxnNumber]
+    })) {
+      representedKeys.add(key);
+    }
+  }
+
+  return quickBooksTransactions.filter((transaction) => {
+    const transactionKeys = buildReconciliationIdentityKeys({
+      invoiceType: transaction.invoiceType,
+      shipmentFileNumber: transaction.shipmentFileNumber,
+      quickBooksEntityId: transaction.quickBooksEntityId,
+      quickBooksTxnId: transaction.quickBooksTxnId,
+      invoiceNumbers: [transaction.quickBooksTxnNumber]
+    });
+    return !transactionKeys.some((key) => representedKeys.has(key));
+  });
+}
+
+function buildReconciliationIdentityKeys({
+  invoiceType,
+  shipmentFileNumber,
+  quickBooksEntityId,
+  quickBooksTxnId,
+  invoiceNumbers
+}: {
+  invoiceType: InvoiceAutomationType;
+  shipmentFileNumber: string | null;
+  quickBooksEntityId: string | null;
+  quickBooksTxnId: string | null;
+  invoiceNumbers: Array<string | null>;
+}) {
+  const keys: string[] = [];
+  const txnId = normalizeIdentityValue(quickBooksTxnId);
+  if (txnId) {
+    keys.push(`${invoiceType}:qb-txn:${txnId}`);
+  }
+
+  const fileNumber = normalizeIdentityValue(shipmentFileNumber);
+  if (!fileNumber) {
+    return keys;
+  }
+
+  const entityId = normalizeIdentityValue(quickBooksEntityId);
+  const uniqueInvoiceNumbers = [...new Set(invoiceNumbers.map(normalizeIdentityValue).filter((value): value is string => Boolean(value)))];
+  for (const invoiceNumber of uniqueInvoiceNumbers) {
+    keys.push(`${invoiceType}:file-doc:${fileNumber}:${invoiceNumber}`);
+    if (entityId) {
+      keys.push(`${invoiceType}:file-entity-doc:${fileNumber}:${entityId}:${invoiceNumber}`);
+    }
+  }
+
+  return keys;
+}
+
+function normalizeIdentityValue(value: string | null | undefined) {
+  return value?.trim().toUpperCase().replace(/\s+/g, "") || null;
 }
 
 export async function getInvoiceAutomationEntityOptions(tenant: TenantContext): Promise<InvoiceAutomationEntityOption[]> {
