@@ -4,6 +4,9 @@ set -euo pipefail
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
+runner_directory="${0:A:h}"
+source "${runner_directory}/lib/resolve-codex-cli.zsh"
+
 scout_env_file="${WEBSITE_GROWTH_SCOUT_ENV_FILE:-${HOME}/.openclaw/agents/scout/.env}"
 if [[ ! -r "${scout_env_file}" ]]; then
   echo "Website Growth Scout environment file is not readable." >&2
@@ -15,7 +18,7 @@ while IFS= read -r scout_env_line || [[ -n "${scout_env_line}" ]]; do
   scout_env_name="${scout_env_line%%=*}"
   scout_env_value="${scout_env_line#*=}"
   case "${scout_env_name}" in
-    NEWL_APPS_URL|OPENCLAW_WEBSITE_GROWTH_TOKEN|NEWL_WEBSITE_REPO_PATH|WEBSITE_GROWTH_TEAMS_TARGET|WEBSITE_GROWTH_TEAMS_ACCOUNT|VERCEL_AUTOMATION_BYPASS_SECRET)
+    NEWL_APPS_URL|OPENCLAW_WEBSITE_GROWTH_TOKEN|NEWL_WEBSITE_REPO_PATH|WEBSITE_GROWTH_TEAMS_TARGET|WEBSITE_GROWTH_TEAMS_ACCOUNT|VERCEL_AUTOMATION_BYPASS_SECRET|CODEX_BIN)
       if [[ "${scout_env_value}" == \"*\" && "${scout_env_value}" == *\" ]]; then
         scout_env_value="${scout_env_value:1:-1}"
       elif [[ "${scout_env_value}" == \'*\' && "${scout_env_value}" == *\' ]]; then
@@ -39,11 +42,8 @@ if [[ ! -e "${NEWL_WEBSITE_REPO_PATH}/.git" ]]; then
   echo "NEWL_WEBSITE_REPO_PATH must point to the Newl website repository." >&2
   exit 1
 fi
-if ! command -v codex >/dev/null 2>&1; then
-  echo "Codex CLI is required for Website Growth Scout." >&2
-  exit 1
-fi
-if ! codex mcp get semrush >/dev/null 2>&1; then
+resolve_codex_cli
+if ! "${codex_bin}" mcp get semrush >/dev/null 2>&1; then
   echo "Official SEMrush MCP is not configured for Codex. Run configure-semrush-mcp.sh first." >&2
   exit 1
 fi
@@ -53,7 +53,6 @@ if [[ -n "${VERCEL_AUTOMATION_BYPASS_SECRET:-}" ]]; then
   scout_curl_headers+=(--header "x-vercel-protection-bypass: ${VERCEL_AUTOMATION_BYPASS_SECRET}")
 fi
 
-runner_directory="${0:A:h}"
 schema_path="${runner_directory}/skills/website-growth-scout/scout-output.schema.json"
 temporary_directory="$(mktemp -d)"
 prepare_path="${temporary_directory}/prepare.json"
@@ -132,7 +131,7 @@ scout_effort="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.a
   printf '%s\n\n' "Your final response must match the supplied JSON schema exactly."
   printf '%s\n' "SCOUT_PACKET_JSON:"
   /bin/cat "${packet_path}"
-} | codex exec \
+} | "${codex_bin}" exec \
   --ephemeral \
   --model "${scout_model}" \
   --config "model_reasoning_effort=\"${scout_effort}\"" \
