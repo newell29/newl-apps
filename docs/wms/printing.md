@@ -20,4 +20,6 @@ Phase 1 single-order printing is implemented in `src/modules/teamship/print-jobs
 
 The worker performs a complete preflight before printing: it verifies the Garland/Annagem order, recalculates the pallet count, confirms the local CUPS queue, and verifies the exact Teamship BOL and outbound-label printer options. It then prints one picking list locally, submits one BOL through Teamship, and submits outbound labels equal to the approved pallet count. It reselects and reads back `BIXOLON SRP-770III` on every order immediately before the label action. A failed, expired, crashed, or partially completed job is never retried automatically.
 
+Browser execution uses the documented Teamship shipping-order detail host, `https://members.fulfillit.io`. The `app.teamshipos.com` application shell is not a valid pallet-count preflight source because it may omit the indexed pallet inputs even when the API plan contains pallet rows.
+
 Batch printing and automatic printing are not implemented.

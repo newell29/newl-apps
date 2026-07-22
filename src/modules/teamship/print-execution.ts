@@ -36,7 +36,7 @@ export class TeamshipPrintExecutionError extends Error {
 }
 
 const execFile = promisify(execFileCallback);
-const DEFAULT_APP_BASE_URL = "https://app.teamshipos.com";
+export const DEFAULT_TEAMSHIP_PRINT_APP_BASE_URL = "https://members.fulfillit.io";
 const DEFAULT_ALLOWED_HOSTS = ["app.teamshipos.com", "members.fulfillit.io"];
 
 export async function executeTeamshipPrintJob(
@@ -47,7 +47,7 @@ export async function executeTeamshipPrintJob(
   let observedPalletCount: number | null = null;
   const browser = await launchBrowser(options);
   try {
-    const baseUrl = resolveBaseUrl(job, options);
+    const baseUrl = resolveTeamshipPrintAppBaseUrl(options.appBaseUrl);
     const allowedHosts = resolveAllowedHosts(options);
     const page = await browser.newPage({ viewport: { width: 1440, height: 1100 }, acceptDownloads: true });
     page.setDefaultTimeout(options.navigationTimeoutMs ?? 20_000);
@@ -368,10 +368,8 @@ function assertApprovedPalletCount(observed: number, approved: number) {
   }
 }
 
-function resolveBaseUrl(job: ClaimedTeamshipPrintJob, options: TeamshipPrintExecutionOptions) {
-  const configured = options.appBaseUrl?.trim();
-  const credentialOrigin = job.credentials.apiBaseUrl ? new URL(job.credentials.apiBaseUrl).origin : null;
-  return new URL(configured || credentialOrigin || DEFAULT_APP_BASE_URL);
+export function resolveTeamshipPrintAppBaseUrl(configured?: string) {
+  return new URL(configured?.trim() || DEFAULT_TEAMSHIP_PRINT_APP_BASE_URL);
 }
 
 function resolveAllowedHosts(options: TeamshipPrintExecutionOptions) {

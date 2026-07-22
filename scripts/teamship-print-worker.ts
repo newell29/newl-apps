@@ -33,7 +33,7 @@ async function main() {
     console.log(`Claimed Teamship print job ${job.id} for order ${job.shippingOrderNumber}.`);
     try {
       const result = await executeTeamshipPrintJob(job, {
-        appBaseUrl: process.env.TEAMSHIP_APP_BASE_URL?.trim() || "https://app.teamshipos.com",
+        appBaseUrl: process.env.TEAMSHIP_APP_BASE_URL?.trim() || undefined,
         allowedHosts: readAllowedHosts(process.env.TEAMSHIP_BROWSER_ALLOWED_HOSTS),
         browserExecutablePath: process.env.TEAMSHIP_BROWSER_EXECUTABLE_PATH?.trim() || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
         headed: process.env.TEAMSHIP_PRINT_HEADED === "true",
