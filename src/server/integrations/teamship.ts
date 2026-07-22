@@ -256,6 +256,7 @@ export async function findTeamshipShippingOrders({
   const matches: TeamshipShippingOrderDetail[] = [];
   const pageLimit = getTeamshipPageLimit();
   const maxPages = getTeamshipMaxPages();
+  let webCookieHeader: string | null | undefined;
 
   for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
     const rows = await listTeamshipShippingOrders({
@@ -278,16 +279,30 @@ export async function findTeamshipShippingOrders({
 
       const detail = await getTeamshipShippingOrder({ apiBaseUrl, token, id: String(id), fetchImpl });
       const merged = mergeTeamshipDetailWithSummary(detail, row);
-      const authoritativePallets = Array.isArray(detail.pallets)
-        ? detail.pallets
-        : Array.isArray(detail.pallet_dims)
-          ? detail.pallet_dims
-          : undefined;
+      let authoritativePallets = readAuthoritativeTeamshipPallets(detail);
+
+      if (!authoritativePallets) {
+        if (webCookieHeader === undefined) {
+          webCookieHeader = await loginToTeamshipWeb(fetchImpl, resolvedCredentials, webBaseUrl).catch(() => null);
+        }
+
+        if (webCookieHeader) {
+          const uiDetail = await getTeamshipShippingOrderUiDetail({
+            webBaseUrl,
+            webCookieHeader,
+            id: String(id),
+            fetchImpl
+          }).catch(() => null);
+          authoritativePallets = readAuthoritativeTeamshipPallets(uiDetail);
+        }
+      }
+
       matches.push({
         ...merged,
-        ...(authoritativePallets !== undefined
-          ? { pallets: authoritativePallets, pallet_dims: authoritativePallets }
-          : {}),
+        // Never retain a list-summary pallet count when neither the exact API
+        // detail nor the signed-in Teamship page confirms it.
+        pallets: authoritativePallets ?? [],
+        pallet_dims: authoritativePallets ?? [],
         teamship_internal_id: String(id),
         url: buildTeamshipOrderUrl(webBaseUrl, String(id))
       });
@@ -299,6 +314,12 @@ export async function findTeamshipShippingOrders({
   }
 
   return matches;
+}
+
+function readAuthoritativeTeamshipPallets(detail: Partial<TeamshipShippingOrderDetail> | null) {
+  if (!detail) return undefined;
+  return [detail.pallets, detail.pallet_dims]
+    .find((rows): rows is NonNullable<TeamshipShippingOrderDetail["pallet_dims"]> => Array.isArray(rows) && rows.length > 0);
 }
 
 function teamshipOrderIdentifiers(order: TeamshipShippingOrderDetail) {

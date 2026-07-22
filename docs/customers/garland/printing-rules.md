@@ -39,7 +39,7 @@ The same employee who creates a plan must explicitly approve its request ID. Cha
 
 Garland shipping-order display numbers and Teamship's internal page IDs are separate identities. For example, the supervised order `30666` resolves to internal Teamship record `31064`. Nemo shows `30666`, while the local worker verifies the API mapping and navigates to `/ship-inventories/31064`; the Teamship detail page itself may visibly show only `Ship Inventory #31064`. The integration resolves this mapping for every order rather than hard-coding a customer example.
 
-The exact-order API detail is authoritative for pallet-label quantity. Detail-level pallet rows override stale list-summary aliases. During the supervised `30666` investigation on 2026-07-22, the signed-in Teamship detail page and its hidden detail payload both showed one pallet row with quantity `1`; a prior plan of two labels was rejected as stale summary data.
+The exact-order detail is authoritative for pallet-label quantity. Detail-level pallet rows override stale list-summary aliases. If the exact API response omits pallet rows, the server signs into the corresponding Teamship detail page and reads its hidden pallet fields; if neither exact source supplies rows, plan creation fails closed instead of reusing the list summary. During the supervised `30666` investigation on 2026-07-22, the signed-in Teamship detail page and its hidden detail payload both showed one pallet row with quantity `1`; prior plans of two labels were rejected as stale summary data.
 
 ## Open questions
 
