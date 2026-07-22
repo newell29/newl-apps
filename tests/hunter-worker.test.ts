@@ -12,7 +12,6 @@ function runWorkerProbe(source: string) {
       ...process.env,
       PYTHONDONTWRITEBYTECODE: "1",
       HUNTER_COLLECTION_DAYS: "1",
-      HUNTER_SEARCH_CHUNK_DAYS: "7",
       HUNTER_DAILY_RUN_TIME: "07:00",
       HUNTER_TRADEMINING_PORTS_JSON: JSON.stringify({
         "Charleston, South Carolina": "1237"
@@ -39,13 +38,54 @@ describe("Hunter daily profile worker", () => {
       "  'lastRunAt': None,",
       "}",
       "plan = module.build_profile_plan(profile)",
-      "print(json.dumps({'lookbackDays': plan['lookbackDays'], 'chunkDays': plan['searchChunkDays']}))"
+      "print(json.dumps({'lookbackDays': plan['lookbackDays'], 'queryCount': plan['queryCount']}))"
     ].join("\n");
 
     const result = runWorkerProbe(python);
 
     expect(result.status, result.stderr).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual({ lookbackDays: 120, chunkDays: 7 });
+    expect(JSON.parse(result.stdout)).toEqual({ lookbackDays: 120, queryCount: 1 });
+  });
+
+  it("plans every source filter in one TradeMining query", () => {
+    const python = [
+      "import importlib.util, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "profile = {",
+      "  'id': 'profile-charlotte',",
+      "  'name': 'Charlotte Warehouse Leads',",
+      "  'destinationPorts': ['Charleston, South Carolina'],",
+      "  'originCountries': ['Vietnam', 'Thailand'],",
+      "  'originPorts': ['Ho Chi Minh City', 'Laem Chabang'],",
+      "  'shipFromPorts': ['Ho Chi Minh', 'Busan'],",
+      "  'productKeywords': ['consumer goods', 'fixtures'],",
+      "  'hsCodes': ['6109', '9403'],",
+      "  'minShipmentVolume': '10',",
+      "  'lookbackDays': 120,",
+      "  'schedule': {'timezone': 'America/Toronto', 'metadata': {}},",
+      "  'lastRunAt': None,",
+      "}",
+      "plan = module.build_profile_plan(profile)",
+      "print(json.dumps(plan))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      queryCount: 1,
+      lookbackDays: 120,
+      originCountries: ["Vietnam", "Thailand"],
+      originPorts: ["Ho Chi Minh City", "Laem Chabang"],
+      shipFromPorts: ["Ho Chi Minh", "Busan"],
+      productKeywords: ["consumer goods", "fixtures"],
+      hsCodes: ["6109", "9403"],
+      minimumTeu: 10
+    });
   });
 
   it("runs each enabled profile at most once per local day after the daily time", () => {

@@ -126,6 +126,23 @@ def profile_lookback_days(profile: dict[str, Any]) -> int:
     return max(1, int(profile.get("lookbackDays") or 1))
 
 
+def profile_values(profile: dict[str, Any], field: str) -> list[str]:
+    values = profile.get(field)
+    if not isinstance(values, list):
+        return []
+    return [str(value).strip() for value in values if str(value).strip()]
+
+
+def profile_minimum_teu(profile: dict[str, Any]) -> Optional[float]:
+    raw = clean(profile.get("minShipmentVolume"))
+    if raw is None:
+        return None
+    value = float(raw)
+    if value < 0:
+        raise RuntimeError("profile minimum TEUs cannot be negative")
+    return value
+
+
 def profile_timezone(profile: dict[str, Any]) -> ZoneInfo:
     schedule = profile.get("schedule") if isinstance(profile.get("schedule"), dict) else {}
     timezone_name = clean(schedule.get("timezone")) or "America/Toronto"
@@ -187,7 +204,7 @@ def run_profile(base_url: str, token: str, profile: dict[str, Any], trigger: str
     if not profile_name:
         raise RuntimeError("TradeMining profile is missing its name")
 
-    destination_ports = [str(value).strip() for value in profile.get("destinationPorts", []) if str(value).strip()]
+    destination_ports = profile_values(profile, "destinationPorts")
     if not destination_ports:
         raise RuntimeError(f'profile "{profile_name}" has no destination ports')
     port_ids = load_port_ids()
@@ -196,7 +213,6 @@ def run_profile(base_url: str, token: str, profile: dict[str, Any], trigger: str
         raise RuntimeError("TradeMining port IDs are not configured for: " + ", ".join(missing_ports))
 
     lookback_days = profile_lookback_days(profile)
-    chunk_days = max(1, int(os.environ.get("HUNTER_SEARCH_CHUNK_DAYS", "7")))
     end_date_override = clean(os.environ.get("HUNTER_END_DATE"))
     run_date = end_date_override or dt.datetime.now(dt.timezone.utc).date().isoformat()
     run_slug = f"{run_date}-{slug(profile_name)}-{profile_id[-8:]}"
@@ -219,14 +235,25 @@ def run_profile(base_url: str, token: str, profile: dict[str, Any], trigger: str
             ",".join(port_keys),
             "--days",
             str(lookback_days),
-            "--chunk-days",
-            str(chunk_days),
             "--run-slug",
             run_slug,
             "--output-root",
             str(export_root),
             *port_specs,
         ]
+        for value in profile_values(profile, "originCountries"):
+            export_command.extend(["--origin-country", value])
+        for value in profile_values(profile, "originPorts"):
+            export_command.extend(["--origin-port", value])
+        for value in profile_values(profile, "shipFromPorts"):
+            export_command.extend(["--ship-from-port", value])
+        for value in profile_values(profile, "productKeywords"):
+            export_command.extend(["--product-keyword", value])
+        for value in profile_values(profile, "hsCodes"):
+            export_command.extend(["--hs-code", value])
+        minimum_teu = profile_minimum_teu(profile)
+        if minimum_teu is not None:
+            export_command.extend(["--minimum-teu", format(minimum_teu, "g")])
         if end_date_override:
             export_command.extend(["--end-date", end_date_override])
         subprocess.run(export_command, check=True)
@@ -274,8 +301,8 @@ def run_profile(base_url: str, token: str, profile: dict[str, Any], trigger: str
         "profileName": profile_name,
         "runSlug": run_slug,
         "portCount": len(destination_ports),
+        "queryCount": 1,
         "lookbackDays": lookback_days,
-        "searchChunkDays": chunk_days,
         "jobRunId": job_run_id,
         "canonicalCsv": canonical_csv.name,
     }
@@ -284,7 +311,7 @@ def run_profile(base_url: str, token: str, profile: dict[str, Any], trigger: str
 def build_profile_plan(profile: dict[str, Any]) -> dict[str, Any]:
     profile_id = clean(profile.get("id"))
     profile_name = clean(profile.get("name"))
-    destination_ports = [str(value).strip() for value in profile.get("destinationPorts", []) if str(value).strip()]
+    destination_ports = profile_values(profile, "destinationPorts")
     configured_ports = load_port_ids()
     missing_ports = [name for name in destination_ports if normalize_port_name(name) not in configured_ports]
     lookback_days = profile_lookback_days(profile)
@@ -292,9 +319,15 @@ def build_profile_plan(profile: dict[str, Any]) -> dict[str, Any]:
         "profileId": profile_id,
         "profileName": profile_name,
         "destinationPorts": destination_ports,
+        "originCountries": profile_values(profile, "originCountries"),
+        "originPorts": profile_values(profile, "originPorts"),
+        "shipFromPorts": profile_values(profile, "shipFromPorts"),
+        "productKeywords": profile_values(profile, "productKeywords"),
+        "hsCodes": profile_values(profile, "hsCodes"),
+        "minimumTeu": profile_minimum_teu(profile),
         "missingPortMappings": missing_ports,
         "lookbackDays": lookback_days,
-        "searchChunkDays": max(1, int(os.environ.get("HUNTER_SEARCH_CHUNK_DAYS", "7"))),
+        "queryCount": 1,
         "dailyRunTime": profile_daily_time(profile).strftime("%H:%M"),
         "timezone": str(profile_timezone(profile)),
         "due": is_profile_due(profile),

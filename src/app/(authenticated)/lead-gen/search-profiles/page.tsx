@@ -327,7 +327,12 @@ function SearchProfileForm({
           max={100000}
           description="A company must meet this count inside the profile lookback window to appear in Found Companies."
         />
-        <DecimalField label="Minimum shipment volume" name="minShipmentVolume" defaultValue={defaults?.minShipmentVolume} />
+        <DecimalField
+          label="Minimum TEUs per BOL"
+          name="minShipmentVolume"
+          defaultValue={defaults?.minShipmentVolume}
+          description="Hunter applies this as TradeMining TEU greater than or equal to the configured value."
+        />
         <NumberField label="Priority weight" name="priorityWeight" defaultValue={defaults?.priorityWeight ?? 50} min={0} max={100} />
         <Field label="Daily run timezone" name="scheduleTimezone" defaultValue={defaults?.scheduleTimezone ?? "America/Toronto"} required />
       </div>
@@ -416,11 +421,13 @@ function NumberField({
 function DecimalField({
   label,
   name,
-  defaultValue
+  defaultValue,
+  description
 }: {
   label: string;
   name: string;
   defaultValue?: string;
+  description?: string;
 }) {
   return (
     <label className="space-y-1 text-sm font-medium text-foreground">
@@ -433,6 +440,7 @@ function DecimalField({
         defaultValue={defaultValue}
         className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
       />
+      {description ? <span className="block text-xs font-normal text-mutedForeground">{description}</span> : null}
     </label>
   );
 }

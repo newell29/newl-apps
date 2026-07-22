@@ -64,7 +64,7 @@ INGESTION_TENANT_SLUG=newl-group
 HUNTER_WORKER_ID=alex-mac-mini-hunter
 HUNTER_COLLECTOR_PATH=/path/to/reviewed/collector
 HUNTER_EXPORT_DIRECTORY=/path/to/runtime/exports
-HUNTER_SEARCH_CHUNK_DAYS=7
+HUNTER_HTTP_MAX_ATTEMPTS=4
 HUNTER_DAILY_RUN_TIME=07:00
 HUNTER_POLL_MS=60000
 ```
@@ -79,6 +79,7 @@ The checked-in template is `ops/openclaw/hunter/.env.example`. Store the real fi
 - `ops/openclaw/hunter/trademining_summary.py`: canonical record conversion and deduplication.
 - `ops/openclaw/hunter/hunter_ingest.py`: tenant-bound job creation, batched ingestion, completion/failure reporting.
 - `ops/openclaw/hunter/hunter_worker.py`: live active-profile lookup, manual run-request polling, once-daily eligibility, per-profile lookback/port planning, collection, and ingestion coordination.
+- Each enabled profile produces one full-lookback TradeMining BOL query. Destination ports use TradeMining's multi-select field; origin countries and foreign ports are resolved through its lookup service; ship-from ports, product keywords, and HS codes use Boolean `OR`; and `minShipmentVolume` is treated as minimum TEUs per BOL.
 - `ops/openclaw/run-hunter-worker.sh`: allowlisted environment loader.
 - `ops/openclaw/install-hunter-worker.sh`: LaunchAgent renderer and installer.
 - `ops/openclaw/launchd/com.newl.hunter-worker.plist.template`: persistent Mac Mini service.
@@ -136,7 +137,7 @@ Do not run the VM and Mac schedulers concurrently against the same profile durin
 ## Confirmed daily profile rules
 
 - Every enabled profile is eligible once per local calendar day after 07:00 by default. `scheduleMetadata.preferredRunHourLocal` can override the hour for an existing profile, while `HUNTER_DAILY_RUN_TIME` controls the fallback.
-- The profile's `lookbackWindowDays` is the actual TradeMining date range. `HUNTER_SEARCH_CHUNK_DAYS` only divides that range into safer requests; it never caps it.
+- The profile's `lookbackWindowDays` is the actual TradeMining date range, and the normal daily path submits it as one query for the whole profile.
 - Found Companies counts shipment evidence from the matched profile inside that profile's lookback and excludes companies below its `minShipmentCount`.
 - New and edited profiles persist the legacy database frequency field as `daily` for compatibility, but frequency is no longer an operator option or a worker decision.
 - Deleting a profile cancels queued or running manual requests, and Hunter rechecks the live enabled list before a search. An HTTP export already in flight may finish its current request, but it cannot start a later daily run from cached profile data.

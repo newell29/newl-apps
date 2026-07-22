@@ -52,7 +52,7 @@ export function validateTradeMiningSearchProfile(input: TradeMiningSearchProfile
   }
 
   if (input.minShipmentVolume != null && input.minShipmentVolume < 0) {
-    errors.push("Minimum shipment volume must be zero or greater when provided.");
+    errors.push("Minimum TEUs per BOL must be zero or greater when provided.");
   }
 
   if (!Number.isInteger(input.priorityWeight) || input.priorityWeight < 0 || input.priorityWeight > 100) {

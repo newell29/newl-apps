@@ -14,6 +14,14 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
 
+## Hunter TradeMining query mapping
+
+- Destination ports are submitted together through TradeMining's multi-select `USPort` field.
+- Origin countries and foreign ports are resolved through TradeMining's lookup service and submitted as multi-select values.
+- Ship-from ports, product keywords, and HS codes use TradeMining Boolean `OR` syntax in `PlaceOfReceipt`, `ContainerCommodity`, and `HTSCode` respectively.
+- The legacy `minShipmentVolume` profile field is treated as minimum TEUs per BOL and submitted as `TEU >= value`.
+- A normal daily profile run creates one TradeMining search log and one export. An explicit date split remains available only as manual recovery tooling.
+
 ## Data model
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.

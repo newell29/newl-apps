@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.parse
 import urllib.request
 import zipfile
@@ -43,11 +44,11 @@ class TradeMiningSession:
         self,
         method: str,
         path_or_url: str,
-        data: Optional[dict[str, str]] = None,
+        data: Optional[dict[str, str | list[str]]] = None,
         output: Optional[Path] = None,
     ) -> tuple[int, dict[str, str], bytes]:
         url = path_or_url if path_or_url.startswith("http") else BASE_URL + path_or_url
-        encoded = None if data is None else urllib.parse.urlencode(data).encode()
+        encoded = None if data is None else urllib.parse.urlencode(data, doseq=True).encode()
         headers = {
             "User-Agent": "Newl-Hunter-TradeMining-Collector/1.0",
             "Accept": "*/*",
@@ -62,10 +63,26 @@ class TradeMiningSession:
         req = urllib.request.Request(url, data=encoded, headers=headers, method=method)
         opener = urllib.request.build_opener(NoRedirectHandler)
 
-        try:
-            response = opener.open(req, timeout=120)
-        except urllib.error.HTTPError as exc:
-            response = exc
+        response = None
+        attempts = max(1, int(os.environ.get("HUNTER_HTTP_MAX_ATTEMPTS", "4")))
+        for attempt in range(1, attempts + 1):
+            try:
+                response = opener.open(req, timeout=120)
+            except urllib.error.HTTPError as exc:
+                response = exc
+            except urllib.error.URLError:
+                if attempt >= attempts:
+                    raise
+                time.sleep(min(2 ** (attempt - 1), 8))
+                continue
+
+            if response.status not in (429, 500, 502, 503, 504) or attempt >= attempts:
+                break
+            response.read()
+            time.sleep(min(2 ** (attempt - 1), 8))
+
+        if response is None:
+            raise RuntimeError("TradeMining request did not return a response")
 
         body = response.read()
         self._store_set_cookies(response.headers.get_all("Set-Cookie") or [])
@@ -82,7 +99,7 @@ class TradeMiningSession:
             return self.get_text(location)
         return body.decode("utf-8", "replace")
 
-    def post_follow(self, path: str, data: dict[str, str]) -> str:
+    def post_follow(self, path: str, data: dict[str, str | list[str]]) -> str:
         status, headers, body = self.request("POST", path, data)
         redirects = 0
         while status in (301, 302, 303, 307, 308):
@@ -158,29 +175,123 @@ def login(session: TradeMiningSession, email: str, password: str) -> None:
 
 def run_search(
     session: TradeMiningSession,
-    port_id: str,
+    port_ids: list[str],
     start_date: dt.date,
     end_date: dt.date,
+    origin_country_ids: Optional[list[str]] = None,
+    origin_port_ids: Optional[list[str]] = None,
+    ship_from_ports: Optional[list[str]] = None,
+    product_keywords: Optional[list[str]] = None,
+    hs_codes: Optional[list[str]] = None,
+    minimum_teu: Optional[float] = None,
 ) -> tuple[str, str]:
     page = session.get_text("/ImportSearch")
-    data = {
-        "__RequestVerificationToken": anti_forgery_token(page),
+    data = build_search_form(
+        token=anti_forgery_token(page),
+        port_ids=port_ids,
+        start_date=start_date,
+        end_date=end_date,
+        origin_country_ids=origin_country_ids or [],
+        origin_port_ids=origin_port_ids or [],
+        ship_from_ports=ship_from_ports or [],
+        product_keywords=product_keywords or [],
+        hs_codes=hs_codes or [],
+        minimum_teu=minimum_teu,
+    )
+    result = session.post_follow("/ImportSearch/Data", data)
+    match = re.search(r'value=(\d+) id="Id"', result)
+    if not match:
+        raise RuntimeError("search log id not found in TradeMining result page")
+    return match.group(1), result
+
+
+def build_search_form(
+    token: str,
+    port_ids: list[str],
+    start_date: dt.date,
+    end_date: dt.date,
+    origin_country_ids: list[str],
+    origin_port_ids: list[str],
+    ship_from_ports: list[str],
+    product_keywords: list[str],
+    hs_codes: list[str],
+    minimum_teu: Optional[float],
+) -> dict[str, str | list[str]]:
+    if not port_ids:
+        raise RuntimeError("at least one TradeMining US port is required")
+
+    data: dict[str, str | list[str]] = {
+        "__RequestVerificationToken": token,
         "TradeStartDate": start_date.strftime("%m/%d/%Y"),
         "TradeEndDate": end_date.strftime("%m/%d/%Y"),
         "BillTypeHouse": "on",
         "BillTypeStraight": "on",
         "ContainerLoad": "All",
         "ContainerFlag": "All",
-        "USPort": port_id,
+        "USPort": port_ids,
         "ShipmentDestinationAll": "on",
         "SaveSearchId": "",
         "RollUpType": "None",
     }
-    result = session.post_follow("/ImportSearch/Data", data)
-    match = re.search(r'value=(\d+) id="Id"', result)
-    if not match:
-        raise RuntimeError("search log id not found in TradeMining result page")
-    return match.group(1), result
+    if origin_country_ids:
+        data["CountryOfOrigin"] = origin_country_ids
+    if origin_port_ids:
+        data["ForeignPort"] = origin_port_ids
+    if ship_from_ports:
+        data["PlaceOfReceipt"] = boolean_or_expression(ship_from_ports)
+    if product_keywords:
+        data["ContainerCommodity"] = boolean_or_expression(product_keywords)
+    if hs_codes:
+        data["HTSCode"] = boolean_or_expression(hs_codes)
+    if minimum_teu is not None:
+        data["TEUSingle"] = "TEUSingle"
+        data["TEUFromSingle"] = "Greater Than Or Equals To"
+        data["TEUToSingle"] = format(minimum_teu, "g")
+    return data
+
+
+def boolean_or_expression(values: list[str]) -> str:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        value = re.sub(r"\s+", " ", str(raw)).strip()
+        if not value or value.casefold() in seen:
+            continue
+        seen.add(value.casefold())
+        escaped = value.replace('"', '\\"')
+        unique.append(f'"{escaped}"' if " " in escaped else escaped)
+    return " OR ".join(unique)
+
+
+def resolve_lookup_ids(session: TradeMiningSession, field: str, values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        status, _headers, body = session.request("POST", f"/AutoComplete/{field}", {"text": value})
+        if status != 200:
+            raise RuntimeError(f"TradeMining {field} lookup failed with status {status}")
+        try:
+            matches = json.loads(body.decode("utf-8", "replace"))
+        except json.JSONDecodeError as error:
+            raise RuntimeError(f"TradeMining {field} lookup returned invalid JSON") from error
+        if not isinstance(matches, list):
+            raise RuntimeError(f"TradeMining {field} lookup returned an unexpected response")
+
+        exact = [
+            match
+            for match in matches
+            if isinstance(match, dict)
+            and str(match.get("lookupName", "")).strip().casefold() == value.strip().casefold()
+            and str(match.get("lookupId", "")).strip()
+        ]
+        candidates = exact or [
+            match
+            for match in matches
+            if isinstance(match, dict) and str(match.get("lookupId", "")).strip()
+        ]
+        if len(candidates) != 1:
+            raise RuntimeError(f'TradeMining {field} lookup for "{value}" was not uniquely resolved')
+        result.append(str(candidates[0]["lookupId"]).strip())
+    return result
 
 
 def extract_result_columns(result_page: str) -> dict[str, Any]:
@@ -315,7 +426,13 @@ def main() -> int:
     parser.add_argument("--days", type=int, default=7, help="Trailing day count ending at --end-date.")
     parser.add_argument("--start-date", default="", help="YYYY-MM-DD. Overrides --days when supplied.")
     parser.add_argument("--end-date", default="", help="YYYY-MM-DD. Defaults to today UTC.")
-    parser.add_argument("--chunk-days", type=int, default=0, help="Split date range into chunks of N days.")
+    parser.add_argument("--chunk-days", type=int, default=0, help="Optional manual recovery split; daily profiles use one query.")
+    parser.add_argument("--origin-country", action="append", default=[])
+    parser.add_argument("--origin-port", action="append", default=[])
+    parser.add_argument("--ship-from-port", action="append", default=[])
+    parser.add_argument("--product-keyword", action="append", default=[])
+    parser.add_argument("--hs-code", action="append", default=[])
+    parser.add_argument("--minimum-teu", type=float)
     parser.add_argument("--run-slug", default="", help="Optional safe output directory name for this profile run.")
     parser.add_argument(
         "--output-root",
@@ -351,6 +468,17 @@ def main() -> int:
 
     session = TradeMiningSession(Path(args.cookie_file).expanduser())
     login(session, email, password)
+    origin_country_ids = resolve_lookup_ids(session, "CountryOfOrigin", args.origin_country)
+    origin_port_ids = resolve_lookup_ids(session, "ForeignPort", args.origin_port)
+
+    selected_ports: list[tuple[str, str, str]] = []
+    for port_key in requested_ports:
+        if port_key not in ports:
+            raise RuntimeError(f"unknown port key: {port_key}")
+        port_name, port_id = ports[port_key]
+        selected_ports.append((port_key, port_name, port_id))
+    port_ids = [port_id for _port_key, _port_name, port_id in selected_ports]
+    port_names = [port_name for _port_key, port_name, _port_id in selected_ports]
 
     manifest = {
         "run_date": end_date.isoformat(),
@@ -361,31 +489,51 @@ def main() -> int:
     }
 
     for window_start, window_end in windows:
-        for port_key in requested_ports:
-            if port_key not in ports:
-                raise RuntimeError(f"unknown port key: {port_key}")
-            port_name, port_id = ports[port_key]
-            print(f"running {port_key} {window_start}..{window_end}", file=sys.stderr)
-            search_log_id, result_page = run_search(session, port_id, window_start, window_end)
-            date_slug = f"{window_start.isoformat()}_to_{window_end.isoformat()}"
-            xlsx_path = run_dir / f"{date_slug}_{port_key}_{search_log_id}.xlsx"
-            csv_path = run_dir / f"{date_slug}_{port_key}_{search_log_id}.csv"
-            export_excel(session, search_log_id, result_page, xlsx_path)
-            rows = xlsx_to_rows(xlsx_path)
-            data_rows = write_csv(rows, csv_path)
-            manifest["ports"].append(
-                {
-                    "port_key": port_key,
-                    "port_name": port_name,
-                    "port_id": port_id,
-                    "window_start_date": window_start.isoformat(),
-                    "window_end_date": window_end.isoformat(),
-                    "search_log_id": search_log_id,
-                    "xlsx": str(xlsx_path),
-                    "csv": str(csv_path),
-                    "data_rows": data_rows,
-                }
-            )
+        print(
+            f"running one profile query for {len(selected_ports)} ports {window_start}..{window_end}",
+            file=sys.stderr,
+        )
+        search_log_id, result_page = run_search(
+            session,
+            port_ids,
+            window_start,
+            window_end,
+            origin_country_ids=origin_country_ids,
+            origin_port_ids=origin_port_ids,
+            ship_from_ports=args.ship_from_port,
+            product_keywords=args.product_keyword,
+            hs_codes=args.hs_code,
+            minimum_teu=args.minimum_teu,
+        )
+        date_slug = f"{window_start.isoformat()}_to_{window_end.isoformat()}"
+        xlsx_path = run_dir / f"{date_slug}_profile_{search_log_id}.xlsx"
+        csv_path = run_dir / f"{date_slug}_profile_{search_log_id}.csv"
+        export_excel(session, search_log_id, result_page, xlsx_path)
+        rows = xlsx_to_rows(xlsx_path)
+        data_rows = write_csv(rows, csv_path)
+        manifest["ports"].append(
+            {
+                "port_key": "profile-query",
+                "port_name": ", ".join(port_names),
+                "port_id": ",".join(port_ids),
+                "port_names": port_names,
+                "port_ids": port_ids,
+                "window_start_date": window_start.isoformat(),
+                "window_end_date": window_end.isoformat(),
+                "search_log_id": search_log_id,
+                "xlsx": str(xlsx_path),
+                "csv": str(csv_path),
+                "data_rows": data_rows,
+                "filters": {
+                    "origin_countries": args.origin_country,
+                    "origin_ports": args.origin_port,
+                    "ship_from_ports": args.ship_from_port,
+                    "product_keywords": args.product_keyword,
+                    "hs_codes": args.hs_code,
+                    "minimum_teu": args.minimum_teu,
+                },
+            }
+        )
 
     manifest_path = run_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
