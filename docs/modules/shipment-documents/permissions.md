@@ -14,6 +14,7 @@ Shipment documents and Garland Teamship review is documented because code, route
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
 - Phase 1 printing requires trusted Teams identity, Assistant and Shipment Documents module access, mutation permission, the approved internal Teamship employee policy, a dedicated print credential, and approval by the same employee who created the plan. Worker endpoints use a separate tenant-bound credential.
+- Adding a PDF to a saved carrier-manifest run requires authenticated Shipment Documents module access and mutation permission. Upload and download lookups filter both the saved run and attachment by the authenticated tenant.
 
 ## Data model
 

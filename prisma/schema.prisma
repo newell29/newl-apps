@@ -466,6 +466,7 @@ model Tenant {
   developmentSuggestions              DevelopmentSuggestion[]
   shipmentDocumentRuns                ShipmentDocumentRun[]
   shipmentCarrierManifestRuns         ShipmentCarrierManifestRun[]
+  shipmentCarrierManifestAttachments  ShipmentCarrierManifestAttachment[]
   teamshipReviewRuns                  TeamshipReviewRun[]
   teamshipReviewOrders                TeamshipReviewOrder[]
   teamshipDailySyncRuns               TeamshipDailySyncRun[]
@@ -533,6 +534,7 @@ model User {
   openClawUnresolvedTurns     OpenClawUnresolvedTurn[]
   shipmentDocumentRuns        ShipmentDocumentRun[]
   shipmentCarrierManifestRuns ShipmentCarrierManifestRun[]
+  shipmentCarrierManifestAttachments ShipmentCarrierManifestAttachment[]
   teamshipReviewRuns          TeamshipReviewRun[]
   teamshipUpdateJobsCreated   TeamshipUpdateJob[]          @relation("TeamshipUpdateJobCreatedBy")
   teamshipUpdateJobsApproved  TeamshipUpdateJob[]          @relation("TeamshipUpdateJobApprovedBy")
@@ -888,10 +890,30 @@ model ShipmentCarrierManifestRun {
 
   tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdBy User?  @relation(fields: [createdByUserId], references: [id], onDelete: NoAction)
+  attachments ShipmentCarrierManifestAttachment[]
 
   @@index([tenantId, workflowKey, shipmentDate])
   @@index([tenantId, createdAt])
   @@index([tenantId, deletedAt])
+}
+
+model ShipmentCarrierManifestAttachment {
+  id               String   @id @default(cuid())
+  tenantId         String
+  runId            String
+  fileName         String
+  contentType      String   @default("application/pdf")
+  sizeBytes        Int
+  fileBytes        Bytes
+  uploadComplete   Boolean  @default(false)
+  uploadedByUserId String?
+  createdAt        DateTime @default(now())
+
+  tenant     Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  run        ShipmentCarrierManifestRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  uploadedBy User?                      @relation(fields: [uploadedByUserId], references: [id], onDelete: NoAction)
+
+  @@index([tenantId, runId, createdAt])
 }
 
 model TeamshipReviewRun {
