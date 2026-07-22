@@ -18,4 +18,8 @@ describe("middleware machine route exemptions", () => {
   it("lets the Mac Mini browser worker endpoints enforce their dedicated token auth", () => {
     expect(config.matcher[0]).toContain("api/assistant/teamship/browser-jobs");
   });
+
+  it("lets the printing endpoints enforce their OpenClaw and worker token auth", () => {
+    expect(config.matcher[0]).toContain("api/assistant/printing");
+  });
 });
