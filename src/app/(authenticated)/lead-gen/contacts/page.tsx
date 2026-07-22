@@ -165,8 +165,8 @@ export default async function ContactsPage({
       />
 
       <div className="rounded-lg border border-accentBorder bg-accentSoft px-4 py-3 text-sm text-foreground">
-        This page now supports live Apollo sequence push for eligible contacts. Assigned rep mapping, selected cadence,
-        and Tier 1 AI draft generation still gate the push so outreach stays deliberate.
+        This page shows both assigned and unassigned contacts. Unassigned contacts remain visible for review, but Apollo
+        push stays blocked until a sales rep is assigned. Selected cadence and Tier 1 AI draft requirements still apply.
       </div>
 
       <form className="overflow-hidden rounded-lg border border-border bg-card shadow-sm" action="/lead-gen/contacts">
@@ -273,6 +273,7 @@ export default async function ContactsPage({
                 className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
               >
                 <option value="ALL">All reps</option>
+                <option value="UNASSIGNED">Unassigned only</option>
                 {filterOptions.owners.map((owner) => (
                   <option key={owner} value={owner}>
                     {owner}
@@ -523,7 +524,7 @@ function buildContactFilterChips({
   }
   if (assignedRep !== "ALL") {
     chips.push({
-      label: `Rep: ${assignedRep}`,
+      label: `Rep: ${assignedRep === "UNASSIGNED" ? "Unassigned" : assignedRep}`,
       href: buildContactsPageHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, replyStatus, source, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, sort })
     });
   }

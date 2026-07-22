@@ -77,3 +77,4 @@ Scoring regression coverage must also verify:
 3. cadence assignment refuses blocked contacts and Apollo queueing requires `APPROVED` status;
 4. default role penalties deprioritize sales-only contacts without suppressing mixed titles that match logistics or operations;
 5. invalid windows, contact tier thresholds, company weight totals, and mid-market TEU ranges are rejected before persistence.
+6. the default Contacts directory includes unassigned pipeline contacts, the `UNASSIGNED` filter remains tenant scoped, and queueing refuses contacts without a sales rep.

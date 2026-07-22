@@ -2,6 +2,7 @@ import { ContactStatus, ContactTier, ReplyStatus } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
+  getContactApolloAssignmentBlockReason,
   getContactSequencePushBlockReason,
   scoreContact
 } from "@/modules/lead-gen/contact-scoring";
@@ -44,6 +45,12 @@ describe("contact scoring safety and fit", () => {
     expect(getContactSequencePushBlockReason(ContactStatus.REVIEWING)).toContain("must be approved");
     expect(getContactSequencePushBlockReason(ContactStatus.DO_NOT_CONTACT)).toContain("do not contact");
     expect(getContactSequencePushBlockReason(ContactStatus.APPROVED)).toBeNull();
+  });
+
+  it("blocks Apollo assignment readiness until a sales rep is present", () => {
+    expect(getContactApolloAssignmentBlockReason(null)).toContain("Assign a sales rep");
+    expect(getContactApolloAssignmentBlockReason("   ")).toContain("Assign a sales rep");
+    expect(getContactApolloAssignmentBlockReason("user-1")).toBeNull();
   });
 
   it("deprioritizes sales roles without penalizing logistics titles that mention sales", () => {

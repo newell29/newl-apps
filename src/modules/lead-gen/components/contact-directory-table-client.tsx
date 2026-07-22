@@ -73,7 +73,9 @@ type ContactDirectoryRow = {
   draftStatus: string;
   lastTouchAt: Date | null;
   lastReplyAt: Date | null;
+  assignedRepValue: string | null;
   assignedRep: string;
+  apolloAssignmentBlockReason: string | null;
   updatedAt: Date;
 };
 
@@ -385,7 +387,22 @@ export function ContactDirectoryTableClient({
         accessorKey: "assignedRep",
         header: "Assigned rep",
         filterFn: "includesString",
-        size: 150
+        size: 220,
+        cell: ({ row }) => {
+          const contact = row.original;
+          return (
+            <div className="max-w-[220px]">
+              <p className={contact.assignedRepValue ? "font-medium text-foreground" : "font-medium text-danger"}>
+                {contact.assignedRep}
+              </p>
+              {contact.apolloAssignmentBlockReason ? (
+                <p className="mt-1 text-xs leading-5 text-danger">{contact.apolloAssignmentBlockReason}</p>
+              ) : (
+                <p className="mt-1 text-xs text-mutedForeground">Rep assigned</p>
+              )}
+            </div>
+          );
+        }
       },
       {
         accessorKey: "lastTouchAt",
@@ -581,6 +598,9 @@ export function ContactDirectoryTableClient({
   const selectedContactsWithSequenceHistory = selectedContacts.filter((contact) =>
     requiresSequenceOverrideConfirmation(contact.sequenceStatus)
   );
+  const selectedContactsBlockedByAssignment = selectedContacts.filter((contact) =>
+    Boolean(contact.apolloAssignmentBlockReason)
+  );
 
   useEffect(() => {
     if (bulkActionState.status === "success" && bulkActionState.completedAt) {
@@ -773,6 +793,12 @@ export function ContactDirectoryTableClient({
                 </span>
               </label>
             ) : null}
+            {selectedContactsBlockedByAssignment.length > 0 ? (
+              <p className="max-w-[300px] rounded-md border border-danger/20 bg-danger/5 px-3 py-2 text-xs text-danger">
+                Assign a sales rep to {selectedContactsBlockedByAssignment.length} selected contact
+                {selectedContactsBlockedByAssignment.length === 1 ? "" : "s"} before pushing to Apollo.
+              </p>
+            ) : null}
             <button
               type="submit"
               disabled={
@@ -791,6 +817,7 @@ export function ContactDirectoryTableClient({
               formAction={runApolloPushAction}
               disabled={
                 selectedIds.length === 0 ||
+                selectedContactsBlockedByAssignment.length > 0 ||
                 isBulkSequencePending ||
                 isBulkRemovePending ||
                 isApolloPushPending ||

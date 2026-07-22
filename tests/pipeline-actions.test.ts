@@ -334,6 +334,30 @@ describe("pipeline bulk actions", () => {
     });
   });
 
+  it("does not queue an unassigned contact for Apollo", async () => {
+    contactFindMany.mockResolvedValueOnce([
+      {
+        id: "contact-1",
+        companyId: "company-1",
+        contactStatus: ContactStatus.APPROVED,
+        assignedRep: null,
+        company: {
+          candidateStatus: CandidateStatus.APPROVED_FOR_PIPELINE,
+          doNotProspect: false
+        }
+      }
+    ]);
+
+    const formData = new FormData();
+    formData.append("contactId", "contact-1");
+
+    await expect(bulkPushContactsToApolloAction(formData)).resolves.toMatchObject({
+      status: "error",
+      operation: "apollo_push",
+      message: "Assign a sales rep before pushing this contact to Apollo."
+    });
+  });
+
   it("preserves sequence status when a confirmed override is applied", async () => {
     contactFindMany.mockResolvedValueOnce([
       {
