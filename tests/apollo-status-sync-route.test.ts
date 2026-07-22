@@ -8,7 +8,7 @@ import { GET } from "@/app/api/lead-gen/apollo/status-sync/route";
 
 describe("Apollo status sync cron route", () => {
   beforeEach(() => {
-    vi.stubEnv("CRON_SECRET", "cron-test-secret");
+    vi.stubEnv("APOLLO_STATUS_SYNC_SECRET", "apollo-sync-test-secret");
     vi.stubEnv("APOLLO_MASTER_API", "apollo-master-key");
     runScheduledApolloStatusSync.mockResolvedValue([
       {
@@ -32,16 +32,30 @@ describe("Apollo status sync cron route", () => {
     vi.unstubAllEnvs();
   });
 
-  it("rejects requests without the Vercel cron secret", async () => {
+  it("rejects requests without the dedicated scheduler secret", async () => {
     const response = await GET(new Request("https://newl.test/api/lead-gen/apollo/status-sync"));
     expect(response.status).toBe(401);
+    expect(runScheduledApolloStatusSync).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back to the shared cron secret", async () => {
+    vi.stubEnv("APOLLO_STATUS_SYNC_SECRET", "");
+    vi.stubEnv("CRON_SECRET", "shared-cron-secret");
+
+    const response = await GET(
+      new Request("https://newl.test/api/lead-gen/apollo/status-sync", {
+        headers: { authorization: "Bearer shared-cron-secret" }
+      })
+    );
+
+    expect(response.status).toBe(503);
     expect(runScheduledApolloStatusSync).not.toHaveBeenCalled();
   });
 
   it("runs the tenant-scoped sync and returns aggregate counts", async () => {
     const response = await GET(
       new Request("https://newl.test/api/lead-gen/apollo/status-sync", {
-        headers: { authorization: "Bearer cron-test-secret" }
+        headers: { authorization: "Bearer apollo-sync-test-secret" }
       })
     );
 

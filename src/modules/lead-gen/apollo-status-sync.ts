@@ -327,7 +327,9 @@ export async function getApolloStatusSyncHealth(tenant: Pick<TenantContext, "ten
 
   const latestSuccessfulJob = recentJobs.find((job) => job.status === JobStatus.SUCCESS) ?? null;
   return {
-    enabled: Boolean(integration && process.env.CRON_SECRET?.trim() && process.env.APOLLO_MASTER_API?.trim()),
+    enabled: Boolean(
+      integration && process.env.APOLLO_STATUS_SYNC_SECRET?.trim() && process.env.APOLLO_MASTER_API?.trim()
+    ),
     trackedContacts,
     dueContacts,
     failedContacts,

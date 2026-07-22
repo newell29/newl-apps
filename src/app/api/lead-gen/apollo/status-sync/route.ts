@@ -8,9 +8,9 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 export async function GET(request: Request) {
-  const secret = process.env.CRON_SECRET?.trim();
+  const secret = process.env.APOLLO_STATUS_SYNC_SECRET?.trim();
   if (!secret) {
-    return NextResponse.json({ error: "Apollo status sync requires CRON_SECRET." }, { status: 503 });
+    return NextResponse.json({ error: "Apollo status sync requires APOLLO_STATUS_SYNC_SECRET." }, { status: 503 });
   }
 
   const authorization = request.headers.get("authorization") ?? "";

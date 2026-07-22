@@ -31,7 +31,7 @@ Required scheduled Apollo synchronization variables:
 
 | Variable | Environment | Purpose |
 | --- | --- | --- |
-| `CRON_SECRET` | Production | Random secret accepted in the scheduled route `Authorization` header. Configure the same value as the GitHub Actions repository secret named `CRON_SECRET`. |
+| `APOLLO_STATUS_SYNC_SECRET` | Production | Dedicated random secret accepted only by the Apollo sync route. Configure the same value as the GitHub Actions repository secret named `APOLLO_STATUS_SYNC_SECRET`; do not reuse or rotate the shared `CRON_SECRET`. |
 | `APOLLO_MASTER_API` | Production | Master Apollo key used to read saved contact status. Do not use a production key in Preview. |
 | `APOLLO_STATUS_SYNC_INTERVAL_HOURS` | Production | Optional freshness interval; defaults to `4` and is clamped to 1–24 hours. |
 | `APOLLO_STATUS_SYNC_BATCH_SIZE` | Production | Optional per-tenant batch size; defaults to `50` and is clamped to 1–100. |

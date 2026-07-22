@@ -16,10 +16,10 @@ jobs:
     steps:
       - name: Refresh due Apollo contacts
         env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APOLLO_STATUS_SYNC_SECRET: ${{ secrets.APOLLO_STATUS_SYNC_SECRET }}
         run: |
-          if [ -z "$CRON_SECRET" ]; then
-            echo "The CRON_SECRET Actions secret is not configured."
+          if [ -z "$APOLLO_STATUS_SYNC_SECRET" ]; then
+            echo "The APOLLO_STATUS_SYNC_SECRET Actions secret is not configured."
             exit 1
           fi
 
@@ -29,5 +29,5 @@ jobs:
             --max-time 330 \
             --retry 2 \
             --retry-all-errors \
-            --header "Authorization: Bearer $CRON_SECRET" \
+            --header "Authorization: Bearer $APOLLO_STATUS_SYNC_SECRET" \
             https://newl-apps.vercel.app/api/lead-gen/apollo/status-sync

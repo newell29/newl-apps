@@ -67,7 +67,7 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 ## Automatic Apollo status sync is stale or failing
 
 - Symptom: the Contacts health panel shows **Setup required**, due contacts that are not draining, or contacts with sync errors.
-- Setup recovery: confirm `CRON_SECRET` and `APOLLO_MASTER_API` are configured in the deployment and that the tenant's Apollo integration is active.
+- Setup recovery: confirm the dedicated `APOLLO_STATUS_SYNC_SECRET` and `APOLLO_MASTER_API` are configured in the deployment and that the tenant's Apollo integration is active. The Apollo scheduler deliberately does not use the shared `CRON_SECRET`.
 - Rate-limit recovery: no manual replay is required. The failed contact receives exponential backoff and the unprocessed remainder stays due for the next hourly run.
 - Non-transient recovery: inspect the latest run message and contact-level error. Deleted or unauthorized Apollo contact IDs continue to retry at the bounded failure interval until the local contact is corrected or removed.
 - Concurrency guard: a tenant run younger than 30 minutes blocks overlap; an older running record is closed as an error before recovery starts.
