@@ -23,6 +23,16 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 5. Hunter creates a tracked job run, exports and normalizes the records, and submits tenant-bound batches.
 6. Candidate evidence is limited to the matched profile and lookback. Companies below that profile's `minShipmentCount` do not appear in Found Companies.
 
+## Automatic Apollo reply sync
+
+1. GitHub Actions calls `/api/lead-gen/apollo/status-sync` hourly using the dedicated `APOLLO_STATUS_SYNC_SECRET`. The workflow also supports an approved manual dispatch for validation or recovery; it never reuses the shared `CRON_SECRET`.
+2. Newl Apps selects only tenants with Lead Generation enabled and an active Apollo integration.
+3. Each run processes at most `APOLLO_STATUS_SYNC_BATCH_SIZE` due contacts. A successful contact becomes due again after `APOLLO_STATUS_SYNC_INTERVAL_HOURS` (four hours by default).
+4. Saved Apollo contacts are read by `apolloContactId`; the scheduler does not run people enrichment or organization search and therefore does not consume enrichment/search credits.
+5. Transient and rate-limit responses receive at most three attempts with bounded backoff. Sustained rate limiting stops the current batch so later contacts remain due rather than creating an API storm.
+6. Reply or sequence changes create the same score snapshot and outcome history used by manual synchronization. Unchanged polls do not create redundant score history.
+7. Run results are stored in `AutomationJobRun` and `AuditLog`; per-contact last-sync, next-sync, failure count, and latest error appear in the Contacts health panel.
+
 ## Data model
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.

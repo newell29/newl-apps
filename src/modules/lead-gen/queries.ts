@@ -194,7 +194,7 @@ export type ContactDraftStatusFilter =
 
 type JsonObject = Record<string, unknown>;
 
-type SearchProfileSummary = {
+export type SearchProfileSummary = {
   id: string;
   name: string;
   priorityWeight: number;
@@ -318,6 +318,14 @@ export async function calculateLeadPipelineScoreForCompany(
   tenant: Pick<TenantContext, "tenantId">,
   companyId: string
 ) {
+  const scoring = await calculateLeadPipelineScoringForCompany(tenant, companyId);
+  return scoring?.score ?? null;
+}
+
+export async function calculateLeadPipelineScoringForCompany(
+  tenant: Pick<TenantContext, "tenantId">,
+  companyId: string
+) {
   const [scoringConfig, searchProfiles] = await Promise.all([
     loadTradeMiningScoringConfig(tenant),
     loadSearchProfileSummaries(tenant)
@@ -352,13 +360,20 @@ export async function calculateLeadPipelineScoreForCompany(
 
   const evidence = summarizeTradeMiningEvidence(company.importRecords, searchProfiles);
 
-  return scoreCompanyFromEvidence({
+  const scoring = scoreCompanyFromEvidence({
     companyPriorityScore: company.priorityScore,
     candidateStatus: company.candidateStatus,
     alreadyInPipeline: false,
     evidence,
     config: scoringConfig
-  }).score;
+  });
+
+  return {
+    ...scoring,
+    scoringConfig,
+    searchProfileId: evidence.searchProfile?.id ?? null,
+    evidenceAsOf: evidence.latestShipmentDate
+  };
 }
 
 export async function getCandidateFeedFilters(tenant: TenantContext) {
@@ -1752,7 +1767,7 @@ function buildCandidateWhere(filters: CandidateFeedFilters, evidenceWhere: Retur
   };
 }
 
-async function loadSearchProfileSummaries(tenant: Pick<TenantContext, "tenantId">) {
+export async function loadSearchProfileSummaries(tenant: Pick<TenantContext, "tenantId">) {
   const searchProfileClient = prisma as SearchProfileClient;
 
   if (!searchProfileClient.tradeMiningSearchProfile) {
@@ -1829,7 +1844,7 @@ export function buildTradeMiningEvidenceWhere(
   });
 }
 
-function resolveEvidenceLookbackDays(
+export function resolveEvidenceLookbackDays(
   config: CandidateScoringConfig,
   searchProfiles: Map<string, SearchProfileSummary>
 ) {
@@ -2419,7 +2434,7 @@ function scoreRecency(latestShipmentDate: Date | null) {
   return 0;
 }
 
-async function loadTradeMiningScoringConfig(tenant: Pick<TenantContext, "tenantId">) {
+export async function loadTradeMiningScoringConfig(tenant: Pick<TenantContext, "tenantId">) {
   const tradeMiningScoringClient = prisma as TradeMiningScoringQueryClient;
 
   try {

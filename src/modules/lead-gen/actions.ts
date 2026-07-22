@@ -29,10 +29,19 @@ import {
 } from "@/modules/lead-gen/contact-bulk-action-summary";
 import {
   buildTradeMiningEvidenceWhere,
-  calculateLeadPipelineScoreForCompany,
+  calculateLeadPipelineScoringForCompany,
   scoreCandidate,
   summarizeTradeMiningEvidence
 } from "@/modules/lead-gen/queries";
+import {
+  COMPANY_SCORING_MODEL_VERSION,
+  CONTACT_SCORING_MODEL_VERSION,
+  recordLeadOutcomeEvent,
+  recordLeadScoreSnapshot,
+  type LeadScoreTrigger
+} from "@/modules/lead-gen/score-history";
+import { recordCurrentContactScoreSnapshot as recordContactScoreSnapshot } from "@/modules/lead-gen/contact-score-snapshot";
+import { getNextApolloSyncAt } from "@/modules/lead-gen/apollo-status-sync-policy";
 import {
   assertValidTradeMiningSearchProfile,
   defaultTradeMiningCompanyIdentityRoles,
@@ -101,6 +110,7 @@ type SearchProfileMutationClient = typeof prisma & {
   company: {
     findFirst(args: { where: Record<string, unknown>; select?: Record<string, boolean> }): Promise<{
       id: string;
+      candidateStatus?: CandidateStatus;
     } | null>;
     update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<unknown>;
   };
@@ -109,6 +119,7 @@ type SearchProfileMutationClient = typeof prisma & {
       id: string;
       companyId: string;
       notes?: string | null;
+      stage?: LeadPipelineStage;
     } | null>;
     upsert(args: {
       where: { tenantId_companyId: { tenantId: string; companyId: string } };
@@ -356,7 +367,7 @@ export async function updateCandidateStatusAction(formData: FormData) {
   const client = prisma as SearchProfileMutationClient;
   const companyId = readRequired(formData, "companyId");
   const status = readCandidateStatus(formData.get("status"));
-  await setCandidateStatusForCompany(client, context.tenantId, companyId, status);
+  await setCandidateStatusForCompany(client, context.tenantId, companyId, status, context.userId);
 
   revalidateLeadGenSurfaces();
 }
@@ -374,7 +385,7 @@ export async function bulkUpdateCandidateStatusAction(formData: FormData) {
   }
 
   for (const companyId of companyIds) {
-    await setCandidateStatusForCompany(client, context.tenantId, companyId, status);
+    await setCandidateStatusForCompany(client, context.tenantId, companyId, status, context.userId);
   }
 
   revalidateLeadGenSurfaces();
@@ -385,7 +396,7 @@ export async function updateLeadStageAction(formData: FormData) {
   const client = prisma as SearchProfileMutationClient;
   const leadId = readRequired(formData, "leadId");
   const stage = readLeadStage(formData.get("stage"));
-  await setLeadStageForTenant(client, context.tenantId, leadId, stage);
+  await setLeadStageForTenant(client, context.tenantId, leadId, stage, context.userId);
 
   revalidateLeadGenSurfaces();
 }
@@ -397,7 +408,7 @@ export async function bulkUpdateLeadStageAction(formData: FormData) {
   const leadIds = readSelectedIds(formData, "leadId");
 
   for (const leadId of leadIds) {
-    await setLeadStageForTenant(client, context.tenantId, leadId, stage);
+    await setLeadStageForTenant(client, context.tenantId, leadId, stage, context.userId);
   }
 
   revalidateLeadGenSurfaces();
@@ -1560,6 +1571,21 @@ export async function runApolloPushJob({
             sequenceName: group.sequenceName,
             payload: pushResult.rawPayload
           });
+          await recordLeadOutcomeEvent({
+            tenantId,
+            companyId: group.companyId,
+            contactId: contact.contactId,
+            outcomeType: "APOLLO_SEQUENCE_ENROLLED",
+            previousValue: contactsById.get(contact.contactId)?.sequenceStatus ?? null,
+            currentValue: SequenceStatus.ENROLLED,
+            source: "APOLLO",
+            metadata: {
+              sequenceId: group.sequenceId,
+              sequenceName: group.sequenceName,
+              jobRunId
+            },
+            occurredAt: pushedAt
+          });
 
           if (contact.draftId && contact.requiresAiDraft) {
             await prisma.contactOutreachDraft.update({
@@ -1978,7 +2004,8 @@ async function setCandidateStatusForCompany(
   client: SearchProfileMutationClient,
   tenantId: string,
   companyId: string,
-  status: CandidateStatus
+  status: CandidateStatus,
+  actorUserId: string | null
 ) {
   const company = await client.company.findFirst({
     where: {
@@ -1986,12 +2013,17 @@ async function setCandidateStatusForCompany(
       tenantId
     },
     select: {
-      id: true
+      id: true,
+      candidateStatus: true
     }
   });
 
   if (!company) {
     throw new Error("Company not found for this tenant.");
+  }
+
+  if (company.candidateStatus === status) {
+    return;
   }
 
   await client.company.update({
@@ -2016,7 +2048,8 @@ async function setCandidateStatusForCompany(
   });
 
   if (status === CandidateStatus.APPROVED_FOR_PIPELINE) {
-    const score = (await calculateLeadPipelineScoreForCompany({ tenantId }, companyId)) ?? 0;
+    const scoring = await calculateLeadPipelineScoringForCompany({ tenantId }, companyId);
+    const score = scoring?.score ?? 0;
 
     await client.lead.upsert({
       where: {
@@ -2036,6 +2069,34 @@ async function setCandidateStatusForCompany(
         score
       }
     });
+
+    if (scoring) {
+      await recordLeadScoreSnapshot({
+        tenantId,
+        companyId,
+        scoreType: "COMPANY_OPPORTUNITY",
+        score: scoring.score,
+        modelVersion: COMPANY_SCORING_MODEL_VERSION,
+        scoringConfig: scoring.scoringConfig,
+        trigger: "CANDIDATE_APPROVED",
+        searchProfileId: scoring.searchProfileId,
+        explanation: scoring.reasoning,
+        breakdown: scoring.breakdown,
+        evidenceAsOf: scoring.evidenceAsOf
+      });
+    }
+  }
+
+  if (company.candidateStatus !== status) {
+    await recordLeadOutcomeEvent({
+      tenantId,
+      companyId,
+      outcomeType: "CANDIDATE_STATUS_CHANGED",
+      previousValue: company.candidateStatus ?? null,
+      currentValue: status,
+      source: "USER_ACTION",
+      actorUserId
+    });
   }
 }
 
@@ -2043,7 +2104,8 @@ async function setLeadStageForTenant(
   client: SearchProfileMutationClient,
   tenantId: string,
   leadId: string,
-  stage: LeadPipelineStage
+  stage: LeadPipelineStage,
+  actorUserId: string | null
 ) {
   const lead = await client.lead.findFirst({
     where: {
@@ -2052,12 +2114,17 @@ async function setLeadStageForTenant(
     },
     select: {
       id: true,
-      companyId: true
+      companyId: true,
+      stage: true
     }
   });
 
   if (!lead) {
     throw new Error("Lead not found for this tenant.");
+  }
+
+  if (lead.stage === stage) {
+    return;
   }
 
   await client.lead.update({
@@ -2080,6 +2147,19 @@ async function setLeadStageForTenant(
         candidateStatusUpdatedAt: new Date(),
         candidateStatusReason: "Pipeline account was disqualified."
       }
+    });
+  }
+
+  if (lead.stage !== stage) {
+    await recordLeadOutcomeEvent({
+      tenantId,
+      companyId: lead.companyId,
+      leadId,
+      outcomeType: "PIPELINE_STAGE_CHANGED",
+      previousValue: lead.stage,
+      currentValue: stage,
+      source: "USER_ACTION",
+      actorUserId
     });
   }
 }
@@ -2758,12 +2838,53 @@ async function syncExistingApolloContactsForCompany({
       incoming
     });
 
+    const syncedAt = new Date();
     await prisma.contact.update({
       where: {
         id: existing.id
       },
-      data: merged
+      data: {
+        ...merged,
+        apolloLastSyncedAt: syncedAt,
+        apolloNextSyncAt: getNextApolloSyncAt(syncedAt),
+        apolloSyncFailureCount: 0,
+        apolloSyncLastError: null
+      }
     });
+
+    const scoreSnapshot = await recordContactScoreSnapshot({
+      tenantId,
+      contactId: existing.id,
+      trigger: "APOLLO_STATUS_SYNC"
+    });
+
+    if (existing.sequenceStatus !== merged.sequenceStatus) {
+      await recordLeadOutcomeEvent({
+        tenantId,
+        companyId,
+        contactId: existing.id,
+        leadId: lead?.id ?? null,
+        outcomeType: "APOLLO_SEQUENCE_STATUS_CHANGED",
+        previousValue: existing.sequenceStatus,
+        currentValue: merged.sequenceStatus,
+        source: "APOLLO",
+        scoreSnapshotId: scoreSnapshot?.id ?? null
+      });
+    }
+
+    if (existing.replyStatus !== merged.replyStatus) {
+      await recordLeadOutcomeEvent({
+        tenantId,
+        companyId,
+        contactId: existing.id,
+        leadId: lead?.id ?? null,
+        outcomeType: "APOLLO_REPLY_STATUS_CHANGED",
+        previousValue: existing.replyStatus,
+        currentValue: merged.replyStatus,
+        source: "APOLLO",
+        scoreSnapshotId: scoreSnapshot?.id ?? null
+      });
+    }
 
     updatedCount += 1;
     await appendApolloContactActivity({
@@ -4470,10 +4591,40 @@ async function syncApolloCustomFieldsForContactPush({
     throw new Error("Contact context is unavailable for Apollo custom field sync.");
   }
 
+  await persistContactScoreSnapshot(draftContext, "APOLLO_PUSH");
+
   const customFieldValues = buildApolloCustomFieldValues(draftContext);
   return syncApolloContactTypedCustomFields({
     apolloContactId,
     fieldValues: customFieldValues
+  });
+}
+
+async function persistContactScoreSnapshot(
+  draftContext: NonNullable<Awaited<ReturnType<typeof loadAiDraftContactContext>>>,
+  trigger: LeadScoreTrigger
+) {
+  return recordLeadScoreSnapshot({
+    tenantId: draftContext.contact.tenantId,
+    companyId: draftContext.contact.companyId,
+    contactId: draftContext.contact.id,
+    leadId: draftContext.leadId,
+    scoreType: "CONTACT_RELEVANCE",
+    score: draftContext.contactScore,
+    tier: draftContext.contactTier,
+    modelVersion: CONTACT_SCORING_MODEL_VERSION,
+    scoringConfig: draftContext.scoringConfig,
+    trigger,
+    searchProfileId: draftContext.evidence.searchProfile?.id ?? null,
+    explanation: draftContext.contactScoreSummary,
+    breakdown: {
+      total: draftContext.contactScore,
+      tier: draftContext.contactTier,
+      summary: draftContext.contactScoreSummary,
+      companyOpportunityScore: draftContext.leadScore,
+      matchedSearchProfileName: draftContext.evidence.searchProfile?.name ?? null
+    },
+    evidenceAsOf: draftContext.evidence.latestShipmentDate
   });
 }
 

@@ -1,6 +1,8 @@
 import { JobStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const recordLeadScoreSnapshot = vi.hoisted(() => vi.fn().mockResolvedValue({ id: "snapshot-1" }));
+
 type TenantRow = {
   id: string;
   slug: string;
@@ -310,6 +312,11 @@ vi.mock("@/server/db", () => ({
   prisma: mockDb.prisma
 }));
 
+vi.mock("@/modules/lead-gen/score-history", () => ({
+  COMPANY_SCORING_MODEL_VERSION: "company-v2.0",
+  recordLeadScoreSnapshot
+}));
+
 import {
   IngestionValidationError,
   createTradeMiningJobRun,
@@ -339,6 +346,7 @@ describe("TradeMining ingestion", () => {
     mockDb.state.nextImportRecordId = 1;
     mockDb.state.nextJobRunId = 1;
     vi.clearAllMocks();
+    recordLeadScoreSnapshot.mockResolvedValue({ id: "snapshot-1" });
     delete process.env.INGESTION_API_TOKEN;
     delete process.env.INGESTION_TENANT_SLUG;
     delete process.env.DEFAULT_TENANT_SLUG;
@@ -540,6 +548,14 @@ describe("TradeMining ingestion", () => {
 
     expect(mockDb.state.companies.size).toBe(1);
     expect(mockDb.state.importRecords.size).toBe(1);
+    expect(recordLeadScoreSnapshot).toHaveBeenCalledTimes(2);
+    expect(recordLeadScoreSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({
+      tenantId: "tenant-a",
+      companyId: "company-1",
+      scoreType: "COMPANY_OPPORTUNITY",
+      trigger: "TRADEMINING_INGESTION",
+      searchProfileId: "profile-a"
+    }));
     expect([...mockDb.state.companies.values()][0]).toMatchObject({
       tenantId: "tenant-a",
       normalizedName: "abc-imports-inc",
