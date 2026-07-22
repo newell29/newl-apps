@@ -6,6 +6,7 @@ import type {
   TeamshipBrowserProductHistory,
   TeamshipBrowserReadAdapter,
   TeamshipBrowserReceivingOrder,
+  TeamshipBrowserShippingOrderPallets,
   TeamshipBrowserScope
 } from "@/modules/teamship/browser-read-contracts";
 import { prisma } from "@/server/db";
@@ -15,7 +16,8 @@ export const TEAMSHIP_BROWSER_JOB_OPERATIONS = [
   "searchInventoryAll",
   "searchLpn",
   "getReceivingOrder",
-  "getProductHistory"
+  "getProductHistory",
+  "getShippingOrderPallets"
 ] as const;
 
 const TEAMSHIP_BROWSER_JOB_WAIT_MS = 120_000;
@@ -27,13 +29,15 @@ export type TeamshipBrowserJobInput =
   | { operation: "searchInventoryAll"; sku: string }
   | { operation: "searchLpn"; queryType: "SKU" | "LPN" | "SERIAL"; query: string }
   | { operation: "getReceivingOrder"; orderId: string }
-  | { operation: "getProductHistory"; productId: string };
+  | { operation: "getProductHistory"; productId: string }
+  | { operation: "getShippingOrderPallets"; teamshipOrderId: string };
 
 export type TeamshipBrowserJobResult =
   | { operation: "searchInventoryAll"; rows: TeamshipBrowserInventoryAllRow[] }
   | { operation: "searchLpn"; rows: TeamshipBrowserLpnRow[] }
   | { operation: "getReceivingOrder"; rows: TeamshipBrowserReceivingOrder[] }
-  | { operation: "getProductHistory"; rows: TeamshipBrowserProductHistory[] };
+  | { operation: "getProductHistory"; rows: TeamshipBrowserProductHistory[] }
+  | { operation: "getShippingOrderPallets"; rows: TeamshipBrowserShippingOrderPallets[] };
 
 export class TeamshipBrowserJobValidationError extends Error {
   constructor(message: string) {
@@ -136,6 +140,14 @@ export function createTeamshipBrowserJobAdapter(options: RemoteAdapterOptions): 
         jobInput: { operation: "getProductHistory", productId: input.productId }
       });
       return result.operation === "getProductHistory" ? result.rows : [];
+    },
+    async getShippingOrderPallets(input) {
+      const result = await enqueueAndWait({
+        ...options,
+        scope: input.scope,
+        jobInput: { operation: "getShippingOrderPallets", teamshipOrderId: input.teamshipOrderId }
+      });
+      return result.operation === "getShippingOrderPallets" ? result.rows : [];
     }
   };
 }
@@ -297,7 +309,8 @@ function parseJobInput(value: unknown): TeamshipBrowserJobInput {
     return { operation, queryType, query: requireString(record.query, "query") };
   }
   if (operation === "getReceivingOrder") return { operation, orderId: requireString(record.orderId, "orderId") };
-  return { operation, productId: requireString(record.productId, "productId") };
+  if (operation === "getProductHistory") return { operation, productId: requireString(record.productId, "productId") };
+  return { operation, teamshipOrderId: requireString(record.teamshipOrderId, "teamshipOrderId") };
 }
 
 export function parseTeamshipBrowserJobResult(
@@ -320,7 +333,24 @@ export function parseTeamshipBrowserJobResult(
   if (operation === "getReceivingOrder") {
     return { operation, rows: rows.map((row) => parseReceivingOrder(row)) };
   }
-  return { operation, rows: rows.map((row) => parseProductHistory(row)) };
+  if (operation === "getProductHistory") {
+    return { operation, rows: rows.map((row) => parseProductHistory(row)) };
+  }
+  return { operation, rows: rows.map((row) => parseShippingOrderPallets(row)) };
+}
+
+function parseShippingOrderPallets(value: unknown): TeamshipBrowserShippingOrderPallets {
+  const row = requireRecord(value, "Shipping order pallet preflight");
+  const palletCount = nullableNumber(row.palletCount, "palletCount");
+  if (!Number.isInteger(palletCount) || palletCount === null || palletCount <= 0 || palletCount > 100) {
+    throw validationError("palletCount must be an integer from 1 to 100.");
+  }
+  return {
+    teamshipOrderId: requiredResultString(row.teamshipOrderId, "teamshipOrderId"),
+    palletCount,
+    customerName: requiredResultString(row.customerName, "customerName"),
+    warehouseName: requiredResultString(row.warehouseName, "warehouseName")
+  };
 }
 
 function parseInventoryAllRow(value: unknown): TeamshipBrowserInventoryAllRow {

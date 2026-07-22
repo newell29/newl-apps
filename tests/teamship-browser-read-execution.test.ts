@@ -9,6 +9,7 @@ import {
   parseLpnTables,
   parseProductHistoryPage,
   parseReceivingOrderPage,
+  parseTeamshipShippingOrderPalletPreflight,
   parseTeamshipInventoryPagerLabel,
   submitTeamshipInventorySearch,
   waitForTeamshipInventorySearchResult
@@ -37,8 +38,29 @@ describe("Teamship browser read extraction", () => {
       searchInventoryAll: expect.any(Function),
       searchLpn: expect.any(Function),
       getReceivingOrder: expect.any(Function),
-      getProductHistory: expect.any(Function)
+      getProductHistory: expect.any(Function),
+      getShippingOrderPallets: expect.any(Function)
     });
+  });
+
+  it("reads one bounded pallet count from the signed-in shipping-order page", () => {
+    expect(parseTeamshipShippingOrderPalletPreflight({
+      teamshipOrderId: "31064",
+      palletCount: "1",
+      customerName: "Garland Canada Distribution",
+      warehouseName: "Annagem"
+    })).toEqual({
+      teamshipOrderId: "31064",
+      palletCount: 1,
+      customerName: "Garland Canada Distribution",
+      warehouseName: "Annagem"
+    });
+    expect(() => parseTeamshipShippingOrderPalletPreflight({
+      teamshipOrderId: "31064",
+      palletCount: "2.5",
+      customerName: "Garland Canada Distribution",
+      warehouseName: "Annagem"
+    })).toThrow(/whole number/i);
   });
 
   it("normalizes only the allowlisted Inventory All fields", () => {

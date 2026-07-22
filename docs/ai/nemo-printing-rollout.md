@@ -14,19 +14,22 @@ Newl Apps requires dedicated values for:
 - `OPENCLAW_PRINT_TENANT_SLUG`
 - `TEAMSHIP_PRINT_WORKER_TOKEN`
 - `TEAMSHIP_PRINT_WORKER_TENANT_SLUG`
+- `TEAMSHIP_BROWSER_WORKER_QUEUE_ENABLED=true`
+- `TEAMSHIP_BROWSER_WORKER_TOKEN`
+- `TEAMSHIP_BROWSER_WORKER_TENANT_SLUG`
 - `TEAMSHIP_PRINT_LOCAL_QUEUE=_192_168_1_28`
 - `TEAMSHIP_PRINT_LOCAL_DISPLAY_NAME=192.168.1.28`
 - `TEAMSHIP_PRINT_BOL_PRINTER_NAME=KONICA MINOLTA bizhub C3350i PCL (192.168.1.28) UPD`
 - `TEAMSHIP_PRINT_LABEL_PRINTER_NAME=BIXOLON SRP-770III`
 - `TEAMSHIP_APP_BASE_URL=https://members.fulfillit.io`
 
-The OpenClaw runtime requires the same `OPENCLAW_PRINT_TOKEN`, referenced by the plugin through `printTokenEnv`. The local worker requires `NEWL_APPS_BASE_URL`, `TEAMSHIP_PRINT_WORKER_TOKEN`, `TEAMSHIP_PRINT_WORKER_TENANT_SLUG`, `TEAMSHIP_PRINT_WORKER_ID`, and `TEAMSHIP_BROWSER_EXECUTABLE_PATH` in its protected environment file.
+The OpenClaw runtime requires the same `OPENCLAW_PRINT_TOKEN`, referenced by the plugin through `printTokenEnv`. The local print worker requires `NEWL_APPS_BASE_URL`, `TEAMSHIP_PRINT_WORKER_TOKEN`, `TEAMSHIP_PRINT_WORKER_TENANT_SLUG`, and `TEAMSHIP_PRINT_WORKER_ID`. The local browser-read worker requires `NEWL_APPS_BASE_URL`, `TEAMSHIP_BROWSER_WORKER_TOKEN`, `TEAMSHIP_BROWSER_WORKER_TENANT_SLUG`, and `TEAMSHIP_BROWSER_EXECUTABLE_PATH` in its protected environment file.
 
-The print worker and Newl Apps print-plan integration must open the shipping-order detail UI on `members.fulfillit.io`. Both use `TEAMSHIP_APP_BASE_URL`; set it explicitly in Vercel and the protected local environment instead of deriving the web host from the API host. Teamship can omit pallet-edit inputs from the browser page, so the worker re-fetches the exact order through the Teamship API for the initial pallet-count preflight and again immediately before outbound labels.
+The local browser-read and print workers must open the shipping-order detail UI on `members.fulfillit.io`. Both use `TEAMSHIP_APP_BASE_URL`; set it explicitly in their protected local environment instead of deriving the web host from the API host. Newl Apps sends an approval-plan preflight through the existing tenant-bound browser-read queue. The local signed-in worker must see the exact `/ship-inventories/:id` page, the configured customer and warehouse, and exactly one valid hidden `pallets_count` value before Newl Apps creates a print request.
 
 The numeric order supplied by an employee is a display number, not necessarily Teamship's internal record ID. Plan creation must resolve and store the matching internal ID from Teamship's list result. The display number remains the employee-visible identity; the internal ID is used for exact API and `/ship-inventories/:id` navigation. The Teamship page may visibly show only `Ship Inventory #<internal-id>`, so the worker confirms the display/internal mapping through the API and separately requires the exact internal browser URL. A missing or conflicting mapping fails closed.
 
-For pallet counts, detail-level `pallets` or `pallet_dims` are authoritative over list-summary pallet aliases. Both the plan and the worker's live preflight use that normalized detail value.
+For approval-plan pallet counts, the signed-in shipping-order page is authoritative. API detail and list-summary pallet aliases may resolve the order identity but never substitute for a missing or failed local page preflight. The print worker still revalidates the approved count immediately before the irreversible outbound-label action.
 
 Every credential must be distinct from the Teamship read token and general assistant token. Do not write secret values to the repository or logs.
 
@@ -40,8 +43,8 @@ Each numbered action requires human approval at its normal production boundary.
 4. Deploy the reviewed Newl Apps commit to production.
 5. Build, validate, install, and enable `ops/openclaw/plugins/newl-print`.
 6. Install `ops/openclaw/skills/teamship-print` and append the printing section from `ops/openclaw/AGENTS.teamship.md`.
-7. Install the local worker with `ops/openclaw/install-teamship-print-worker.sh`.
-8. Confirm the worker can poll with no approved jobs. This must print nothing.
+7. Install the local print worker with `ops/openclaw/install-teamship-print-worker.sh` and the existing local Teamship browser-read worker.
+8. Confirm both workers can poll with no approved jobs. This must print nothing.
 9. Run one supervised single-order Teams test. Read the plan, verify the exact order, pallet count, and all three destinations, then approve it.
 10. Confirm the physical picking list, BOL, and exact number of pallet labels before treating Phase 1 as live.
 

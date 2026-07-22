@@ -2,11 +2,16 @@ import crypto from "node:crypto";
 import { ModuleKey, type Prisma } from "@prisma/client";
 
 import { hasTeamshipInternalReadAccess } from "@/modules/teamship/access-policy";
+import { getConfiguredTeamshipBrowserJobAdapter } from "@/modules/teamship/browser-read-jobs";
 import type { TeamshipShippingOrderDetail } from "@/modules/shipment-documents/teamship-review-types";
 import { requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
 import { findTeamshipShippingOrders } from "@/server/integrations/teamship";
-import { resolveTenantTeamshipCredentials, type TeamshipStoredCredentials } from "@/server/integrations/teamship-settings";
+import {
+  getTenantTeamshipSettings,
+  resolveTenantTeamshipCredentials,
+  type TeamshipStoredCredentials
+} from "@/server/integrations/teamship-settings";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 
 export const TEAMSHIP_PRINT_JOB_STATUSES = [
@@ -70,6 +75,12 @@ export type TeamshipPrintExecutionResult = {
 
 type PrintJobDependencies = {
   findOrders?: typeof findTeamshipShippingOrders;
+  preflightPalletCount?: (input: {
+    context: AuthenticatedContext;
+    teamshipOrderId: string;
+    customerName: string;
+    warehouseName: string;
+  }) => Promise<number>;
   now?: () => Date;
 };
 
@@ -151,7 +162,12 @@ export async function createTeamshipPrintPlan(
     throw new TeamshipPrintJobError("Phase 1 Garland printing is restricted to the Annagem warehouse.", 403);
   }
 
-  const approvedPalletCount = calculateTeamshipPalletCount(order);
+  const approvedPalletCount = await (dependencies.preflightPalletCount ?? preflightTeamshipShippingOrderPalletCount)({
+    context,
+    teamshipOrderId,
+    customerName,
+    warehouseName
+  });
   const documentPlan: TeamshipPrintDocumentPlan = {
     pickingListCopies: 1,
     bolCopies: 1,
@@ -411,6 +427,90 @@ export function calculateTeamshipPalletCount(order: TeamshipShippingOrderDetail)
     throw new TeamshipPrintJobError("The calculated pallet-label quantity is outside the allowed range.", 409);
   }
   return total;
+}
+
+async function preflightTeamshipShippingOrderPalletCount(input: {
+  context: AuthenticatedContext;
+  teamshipOrderId: string;
+  customerName: string;
+  warehouseName: string;
+}) {
+  const adapter = getConfiguredTeamshipBrowserJobAdapter({
+    tenantId: input.context.tenantId,
+    tenantSlug: input.context.tenantSlug,
+    requestedBy: {
+      userId: input.context.userId,
+      userEmail: input.context.userEmail,
+      userName: input.context.userName
+    },
+    timeoutMs: 90_000
+  });
+  if (!adapter?.getShippingOrderPallets) {
+    throw new TeamshipPrintJobError(
+      "The local Teamship page preflight is not configured; nothing was queued.",
+      503
+    );
+  }
+
+  const settings = await getTenantTeamshipSettings(input.context);
+  const matchingScopes = settings.readOnlyScopes.filter((scope) =>
+    sameTeamshipName(scope.customerName, input.customerName)
+    && sameTeamshipName(scope.warehouseName, input.warehouseName)
+  );
+  if (matchingScopes.length !== 1) {
+    throw new TeamshipPrintJobError(
+      "The Garland and Annagem Teamship browser scope was missing or ambiguous; nothing was queued.",
+      409
+    );
+  }
+
+  const credentials = await resolveTenantTeamshipCredentials(input.context);
+  if (!credentials) {
+    throw new TeamshipPrintJobError("Teamship credentials are not configured; nothing was queued.", 503);
+  }
+
+  let rows;
+  try {
+    rows = await adapter.getShippingOrderPallets({
+      credentials,
+      scope: matchingScopes[0]!,
+      teamshipOrderId: input.teamshipOrderId
+    });
+  } catch {
+    throw new TeamshipPrintJobError(
+      "The local Teamship page preflight was unavailable or failed; nothing was queued.",
+      503
+    );
+  }
+  if (rows.length !== 1) {
+    throw new TeamshipPrintJobError(
+      "The local Teamship page preflight did not return one exact shipping order; nothing was queued.",
+      409
+    );
+  }
+
+  const row = rows[0]!;
+  if (
+    row.teamshipOrderId !== input.teamshipOrderId
+    || !sameTeamshipName(row.customerName, input.customerName)
+    || !sameTeamshipName(row.warehouseName, input.warehouseName)
+  ) {
+    throw new TeamshipPrintJobError(
+      "The local Teamship page preflight did not match the requested order, customer, and warehouse; nothing was queued.",
+      409
+    );
+  }
+  if (!Number.isInteger(row.palletCount) || row.palletCount < 1 || row.palletCount > MAX_PALLET_COUNT) {
+    throw new TeamshipPrintJobError(
+      "The local Teamship page preflight returned an invalid pallet count; nothing was queued.",
+      409
+    );
+  }
+  return row.palletCount;
+}
+
+function sameTeamshipName(left: string, right: string) {
+  return left.replace(/\s+/g, " ").trim().toLowerCase() === right.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 async function requirePrintAccess(context: AuthenticatedContext) {
