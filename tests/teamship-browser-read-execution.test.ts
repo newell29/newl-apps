@@ -94,6 +94,41 @@ describe("Teamship browser read extraction", () => {
     expect(waitFor).toHaveBeenCalledWith({ state: "attached", timeout: 30_000 });
   });
 
+  it("treats Teamship's hidden count as a row count and sums physical pallet quantities", async () => {
+    const waitFor = vi.fn().mockResolvedValue(undefined);
+    const values: Record<string, string> = {
+      "input#pallets_count": "2",
+      "input#pallet_1": "2",
+      "input#pallet_1_length": "1",
+      "input#pallet_1_width": "1",
+      "input#pallet_1_height": "1",
+      "input#pallet_1_weight": "1",
+      "#pallet_1_weight_unit": "lbs",
+      "#pallet_1_commodity": "SKU: MCO-GS-10S-5002 QTY: 2",
+      "input#pallet_2": "1",
+      "input#pallet_2_length": "1",
+      "input#pallet_2_width": "1",
+      "input#pallet_2_height": "1",
+      "input#pallet_2_weight": "1",
+      "#pallet_2_weight_unit": "lbs",
+      "#pallet_2_commodity": "SKU: 1951223-5001 QTY: 1"
+    };
+    const page = {
+      locator: vi.fn((selector: string) => {
+        if (selector.startsWith("input#pallets_count,input[id^=")) {
+          return { first: () => ({ waitFor }) };
+        }
+        const value = values[selector];
+        return {
+          count: vi.fn().mockResolvedValue(value === undefined ? 0 : 1),
+          first: () => ({ inputValue: vi.fn().mockResolvedValue(value) })
+        };
+      })
+    };
+
+    await expect(readTeamshipShippingOrderPalletCount(page as never, 30_000)).resolves.toBe("3");
+  });
+
   it("reads the bounded pallet table rendered for a completed shipping order", () => {
     expect(parseTeamshipShippingOrderPalletTableRows([
       ["1", "W: 1 L: 1 H: 1", "34"]
@@ -136,6 +171,8 @@ describe("Teamship browser read extraction", () => {
 
     await expect(readTeamshipShippingOrderPalletCount(page as never, 30_000)).resolves.toBe("1");
     expect(tables.filter).toHaveBeenCalledTimes(3);
+    expect(table.locator).toHaveBeenCalledWith("tr:visible");
+    expect(tableRows.nth).toHaveBeenCalledWith(1);
   });
 
   it("ignores default-only ghost rows and sums valid pallet-row quantities", () => {

@@ -201,10 +201,18 @@ export async function readTeamshipShippingOrderPalletCount(
   const countInput = page.locator("input#pallets_count");
   const countMatches = await countInput.count();
   if (countMatches > 1) {
-    throw new Error("The Teamship shipping-order page did not expose one unambiguous pallet count.");
+    throw new Error("The Teamship shipping-order page did not expose one unambiguous pallet-row count.");
   }
+  let expectedEditableRowCount: number | null = null;
   if (countMatches === 1) {
-    return countInput.first().inputValue();
+    const rawRowCount = (await countInput.first().inputValue()).trim();
+    if (!/^\d+$/.test(rawRowCount)) {
+      throw new Error("The Teamship shipping-order pallet-row count was not a whole number.");
+    }
+    expectedEditableRowCount = Number(rawRowCount);
+    if (expectedEditableRowCount < 1 || expectedEditableRowCount > 10) {
+      throw new Error("The Teamship shipping-order pallet-row count was outside the allowed range.");
+    }
   }
 
   const rows = [];
@@ -220,13 +228,17 @@ export async function readTeamshipShippingOrderPalletCount(
     });
   }
 
-  if (!rows.some(teamshipShippingOrderPalletRowIsObserved)) {
+  const observedRows = rows.filter(teamshipShippingOrderPalletRowIsObserved);
+  if (observedRows.length === 0) {
     return String(parseTeamshipShippingOrderPalletTableRows(
       await readTeamshipShippingOrderPalletTableRows(page)
     ));
   }
+  if (expectedEditableRowCount !== null && observedRows.length !== expectedEditableRowCount) {
+    throw new Error("The Teamship shipping-order pallet rows did not match the rendered row count.");
+  }
 
-  return String(parseTeamshipShippingOrderPalletRows(rows));
+  return String(parseTeamshipShippingOrderPalletRows(observedRows));
 }
 
 export function parseTeamshipShippingOrderPalletTableRows(rows: string[][]) {
@@ -314,10 +326,10 @@ async function readTeamshipShippingOrderPalletTableRows(page: Pick<Page, "locato
     throw new Error("The Teamship shipping-order page did not expose one unambiguous pallet table.");
   }
 
-  const tableRows = tables.first().locator("tr");
+  const tableRows = tables.first().locator("tr:visible");
   const rows: string[][] = [];
   for (let index = 0; index < await tableRows.count(); index += 1) {
-    const cells = tableRows.nth(index).locator("td");
+    const cells = tableRows.nth(index).locator("td:visible");
     if (await cells.count() === 0) continue;
     rows.push(await cells.allInnerTexts());
   }
