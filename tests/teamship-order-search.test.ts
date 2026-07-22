@@ -107,6 +107,7 @@ describe("Teamship shipping-order search identity", () => {
 
   it("prefers the signed-in Teamship page for printing when API pallet data is stale", async () => {
     vi.stubEnv("TEAMSHIP_MAX_LIST_PAGES", "1");
+    vi.stubEnv("TEAMSHIP_APP_BASE_URL", "https://members.fulfillit.io/");
     const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
       const url = String(input);
 
@@ -122,17 +123,20 @@ describe("Teamship shipping-order search identity", () => {
         return Response.json({ data: { id: 31064, pallet_dims: [{ quantity: 2 }] } });
       }
       if (url.endsWith("/login") && (init?.method ?? "GET") === "GET") {
+        expect(url).toBe("https://members.fulfillit.io/login");
         return new Response('<input type="hidden" name="_token" value="csrf-1">', {
           headers: { "set-cookie": "teamship_session=before-login; Path=/" }
         });
       }
       if (url.endsWith("/login") && init?.method === "POST") {
+        expect(url).toBe("https://members.fulfillit.io/login");
         return new Response("", {
           status: 302,
           headers: { "set-cookie": "teamship_session=after-login; Path=/" }
         });
       }
       if (url.endsWith("/ship-inventories/31064")) {
+        expect(url).toBe("https://members.fulfillit.io/ship-inventories/31064");
         return new Response(`
           <input type="hidden" id="pallets_count" value="1">
           <input id="pallet_1" value="1">
@@ -151,7 +155,7 @@ describe("Teamship shipping-order search identity", () => {
       credentials: {
         email: "employee@example.com",
         password: "not-a-live-password",
-        apiBaseUrl: "https://members.fulfillit.io/api"
+        apiBaseUrl: "https://app.teamshipos.com/api"
       },
       fetchImpl: fetchMock as unknown as typeof fetch
     });
