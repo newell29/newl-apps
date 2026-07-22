@@ -10,7 +10,7 @@ import type {
   TeamshipPrintExecutionDocument,
   TeamshipPrintExecutionResult
 } from "@/modules/teamship/print-jobs";
-import { calculateTeamshipPalletCount } from "@/modules/teamship/print-jobs";
+import { calculateTeamshipPalletCount, resolveTeamshipInternalOrderId } from "@/modules/teamship/print-jobs";
 import { findTeamshipShippingOrders } from "@/server/integrations/teamship";
 
 export type TeamshipPrintExecutionOptions = {
@@ -103,8 +103,7 @@ export async function readTeamshipApiPalletCount(
     orderIdentifier: job.shippingOrderNumber,
     credentials: job.credentials
   });
-  const exact = orders.filter((order) => [order.id, order.order_id]
-    .some((value) => String(value ?? "").trim() === job.teamshipOrderId));
+  const exact = orders.filter((order) => resolveTeamshipInternalOrderId(order) === job.teamshipOrderId);
   if (exact.length !== 1) {
     throw new Error("Teamship API did not return exactly one approved shipping order for pallet preflight.");
   }

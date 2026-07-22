@@ -37,6 +37,8 @@ Teamship may reset its selected printer when another shipping order opens. The w
 
 The same employee who creates a plan must explicitly approve its request ID. Changed pallet counts, missing or duplicated printer options, unavailable local queues, expired approvals, and ambiguous Teamship pages stop the job. Uncertain jobs never retry automatically.
 
+Garland shipping-order display numbers and Teamship's internal page IDs are separate identities. For example, the supervised order `30666` resolves to internal Teamship record `31064`. Nemo shows and verifies `30666`, while the local worker navigates to `/ship-inventories/31064`; the integration resolves this mapping for every order rather than hard-coding a customer example.
+
 ## Open questions
 
 - Final employee-approved Garland order lifecycle terms. Requires employee confirmation.
