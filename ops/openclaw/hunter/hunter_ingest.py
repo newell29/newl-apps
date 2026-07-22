@@ -32,18 +32,26 @@ def required_env(name: str) -> str:
     return value
 
 
+def api_headers(token: str) -> dict[str, str]:
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": "Newl-Hunter-Ingestion/1.0",
+    }
+    bypass_secret = os.environ.get("VERCEL_AUTOMATION_BYPASS_SECRET", "").strip()
+    if bypass_secret:
+        headers["x-vercel-protection-bypass"] = bypass_secret
+    return headers
+
+
 def api_request(base_url: str, token: str, method: str, path: str, payload: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     body = None if payload is None else json.dumps(payload).encode()
     request = urllib.request.Request(
         f"{base_url.rstrip('/')}{path}",
         data=body,
         method=method,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "User-Agent": "Newl-Hunter-Ingestion/1.0",
-        },
+        headers=api_headers(token),
     )
     try:
         with urllib.request.urlopen(request, timeout=120) as response:
@@ -186,8 +194,6 @@ def main() -> int:
     csv_path = Path(args.canonical_csv).expanduser().resolve()
     rows = read_canonical_rows(csv_path)
     records, rejected_before_upload = prepare_records(rows, clean(args.destination_market))
-    if not records:
-        raise RuntimeError("canonical CSV does not contain any records with a company identity")
 
     job_run_id = clean(args.job_run_id)
     if not job_run_id:

@@ -18,9 +18,11 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 
 - Destination ports are submitted together through TradeMining's multi-select `USPort` field.
 - Origin countries and foreign ports are resolved through TradeMining's lookup service and submitted as multi-select values.
-- Ship-from ports, product keywords, and HS codes use TradeMining Boolean `OR` syntax in `PlaceOfReceipt`, `ContainerCommodity`, and `HTSCode` respectively.
+- Canonical Newl Apps labels may use explicit TradeMining aliases where its lookup vocabulary differs; for example, profile value `Busan` resolves to TradeMining's `Pusan`.
+- Ship-from ports and product keywords use TradeMining Boolean `OR` syntax in `PlaceOfReceipt` and `ContainerCommodity`. The dedicated `HTSCode` field requires comma-separated codes; Boolean syntax causes TradeMining's result endpoint to fail.
 - The legacy `minShipmentVolume` profile field is treated as minimum TEUs per BOL and submitted as `TEU >= value`.
 - A normal daily profile run creates one TradeMining search log and one export. An explicit date split remains available only as manual recovery tooling.
+- A valid search with zero matching BOLs completes successfully with zero ingested records; Hunter does not call TradeMining's Excel endpoint because that endpoint rejects empty result sets.
 
 ## Data model
 

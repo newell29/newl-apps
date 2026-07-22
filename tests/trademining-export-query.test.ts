@@ -27,7 +27,7 @@ describe("Hunter TradeMining profile query", () => {
       "  minimum_teu=10,",
       ")",
       "encoded = urllib.parse.urlencode(form, doseq=True)",
-      "print(json.dumps({'form': form, 'encoded': encoded}))"
+      "print(json.dumps({'form': form, 'encoded': encoded, 'busanLookup': module.lookup_query('ForeignPort', 'Busan')}))"
     ].join("\n");
 
     const result = spawnSync("python3", ["-c", source, exporterPath], {
@@ -43,11 +43,12 @@ describe("Hunter TradeMining profile query", () => {
       ForeignPort: ["HCM", "LCH"],
       PlaceOfReceipt: '"Ho Chi Minh" OR Busan',
       ContainerCommodity: '"consumer goods" OR fixtures',
-      HTSCode: "6109 OR 9403",
+      HTSCode: "6109,9403",
       TEUFromSingle: "Greater Than Or Equals To",
       TEUToSingle: "10"
     });
     expect(parsed.encoded.match(/USPort=/g)).toHaveLength(3);
+    expect(parsed.busanLookup).toBe("Pusan");
   });
 
   it("retries transient TradeMining responses but not authentication failures", () => {
@@ -91,5 +92,27 @@ describe("Hunter TradeMining profile query", () => {
       authCalls: 1,
       authStatus: 401
     });
+  });
+
+  it("recognizes an empty TradeMining result set before attempting Excel export", () => {
+    const source = [
+      "import importlib.util, json, pathlib, sys",
+      "path = pathlib.Path(sys.argv[1])",
+      "spec = importlib.util.spec_from_file_location('trademining_export', path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "sys.modules[spec.name] = module",
+      "spec.loader.exec_module(module)",
+      "class Session:",
+      "  def request(self, *args, **kwargs): return 200, {'content-type': 'application/json'}, b'{\"ResultCount\":0,\"Data\":[]}'",
+      "print(json.dumps({'count': module.search_result_count(Session(), 'test-search')}))"
+    ].join("\n");
+
+    const result = spawnSync("python3", ["-c", source, exporterPath], {
+      encoding: "utf8",
+      env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ count: 0 });
   });
 });

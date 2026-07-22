@@ -94,7 +94,9 @@ def create_job_run(base_url: str, token: str, profile: dict[str, Any], trigger: 
                 "agent": "Hunter",
                 "profileName": clean(profile.get("name")),
                 "trigger": trigger,
-                "lookbackDays": profile_lookback_days(profile),
+                "lookbackDays": query_lookback_days(profile),
+                "configuredLookbackDays": profile_lookback_days(profile),
+                "controlledTest": clean(os.environ.get("HUNTER_TEST_DAYS")) is not None,
             },
         },
     )
@@ -124,6 +126,17 @@ def fail_job_run(base_url: str, token: str, job_run_id: str, error: Exception) -
 
 def profile_lookback_days(profile: dict[str, Any]) -> int:
     return max(1, int(profile.get("lookbackDays") or 1))
+
+
+def query_lookback_days(profile: dict[str, Any]) -> int:
+    configured_days = profile_lookback_days(profile)
+    override = clean(os.environ.get("HUNTER_TEST_DAYS"))
+    if override is None:
+        return configured_days
+    test_days = int(override)
+    if test_days < 1 or test_days > configured_days:
+        raise RuntimeError("--test-days must be between 1 and the profile lookback")
+    return test_days
 
 
 def profile_values(profile: dict[str, Any], field: str) -> list[str]:
@@ -212,7 +225,8 @@ def run_profile(base_url: str, token: str, profile: dict[str, Any], trigger: str
     if missing_ports:
         raise RuntimeError("TradeMining port IDs are not configured for: " + ", ".join(missing_ports))
 
-    lookback_days = profile_lookback_days(profile)
+    configured_lookback_days = profile_lookback_days(profile)
+    lookback_days = query_lookback_days(profile)
     end_date_override = clean(os.environ.get("HUNTER_END_DATE"))
     run_date = end_date_override or dt.datetime.now(dt.timezone.utc).date().isoformat()
     run_slug = f"{run_date}-{slug(profile_name)}-{profile_id[-8:]}"
@@ -303,6 +317,7 @@ def run_profile(base_url: str, token: str, profile: dict[str, Any], trigger: str
         "portCount": len(destination_ports),
         "queryCount": 1,
         "lookbackDays": lookback_days,
+        "configuredLookbackDays": configured_lookback_days,
         "jobRunId": job_run_id,
         "canonicalCsv": canonical_csv.name,
     }
@@ -381,6 +396,7 @@ def main() -> int:
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--plan", action="store_true", help="Validate one profile without logging in or exporting.")
     parser.add_argument("--end-date", help="Use a specific YYYY-MM-DD TradeMining end date for a controlled run.")
+    parser.add_argument("--test-days", type=int, help="Temporarily shorten an explicit profile run without changing it.")
     profile = parser.add_mutually_exclusive_group()
     profile.add_argument("--profile-id")
     profile.add_argument("--profile-name")
@@ -389,6 +405,10 @@ def main() -> int:
     if args.end_date:
         dt.date.fromisoformat(args.end_date)
         os.environ["HUNTER_END_DATE"] = args.end_date
+    if args.test_days is not None:
+        if not args.profile_id and not args.profile_name:
+            raise RuntimeError("--test-days requires --profile-id or --profile-name")
+        os.environ["HUNTER_TEST_DAYS"] = str(args.test_days)
 
     base_url = required_env("NEWL_APPS_BASE_URL")
     token = required_env("INGESTION_API_TOKEN")

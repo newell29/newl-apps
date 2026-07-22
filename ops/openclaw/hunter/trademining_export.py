@@ -35,6 +35,10 @@ PORTS = {
     "norfolk": ("Norfolk-Newport News, Virginia", "1228"),
 }
 
+LOOKUP_ALIASES = {
+    ("ForeignPort", "busan"): "Pusan",
+}
+
 
 @dataclass
 class TradeMiningSession:
@@ -46,6 +50,7 @@ class TradeMiningSession:
         path_or_url: str,
         data: Optional[dict[str, str | list[str]]] = None,
         output: Optional[Path] = None,
+        extra_headers: Optional[dict[str, str]] = None,
     ) -> tuple[int, dict[str, str], bytes]:
         url = path_or_url if path_or_url.startswith("http") else BASE_URL + path_or_url
         encoded = None if data is None else urllib.parse.urlencode(data, doseq=True).encode()
@@ -55,6 +60,8 @@ class TradeMiningSession:
         }
         if encoded is not None:
             headers["Content-Type"] = "application/x-www-form-urlencoded"
+        if extra_headers:
+            headers.update(extra_headers)
 
         cookie_header = self._cookie_header()
         if cookie_header:
@@ -242,7 +249,7 @@ def build_search_form(
     if product_keywords:
         data["ContainerCommodity"] = boolean_or_expression(product_keywords)
     if hs_codes:
-        data["HTSCode"] = boolean_or_expression(hs_codes)
+        data["HTSCode"] = comma_separated_values(hs_codes)
     if minimum_teu is not None:
         data["TEUSingle"] = "TEUSingle"
         data["TEUFromSingle"] = "Greater Than Or Equals To"
@@ -263,10 +270,23 @@ def boolean_or_expression(values: list[str]) -> str:
     return " OR ".join(unique)
 
 
+def comma_separated_values(values: list[str]) -> str:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        value = re.sub(r"\s+", "", str(raw)).strip(",")
+        if not value or value.casefold() in seen:
+            continue
+        seen.add(value.casefold())
+        unique.append(value)
+    return ",".join(unique)
+
+
 def resolve_lookup_ids(session: TradeMiningSession, field: str, values: list[str]) -> list[str]:
     result: list[str] = []
     for value in values:
-        status, _headers, body = session.request("POST", f"/AutoComplete/{field}", {"text": value})
+        query = lookup_query(field, value)
+        status, _headers, body = session.request("POST", f"/AutoComplete/{field}", {"text": query})
         if status != 200:
             raise RuntimeError(f"TradeMining {field} lookup failed with status {status}")
         try:
@@ -280,7 +300,7 @@ def resolve_lookup_ids(session: TradeMiningSession, field: str, values: list[str
             match
             for match in matches
             if isinstance(match, dict)
-            and str(match.get("lookupName", "")).strip().casefold() == value.strip().casefold()
+            and str(match.get("lookupName", "")).strip().casefold() == query.casefold()
             and str(match.get("lookupId", "")).strip()
         ]
         candidates = exact or [
@@ -294,11 +314,34 @@ def resolve_lookup_ids(session: TradeMiningSession, field: str, values: list[str
     return result
 
 
+def lookup_query(field: str, value: str) -> str:
+    normalized = re.sub(r"\s+", " ", value).strip()
+    return LOOKUP_ALIASES.get((field, normalized.casefold()), normalized)
+
+
 def extract_result_columns(result_page: str) -> dict[str, Any]:
     match = re.search(r"var resultTemplate = (\{.*?\});\s*var bolImportRollupType", result_page, re.S)
     if not match:
         raise RuntimeError("result template not found")
     return json.loads(match.group(1))
+
+
+def search_result_count(session: TradeMiningSession, search_log_id: str) -> int:
+    query = urllib.parse.urlencode({"page": 1, "pageSize": 1, "skip": 0, "take": 1})
+    status, _headers, body = session.request(
+        "GET",
+        f"/ImportSearch/Results/{search_log_id}?{query}",
+        extra_headers={"Accept": "application/json", "X-Requested-With": "XMLHttpRequest"},
+    )
+    if status != 200:
+        raise RuntimeError(f"TradeMining result count failed with status {status}")
+    try:
+        parsed = json.loads(body.decode("utf-8", "replace"))
+    except json.JSONDecodeError as error:
+        raise RuntimeError("TradeMining result count returned invalid JSON") from error
+    if not isinstance(parsed, dict):
+        raise RuntimeError("TradeMining result count returned an unexpected response")
+    return max(0, int(parsed.get("ResultCount") or 0))
 
 
 def export_excel(
@@ -505,12 +548,19 @@ def main() -> int:
             hs_codes=args.hs_code,
             minimum_teu=args.minimum_teu,
         )
+        result_count = search_result_count(session, search_log_id)
         date_slug = f"{window_start.isoformat()}_to_{window_end.isoformat()}"
         xlsx_path = run_dir / f"{date_slug}_profile_{search_log_id}.xlsx"
         csv_path = run_dir / f"{date_slug}_profile_{search_log_id}.csv"
-        export_excel(session, search_log_id, result_page, xlsx_path)
-        rows = xlsx_to_rows(xlsx_path)
-        data_rows = write_csv(rows, csv_path)
+        if result_count == 0:
+            xlsx_manifest_path: Optional[str] = None
+            csv_path.write_text("")
+            data_rows = 0
+        else:
+            export_excel(session, search_log_id, result_page, xlsx_path)
+            rows = xlsx_to_rows(xlsx_path)
+            data_rows = write_csv(rows, csv_path)
+            xlsx_manifest_path = str(xlsx_path)
         manifest["ports"].append(
             {
                 "port_key": "profile-query",
@@ -521,9 +571,10 @@ def main() -> int:
                 "window_start_date": window_start.isoformat(),
                 "window_end_date": window_end.isoformat(),
                 "search_log_id": search_log_id,
-                "xlsx": str(xlsx_path),
+                "xlsx": xlsx_manifest_path,
                 "csv": str(csv_path),
                 "data_rows": data_rows,
+                "result_count": result_count,
                 "filters": {
                     "origin_countries": args.origin_country,
                     "origin_ports": args.origin_port,

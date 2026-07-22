@@ -114,6 +114,25 @@ describe("Hunter daily profile worker", () => {
     expect(JSON.parse(result.stdout)).toEqual({ before: false, after: true, sameDay: false });
   });
 
+  it("allows an explicit one-day test without changing the configured lookback", () => {
+    const python = [
+      "import importlib.util, json, os, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "profile = {'lookbackDays': 120}",
+      "os.environ['HUNTER_TEST_DAYS'] = '1'",
+      "print(json.dumps({'queryDays': module.query_lookback_days(profile), 'configuredDays': module.profile_lookback_days(profile)}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ queryDays: 1, configuredDays: 120 });
+  });
+
   it("fails closed when a deleted profile is absent from the current enabled list", () => {
     const python = [
       "import importlib.util, pathlib, sys",

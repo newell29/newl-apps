@@ -65,6 +65,7 @@ HUNTER_WORKER_ID=alex-mac-mini-hunter
 HUNTER_COLLECTOR_PATH=/path/to/reviewed/collector
 HUNTER_EXPORT_DIRECTORY=/path/to/runtime/exports
 HUNTER_HTTP_MAX_ATTEMPTS=4
+VERCEL_AUTOMATION_BYPASS_SECRET=<dedicated Preview automation bypass>
 HUNTER_DAILY_RUN_TIME=07:00
 HUNTER_POLL_MS=60000
 ```
@@ -91,6 +92,8 @@ python3 ops/openclaw/hunter/hunter_worker.py \
   --plan \
   --profile-name "Charlotte Warehouse Leads"
 ```
+
+For a controlled live validation, `--test-days 1` may be combined with an explicit profile and `--end-date`. The job metadata records both the one-day query and the profile's configured lookback; the stored profile is not changed.
 
 Install only after the reviewed Preview URL, dedicated ingestion token, TradeMining credentials, runtime directories, and port map are in Hunter's local environment file:
 
@@ -129,6 +132,8 @@ Do not run the VM and Mac schedulers concurrently against the same profile durin
 - The same run exposed a Newl Apps sequence-status parsing defect for Apollo's `contact_campaign_statuses` response; a regression fix is prepared on the Hunter feature branch.
 - Hunter's new ingestion adapter posted a synthetic canonical CSV through the local tenant-bound routes: one record processed and created with no skips.
 - Hunter's profile planner resolves all three Charlotte destination ports and both Houston-profile ports. TradeMining identifies the Houston seaport as `1382` and Freeport, Texas as `1385`; the local profile label `Houston, Texas` is an explicit alias for the seaport ID.
+- A controlled one-day Charlotte profile run submitted one live TradeMining query containing all three destination ports, configured origin countries/ports, ship-from ports, product keywords, comma-separated HS codes, and `TEU >= 10`. It returned zero matching BOLs and completed the local Newl Apps job successfully with zero records while preserving the profile's configured 120-day lookback.
+- The live test confirmed two TradeMining vocabulary/format requirements: canonical profile value `Busan` must resolve to lookup label `Pusan`, and multiple HS codes must be comma-separated rather than joined with Boolean `OR`.
 - A controlled one-day Charlotte run exported 1,163 shipment rows from the three configured ports. Hunter quarantined 66 rows that lacked every company identity field, submitted 1,097 valid rows to the local database, created 1,034 records, and counted 63 API-level duplicates/skips. The local job completed successfully.
 - The first live batch exposed a mismatch between the legacy summary output and Newl Apps validation: shipment-only rows without an importer, consignee, notify party, or shipper cannot become company candidates. Hunter now rejects and counts those rows before upload instead of failing the whole batch.
 - A controlled one-day Houston run exported 716 rows from Houston and zero from Freeport for the selected date. Hunter quarantined 68 identity-free rows, submitted 648 valid rows to the local database, created 627 records, and counted 21 API-level duplicates/skips. The local job completed successfully.
