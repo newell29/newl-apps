@@ -10,6 +10,8 @@ import type {
   TeamshipPrintExecutionDocument,
   TeamshipPrintExecutionResult
 } from "@/modules/teamship/print-jobs";
+import { calculateTeamshipPalletCount } from "@/modules/teamship/print-jobs";
+import { findTeamshipShippingOrders } from "@/server/integrations/teamship";
 
 export type TeamshipPrintExecutionOptions = {
   appBaseUrl?: string;
@@ -58,7 +60,7 @@ export async function executeTeamshipPrintJob(
 
     // Preflight every destination and the live pallet count before any print is sent.
     await openTeamshipPage(page, orderUrl, job, allowedHosts, options);
-    observedPalletCount = await readTeamshipPalletCount(page);
+    observedPalletCount = await readTeamshipApiPalletCount(job);
     assertApprovedPalletCount(observedPalletCount, job.approvedPalletCount);
     await findExactPrinterOption(page, job.printerPlan.outboundLabels.exactName);
     await openTeamshipPage(page, bolUrl, job, allowedHosts, options);
@@ -73,7 +75,7 @@ export async function executeTeamshipPrintJob(
 
     // Printer selection is intentionally redone after returning to the order.
     await openTeamshipPage(page, orderUrl, job, allowedHosts, options);
-    observedPalletCount = await readTeamshipPalletCount(page);
+    observedPalletCount = await readTeamshipApiPalletCount(job);
     assertApprovedPalletCount(observedPalletCount, job.approvedPalletCount);
     completedDocuments.push(await printOutboundLabels(page, job));
 
@@ -93,22 +95,20 @@ export async function executeTeamshipPrintJob(
   }
 }
 
-export async function readTeamshipPalletCount(page: Pick<Page, "locator">) {
-  const declaredCountValue = await page.locator("#pallets_count").first().inputValue().catch(() => "");
-  const declaredCount = Number.parseInt(declaredCountValue, 10);
-  const quantityInputs = page.locator('input[id^="pallet_"]:visible');
-  const values = await quantityInputs.evaluateAll((inputs) => inputs
-    .filter((input) => /^pallet_\d+$/.test(input.id))
-    .map((input) => (input as HTMLInputElement).value));
-  if (values.length === 0 && Number.isInteger(declaredCount) && declaredCount > 0) return declaredCount;
-  const quantities = values.map((value) => Number(value));
-  if (quantities.length === 0 || quantities.some((value) => !Number.isInteger(value) || value < 1)) {
-    throw new Error("Teamship did not expose valid pallet quantities on the shipping order.");
+export async function readTeamshipApiPalletCount(
+  job: ClaimedTeamshipPrintJob,
+  findOrders: typeof findTeamshipShippingOrders = findTeamshipShippingOrders
+) {
+  const orders = await findOrders({
+    orderIdentifier: job.shippingOrderNumber,
+    credentials: job.credentials
+  });
+  const exact = orders.filter((order) => [order.id, order.order_id]
+    .some((value) => String(value ?? "").trim() === job.teamshipOrderId));
+  if (exact.length !== 1) {
+    throw new Error("Teamship API did not return exactly one approved shipping order for pallet preflight.");
   }
-  if (Number.isInteger(declaredCount) && declaredCount > 0 && declaredCount !== quantities.length) {
-    throw new Error("Teamship pallet-row count changed or is internally inconsistent.");
-  }
-  return quantities.reduce((sum, quantity) => sum + quantity, 0);
+  return calculateTeamshipPalletCount(exact[0]!);
 }
 
 export async function selectTeamshipPrinterExact(scope: Page | Locator, exactName: string) {
