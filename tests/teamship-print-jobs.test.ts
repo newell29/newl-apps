@@ -94,6 +94,11 @@ describe("Teamship print jobs", () => {
         teamshipOrderId: "31064"
       })
     }));
+    expect(findOrders).toHaveBeenCalledWith({
+      tenantId: "tenant-1",
+      orderIdentifier: "30666",
+      preferUiPallets: true
+    });
   });
 
   it("fails closed when Teamship returns conflicting internal order IDs", async () => {
