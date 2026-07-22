@@ -2,10 +2,57 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReplyStatus, SequenceStatus } from "@prisma/client";
 import {
   fetchApolloActivitySummary,
+  fetchApolloContactById,
   fetchApolloContactsForCompany,
   fetchApolloRepDirectory,
   fetchApolloSequenceDirectory
 } from "@/server/integrations/apollo";
+
+describe("fetchApolloContactById", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.stubEnv("APOLLO_MASTER_API", "master-api-key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("reads one saved Apollo contact and infers a reply from current campaign status", async () => {
+    const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        contact: {
+          id: "apollo-contact-1",
+          first_name: "Jordan",
+          last_name: "Demo",
+          contact_campaign_statuses: [
+            {
+              emailer_campaign_id: "sequence-1",
+              status: "replied",
+              updated_at: "2026-07-22T16:30:00.000Z"
+            }
+          ]
+        }
+      })
+    } as unknown as Response);
+
+    const contact = await fetchApolloContactById("apollo-contact-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.apollo.io/api/v1/contacts/apollo-contact-1",
+      expect.objectContaining({ method: "GET", cache: "no-store" })
+    );
+    expect(contact).toMatchObject({
+      apolloContactId: "apollo-contact-1",
+      sequenceId: "sequence-1",
+      sequenceStatus: SequenceStatus.REPLIED,
+      replyStatus: ReplyStatus.REPLIED,
+      lastReplyAt: new Date("2026-07-22T16:30:00.000Z")
+    });
+  });
+});
 
 describe("fetchApolloRepDirectory", () => {
   beforeEach(() => {

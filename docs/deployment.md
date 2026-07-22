@@ -27,6 +27,17 @@ Required non-secret safety variable:
 | `DATABASE_ENVIRONMENT` | Production | Must be `production`. Labels the connected database as production. |
 | `DATABASE_ENVIRONMENT` | Preview | Must be `preview`. Preview builds require this exact value before running migrations. |
 
+Required scheduled Apollo synchronization variables:
+
+| Variable | Environment | Purpose |
+| --- | --- | --- |
+| `CRON_SECRET` | Production and Preview | Random secret Vercel sends in the cron request `Authorization` header. |
+| `APOLLO_MASTER_API` | Production | Master Apollo key used to read saved contact status. Do not use a production key in Preview. |
+| `APOLLO_STATUS_SYNC_INTERVAL_HOURS` | Production | Optional freshness interval; defaults to `4` and is clamped to 1–24 hours. |
+| `APOLLO_STATUS_SYNC_BATCH_SIZE` | Production | Optional per-tenant batch size; defaults to `50` and is clamped to 1–100. |
+
+The hourly cron expression requires Vercel Pro or Enterprise. Vercel Hobby only permits daily cron schedules.
+
 Optional non-secret diagnostics:
 
 | Variable | Environment | Purpose |

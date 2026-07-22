@@ -194,7 +194,7 @@ export type ContactDraftStatusFilter =
 
 type JsonObject = Record<string, unknown>;
 
-type SearchProfileSummary = {
+export type SearchProfileSummary = {
   id: string;
   name: string;
   priorityWeight: number;
@@ -1767,7 +1767,7 @@ function buildCandidateWhere(filters: CandidateFeedFilters, evidenceWhere: Retur
   };
 }
 
-async function loadSearchProfileSummaries(tenant: Pick<TenantContext, "tenantId">) {
+export async function loadSearchProfileSummaries(tenant: Pick<TenantContext, "tenantId">) {
   const searchProfileClient = prisma as SearchProfileClient;
 
   if (!searchProfileClient.tradeMiningSearchProfile) {
@@ -1844,7 +1844,7 @@ export function buildTradeMiningEvidenceWhere(
   });
 }
 
-function resolveEvidenceLookbackDays(
+export function resolveEvidenceLookbackDays(
   config: CandidateScoringConfig,
   searchProfiles: Map<string, SearchProfileSummary>
 ) {
@@ -2434,7 +2434,7 @@ function scoreRecency(latestShipmentDate: Date | null) {
   return 0;
 }
 
-async function loadTradeMiningScoringConfig(tenant: Pick<TenantContext, "tenantId">) {
+export async function loadTradeMiningScoringConfig(tenant: Pick<TenantContext, "tenantId">) {
   const tradeMiningScoringClient = prisma as TradeMiningScoringQueryClient;
 
   try {

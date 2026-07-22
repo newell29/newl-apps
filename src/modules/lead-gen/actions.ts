@@ -40,6 +40,8 @@ import {
   recordLeadScoreSnapshot,
   type LeadScoreTrigger
 } from "@/modules/lead-gen/score-history";
+import { recordCurrentContactScoreSnapshot as recordContactScoreSnapshot } from "@/modules/lead-gen/contact-score-snapshot";
+import { getNextApolloSyncAt } from "@/modules/lead-gen/apollo-status-sync-policy";
 import {
   assertValidTradeMiningSearchProfile,
   defaultTradeMiningCompanyIdentityRoles,
@@ -2836,11 +2838,18 @@ async function syncExistingApolloContactsForCompany({
       incoming
     });
 
+    const syncedAt = new Date();
     await prisma.contact.update({
       where: {
         id: existing.id
       },
-      data: merged
+      data: {
+        ...merged,
+        apolloLastSyncedAt: syncedAt,
+        apolloNextSyncAt: getNextApolloSyncAt(syncedAt),
+        apolloSyncFailureCount: 0,
+        apolloSyncLastError: null
+      }
     });
 
     const scoreSnapshot = await recordContactScoreSnapshot({
@@ -4589,27 +4598,6 @@ async function syncApolloCustomFieldsForContactPush({
     apolloContactId,
     fieldValues: customFieldValues
   });
-}
-
-async function recordContactScoreSnapshot({
-  tenantId,
-  contactId,
-  trigger
-}: {
-  tenantId: string;
-  contactId: string;
-  trigger: LeadScoreTrigger;
-}) {
-  const draftContext = await loadAiDraftContactContext({
-    tenantId,
-    contactId
-  });
-
-  if (!draftContext) {
-    return null;
-  }
-
-  return persistContactScoreSnapshot(draftContext, trigger);
 }
 
 async function persistContactScoreSnapshot(

@@ -1605,6 +1605,10 @@ model Contact {
   sequenceManuallyOverridden   Boolean        @default(false)
   lastTouchAt                  DateTime?
   lastReplyAt                  DateTime?
+  apolloLastSyncedAt           DateTime?
+  apolloNextSyncAt             DateTime?
+  apolloSyncFailureCount       Int            @default(0)
+  apolloSyncLastError          String?
   assignedRep                  String?
   rawJson                      Json?
   createdAt                    DateTime       @default(now())
@@ -1633,6 +1637,8 @@ model Contact {
   @@index([tenantId, selectedSequenceId])
   @@index([tenantId, sequenceManuallyOverridden])
   @@index([tenantId, replyStatus])
+  @@index([tenantId, apolloNextSyncAt])
+  @@index([tenantId, apolloSyncFailureCount])
   @@index([tenantId, source])
   @@index([tenantId, assignedRep])
 }

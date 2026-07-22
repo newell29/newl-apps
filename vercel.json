@@ -4,6 +4,10 @@
     {
       "path": "/api/website-growth/weekly-plan",
       "schedule": "0 13 * * 1"
+    },
+    {
+      "path": "/api/lead-gen/apollo/status-sync",
+      "schedule": "17 * * * *"
     }
   ]
 }
