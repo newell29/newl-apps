@@ -19,6 +19,7 @@ Shipment documents and Garland Teamship review is documented because code, route
 - Phase 1 does not update Teamship or print. Existing update and print paths retain their separate approval requirements.
 - CSRs can ask why the latest saved PS/SR check failed. The explanation uses the saved deterministic per-field comparison and may additionally show active admin-approved lessons.
 - CSRs can report that a result should have passed or failed. The report is not treated as true until reviewed.
+- A saved Garland carrier-manifest run can retain multiple completed PDF attachments. Employees can add another PDF after the first signed/completed copy has been uploaded; older single signed-copy files remain available alongside newer attachments.
 
 ## Data model
 

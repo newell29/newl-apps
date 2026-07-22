@@ -15,6 +15,7 @@ Shipment documents and Garland Teamship review is documented because code, route
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
 - Printing stops for changed pallet counts, a missing or duplicated exact printer, a changed selection, unavailable CUPS queue, invalid PDF download, expired approval, worker timeout, page/scope mismatch, or partial failure. No uncertain job is retried automatically; physical output must be checked first.
 - Printing API routes remain outside session-cookie middleware so their dedicated OpenClaw and worker tokens are validated by the route handlers. The worker treats a login redirect as an authentication failure and never follows it.
+- Carrier-manifest attachments reject empty files, non-PDF contents, files larger than 20 MB, incomplete or out-of-order chunks, missing/deleted runs, and run or attachment identifiers outside the authenticated tenant. Incomplete uploads remain hidden from saved-run history and downloads.
 
 ## Data model
 

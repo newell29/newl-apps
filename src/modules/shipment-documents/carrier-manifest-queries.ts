@@ -1,4 +1,5 @@
 import type {
+  GarlandCarrierManifestAttachmentSummary,
   GarlandCarrierKey,
   GarlandCarrierManifestHistoryResponse,
   GarlandCarrierManifestRunSummary
@@ -32,6 +33,11 @@ type CarrierManifestRunRecord = {
   suretrackWorkbookBytes: Uint8Array | null;
   signedCopyFileName: string | null;
   signedCopyUploadedAt: Date | null;
+  attachments: Array<{
+    id: string;
+    fileName: string;
+    createdAt: Date;
+  }>;
   createdAt: Date;
   createdBy: {
     name: string | null;
@@ -67,6 +73,15 @@ export async function getGarlandCarrierManifestHistory(
         suretrackWorkbookBytes: true,
         signedCopyFileName: true,
         signedCopyUploadedAt: true,
+        attachments: {
+          where: { uploadComplete: true },
+          orderBy: { createdAt: "asc" },
+          select: {
+            id: true,
+            fileName: true,
+            createdAt: true
+          }
+        },
         createdAt: true,
         createdBy: {
           select: {
@@ -86,6 +101,22 @@ export async function getGarlandCarrierManifestHistory(
 }
 
 function mapGarlandCarrierManifestRunSummary(record: CarrierManifestRunRecord): GarlandCarrierManifestRunSummary {
+  const attachments: GarlandCarrierManifestAttachmentSummary[] = record.attachments.map((attachment) => ({
+    id: attachment.id,
+    fileName: attachment.fileName,
+    uploadedAt: attachment.createdAt.toISOString(),
+    isLegacySignedCopy: false
+  }));
+
+  if (record.signedCopyFileName && record.signedCopyUploadedAt) {
+    attachments.unshift({
+      id: null,
+      fileName: record.signedCopyFileName,
+      uploadedAt: record.signedCopyUploadedAt.toISOString(),
+      isLegacySignedCopy: true
+    });
+  }
+
   return {
     id: record.id,
     documentLabel: record.documentLabel,
@@ -98,7 +129,8 @@ function mapGarlandCarrierManifestRunSummary(record: CarrierManifestRunRecord): 
     hasSpeedyWorkbook: Boolean(record.speedyWorkbookBytes),
     hasSuretrackWorkbook: Boolean(record.suretrackWorkbookBytes),
     signedCopyFileName: record.signedCopyFileName,
-    signedCopyUploadedAt: record.signedCopyUploadedAt?.toISOString() ?? null
+    signedCopyUploadedAt: record.signedCopyUploadedAt?.toISOString() ?? null,
+    attachments
   };
 }
 

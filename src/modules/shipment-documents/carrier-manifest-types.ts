@@ -11,6 +11,13 @@ export type GarlandCarrierManifestRow = {
   notes: string | null;
 };
 
+export type GarlandCarrierManifestAttachmentSummary = {
+  id: string | null;
+  fileName: string;
+  uploadedAt: string;
+  isLegacySignedCopy: boolean;
+};
+
 export type GarlandCarrierManifestRunSummary = {
   id: string;
   documentLabel: string;
@@ -24,6 +31,7 @@ export type GarlandCarrierManifestRunSummary = {
   hasSuretrackWorkbook: boolean;
   signedCopyFileName: string | null;
   signedCopyUploadedAt: string | null;
+  attachments: GarlandCarrierManifestAttachmentSummary[];
 };
 
 export type GarlandCarrierManifestHistoryResponse = {

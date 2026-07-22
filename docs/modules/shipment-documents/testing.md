@@ -14,6 +14,7 @@ Shipment documents and Garland Teamship review is documented because code, route
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
 - Printing regression tests cover tenant and identity binding, dedicated credentials, exact numeric order input, Garland/Annagem restriction, pallet-quantity summation, corrected `BIXOLON SRP-770III` selection, same-user confirmation, plugin routing, and no-retry failure reporting. Live printer validation requires a separately approved supervised production test.
+- Carrier-manifest attachment regression tests cover repeated chunked PDF uploads, PDF signature and size validation, tenant-scoped creation and download, incomplete-upload hiding, and combined history for legacy signed copies plus newer attachments.
 
 ## Data model
 
