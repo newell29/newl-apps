@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { findTeamshipShippingOrders } from "@/server/integrations/teamship";
+import { findTeamshipShippingOrders, parseTeamshipShippingOrderUiPage } from "@/server/integrations/teamship";
 
 describe("Teamship shipping-order search identity", () => {
   afterEach(() => {
@@ -162,6 +162,27 @@ describe("Teamship shipping-order search identity", () => {
       pallets: [expect.objectContaining({ quantity: "1" })],
       pallet_dims: [expect.objectContaining({ quantity: "1" })]
     })]);
+  });
+
+  it("does not create default-only ghost pallet rows when the count marker is absent", () => {
+    const parsed = parseTeamshipShippingOrderUiPage(`
+      <input id="pallet_1" value="1">
+      <input id="pallet_1_length" value="1">
+      <input id="pallet_1_width" value="1">
+      <input id="pallet_1_height" value="1">
+      <input id="pallet_1_weight" value="1">
+      <input id="pallet_1_commodity" value="SKU: A4505560-5001 QTY: 1">
+    `);
+
+    expect(parsed.pallet_dims).toEqual([{
+      quantity: "1",
+      length: "1",
+      width: "1",
+      height: "1",
+      weight: "1",
+      weight_unit: "lbs",
+      commodity: "SKU: A4505560-5001 QTY: 1"
+    }]);
   });
 
   it("does not reuse stale summary pallets when authoritative detail is unavailable", async () => {
