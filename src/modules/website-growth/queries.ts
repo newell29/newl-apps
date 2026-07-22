@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 
 import { getWebsiteGrowthIntegrationStatus } from "@/modules/website-growth/integrations";
+import { getWebsiteGrowthDeveloperDispatchStatus } from "@/modules/website-growth/developer-dispatch";
 import {
   buildLegacyRebuildEvidence,
   buildLegacyRebuildReason,
@@ -196,6 +197,7 @@ export async function getWebsiteGrowthShell(
     recentImports,
     latestMetrics,
     integrations: getWebsiteGrowthIntegrationStatus(),
+    developerDispatch: getWebsiteGrowthDeveloperDispatchStatus(),
     metrics: {
       totalCount,
       reviewQueueCount,
