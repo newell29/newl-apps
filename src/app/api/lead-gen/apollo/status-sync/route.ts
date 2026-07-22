@@ -24,18 +24,23 @@ export async function GET(request: Request) {
 
   try {
     const results = await runScheduledApolloStatusSync();
-    return NextResponse.json({
-      generatedAt: new Date().toISOString(),
-      tenantCount: results.length,
-      totals: {
-        selectedContacts: results.reduce((sum, result) => sum + result.selectedContacts, 0),
-        syncedContacts: results.reduce((sum, result) => sum + result.syncedContacts, 0),
-        changedContacts: results.reduce((sum, result) => sum + result.changedContacts, 0),
-        failedContacts: results.reduce((sum, result) => sum + result.failedContacts, 0),
-        retryCount: results.reduce((sum, result) => sum + result.retryCount, 0)
+    const failedTenants = results.filter((result) => result.status === "error").length;
+    return NextResponse.json(
+      {
+        generatedAt: new Date().toISOString(),
+        tenantCount: results.length,
+        totals: {
+          selectedContacts: results.reduce((sum, result) => sum + result.selectedContacts, 0),
+          syncedContacts: results.reduce((sum, result) => sum + result.syncedContacts, 0),
+          changedContacts: results.reduce((sum, result) => sum + result.changedContacts, 0),
+          failedContacts: results.reduce((sum, result) => sum + result.failedContacts, 0),
+          failedTenants,
+          retryCount: results.reduce((sum, result) => sum + result.retryCount, 0)
+        },
+        results
       },
-      results
-    });
+      { status: failedTenants > 0 ? 502 : 200 }
+    );
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to run the scheduled Apollo status sync." },

@@ -68,8 +68,39 @@ describe("Apollo status sync cron route", () => {
         syncedContacts: 3,
         changedContacts: 1,
         failedContacts: 0,
+        failedTenants: 0,
         retryCount: 1
       }
+    });
+  });
+
+  it("returns a failing HTTP status when any tenant sync fails", async () => {
+    runScheduledApolloStatusSync.mockResolvedValueOnce([
+      {
+        tenantId: "tenant-a",
+        jobRunId: "job-2",
+        status: "error",
+        selectedContacts: 0,
+        syncedContacts: 0,
+        changedContacts: 0,
+        failedContacts: 0,
+        deferredContacts: 0,
+        retryCount: 0,
+        rateLimited: false,
+        message: "Database migration is missing"
+      }
+    ]);
+
+    const response = await GET(
+      new Request("https://newl.test/api/lead-gen/apollo/status-sync", {
+        headers: { authorization: "Bearer apollo-sync-test-secret" }
+      })
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toMatchObject({
+      totals: { failedTenants: 1 },
+      results: [{ status: "error", message: "Database migration is missing" }]
     });
   });
 });
