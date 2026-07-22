@@ -86,7 +86,7 @@ describe("scheduled Apollo status sync", () => {
     prismaMock.auditLog.create.mockResolvedValue({});
   });
 
-  it("updates a due contact inside its tenant and records reply outcomes against the new score", async () => {
+  it("updates a due contact and links reply outcomes to the pre-outcome score", async () => {
     prismaMock.contact.findMany.mockResolvedValue([existingContact()]);
     const fetchContact = vi.fn().mockResolvedValue(incomingContact());
     const recordScoreSnapshot = vi.fn().mockResolvedValue({ id: "snapshot-1" });
@@ -121,6 +121,9 @@ describe("scheduled Apollo status sync", () => {
       contactId: "contact-1",
       trigger: "APOLLO_STATUS_SYNC"
     });
+    expect(recordScoreSnapshot.mock.invocationCallOrder[0]).toBeLessThan(
+      prismaMock.contact.updateMany.mock.invocationCallOrder[0]
+    );
     expect(recordOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
         tenantId: "tenant-a",

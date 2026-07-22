@@ -29,8 +29,8 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 2. Newl Apps selects only tenants with Lead Generation enabled and an active Apollo integration.
 3. Each run processes at most `APOLLO_STATUS_SYNC_BATCH_SIZE` due contacts. A successful contact becomes due again after `APOLLO_STATUS_SYNC_INTERVAL_HOURS` (four hours by default).
 4. Saved Apollo contacts are read by `apolloContactId`; the scheduler does not run people enrichment or organization search and therefore does not consume enrichment/search credits.
-5. Transient and rate-limit responses receive at most three attempts with bounded backoff. Sustained rate limiting stops the current batch so later contacts remain due rather than creating an API storm.
-6. Reply or sequence changes create the same score snapshot and outcome history used by manual synchronization. Unchanged polls do not create redundant score history.
+5. Transient and rate-limit responses receive at most three contact-level attempts with bounded backoff. Sustained rate limiting stops the current batch so later contacts remain due rather than creating an API storm. The GitHub caller does not retry the entire HTTP request because that could hide a partially failed batch behind a later empty success.
+6. Reply or sequence changes create a pre-outcome score snapshot before Apollo state is persisted, then link the outcome to that snapshot. Manual synchronization follows the same ordering. Unchanged scheduled polls do not create redundant score history.
 7. Run results are stored in `AutomationJobRun` and `AuditLog`; per-contact last-sync, next-sync, failure count, and latest error appear in the Contacts health panel.
 
 ## Data model
