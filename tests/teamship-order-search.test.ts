@@ -16,10 +16,12 @@ describe("Teamship shipping-order search identity", () => {
         return Response.json({ data: { token: "test-token" } });
       }
       if (url.includes("/v1/ship-inventories?")) {
-        return Response.json({ data: [{ id: 31064, order_number: "30666" }] });
+        return Response.json({
+          data: [{ id: 31064, order_number: "30666", pallet_dims: [{ quantity: 2 }] }]
+        });
       }
       if (url.endsWith("/v1/ship-inventories/31064")) {
-        return Response.json({ data: { id: 30666, pallet_dims: [{ quantity: 2 }] } });
+        return Response.json({ data: { id: 31064, pallets: [{ quantity: 1 }] } });
       }
       throw new Error(`Unexpected Teamship fetch: ${url}`);
     });
@@ -35,10 +37,12 @@ describe("Teamship shipping-order search identity", () => {
     });
 
     expect(orders).toEqual([expect.objectContaining({
-      id: 30666,
+      id: 31064,
       order_number: "30666",
       teamship_internal_id: "31064",
-      url: "https://members.fulfillit.io/ship-inventories/31064"
+      url: "https://members.fulfillit.io/ship-inventories/31064",
+      pallets: [{ quantity: 1 }],
+      pallet_dims: [{ quantity: 1 }]
     })]);
   });
 });

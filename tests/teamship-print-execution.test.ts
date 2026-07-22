@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  assertTeamshipPrintPageUrl,
   resolveExactPrinterOption,
   resolveTeamshipPrintAppBaseUrl,
   readTeamshipApiPalletCount
@@ -34,6 +35,8 @@ describe("Teamship print execution safeguards", () => {
       id: "30666",
       teamship_internal_id: "31064",
       url: "https://members.fulfillit.io/ship-inventories/31064",
+      customer: { company: "Garland Canada Distribution" },
+      warehouse_name: "Annagem",
       pallet_dims: [{ quantity: 1 }, { quantity: 1 }]
     }]);
 
@@ -42,6 +45,78 @@ describe("Teamship print execution safeguards", () => {
       orderIdentifier: "30666",
       credentials: job.credentials
     });
+  });
+
+  it("accepts the exact internal page URL without relying on body innerText", () => {
+    const target = new URL("https://members.fulfillit.io/ship-inventories/31064");
+    expect(() => assertTeamshipPrintPageUrl(
+      "https://members.fulfillit.io/ship-inventories/31064",
+      target,
+      "31064"
+    )).not.toThrow();
+    expect(() => assertTeamshipPrintPageUrl(
+      "https://members.fulfillit.io/ship-inventories/31065",
+      target,
+      "31064"
+    )).toThrow(/approved shipping order/i);
+    expect(() => assertTeamshipPrintPageUrl(
+      "https://members.fulfillit.io/ship-inventories/310640",
+      target,
+      "31064"
+    )).toThrow(/approved shipping order/i);
+  });
+
+  it("fails closed when the internal ID matches but the display order does not", async () => {
+    const job = {
+      shippingOrderNumber: "30666",
+      teamshipOrderId: "31064",
+      customerName: "Garland Canada Distribution",
+      warehouseName: "Annagem",
+      credentials: { email: "employee@example.com", password: "test-password", apiBaseUrl: null }
+    } as ClaimedTeamshipPrintJob;
+    const findOrders = vi.fn(async () => [{
+      id: "99999",
+      teamship_internal_id: "31064",
+      url: "https://members.fulfillit.io/ship-inventories/31064",
+      customer: { company: "Garland Canada Distribution" },
+      warehouse_name: "Annagem",
+      pallet_dims: [{ quantity: 2 }]
+    }]);
+
+    await expect(readTeamshipApiPalletCount(job, findOrders))
+      .rejects.toThrow(/exactly one approved shipping order/i);
+  });
+
+  it("fails closed when the approved API customer or warehouse changes", async () => {
+    const job = {
+      shippingOrderNumber: "30666",
+      teamshipOrderId: "31064",
+      customerName: "Garland Canada Distribution",
+      warehouseName: "Annagem",
+      credentials: { email: "employee@example.com", password: "test-password", apiBaseUrl: null }
+    } as ClaimedTeamshipPrintJob;
+    const findOrders = vi.fn(async () => [{
+      id: "30666",
+      teamship_internal_id: "31064",
+      url: "https://members.fulfillit.io/ship-inventories/31064",
+      customer: { company: "Another Customer" },
+      warehouse_name: "Annagem",
+      pallet_dims: [{ quantity: 2 }]
+    }]);
+
+    await expect(readTeamshipApiPalletCount(job, findOrders))
+      .rejects.toThrow(/customer does not match/i);
+
+    const wrongWarehouse = vi.fn(async () => [{
+      id: "30666",
+      teamship_internal_id: "31064",
+      url: "https://members.fulfillit.io/ship-inventories/31064",
+      customer: { company: "Garland Canada Distribution" },
+      warehouse_name: "Another Warehouse",
+      pallet_dims: [{ quantity: 2 }]
+    }]);
+    await expect(readTeamshipApiPalletCount(job, wrongWarehouse))
+      .rejects.toThrow(/warehouse does not match/i);
   });
 
   it("fails closed when the Teamship API does not return one exact approved order", async () => {

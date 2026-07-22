@@ -10,7 +10,13 @@ import type {
   TeamshipPrintExecutionDocument,
   TeamshipPrintExecutionResult
 } from "@/modules/teamship/print-jobs";
-import { calculateTeamshipPalletCount, resolveTeamshipInternalOrderId } from "@/modules/teamship/print-jobs";
+import {
+  calculateTeamshipPalletCount,
+  readTeamshipCustomerName,
+  readTeamshipWarehouseName,
+  resolveTeamshipInternalOrderId,
+  teamshipOrderMatchesShippingOrderNumber
+} from "@/modules/teamship/print-jobs";
 import { findTeamshipShippingOrders } from "@/server/integrations/teamship";
 
 export type TeamshipPrintExecutionOptions = {
@@ -58,10 +64,11 @@ export async function executeTeamshipPrintJob(
     const orderUrl = new URL(`/ship-inventories/${encodeURIComponent(job.teamshipOrderId)}`, baseUrl);
     const bolUrl = new URL(`/ship-inventories/${encodeURIComponent(job.teamshipOrderId)}/bol-editor`, baseUrl);
 
-    // Preflight every destination and the live pallet count before any print is sent.
-    await openTeamshipPage(page, orderUrl, job, allowedHosts, options);
+    // Resolve the display number to the approved internal ID before any browser action or print is sent.
     observedPalletCount = await readTeamshipApiPalletCount(job);
     assertApprovedPalletCount(observedPalletCount, job.approvedPalletCount);
+    // Preflight every browser and printer destination before any print is sent.
+    await openTeamshipPage(page, orderUrl, job, allowedHosts, options);
     await findExactPrinterOption(page, job.printerPlan.outboundLabels.exactName);
     await openTeamshipPage(page, bolUrl, job, allowedHosts, options);
     await findExactPrinterOption(page, job.printerPlan.bol.exactName);
@@ -103,11 +110,25 @@ export async function readTeamshipApiPalletCount(
     orderIdentifier: job.shippingOrderNumber,
     credentials: job.credentials
   });
-  const exact = orders.filter((order) => resolveTeamshipInternalOrderId(order) === job.teamshipOrderId);
+  const exact = orders.filter((order) => (
+    teamshipOrderMatchesShippingOrderNumber(order, job.shippingOrderNumber)
+    && resolveTeamshipInternalOrderId(order) === job.teamshipOrderId
+  ));
   if (exact.length !== 1) {
     throw new Error("Teamship API did not return exactly one approved shipping order for pallet preflight.");
   }
-  return calculateTeamshipPalletCount(exact[0]!);
+  const order = exact[0]!;
+  if (normalizeTeamshipIdentity(readTeamshipCustomerName(order)) !== normalizeTeamshipIdentity(job.customerName)) {
+    throw new Error("Teamship API customer does not match the approved print plan.");
+  }
+  if (normalizeTeamshipIdentity(readTeamshipWarehouseName(order)) !== normalizeTeamshipIdentity(job.warehouseName)) {
+    throw new Error("Teamship API warehouse does not match the approved print plan.");
+  }
+  return calculateTeamshipPalletCount(order);
+}
+
+function normalizeTeamshipIdentity(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 export async function selectTeamshipPrinterExact(scope: Page | Locator, exactName: string) {
@@ -245,14 +266,15 @@ async function openTeamshipPage(
     await page.goto(target.toString(), { waitUntil: "domcontentloaded" });
   }
   await page.waitForLoadState("networkidle", { timeout: options.navigationTimeoutMs ?? 15_000 }).catch(() => undefined);
-  if (new URL(page.url()).origin !== target.origin || !new URL(page.url()).pathname.startsWith(`/ship-inventories/${job.teamshipOrderId}`)) {
+  assertTeamshipPrintPageUrl(page.url(), target, job.teamshipOrderId);
+}
+
+export function assertTeamshipPrintPageUrl(actualUrl: string, target: URL, teamshipOrderId: string) {
+  const actual = new URL(actualUrl);
+  const expectedPath = `/ship-inventories/${teamshipOrderId}`;
+  const matchesOrderPath = actual.pathname === expectedPath || actual.pathname.startsWith(`${expectedPath}/`);
+  if (actual.origin !== target.origin || !matchesOrderPath) {
     throw new Error("Teamship did not open the approved shipping order.");
-  }
-  const visibleText = await page.locator("body").innerText();
-  if (!visibleText.includes(job.shippingOrderNumber)) throw new Error("The Teamship page does not show the approved shipping-order number.");
-  if (!target.pathname.endsWith("/bol-editor")) {
-    if (!visibleText.toLowerCase().includes(job.customerName.toLowerCase())) throw new Error("The Teamship page does not show the approved customer.");
-    if (!visibleText.toLowerCase().includes(job.warehouseName.toLowerCase())) throw new Error("The Teamship page does not show the approved warehouse.");
   }
 }
 

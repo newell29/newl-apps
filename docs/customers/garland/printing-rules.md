@@ -37,7 +37,9 @@ Teamship may reset its selected printer when another shipping order opens. The w
 
 The same employee who creates a plan must explicitly approve its request ID. Changed pallet counts, missing or duplicated printer options, unavailable local queues, expired approvals, and ambiguous Teamship pages stop the job. Uncertain jobs never retry automatically.
 
-Garland shipping-order display numbers and Teamship's internal page IDs are separate identities. For example, the supervised order `30666` resolves to internal Teamship record `31064`. Nemo shows and verifies `30666`, while the local worker navigates to `/ship-inventories/31064`; the integration resolves this mapping for every order rather than hard-coding a customer example.
+Garland shipping-order display numbers and Teamship's internal page IDs are separate identities. For example, the supervised order `30666` resolves to internal Teamship record `31064`. Nemo shows `30666`, while the local worker verifies the API mapping and navigates to `/ship-inventories/31064`; the Teamship detail page itself may visibly show only `Ship Inventory #31064`. The integration resolves this mapping for every order rather than hard-coding a customer example.
+
+The exact-order API detail is authoritative for pallet-label quantity. Detail-level pallet rows override stale list-summary aliases. During the supervised `30666` investigation on 2026-07-22, the signed-in Teamship detail page and its hidden detail payload both showed one pallet row with quantity `1`; a prior plan of two labels was rejected as stale summary data.
 
 ## Open questions
 

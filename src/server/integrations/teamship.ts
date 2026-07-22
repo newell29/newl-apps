@@ -277,8 +277,17 @@ export async function findTeamshipShippingOrders({
       }
 
       const detail = await getTeamshipShippingOrder({ apiBaseUrl, token, id: String(id), fetchImpl });
+      const merged = mergeTeamshipDetailWithSummary(detail, row);
+      const authoritativePallets = Array.isArray(detail.pallets)
+        ? detail.pallets
+        : Array.isArray(detail.pallet_dims)
+          ? detail.pallet_dims
+          : undefined;
       matches.push({
-        ...mergeTeamshipDetailWithSummary(detail, row),
+        ...merged,
+        ...(authoritativePallets !== undefined
+          ? { pallets: authoritativePallets, pallet_dims: authoritativePallets }
+          : {}),
         teamship_internal_id: String(id),
         url: buildTeamshipOrderUrl(webBaseUrl, String(id))
       });
