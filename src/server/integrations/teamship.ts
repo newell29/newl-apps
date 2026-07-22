@@ -778,7 +778,12 @@ function readTeamshipUiPallets(html: string) {
     const weight = readHtmlFormValueById(html, `pallet_${index}_weight`);
     const weightUnit = readHtmlFormValueById(html, `pallet_${index}_weight_unit`);
     const commodity = readHtmlFormValueById(html, `pallet_${index}_commodity`);
-    const observedValues = [quantity, length, width, height, weight, weightUnit, commodity];
+    const normalizedWeightUnit = String(weightUnit ?? "").trim().toLowerCase();
+    const meaningfulWeightUnit = normalizedWeightUnit
+      && !["lb", "lbs", "pound", "pounds"].includes(normalizedWeightUnit)
+      ? weightUnit
+      : null;
+    const observedValues = [quantity, length, width, height, weight, meaningfulWeightUnit, commodity];
 
     if (!observedValues.some((value) => value && String(value).trim())) {
       continue;
