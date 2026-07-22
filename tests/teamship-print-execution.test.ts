@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   assertTeamshipApiOrderIdentity,
   assertTeamshipPrintPageUrl,
+  openTeamshipOutboundLabelsDialog,
   resolveExactPrinterOption,
   resolveTeamshipPrintAppBaseUrl
 } from "@/modules/teamship/print-execution";
@@ -148,5 +149,56 @@ describe("Teamship print execution safeguards", () => {
       [{ label: "BIXOLON SRP-770III", value: "one" }],
       [{ label: "BIXOLON SRP-770III", value: "two" }]
     ], "BIXOLON SRP-770III")).toThrow(/more than one visible control/i);
+  });
+
+  it("uses the exact Step 2 menu and outbound-label controls", async () => {
+    const menuClick = vi.fn().mockResolvedValue(undefined);
+    const outboundClick = vi.fn().mockResolvedValue(undefined);
+    const exact = (overrides: Record<string, unknown> = {}) => ({
+      count: vi.fn().mockResolvedValue(1),
+      first: vi.fn().mockReturnThis(),
+      isVisible: vi.fn().mockResolvedValue(true),
+      ...overrides
+    });
+    const quantity = exact();
+    const submit = exact();
+    const dialog = exact({
+      locator: vi.fn((selector: string) => {
+        expect(selector).toBe("#outboundLabelQty:visible");
+        return quantity;
+      }),
+      getByRole: vi.fn((role: string, options: { name: string; exact: boolean }) => {
+        expect({ role, options }).toEqual({ role: "button", options: { name: "Print", exact: true } });
+        return submit;
+      })
+    });
+    const menu = exact({ click: menuClick });
+    const outbound = exact({
+      click: outboundClick,
+      innerText: vi.fn().mockResolvedValue("Print Outbound Labels")
+    });
+    const dropdownSurface = { waitFor: vi.fn().mockResolvedValue(undefined) };
+    const dialogSurface = { waitFor: vi.fn().mockResolvedValue(undefined) };
+    const page = {
+      locator: vi.fn((selector: string) => {
+        if (selector === ".step2-menu:visible") return menu;
+        if (selector === ".step2-dropdown-item") return dropdownSurface;
+        if (selector === ".step2-dropdown-item:visible") return outbound;
+        if (selector === "#printOutboundLabelsModal") return dialogSurface;
+        if (selector === "#printOutboundLabelsModal:visible") return dialog;
+        throw new Error(`Unexpected selector ${selector}`);
+      })
+    };
+
+    await expect(openTeamshipOutboundLabelsDialog(page as never)).resolves.toEqual({
+      dialog,
+      quantity,
+      submit
+    });
+    expect(menuClick).toHaveBeenCalledOnce();
+    expect(outboundClick).toHaveBeenCalledOnce();
+    expect(dropdownSurface.waitFor).toHaveBeenCalledWith({ state: "visible" });
+    expect(dialogSurface.waitFor).toHaveBeenCalledWith({ state: "visible" });
+    expect(page.locator).not.toHaveBeenCalledWith(expect.stringContaining("Step 2"));
   });
 });
