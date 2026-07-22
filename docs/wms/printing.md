@@ -22,6 +22,8 @@ The worker performs a complete preflight before printing: it verifies the Garlan
 
 Browser execution uses the documented Teamship shipping-order detail host, `https://members.fulfillit.io`. Browser pallet inputs are not authoritative because Teamship can omit them even when the API contains pallet rows; deterministic API data is used for both live pallet-count checks.
 
-Teamship's employee-facing shipping-order number is not necessarily its internal API/page ID. The search integration preserves both values. Plans retain the employee-facing number for prompts, downloaded-file verification, and visible-page checks, while browser URLs and API identity checks use the internal ID returned by the matching list record. Conflicting or missing internal IDs stop the plan before approval.
+Teamship's employee-facing shipping-order number is not necessarily its internal API/page ID. The search integration preserves both values. Plans retain the employee-facing number for prompts and downloaded-file verification, while browser URLs and API identity checks use the internal ID returned by the matching list record. Teamship detail pages can show only the internal `Ship Inventory` number in visible text, so browser identity is verified by the exact URL after the API confirms the display/internal mapping, customer, warehouse, and pallet count. Conflicting or missing identities stop the plan before approval.
+
+Teamship list summaries can contain stale `pallet_dims` alongside authoritative detail-level `pallets`. Exact-order searches normalize both pallet aliases from the detail response when it supplies either array; an explicitly empty detail array remains empty and fails the print plan instead of falling back to stale summary data.
 
 Batch printing and automatic printing are not implemented.

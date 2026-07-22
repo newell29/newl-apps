@@ -24,7 +24,9 @@ The OpenClaw runtime requires the same `OPENCLAW_PRINT_TOKEN`, referenced by the
 
 The print worker must open the shipping-order detail UI on `members.fulfillit.io`. The worker defaults to the documented detail host, and `TEAMSHIP_APP_BASE_URL` should be set explicitly in the protected local environment. Teamship can omit pallet-edit inputs from the browser page, so the worker re-fetches the exact order through the Teamship API for the initial pallet-count preflight and again immediately before outbound labels.
 
-The numeric order supplied by an employee is a display number, not necessarily Teamship's internal record ID. Plan creation must resolve and store the matching internal ID from Teamship's list result. The display number remains the employee-visible identity; the internal ID is used only for exact API and `/ship-inventories/:id` navigation. A missing or conflicting mapping fails closed.
+The numeric order supplied by an employee is a display number, not necessarily Teamship's internal record ID. Plan creation must resolve and store the matching internal ID from Teamship's list result. The display number remains the employee-visible identity; the internal ID is used for exact API and `/ship-inventories/:id` navigation. The Teamship page may visibly show only `Ship Inventory #<internal-id>`, so the worker confirms the display/internal mapping through the API and separately requires the exact internal browser URL. A missing or conflicting mapping fails closed.
+
+For pallet counts, detail-level `pallets` or `pallet_dims` are authoritative over list-summary pallet aliases. Both the plan and the worker's live preflight use that normalized detail value.
 
 Every credential must be distinct from the Teamship read token and general assistant token. Do not write secret values to the repository or logs.
 
