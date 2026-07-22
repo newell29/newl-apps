@@ -22,7 +22,7 @@ Newl Apps requires dedicated values for:
 
 The OpenClaw runtime requires the same `OPENCLAW_PRINT_TOKEN`, referenced by the plugin through `printTokenEnv`. The local worker requires `NEWL_APPS_BASE_URL`, `TEAMSHIP_PRINT_WORKER_TOKEN`, `TEAMSHIP_PRINT_WORKER_TENANT_SLUG`, `TEAMSHIP_PRINT_WORKER_ID`, and `TEAMSHIP_BROWSER_EXECUTABLE_PATH` in its protected environment file.
 
-The print worker must open the shipping-order detail UI on `members.fulfillit.io`. The `app.teamshipos.com` shell can show the order while omitting the indexed pallet inputs required for the live pallet-count preflight. The worker defaults to the documented detail host, and `TEAMSHIP_APP_BASE_URL` should be set explicitly in the protected local environment.
+The print worker must open the shipping-order detail UI on `members.fulfillit.io`. The worker defaults to the documented detail host, and `TEAMSHIP_APP_BASE_URL` should be set explicitly in the protected local environment. Teamship can omit pallet-edit inputs from the browser page, so the worker re-fetches the exact order through the Teamship API for the initial pallet-count preflight and again immediately before outbound labels.
 
 Every credential must be distinct from the Teamship read token and general assistant token. Do not write secret values to the repository or logs.
 
