@@ -31,12 +31,12 @@ Required scheduled Apollo synchronization variables:
 
 | Variable | Environment | Purpose |
 | --- | --- | --- |
-| `CRON_SECRET` | Production and Preview | Random secret Vercel sends in the cron request `Authorization` header. |
+| `CRON_SECRET` | Production | Random secret accepted in the scheduled route `Authorization` header. Configure the same value as the GitHub Actions repository secret named `CRON_SECRET`. |
 | `APOLLO_MASTER_API` | Production | Master Apollo key used to read saved contact status. Do not use a production key in Preview. |
 | `APOLLO_STATUS_SYNC_INTERVAL_HOURS` | Production | Optional freshness interval; defaults to `4` and is clamped to 1–24 hours. |
 | `APOLLO_STATUS_SYNC_BATCH_SIZE` | Production | Optional per-tenant batch size; defaults to `50` and is clamped to 1–100. |
 
-The hourly cron expression requires Vercel Pro or Enterprise. Vercel Hobby only permits daily cron schedules.
+The hourly scheduler is `.github/workflows/apollo-status-sync.yml`. It calls `https://newl-apps.vercel.app/api/lead-gen/apollo/status-sync` and fails visibly when the GitHub Actions secret is missing or the route returns a non-success response. Scheduled workflows run from the default branch, so this does not begin until the reviewed PR is merged.
 
 Optional non-secret diagnostics:
 

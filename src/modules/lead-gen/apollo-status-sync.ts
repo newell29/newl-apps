@@ -134,7 +134,7 @@ export async function syncApolloStatusesForTenant(
       status: JobStatus.RUNNING,
       startedAt,
       input: {
-        trigger: "VERCEL_CRON",
+        trigger: "SCHEDULED_HTTP",
         batchSize
       }
     },

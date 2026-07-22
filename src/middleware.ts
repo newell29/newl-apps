@@ -52,7 +52,7 @@ export const config = {
    *  - /api/shipment-documents/teamship-review/email-intake/scheduled
    *                                      (n8n Garland email intake ingestion auth)
    *  - /api/website-inbound              (website form ingestion auth)
-   *  - /api/lead-gen/apollo/status-sync  (Vercel cron secret auth)
+   *  - /api/lead-gen/apollo/status-sync  (scheduler secret auth)
    *  - Next.js internals and static files
    */
   matcher: [
