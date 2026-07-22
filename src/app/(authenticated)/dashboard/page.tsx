@@ -134,7 +134,7 @@ export default async function DashboardPage() {
                 <div>
                   <p className="font-medium text-foreground">{profile.name}</p>
                   <p className="mt-1 text-sm text-mutedForeground">
-                    {profile.scheduleFrequency} schedule
+                    Daily schedule
                     {profile.lastRunAt ? ` • ${formatLastRun(profile.lastRunAt, profile.lastRunStatus)}` : " • Not run yet"}
                   </p>
                 </div>

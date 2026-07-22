@@ -206,6 +206,8 @@ type SearchProfileSummary = {
   productKeywords: string[];
   hsCodes: string[];
   contactCadenceConfig: unknown;
+  lookbackWindowDays?: number;
+  minShipmentCount?: number;
 };
 
 type CandidateScoringConfig = TradeMiningScoringSettings;
@@ -286,6 +288,8 @@ export async function getCandidateFeed(tenant: TenantContext, filters: Candidate
         scoreReasoning: scoring.reasoning,
         importedScoreReasoning: evidence.importedScoreReasoning,
         shipmentCount: evidence.shipmentCount,
+        profileMinimumShipmentCount: evidence.searchProfile?.minShipmentCount ?? 0,
+        meetsProfileMinimumShipmentCount: meetsSearchProfileMinimumShipmentCount(evidence),
         latestShipmentDate: evidence.latestShipmentDate,
         matchedSearchProfileId: evidence.searchProfile?.id ?? null,
         matchedSearchProfileName: evidence.searchProfile?.name ?? "Unmatched import",
@@ -307,6 +311,7 @@ export async function getCandidateFeed(tenant: TenantContext, filters: Candidate
         updatedAt: company.updatedAt
       };
     })
+    .filter((candidate) => candidate.meetsProfileMinimumShipmentCount)
     .filter((candidate) => !filters.searchProfileId || candidate.matchedSearchProfileId === filters.searchProfileId)
     .filter((candidate) => matchesIndustryFilter(candidate.primaryIndustry, candidate.secondaryIndustry, filters.industry))
     .filter((candidate) => isWithinScoreRange(candidate.candidateScore, filters.minScore, filters.maxScore))
@@ -490,7 +495,6 @@ export async function getTradeMiningSearchProfiles(tenant: TenantContext) {
         lookbackWindowDays: profile.lookbackWindowDays,
         minShipmentCount: profile.minShipmentCount,
         minShipmentVolume: profile.minShipmentVolume?.toString() ?? null,
-        scheduleFrequency: profile.scheduleFrequency,
         scheduleTimezone: profile.scheduleTimezone,
         priorityWeight: profile.priorityWeight,
         lastRunAt: profile.lastRunAt,
@@ -1806,7 +1810,9 @@ async function loadSearchProfileSummaries(tenant: Pick<TenantContext, "tenantId"
       originCountries: true,
       productKeywords: true,
       hsCodes: true,
-      contactCadenceConfig: true
+      contactCadenceConfig: true,
+      lookbackWindowDays: true,
+      minShipmentCount: true
     }
   });
 
@@ -1824,7 +1830,9 @@ async function loadSearchProfileSummaries(tenant: Pick<TenantContext, "tenantId"
         originCountries: asStringArray(profile.originCountries),
         productKeywords: asStringArray(profile.productKeywords),
         hsCodes: asStringArray(profile.hsCodes),
-        contactCadenceConfig: profile.contactCadenceConfig
+        contactCadenceConfig: profile.contactCadenceConfig,
+        lookbackWindowDays: profile.lookbackWindowDays,
+        minShipmentCount: profile.minShipmentCount
       }
     ])
   );
@@ -1834,6 +1842,7 @@ export function summarizeTradeMiningEvidence(
   importRecords: Array<{
     rawJson: unknown;
     arrivalDate: Date | null;
+    createdAt?: Date;
     sourcePort: string | null;
     destinationCity: string | null;
     destinationState: string | null;
@@ -1842,34 +1851,40 @@ export function summarizeTradeMiningEvidence(
   }>,
   searchProfiles: Map<string, SearchProfileSummary>
 ) {
-  const latestRecord = importRecords[0];
-  const latestRawJson = asObject(latestRecord?.rawJson);
-  const searchProfileId = readString(latestRawJson, "searchProfileId");
-
-  const containerCount = sumNumericRawValues(importRecords, ["containerCount", "container_count", "containers", "shipmentVolume"]);
-  const shipmentWeight = sumNumericRawValues(importRecords, ["weight", "weightKg", "shipmentWeight"]);
-  const totalTeu = sumNumericRawValues(importRecords, ["teu"]);
-  const totalQuantity = sumNumericRawValues(importRecords, ["quantity"]);
-  const destinationCity = latestRecord?.destinationCity ?? firstStringFromRecords(importRecords, "destinationCity");
-  const destinationState = latestRecord?.destinationState ?? firstStringFromRecords(importRecords, "destinationState");
-  const destinationZip = firstStringFromRecords(importRecords, "destinationZip");
-  const destinationPort = firstStringFromRecords(importRecords, "destinationPort") ?? firstStringFromRecords(importRecords, "arrivalPort");
-  const destinationMarket =
-    firstStringFromRecords(importRecords, "destinationMarket") ??
-    formatDestination(latestRawJson, destinationCity ?? null, destinationState ?? null);
-  const originCountry = latestRecord?.originCountry ?? firstStringFromRecords(importRecords, "originCountry");
-  const originPort = latestRecord?.sourcePort ?? firstStringFromRecords(importRecords, "originPort");
-  const foreignPort = firstStringFromRecords(importRecords, "foreignPort");
-  const shipFromPort = firstStringFromRecords(importRecords, "shipFromPort");
-  const placeOfReceipt = firstStringFromRecords(importRecords, "placeOfReceipt");
-  const productDescription = latestRecord?.productDescription ?? firstStringFromRecords(importRecords, "productDescription");
-  const hsCode = firstStringFromRecords(importRecords, "hsCode");
-  const sourceRole = firstStringFromRecords(importRecords, "sourceRole");
-  const companyMatchName = firstStringFromRecords(importRecords, "companyMatchName");
-  const carrier = firstStringFromRecords(importRecords, "carrier");
-  const vessel = firstStringFromRecords(importRecords, "vessel");
-  const voyage = firstStringFromRecords(importRecords, "voyage");
+  const mostRecentRawJson = asObject(importRecords[0]?.rawJson);
+  const searchProfileId = readString(mostRecentRawJson, "searchProfileId");
   const searchProfile = searchProfileId ? searchProfiles.get(searchProfileId) ?? null : null;
+  const evidenceRecords = searchProfile
+    ? importRecords.filter((record) =>
+        isRecordInSearchProfileWindow(record, searchProfileId as string, searchProfile.lookbackWindowDays)
+      )
+    : importRecords;
+  const latestRecord = evidenceRecords[0];
+  const latestRawJson = asObject(latestRecord?.rawJson);
+
+  const containerCount = sumNumericRawValues(evidenceRecords, ["containerCount", "container_count", "containers", "shipmentVolume"]);
+  const shipmentWeight = sumNumericRawValues(evidenceRecords, ["weight", "weightKg", "shipmentWeight"]);
+  const totalTeu = sumNumericRawValues(evidenceRecords, ["teu"]);
+  const totalQuantity = sumNumericRawValues(evidenceRecords, ["quantity"]);
+  const destinationCity = latestRecord?.destinationCity ?? firstStringFromRecords(evidenceRecords, "destinationCity");
+  const destinationState = latestRecord?.destinationState ?? firstStringFromRecords(evidenceRecords, "destinationState");
+  const destinationZip = firstStringFromRecords(evidenceRecords, "destinationZip");
+  const destinationPort = firstStringFromRecords(evidenceRecords, "destinationPort") ?? firstStringFromRecords(evidenceRecords, "arrivalPort");
+  const destinationMarket =
+    firstStringFromRecords(evidenceRecords, "destinationMarket") ??
+    formatDestination(latestRawJson, destinationCity ?? null, destinationState ?? null);
+  const originCountry = latestRecord?.originCountry ?? firstStringFromRecords(evidenceRecords, "originCountry");
+  const originPort = latestRecord?.sourcePort ?? firstStringFromRecords(evidenceRecords, "originPort");
+  const foreignPort = firstStringFromRecords(evidenceRecords, "foreignPort");
+  const shipFromPort = firstStringFromRecords(evidenceRecords, "shipFromPort");
+  const placeOfReceipt = firstStringFromRecords(evidenceRecords, "placeOfReceipt");
+  const productDescription = latestRecord?.productDescription ?? firstStringFromRecords(evidenceRecords, "productDescription");
+  const hsCode = firstStringFromRecords(evidenceRecords, "hsCode");
+  const sourceRole = firstStringFromRecords(evidenceRecords, "sourceRole");
+  const companyMatchName = firstStringFromRecords(evidenceRecords, "companyMatchName");
+  const carrier = firstStringFromRecords(evidenceRecords, "carrier");
+  const vessel = firstStringFromRecords(evidenceRecords, "vessel");
+  const voyage = firstStringFromRecords(evidenceRecords, "voyage");
   const profileFit = scoreProfileFit({
     destinationMarket,
     destinationPort,
@@ -1886,7 +1901,7 @@ export function summarizeTradeMiningEvidence(
   });
 
   return {
-    shipmentCount: importRecords.length,
+    shipmentCount: evidenceRecords.length,
     latestShipmentDate: latestRecord?.arrivalDate ?? null,
     searchProfile,
     destinationMarket,
@@ -1910,7 +1925,7 @@ export function summarizeTradeMiningEvidence(
     totalTeu,
     shipmentWeight,
     totalQuantity,
-    activity: importRecords.map((record) => ({
+    activity: evidenceRecords.map((record) => ({
       arrivalDate: record.arrivalDate,
       teu: readNumericRawValue(asObject(record.rawJson), ["teu"]),
       containerCount: readNumericRawValue(asObject(record.rawJson), [
@@ -1924,6 +1939,36 @@ export function summarizeTradeMiningEvidence(
     profileFit,
     importedScoreReasoning: readImportedScoreReasoning(latestRawJson)
   };
+}
+
+export function meetsSearchProfileMinimumShipmentCount(
+  evidence: Pick<ReturnType<typeof summarizeTradeMiningEvidence>, "shipmentCount" | "searchProfile">
+) {
+  return evidence.shipmentCount >= (evidence.searchProfile?.minShipmentCount ?? 0);
+}
+
+function isRecordInSearchProfileWindow(
+  record: { rawJson: unknown; arrivalDate: Date | null; createdAt?: Date },
+  searchProfileId: string,
+  lookbackWindowDays?: number
+) {
+  if (readString(asObject(record.rawJson), "searchProfileId") !== searchProfileId) {
+    return false;
+  }
+
+  if (!lookbackWindowDays || lookbackWindowDays < 1) {
+    return true;
+  }
+
+  const activityDate = record.arrivalDate ?? record.createdAt;
+  if (!activityDate) {
+    return false;
+  }
+
+  const cutoff = new Date();
+  cutoff.setUTCHours(0, 0, 0, 0);
+  cutoff.setUTCDate(cutoff.getUTCDate() - (lookbackWindowDays - 1));
+  return activityDate >= cutoff;
 }
 
 export function scoreCandidate({

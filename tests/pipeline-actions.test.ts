@@ -12,7 +12,10 @@ const integrationCredentialFindFirst = vi.fn();
 const revalidatePath = vi.fn();
 const getAuthenticatedContext = vi.fn();
 const requireAdmin = vi.fn();
+const requireModule = vi.fn();
+const requireMutationAccess = vi.fn();
 const fetchApolloContactsForCompany = vi.fn();
+const apolloCompanyMatchCreate = vi.fn();
 
 vi.mock("@/server/db", () => ({
   prisma: {
@@ -31,6 +34,9 @@ vi.mock("@/server/db", () => ({
     },
     integrationCredential: {
       findFirst: (...args: unknown[]) => integrationCredentialFindFirst(...args)
+    },
+    apolloCompanyMatch: {
+      create: (...args: unknown[]) => apolloCompanyMatchCreate(...args)
     }
   }
 }));
@@ -44,7 +50,9 @@ vi.mock("@/server/tenant-context", () => ({
 }));
 
 vi.mock("@/server/auth/authorization", () => ({
-  requireAdmin: (...args: unknown[]) => requireAdmin(...args)
+  requireAdmin: (...args: unknown[]) => requireAdmin(...args),
+  requireModule: (...args: unknown[]) => requireModule(...args),
+  requireMutationAccess: (...args: unknown[]) => requireMutationAccess(...args)
 }));
 
 vi.mock("@/server/integrations/apollo", () => ({
@@ -88,6 +96,7 @@ describe("pipeline bulk actions", () => {
     }));
     contactUpdate.mockResolvedValue({});
     contactUpdateMany.mockResolvedValue({ count: 1 });
+    apolloCompanyMatchCreate.mockResolvedValue({});
     integrationCredentialFindFirst.mockResolvedValue({
       publicConfig: {
         apolloSequenceDirectory: [
@@ -103,6 +112,22 @@ describe("pipeline bulk actions", () => {
       organizationId: "apollo-org-1",
       companyName: "Harbor Home Retail LLC",
       domain: "harbor-home.com",
+      linkedinUrl: null,
+      match: {
+        organizationId: "apollo-org-1",
+        companyName: "Harbor Home Retail LLC",
+        domain: "harbor-home.com",
+        linkedinUrl: null,
+        score: 100,
+        classification: "DIRECT_COMPANY",
+        nameMatchType: "exact",
+        domainMatch: true,
+        logisticsProviderMatch: false,
+        branchLocationMatch: false,
+        matchReason: "Exact company and domain match.",
+        query: {},
+        rawPayload: {}
+      },
       contacts: [
         {
           apolloContactId: "apollo-contact-1",
@@ -233,9 +258,12 @@ describe("pipeline bulk actions", () => {
     formData.append("contactId", "contact-1");
     formData.set("sequenceId", "houston-import-decision-maker");
 
-    await expect(bulkUpdateContactSequenceAction(formData)).rejects.toThrow(
-      "One or more selected contacts already show Apollo sequence history. Confirm the override before assigning a new cadence."
-    );
+    await expect(bulkUpdateContactSequenceAction(formData)).resolves.toMatchObject({
+      status: "error",
+      operation: "sequence",
+      message:
+        "One or more selected contacts already show Apollo sequence history. Confirm the override before assigning a new cadence."
+    });
   });
 
   it("preserves sequence status when a confirmed override is applied", async () => {

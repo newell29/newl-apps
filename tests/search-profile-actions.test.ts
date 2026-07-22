@@ -6,6 +6,7 @@ const deleteSearchProfile = vi.fn();
 const findSearchProfile = vi.fn();
 const findAutomationJobRun = vi.fn();
 const createAutomationJobRun = vi.fn();
+const updateAutomationJobRuns = vi.fn();
 const createAuditLog = vi.fn();
 const revalidatePath = vi.fn();
 const getAuthenticatedContext = vi.fn();
@@ -21,7 +22,8 @@ vi.mock("@/server/db", () => ({
     },
     automationJobRun: {
       findFirst: (...args: unknown[]) => findAutomationJobRun(...args),
-      create: (...args: unknown[]) => createAutomationJobRun(...args)
+      create: (...args: unknown[]) => createAutomationJobRun(...args),
+      updateMany: (...args: unknown[]) => updateAutomationJobRuns(...args)
     },
     auditLog: {
       create: (...args: unknown[]) => createAuditLog(...args)
@@ -65,6 +67,7 @@ describe("trade mining search profile actions", () => {
     findSearchProfile.mockResolvedValue({ id: "profile-123", name: "Houston Import Leads", enabled: true });
     findAutomationJobRun.mockResolvedValue(null);
     createAutomationJobRun.mockResolvedValue({});
+    updateAutomationJobRuns.mockResolvedValue({ count: 0 });
     createAuditLog.mockResolvedValue({});
   });
 
@@ -77,10 +80,12 @@ describe("trade mining search profile actions", () => {
     const args = createSearchProfile.mock.calls[0][0];
     expect(args.data.tenantId).toBe("tenant-1");
     expect(args.data.destinationMarkets).toEqual(["Houston", "Dallas"]);
+    expect(args.data.destinationPorts).toEqual(["Houston, Texas"]);
     expect(args.data.originCountries).toEqual(["Italy", "Germany"]);
     expect(args.data.allowedCompanyIdentityRoles).toEqual(["consignee_name", "importer_name"]);
     expect(args.data.excludedCompanyKeywords).toEqual(["maersk", "msc"]);
     expect(args.data.enabled).toBe(true);
+    expect(args.data.scheduleFrequency).toBe("daily");
     expect(revalidatePath).toHaveBeenCalledWith("/lead-gen/search-profiles");
   });
 
@@ -96,6 +101,30 @@ describe("trade mining search profile actions", () => {
     expect(args.data.priorityWeight).toBe(80);
   });
 
+  it("cancels pending runs when a profile is disabled", async () => {
+    const formData = buildValidFormData();
+    formData.set("profileId", "profile-123");
+    formData.delete("enabled");
+
+    await updateTradeMiningSearchProfileAction(formData);
+
+    expect(updateAutomationJobRuns).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        tenantId: "tenant-1",
+        input: {
+          path: ["searchProfileId"],
+          equals: "profile-123"
+        }
+      }),
+      data: expect.objectContaining({
+        status: "CANCELLED",
+        output: {
+          cancellationReason: "Search profile disabled"
+        }
+      })
+    });
+  });
+
   it("deletes a profile by id", async () => {
     const formData = new FormData();
     formData.set("profileId", "profile-123");
@@ -106,6 +135,19 @@ describe("trade mining search profile actions", () => {
       where: {
         id: "profile-123"
       }
+    });
+    expect(updateAutomationJobRuns).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        tenantId: "tenant-1",
+        jobType: "trademining.run_request",
+        input: {
+          path: ["searchProfileId"],
+          equals: "profile-123"
+        }
+      }),
+      data: expect.objectContaining({
+        status: "CANCELLED"
+      })
     });
   });
 
@@ -143,7 +185,6 @@ function buildValidFormData() {
   formData.set("lookbackWindowDays", "90");
   formData.set("minShipmentCount", "1");
   formData.set("minShipmentVolume", "10");
-  formData.set("scheduleFrequency", "daily");
   formData.set("scheduleTimezone", "America/Toronto");
   formData.set("priorityWeight", "80");
   return formData;

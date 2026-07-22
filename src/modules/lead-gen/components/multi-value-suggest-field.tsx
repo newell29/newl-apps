@@ -177,7 +177,7 @@ function parseInitialItems(value?: string) {
   }
 
   return value
-    .split(/[\n,]/)
+    .split("\n")
     .map((item) => item.trim())
     .filter((item, index, array) => item.length > 0 && array.indexOf(item) === index);
 }

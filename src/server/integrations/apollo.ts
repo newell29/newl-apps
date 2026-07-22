@@ -1300,7 +1300,11 @@ function parseApolloContacts(payload: Record<string, unknown>): ApolloContactRec
     }
 
     const organization = asRecord(record.organization) ?? asRecord(record.account) ?? asRecord(record.company);
-    const sequenceDetails = asRecord(record.sequence) ?? asRecord(record.cadence) ?? asRecord(record.enrollment);
+    const sequenceDetails =
+      asRecord(record.sequence) ??
+      asRecord(record.cadence) ??
+      asRecord(record.enrollment) ??
+      selectCurrentApolloCampaignStatus(record);
 
     return [
       {
@@ -1332,7 +1336,7 @@ function parseApolloContacts(payload: Record<string, unknown>): ApolloContactRec
         ),
         sequenceId:
           readApolloString(record, ["apollo_sequence_id", "sequence_id", "emailer_campaign_id"]) ??
-          readApolloString(sequenceDetails ?? {}, ["id"]),
+          readApolloString(sequenceDetails ?? {}, ["emailer_campaign_id", "campaign_id", "id"]),
         sequenceName:
           readApolloString(record, ["apollo_sequence_name", "sequence_name", "cadence_recommendation"]) ??
           readApolloString(sequenceDetails ?? {}, ["name"]),
@@ -1356,6 +1360,49 @@ function parseApolloContacts(payload: Record<string, unknown>): ApolloContactRec
       }
     ];
   });
+}
+
+function selectCurrentApolloCampaignStatus(record: Record<string, unknown>) {
+  const candidates = readApolloArray(record, ["contact_campaign_statuses"])
+    .map((candidate) => asRecord(candidate))
+    .filter((candidate): candidate is Record<string, unknown> => Boolean(candidate));
+
+  return candidates.reduce<Record<string, unknown> | null>((selected, candidate) => {
+    if (!selected) {
+      return candidate;
+    }
+
+    const candidateRank = apolloCampaignStatusRank(readApolloString(candidate, ["status", "state"]));
+    const selectedRank = apolloCampaignStatusRank(readApolloString(selected, ["status", "state"]));
+    if (candidateRank !== selectedRank) {
+      return candidateRank > selectedRank ? candidate : selected;
+    }
+
+    const candidateAddedAt = parseApolloDate(readApolloString(candidate, ["added_at", "created_at", "updated_at"]));
+    const selectedAddedAt = parseApolloDate(readApolloString(selected, ["added_at", "created_at", "updated_at"]));
+    return (candidateAddedAt?.getTime() ?? 0) >= (selectedAddedAt?.getTime() ?? 0) ? candidate : selected;
+  }, null);
+}
+
+function apolloCampaignStatusRank(value: string | null) {
+  const status = parseSequenceStatus(value);
+
+  switch (status) {
+    case SequenceStatus.REPLIED:
+      return 6;
+    case SequenceStatus.ENROLLED:
+      return 5;
+    case SequenceStatus.PAUSED:
+      return 4;
+    case SequenceStatus.BOUNCED:
+      return 3;
+    case SequenceStatus.FINISHED:
+      return 2;
+    case SequenceStatus.READY:
+      return 1;
+    case SequenceStatus.NOT_STARTED:
+      return 0;
+  }
 }
 
 function inferApolloOrganizationFromContacts(

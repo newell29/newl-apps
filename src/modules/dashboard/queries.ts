@@ -91,7 +91,6 @@ export async function getDashboardSummary(tenant: TenantContext) {
       id: profile.id,
       name: profile.name,
       enabled: profile.enabled,
-      scheduleFrequency: profile.scheduleFrequency,
       lastRunAt: profile.lastRunAt,
       lastRunStatus: profile.lastRunStatus ?? (profile.enabled ? "Not run yet" : "Disabled")
     })),

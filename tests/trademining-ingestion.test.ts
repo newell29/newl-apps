@@ -29,6 +29,8 @@ type SearchProfileRow = {
   scheduleTimezone: string;
   scheduleMetadata: Record<string, unknown> | null;
   priorityWeight: number;
+  lastRunAt: Date | null;
+  lastRunStatus: string | null;
 };
 
 type CompanyRow = {
@@ -40,6 +42,7 @@ type CompanyRow = {
   priorityScore: number;
   candidateStatus?: string;
   doNotProspect?: boolean;
+  domain?: string | null;
   primaryIndustry?: string | null;
   secondaryIndustry?: string | null;
   industryConfidence?: number | null;
@@ -135,6 +138,14 @@ const mockDb = vi.hoisted(() => {
         const updated = { ...profile, ...data };
         state.searchProfiles.set(where.id, updated);
         return updated;
+      }),
+      updateMany: vi.fn(async ({ where, data }: { where: { id: string; tenantId: string }; data: Partial<SearchProfileRow> }) => {
+        const profile = state.searchProfiles.get(where.id);
+        if (!profile || profile.tenantId !== where.tenantId) {
+          return { count: 0 };
+        }
+        state.searchProfiles.set(where.id, { ...profile, ...data });
+        return { count: 1 };
       })
     },
     automationJobRun: {
@@ -160,20 +171,28 @@ const mockDb = vi.hoisted(() => {
       })
     },
     company: {
-      findUnique: vi.fn(async ({ where, select }: { where: { tenantId_normalizedName: { tenantId: string; normalizedName: string } }; select?: { id?: boolean; priorityScore?: boolean; candidateStatus?: boolean; doNotProspect?: boolean } }) => {
-        const company = state.companies.get(tenantScopedKey(where.tenantId_normalizedName.tenantId, where.tenantId_normalizedName.normalizedName));
+      findUnique: vi.fn(async ({ where, select }: { where: { id?: string; tenantId_normalizedName?: { tenantId: string; normalizedName: string } }; select?: Record<string, boolean> }) => {
+        const company = where.id
+          ? [...state.companies.values()].find((candidate) => candidate.id === where.id) ?? null
+          : where.tenantId_normalizedName
+            ? state.companies.get(
+                tenantScopedKey(
+                  where.tenantId_normalizedName.tenantId,
+                  where.tenantId_normalizedName.normalizedName
+                )
+              ) ?? null
+            : null;
 
         if (!company) {
           return null;
         }
 
         if (select) {
-          return {
-            ...(select.id ? { id: company.id } : {}),
-            ...(select.priorityScore ? { priorityScore: company.priorityScore } : {}),
-            ...(select.candidateStatus ? { candidateStatus: company.candidateStatus ?? null } : {}),
-            ...(select.doNotProspect ? { doNotProspect: company.doNotProspect ?? false } : {})
-          };
+          return Object.fromEntries(
+            Object.entries(select)
+              .filter(([, include]) => include)
+              .map(([key]) => [key, company[key as keyof CompanyRow] ?? null])
+          );
         }
 
         return company;
@@ -362,7 +381,7 @@ describe("TradeMining ingestion", () => {
         enabled: true,
         priorityWeight: 80,
         destinationMarkets: ["Houston, TX | United States"],
-        destinationPorts: ["Houston, TX | United States"],
+        destinationPorts: ["Charleston", "South Carolina", "Savannah", "Georgia"],
         originCountries: ["China (CN)"]
       })
     );
@@ -376,11 +395,13 @@ describe("TradeMining ingestion", () => {
       id: "profile-a",
       name: "Houston Leads",
       destinationMarkets: ["Houston, TX"],
-      destinationPorts: ["Houston, TX"],
+      destinationPorts: ["Charleston, South Carolina", "Savannah, Georgia"],
       originCountries: ["China"],
       allowedCompanyIdentityRoles: ["consignee_name"],
       excludedCompanyKeywords: ["maersk"],
-      priorityWeight: 80
+      priorityWeight: 80,
+      lastRunAt: null,
+      lastRunStatus: null
     });
   });
 
@@ -732,6 +753,8 @@ function searchProfile(overrides: Partial<SearchProfileRow> = {}): SearchProfile
     scheduleTimezone: "America/Toronto",
     scheduleMetadata: { preferredRunHourLocal: 7 },
     priorityWeight: 80,
+    lastRunAt: null,
+    lastRunStatus: null,
     ...overrides
   };
 }
