@@ -9,8 +9,9 @@ import {
   parseLpnTables,
   parseProductHistoryPage,
   parseReceivingOrderPage,
-  parseTeamshipShippingOrderPalletPreflight,
   parseTeamshipInventoryPagerLabel,
+  parseTeamshipShippingOrderPalletPreflight,
+  readUniqueTeamshipPalletCountInput,
   submitTeamshipInventorySearch,
   waitForTeamshipInventorySearchResult
 } from "@/modules/teamship/browser-read-execution";
@@ -61,6 +62,22 @@ describe("Teamship browser read extraction", () => {
       customerName: "Garland Canada Distribution",
       warehouseName: "Annagem"
     })).toThrow(/whole number/i);
+  });
+
+  it("waits for Teamship to attach its dynamic pallet count before reading it", async () => {
+    const events: string[] = [];
+    const input = {
+      waitFor: vi.fn().mockImplementation(async () => { events.push("wait"); }),
+      inputValue: vi.fn().mockImplementation(async () => { events.push("value"); return "1"; })
+    };
+    const locator = {
+      first: vi.fn().mockReturnValue(input),
+      count: vi.fn().mockImplementation(async () => { events.push("count"); return 1; })
+    };
+
+    await expect(readUniqueTeamshipPalletCountInput(locator as never, 15_000)).resolves.toBe("1");
+    expect(input.waitFor).toHaveBeenCalledWith({ state: "attached", timeout: 15_000 });
+    expect(events).toEqual(["wait", "count", "value"]);
   });
 
   it("normalizes only the allowlisted Inventory All fields", () => {
