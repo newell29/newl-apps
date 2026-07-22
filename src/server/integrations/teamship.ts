@@ -19,6 +19,7 @@ type TeamshipFetchOptions = {
 type TeamshipShippingOrderSearchOptions = {
   tenantId?: string | null;
   orderIdentifier: string;
+  preferUiPallets?: boolean;
   credentials?: TeamshipRuntimeCredentials | null;
   fetchImpl?: typeof fetch;
 };
@@ -245,6 +246,7 @@ export async function searchTeamshipProductsForShipping({
 export async function findTeamshipShippingOrders({
   tenantId,
   orderIdentifier,
+  preferUiPallets = false,
   credentials = null,
   fetchImpl = fetch
 }: TeamshipShippingOrderSearchOptions): Promise<TeamshipShippingOrderDetail[]> {
@@ -279,9 +281,10 @@ export async function findTeamshipShippingOrders({
 
       const detail = await getTeamshipShippingOrder({ apiBaseUrl, token, id: String(id), fetchImpl });
       const merged = mergeTeamshipDetailWithSummary(detail, row);
-      let authoritativePallets = readAuthoritativeTeamshipPallets(detail);
+      const apiPallets = readAuthoritativeTeamshipPallets(detail);
+      let uiPallets: ReturnType<typeof readAuthoritativeTeamshipPallets> = undefined;
 
-      if (!authoritativePallets) {
+      if (preferUiPallets || !apiPallets) {
         if (webCookieHeader === undefined) {
           webCookieHeader = await loginToTeamshipWeb(fetchImpl, resolvedCredentials, webBaseUrl).catch(() => null);
         }
@@ -293,9 +296,13 @@ export async function findTeamshipShippingOrders({
             id: String(id),
             fetchImpl
           }).catch(() => null);
-          authoritativePallets = readAuthoritativeTeamshipPallets(uiDetail);
+          uiPallets = readAuthoritativeTeamshipPallets(uiDetail);
         }
       }
+
+      const authoritativePallets = preferUiPallets
+        ? uiPallets ?? apiPallets
+        : apiPallets ?? uiPallets;
 
       matches.push({
         ...merged,

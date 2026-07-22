@@ -127,7 +127,11 @@ export async function createTeamshipPrintPlan(
   }
 
   const findOrders = dependencies.findOrders ?? findTeamshipShippingOrders;
-  const orders = await findOrders({ tenantId: context.tenantId, orderIdentifier: shippingOrderNumber });
+  const orders = await findOrders({
+    tenantId: context.tenantId,
+    orderIdentifier: shippingOrderNumber,
+    preferUiPallets: true
+  });
   const exact = orders.filter((order) => teamshipOrderMatchesShippingOrderNumber(order, shippingOrderNumber));
   if (exact.length === 0) {
     throw new TeamshipPrintJobError(`No exact Teamship shipping order ${shippingOrderNumber} was found.`, 404);

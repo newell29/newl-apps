@@ -105,6 +105,65 @@ describe("Teamship shipping-order search identity", () => {
     })]);
   });
 
+  it("prefers the signed-in Teamship page for printing when API pallet data is stale", async () => {
+    vi.stubEnv("TEAMSHIP_MAX_LIST_PAGES", "1");
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/v1/login")) {
+        return Response.json({ data: { token: "test-token" } });
+      }
+      if (url.includes("/api/v1/ship-inventories?")) {
+        return Response.json({
+          data: [{ id: 31064, order_number: "30666", pallet_dims: [{ quantity: 2 }] }]
+        });
+      }
+      if (url.endsWith("/api/v1/ship-inventories/31064")) {
+        return Response.json({ data: { id: 31064, pallet_dims: [{ quantity: 2 }] } });
+      }
+      if (url.endsWith("/login") && (init?.method ?? "GET") === "GET") {
+        return new Response('<input type="hidden" name="_token" value="csrf-1">', {
+          headers: { "set-cookie": "teamship_session=before-login; Path=/" }
+        });
+      }
+      if (url.endsWith("/login") && init?.method === "POST") {
+        return new Response("", {
+          status: 302,
+          headers: { "set-cookie": "teamship_session=after-login; Path=/" }
+        });
+      }
+      if (url.endsWith("/ship-inventories/31064")) {
+        return new Response(`
+          <input type="hidden" id="pallets_count" value="1">
+          <input id="pallet_1" value="1">
+          <input id="pallet_1_length" value="1">
+          <input id="pallet_1_width" value="1">
+          <input id="pallet_1_height" value="1">
+          <input id="pallet_1_weight" value="1">
+        `);
+      }
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+
+    const orders = await findTeamshipShippingOrders({
+      orderIdentifier: "30666",
+      preferUiPallets: true,
+      credentials: {
+        email: "employee@example.com",
+        password: "not-a-live-password",
+        apiBaseUrl: "https://members.fulfillit.io/api"
+      },
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(orders).toEqual([expect.objectContaining({
+      id: 31064,
+      order_number: "30666",
+      pallets: [expect.objectContaining({ quantity: "1" })],
+      pallet_dims: [expect.objectContaining({ quantity: "1" })]
+    })]);
+  });
+
   it("does not reuse stale summary pallets when authoritative detail is unavailable", async () => {
     vi.stubEnv("TEAMSHIP_MAX_LIST_PAGES", "1");
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
