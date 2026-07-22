@@ -172,6 +172,7 @@ describe("Teamship shipping-order search identity", () => {
       <input id="pallet_1_height" value="1">
       <input id="pallet_1_weight" value="1">
       <input id="pallet_1_commodity" value="SKU: A4505560-5001 QTY: 1">
+      <input id="pallet_2_weight_unit" value="lbs">
     `);
 
     expect(parsed.pallet_dims).toEqual([{
