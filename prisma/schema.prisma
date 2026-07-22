@@ -1715,6 +1715,7 @@ model LeadScoreSnapshot {
 
   tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   company Company @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  outcomeEvents LeadOutcomeEvent[]
 
   @@index([tenantId, companyId, createdAt])
   @@index([tenantId, contactId, createdAt])
@@ -1741,6 +1742,7 @@ model LeadOutcomeEvent {
 
   tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   company Company @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  scoreSnapshot LeadScoreSnapshot? @relation(fields: [scoreSnapshotId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, companyId, occurredAt])
   @@index([tenantId, contactId, occurredAt])

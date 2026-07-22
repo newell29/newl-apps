@@ -66,8 +66,10 @@ describe("lead scoring history", () => {
 
   it("persists previous and current outcome values inside the same tenant", async () => {
     const createOutcome = vi.fn().mockResolvedValue({ id: "outcome-1" });
+    const findSnapshot = vi.fn().mockResolvedValue({ id: "snapshot-1" });
+    const occurredAt = new Date("2026-07-22T19:00:00.000Z");
     const client = {
-      leadScoreSnapshot: { create: vi.fn() },
+      leadScoreSnapshot: { create: vi.fn(), findFirst: findSnapshot },
       leadOutcomeEvent: { create: createOutcome }
     };
 
@@ -80,18 +82,75 @@ describe("lead scoring history", () => {
         previousValue: "NEW",
         currentValue: "QUALIFIED",
         source: "USER_ACTION",
-        actorUserId: "user-1"
+        actorUserId: "user-1",
+        occurredAt
       },
       client
     );
 
+    expect(findSnapshot).toHaveBeenCalledWith({
+      where: {
+        tenantId: "tenant-a",
+        companyId: "company-1",
+        contactId: null,
+        scoreType: "COMPANY_OPPORTUNITY",
+        createdAt: {
+          lte: occurredAt
+        }
+      },
+      orderBy: {
+        createdAt: "desc"
+      },
+      select: {
+        id: true
+      }
+    });
     expect(createOutcome).toHaveBeenCalledWith({
       data: expect.objectContaining({
         tenantId: "tenant-a",
         companyId: "company-1",
         leadId: "lead-1",
         previousValue: "NEW",
-        currentValue: "QUALIFIED"
+        currentValue: "QUALIFIED",
+        scoreSnapshotId: "snapshot-1"
+      })
+    });
+  });
+
+  it("uses contact-relevance history for Apollo outcomes and allows no earlier snapshot", async () => {
+    const createOutcome = vi.fn().mockResolvedValue({ id: "outcome-1" });
+    const findSnapshot = vi.fn().mockResolvedValue(null);
+    const client = {
+      leadScoreSnapshot: { create: vi.fn(), findFirst: findSnapshot },
+      leadOutcomeEvent: { create: createOutcome }
+    };
+
+    await recordLeadOutcomeEvent(
+      {
+        tenantId: "tenant-a",
+        companyId: "company-1",
+        contactId: "contact-1",
+        outcomeType: "APOLLO_REPLY_STATUS_CHANGED",
+        previousValue: "NO_REPLY",
+        currentValue: "POSITIVE",
+        source: "APOLLO"
+      },
+      client
+    );
+
+    expect(findSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId: "tenant-a",
+          companyId: "company-1",
+          contactId: "contact-1",
+          scoreType: "CONTACT_RELEVANCE"
+        })
+      })
+    );
+    expect(createOutcome).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        scoreSnapshotId: null
       })
     });
   });

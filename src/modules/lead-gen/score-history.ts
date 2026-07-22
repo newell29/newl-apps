@@ -21,7 +21,8 @@ export type LeadOutcomeType =
 
 type ScoreHistoryPersistenceClient = {
   leadScoreSnapshot: {
-    create(args: { data: Record<string, unknown> }): Promise<{ id: string } | unknown>;
+    create(args: { data: Record<string, unknown> }): Promise<{ id: string }>;
+    findFirst?(args: Record<string, unknown>): Promise<{ id: string } | null>;
   };
   leadOutcomeEvent: {
     create(args: { data: Record<string, unknown> }): Promise<unknown>;
@@ -57,6 +58,12 @@ type OutcomeHistoryRow = {
   source: string;
   actorUserId: string | null;
   scoreSnapshotId: string | null;
+  scoreSnapshot: {
+    score: number;
+    tier: string | null;
+    modelVersion: string;
+    scoreType: string;
+  } | null;
   occurredAt: Date;
   company: { name: string };
 };
@@ -91,7 +98,7 @@ export async function recordLeadScoreSnapshot(
     breakdown: unknown;
     evidenceAsOf?: Date | null;
   },
-  client: ScoreHistoryPersistenceClient = prisma
+  client: ScoreHistoryPersistenceClient = prisma as unknown as ScoreHistoryPersistenceClient
 ) {
   return client.leadScoreSnapshot.create({
     data: {
@@ -128,8 +135,22 @@ export async function recordLeadOutcomeEvent(
     metadata?: unknown;
     occurredAt?: Date;
   },
-  client: ScoreHistoryPersistenceClient = prisma
+  client: ScoreHistoryPersistenceClient = prisma as unknown as ScoreHistoryPersistenceClient
 ) {
+  const occurredAt = input.occurredAt ?? new Date();
+  const scoreSnapshotId =
+    input.scoreSnapshotId === undefined
+      ? await findLatestScoreSnapshotId(
+          {
+            tenantId: input.tenantId,
+            companyId: input.companyId,
+            contactId: input.contactId ?? null,
+            occurredAt
+          },
+          client
+        )
+      : input.scoreSnapshotId;
+
   return client.leadOutcomeEvent.create({
     data: {
       tenantId: input.tenantId,
@@ -141,9 +162,9 @@ export async function recordLeadOutcomeEvent(
       currentValue: input.currentValue ?? null,
       source: input.source,
       actorUserId: input.actorUserId ?? null,
-      scoreSnapshotId: input.scoreSnapshotId ?? null,
+      scoreSnapshotId: scoreSnapshotId ?? null,
       metadata: input.metadata === undefined ? undefined : toInputJsonValue(input.metadata),
-      occurredAt: input.occurredAt ?? new Date()
+      occurredAt
     }
   });
 }
@@ -204,6 +225,14 @@ export async function getLeadScoringHistory(
         source: true,
         actorUserId: true,
         scoreSnapshotId: true,
+        scoreSnapshot: {
+          select: {
+            score: true,
+            tier: true,
+            modelVersion: true,
+            scoreType: true
+          }
+        },
         occurredAt: true,
         company: {
           select: {
@@ -231,6 +260,40 @@ export async function getLeadScoringHistory(
     }),
     outcomes
   };
+}
+
+async function findLatestScoreSnapshotId(
+  input: {
+    tenantId: string;
+    companyId: string;
+    contactId: string | null;
+    occurredAt: Date;
+  },
+  client: ScoreHistoryPersistenceClient
+) {
+  if (!client.leadScoreSnapshot.findFirst) {
+    return null;
+  }
+
+  const snapshot = await client.leadScoreSnapshot.findFirst({
+    where: {
+      tenantId: input.tenantId,
+      companyId: input.companyId,
+      contactId: input.contactId,
+      scoreType: input.contactId ? "CONTACT_RELEVANCE" : "COMPANY_OPPORTUNITY",
+      createdAt: {
+        lte: input.occurredAt
+      }
+    },
+    orderBy: {
+      createdAt: "desc"
+    },
+    select: {
+      id: true
+    }
+  });
+
+  return snapshot?.id ?? null;
 }
 
 function stableSerialize(value: unknown): string {

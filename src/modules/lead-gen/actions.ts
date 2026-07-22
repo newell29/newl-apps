@@ -2843,6 +2843,12 @@ async function syncExistingApolloContactsForCompany({
       data: merged
     });
 
+    const scoreSnapshot = await recordContactScoreSnapshot({
+      tenantId,
+      contactId: existing.id,
+      trigger: "APOLLO_STATUS_SYNC"
+    });
+
     if (existing.sequenceStatus !== merged.sequenceStatus) {
       await recordLeadOutcomeEvent({
         tenantId,
@@ -2852,7 +2858,8 @@ async function syncExistingApolloContactsForCompany({
         outcomeType: "APOLLO_SEQUENCE_STATUS_CHANGED",
         previousValue: existing.sequenceStatus,
         currentValue: merged.sequenceStatus,
-        source: "APOLLO"
+        source: "APOLLO",
+        scoreSnapshotId: scoreSnapshot?.id ?? null
       });
     }
 
@@ -2865,15 +2872,10 @@ async function syncExistingApolloContactsForCompany({
         outcomeType: "APOLLO_REPLY_STATUS_CHANGED",
         previousValue: existing.replyStatus,
         currentValue: merged.replyStatus,
-        source: "APOLLO"
+        source: "APOLLO",
+        scoreSnapshotId: scoreSnapshot?.id ?? null
       });
     }
-
-    await recordContactScoreSnapshot({
-      tenantId,
-      contactId: existing.id,
-      trigger: "APOLLO_STATUS_SYNC"
-    });
 
     updatedCount += 1;
     await appendApolloContactActivity({
@@ -4604,17 +4606,17 @@ async function recordContactScoreSnapshot({
   });
 
   if (!draftContext) {
-    return;
+    return null;
   }
 
-  await persistContactScoreSnapshot(draftContext, trigger);
+  return persistContactScoreSnapshot(draftContext, trigger);
 }
 
 async function persistContactScoreSnapshot(
   draftContext: NonNullable<Awaited<ReturnType<typeof loadAiDraftContactContext>>>,
   trigger: LeadScoreTrigger
 ) {
-  await recordLeadScoreSnapshot({
+  return recordLeadScoreSnapshot({
     tenantId: draftContext.contact.tenantId,
     companyId: draftContext.contact.companyId,
     contactId: draftContext.contact.id,

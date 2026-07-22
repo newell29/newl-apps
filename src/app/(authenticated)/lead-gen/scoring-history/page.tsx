@@ -104,7 +104,7 @@ export default async function LeadScoringHistoryPage() {
         <div className="border-b border-border bg-muted px-4 py-3">
           <h2 className="text-base font-semibold text-foreground">Recent outcomes</h2>
           <p className="mt-1 text-sm text-mutedForeground">
-            Status changes, pipeline movement, Apollo enrollment, and reply changes are kept separately from scores.
+            Each outcome points to the most recent applicable score snapshot that existed when the event occurred.
           </p>
         </div>
         {history.outcomes.length === 0 ? (
@@ -117,6 +117,7 @@ export default async function LeadScoringHistoryPage() {
                   <th className="px-4 py-3">Company</th>
                   <th className="px-4 py-3">Outcome</th>
                   <th className="px-4 py-3">Change</th>
+                  <th className="px-4 py-3">Linked score</th>
                   <th className="px-4 py-3">Source</th>
                   <th className="px-4 py-3">Occurred</th>
                 </tr>
@@ -128,6 +129,19 @@ export default async function LeadScoringHistoryPage() {
                     <td className="whitespace-nowrap px-4 py-3 text-mutedForeground">{formatLabel(outcome.outcomeType)}</td>
                     <td className="px-4 py-3 text-mutedForeground">
                       {formatChange(outcome.previousValue, outcome.currentValue)}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3">
+                      {outcome.scoreSnapshot ? (
+                        <>
+                          <p className="font-semibold text-foreground">{outcome.scoreSnapshot.score}</p>
+                          <p className="text-xs text-mutedForeground">
+                            {outcome.scoreSnapshot.tier ? `${formatLabel(outcome.scoreSnapshot.tier)} · ` : ""}
+                            {outcome.scoreSnapshot.modelVersion}
+                          </p>
+                        </>
+                      ) : (
+                        <span className="text-xs text-mutedForeground">No earlier snapshot</span>
+                      )}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-mutedForeground">{formatLabel(outcome.source)}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-mutedForeground">{formatDate(outcome.occurredAt)}</td>

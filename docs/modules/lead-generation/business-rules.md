@@ -37,6 +37,8 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - Score history is immutable and event-driven. Company opportunity scores are captured after TradeMining ingestion and pipeline approval; contact relevance scores are captured when Apollo status is synchronized or a push is attempted. Opening a page does not create history.
 - Every score snapshot records the scoring model version, a deterministic fingerprint of the full scoring configuration, the matched search profile when available, an explanation, and the evidence date. This allows later outcomes to be compared against the score that was actually used.
 - Candidate decisions, pipeline stage changes, Apollo cadence enrollment, sequence status changes, and reply status changes are stored as tenant-scoped outcome events.
+- Each new outcome links to the latest applicable score snapshot for the same tenant and subject at or before the outcome time. Contact outcomes use contact-relevance snapshots; company and pipeline outcomes use company-opportunity snapshots. Outcomes remain unlinked when no earlier snapshot exists.
+- Apollo reply data is refreshed when a user selects contacts and runs **Sync Apollo status**, and during the immediate Apollo lookup used to verify a push. There is currently no scheduled tenant-wide Apollo reply sync. Push-job polling only rechecks pending cadence enrollment and is not a general reply refresh.
 - The scoring-history migration is additive and performs no score backfill. Historical reporting begins after the migration is deployed; current Company, Contact, Lead, and TradeMining records are not rewritten.
 
 ## Data model
