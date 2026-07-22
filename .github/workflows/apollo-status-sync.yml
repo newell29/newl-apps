@@ -27,7 +27,5 @@ jobs:
             --silent \
             --show-error \
             --max-time 330 \
-            --retry 2 \
-            --retry-all-errors \
             --header "Authorization: Bearer $APOLLO_STATUS_SYNC_SECRET" \
             https://newl-apps.vercel.app/api/lead-gen/apollo/status-sync

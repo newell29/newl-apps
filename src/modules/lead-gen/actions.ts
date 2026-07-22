@@ -2839,6 +2839,12 @@ async function syncExistingApolloContactsForCompany({
     });
 
     const syncedAt = new Date();
+    const scoreSnapshot = await recordContactScoreSnapshot({
+      tenantId,
+      contactId: existing.id,
+      trigger: "APOLLO_STATUS_SYNC"
+    });
+
     await prisma.contact.update({
       where: {
         id: existing.id
@@ -2850,12 +2856,6 @@ async function syncExistingApolloContactsForCompany({
         apolloSyncFailureCount: 0,
         apolloSyncLastError: null
       }
-    });
-
-    const scoreSnapshot = await recordContactScoreSnapshot({
-      tenantId,
-      contactId: existing.id,
-      trigger: "APOLLO_STATUS_SYNC"
     });
 
     if (existing.sequenceStatus !== merged.sequenceStatus) {

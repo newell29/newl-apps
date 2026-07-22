@@ -88,6 +88,8 @@ Scoring regression coverage must also verify:
 14. transient and `429` responses receive no more than three total attempts, and sustained rate limiting defers the rest of the batch;
 15. the scheduled route rejects missing or invalid `APOLLO_STATUS_SYNC_SECRET` values before any tenant or Apollo work begins and never falls back to the shared `CRON_SECRET`.
 16. the scheduled route returns a non-success HTTP status when any tenant run reports `error`, so the calling GitHub Actions workflow cannot appear green after an internal sync failure.
+17. Apollo reply and sequence outcomes link to a score snapshot created before the new Apollo status is persisted, preventing positive engagement from leaking into the score used to evaluate that outcome.
+18. the GitHub Actions caller does not retry a failed whole-batch HTTP request; retries remain bounded inside the per-contact Apollo client.
 
 The `20260722193000_add_lead_scoring_history` migration must remain additive: it may create the two history tables, indexes, and foreign keys, but must not drop, rename, truncate, update, or backfill existing tables.
 The `20260722201500_link_lead_outcomes_to_scores` migration may only add the nullable snapshot foreign key; it must not rewrite existing outcomes.
