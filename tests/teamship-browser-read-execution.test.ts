@@ -10,8 +10,9 @@ import {
   parseProductHistoryPage,
   parseReceivingOrderPage,
   parseTeamshipInventoryPagerLabel,
+  parseTeamshipShippingOrderPalletRows,
   parseTeamshipShippingOrderPalletPreflight,
-  readUniqueTeamshipPalletCountInput,
+  readTeamshipShippingOrderPalletCount,
   submitTeamshipInventorySearch,
   waitForTeamshipInventorySearchResult
 } from "@/modules/teamship/browser-read-execution";
@@ -64,20 +65,52 @@ describe("Teamship browser read extraction", () => {
     })).toThrow(/whole number/i);
   });
 
-  it("waits for Teamship to attach its dynamic pallet count before reading it", async () => {
-    const events: string[] = [];
-    const input = {
-      waitFor: vi.fn().mockImplementation(async () => { events.push("wait"); }),
-      inputValue: vi.fn().mockImplementation(async () => { events.push("value"); return "1"; })
+  it("falls back to the signed-in pallet rows when Teamship omits its hidden count", async () => {
+    const waitFor = vi.fn().mockResolvedValue(undefined);
+    const values: Record<string, string> = {
+      "input#pallet_1": "1",
+      "input#pallet_1_length": "48",
+      "input#pallet_1_width": "40",
+      "input#pallet_1_height": "40",
+      "input#pallet_1_weight": "250",
+      "#pallet_1_weight_unit": "lbs",
+      "#pallet_1_commodity": "SKU: A4505560-5001 QTY: 1"
     };
-    const locator = {
-      first: vi.fn().mockReturnValue(input),
-      count: vi.fn().mockImplementation(async () => { events.push("count"); return 1; })
+    const page = {
+      locator: vi.fn((selector: string) => {
+        if (selector === "input#pallets_count,input[id^='pallet_']") {
+          return { first: () => ({ waitFor }) };
+        }
+        const value = values[selector];
+        return {
+          count: vi.fn().mockResolvedValue(value === undefined ? 0 : 1),
+          first: () => ({ inputValue: vi.fn().mockResolvedValue(value) })
+        };
+      })
     };
 
-    await expect(readUniqueTeamshipPalletCountInput(locator as never, 15_000)).resolves.toBe("1");
-    expect(input.waitFor).toHaveBeenCalledWith({ state: "attached", timeout: 15_000 });
-    expect(events).toEqual(["wait", "count", "value"]);
+    await expect(readTeamshipShippingOrderPalletCount(page as never, 30_000)).resolves.toBe("1");
+    expect(waitFor).toHaveBeenCalledWith({ state: "attached", timeout: 30_000 });
+  });
+
+  it("ignores default-only ghost rows and sums valid pallet-row quantities", () => {
+    expect(parseTeamshipShippingOrderPalletRows([{
+      quantity: "2",
+      length: "48",
+      width: "40",
+      height: "40",
+      weight: "500",
+      weightUnit: "lbs",
+      commodity: "Pallet one"
+    }, {
+      quantity: null,
+      length: null,
+      width: null,
+      height: null,
+      weight: null,
+      weightUnit: "lbs",
+      commodity: null
+    }])).toBe(2);
   });
 
   it("normalizes only the allowlisted Inventory All fields", () => {
