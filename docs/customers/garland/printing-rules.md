@@ -41,6 +41,8 @@ Garland shipping-order display numbers and Teamship's internal page IDs are sepa
 
 The signed-in exact-order Teamship page is authoritative for print-plan pallet-label quantity because it is the same order screen the local worker preflights immediately before printing. Its hidden pallet fields override stale API detail and list-summary aliases. If the page cannot be read, exact API-detail pallet rows are the fallback; if neither exact source supplies rows, plan creation fails closed instead of reusing the list summary. During the supervised `30666` investigation on 2026-07-22, the signed-in Teamship page showed one pallet row with quantity `1` while the API could still report `2`; plans using the stale value were rejected.
 
+Some Teamship page responses omit the hidden pallet-count marker. The parser then scans the bounded pallet field range but includes only rows with an observed quantity, dimension, weight, unit, or commodity field; a default weight unit alone never creates a pallet row.
+
 ## Open questions
 
 - Final employee-approved Garland order lifecycle terms. Requires employee confirmation.

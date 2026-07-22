@@ -771,19 +771,30 @@ function readTeamshipUiPallets(html: string) {
   const pallets: TeamshipShippingOrderDetail["pallet_dims"] = [];
 
   for (let index = 1; index <= maxCount; index += 1) {
+    const quantity = readHtmlFormValueById(html, `pallet_${index}`);
+    const length = readHtmlFormValueById(html, `pallet_${index}_length`);
+    const width = readHtmlFormValueById(html, `pallet_${index}_width`);
+    const height = readHtmlFormValueById(html, `pallet_${index}_height`);
+    const weight = readHtmlFormValueById(html, `pallet_${index}_weight`);
+    const weightUnit = readHtmlFormValueById(html, `pallet_${index}_weight_unit`);
+    const commodity = readHtmlFormValueById(html, `pallet_${index}_commodity`);
+    const observedValues = [quantity, length, width, height, weight, weightUnit, commodity];
+
+    if (!observedValues.some((value) => value && String(value).trim())) {
+      continue;
+    }
+
     const pallet = {
-      quantity: readHtmlFormValueById(html, `pallet_${index}`),
-      length: readHtmlFormValueById(html, `pallet_${index}_length`),
-      width: readHtmlFormValueById(html, `pallet_${index}_width`),
-      height: readHtmlFormValueById(html, `pallet_${index}_height`),
-      weight: readHtmlFormValueById(html, `pallet_${index}_weight`),
-      weight_unit: readHtmlFormValueById(html, `pallet_${index}_weight_unit`) ?? "lbs",
-      commodity: readHtmlFormValueById(html, `pallet_${index}_commodity`)
+      quantity,
+      length,
+      width,
+      height,
+      weight,
+      weight_unit: weightUnit ?? "lbs",
+      commodity
     };
 
-    if (Object.values(pallet).some((value) => value && String(value).trim())) {
-      pallets.push(pallet);
-    }
+    pallets.push(pallet);
   }
 
   return pallets;
