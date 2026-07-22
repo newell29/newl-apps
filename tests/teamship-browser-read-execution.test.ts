@@ -11,6 +11,7 @@ import {
   parseReceivingOrderPage,
   parseTeamshipInventoryPagerLabel,
   parseTeamshipShippingOrderPalletRows,
+  parseTeamshipShippingOrderPalletTableRows,
   parseTeamshipShippingOrderPalletPreflight,
   readTeamshipShippingOrderPalletCount,
   submitTeamshipInventorySearch,
@@ -78,7 +79,7 @@ describe("Teamship browser read extraction", () => {
     };
     const page = {
       locator: vi.fn((selector: string) => {
-        if (selector === "input#pallets_count,input[id^='pallet_']") {
+        if (selector.startsWith("input#pallets_count,input[id^=")) {
           return { first: () => ({ waitFor }) };
         }
         const value = values[selector];
@@ -91,6 +92,50 @@ describe("Teamship browser read extraction", () => {
 
     await expect(readTeamshipShippingOrderPalletCount(page as never, 30_000)).resolves.toBe("1");
     expect(waitFor).toHaveBeenCalledWith({ state: "attached", timeout: 30_000 });
+  });
+
+  it("reads the bounded pallet table rendered for a completed shipping order", () => {
+    expect(parseTeamshipShippingOrderPalletTableRows([
+      ["1", "W: 1 L: 1 H: 1", "34"]
+    ])).toBe(1);
+    expect(() => parseTeamshipShippingOrderPalletTableRows([
+      ["2.5", "W: 1 L: 1 H: 1", "34"]
+    ])).toThrow(/invalid quantity/i);
+  });
+
+  it("falls back to the completed-order pallet table when editable fields are absent", async () => {
+    const waitFor = vi.fn().mockResolvedValue(undefined);
+    const cells = {
+      count: vi.fn().mockResolvedValue(3),
+      allInnerTexts: vi.fn().mockResolvedValue(["1", "W: 1 L: 1 H: 1", "34"])
+    };
+    const headerCells = { count: vi.fn().mockResolvedValue(0) };
+    const tableRows = {
+      count: vi.fn().mockResolvedValue(2),
+      nth: vi.fn((index: number) => ({
+        locator: vi.fn().mockReturnValue(index === 0 ? headerCells : cells)
+      }))
+    };
+    const table = {
+      locator: vi.fn().mockReturnValue(tableRows)
+    };
+    const tables = {
+      filter: vi.fn().mockReturnThis(),
+      count: vi.fn().mockResolvedValue(1),
+      first: vi.fn().mockReturnValue(table)
+    };
+    const page = {
+      locator: vi.fn((selector: string) => {
+        if (selector.startsWith("input#pallets_count,input[id^=")) {
+          return { first: () => ({ waitFor }) };
+        }
+        if (selector === "table:visible") return tables;
+        return { count: vi.fn().mockResolvedValue(0) };
+      })
+    };
+
+    await expect(readTeamshipShippingOrderPalletCount(page as never, 30_000)).resolves.toBe("1");
+    expect(tables.filter).toHaveBeenCalledTimes(3);
   });
 
   it("ignores default-only ghost rows and sums valid pallet-row quantities", () => {

@@ -140,8 +140,7 @@ export async function createTeamshipPrintPlan(
   const findOrders = dependencies.findOrders ?? findTeamshipShippingOrders;
   const orders = await findOrders({
     tenantId: context.tenantId,
-    orderIdentifier: shippingOrderNumber,
-    preferUiPallets: true
+    orderIdentifier: shippingOrderNumber
   });
   const exact = orders.filter((order) => teamshipOrderMatchesShippingOrderNumber(order, shippingOrderNumber));
   if (exact.length === 0) {
