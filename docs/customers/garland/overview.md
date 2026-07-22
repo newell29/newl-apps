@@ -15,11 +15,13 @@ flowchart TB
   PDF[PDF extraction] --> Parse[Garland PS/SR/order parsing]
   Parse --> Review[Teamship review run/order]
   Teamship[Teamship API/UI evidence] --> Review
-  Review --> Human[Human review/approval]
+Review --> Human[Human review/approval]
   Human --> Job[TeamshipUpdateJob]
   Job --> Worker[Phase 2 dry-run or live worker]
-  Worker --> TeamshipUpdate[Teamship update if explicitly allowed]
+Worker --> TeamshipUpdate[Teamship update if explicitly allowed]
 ```
+
+For a Teams-uploaded PDF, the selected PS/SR is reviewed and saved before any update is possible. A matched, safe order produces a `DRAFT` live-API job containing the existing Garland pallet dimension/weight plan and editable-BOL customer-order weight cleanup. Nemo must show the proposed actions and unresolved investigation items. A separate explicit Teams approval binds the artifact, selected reference, and job before the job becomes `APPROVED`. A missing Teamship order is saved and reported but is never created or updated automatically.
 
 Emails are classified using Garland-domain, PS-range, order/page-count, attachment, and correction signals. Attachments are hashed for duplicate detection. Parsed PDF pages extract PS number, SR number, ship-to data, PO, freight terms, order date, ship-via, instructions, and item rows when present. Teamship review compares Garland parsed data with Teamship details.
 

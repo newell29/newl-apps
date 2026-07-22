@@ -7,6 +7,7 @@ import { collectGarlandProductDimensionSkus } from "@/modules/shipment-documents
 import { buildTeamshipPhase2DryRunPlan } from "@/modules/shipment-documents/teamship-phase2-dry-run";
 import { buildGarlandTeamshipReview } from "@/modules/shipment-documents/teamship-review";
 import { saveTeamshipReviewRun } from "@/modules/shipment-documents/teamship-review-history";
+import { prepareReviewForTeamshipUpdates } from "@/modules/shipment-documents/teamship-update-review";
 import { approveTeamshipUpdateJob, createTeamshipUpdateJob } from "@/modules/shipment-documents/teamship-update-jobs";
 import { requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
@@ -18,13 +19,6 @@ import type { GarlandTeamshipReviewResponse } from "@/modules/shipment-documents
 
 const READY_ATTACHMENT_STATUSES = ["PDF_METADATA_READY", "PDF_PARSE_FAILED"] as const;
 const DEFAULT_MAX_ATTACHMENTS = 8;
-const AUTOMATED_TEAMSHIP_FIELD_UPDATE_KEYS = new Set([
-  "po_number",
-  "freight_terms",
-  "carrier",
-  "ship_to_address_1",
-  "shipping_instructions"
-]);
 
 export type GarlandEmailAgentAutomationResult = {
   processedAttachmentCount: number;
@@ -266,20 +260,7 @@ async function buildAutomatedReview(
 export function prepareReviewForAutomatedTeamshipUpdates(
   review: GarlandTeamshipReviewResponse
 ): GarlandTeamshipReviewResponse {
-  return {
-    ...review,
-    reviews: review.reviews.map((orderReview) => ({
-      ...orderReview,
-      fields: orderReview.fields.map((field) =>
-        AUTOMATED_TEAMSHIP_FIELD_UPDATE_KEYS.has(field.key) && field.pdfValue?.trim()
-          ? {
-              ...field,
-              botActionEnabled: true
-            }
-          : field
-      )
-    }))
-  };
+  return prepareReviewForTeamshipUpdates(review);
 }
 
 async function findDuplicateParsedAttachment({

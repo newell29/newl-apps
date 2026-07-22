@@ -83,6 +83,17 @@ const garlandPdfReviewParameters = Type.Object({
   }))
 });
 
+const garlandApproveUpdateParameters = Type.Object({
+  artifactId: Type.String({ minLength: 1, maxLength: 100 }),
+  jobId: Type.String({ minLength: 1, maxLength: 100 }),
+  targetReference: Type.String({
+    minLength: 7,
+    maxLength: 10,
+    pattern: "^(?:[Pp][Ss]\\d{6}|[Ss][Rr]\\d{5,8})$",
+    description: "The exact PS or SR number shown in the proposal being approved."
+  })
+});
+
 const emptyParameters = Type.Object({});
 
 const configSchema = Type.Object({
@@ -120,9 +131,16 @@ const plugin = defineToolPlugin({
     tool({
       name: "newl_garland_pdf_review",
       label: "Review Garland PDF",
-      description: "Always call this tool when an authenticated Microsoft Teams employee attaches a Garland order PDF, supplies an exact PS or SR number, and asks Nemo to check or review it. The tool uses only the PDF paths captured from that same trusted Teams session, saves the PDF in Newl Apps, checks only the selected PDF order with a fresh read-only Teamship comparison, and returns the saved check. Prefer PS because an SR can identify more than one PDF order. It never updates Teamship or prints.",
+      description: "Always call this tool when an authenticated Microsoft Teams employee attaches a Garland order PDF, supplies an exact PS or SR number, and asks Nemo to check or review it. The tool uses only the PDF paths captured from that same trusted Teams session, saves the PDF in Newl Apps, checks only the selected PDF order, and prepares an approval-gated Teamship draft when the matched order is safe to update. Prefer PS because an SR can identify more than one PDF order. The review itself never changes Teamship or prints.",
       parameters: garlandPdfReviewParameters,
       factory: createGarlandPdfReviewTool
+    }),
+    tool({
+      name: "newl_garland_approve_update",
+      label: "Approve Garland Teamship Update",
+      description: "Call only after an authenticated Teams employee explicitly approves the exact Garland update proposal shown by newl_garland_pdf_review. It validates the artifact, target reference, and draft job together, then queues the existing Teamship worker. Never infer approval from the upload or from a request to check an order. It never prints.",
+      parameters: garlandApproveUpdateParameters,
+      factory: createGarlandApproveUpdateTool
     }),
     tool({
       name: "newl_garland_explain",
@@ -141,7 +159,7 @@ const plugin = defineToolPlugin({
     tool({
       name: "newl_development_suggestion_digest",
       label: "Development Suggestion Digest",
-      description: "Use only for the configured daily admin review. It groups unqueued employee feedback into approval-required development suggestions. It cannot start Codex, build, merge, deploy, write Teamship, or print.",
+      description: "Use only for the configured daily admin review. It groups unqueued employee feedback into approval-required development suggestions and lists failed or unanswered Nemo queries. It cannot start development, merge, deploy, write Teamship, or print.",
       parameters: emptyParameters,
       factory: createDevelopmentSuggestionDigestTool
     })
@@ -319,13 +337,74 @@ export function createDevelopmentSuggestionDigestTool({
       if (!response.ok || !body.data) {
         return textResult(body.error || `Suggestion digest returned HTTP ${response.status}.`, "failed");
       }
-      const data = body.data as { awaitingApproval?: Array<Record<string, unknown>>; safety?: string };
+      const data = body.data as {
+        awaitingApproval?: Array<Record<string, unknown>>;
+        unresolvedQueries?: Array<Record<string, unknown>>;
+        safety?: string;
+      };
       const suggestions = data.awaitingApproval ?? [];
-      const lines = suggestions.map(
-        (item) => `- ${String(item.title ?? "Suggestion")} (${String(item.feedbackCount ?? 0)} feedback item(s), ${String(item.riskLevel ?? "MEDIUM")} risk) — approval required`
+      const suggestionLines = suggestions.map(
+        (item) => `- ${String(item.title ?? "Suggestion")} [ID ${String(item.id ?? "unknown")}] (${String(item.feedbackCount ?? 0)} feedback item(s), ${String(item.riskLevel ?? "MEDIUM")} risk) — approval required`
       );
+      const unresolvedQueries = data.unresolvedQueries ?? [];
+      const queryLines = unresolvedQueries.slice(0, 20).map((item) => {
+        const prompt = String(item.promptText ?? "No prompt captured").replace(/\s+/g, " ").slice(0, 240);
+        const detail = String(item.errorMessage ?? item.toolName ?? item.failureKind ?? "Unknown failure").replace(/\s+/g, " ").slice(0, 180);
+        return `- ${String(item.failureKind ?? "UNKNOWN")}: ${prompt} — ${detail}`;
+      });
       return textResult(
-        `${suggestions.length} development suggestion(s) await approval.${lines.length ? `\n${lines.join("\n")}` : ""}\n${data.safety ?? "No development was started."}`,
+        [
+          `${suggestions.length} development suggestion(s) await approval.`,
+          ...suggestionLines,
+          `${unresolvedQueries.length} failed or unanswered Nemo quer${unresolvedQueries.length === 1 ? "y" : "ies"} need review.`,
+          ...queryLines,
+          data.safety ?? "No development was started."
+        ].join("\n"),
+        "ok"
+      );
+    }
+  };
+}
+
+export function createGarlandApproveUpdateTool({
+  config,
+  toolContext
+}: {
+  config: TeamshipPluginConfig;
+  toolContext: TeamshipToolContext;
+}) {
+  return {
+    name: "newl_garland_approve_update",
+    label: "Approve Garland Teamship Update",
+    description: "Approve one exact, previously prepared Garland Teamship update draft.",
+    parameters: garlandApproveUpdateParameters,
+    async execute(_toolCallId: string, params: unknown, signal?: AbortSignal) {
+      const auth = resolveTrustedTeamsAuth(config, toolContext);
+      if (!auth.ok) return auth.result;
+      const artifactId = readParameterString(params, "artifactId", 100);
+      const jobId = readParameterString(params, "jobId", 100);
+      const targetReference = readParameterString(params, "targetReference", 10).toUpperCase();
+      const response = await fetch(
+        new URL(`/api/assistant/garland/artifacts/${artifactId}/update`, normalizeBaseUrl(config.baseUrl)),
+        {
+          method: "POST",
+          redirect: "manual",
+          signal,
+          headers: buildRequestHeaders(auth.value),
+          body: JSON.stringify({
+            jobId,
+            targetReference,
+            confirmation: "APPROVE_TEAMSHIP_UPDATE"
+          })
+        }
+      );
+      const body = await readGenericResponse(response);
+      if (!response.ok || !body.data) {
+        return textResult(body.error || `Garland update approval returned HTTP ${response.status}.`, "failed");
+      }
+      const result = asRecord(body.data);
+      return textResult(
+        `${targetReference} update job ${String(result.jobId ?? jobId)} is ${String(result.status ?? "APPROVED")} and queued for the Teamship worker. Completion has not yet been verified. Nothing was printed.`,
         "ok"
       );
     }
@@ -592,6 +671,7 @@ function formatStoredArtifactResult(fileName: string, artifact: Record<string, u
       srNumbers: summary.srNumbers
     },
     review: asRecord(summary.review),
+    updateProposal: asRecord(summary.updateProposal),
     reused: true
   };
 }
@@ -608,7 +688,16 @@ function formatPdfReviewResults(results: Array<Record<string, unknown>>) {
     const ignoredText = ignoredOrderCount > 0
       ? ` ${ignoredOrderCount} other order${ignoredOrderCount === 1 ? "" : "s"} in the PDF ${ignoredOrderCount === 1 ? "was" : "were"} ignored.`
       : "";
-    return `${String(result.fileName ?? "Garland PDF")} ${storageResult} artifact ${String(result.artifactId ?? "")}. Review ${String(result.reviewRunId ?? "")} checked only ${selectedReference || String(extraction.targetReference ?? "the selected order")}: ${String(review.passedCount ?? 0)} passed, ${String(review.failedCount ?? 0)} failed, ${String(review.missingTeamshipCount ?? 0)} missing in Teamship, and ${String(review.pendingTeamshipCount ?? 0)} pending.${ignoredText} No Teamship values were changed and nothing was printed.`;
+    const proposal = asRecord(result.updateProposal);
+    const actions = arrayStrings(proposal.proposedActions);
+    const investigationItems = arrayStrings(proposal.investigationItems);
+    const proposalText = typeof proposal.jobId === "string" && proposal.jobId
+      ? ` Update draft ${proposal.jobId} is ${String(proposal.status ?? "DRAFT")}. Proposed actions:\n${actions.map((action) => `- ${action}`).join("\n")}\nExplicit approval is required before Teamship is changed; approve artifact ${String(result.artifactId ?? "")}, job ${proposal.jobId}, for ${String(extraction.targetReference ?? selectedReference)}.`
+      : ` No Teamship update draft was created.${actions.length ? ` Proposed actions:\n${actions.map((action) => `- ${action}`).join("\n")}` : ""}`;
+    const investigationText = investigationItems.length
+      ? `\nTeam investigation needed:\n${investigationItems.map((item) => `- ${item}`).join("\n")}`
+      : "\nNo other differences require team investigation.";
+    return `${String(result.fileName ?? "Garland PDF")} ${storageResult} artifact ${String(result.artifactId ?? "")}. Review ${String(result.reviewRunId ?? "")} checked only ${selectedReference || String(extraction.targetReference ?? "the selected order")}: ${String(review.passedCount ?? 0)} passed, ${String(review.failedCount ?? 0)} failed, ${String(review.missingTeamshipCount ?? 0)} missing in Teamship, and ${String(review.pendingTeamshipCount ?? 0)} pending.${ignoredText}${proposalText}${investigationText}\nNo Teamship values were changed and nothing was printed.`;
   });
   return lines.join("\n");
 }

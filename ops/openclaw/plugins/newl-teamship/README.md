@@ -6,10 +6,11 @@ The Teamship integration remains read-only. The Garland tools may save tenant-sc
 
 ## Garland tools
 
-- `newl_garland_pdf_review` requires the exact PS or SR number named by the employee and uses only PDF paths captured by the plugin from the same trusted Teams session and sender. The model cannot supply a filesystem path. It uploads the PDF in 3 MB hashed chunks, up to 20 MB total, then filters the parsed PDF before Teamship is queried. PS is preferred because an SR can identify multiple PDF orders. Missing and ambiguous references stop without a Teamship query; successful reviews check only the selected order and report how many other PDF orders were ignored.
+- `newl_garland_pdf_review` requires the exact PS or SR number named by the employee and uses only PDF paths captured by the plugin from the same trusted Teams session and sender. The model cannot supply a filesystem path. It uploads the PDF in 3 MB hashed chunks, up to 20 MB total, then filters the parsed PDF before Teamship is queried. PS is preferred because an SR can identify multiple PDF orders. Missing and ambiguous references stop without a Teamship query; successful reviews check only the selected order, report ignored orders and investigation items, and prepare a draft for pallet dimensions/weights plus editable-BOL customer-order weight cleanup when safe.
+- `newl_garland_approve_update` requires an explicit employee approval of the exact artifact, draft job, and PS/SR returned by the review. It queues the existing Teamship worker and never prints. Uploading or checking a PDF is not approval.
 - `newl_garland_explain` explains the latest saved deterministic check for a PS or SR number and labels any admin-approved lessons separately.
 - `newl_operational_feedback` saves an employee's statement as reported evidence. It never promotes the statement into a Nemo rule.
-- `newl_development_suggestion_digest` is admin-only at the Newl Apps boundary. It creates or reads an approval queue and does not start development.
+- `newl_development_suggestion_digest` is admin-only at the Newl Apps boundary. It creates or reads an approval queue, includes captured failed/unanswered Nemo queries, and does not start development.
 
 Inbound Teams media is held in a short-lived, in-memory session map for at most ten minutes and removed after a successful review. Durable bytes are stored only through Newl Apps after tenant, membership, module, and mutation authorization.
 

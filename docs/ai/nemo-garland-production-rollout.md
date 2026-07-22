@@ -84,7 +84,7 @@ Stop immediately if Nemo asks for a filesystem path, accepts an identity supplie
 
 Requires explicit approval to create the live schedule and send the first Teams message.
 
-Enable this only after the supervised PDF test passes. Schedule it for 10:00 AM in `America/Toronto` and target Alex's existing direct Teams conversation as `user:<aad-object-id>`. The scheduled run may call only `newl_development_suggestion_digest`. Its response must say that approval is required and no development was started.
+Enable this only after the supervised PDF test passes. Schedule it for 10:00 AM in `America/Toronto` and target Alex's existing direct Teams conversation as `user:<aad-object-id>`. Run it under the dedicated Rivet developer agent through the Codex harness. The scheduled run may call only `newl_development_suggestion_digest`; it summarizes approval-gated team suggestions and captured failed/unanswered Nemo queries. Its response must say that approval is required and no development was started.
 
 Do not give the scheduled Nemo task Codex, GitHub write, deployment, Teamship write, printing, or arbitrary browser permissions. A later developer agent may summarize approved suggestions, but each build still requires a separate human-approved Codex task and reviewed pull request.
 
