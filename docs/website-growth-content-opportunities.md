@@ -41,7 +41,7 @@ The service account must be added to Google Search Console as a user for the rel
 
 ## Google Analytics 4
 
-GA4 is represented in the connection status and can be manually imported today. The API fields are reserved so the module can add direct GA4 sync without changing the data model:
+GA4 Data API sync stores 28-day landing-page sessions, engaged sessions, engagement rate, and event count. Manual imports remain available for historical exports:
 
 - `GA4_PROPERTY_ID`
 - `GA4_CLIENT_EMAIL`
@@ -94,5 +94,9 @@ The score is intentionally directional. It ranks work for review; it does not au
 2. Generate opportunities from internal Newl Apps data.
 3. Review high-score items.
 4. Approve work that maps to a real service, industry, location, blog, glossary, or redirect need.
-5. Execute the content work in the website repo.
-6. Mark items as published and monitor future Search Console/GA4 movement.
+5. Approval creates a tenant-scoped build request and dispatches the website repository's Codex workflow.
+6. Codex implements the page, runs lint/build, and opens a draft PR that receives a Vercel Preview.
+7. The owner reviews the content, claims, design, and preview and owns the merge decision.
+8. After a human-approved merge, monitor future Search Console, GA4, and first-party lead movement.
+
+See `docs/modules/website-growth/overview.md` for the Scout/Hunter boundary, model routing, claim rules, and developer security design.

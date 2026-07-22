@@ -10,13 +10,20 @@ import {
 } from "@/modules/website-growth/build-package";
 import { parseDelimitedRows, readNumber, readString } from "@/modules/website-growth/csv";
 import { buildTemplateWebsiteGrowthContentDraft } from "@/modules/website-growth/content-drafts";
+import { reviewWebsiteGrowthClaims } from "@/modules/website-growth/claims-policy";
+import {
+  dispatchWebsiteGrowthDeveloperBuild,
+  getWebsiteGrowthDeveloperDispatchStatus
+} from "@/modules/website-growth/developer-dispatch";
 import {
   createWebsiteGrowthPullRequestPackage,
   getWebsiteGrowthGitHubPrStatus
 } from "@/modules/website-growth/github-pr";
 import {
   fetchSearchConsoleRows,
+  fetchGa4LandingPageRows,
   getWebsiteGrowthIntegrationStatus,
+  normalizeGa4PropertyId,
   normalizeSearchConsoleSiteUrl
 } from "@/modules/website-growth/integrations";
 import {
@@ -25,6 +32,8 @@ import {
   weeklyContentRecommendations
 } from "@/modules/website-growth/opportunities";
 import { selectWeeklyWebsiteGrowthCandidates } from "@/modules/website-growth/weekly-plan";
+import { authenticateWebsiteGrowthBuildWorkerRequest } from "@/server/website-growth-build-worker-auth";
+import { authenticateWebsiteGrowthScoutRequest } from "@/server/website-growth-scout-auth";
 
 describe("website growth CSV parsing", () => {
   it("normalizes Search Console export rows", () => {
@@ -278,7 +287,7 @@ describe("website growth content draft packages", () => {
       }
     });
 
-    expect(draft.contentType).toBe("New commercial page");
+    expect(draft.contentType).toBe("Legacy redirect rebuild");
     expect(draft.proposedPath).toBe("/top-3pl-companies-in-usa");
     expect(draft.implementationNotes.some((note) => note.includes("currently redirects"))).toBe(true);
   });
@@ -323,7 +332,7 @@ describe("website growth content draft packages", () => {
     expect(buildPackage.status).toBe("READY_FOR_PR");
     expect(buildPackage.mode).toBe("CREATE_NEW_PAGE");
     expect(buildPackage.routePath).toBe("/top-3pl-companies-in-usa");
-    expect(buildPackage.branchName).toBe("website-growth/top-3pl-companies-in-usa");
+    expect(buildPackage.branchName).toBe("codex/website-growth-draft_1");
     expect(buildPackage.approvalFlow).toContain("A GitHub pull request is opened for review.");
     expect(savedPackage?.routePath).toBe("/top-3pl-companies-in-usa");
   });
@@ -427,6 +436,124 @@ describe("website growth GitHub pull request packages", () => {
   });
 });
 
+describe("website growth claim policy", () => {
+  it("allows capability copy without restricted claims", () => {
+    const review = reviewWebsiteGrowthClaims({
+      title: "Warehouse inventory visibility",
+      sections: [{ draftCopy: "Newl coordinates receiving, storage, fulfillment, and reporting through one operating workflow." }]
+    });
+
+    expect(review.status).toBe("CLEAR");
+    expect(review.findings).toEqual([]);
+  });
+
+  it("requires owner evidence for performance and certification claims", () => {
+    const review = reviewWebsiteGrowthClaims({
+      pagePreview: {
+        proofCards: [
+          { value: "99.24%", body: "inventory accuracy" },
+          { value: "IATA certified", body: "air freight support" }
+        ]
+      }
+    });
+
+    expect(review.status).toBe("OWNER_CONFIRMATION_REQUIRED");
+    expect(review.findings.map((finding) => finding.category)).toEqual(["PERFORMANCE", "CERTIFICATION"]);
+  });
+
+  it("blocks absolute guarantees even when a human could otherwise approve", () => {
+    const review = reviewWebsiteGrowthClaims({ metaDescription: "Guaranteed zero errors on every order." });
+
+    expect(review.status).toBe("BLOCKED");
+    expect(review.findings[0]?.disposition).toBe("BLOCKED");
+  });
+});
+
+describe("website growth developer dispatch", () => {
+  it("reports the scoped configuration needed for Codex builds", () => {
+    const status = getWebsiteGrowthDeveloperDispatchStatus({});
+
+    expect(status.configured).toBe(false);
+    expect(status.missing).toEqual(["WEBSITE_GROWTH_GITHUB_TOKEN", "NEWL_WEBSITE_GITHUB_REPO"]);
+    expect(status.model).toBe("gpt-5.6-sol");
+    expect(status.reasoningEffort).toBe("high");
+  });
+
+  it("dispatches only a request ID and tenant scope to the website workflow", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+    const result = await dispatchWebsiteGrowthDeveloperBuild({
+      buildRequestId: "build_request_123",
+      tenantSlug: "newl-group",
+      env: {
+        WEBSITE_GROWTH_GITHUB_TOKEN: "test-token",
+        NEWL_WEBSITE_GITHUB_REPO: "newell29/newl_website",
+        NEWL_WEBSITE_BASE_BRANCH: "main"
+      },
+      fetcher: fetcher as unknown as typeof fetch
+    });
+
+    const request = fetcher.mock.calls[0];
+    const body = JSON.parse(String(request?.[1]?.body));
+    expect(result.status).toBe("DISPATCHED");
+    expect(body.inputs).toEqual({
+      build_request_id: "build_request_123",
+      tenant_slug: "newl-group",
+      model: "gpt-5.6-sol",
+      reasoning_effort: "high"
+    });
+    expect(JSON.stringify(body)).not.toContain("test-token");
+  });
+
+  it("requires both a bearer token and the configured tenant scope for callbacks", () => {
+    const previousToken = process.env.WEBSITE_GROWTH_BUILD_WORKER_TOKEN;
+    const previousTenant = process.env.WEBSITE_GROWTH_BUILD_WORKER_TENANT_SLUG;
+    process.env.WEBSITE_GROWTH_BUILD_WORKER_TOKEN = "worker-token";
+    process.env.WEBSITE_GROWTH_BUILD_WORKER_TENANT_SLUG = "newl-group";
+
+    try {
+      const result = authenticateWebsiteGrowthBuildWorkerRequest(new Request("https://apps.example.test/api", {
+        headers: {
+          authorization: "Bearer worker-token",
+          "x-newl-website-growth-tenant": "newl-group"
+        }
+      }));
+      expect(result).toEqual({ tenantSlug: "newl-group" });
+      expect(() => authenticateWebsiteGrowthBuildWorkerRequest(new Request("https://apps.example.test/api", {
+        headers: {
+          authorization: "Bearer worker-token",
+          "x-newl-website-growth-tenant": "another-tenant"
+        }
+      }))).toThrow("tenant scope does not match");
+    } finally {
+      restoreEnv("WEBSITE_GROWTH_BUILD_WORKER_TOKEN", previousToken);
+      restoreEnv("WEBSITE_GROWTH_BUILD_WORKER_TENANT_SLUG", previousTenant);
+    }
+  });
+
+  it("keeps Scout on a separate tenant-scoped OpenClaw credential", () => {
+    const previousToken = process.env.OPENCLAW_WEBSITE_GROWTH_TOKEN;
+    const previousTenant = process.env.OPENCLAW_WEBSITE_GROWTH_TENANT_SLUG;
+    process.env.OPENCLAW_WEBSITE_GROWTH_TOKEN = "scout-token";
+    process.env.OPENCLAW_WEBSITE_GROWTH_TENANT_SLUG = "newl-group";
+    try {
+      expect(authenticateWebsiteGrowthScoutRequest(new Request("https://apps.example.test/api", {
+        headers: { authorization: "Bearer scout-token" }
+      }))).toEqual({ tenantSlug: "newl-group" });
+      expect(() => authenticateWebsiteGrowthScoutRequest(new Request("https://apps.example.test/api", {
+        headers: { authorization: "Bearer worker-token" }
+      }))).toThrow("Invalid Website Growth Scout credentials");
+    } finally {
+      restoreEnv("OPENCLAW_WEBSITE_GROWTH_TOKEN", previousToken);
+      restoreEnv("OPENCLAW_WEBSITE_GROWTH_TENANT_SLUG", previousTenant);
+    }
+  });
+});
+
+function restoreEnv(key: string, value: string | undefined) {
+  if (value === undefined) delete process.env[key];
+  else process.env[key] = value;
+}
+
 describe("website growth integrations", () => {
   it("detects missing Search Console and GA4 configuration", () => {
     const status = getWebsiteGrowthIntegrationStatus({});
@@ -434,6 +561,52 @@ describe("website growth integrations", () => {
     expect(status.googleSearchConsole.configured).toBe(false);
     expect(status.googleSearchConsole.mode).toBe("not_configured");
     expect(status.ga4.configured).toBe(false);
+    expect(status.ga4.mode).toBe("not_configured");
+  });
+
+  it("normalizes GA4 property resource names", () => {
+    expect(normalizeGa4PropertyId("123456789")).toBe("123456789");
+    expect(normalizeGa4PropertyId("properties/123456789")).toBe("123456789");
+  });
+
+  it("fetches GA4 landing-page performance with service-account credentials", async () => {
+    const { privateKey } = generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      privateKeyEncoding: { format: "pem", type: "pkcs8" },
+      publicKeyEncoding: { format: "pem", type: "spki" }
+    });
+    const fetcher = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).includes("oauth2.googleapis.com/token")) {
+        return new Response(JSON.stringify({ access_token: "access-token" }), { status: 200 });
+      }
+      return new Response(JSON.stringify({
+        rows: [{
+          dimensionValues: [{ value: "/services/warehousing-services" }],
+          metricValues: [{ value: "120" }, { value: "84" }, { value: "0.7" }, { value: "950" }]
+        }]
+      }), { status: 200 });
+    });
+
+    const rows = await fetchGa4LandingPageRows({
+      env: {
+        GA4_PROPERTY_ID: "properties/123456789",
+        GA4_CLIENT_EMAIL: "service-account@example.iam.gserviceaccount.com",
+        GA4_PRIVATE_KEY: privateKey
+      },
+      fetcher: fetcher as unknown as typeof fetch,
+      startDate: "2026-07-01",
+      endDate: "2026-07-21"
+    });
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(String(fetcher.mock.calls[1]?.[0])).toContain("properties/123456789:runReport");
+    expect(rows[0]).toMatchObject({
+      page: "/services/warehousing-services",
+      sessions: 120,
+      engagedSessions: 84,
+      engagementRate: 0.7,
+      eventCount: 950
+    });
   });
 
   it("detects Search Console OAuth credentials", () => {

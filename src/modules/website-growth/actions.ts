@@ -2,6 +2,7 @@
 
 import {
   ModuleKey,
+  PlatformRole,
   WebsiteGrowthContentDraftStatus,
   WebsiteGrowthDataSource,
   WebsiteGrowthImportStatus,
@@ -13,11 +14,16 @@ import { revalidatePath } from "next/cache";
 import { parseDelimitedRows, readNumber, readString } from "@/modules/website-growth/csv";
 import {
   buildWebsiteGrowthBuildPackage,
-  mergeBuildPackageIntoDraftJson
+  mergeBuildPackageIntoDraftJson,
+  readWebsiteGrowthBuildPackage
 } from "@/modules/website-growth/build-package";
-import { createWebsiteGrowthContentDraftPayload } from "@/modules/website-growth/content-drafts";
-import { fetchSearchConsoleRows, getWebsiteGrowthIntegrationStatus } from "@/modules/website-growth/integrations";
-import { createWebsiteGrowthPullRequestPackage } from "@/modules/website-growth/github-pr";
+import { reviewWebsiteGrowthClaims } from "@/modules/website-growth/claims-policy";
+import { createAndDispatchWebsiteGrowthBuildRequest } from "@/modules/website-growth/build-requests";
+import {
+  fetchGa4LandingPageRows,
+  fetchSearchConsoleRows,
+  getWebsiteGrowthIntegrationStatus
+} from "@/modules/website-growth/integrations";
 import {
   getOpportunityReviewKey,
   resolveLegacyPageRebuild
@@ -30,9 +36,10 @@ import {
   type OpportunityCandidate
 } from "@/modules/website-growth/opportunities";
 import { parseWebsiteGrowthDataSource } from "@/modules/website-growth/queries";
+import { produceWebsiteGrowthDraft } from "@/modules/website-growth/producer";
 import { createWeeklyWebsiteGrowthPlanForTenant } from "@/modules/website-growth/weekly-plan";
 import { prisma } from "@/server/db";
-import { requireModule, requireMutationAccess } from "@/server/auth/authorization";
+import { requireModule, requireMutationAccess, requireRole } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
 export async function importWebsiteGrowthMetricsAction(formData: FormData) {
@@ -210,6 +217,119 @@ export async function syncSearchConsoleAction() {
         status: WebsiteGrowthImportStatus.ERROR,
         completedAt: new Date(),
         errorMessage: error instanceof Error ? error.message : "Unknown Search Console sync error"
+      }
+    });
+  }
+
+  revalidatePath("/website-growth");
+}
+
+export async function syncGa4Action() {
+  const context = await getAuthenticatedContext();
+  await requireModule(context, ModuleKey.WEBSITE_GROWTH);
+  await requireMutationAccess(context);
+
+  const importRecord = await prisma.websiteGrowthDataImport.create({
+    data: {
+      tenantId: context.tenantId,
+      source: WebsiteGrowthDataSource.GA4_API,
+      status: WebsiteGrowthImportStatus.RUNNING,
+      startedAt: new Date()
+    }
+  });
+
+  try {
+    const status = getWebsiteGrowthIntegrationStatus();
+    if (!status.ga4.configured) {
+      throw new Error(`GA4 is not configured. Missing: ${status.ga4.missing.join(", ")}`);
+    }
+
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(endDate.getDate() - 28);
+    const rows = await fetchGa4LandingPageRows({
+      startDate: formatApiDate(startDate),
+      endDate: formatApiDate(endDate)
+    });
+
+    if (rows.length > 0) {
+      await prisma.websiteGrowthMetric.createMany({
+        data: rows.map((row) => ({
+          tenantId: context.tenantId,
+          source: WebsiteGrowthDataSource.GA4_API,
+          page: row.page,
+          sessions: row.sessions,
+          engagedSessions: row.engagedSessions,
+          engagementRate: row.engagementRate,
+          eventCount: row.eventCount,
+          dateRangeStart: startDate,
+          dateRangeEnd: endDate,
+          raw: row.raw as Prisma.InputJsonValue
+        }))
+      });
+    }
+
+    const ga4ByPage = new Map(rows.map((row) => [normalizePagePath(row.page), row]));
+    const refreshableOpportunities = await prisma.websiteGrowthOpportunity.findMany({
+      where: {
+        tenantId: context.tenantId,
+        status: {
+          in: [
+            WebsiteGrowthOpportunityStatus.NEW,
+            WebsiteGrowthOpportunityStatus.REVIEWING,
+            WebsiteGrowthOpportunityStatus.MONITORING
+          ]
+        }
+      },
+      select: { id: true, targetPage: true, sourcePage: true, evidence: true },
+      take: 500
+    });
+    const enrichmentUpdates: Array<ReturnType<typeof prisma.websiteGrowthOpportunity.update>> = [];
+    for (const opportunity of refreshableOpportunities) {
+      const ga4 = ga4ByPage.get(normalizePagePath(opportunity.targetPage ?? opportunity.sourcePage));
+      if (!ga4) continue;
+      enrichmentUpdates.push(prisma.websiteGrowthOpportunity.update({
+        where: { id: opportunity.id },
+        data: {
+          evidence: {
+            ...readRecord(opportunity.evidence),
+            ga4: {
+              sessions: ga4.sessions,
+              engagedSessions: ga4.engagedSessions,
+              engagementRate: ga4.engagementRate,
+              eventCount: ga4.eventCount,
+              dateRangeStart: formatApiDate(startDate),
+              dateRangeEnd: formatApiDate(endDate)
+            }
+          } as Prisma.InputJsonValue
+        }
+      }));
+    }
+    if (enrichmentUpdates.length > 0) await prisma.$transaction(enrichmentUpdates);
+    const opportunitiesEnriched = enrichmentUpdates.length;
+
+    await prisma.websiteGrowthDataImport.update({
+      where: { id: importRecord.id },
+      data: {
+        status: WebsiteGrowthImportStatus.SUCCESS,
+        rowCount: rows.length,
+        completedAt: new Date(),
+        summary: {
+          rows: rows.length,
+          dateRange: "last_28_days",
+          totalSessions: rows.reduce((sum, row) => sum + row.sessions, 0),
+          opportunitiesEnriched,
+          note: "GA4 landing-page performance is stored as evidence. Lead counts continue to come from Newl's first-party inbound records."
+        }
+      }
+    });
+  } catch (error) {
+    await prisma.websiteGrowthDataImport.update({
+      where: { id: importRecord.id },
+      data: {
+        status: WebsiteGrowthImportStatus.ERROR,
+        completedAt: new Date(),
+        errorMessage: error instanceof Error ? error.message : "Unknown GA4 sync error"
       }
     });
   }
@@ -432,33 +552,13 @@ export async function generateWebsiteGrowthDraftAction(formData: FormData) {
     throw new Error("Missing opportunity ID.");
   }
 
-  const opportunity = await prisma.websiteGrowthOpportunity.findFirst({
-    where: {
-      id: opportunityId,
-      tenantId: context.tenantId
-    }
+  const draft = await produceWebsiteGrowthDraft({
+    tenantId: context.tenantId,
+    opportunityId,
+    actorUserId: context.userId,
+    source: "employee"
   });
-
-  if (!opportunity) {
-    throw new Error("Opportunity was not found.");
-  }
-
-  const draft = await createWebsiteGrowthContentDraftPayload(opportunity);
-
-  await prisma.websiteGrowthContentDraft.create({
-    data: {
-      tenantId: context.tenantId,
-      opportunityId: opportunity.id,
-      source: draft.source,
-      title: draft.title,
-      summary: draft.summary,
-      contentType: draft.contentType,
-      proposedPath: draft.proposedPath,
-      targetPage: opportunity.targetPage,
-      draftJson: draft as Prisma.InputJsonValue,
-      rawResponse: draft.rawResponse ? draft.rawResponse as Prisma.InputJsonValue : undefined
-    }
-  });
+  if (!draft) throw new Error("Opportunity was not found or already has a draft.");
 
   revalidatePath("/website-growth");
 }
@@ -470,9 +570,39 @@ export async function updateWebsiteGrowthDraftAction(formData: FormData) {
 
   const draftId = String(formData.get("draftId") ?? "");
   const status = parseContentDraftStatus(formData.get("status"));
+  const claimsConfirmed = formData.get("claimsConfirmed") === "on";
+
+  if (
+    status === WebsiteGrowthContentDraftStatus.APPROVED ||
+    status === WebsiteGrowthContentDraftStatus.BUILT ||
+    status === WebsiteGrowthContentDraftStatus.PUBLISHED
+  ) {
+    requireRole(context, [PlatformRole.ADMIN, PlatformRole.MANAGER]);
+  }
 
   if (!draftId) {
     throw new Error("Missing draft ID.");
+  }
+
+  const currentDraft = await prisma.websiteGrowthContentDraft.findFirst({
+    where: { id: draftId, tenantId: context.tenantId },
+    include: { opportunity: true }
+  });
+
+  if (!currentDraft) {
+    throw new Error("Draft was not found.");
+  }
+
+  validateHumanDraftTransition(currentDraft.status, status);
+
+  if (status === WebsiteGrowthContentDraftStatus.APPROVED) {
+    const claimReview = reviewWebsiteGrowthClaims(currentDraft.draftJson);
+    if (claimReview.status === "BLOCKED") {
+      throw new Error("This draft contains blocked guarantee or absolute claims. Edit or regenerate it before approval.");
+    }
+    if (claimReview.status === "OWNER_CONFIRMATION_REQUIRED" && !claimsConfirmed) {
+      throw new Error("Confirm the highlighted performance, certification, or customer-proof claims before approval.");
+    }
   }
 
   await prisma.websiteGrowthContentDraft.updateMany({
@@ -489,15 +619,7 @@ export async function updateWebsiteGrowthDraftAction(formData: FormData) {
   });
 
   if (status === WebsiteGrowthContentDraftStatus.APPROVED) {
-    const draft = await prisma.websiteGrowthContentDraft.findFirst({
-      where: {
-        id: draftId,
-        tenantId: context.tenantId
-      },
-      include: {
-        opportunity: true
-      }
-    });
+    const draft = currentDraft;
 
     if (draft) {
       const buildPackage = buildWebsiteGrowthBuildPackage(draft);
@@ -524,6 +646,30 @@ export async function updateWebsiteGrowthDraftAction(formData: FormData) {
           approvedByUserId: context.userId
         }
       });
+
+      await prisma.auditLog.create({
+        data: {
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          action: "website-growth.draft.approved",
+          entityType: "WebsiteGrowthContentDraft",
+          entityId: draft.id,
+          before: { status: currentDraft.status },
+          after: {
+            status: WebsiteGrowthContentDraftStatus.APPROVED,
+            routePath: buildPackage.routePath,
+            claimReview: buildPackage.claimReview,
+            claimsConfirmed
+          } as Prisma.InputJsonValue
+        }
+      });
+
+      await createAndDispatchWebsiteGrowthBuildRequest({
+        context,
+        contentDraftId: draft.id,
+        opportunityId: draft.opportunityId,
+        brief: buildPackage
+      });
     }
   }
 
@@ -531,10 +677,11 @@ export async function updateWebsiteGrowthDraftAction(formData: FormData) {
   revalidatePath(`/website-growth/drafts/${draftId}`);
 }
 
-export async function createWebsiteGrowthDraftPullRequestAction(formData: FormData) {
+export async function retryWebsiteGrowthDeveloperBuildAction(formData: FormData) {
   const context = await getAuthenticatedContext();
   await requireModule(context, ModuleKey.WEBSITE_GROWTH);
   await requireMutationAccess(context);
+  requireRole(context, [PlatformRole.ADMIN, PlatformRole.MANAGER]);
 
   const draftId = String(formData.get("draftId") ?? "");
 
@@ -543,45 +690,17 @@ export async function createWebsiteGrowthDraftPullRequestAction(formData: FormDa
   }
 
   const draft = await prisma.websiteGrowthContentDraft.findFirst({
-    where: {
-      id: draftId,
-      tenantId: context.tenantId
-    },
-    include: {
-      opportunity: true
-    }
+    where: { id: draftId, tenantId: context.tenantId, status: WebsiteGrowthContentDraftStatus.APPROVED },
+    select: { id: true, opportunityId: true, draftJson: true }
   });
-
-  if (!draft) {
-    throw new Error("Draft was not found.");
-  }
-
-  const buildPackage = buildWebsiteGrowthBuildPackage(draft);
-  const draftJsonWithPackage = mergeBuildPackageIntoDraftJson(draft.draftJson, buildPackage);
-  const pullRequest = await createWebsiteGrowthPullRequestPackage({ buildPackage });
-
-  await prisma.websiteGrowthContentDraft.updateMany({
-    where: {
-      id: draftId,
-      tenantId: context.tenantId
-    },
-    data: {
-      status: WebsiteGrowthContentDraftStatus.BUILT,
-      draftJson: mergePullRequestIntoDraftJson(draftJsonWithPackage, pullRequest),
-      pullRequestUrl: pullRequest.pullRequestUrl,
-      builtUrl: null
-    }
-  });
-
-  await prisma.websiteGrowthOpportunity.updateMany({
-    where: {
-      id: draft.opportunityId,
-      tenantId: context.tenantId
-    },
-    data: {
-      status: WebsiteGrowthOpportunityStatus.IN_PROGRESS,
-      approvedByUserId: context.userId
-    }
+  if (!draft) throw new Error("Only an approved Website Growth draft can start a developer build.");
+  const buildPackage = readWebsiteGrowthBuildPackage(draft.draftJson);
+  if (!buildPackage) throw new Error("The approved draft does not contain an immutable build package.");
+  await createAndDispatchWebsiteGrowthBuildRequest({
+    context,
+    contentDraftId: draft.id,
+    opportunityId: draft.opportunityId,
+    brief: buildPackage
   });
 
   revalidatePath("/website-growth");
@@ -614,7 +733,22 @@ async function createMissingOpportunities(tenantId: string, candidates: Opportun
     });
 
     if (existing) {
-      if (legacyRebuild) {
+      const refreshable = await prisma.websiteGrowthOpportunity.findFirst({
+        where: {
+          id: existing.id,
+          tenantId,
+          status: {
+            in: [
+              WebsiteGrowthOpportunityStatus.NEW,
+              WebsiteGrowthOpportunityStatus.REVIEWING,
+              WebsiteGrowthOpportunityStatus.MONITORING
+            ]
+          }
+        },
+        select: { id: true }
+      });
+
+      if (legacyRebuild || refreshable) {
         await prisma.websiteGrowthOpportunity.update({
           where: { id: existing.id },
           data: {
@@ -716,16 +850,21 @@ function parseContentDraftStatus(value: FormDataEntryValue | null) {
   return value as WebsiteGrowthContentDraftStatus;
 }
 
-function mergePullRequestIntoDraftJson(
-  draftJson: Prisma.JsonValue | Prisma.InputJsonValue,
-  pullRequest: unknown
-): Prisma.InputJsonValue {
-  const record = isRecord(draftJson) ? draftJson : {};
+function validateHumanDraftTransition(
+  current: WebsiteGrowthContentDraftStatus,
+  next: WebsiteGrowthContentDraftStatus
+) {
+  if (current === next) return;
+  const allowed: WebsiteGrowthContentDraftStatus[] =
+    current === WebsiteGrowthContentDraftStatus.DRAFT
+      ? [WebsiteGrowthContentDraftStatus.APPROVED, WebsiteGrowthContentDraftStatus.REJECTED]
+      : current === WebsiteGrowthContentDraftStatus.REJECTED
+        ? [WebsiteGrowthContentDraftStatus.DRAFT]
+        : [];
 
-  return {
-    ...record,
-    pullRequestPackage: pullRequest as Prisma.InputJsonValue
-  } as Prisma.InputJsonValue;
+  if (!allowed.includes(next)) {
+    throw new Error(`Draft status cannot move from ${current} to ${next} through the review form.`);
+  }
 }
 
 function normalizeRate(value: number | null) {
@@ -750,4 +889,17 @@ function pageUrlToTopic(pageUrl: string) {
   } catch {
     return pageUrl.replace(/^https?:\/\//, "").replaceAll("-", " ");
   }
+}
+
+function normalizePagePath(value?: string | null) {
+  if (!value) return "/";
+  try {
+    return new URL(value, "https://www.newlgroup.com").pathname.replace(/\/$/, "") || "/";
+  } catch {
+    return value.split("?")[0]?.replace(/\/$/, "") || "/";
+  }
+}
+
+function readRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }

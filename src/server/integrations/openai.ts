@@ -45,6 +45,7 @@ type Tier1DraftResult = {
 
 export type WebsiteGrowthDraftContext = {
   model: string;
+  reasoningEffort: "low" | "medium" | "high" | "xhigh";
   opportunity: {
     action: string;
     topic: string;
@@ -232,7 +233,7 @@ export async function generateWebsiteGrowthContentDraft(
     },
     body: JSON.stringify({
       model: context.model,
-      temperature: 0.35,
+      reasoning_effort: context.reasoningEffort,
       response_format: {
         type: "json_object"
       },
@@ -345,6 +346,8 @@ function buildWebsiteGrowthDraftPrompt(context: WebsiteGrowthDraftContext) {
         "Use the websiteContext and selectedPagePattern to mirror Newl hero, proof card, section, FAQ, internal link, and CTA patterns.",
         "Reference existing page components by name when giving implementation notes.",
         "Use FAQs and internal links to support conversion and topical authority.",
+        "Do not introduce numerical performance, comparative, guarantee, certification, affiliation, or customer-proof claims unless the supplied evidence contains the exact claim and source.",
+        "Prefer concrete capability language over superlatives or promises.",
         "Include a review checklist for a human approver before anything is posted."
       ],
       websiteContext: context.websiteContext,

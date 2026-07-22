@@ -1,53 +1,72 @@
-# Website growth and SEO: Overview
+# Website Growth and SEO
 
-> Evidence status: Confirmed from code for file locations and schema references; business workflow details not explicitly encoded are marked Requires employee confirmation.
+> Evidence status: implementation details are confirmed from code. Claims, publishing limits, and business outcomes remain human-approved.
 
-## Purpose and status
+## Purpose
 
-Website growth and SEO is documented because code, routes, schema, or tests were located. Main evidence: `src/app/(authenticated)/website-growth/*`, `src/modules/website-growth/*`, website growth Prisma models/tests.
+Website Growth is Newl's control plane for turning Search Console, GA4, first-party inbound, and manual research into approved website work. It owns evidence, prioritization, the page brief, claim review, approval, and build status. It never merges or publishes the website.
 
-## Workflow / rules summary
+The page-producing role is called **Scout**, not Hunter. Hunter remains a lead-discovery collector. Scout is a separate OpenClaw agent because its inputs, approval boundary, evaluation criteria, and website access are materially different.
 
-- Entry points are protected authenticated pages and/or API routes for this module.
-- Server-side pages and mutating APIs should validate tenant context and module entitlement before data access.
-- Data persistence uses tenant-scoped Prisma models where a database model exists.
-- External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
-- Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
-
-## Data model
-
-Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.
+## Workflow
 
 ```mermaid
 flowchart LR
-  UI[Authenticated UI/API] --> Auth[Auth + module guard]
-  Auth --> Service[Module service]
-  Service --> DB[(Tenant-scoped Prisma tables)]
-  Service --> Ext[External services when configured]
+  GSC[Search Console] --> Scout[Scout producer]
+  GA4[GA4 landing pages] --> Scout
+  Leads[First-party inbound] --> Scout
+  Repo[Website repo context] --> Scout
+  Scout --> Brief[Versioned page brief + claim review]
+  Brief --> Approval{Owner or manager approves}
+  Approval -->|approved| Build[Codex developer workflow]
+  Build --> Checks[Lint + production build]
+  Checks --> PR[Draft PR + Vercel preview]
+  PR --> Merge{Owner merge decision}
+  Merge --> Monitor[Search Console + GA4 monitoring]
 ```
 
-## Permissions
+Approval of a brief starts the developer workflow automatically. It is not approval to merge. The website repository workflow uses a read-only Codex job to create and verify a patch, then a separate job without the OpenAI key pushes the patch and opens a draft PR.
 
-Roles and defaults are in `src/server/auth/role-policy.ts`. Runtime checks are in `src/server/auth/authorization.ts`; gaps should be treated as requiring code review before enabling production writes.
+## Model routing
 
-## Failure modes
+| Work | Default | Reasoning | Notes |
+| --- | --- | --- | --- |
+| Imports, scoring, clustering, state checks | Deterministic code | N/A | No model should perform exact comparisons or status changes. |
+| Scout page brief | `gpt-5.6-sol` | `medium` | Quality-first while volume is low and the prompt is being evaluated. Terra may replace Sol for lower-risk briefs after matched evals. |
+| Website developer | Codex `gpt-5.6-sol` | `high` | Runs only after approval, in the website repo, with tests and a draft PR. |
+| Kimi K3 | Shadow challenger only | Provider-specific | No automatic repository writes until it passes the same brief, claims, build, and visual-review eval set. |
 
-Expected failures include missing tenant entitlement, read-only mutation attempts, validation errors, missing integration credentials, duplicate records, empty parser results, external API errors, timeouts, and partial job completion. Recovery should use module UI review screens, audit/job records, and documented dry-run scripts before live writes.
+Model changes must be evaluated against the same saved opportunities. Compare factuality, claim violations, duplicated intent, route correctness, design fit, lint/build success, reviewer edits, latency, and cost. Do not choose a model from benchmark scores alone.
 
-## Testing
+## Data sources
 
-Relevant tests are under `tests/` and generally named after the module. Recommended checks: `npm test`, `npm run lint`, `npm run typecheck`, and targeted route/service tests. Live integration scripts must not be run without explicit approval and safe credentials.
+- Search Console: query/page clicks, impressions, CTR, and position.
+- GA4 Data API: landing page sessions, engaged sessions, engagement rate, and event count for the last 28 days.
+- Newl inbound: form submissions and lead-producing pages. These remain the source of truth for lead counts.
+- Manual CSV/TSV: historical Search Console, GA4, Semrush, or one-off research.
+- Website repository context: routes, templates, components, navigation, sitemap, and current content.
 
-## Source map
+Existing non-final opportunities are refreshed when matching evidence is re-imported. Approved, in-progress, published, and rejected records are not silently rewritten.
 
-| Responsibility | Main files | Supporting files | Tests |
-|---|---|---|---|
-| UI and routes | See evidence paths above | `src/components/app-shell.tsx` | module-named tests under `tests/` |
-| Services/actions/queries | `src/modules/website*` or evidence paths above | `src/server/*` | module-named tests |
-| Schema | `prisma/schema.prisma` | `prisma/migrations/*` | schema-dependent unit tests |
+## Claims policy
 
-## Open questions
+- Capability descriptions are allowed when supported by the current website/repository context.
+- Numerical performance claims need a definition, source, reporting period, sample, owner, and next review date.
+- Certifications and affiliations need current documentary evidence and an expiry/review date.
+- Customer names, logos, testimonials, case studies, and volumes need explicit permission.
+- Absolute and guarantee language is blocked; human approval does not make an unbounded claim safe.
+- Public metrics currently visible on the website, including inventory/order accuracy and dock-to-stock timing, should be treated as requiring owner confirmation until their internal source and reporting period are attached.
 
-- Which status values map to employee-approved business language? Requires employee confirmation.
-- Which write actions should require two-person approval? Requires owner confirmation.
-- Which external integration credentials should be moved from env fallback to tenant-scoped settings first? Requires owner confirmation.
+The initial repository research and evidence requests are recorded in `claims-register.md`.
+
+## Capacity and cost controls
+
+The developer run belongs in GitHub Actions rather than a Vercel function. Vercel serves the control plane and preview, while repository checkout, Codex execution, lint, and production build run in GitHub. Weekly publish guides remain two core pages, four supporting items, and six quick optimizations; they are queue limits, not automatic publishing targets.
+
+## Human boundaries
+
+- Admin or Manager may approve a brief and start a build.
+- Sales and Operations may prepare and review opportunities but may not approve developer or publishing states.
+- Codex may edit only the isolated website branch created for the build request.
+- Vercel Preview is required for visual review.
+- The owner decides whether to merge. Production deployment is never initiated by Newl Apps or Scout.

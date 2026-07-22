@@ -12,13 +12,15 @@ import Link from "next/link";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { readWebsiteGrowthBuildPackage } from "@/modules/website-growth/build-package";
+import { reviewWebsiteGrowthClaims } from "@/modules/website-growth/claims-policy";
 import {
   createWeeklyWebsiteGrowthPlanAction,
-  createWebsiteGrowthDraftPullRequestAction,
   generateWebsiteGrowthDraftAction,
   generateWebsiteGrowthOpportunitiesAction,
   importWebsiteGrowthMetricsAction,
   organizeWebsiteGrowthQueueAction,
+  retryWebsiteGrowthDeveloperBuildAction,
+  syncGa4Action,
   syncSearchConsoleAction,
   updateWebsiteGrowthDraftAction,
   updateWebsiteGrowthOpportunityAction
@@ -100,6 +102,26 @@ export default async function WebsiteGrowthPage({
         </div>
       </section>
 
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-primary">Developer handoff</p>
+            <h2 className="mt-2 text-base font-semibold text-foreground">Approved briefs start a Codex website build.</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-mutedForeground">
+              Codex builds on an isolated website branch, runs the website checks, and opens a draft PR. Only you decide whether to merge it.
+            </p>
+          </div>
+          <span className={shell.developerDispatch.configured ? "rounded-full border border-success/25 bg-success/10 px-3 py-1 text-xs font-semibold text-success" : "rounded-full border border-warning/25 bg-warning/10 px-3 py-1 text-xs font-semibold text-warning"}>
+            {shell.developerDispatch.configured ? "Dispatch ready" : "Configuration required"}
+          </span>
+        </div>
+        <dl className="mt-4 grid gap-3 md:grid-cols-3">
+          <SummaryRow label="Developer model" value={`${shell.developerDispatch.model} (${shell.developerDispatch.reasoningEffort})`} />
+          <SummaryRow label="Website repository" value={shell.developerDispatch.repository ?? "Not configured"} />
+          <SummaryRow label="Missing configuration" value={shell.developerDispatch.missing.join(", ") || "None"} />
+        </dl>
+      </section>
+
       <section className="rounded-lg border border-border bg-card shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border p-5">
           <div>
@@ -136,11 +158,18 @@ export default async function WebsiteGrowthPage({
                 API status is checked from environment variables. Manual imports remain available for Semrush and historical exports.
               </p>
             </div>
-            <form action={syncSearchConsoleAction}>
-              <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
-                Sync Search Console
-              </button>
-            </form>
+            <div className="flex flex-wrap gap-2">
+              <form action={syncSearchConsoleAction}>
+                <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
+                  Sync Search Console
+                </button>
+              </form>
+              <form action={syncGa4Action}>
+                <button className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
+                  Sync GA4
+                </button>
+              </form>
+            </div>
           </div>
 
           <div className="mt-4 grid gap-3 md:grid-cols-3">
@@ -156,11 +185,11 @@ export default async function WebsiteGrowthPage({
             />
             <IntegrationCard
               title="GA4"
-              status={shell.integrations.ga4.configured ? "Ready" : "Planned"}
+              status={shell.integrations.ga4.configured ? "Ready" : "Needs API"}
               caption={
                 shell.integrations.ga4.configured
                   ? `Property: ${shell.integrations.ga4.propertyId}`
-                  : "Use manual export until GA4 API is connected"
+                  : `Missing ${shell.integrations.ga4.missing.length} env values`
               }
               ready={shell.integrations.ga4.configured}
             />
@@ -485,6 +514,7 @@ function PreparedOpportunityCard({
   const draft = opportunity.contentDrafts[0] ?? null;
   const draftPayload = draft ? readDraftPayload(draft.draftJson) : null;
   const buildPackage = draft ? readWebsiteGrowthBuildPackage(draft.draftJson) : null;
+  const claimReview = draft ? reviewWebsiteGrowthClaims(draft.draftJson) : null;
   const legacyRebuild = resolveLegacyPageRebuild(opportunity);
 
   return (
@@ -575,6 +605,7 @@ function PreparedOpportunityCard({
                 <SummaryRow label="Route" value={buildPackage.routePath} />
                 <SummaryRow label="Branch" value={buildPackage.branchName} />
                 <SummaryRow label="Repo" value={buildPackage.targetRepo} />
+                <SummaryRow label="Developer run" value="Starts automatically after approval" />
               </dl>
               <p className="mt-2 text-xs leading-5 text-mutedForeground">
                 Approval prepared the implementation package. The next automation step can use this to open a GitHub PR and Vercel preview without publishing directly.
@@ -587,13 +618,13 @@ function PreparedOpportunityCard({
                   View GitHub PR
                 </Link>
               ) : (
-                <form action={createWebsiteGrowthDraftPullRequestAction} className="mt-3">
+                <form action={retryWebsiteGrowthDeveloperBuildAction} className="mt-3">
                   <input type="hidden" name="draftId" value={draft.id} />
                   <button className="w-full rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
-                    Create GitHub PR
+                    Check or retry developer build
                   </button>
                   <p className="mt-2 text-xs leading-5 text-mutedForeground">
-                    Creates or updates a website branch, writes the build package, opens a PR, and saves the PR link here.
+                    Retries the approved Codex workflow after a configuration or dispatch failure. Approval starts the first run automatically.
                   </p>
                 </form>
               )}
@@ -611,8 +642,26 @@ function PreparedOpportunityCard({
               </div>
             </details>
           ) : null}
+          {claimReview && claimReview.status !== "CLEAR" ? (
+            <div className={claimReview.status === "BLOCKED" ? "mt-3 rounded-md border border-danger/25 bg-danger/10 p-3" : "mt-3 rounded-md border border-warning/25 bg-warning/10 p-3"}>
+              <p className="text-xs font-semibold uppercase tracking-wide text-foreground">
+                {claimReview.status === "BLOCKED" ? "Claim language must be revised" : "Claim confirmation required"}
+              </p>
+              <ul className="mt-2 space-y-2 text-xs leading-5 text-mutedForeground">
+                {claimReview.findings.slice(0, 4).map((finding) => (
+                  <li key={`${finding.category}-${finding.excerpt}`}>{finding.excerpt} — {finding.reason}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           <form action={updateWebsiteGrowthDraftAction} className="mt-4 grid gap-2 sm:grid-cols-[1fr,auto]">
             <input type="hidden" name="draftId" value={draft.id} />
+            {claimReview?.status === "OWNER_CONFIRMATION_REQUIRED" ? (
+              <label className="flex items-start gap-2 text-xs leading-5 text-mutedForeground sm:col-span-2">
+                <input type="checkbox" name="claimsConfirmed" className="mt-1" />
+                I confirm the highlighted claims have current evidence, permission where needed, and an owner/review date.
+              </label>
+            ) : null}
             <select
               name="status"
               defaultValue={draft.status}
@@ -621,8 +670,6 @@ function PreparedOpportunityCard({
               <option value={WebsiteGrowthContentDraftStatus.DRAFT}>Keep as draft</option>
               <option value={WebsiteGrowthContentDraftStatus.APPROVED}>Approve draft for build</option>
               <option value={WebsiteGrowthContentDraftStatus.REJECTED}>Reject draft</option>
-              <option value={WebsiteGrowthContentDraftStatus.BUILT}>Mark built</option>
-              <option value={WebsiteGrowthContentDraftStatus.PUBLISHED}>Mark published</option>
             </select>
             <button className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
               Save draft
