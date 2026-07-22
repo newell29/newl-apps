@@ -647,6 +647,11 @@ function resolveTeamshipApiBaseUrl(credentials: TeamshipRuntimeCredentials | nul
 }
 
 function resolveTeamshipWebBaseUrl(apiBaseUrl: string) {
+  const configuredWebBaseUrl = process.env.TEAMSHIP_APP_BASE_URL?.trim();
+  if (configuredWebBaseUrl) {
+    return configuredWebBaseUrl.replace(/\/+$/, "");
+  }
+
   try {
     return new URL(apiBaseUrl).origin.replace(/\/+$/, "");
   } catch {
