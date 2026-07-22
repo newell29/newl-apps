@@ -152,13 +152,14 @@ export function createTeamshipPlaywrightReadAdapter(
       }
 
       const palletCountInputs = page.locator("input#pallets_count");
-      if (await palletCountInputs.count() !== 1) {
-        throw new Error("The Teamship shipping-order page did not expose one unambiguous pallet count.");
-      }
+      const palletCount = await readUniqueTeamshipPalletCountInput(
+        palletCountInputs,
+        options.navigationTimeoutMs ?? 15_000
+      );
 
       return [parseTeamshipShippingOrderPalletPreflight({
         teamshipOrderId: input.teamshipOrderId,
-        palletCount: await palletCountInputs.inputValue(),
+        palletCount,
         customerName: input.scope.customerName,
         warehouseName: input.scope.warehouseName
       })];
@@ -187,6 +188,15 @@ export function parseTeamshipShippingOrderPalletPreflight(input: {
     throw new Error("The Teamship shipping-order pallet count was outside the allowed range.");
   }
   return { teamshipOrderId, palletCount, customerName, warehouseName };
+}
+
+export async function readUniqueTeamshipPalletCountInput(locator: Locator, timeoutMs: number) {
+  const first = locator.first();
+  await first.waitFor({ state: "attached", timeout: timeoutMs });
+  if (await locator.count() !== 1) {
+    throw new Error("The Teamship shipping-order page did not expose one unambiguous pallet count.");
+  }
+  return first.inputValue();
 }
 
 async function runBrowserRead<T>(
