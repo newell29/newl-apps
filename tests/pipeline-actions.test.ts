@@ -16,6 +16,8 @@ const requireModule = vi.fn();
 const requireMutationAccess = vi.fn();
 const fetchApolloContactsForCompany = vi.fn();
 const apolloCompanyMatchCreate = vi.fn();
+const recordLeadOutcomeEvent = vi.fn();
+const recordLeadScoreSnapshot = vi.fn();
 
 vi.mock("@/server/db", () => ({
   prisma: {
@@ -59,6 +61,13 @@ vi.mock("@/server/integrations/apollo", () => ({
   fetchApolloContactsForCompany: (...args: unknown[]) => fetchApolloContactsForCompany(...args)
 }));
 
+vi.mock("@/modules/lead-gen/score-history", () => ({
+  COMPANY_SCORING_MODEL_VERSION: "company-v2.0",
+  CONTACT_SCORING_MODEL_VERSION: "contact-v1.0",
+  recordLeadOutcomeEvent: (...args: unknown[]) => recordLeadOutcomeEvent(...args),
+  recordLeadScoreSnapshot: (...args: unknown[]) => recordLeadScoreSnapshot(...args)
+}));
+
 import {
   bulkAssignLeadOwnerAction,
   bulkPushContactsToApolloAction,
@@ -98,6 +107,8 @@ describe("pipeline bulk actions", () => {
     contactUpdate.mockResolvedValue({});
     contactUpdateMany.mockResolvedValue({ count: 1 });
     apolloCompanyMatchCreate.mockResolvedValue({});
+    recordLeadOutcomeEvent.mockResolvedValue({});
+    recordLeadScoreSnapshot.mockResolvedValue({});
     integrationCredentialFindFirst.mockResolvedValue({
       publicConfig: {
         apolloSequenceDirectory: [
@@ -177,6 +188,14 @@ describe("pipeline bulk actions", () => {
       data: { stage: LeadPipelineStage.QUALIFIED }
     });
     expect(companyUpdate).not.toHaveBeenCalled();
+    expect(recordLeadOutcomeEvent).toHaveBeenCalledTimes(2);
+    expect(recordLeadOutcomeEvent).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      tenantId: "tenant-1",
+      companyId: "company-for-lead-1",
+      leadId: "lead-1",
+      outcomeType: "PIPELINE_STAGE_CHANGED",
+      currentValue: LeadPipelineStage.QUALIFIED
+    }));
     expect(revalidatePath).toHaveBeenCalledWith("/lead-gen/pipeline");
   });
 

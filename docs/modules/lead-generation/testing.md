@@ -78,3 +78,9 @@ Scoring regression coverage must also verify:
 4. default role penalties deprioritize sales-only contacts without suppressing mixed titles that match logistics or operations;
 5. invalid windows, contact tier thresholds, company weight totals, and mid-market TEU ranges are rejected before persistence.
 6. the default Contacts directory includes unassigned pipeline contacts, the `UNASSIGNED` filter remains tenant scoped, and queueing refuses contacts without a sales rep.
+7. identical scoring configuration objects produce the same fingerprint regardless of key order, while a changed setting produces a different fingerprint;
+8. score snapshots and outcome events always include `tenantId`, and scoring-history reads filter both tables by the authenticated tenant;
+9. ingestion records a company snapshot after its evidence and persisted pipeline score are refreshed;
+10. candidate and pipeline mutations record the previous and current values without creating events from read-only page loads.
+
+The `20260722193000_add_lead_scoring_history` migration must remain additive: it may create the two history tables, indexes, and foreign keys, but must not drop, rename, truncate, update, or backfill existing tables.

@@ -318,6 +318,14 @@ export async function calculateLeadPipelineScoreForCompany(
   tenant: Pick<TenantContext, "tenantId">,
   companyId: string
 ) {
+  const scoring = await calculateLeadPipelineScoringForCompany(tenant, companyId);
+  return scoring?.score ?? null;
+}
+
+export async function calculateLeadPipelineScoringForCompany(
+  tenant: Pick<TenantContext, "tenantId">,
+  companyId: string
+) {
   const [scoringConfig, searchProfiles] = await Promise.all([
     loadTradeMiningScoringConfig(tenant),
     loadSearchProfileSummaries(tenant)
@@ -352,13 +360,20 @@ export async function calculateLeadPipelineScoreForCompany(
 
   const evidence = summarizeTradeMiningEvidence(company.importRecords, searchProfiles);
 
-  return scoreCompanyFromEvidence({
+  const scoring = scoreCompanyFromEvidence({
     companyPriorityScore: company.priorityScore,
     candidateStatus: company.candidateStatus,
     alreadyInPipeline: false,
     evidence,
     config: scoringConfig
-  }).score;
+  });
+
+  return {
+    ...scoring,
+    scoringConfig,
+    searchProfileId: evidence.searchProfile?.id ?? null,
+    evidenceAsOf: evidence.latestShipmentDate
+  };
 }
 
 export async function getCandidateFeedFilters(tenant: TenantContext) {
