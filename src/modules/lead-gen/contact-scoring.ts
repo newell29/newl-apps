@@ -110,6 +110,14 @@ export function getContactSequencePushBlockReason(contactStatus: ContactStatus) 
   return null;
 }
 
+export function getContactApolloAssignmentBlockReason(assignedRep: string | null) {
+  if (!assignedRep?.trim()) {
+    return "Assign a sales rep before pushing this contact to Apollo.";
+  }
+
+  return null;
+}
+
 function scoreRoleFit(title: string | null, department: string | null, config: ContactScoringConfig) {
   const roleText = `${title ?? ""} ${department ?? ""}`.trim();
 

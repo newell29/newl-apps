@@ -39,6 +39,7 @@ import {
   tradeMiningCompanyIdentityRoleOptions
 } from "@/modules/lead-gen/search-profile-validation";
 import {
+  getContactApolloAssignmentBlockReason,
   getContactScoringBlockReason,
   getContactSequencePushBlockReason,
   scoreContact
@@ -1071,6 +1072,7 @@ export async function bulkPushContactsToApolloAction(
         id: true,
         companyId: true,
         contactStatus: true,
+        assignedRep: true,
         company: {
           select: {
             candidateStatus: true,
@@ -1096,6 +1098,11 @@ export async function bulkPushContactsToApolloAction(
         contact.company.candidateStatus === CandidateStatus.DISQUALIFIED
       ) {
         throw new Error("The contact's company is blocked from prospecting.");
+      }
+
+      const assignmentBlockReason = getContactApolloAssignmentBlockReason(contact.assignedRep);
+      if (assignmentBlockReason) {
+        throw new Error(assignmentBlockReason);
       }
     }
 
@@ -2452,20 +2459,25 @@ async function validateApolloPushCandidate({
     }
   }
 
-  if (!contact.assignedRep) {
-    return { ok: false, reason: "Assign a sales rep before pushing this contact to Apollo." };
+  const assignedRep = contact.assignedRep?.trim() ?? null;
+  const assignmentBlockReason = getContactApolloAssignmentBlockReason(assignedRep);
+  if (!assignedRep || assignmentBlockReason) {
+    return {
+      ok: false,
+      reason: assignmentBlockReason ?? "Assign a sales rep before pushing this contact to Apollo."
+    };
   }
 
   const localOwner = await resolveAssignedRepUser({
     tenantId,
-    assignedRep: contact.assignedRep
+    assignedRep
   });
 
   if (!localOwner) {
     return { ok: false, reason: "Assigned rep no longer exists in Newl Apps." };
   }
 
-  if (contact.assignedRep !== localOwner.id) {
+  if (assignedRep !== localOwner.id) {
     await prisma.contact.update({
       where: {
         id: contact.id

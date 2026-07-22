@@ -15,7 +15,7 @@ import {
 import { prisma } from "@/server/db";
 import { tenantWhere } from "@/server/tenant-query";
 import type { TenantContext } from "@/server/tenant-context";
-import { scoreContact } from "@/modules/lead-gen/contact-scoring";
+import { getContactApolloAssignmentBlockReason, scoreContact } from "@/modules/lead-gen/contact-scoring";
 import {
   classifyTradeMiningIndustryFromRecords,
   INDUSTRY_OPTIONS
@@ -1037,7 +1037,9 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
       draftStatus: readDraftStatus(scoring.tier, draft?.status ?? null, requiresAiDraft),
       lastTouchAt: contact.lastTouchAt,
       lastReplyAt: contact.lastReplyAt,
+      assignedRepValue: contact.assignedRep,
       assignedRep: contact.assignedRep ?? "Unassigned",
+      apolloAssignmentBlockReason: getContactApolloAssignmentBlockReason(contact.assignedRep),
       updatedAt: contact.updatedAt
     };
   });
@@ -1205,11 +1207,8 @@ function sortSuggestions(values: Set<string>) {
   return [...values].sort((left, right) => left.localeCompare(right));
 }
 
-function buildContactDirectoryWhere(tenant: TenantContext, filters: ContactDirectoryFilters) {
+export function buildContactDirectoryWhere(tenant: TenantContext, filters: ContactDirectoryFilters) {
   const where: Prisma.ContactWhereInput = {
-    assignedRep: {
-      not: null
-    },
     company: {
       leads: {
         some: tenantWhere(tenant)
