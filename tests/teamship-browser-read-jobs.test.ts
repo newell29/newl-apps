@@ -68,7 +68,8 @@ describe("Teamship browser read job boundary", () => {
       searchInventoryAll: expect.any(Function),
       searchLpn: expect.any(Function),
       getReceivingOrder: expect.any(Function),
-      getProductHistory: expect.any(Function)
+      getProductHistory: expect.any(Function),
+      getShippingOrderPallets: expect.any(Function)
     });
   });
 
@@ -119,5 +120,36 @@ describe("Teamship browser read job boundary", () => {
     });
     expect(JSON.stringify(result)).not.toContain("billingRate");
     expect(JSON.stringify(result)).not.toContain("999");
+  });
+
+  it("accepts only a bounded whole pallet count for an exact shipping order", () => {
+    expect(parseTeamshipBrowserJobResult({
+      operation: "getShippingOrderPallets",
+      rows: [{
+        teamshipOrderId: "31064",
+        palletCount: 1,
+        customerName: "Garland Canada Distribution",
+        warehouseName: "Annagem",
+        editableBolWeights: "secret"
+      }]
+    }, "getShippingOrderPallets")).toEqual({
+      operation: "getShippingOrderPallets",
+      rows: [{
+        teamshipOrderId: "31064",
+        palletCount: 1,
+        customerName: "Garland Canada Distribution",
+        warehouseName: "Annagem"
+      }]
+    });
+
+    expect(() => parseTeamshipBrowserJobResult({
+      operation: "getShippingOrderPallets",
+      rows: [{
+        teamshipOrderId: "31064",
+        palletCount: 0,
+        customerName: "Garland Canada Distribution",
+        warehouseName: "Annagem"
+      }]
+    }, "getShippingOrderPallets")).toThrow(/1 to 100/i);
   });
 });

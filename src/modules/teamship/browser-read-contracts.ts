@@ -76,6 +76,13 @@ export type TeamshipBrowserProductHistory = {
   }>;
 };
 
+export type TeamshipBrowserShippingOrderPallets = {
+  teamshipOrderId: string;
+  palletCount: number;
+  customerName: string;
+  warehouseName: string;
+};
+
 type TeamshipBrowserRequest = {
   credentials: TeamshipStoredCredentials;
   scope: TeamshipBrowserScope;
@@ -86,6 +93,7 @@ export type TeamshipBrowserReadAdapter = {
   searchLpn(input: TeamshipBrowserRequest & { queryType: "SKU" | "LPN" | "SERIAL"; query: string }): Promise<TeamshipBrowserLpnRow[]>;
   getReceivingOrder(input: TeamshipBrowserRequest & { orderId: string }): Promise<TeamshipBrowserReceivingOrder[]>;
   getProductHistory(input: TeamshipBrowserRequest & { productId: string }): Promise<TeamshipBrowserProductHistory[]>;
+  getShippingOrderPallets?(input: TeamshipBrowserRequest & { teamshipOrderId: string }): Promise<TeamshipBrowserShippingOrderPallets[]>;
 };
 
 export const TEAMSHIP_BROWSER_READ_ALLOWED_CONTROLS = [

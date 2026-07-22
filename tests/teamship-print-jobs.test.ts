@@ -64,8 +64,12 @@ describe("Teamship print jobs", () => {
   });
 
   it("creates a tenant-scoped approval plan for one exact Garland order", async () => {
-    const stored = storedJob();
+    const stored = storedJob({
+      approvedPalletCount: 1,
+      documentPlan: { pickingListCopies: 1, bolCopies: 1, outboundLabelCopies: 1 }
+    });
     teamshipPrintJob.create.mockResolvedValue(stored);
+    const preflightPalletCount = vi.fn().mockResolvedValue(1);
     const findOrders = vi.fn().mockResolvedValue([{
       id: 30666,
       teamship_internal_id: 31064,
@@ -78,12 +82,12 @@ describe("Teamship print jobs", () => {
     const result = await createTeamshipPrintPlan(context, {
       shippingOrderNumber: "30666",
       requestKey: "a".repeat(64)
-    }, { findOrders });
+    }, { findOrders, preflightPalletCount });
 
     expect(result).toMatchObject({
       shippingOrderNumber: "30666",
       status: "PENDING_APPROVAL",
-      approvedPalletCount: 2,
+      approvedPalletCount: 1,
       printerPlan: { outboundLabels: { exactName: "BIXOLON SRP-770III" } }
     });
     expect(teamshipPrintJob.create).toHaveBeenCalledWith(expect.objectContaining({
@@ -99,6 +103,32 @@ describe("Teamship print jobs", () => {
       orderIdentifier: "30666",
       preferUiPallets: true
     });
+    expect(preflightPalletCount).toHaveBeenCalledWith({
+      context,
+      teamshipOrderId: "31064",
+      customerName: "Garland Canada Distribution",
+      warehouseName: "Annagem"
+    });
+    expect(teamshipPrintJob.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ approvedPalletCount: 1 })
+    }));
+  });
+
+  it("does not create an approval request when the local page preflight fails", async () => {
+    const findOrders = vi.fn().mockResolvedValue([{
+      id: 30666,
+      teamship_internal_id: 31064,
+      customer: { company: "Garland Canada Distribution" },
+      warehouse_name: "Annagem",
+      pallet_dims: [{ quantity: 2 }]
+    }]);
+    const preflightPalletCount = vi.fn().mockRejectedValue(new Error("browser unavailable"));
+
+    await expect(createTeamshipPrintPlan(context, {
+      shippingOrderNumber: "30666",
+      requestKey: "e".repeat(64)
+    }, { findOrders, preflightPalletCount })).rejects.toThrow(/browser unavailable/i);
+    expect(teamshipPrintJob.create).not.toHaveBeenCalled();
   });
 
   it("fails closed when Teamship returns conflicting internal order IDs", async () => {

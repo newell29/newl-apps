@@ -106,6 +106,20 @@ async function executeJob(
       rows: await adapter.getProductHistory({ credentials: job.credentials, scope: job.scope, productId: job.input.productId })
     };
   }
+  if (
+    job.operation === "getShippingOrderPallets"
+    && job.input.operation === "getShippingOrderPallets"
+    && adapter.getShippingOrderPallets
+  ) {
+    return {
+      operation: job.operation,
+      rows: await adapter.getShippingOrderPallets({
+        credentials: job.credentials,
+        scope: job.scope,
+        teamshipOrderId: job.input.teamshipOrderId
+      })
+    };
+  }
   throw new Error("Claimed Teamship browser job operation did not match its input payload.");
 }
 

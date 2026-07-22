@@ -6,7 +6,8 @@ import {
   type TeamshipBrowserLpnRow,
   type TeamshipBrowserProductHistory,
   type TeamshipBrowserReadAdapter,
-  type TeamshipBrowserReceivingOrder
+  type TeamshipBrowserReceivingOrder,
+  type TeamshipBrowserShippingOrderPallets
 } from "@/modules/teamship/browser-read-contracts";
 import type { TeamshipStoredCredentials } from "@/server/integrations/teamship-settings";
 
@@ -135,8 +136,57 @@ export function createTeamshipPlaywrightReadAdapter(
         fields: await readProductDetailFields(page),
         tables: await readVisibleTables(page)
       })];
+    }),
+    getShippingOrderPallets: (input) => runBrowserRead(input.credentials, options, async (page, baseUrl) => {
+      const route = `/ship-inventories/${encodeURIComponent(input.teamshipOrderId)}`;
+      await openReadPage(page, baseUrl, route, input.credentials, options);
+      await assertPageContext(page, route, [`Ship Inventory #${input.teamshipOrderId}`]);
+      if (new URL(page.url()).pathname !== route) {
+        throw new Error("The Teamship shipping-order page did not match the requested internal order ID.");
+      }
+
+      const customerMatches = await page.getByText(input.scope.customerName, { exact: true }).count();
+      const warehouseMatches = await page.getByText(input.scope.warehouseName, { exact: true }).count();
+      if (customerMatches < 1 || warehouseMatches < 1) {
+        throw new Error("The Teamship shipping-order page did not match the approved customer and warehouse scope.");
+      }
+
+      const palletCountInputs = page.locator("input#pallets_count");
+      if (await palletCountInputs.count() !== 1) {
+        throw new Error("The Teamship shipping-order page did not expose one unambiguous pallet count.");
+      }
+
+      return [parseTeamshipShippingOrderPalletPreflight({
+        teamshipOrderId: input.teamshipOrderId,
+        palletCount: await palletCountInputs.inputValue(),
+        customerName: input.scope.customerName,
+        warehouseName: input.scope.warehouseName
+      })];
     })
   };
+}
+
+export function parseTeamshipShippingOrderPalletPreflight(input: {
+  teamshipOrderId: string;
+  palletCount: string;
+  customerName: string;
+  warehouseName: string;
+}): TeamshipBrowserShippingOrderPallets {
+  const teamshipOrderId = input.teamshipOrderId.trim();
+  const customerName = input.customerName.replace(/\s+/g, " ").trim();
+  const warehouseName = input.warehouseName.replace(/\s+/g, " ").trim();
+  const rawPalletCount = input.palletCount.trim();
+  if (!teamshipOrderId || !customerName || !warehouseName) {
+    throw new Error("The Teamship shipping-order pallet preflight was missing required identity fields.");
+  }
+  if (!/^\d+$/.test(rawPalletCount)) {
+    throw new Error("The Teamship shipping-order pallet count was not a whole number.");
+  }
+  const palletCount = Number(rawPalletCount);
+  if (!Number.isInteger(palletCount) || palletCount < 1 || palletCount > 100) {
+    throw new Error("The Teamship shipping-order pallet count was outside the allowed range.");
+  }
+  return { teamshipOrderId, palletCount, customerName, warehouseName };
 }
 
 async function runBrowserRead<T>(
