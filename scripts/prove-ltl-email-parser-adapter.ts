@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { buildLtlRateRequestFromParsedInquiry } from "@/modules/tms-bridge/ltl-inquiry-rate-request";
-import { parseEmailWithGemini, type ParsedEmailLogisticsData } from "@/modules/tms-bridge/actions";
+import { parseEmailWithOpenAI, type ParsedEmailLogisticsData } from "@/modules/tms-bridge/actions";
 
 type SanitizedParsedReport = {
   parsedOrigin: string;
@@ -39,7 +39,7 @@ async function main() {
 
   const absoluteInputPath = path.resolve(process.cwd(), inputPath);
   const inquiryText = await readFile(absoluteInputPath, "utf8");
-  const parsedJson = await parseEmailWithGemini(inquiryText);
+  const parsedJson = await parseEmailWithOpenAI(inquiryText);
   const parsed = JSON.parse(parsedJson) as ParsedEmailLogisticsData;
   const adapterResult = buildLtlRateRequestFromParsedInquiry(parsed);
 

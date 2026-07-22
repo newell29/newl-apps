@@ -4,6 +4,8 @@
 // database client.
 
 const THIRTY_DAYS_SECONDS = 60 * 60 * 24 * 30;
+export const DEFAULT_LOCAL_ADMIN_EMAIL = "admin@example.com";
+const DEFAULT_LOCAL_ADMIN_PASSWORD = "newl-dev-password";
 
 /**
  * Database session lifetime in seconds. Configurable via SESSION_MAX_AGE_DAYS,
@@ -40,9 +42,25 @@ export function isDevLoginEnabled(): boolean {
  * production can never accidentally inherit the local-dev bypass.
  */
 export function isTemporaryPasswordLoginEnabled(): boolean {
-  return process.env.AUTH_TEMP_PASSWORD_LOGIN === "true";
+  return process.env.NODE_ENV !== "production" && process.env.AUTH_TEMP_PASSWORD_LOGIN === "true";
 }
 
 export function isPasswordLoginEnabled(): boolean {
   return isDevLoginEnabled() || isTemporaryPasswordLoginEnabled();
+}
+
+export function getTemporaryPasswordLoginEmail(): string {
+  return readOptionalEnv("AUTH_TEMP_PASSWORD_EMAIL")?.toLowerCase() ?? DEFAULT_LOCAL_ADMIN_EMAIL;
+}
+
+export function getTemporaryPasswordLoginPassword(): string {
+  return readOptionalEnv("SEED_ADMIN_PASSWORD") ?? DEFAULT_LOCAL_ADMIN_PASSWORD;
+}
+
+function readOptionalEnv(key: string): string | undefined {
+  const value = process.env[key]?.trim();
+  if (!value || value === "undefined") {
+    return undefined;
+  }
+  return value;
 }

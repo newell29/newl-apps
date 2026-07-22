@@ -20,7 +20,7 @@ describe("TMS customer resolution", () => {
     expect(customer).not.toBe("dormeo-na.com");
   });
 
-  it("matches slash-separated Gemini customer values against the exact Teamship customer name", () => {
+  it("matches slash-separated parser customer values against the exact Teamship customer name", () => {
     const match = resolveTeamshipCustomerNameForTms(
       "Clary Business Machines / OneScreen",
       ["OneScreen", "OneScreen Storage"],
@@ -47,7 +47,7 @@ describe("TMS customer resolution", () => {
     expect(match?.customerName).not.toBe("Onescreen Solutions");
   });
 
-  it("prioritizes the exact Teamship customer name over a generic Gemini suffix", () => {
+  it("prioritizes the exact Teamship customer name over a generic parser suffix", () => {
     const match = resolveTeamshipCustomerNameForTms(
       "OneScreen Solutions",
       ["OneScreen", "OneScreen Storage"],

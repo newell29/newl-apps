@@ -520,7 +520,7 @@ describe("LTL inquiry rate request adapter", () => {
     expect(result.unsupportedOrUnmappedTerms).not.toContain("inside pickup/delivery");
   });
 
-  it("uses pieces as the quantity when Gemini does not return quantity", () => {
+  it("uses pieces as the quantity when parser output does not return quantity", () => {
     const result = buildLtlRateRequestFromParsedInquiry(
       baseInquiry({
         freightClass: "",

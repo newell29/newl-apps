@@ -133,6 +133,15 @@ export type WebsiteGrowthDraftPagePreview = {
   };
 };
 
+export type OpenAiJsonCompletionRequest = {
+  model?: string;
+  system: string;
+  user: string;
+  schemaName: string;
+  schema: Record<string, unknown>;
+  errorLabel: string;
+};
+
 export type ApolloCompanySuggestionContext = {
   model: string;
   companyName: string;
@@ -213,6 +222,52 @@ export async function generateTier1SequenceDraft(context: Tier1DraftContext): Pr
     ...parsed,
     rawResponse: json
   };
+}
+
+export async function generateOpenAiJsonCompletion(request: OpenAiJsonCompletionRequest): Promise<string> {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+
+  if (!apiKey || apiKey === "OPENAI_API_KEY_PLACEHOLDER") {
+    throw new Error("OPENAI_API_KEY is not configured.");
+  }
+
+  const response = await fetch(`${OPENAI_API_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: request.model?.trim() || process.env.OPENAI_TMS_INQUIRY_MODEL?.trim() || "gpt-5-mini",
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: request.schemaName,
+          strict: true,
+          schema: request.schema
+        }
+      },
+      messages: [
+        {
+          role: "system",
+          content: request.system
+        },
+        {
+          role: "user",
+          content: request.user
+        }
+      ]
+    }),
+    cache: "no-store"
+  });
+
+  const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+
+  if (!response.ok || !json) {
+    throw new Error(extractOpenAiError(json) ?? `${request.errorLabel} failed with status ${response.status}.`);
+  }
+
+  return readAssistantContent(json);
 }
 
 export async function generateWebsiteGrowthContentDraft(

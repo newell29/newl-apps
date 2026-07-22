@@ -1,4 +1,3 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { ImapFlow } from "imapflow";
 import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
@@ -7,6 +6,7 @@ import { chromium, type Locator, type Page } from "playwright";
 import { fileURLToPath } from "url";
 
 import { LTL_ACCESSORIAL_LEGEND } from "@/modules/ltl-rate-portal/constants";
+import { generateOpenAiJsonCompletion } from "@/server/integrations/openai";
 import { isLtlInquiry, rateLtlInquiryIfApplicable, type LtlInquiryRatingResult } from "./ltl-inquiry-rating";
 import { enrichTmsInquiryCustomerWithTradeMining, type TradeMiningCustomerIntelligenceResult } from "./trademining-customer-intelligence";
 
@@ -15,7 +15,6 @@ const GMAIL_IMAP_PORT = 993;
 const GMAIL_SMTP_HOST = "smtp.gmail.com";
 const GMAIL_SMTP_PORT = 465;
 const GMAIL_IDLE_REFRESH_MS = 15_000;
-const GEMINI_MODEL = "gemini-2.5-flash";
 const COMPLETED_INQUIRY_EMAIL_TO = "pricing@newlgroup.com";
 const COMPLETED_LTL_INQUIRY_EMAIL_TO = "dispatch@newlgroup.com";
 const TMS_DIAGNOSTIC_DIR = path.join(process.cwd(), ".tmp", "tms-diagnostics");
@@ -226,8 +225,8 @@ export async function startTmsEmailListener(): Promise<void> {
     const originalSender = extractOriginalSenderInfo(emailText, forwardingSenderDomain);
     console.log(`[gmail-listener] Original sender domain for customer resolution: ${originalSender.domain ?? "(none)"} source=${originalSender.source}`);
     await markFetchedEmailSeen(client, uid);
-    console.log(`[gmail-listener] Calling Gemini parser for UID ${uid}...`);
-    const parsedJson = await parseEmailWithGemini(emailText);
+    console.log(`[gmail-listener] Calling OpenAI parser for UID ${uid}...`);
+    const parsedJson = await parseEmailWithOpenAI(emailText);
     const parsedData = JSON.parse(parsedJson) as ParsedEmailLogisticsData;
     await resolveParsedCustomerNameFromWebsite(parsedData, originalSender.domain);
     await applyTeamshipCustomerMatch(parsedData, originalSender.domain);
@@ -1165,87 +1164,82 @@ function escapeHtmlAttribute(value: string) {
   return escapeHtml(value).replace(/`/g, "&#96;");
 }
 
-export async function parseLogisticsInquiryWithGemini(emailBody: string): Promise<LogisticsInquiry> {
-  const parsedData = JSON.parse(await parseEmailWithGemini(emailBody)) as ParsedEmailLogisticsData;
+export async function parseLogisticsInquiryWithOpenAI(emailBody: string): Promise<LogisticsInquiry> {
+  const parsedData = JSON.parse(await parseEmailWithOpenAI(emailBody)) as ParsedEmailLogisticsData;
   await resolveParsedCustomerNameFromWebsite(parsedData, null);
   return normalizeLogisticsInquiry(parsedData);
 }
 
-export async function parseEmailWithGemini(emailBody: string): Promise<string> {
-  const apiKey = requireEnvValue("GEMINI_API_KEY");
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({
-    model: GEMINI_MODEL,
-    generationConfig: {
-      responseMimeType: "application/json"
-    }
-  });
-
-  const result = await model.generateContent([
-    [
-      "You are a logistics operations agent for a freight forwarding company.",
-      "Analyze messy freight inquiry emails like a forwarding coordinator would.",
-      "Use the email body, quoted/replied text, sender name, sender email domain, signature block, company footer, and any attached-looking pasted text to infer the shipment request.",
-      "Extract every data point needed to create a TMS quote.",
-      "Return only a clean, parseable JSON string.",
-      "Do not return markdown wrapper blocks such as ```json.",
-      "Do not include comments, explanations, or extra text.",
-      "Use empty strings for unknown string fields.",
-      "Use false for unknown boolean fields.",
-      "Use an empty array when no item dimensions are listed.",
-      "The customer field must be the requesting customer, or company that is asking for the quote. Never return website url or domain name. Extract actual company name from the email text, signature, original forwarded sender email domain, or if not available then check proper details from sender's website",
-      "For customer, never output a raw email address, website URL, hostname, or bare domain such as example.com.",
-      "If the only customer clue is an email domain, convert the organization part into a readable company name by removing the user, protocol, www, path, and TLD. Example: logistics-example.com must become Logistics Example, not logistics-example.com.",
-      "When the forwarded sender domain clearly points to one company but the email body contains multiple company names separated by slash, pipe, parenthesis, or DBA wording, prefer the company supported by the original sender domain.",
-      "Do not use the email receiver, To recipient, Newl, Newl Express, Teamship, or an internal receiver name as customer.",
-      "If the email contains a From signature/company, use that as customer only when no explicit customer/account is stated in the body.",
-      "Populate customertype as either customer or agent only.",
-      "Use customertype=customer when the company is requesting freight services for its own shipment or business.",
-      "Use customertype=agent when an overseas or forwarding partner is arranging the shipment on behalf of another company.",
-      "Classify customertype using the email content, forwarded headers, signature, wording, email domain, and country. Overseas forwarding/logistics companies outside Canada or the USA can be marked as agent when the wording supports that they are arranging for another party.",
-      "Populate urgency from language like urgent, asap, today, rush, quote needed, deadline, standard, or normal. Use empty string if unknown.",
-      "Populate requestedTiming with the exact requested timing phrase, due date, pickup date, cargo ready date, cut-off, delivery deadline, or quote deadline when present. Use empty string if unknown.",
-      "Populate direction with import, export, domestic, cross-border, or unknown when stated or inferable. Use empty string if unknown.",
-      "Normalize mode to the lowercase TMS selector key: air, ocean, ground, trucking, rail, drayage, warehousing, or the nearest available mode.",
-      "Populate shipmentType with LCL or FCL for ocean shipments, LTL or FTL for trucking or ground shipments, or empty string when unknown or not applicable.",
-      "For trucking or ground, identify LTL vs FTL, number of pieces, packaging type such as pieces, boxes, cartons, crates, skids, or pallets, and truck type such as 53' dry van, 48' flatbed, reefer, sprinter, straight truck, etc. Put LTL or FTL into shipmentType and truck type/equipment into equipmentType.",
-      "For ocean, identify LCL vs FCL, container quantity, 20 or 40 container size, general purpose vs high cube, and map equipmentType to the closest TMS value such as HC - High Cube or GP - General Purpose. Put LCL or FCL into shipmentType.",
-      "For air, identify chargeable/gross weight, pieces, dimensions, origin airport/city/address, destination airport/city/address, commodity, and readiness date.",
-      "For drayage, identify port/rail ramp, pickup/delivery location, container size/type, weight, and ready date.",
-      "For warehousing, identify storage/service request, commodity, pieces/pallets, location, dates, and special handling.",
-      "For origin and destination only: preserve the full original location text from the email as received typically listed as origin, POL, shipper, consignee, POD, receiver, AOL, or AOD.",
-      "Never truncate brief geographic indicators. If the email says 'POL: SHENGZHEN', origin must include 'SHENGZHEN' exactly, or map the full extracted value into origin.",
-      "If the email says 'POD: TORONTO' or 'Destination: TORONTO', destination must include 'TORONTO' exactly, or map the full extracted value into destination.",
-      "Do not drop short city, port, airport, rail ramp, or country names just because they are brief or uppercase.",
-      "Do not shorten, normalize, clean, strip, summarize, or remove street addresses, suite numbers, postal codes, dock details, warehouse names, port names, ramp names, state/province, or country from origin or destination.",
-      "If the email gives a full pickup or delivery address, put that full raw address in origin or destination.",
-      "Extract commodity, number of pieces, packaging type, pallet/container rows, length, width, height, weight, and units.",
-      "For LTL/trucking/ground inquiries, extract originPostalCode, originCountry, destinationPostalCode, destinationCountry, pickupDate, freightClass, NMFC, UN number, and accessorial wording when explicitly stated.",
-      "Use originCountry and destinationCountry values US, CA, or MX only when stated or clearly inferable from the address/postal code. Use empty string otherwise.",
-      "Put accessorial wording as customer-stated phrases in accessorials. Do not convert accessorial wording to 7L codes.",
-      "For item piece count, use the item key quantity only. Do not output item keys named numberPieces, pieces, count, noOfPieces, or number.",
-      "For each item, populate packagingType from stated terms like pallet, skid, carton, box, crate, drum, cylinder, bundle, container, or envelope.",
-      "For each item, populate weightType as total when the weight is stated as total shipment weight or total line weight, each when the weight is clearly per piece, or empty string when unclear.",
-      "For each item, populate freightClass, NMFC, and UN number only when stated for that item. If stated only once for the whole shipment, use the top-level freightClass, nmfc, or unNumber field.",
-      "Normalize weightUnit to LBS or KG only. Normalize dimensionsUnit to INCH or CM only.",
-      "Extract whether insurance is required. If explicitly declined or absent, use false.",
-      "Extract whether customs clearance is required. If explicitly declined or absent, use false.",
-      "Extract whether dangerous goods / hazmat / DG is involved. If explicitly declined or absent, use false.",
-      "Extract readyDate as a clear date string from pickup date, cargo ready date, cut-off, or requested ship date.",
-      "Normalize incoterms to a TMS value such as EXW when stated or inferable.",
-      "Normalize service to a TMS value such as port_to_port when stated or inferable.",
-      "For containers, map the first container count/size/equipment/weight into containerQuantity, containerSize, equipmentType, and containerWeight.",
-      "For loose cargo or pallets, map pallet/carton rows into items.",
-      "Always include customertype, direction, shipmentType, urgency, requestedTiming, originPostalCode, originCountry, destinationPostalCode, destinationCountry, pickupDate, freightClass, nmfc, unNumber, and accessorials in the returned JSON object.",
-      "The JSON object must use exactly these keys:",
-      JSON.stringify(emptyParsedEmailLogisticsData()),
-      "",
-      "Email body:",
-      emailBody
-    ].join("\n")
-  ]);
-
-  return stripJsonFence(result.response.text());
+export async function parseEmailWithOpenAI(emailBody: string): Promise<string> {
+  return stripJsonFence(
+    await generateOpenAiJsonCompletion({
+      schemaName: "tms_email_logistics_inquiry",
+      schema: buildParsedEmailLogisticsDataJsonSchema(),
+      errorLabel: "OpenAI inquiry parsing",
+      system: "You are a logistics operations agent for a freight forwarding company. Return only valid JSON matching the supplied schema.",
+      user: [
+        "You are a logistics operations agent for a freight forwarding company.",
+        "Analyze messy freight inquiry emails like a forwarding coordinator would.",
+        "Use the email body, quoted/replied text, sender name, sender email domain, signature block, company footer, and any attached-looking pasted text to infer the shipment request.",
+        "Extract every data point needed to create a TMS quote.",
+        "Return only a clean, parseable JSON string.",
+        "Do not return markdown wrapper blocks such as ```json.",
+        "Do not include comments, explanations, or extra text.",
+        "Use empty strings for unknown string fields.",
+        "Use false for unknown boolean fields.",
+        "Use an empty array when no item dimensions are listed.",
+        "The customer field must be the requesting customer, or company that is asking for the quote. Never return website url or domain name. Extract actual company name from the email text, signature, original forwarded sender email domain, or if not available then check proper details from sender's website",
+        "For customer, never output a raw email address, website URL, hostname, or bare domain such as example.com.",
+        "Do not convert a bare domain into a cleaned or title-cased company name. Use the domain only as evidence. If a real company name cannot be established, use an empty string.",
+        "When the forwarded sender domain clearly points to one company but the email body contains multiple company names separated by slash, pipe, parenthesis, or DBA wording, prefer the company supported by the original sender domain.",
+        "Do not use the email receiver, To recipient, Newl, Newl Express, Teamship, or an internal receiver name as customer.",
+        "If the email contains a From signature/company, use that as customer only when no explicit customer/account is stated in the body.",
+        "Populate customertype as either customer or agent only.",
+        "Use customertype=customer when the company is requesting freight services for its own shipment or business.",
+        "Use customertype=agent when an overseas or forwarding partner is arranging the shipment on behalf of another company.",
+        "Classify customertype using the email content, forwarded headers, signature, wording, email domain, and country. Overseas forwarding/logistics companies outside Canada or the USA can be marked as agent when the wording supports that they are arranging for another party.",
+        "Populate urgency from language like urgent, asap, today, rush, quote needed, deadline, standard, or normal. Use empty string if unknown.",
+        "Populate requestedTiming with the exact requested timing phrase, due date, pickup date, cargo ready date, cut-off, delivery deadline, or quote deadline when present. Use empty string if unknown.",
+        "Populate direction with import, export, domestic, cross-border, or unknown when stated or inferable. Use empty string if unknown.",
+        "Normalize mode to the lowercase TMS selector key: air, ocean, ground, trucking, rail, drayage, warehousing, or the nearest available mode.",
+        "Populate shipmentType with LCL or FCL for ocean shipments, LTL or FTL for trucking or ground shipments, or empty string when unknown or not applicable.",
+        "For trucking or ground, identify LTL vs FTL, number of pieces, packaging type such as pieces, boxes, cartons, crates, skids, or pallets, and truck type such as 53' dry van, 48' flatbed, reefer, sprinter, straight truck, etc. Put LTL or FTL into shipmentType and truck type/equipment into equipmentType.",
+        "For ocean, identify LCL vs FCL, container quantity, 20 or 40 container size, general purpose vs high cube, and map equipmentType to the closest TMS value such as HC - High Cube or GP - General Purpose. Put LCL or FCL into shipmentType.",
+        "For air, identify chargeable/gross weight, pieces, dimensions, origin airport/city/address, destination airport/city/address, commodity, and readiness date.",
+        "For drayage, identify port/rail ramp, pickup/delivery location, container size/type, weight, and ready date.",
+        "For warehousing, identify storage/service request, commodity, pieces/pallets, location, dates, and special handling.",
+        "For origin and destination only: preserve the full original location text from the email as received typically listed as origin, POL, shipper, consignee, POD, receiver, AOL, or AOD.",
+        "Never truncate brief geographic indicators. If the email says 'POL: SHENGZHEN', origin must include 'SHENGZHEN' exactly, or map the full extracted value into origin.",
+        "If the email says 'POD: TORONTO' or 'Destination: TORONTO', destination must include 'TORONTO' exactly, or map the full extracted value into destination.",
+        "Do not drop short city, port, airport, rail ramp, or country names just because they are brief or uppercase.",
+        "Do not shorten, normalize, clean, strip, summarize, or remove street addresses, suite numbers, postal codes, dock details, warehouse names, port names, state/province, or country from origin or destination.",
+        "If the email gives a full pickup or delivery address, put that full raw address in origin or destination.",
+        "Extract commodity, number of pieces, packaging type, pallet/container rows, length, width, height, weight, and units.",
+        "For LTL/trucking/ground inquiries, extract originPostalCode, originCountry, destinationPostalCode, destinationCountry, pickupDate, freightClass, NMFC, UN number, and accessorial wording when explicitly stated.",
+        "Use originCountry and destinationCountry values US, CA, or MX only when stated or clearly inferable from the address/postal code. Use empty string otherwise.",
+        "Put accessorial wording as customer-stated phrases in accessorials. Do not convert accessorial wording to 7L codes.",
+        "For item piece count, use the item key quantity only. Do not output item keys named numberPieces, pieces, count, noOfPieces, or number.",
+        "For each item, populate packagingType from stated terms like pallet, skid, carton, box, crate, drum, cylinder, bundle, container, or envelope.",
+        "For each item, populate weightType as total when the weight is stated as total shipment weight or total line weight, each when the weight is clearly per piece, or empty string when unclear.",
+        "For each item, populate freightClass, NMFC, and UN number only when stated for that item. If stated only once for the whole shipment, use the top-level freightClass, nmfc, or unNumber field.",
+        "Normalize weightUnit to LBS or KG only. Normalize dimensionsUnit to INCH or CM only.",
+        "Extract whether insurance is required. If explicitly declined or absent, use false.",
+        "Extract whether customs clearance is required. If explicitly declined or absent, use false.",
+        "Extract whether dangerous goods / hazmat / DG is involved. If explicitly declined or absent, use false.",
+        "Extract readyDate as a clear date string from pickup date, cargo ready date, cut-off, or requested ship date.",
+        "Normalize incoterms to a TMS value such as EXW when stated or inferable.",
+        "Normalize service to a TMS value such as port_to_port when stated or inferable.",
+        "For containers, map the first container count/size/equipment/weight into containerQuantity, containerSize, equipmentType, and containerWeight.",
+        "For loose cargo or pallets, map pallet/carton rows into items.",
+        "Always include customertype, direction, shipmentType, urgency, requestedTiming, originPostalCode, originCountry, destinationPostalCode, destinationCountry, pickupDate, freightClass, nmfc, unNumber, and accessorials in the returned JSON object.",
+        "The JSON object must use exactly these keys:",
+        JSON.stringify(emptyParsedEmailLogisticsData()),
+        "",
+        "Email body:",
+        emailBody
+      ].join("\n")
+    })
+  );
 }
 
 export async function runTmsAutomationTestAction(_rawEmailInquiry?: string): Promise<TmsAutomationResult> {
@@ -2169,7 +2163,7 @@ async function markMessageSeenByUid(client: ImapFlow, uid: number): Promise<void
 }
 
 async function markFetchedEmailSeen(client: ImapFlow, uid: number): Promise<void> {
-  console.log(`[gmail-listener] Marking fetched Gmail UID ${uid} as SEEN before Gemini/Playwright.`);
+  console.log(`[gmail-listener] Marking fetched Gmail UID ${uid} as SEEN before parsing/Playwright.`);
   await markMessageSeenByUid(client, uid);
 }
 
@@ -2432,6 +2426,77 @@ function emptyParsedEmailLogisticsData(): ParsedEmailLogisticsData {
     customs: false,
     dangerousGoods: false,
     readyDate: ""
+  };
+}
+
+function buildParsedEmailLogisticsDataJsonSchema(): Record<string, unknown> {
+  const stringField = { type: "string" };
+  const booleanField = { type: "boolean" };
+  const itemSchema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      quantity: stringField,
+      packagingType: stringField,
+      length: stringField,
+      width: stringField,
+      height: stringField,
+      weight: stringField,
+      weightType: { type: "string", enum: ["each", "total", ""] },
+      freightClass: stringField,
+      nmfc: stringField,
+      unNumber: stringField
+    },
+    required: ["quantity", "packagingType", "length", "width", "height", "weight", "weightType", "freightClass", "nmfc", "unNumber"]
+  };
+
+  const properties = {
+    customer: stringField,
+    customertype: { type: "string", enum: ["customer", "agent", ""] },
+    mode: stringField,
+    origin: stringField,
+    destination: stringField,
+    incoterms: stringField,
+    service: stringField,
+    direction: stringField,
+    shipmentType: stringField,
+    urgency: stringField,
+    requestedTiming: stringField,
+    originPostalCode: stringField,
+    originCountry: stringField,
+    destinationPostalCode: stringField,
+    destinationCountry: stringField,
+    pickupDate: stringField,
+    freightClass: stringField,
+    nmfc: stringField,
+    unNumber: stringField,
+    accessorials: {
+      type: "array",
+      items: stringField
+    },
+    containerQuantity: stringField,
+    containerSize: stringField,
+    equipmentType: stringField,
+    containerWeight: stringField,
+    weightUnit: { type: "string", enum: ["LBS", "KG", ""] },
+    dimensionsUnit: { type: "string", enum: ["CM", "INCH", ""] },
+    floorLoaded: booleanField,
+    commodity: stringField,
+    items: {
+      type: "array",
+      items: itemSchema
+    },
+    insurance: booleanField,
+    customs: booleanField,
+    dangerousGoods: booleanField,
+    readyDate: stringField
+  };
+
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties,
+    required: Object.keys(properties)
   };
 }
 

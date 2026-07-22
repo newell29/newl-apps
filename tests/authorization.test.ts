@@ -95,6 +95,7 @@ describe("ROLE_MATRIX", () => {
       ModuleKey.SHIPMENT_DOCUMENTS,
       ModuleKey.INVOICE_VERIFICATION,
       ModuleKey.CUSTOMER_CASHFLOW,
+      ModuleKey.WEBSITE_GROWTH,
       ModuleKey.OCEAN_FREIGHT_PRICING
     ]);
   });

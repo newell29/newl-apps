@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  getTemporaryPasswordLoginEmail,
+  getTemporaryPasswordLoginPassword,
   getSessionMaxAgeSeconds,
   isDevLoginEnabled,
   isPasswordLoginEnabled,
@@ -10,6 +12,8 @@ import {
 const originalNodeEnv = process.env.NODE_ENV;
 const originalBypass = process.env.AUTH_DEV_BYPASS;
 const originalTemporaryPasswordLogin = process.env.AUTH_TEMP_PASSWORD_LOGIN;
+const originalTemporaryPasswordEmail = process.env.AUTH_TEMP_PASSWORD_EMAIL;
+const originalSeedAdminPassword = process.env.SEED_ADMIN_PASSWORD;
 const originalMaxAge = process.env.SESSION_MAX_AGE_DAYS;
 
 function setNodeEnv(value: string | undefined) {
@@ -21,6 +25,8 @@ afterEach(() => {
   setNodeEnv(originalNodeEnv);
   process.env.AUTH_DEV_BYPASS = originalBypass;
   process.env.AUTH_TEMP_PASSWORD_LOGIN = originalTemporaryPasswordLogin;
+  process.env.AUTH_TEMP_PASSWORD_EMAIL = originalTemporaryPasswordEmail;
+  process.env.SEED_ADMIN_PASSWORD = originalSeedAdminPassword;
   process.env.SESSION_MAX_AGE_DAYS = originalMaxAge;
 });
 
@@ -67,7 +73,7 @@ describe("isDevLoginEnabled (dev-bypass production gate)", () => {
 });
 
 describe("temporary password login gate", () => {
-  it("can be enabled in production only through its explicit temporary env var", () => {
+  it("is disabled in production even when its explicit temporary env var is true", () => {
     setNodeEnv("production");
     process.env.AUTH_DEV_BYPASS = "true";
     process.env.AUTH_TEMP_PASSWORD_LOGIN = undefined;
@@ -79,6 +85,14 @@ describe("temporary password login gate", () => {
     process.env.AUTH_TEMP_PASSWORD_LOGIN = "true";
 
     expect(isDevLoginEnabled()).toBe(false);
+    expect(isTemporaryPasswordLoginEnabled()).toBe(false);
+    expect(isPasswordLoginEnabled()).toBe(false);
+  });
+
+  it("can be enabled for local development through its explicit temporary env var", () => {
+    setNodeEnv("development");
+    process.env.AUTH_TEMP_PASSWORD_LOGIN = "true";
+
     expect(isTemporaryPasswordLoginEnabled()).toBe(true);
     expect(isPasswordLoginEnabled()).toBe(true);
   });
@@ -88,6 +102,22 @@ describe("temporary password login gate", () => {
       process.env.AUTH_TEMP_PASSWORD_LOGIN = value as string | undefined;
       expect(isTemporaryPasswordLoginEnabled()).toBe(false);
     }
+  });
+
+  it("reads the temporary login email and password from the local auth env names", () => {
+    process.env.AUTH_TEMP_PASSWORD_EMAIL = " Local.Admin@Example.Com ";
+    process.env.SEED_ADMIN_PASSWORD = "configured-local-password";
+
+    expect(getTemporaryPasswordLoginEmail()).toBe("local.admin@example.com");
+    expect(getTemporaryPasswordLoginPassword()).toBe("configured-local-password");
+  });
+
+  it("falls back to the seeded local admin credentials when optional env names are omitted", () => {
+    process.env.AUTH_TEMP_PASSWORD_EMAIL = undefined;
+    process.env.SEED_ADMIN_PASSWORD = undefined;
+
+    expect(getTemporaryPasswordLoginEmail()).toBe("admin@example.com");
+    expect(getTemporaryPasswordLoginPassword()).toBe("newl-dev-password");
   });
 });
 

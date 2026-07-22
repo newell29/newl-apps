@@ -7,6 +7,8 @@ import {
   SECURE_SESSION_COOKIE_NAME,
   SESSION_COOKIE_NAME,
   getSessionMaxAgeSeconds,
+  getTemporaryPasswordLoginEmail,
+  getTemporaryPasswordLoginPassword,
   isDevLoginEnabled,
   isPasswordLoginEnabled,
   isTemporaryPasswordLoginEnabled
@@ -28,6 +30,7 @@ export async function handlePasswordLogin(request: Request) {
   const email = readString(formData, "email")?.toLowerCase();
   const password = readString(formData, "password");
   const callbackUrl = sanitizeCallbackUrl(readString(formData, "callbackUrl"));
+  const temporaryPasswordLoginActive = isTemporaryPasswordLoginEnabled();
 
   const loginUrl = new URL("/login", request.url);
   if (callbackUrl !== "/dashboard") {
@@ -36,6 +39,12 @@ export async function handlePasswordLogin(request: Request) {
 
   if (!email || !password) {
     loginUrl.searchParams.set("error", "missing_credentials");
+    return NextResponse.redirect(loginUrl, { status: 303 });
+  }
+
+  const expectedTemporaryEmail = temporaryPasswordLoginActive ? getTemporaryPasswordLoginEmail() : null;
+  if (expectedTemporaryEmail && email !== expectedTemporaryEmail) {
+    loginUrl.searchParams.set("error", "invalid_credentials");
     return NextResponse.redirect(loginUrl, { status: 303 });
   }
 
@@ -48,12 +57,14 @@ export async function handlePasswordLogin(request: Request) {
     }
   });
 
-  if (!user || !user.passwordHash || user._count.memberships === 0) {
+  if (!user || user._count.memberships === 0 || (!temporaryPasswordLoginActive && !user.passwordHash)) {
     loginUrl.searchParams.set("error", "invalid_credentials");
     return NextResponse.redirect(loginUrl, { status: 303 });
   }
 
-  const passwordValid = await verifyPassword(password, user.passwordHash);
+  const passwordValid = temporaryPasswordLoginActive
+    ? timingSafeEqualText(password, getTemporaryPasswordLoginPassword())
+    : await verifyPassword(password, user.passwordHash ?? "");
   if (!passwordValid) {
     loginUrl.searchParams.set("error", "invalid_credentials");
     return NextResponse.redirect(loginUrl, { status: 303 });
@@ -97,6 +108,13 @@ function sanitizeCallbackUrl(value: string | undefined): string {
     return "/dashboard";
   }
   return value;
+}
+
+function timingSafeEqualText(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+
+  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
 }
 
 function shouldUseSecureCookie(request: Request): boolean {

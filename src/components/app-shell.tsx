@@ -84,15 +84,10 @@ const navEntries: NavNode[] = [
       { id: "ups-tools", href: "/ups-tools", label: "UPS Tools", moduleKey: "UPS_TOOLS" as ModuleKey },
       { id: "ltl-rate-portal", href: "/ltl-rate-portal", label: "LTL Rate Portal", moduleKey: "LTL_RATE_PORTAL" as ModuleKey },
       {
-        id: "vendor-invoice-approval",
-        href: "/operations/vendor-invoice-review",
-        label: "Vendor Invoice Approval",
-        moduleKey: "INVOICE_VERIFICATION" as ModuleKey
-      },
-      {
-        id: "customer-invoice-intake",
-        href: "/operations/customer-invoice-intake",
-        label: "Customer Invoice Intake",
+        id: "invoice-automation-upload",
+        href: "/finance/invoice-automation",
+        label: "Operations Upload",
+        exact: true,
         moduleKey: "INVOICE_VERIFICATION" as ModuleKey
       },
       {
@@ -139,13 +134,6 @@ const navEntries: NavNode[] = [
         label: "Invoice Automation",
         moduleKey: "INVOICE_VERIFICATION" as ModuleKey,
         children: [
-          {
-            id: "invoice-automation-upload",
-            href: "/finance/invoice-automation",
-            label: "Operations Upload",
-            exact: true,
-            moduleKey: "INVOICE_VERIFICATION" as ModuleKey
-          },
           {
             id: "invoice-automation-accounting",
             href: "/finance/invoice-automation/accounting",

@@ -418,11 +418,6 @@ enum InvoiceAutomationBatchStatus {
   COMPLETED
 }
 
-enum VendorInvoiceReviewStatus {
-  DRAFT
-  SAVED
-}
-
 model Tenant {
   id        String   @id @default(cuid())
   name      String
@@ -430,97 +425,95 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships                         Membership[]
-  moduleAccess                        TenantModuleAccess[]
-  rolePolicies                        TenantRolePolicy[]
-  roleModuleAccess                    TenantRoleModuleAccess[]
-  integrationCredentials              IntegrationCredential[]
-  auditLogs                           AuditLog[]
-  jobRuns                             AutomationJobRun[]
-  companies                           Company[]
-  importRecords                       TradeMiningImportRecord[]
-  searchProfiles                      TradeMiningSearchProfile[]
-  tradeMiningScoringConfig            TradeMiningScoringConfig?
-  contacts                            Contact[]
-  leads                               Lead[]
-  contactOutreachDrafts               ContactOutreachDraft[]
-  apolloCompanyMatches                ApolloCompanyMatch[]
-  ltlBatchQuoteLanes                  LtlBatchQuoteLane[]
-  assistantThreads                    AssistantChatThread[]
-  assistantMessages                   AssistantChatMessage[]
-  websiteInboundSubmissions           WebsiteInboundSubmission[]
-  websiteGrowthOpportunities          WebsiteGrowthOpportunity[]
-  websiteGrowthContentDrafts          WebsiteGrowthContentDraft[]
-  websiteGrowthDataImports            WebsiteGrowthDataImport[]
-  websiteGrowthMetrics                WebsiteGrowthMetric[]
-  creditChecks                        CreditCheck[]
-  assistantRuns                       AssistantRun[]
-  assistantRetrievedSources           AssistantRetrievedSource[]
-  assistantKnowledgeDocuments         AssistantKnowledgeDocument[]
-  assistantKnowledgeChunks            AssistantKnowledgeChunk[]
-  assistantMemories                   AssistantMemory[]
-  assistantMailboxSyncStates          AssistantMailboxSyncState[]
-  assistantAutomations                AssistantAutomation[]
-  assistantAutomationRuns             AssistantAutomationRun[]
-  shipmentDocumentRuns                ShipmentDocumentRun[]
-  shipmentCarrierManifestRuns         ShipmentCarrierManifestRun[]
-  teamshipReviewRuns                  TeamshipReviewRun[]
-  teamshipReviewOrders                TeamshipReviewOrder[]
-  teamshipDailySyncRuns               TeamshipDailySyncRun[]
-  teamshipSyncedOrders                TeamshipSyncedOrder[]
-  teamshipUpdateJobs                  TeamshipUpdateJob[]
-  teamshipUpdateOrders                TeamshipUpdateOrder[]
-  teamshipBrowserReadJobs             TeamshipBrowserReadJob[]
-  openClawUnresolvedTurns             OpenClawUnresolvedTurn[]
-  garlandProductDimensionObservations GarlandProductDimensionObservation[]
-  garlandSourceEmails                 GarlandSourceEmail[]
-  garlandSourceAttachments            GarlandSourceAttachment[]
-  garlandEmailSyncRuns                GarlandEmailSyncRun[]
-  cashflowCustomers                   CashflowCustomer[]
-  cashflowCustomerAliases             CashflowCustomerAlias[]
-  cashflowFiles                       CashflowFile[]
-  cashflowCustomerInvoices            CashflowCustomerInvoice[]
-  cashflowVendorBills                 CashflowVendorBill[]
-  cashflowSnapshots                   CashflowCustomerSnapshot[]
-  cashflowAlerts                      CashflowAlert[]
-  cashflowFollowUps                   CashflowFollowUp[]
-  cashflowAccountingLines             CashflowAccountingLine[]
-  cashflowSettings                    CashflowSettings?
-  oceanFreightAgents                  OceanFreightAgent[]
-  oceanFreightAgentBranches           OceanFreightAgentBranch[]
-  oceanFreightAgentContacts           OceanFreightAgentContact[]
-  oceanFreightSourceEmails            OceanFreightSourceEmail[]
-  oceanFreightSourceAttachments       OceanFreightSourceAttachment[]
-  oceanFreightRateCandidates          OceanFreightRateCandidate[]
-  oceanFreightRates                   OceanFreightRate[]
-  invoiceAutomationDocuments          InvoiceAutomationDocument[]
-  invoiceAutomationBatches            InvoiceAutomationBatch[]
-  invoiceAutomationInvoices           InvoiceAutomationInvoice[]
-  invoiceAutomationQuickBooksEntities InvoiceAutomationQuickBooksEntity[]
+  memberships                             Membership[]
+  moduleAccess                            TenantModuleAccess[]
+  rolePolicies                            TenantRolePolicy[]
+  roleModuleAccess                        TenantRoleModuleAccess[]
+  integrationCredentials                  IntegrationCredential[]
+  auditLogs                               AuditLog[]
+  jobRuns                                 AutomationJobRun[]
+  companies                               Company[]
+  importRecords                           TradeMiningImportRecord[]
+  searchProfiles                          TradeMiningSearchProfile[]
+  tradeMiningScoringConfig                TradeMiningScoringConfig?
+  contacts                                Contact[]
+  leads                                   Lead[]
+  contactOutreachDrafts                   ContactOutreachDraft[]
+  apolloCompanyMatches                    ApolloCompanyMatch[]
+  ltlBatchQuoteLanes                      LtlBatchQuoteLane[]
+  assistantThreads                        AssistantChatThread[]
+  assistantMessages                       AssistantChatMessage[]
+  websiteInboundSubmissions               WebsiteInboundSubmission[]
+  websiteGrowthOpportunities              WebsiteGrowthOpportunity[]
+  websiteGrowthContentDrafts              WebsiteGrowthContentDraft[]
+  websiteGrowthDataImports                WebsiteGrowthDataImport[]
+  websiteGrowthMetrics                    WebsiteGrowthMetric[]
+  creditChecks                            CreditCheck[]
+  assistantRuns                           AssistantRun[]
+  assistantRetrievedSources               AssistantRetrievedSource[]
+  assistantKnowledgeDocuments             AssistantKnowledgeDocument[]
+  assistantKnowledgeChunks                AssistantKnowledgeChunk[]
+  assistantMemories                       AssistantMemory[]
+  assistantMailboxSyncStates              AssistantMailboxSyncState[]
+  assistantAutomations                    AssistantAutomation[]
+  assistantAutomationRuns                 AssistantAutomationRun[]
+  shipmentDocumentRuns                    ShipmentDocumentRun[]
+  shipmentCarrierManifestRuns             ShipmentCarrierManifestRun[]
+  teamshipReviewRuns                      TeamshipReviewRun[]
+  teamshipReviewOrders                    TeamshipReviewOrder[]
+  teamshipDailySyncRuns                   TeamshipDailySyncRun[]
+  teamshipSyncedOrders                    TeamshipSyncedOrder[]
+  teamshipUpdateJobs                      TeamshipUpdateJob[]
+  teamshipUpdateOrders                    TeamshipUpdateOrder[]
+  teamshipBrowserReadJobs                 TeamshipBrowserReadJob[]
+  openClawUnresolvedTurns                 OpenClawUnresolvedTurn[]
+  garlandProductDimensionObservations     GarlandProductDimensionObservation[]
+  garlandSourceEmails                     GarlandSourceEmail[]
+  garlandSourceAttachments                GarlandSourceAttachment[]
+  garlandEmailSyncRuns                    GarlandEmailSyncRun[]
+  cashflowCustomers                       CashflowCustomer[]
+  cashflowCustomerAliases                 CashflowCustomerAlias[]
+  cashflowFiles                           CashflowFile[]
+  cashflowCustomerInvoices                CashflowCustomerInvoice[]
+  cashflowVendorBills                     CashflowVendorBill[]
+  cashflowSnapshots                       CashflowCustomerSnapshot[]
+  cashflowAlerts                          CashflowAlert[]
+  cashflowFollowUps                       CashflowFollowUp[]
+  cashflowAccountingLines                 CashflowAccountingLine[]
+  cashflowSettings                        CashflowSettings?
+  oceanFreightAgents                      OceanFreightAgent[]
+  oceanFreightAgentBranches               OceanFreightAgentBranch[]
+  oceanFreightAgentContacts               OceanFreightAgentContact[]
+  oceanFreightSourceEmails                OceanFreightSourceEmail[]
+  oceanFreightSourceAttachments           OceanFreightSourceAttachment[]
+  oceanFreightRateCandidates              OceanFreightRateCandidate[]
+  oceanFreightRates                       OceanFreightRate[]
+  invoiceAutomationDocuments              InvoiceAutomationDocument[]
+  invoiceAutomationBatches                InvoiceAutomationBatch[]
+  invoiceAutomationInvoices               InvoiceAutomationInvoice[]
+  invoiceAutomationQuickBooksEntities     InvoiceAutomationQuickBooksEntity[]
   invoiceAutomationQuickBooksTransactions InvoiceAutomationQuickBooksTransaction[]
   invoiceAutomationEntityAliases          InvoiceAutomationEntityAlias[]
   invoiceAutomationCorrectionMemories     InvoiceAutomationCorrectionMemory[]
-  vendorInvoiceReviewDocuments            VendorInvoiceReviewDocument[]
-  vendorInvoiceReviewInvoices             VendorInvoiceReviewInvoice[]
 }
 
 model User {
-  id                       String    @id @default(cuid())
-  email                    String    @unique
-  name                     String?
+  id                     String    @id @default(cuid())
+  email                  String    @unique
+  name                   String?
   // Stable Microsoft Entra claims captured from a successful Newl Apps SSO
   // login. Teams supplies this same tenant/object pair to the trusted
   // OpenClaw tool, allowing server-side membership resolution without
   // trusting an email or identity supplied in prompt text.
-  microsoftEntraTenantId   String?
-  microsoftEntraObjectId   String?
+  microsoftEntraTenantId String?
+  microsoftEntraObjectId String?
   // Used ONLY by the dev-only local credentials login path. Production logins
   // go through Microsoft Entra ID SSO and never set this field.
-  passwordHash  String?
-  emailVerified DateTime?
-  image         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  passwordHash           String?
+  emailVerified          DateTime?
+  image                  String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
   memberships                 Membership[]
   accounts                    Account[]
@@ -1207,23 +1200,23 @@ model TeamshipUpdateOrder {
 }
 
 model TeamshipBrowserReadJob {
-  id              String    @id @default(cuid())
-  tenantId        String
-  status          String    @default("PENDING")
-  operation       String
-  input           Json
-  scope           Json
-  requestedBy     Json
-  result          Json?
-  errorCode       String?
-  errorMessage    String?
-  workerId        String?
-  claimedAt       DateTime?
-  completedAt     DateTime?
-  failedAt        DateTime?
-  expiresAt       DateTime
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id           String    @id @default(cuid())
+  tenantId     String
+  status       String    @default("PENDING")
+  operation    String
+  input        Json
+  scope        Json
+  requestedBy  Json
+  result       Json?
+  errorCode    String?
+  errorMessage String?
+  workerId     String?
+  claimedAt    DateTime?
+  completedAt  DateTime?
+  failedAt     DateTime?
+  expiresAt    DateTime
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -2217,73 +2210,6 @@ model InvoiceAutomationCorrectionMemory {
   @@index([tenantId, quickBooksEntityId])
   @@index([tenantId, normalizedEntityName])
   @@index([tenantId, lastUsedAt])
-}
-
-model VendorInvoiceReviewDocument {
-  id               String    @id @default(cuid())
-  tenantId         String
-  invoiceKind      String    @default("Vendor_Invoices")
-  fileName         String
-  contentType      String
-  sizeBytes        Int
-  sha256           String
-  extractedText    String?
-  pdfBytes         Bytes
-  approvedAt       DateTime?
-  approvedByUserId String?
-  approvedByName   String?
-  financeStatus    String    @default("DRAFT")
-  financeError     String?
-  financeBatchId   String?
-  uploadedByUserId String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-
-  tenant   Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  invoices VendorInvoiceReviewInvoice[]
-
-  @@unique([tenantId, id])
-  @@index([tenantId, sha256])
-  @@index([tenantId, createdAt])
-  @@index([tenantId, financeStatus])
-}
-
-model VendorInvoiceReviewInvoice {
-  id               String                    @id @default(cuid())
-  tenantId         String
-  documentId       String
-  invoiceKind      String                    @default("Vendor_Invoices")
-  status           VendorInvoiceReviewStatus @default(SAVED)
-  fileName         String
-  vendorName       String?
-  invoiceNumber    String?
-  invoiceDate      DateTime?
-  tmsFileNumber    String
-  vendorReference  String?
-  currency         String?
-  subtotalAmount   Decimal?                  @db.Decimal(14, 2)
-  taxAmount        Decimal?                  @db.Decimal(14, 2)
-  totalAmount      Decimal?                  @db.Decimal(14, 2)
-  duplicateKey     String?
-  issueCodes       Json?
-  extractionJson   Json?
-  financeInvoiceId String?
-  uploadedByUserId String?
-  createdAt        DateTime                  @default(now())
-  updatedAt        DateTime                  @updatedAt
-
-  tenant   Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  document VendorInvoiceReviewDocument @relation(fields: [tenantId, documentId], references: [tenantId, id], onDelete: Cascade)
-
-  @@unique([tenantId, id])
-  @@unique([tenantId, duplicateKey])
-  @@index([tenantId, documentId])
-  @@index([tenantId, invoiceKind])
-  @@index([tenantId, status])
-  @@index([tenantId, tmsFileNumber])
-  @@index([tenantId, invoiceNumber])
-  @@index([tenantId, vendorName])
-  @@index([tenantId, createdAt])
 }
 
 model AssistantChatThread {

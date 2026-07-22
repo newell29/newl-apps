@@ -1,6 +1,10 @@
 import { NewlLogo } from "@/components/newl-logo";
 import { signInWithEntraAction } from "@/server/auth/actions";
-import { isDevLoginEnabled, isTemporaryPasswordLoginEnabled } from "@/server/auth/constants";
+import {
+  getTemporaryPasswordLoginEmail,
+  isDevLoginEnabled,
+  isTemporaryPasswordLoginEnabled
+} from "@/server/auth/constants";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +30,7 @@ export default async function LoginPage({
   const devLoginEnabled = isDevLoginEnabled();
   const temporaryPasswordLoginEnabled = isTemporaryPasswordLoginEnabled();
   const passwordLoginEnabled = devLoginEnabled || temporaryPasswordLoginEnabled;
+  const passwordLoginEmail = passwordLoginEnabled ? getTemporaryPasswordLoginEmail() : "";
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-12">
@@ -88,7 +93,7 @@ export default async function LoginPage({
                     name="email"
                     type="email"
                     autoComplete="username"
-                    defaultValue={devLoginEnabled ? "admin@example.com" : ""}
+                    defaultValue={passwordLoginEmail}
                     className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
                   />
                 </label>
