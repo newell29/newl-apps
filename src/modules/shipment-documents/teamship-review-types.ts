@@ -113,6 +113,8 @@ export type TeamshipPalletDim = {
 };
 
 export type TeamshipShippingOrderDetail = {
+  /** Internal Teamship record ID used in API and /ship-inventories/:id URLs. */
+  teamship_internal_id?: number | string | null;
   id?: number | string | null;
   order_id?: number | string | null;
   display_id?: string | null;

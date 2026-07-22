@@ -158,7 +158,8 @@ export async function fetchTeamshipShippingOrdersForReview({
       let mergedDetail = mergeTeamshipDetailWithSummary(detail, row);
       mergedDetail = {
         ...mergedDetail,
-        url: mergedDetail.url ?? buildTeamshipOrderUrl(webBaseUrl, String(orderId))
+        teamship_internal_id: String(orderId),
+        url: buildTeamshipOrderUrl(webBaseUrl, String(orderId))
       };
 
       if (shouldEnrichFromUiPage && !hasTeamshipSerialEvidence(mergedDetail)) {
@@ -249,6 +250,7 @@ export async function findTeamshipShippingOrders({
 }: TeamshipShippingOrderSearchOptions): Promise<TeamshipShippingOrderDetail[]> {
   const resolvedCredentials = credentials ?? (await resolveTenantTeamshipCredentials(tenantId ? { tenantId } : null));
   const apiBaseUrl = resolveTeamshipApiBaseUrl(resolvedCredentials);
+  const webBaseUrl = resolveTeamshipWebBaseUrl(apiBaseUrl);
   const token = await loginToTeamship(fetchImpl, resolvedCredentials, apiBaseUrl);
   const normalizedTarget = normalizeIdentifier(orderIdentifier);
   const matches: TeamshipShippingOrderDetail[] = [];
@@ -275,7 +277,11 @@ export async function findTeamshipShippingOrders({
       }
 
       const detail = await getTeamshipShippingOrder({ apiBaseUrl, token, id: String(id), fetchImpl });
-      matches.push(mergeTeamshipDetailWithSummary(detail, row));
+      matches.push({
+        ...mergeTeamshipDetailWithSummary(detail, row),
+        teamship_internal_id: String(id),
+        url: buildTeamshipOrderUrl(webBaseUrl, String(id))
+      });
     }
 
     if (rows.length < pageLimit) {

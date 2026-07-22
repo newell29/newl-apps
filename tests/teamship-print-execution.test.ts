@@ -18,7 +18,7 @@ describe("Teamship print execution safeguards", () => {
     const job: ClaimedTeamshipPrintJob = {
       id: "print-job-1",
       shippingOrderNumber: "30666",
-      teamshipOrderId: "30666",
+      teamshipOrderId: "31064",
       customerName: "Garland Canada Distribution",
       warehouseName: "Annagem",
       approvedPalletCount: 2,
@@ -32,6 +32,8 @@ describe("Teamship print execution safeguards", () => {
     };
     const findOrders = vi.fn(async () => [{
       id: "30666",
+      teamship_internal_id: "31064",
+      url: "https://members.fulfillit.io/ship-inventories/31064",
       pallet_dims: [{ quantity: 1 }, { quantity: 1 }]
     }]);
 
@@ -45,7 +47,7 @@ describe("Teamship print execution safeguards", () => {
   it("fails closed when the Teamship API does not return one exact approved order", async () => {
     const job = {
       shippingOrderNumber: "30666",
-      teamshipOrderId: "30666",
+      teamshipOrderId: "31064",
       credentials: { email: "employee@example.com", password: "test-password", apiBaseUrl: null }
     } as ClaimedTeamshipPrintJob;
 

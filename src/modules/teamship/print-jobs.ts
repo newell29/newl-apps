@@ -128,7 +128,7 @@ export async function createTeamshipPrintPlan(
 
   const findOrders = dependencies.findOrders ?? findTeamshipShippingOrders;
   const orders = await findOrders({ tenantId: context.tenantId, orderIdentifier: shippingOrderNumber });
-  const exact = orders.filter((order) => readTeamshipOrderId(order) === shippingOrderNumber);
+  const exact = orders.filter((order) => readTeamshipShippingOrderNumbers(order).includes(shippingOrderNumber));
   if (exact.length === 0) {
     throw new TeamshipPrintJobError(`No exact Teamship shipping order ${shippingOrderNumber} was found.`, 404);
   }
@@ -137,6 +137,7 @@ export async function createTeamshipPrintPlan(
   }
 
   const order = exact[0]!;
+  const teamshipOrderId = resolveTeamshipInternalOrderId(order);
   const customerName = readCustomerName(order);
   const warehouseName = readWarehouseName(order);
   if (!/\bgarland\b/i.test(customerName)) {
@@ -160,7 +161,7 @@ export async function createTeamshipPrintPlan(
         data: {
           tenantId: context.tenantId,
           shippingOrderNumber,
-          teamshipOrderId: shippingOrderNumber,
+          teamshipOrderId,
           customerName,
           warehouseName,
           documentPlan: documentPlan as unknown as Prisma.InputJsonValue,
@@ -181,6 +182,7 @@ export async function createTeamshipPrintPlan(
           entityId: job.id,
           after: {
             shippingOrderNumber,
+            teamshipOrderId,
             status: "PENDING_APPROVAL",
             approvedPalletCount,
             documentPlan,
@@ -540,8 +542,39 @@ function readStatus(value: string): TeamshipPrintJobStatus {
   return value as TeamshipPrintJobStatus;
 }
 
-function readTeamshipOrderId(order: TeamshipShippingOrderDetail) {
-  return String(order.id ?? order.order_id ?? "").trim();
+function readTeamshipShippingOrderNumbers(order: TeamshipShippingOrderDetail) {
+  return [order.display_id, order.order_number, order.record_no, order.id, order.order_id]
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean);
+}
+
+export function resolveTeamshipInternalOrderId(order: TeamshipShippingOrderDetail) {
+  const explicit = normalizeInternalOrderId(order.teamship_internal_id);
+  const fromUrl = readInternalOrderIdFromUrl(order.url);
+  if (explicit && fromUrl && explicit !== fromUrl) {
+    throw new TeamshipPrintJobError("Teamship returned conflicting internal shipping-order IDs; nothing was queued.", 409);
+  }
+  const resolved = explicit ?? fromUrl;
+  if (!resolved) {
+    throw new TeamshipPrintJobError("Teamship did not return the internal shipping-order ID; nothing was queued.", 409);
+  }
+  return resolved;
+}
+
+function normalizeInternalOrderId(value: unknown) {
+  const normalized = String(value ?? "").trim();
+  return /^\d{1,10}$/.test(normalized) ? normalized : null;
+}
+
+function readInternalOrderIdFromUrl(value: unknown) {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!normalized) return null;
+  try {
+    const match = new URL(normalized).pathname.match(/^\/ship-inventories\/(\d{1,10})(?:\/|$)/);
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function readCustomerName(order: TeamshipShippingOrderDetail) {

@@ -68,6 +68,8 @@ describe("Teamship print jobs", () => {
     teamshipPrintJob.create.mockResolvedValue(stored);
     const findOrders = vi.fn().mockResolvedValue([{
       id: 30666,
+      teamship_internal_id: 31064,
+      url: "https://members.fulfillit.io/ship-inventories/31064",
       customer: { company: "Garland Canada Distribution" },
       warehouse_name: "Annagem",
       pallet_dims: [{ quantity: 1 }, { quantity: 1 }]
@@ -85,13 +87,36 @@ describe("Teamship print jobs", () => {
       printerPlan: { outboundLabels: { exactName: "BIXOLON SRP-770III" } }
     });
     expect(teamshipPrintJob.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ tenantId: "tenant-1", requestedByUserId: "user-1" })
+      data: expect.objectContaining({
+        tenantId: "tenant-1",
+        requestedByUserId: "user-1",
+        shippingOrderNumber: "30666",
+        teamshipOrderId: "31064"
+      })
     }));
+  });
+
+  it("fails closed when Teamship returns conflicting internal order IDs", async () => {
+    const findOrders = vi.fn().mockResolvedValue([{
+      id: 30666,
+      teamship_internal_id: 31064,
+      url: "https://members.fulfillit.io/ship-inventories/31065",
+      customer: { company: "Garland Canada Distribution" },
+      warehouse_name: "Annagem",
+      pallet_dims: [{ quantity: 1 }]
+    }]);
+
+    await expect(createTeamshipPrintPlan(context, {
+      shippingOrderNumber: "30666",
+      requestKey: "d".repeat(64)
+    }, { findOrders })).rejects.toThrow(/conflicting internal shipping-order IDs/i);
+    expect(teamshipPrintJob.create).not.toHaveBeenCalled();
   });
 
   it("fails closed when the order is not Garland at Annagem", async () => {
     const findOrders = vi.fn().mockResolvedValue([{
       id: 30666,
+      teamship_internal_id: 31064,
       customer: { company: "Another Customer" },
       warehouse_name: "Annagem",
       pallet_dims: [{ quantity: 1 }]
@@ -129,7 +154,7 @@ function storedJob(overrides: Record<string, unknown> = {}) {
     id: "cmprintjob12345",
     tenantId: "tenant-1",
     shippingOrderNumber: "30666",
-    teamshipOrderId: "30666",
+    teamshipOrderId: "31064",
     customerName: "Garland Canada Distribution",
     warehouseName: "Annagem",
     status: "PENDING_APPROVAL",
