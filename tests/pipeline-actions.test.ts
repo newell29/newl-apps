@@ -89,6 +89,7 @@ describe("pipeline bulk actions", () => {
       id: where.id,
       companyId: `company-for-${where.id}`,
       contactId: null,
+      stage: LeadPipelineStage.NEW,
       ownerUserId: "Zalan Riaz",
       notes: where.id === "lead-1" ? "Existing note" : null,
       company: {
@@ -211,6 +212,16 @@ describe("pipeline bulk actions", () => {
     expect(companyUpdate.mock.calls[0][0].data.candidateStatus).toBe(CandidateStatus.DISQUALIFIED);
     expect(companyUpdate.mock.calls[0][0].data.doNotProspect).toBe(true);
     expect(companyUpdate.mock.calls[1][0].where).toEqual({ id: "company-for-lead-2" });
+  });
+
+  it("does not record a pipeline outcome when the requested stage is unchanged", async () => {
+    const formData = new FormData();
+    formData.set("stage", LeadPipelineStage.NEW);
+    formData.append("leadId", "lead-1");
+
+    await bulkUpdateLeadStageAction(formData);
+
+    expect(recordLeadOutcomeEvent).not.toHaveBeenCalled();
   });
 
   it("imports Apollo contacts, preserves rep assignment, and notes completion", async () => {

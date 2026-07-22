@@ -2085,15 +2085,17 @@ async function setCandidateStatusForCompany(
     }
   }
 
-  await recordLeadOutcomeEvent({
-    tenantId,
-    companyId,
-    outcomeType: "CANDIDATE_STATUS_CHANGED",
-    previousValue: company.candidateStatus ?? null,
-    currentValue: status,
-    source: "USER_ACTION",
-    actorUserId
-  });
+  if (company.candidateStatus !== status) {
+    await recordLeadOutcomeEvent({
+      tenantId,
+      companyId,
+      outcomeType: "CANDIDATE_STATUS_CHANGED",
+      previousValue: company.candidateStatus ?? null,
+      currentValue: status,
+      source: "USER_ACTION",
+      actorUserId
+    });
+  }
 }
 
 async function setLeadStageForTenant(
@@ -2146,16 +2148,18 @@ async function setLeadStageForTenant(
     });
   }
 
-  await recordLeadOutcomeEvent({
-    tenantId,
-    companyId: lead.companyId,
-    leadId,
-    outcomeType: "PIPELINE_STAGE_CHANGED",
-    previousValue: lead.stage,
-    currentValue: stage,
-    source: "USER_ACTION",
-    actorUserId
-  });
+  if (lead.stage !== stage) {
+    await recordLeadOutcomeEvent({
+      tenantId,
+      companyId: lead.companyId,
+      leadId,
+      outcomeType: "PIPELINE_STAGE_CHANGED",
+      previousValue: lead.stage,
+      currentValue: stage,
+      source: "USER_ACTION",
+      actorUserId
+    });
+  }
 }
 
 async function applySequenceSelectionToContacts({
