@@ -436,6 +436,8 @@ model Tenant {
   importRecords                       TradeMiningImportRecord[]
   searchProfiles                      TradeMiningSearchProfile[]
   tradeMiningScoringConfig            TradeMiningScoringConfig?
+  leadScoreSnapshots                  LeadScoreSnapshot[]
+  leadOutcomeEvents                   LeadOutcomeEvent[]
   contacts                            Contact[]
   leads                               Lead[]
   contactOutreachDrafts               ContactOutreachDraft[]
@@ -1408,6 +1410,8 @@ model Company {
   leads                   Lead[]
   contactOutreachDrafts   ContactOutreachDraft[]
   apolloCompanyMatches    ApolloCompanyMatch[]
+  leadScoreSnapshots      LeadScoreSnapshot[]
+  leadOutcomeEvents       LeadOutcomeEvent[]
   cashflowCustomers       CashflowCustomer[]
   cashflowCustomerAliases CashflowCustomerAlias[]
 
@@ -1601,6 +1605,10 @@ model Contact {
   sequenceManuallyOverridden   Boolean        @default(false)
   lastTouchAt                  DateTime?
   lastReplyAt                  DateTime?
+  apolloLastSyncedAt           DateTime?
+  apolloNextSyncAt             DateTime?
+  apolloSyncFailureCount       Int            @default(0)
+  apolloSyncLastError          String?
   assignedRep                  String?
   rawJson                      Json?
   createdAt                    DateTime       @default(now())
@@ -1629,6 +1637,8 @@ model Contact {
   @@index([tenantId, selectedSequenceId])
   @@index([tenantId, sequenceManuallyOverridden])
   @@index([tenantId, replyStatus])
+  @@index([tenantId, apolloNextSyncAt])
+  @@index([tenantId, apolloSyncFailureCount])
   @@index([tenantId, source])
   @@index([tenantId, assignedRep])
 }
@@ -1689,6 +1699,62 @@ model Lead {
   @@index([tenantId, stage])
   @@index([tenantId, ownerUserId])
   @@index([tenantId, score])
+}
+
+model LeadScoreSnapshot {
+  id                String   @id @default(cuid())
+  tenantId          String
+  companyId         String
+  contactId         String?
+  leadId            String?
+  scoreType         String
+  score             Int
+  tier              String?
+  modelVersion      String
+  configFingerprint String
+  trigger           String
+  searchProfileId   String?
+  explanation       String?
+  breakdown         Json
+  evidenceAsOf      DateTime?
+  createdAt         DateTime @default(now())
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  outcomeEvents LeadOutcomeEvent[]
+
+  @@index([tenantId, companyId, createdAt])
+  @@index([tenantId, contactId, createdAt])
+  @@index([tenantId, leadId, createdAt])
+  @@index([tenantId, scoreType, createdAt])
+  @@index([tenantId, configFingerprint, createdAt])
+}
+
+model LeadOutcomeEvent {
+  id              String   @id @default(cuid())
+  tenantId        String
+  companyId       String
+  contactId       String?
+  leadId          String?
+  outcomeType     String
+  previousValue   String?
+  currentValue    String?
+  source          String
+  actorUserId     String?
+  scoreSnapshotId String?
+  metadata        Json?
+  occurredAt      DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  scoreSnapshot LeadScoreSnapshot? @relation(fields: [scoreSnapshotId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, companyId, occurredAt])
+  @@index([tenantId, contactId, occurredAt])
+  @@index([tenantId, leadId, occurredAt])
+  @@index([tenantId, outcomeType, occurredAt])
+  @@index([tenantId, scoreSnapshotId])
 }
 
 model CashflowCustomer {

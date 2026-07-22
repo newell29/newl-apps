@@ -113,9 +113,22 @@ export type ApolloContactLookupResult = {
 };
 
 export class ApolloRateLimitError extends Error {
-  constructor(message: string) {
+  retryAfterMs: number | null;
+
+  constructor(message: string, retryAfterMs: number | null = null) {
     super(message);
     this.name = "ApolloRateLimitError";
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+export class ApolloTransientError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApolloTransientError";
+    this.status = status;
   }
 }
 
@@ -518,6 +531,44 @@ export async function fetchApolloContactsForCompany(
     match: toApolloCompanyLookupMatch(effectiveMatchOrganization, input.companyName, normalizeDomain(input.domain)),
     contacts: dedupeApolloContacts(contactsFromApollo)
   };
+}
+
+export async function fetchApolloContactById(apolloContactId: string): Promise<ApolloContactRecord> {
+  const contactId = apolloContactId.trim();
+  if (!contactId) {
+    throw new Error("Apollo contact status sync requires a contact ID.");
+  }
+
+  const apiKey = readApolloMasterApiKey();
+  const response = await fetch(`${DEFAULT_BASE_URL}/api/v1/contacts/${encodeURIComponent(contactId)}`, {
+    method: "GET",
+    headers: buildApolloHeaders(apiKey),
+    cache: "no-store"
+  });
+  const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+
+  if (!response.ok) {
+    const message = extractApolloError(json) ?? `Apollo contact status sync failed with status ${response.status}.`;
+    if (response.status === 429 || isApolloRateLimitMessage(message)) {
+      throw new ApolloRateLimitError(message, parseRetryAfterMs(response.headers.get("retry-after")));
+    }
+    if (response.status >= 500) {
+      throw new ApolloTransientError(message, response.status);
+    }
+    throw new Error(message);
+  }
+
+  if (!json) {
+    throw new ApolloTransientError("Apollo returned an unreadable contact response.", 502);
+  }
+
+  const record = asRecord(json.contact) ?? asRecord(json.data) ?? json;
+  const contact = parseApolloContacts({ contacts: [record] })[0];
+  if (!contact) {
+    throw new Error("Apollo returned a contact response without a usable contact record.");
+  }
+
+  return contact;
 }
 
 export async function pushApolloContactsToSequence(
@@ -1305,6 +1356,26 @@ function parseApolloContacts(payload: Record<string, unknown>): ApolloContactRec
       asRecord(record.cadence) ??
       asRecord(record.enrollment) ??
       selectCurrentApolloCampaignStatus(record);
+    const sequenceStatus = parseSequenceStatus(
+      readApolloString(record, [
+        "apollo_sequence_status",
+        "sequence_status",
+        "enrollment_status",
+        "emailer_campaign_status"
+      ]) ?? readApolloString(sequenceDetails ?? {}, ["status", "state"])
+    );
+    const explicitReplyStatus = parseReplyStatus(
+      readApolloString(record, ["reply_status", "response_status", "last_response_type"])
+    );
+    const replyStatus =
+      explicitReplyStatus === ReplyStatus.NO_REPLY && sequenceStatus === SequenceStatus.REPLIED
+        ? ReplyStatus.REPLIED
+        : explicitReplyStatus;
+    const lastReplyAt =
+      parseApolloDate(readApolloString(record, ["last_reply_at", "replied_at", "responded_at"])) ??
+      (sequenceStatus === SequenceStatus.REPLIED
+        ? parseApolloDate(readApolloString(sequenceDetails ?? {}, ["replied_at", "responded_at", "updated_at"]))
+        : null);
 
     return [
       {
@@ -1322,18 +1393,8 @@ function parseApolloContacts(payload: Record<string, unknown>): ApolloContactRec
         city: readApolloString(record, ["city"]),
         state: readApolloString(record, ["state", "region"]),
         country: readApolloString(record, ["country"]),
-        sequenceStatus: parseSequenceStatus(
-          readApolloString(record, [
-            "apollo_sequence_status",
-            "sequence_status",
-            "enrollment_status",
-            "emailer_campaign_status"
-          ]) ??
-            readApolloString(sequenceDetails ?? {}, ["status", "state"])
-        ),
-        replyStatus: parseReplyStatus(
-          readApolloString(record, ["reply_status", "response_status", "last_response_type"])
-        ),
+        sequenceStatus,
+        replyStatus,
         sequenceId:
           readApolloString(record, ["apollo_sequence_id", "sequence_id", "emailer_campaign_id"]) ??
           readApolloString(sequenceDetails ?? {}, ["emailer_campaign_id", "campaign_id", "id"]),
@@ -1349,9 +1410,7 @@ function parseApolloContacts(payload: Record<string, unknown>): ApolloContactRec
         lastTouchAt: parseApolloDate(
           readApolloString(record, ["updated_at", "last_activity_at", "last_contacted_at", "last_touch_at"])
         ),
-        lastReplyAt: parseApolloDate(
-          readApolloString(record, ["last_reply_at", "replied_at", "responded_at", "apollo_sequence_enrolled_at"])
-        ),
+        lastReplyAt,
         rawPayload: {
           ...record,
           organization,
@@ -2575,7 +2634,7 @@ function parseSequenceStatus(value: string | null): SequenceStatus {
     return SequenceStatus.NOT_STARTED;
   }
 
-  if (/(reply|respond)/.test(normalized)) {
+  if (/(repl(y|ied|ies)|respond)/.test(normalized)) {
     return SequenceStatus.REPLIED;
   }
 
@@ -2629,7 +2688,7 @@ function parseReplyStatus(value: string | null): ReplyStatus {
     return ReplyStatus.OUT_OF_OFFICE;
   }
 
-  if (/reply|respond/.test(normalized)) {
+  if (/repl(y|ied|ies)|respond/.test(normalized)) {
     return ReplyStatus.REPLIED;
   }
 
@@ -2643,6 +2702,24 @@ function parseApolloDate(value: string | null) {
 
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function parseRetryAfterMs(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(seconds * 1000, 30_000);
+  }
+
+  const retryAt = new Date(value);
+  if (Number.isNaN(retryAt.getTime())) {
+    return null;
+  }
+
+  return Math.min(Math.max(0, retryAt.getTime() - Date.now()), 30_000);
 }
 
 function asRecord(value: unknown) {

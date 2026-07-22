@@ -20,6 +20,7 @@ import {
   updateContactSequenceAction
 } from "@/modules/lead-gen/actions";
 import { getRecentApolloPushJobs } from "@/modules/lead-gen/apollo-push-jobs";
+import { getApolloStatusSyncHealth } from "@/modules/lead-gen/apollo-status-sync";
 import { ContactDirectoryTableClient } from "@/modules/lead-gen/components/contact-directory-table-client";
 import {
   getContactDirectory,
@@ -114,7 +115,7 @@ export default async function ContactsPage({
     sort
   });
   const exportAllHref = "/api/lead-gen/contacts/export";
-  const [contacts, filterOptions, apolloPushJobs] = await Promise.all([
+  const [contacts, filterOptions, apolloPushJobs, apolloSyncHealth] = await Promise.all([
     getContactDirectory(tenant, {
       query,
       companyId,
@@ -133,7 +134,8 @@ export default async function ContactsPage({
       sort
     }),
     getContactDirectoryFilters(tenant),
-    getRecentApolloPushJobs(tenant)
+    getRecentApolloPushJobs(tenant),
+    getApolloStatusSyncHealth(tenant)
   ]);
   const filterChips = buildContactFilterChips({
     query,
@@ -168,6 +170,44 @@ export default async function ContactsPage({
         This page shows both assigned and unassigned contacts. Unassigned contacts remain visible for review, but Apollo
         push stays blocked until a sales rep is assigned. Selected cadence and Tier 1 AI draft requirements still apply.
       </div>
+
+      <section className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border bg-muted px-4 py-3">
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">Automatic Apollo reply sync</h2>
+            <p className="mt-1 text-xs text-mutedForeground">
+              The scheduler checks due Apollo contacts hourly; each successful contact is checked again in about {apolloSyncHealth.intervalHours} hours.
+            </p>
+          </div>
+          <span
+            className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
+              apolloSyncHealth.enabled
+                ? "border-success/30 bg-success/10 text-success"
+                : "border-warning/30 bg-warning/10 text-warning"
+            }`}
+          >
+            {apolloSyncHealth.enabled ? "Active" : "Setup required"}
+          </span>
+        </div>
+        <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-4">
+          <SyncMetric label="Apollo contacts tracked" value={apolloSyncHealth.trackedContacts.toLocaleString("en-US")} />
+          <SyncMetric label="Due now" value={apolloSyncHealth.dueContacts.toLocaleString("en-US")} />
+          <SyncMetric
+            label="Contacts with sync errors"
+            value={apolloSyncHealth.failedContacts.toLocaleString("en-US")}
+            warning={apolloSyncHealth.failedContacts > 0}
+          />
+          <SyncMetric
+            label="Last successful run"
+            value={formatSyncDate(apolloSyncHealth.lastSuccessfulAt)}
+          />
+        </div>
+        {apolloSyncHealth.latestJob?.status === "ERROR" ? (
+          <div className="border-t border-danger/20 bg-danger/5 px-4 py-3 text-sm text-danger">
+            Latest sync issue: {apolloSyncHealth.latestJob.errorMessage ?? "Review the latest Apollo sync run."}
+          </div>
+        ) : null}
+      </section>
 
       <form className="overflow-hidden rounded-lg border border-border bg-card shadow-sm" action="/lead-gen/contacts">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border bg-muted px-4 py-3">
@@ -719,4 +759,23 @@ function formatDraftStatusFilter(value: string) {
   }
 
   return formatEnum(value);
+}
+
+function SyncMetric({ label, value, warning = false }: { label: string; value: string; warning?: boolean }) {
+  return (
+    <div className="bg-card px-4 py-3">
+      <p className="text-xs font-medium text-mutedForeground">{label}</p>
+      <p className={`mt-1 text-lg font-semibold ${warning ? "text-danger" : "text-foreground"}`}>{value}</p>
+    </div>
+  );
+}
+
+function formatSyncDate(value: Date | null) {
+  if (!value) return "Not yet";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(value);
 }

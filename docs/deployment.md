@@ -27,6 +27,17 @@ Required non-secret safety variable:
 | `DATABASE_ENVIRONMENT` | Production | Must be `production`. Labels the connected database as production. |
 | `DATABASE_ENVIRONMENT` | Preview | Must be `preview`. Preview builds require this exact value before running migrations. |
 
+Required scheduled Apollo synchronization variables:
+
+| Variable | Environment | Purpose |
+| --- | --- | --- |
+| `APOLLO_STATUS_SYNC_SECRET` | Production | Dedicated random secret accepted only by the Apollo sync route. Configure the same value as the GitHub Actions repository secret named `APOLLO_STATUS_SYNC_SECRET`; do not reuse or rotate the shared `CRON_SECRET`. |
+| `APOLLO_MASTER_API` | Production | Master Apollo key used to read saved contact status. Do not use a production key in Preview. |
+| `APOLLO_STATUS_SYNC_INTERVAL_HOURS` | Production | Optional freshness interval; defaults to `4` and is clamped to 1–24 hours. |
+| `APOLLO_STATUS_SYNC_BATCH_SIZE` | Production | Optional per-tenant batch size; defaults to `50` and is clamped to 1–100. |
+
+The hourly scheduler is `.github/workflows/apollo-status-sync.yml`. It calls `https://newl-apps.vercel.app/api/lead-gen/apollo/status-sync` and fails visibly when the GitHub Actions secret is missing or the route returns a non-success response. Scheduled workflows run from the default branch, so this does not begin until the reviewed PR is merged.
+
 Optional non-secret diagnostics:
 
 | Variable | Environment | Purpose |

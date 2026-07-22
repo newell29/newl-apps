@@ -1,7 +1,11 @@
 import { JobStatus, type Prisma } from "@prisma/client";
 
 import { classifyTradeMiningIndustryFromRecords } from "@/modules/lead-gen/industry-classification";
-import { calculateLeadPipelineScoreForCompany } from "@/modules/lead-gen/queries";
+import { calculateLeadPipelineScoringForCompany } from "@/modules/lead-gen/queries";
+import {
+  COMPANY_SCORING_MODEL_VERSION,
+  recordLeadScoreSnapshot
+} from "@/modules/lead-gen/score-history";
 import { normalizeSearchProfileValueForWorker } from "@/modules/lead-gen/search-profile-suggestions";
 import {
   defaultTradeMiningCompanyIdentityRoles,
@@ -426,17 +430,31 @@ export async function ingestTradeMiningBatch(tenant: TenantContext, payload: unk
 
   for (const companyId of touchedCompanyIds) {
     await refreshCompanyIndustry(tenant.tenantId, companyId);
-    const score = await calculateLeadPipelineScoreForCompany(tenant, companyId);
+    const scoring = await calculateLeadPipelineScoringForCompany(tenant, companyId);
 
-    if (score !== null) {
+    if (scoring !== null) {
       await prisma.lead.updateMany({
         where: {
           tenantId: tenant.tenantId,
           companyId
         },
         data: {
-          score
+          score: scoring.score
         }
+      });
+
+      await recordLeadScoreSnapshot({
+        tenantId: tenant.tenantId,
+        companyId,
+        scoreType: "COMPANY_OPPORTUNITY",
+        score: scoring.score,
+        modelVersion: COMPANY_SCORING_MODEL_VERSION,
+        scoringConfig: scoring.scoringConfig,
+        trigger: "TRADEMINING_INGESTION",
+        searchProfileId: scoring.searchProfileId ?? batch.searchProfileId,
+        explanation: scoring.reasoning,
+        breakdown: scoring.breakdown,
+        evidenceAsOf: scoring.evidenceAsOf
       });
     }
   }
