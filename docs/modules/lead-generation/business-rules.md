@@ -24,6 +24,16 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - Search profile frequency is a legacy database compatibility field fixed to `daily`; it is not editable and does not control the worker.
 - Newl Apps is the source of truth for enabled profiles. Deleting a profile cancels its pending immediate-run requests, and Hunter reloads the enabled profile list before execution so deleted or disabled profiles do not receive future searches.
 
+## Scoring and outreach safety
+
+- Company scoring uses only tenant-scoped TradeMining evidence inside the matched search profile's own `lookbackWindowDays`. The scoring-level lookback is a fallback for unmatched or legacy imports and must cover the recent plus comparison windows.
+- Shipment evidence queries are date bounded but not row capped. This prevents arbitrary 25-, 100-, or 250-record limits from changing a score for high-volume companies.
+- The matched profile's `minShipmentCount` is a qualification gate for Found Companies; it is not replaced by the fallback scoring lookback.
+- Contacts marked `DO_NOT_CONTACT` or `REJECTED` receive score `0`, remain `UNRANKED`, and cannot be assigned a cadence.
+- Only contacts explicitly marked `APPROVED` can be queued for Apollo. The queue worker rechecks the contact and blocks companies marked `doNotProspect`, `REJECTED`, or `DISQUALIFIED` before any external write.
+- Contact title and department matching uses normalized phrase boundaries. Sales, business-development, and customer-service roles are deprioritized by default, while a preferred logistics/operations match takes precedence for mixed-function titles.
+- Scoring settings reject invalid window combinations, company weights that do not total exactly 100 points, non-descending contact tiers, and incomplete or inverted mid-market TEU ranges.
+
 ## Data model
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.

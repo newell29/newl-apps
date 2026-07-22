@@ -51,6 +51,15 @@ export function scoreContact(
   input: ContactScoringInput,
   config: ContactScoringConfig
 ): ContactScoringResult {
+  const blockingReason = getContactScoringBlockReason(input.contactStatus);
+  if (blockingReason) {
+    return {
+      score: 0,
+      tier: ContactTier.UNRANKED,
+      summary: blockingReason
+    };
+  }
+
   const role = scoreRoleFit(input.title, input.department, config);
   const seniority = scoreSeniority(input.seniority, input.title);
   const companyContext = scoreCompanyContext(input.companyPriorityScore, input.companyLeadScore, config);
@@ -74,6 +83,31 @@ export function scoreContact(
     tier,
     summary
   };
+}
+
+export function getContactScoringBlockReason(contactStatus: ContactStatus) {
+  if (contactStatus === ContactStatus.DO_NOT_CONTACT) {
+    return "do not contact; blocked from scoring and outreach";
+  }
+
+  if (contactStatus === ContactStatus.REJECTED) {
+    return "rejected contact; blocked from scoring and outreach";
+  }
+
+  return null;
+}
+
+export function getContactSequencePushBlockReason(contactStatus: ContactStatus) {
+  const blockingReason = getContactScoringBlockReason(contactStatus);
+  if (blockingReason) {
+    return blockingReason;
+  }
+
+  if (contactStatus !== ContactStatus.APPROVED) {
+    return "Contact must be approved before it can be pushed to an Apollo cadence.";
+  }
+
+  return null;
 }
 
 function scoreRoleFit(title: string | null, department: string | null, config: ContactScoringConfig) {
@@ -116,6 +150,8 @@ function scoreRoleFit(title: string | null, department: string | null, config: C
     reason:
       isDecisionMaker && isLogisticsFit
         ? "strong logistics decision-maker role"
+        : isDecisionMaker && isWeakFunction
+          ? "senior decision-maker in non-core function"
         : isDecisionMaker
           ? "senior decision-maker title"
           : isManager && isLogisticsFit
@@ -215,13 +251,6 @@ function scoreDataQuality(input: ContactScoringInput, config: ContactScoringConf
 }
 
 function scoreWorkflow(input: ContactScoringInput, config: ContactScoringConfig) {
-  if (input.contactStatus === ContactStatus.DO_NOT_CONTACT || input.contactStatus === ContactStatus.REJECTED) {
-    return {
-      score: 0,
-      reason: "blocked from outreach"
-    };
-  }
-
   let score = 4;
   const reasons: string[] = [];
 
@@ -266,8 +295,15 @@ function classifyContactTier(score: number, config: ContactScoringConfig): Conta
 }
 
 function matchesKeywordList(value: string, keywords: string[]) {
-  const normalized = value.toLowerCase();
-  return keywords.some((keyword) => keyword.trim().length > 0 && normalized.includes(keyword.trim().toLowerCase()));
+  const normalized = normalizeKeywordText(value);
+  return keywords.some((keyword) => {
+    const normalizedKeyword = normalizeKeywordText(keyword);
+    return normalizedKeyword.length > 0 && ` ${normalized} `.includes(` ${normalizedKeyword} `);
+  });
+}
+
+function normalizeKeywordText(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function clamp(value: number, min: number, max: number) {

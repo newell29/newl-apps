@@ -61,6 +61,7 @@ vi.mock("@/server/integrations/apollo", () => ({
 
 import {
   bulkAssignLeadOwnerAction,
+  bulkPushContactsToApolloAction,
   bulkQueueApolloEnrichmentAction,
   bulkUnassignLeadOwnerAction,
   bulkUpdateContactSequenceAction,
@@ -263,6 +264,73 @@ describe("pipeline bulk actions", () => {
       operation: "sequence",
       message:
         "One or more selected contacts already show Apollo sequence history. Confirm the override before assigning a new cadence."
+    });
+  });
+
+  it("does not assign a cadence to a do-not-contact record", async () => {
+    contactFindMany.mockResolvedValueOnce([
+      {
+        id: "contact-1",
+        contactStatus: ContactStatus.DO_NOT_CONTACT,
+        sequenceStatus: SequenceStatus.NOT_STARTED
+      }
+    ]);
+
+    const formData = new FormData();
+    formData.append("contactId", "contact-1");
+    formData.set("sequenceId", "houston-import-decision-maker");
+
+    await expect(bulkUpdateContactSequenceAction(formData)).resolves.toMatchObject({
+      status: "error",
+      operation: "sequence",
+      message: "do not contact; blocked from scoring and outreach"
+    });
+    expect(contactUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not queue an unapproved contact for Apollo", async () => {
+    contactFindMany.mockResolvedValueOnce([
+      {
+        id: "contact-1",
+        companyId: "company-1",
+        contactStatus: ContactStatus.REVIEWING,
+        company: {
+          candidateStatus: CandidateStatus.APPROVED_FOR_PIPELINE,
+          doNotProspect: false
+        }
+      }
+    ]);
+
+    const formData = new FormData();
+    formData.append("contactId", "contact-1");
+
+    await expect(bulkPushContactsToApolloAction(formData)).resolves.toMatchObject({
+      status: "error",
+      operation: "apollo_push",
+      message: "Contact must be approved before it can be pushed to an Apollo cadence."
+    });
+  });
+
+  it("does not queue a contact when its company is blocked from prospecting", async () => {
+    contactFindMany.mockResolvedValueOnce([
+      {
+        id: "contact-1",
+        companyId: "company-1",
+        contactStatus: ContactStatus.APPROVED,
+        company: {
+          candidateStatus: CandidateStatus.DISQUALIFIED,
+          doNotProspect: true
+        }
+      }
+    ]);
+
+    const formData = new FormData();
+    formData.append("contactId", "contact-1");
+
+    await expect(bulkPushContactsToApolloAction(formData)).resolves.toMatchObject({
+      status: "error",
+      operation: "apollo_push",
+      message: "The contact's company is blocked from prospecting."
     });
   });
 

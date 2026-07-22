@@ -226,7 +226,19 @@ export const DEFAULT_TRADEMINING_SCORING_SETTINGS: TradeMiningScoringSettings = 
     "distribution",
     "operations"
   ],
-  penalizedContactDepartments: ["hr", "human resources", "legal", "finance", "accounting", "marketing", "communications", "it"],
+  penalizedContactDepartments: [
+    "hr",
+    "human resources",
+    "legal",
+    "finance",
+    "accounting",
+    "marketing",
+    "communications",
+    "it",
+    "sales",
+    "business development",
+    "customer service"
+  ],
   aiClassificationEnabled: false,
   aiModel: "gpt-5.4-mini"
 };

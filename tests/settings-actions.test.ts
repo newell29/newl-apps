@@ -62,6 +62,64 @@ import {
   syncApolloSequenceMappingAction
 } from "@/modules/settings/actions";
 
+function buildValidScoringFormData() {
+  const formData = new FormData();
+  const values: Record<string, string> = {
+    recentWindowDays: "30",
+    comparisonWindowDays: "30",
+    lookbackWindowDays: "90",
+    momentumWeight: "30",
+    marketFitWeight: "20",
+    industryFitWeight: "15",
+    companySizeWeight: "15",
+    roleWeight: "10",
+    confidenceWeight: "5",
+    workflowWeight: "5",
+    preferredOriginCountries: "Italy\nGermany",
+    penalizedOriginCountries: "China",
+    preferredOriginPorts: "Genoa",
+    penalizedOriginPorts: "Ningbo",
+    preferredDestinationMarkets: "Houston",
+    penalizedDestinationMarkets: "Los Angeles",
+    preferredIndustryKeywords: "furniture",
+    penalizedIndustryKeywords: "broker",
+    preferredHsCodePrefixes: "9403",
+    penalizedHsCodePrefixes: "9999",
+    oversizeTeuThreshold: "30",
+    oversizeShipmentCount30dThreshold: "18",
+    oversizePenalty: "10",
+    midMarketTeuMin: "2",
+    midMarketTeuMax: "15",
+    midMarketBoost: "6",
+    contactDecisionMakerWeight: "20",
+    contactManagerWeight: "12",
+    contactLogisticsDepartmentWeight: "15",
+    contactWeakFunctionPenalty: "6",
+    contactCompanyContextWeight: "15",
+    contactEmailWeight: "6",
+    contactLinkedinWeight: "4",
+    contactPhoneWeight: "2",
+    contactPrimaryContactBoost: "6",
+    contactApprovedStatusBoost: "3",
+    contactReviewingStatusBoost: "2",
+    contactTier1Threshold: "78",
+    contactTier2Threshold: "58",
+    contactTier3Threshold: "36",
+    preferredContactTitleKeywords: "director",
+    penalizedContactTitleKeywords: "assistant",
+    preferredContactDepartments: "logistics",
+    penalizedContactDepartments: "finance",
+    aiClassificationEnabled: "true",
+    aiModel: "gpt-5-mini"
+  };
+
+  for (const [key, value] of Object.entries(values)) {
+    formData.set(key, value);
+  }
+
+  return formData;
+}
+
 describe("saveTradeMiningScoringSettingsAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -149,6 +207,52 @@ describe("saveTradeMiningScoringSettingsAction", () => {
     expect(revalidatePath).toHaveBeenCalledWith("/settings");
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
     expect(revalidatePath).toHaveBeenCalledWith("/lead-gen/candidates");
+  });
+
+  it("rejects scoring windows that exceed the fallback lookback", async () => {
+    const formData = buildValidScoringFormData();
+    formData.set("lookbackWindowDays", "50");
+
+    await expect(saveTradeMiningScoringSettingsAction(formData)).rejects.toThrow(
+      "Scoring lookback must cover both the recent and comparison windows."
+    );
+    expect(upsertTradeMiningScoringConfig).not.toHaveBeenCalled();
+  });
+
+  it("rejects overlapping or inverted contact tiers", async () => {
+    const formData = buildValidScoringFormData();
+    formData.set("contactTier2Threshold", "80");
+
+    await expect(saveTradeMiningScoringSettingsAction(formData)).rejects.toThrow(
+      "Contact tier thresholds must descend from Tier 1 to Tier 3."
+    );
+    expect(upsertTradeMiningScoringConfig).not.toHaveBeenCalled();
+  });
+
+  it("requires company scoring weights to total 100 points", async () => {
+    const formData = buildValidScoringFormData();
+    formData.set("workflowWeight", "4");
+
+    await expect(saveTradeMiningScoringSettingsAction(formData)).rejects.toThrow(
+      "Company scoring weights must total exactly 100 points."
+    );
+    expect(upsertTradeMiningScoringConfig).not.toHaveBeenCalled();
+  });
+
+  it("rejects incomplete or inverted mid-market TEU ranges", async () => {
+    const missingMaximum = buildValidScoringFormData();
+    missingMaximum.delete("midMarketTeuMax");
+    await expect(saveTradeMiningScoringSettingsAction(missingMaximum)).rejects.toThrow(
+      "Set both mid-market TEU limits or leave both blank."
+    );
+
+    const inverted = buildValidScoringFormData();
+    inverted.set("midMarketTeuMin", "20");
+    inverted.set("midMarketTeuMax", "10");
+    await expect(saveTradeMiningScoringSettingsAction(inverted)).rejects.toThrow(
+      "Mid-market TEU minimum cannot exceed the maximum."
+    );
+    expect(upsertTradeMiningScoringConfig).not.toHaveBeenCalled();
   });
 
   it("saves tenant-scoped Apollo rep mapping entries", async () => {
