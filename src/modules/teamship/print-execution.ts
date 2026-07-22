@@ -5,13 +5,16 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { chromium, type Browser, type Locator, type Page } from "playwright-core";
 
+import {
+  parseTeamshipShippingOrderPalletPreflight,
+  readTeamshipShippingOrderPalletCount
+} from "@/modules/teamship/browser-read-execution";
 import type {
   ClaimedTeamshipPrintJob,
   TeamshipPrintExecutionDocument,
   TeamshipPrintExecutionResult
 } from "@/modules/teamship/print-jobs";
 import {
-  calculateTeamshipPalletCount,
   readTeamshipCustomerName,
   readTeamshipWarehouseName,
   resolveTeamshipInternalOrderId,
@@ -65,10 +68,11 @@ export async function executeTeamshipPrintJob(
     const bolUrl = new URL(`/ship-inventories/${encodeURIComponent(job.teamshipOrderId)}/bol-editor`, baseUrl);
 
     // Resolve the display number to the approved internal ID before any browser action or print is sent.
-    observedPalletCount = await readTeamshipApiPalletCount(job);
+    await assertTeamshipApiOrderIdentity(job);
+    await openTeamshipPage(page, orderUrl, job, allowedHosts, options);
+    observedPalletCount = await readTeamshipPrintPagePalletCount(page, job, options);
     assertApprovedPalletCount(observedPalletCount, job.approvedPalletCount);
     // Preflight every browser and printer destination before any print is sent.
-    await openTeamshipPage(page, orderUrl, job, allowedHosts, options);
     await findExactPrinterOption(page, job.printerPlan.outboundLabels.exactName);
     await openTeamshipPage(page, bolUrl, job, allowedHosts, options);
     await findExactPrinterOption(page, job.printerPlan.bol.exactName);
@@ -82,7 +86,7 @@ export async function executeTeamshipPrintJob(
 
     // Printer selection is intentionally redone after returning to the order.
     await openTeamshipPage(page, orderUrl, job, allowedHosts, options);
-    observedPalletCount = await readTeamshipApiPalletCount(job);
+    observedPalletCount = await readTeamshipPrintPagePalletCount(page, job, options);
     assertApprovedPalletCount(observedPalletCount, job.approvedPalletCount);
     completedDocuments.push(await printOutboundLabels(page, job));
 
@@ -102,7 +106,7 @@ export async function executeTeamshipPrintJob(
   }
 }
 
-export async function readTeamshipApiPalletCount(
+export async function assertTeamshipApiOrderIdentity(
   job: ClaimedTeamshipPrintJob,
   findOrders: typeof findTeamshipShippingOrders = findTeamshipShippingOrders
 ) {
@@ -124,7 +128,28 @@ export async function readTeamshipApiPalletCount(
   if (normalizeTeamshipIdentity(readTeamshipWarehouseName(order)) !== normalizeTeamshipIdentity(job.warehouseName)) {
     throw new Error("Teamship API warehouse does not match the approved print plan.");
   }
-  return calculateTeamshipPalletCount(order);
+}
+
+export async function readTeamshipPrintPagePalletCount(
+  page: Page,
+  job: ClaimedTeamshipPrintJob,
+  options: TeamshipPrintExecutionOptions = {}
+) {
+  const customerMatches = await page.getByText(job.customerName, { exact: true }).count();
+  const warehouseMatches = await page.getByText(job.warehouseName, { exact: true }).count();
+  if (customerMatches < 1 || warehouseMatches < 1) {
+    throw new Error("The Teamship shipping-order page does not match the approved customer and warehouse.");
+  }
+
+  return parseTeamshipShippingOrderPalletPreflight({
+    teamshipOrderId: job.teamshipOrderId,
+    palletCount: await readTeamshipShippingOrderPalletCount(
+      page,
+      options.navigationTimeoutMs ?? 15_000
+    ),
+    customerName: job.customerName,
+    warehouseName: job.warehouseName
+  }).palletCount;
 }
 
 function normalizeTeamshipIdentity(value: string) {

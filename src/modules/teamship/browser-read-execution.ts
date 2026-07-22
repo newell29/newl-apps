@@ -193,7 +193,7 @@ export async function readTeamshipShippingOrderPalletCount(
   page: Pick<Page, "locator">,
   timeoutMs: number
 ) {
-  await page.locator("input#pallets_count,input[id^='pallet_']").first().waitFor({
+  await page.locator('input#pallets_count,input[id^="pallet_"],table:has-text("No. of Pallets")').first().waitFor({
     state: "attached",
     timeout: timeoutMs
   });
@@ -220,7 +220,39 @@ export async function readTeamshipShippingOrderPalletCount(
     });
   }
 
+  if (!rows.some(teamshipShippingOrderPalletRowIsObserved)) {
+    return String(parseTeamshipShippingOrderPalletTableRows(
+      await readTeamshipShippingOrderPalletTableRows(page)
+    ));
+  }
+
   return String(parseTeamshipShippingOrderPalletRows(rows));
+}
+
+export function parseTeamshipShippingOrderPalletTableRows(rows: string[][]) {
+  if (rows.length < 1 || rows.length > 10) {
+    throw new Error("The Teamship shipping-order pallet table did not expose a bounded set of rows.");
+  }
+
+  let total = 0;
+  for (const row of rows) {
+    if (row.length !== 3) {
+      throw new Error("The Teamship shipping-order pallet table row was invalid.");
+    }
+    const rawQuantity = row[0]?.trim() ?? "";
+    if (!/^\d+$/.test(rawQuantity)) {
+      throw new Error("The Teamship shipping-order pallet table had an invalid quantity.");
+    }
+    const quantity = Number(rawQuantity);
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) {
+      throw new Error("The Teamship shipping-order pallet table quantity was outside the allowed range.");
+    }
+    total += quantity;
+    if (total > 100) {
+      throw new Error("The Teamship shipping-order pallet count was outside the allowed range.");
+    }
+  }
+  return total;
 }
 
 export function parseTeamshipShippingOrderPalletRows(rows: Array<{
@@ -234,14 +266,7 @@ export function parseTeamshipShippingOrderPalletRows(rows: Array<{
 }>) {
   let total = 0;
   for (const row of rows) {
-    const normalizedWeightUnit = row.weightUnit?.trim().toLowerCase() ?? "";
-    const meaningfulWeightUnit = normalizedWeightUnit
-      && !["lb", "lbs", "pound", "pounds"].includes(normalizedWeightUnit)
-      ? row.weightUnit
-      : null;
-    const observed = [row.quantity, row.length, row.width, row.height, row.weight, meaningfulWeightUnit, row.commodity]
-      .some((value) => Boolean(value?.trim()));
-    if (!observed) continue;
+    if (!teamshipShippingOrderPalletRowIsObserved(row)) continue;
 
     const rawQuantity = row.quantity?.trim() ?? "";
     if (!/^\d+$/.test(rawQuantity)) {
@@ -260,6 +285,43 @@ export function parseTeamshipShippingOrderPalletRows(rows: Array<{
     throw new Error("The Teamship shipping-order page did not expose any valid pallet rows.");
   }
   return total;
+}
+
+function teamshipShippingOrderPalletRowIsObserved(row: {
+  quantity: string | null;
+  length: string | null;
+  width: string | null;
+  height: string | null;
+  weight: string | null;
+  weightUnit: string | null;
+  commodity: string | null;
+}) {
+  const normalizedWeightUnit = row.weightUnit?.trim().toLowerCase() ?? "";
+  const meaningfulWeightUnit = normalizedWeightUnit
+    && !["lb", "lbs", "pound", "pounds"].includes(normalizedWeightUnit)
+    ? row.weightUnit
+    : null;
+  return [row.quantity, row.length, row.width, row.height, row.weight, meaningfulWeightUnit, row.commodity]
+    .some((value) => Boolean(value?.trim()));
+}
+
+async function readTeamshipShippingOrderPalletTableRows(page: Pick<Page, "locator">) {
+  const tables = page.locator('table:visible')
+    .filter({ hasText: "No. of Pallets" })
+    .filter({ hasText: "Dimensions (in inches)" })
+    .filter({ hasText: "Weight (in pounds)" });
+  if (await tables.count() !== 1) {
+    throw new Error("The Teamship shipping-order page did not expose one unambiguous pallet table.");
+  }
+
+  const tableRows = tables.first().locator("tr");
+  const rows: string[][] = [];
+  for (let index = 0; index < await tableRows.count(); index += 1) {
+    const cells = tableRows.nth(index).locator("td");
+    if (await cells.count() === 0) continue;
+    rows.push(await cells.allInnerTexts());
+  }
+  return rows;
 }
 
 async function readOptionalUniqueInputValue(page: Pick<Page, "locator">, selector: string) {
