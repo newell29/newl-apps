@@ -53,6 +53,8 @@ Run Scout on Monday at 9:15 AM in `America/Toronto`, after the evidence refresh 
 
 Use a dedicated Scout read/prepare token and environment file. Keep the developer callback token separate. Every request must carry the configured tenant slug, and Newl Apps must resolve that slug to a tenant before reading or changing a record. SEMrush OAuth state stays in the Codex/OpenClaw runtime; Newl Apps receives only sanitized evidence rows. Never put tokens, credentials, customer data, or the full brief in the GitHub dispatch payload.
 
+The OpenClaw scripts resolve Codex from `CODEX_BIN`, the current executable path, common user-local installations, or the Codex binary bundled with the ChatGPT application. Set `CODEX_BIN` in the protected Scout environment file when the runtime uses another location.
+
 ## Evaluation gates
 
 Before widening volume or changing models, review at least 20 saved opportunities across core pages, supporting content, and quick optimizations. Record:

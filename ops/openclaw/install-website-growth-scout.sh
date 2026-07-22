@@ -8,6 +8,8 @@ script_directory="${0:A:h}"
 repo_path="${script_directory:h:h}"
 runner_path="${script_directory}/run-website-growth-scout.sh"
 scout_env_file="${WEBSITE_GROWTH_SCOUT_ENV_FILE:-${HOME}/.openclaw/agents/scout/.env}"
+source "${script_directory}/lib/resolve-codex-cli.zsh"
+resolve_codex_cli
 
 if [[ ! -r "${scout_env_file}" ]]; then
   echo "Create the protected Scout environment file before installation." >&2
@@ -19,7 +21,7 @@ for required_name in NEWL_APPS_URL OPENCLAW_WEBSITE_GROWTH_TOKEN NEWL_WEBSITE_RE
     exit 1
   fi
 done
-if ! codex mcp get semrush >/dev/null 2>&1; then
+if ! "${codex_bin}" mcp get semrush >/dev/null 2>&1; then
   echo "Configure the official SEMrush MCP OAuth connection before installing the weekly job." >&2
   exit 1
 fi

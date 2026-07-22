@@ -8,7 +8,7 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 
 ## Scout regression coverage
 
-`tests/website-growth.test.ts` verifies that scheduled completion requires SEMrush to have been queried, accepts schema-complete drafts and sanitized SEMrush evidence, and builds deterministic Teams review links. Shell syntax and the JSON output schema should also be validated before rollout. Live Google, SEMrush, Codex, Teams, and Vercel calls are not part of unit tests and require the guarded preview/runtime validation described in the rollout documentation.
+`tests/website-growth.test.ts` verifies that scheduled completion requires SEMrush to have been queried, accepts schema-complete drafts and sanitized SEMrush evidence, and builds deterministic Teams review links. `tests/openclaw-website-growth-scout.test.ts` verifies the shared Codex executable resolver, including explicit `CODEX_BIN` and the ChatGPT application bundle fallback. Shell syntax and the JSON output schema should also be validated before rollout. Live Google, SEMrush, Codex, Teams, and Vercel calls are not part of unit tests and require the guarded preview/runtime validation described in the rollout documentation.
 
 ## Workflow / rules summary
 
