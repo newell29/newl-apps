@@ -32,6 +32,10 @@ import {
   weeklyContentRecommendations
 } from "@/modules/website-growth/opportunities";
 import { selectWeeklyWebsiteGrowthCandidates } from "@/modules/website-growth/weekly-plan";
+import {
+  buildWebsiteGrowthScoutTeamsMessage,
+  parseWebsiteGrowthScoutCompletion
+} from "@/modules/website-growth/scout-run";
 import { authenticateWebsiteGrowthBuildWorkerRequest } from "@/server/website-growth-build-worker-auth";
 import { authenticateWebsiteGrowthScoutRequest } from "@/server/website-growth-scout-auth";
 
@@ -194,6 +198,74 @@ describe("website growth weekly planning lanes", () => {
 
     expect(result.selected.map((candidate) => candidate.id)).toEqual(["nationwide", "resource"]);
     expect(result.laneCounts.CORE_PAGE).toBe(1);
+  });
+});
+
+describe("website growth Codex Scout completion", () => {
+  it("accepts official SEMrush MCP evidence and a schema-complete draft", () => {
+    const draft = buildTemplateWebsiteGrowthContentDraft({
+      action: WebsiteGrowthAction.IMPROVE_EXISTING_PAGE,
+      topic: "gta local trucking",
+      primaryKeyword: "gta local trucking",
+      targetPage: "https://www.newlgroup.com/freight/gta-local-trucking",
+      sourcePage: "https://www.newlgroup.com/freight/gta-local-trucking",
+      score: 70,
+      confidence: "High",
+      reason: "Search Console and first-party form evidence",
+      recommendation: "Improve the existing page.",
+      supportingKeywords: [],
+      evidence: {}
+    });
+
+    const completion = parseWebsiteGrowthScoutCompletion({
+      runSummary: "Prepared one evidence-backed page improvement.",
+      semrush: {
+        queried: true,
+        summary: "The existing page ranks for a relevant commercial keyword.",
+        rows: [{
+          opportunityId: "opportunity_1",
+          keyword: "gta local trucking",
+          page: "https://www.newlgroup.com/freight/gta-local-trucking",
+          position: 14,
+          searchVolume: 90,
+          keywordDifficulty: 31,
+          intent: "commercial",
+          competitorDomain: null,
+          opportunityType: "weak",
+          note: "The existing route should be improved rather than duplicated."
+        }]
+      },
+      drafts: [{
+        opportunityId: "opportunity_1",
+        recommendationSummary: "Improve the current freight page.",
+        draft
+      }]
+    });
+
+    expect(completion.semrush.queried).toBe(true);
+    expect(completion.semrush.rows[0]?.searchVolume).toBe(90);
+    expect(completion.drafts[0]?.draft.proposedPath).toBe("/freight/gta-local-trucking");
+  });
+
+  it("rejects a Scout result that silently skips SEMrush", () => {
+    expect(() => parseWebsiteGrowthScoutCompletion({
+      runSummary: "Skipped SEMrush.",
+      semrush: { queried: false, summary: "Unavailable", rows: [] },
+      drafts: []
+    })).toThrow("required response structure");
+  });
+
+  it("builds a deterministic Teams approval message with direct review links", () => {
+    const message = buildWebsiteGrowthScoutTeamsMessage({
+      drafts: [{ id: "draft_1", title: "GTA local trucking", summary: "Improve the current commercial page." }],
+      semrushQueried: true,
+      semrushSummary: "Found one weak commercial keyword.",
+      reviewBaseUrl: "https://newl-apps.example.com/"
+    });
+
+    expect(message).toContain("Search Console, GA4, first-party website forms, and SEMrush MCP");
+    expect(message).toContain("https://newl-apps.example.com/website-growth/drafts/draft_1");
+    expect(message).toContain("Approval starts the developer build automatically");
   });
 });
 

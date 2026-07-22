@@ -6,6 +6,17 @@
 
 Website growth and SEO is documented because code, routes, schema, or tests were located. Main evidence: `src/app/(authenticated)/website-growth/*`, `src/modules/website-growth/*`, website growth Prisma models/tests.
 
+## Automated weekly workflow
+
+1. OpenClaw runs `ops/openclaw/run-website-growth-scout.sh` Monday at 9:15 AM `America/Toronto`.
+2. `/api/website-growth/scout/prepare` refreshes Search Console, GA4, and aggregate form evidence and prepares up to six candidates.
+3. Codex `gpt-5.6-sol` with high reasoning inspects the current website repository in a read-only, ephemeral session and queries official SEMrush MCP through OAuth.
+4. `/api/website-growth/scout/complete` rejects out-of-scope candidates or malformed results, stores sanitized SEMrush evidence, and saves drafts.
+5. OpenClaw sends the returned message and direct draft links to the configured Teams target.
+6. An Admin or Manager reviews each brief. Approval starts the existing developer build; the owner still owns the merge.
+
+The run is locked per tenant for three hours. No-candidate runs complete without sending an approval message. A Codex or SEMrush failure is recorded through `/api/website-growth/scout/fail` and does not create a draft.
+
 ## Workflow / rules summary
 
 - Entry points are protected authenticated pages and/or API routes for this module.
