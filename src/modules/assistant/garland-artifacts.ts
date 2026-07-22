@@ -4,8 +4,17 @@ import { Prisma } from "@prisma/client";
 import { getGarlandLearnedProductDimensionRecommendations } from "@/modules/shipment-documents/garland-product-dimension-directory";
 import { collectGarlandProductDimensionSkus } from "@/modules/shipment-documents/garland-product-dimensions";
 import { extractGarlandShippingOrdersFromPdfBytes } from "@/modules/shipment-documents/garland-pdf-server-extraction";
+import {
+  buildTeamshipPhase2DryRunPlan,
+  type TeamshipPhase2OrderPlan
+} from "@/modules/shipment-documents/teamship-phase2-dry-run";
 import { buildGarlandTeamshipReview } from "@/modules/shipment-documents/teamship-review";
 import { saveTeamshipReviewRun } from "@/modules/shipment-documents/teamship-review-history";
+import { prepareReviewForTeamshipUpdates } from "@/modules/shipment-documents/teamship-update-review";
+import {
+  approveTeamshipUpdateJob,
+  createTeamshipUpdateJob
+} from "@/modules/shipment-documents/teamship-update-jobs";
 import type {
   GarlandPdfShippingOrder,
   TeamshipShippingOrderDetail
@@ -283,6 +292,12 @@ export async function finalizeGarlandArtifact(
       review,
       alertDigestOrderCount: 0
     });
+    const updateProposal = await createGarlandArtifactUpdateProposal(context, {
+      documentLabel: buildDocumentLabel(shipmentDateInput, [selection.order.psNumber]),
+      shipmentDate: shipmentDateInput,
+      sourcePdfFileName: artifact.fileName,
+      review
+    });
     const duplicate = await prisma.workflowArtifact.findFirst({
       where: {
         tenantId: context.tenantId,
@@ -313,7 +328,8 @@ export async function finalizeGarlandArtifact(
             ignoredOrderCount: selection.ignoredOrderCount,
             psNumbers: [selection.order.psNumber],
             srNumbers: [selection.order.srNumber],
-            review: review.summary
+            review: review.summary,
+            updateProposal
           } satisfies Prisma.InputJsonValue,
           errorMessage: null,
           completedAt: new Date()
@@ -336,7 +352,8 @@ export async function finalizeGarlandArtifact(
             totalOrderCount: extraction.orders.length,
             orderCount: selectedOrders.length,
             ignoredOrderCount: selection.ignoredOrderCount,
-            review: review.summary
+            review: review.summary,
+            updateProposal
           } satisfies Prisma.InputJsonValue
         }
       });
@@ -359,6 +376,7 @@ export async function finalizeGarlandArtifact(
         srNumbers: [selection.order.srNumber]
       },
       review: review.summary,
+      updateProposal,
       orders: review.reviews.map((order) => ({
         psNumber: order.psNumber,
         srNumber: order.srNumber,
@@ -391,6 +409,165 @@ export async function finalizeGarlandArtifact(
     });
     throw error;
   }
+}
+
+export async function approveGarlandArtifactUpdate(
+  context: AuthenticatedContext,
+  artifactId: string,
+  input: { jobId: string; targetReference: string; confirmation: string }
+) {
+  if (input.confirmation !== "APPROVE_TEAMSHIP_UPDATE") {
+    throw new GarlandArtifactError("Explicit Teamship update confirmation is required.");
+  }
+  const targetReference = normalizeGarlandTargetReference(input.targetReference);
+  const artifact = await prisma.workflowArtifact.findFirst({
+    where: {
+      id: artifactId,
+      tenantId: context.tenantId,
+      workflowKey: GARLAND_WORKFLOW_KEY,
+      status: "REVIEWED"
+    },
+    select: { id: true, extractionSummary: true }
+  });
+  if (!artifact) throw new GarlandArtifactError("The reviewed Garland artifact was not found.", 404);
+
+  const summary = asJsonRecord(artifact.extractionSummary);
+  const proposal = asJsonRecord(summary.updateProposal);
+  if (summary.targetReference !== targetReference || proposal.jobId !== input.jobId) {
+    throw new GarlandArtifactError("The approval does not match this Garland artifact and selected order.", 409);
+  }
+  if (proposal.approvalRequired !== true) {
+    throw new GarlandArtifactError("This Garland update proposal is not eligible for approval.", 409);
+  }
+
+  const approved = await approveTeamshipUpdateJob(context, input.jobId);
+  await prisma.workflowArtifact.update({
+    where: { tenantId_id: { tenantId: context.tenantId, id: artifact.id } },
+    data: {
+      extractionSummary: {
+        ...summary,
+        updateProposal: {
+          ...proposal,
+          status: approved.status,
+          approvalRequired: false,
+          approvedAt: new Date().toISOString()
+        }
+      } satisfies Prisma.InputJsonValue
+    }
+  });
+  await prisma.auditLog.create({
+    data: {
+      tenantId: context.tenantId,
+      actorUserId: context.userId,
+      action: "assistant.garland_artifact.update_approved",
+      entityType: "WorkflowArtifact",
+      entityId: artifact.id,
+      after: {
+        targetReference,
+        jobId: approved.id,
+        status: approved.status
+      } satisfies Prisma.InputJsonValue
+    }
+  });
+  return {
+    artifactId: artifact.id,
+    targetReference,
+    jobId: approved.id,
+    status: approved.status,
+    queuedForTeamshipWorker: approved.status === "APPROVED",
+    printingRequested: false
+  };
+}
+
+async function createGarlandArtifactUpdateProposal(
+  context: AuthenticatedContext,
+  input: {
+    documentLabel: string;
+    shipmentDate: string;
+    sourcePdfFileName: string;
+    review: ReturnType<typeof buildGarlandTeamshipReview>;
+  }
+) {
+  const preparedReview = prepareReviewForTeamshipUpdates(input.review);
+  const plan = buildTeamshipPhase2DryRunPlan(preparedReview);
+  const order = plan.orders[0] ?? null;
+  const proposedActions = order ? describePlannedActions(order) : [];
+  const investigationItems = buildInvestigationItems(preparedReview, order);
+  const hasAction = Boolean(
+    order && (
+      order.plannedFieldUpdates.length > 0 ||
+      order.plannedPalletRows.length > 0 ||
+      order.plannedBolCleanup?.removeCustomerOrderWeights
+    )
+  );
+
+  if (!order || order.status !== "READY" || !hasAction) {
+    return {
+      jobId: null,
+      status: order?.status ?? "SKIPPED",
+      approvalRequired: false,
+      proposedActions,
+      investigationItems
+    };
+  }
+
+  const job = await createTeamshipUpdateJob(context, {
+    documentLabel: input.documentLabel,
+    shipmentDate: input.shipmentDate,
+    sourcePdfFileName: input.sourcePdfFileName,
+    review: preparedReview,
+    selectedSrNumbers: [order.srNumber],
+    agentMode: "LIVE_API"
+  });
+  return {
+    jobId: job.id,
+    status: job.status,
+    approvalRequired: job.status === "DRAFT",
+    proposedActions,
+    investigationItems
+  };
+}
+
+function describePlannedActions(order: TeamshipPhase2OrderPlan) {
+  const actions = order.plannedFieldUpdates.map(
+    (field) => `Update ${field.label} to ${field.proposedValue}.`
+  );
+  actions.push(...order.plannedPalletRows.map((row) =>
+    `Set pallet ${row.rowNumber} for SKU ${row.sku} to ${row.lengthIn} x ${row.widthIn} x ${row.heightIn} in and ${row.weightLb} ${row.weightUnit} (${row.dimensionSource}, ${row.dimensionConfidence.toLowerCase()} confidence).`
+  ));
+  if (order.plannedBolCleanup?.removeCustomerOrderWeights) {
+    actions.push("Remove Teamship-generated Customer Order Information weights from the editable BOL.");
+  }
+  return actions;
+}
+
+function buildInvestigationItems(
+  review: ReturnType<typeof prepareReviewForTeamshipUpdates>,
+  order: TeamshipPhase2OrderPlan | null
+) {
+  const plannedFieldKeys = new Set(order?.plannedFieldUpdates.map((field) => field.reviewFieldKey) ?? []);
+  const items = review.reviews.flatMap((reviewOrder) =>
+    reviewOrder.fields
+      .filter((field) => field.status !== "MATCH" && field.status !== "INFO")
+      .filter((field) => !plannedFieldKeys.has(field.key))
+      .map((field) => `${field.label}: ${field.message}`)
+  );
+  if (order) {
+    items.push(...order.validationIssues);
+    items.push(...order.plannedPalletRows
+      .filter((row) => !row.hasUsableDimensions || row.dimensionConfidence === "LOW")
+      .map((row) => `Confirm SKU ${row.sku} dimensions and weight: ${row.sourceNote}`));
+    if (order.status === "SKIPPED") {
+      items.push("No matched Teamship order exists, so the PDF and review were saved but no update draft was created.");
+    }
+  }
+  return [...new Set(items)];
+}
+
+function asJsonRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }
 
 function normalizePdfFileName(value: string) {

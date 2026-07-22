@@ -13,6 +13,9 @@ const dimensionsMock = vi.hoisted(() => vi.fn());
 const collectSkusMock = vi.hoisted(() => vi.fn());
 const reviewMock = vi.hoisted(() => vi.fn());
 const saveReviewMock = vi.hoisted(() => vi.fn());
+const prepareUpdateReviewMock = vi.hoisted(() => vi.fn());
+const phase2PlanMock = vi.hoisted(() => vi.fn());
+const createUpdateJobMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/server/db", () => ({ prisma: prismaMock }));
 vi.mock("@/modules/shipment-documents/garland-pdf-server-extraction", () => ({
@@ -32,6 +35,16 @@ vi.mock("@/modules/shipment-documents/teamship-review", () => ({
 }));
 vi.mock("@/modules/shipment-documents/teamship-review-history", () => ({
   saveTeamshipReviewRun: saveReviewMock
+}));
+vi.mock("@/modules/shipment-documents/teamship-update-review", () => ({
+  prepareReviewForTeamshipUpdates: prepareUpdateReviewMock
+}));
+vi.mock("@/modules/shipment-documents/teamship-phase2-dry-run", () => ({
+  buildTeamshipPhase2DryRunPlan: phase2PlanMock
+}));
+vi.mock("@/modules/shipment-documents/teamship-update-jobs", () => ({
+  createTeamshipUpdateJob: createUpdateJobMock,
+  approveTeamshipUpdateJob: vi.fn()
 }));
 
 import { finalizeGarlandArtifact } from "@/modules/assistant/garland-artifacts";
@@ -99,10 +112,46 @@ describe("Garland artifact target-reference enforcement", () => {
         psNumber: order.psNumber,
         srNumber: order.srNumber,
         status: "PASS",
-        issueCount: 0
+        issueCount: 0,
+        fields: []
       }))
     }));
     saveReviewMock.mockResolvedValue("review-1");
+    prepareUpdateReviewMock.mockImplementation((review) => review);
+    phase2PlanMock.mockReturnValue({
+      orders: [{
+        psNumber: "PS210236",
+        srNumber: "SR810264",
+        teamshipOrderId: "teamship-1",
+        teamshipUrl: null,
+        status: "READY",
+        sourceReviewStatus: "PASS",
+        plannedFieldUpdates: [],
+        plannedPalletRows: [{
+          rowNumber: 1,
+          sku: "ABC",
+          quantity: 1,
+          lengthIn: 48,
+          widthIn: 40,
+          heightIn: 50,
+          weightLb: 500,
+          weightUnit: "lbs",
+          commodity: "SKU: ABC",
+          hasUsableDimensions: true,
+          dimensionSource: "GARLAND_REFERENCE",
+          dimensionConfidence: "HIGH",
+          sourceNote: "Approved Garland reference.",
+          teamshipFields: {}
+        }],
+        plannedBolCleanup: {
+          removeCustomerOrderWeights: true,
+          compactSpecialInstructions: false,
+          reason: "Remove BOL weights."
+        },
+        validationIssues: []
+      }]
+    });
+    createUpdateJobMock.mockResolvedValue({ id: "job-1", status: "DRAFT" });
   });
 
   it("queries and saves only the exact PS selected from a multi-order PDF", async () => {
@@ -127,8 +176,22 @@ describe("Garland artifact target-reference enforcement", () => {
         orderCount: 1,
         ignoredOrderCount: 1
       },
-      orders: [{ psNumber: "PS210236", srNumber: "SR810264" }]
+      orders: [{ psNumber: "PS210236", srNumber: "SR810264" }],
+      updateProposal: {
+        jobId: "job-1",
+        status: "DRAFT",
+        approvalRequired: true,
+        proposedActions: expect.arrayContaining([
+          expect.stringContaining("48 x 40 x 50"),
+          expect.stringContaining("editable BOL")
+        ]),
+        investigationItems: []
+      }
     });
+    expect(createUpdateJobMock).toHaveBeenCalledWith(context, expect.objectContaining({
+      selectedSrNumbers: ["SR810264"],
+      agentMode: "LIVE_API"
+    }));
     expect(prismaMock.workflowArtifact.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
