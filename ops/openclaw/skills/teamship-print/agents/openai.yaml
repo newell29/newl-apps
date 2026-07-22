@@ -1,0 +1,4 @@
+interface:
+  display_name: "Teamship Print"
+  short_description: "Approve single-order Teamship document printing"
+  default_prompt: "Use $teamship-print to plan printing for one Teamship shipping order."

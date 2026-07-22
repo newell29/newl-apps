@@ -13,6 +13,7 @@ Shipment documents and Garland Teamship review is documented because code, route
 - Data persistence uses tenant-scoped Prisma models where a database model exists.
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
+- Phase 1 printing requires trusted Teams identity, Assistant and Shipment Documents module access, mutation permission, the approved internal Teamship employee policy, a dedicated print credential, and approval by the same employee who created the plan. Worker endpoints use a separate tenant-bound credential.
 
 ## Data model
 

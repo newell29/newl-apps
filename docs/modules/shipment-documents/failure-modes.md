@@ -13,6 +13,7 @@ Shipment documents and Garland Teamship review is documented because code, route
 - Data persistence uses tenant-scoped Prisma models where a database model exists.
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
+- Printing stops for changed pallet counts, a missing or duplicated exact printer, a changed selection, unavailable CUPS queue, invalid PDF download, expired approval, worker timeout, page/scope mismatch, or partial failure. No uncertain job is retried automatically; physical output must be checked first.
 
 ## Data model
 

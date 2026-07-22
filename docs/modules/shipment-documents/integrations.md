@@ -13,6 +13,7 @@ Shipment documents and Garland Teamship review is documented because code, route
 - Data persistence uses tenant-scoped Prisma models where a database model exists.
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
+- The `newl-print` OpenClaw plugin creates and approves print jobs through Newl Apps. A dedicated local worker uses Teamship for BOL and outbound-label submission and CUPS for the picking list; neither OpenClaw nor the model receives Teamship credentials or printer access.
 
 ## Teams and OpenClaw Phase 1
 

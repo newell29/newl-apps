@@ -15,6 +15,12 @@ Approved data sources: this repository documentation, authenticated app APIs, te
 
 The optional `newl-unresolved-turns` OpenClaw plugin and tenant-scoped Newl Apps endpoint capture failed or unanswered Microsoft Teams turns for developer review. Successful turns are deleted; the capture does not retain model reasoning, full conversation history, tool parameters, or raw tool results. Detection, storage fields, developer discovery, privacy boundaries, and known limitations are defined in [openclaw-unresolved-turns.md](openclaw-unresolved-turns.md). The capture package does not include a scheduler.
 
+## Approval-gated printing
+
+The separate `newl-print` OpenClaw plugin exposes plan, approve, and status tools for one exact numeric Teamship shipping-order number. OpenClaw never receives Teamship credentials and never controls a printer directly. Newl Apps binds the trusted Teams sender to a current membership, requires Assistant and Shipment Documents access plus mutation permission, stores an immutable audit record, and queues work only after a separate explicit approval by the same employee.
+
+The local `teamship-print-worker` has a dedicated credential and tenant scope. It validates all destinations and the live pallet count before the first print, reselects printers per order, and does not retry uncertain jobs. See [Nemo printing rollout](nemo-printing-rollout.md).
+
 ## Garland Phase 1
 
 The `newl-teamship` plugin also exposes identity-bound Garland tools for Teams PDF review, saved-check explanation, feedback capture, and an admin development-suggestion digest. Trusted inbound media is correlated by OpenClaw session and Teams sender; attachment paths are never model parameters. Newl Apps remains the persistence and authorization boundary.

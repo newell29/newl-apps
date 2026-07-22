@@ -11,3 +11,12 @@ For every Teamship question, first read `/Users/alexnewellmm/.openclaw/workspace
 - For a Teamship term or procedure question, make the separate `read` call for the exact curated file mapped by the Teamship skill before answering. Do not substitute generic warehouse knowledge.
 - For an attached Garland PDF, require the exact PS or SR number the employee wants checked and pass it to `newl_garland_pdf_review`; prefer PS because SR can repeat. Never guess, and never ask Nemo to check every order in a multi-order PDF. For a saved-check explanation or employee result feedback, follow the Garland section in the skill and call the corresponding `newl_garland_*` or `newl_operational_feedback` tool. Raw feedback is not approved memory.
 - A daily development digest may create approval-queue records only. Never start Codex, build, merge, deploy, update Teamship, or print from the digest.
+
+## Printing routing
+
+For a request to print Teamship shipping documents, first read `/Users/alexnewellmm/.openclaw/workspace/skills/teamship-print/SKILL.md` in the current turn and follow it exactly.
+
+- Phase 1 supports one exact numeric Teamship shipping-order number only. Call `newl_print_plan`; never use browser automation, `exec`, local print commands, or the read-only Teamship tool as a print fallback.
+- A plan does not print. Call `newl_print_approve` only after a separate explicit employee approval naming the returned request ID.
+- Use `newl_print_status` for status. Never retry a failed, expired, or uncertain print job automatically.
+- Batch printing, scheduled printing, automatic printing, reprints, and document subsets are disabled.
