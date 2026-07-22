@@ -14,6 +14,16 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
 
+## TradeMining search profile execution
+
+- Every enabled TradeMining search profile is run once daily by Hunter after its configured local run time.
+- `lookbackWindowDays` controls the full trailing TradeMining query window for that individual profile.
+- Each daily profile run submits one BOL search containing every configured destination port, origin country, origin port, ship-from port, product keyword, HS code, and minimum-TEU rule.
+- The legacy database field `minShipmentVolume` represents minimum TEUs per BOL and is posted to TradeMining as `TEU >= value`.
+- A company qualifies for Found Companies only when its shipment evidence for the matched profile, within that profile's lookback window, meets `minShipmentCount`.
+- Search profile frequency is a legacy database compatibility field fixed to `daily`; it is not editable and does not control the worker.
+- Newl Apps is the source of truth for enabled profiles. Deleting a profile cancels its pending immediate-run requests, and Hunter reloads the enabled profile list before execution so deleted or disabled profiles do not receive future searches.
+
 ## Data model
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.

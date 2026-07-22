@@ -83,6 +83,7 @@ type SearchProfileMutationClient = typeof prisma & {
       status?: string;
     } | null>;
     create(args: { data: Record<string, unknown> }): Promise<unknown>;
+    updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<unknown>;
   };
   auditLog: {
     create(args: { data: Record<string, unknown> }): Promise<unknown>;
@@ -140,6 +141,34 @@ async function authorizeLeadGenMutation() {
   return context;
 }
 
+async function cancelTradeMiningProfileRunRequests(
+  client: SearchProfileMutationClient,
+  tenantId: string,
+  profileId: string,
+  cancellationReason: string
+) {
+  await client.automationJobRun.updateMany({
+    where: {
+      tenantId,
+      jobType: "trademining.run_request",
+      status: {
+        in: [JobStatus.QUEUED, JobStatus.RUNNING]
+      },
+      input: {
+        path: ["searchProfileId"],
+        equals: profileId
+      }
+    },
+    data: {
+      status: JobStatus.CANCELLED,
+      finishedAt: new Date(),
+      output: {
+        cancellationReason
+      }
+    }
+  });
+}
+
 export async function createTradeMiningSearchProfileAction(formData: FormData) {
   const context = await authorizeLeadGenAdminMutation();
   const client = prisma as SearchProfileMutationClient;
@@ -181,11 +210,15 @@ export async function updateTradeMiningSearchProfileAction(formData: FormData) {
     }
   });
 
+  if (!payload.enabled) {
+    await cancelTradeMiningProfileRunRequests(client, context.tenantId, profileId, "Search profile disabled");
+  }
+
   revalidateTradeMiningProfileSurfaces();
 }
 
 export async function deleteTradeMiningSearchProfileAction(formData: FormData) {
-  await authorizeLeadGenAdminMutation();
+  const context = await authorizeLeadGenAdminMutation();
   const client = prisma as SearchProfileMutationClient;
 
   if (!client.tradeMiningSearchProfile) {
@@ -193,6 +226,21 @@ export async function deleteTradeMiningSearchProfileAction(formData: FormData) {
   }
 
   const profileId = readRequired(formData, "profileId");
+  const profile = await client.tradeMiningSearchProfile.findFirst({
+    where: {
+      id: profileId,
+      tenantId: context.tenantId
+    },
+    select: {
+      id: true
+    }
+  });
+
+  if (!profile) {
+    throw new Error("Search profile not found for this tenant.");
+  }
+
+  await cancelTradeMiningProfileRunRequests(client, context.tenantId, profileId, "Search profile deleted");
 
   await client.tradeMiningSearchProfile.delete({
     where: {
@@ -3341,11 +3389,11 @@ function readSearchProfilePayload(formData: FormData) {
   const minShipmentVolumeNumber = readOptionalNumber(formData, "minShipmentVolume");
   const payload = {
     name: readRequired(formData, "name"),
-    destinationMarkets: readStringList(formData, "destinationMarkets"),
-    destinationPorts: readStringList(formData, "destinationPorts"),
-    originPorts: readStringList(formData, "originPorts"),
-    shipFromPorts: readStringList(formData, "shipFromPorts"),
-    originCountries: readStringList(formData, "originCountries"),
+    destinationMarkets: readMultiValueField(formData, "destinationMarkets"),
+    destinationPorts: readMultiValueField(formData, "destinationPorts"),
+    originPorts: readMultiValueField(formData, "originPorts"),
+    shipFromPorts: readMultiValueField(formData, "shipFromPorts"),
+    originCountries: readMultiValueField(formData, "originCountries"),
     productKeywords: readStringList(formData, "productKeywords"),
     hsCodes: readStringList(formData, "hsCodes"),
     allowedCompanyIdentityRoles: readSelectedCompanyIdentityRoles(formData),
@@ -3353,7 +3401,6 @@ function readSearchProfilePayload(formData: FormData) {
     lookbackWindowDays: readRequiredInteger(formData, "lookbackWindowDays", 1, 365),
     minShipmentCount: readRequiredInteger(formData, "minShipmentCount", 0, 100000),
     minShipmentVolume: minShipmentVolumeNumber,
-    scheduleFrequency: readScheduleFrequency(formData.get("scheduleFrequency")),
     priorityWeight: readRequiredInteger(formData, "priorityWeight", 0, 100)
   };
 
@@ -3361,6 +3408,7 @@ function readSearchProfilePayload(formData: FormData) {
 
   return {
     ...payload,
+    scheduleFrequency: "daily",
     minShipmentVolume:
       minShipmentVolumeNumber === null ? null : new Prisma.Decimal(minShipmentVolumeNumber.toString()),
     description: readOptional(formData, "description") ?? null,
@@ -3437,6 +3485,18 @@ function readStringList(formData: FormData, field: string) {
     .filter((item, index, array) => item.length > 0 && array.indexOf(item) === index);
 }
 
+function readMultiValueField(formData: FormData, field: string) {
+  const value = readOptional(formData, field);
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split("\n")
+    .map((item) => item.trim())
+    .filter((item, index, array) => item.length > 0 && array.indexOf(item) === index);
+}
+
 function readSelectedIds(formData: FormData, field: string) {
   const values = formData
     .getAll(field)
@@ -3464,10 +3524,6 @@ function readBulkOwnerValue(value: FormDataEntryValue | null) {
   }
 
   return value.trim();
-}
-
-function readScheduleFrequency(value: FormDataEntryValue | null) {
-  return value === "weekly" || value === "manual" ? value : "daily";
 }
 
 function readCandidateStatus(value: FormDataEntryValue | null) {
@@ -4264,7 +4320,9 @@ async function loadAiDraftContactContext({
               originCountries: true,
               productKeywords: true,
               hsCodes: true,
-              contactCadenceConfig: true
+              contactCadenceConfig: true,
+              lookbackWindowDays: true,
+              minShipmentCount: true
             }
           })
         ).map((profile) => [
@@ -4280,7 +4338,9 @@ async function loadAiDraftContactContext({
             originCountries: asStringArray(profile.originCountries),
             productKeywords: asStringArray(profile.productKeywords),
             hsCodes: asStringArray(profile.hsCodes),
-            contactCadenceConfig: profile.contactCadenceConfig
+            contactCadenceConfig: profile.contactCadenceConfig,
+            lookbackWindowDays: profile.lookbackWindowDays,
+            minShipmentCount: profile.minShipmentCount
           }
         ])
       )

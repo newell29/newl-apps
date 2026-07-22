@@ -8,6 +8,7 @@ import {
   listDevelopmentSuggestions,
   OperationalMemoryError
 } from "@/modules/assistant/operational-memory";
+import { listOpenClawUnresolvedTurns } from "@/modules/assistant/openclaw-unresolved-turns";
 import {
   AuthorizationError,
   requireAdmin,
@@ -60,9 +61,14 @@ export async function POST(request: Request) {
       await requireMutationAccess(context);
       await generateDevelopmentSuggestions(context);
       const suggestions = await listDevelopmentSuggestions(context, 50);
+      const unresolvedQueries = await listOpenClawUnresolvedTurns(context, {
+        limit: 50,
+        staleAfterSeconds: 600
+      });
       return NextResponse.json({
         data: {
           awaitingApproval: suggestions.filter((item) => item.status === "AWAITING_APPROVAL"),
+          unresolvedQueries,
           safety: "No development, branch, pull request, merge, deployment, Teamship write, or printing action was started."
         }
       });

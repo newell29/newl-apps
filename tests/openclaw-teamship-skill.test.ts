@@ -23,5 +23,7 @@ describe("OpenClaw Teamship skill routing", () => {
     expect(skill).toContain("pass it as `targetReference` to `newl_garland_pdf_review`");
     expect(skill).toContain("Prefer PS because SR can repeat");
     expect(skill).toContain("Never infer a reference from the PDF or ask to check every order");
+    expect(skill).toContain("Call `newl_garland_approve_update` only when the employee explicitly approves");
+    expect(skill).toContain("editable-BOL weight cleanup");
   });
 });

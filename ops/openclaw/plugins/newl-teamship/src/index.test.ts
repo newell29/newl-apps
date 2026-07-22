@@ -8,6 +8,7 @@ import { getToolPluginMetadata } from "openclaw/plugin-sdk/tool-plugin";
 import plugin, {
   buildRequestHeaders,
   createDevelopmentSuggestionDigestTool,
+  createGarlandApproveUpdateTool,
   createGarlandExplainTool,
   createGarlandPdfReviewTool,
   createTeamshipReadTool,
@@ -31,6 +32,7 @@ describe("Newl Teamship OpenClaw plugin", () => {
     expect(getToolPluginMetadata(plugin)?.tools.map((tool) => tool.name)).toEqual([
       "newl_teamship_read",
       "newl_garland_pdf_review",
+      "newl_garland_approve_update",
       "newl_garland_explain",
       "newl_operational_feedback",
       "newl_development_suggestion_digest"
@@ -53,6 +55,40 @@ describe("Newl Teamship OpenClaw plugin", () => {
 
     await expect(tool.execute("call-2", { reference: "PS123456" }))
       .resolves.toMatchObject({ details: { status: "unauthorized" } });
+  });
+
+  it("keeps Garland Teamship approval identity-bound and exact", async () => {
+    process.env.OPENCLAW_ASSISTANT_TOKEN = "assistant-token";
+    process.env.OPENCLAW_TEAMSHIP_READ_TOKEN = "read-token";
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      data: { jobId: "job-1", status: "APPROVED" }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const tool = createGarlandApproveUpdateTool({
+      config: {
+        baseUrl: "https://newl.example.com",
+        tenantId: "11111111-1111-4111-8111-111111111111"
+      },
+      toolContext: {
+        messageChannel: "msteams",
+        requesterSenderId: "22222222-2222-4222-8222-222222222222"
+      }
+    });
+
+    await expect(tool.execute("approve-1", {
+      artifactId: "artifact-1",
+      jobId: "job-1",
+      targetReference: "PS210235"
+    })).resolves.toMatchObject({
+      details: { status: "ok" },
+      content: [{ text: expect.stringContaining("Completion has not yet been verified") }]
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/artifacts/artifact-1/update");
+    expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toEqual({
+      jobId: "job-1",
+      targetReference: "PS210235",
+      confirmation: "APPROVE_TEAMSHIP_UPDATE"
+    });
   });
 
   it("accepts only stable UUID-shaped Entra identities", () => {
@@ -88,7 +124,12 @@ describe("Newl Teamship OpenClaw plugin", () => {
 
   it("uses the configured admin identity only for a sender-less scheduled digest", async () => {
     process.env.OPENCLAW_ASSISTANT_TOKEN = "assistant-token";
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { awaitingApproval: [] } }), {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: {
+        awaitingApproval: [{ id: "suggestion-1", title: "Improve Garland parser", feedbackCount: 2 }],
+        unresolvedQueries: [{ failureKind: "TOOL_FAILURE", promptText: "Check PS210235", toolName: "newl_garland_pdf_review" }]
+      }
+    }), {
       status: 200,
       headers: { "content-type": "application/json" }
     }));
@@ -102,7 +143,10 @@ describe("Newl Teamship OpenClaw plugin", () => {
       toolContext: { messageChannel: "msteams" }
     });
 
-    await expect(tool.execute("call-3", {})).resolves.toMatchObject({ details: { status: "ok" } });
+    await expect(tool.execute("call-3", {})).resolves.toMatchObject({
+      details: { status: "ok" },
+      content: [{ text: expect.stringMatching(/suggestion-1[\s\S]*1 failed or unanswered Nemo query[\s\S]*TOOL_FAILURE/) }]
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.any(URL),
       expect.objectContaining({
@@ -198,6 +242,16 @@ describe("Newl Teamship OpenClaw plugin", () => {
             failedCount: 0,
             missingTeamshipCount: 0,
             pendingTeamshipCount: 0
+          },
+          updateProposal: {
+            jobId: "job-1",
+            status: "DRAFT",
+            approvalRequired: true,
+            proposedActions: [
+              "Set pallet 1 for SKU ABC to 48 x 40 x 50 in and 500 lbs.",
+              "Remove Teamship-generated Customer Order Information weights from the editable BOL."
+            ],
+            investigationItems: ["Confirm carrier selection."]
           }
         }
       }));
@@ -220,7 +274,7 @@ describe("Newl Teamship OpenClaw plugin", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     await expect(tool.execute("call-6", { targetReference: "PS210235" })).resolves.toMatchObject({
       details: { status: "ok" },
-      content: [{ text: expect.stringMatching(/checked only PS210235 \/ SR810263.*1 other order.*was ignored/) }]
+      content: [{ text: expect.stringMatching(/checked only PS210235 \/ SR810263.*1 other order.*was ignored[\s\S]*Update draft job-1[\s\S]*Explicit approval is required[\s\S]*Confirm carrier selection/) }]
     });
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/assistant/garland/artifacts");

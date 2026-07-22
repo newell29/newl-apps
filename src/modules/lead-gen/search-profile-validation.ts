@@ -1,5 +1,3 @@
-const allowedScheduleFrequencies = new Set(["daily", "weekly", "manual"]);
-
 export const tradeMiningCompanyIdentityRoleOptions = [
   { value: "importer_name", label: "Importer" },
   { value: "consignee_name", label: "Consignee" },
@@ -31,7 +29,6 @@ export type TradeMiningSearchProfileInput = {
   lookbackWindowDays: number;
   minShipmentCount: number;
   minShipmentVolume?: number | null;
-  scheduleFrequency: string;
   priorityWeight: number;
 };
 
@@ -55,11 +52,7 @@ export function validateTradeMiningSearchProfile(input: TradeMiningSearchProfile
   }
 
   if (input.minShipmentVolume != null && input.minShipmentVolume < 0) {
-    errors.push("Minimum shipment volume must be zero or greater when provided.");
-  }
-
-  if (!allowedScheduleFrequencies.has(input.scheduleFrequency)) {
-    errors.push("Schedule frequency must be daily, weekly, or manual.");
+    errors.push("Minimum TEUs per BOL must be zero or greater when provided.");
   }
 
   if (!Number.isInteger(input.priorityWeight) || input.priorityWeight < 0 || input.priorityWeight > 100) {
