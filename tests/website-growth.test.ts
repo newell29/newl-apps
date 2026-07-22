@@ -33,6 +33,7 @@ import {
 } from "@/modules/website-growth/opportunities";
 import { selectWeeklyWebsiteGrowthCandidates } from "@/modules/website-growth/weekly-plan";
 import { authenticateWebsiteGrowthBuildWorkerRequest } from "@/server/website-growth-build-worker-auth";
+import { authenticateWebsiteGrowthScoutRequest } from "@/server/website-growth-scout-auth";
 
 describe("website growth CSV parsing", () => {
   it("normalizes Search Console export rows", () => {
@@ -526,6 +527,24 @@ describe("website growth developer dispatch", () => {
     } finally {
       restoreEnv("WEBSITE_GROWTH_BUILD_WORKER_TOKEN", previousToken);
       restoreEnv("WEBSITE_GROWTH_BUILD_WORKER_TENANT_SLUG", previousTenant);
+    }
+  });
+
+  it("keeps Scout on a separate tenant-scoped OpenClaw credential", () => {
+    const previousToken = process.env.OPENCLAW_WEBSITE_GROWTH_TOKEN;
+    const previousTenant = process.env.OPENCLAW_WEBSITE_GROWTH_TENANT_SLUG;
+    process.env.OPENCLAW_WEBSITE_GROWTH_TOKEN = "scout-token";
+    process.env.OPENCLAW_WEBSITE_GROWTH_TENANT_SLUG = "newl-group";
+    try {
+      expect(authenticateWebsiteGrowthScoutRequest(new Request("https://apps.example.test/api", {
+        headers: { authorization: "Bearer scout-token" }
+      }))).toEqual({ tenantSlug: "newl-group" });
+      expect(() => authenticateWebsiteGrowthScoutRequest(new Request("https://apps.example.test/api", {
+        headers: { authorization: "Bearer worker-token" }
+      }))).toThrow("Invalid Website Growth Scout credentials");
+    } finally {
+      restoreEnv("OPENCLAW_WEBSITE_GROWTH_TOKEN", previousToken);
+      restoreEnv("OPENCLAW_WEBSITE_GROWTH_TENANT_SLUG", previousTenant);
     }
   });
 });

@@ -32,6 +32,8 @@ Newl Apps is the control plane. An Admin or Manager approves the exact saved bri
 
 The website repository workflow fetches the brief through a tenant-bound bearer-token endpoint, runs Codex in a read-only GitHub job to create and verify a patch, and passes only the patch artifact to a separate GitHub job with write permission. That second job opens a draft PR. Vercel Preview reports its URL back to the same job record. The owner retains the merge decision.
 
+The initial Scout runtime is intentionally narrow: `ops/openclaw/run-website-growth-scout.sh` calls `POST /api/website-growth/scout/produce`, which selects one highest-scoring Reviewing opportunity without a draft and asks Newl Apps to save the brief. The OpenClaw skill contains no GitHub or approval capability.
+
 ## Model policy
 
 - Deterministic imports, scoring, deduplication, claim pattern checks, and state transitions: no model.

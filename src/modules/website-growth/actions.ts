@@ -18,7 +18,6 @@ import {
   readWebsiteGrowthBuildPackage
 } from "@/modules/website-growth/build-package";
 import { reviewWebsiteGrowthClaims } from "@/modules/website-growth/claims-policy";
-import { createWebsiteGrowthContentDraftPayload } from "@/modules/website-growth/content-drafts";
 import { createAndDispatchWebsiteGrowthBuildRequest } from "@/modules/website-growth/build-requests";
 import {
   fetchGa4LandingPageRows,
