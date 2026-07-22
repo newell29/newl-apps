@@ -213,11 +213,19 @@ type SearchProfileSummary = {
 type CandidateScoringConfig = TradeMiningScoringSettings;
 
 export async function getCandidateFeed(tenant: TenantContext, filters: CandidateFeedFilters = {}) {
+  const [scoringConfig, searchProfiles] = await Promise.all([
+    loadTradeMiningScoringConfig(tenant),
+    loadSearchProfileSummaries(tenant)
+  ]);
+  const evidenceWhere = buildTradeMiningEvidenceWhere(
+    tenant,
+    resolveEvidenceLookbackDays(scoringConfig, searchProfiles)
+  );
   const companies = await prisma.company.findMany({
-    where: tenantWhere(tenant, buildCandidateWhere(filters)),
+    where: tenantWhere(tenant, buildCandidateWhere(filters, evidenceWhere)),
     include: {
       importRecords: {
-        where: tenantWhere(tenant),
+        where: evidenceWhere,
         orderBy: [
           {
             arrivalDate: "desc"
@@ -225,8 +233,7 @@ export async function getCandidateFeed(tenant: TenantContext, filters: Candidate
           {
             createdAt: "desc"
           }
-        ],
-        take: 100
+        ]
       },
       leads: {
         where: tenantWhere(tenant),
@@ -240,20 +247,6 @@ export async function getCandidateFeed(tenant: TenantContext, filters: Candidate
       updatedAt: "desc"
     }
   });
-
-  const searchProfileIds = new Set<string>();
-
-  for (const company of companies) {
-    for (const record of company.importRecords) {
-      const searchProfileId = readString(asObject(record.rawJson), "searchProfileId");
-      if (searchProfileId) {
-        searchProfileIds.add(searchProfileId);
-      }
-    }
-  }
-
-  const searchProfiles = await loadSearchProfileSummaries(tenant, [...searchProfileIds]);
-  const scoringConfig = await loadTradeMiningScoringConfig(tenant);
 
   const candidates = companies
     .map((company) => {
@@ -325,6 +318,14 @@ export async function calculateLeadPipelineScoreForCompany(
   tenant: Pick<TenantContext, "tenantId">,
   companyId: string
 ) {
+  const [scoringConfig, searchProfiles] = await Promise.all([
+    loadTradeMiningScoringConfig(tenant),
+    loadSearchProfileSummaries(tenant)
+  ]);
+  const evidenceWhere = buildTradeMiningEvidenceWhere(
+    tenant,
+    resolveEvidenceLookbackDays(scoringConfig, searchProfiles)
+  );
   const company = await prisma.company.findFirst({
     where: {
       tenantId: tenant.tenantId,
@@ -332,9 +333,7 @@ export async function calculateLeadPipelineScoreForCompany(
     },
     include: {
       importRecords: {
-        where: {
-          tenantId: tenant.tenantId
-        },
+        where: evidenceWhere,
         orderBy: [
           {
             arrivalDate: "desc"
@@ -342,8 +341,7 @@ export async function calculateLeadPipelineScoreForCompany(
           {
             createdAt: "desc"
           }
-        ],
-        take: 100
+        ]
       }
     }
   });
@@ -352,17 +350,6 @@ export async function calculateLeadPipelineScoreForCompany(
     return null;
   }
 
-  const scoringConfig = await loadTradeMiningScoringConfig(tenant);
-  const searchProfileIds = new Set<string>();
-
-  for (const record of company.importRecords) {
-    const searchProfileId = readString(asObject(record.rawJson), "searchProfileId");
-    if (searchProfileId) {
-      searchProfileIds.add(searchProfileId);
-    }
-  }
-
-  const searchProfiles = await loadSearchProfileSummaries(tenant, [...searchProfileIds]);
   const evidence = summarizeTradeMiningEvidence(company.importRecords, searchProfiles);
 
   return scoreCompanyFromEvidence({
@@ -605,17 +592,22 @@ export async function getTradeMiningSearchProfileSuggestions(tenant: TenantConte
 }
 
 export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipelineFilters = {}) {
-  const [repDirectory, scoringConfig] = await Promise.all([
+  const [repDirectory, scoringConfig, searchProfiles] = await Promise.all([
     getLeadPipelineRepDirectory(tenant),
-    loadTradeMiningScoringConfig(tenant)
+    loadTradeMiningScoringConfig(tenant),
+    loadSearchProfileSummaries(tenant)
   ]);
+  const evidenceWhere = buildTradeMiningEvidenceWhere(
+    tenant,
+    resolveEvidenceLookbackDays(scoringConfig, searchProfiles)
+  );
   const leads = await prisma.lead.findMany({
     where: tenantWhere(tenant, buildLeadPipelineWhere(filters)),
     include: {
       company: {
         include: {
           importRecords: {
-            where: tenantWhere(tenant),
+            where: evidenceWhere,
             orderBy: [
               {
                 arrivalDate: "desc"
@@ -623,8 +615,7 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
               {
                 createdAt: "desc"
               }
-            ],
-            take: 100
+            ]
           },
           contacts: {
             where: tenantWhere(tenant),
@@ -642,17 +633,6 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
     },
     orderBy: buildLeadPipelineOrder(filters.sort ?? "approved_desc")
   });
-
-  const searchProfileIds = new Set<string>();
-  for (const lead of leads) {
-    for (const record of lead.company.importRecords) {
-      const searchProfileId = readString(asObject(record.rawJson), "searchProfileId");
-      if (searchProfileId) {
-        searchProfileIds.add(searchProfileId);
-      }
-    }
-  }
-  const searchProfiles = await loadSearchProfileSummaries(tenant, [...searchProfileIds]);
 
   const pipelineLeads = leads.map((lead) => {
     const contacts = lead.company.contacts;
@@ -872,7 +852,7 @@ function parseApolloRepOptions(publicConfig: unknown): LeadPipelineFilterRepOpti
 }
 
 export async function getContactDirectory(tenant: TenantContext, filters: ContactDirectoryFilters = {}) {
-  const [scoringConfig, apolloCredentials] = await Promise.all([
+  const [scoringConfig, apolloCredentials, searchProfiles] = await Promise.all([
     loadTradeMiningScoringConfig(tenant),
     prisma.integrationCredential.findMany({
       where: tenantWhere(tenant, {
@@ -882,8 +862,13 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
         publicConfig: true
       },
       take: 1
-    })
+    }),
+    loadSearchProfileSummaries(tenant)
   ]);
+  const evidenceWhere = buildTradeMiningEvidenceWhere(
+    tenant,
+    resolveEvidenceLookbackDays(scoringConfig, searchProfiles)
+  );
   const apolloPublicConfig = apolloCredentials[0]?.publicConfig;
   const apolloSequenceDirectory = parseApolloSequenceDirectory(apolloPublicConfig);
   const apolloSequenceMapping = buildApolloSequenceMappingsWithDefaults({
@@ -900,7 +885,7 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
           normalizedName: true,
           priorityScore: true,
           importRecords: {
-            where: tenantWhere(tenant),
+            where: evidenceWhere,
             orderBy: [
               {
                 arrivalDate: "desc"
@@ -909,10 +894,10 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
                 createdAt: "desc"
               }
             ],
-            take: 25,
             select: {
               rawJson: true,
               arrivalDate: true,
+              createdAt: true,
               sourcePort: true,
               destinationCity: true,
               destinationState: true,
@@ -946,19 +931,6 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
     },
     orderBy: buildContactDirectoryOrder(filters.sort ?? "score_desc")
   });
-  const searchProfileIds = new Set<string>();
-
-  for (const contact of contacts) {
-    for (const record of contact.company.importRecords) {
-      const searchProfileId = readString(asObject(record.rawJson), "searchProfileId");
-      if (searchProfileId) {
-        searchProfileIds.add(searchProfileId);
-      }
-    }
-  }
-
-  const searchProfiles = await loadSearchProfileSummaries(tenant, [...searchProfileIds]);
-
   const mappedContacts = contacts.map((contact) => {
     const evidence = summarizeTradeMiningEvidence(contact.company.importRecords, searchProfiles);
     const scoring = scoreContact({
@@ -1759,10 +1731,10 @@ function buildCompanyWebsiteUrl(domain: string) {
   return `https://${trimmed}`;
 }
 
-function buildCandidateWhere(filters: CandidateFeedFilters) {
+function buildCandidateWhere(filters: CandidateFeedFilters, evidenceWhere: ReturnType<typeof buildTradeMiningEvidenceWhere>) {
   const baseWhere = {
     importRecords: {
-      some: {}
+      some: evidenceWhere
     }
   };
 
@@ -1781,11 +1753,7 @@ function buildCandidateWhere(filters: CandidateFeedFilters) {
   };
 }
 
-async function loadSearchProfileSummaries(tenant: Pick<TenantContext, "tenantId">, searchProfileIds: string[]) {
-  if (searchProfileIds.length === 0) {
-    return new Map<string, SearchProfileSummary>();
-  }
-
+async function loadSearchProfileSummaries(tenant: Pick<TenantContext, "tenantId">) {
   const searchProfileClient = prisma as SearchProfileClient;
 
   if (!searchProfileClient.tradeMiningSearchProfile) {
@@ -1794,10 +1762,7 @@ async function loadSearchProfileSummaries(tenant: Pick<TenantContext, "tenantId"
 
   const profiles = await searchProfileClient.tradeMiningSearchProfile.findMany({
     where: {
-      tenantId: tenant.tenantId,
-      id: {
-        in: searchProfileIds
-      }
+      tenantId: tenant.tenantId
     },
     select: {
       id: true,
@@ -1835,6 +1800,43 @@ async function loadSearchProfileSummaries(tenant: Pick<TenantContext, "tenantId"
         minShipmentCount: profile.minShipmentCount
       }
     ])
+  );
+}
+
+export function buildTradeMiningEvidenceWhere(
+  tenant: Pick<TenantContext, "tenantId">,
+  lookbackWindowDays: number,
+  now = new Date()
+) {
+  const normalizedLookbackDays = Math.max(1, Math.floor(lookbackWindowDays));
+  const cutoff = new Date(now);
+  cutoff.setUTCHours(0, 0, 0, 0);
+  cutoff.setUTCDate(cutoff.getUTCDate() - (normalizedLookbackDays - 1));
+
+  return tenantWhere(tenant, {
+    OR: [
+      {
+        arrivalDate: {
+          gte: cutoff
+        }
+      },
+      {
+        arrivalDate: null,
+        createdAt: {
+          gte: cutoff
+        }
+      }
+    ]
+  });
+}
+
+function resolveEvidenceLookbackDays(
+  config: CandidateScoringConfig,
+  searchProfiles: Map<string, SearchProfileSummary>
+) {
+  return Math.max(
+    config.lookbackWindowDays,
+    ...[...searchProfiles.values()].map((profile) => profile.lookbackWindowDays ?? 0)
   );
 }
 

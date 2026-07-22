@@ -2,6 +2,7 @@ import { CandidateStatus } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
+  buildTradeMiningEvidenceWhere,
   meetsSearchProfileMinimumShipmentCount,
   scoreCandidate,
   summarizeTradeMiningEvidence
@@ -9,6 +10,25 @@ import {
 import { DEFAULT_TRADEMINING_SCORING_SETTINGS } from "@/modules/settings/types";
 
 describe("lead-gen candidate scoring", () => {
+  it("builds an inclusive tenant-scoped evidence window", () => {
+    const where = buildTradeMiningEvidenceWhere(
+      { tenantId: "tenant-1" },
+      120,
+      new Date("2026-07-22T16:30:00.000Z")
+    );
+
+    expect(where).toEqual({
+      tenantId: "tenant-1",
+      OR: [
+        { arrivalDate: { gte: new Date("2026-03-25T00:00:00.000Z") } },
+        {
+          arrivalDate: null,
+          createdAt: { gte: new Date("2026-03-25T00:00:00.000Z") }
+        }
+      ]
+    });
+  });
+
   it("counts only the matched profile's shipments inside its own lookback window", () => {
     const now = Date.now();
     const day = 86_400_000;

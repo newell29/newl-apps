@@ -373,6 +373,48 @@ export async function saveTradeMiningScoringSettingsAction(formData: FormData) {
     aiModel: readOptional(formData, "aiModel") ?? null
   };
 
+  if (
+    scoringConfigData.recentWindowDays + scoringConfigData.comparisonWindowDays >
+    scoringConfigData.lookbackWindowDays
+  ) {
+    throw new Error("Scoring lookback must cover both the recent and comparison windows.");
+  }
+
+  const companyWeightTotal = [
+    scoringConfigData.momentumWeight,
+    scoringConfigData.marketFitWeight,
+    scoringConfigData.industryFitWeight,
+    scoringConfigData.companySizeWeight,
+    scoringConfigData.roleWeight,
+    scoringConfigData.confidenceWeight,
+    scoringConfigData.workflowWeight
+  ].reduce((sum, weight) => sum + weight, 0);
+
+  if (companyWeightTotal !== 100) {
+    throw new Error("Company scoring weights must total exactly 100 points.");
+  }
+
+  if (
+    !(
+      scoringConfigData.contactTier1Threshold > scoringConfigData.contactTier2Threshold &&
+      scoringConfigData.contactTier2Threshold > scoringConfigData.contactTier3Threshold
+    )
+  ) {
+    throw new Error("Contact tier thresholds must descend from Tier 1 to Tier 3.");
+  }
+
+  if ((scoringConfigData.midMarketTeuMin === null) !== (scoringConfigData.midMarketTeuMax === null)) {
+    throw new Error("Set both mid-market TEU limits or leave both blank.");
+  }
+
+  if (
+    scoringConfigData.midMarketTeuMin !== null &&
+    scoringConfigData.midMarketTeuMax !== null &&
+    scoringConfigData.midMarketTeuMin.greaterThan(scoringConfigData.midMarketTeuMax)
+  ) {
+    throw new Error("Mid-market TEU minimum cannot exceed the maximum.");
+  }
+
   try {
     await tradeMiningScoringClient.tradeMiningScoringConfig.upsert({
       where: {

@@ -1141,12 +1141,12 @@ export default async function SettingsPage() {
                   info="The prior period used to compare against the recent window. This is what lets us tell whether activity is rising or softening."
                 />
                 <NumberField
-                  label="Scoring lookback (days)"
+                  label="Fallback scoring lookback (days)"
                   name="lookbackWindowDays"
                   defaultValue={settings.tradeMiningScoring.lookbackWindowDays}
                   min={30}
                   max={365}
-                  info="Maximum history considered when summarizing a company’s TradeMining evidence for ranking."
+                  info="Used for unmatched or legacy TradeMining evidence. Records tied to a search profile always use that profile’s own lookback window. This fallback must still cover the recent and comparison windows."
                 />
               </div>
             </div>

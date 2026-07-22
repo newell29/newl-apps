@@ -27,13 +27,22 @@ import {
   EMPTY_CONTACT_BULK_ACTION_SUMMARY,
   type ContactBulkActionSummary
 } from "@/modules/lead-gen/contact-bulk-action-summary";
-import { calculateLeadPipelineScoreForCompany, scoreCandidate, summarizeTradeMiningEvidence } from "@/modules/lead-gen/queries";
+import {
+  buildTradeMiningEvidenceWhere,
+  calculateLeadPipelineScoreForCompany,
+  scoreCandidate,
+  summarizeTradeMiningEvidence
+} from "@/modules/lead-gen/queries";
 import {
   assertValidTradeMiningSearchProfile,
   defaultTradeMiningCompanyIdentityRoles,
   tradeMiningCompanyIdentityRoleOptions
 } from "@/modules/lead-gen/search-profile-validation";
-import { scoreContact } from "@/modules/lead-gen/contact-scoring";
+import {
+  getContactScoringBlockReason,
+  getContactSequencePushBlockReason,
+  scoreContact
+} from "@/modules/lead-gen/contact-scoring";
 import { buildSequenceCatalogItems, recommendSequenceForContact } from "@/modules/lead-gen/sequence-catalog";
 import {
   buildApolloSequenceMappingsWithDefaults,
@@ -1059,12 +1068,35 @@ export async function bulkPushContactsToApolloAction(
         }
       },
       select: {
-        companyId: true
+        id: true,
+        companyId: true,
+        contactStatus: true,
+        company: {
+          select: {
+            candidateStatus: true,
+            doNotProspect: true
+          }
+        }
       }
     });
 
     if (contacts.length !== contactIds.length) {
       throw new Error("One or more selected contacts were not found for this tenant.");
+    }
+
+    for (const contact of contacts) {
+      const contactBlockReason = getContactSequencePushBlockReason(contact.contactStatus);
+      if (contactBlockReason) {
+        throw new Error(contactBlockReason);
+      }
+
+      if (
+        contact.company.doNotProspect ||
+        contact.company.candidateStatus === CandidateStatus.REJECTED ||
+        contact.company.candidateStatus === CandidateStatus.DISQUALIFIED
+      ) {
+        throw new Error("The contact's company is blocked from prospecting.");
+      }
     }
 
     const jobInput: ApolloPushJobInput = {
@@ -1167,7 +1199,9 @@ export async function runApolloPushJob({
             name: true,
             domain: true,
             linkedinUrl: true,
-            apolloOrganizationId: true
+            apolloOrganizationId: true,
+            candidateStatus: true,
+            doNotProspect: true
           }
         },
         outreachDrafts: {
@@ -2071,12 +2105,20 @@ async function applySequenceSelectionToContacts({
     },
     select: {
       id: true,
+      contactStatus: true,
       sequenceStatus: true
     }
   });
 
   if (contacts.length !== contactIds.length) {
     throw new Error("One or more contacts were not found for this tenant.");
+  }
+
+  const contactBlockReason = contacts
+    .map((contact) => getContactScoringBlockReason(contact.contactStatus))
+    .find((reason) => Boolean(reason));
+  if (contactBlockReason) {
+    throw new Error(contactBlockReason);
   }
 
   const protectedContacts = contacts.filter((contact) => requiresSequenceOverrideConfirmation(contact.sequenceStatus));
@@ -2177,6 +2219,7 @@ type ApolloPushContactRecord = {
   companyId: string;
   fullName: string;
   email: string | null;
+  contactStatus: ContactStatus;
   assignedRep: string | null;
   recommendedSequenceId: string | null;
   recommendedSequenceName: string | null;
@@ -2190,6 +2233,8 @@ type ApolloPushContactRecord = {
     domain: string | null;
     linkedinUrl: string | null;
     apolloOrganizationId: string | null;
+    candidateStatus: CandidateStatus;
+    doNotProspect: boolean;
   };
   outreachDrafts: Array<{
     id: string;
@@ -2348,6 +2393,19 @@ async function validateApolloPushCandidate({
   companyLookup?: ApolloContactLookupResult;
 }): Promise<{ ok: true } & ApolloPushReadyContact | { ok: false; reason: string }> {
   let effectiveSequence = resolveEffectiveApolloSequence(contact);
+
+  const contactBlockReason = getContactSequencePushBlockReason(contact.contactStatus);
+  if (contactBlockReason) {
+    return { ok: false, reason: contactBlockReason };
+  }
+
+  if (
+    contact.company.doNotProspect ||
+    contact.company.candidateStatus === CandidateStatus.REJECTED ||
+    contact.company.candidateStatus === CandidateStatus.DISQUALIFIED
+  ) {
+    return { ok: false, reason: "The contact's company is blocked from prospecting." };
+  }
 
   if (!contact.apolloContactId) {
     return { ok: false, reason: "Apollo contact ID is missing. Enrich the company again before pushing." };
@@ -4186,7 +4244,61 @@ async function loadAiDraftContactContext({
   tenantId: string;
   contactId: string;
 }) {
-  const [contact, apolloCredential, scoringConfigRecord, model] = await Promise.all([
+  const [scoringConfigRecord, profileRecords] = await Promise.all([
+    prisma.tradeMiningScoringConfig.findUnique({
+      where: {
+        tenantId
+      }
+    }),
+    prisma.tradeMiningSearchProfile.findMany({
+      where: {
+        tenantId
+      },
+      select: {
+        id: true,
+        name: true,
+        priorityWeight: true,
+        destinationMarkets: true,
+        destinationPorts: true,
+        originPorts: true,
+        shipFromPorts: true,
+        originCountries: true,
+        productKeywords: true,
+        hsCodes: true,
+        contactCadenceConfig: true,
+        lookbackWindowDays: true,
+        minShipmentCount: true
+      }
+    })
+  ]);
+  const scoringConfig = normalizeLeadGenAiScoringConfig(scoringConfigRecord);
+  const evidenceLookbackDays = Math.max(
+    scoringConfig.lookbackWindowDays,
+    ...profileRecords.map((profile) => profile.lookbackWindowDays)
+  );
+  const evidenceWhere = buildTradeMiningEvidenceWhere({ tenantId }, evidenceLookbackDays);
+  const searchProfiles = new Map(
+    profileRecords.map((profile) => [
+      profile.id,
+      {
+        id: profile.id,
+        name: profile.name,
+        priorityWeight: profile.priorityWeight,
+        destinationMarkets: asStringArray(profile.destinationMarkets),
+        destinationPorts: asStringArray(profile.destinationPorts),
+        originPorts: asStringArray(profile.originPorts),
+        shipFromPorts: asStringArray(profile.shipFromPorts),
+        originCountries: asStringArray(profile.originCountries),
+        productKeywords: asStringArray(profile.productKeywords),
+        hsCodes: asStringArray(profile.hsCodes),
+        contactCadenceConfig: profile.contactCadenceConfig,
+        lookbackWindowDays: profile.lookbackWindowDays,
+        minShipmentCount: profile.minShipmentCount
+      }
+    ])
+  );
+
+  const [contact, apolloCredential, model] = await Promise.all([
     prisma.contact.findFirst({
       where: {
         id: contactId,
@@ -4211,13 +4323,14 @@ async function loadAiDraftContactContext({
             domain: true,
             apolloOrganizationId: true,
             importRecords: {
+              where: evidenceWhere,
               orderBy: {
                 arrivalDate: "desc"
               },
-              take: 250,
               select: {
                 rawJson: true,
                 arrivalDate: true,
+                createdAt: true,
                 sourcePort: true,
                 destinationCity: true,
                 destinationState: true,
@@ -4260,11 +4373,6 @@ async function loadAiDraftContactContext({
         publicConfig: true
       }
     }),
-    prisma.tradeMiningScoringConfig.findUnique({
-      where: {
-        tenantId
-      }
-    }),
     loadTier1DraftModel(tenantId)
   ]);
 
@@ -4272,7 +4380,6 @@ async function loadAiDraftContactContext({
     return null;
   }
 
-  const scoringConfig = normalizeLeadGenAiScoringConfig(scoringConfigRecord);
   const companyLeadScore = contact.company.leads[0]?.score ?? null;
   const scoring = scoreContact(
     {
@@ -4291,60 +4398,6 @@ async function loadAiDraftContactContext({
     },
     scoringConfig
   );
-
-  const searchProfileIds = [
-    ...new Set(
-      contact.company.importRecords
-        .map((record) => readString(asObject(record.rawJson), "searchProfileId"))
-        .filter((value): value is string => Boolean(value))
-    )
-  ];
-  const searchProfiles = searchProfileIds.length
-    ? new Map(
-        (
-          await prisma.tradeMiningSearchProfile.findMany({
-            where: {
-              tenantId,
-              id: {
-                in: searchProfileIds
-              }
-            },
-            select: {
-              id: true,
-              name: true,
-              priorityWeight: true,
-              destinationMarkets: true,
-              destinationPorts: true,
-              originPorts: true,
-              shipFromPorts: true,
-              originCountries: true,
-              productKeywords: true,
-              hsCodes: true,
-              contactCadenceConfig: true,
-              lookbackWindowDays: true,
-              minShipmentCount: true
-            }
-          })
-        ).map((profile) => [
-          profile.id,
-          {
-            id: profile.id,
-            name: profile.name,
-            priorityWeight: profile.priorityWeight,
-            destinationMarkets: asStringArray(profile.destinationMarkets),
-            destinationPorts: asStringArray(profile.destinationPorts),
-            originPorts: asStringArray(profile.originPorts),
-            shipFromPorts: asStringArray(profile.shipFromPorts),
-            originCountries: asStringArray(profile.originCountries),
-            productKeywords: asStringArray(profile.productKeywords),
-            hsCodes: asStringArray(profile.hsCodes),
-            contactCadenceConfig: profile.contactCadenceConfig,
-            lookbackWindowDays: profile.lookbackWindowDays,
-            minShipmentCount: profile.minShipmentCount
-          }
-        ])
-      )
-    : new Map();
 
   const evidence = summarizeTradeMiningEvidence(contact.company.importRecords, searchProfiles);
   const apolloSequenceDirectory = parseApolloSequenceDirectory(apolloCredential?.publicConfig);

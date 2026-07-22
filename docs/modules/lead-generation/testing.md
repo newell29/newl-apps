@@ -69,3 +69,11 @@ Do not use a contact with active or finished sequence history unless the owner e
 For Hunter collector validation, include a canonical export containing both a valid company row and a shipment-only row. Confirm the adapter uploads the valid row, counts the identity-free row under `recordsRejectedBeforeUpload`, and does not fail the complete batch.
 
 For daily profile rules, verify a worker plan reports the profile's exact lookback, not a global collection cap. Test before/after the configured local run time and with a `lastRunAt` on the same local date. Candidate scoring tests must also prove that records outside the profile lookback or belonging to a different profile do not count toward `minShipmentCount`.
+
+Scoring regression coverage must also verify:
+
+1. TradeMining evidence queries are tenant scoped and use an inclusive UTC-day cutoff;
+2. `DO_NOT_CONTACT` and `REJECTED` contacts are unranked with score zero;
+3. cadence assignment refuses blocked contacts and Apollo queueing requires `APPROVED` status;
+4. default role penalties deprioritize sales-only contacts without suppressing mixed titles that match logistics or operations;
+5. invalid windows, contact tier thresholds, company weight totals, and mid-market TEU ranges are rejected before persistence.
