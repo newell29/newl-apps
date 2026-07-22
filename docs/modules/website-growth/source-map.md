@@ -6,6 +6,19 @@
 
 Website growth and SEO is documented because code, routes, schema, or tests were located. Main evidence: `src/app/(authenticated)/website-growth/*`, `src/modules/website-growth/*`, website growth Prisma models/tests.
 
+## Scout source map
+
+| Responsibility | Source |
+|---|---|
+| Search Console, GA4, and sanitized form refresh | `src/modules/website-growth/evidence-refresh.ts` |
+| Tenant-scoped candidate upsert | `src/modules/website-growth/opportunity-store.ts` |
+| Scout run locking, packet, SEMrush evidence, draft save, Teams message | `src/modules/website-growth/scout-run.ts` |
+| Machine API | `src/app/api/website-growth/scout/prepare`, `complete`, and `fail` |
+| Read-only Codex/OpenClaw runtime | `ops/openclaw/run-website-growth-scout.sh` |
+| Official SEMrush OAuth setup | `ops/openclaw/configure-semrush-mcp.sh` |
+| Weekly OpenClaw schedule | `ops/openclaw/install-website-growth-scout.sh` |
+| Structured output contract | `ops/openclaw/skills/website-growth-scout/scout-output.schema.json` |
+
 ## Workflow / rules summary
 
 - Entry points are protected authenticated pages and/or API routes for this module.

@@ -4,7 +4,12 @@ import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { readWebsiteGrowthBuildPackage } from "@/modules/website-growth/build-package";
-import { createWebsiteGrowthDraftPullRequestAction } from "@/modules/website-growth/actions";
+import { reviewWebsiteGrowthClaims } from "@/modules/website-growth/claims-policy";
+import {
+  findWebsiteGrowthBuildRequestForDraft,
+  summarizeWebsiteGrowthBuildRequest
+} from "@/modules/website-growth/build-requests";
+import { retryWebsiteGrowthDeveloperBuildAction } from "@/modules/website-growth/actions";
 import type {
   WebsiteGrowthPageChangePreview,
   WebsiteGrowthRenderedPagePreview
@@ -40,6 +45,9 @@ export default async function WebsiteGrowthDraftPreviewPage({ params }: PageProp
 
   const payload = readDraftPayload(draft.draftJson);
   const buildPackage = readWebsiteGrowthBuildPackage(draft.draftJson);
+  const claimReview = reviewWebsiteGrowthClaims(draft.draftJson);
+  const developerBuildJob = await findWebsiteGrowthBuildRequestForDraft(context.tenantId, draft.id);
+  const developerBuild = developerBuildJob ? summarizeWebsiteGrowthBuildRequest(developerBuildJob) : null;
 
   return (
     <div className="space-y-6">
@@ -87,6 +95,20 @@ export default async function WebsiteGrowthDraftPreviewPage({ params }: PageProp
       />
       <ExistingPageChangePreview preview={payload.pageChangePreview} />
 
+      <section className={claimReview.status === "CLEAR" ? "rounded-lg border border-success/25 bg-success/10 p-5" : claimReview.status === "BLOCKED" ? "rounded-lg border border-danger/25 bg-danger/10 p-5" : "rounded-lg border border-warning/25 bg-warning/10 p-5"}>
+        <p className="text-xs font-semibold uppercase tracking-wide text-foreground">Claims and substantiation</p>
+        <h2 className="mt-2 text-xl font-semibold text-foreground">
+          {claimReview.status === "CLEAR" ? "No restricted claims detected." : claimReview.status === "BLOCKED" ? "Revise blocked claim language before approval." : "Owner confirmation is required before approval."}
+        </h2>
+        {claimReview.findings.length > 0 ? (
+          <ul className="mt-4 space-y-3 text-sm leading-6 text-mutedForeground">
+            {claimReview.findings.map((finding) => (
+              <li key={`${finding.category}-${finding.excerpt}`}><strong className="text-foreground">{finding.category}:</strong> {finding.excerpt} — {finding.reason}</li>
+            ))}
+          </ul>
+        ) : null}
+      </section>
+
       <section className="grid gap-4 lg:grid-cols-2">
         {buildPackage ? (
           <div className="rounded-lg border border-success/25 bg-success/10 p-5 lg:col-span-2">
@@ -104,6 +126,7 @@ export default async function WebsiteGrowthDraftPreviewPage({ params }: PageProp
               <SummaryRow label="Route" value={buildPackage.routePath} />
               <SummaryRow label="Branch" value={buildPackage.branchName} />
               <SummaryRow label="Target repo" value={buildPackage.targetRepo} />
+              <SummaryRow label="Developer run" value={developerBuild ? `${formatStatusLike(developerBuild.phase)} · ${developerBuild.model} (${developerBuild.reasoningEffort})` : "Starts automatically after approval"} />
             </dl>
             <div className="mt-5 grid gap-4 lg:grid-cols-2">
               <ReviewPanel title="Build flow" items={buildPackage.approvalFlow} />
@@ -116,16 +139,20 @@ export default async function WebsiteGrowthDraftPreviewPage({ params }: PageProp
               >
                 View GitHub PR
               </Link>
-            ) : (
-              <form action={createWebsiteGrowthDraftPullRequestAction} className="mt-5">
+            ) : developerBuild?.canRetry ? (
+              <form action={retryWebsiteGrowthDeveloperBuildAction} className="mt-5">
                 <input type="hidden" name="draftId" value={draft.id} />
                 <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
-                  Create GitHub PR
+                  Retry developer build
                 </button>
                 <p className="mt-2 max-w-2xl text-xs leading-5 text-mutedForeground">
-                  This creates or updates a website branch, writes the approved Website Growth package, opens a GitHub PR, and stores the PR link on this draft.
+                  Approval starts the Codex workflow automatically. Use this only after a configuration or dispatch failure; successful runs open a draft PR and store its link here.
                 </p>
               </form>
+            ) : (
+              <p className="mt-5 text-sm leading-6 text-mutedForeground">
+                {developerBuild ? `Developer run: ${formatStatusLike(developerBuild.phase)}.` : "The Codex developer run starts automatically after approval."}
+              </p>
             )}
           </div>
         ) : null}

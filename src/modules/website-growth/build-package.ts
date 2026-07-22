@@ -4,6 +4,7 @@ import type {
   WebsiteGrowthPageChangePreview,
   WebsiteGrowthRenderedPagePreview
 } from "@/modules/website-growth/content-drafts";
+import { reviewWebsiteGrowthClaims, type WebsiteGrowthClaimReview } from "@/modules/website-growth/claims-policy";
 
 export type WebsiteGrowthBuildPackage = {
   version: 1;
@@ -22,6 +23,7 @@ export type WebsiteGrowthBuildPackage = {
     targetKeyword: string;
     searchIntent: string;
   };
+  claimReview: WebsiteGrowthClaimReview;
   newlWebsitePattern: {
     pageType: string;
     sourceTemplate: string;
@@ -73,7 +75,7 @@ export function buildWebsiteGrowthBuildPackage(draft: DraftForBuildPackage): Web
   const payload = readDraftPayload(draft.draftJson);
   const routePath = resolveRoutePath(draft.proposedPath ?? draft.targetPage ?? draft.opportunity.targetPage, draft.opportunity.topic);
   const mode = resolveBuildMode(draft.opportunity.action, payload.pagePreview?.mode, draft.contentType);
-  const branchName = `website-growth/${slugify(routePath) || slugify(draft.opportunity.topic) || draft.id.slice(-8)}`;
+  const branchName = `codex/website-growth-${draft.id}`;
 
   return {
     version: 1,
@@ -92,6 +94,7 @@ export function buildWebsiteGrowthBuildPackage(draft: DraftForBuildPackage): Web
       targetKeyword: payload.targetKeyword || draft.opportunity.topic,
       searchIntent: payload.searchIntent || "Commercial research"
     },
+    claimReview: reviewWebsiteGrowthClaims(draft.draftJson),
     newlWebsitePattern: {
       pageType: payload.websitePageType || "Newl website page",
       sourceTemplate: payload.websiteTemplate || "Repo pattern scan",

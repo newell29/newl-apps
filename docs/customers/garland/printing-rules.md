@@ -37,7 +37,11 @@ Teamship may reset its selected printer when another shipping order opens. The w
 
 The same employee who creates a plan must explicitly approve its request ID. Changed pallet counts, missing or duplicated printer options, unavailable local queues, expired approvals, and ambiguous Teamship pages stop the job. Uncertain jobs never retry automatically.
 
-Garland shipping-order display numbers and Teamship's internal page IDs are separate identities. For example, the supervised order `30666` resolves to internal Teamship record `31064`. Nemo shows and verifies `30666`, while the local worker navigates to `/ship-inventories/31064`; the integration resolves this mapping for every order rather than hard-coding a customer example.
+Garland shipping-order display numbers and Teamship's internal page IDs are separate identities. For example, the supervised order `30666` resolves to internal Teamship record `31064`. Nemo shows `30666`, while the local worker verifies the API mapping and navigates to `/ship-inventories/31064`; the Teamship detail page itself may visibly show only `Ship Inventory #31064`. The integration resolves this mapping for every order rather than hard-coding a customer example.
+
+The signed-in exact-order Teamship page is authoritative for print-plan pallet-label quantity because it is the same order screen the local worker preflights immediately before printing. Its hidden pallet fields override stale API detail and list-summary aliases. If the page cannot be read, exact API-detail pallet rows are the fallback; if neither exact source supplies rows, plan creation fails closed instead of reusing the list summary. During the supervised `30666` investigation on 2026-07-22, the signed-in Teamship page showed one pallet row with quantity `1` while the API could still report `2`; plans using the stale value were rejected.
+
+Some Teamship page responses omit the hidden pallet-count marker. The parser then scans the bounded pallet field range but includes only rows with an observed quantity, dimension, weight, unit, or commodity field; a default weight unit alone never creates a pallet row.
 
 ## Open questions
 

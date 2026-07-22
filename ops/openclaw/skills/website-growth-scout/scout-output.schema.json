@@ -1,0 +1,208 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["runSummary", "semrush", "drafts"],
+  "properties": {
+    "runSummary": { "type": "string", "minLength": 1 },
+    "semrush": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["queried", "summary", "rows"],
+      "properties": {
+        "queried": { "const": true },
+        "summary": { "type": "string", "minLength": 1 },
+        "rows": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["opportunityId", "keyword", "page", "position", "searchVolume", "keywordDifficulty", "intent", "competitorDomain", "opportunityType", "note"],
+            "properties": {
+              "opportunityId": { "type": "string", "minLength": 1 },
+              "keyword": { "type": "string", "minLength": 1 },
+              "page": { "type": ["string", "null"] },
+              "position": { "type": ["number", "null"] },
+              "searchVolume": { "type": ["integer", "null"] },
+              "keywordDifficulty": { "type": ["number", "null"] },
+              "intent": { "type": ["string", "null"] },
+              "competitorDomain": { "type": ["string", "null"] },
+              "opportunityType": { "type": "string", "minLength": 1 },
+              "note": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "drafts": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["opportunityId", "recommendationSummary", "draft"],
+        "properties": {
+          "opportunityId": { "type": "string", "minLength": 1 },
+          "recommendationSummary": { "type": "string", "minLength": 1 },
+          "draft": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["title", "summary", "contentType", "proposedPath", "targetKeyword", "searchIntent", "sections", "metaTitle", "metaDescription", "faqs", "internalLinks", "implementationNotes", "reviewChecklist", "websitePageType", "websiteTemplate", "layoutComponents", "designSystemNotes", "pageChangePreview", "pagePreview"],
+            "properties": {
+              "title": { "type": "string", "minLength": 1 },
+              "summary": { "type": "string", "minLength": 1 },
+              "contentType": { "type": "string", "minLength": 1 },
+              "proposedPath": { "type": ["string", "null"] },
+              "targetKeyword": { "type": "string", "minLength": 1 },
+              "searchIntent": { "type": "string", "minLength": 1 },
+              "sections": { "type": "array", "items": { "$ref": "#/$defs/section" } },
+              "metaTitle": { "type": "string", "minLength": 1 },
+              "metaDescription": { "type": "string", "minLength": 1 },
+              "faqs": { "type": "array", "items": { "$ref": "#/$defs/faq" } },
+              "internalLinks": { "type": "array", "items": { "$ref": "#/$defs/link" } },
+              "implementationNotes": { "type": "array", "items": { "type": "string" } },
+              "reviewChecklist": { "type": "array", "items": { "type": "string" } },
+              "websitePageType": { "type": "string", "minLength": 1 },
+              "websiteTemplate": { "type": "string", "minLength": 1 },
+              "layoutComponents": { "type": "array", "items": { "type": "string" } },
+              "designSystemNotes": { "type": "array", "items": { "type": "string" } },
+              "pageChangePreview": { "$ref": "#/$defs/pageChangePreview" },
+              "pagePreview": { "$ref": "#/$defs/pagePreview" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["heading", "purpose", "draftCopy"],
+      "properties": {
+        "heading": { "type": "string" },
+        "purpose": { "type": "string" },
+        "draftCopy": { "type": "string" }
+      }
+    },
+    "faq": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question", "answer"],
+      "properties": {
+        "question": { "type": "string" },
+        "answer": { "type": "string" }
+      }
+    },
+    "link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "url", "reason"],
+      "properties": {
+        "label": { "type": "string" },
+        "url": { "type": "string" },
+        "reason": { "type": "string" }
+      }
+    },
+    "pageChangePreview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currentPage", "proposedChanges", "visualReviewNotes", "approvalSummary"],
+      "properties": {
+        "currentPage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "pageType", "role", "likelySourceFiles", "existingComponents", "currentFocus"],
+          "properties": {
+            "path": { "type": "string" },
+            "pageType": { "type": "string" },
+            "role": { "type": "string" },
+            "likelySourceFiles": { "type": "array", "items": { "type": "string" } },
+            "existingComponents": { "type": "array", "items": { "type": "string" } },
+            "currentFocus": { "type": "string" }
+          }
+        },
+        "proposedChanges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["changeType", "location", "currentState", "proposedState", "exactDraftCopy", "reason", "impact"],
+            "properties": {
+              "changeType": { "enum": ["meta", "hero", "section", "faq", "internal_links", "cta", "redirect", "technical"] },
+              "location": { "type": "string" },
+              "currentState": { "type": "string" },
+              "proposedState": { "type": "string" },
+              "exactDraftCopy": { "type": "string" },
+              "reason": { "type": "string" },
+              "impact": { "type": "string" }
+            }
+          }
+        },
+        "visualReviewNotes": { "type": "array", "items": { "type": "string" } },
+        "approvalSummary": { "type": "string" }
+      }
+    },
+    "pagePreview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "eyebrow", "heroTitle", "heroCopy", "heroBullets", "primaryCta", "secondaryCta", "proofCards", "sections", "faqs", "internalLinks", "finalCta"],
+      "properties": {
+        "mode": { "enum": ["new_page", "existing_page_update", "legacy_redirect_rebuild", "internal_link_update"] },
+        "eyebrow": { "type": "string" },
+        "heroTitle": { "type": "string" },
+        "heroCopy": { "type": "string" },
+        "heroBullets": { "type": "array", "items": { "type": "string" } },
+        "primaryCta": { "type": "string" },
+        "secondaryCta": { "type": "string" },
+        "proofCards": { "type": "array", "items": { "$ref": "#/$defs/previewCard" } },
+        "sections": { "type": "array", "items": { "$ref": "#/$defs/previewSection" } },
+        "faqs": { "type": "array", "items": { "$ref": "#/$defs/faq" } },
+        "internalLinks": { "type": "array", "items": { "$ref": "#/$defs/link" } },
+        "finalCta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["heading", "body", "buttonLabel"],
+          "properties": {
+            "heading": { "type": "string" },
+            "body": { "type": "string" },
+            "buttonLabel": { "type": "string" }
+          }
+        }
+      }
+    },
+    "previewCard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "value", "body"],
+      "properties": {
+        "label": { "type": "string" },
+        "value": { "type": "string" },
+        "body": { "type": "string" }
+      }
+    },
+    "previewSection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eyebrow", "heading", "body", "cards"],
+      "properties": {
+        "eyebrow": { "type": "string" },
+        "heading": { "type": "string" },
+        "body": { "type": "string" },
+        "cards": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["title", "body"],
+            "properties": {
+              "title": { "type": "string" },
+              "body": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

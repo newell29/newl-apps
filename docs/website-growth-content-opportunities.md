@@ -9,7 +9,8 @@ The Website Growth module turns search, analytics, and Newl Apps operating data 
 The queue uses three source categories:
 
 - Google Search Console API: queries, pages, clicks, impressions, CTR, and average position.
-- Manual uploads: Semrush exports, GA4 exports, Search Console exports, or one-off CSV/TSV research.
+- Official SEMrush MCP through OAuth: read-only rank, competitor, keyword-gap, volume, difficulty, intent, and landing-page evidence.
+- Manual uploads: historical Semrush exports, GA4 exports, Search Console exports, or one-off CSV/TSV research.
 - Newl Apps internal data: website inbound submissions, lead-producing pages, primary needs, companies, contacts, pipeline records, and finance credit checks.
 
 Future modules should feed this queue instead of living separately when they create website growth signals. Examples:
@@ -41,7 +42,7 @@ The service account must be added to Google Search Console as a user for the rel
 
 ## Google Analytics 4
 
-GA4 is represented in the connection status and can be manually imported today. The API fields are reserved so the module can add direct GA4 sync without changing the data model:
+GA4 Data API sync stores 28-day landing-page sessions, engaged sessions, engagement rate, and event count. Manual imports remain available for historical exports:
 
 - `GA4_PROPERTY_ID`
 - `GA4_CLIENT_EMAIL`
@@ -90,9 +91,26 @@ The score is intentionally directional. It ranks work for review; it does not au
 
 ## Operating Workflow
 
-1. Sync Search Console or import Semrush/Search Console/GA4 exports.
-2. Generate opportunities from internal Newl Apps data.
-3. Review high-score items.
+1. The Monday Scout job refreshes Search Console, GA4, and aggregate website-form evidence automatically.
+2. Read-only Codex Scout checks the current website repository and queries official SEMrush MCP through OAuth.
+3. Newl Apps validates and saves the bounded approval slate, then OpenClaw sends direct review links through Teams.
 4. Approve work that maps to a real service, industry, location, blog, glossary, or redirect need.
-5. Execute the content work in the website repo.
-6. Mark items as published and monitor future Search Console/GA4 movement.
+5. Approval creates a tenant-scoped build request and dispatches the website repository's Codex workflow.
+6. Codex implements the page, runs lint/build, and opens a draft PR that receives a Vercel Preview.
+7. The owner reviews the content, claims, design, and preview and owns the merge decision.
+8. After a human-approved merge, monitor future Search Console, GA4, and first-party lead movement.
+
+## Scout runtime configuration
+
+The OpenClaw Mac mini keeps these values in `~/.openclaw/agents/scout/.env`, never in Git:
+
+- `NEWL_APPS_URL`
+- `OPENCLAW_WEBSITE_GROWTH_TOKEN`
+- `NEWL_WEBSITE_REPO_PATH`
+- `WEBSITE_GROWTH_TEAMS_TARGET`
+- `WEBSITE_GROWTH_TEAMS_ACCOUNT` when more than one Teams account exists
+- `VERCEL_AUTOMATION_BYPASS_SECRET` only when the selected deployment is protected
+
+Newl Apps may set `WEBSITE_GROWTH_SCOUT_CODEX_MODEL`, `WEBSITE_GROWTH_SCOUT_CODEX_REASONING_EFFORT`, and `WEBSITE_GROWTH_SCOUT_MAX_CANDIDATES`; defaults are `gpt-5.6-sol`, `high`, and six. SEMrush credentials are not environment variables: run `ops/openclaw/configure-semrush-mcp.sh` and approve the official OAuth flow.
+
+See `docs/modules/website-growth/overview.md` for the Scout/Hunter boundary, model routing, claim rules, and developer security design.

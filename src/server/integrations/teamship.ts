@@ -19,6 +19,7 @@ type TeamshipFetchOptions = {
 type TeamshipShippingOrderSearchOptions = {
   tenantId?: string | null;
   orderIdentifier: string;
+  preferUiPallets?: boolean;
   credentials?: TeamshipRuntimeCredentials | null;
   fetchImpl?: typeof fetch;
 };
@@ -245,6 +246,7 @@ export async function searchTeamshipProductsForShipping({
 export async function findTeamshipShippingOrders({
   tenantId,
   orderIdentifier,
+  preferUiPallets = false,
   credentials = null,
   fetchImpl = fetch
 }: TeamshipShippingOrderSearchOptions): Promise<TeamshipShippingOrderDetail[]> {
@@ -256,6 +258,7 @@ export async function findTeamshipShippingOrders({
   const matches: TeamshipShippingOrderDetail[] = [];
   const pageLimit = getTeamshipPageLimit();
   const maxPages = getTeamshipMaxPages();
+  let webCookieHeader: string | null | undefined;
 
   for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
     const rows = await listTeamshipShippingOrders({
@@ -277,8 +280,36 @@ export async function findTeamshipShippingOrders({
       }
 
       const detail = await getTeamshipShippingOrder({ apiBaseUrl, token, id: String(id), fetchImpl });
+      const merged = mergeTeamshipDetailWithSummary(detail, row);
+      const apiPallets = readAuthoritativeTeamshipPallets(detail);
+      let uiPallets: ReturnType<typeof readAuthoritativeTeamshipPallets> = undefined;
+
+      if (preferUiPallets || !apiPallets) {
+        if (webCookieHeader === undefined) {
+          webCookieHeader = await loginToTeamshipWeb(fetchImpl, resolvedCredentials, webBaseUrl).catch(() => null);
+        }
+
+        if (webCookieHeader) {
+          const uiDetail = await getTeamshipShippingOrderUiDetail({
+            webBaseUrl,
+            webCookieHeader,
+            id: String(id),
+            fetchImpl
+          }).catch(() => null);
+          uiPallets = readAuthoritativeTeamshipPallets(uiDetail);
+        }
+      }
+
+      const authoritativePallets = preferUiPallets
+        ? uiPallets ?? apiPallets
+        : apiPallets ?? uiPallets;
+
       matches.push({
-        ...mergeTeamshipDetailWithSummary(detail, row),
+        ...merged,
+        // Never retain a list-summary pallet count when neither the exact API
+        // detail nor the signed-in Teamship page confirms it.
+        pallets: authoritativePallets ?? [],
+        pallet_dims: authoritativePallets ?? [],
         teamship_internal_id: String(id),
         url: buildTeamshipOrderUrl(webBaseUrl, String(id))
       });
@@ -290,6 +321,12 @@ export async function findTeamshipShippingOrders({
   }
 
   return matches;
+}
+
+function readAuthoritativeTeamshipPallets(detail: Partial<TeamshipShippingOrderDetail> | null) {
+  if (!detail) return undefined;
+  return [detail.pallets, detail.pallet_dims]
+    .find((rows): rows is NonNullable<TeamshipShippingOrderDetail["pallet_dims"]> => Array.isArray(rows) && rows.length > 0);
 }
 
 function teamshipOrderIdentifiers(order: TeamshipShippingOrderDetail) {
@@ -610,6 +647,11 @@ function resolveTeamshipApiBaseUrl(credentials: TeamshipRuntimeCredentials | nul
 }
 
 function resolveTeamshipWebBaseUrl(apiBaseUrl: string) {
+  const configuredWebBaseUrl = process.env.TEAMSHIP_APP_BASE_URL?.trim();
+  if (configuredWebBaseUrl) {
+    return configuredWebBaseUrl.replace(/\/+$/, "");
+  }
+
   try {
     return new URL(apiBaseUrl).origin.replace(/\/+$/, "");
   } catch {
@@ -734,19 +776,35 @@ function readTeamshipUiPallets(html: string) {
   const pallets: TeamshipShippingOrderDetail["pallet_dims"] = [];
 
   for (let index = 1; index <= maxCount; index += 1) {
+    const quantity = readHtmlFormValueById(html, `pallet_${index}`);
+    const length = readHtmlFormValueById(html, `pallet_${index}_length`);
+    const width = readHtmlFormValueById(html, `pallet_${index}_width`);
+    const height = readHtmlFormValueById(html, `pallet_${index}_height`);
+    const weight = readHtmlFormValueById(html, `pallet_${index}_weight`);
+    const weightUnit = readHtmlFormValueById(html, `pallet_${index}_weight_unit`);
+    const commodity = readHtmlFormValueById(html, `pallet_${index}_commodity`);
+    const normalizedWeightUnit = String(weightUnit ?? "").trim().toLowerCase();
+    const meaningfulWeightUnit = normalizedWeightUnit
+      && !["lb", "lbs", "pound", "pounds"].includes(normalizedWeightUnit)
+      ? weightUnit
+      : null;
+    const observedValues = [quantity, length, width, height, weight, meaningfulWeightUnit, commodity];
+
+    if (!observedValues.some((value) => value && String(value).trim())) {
+      continue;
+    }
+
     const pallet = {
-      quantity: readHtmlFormValueById(html, `pallet_${index}`),
-      length: readHtmlFormValueById(html, `pallet_${index}_length`),
-      width: readHtmlFormValueById(html, `pallet_${index}_width`),
-      height: readHtmlFormValueById(html, `pallet_${index}_height`),
-      weight: readHtmlFormValueById(html, `pallet_${index}_weight`),
-      weight_unit: readHtmlFormValueById(html, `pallet_${index}_weight_unit`) ?? "lbs",
-      commodity: readHtmlFormValueById(html, `pallet_${index}_commodity`)
+      quantity,
+      length,
+      width,
+      height,
+      weight,
+      weight_unit: weightUnit ?? "lbs",
+      commodity
     };
 
-    if (Object.values(pallet).some((value) => value && String(value).trim())) {
-      pallets.push(pallet);
-    }
+    pallets.push(pallet);
   }
 
   return pallets;

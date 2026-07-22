@@ -126,7 +126,8 @@ export async function createWebsiteGrowthContentDraftPayload(
   if (isOpenAiDraftGenerationConfigured()) {
     try {
       const generated = await generateWebsiteGrowthContentDraft({
-        model: process.env.OPENAI_WEBSITE_GROWTH_MODEL?.trim() || "gpt-5-mini",
+        model: process.env.OPENAI_WEBSITE_GROWTH_MODEL?.trim() || "gpt-5.6-sol",
+        reasoningEffort: normalizeReasoningEffort(process.env.OPENAI_WEBSITE_GROWTH_REASONING_EFFORT),
         opportunity: serializeOpportunity(opportunity),
         websiteContext,
         pagePattern
@@ -158,11 +159,14 @@ export async function createWebsiteGrowthContentDraftPayload(
         pagePreview,
         source: WebsiteGrowthContentDraftSource.AI
       };
-    } catch {
+    } catch (error) {
       return {
         ...buildTemplateWebsiteGrowthContentDraft(opportunity, websiteContext),
         source: WebsiteGrowthContentDraftSource.TEMPLATE,
-        rawResponse: null
+        rawResponse: {
+          fallback: true,
+          reason: error instanceof Error ? error.message : "Website Growth draft generation failed."
+        }
       };
     }
   }
@@ -172,6 +176,10 @@ export async function createWebsiteGrowthContentDraftPayload(
     source: WebsiteGrowthContentDraftSource.TEMPLATE,
     rawResponse: null
   };
+}
+
+function normalizeReasoningEffort(value?: string) {
+  return value === "low" || value === "medium" || value === "high" || value === "xhigh" ? value : "medium";
 }
 
 export function buildTemplateWebsiteGrowthContentDraft(

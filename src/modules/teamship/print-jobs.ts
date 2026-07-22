@@ -127,8 +127,12 @@ export async function createTeamshipPrintPlan(
   }
 
   const findOrders = dependencies.findOrders ?? findTeamshipShippingOrders;
-  const orders = await findOrders({ tenantId: context.tenantId, orderIdentifier: shippingOrderNumber });
-  const exact = orders.filter((order) => readTeamshipShippingOrderNumbers(order).includes(shippingOrderNumber));
+  const orders = await findOrders({
+    tenantId: context.tenantId,
+    orderIdentifier: shippingOrderNumber,
+    preferUiPallets: true
+  });
+  const exact = orders.filter((order) => teamshipOrderMatchesShippingOrderNumber(order, shippingOrderNumber));
   if (exact.length === 0) {
     throw new TeamshipPrintJobError(`No exact Teamship shipping order ${shippingOrderNumber} was found.`, 404);
   }
@@ -138,8 +142,8 @@ export async function createTeamshipPrintPlan(
 
   const order = exact[0]!;
   const teamshipOrderId = resolveTeamshipInternalOrderId(order);
-  const customerName = readCustomerName(order);
-  const warehouseName = readWarehouseName(order);
+  const customerName = readTeamshipCustomerName(order);
+  const warehouseName = readTeamshipWarehouseName(order);
   if (!/\bgarland\b/i.test(customerName)) {
     throw new TeamshipPrintJobError("Phase 1 printing is restricted to Garland shipping orders.", 403);
   }
@@ -548,6 +552,13 @@ function readTeamshipShippingOrderNumbers(order: TeamshipShippingOrderDetail) {
     .filter(Boolean);
 }
 
+export function teamshipOrderMatchesShippingOrderNumber(
+  order: TeamshipShippingOrderDetail,
+  shippingOrderNumber: string
+) {
+  return readTeamshipShippingOrderNumbers(order).includes(shippingOrderNumber);
+}
+
 export function resolveTeamshipInternalOrderId(order: TeamshipShippingOrderDetail) {
   const explicit = normalizeInternalOrderId(order.teamship_internal_id);
   const fromUrl = readInternalOrderIdFromUrl(order.url);
@@ -577,11 +588,11 @@ function readInternalOrderIdFromUrl(value: unknown) {
   }
 }
 
-function readCustomerName(order: TeamshipShippingOrderDetail) {
+export function readTeamshipCustomerName(order: TeamshipShippingOrderDetail) {
   return String(order.customer?.company ?? order.customer?.name ?? order.customer_name ?? order.company ?? order.user_company ?? "").trim();
 }
 
-function readWarehouseName(order: TeamshipShippingOrderDetail) {
+export function readTeamshipWarehouseName(order: TeamshipShippingOrderDetail) {
   return String(order.warehouse_name ?? order.location_name ?? "").trim();
 }
 
