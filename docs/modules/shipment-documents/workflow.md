@@ -13,6 +13,7 @@ Shipment documents and Garland Teamship review is documented because code, route
 - Data persistence uses tenant-scoped Prisma models where a database model exists.
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
+- Single-order Teamship printing uses a separate plan and approval message from the same employee. The worker claims an immutable job once, preflights all printers and the live pallet count, and never retries uncertain work.
 - A Garland PDF attached through authenticated Teams is captured only from the trusted OpenClaw session, uploaded to Newl Apps in hashed chunks, and parsed server-side. The CSR must name the exact PS or SR to review. Newl Apps filters to that order before a fresh read-only Teamship fetch and saves only that selected comparison as a normal `TeamshipReviewRun`.
 - PS is preferred because SR can repeat. A missing reference, a reference absent from the PDF, or an SR that matches multiple PDF orders stops without a Teamship query. Newl Apps never guesses or silently checks the remaining orders.
 - Phase 1 does not update Teamship or print. Existing update and print paths retain their separate approval requirements.

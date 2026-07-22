@@ -45,6 +45,7 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 | UI and routes | See evidence paths above | `src/components/app-shell.tsx` | module-named tests under `tests/` |
 | Services/actions/queries | `src/modules/shipment*` or evidence paths above | `src/server/*` | module-named tests |
 | Schema | `prisma/schema.prisma` | `prisma/migrations/*` | schema-dependent unit tests |
+| Single-order printing | `src/modules/teamship/print-jobs.ts`, `src/modules/teamship/print-execution.ts`, `src/app/api/assistant/printing/*` | `scripts/teamship-print-worker.ts`, `ops/openclaw/plugins/newl-print`, `ops/openclaw/skills/teamship-print` | `tests/teamship-print-*.test.ts`, `tests/openclaw-print-auth.test.ts`, plugin tests |
 
 ## Open questions
 

@@ -25,10 +25,22 @@ Emails are classified using Garland-domain, PS-range, order/page-count, attachme
 
 ## Pallet and printing notes
 
-Pallet dimensions, serials, weight, and SKU observations are represented in Teamship review/update types and `GarlandProductDimensionObservation`. The UPS special dimension rule is confirmed in existing documentation and tests should be consulted before changing it. Printer mappings, duplicate print protection, and a general print service were not located; production printing requires explicit human approval.
+Pallet dimensions, serials, weight, and SKU observations are represented in Teamship review/update types and `GarlandProductDimensionObservation`. The UPS special dimension rule is confirmed in existing documentation and tests should be consulted before changing it.
+
+Phase 1 has an approval-gated single-order print queue. It uses these fixed destinations:
+
+- Picking list: one copy through the local CUPS queue `_192_168_1_28` (`192.168.1.28`).
+- BOL: one copy through Teamship using `KONICA MINOLTA bizhub C3350i PCL (192.168.1.28) UPD`.
+- Outbound pallet labels: copies equal to the current approved pallet count through Teamship using exactly `BIXOLON SRP-770III`.
+
+Teamship may reset its selected printer when another shipping order opens. The worker therefore resolves, selects, and reads back the exact outbound-label printer on every order and again immediately before the irreversible Print action. It never substitutes `BIXOLON SRP-770III - BPL-Z` or reuses a printer ID from a prior order. Teamship's Draft BOL label is normal and does not block printing.
+
+The same employee who creates a plan must explicitly approve its request ID. Changed pallet counts, missing or duplicated printer options, unavailable local queues, expired approvals, and ambiguous Teamship pages stop the job. Uncertain jobs never retry automatically.
 
 ## Open questions
 
 - Final employee-approved Garland order lifecycle terms. Requires employee confirmation.
 - Exact Teamship screen behaviour outside coded API/UI selectors. Requires employee confirmation.
 - Whether any customer communications can be automated. Requires owner confirmation.
+- When Phase 2 batch printing may be enabled after supervised single-order evidence. Requires owner confirmation.
+- Whether Phase 3 automatic printing should require per-batch approval or a separately approved automation policy. Requires owner confirmation.

@@ -18,6 +18,8 @@ Shipment documents and Garland Teamship review is documented because code, route
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.
 
+`TeamshipPrintJob` stores one tenant-scoped, single-order print plan. It records the exact Teamship order, Garland/Annagem evidence, immutable document and printer plans, approved pallet count, request idempotency key, active-order duplicate lock, requester and approver, worker claim, expiry, result, and bounded failure evidence. Failed and expired jobs release the active-order lock; completed jobs retain it because Phase 1 does not support reprints.
+
 ```mermaid
 flowchart LR
   UI[Authenticated UI/API] --> Auth[Auth + module guard]

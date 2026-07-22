@@ -14,4 +14,10 @@ Repository evidence for WMS/Teamship is concentrated in `src/server/integrations
 
 ## Automation boundary
 
-Teamship reading is implemented through API login/list/detail calls and selective UI-page enrichment. Teamship updates are isolated in Phase 2 job/execution files and scripts with dry-run/live controls. Printing and broad WMS receiving/inventory/picking screens were not located as standalone Newl Apps modules; document requests for those areas require operational confirmation.
+Teamship reading is implemented through API login/list/detail calls and selective UI-page enrichment. Teamship updates are isolated in Phase 2 job/execution files and scripts with dry-run/live controls.
+
+Phase 1 single-order printing is implemented in `src/modules/teamship/print-jobs.ts`, `src/modules/teamship/print-execution.ts`, `scripts/teamship-print-worker.ts`, and the `newl-print` OpenClaw plugin. A Teams request creates an immutable tenant-scoped plan for one exact numeric Teamship shipping-order number. A separate explicit approval by the same employee is required before the local worker can claim it.
+
+The worker performs a complete preflight before printing: it verifies the Garland/Annagem order, recalculates the pallet count, confirms the local CUPS queue, and verifies the exact Teamship BOL and outbound-label printer options. It then prints one picking list locally, submits one BOL through Teamship, and submits outbound labels equal to the approved pallet count. It reselects and reads back `BIXOLON SRP-770III` on every order immediately before the label action. A failed, expired, crashed, or partially completed job is never retried automatically.
+
+Batch printing and automatic printing are not implemented.

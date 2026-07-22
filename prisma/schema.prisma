@@ -471,6 +471,7 @@ model Tenant {
   teamshipUpdateJobs                  TeamshipUpdateJob[]
   teamshipUpdateOrders                TeamshipUpdateOrder[]
   teamshipBrowserReadJobs             TeamshipBrowserReadJob[]
+  teamshipPrintJobs                   TeamshipPrintJob[]
   openClawUnresolvedTurns             OpenClawUnresolvedTurn[]
   garlandProductDimensionObservations GarlandProductDimensionObservation[]
   garlandSourceEmails                 GarlandSourceEmail[]
@@ -533,6 +534,8 @@ model User {
   teamshipReviewRuns          TeamshipReviewRun[]
   teamshipUpdateJobsCreated   TeamshipUpdateJob[]          @relation("TeamshipUpdateJobCreatedBy")
   teamshipUpdateJobsApproved  TeamshipUpdateJob[]          @relation("TeamshipUpdateJobApprovedBy")
+  teamshipPrintJobsRequested  TeamshipPrintJob[]           @relation("TeamshipPrintJobRequestedBy")
+  teamshipPrintJobsApproved   TeamshipPrintJob[]           @relation("TeamshipPrintJobApprovedBy")
 
   @@unique([microsoftEntraTenantId, microsoftEntraObjectId])
 }
@@ -1227,6 +1230,45 @@ model TeamshipBrowserReadJob {
 
   @@index([tenantId, status, createdAt])
   @@index([tenantId, operation, createdAt])
+  @@index([expiresAt])
+}
+
+model TeamshipPrintJob {
+  id                    String    @id @default(cuid())
+  tenantId              String
+  shippingOrderNumber   String
+  teamshipOrderId       String
+  customerName          String
+  warehouseName         String
+  status                String    @default("PENDING_APPROVAL")
+  documentPlan          Json
+  printerPlan           Json
+  approvedPalletCount   Int
+  idempotencyKey        String
+  activeOrderKey        String?
+  requestedByUserId     String
+  approvedByUserId      String?
+  approvedAt            DateTime?
+  workerId              String?
+  claimedAt             DateTime?
+  completedAt           DateTime?
+  failedAt              DateTime?
+  expiresAt             DateTime
+  result                 Json?
+  errorCode              String?
+  errorMessage           String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  tenant      Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  requestedBy User   @relation("TeamshipPrintJobRequestedBy", fields: [requestedByUserId], references: [id], onDelete: NoAction)
+  approvedBy  User?  @relation("TeamshipPrintJobApprovedBy", fields: [approvedByUserId], references: [id], onDelete: NoAction)
+
+  @@unique([tenantId, idempotencyKey])
+  @@unique([tenantId, activeOrderKey])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, shippingOrderNumber, createdAt])
+  @@index([tenantId, requestedByUserId, createdAt])
   @@index([expiresAt])
 }
 

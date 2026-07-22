@@ -1,0 +1,41 @@
+{
+  "id": "newl-print",
+  "name": "Newl Printing",
+  "description": "Creates and approves audited, single-order Teamship printing jobs through Newl Apps.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "required": [
+      "baseUrl",
+      "tenantId"
+    ],
+    "properties": {
+      "baseUrl": {
+        "type": "string",
+        "description": "Newl Apps base URL."
+      },
+      "tenantId": {
+        "type": "string",
+        "description": "Microsoft Entra tenant ID used by the configured Teams channel."
+      },
+      "printTokenEnv": {
+        "type": "string",
+        "description": "Environment variable containing the dedicated Newl Apps print token."
+      },
+      "vercelProtectionBypassEnv": {
+        "type": "string",
+        "description": "Optional environment variable containing a Vercel Preview automation bypass secret."
+      }
+    }
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "newl_print_plan",
+      "newl_print_approve",
+      "newl_print_status"
+    ]
+  }
+}
