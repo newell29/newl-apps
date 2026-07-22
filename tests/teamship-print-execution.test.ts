@@ -1,8 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveExactPrinterOption } from "@/modules/teamship/print-execution";
+import {
+  resolveExactPrinterOption,
+  resolveTeamshipPrintAppBaseUrl
+} from "@/modules/teamship/print-execution";
 
 describe("Teamship print execution safeguards", () => {
+  it("opens the documented shipping-order detail host when no override is configured", () => {
+    expect(resolveTeamshipPrintAppBaseUrl(undefined).origin).toBe("https://members.fulfillit.io");
+    expect(resolveTeamshipPrintAppBaseUrl("  https://app.teamshipos.com  ").origin)
+      .toBe("https://app.teamshipos.com");
+  });
+
   it("selects only the corrected exact BIXOLON printer and returns its current page value", () => {
     expect(resolveExactPrinterOption([[
       { label: "BIXOLON SRP-770III - BPL-Z", value: "old-printer-id" },

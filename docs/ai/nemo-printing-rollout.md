@@ -18,8 +18,11 @@ Newl Apps requires dedicated values for:
 - `TEAMSHIP_PRINT_LOCAL_DISPLAY_NAME=192.168.1.28`
 - `TEAMSHIP_PRINT_BOL_PRINTER_NAME=KONICA MINOLTA bizhub C3350i PCL (192.168.1.28) UPD`
 - `TEAMSHIP_PRINT_LABEL_PRINTER_NAME=BIXOLON SRP-770III`
+- `TEAMSHIP_APP_BASE_URL=https://members.fulfillit.io`
 
 The OpenClaw runtime requires the same `OPENCLAW_PRINT_TOKEN`, referenced by the plugin through `printTokenEnv`. The local worker requires `NEWL_APPS_BASE_URL`, `TEAMSHIP_PRINT_WORKER_TOKEN`, `TEAMSHIP_PRINT_WORKER_TENANT_SLUG`, `TEAMSHIP_PRINT_WORKER_ID`, and `TEAMSHIP_BROWSER_EXECUTABLE_PATH` in its protected environment file.
+
+The print worker must open the shipping-order detail UI on `members.fulfillit.io`. The `app.teamshipos.com` shell can show the order while omitting the indexed pallet inputs required for the live pallet-count preflight. The worker defaults to the documented detail host, and `TEAMSHIP_APP_BASE_URL` should be set explicitly in the protected local environment.
 
 Every credential must be distinct from the Teamship read token and general assistant token. Do not write secret values to the repository or logs.
 
