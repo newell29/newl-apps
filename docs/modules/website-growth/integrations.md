@@ -6,6 +6,14 @@
 
 Website growth and SEO is documented because code, routes, schema, or tests were located. Main evidence: `src/app/(authenticated)/website-growth/*`, `src/modules/website-growth/*`, website growth Prisma models/tests.
 
+## Implemented Scout integrations
+
+- Search Console and GA4 use the existing server-side Google API credentials and save 28-day tenant-scoped metrics.
+- Website forms are reduced to counts by page and primary need before Scout sees them. Names, email addresses, phone numbers, and message bodies are excluded.
+- SEMrush uses `https://mcp.semrush.com/v1/mcp` through official OAuth in the Codex runtime. Newl Apps does not hold the OAuth token and stores only capped, sanitized evidence rows under the existing SEMrush data source with `transport: official_mcp_oauth` metadata.
+- Microsoft Teams delivery runs through the configured OpenClaw Teams account. Newl Apps constructs the message and review links deterministically; Codex cannot choose a recipient or send a message.
+- Scout machine routes use the dedicated `OPENCLAW_WEBSITE_GROWTH_TOKEN` and configured tenant slug.
+
 ## Workflow / rules summary
 
 - Entry points are protected authenticated pages and/or API routes for this module.

@@ -6,6 +6,16 @@
 
 Website growth and SEO is documented because code, routes, schema, or tests were located. Main evidence: `src/app/(authenticated)/website-growth/*`, `src/modules/website-growth/*`, website growth Prisma models/tests.
 
+## Scout-specific failures
+
+- Missing Google credentials: that source receives an error import, but other first-party sources continue.
+- Missing or expired SEMrush OAuth: the worker stops and marks the Scout job failed; it never silently generates a scheduled slate without SEMrush.
+- Codex output outside the stored candidate IDs: completion is rejected.
+- Malformed or oversized SEMrush output: completion is rejected; at most 200 sanitized rows are accepted.
+- Duplicate worker start: an active tenant run blocks a second run for three hours.
+- Teams delivery failure after drafts are saved: the command job fails and the links remain available in Newl Apps; an operator may resend after fixing Teams.
+- No candidates: the job succeeds without a Teams review request.
+
 ## Workflow / rules summary
 
 - Entry points are protected authenticated pages and/or API routes for this module.

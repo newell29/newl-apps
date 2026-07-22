@@ -22,4 +22,9 @@ describe("middleware machine route exemptions", () => {
   it("lets the printing endpoints enforce their OpenClaw and worker token auth", () => {
     expect(config.matcher[0]).toContain("api/assistant/printing");
   });
+
+  it("lets Website Growth Scout and weekly cron routes enforce their dedicated token auth", () => {
+    expect(config.matcher[0]).toContain("api/website-growth/scout");
+    expect(config.matcher[0]).toContain("api/website-growth/weekly-plan");
+  });
 });

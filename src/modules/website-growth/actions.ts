@@ -4,7 +4,6 @@ import {
   ModuleKey,
   PlatformRole,
   WebsiteGrowthContentDraftStatus,
-  WebsiteGrowthDataSource,
   WebsiteGrowthImportStatus,
   WebsiteGrowthOpportunityStatus,
   type Prisma
@@ -20,20 +19,15 @@ import {
 import { reviewWebsiteGrowthClaims } from "@/modules/website-growth/claims-policy";
 import { createAndDispatchWebsiteGrowthBuildRequest } from "@/modules/website-growth/build-requests";
 import {
-  fetchGa4LandingPageRows,
-  fetchSearchConsoleRows,
-  getWebsiteGrowthIntegrationStatus
-} from "@/modules/website-growth/integrations";
-import {
-  getOpportunityReviewKey,
-  resolveLegacyPageRebuild
-} from "@/modules/website-growth/legacy-rebuilds";
+  syncGa4ForTenant,
+  syncSearchConsoleForTenant,
+  syncWebsiteInboundForTenant
+} from "@/modules/website-growth/evidence-refresh";
+import { createMissingWebsiteGrowthOpportunities } from "@/modules/website-growth/opportunity-store";
 import {
   buildCandidatesFromMetricRows,
-  buildOpportunityCandidate,
   isQualifiedOpportunity,
-  qualifyOpportunityCandidates,
-  type OpportunityCandidate
+  qualifyOpportunityCandidates
 } from "@/modules/website-growth/opportunities";
 import { parseWebsiteGrowthDataSource } from "@/modules/website-growth/queries";
 import { produceWebsiteGrowthDraft } from "@/modules/website-growth/producer";
@@ -93,7 +87,7 @@ export async function importWebsiteGrowthMetricsAction(formData: FormData) {
     }
 
     const qualification = qualifyOpportunityCandidates(buildCandidatesFromMetricRows(rows, source));
-    const opportunitySummary = await createMissingOpportunities(context.tenantId, qualification.qualified);
+    const opportunitySummary = await createMissingWebsiteGrowthOpportunities(context.tenantId, qualification.qualified);
 
     await prisma.websiteGrowthDataImport.update({
       where: { id: importRecord.id },
@@ -132,93 +126,10 @@ export async function syncSearchConsoleAction() {
   const context = await getAuthenticatedContext();
   await requireModule(context, ModuleKey.WEBSITE_GROWTH);
   await requireMutationAccess(context);
-
-  const importRecord = await prisma.websiteGrowthDataImport.create({
-    data: {
-      tenantId: context.tenantId,
-      source: WebsiteGrowthDataSource.GOOGLE_SEARCH_CONSOLE_API,
-      status: WebsiteGrowthImportStatus.RUNNING,
-      startedAt: new Date()
-    }
-  });
-
   try {
-    const status = getWebsiteGrowthIntegrationStatus();
-
-    if (!status.googleSearchConsole.configured) {
-      throw new Error(`Google Search Console is not configured. Missing: ${status.googleSearchConsole.missing.join(", ")}`);
-    }
-
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(endDate.getDate() - 28);
-    const rows = await fetchSearchConsoleRows({
-      startDate: formatApiDate(startDate),
-      endDate: formatApiDate(endDate),
-      dimensions: ["query", "page"]
-    });
-
-    const metricRows = rows.map((row) => ({
-      tenantId: context.tenantId,
-      source: WebsiteGrowthDataSource.GOOGLE_SEARCH_CONSOLE_API,
-      query: row.keys?.[0] ?? null,
-      page: row.keys?.[1] ?? null,
-      clicks: Math.round(row.clicks ?? 0),
-      impressions: Math.round(row.impressions ?? 0),
-      ctr: row.ctr ?? null,
-      position: row.position ?? null,
-      dateRangeStart: startDate,
-      dateRangeEnd: endDate,
-      raw: row
-    }));
-
-    if (metricRows.length > 0) {
-      await prisma.websiteGrowthMetric.createMany({ data: metricRows });
-    }
-
-    const candidates = rows.map((row) =>
-        buildOpportunityCandidate({
-          topic: row.keys?.[0] ?? row.keys?.[1] ?? "Search Console opportunity",
-          primaryKeyword: row.keys?.[0] ?? null,
-          targetPage: row.keys?.[1] ?? null,
-          sourcePage: row.keys?.[1] ?? null,
-          impressions: row.impressions ?? 0,
-          clicks: row.clicks ?? 0,
-          position: row.position ?? null,
-          source: "google_search_console_api",
-          evidence: row
-        })
-      );
-    const qualification = qualifyOpportunityCandidates(candidates);
-    const opportunitySummary = await createMissingOpportunities(context.tenantId, qualification.qualified);
-
-    await prisma.websiteGrowthDataImport.update({
-      where: { id: importRecord.id },
-      data: {
-        status: WebsiteGrowthImportStatus.SUCCESS,
-        rowCount: rows.length,
-        completedAt: new Date(),
-        summary: {
-          rows: rows.length,
-          dateRange: "last_28_days",
-          rawCandidates: qualification.rawCount,
-          clusters: qualification.clusterCount,
-          qualifiedOpportunities: qualification.qualified.length,
-          skippedClusters: qualification.skippedCount,
-          opportunitiesCreated: opportunitySummary.createdCount,
-          existingMatches: opportunitySummary.existingCount
-        }
-      }
-    });
-  } catch (error) {
-    await prisma.websiteGrowthDataImport.update({
-      where: { id: importRecord.id },
-      data: {
-        status: WebsiteGrowthImportStatus.ERROR,
-        completedAt: new Date(),
-        errorMessage: error instanceof Error ? error.message : "Unknown Search Console sync error"
-      }
-    });
+    await syncSearchConsoleForTenant(context.tenantId);
+  } catch {
+    // The shared service records a tenant-scoped error import for review.
   }
 
   revalidatePath("/website-growth");
@@ -228,110 +139,10 @@ export async function syncGa4Action() {
   const context = await getAuthenticatedContext();
   await requireModule(context, ModuleKey.WEBSITE_GROWTH);
   await requireMutationAccess(context);
-
-  const importRecord = await prisma.websiteGrowthDataImport.create({
-    data: {
-      tenantId: context.tenantId,
-      source: WebsiteGrowthDataSource.GA4_API,
-      status: WebsiteGrowthImportStatus.RUNNING,
-      startedAt: new Date()
-    }
-  });
-
   try {
-    const status = getWebsiteGrowthIntegrationStatus();
-    if (!status.ga4.configured) {
-      throw new Error(`GA4 is not configured. Missing: ${status.ga4.missing.join(", ")}`);
-    }
-
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(endDate.getDate() - 28);
-    const rows = await fetchGa4LandingPageRows({
-      startDate: formatApiDate(startDate),
-      endDate: formatApiDate(endDate)
-    });
-
-    if (rows.length > 0) {
-      await prisma.websiteGrowthMetric.createMany({
-        data: rows.map((row) => ({
-          tenantId: context.tenantId,
-          source: WebsiteGrowthDataSource.GA4_API,
-          page: row.page,
-          sessions: row.sessions,
-          engagedSessions: row.engagedSessions,
-          engagementRate: row.engagementRate,
-          eventCount: row.eventCount,
-          dateRangeStart: startDate,
-          dateRangeEnd: endDate,
-          raw: row.raw as Prisma.InputJsonValue
-        }))
-      });
-    }
-
-    const ga4ByPage = new Map(rows.map((row) => [normalizePagePath(row.page), row]));
-    const refreshableOpportunities = await prisma.websiteGrowthOpportunity.findMany({
-      where: {
-        tenantId: context.tenantId,
-        status: {
-          in: [
-            WebsiteGrowthOpportunityStatus.NEW,
-            WebsiteGrowthOpportunityStatus.REVIEWING,
-            WebsiteGrowthOpportunityStatus.MONITORING
-          ]
-        }
-      },
-      select: { id: true, targetPage: true, sourcePage: true, evidence: true },
-      take: 500
-    });
-    const enrichmentUpdates: Array<ReturnType<typeof prisma.websiteGrowthOpportunity.update>> = [];
-    for (const opportunity of refreshableOpportunities) {
-      const ga4 = ga4ByPage.get(normalizePagePath(opportunity.targetPage ?? opportunity.sourcePage));
-      if (!ga4) continue;
-      enrichmentUpdates.push(prisma.websiteGrowthOpportunity.update({
-        where: { id: opportunity.id },
-        data: {
-          evidence: {
-            ...readRecord(opportunity.evidence),
-            ga4: {
-              sessions: ga4.sessions,
-              engagedSessions: ga4.engagedSessions,
-              engagementRate: ga4.engagementRate,
-              eventCount: ga4.eventCount,
-              dateRangeStart: formatApiDate(startDate),
-              dateRangeEnd: formatApiDate(endDate)
-            }
-          } as Prisma.InputJsonValue
-        }
-      }));
-    }
-    if (enrichmentUpdates.length > 0) await prisma.$transaction(enrichmentUpdates);
-    const opportunitiesEnriched = enrichmentUpdates.length;
-
-    await prisma.websiteGrowthDataImport.update({
-      where: { id: importRecord.id },
-      data: {
-        status: WebsiteGrowthImportStatus.SUCCESS,
-        rowCount: rows.length,
-        completedAt: new Date(),
-        summary: {
-          rows: rows.length,
-          dateRange: "last_28_days",
-          totalSessions: rows.reduce((sum, row) => sum + row.sessions, 0),
-          opportunitiesEnriched,
-          note: "GA4 landing-page performance is stored as evidence. Lead counts continue to come from Newl's first-party inbound records."
-        }
-      }
-    });
-  } catch (error) {
-    await prisma.websiteGrowthDataImport.update({
-      where: { id: importRecord.id },
-      data: {
-        status: WebsiteGrowthImportStatus.ERROR,
-        completedAt: new Date(),
-        errorMessage: error instanceof Error ? error.message : "Unknown GA4 sync error"
-      }
-    });
+    await syncGa4ForTenant(context.tenantId);
+  } catch {
+    // The shared service records a tenant-scoped error import for review.
   }
 
   revalidatePath("/website-growth");
@@ -341,106 +152,7 @@ export async function generateWebsiteGrowthOpportunitiesAction() {
   const context = await getAuthenticatedContext();
   await requireModule(context, ModuleKey.WEBSITE_GROWTH);
   await requireMutationAccess(context);
-
-  const importRecord = await prisma.websiteGrowthDataImport.create({
-    data: {
-      tenantId: context.tenantId,
-      source: WebsiteGrowthDataSource.INTERNAL_APP_DATA,
-      status: WebsiteGrowthImportStatus.RUNNING,
-      startedAt: new Date()
-    }
-  });
-
-  try {
-    const [submissions, companies, contacts, leads, creditChecks] = await Promise.all([
-      prisma.websiteInboundSubmission.findMany({
-        where: {
-          tenantId: context.tenantId,
-          formType: {
-            not: "account_setup"
-          }
-        },
-        orderBy: {
-          createdAt: "desc"
-        },
-        take: 1000
-      }),
-      prisma.company.count({ where: { tenantId: context.tenantId } }),
-      prisma.contact.count({ where: { tenantId: context.tenantId } }),
-      prisma.lead.count({ where: { tenantId: context.tenantId } }),
-      prisma.creditCheck.count({ where: { tenantId: context.tenantId } })
-    ]);
-
-    const byPage = new Map<string, number>();
-    const byNeed = new Map<string, number>();
-
-    for (const submission of submissions) {
-      if (submission.pageUrl) {
-        byPage.set(submission.pageUrl, (byPage.get(submission.pageUrl) ?? 0) + 1);
-      }
-
-      if (submission.primaryNeed) {
-        byNeed.set(submission.primaryNeed, (byNeed.get(submission.primaryNeed) ?? 0) + 1);
-      }
-    }
-
-    const candidates: OpportunityCandidate[] = [
-      ...Array.from(byPage.entries()).map(([pageUrl, leadCount]) =>
-        buildOpportunityCandidate({
-          topic: pageUrlToTopic(pageUrl),
-          targetPage: pageUrl,
-          sourcePage: pageUrl,
-          leadCount,
-          source: "website_inbound",
-          evidence: { pageUrl, leadCount }
-        })
-      ),
-      ...Array.from(byNeed.entries()).map(([primaryNeed, leadCount]) =>
-        buildOpportunityCandidate({
-          topic: primaryNeed,
-          primaryKeyword: primaryNeed,
-          leadCount,
-          source: "website_inbound_primary_need",
-          evidence: { primaryNeed, leadCount }
-        })
-      )
-    ];
-
-    const qualification = qualifyOpportunityCandidates(candidates);
-    const opportunitySummary = await createMissingOpportunities(context.tenantId, qualification.qualified);
-
-    await prisma.websiteGrowthDataImport.update({
-      where: { id: importRecord.id },
-      data: {
-        status: WebsiteGrowthImportStatus.SUCCESS,
-        rowCount: submissions.length,
-        completedAt: new Date(),
-        summary: {
-          inboundSubmissions: submissions.length,
-          companies,
-          contacts,
-          pipelineRecords: leads,
-          creditChecks,
-          rawCandidates: qualification.rawCount,
-          clusters: qualification.clusterCount,
-          qualifiedOpportunities: qualification.qualified.length,
-          skippedClusters: qualification.skippedCount,
-          opportunitiesCreated: opportunitySummary.createdCount,
-          existingMatches: opportunitySummary.existingCount
-        }
-      }
-    });
-  } catch (error) {
-    await prisma.websiteGrowthDataImport.update({
-      where: { id: importRecord.id },
-      data: {
-        status: WebsiteGrowthImportStatus.ERROR,
-        completedAt: new Date(),
-        errorMessage: error instanceof Error ? error.message : "Unknown internal data sync error"
-      }
-    });
-    throw error;
-  }
+  await syncWebsiteInboundForTenant(context.tenantId);
 
   revalidatePath("/website-growth");
 }
@@ -707,129 +419,6 @@ export async function retryWebsiteGrowthDeveloperBuildAction(formData: FormData)
   revalidatePath(`/website-growth/drafts/${draftId}`);
 }
 
-async function createMissingOpportunities(tenantId: string, candidates: OpportunityCandidate[]) {
-  let createdCount = 0;
-  let existingCount = 0;
-
-  for (const candidate of candidates) {
-    if (!candidate.topic) {
-      continue;
-    }
-
-    const legacyRebuild = resolveLegacyPageRebuild(candidate);
-    const existing = legacyRebuild
-      ? await findExistingLegacyRebuildOpportunity(tenantId, candidate)
-      : await prisma.websiteGrowthOpportunity.findFirst({
-      where: {
-        tenantId,
-        topic: candidate.topic,
-        targetPage: candidate.targetPage,
-        action: candidate.action
-      },
-      select: {
-        id: true,
-        score: true
-      }
-    });
-
-    if (existing) {
-      const refreshable = await prisma.websiteGrowthOpportunity.findFirst({
-        where: {
-          id: existing.id,
-          tenantId,
-          status: {
-            in: [
-              WebsiteGrowthOpportunityStatus.NEW,
-              WebsiteGrowthOpportunityStatus.REVIEWING,
-              WebsiteGrowthOpportunityStatus.MONITORING
-            ]
-          }
-        },
-        select: { id: true }
-      });
-
-      if (legacyRebuild || refreshable) {
-        await prisma.websiteGrowthOpportunity.update({
-          where: { id: existing.id },
-          data: {
-            action: candidate.action,
-            topic: candidate.topic,
-            primaryKeyword: candidate.primaryKeyword,
-            targetPage: candidate.targetPage,
-            sourcePage: candidate.sourcePage,
-            score: Math.max(candidate.score, existing.score ?? 0),
-            confidence: candidate.confidence,
-            reason: candidate.reason,
-            recommendation: candidate.recommendation,
-            supportingKeywords: candidate.supportingKeywords,
-            evidence: candidate.evidence as Prisma.InputJsonValue
-          }
-        });
-      }
-      existingCount += 1;
-      continue;
-    }
-
-    await prisma.websiteGrowthOpportunity.create({
-      data: {
-        tenantId,
-        action: candidate.action,
-        topic: candidate.topic,
-        primaryKeyword: candidate.primaryKeyword,
-        targetPage: candidate.targetPage,
-        sourcePage: candidate.sourcePage,
-        score: candidate.score,
-        confidence: candidate.confidence,
-        reason: candidate.reason,
-        recommendation: candidate.recommendation,
-        supportingKeywords: candidate.supportingKeywords,
-        evidence: candidate.evidence as Prisma.InputJsonValue
-      }
-    });
-    createdCount += 1;
-  }
-
-  return { createdCount, existingCount };
-}
-
-async function findExistingLegacyRebuildOpportunity(tenantId: string, candidate: OpportunityCandidate) {
-  const reviewKey = getOpportunityReviewKey(candidate);
-  const rebuild = resolveLegacyPageRebuild(candidate);
-
-  if (!rebuild) {
-    return null;
-  }
-
-  const candidates = await prisma.websiteGrowthOpportunity.findMany({
-    where: {
-      tenantId,
-      OR: [
-        { targetPage: candidate.targetPage },
-        { sourcePage: candidate.targetPage },
-        { targetPage: { contains: rebuild.legacyPath } },
-        { sourcePage: { contains: rebuild.legacyPath } },
-        { targetPage: { contains: rebuild.currentRedirectPath } },
-        { sourcePage: { contains: rebuild.currentRedirectPath } },
-        { topic: { contains: "3pl" } },
-        { primaryKeyword: { contains: "3pl" } }
-      ]
-    },
-    select: {
-      id: true,
-      score: true,
-      action: true,
-      topic: true,
-      primaryKeyword: true,
-      targetPage: true,
-      sourcePage: true,
-      evidence: true
-    },
-    take: 50
-  });
-
-  return candidates.find((opportunity) => getOpportunityReviewKey(opportunity) === reviewKey) ?? null;
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -873,33 +462,4 @@ function normalizeRate(value: number | null) {
   }
 
   return value > 1 ? value / 100 : value;
-}
-
-function formatApiDate(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function pageUrlToTopic(pageUrl: string) {
-  try {
-    const parsed = new URL(pageUrl);
-    const path = parsed.pathname;
-    const segment = path.split("/").filter(Boolean).at(-1) ?? path;
-
-    return segment.replaceAll("-", " ");
-  } catch {
-    return pageUrl.replace(/^https?:\/\//, "").replaceAll("-", " ");
-  }
-}
-
-function normalizePagePath(value?: string | null) {
-  if (!value) return "/";
-  try {
-    return new URL(value, "https://www.newlgroup.com").pathname.replace(/\/$/, "") || "/";
-  } catch {
-    return value.split("?")[0]?.replace(/\/$/, "") || "/";
-  }
-}
-
-function readRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }

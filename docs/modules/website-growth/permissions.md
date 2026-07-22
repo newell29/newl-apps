@@ -6,6 +6,14 @@
 
 Website growth and SEO is documented because code, routes, schema, or tests were located. Main evidence: `src/app/(authenticated)/website-growth/*`, `src/modules/website-growth/*`, website growth Prisma models/tests.
 
+## Scout permission boundary
+
+- The scheduled Scout token can prepare and complete only the configured tenant's Scout run.
+- Codex runs with a read-only filesystem sandbox and an ephemeral session. It cannot edit Git, open a PR, approve a draft, send Teams messages, or publish.
+- SEMrush MCP is read-only and authenticated through OAuth on the OpenClaw/Codex machine.
+- Newl Apps validates every returned opportunity ID against the exact candidate IDs stored in the tenant-scoped job.
+- Only Admin and Manager roles may approve a brief and start the existing developer workflow. Scout never receives that authority.
+
 ## Workflow / rules summary
 
 - Entry points are protected authenticated pages and/or API routes for this module.

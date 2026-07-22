@@ -15,6 +15,7 @@ flowchart LR
   GSC[Search Console] --> Scout[Scout producer]
   GA4[GA4 landing pages] --> Scout
   Leads[First-party inbound] --> Scout
+  Semrush[Official SEMrush MCP through OAuth] --> Scout
   Repo[Website repo context] --> Scout
   Scout --> Brief[Versioned page brief + claim review]
   Brief --> Approval{Owner or manager approves}
@@ -32,7 +33,7 @@ Approval of a brief starts the developer workflow automatically. It is not appro
 | Work | Default | Reasoning | Notes |
 | --- | --- | --- | --- |
 | Imports, scoring, clustering, state checks | Deterministic code | N/A | No model should perform exact comparisons or status changes. |
-| Scout page brief | `gpt-5.6-sol` | `medium` | Quality-first while volume is low and the prompt is being evaluated. Terra may replace Sol for lower-risk briefs after matched evals. |
+| Scout research and page brief | Codex `gpt-5.6-sol` | `high` | Ephemeral, read-only website-repository session. Official SEMrush MCP through OAuth is mandatory for the scheduled run. |
 | Website developer | Codex `gpt-5.6-sol` | `high` | Runs only after approval, in the website repo, with tests and a draft PR. |
 | Kimi K3 | Shadow challenger only | Provider-specific | No automatic repository writes until it passes the same brief, claims, build, and visual-review eval set. |
 
@@ -43,8 +44,10 @@ Model changes must be evaluated against the same saved opportunities. Compare fa
 - Search Console: query/page clicks, impressions, CTR, and position.
 - GA4 Data API: landing page sessions, engaged sessions, engagement rate, and event count for the last 28 days.
 - Newl inbound: form submissions and lead-producing pages. These remain the source of truth for lead counts.
+- SEMrush: official read-only MCP through OAuth for rankings, keyword gaps, competitors, intent, volume, and difficulty. Results are capped and cached as sanitized evidence.
 - Manual CSV/TSV: historical Search Console, GA4, Semrush, or one-off research.
 - Website repository context: routes, templates, components, navigation, sitemap, and current content.
+- Durable design and decision memory: the versioned Newl page-pattern library, current repository inventory (including forms, heroes, CTAs, FAQs, and internal links), and up to 50 recent approved, rejected, built, or published brief decisions.
 
 Existing non-final opportunities are refreshed when matching evidence is re-imported. Approved, in-progress, published, and rejected records are not silently rewritten.
 
@@ -62,6 +65,8 @@ The initial repository research and evidence requests are recorded in `claims-re
 ## Capacity and cost controls
 
 The developer run belongs in GitHub Actions rather than a Vercel function. Vercel serves the control plane and preview, while repository checkout, Codex execution, lint, and production build run in GitHub. Weekly publish guides remain two core pages, four supporting items, and six quick optimizations; they are queue limits, not automatic publishing targets.
+
+The OpenClaw command job runs Monday at 9:15 AM `America/Toronto`. It refreshes evidence, runs the bounded read-only Codex Scout, saves drafts, and sends Teams links. The existing Vercel weekly planner remains a safe queue-preparation fallback; it does not run Codex or send Teams.
 
 ## Human boundaries
 
