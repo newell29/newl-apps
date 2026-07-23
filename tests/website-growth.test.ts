@@ -3,6 +3,8 @@ import { generateKeyPairSync } from "node:crypto";
 import {
   JobStatus,
   WebsiteGrowthAction,
+  WebsiteGrowthContentDraftStatus,
+  WebsiteGrowthOpportunityStatus,
   type Prisma,
   type WebsiteGrowthOpportunity
 } from "@prisma/client";
@@ -46,6 +48,14 @@ import {
   buildWebsiteGrowthScoutTeamsMessage,
   parseWebsiteGrowthScoutCompletion
 } from "@/modules/website-growth/scout-run";
+import {
+  deduplicateScoutDrafts,
+  getWebsiteGrowthChangeType,
+  getWebsiteGrowthPrimaryChange,
+  getWebsiteGrowthRoute,
+  getWebsiteGrowthWorkflowStage,
+  readScoutRunSummary
+} from "@/modules/website-growth/workspace";
 import { authenticateWebsiteGrowthBuildWorkerRequest } from "@/server/website-growth-build-worker-auth";
 import { authenticateWebsiteGrowthScoutRequest } from "@/server/website-growth-scout-auth";
 
@@ -151,6 +161,115 @@ describe("website growth opportunity scoring", () => {
     expect(candidate.targetPage).toBe("https://www.newlgroup.com/top-3pl-companies-in-usa");
     expect(candidate.evidence.legacyRebuild).toBe(true);
     expect(candidate.recommendation).toContain("dedicated draft page");
+  });
+});
+
+describe("website growth Scout workspace", () => {
+  const existingPageDraft = {
+    status: WebsiteGrowthContentDraftStatus.DRAFT,
+    builtUrl: null,
+    pullRequestUrl: null,
+    proposedPath: "/services/fulfillment-services",
+    targetPage: "https://www.newlgroup.com/services/fulfillment-services",
+    draftJson: {
+      scout: {
+        runId: "scout-run-1",
+        recommendationSummary: "Add a dedicated kitting section and four kitting FAQs."
+      },
+      pageChangePreview: {
+        approvalSummary: "Improve the existing fulfillment page with a dedicated kitting section."
+      }
+    },
+    opportunity: {
+      action: WebsiteGrowthAction.IMPROVE_EXISTING_PAGE,
+      status: WebsiteGrowthOpportunityStatus.REVIEWING,
+      targetPage: "https://www.newlgroup.com/services/fulfillment-services",
+      sourcePage: "https://www.newlgroup.com/services/fulfillment-services",
+      recommendation: "Improve the existing page."
+    }
+  };
+
+  it("makes an existing-page improvement explicit", () => {
+    expect(getWebsiteGrowthChangeType(existingPageDraft.opportunity.action).label).toBe(
+      "Update existing page"
+    );
+    expect(getWebsiteGrowthRoute(existingPageDraft)).toBe(
+      "/services/fulfillment-services"
+    );
+    expect(getWebsiteGrowthPrimaryChange(existingPageDraft)).toContain(
+      "existing fulfillment page"
+    );
+    expect(getWebsiteGrowthWorkflowStage(existingPageDraft)).toBe("NEEDS_REVIEW");
+  });
+
+  it("distinguishes a new page from an existing-page update", () => {
+    expect(getWebsiteGrowthChangeType(WebsiteGrowthAction.CREATE_PAGE).label).toBe(
+      "New page"
+    );
+    expect(
+      getWebsiteGrowthRoute({
+        ...existingPageDraft,
+        proposedPath: "/services/new-service",
+        draftJson: {
+          buildPackage: {
+            routePath: "/services/new-service"
+          }
+        },
+        opportunity: {
+          ...existingPageDraft.opportunity,
+          action: WebsiteGrowthAction.CREATE_PAGE
+        }
+      })
+    ).toBe("/services/new-service");
+  });
+
+  it("moves approved work from building to preview ready", () => {
+    expect(
+      getWebsiteGrowthWorkflowStage({
+        ...existingPageDraft,
+        status: WebsiteGrowthContentDraftStatus.APPROVED,
+        opportunity: {
+          ...existingPageDraft.opportunity,
+          status: WebsiteGrowthOpportunityStatus.IN_PROGRESS
+        }
+      })
+    ).toBe("BUILDING");
+
+    expect(
+      getWebsiteGrowthWorkflowStage({
+        ...existingPageDraft,
+        status: WebsiteGrowthContentDraftStatus.BUILT,
+        builtUrl: "https://preview.example.com/services/fulfillment-services"
+      })
+    ).toBe("PREVIEW_READY");
+  });
+
+  it("reads the latest Scout batch without treating raw signals as ideas", () => {
+    expect(
+      readScoutRunSummary({
+        phase: "AWAITING_HUMAN_REVIEW",
+        draftIds: ["draft-1", "draft-2"],
+        semrushRowCount: 24
+      })
+    ).toEqual({
+      phase: "AWAITING_HUMAN_REVIEW",
+      draftIds: ["draft-1", "draft-2"],
+      semrushRowCount: 24,
+      completedAt: null
+    });
+  });
+
+  it("shows only the newest Scout brief for the same opportunity", () => {
+    expect(
+      deduplicateScoutDrafts([
+        { id: "new-draft", opportunityId: "opportunity-1" },
+        { id: "old-draft", opportunityId: "opportunity-1" },
+        { id: "other-draft", opportunityId: "opportunity-2" }
+      ])
+    ).toEqual([
+      { id: "new-draft", opportunityId: "opportunity-1" },
+      { id: "other-draft", opportunityId: "opportunity-2" }
+    ]);
   });
 });
 

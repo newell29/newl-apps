@@ -28,6 +28,15 @@ flowchart LR
 
 Approval of a brief starts the developer workflow automatically. It is not approval to merge. The website repository workflow uses a read-only Codex job to create and verify a patch, then a separate job without the OpenAI key pushes the patch and opens a draft PR.
 
+## Control-plane views
+
+The Website Growth UI intentionally separates two different kinds of records:
+
+- **Scout workspace** is the default view. It contains only AI-curated Scout briefs and groups them into `Needs your review`, `Approved and building`, `Preview ready`, and `Completed and closed`.
+- **Research signals** contains the full GA4, Search Console, Semrush, and first-party evidence inventory. These records are inputs to Scout, not a human work queue.
+
+Every Scout card must state whether it proposes a **new page** or an **update to an existing page**, show the affected route, and summarize the primary proposed change. A draft created by the latest Scout run is labeled as new. The latest run summary remains visible even when no opportunities were selected.
+
 ## Model routing
 
 | Work | Default | Reasoning | Notes |

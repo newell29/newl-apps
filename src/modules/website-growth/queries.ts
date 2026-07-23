@@ -1,5 +1,6 @@
 import {
   WebsiteGrowthAction,
+  WebsiteGrowthContentDraftSource,
   WebsiteGrowthDataSource,
   WebsiteGrowthOpportunityStatus,
   type Prisma
@@ -17,11 +18,50 @@ import {
   toNewlUrl
 } from "@/modules/website-growth/legacy-rebuilds";
 import { weeklyContentRecommendations } from "@/modules/website-growth/opportunities";
+import { deduplicateScoutDrafts } from "@/modules/website-growth/workspace";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 import { prisma } from "@/server/db";
 
 export type WebsiteGrowthStatusFilter = WebsiteGrowthOpportunityStatus | "ALL";
 export type WebsiteGrowthActionFilter = WebsiteGrowthAction | "ALL";
+
+export async function getWebsiteGrowthWorkspace(context: AuthenticatedContext) {
+  const [drafts, latestScoutRun, signalCount] = await Promise.all([
+    prisma.websiteGrowthContentDraft.findMany({
+      where: {
+        tenantId: context.tenantId,
+        source: WebsiteGrowthContentDraftSource.AI
+      },
+      include: {
+        opportunity: true
+      },
+      orderBy: {
+        updatedAt: "desc"
+      },
+      take: 100
+    }),
+    prisma.automationJobRun.findFirst({
+      where: {
+        tenantId: context.tenantId,
+        jobType: "WEBSITE_GROWTH_SCOUT_WEEKLY"
+      },
+      orderBy: {
+        startedAt: "desc"
+      }
+    }),
+    prisma.websiteGrowthOpportunity.count({
+      where: {
+        tenantId: context.tenantId
+      }
+    })
+  ]);
+
+  return {
+    drafts: deduplicateScoutDrafts(drafts),
+    latestScoutRun,
+    signalCount
+  };
+}
 
 export async function getWebsiteGrowthShell(
   context: AuthenticatedContext,

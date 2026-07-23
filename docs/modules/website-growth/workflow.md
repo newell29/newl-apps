@@ -17,6 +17,15 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 
 The run is locked per tenant for three hours. No-candidate runs complete without sending an approval message. A Codex or SEMrush failure is recorded through `/api/website-growth/scout/fail` and does not create a draft.
 
+## Review workspace
+
+1. Open `/website-growth` to see Scout-curated briefs only.
+2. Start with `Needs your review`. Each card identifies `New page` or `Update existing page`, the affected route, and the primary proposed change.
+3. Open the brief for the complete current-page comparison, proposed copy, layout, claims review, and approval action.
+4. After approval, follow the same item through `Approved and building` and then `Preview ready`.
+5. Open the Vercel website preview for visual review. The owner makes the final GitHub merge decision.
+6. Use `/website-growth/signals` only when investigating the underlying analytics and imported evidence. Signal counts are not counts of approved or active ideas.
+
 ## Workflow / rules summary
 
 - Entry points are protected authenticated pages and/or API routes for this module.
