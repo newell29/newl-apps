@@ -14,6 +14,11 @@ import type {
   WebsiteGrowthPageChangePreview,
   WebsiteGrowthRenderedPagePreview
 } from "@/modules/website-growth/content-drafts";
+import {
+  getWebsiteGrowthChangeType,
+  getWebsiteGrowthPrimaryChange,
+  getWebsiteGrowthRoute
+} from "@/modules/website-growth/workspace";
 import { requireModule } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -48,6 +53,9 @@ export default async function WebsiteGrowthDraftPreviewPage({ params }: PageProp
   const claimReview = reviewWebsiteGrowthClaims(draft.draftJson);
   const developerBuildJob = await findWebsiteGrowthBuildRequestForDraft(context.tenantId, draft.id);
   const developerBuild = developerBuildJob ? summarizeWebsiteGrowthBuildRequest(developerBuildJob) : null;
+  const changeType = getWebsiteGrowthChangeType(draft.opportunity.action);
+  const route = getWebsiteGrowthRoute(draft);
+  const primaryChange = getWebsiteGrowthPrimaryChange(draft);
 
   return (
     <div className="space-y-6">
@@ -64,10 +72,20 @@ export default async function WebsiteGrowthDraftPreviewPage({ params }: PageProp
             href="/website-growth"
             className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
           >
-            Back to queue
+            Back to Scout workspace
           </Link>
         </div>
       </header>
+
+      <section className={changeType.label === "New page" ? "rounded-lg border border-accentBorder bg-accentSoft p-5" : "rounded-lg border border-warning/25 bg-warning/10 p-5"}>
+        <p className="text-xs font-semibold uppercase tracking-wide text-foreground">{changeType.label}</p>
+        <h2 className="mt-2 break-all font-mono text-xl font-semibold text-foreground">{route}</h2>
+        <p className="mt-2 text-sm leading-6 text-mutedForeground">{changeType.description}</p>
+        <div className="mt-4 rounded-md border border-border bg-background/80 p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Primary proposed change</p>
+          <p className="mt-2 text-sm leading-6 text-foreground">{primaryChange}</p>
+        </div>
+      </section>
 
       <section className="rounded-lg border border-border bg-card p-5">
         <div className="flex flex-wrap items-center gap-2">

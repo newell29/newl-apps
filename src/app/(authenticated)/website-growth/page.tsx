@@ -1,1036 +1,450 @@
 import {
+  JobStatus,
   ModuleKey,
-  WebsiteGrowthAction,
-  WebsiteGrowthContentDraftSource,
-  WebsiteGrowthContentDraftStatus,
-  WebsiteGrowthDataSource,
-  WebsiteGrowthImportStatus,
-  WebsiteGrowthOpportunityStatus
+  WebsiteGrowthContentDraftStatus
 } from "@prisma/client";
 import Link from "next/link";
 
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
-import { readWebsiteGrowthBuildPackage } from "@/modules/website-growth/build-package";
-import { reviewWebsiteGrowthClaims } from "@/modules/website-growth/claims-policy";
+import { getWebsiteGrowthWorkspace } from "@/modules/website-growth/queries";
 import {
-  createWeeklyWebsiteGrowthPlanAction,
-  generateWebsiteGrowthDraftAction,
-  generateWebsiteGrowthOpportunitiesAction,
-  importWebsiteGrowthMetricsAction,
-  organizeWebsiteGrowthQueueAction,
-  retryWebsiteGrowthDeveloperBuildAction,
-  syncGa4Action,
-  syncSearchConsoleAction,
-  updateWebsiteGrowthDraftAction,
-  updateWebsiteGrowthOpportunityAction
-} from "@/modules/website-growth/actions";
-import {
-  getWebsiteGrowthShell,
-  type WebsiteGrowthActionFilter,
-  type WebsiteGrowthStatusFilter
-} from "@/modules/website-growth/queries";
-import {
-  resolveLegacyPageRebuild,
-  toNewlUrl
-} from "@/modules/website-growth/legacy-rebuilds";
-import type { WebsiteGrowthPageChangePreview } from "@/modules/website-growth/content-drafts";
+  getWebsiteGrowthChangeType,
+  getWebsiteGrowthPrimaryChange,
+  getWebsiteGrowthRoute,
+  getWebsiteGrowthWorkflowStage,
+  readScoutRunId,
+  readScoutRunSummary,
+  type WebsiteGrowthWorkflowStage
+} from "@/modules/website-growth/workspace";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = Record<string, string | string[] | undefined>;
-
-export default async function WebsiteGrowthPage({
-  searchParams
-}: {
-  searchParams?: Promise<SearchParams>;
-}) {
+export default async function WebsiteGrowthPage() {
   const context = await getAuthenticatedContext();
   await requireModule(context, ModuleKey.WEBSITE_GROWTH);
-  const params = searchParams ? await searchParams : {};
-  const status = parseStatus(readParam(params.status));
-  const action = parseAction(readParam(params.action));
-  const search = readParam(params.search) ?? "";
-  const shell = await getWebsiteGrowthShell(context, { status, action, search });
+  const workspace = await getWebsiteGrowthWorkspace(context);
+  const latestRun = workspace.latestScoutRun;
+  const latestRunSummary = readScoutRunSummary(latestRun?.output);
+  const latestDraftIds = new Set(latestRunSummary.draftIds);
+  const groups = groupDrafts(workspace.drafts);
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Website Growth"
-        title="Content opportunity queue"
-        description="Turn Search Console, Semrush, GA4, and Newl Apps data into a prioritized queue of pages, sections, links, redirects, and resources to improve inbound opportunities."
+        title="Scout ideas and page builds"
+        description="Review the small set of ideas Scout has selected, approve exact page briefs, and follow each build through to its website preview."
       />
 
+      <WorkspaceNavigation signalCount={workspace.signalCount} />
+
       <section className="grid gap-4 md:grid-cols-4">
-        <MetricCard label="Review queue" value={shell.metrics.reviewQueueCount} caption="Qualified items to triage" />
-        <MetricCard label="Approved / active" value={shell.metrics.approvedCount} caption="Ready for execution" />
-        <MetricCard label="Published" value={shell.metrics.publishedCount} caption="Marked live" />
-        <MetricCard label="Inbound leads" value={shell.metrics.inboundCount} caption="Last 30 days" />
+        <MetricCard
+          label="Needs your review"
+          value={groups.NEEDS_REVIEW.length}
+          caption="Scout briefs awaiting a decision"
+        />
+        <MetricCard
+          label="Approved / building"
+          value={groups.BUILDING.length}
+          caption="With the website developer"
+        />
+        <MetricCard
+          label="Preview ready"
+          value={groups.PREVIEW_READY.length}
+          caption="Ready for your visual review"
+        />
+        <MetricCard
+          label="Completed / closed"
+          value={groups.COMPLETED.length}
+          caption="Published or declined ideas"
+        />
       </section>
 
-      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h2 className="text-base font-semibold text-foreground">Weekly SEO approval plan</h2>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-mutedForeground">
-              Each weekly run prepares a balanced slate for approval: core commercial page work, supporting articles or glossary content, and quick optimization tasks. The planner never publishes automatically.
-            </p>
-          </div>
-          <form action={createWeeklyWebsiteGrowthPlanAction}>
-            <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
-              Prepare this week&apos;s approval plan
-            </button>
-          </form>
-        </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          {shell.weeklyLaneCounts.map((lane) => (
-            <div key={lane.lane} className="rounded-md border border-border bg-muted/30 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <h3 className="text-sm font-semibold text-foreground">{lane.label}</h3>
-                <span className="rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-xs font-semibold text-primary">
-                  {lane.count} ready
-                </span>
-              </div>
-              <p className="mt-2 text-sm leading-6 text-mutedForeground">{lane.description}</p>
-              <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
-                Weekly publish guide: up to {lane.publishLimit}
-              </p>
-            </div>
-          ))}
-        </div>
-      </section>
+      <LatestScoutRun
+        run={latestRun}
+        draftCount={latestRunSummary.draftIds.length}
+        semrushRowCount={latestRunSummary.semrushRowCount}
+        phase={latestRunSummary.phase}
+      />
 
-      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-primary">Developer handoff</p>
-            <h2 className="mt-2 text-base font-semibold text-foreground">Approved briefs start a Codex website build.</h2>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-mutedForeground">
-              Codex builds on an isolated website branch, runs the website checks, and opens a draft PR. Only you decide whether to merge it.
-            </p>
-          </div>
-          <span className={shell.developerDispatch.configured ? "rounded-full border border-success/25 bg-success/10 px-3 py-1 text-xs font-semibold text-success" : "rounded-full border border-warning/25 bg-warning/10 px-3 py-1 text-xs font-semibold text-warning"}>
-            {shell.developerDispatch.configured ? "Dispatch ready" : "Configuration required"}
-          </span>
-        </div>
-        <dl className="mt-4 grid gap-3 md:grid-cols-3">
-          <SummaryRow label="Developer model" value={`${shell.developerDispatch.model} (${shell.developerDispatch.reasoningEffort})`} />
-          <SummaryRow label="Website repository" value={shell.developerDispatch.repository ?? "Not configured"} />
-          <SummaryRow label="Missing configuration" value={shell.developerDispatch.missing.join(", ") || "None"} />
-        </dl>
-      </section>
+      <WorkflowGuide />
 
-      <section className="rounded-lg border border-border bg-card shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border p-5">
-          <div>
-            <h2 className="text-base font-semibold text-foreground">Prepared for approval</h2>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-mutedForeground">
-              These are the weekly recommendations selected for your review. Generate a draft package to review the proposed URL, structure, SEO copy, FAQs, internal links, and build checklist before anything is posted.
-            </p>
-          </div>
-          <Link
-            href="/website-growth?status=REVIEWING"
-            className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
-          >
-            Open reviewing view
-          </Link>
-        </div>
-        <div className="grid gap-4 p-5 xl:grid-cols-3">
-          {shell.preparedOpportunities.length === 0 ? (
-            <div className="rounded-md border border-dashed border-border bg-muted/20 p-4 text-sm leading-6 text-mutedForeground xl:col-span-3">
-              No weekly approval items are waiting. Run the weekly planner to prepare core pages, support content, and quick optimizations.
-            </div>
-          ) : null}
-          {shell.preparedOpportunities.map((opportunity) => (
-            <PreparedOpportunityCard key={opportunity.id} opportunity={opportunity} />
-          ))}
-        </div>
-      </section>
-
-      <section className="grid gap-4 xl:grid-cols-[1.1fr,0.9fr]">
-        <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <h2 className="text-base font-semibold text-foreground">Data connections</h2>
-              <p className="mt-1 text-sm leading-6 text-mutedForeground">
-                API status is checked from environment variables. Manual imports remain available for Semrush and historical exports.
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <form action={syncSearchConsoleAction}>
-                <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
-                  Sync Search Console
-                </button>
-              </form>
-              <form action={syncGa4Action}>
-                <button className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
-                  Sync GA4
-                </button>
-              </form>
-            </div>
-          </div>
-
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <IntegrationCard
-              title="Search Console"
-              status={shell.integrations.googleSearchConsole.configured ? "Ready" : "Needs API"}
-              caption={
-                shell.integrations.googleSearchConsole.configured
-                  ? `Site: ${shell.integrations.googleSearchConsole.siteUrl ?? "configured"}`
-                  : `Missing ${shell.integrations.googleSearchConsole.missing.length} env values`
-              }
-              ready={shell.integrations.googleSearchConsole.configured}
-            />
-            <IntegrationCard
-              title="GA4"
-              status={shell.integrations.ga4.configured ? "Ready" : "Needs API"}
-              caption={
-                shell.integrations.ga4.configured
-                  ? `Property: ${shell.integrations.ga4.propertyId}`
-                  : `Missing ${shell.integrations.ga4.missing.length} env values`
-              }
-              ready={shell.integrations.ga4.configured}
-            />
-            <IntegrationCard
-              title="Internal app data"
-              status="Connected"
-              caption={`${shell.metrics.companyCount} companies, ${shell.metrics.pipelineCount} pipeline records`}
-              ready
-            />
-          </div>
-
-          <form action={generateWebsiteGrowthOpportunitiesAction} className="mt-4">
-            <button className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
-              Generate from Newl Apps data
-            </button>
-          </form>
-          <form action={organizeWebsiteGrowthQueueAction} className="mt-3">
-            <button className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
-              Organize current queue
-            </button>
-            <p className="mt-2 text-xs leading-5 text-mutedForeground">
-              Moves weak existing signals into Monitoring without deleting raw metrics or approved work.
-            </p>
-          </form>
-        </div>
-
-        <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
-          <h2 className="text-base font-semibold text-foreground">Manual import fallback</h2>
-          <p className="mt-1 text-sm leading-6 text-mutedForeground">
-            Paste CSV or tab-separated rows from Search Console, GA4, or Semrush. The parser maps common columns like query, page, clicks, impressions, position, sessions, and leads.
+      {workspace.drafts.length === 0 ? (
+        <section className="rounded-lg border border-dashed border-border bg-card p-8 text-center shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary">Scout workspace</p>
+          <h2 className="mt-2 text-xl font-semibold text-foreground">No Scout ideas have been prepared yet.</h2>
+          <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-mutedForeground">
+            Raw analytics are safely stored under Research signals. When Scout completes a run, only its curated briefs will appear here.
           </p>
-          <form action={importWebsiteGrowthMetricsAction} className="mt-4 space-y-3">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="text-sm font-medium text-foreground">
-                Source
-                <select
-                  name="source"
-                  defaultValue={WebsiteGrowthDataSource.GOOGLE_SEARCH_CONSOLE_UPLOAD}
-                  className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-                >
-                  <option value={WebsiteGrowthDataSource.GOOGLE_SEARCH_CONSOLE_UPLOAD}>Search Console export</option>
-                  <option value={WebsiteGrowthDataSource.SEMRUSH_UPLOAD}>Semrush export</option>
-                  <option value={WebsiteGrowthDataSource.GA4_UPLOAD}>GA4 export</option>
-                  <option value={WebsiteGrowthDataSource.MANUAL}>Manual rows</option>
-                </select>
-              </label>
-              <label className="text-sm font-medium text-foreground">
-                Import label
-                <input
-                  name="fileName"
-                  className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-                  placeholder="Semrush position tracking July"
-                />
-              </label>
-            </div>
-            <textarea
-              name="csvText"
-              rows={6}
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-              placeholder="query,page,clicks,impressions,position&#10;warehouse logistics,/services/warehousing-services,10,500,8.2"
-            />
-            <button className="w-full rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
-              Import and generate opportunities
-            </button>
-          </form>
-        </div>
-      </section>
-
-      <section className="grid gap-4 xl:grid-cols-[0.9fr,1.1fr]">
-        <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
-          <h2 className="text-base font-semibold text-foreground">Internal Newl Apps signal</h2>
-          <dl className="mt-4 grid gap-3 sm:grid-cols-2">
-            <Signal label="Companies" value={shell.metrics.companyCount} />
-            <Signal label="Contacts" value={shell.metrics.contactCount} />
-            <Signal label="Pipeline records" value={shell.metrics.pipelineCount} />
-            <Signal label="Credit checks" value={shell.metrics.creditCheckCount} />
-          </dl>
-          <div className="mt-5">
-            <h3 className="text-sm font-semibold text-foreground">Lead-producing pages</h3>
-            <div className="mt-3 space-y-2">
-              {shell.inboundLeadPages.length === 0 ? (
-                <p className="text-sm text-mutedForeground">No inbound page data captured yet.</p>
-              ) : null}
-              {shell.inboundLeadPages.map((page) => (
-                <div key={page.pageUrl} className="rounded-md border border-border bg-muted/30 p-3">
-                  <p className="break-all text-sm font-semibold text-foreground">{page.pageUrl}</p>
-                  <p className="mt-1 text-xs font-medium uppercase tracking-wide text-mutedForeground">
-                    {page.count} related submissions
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
-          <h2 className="text-base font-semibold text-foreground">Recent data runs</h2>
-          <div className="mt-4 space-y-3">
-            {shell.recentImports.length === 0 ? (
-              <p className="text-sm text-mutedForeground">No imports or sync attempts yet.</p>
-            ) : null}
-            {shell.recentImports.map((entry) => (
-              <div key={entry.id} className="rounded-md border border-border bg-muted/30 p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className={importBadgeClassName(entry.status)}>{formatStatusLike(entry.status)}</span>
-                  <span className="text-xs text-mutedForeground">{formatDate(entry.createdAt)}</span>
-                </div>
-                <p className="mt-2 text-sm font-semibold text-foreground">{formatStatusLike(entry.source)}</p>
-                <p className="mt-1 text-sm text-mutedForeground">
-                  {entry.errorMessage ?? `${entry.rowCount.toLocaleString("en-US")} rows processed`}
-                </p>
-                {entry.summary ? (
-                  <RunSummary summary={entry.summary} />
-                ) : null}
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h2 className="text-base font-semibold text-foreground">Opportunity filters</h2>
-            <p className="mt-1 text-sm leading-6 text-mutedForeground">
-              Review recommendations by status, action, keyword, page, or reason.
-            </p>
-          </div>
           <Link
-            href="/website-growth"
-            className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
+            href="/website-growth/signals"
+            className="mt-5 inline-flex rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
           >
-            Clear filters
+            View research signals
           </Link>
-        </div>
-        <form className="mt-4 grid gap-3 md:grid-cols-[1fr,1fr,1.4fr,auto]">
-          <label className="text-sm font-medium text-foreground">
-            Status
-            <select
-              name="status"
-              defaultValue={status}
-              className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-            >
-              <option value="ALL">All statuses</option>
-              {Object.values(WebsiteGrowthOpportunityStatus).map((value) => (
-                <option key={value} value={value}>
-                  {formatStatusLike(value)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-sm font-medium text-foreground">
-            Action
-            <select
-              name="action"
-              defaultValue={action}
-              className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-            >
-              <option value="ALL">All actions</option>
-              {Object.values(WebsiteGrowthAction).map((value) => (
-                <option key={value} value={value}>
-                  {formatStatusLike(value)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-sm font-medium text-foreground">
-            Search
-            <input
-              name="search"
-              defaultValue={search}
-              className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-              placeholder="Keyword, topic, page, recommendation"
-            />
-          </label>
-          <div className="flex items-end">
-            <button className="w-full rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
-              Apply
-            </button>
-          </div>
-        </form>
-      </section>
-
-      <section className="rounded-lg border border-border bg-card shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border p-5">
-          <div>
-            <h2 className="text-base font-semibold text-foreground">Content opportunity queue</h2>
-            <p className="mt-1 text-sm leading-6 text-mutedForeground">
-              Showing the top 200 items by score and freshness. Total stored: {shell.metrics.totalCount.toLocaleString("en-US")}; monitoring: {shell.metrics.monitoringCount.toLocaleString("en-US")}.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {shell.statusCounts.map((entry) => (
-              <span key={entry.status} className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs font-semibold text-mutedForeground">
-                {formatStatusLike(entry.status)}: {entry.count}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        <div className="divide-y divide-border">
-          {shell.opportunities.length === 0 ? (
-            <div className="p-5 text-sm text-mutedForeground">
-              No opportunities match this view. Run an API sync, import a report, or generate from internal app data.
-            </div>
-          ) : null}
-          {shell.opportunities.map((opportunity) => (
-            <article key={opportunity.id} className="grid gap-5 p-5 xl:grid-cols-[0.75fr,1.25fr]">
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className={opportunityBadgeClassName(opportunity.status)}>
-                    {formatStatusLike(opportunity.status)}
-                  </span>
-                  <span className="rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-xs font-semibold text-primary">
-                    {formatStatusLike(opportunity.action)}
-                  </span>
-                  <span className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs font-semibold text-mutedForeground">
-                    Score {opportunity.score}
-                  </span>
-                </div>
-                <h3 className="mt-3 text-lg font-semibold text-foreground">{opportunity.topic}</h3>
-                <dl className="mt-4 grid gap-2 text-sm">
-                  <SummaryRow label="Keyword" value={opportunity.primaryKeyword} />
-                  <SummaryRow label="Target page" value={opportunity.targetPage} />
-                  <SummaryRow label="Source page" value={opportunity.sourcePage} />
-                  <SummaryRow label="Confidence" value={opportunity.confidence} />
-                </dl>
-                {opportunity.contentDrafts[0] ? (
-                  <Link
-                    href={`/website-growth/drafts/${opportunity.contentDrafts[0].id}`}
-                    className="mt-4 inline-flex rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary transition-colors hover:bg-muted"
-                  >
-                    View draft / build status
-                  </Link>
-                ) : null}
-              </div>
-              <div className="space-y-4">
-                <div className="rounded-md border border-border bg-muted/30 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Why this matters</p>
-                  <p className="mt-2 text-sm leading-6 text-foreground">{opportunity.reason}</p>
-                  <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-mutedForeground">Recommended next step</p>
-                  <p className="mt-2 text-sm leading-6 text-foreground">{opportunity.recommendation}</p>
-                  <details className="mt-4">
-                    <summary className="cursor-pointer text-sm font-semibold text-primary">View evidence</summary>
-                    <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-background p-3 text-xs text-mutedForeground">
-                      {JSON.stringify(opportunity.evidence, null, 2)}
-                    </pre>
-                  </details>
-                </div>
-                <form action={updateWebsiteGrowthOpportunityAction} className="rounded-md border border-border bg-background p-4">
-                  <input type="hidden" name="opportunityId" value={opportunity.id} />
-                  <div className="grid gap-3 sm:grid-cols-[0.7fr,1.3fr,auto]">
-                    <label className="text-sm font-medium text-foreground">
-                      Status
-                      <select
-                        name="status"
-                        defaultValue={opportunity.status}
-                        className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-                      >
-                        {Object.values(WebsiteGrowthOpportunityStatus).map((value) => (
-                          <option key={value} value={value}>
-                            {formatStatusLike(value)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="text-sm font-medium text-foreground">
-                      Notes
-                      <input
-                        name="notes"
-                        defaultValue={opportunity.notes ?? ""}
-                        className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-                        placeholder="Decision, owner, next action, or build note"
-                      />
-                    </label>
-                    <div className="flex items-end">
-                      <button className="w-full rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
-                        Save
-                      </button>
-                    </div>
-                  </div>
-                </form>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
+        </section>
+      ) : (
+        <>
+          <IdeaSection
+            title="Needs your review"
+            description="These are the new ideas Scout recommends. Open a brief to review the exact page, copy, layout, claims, and proposed change before approving it."
+            emptyMessage="Nothing is waiting for your approval."
+            drafts={groups.NEEDS_REVIEW}
+            latestDraftIds={latestDraftIds}
+            stage="NEEDS_REVIEW"
+          />
+          <IdeaSection
+            title="Approved and building"
+            description="You approved these briefs. Codex is creating or updating the website page and preparing a draft pull request."
+            emptyMessage="No approved ideas are currently being built."
+            drafts={groups.BUILDING}
+            latestDraftIds={latestDraftIds}
+            stage="BUILDING"
+          />
+          <IdeaSection
+            title="Preview ready"
+            description="Open the website preview, review the page visually, then make the final merge decision in GitHub."
+            emptyMessage="No website previews are waiting for review."
+            drafts={groups.PREVIEW_READY}
+            latestDraftIds={latestDraftIds}
+            stage="PREVIEW_READY"
+          />
+          <IdeaSection
+            title="Completed and closed"
+            description="A short history of ideas that were published or declined. Research signals remain available separately."
+            emptyMessage="No completed ideas yet."
+            drafts={groups.COMPLETED.slice(0, 12)}
+            latestDraftIds={latestDraftIds}
+            stage="COMPLETED"
+            compact
+          />
+        </>
+      )}
     </div>
   );
 }
 
-function IntegrationCard({
+function WorkspaceNavigation({ signalCount }: { signalCount: number }) {
+  return (
+    <nav className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-2 shadow-sm" aria-label="Website Growth views">
+      <Link
+        href="/website-growth"
+        aria-current="page"
+        className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground"
+      >
+        Scout workspace
+      </Link>
+      <Link
+        href="/website-growth/signals"
+        className="rounded-md px-4 py-2 text-sm font-semibold text-mutedForeground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        Research signals
+        <span className="ml-2 rounded-full border border-border bg-background px-2 py-0.5 text-xs">
+          {signalCount.toLocaleString("en-US")}
+        </span>
+      </Link>
+      <p className="ml-auto hidden px-3 text-xs text-mutedForeground lg:block">
+        Scout ideas are curated work. Research signals are supporting evidence.
+      </p>
+    </nav>
+  );
+}
+
+function LatestScoutRun({
+  run,
+  draftCount,
+  semrushRowCount,
+  phase
+}: {
+  run: Awaited<ReturnType<typeof getWebsiteGrowthWorkspace>>["latestScoutRun"];
+  draftCount: number;
+  semrushRowCount: number;
+  phase: string | null;
+}) {
+  if (!run) {
+    return (
+      <section className="rounded-lg border border-warning/25 bg-warning/10 p-5">
+        <p className="text-xs font-semibold uppercase tracking-wide text-warning">Scout has not run yet</p>
+        <p className="mt-2 text-sm leading-6 text-foreground">
+          The first scheduled run will create this summary even when it finds no suitable opportunities.
+        </p>
+      </section>
+    );
+  }
+
+  const succeeded = run.status === JobStatus.SUCCESS;
+  const isEmpty = phase === "NO_CANDIDATES" || (succeeded && draftCount === 0);
+
+  return (
+    <section className={succeeded ? "rounded-lg border border-success/25 bg-success/10 p-5" : run.status === JobStatus.ERROR ? "rounded-lg border border-danger/25 bg-danger/10 p-5" : "rounded-lg border border-warning/25 bg-warning/10 p-5"}>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-foreground">Latest Scout run</p>
+          <h2 className="mt-2 text-xl font-semibold text-foreground">
+            {isEmpty
+              ? "Scout reviewed the data and found no new ideas."
+              : succeeded
+                ? `${draftCount} ${draftCount === 1 ? "idea is" : "ideas are"} ready from the latest run.`
+                : run.status === JobStatus.ERROR
+                  ? "Scout could not complete the latest run."
+                  : "Scout is reviewing the latest evidence."}
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-mutedForeground">
+            Search Console, GA4, website form submissions, and Semrush are evidence sources. Only the ideas selected by Scout appear in this workspace.
+          </p>
+          {run.errorMessage ? (
+            <p className="mt-3 text-sm font-medium text-danger">{run.errorMessage}</p>
+          ) : null}
+        </div>
+        <div className="text-right">
+          <span className="inline-flex rounded-full border border-border bg-background px-3 py-1 text-xs font-semibold text-foreground">
+            {formatStatus(run.status)}
+          </span>
+          <p className="mt-2 text-xs text-mutedForeground">{formatDateTime(run.finishedAt ?? run.startedAt)}</p>
+        </div>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2 text-xs font-semibold text-mutedForeground">
+        <span className="rounded-full border border-border bg-background px-3 py-1">GSC checked</span>
+        <span className="rounded-full border border-border bg-background px-3 py-1">GA4 checked</span>
+        <span className="rounded-full border border-border bg-background px-3 py-1">Forms checked</span>
+        <span className="rounded-full border border-border bg-background px-3 py-1">
+          Semrush evidence: {semrushRowCount.toLocaleString("en-US")} rows
+        </span>
+      </div>
+    </section>
+  );
+}
+
+function WorkflowGuide() {
+  const steps = [
+    ["1", "Scout selects ideas", "Codex reviews the evidence and removes weak or duplicate opportunities."],
+    ["2", "You review the brief", "Confirm the exact existing page or new route, proposed copy, layout, and claims."],
+    ["3", "Codex builds a preview", "Approval starts an isolated website branch and draft pull request."],
+    ["4", "You make the merge decision", "Review the Vercel website preview. Nothing goes live until you merge."]
+  ];
+
+  return (
+    <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-primary">How work moves</p>
+        <h2 className="mt-2 text-base font-semibold text-foreground">Four clear stages from evidence to website.</h2>
+      </div>
+      <ol className="mt-4 grid gap-3 lg:grid-cols-4">
+        {steps.map(([number, title, description]) => (
+          <li key={number} className="rounded-md border border-border bg-muted/30 p-4">
+            <div className="flex items-center gap-3">
+              <span className="flex size-7 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primaryForeground">
+                {number}
+              </span>
+              <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-mutedForeground">{description}</p>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function IdeaSection({
   title,
-  status,
-  caption,
-  ready
+  description,
+  emptyMessage,
+  drafts,
+  latestDraftIds,
+  stage,
+  compact = false
 }: {
   title: string;
-  status: string;
-  caption: string;
-  ready: boolean;
+  description: string;
+  emptyMessage: string;
+  drafts: Awaited<ReturnType<typeof getWebsiteGrowthWorkspace>>["drafts"];
+  latestDraftIds: Set<string>;
+  stage: WebsiteGrowthWorkflowStage;
+  compact?: boolean;
 }) {
   return (
-    <div className="rounded-md border border-border bg-muted/30 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-        <span className={ready ? "text-xs font-semibold text-success" : "text-xs font-semibold text-warning"}>
-          {status}
+    <section className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border p-5">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-mutedForeground">{description}</p>
+        </div>
+        <span className="rounded-full border border-border bg-muted/40 px-3 py-1 text-xs font-semibold text-mutedForeground">
+          {drafts.length}
         </span>
       </div>
-      <p className="mt-2 text-sm leading-6 text-mutedForeground">{caption}</p>
-    </div>
+      {drafts.length === 0 ? (
+        <p className="p-5 text-sm text-mutedForeground">{emptyMessage}</p>
+      ) : (
+        <div className={compact ? "grid gap-3 p-5 xl:grid-cols-3" : "grid gap-4 p-5 xl:grid-cols-2"}>
+          {drafts.map((draft) => (
+            <ScoutIdeaCard
+              key={draft.id}
+              draft={draft}
+              stage={stage}
+              isLatest={latestDraftIds.has(draft.id)}
+              compact={compact}
+            />
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
-function Signal({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-md border border-border bg-muted/30 p-3">
-      <dt className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</dt>
-      <dd className="mt-2 text-2xl font-semibold text-foreground">{value.toLocaleString("en-US")}</dd>
-    </div>
-  );
-}
-
-function PreparedOpportunityCard({
-  opportunity
+function ScoutIdeaCard({
+  draft,
+  stage,
+  isLatest,
+  compact
 }: {
-  opportunity: Awaited<ReturnType<typeof getWebsiteGrowthShell>>["preparedOpportunities"][number];
+  draft: Awaited<ReturnType<typeof getWebsiteGrowthWorkspace>>["drafts"][number];
+  stage: WebsiteGrowthWorkflowStage;
+  isLatest: boolean;
+  compact: boolean;
 }) {
-  const draft = opportunity.contentDrafts[0] ?? null;
-  const draftPayload = draft ? readDraftPayload(draft.draftJson) : null;
-  const buildPackage = draft ? readWebsiteGrowthBuildPackage(draft.draftJson) : null;
-  const claimReview = draft ? reviewWebsiteGrowthClaims(draft.draftJson) : null;
-  const legacyRebuild = resolveLegacyPageRebuild(opportunity);
+  const changeType = getWebsiteGrowthChangeType(draft.opportunity.action);
+  const route = getWebsiteGrowthRoute(draft);
+  const primaryChange = getWebsiteGrowthPrimaryChange(draft);
+  const scoutRunId = readScoutRunId(draft.draftJson);
 
   return (
-    <article className="flex h-full flex-col rounded-md border border-border bg-background p-4">
+    <article className="flex h-full flex-col rounded-lg border border-border bg-background p-5">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-xs font-semibold text-primary">
-          Prepared
-        </span>
-        {legacyRebuild ? (
-          <span className="rounded-full border border-warning/25 bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning">
-            Rebuild legacy URL
+        {isLatest ? (
+          <span className="rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-xs font-semibold text-primary">
+            New from latest Scout run
           </span>
         ) : null}
-        <span className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs font-semibold text-mutedForeground">
-          Score {opportunity.score}
-        </span>
-        {draft ? (
-          <span className={draft.source === WebsiteGrowthContentDraftSource.AI ? "rounded-full border border-success/25 bg-success/10 px-2.5 py-1 text-xs font-semibold text-success" : "rounded-full border border-warning/25 bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning"}>
-            {draft.source === WebsiteGrowthContentDraftSource.AI ? "AI draft ready" : "Template draft ready"}
-          </span>
-        ) : null}
+        <span className={stageBadgeClassName(stage)}>{stageLabel(stage, draft.status)}</span>
       </div>
-      <h3 className="mt-3 text-base font-semibold text-foreground">{opportunity.topic}</h3>
-      <p className="mt-2 text-sm leading-6 text-mutedForeground">{formatStatusLike(opportunity.action)}</p>
-      <div className="mt-4 space-y-2 text-sm">
-        {legacyRebuild ? (
-          <>
-            <PageReference label="Draft target" value={toNewlUrl(legacyRebuild.proposedPath)} />
-            <PageReviewLink label="Current live redirect" value={toNewlUrl(legacyRebuild.currentRedirectPath)} linkText="Open redirect target" />
-            <PageReference label="Original signal" value={opportunity.sourcePage ?? opportunity.targetPage} />
-          </>
-        ) : (
-          <>
-            <PageReviewLink label="Target page" value={opportunity.targetPage} />
-            <PageReviewLink label="Source page" value={opportunity.sourcePage} />
-          </>
-        )}
+
+      <div className={changeType.label === "New page" ? "mt-4 rounded-md border border-accentBorder bg-accentSoft p-3" : "mt-4 rounded-md border border-warning/25 bg-warning/10 p-3"}>
+        <p className="text-xs font-semibold uppercase tracking-wide text-foreground">{changeType.label}</p>
+        <p className="mt-1 break-all font-mono text-sm font-semibold text-foreground">{route}</p>
+        <p className="mt-1 text-xs leading-5 text-mutedForeground">{changeType.description}</p>
       </div>
-      {legacyRebuild ? (
-        <div className="mt-4 rounded-md border border-warning/25 bg-warning/10 p-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-warning">Draft-first rebuild</p>
-          <p className="mt-2 text-sm leading-6 text-foreground">
-            The legacy URL currently redirects to {legacyRebuild.currentRedirectPath}. Review the draft preview before approving a rebuilt page at {legacyRebuild.proposedPath}.
-          </p>
+
+      <h3 className="mt-4 text-lg font-semibold text-foreground">{draft.title}</h3>
+      <p className="mt-2 text-sm leading-6 text-mutedForeground">{draft.summary}</p>
+
+      {!compact ? (
+        <div className="mt-4 rounded-md border border-border bg-muted/30 p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Primary proposed change</p>
+          <p className="mt-2 text-sm leading-6 text-foreground">{primaryChange}</p>
         </div>
       ) : null}
-      <div className="mt-4 rounded-md border border-border bg-muted/30 p-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Approval note</p>
-        <p className="mt-2 text-sm leading-6 text-foreground">{opportunity.recommendation}</p>
-      </div>
-      {draft ? (
-        <div className="mt-4 rounded-md border border-border bg-card p-3">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Draft package</p>
-              <h4 className="mt-2 text-sm font-semibold text-foreground">{draft.title}</h4>
-            </div>
-            <span className={contentDraftBadgeClassName(draft.status)}>
-              {formatStatusLike(draft.status)}
-            </span>
-          </div>
-          <p className="mt-2 text-sm leading-6 text-mutedForeground">{draft.summary}</p>
-          <dl className="mt-3 grid gap-2 text-sm">
-            <SummaryRow label="Content type" value={draft.contentType} />
-            <SummaryRow label="Proposed URL" value={draft.proposedPath} />
-            <SummaryRow label="Target keyword" value={draftPayload?.targetKeyword} />
-            <SummaryRow label="Search intent" value={draftPayload?.searchIntent} />
-            <SummaryRow label="Newl pattern" value={draftPayload?.websitePageType} />
-          </dl>
-          {draftPayload?.pageChangePreview ? (
-            <DraftChangeSummary preview={draftPayload.pageChangePreview} />
+
+      <div className="mt-auto flex flex-wrap items-end justify-between gap-3 pt-5">
+        <div className="text-xs leading-5 text-mutedForeground">
+          <p>Updated {formatDateTime(draft.updatedAt)}</p>
+          {scoutRunId ? <p>Scout run {scoutRunId.slice(-8)}</p> : null}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {draft.builtUrl ? (
+            <a
+              href={draft.builtUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover"
+            >
+              Open website preview
+            </a>
+          ) : null}
+          {draft.pullRequestUrl ? (
+            <a
+              href={draft.pullRequestUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
+            >
+              Open PR
+            </a>
           ) : null}
           <Link
             href={`/website-growth/drafts/${draft.id}`}
-            className="mt-3 inline-flex text-sm font-semibold text-primary transition-colors hover:text-primaryHover"
+            className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
           >
-            Review current page + proposed changes
+            {stage === "NEEDS_REVIEW" ? "Review brief" : "View details"}
           </Link>
-          {buildPackage ? (
-            <div className="mt-3 rounded-md border border-success/25 bg-success/10 p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-success">Build package ready</p>
-                <span className="rounded-full border border-success/25 bg-background px-2.5 py-1 text-xs font-semibold text-success">
-                  {formatStatusLike(buildPackage.mode)}
-                </span>
-              </div>
-              <dl className="mt-3 grid gap-2 text-sm">
-                <SummaryRow label="Route" value={buildPackage.routePath} />
-                <SummaryRow label="Branch" value={buildPackage.branchName} />
-                <SummaryRow label="Repo" value={buildPackage.targetRepo} />
-                <SummaryRow label="Developer run" value="Starts automatically after approval" />
-              </dl>
-              <p className="mt-2 text-xs leading-5 text-mutedForeground">
-                Approval prepared the implementation package. The next automation step can use this to open a GitHub PR and Vercel preview without publishing directly.
-              </p>
-              {draft.pullRequestUrl ? (
-                <Link
-                  href={draft.pullRequestUrl}
-                  className="mt-3 inline-flex text-sm font-semibold text-success transition-colors hover:text-success/80"
-                >
-                  View GitHub PR
-                </Link>
-              ) : (
-                <form action={retryWebsiteGrowthDeveloperBuildAction} className="mt-3">
-                  <input type="hidden" name="draftId" value={draft.id} />
-                  <button className="w-full rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
-                    Check or retry developer build
-                  </button>
-                  <p className="mt-2 text-xs leading-5 text-mutedForeground">
-                    Retries the approved Codex workflow after a configuration or dispatch failure. Approval starts the first run automatically.
-                  </p>
-                </form>
-              )}
-            </div>
-          ) : null}
-          {draftPayload ? (
-            <details className="mt-3">
-              <summary className="cursor-pointer text-sm font-semibold text-primary">Review draft details</summary>
-              <div className="mt-3 space-y-3">
-                <DraftList title="Sections" items={draftPayload.sections.map((section) => `${section.heading}: ${section.purpose}`)} />
-                <DraftList title="FAQs" items={draftPayload.faqs.map((faq) => faq.question)} />
-                <DraftList title="Internal links" items={draftPayload.internalLinks.map((link) => `${link.label} -> ${link.url}`)} />
-                <DraftList title="Layout components" items={draftPayload.layoutComponents} />
-                <DraftList title="Build checklist" items={draftPayload.reviewChecklist} />
-              </div>
-            </details>
-          ) : null}
-          {claimReview && claimReview.status !== "CLEAR" ? (
-            <div className={claimReview.status === "BLOCKED" ? "mt-3 rounded-md border border-danger/25 bg-danger/10 p-3" : "mt-3 rounded-md border border-warning/25 bg-warning/10 p-3"}>
-              <p className="text-xs font-semibold uppercase tracking-wide text-foreground">
-                {claimReview.status === "BLOCKED" ? "Claim language must be revised" : "Claim confirmation required"}
-              </p>
-              <ul className="mt-2 space-y-2 text-xs leading-5 text-mutedForeground">
-                {claimReview.findings.slice(0, 4).map((finding) => (
-                  <li key={`${finding.category}-${finding.excerpt}`}>{finding.excerpt} — {finding.reason}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          <form action={updateWebsiteGrowthDraftAction} className="mt-4 grid gap-2 sm:grid-cols-[1fr,auto]">
-            <input type="hidden" name="draftId" value={draft.id} />
-            {claimReview?.status === "OWNER_CONFIRMATION_REQUIRED" ? (
-              <label className="flex items-start gap-2 text-xs leading-5 text-mutedForeground sm:col-span-2">
-                <input type="checkbox" name="claimsConfirmed" className="mt-1" />
-                I confirm the highlighted claims have current evidence, permission where needed, and an owner/review date.
-              </label>
-            ) : null}
-            <select
-              name="status"
-              defaultValue={draft.status}
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-            >
-              <option value={WebsiteGrowthContentDraftStatus.DRAFT}>Keep as draft</option>
-              <option value={WebsiteGrowthContentDraftStatus.APPROVED}>Approve draft for build</option>
-              <option value={WebsiteGrowthContentDraftStatus.REJECTED}>Reject draft</option>
-            </select>
-            <button className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
-              Save draft
-            </button>
-          </form>
         </div>
-      ) : (
-        <form action={generateWebsiteGrowthDraftAction} className="mt-4">
-          <input type="hidden" name="opportunityId" value={opportunity.id} />
-          <button className="w-full rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
-            Generate review draft
-          </button>
-          <p className="mt-2 text-xs leading-5 text-mutedForeground">
-            Creates a saved proposal for review. This does not publish or modify the website.
-          </p>
-        </form>
-      )}
-      <form action={updateWebsiteGrowthOpportunityAction} className="mt-auto pt-4">
-        <input type="hidden" name="opportunityId" value={opportunity.id} />
-        <input type="hidden" name="notes" value={opportunity.notes ?? ""} />
-        <div className="grid gap-2 sm:grid-cols-[1fr,auto]">
-          <select
-            name="status"
-            defaultValue={opportunity.status}
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-          >
-            <option value={WebsiteGrowthOpportunityStatus.REVIEWING}>Keep reviewing</option>
-            <option value={WebsiteGrowthOpportunityStatus.APPROVED}>Approve for build</option>
-            <option value={WebsiteGrowthOpportunityStatus.REJECTED}>Reject</option>
-            <option value={WebsiteGrowthOpportunityStatus.MONITORING}>Monitor only</option>
-          </select>
-          <button className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
-            Save
-          </button>
-        </div>
-      </form>
+      </div>
     </article>
   );
 }
 
-function DraftChangeSummary({ preview }: { preview: WebsiteGrowthPageChangePreview }) {
-  const changes = preview.proposedChanges.slice(0, 3);
-
-  return (
-    <div className="mt-3 rounded-md border border-primary/20 bg-primary/5 p-3">
-      <p className="text-xs font-semibold uppercase tracking-wide text-primary">What this draft would change</p>
-      <dl className="mt-3 grid gap-2 text-sm">
-        <SummaryRow label="Current page" value={`${preview.currentPage.path} (${preview.currentPage.pageType})`} />
-        <SummaryRow label="Page role" value={preview.currentPage.role} />
-      </dl>
-      <div className="mt-3 grid gap-2">
-        {changes.map((change, index) => (
-          <div key={`${change.changeType}-${change.location}-${index}`} className="rounded-md border border-border bg-background p-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full border border-accentBorder bg-accentSoft px-2 py-0.5 text-[0.68rem] font-semibold text-primary">
-                {formatStatusLike(change.changeType)}
-              </span>
-              <p className="text-sm font-semibold text-foreground">{change.location}</p>
-            </div>
-            <p className="mt-2 text-sm leading-6 text-mutedForeground">{change.proposedState}</p>
-          </div>
-        ))}
-      </div>
-      {preview.approvalSummary ? (
-        <p className="mt-3 text-xs leading-5 text-mutedForeground">{preview.approvalSummary}</p>
-      ) : null}
-    </div>
-  );
-}
-
-function DraftList({ title, items }: { title: string; items: string[] }) {
-  if (items.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="rounded-md border border-border bg-muted/30 p-3">
-      <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{title}</p>
-      <ul className="mt-2 space-y-1 text-sm leading-6 text-foreground">
-        {items.slice(0, 6).map((item) => (
-          <li key={item}>{item}</li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function PageReference({ label, value }: { label: string; value?: string | null }) {
-  if (!value) {
-    return (
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</p>
-        <p className="mt-1 text-mutedForeground">Not attached yet</p>
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</p>
-      <p className="mt-1 break-all font-semibold text-foreground">{value}</p>
-    </div>
-  );
-}
-
-function PageReviewLink({
-  label,
-  value,
-  linkText = "Open live page"
-}: {
-  label: string;
-  value?: string | null;
-  linkText?: string;
-}) {
-  if (!value) {
-    return (
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</p>
-        <p className="mt-1 text-mutedForeground">Not attached yet</p>
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</p>
-      <a
-        href={value}
-        target="_blank"
-        rel="noreferrer"
-        className="mt-1 block break-all font-semibold text-primary transition-colors hover:text-primaryHover"
-      >
-        {linkText}
-      </a>
-      <p className="mt-1 break-all text-xs text-mutedForeground">{value}</p>
-    </div>
-  );
-}
-
-function SummaryRow({ label, value }: { label: string; value?: string | null }) {
-  if (!value) {
-    return null;
-  }
-
-  return (
-    <div className="grid gap-1 sm:grid-cols-[7rem,1fr]">
-      <dt className="font-medium text-mutedForeground">{label}</dt>
-      <dd className="break-words text-foreground">{value}</dd>
-    </div>
-  );
-}
-
-function readDraftPayload(value: unknown) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-
-  return {
-    targetKeyword: typeof record.targetKeyword === "string" ? record.targetKeyword : null,
-    searchIntent: typeof record.searchIntent === "string" ? record.searchIntent : null,
-    websitePageType: typeof record.websitePageType === "string" ? record.websitePageType : null,
-    sections: readDraftObjectArray(record.sections).map((section) => ({
-      heading: readDraftString(section.heading),
-      purpose: readDraftString(section.purpose)
-    })).filter((section) => section.heading && section.purpose),
-    faqs: readDraftObjectArray(record.faqs).map((faq) => ({
-      question: readDraftString(faq.question)
-    })).filter((faq) => faq.question),
-    internalLinks: readDraftObjectArray(record.internalLinks).map((link) => ({
-      label: readDraftString(link.label),
-      url: readDraftString(link.url)
-    })).filter((link) => link.label && link.url),
-    layoutComponents: readDraftStringArray(record.layoutComponents),
-    reviewChecklist: readDraftStringArray(record.reviewChecklist),
-    pageChangePreview: readPageChangePreview(record.pageChangePreview)
+function groupDrafts(
+  drafts: Awaited<ReturnType<typeof getWebsiteGrowthWorkspace>>["drafts"]
+) {
+  const groups: Record<
+    WebsiteGrowthWorkflowStage,
+    Awaited<ReturnType<typeof getWebsiteGrowthWorkspace>>["drafts"]
+  > = {
+    NEEDS_REVIEW: [],
+    BUILDING: [],
+    PREVIEW_READY: [],
+    COMPLETED: []
   };
-}
 
-function readPageChangePreview(value: unknown): WebsiteGrowthPageChangePreview | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
+  for (const draft of drafts) {
+    groups[getWebsiteGrowthWorkflowStage(draft)].push(draft);
   }
 
-  const record = value as Record<string, unknown>;
-  const currentPage = record.currentPage && typeof record.currentPage === "object" && !Array.isArray(record.currentPage)
-    ? (record.currentPage as Record<string, unknown>)
-    : {};
-  const proposedChanges = readDraftObjectArray(record.proposedChanges)
-    .map((change) => ({
-      changeType: readChangeType(change.changeType),
-      location: readDraftString(change.location),
-      currentState: readDraftString(change.currentState),
-      proposedState: readDraftString(change.proposedState),
-      exactDraftCopy: readDraftString(change.exactDraftCopy) || undefined,
-      reason: readDraftString(change.reason),
-      impact: readDraftString(change.impact)
-    }))
-    .filter((change) => change.location && change.proposedState);
-
-  return {
-    currentPage: {
-      path: readDraftString(currentPage.path) || "/",
-      pageType: readDraftString(currentPage.pageType) || "Newl website page",
-      role: readDraftString(currentPage.role),
-      likelySourceFiles: readDraftStringArray(currentPage.likelySourceFiles),
-      existingComponents: readDraftStringArray(currentPage.existingComponents),
-      currentFocus: readDraftString(currentPage.currentFocus)
-    },
-    proposedChanges,
-    visualReviewNotes: readDraftStringArray(record.visualReviewNotes),
-    approvalSummary: readDraftString(record.approvalSummary)
-  };
+  return groups;
 }
 
-function readChangeType(value: unknown): WebsiteGrowthPageChangePreview["proposedChanges"][number]["changeType"] {
-  const allowed = ["meta", "hero", "section", "faq", "internal_links", "cta", "redirect", "technical"];
-
-  return typeof value === "string" && allowed.includes(value)
-    ? (value as WebsiteGrowthPageChangePreview["proposedChanges"][number]["changeType"])
-    : "section";
-}
-
-function readDraftObjectArray(value: unknown) {
-  return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item))) : [];
-}
-
-function readDraftStringArray(value: unknown) {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
-}
-
-function readDraftString(value: unknown) {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : "";
-}
-
-function RunSummary({ summary }: { summary: unknown }) {
-  if (!summary || typeof summary !== "object" || Array.isArray(summary)) {
-    return null;
+function stageLabel(
+  stage: WebsiteGrowthWorkflowStage,
+  draftStatus: WebsiteGrowthContentDraftStatus
+) {
+  if (stage === "NEEDS_REVIEW") {
+    return "Needs review";
   }
 
-  const record = summary as Record<string, unknown>;
-  const items = [
-    ["Raw candidates", record.rawCandidates],
-    ["Clusters", record.clusters],
-    ["Qualified", record.qualifiedOpportunities],
-    ["Created", record.opportunitiesCreated],
-    ["Existing", record.existingMatches],
-    ["Skipped", record.skippedClusters]
-  ].filter((item): item is [string, number] => typeof item[1] === "number");
-
-  if (items.length === 0) {
-    return null;
+  if (stage === "BUILDING") {
+    return "Approved · building";
   }
 
-  return (
-    <dl className="mt-3 grid gap-2 sm:grid-cols-3">
-      {items.map(([label, value]) => (
-        <div key={label} className="rounded-md border border-border bg-background px-3 py-2">
-          <dt className="text-[0.65rem] font-semibold uppercase tracking-wide text-mutedForeground">{label}</dt>
-          <dd className="mt-1 text-sm font-semibold text-foreground">{Number(value).toLocaleString("en-US")}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
-
-function readParam(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-function parseStatus(value: string | undefined): WebsiteGrowthStatusFilter {
-  if (!value || value === "ALL") {
-    return "ALL";
+  if (stage === "PREVIEW_READY") {
+    return "Preview ready";
   }
 
-  return value in WebsiteGrowthOpportunityStatus ? (value as WebsiteGrowthOpportunityStatus) : "ALL";
+  return draftStatus === WebsiteGrowthContentDraftStatus.REJECTED
+    ? "Declined"
+    : "Completed";
 }
 
-function parseAction(value: string | undefined): WebsiteGrowthActionFilter {
-  if (!value || value === "ALL") {
-    return "ALL";
+function stageBadgeClassName(stage: WebsiteGrowthWorkflowStage) {
+  if (stage === "PREVIEW_READY") {
+    return "rounded-full border border-success/25 bg-success/10 px-2.5 py-1 text-xs font-semibold text-success";
   }
 
-  return value in WebsiteGrowthAction ? (value as WebsiteGrowthAction) : "ALL";
+  if (stage === "BUILDING") {
+    return "rounded-full border border-warning/25 bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning";
+  }
+
+  return "rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs font-semibold text-mutedForeground";
 }
 
-function formatStatusLike(value: string) {
+function formatStatus(value: string) {
   return value
     .toLowerCase()
-    .replaceAll("_", " ")
-    .split(" ")
+    .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
 }
 
-function formatDate(date: Date) {
-  return new Intl.DateTimeFormat("en", {
-    dateStyle: "medium",
-    timeStyle: "short"
+function formatDateTime(date: Date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
   }).format(date);
-}
-
-function importBadgeClassName(status: WebsiteGrowthImportStatus) {
-  const base = "rounded-full border px-2.5 py-1 text-xs font-semibold";
-
-  if (status === WebsiteGrowthImportStatus.SUCCESS) {
-    return `${base} border-success/25 bg-success/10 text-success`;
-  }
-
-  if (status === WebsiteGrowthImportStatus.ERROR) {
-    return `${base} border-danger/25 bg-danger/10 text-danger`;
-  }
-
-  return `${base} border-warning/25 bg-warning/10 text-warning`;
-}
-
-function opportunityBadgeClassName(status: WebsiteGrowthOpportunityStatus) {
-  const base = "rounded-full border px-2.5 py-1 text-xs font-semibold";
-
-  if (status === WebsiteGrowthOpportunityStatus.NEW) {
-    return `${base} border-warning/25 bg-warning/10 text-warning`;
-  }
-
-  if (
-    status === WebsiteGrowthOpportunityStatus.APPROVED ||
-    status === WebsiteGrowthOpportunityStatus.IN_PROGRESS ||
-    status === WebsiteGrowthOpportunityStatus.PUBLISHED
-  ) {
-    return `${base} border-success/25 bg-success/10 text-success`;
-  }
-
-  if (status === WebsiteGrowthOpportunityStatus.REJECTED) {
-    return `${base} border-danger/25 bg-danger/10 text-danger`;
-  }
-
-  return `${base} border-accentBorder bg-accentSoft text-primary`;
-}
-
-function contentDraftBadgeClassName(status: WebsiteGrowthContentDraftStatus) {
-  const base = "rounded-full border px-2.5 py-1 text-xs font-semibold";
-
-  if (
-    status === WebsiteGrowthContentDraftStatus.APPROVED ||
-    status === WebsiteGrowthContentDraftStatus.BUILT ||
-    status === WebsiteGrowthContentDraftStatus.PUBLISHED
-  ) {
-    return `${base} border-success/25 bg-success/10 text-success`;
-  }
-
-  if (status === WebsiteGrowthContentDraftStatus.REJECTED) {
-    return `${base} border-danger/25 bg-danger/10 text-danger`;
-  }
-
-  return `${base} border-warning/25 bg-warning/10 text-warning`;
 }
