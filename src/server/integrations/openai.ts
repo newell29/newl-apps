@@ -43,6 +43,15 @@ type Tier1DraftResult = {
   rawResponse: Record<string, unknown>;
 };
 
+type OpenAiJsonCompletionInput = {
+  schemaName: string;
+  schema: Record<string, unknown>;
+  errorLabel: string;
+  system: string;
+  user: string;
+  model?: string;
+};
+
 export type WebsiteGrowthDraftContext = {
   model: string;
   reasoningEffort: "low" | "medium" | "high" | "xhigh";
@@ -165,6 +174,53 @@ export function getOpenAiDraftRuntimeNotes() {
   return isOpenAiDraftGenerationConfigured()
     ? "OpenAI runtime is configured through the server environment."
     : "OpenAI runtime is not configured yet. Add OPENAI_API_KEY in the server environment to enable live draft generation.";
+}
+
+export async function generateOpenAiJsonCompletion(input: OpenAiJsonCompletionInput): Promise<string> {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+
+  if (!apiKey || apiKey === "OPENAI_API_KEY_PLACEHOLDER") {
+    throw new Error("OPENAI_API_KEY is not configured. Add it before running OpenAI JSON completion.");
+  }
+
+  const response = await fetch(`${OPENAI_API_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: input.model ?? process.env.OPENAI_INQUIRY_PARSER_MODEL?.trim() ?? "gpt-4o-mini",
+      temperature: 0,
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: input.schemaName,
+          strict: false,
+          schema: input.schema
+        }
+      },
+      messages: [
+        {
+          role: "system",
+          content: input.system
+        },
+        {
+          role: "user",
+          content: input.user
+        }
+      ]
+    }),
+    cache: "no-store"
+  });
+
+  const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+
+  if (!response.ok || !json) {
+    throw new Error(extractOpenAiError(json) ?? `${input.errorLabel} failed with status ${response.status}.`);
+  }
+
+  return readAssistantContent(json);
 }
 
 export async function generateTier1SequenceDraft(context: Tier1DraftContext): Promise<Tier1DraftResult> {

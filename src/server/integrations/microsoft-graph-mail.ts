@@ -52,6 +52,12 @@ export type MicrosoftGraphMailFetchOptions = {
   maxMessagesPerMailbox: number;
 };
 
+export type MicrosoftGraphMailFolder = {
+  id: string;
+  displayName?: string | null;
+  parentFolderId?: string | null;
+};
+
 export async function fetchMicrosoftGraphMailboxMessages(
   accessToken: string,
   mailbox: string,
@@ -61,6 +67,52 @@ export async function fetchMicrosoftGraphMailboxMessages(
   const since = new Date(Date.now() - options.lookbackDays * 24 * 60 * 60 * 1000);
   const messages: MicrosoftGraphMailMessage[] = [];
   let nextUrl: string | null = buildMailboxMessagesUrl(path, since, options.maxMessagesPerMailbox);
+
+  while (nextUrl && messages.length < options.maxMessagesPerMailbox) {
+    const page = await fetchMailboxMessagesPage(accessToken, mailbox, nextUrl);
+    messages.push(...page.messages);
+    nextUrl = messages.length < options.maxMessagesPerMailbox ? page.nextLink : null;
+  }
+
+  return messages.slice(0, options.maxMessagesPerMailbox);
+}
+
+export async function resolveMicrosoftGraphMailboxFolderPath(
+  accessToken: string,
+  mailbox: string,
+  folderNames: string[]
+) {
+  const mailboxPath = mailbox === "me" ? "me" : await resolveMicrosoftGraphMailboxUserPath(accessToken, mailbox);
+  let currentFolder: MicrosoftGraphMailFolder | null = null;
+
+  for (const folderName of folderNames) {
+    currentFolder = await findMicrosoftGraphChildMailFolder(accessToken, mailboxPath, currentFolder?.id ?? null, folderName);
+    if (!currentFolder) {
+      const requestedPath = folderNames.join("/");
+      throw new Error(`Microsoft Graph mailbox ${mailbox} does not contain required mail folder ${requestedPath}.`);
+    }
+  }
+
+  if (!currentFolder?.id) {
+    throw new Error(`Microsoft Graph mailbox ${mailbox} folder path ${folderNames.join("/")} could not be resolved.`);
+  }
+
+  return {
+    mailboxPath,
+    folder: currentFolder,
+    messagesPath: `${mailboxPath}/mailFolders/${encodeURIComponent(currentFolder.id)}/messages`
+  };
+}
+
+export async function fetchMicrosoftGraphMailboxFolderMessages(
+  accessToken: string,
+  mailbox: string,
+  graphFolderId: string,
+  options: Pick<MicrosoftGraphMailFetchOptions, "maxMessagesPerMailbox">
+) {
+  const mailboxPath = mailbox === "me" ? "me" : await resolveMicrosoftGraphMailboxUserPath(accessToken, mailbox);
+  const messages: MicrosoftGraphMailMessage[] = [];
+  let nextUrl: string | null = buildFolderMessagesUrl(mailboxPath, graphFolderId, options.maxMessagesPerMailbox);
 
   while (nextUrl && messages.length < options.maxMessagesPerMailbox) {
     const page = await fetchMailboxMessagesPage(accessToken, mailbox, nextUrl);
@@ -121,8 +173,17 @@ export async function fetchMicrosoftGraphMessageAttachmentContent(
 }
 
 export async function resolveMicrosoftGraphMailboxMessagesPath(accessToken: string, mailbox: string) {
-  const directPath = `users/${encodeURIComponent(mailbox)}/messages`;
-  const probeResponse = await fetch(`https://graph.microsoft.com/v1.0/${directPath}?$top=1&$select=id`, {
+  const directPath = `${await resolveMicrosoftGraphMailboxUserPath(accessToken, mailbox)}/messages`;
+  return directPath;
+}
+
+async function resolveMicrosoftGraphMailboxUserPath(accessToken: string, mailbox: string) {
+  if (mailbox === "me") {
+    return "me";
+  }
+
+  const directPath = `users/${encodeURIComponent(mailbox)}`;
+  const probeResponse = await fetch(`https://graph.microsoft.com/v1.0/${directPath}?$select=id`, {
     headers: {
       Authorization: `Bearer ${accessToken}`
     },
@@ -148,7 +209,7 @@ export async function resolveMicrosoftGraphMailboxMessagesPath(accessToken: stri
     );
   }
 
-  return `users/${encodeURIComponent(resolvedUserId)}/messages`;
+  return `users/${encodeURIComponent(resolvedUserId)}`;
 }
 
 async function fetchMailboxMessagesPage(accessToken: string, mailbox: string, url: string) {
@@ -190,6 +251,48 @@ function buildMailboxMessagesUrl(path: string, since: Date, maxMessages: number)
   const filter = encodeURIComponent(`receivedDateTime ge ${since.toISOString()}`);
 
   return `https://graph.microsoft.com/v1.0/${path}?$top=${top}&$select=${select}&$orderby=receivedDateTime%20desc&$filter=${filter}`;
+}
+
+function buildFolderMessagesUrl(mailboxPath: string, graphFolderId: string, maxMessages: number) {
+  const select = "id,subject,bodyPreview,body,webLink,internetMessageId,conversationId,receivedDateTime,hasAttachments,from,toRecipients,ccRecipients";
+  const top = Math.min(MICROSOFT_GRAPH_MAIL_PAGE_SIZE, maxMessages);
+
+  return `https://graph.microsoft.com/v1.0/${mailboxPath}/mailFolders/${encodeURIComponent(
+    graphFolderId
+  )}/messages?$top=${top}&$select=${select}&$orderby=receivedDateTime%20desc`;
+}
+
+async function findMicrosoftGraphChildMailFolder(
+  accessToken: string,
+  mailboxPath: string,
+  parentFolderId: string | null,
+  displayName: string
+) {
+  const targetName = displayName.trim().toLowerCase();
+  const encodedFilter = encodeURIComponent(`displayName eq '${escapeODataString(displayName.trim())}'`);
+  const basePath = parentFolderId
+    ? `${mailboxPath}/mailFolders/${encodeURIComponent(parentFolderId)}/childFolders`
+    : `${mailboxPath}/mailFolders`;
+  const url = `https://graph.microsoft.com/v1.0/${basePath}?$top=10&$select=id,displayName,parentFolderId&$filter=${encodedFilter}`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+    signal: AbortSignal.timeout(MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS)
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      (await extractMicrosoftGraphResponseError(response)) ??
+        `Microsoft Graph folder lookup failed for ${mailboxPath} with status ${response.status}.`
+    );
+  }
+
+  const json = (await response.json().catch(() => null)) as { value?: MicrosoftGraphMailFolder[] } | null;
+  const folders = Array.isArray(json?.value) ? json.value : [];
+  return (
+    folders.find((folder) => folder.displayName?.trim().toLowerCase() === targetName && typeof folder.id === "string") ??
+    null
+  );
 }
 
 async function resolveMicrosoftGraphMailboxUserId(accessToken: string, mailbox: string) {

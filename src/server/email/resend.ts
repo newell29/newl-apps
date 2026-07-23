@@ -5,6 +5,10 @@ type SendEmailInput = {
   text: string;
   html?: string | null;
   replyTo?: string | null;
+  attachments?: Array<{
+    filename: string;
+    content: Buffer;
+  }>;
 };
 
 type SendEmailResult = {
@@ -34,7 +38,11 @@ export async function sendResendEmail(input: SendEmailInput): Promise<SendEmailR
         subject: input.subject,
         text: input.text,
         html: input.html || undefined,
-        reply_to: input.replyTo || undefined
+        reply_to: input.replyTo || undefined,
+        attachments: input.attachments?.map((attachment) => ({
+          filename: attachment.filename,
+          content: attachment.content.toString("base64")
+        }))
       })
     });
 
