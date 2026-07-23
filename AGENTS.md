@@ -13,6 +13,13 @@ This repository is the source of truth for the Newl Apps platform. Future agents
 7. Never deploy directly to production.
 8. Never merge to `main` automatically.
 9. Work only on a feature branch or isolated worktree.
+   - Treat the repository's root checkout as a coordination checkout, not a reusable task workspace.
+   - If the current checkout is not already dedicated to the active task, start one with `npm run codex:task:start -- <unique-task-slug>`.
+   - Create task branches from freshly fetched `origin/main`; never create them from a stale local `main`.
+   - Use persistent worktrees under `work/codex/`. Do not create task worktrees under `/tmp` or `/private/tmp`.
+   - Never reuse one branch or worktree across unrelated Codex chats.
+   - Before opening a pull request, run `npm run codex:task:publish -- ...` so current `main` is incorporated and conflicts are detected before review.
+   - After the owner merges the pull request, use `npm run codex:task:cleanup -- <task-slug>` to remove only the confirmed-merged worktree and local branch.
 10. Add regression tests for confirmed failures.
 11. Update relevant documentation when behaviour changes.
 12. Mark inferred business behaviour as requiring confirmation; never present it as approved.
