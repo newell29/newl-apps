@@ -50,9 +50,11 @@ function getTodayIsoDate() {
 }
 
 export function GarlandCarrierManifestClient({
-  initialHistory
+  initialHistory,
+  initialHistoryError = null
 }: {
   initialHistory: GarlandCarrierManifestHistoryResponse;
+  initialHistoryError?: string | null;
 }) {
   const [shipmentDate, setShipmentDate] = useState(getTodayIsoDate);
   const [documentLabel, setDocumentLabel] = useState(() => formatHumanDateFromIso(getTodayIsoDate()));
@@ -63,7 +65,7 @@ export function GarlandCarrierManifestClient({
   const [history, setHistory] = useState(initialHistory);
   const [status, setStatus] = useState("Upload the daily Garland BOL bundle to build carrier manifests.");
   const [error, setError] = useState<string | null>(null);
-  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(initialHistoryError);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [uploadingPdfRunId, setUploadingPdfRunId] = useState<string | null>(null);
