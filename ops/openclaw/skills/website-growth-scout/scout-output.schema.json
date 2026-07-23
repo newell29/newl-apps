@@ -8,7 +8,7 @@
     "semrush": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["queried", "summary", "rows"],
+      "required": ["queried", "summary", "rows", "tracking"],
       "properties": {
         "queried": { "type": "boolean", "const": true },
         "summary": { "type": "string", "minLength": 1 },
@@ -30,6 +30,45 @@
               "competitorDomain": { "type": ["string", "null"] },
               "opportunityType": { "type": "string", "minLength": 1 },
               "note": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "tracking": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["projectId", "campaignId", "domain", "database", "device", "visibility", "previousVisibility", "top3", "top10", "top20", "top100", "improved", "declined", "entered", "lost", "trackedKeywords"],
+          "properties": {
+            "projectId": { "type": ["string", "null"] },
+            "campaignId": { "type": ["string", "null"] },
+            "domain": { "type": ["string", "null"] },
+            "database": { "type": ["string", "null"] },
+            "device": { "type": ["string", "null"] },
+            "visibility": { "type": ["number", "null"] },
+            "previousVisibility": { "type": ["number", "null"] },
+            "top3": { "type": ["integer", "null"] },
+            "top10": { "type": ["integer", "null"] },
+            "top20": { "type": ["integer", "null"] },
+            "top100": { "type": ["integer", "null"] },
+            "improved": { "type": ["integer", "null"] },
+            "declined": { "type": ["integer", "null"] },
+            "entered": { "type": ["integer", "null"] },
+            "lost": { "type": ["integer", "null"] },
+            "trackedKeywords": {
+              "type": "array",
+              "maxItems": 500,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["keyword", "tags", "position", "previousPosition", "landingPage", "searchVolume"],
+                "properties": {
+                  "keyword": { "type": "string", "minLength": 1 },
+                  "tags": { "type": "array", "items": { "type": "string" } },
+                  "position": { "type": ["number", "null"] },
+                  "previousPosition": { "type": ["number", "null"] },
+                  "landingPage": { "type": ["string", "null"] },
+                  "searchVolume": { "type": ["integer", "null"] }
+                }
+              }
             }
           }
         }

@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -68,5 +69,59 @@ describe("Website Growth Scout OpenClaw scripts", () => {
 
     inspect(schema, "$");
     expect(missingTypes).toEqual([]);
+  });
+
+  it("creates valid weekly Excel attachments from the completion response", async () => {
+    const outputDirectory = await mkdtemp(path.join(tmpdir(), "newl-scout-reports-"));
+    const responsePath = path.join(outputDirectory, "completion.json");
+    const reportScript = path.join(
+      repoRoot,
+      "ops/openclaw/lib/create-website-growth-reports.ts"
+    );
+
+    try {
+      await writeFile(responsePath, JSON.stringify({
+        data: {
+          reports: {
+            keywordImport: {
+              filename: "newl-semrush-keywords.xlsx",
+              sheetName: "SEMrush Import",
+              columns: [
+                { key: "keyword", header: "Keyword" },
+                { key: "tags", header: "Tags" }
+              ],
+              rows: [{ keyword: "kitting services", tags: "website-growth,scout" }]
+            },
+            performance: {
+              filename: "newl-seo-performance.xlsx",
+              sheetName: "Weekly SEO",
+              columns: [
+                { key: "item", header: "Keyword or Metric" },
+                { key: "currentValue", header: "Current" }
+              ],
+              rows: [{ item: "Visibility", currentValue: 6.42 }]
+            }
+          }
+        }
+      }));
+
+      const { stdout } = await execFileAsync(
+        process.execPath,
+        ["--experimental-strip-types", reportScript, responsePath, outputDirectory]
+      );
+      const manifest = JSON.parse(stdout) as {
+        keywordImport: { path: string };
+        performance: { path: string };
+      };
+      const [keywordBytes, performanceBytes] = await Promise.all([
+        readFile(manifest.keywordImport.path),
+        readFile(manifest.performance.path)
+      ]);
+
+      expect(keywordBytes.subarray(0, 2).toString()).toBe("PK");
+      expect(performanceBytes.subarray(0, 2).toString()).toBe("PK");
+    } finally {
+      await rm(outputDirectory, { recursive: true, force: true });
+    }
   });
 });
