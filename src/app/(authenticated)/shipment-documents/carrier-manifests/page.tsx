@@ -4,16 +4,31 @@ import { PageHeader } from "@/components/page-header";
 import { GarlandCarrierManifestClient } from "@/modules/shipment-documents/components/garland-carrier-manifest-client";
 import { GarlandToolTabs } from "@/modules/shipment-documents/components/garland-tool-tabs";
 import { getGarlandCarrierManifestHistory } from "@/modules/shipment-documents/carrier-manifest-queries";
+import type { GarlandCarrierManifestHistoryResponse } from "@/modules/shipment-documents/carrier-manifest-types";
 import { requireModule } from "@/server/auth/authorization";
 import { isOpenAiDraftGenerationConfigured } from "@/server/integrations/openai";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
 
+const EMPTY_HISTORY: GarlandCarrierManifestHistoryResponse = {
+  runs: [],
+  totalCount: 0
+};
+
 export default async function GarlandCarrierManifestsPage() {
   const context = await getAuthenticatedContext();
   await requireModule(context, ModuleKey.SHIPMENT_DOCUMENTS);
-  const history = await getGarlandCarrierManifestHistory(context);
+  let history = EMPTY_HISTORY;
+  let historyError: string | null = null;
+
+  try {
+    history = await getGarlandCarrierManifestHistory(context);
+  } catch (error) {
+    console.error("[garland-carrier-manifests] Unable to load saved history.", error);
+    historyError =
+      "Saved carrier manifest history is temporarily unavailable. You can still open this workspace, but saving or downloading saved manifests may fail until history storage is restored.";
+  }
 
   return (
     <div className="space-y-6">
@@ -45,7 +60,7 @@ export default async function GarlandCarrierManifestsPage() {
         </div>
       </section>
 
-      <GarlandCarrierManifestClient initialHistory={history} />
+      <GarlandCarrierManifestClient initialHistory={history} initialHistoryError={historyError} />
     </div>
   );
 }
