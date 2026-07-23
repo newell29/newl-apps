@@ -16,6 +16,14 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - Teams delivery failure after drafts are saved: the command job fails and the links remain available in Newl Apps; an operator may resend after fixing Teams.
 - No candidates: the job succeeds without a Teams review request.
 
+## Developer comparison failures
+
+- Missing Kimi API key: the Kimi shadow job is skipped and the primary Codex build continues.
+- Kimi agent, lint, or production-build failure: no Kimi branch or PR is created; the GitHub Actions summary records a warning and Codex continues.
+- Kimi PR handoff failure: the verified shadow patch is not treated as the primary build and cannot overwrite Newl Apps status.
+- Codex build or PR handoff failure: Newl Apps records the existing primary failure callback; a Kimi result is not promoted automatically.
+- Either Vercel Preview failure: production remains unchanged and the owner does not merge until the intended preview passes visual review.
+
 ## Workflow / rules summary
 
 - Entry points are protected authenticated pages and/or API routes for this module.
