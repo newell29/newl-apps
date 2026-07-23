@@ -22,7 +22,8 @@ import {
 } from "@/modules/website-growth/developer-dispatch";
 import {
   getWebsiteGrowthBuildRetryState,
-  WEBSITE_GROWTH_STALE_DISPATCH_MS
+  WEBSITE_GROWTH_STALE_DISPATCH_MS,
+  WEBSITE_GROWTH_STALE_RUNNING_MS
 } from "@/modules/website-growth/build-requests";
 import {
   createWebsiteGrowthPullRequestPackage,
@@ -624,6 +625,20 @@ describe("website growth developer dispatch", () => {
     }, now);
 
     expect(retry).toEqual({ canRetry: false, reason: null });
+  });
+
+  it("allows a running build to be retried only after its longer callback window expires", () => {
+    const now = new Date("2026-07-23T18:00:00.000Z");
+    const retry = getWebsiteGrowthBuildRetryState({
+      status: JobStatus.RUNNING,
+      output: {
+        phase: "RUNNING",
+        updatedAt: new Date(now.getTime() - WEBSITE_GROWTH_STALE_RUNNING_MS).toISOString()
+      },
+      startedAt: new Date("2026-07-23T12:00:00.000Z")
+    }, now);
+
+    expect(retry).toEqual({ canRetry: true, reason: "STALE_DISPATCH" });
   });
 
   it("requires both a bearer token and the configured tenant scope for callbacks", () => {

@@ -14,7 +14,8 @@ import { prisma } from "@/server/db";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 
 const JOB_TYPE = "WEBSITE_GROWTH_DEVELOPER_BUILD";
-export const WEBSITE_GROWTH_STALE_DISPATCH_MS = 45 * 60 * 1000;
+export const WEBSITE_GROWTH_STALE_DISPATCH_MS = 10 * 60 * 1000;
+export const WEBSITE_GROWTH_STALE_RUNNING_MS = 45 * 60 * 1000;
 
 export type WebsiteGrowthBuildPhase =
   | "QUEUED"
@@ -225,8 +226,12 @@ export function getWebsiteGrowthBuildRetryState(
     readTimestamp(output.dispatchedAt) ??
     job.startedAt;
   const staleForMs = now.getTime() - lastActivityAt.getTime();
+  const staleAfterMs =
+    phase === "DISPATCHED"
+      ? WEBSITE_GROWTH_STALE_DISPATCH_MS
+      : WEBSITE_GROWTH_STALE_RUNNING_MS;
 
-  if (canBecomeStale && staleForMs >= WEBSITE_GROWTH_STALE_DISPATCH_MS) {
+  if (canBecomeStale && staleForMs >= staleAfterMs) {
     return { canRetry: true, reason: "STALE_DISPATCH" as const };
   }
 

@@ -8,10 +8,12 @@ An approved Website Growth brief dispatches a GitHub Actions build in the Newl w
 
 If GitHub Actions stops before its first callback, Newl Apps may still show the developer run as `DISPATCHED` even though the external workflow has already failed. This can happen during repository checkout or infrastructure startup.
 
+The approved-brief package and status callback endpoints are machine routes. Middleware must allow them to reach their dedicated tenant-bound bearer-token authentication without requiring a browser session cookie. Otherwise the website workflow receives the login page instead of JSON and stops before either model runs.
+
 ## Stale-run recovery
 
-- A `DISPATCHED` queued run becomes retryable when no callback has updated it for 45 minutes.
-- A `DISPATCHED` or `RUNNING` active run also becomes retryable after the same 45-minute callback window.
+- A `DISPATCHED` queued run becomes retryable when no callback has updated it for 10 minutes. The package fetch and initial running callback normally happen within seconds, so this shorter window recovers startup and authentication failures without waiting for the full model-build timeout.
+- A `RUNNING` active run becomes retryable after a longer 45-minute callback window.
 - Runs at `PR_OPEN` or `PREVIEW_READY` never become retryable through this timeout because a branch or review artifact already exists.
 - Existing `ERROR` and `CANCELLED` runs remain retryable immediately.
 - Retry reuses the same tenant-scoped, immutable approved brief and dispatches the workflow from the currently configured website base branch.
@@ -25,4 +27,6 @@ If GitHub Actions stops before its first callback, Newl Apps may still show the 
 
 ## Regression coverage
 
-`tests/website-growth.test.ts` verifies the 45-minute retry boundary and confirms that a run with an open pull request is not treated as stale.
+`tests/website-growth.test.ts` verifies the 10-minute dispatched and 45-minute running retry boundaries and confirms that a run with an open pull request is not treated as stale.
+
+`tests/middleware-machine-routes.test.ts` verifies that the Website Growth build-request endpoints bypass browser-session middleware and retain their own worker-token and tenant authentication.

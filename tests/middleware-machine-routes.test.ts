@@ -27,4 +27,13 @@ describe("middleware machine route exemptions", () => {
     expect(config.matcher[0]).toContain("api/website-growth/scout");
     expect(config.matcher[0]).toContain("api/website-growth/weekly-plan");
   });
+
+  it("lets Website Growth build workers enforce their tenant-bound token auth", () => {
+    expect(config.matcher[0]).toContain("api/website-growth/build-requests");
+    const matcher = new RegExp(`^${config.matcher[0]}$`);
+
+    expect(matcher.test("/api/website-growth/build-requests/build_123/package")).toBe(false);
+    expect(matcher.test("/api/website-growth/build-requests/build_123/status")).toBe(false);
+    expect(matcher.test("/website-growth")).toBe(true);
+  });
 });
