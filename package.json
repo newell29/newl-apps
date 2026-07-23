@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "NEXT_DIST_DIR=.next-dev next dev",
+    "dev": "node scripts/next-dev.js",
     "dev:fresh": "npm run sync:main && npm run dev",
     "build": "next build",
     "build:canonical-trademining-reference": "tsx scripts/build-canonical-trademining-reference.ts",
