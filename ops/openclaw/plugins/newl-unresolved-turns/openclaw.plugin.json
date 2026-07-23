@@ -2,7 +2,7 @@
   "id": "newl-unresolved-turns",
   "name": "Newl Unresolved Turns",
   "description": "Captures failed or unanswered Microsoft Teams turns for tenant-scoped developer review.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "configSchema": {
     "type": "object",
     "required": [

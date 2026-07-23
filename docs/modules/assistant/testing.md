@@ -40,7 +40,9 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 
 Sanitized Preview-only model comparisons are recorded in [model-benchmarks.md](model-benchmarks.md). Candidate models must use the fixed prompt suite, fake identifiers, identity-bound read-only tools, and the documented scoring criteria so results remain comparable.
 
-Unresolved-turn tests verify that capture is tenant scoped, successful Teams turns are removed, failed turns retain sanitized evidence, external identifiers are hashed, stale pending turns are listed as `NO_RESPONSE`, only Admin users can list issues, and capture failures do not interrupt Nemo. The OpenClaw plugin tests cover model, tool, and delivery signals without retaining model reasoning or raw tool payloads.
+Unresolved-turn tests verify that capture is tenant scoped, successful Teams turns are removed, failed turns retain sanitized evidence, external identifiers are hashed, stale pending turns are listed as `NO_RESPONSE`, only Admin users can list issues, and capture failures do not interrupt Nemo. The OpenClaw plugin tests cover the run-correlated `before_agent_run` hook, model/tool/delivery signals, conservative capability-gap language, and local-only spreadsheet links without retaining model reasoning or raw tool payloads.
+
+Teams spreadsheet tests verify that only an authenticated Teams turn can create a workbook, output stays inside the OpenClaw workspace, limits are enforced, formula-like text is neutralized, the result is a valid ZIP-based `.xlsx`, and the routing skill requires the native `message(action=upload-file)` workflow instead of returning a Mac path.
 
 Teamship routing regression tests verify that configured customer names resolve through tenant-scoped `readOnlyScopes`, single-warehouse customers default safely, explicit warehouse names resolve without numeric IDs, and multi-warehouse customers receive a clarification instead of an inferred scope.
 

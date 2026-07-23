@@ -101,6 +101,32 @@ describe("OpenClaw unresolved turns", () => {
     expect(JSON.stringify(args)).not.toContain("secret-value");
   });
 
+  it("accepts deterministic capability and artifact-delivery failure categories", async () => {
+    await failOpenClawTurn(context, {
+      runId: "run-capability",
+      prompt: "Create a spreadsheet",
+      failureKind: "ARTIFACT_DELIVERY_FAILURE",
+      response: "The file was not attached.",
+      errorCode: "local_file_not_uploaded"
+    });
+
+    expect(mocks.upsert.mock.calls[0]?.[0].create).toMatchObject({
+      failureKind: "ARTIFACT_DELIVERY_FAILURE",
+      errorCode: "local_file_not_uploaded"
+    });
+
+    await failOpenClawTurn(context, {
+      runId: "run-capability-2",
+      prompt: "Check the open invoice",
+      failureKind: "CAPABILITY_GAP",
+      response: "I cannot verify it."
+    });
+
+    expect(mocks.upsert.mock.calls[1]?.[0].create).toMatchObject({
+      failureKind: "CAPABILITY_GAP"
+    });
+  });
+
   it("lists only open and stale pending rows inside the tenant", async () => {
     mocks.findMany.mockResolvedValue([
       {

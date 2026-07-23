@@ -14,6 +14,14 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - Newl Apps validates every returned opportunity ID against the exact candidate IDs stored in the tenant-scoped job.
 - Only Admin and Manager roles may approve a brief and start the existing developer workflow. Scout never receives that authority.
 
+## Developer comparison boundary
+
+- Codex and optional Kimi K3 start only from the same tenant-scoped, immutable approved brief.
+- Agent jobs have read-only repository permissions and cannot push, open a PR, merge, or deploy production.
+- A separate job applies only a verified patch to an isolated `codex/website-growth-*` or `kimi/website-growth-*` branch and opens a draft PR.
+- Only the Codex branch reports PR and Preview status to the primary Newl Apps build record during the Kimi trial.
+- The owner retains the merge decision for every branch. Kimi failure cannot block or downgrade the primary Codex result.
+
 ## Workflow / rules summary
 
 - Entry points are protected authenticated pages and/or API routes for this module.
