@@ -5,13 +5,16 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { chromium, type Browser, type Locator, type Page } from "playwright-core";
 
+import {
+  parseTeamshipShippingOrderPalletPreflight,
+  readTeamshipShippingOrderPalletCount
+} from "@/modules/teamship/browser-read-execution";
 import type {
   ClaimedTeamshipPrintJob,
   TeamshipPrintExecutionDocument,
   TeamshipPrintExecutionResult
 } from "@/modules/teamship/print-jobs";
 import {
-  calculateTeamshipPalletCount,
   readTeamshipCustomerName,
   readTeamshipWarehouseName,
   resolveTeamshipInternalOrderId,
@@ -65,11 +68,12 @@ export async function executeTeamshipPrintJob(
     const bolUrl = new URL(`/ship-inventories/${encodeURIComponent(job.teamshipOrderId)}/bol-editor`, baseUrl);
 
     // Resolve the display number to the approved internal ID before any browser action or print is sent.
-    observedPalletCount = await readTeamshipApiPalletCount(job);
-    assertApprovedPalletCount(observedPalletCount, job.approvedPalletCount);
-    // Preflight every browser and printer destination before any print is sent.
+    await assertTeamshipApiOrderIdentity(job);
     await openTeamshipPage(page, orderUrl, job, allowedHosts, options);
-    await findExactPrinterOption(page, job.printerPlan.outboundLabels.exactName);
+    observedPalletCount = await readTeamshipPrintPagePalletCount(page, job, options);
+    assertApprovedPalletCount(observedPalletCount, job.approvedPalletCount);
+    // Preflight every browser control and printer destination before any print is sent.
+    await preflightOutboundLabels(page, job);
     await openTeamshipPage(page, bolUrl, job, allowedHosts, options);
     await findExactPrinterOption(page, job.printerPlan.bol.exactName);
     await assertCupsQueueAvailable(job.printerPlan.pickingList.queue);
@@ -82,7 +86,7 @@ export async function executeTeamshipPrintJob(
 
     // Printer selection is intentionally redone after returning to the order.
     await openTeamshipPage(page, orderUrl, job, allowedHosts, options);
-    observedPalletCount = await readTeamshipApiPalletCount(job);
+    observedPalletCount = await readTeamshipPrintPagePalletCount(page, job, options);
     assertApprovedPalletCount(observedPalletCount, job.approvedPalletCount);
     completedDocuments.push(await printOutboundLabels(page, job));
 
@@ -102,7 +106,7 @@ export async function executeTeamshipPrintJob(
   }
 }
 
-export async function readTeamshipApiPalletCount(
+export async function assertTeamshipApiOrderIdentity(
   job: ClaimedTeamshipPrintJob,
   findOrders: typeof findTeamshipShippingOrders = findTeamshipShippingOrders
 ) {
@@ -124,7 +128,28 @@ export async function readTeamshipApiPalletCount(
   if (normalizeTeamshipIdentity(readTeamshipWarehouseName(order)) !== normalizeTeamshipIdentity(job.warehouseName)) {
     throw new Error("Teamship API warehouse does not match the approved print plan.");
   }
-  return calculateTeamshipPalletCount(order);
+}
+
+export async function readTeamshipPrintPagePalletCount(
+  page: Page,
+  job: ClaimedTeamshipPrintJob,
+  options: TeamshipPrintExecutionOptions = {}
+) {
+  const customerMatches = await page.getByText(job.customerName, { exact: true }).count();
+  const warehouseMatches = await page.getByText(job.warehouseName, { exact: true }).count();
+  if (customerMatches < 1 || warehouseMatches < 1) {
+    throw new Error("The Teamship shipping-order page does not match the approved customer and warehouse.");
+  }
+
+  return parseTeamshipShippingOrderPalletPreflight({
+    teamshipOrderId: job.teamshipOrderId,
+    palletCount: await readTeamshipShippingOrderPalletCount(
+      page,
+      options.navigationTimeoutMs ?? 15_000
+    ),
+    customerName: job.customerName,
+    warehouseName: job.warehouseName
+  }).palletCount;
 }
 
 function normalizeTeamshipIdentity(value: string) {
@@ -210,20 +235,7 @@ async function printBol(page: Page, job: ClaimedTeamshipPrintJob): Promise<Teams
 async function printOutboundLabels(page: Page, job: ClaimedTeamshipPrintJob): Promise<TeamshipPrintExecutionDocument> {
   const expectedName = job.printerPlan.outboundLabels.exactName;
   const selected = await selectTeamshipPrinterExact(page, expectedName);
-  const menu = await requireUniqueVisible([
-    page.locator(".step2-menu"),
-    page.getByText("Step 2", { exact: false })
-  ], "Teamship Step 2 menu");
-  await menu.click();
-  const outbound = await requireUniqueVisible([
-    page.locator(".step2-dropdown-item").filter({ hasText: "Print Outbound Labels" }),
-    page.getByText("Print Outbound Labels", { exact: true })
-  ], "Print Outbound Labels control");
-  await outbound.click();
-  const dialog = page.getByRole("dialog").filter({ hasText: "Print Outbound Labels" }).first();
-  await dialog.waitFor({ state: "visible" });
-  const quantity = dialog.locator('input[type="number"]:visible').first();
-  if (await quantity.count() !== 1) throw new Error("Outbound-label quantity control was not uniquely identified.");
+  const { quantity, submit } = await openTeamshipOutboundLabelsDialog(page);
   await quantity.fill(String(job.approvedPalletCount));
 
   // Re-read the page-level printer immediately before the irreversible click.
@@ -232,16 +244,12 @@ async function printOutboundLabels(page: Page, job: ClaimedTeamshipPrintJob): Pr
   if (await quantity.inputValue() !== String(job.approvedPalletCount)) {
     throw new Error("Outbound-label quantity changed before printing.");
   }
-  const submit = await requireUniqueVisible([
-    dialog.getByRole("button", { name: "Print", exact: true }),
-    dialog.locator('button:has-text("Print")')
-  ], "final outbound-label Print control");
   await submit.click();
   await Promise.race([
     page.getByText("Sending print job...", { exact: false }).waitFor({ state: "visible", timeout: 8_000 }),
-    dialog.waitFor({ state: "hidden", timeout: 8_000 })
+    page.locator("#printOutboundLabelsModal").waitFor({ state: "hidden", timeout: 8_000 })
   ]).catch(() => undefined);
-  await dialog.waitFor({ state: "hidden" });
+  await page.locator("#printOutboundLabelsModal").waitFor({ state: "hidden" });
   await assertNoVisiblePrintError(page);
   return {
     kind: "OUTBOUND_LABELS",
@@ -249,6 +257,51 @@ async function printOutboundLabels(page: Page, job: ClaimedTeamshipPrintJob): Pr
     printer: expectedName,
     copies: job.approvedPalletCount
   };
+}
+
+async function preflightOutboundLabels(page: Page, job: ClaimedTeamshipPrintJob) {
+  const expectedName = job.printerPlan.outboundLabels.exactName;
+  const selected = await selectTeamshipPrinterExact(page, expectedName);
+  const { dialog } = await openTeamshipOutboundLabelsDialog(page);
+  const headerPrinter = await findExactPrinterOption(page, expectedName);
+  await assertTeamshipPrinterSelected(headerPrinter.select, expectedName, selected.value);
+  const close = await requireOneVisible(
+    dialog.getByRole("button", { name: "Close", exact: true }),
+    "outbound-label Close control"
+  );
+  await close.click();
+  await page.locator("#printOutboundLabelsModal").waitFor({ state: "hidden" });
+}
+
+export async function openTeamshipOutboundLabelsDialog(page: Page) {
+  const menu = await requireOneVisible(
+    page.locator(".step2-menu:visible"),
+    "Teamship Step 2 menu"
+  );
+  await menu.click();
+  await page.locator(".step2-dropdown-item").waitFor({ state: "visible" });
+  const outbound = await requireOneVisible(
+    page.locator(".step2-dropdown-item:visible"),
+    "Print Outbound Labels control"
+  );
+  if ((await outbound.innerText()).trim() !== "Print Outbound Labels") {
+    throw new Error("The Teamship Step 2 menu did not expose the exact outbound-label action.");
+  }
+  await outbound.click();
+  await page.locator("#printOutboundLabelsModal").waitFor({ state: "visible" });
+  const dialog = await requireOneVisible(
+    page.locator("#printOutboundLabelsModal:visible"),
+    "Print Outbound Labels dialog"
+  );
+  const quantity = await requireOneVisible(
+    dialog.locator("#outboundLabelQty:visible"),
+    "outbound-label quantity control"
+  );
+  const submit = await requireOneVisible(
+    dialog.getByRole("button", { name: "Print", exact: true }),
+    "final outbound-label Print control"
+  );
+  return { dialog, quantity, submit };
 }
 
 async function openTeamshipPage(
@@ -359,6 +412,13 @@ async function requireUniqueVisible(candidates: Locator[], label: string) {
   }
   if (unique.size !== 1) throw new Error(`${label} was not uniquely identified.`);
   return [...unique.values()][0]!;
+}
+
+async function requireOneVisible(candidate: Locator, label: string) {
+  if (await candidate.count() !== 1) throw new Error(`${label} was not uniquely identified.`);
+  const exact = candidate.first();
+  if (!await exact.isVisible()) throw new Error(`${label} was not visible.`);
+  return exact;
 }
 
 async function assertNoVisiblePrintError(page: Page) {

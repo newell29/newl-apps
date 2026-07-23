@@ -10,8 +10,10 @@ import {
   parseProductHistoryPage,
   parseReceivingOrderPage,
   parseTeamshipInventoryPagerLabel,
+  parseTeamshipShippingOrderPalletRows,
+  parseTeamshipShippingOrderPalletTableRows,
   parseTeamshipShippingOrderPalletPreflight,
-  readUniqueTeamshipPalletCountInput,
+  readTeamshipShippingOrderPalletCount,
   submitTeamshipInventorySearch,
   waitForTeamshipInventorySearchResult
 } from "@/modules/teamship/browser-read-execution";
@@ -64,20 +66,133 @@ describe("Teamship browser read extraction", () => {
     })).toThrow(/whole number/i);
   });
 
-  it("waits for Teamship to attach its dynamic pallet count before reading it", async () => {
-    const events: string[] = [];
-    const input = {
-      waitFor: vi.fn().mockImplementation(async () => { events.push("wait"); }),
-      inputValue: vi.fn().mockImplementation(async () => { events.push("value"); return "1"; })
+  it("falls back to the signed-in pallet rows when Teamship omits its hidden count", async () => {
+    const waitFor = vi.fn().mockResolvedValue(undefined);
+    const values: Record<string, string> = {
+      "input#pallet_1": "1",
+      "input#pallet_1_length": "48",
+      "input#pallet_1_width": "40",
+      "input#pallet_1_height": "40",
+      "input#pallet_1_weight": "250",
+      "#pallet_1_weight_unit": "lbs",
+      "#pallet_1_commodity": "SKU: A4505560-5001 QTY: 1"
     };
-    const locator = {
-      first: vi.fn().mockReturnValue(input),
-      count: vi.fn().mockImplementation(async () => { events.push("count"); return 1; })
+    const page = {
+      locator: vi.fn((selector: string) => {
+        if (selector.startsWith("input#pallets_count,input[id^=")) {
+          return { first: () => ({ waitFor }) };
+        }
+        const value = values[selector];
+        return {
+          count: vi.fn().mockResolvedValue(value === undefined ? 0 : 1),
+          first: () => ({ inputValue: vi.fn().mockResolvedValue(value) })
+        };
+      })
     };
 
-    await expect(readUniqueTeamshipPalletCountInput(locator as never, 15_000)).resolves.toBe("1");
-    expect(input.waitFor).toHaveBeenCalledWith({ state: "attached", timeout: 15_000 });
-    expect(events).toEqual(["wait", "count", "value"]);
+    await expect(readTeamshipShippingOrderPalletCount(page as never, 30_000)).resolves.toBe("1");
+    expect(waitFor).toHaveBeenCalledWith({ state: "attached", timeout: 30_000 });
+  });
+
+  it("treats Teamship's hidden count as a row count and sums physical pallet quantities", async () => {
+    const waitFor = vi.fn().mockResolvedValue(undefined);
+    const values: Record<string, string> = {
+      "input#pallets_count": "2",
+      "input#pallet_1": "2",
+      "input#pallet_1_length": "1",
+      "input#pallet_1_width": "1",
+      "input#pallet_1_height": "1",
+      "input#pallet_1_weight": "1",
+      "#pallet_1_weight_unit": "lbs",
+      "#pallet_1_commodity": "SKU: MCO-GS-10S-5002 QTY: 2",
+      "input#pallet_2": "1",
+      "input#pallet_2_length": "1",
+      "input#pallet_2_width": "1",
+      "input#pallet_2_height": "1",
+      "input#pallet_2_weight": "1",
+      "#pallet_2_weight_unit": "lbs",
+      "#pallet_2_commodity": "SKU: 1951223-5001 QTY: 1"
+    };
+    const page = {
+      locator: vi.fn((selector: string) => {
+        if (selector.startsWith("input#pallets_count,input[id^=")) {
+          return { first: () => ({ waitFor }) };
+        }
+        const value = values[selector];
+        return {
+          count: vi.fn().mockResolvedValue(value === undefined ? 0 : 1),
+          first: () => ({ inputValue: vi.fn().mockResolvedValue(value) })
+        };
+      })
+    };
+
+    await expect(readTeamshipShippingOrderPalletCount(page as never, 30_000)).resolves.toBe("3");
+  });
+
+  it("reads the bounded pallet table rendered for a completed shipping order", () => {
+    expect(parseTeamshipShippingOrderPalletTableRows([
+      ["1", "W: 1 L: 1 H: 1", "34"]
+    ])).toBe(1);
+    expect(() => parseTeamshipShippingOrderPalletTableRows([
+      ["2.5", "W: 1 L: 1 H: 1", "34"]
+    ])).toThrow(/invalid quantity/i);
+  });
+
+  it("falls back to the completed-order pallet table when editable fields are absent", async () => {
+    const waitFor = vi.fn().mockResolvedValue(undefined);
+    const cells = {
+      count: vi.fn().mockResolvedValue(3),
+      allInnerTexts: vi.fn().mockResolvedValue(["1", "W: 1 L: 1 H: 1", "34"])
+    };
+    const headerCells = { count: vi.fn().mockResolvedValue(0) };
+    const tableRows = {
+      count: vi.fn().mockResolvedValue(2),
+      nth: vi.fn((index: number) => ({
+        locator: vi.fn().mockReturnValue(index === 0 ? headerCells : cells)
+      }))
+    };
+    const table = {
+      locator: vi.fn().mockReturnValue(tableRows)
+    };
+    const tables = {
+      filter: vi.fn().mockReturnThis(),
+      count: vi.fn().mockResolvedValue(1),
+      first: vi.fn().mockReturnValue(table)
+    };
+    const page = {
+      locator: vi.fn((selector: string) => {
+        if (selector.startsWith("input#pallets_count,input[id^=")) {
+          return { first: () => ({ waitFor }) };
+        }
+        if (selector === "table:visible") return tables;
+        return { count: vi.fn().mockResolvedValue(0) };
+      })
+    };
+
+    await expect(readTeamshipShippingOrderPalletCount(page as never, 30_000)).resolves.toBe("1");
+    expect(tables.filter).toHaveBeenCalledTimes(3);
+    expect(table.locator).toHaveBeenCalledWith("tr:visible");
+    expect(tableRows.nth).toHaveBeenCalledWith(1);
+  });
+
+  it("ignores default-only ghost rows and sums valid pallet-row quantities", () => {
+    expect(parseTeamshipShippingOrderPalletRows([{
+      quantity: "2",
+      length: "48",
+      width: "40",
+      height: "40",
+      weight: "500",
+      weightUnit: "lbs",
+      commodity: "Pallet one"
+    }, {
+      quantity: null,
+      length: null,
+      width: null,
+      height: null,
+      weight: null,
+      weightUnit: "lbs",
+      commodity: null
+    }])).toBe(2);
   });
 
   it("normalizes only the allowlisted Inventory All fields", () => {

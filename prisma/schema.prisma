@@ -432,81 +432,82 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships                             Membership[]
-  moduleAccess                            TenantModuleAccess[]
-  rolePolicies                            TenantRolePolicy[]
-  roleModuleAccess                        TenantRoleModuleAccess[]
-  integrationCredentials                  IntegrationCredential[]
-  auditLogs                               AuditLog[]
-  jobRuns                                 AutomationJobRun[]
-  companies                               Company[]
-  importRecords                           TradeMiningImportRecord[]
-  searchProfiles                          TradeMiningSearchProfile[]
-  tradeMiningScoringConfig                TradeMiningScoringConfig?
-  leadScoreSnapshots                      LeadScoreSnapshot[]
-  leadOutcomeEvents                       LeadOutcomeEvent[]
-  contacts                                Contact[]
-  leads                                   Lead[]
-  contactOutreachDrafts                   ContactOutreachDraft[]
-  apolloCompanyMatches                    ApolloCompanyMatch[]
-  ltlBatchQuoteLanes                      LtlBatchQuoteLane[]
-  assistantThreads                        AssistantChatThread[]
-  assistantMessages                       AssistantChatMessage[]
-  websiteInboundSubmissions               WebsiteInboundSubmission[]
-  websiteGrowthOpportunities              WebsiteGrowthOpportunity[]
-  websiteGrowthContentDrafts              WebsiteGrowthContentDraft[]
-  websiteGrowthDataImports                WebsiteGrowthDataImport[]
-  websiteGrowthMetrics                    WebsiteGrowthMetric[]
-  creditChecks                            CreditCheck[]
-  assistantRuns                           AssistantRun[]
-  assistantRetrievedSources               AssistantRetrievedSource[]
-  assistantKnowledgeDocuments             AssistantKnowledgeDocument[]
-  assistantKnowledgeChunks                AssistantKnowledgeChunk[]
-  assistantMemories                       AssistantMemory[]
-  assistantMailboxSyncStates              AssistantMailboxSyncState[]
-  assistantAutomations                    AssistantAutomation[]
-  assistantAutomationRuns                 AssistantAutomationRun[]
-  workflowArtifacts                       WorkflowArtifact[]
-  workflowArtifactChunks                  WorkflowArtifactChunk[]
-  operationalFeedback                     OperationalFeedback[]
-  approvedOperationalLessons              ApprovedOperationalLesson[]
-  developmentSuggestions                  DevelopmentSuggestion[]
-  shipmentDocumentRuns                    ShipmentDocumentRun[]
-  shipmentCarrierManifestRuns             ShipmentCarrierManifestRun[]
-  teamshipReviewRuns                      TeamshipReviewRun[]
-  teamshipReviewOrders                    TeamshipReviewOrder[]
-  teamshipDailySyncRuns                   TeamshipDailySyncRun[]
-  teamshipSyncedOrders                    TeamshipSyncedOrder[]
-  teamshipUpdateJobs                      TeamshipUpdateJob[]
-  teamshipUpdateOrders                    TeamshipUpdateOrder[]
-  teamshipBrowserReadJobs                 TeamshipBrowserReadJob[]
-  teamshipPrintJobs                       TeamshipPrintJob[]
-  openClawUnresolvedTurns                 OpenClawUnresolvedTurn[]
-  garlandProductDimensionObservations     GarlandProductDimensionObservation[]
-  garlandSourceEmails                     GarlandSourceEmail[]
-  garlandSourceAttachments                GarlandSourceAttachment[]
-  garlandEmailSyncRuns                    GarlandEmailSyncRun[]
-  cashflowCustomers                       CashflowCustomer[]
-  cashflowCustomerAliases                 CashflowCustomerAlias[]
-  cashflowFiles                           CashflowFile[]
-  cashflowCustomerInvoices                CashflowCustomerInvoice[]
-  cashflowVendorBills                     CashflowVendorBill[]
-  cashflowSnapshots                       CashflowCustomerSnapshot[]
-  cashflowAlerts                          CashflowAlert[]
-  cashflowFollowUps                       CashflowFollowUp[]
-  cashflowAccountingLines                 CashflowAccountingLine[]
-  cashflowSettings                        CashflowSettings?
-  oceanFreightAgents                      OceanFreightAgent[]
-  oceanFreightAgentBranches               OceanFreightAgentBranch[]
-  oceanFreightAgentContacts               OceanFreightAgentContact[]
-  oceanFreightSourceEmails                OceanFreightSourceEmail[]
-  oceanFreightSourceAttachments           OceanFreightSourceAttachment[]
-  oceanFreightRateCandidates              OceanFreightRateCandidate[]
-  oceanFreightRates                       OceanFreightRate[]
-  invoiceAutomationDocuments              InvoiceAutomationDocument[]
-  invoiceAutomationBatches                InvoiceAutomationBatch[]
-  invoiceAutomationInvoices               InvoiceAutomationInvoice[]
-  invoiceAutomationQuickBooksEntities     InvoiceAutomationQuickBooksEntity[]
+  memberships                         Membership[]
+  moduleAccess                        TenantModuleAccess[]
+  rolePolicies                        TenantRolePolicy[]
+  roleModuleAccess                    TenantRoleModuleAccess[]
+  integrationCredentials              IntegrationCredential[]
+  auditLogs                           AuditLog[]
+  jobRuns                             AutomationJobRun[]
+  companies                           Company[]
+  importRecords                       TradeMiningImportRecord[]
+  searchProfiles                      TradeMiningSearchProfile[]
+  tradeMiningScoringConfig            TradeMiningScoringConfig?
+  leadScoreSnapshots                  LeadScoreSnapshot[]
+  leadOutcomeEvents                   LeadOutcomeEvent[]
+  contacts                            Contact[]
+  leads                               Lead[]
+  contactOutreachDrafts               ContactOutreachDraft[]
+  apolloCompanyMatches                ApolloCompanyMatch[]
+  ltlBatchQuoteLanes                  LtlBatchQuoteLane[]
+  assistantThreads                    AssistantChatThread[]
+  assistantMessages                   AssistantChatMessage[]
+  websiteInboundSubmissions           WebsiteInboundSubmission[]
+  websiteGrowthOpportunities          WebsiteGrowthOpportunity[]
+  websiteGrowthContentDrafts          WebsiteGrowthContentDraft[]
+  websiteGrowthDataImports            WebsiteGrowthDataImport[]
+  websiteGrowthMetrics                WebsiteGrowthMetric[]
+  creditChecks                        CreditCheck[]
+  assistantRuns                       AssistantRun[]
+  assistantRetrievedSources           AssistantRetrievedSource[]
+  assistantKnowledgeDocuments         AssistantKnowledgeDocument[]
+  assistantKnowledgeChunks            AssistantKnowledgeChunk[]
+  assistantMemories                   AssistantMemory[]
+  assistantMailboxSyncStates          AssistantMailboxSyncState[]
+  assistantAutomations                AssistantAutomation[]
+  assistantAutomationRuns             AssistantAutomationRun[]
+  workflowArtifacts                   WorkflowArtifact[]
+  workflowArtifactChunks              WorkflowArtifactChunk[]
+  operationalFeedback                 OperationalFeedback[]
+  approvedOperationalLessons          ApprovedOperationalLesson[]
+  developmentSuggestions              DevelopmentSuggestion[]
+  shipmentDocumentRuns                ShipmentDocumentRun[]
+  shipmentCarrierManifestRuns         ShipmentCarrierManifestRun[]
+  shipmentCarrierManifestAttachments  ShipmentCarrierManifestAttachment[]  
+  teamshipReviewRuns                  TeamshipReviewRun[]
+  teamshipReviewOrders                TeamshipReviewOrder[]
+  teamshipDailySyncRuns               TeamshipDailySyncRun[]
+  teamshipSyncedOrders                TeamshipSyncedOrder[]
+  teamshipUpdateJobs                  TeamshipUpdateJob[]
+  teamshipUpdateOrders                TeamshipUpdateOrder[]
+  teamshipBrowserReadJobs             TeamshipBrowserReadJob[]
+  teamshipPrintJobs                   TeamshipPrintJob[]
+  openClawUnresolvedTurns             OpenClawUnresolvedTurn[]
+  garlandProductDimensionObservations GarlandProductDimensionObservation[]
+  garlandSourceEmails                 GarlandSourceEmail[]
+  garlandSourceAttachments            GarlandSourceAttachment[]
+  garlandEmailSyncRuns                GarlandEmailSyncRun[]
+  cashflowCustomers                   CashflowCustomer[]
+  cashflowCustomerAliases             CashflowCustomerAlias[]
+  cashflowFiles                       CashflowFile[]
+  cashflowCustomerInvoices            CashflowCustomerInvoice[]
+  cashflowVendorBills                 CashflowVendorBill[]
+  cashflowSnapshots                   CashflowCustomerSnapshot[]
+  cashflowAlerts                      CashflowAlert[]
+  cashflowFollowUps                   CashflowFollowUp[]
+  cashflowAccountingLines             CashflowAccountingLine[]
+  cashflowSettings                    CashflowSettings?
+  oceanFreightAgents                  OceanFreightAgent[]
+  oceanFreightAgentBranches           OceanFreightAgentBranch[]
+  oceanFreightAgentContacts           OceanFreightAgentContact[]
+  oceanFreightSourceEmails            OceanFreightSourceEmail[]
+  oceanFreightSourceAttachments       OceanFreightSourceAttachment[]
+  oceanFreightRateCandidates          OceanFreightRateCandidate[]
+  oceanFreightRates                   OceanFreightRate[]
+  invoiceAutomationDocuments          InvoiceAutomationDocument[]
+  invoiceAutomationBatches            InvoiceAutomationBatch[]
+  invoiceAutomationInvoices           InvoiceAutomationInvoice[]
+  invoiceAutomationQuickBooksEntities InvoiceAutomationQuickBooksEntity[]
   invoiceAutomationQuickBooksTransactions InvoiceAutomationQuickBooksTransaction[]
   invoiceAutomationEntityAliases          InvoiceAutomationEntityAlias[]
   invoiceAutomationCorrectionMemories     InvoiceAutomationCorrectionMemory[]
@@ -541,6 +542,7 @@ model User {
   openClawUnresolvedTurns     OpenClawUnresolvedTurn[]
   shipmentDocumentRuns        ShipmentDocumentRun[]
   shipmentCarrierManifestRuns ShipmentCarrierManifestRun[]
+  shipmentCarrierManifestAttachments ShipmentCarrierManifestAttachment[]
   teamshipReviewRuns          TeamshipReviewRun[]
   teamshipUpdateJobsCreated   TeamshipUpdateJob[]          @relation("TeamshipUpdateJobCreatedBy")
   teamshipUpdateJobsApproved  TeamshipUpdateJob[]          @relation("TeamshipUpdateJobApprovedBy")
@@ -896,10 +898,30 @@ model ShipmentCarrierManifestRun {
 
   tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdBy User?  @relation(fields: [createdByUserId], references: [id], onDelete: NoAction)
+  attachments ShipmentCarrierManifestAttachment[]
 
   @@index([tenantId, workflowKey, shipmentDate])
   @@index([tenantId, createdAt])
   @@index([tenantId, deletedAt])
+}
+
+model ShipmentCarrierManifestAttachment {
+  id               String   @id @default(cuid())
+  tenantId         String
+  runId            String
+  fileName         String
+  contentType      String   @default("application/pdf")
+  sizeBytes        Int
+  fileBytes        Bytes
+  uploadComplete   Boolean  @default(false)
+  uploadedByUserId String?
+  createdAt        DateTime @default(now())
+
+  tenant     Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  run        ShipmentCarrierManifestRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  uploadedBy User?                      @relation(fields: [uploadedByUserId], references: [id], onDelete: NoAction)
+
+  @@index([tenantId, runId, createdAt])
 }
 
 model TeamshipReviewRun {

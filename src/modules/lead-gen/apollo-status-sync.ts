@@ -188,6 +188,22 @@ export async function syncApolloStatusesForTenant(
         const sequenceChanged = sequenceStatus !== contact.sequenceStatus;
         const replyChanged = replyStatus !== contact.replyStatus;
         const rawJson = mergeApolloSyncPayload(contact.rawJson, incoming, syncedAt);
+        let leadId: string | null = null;
+        let scoreSnapshotId: string | null = null;
+
+        if (sequenceChanged || replyChanged) {
+          const lead = await prisma.lead.findFirst({
+            where: { tenantId: tenant.tenantId, companyId: contact.companyId },
+            select: { id: true }
+          });
+          const scoreSnapshot = await dependencies.recordScoreSnapshot({
+            tenantId: tenant.tenantId,
+            contactId: contact.id,
+            trigger: "APOLLO_STATUS_SYNC"
+          });
+          leadId = lead?.id ?? null;
+          scoreSnapshotId = scoreSnapshot?.id ?? null;
+        }
 
         const updated = await prisma.contact.updateMany({
           where: { id: contact.id, tenantId: tenant.tenantId },
@@ -214,27 +230,18 @@ export async function syncApolloStatusesForTenant(
         result.syncedContacts += 1;
         if (sequenceChanged || replyChanged) {
           result.changedContacts += 1;
-          const lead = await prisma.lead.findFirst({
-            where: { tenantId: tenant.tenantId, companyId: contact.companyId },
-            select: { id: true }
-          });
-          const scoreSnapshot = await dependencies.recordScoreSnapshot({
-            tenantId: tenant.tenantId,
-            contactId: contact.id,
-            trigger: "APOLLO_STATUS_SYNC"
-          });
 
           if (sequenceChanged) {
             await dependencies.recordOutcome({
               tenantId: tenant.tenantId,
               companyId: contact.companyId,
               contactId: contact.id,
-              leadId: lead?.id ?? null,
+              leadId,
               outcomeType: "APOLLO_SEQUENCE_STATUS_CHANGED",
               previousValue: contact.sequenceStatus,
               currentValue: sequenceStatus,
               source: "APOLLO",
-              scoreSnapshotId: scoreSnapshot?.id ?? null,
+              scoreSnapshotId,
               occurredAt: syncedAt,
               metadata: { trigger: "SCHEDULED_SYNC" }
             });
@@ -244,12 +251,12 @@ export async function syncApolloStatusesForTenant(
               tenantId: tenant.tenantId,
               companyId: contact.companyId,
               contactId: contact.id,
-              leadId: lead?.id ?? null,
+              leadId,
               outcomeType: "APOLLO_REPLY_STATUS_CHANGED",
               previousValue: contact.replyStatus,
               currentValue: replyStatus,
               source: "APOLLO",
-              scoreSnapshotId: scoreSnapshot?.id ?? null,
+              scoreSnapshotId,
               occurredAt: syncedAt,
               metadata: { trigger: "SCHEDULED_SYNC" }
             });

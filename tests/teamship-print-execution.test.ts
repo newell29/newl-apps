@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  assertTeamshipApiOrderIdentity,
   assertTeamshipPrintPageUrl,
+  openTeamshipOutboundLabelsDialog,
   resolveExactPrinterOption,
-  resolveTeamshipPrintAppBaseUrl,
-  readTeamshipApiPalletCount
+  resolveTeamshipPrintAppBaseUrl
 } from "@/modules/teamship/print-execution";
 import type { ClaimedTeamshipPrintJob } from "@/modules/teamship/print-jobs";
 
@@ -15,15 +16,15 @@ describe("Teamship print execution safeguards", () => {
       .toBe("https://members.fulfillit.io");
   });
 
-  it("rechecks the approved order's pallet count through the Teamship API", async () => {
+  it("uses the Teamship API only for approved order identity, not its stale pallet count", async () => {
     const job: ClaimedTeamshipPrintJob = {
       id: "print-job-1",
       shippingOrderNumber: "30666",
       teamshipOrderId: "31064",
       customerName: "Garland Canada Distribution",
       warehouseName: "Annagem",
-      approvedPalletCount: 2,
-      documentPlan: { pickingListCopies: 1, bolCopies: 1, outboundLabelCopies: 2 },
+      approvedPalletCount: 1,
+      documentPlan: { pickingListCopies: 1, bolCopies: 1, outboundLabelCopies: 1 },
       printerPlan: {
         pickingList: { transport: "CUPS", queue: "_192_168_1_28", displayName: "192.168.1.28" },
         bol: { transport: "TEAMSHIP", exactName: "Office printer" },
@@ -40,7 +41,7 @@ describe("Teamship print execution safeguards", () => {
       pallet_dims: [{ quantity: 1 }, { quantity: 1 }]
     }]);
 
-    await expect(readTeamshipApiPalletCount(job, findOrders)).resolves.toBe(2);
+    await expect(assertTeamshipApiOrderIdentity(job, findOrders)).resolves.toBeUndefined();
     expect(findOrders).toHaveBeenCalledWith({
       orderIdentifier: "30666",
       credentials: job.credentials
@@ -83,7 +84,7 @@ describe("Teamship print execution safeguards", () => {
       pallet_dims: [{ quantity: 2 }]
     }]);
 
-    await expect(readTeamshipApiPalletCount(job, findOrders))
+    await expect(assertTeamshipApiOrderIdentity(job, findOrders))
       .rejects.toThrow(/exactly one approved shipping order/i);
   });
 
@@ -104,7 +105,7 @@ describe("Teamship print execution safeguards", () => {
       pallet_dims: [{ quantity: 2 }]
     }]);
 
-    await expect(readTeamshipApiPalletCount(job, findOrders))
+    await expect(assertTeamshipApiOrderIdentity(job, findOrders))
       .rejects.toThrow(/customer does not match/i);
 
     const wrongWarehouse = vi.fn(async () => [{
@@ -115,7 +116,7 @@ describe("Teamship print execution safeguards", () => {
       warehouse_name: "Another Warehouse",
       pallet_dims: [{ quantity: 2 }]
     }]);
-    await expect(readTeamshipApiPalletCount(job, wrongWarehouse))
+    await expect(assertTeamshipApiOrderIdentity(job, wrongWarehouse))
       .rejects.toThrow(/warehouse does not match/i);
   });
 
@@ -126,7 +127,7 @@ describe("Teamship print execution safeguards", () => {
       credentials: { email: "employee@example.com", password: "test-password", apiBaseUrl: null }
     } as ClaimedTeamshipPrintJob;
 
-    await expect(readTeamshipApiPalletCount(job, vi.fn(async () => [])))
+    await expect(assertTeamshipApiOrderIdentity(job, vi.fn(async () => [])))
       .rejects.toThrow(/exactly one approved shipping order/i);
   });
 
@@ -148,5 +149,56 @@ describe("Teamship print execution safeguards", () => {
       [{ label: "BIXOLON SRP-770III", value: "one" }],
       [{ label: "BIXOLON SRP-770III", value: "two" }]
     ], "BIXOLON SRP-770III")).toThrow(/more than one visible control/i);
+  });
+
+  it("uses the exact Step 2 menu and outbound-label controls", async () => {
+    const menuClick = vi.fn().mockResolvedValue(undefined);
+    const outboundClick = vi.fn().mockResolvedValue(undefined);
+    const exact = (overrides: Record<string, unknown> = {}) => ({
+      count: vi.fn().mockResolvedValue(1),
+      first: vi.fn().mockReturnThis(),
+      isVisible: vi.fn().mockResolvedValue(true),
+      ...overrides
+    });
+    const quantity = exact();
+    const submit = exact();
+    const dialog = exact({
+      locator: vi.fn((selector: string) => {
+        expect(selector).toBe("#outboundLabelQty:visible");
+        return quantity;
+      }),
+      getByRole: vi.fn((role: string, options: { name: string; exact: boolean }) => {
+        expect({ role, options }).toEqual({ role: "button", options: { name: "Print", exact: true } });
+        return submit;
+      })
+    });
+    const menu = exact({ click: menuClick });
+    const outbound = exact({
+      click: outboundClick,
+      innerText: vi.fn().mockResolvedValue("Print Outbound Labels")
+    });
+    const dropdownSurface = { waitFor: vi.fn().mockResolvedValue(undefined) };
+    const dialogSurface = { waitFor: vi.fn().mockResolvedValue(undefined) };
+    const page = {
+      locator: vi.fn((selector: string) => {
+        if (selector === ".step2-menu:visible") return menu;
+        if (selector === ".step2-dropdown-item") return dropdownSurface;
+        if (selector === ".step2-dropdown-item:visible") return outbound;
+        if (selector === "#printOutboundLabelsModal") return dialogSurface;
+        if (selector === "#printOutboundLabelsModal:visible") return dialog;
+        throw new Error(`Unexpected selector ${selector}`);
+      })
+    };
+
+    await expect(openTeamshipOutboundLabelsDialog(page as never)).resolves.toEqual({
+      dialog,
+      quantity,
+      submit
+    });
+    expect(menuClick).toHaveBeenCalledOnce();
+    expect(outboundClick).toHaveBeenCalledOnce();
+    expect(dropdownSurface.waitFor).toHaveBeenCalledWith({ state: "visible" });
+    expect(dialogSurface.waitFor).toHaveBeenCalledWith({ state: "visible" });
+    expect(page.locator).not.toHaveBeenCalledWith(expect.stringContaining("Step 2"));
   });
 });

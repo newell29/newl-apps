@@ -20,6 +20,8 @@ Relevant tables and enums are in `prisma/schema.prisma`. Operationally important
 
 `TeamshipPrintJob` stores one tenant-scoped, single-order print plan. It records the exact Teamship order, Garland/Annagem evidence, immutable document and printer plans, approved pallet count, request idempotency key, active-order duplicate lock, requester and approver, worker claim, expiry, result, and bounded failure evidence. Failed and expired jobs release the active-order lock; completed jobs retain it because Phase 1 does not support reprints.
 
+`ShipmentCarrierManifestAttachment` stores each additional PDF attached to a saved carrier-manifest run. The record carries both `tenantId` and `runId`, the original file name, PDF content type, byte size, binary contents, upload-complete state, uploader, and upload time. Existing single signed-copy columns on `ShipmentCarrierManifestRun` remain readable for backward compatibility.
+
 ```mermaid
 flowchart LR
   UI[Authenticated UI/API] --> Auth[Auth + module guard]

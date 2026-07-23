@@ -10,6 +10,8 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 
 `tests/website-growth.test.ts` verifies that scheduled completion requires SEMrush to have been queried, accepts schema-complete drafts and sanitized SEMrush evidence, and builds deterministic Teams review links. `tests/openclaw-website-growth-scout.test.ts` verifies the shared Codex executable resolver, including explicit `CODEX_BIN` and the ChatGPT application bundle fallback. Shell syntax and the JSON output schema should also be validated before rollout. Live Google, SEMrush, Codex, Teams, and Vercel calls are not part of unit tests and require the guarded preview/runtime validation described in the rollout documentation.
 
+The website repository validates the optional Kimi workflow with GitHub Actions syntax checks plus the same changed-file lint and production build used for Codex. The controlled model evaluation must start both agents from the same approved brief and website commit, then compare claim compliance, route correctness, design fit, build success, reviewer edits, latency, and cost across their separate Vercel Previews. A missing or failed Kimi run must leave the Codex callback and primary build state unchanged.
+
 ## Workflow / rules summary
 
 - Entry points are protected authenticated pages and/or API routes for this module.

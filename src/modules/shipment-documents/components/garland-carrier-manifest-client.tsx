@@ -41,6 +41,8 @@ const MANIFEST_CROP_IMAGE_JPEG_QUALITY = 0.9;
 const MANIFEST_CROP_SHEET_PADDING = 24;
 const MANIFEST_CROP_LABEL_HEIGHT = 34;
 const MANIFEST_CROP_GAP = 18;
+const PDF_ATTACHMENT_CHUNK_SIZE = 1024 * 1024;
+const MAX_PDF_ATTACHMENT_SIZE = 20 * 1024 * 1024;
 let pdfJsLoader: Promise<PdfJsModule> | null = null;
 
 function getTodayIsoDate() {
@@ -64,7 +66,7 @@ export function GarlandCarrierManifestClient({
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [uploadingSignedCopyRunId, setUploadingSignedCopyRunId] = useState<string | null>(null);
+  const [uploadingPdfRunId, setUploadingPdfRunId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!labelManuallyEdited) {
@@ -211,36 +213,71 @@ export function GarlandCarrierManifestClient({
     }
   }
 
-  async function handleSignedCopyUpload(runId: string, file: File | null) {
+  async function handlePdfAttachmentUpload(runId: string, file: File | null) {
     if (!file) {
       return;
     }
 
-    setUploadingSignedCopyRunId(runId);
+    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+      setHistoryError("Choose a PDF file to attach to the saved run.");
+      return;
+    }
+
+    setUploadingPdfRunId(runId);
     setHistoryError(null);
 
     try {
-      const response = await fetch(`/api/shipment-documents/carrier-manifest/runs/${runId}/signed-copy`, {
+      const fileBytes = await readFileAsUint8Array(file);
+
+      if (fileBytes.byteLength > MAX_PDF_ATTACHMENT_SIZE) {
+        throw new Error("PDF attachments must be 20 MB or smaller.");
+      }
+
+      const response = await fetch(`/api/shipment-documents/carrier-manifest/runs/${runId}/attachments`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           fileName: file.name,
-          contentType: file.type || "application/octet-stream",
-          base64: bytesToBase64(await readFileAsUint8Array(file))
+          contentType: "application/pdf",
+          sizeBytes: fileBytes.byteLength
         })
       });
-      const json = (await response.json().catch(() => null)) as GarlandCarrierManifestHistoryResponse | { error?: string } | null;
+      const json = (await response.json().catch(() => null)) as { attachment?: { id?: string }; error?: string } | null;
 
-      if (!response.ok || !json || !("runs" in json)) {
-        throw new Error((json && "error" in json && typeof json.error === "string" ? json.error : null) ?? "Unable to upload signed copy.");
+      if (!response.ok || !json?.attachment?.id) {
+        throw new Error((json && "error" in json && typeof json.error === "string" ? json.error : null) ?? "Unable to attach PDF.");
       }
 
-      setHistory(json);
+      const totalChunks = Math.ceil(fileBytes.byteLength / PDF_ATTACHMENT_CHUNK_SIZE);
+
+      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+        const start = chunkIndex * PDF_ATTACHMENT_CHUNK_SIZE;
+        const chunk = fileBytes.slice(start, start + PDF_ATTACHMENT_CHUNK_SIZE);
+        const chunkResponse = await fetch(
+          `/api/shipment-documents/carrier-manifest/runs/${runId}/attachments/${json.attachment.id}/chunks`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              chunkBase64: bytesToBase64(chunk),
+              chunkIndex,
+              isLast: chunkIndex === totalChunks - 1
+            })
+          }
+        );
+        const chunkJson = (await chunkResponse.json().catch(() => null)) as { error?: string } | null;
+
+        if (!chunkResponse.ok) {
+          throw new Error(chunkJson?.error ?? "Unable to upload the PDF attachment.");
+        }
+      }
+
+      await refreshHistory();
     } catch (uploadError) {
-      const message = uploadError instanceof Error ? uploadError.message : "Unable to upload signed copy.";
+      const message = uploadError instanceof Error ? uploadError.message : "Unable to attach PDF.";
       setHistoryError(message);
     } finally {
-      setUploadingSignedCopyRunId(null);
+      setUploadingPdfRunId(null);
     }
   }
 
@@ -408,7 +445,7 @@ export function GarlandCarrierManifestClient({
           <div>
             <h2 className="text-base font-semibold text-foreground">Saved carrier manifest history</h2>
             <p className="mt-1 text-sm leading-6 text-mutedForeground">
-              Download generated Excel files or upload the final signed copy after loading is complete.
+              Download generated Excel files or attach one or more PDFs after loading is complete.
             </p>
           </div>
           <div className="rounded-full border border-accentBorder bg-accentSoft px-3 py-1 text-xs font-semibold text-primary">
@@ -434,7 +471,7 @@ export function GarlandCarrierManifestClient({
                   <tr>
                     <th className="px-3 py-2">Run</th>
                     <th className="px-3 py-2">Carriers</th>
-                    <th className="px-3 py-2">Signed copy</th>
+                    <th className="px-3 py-2">Attached PDFs</th>
                     <th className="px-3 py-2">Actions</th>
                   </tr>
                 </thead>
@@ -459,28 +496,43 @@ export function GarlandCarrierManifestClient({
                         ))}
                       </td>
                       <td className="px-3 py-3 align-top text-mutedForeground">
-                        {run.signedCopyFileName ? (
-                          <>
-                            <a
-                              href={`/api/shipment-documents/carrier-manifest/runs/${run.id}?documentType=signed`}
-                              className="font-semibold text-primary hover:underline"
-                            >
-                              {run.signedCopyFileName}
-                            </a>
-                            <p className="mt-1 text-xs">Uploaded {formatDateTime(run.signedCopyUploadedAt)}</p>
-                          </>
-                        ) : (
-                          <label className="block">
-                            <span className="text-xs font-semibold text-mutedForeground">Upload final signed copy</span>
-                            <input
-                              type="file"
-                              accept="application/pdf,image/*"
-                              disabled={uploadingSignedCopyRunId === run.id}
-                              onChange={(event) => void handleSignedCopyUpload(run.id, event.target.files?.[0] ?? null)}
-                              className="mt-2 w-full text-xs"
-                            />
-                          </label>
-                        )}
+                        {run.attachments.length > 0 ? (
+                          <div className="mb-3 space-y-2">
+                            {run.attachments.map((attachment) => (
+                              <div key={attachment.id ?? "legacy-signed-copy"}>
+                                <a
+                                  href={
+                                    attachment.id
+                                      ? `/api/shipment-documents/carrier-manifest/runs/${run.id}/attachments/${attachment.id}`
+                                      : `/api/shipment-documents/carrier-manifest/runs/${run.id}?documentType=signed`
+                                  }
+                                  className="font-semibold text-primary hover:underline"
+                                >
+                                  {attachment.fileName}
+                                </a>
+                                <p className="mt-0.5 text-xs">Uploaded {formatDateTime(attachment.uploadedAt)}</p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                        <label className="block">
+                          <span className="text-xs font-semibold text-mutedForeground">
+                            {run.attachments.length > 0 ? "Add another PDF" : "Upload a completed PDF"}
+                          </span>
+                          <input
+                            type="file"
+                            accept="application/pdf,.pdf"
+                            disabled={uploadingPdfRunId === run.id}
+                            onChange={(event) => {
+                              const input = event.currentTarget;
+                              void handlePdfAttachmentUpload(run.id, input.files?.[0] ?? null).finally(() => {
+                                input.value = "";
+                              });
+                            }}
+                            className="mt-2 w-full text-xs"
+                          />
+                          {uploadingPdfRunId === run.id ? <span className="mt-1 block text-xs">Uploading PDF...</span> : null}
+                        </label>
                       </td>
                       <td className="px-3 py-3 align-top">
                         <div className="flex flex-wrap gap-2">

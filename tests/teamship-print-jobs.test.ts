@@ -100,8 +100,7 @@ describe("Teamship print jobs", () => {
     }));
     expect(findOrders).toHaveBeenCalledWith({
       tenantId: "tenant-1",
-      orderIdentifier: "30666",
-      preferUiPallets: true
+      orderIdentifier: "30666"
     });
     expect(preflightPalletCount).toHaveBeenCalledWith({
       context,

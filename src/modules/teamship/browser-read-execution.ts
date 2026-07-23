@@ -151,9 +151,8 @@ export function createTeamshipPlaywrightReadAdapter(
         throw new Error("The Teamship shipping-order page did not match the approved customer and warehouse scope.");
       }
 
-      const palletCountInputs = page.locator("input#pallets_count");
-      const palletCount = await readUniqueTeamshipPalletCountInput(
-        palletCountInputs,
+      const palletCount = await readTeamshipShippingOrderPalletCount(
+        page,
         options.navigationTimeoutMs ?? 15_000
       );
 
@@ -190,13 +189,161 @@ export function parseTeamshipShippingOrderPalletPreflight(input: {
   return { teamshipOrderId, palletCount, customerName, warehouseName };
 }
 
-export async function readUniqueTeamshipPalletCountInput(locator: Locator, timeoutMs: number) {
-  const first = locator.first();
-  await first.waitFor({ state: "attached", timeout: timeoutMs });
-  if (await locator.count() !== 1) {
-    throw new Error("The Teamship shipping-order page did not expose one unambiguous pallet count.");
+export async function readTeamshipShippingOrderPalletCount(
+  page: Pick<Page, "locator">,
+  timeoutMs: number
+) {
+  await page.locator('input#pallets_count,input[id^="pallet_"],table:has-text("No. of Pallets")').first().waitFor({
+    state: "attached",
+    timeout: timeoutMs
+  });
+
+  const countInput = page.locator("input#pallets_count");
+  const countMatches = await countInput.count();
+  if (countMatches > 1) {
+    throw new Error("The Teamship shipping-order page did not expose one unambiguous pallet-row count.");
   }
-  return first.inputValue();
+  let expectedEditableRowCount: number | null = null;
+  if (countMatches === 1) {
+    const rawRowCount = (await countInput.first().inputValue()).trim();
+    if (!/^\d+$/.test(rawRowCount)) {
+      throw new Error("The Teamship shipping-order pallet-row count was not a whole number.");
+    }
+    expectedEditableRowCount = Number(rawRowCount);
+    if (expectedEditableRowCount < 1 || expectedEditableRowCount > 10) {
+      throw new Error("The Teamship shipping-order pallet-row count was outside the allowed range.");
+    }
+  }
+
+  const rows = [];
+  for (let index = 1; index <= 10; index += 1) {
+    rows.push({
+      quantity: await readOptionalUniqueInputValue(page, `input#pallet_${index}`),
+      length: await readOptionalUniqueInputValue(page, `input#pallet_${index}_length`),
+      width: await readOptionalUniqueInputValue(page, `input#pallet_${index}_width`),
+      height: await readOptionalUniqueInputValue(page, `input#pallet_${index}_height`),
+      weight: await readOptionalUniqueInputValue(page, `input#pallet_${index}_weight`),
+      weightUnit: await readOptionalUniqueInputValue(page, `#pallet_${index}_weight_unit`),
+      commodity: await readOptionalUniqueInputValue(page, `#pallet_${index}_commodity`)
+    });
+  }
+
+  const observedRows = rows.filter(teamshipShippingOrderPalletRowIsObserved);
+  if (observedRows.length === 0) {
+    return String(parseTeamshipShippingOrderPalletTableRows(
+      await readTeamshipShippingOrderPalletTableRows(page)
+    ));
+  }
+  if (expectedEditableRowCount !== null && observedRows.length !== expectedEditableRowCount) {
+    throw new Error("The Teamship shipping-order pallet rows did not match the rendered row count.");
+  }
+
+  return String(parseTeamshipShippingOrderPalletRows(observedRows));
+}
+
+export function parseTeamshipShippingOrderPalletTableRows(rows: string[][]) {
+  if (rows.length < 1 || rows.length > 10) {
+    throw new Error("The Teamship shipping-order pallet table did not expose a bounded set of rows.");
+  }
+
+  let total = 0;
+  for (const row of rows) {
+    if (row.length !== 3) {
+      throw new Error("The Teamship shipping-order pallet table row was invalid.");
+    }
+    const rawQuantity = row[0]?.trim() ?? "";
+    if (!/^\d+$/.test(rawQuantity)) {
+      throw new Error("The Teamship shipping-order pallet table had an invalid quantity.");
+    }
+    const quantity = Number(rawQuantity);
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) {
+      throw new Error("The Teamship shipping-order pallet table quantity was outside the allowed range.");
+    }
+    total += quantity;
+    if (total > 100) {
+      throw new Error("The Teamship shipping-order pallet count was outside the allowed range.");
+    }
+  }
+  return total;
+}
+
+export function parseTeamshipShippingOrderPalletRows(rows: Array<{
+  quantity: string | null;
+  length: string | null;
+  width: string | null;
+  height: string | null;
+  weight: string | null;
+  weightUnit: string | null;
+  commodity: string | null;
+}>) {
+  let total = 0;
+  for (const row of rows) {
+    if (!teamshipShippingOrderPalletRowIsObserved(row)) continue;
+
+    const rawQuantity = row.quantity?.trim() ?? "";
+    if (!/^\d+$/.test(rawQuantity)) {
+      throw new Error("The Teamship shipping-order pallet row had an invalid quantity.");
+    }
+    const quantity = Number(rawQuantity);
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) {
+      throw new Error("The Teamship shipping-order pallet row quantity was outside the allowed range.");
+    }
+    total += quantity;
+    if (total > 100) {
+      throw new Error("The Teamship shipping-order pallet count was outside the allowed range.");
+    }
+  }
+  if (total < 1) {
+    throw new Error("The Teamship shipping-order page did not expose any valid pallet rows.");
+  }
+  return total;
+}
+
+function teamshipShippingOrderPalletRowIsObserved(row: {
+  quantity: string | null;
+  length: string | null;
+  width: string | null;
+  height: string | null;
+  weight: string | null;
+  weightUnit: string | null;
+  commodity: string | null;
+}) {
+  const normalizedWeightUnit = row.weightUnit?.trim().toLowerCase() ?? "";
+  const meaningfulWeightUnit = normalizedWeightUnit
+    && !["lb", "lbs", "pound", "pounds"].includes(normalizedWeightUnit)
+    ? row.weightUnit
+    : null;
+  return [row.quantity, row.length, row.width, row.height, row.weight, meaningfulWeightUnit, row.commodity]
+    .some((value) => Boolean(value?.trim()));
+}
+
+async function readTeamshipShippingOrderPalletTableRows(page: Pick<Page, "locator">) {
+  const tables = page.locator('table:visible')
+    .filter({ hasText: "No. of Pallets" })
+    .filter({ hasText: "Dimensions (in inches)" })
+    .filter({ hasText: "Weight (in pounds)" });
+  if (await tables.count() !== 1) {
+    throw new Error("The Teamship shipping-order page did not expose one unambiguous pallet table.");
+  }
+
+  const tableRows = tables.first().locator("tr:visible");
+  const rows: string[][] = [];
+  for (let index = 0; index < await tableRows.count(); index += 1) {
+    const cells = tableRows.nth(index).locator("td:visible");
+    if (await cells.count() === 0) continue;
+    rows.push(await cells.allInnerTexts());
+  }
+  return rows;
+}
+
+async function readOptionalUniqueInputValue(page: Pick<Page, "locator">, selector: string) {
+  const locator = page.locator(selector);
+  const count = await locator.count();
+  if (count === 0) return null;
+  if (count !== 1) {
+    throw new Error(`The Teamship shipping-order field ${selector} was ambiguous.`);
+  }
+  return locator.first().inputValue();
 }
 
 async function runBrowserRead<T>(
