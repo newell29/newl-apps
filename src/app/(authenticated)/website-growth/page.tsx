@@ -417,6 +417,14 @@ export default async function WebsiteGrowthPage({
                   <SummaryRow label="Source page" value={opportunity.sourcePage} />
                   <SummaryRow label="Confidence" value={opportunity.confidence} />
                 </dl>
+                {opportunity.contentDrafts[0] ? (
+                  <Link
+                    href={`/website-growth/drafts/${opportunity.contentDrafts[0].id}`}
+                    className="mt-4 inline-flex rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary transition-colors hover:bg-muted"
+                  >
+                    View draft / build status
+                  </Link>
+                ) : null}
               </div>
               <div className="space-y-4">
                 <div className="rounded-md border border-border bg-muted/30 p-4">

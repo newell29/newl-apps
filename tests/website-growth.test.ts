@@ -1,6 +1,11 @@
 import { generateKeyPairSync } from "node:crypto";
 
-import { WebsiteGrowthAction, type Prisma, type WebsiteGrowthOpportunity } from "@prisma/client";
+import {
+  JobStatus,
+  WebsiteGrowthAction,
+  type Prisma,
+  type WebsiteGrowthOpportunity
+} from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -15,6 +20,10 @@ import {
   dispatchWebsiteGrowthDeveloperBuild,
   getWebsiteGrowthDeveloperDispatchStatus
 } from "@/modules/website-growth/developer-dispatch";
+import {
+  getWebsiteGrowthBuildRetryState,
+  WEBSITE_GROWTH_STALE_DISPATCH_MS
+} from "@/modules/website-growth/build-requests";
 import {
   createWebsiteGrowthPullRequestPackage,
   getWebsiteGrowthGitHubPrStatus
@@ -574,6 +583,47 @@ describe("website growth developer dispatch", () => {
       reasoning_effort: "high"
     });
     expect(JSON.stringify(body)).not.toContain("test-token");
+  });
+
+  it("allows a dispatched build to be retried after its callback window expires", () => {
+    const now = new Date("2026-07-23T18:00:00.000Z");
+    const fresh = getWebsiteGrowthBuildRetryState({
+      status: JobStatus.QUEUED,
+      output: { phase: "DISPATCHED" },
+      startedAt: new Date(now.getTime() - WEBSITE_GROWTH_STALE_DISPATCH_MS + 1)
+    }, now);
+    const stale = getWebsiteGrowthBuildRetryState({
+      status: JobStatus.QUEUED,
+      output: { phase: "DISPATCHED" },
+      startedAt: new Date(now.getTime() - WEBSITE_GROWTH_STALE_DISPATCH_MS)
+    }, now);
+
+    expect(fresh).toEqual({ canRetry: false, reason: null });
+    expect(stale).toEqual({ canRetry: true, reason: "STALE_DISPATCH" });
+  });
+
+  it("does not treat a build with an open pull request as a stale dispatch", () => {
+    const retry = getWebsiteGrowthBuildRetryState({
+      status: JobStatus.RUNNING,
+      output: { phase: "PR_OPEN" },
+      startedAt: new Date("2026-07-23T12:00:00.000Z")
+    }, new Date("2026-07-23T18:00:00.000Z"));
+
+    expect(retry).toEqual({ canRetry: false, reason: null });
+  });
+
+  it("uses the latest worker callback instead of the original start time", () => {
+    const now = new Date("2026-07-23T18:00:00.000Z");
+    const retry = getWebsiteGrowthBuildRetryState({
+      status: JobStatus.RUNNING,
+      output: {
+        phase: "RUNNING",
+        updatedAt: new Date(now.getTime() - 5 * 60 * 1000).toISOString()
+      },
+      startedAt: new Date("2026-07-23T12:00:00.000Z")
+    }, now);
+
+    expect(retry).toEqual({ canRetry: false, reason: null });
   });
 
   it("requires both a bearer token and the configured tenant scope for callbacks", () => {

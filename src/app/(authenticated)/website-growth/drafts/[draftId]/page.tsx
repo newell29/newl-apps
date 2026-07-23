@@ -143,10 +143,14 @@ export default async function WebsiteGrowthDraftPreviewPage({ params }: PageProp
               <form action={retryWebsiteGrowthDeveloperBuildAction} className="mt-5">
                 <input type="hidden" name="draftId" value={draft.id} />
                 <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
-                  Retry developer build
+                  {developerBuild.retryReason === "STALE_DISPATCH"
+                    ? "Retry stale developer build"
+                    : "Retry developer build"}
                 </button>
                 <p className="mt-2 max-w-2xl text-xs leading-5 text-mutedForeground">
-                  Approval starts the Codex workflow automatically. Use this only after a configuration or dispatch failure; successful runs open a draft PR and store its link here.
+                  {developerBuild.retryReason === "STALE_DISPATCH"
+                    ? "No website callback arrived within the expected build window. Retry starts a fresh run from the current website main branch using this same approved brief."
+                    : "Approval starts the Codex workflow automatically. Use this only after a configuration or dispatch failure; successful runs open a draft PR and store its link here."}
                 </p>
               </form>
             ) : (
