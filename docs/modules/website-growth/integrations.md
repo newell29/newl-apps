@@ -12,6 +12,8 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - Website forms are reduced to counts by page and primary need before Scout sees them. Names, email addresses, phone numbers, and message bodies are excluded.
 - SEMrush uses `https://mcp.semrush.com/v1/mcp` through official OAuth in the Codex runtime. Newl Apps does not hold the OAuth token and stores only capped, sanitized evidence rows under the existing SEMrush data source with `transport: official_mcp_oauth` metadata.
 - Microsoft Teams delivery runs through the configured OpenClaw Teams account. Newl Apps constructs the message and review links deterministically; Codex cannot choose a recipient or send a message.
+- The weekly runner uses Teams' native document attachment support to deliver the SEO performance workbook and, when needed, the SEMrush keyword-import workbook to the same configured target.
+- Position Tracking remains read-only through official SEMrush MCP. Newl Apps stores the sanitized weekly snapshot and automatically prepares import rows from approved/built/published Scout briefs after case-insensitive keyword deduplication. Direct SEMrush mutation requires separate Business/API access and is not part of this workflow.
 - Scout machine routes use the dedicated `OPENCLAW_WEBSITE_GROWTH_TOKEN` and configured tenant slug.
 
 ## Workflow / rules summary

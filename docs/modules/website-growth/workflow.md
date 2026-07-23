@@ -10,15 +10,17 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 
 1. OpenClaw runs `ops/openclaw/run-website-growth-scout.sh` Monday at 9:15 AM `America/Toronto`.
 2. `/api/website-growth/scout/prepare` refreshes Search Console, GA4, and aggregate form evidence and prepares up to six candidates.
-3. Codex `gpt-5.6-sol` with high reasoning inspects the current website repository in a read-only, ephemeral session and queries official SEMrush MCP through OAuth.
-4. `/api/website-growth/scout/complete` rejects out-of-scope candidates or malformed results, stores sanitized SEMrush evidence, and saves drafts.
-5. OpenClaw sends the returned message and direct draft links to the configured Teams target.
+3. Codex `gpt-5.6-sol` with high reasoning inspects the current website repository in a read-only, ephemeral session and queries official SEMrush MCP through OAuth. It refreshes Position Tracking even when there are no page candidates.
+4. `/api/website-growth/scout/complete` rejects out-of-scope candidates or malformed results, stores sanitized SEMrush evidence and the tracking snapshot, saves drafts, and deterministically selects keywords from previously approved/built/published Scout briefs.
+5. OpenClaw sends the returned funnel summary and direct draft links to the configured Teams target, attaches a weekly SEO performance workbook on every completed run, and attaches the two-column SEMrush keyword import workbook when new deduplicated keywords exist.
 6. An Admin or Manager reviews each brief. Approval starts the website developer workflow; the owner still owns the merge.
 7. Codex builds the primary implementation. If the optional Kimi API key is configured, Kimi K3 independently builds the same immutable brief from the same website commit.
 8. Each agent output must pass the same website lint and production-build checks before a credential-separated job may open its draft PR. Vercel creates one Preview per draft PR.
 9. Newl Apps records the Codex PR and Preview as the primary build. The Kimi PR remains a shadow comparison in GitHub and cannot overwrite the primary status.
 
-The run is locked per tenant for three hours. No-candidate runs complete without sending an approval message. A Codex or SEMrush failure is recorded through `/api/website-growth/scout/fail` and does not create a draft.
+The run is locked per tenant for three hours. No-candidate runs still query Position Tracking and send the weekly Teams report, but contain no approval request. A Codex or SEMrush failure is recorded through `/api/website-growth/scout/fail` and does not create a draft.
+
+The 6,000-plus records visible under Research signals are not 6,000 proposed pages. They are a durable signal inventory. Each weekly run reviews at most 500 new records, clusters duplicate query/page intent, applies qualification thresholds, selects no more than 2 core pages, 4 supporting items, and 6 quick optimizations, sends at most 6 candidates to Scout by default, and allows Codex to promote only the ideas it recommends. These funnel counts are included in the Teams report.
 
 The Kimi comparison is optional and fails independently: a missing key, agent error, verification failure, or PR handoff failure is surfaced in the GitHub Actions summary but does not block the primary Codex build. Neither agent workflow merges or deploys production.
 

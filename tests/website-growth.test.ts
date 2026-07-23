@@ -43,6 +43,11 @@ import {
   qualifyOpportunityCandidates,
   weeklyContentRecommendations
 } from "@/modules/website-growth/opportunities";
+import {
+  buildWebsiteGrowthKeywordAdditions,
+  buildWebsiteGrowthKeywordImportReport,
+  buildWebsiteGrowthPerformanceReport
+} from "@/modules/website-growth/keyword-tracking";
 import { selectWeeklyWebsiteGrowthCandidates } from "@/modules/website-growth/weekly-plan";
 import {
   buildWebsiteGrowthScoutTeamsMessage,
@@ -351,6 +356,7 @@ describe("website growth Codex Scout completion", () => {
       semrush: {
         queried: true,
         summary: "The existing page ranks for a relevant commercial keyword.",
+        tracking: semrushTrackingSnapshot(),
         rows: [{
           opportunityId: "opportunity_1",
           keyword: "gta local trucking",
@@ -379,7 +385,7 @@ describe("website growth Codex Scout completion", () => {
   it("rejects a Scout result that silently skips SEMrush", () => {
     expect(() => parseWebsiteGrowthScoutCompletion({
       runSummary: "Skipped SEMrush.",
-      semrush: { queried: false, summary: "Unavailable", rows: [] },
+      semrush: { queried: false, summary: "Unavailable", rows: [], tracking: semrushTrackingSnapshot() },
       drafts: []
     })).toThrow("required response structure");
   });
@@ -389,14 +395,132 @@ describe("website growth Codex Scout completion", () => {
       drafts: [{ id: "draft_1", title: "GTA local trucking", summary: "Improve the current commercial page." }],
       semrushQueried: true,
       semrushSummary: "Found one weak commercial keyword.",
+      weeklyPlan: { reviewedCount: 500, selectedCount: 12 },
+      candidateCount: 6,
+      researchSignalCount: 6505,
+      researchInventory: { MONITORING: 6105 },
+      keywordAdditionCount: 2,
+      tracking: semrushTrackingSnapshot(),
       reviewBaseUrl: "https://newl-apps.example.com/"
     });
 
     expect(message).toContain("Search Console, GA4, first-party website forms, and SEMrush MCP");
     expect(message).toContain("https://newl-apps.example.com/website-growth/drafts/draft_1");
     expect(message).toContain("Approval starts the developer build automatically");
+    expect(message).toContain("6505 stored signals");
+    expect(message).toContain("6 sent to Codex; 1 promoted");
+  });
+
+  it("sends a useful weekly Teams message when no new idea is promoted", () => {
+    const message = buildWebsiteGrowthScoutTeamsMessage({
+      drafts: [],
+      semrushQueried: true,
+      semrushSummary: "Position Tracking refreshed.",
+      weeklyPlan: { reviewedCount: 0, selectedCount: 0 },
+      candidateCount: 0,
+      researchSignalCount: 6505,
+      researchInventory: { MONITORING: 6105 },
+      keywordAdditionCount: 0,
+      tracking: semrushTrackingSnapshot(),
+      reviewBaseUrl: "https://newl-apps.example.com"
+    });
+
+    expect(message).toContain("0 ideas promoted");
+    expect(message).toContain("No new page brief needs your approval");
+    expect(message).toContain("performance workbook is attached");
   });
 });
+
+describe("website growth SEMrush keyword tracking", () => {
+  it("selects approved-page keywords and removes live SEMrush duplicates", () => {
+    const additions = buildWebsiteGrowthKeywordAdditions({
+      drafts: [{
+        id: "draft_1",
+        status: WebsiteGrowthContentDraftStatus.APPROVED,
+        proposedPath: "/services/fulfillment-services",
+        targetPage: "https://www.newlgroup.com/services/fulfillment-services",
+        draftJson: { targetKeyword: "Kitting and Fulfillment Services" },
+        opportunity: {
+          action: WebsiteGrowthAction.IMPROVE_EXISTING_PAGE,
+          primaryKeyword: "fulfillment services",
+          supportingKeywords: [
+            "kitting services",
+            "Fulfillment Services",
+            "promotional kitting"
+          ],
+          targetPage: "https://www.newlgroup.com/services/fulfillment-services",
+          sourcePage: "https://www.newlgroup.com/services/fulfillment-services"
+        }
+      }],
+      trackedKeywords: [{
+        keyword: "fulfillment services",
+        tags: [],
+        position: 18,
+        previousPosition: 19,
+        landingPage: "/services/fulfillment-services",
+        searchVolume: 1000
+      }]
+    });
+
+    expect(additions.map((row) => row.keyword)).toEqual([
+      "Kitting and Fulfillment Services",
+      "kitting services",
+      "promotional kitting"
+    ]);
+    expect(additions[0]?.tags).toContain("page-update");
+  });
+
+  it("builds a two-column SEMrush import and a weekly performance workbook payload", () => {
+    const generatedAt = new Date("2026-07-23T12:00:00Z");
+    const keywordReport = buildWebsiteGrowthKeywordImportReport([{
+      keyword: "kitting services",
+      tags: "website-growth,scout,page-update",
+      route: "/services/fulfillment-services",
+      draftId: "draft_1",
+      draftStatus: WebsiteGrowthContentDraftStatus.APPROVED
+    }], generatedAt);
+    const performanceReport = buildWebsiteGrowthPerformanceReport(
+      semrushTrackingSnapshot(),
+      generatedAt
+    );
+
+    expect(keywordReport.columns.map((column) => column.header)).toEqual(["Keyword", "Tags"]);
+    expect(keywordReport.rows).toEqual([{
+      keyword: "kitting services",
+      tags: "website-growth,scout,page-update"
+    }]);
+    expect(performanceReport.rows.some((row) => row.item === "Visibility")).toBe(true);
+    expect(performanceReport.rows.some((row) => row.item === "fulfillment services")).toBe(true);
+  });
+});
+
+function semrushTrackingSnapshot() {
+  return {
+    projectId: "12911828",
+    campaignId: "12911828_1198016",
+    domain: "newlgroup.com",
+    database: "us",
+    device: "desktop",
+    visibility: 6.42,
+    previousVisibility: 5.71,
+    top3: 6,
+    top10: 8,
+    top20: 12,
+    top100: 26,
+    improved: 8,
+    declined: 12,
+    entered: 4,
+    lost: 0,
+    trackedKeywords: [{
+      keyword: "fulfillment services",
+      tags: ["website-growth"],
+      position: 18,
+      previousPosition: 19,
+      landingPage: "/services/fulfillment-services",
+      searchVolume: 1000
+    }]
+  };
+}
 
 function weeklyCandidate({
   id,

@@ -78,7 +78,11 @@ The initial repository research and evidence requests are recorded in `claims-re
 
 The developer run belongs in GitHub Actions rather than a Vercel function. Vercel serves the control plane and previews, while repository checkout, agent execution, lint, and production build run in GitHub. A successful comparison creates two Preview deployments per approved build request. They may queue when the Vercel account has one concurrent build slot, but neither preview is a production deployment. Weekly publish guides remain two core pages, four supporting items, and six quick optimizations; they are queue limits, not automatic publishing targets.
 
-The OpenClaw command job runs Monday at 9:15 AM `America/Toronto`. It refreshes evidence, runs the bounded read-only Codex Scout, saves drafts, and sends Teams links. The existing Vercel weekly planner remains a safe queue-preparation fallback; it does not run Codex or send Teams.
+The OpenClaw command job runs Monday at 9:15 AM `America/Toronto`. It refreshes evidence, runs the bounded read-only Codex Scout, saves drafts, and sends a Teams report every week. The report states how many stored signals were reviewed, shortlisted, sent to Codex, and promoted so the research inventory is not confused with the approval queue.
+
+The same read-only SEMrush session refreshes the Newl Group Position Tracking snapshot. Deterministic Newl Apps code selects primary and supporting keywords only from human-approved, built, or published Scout briefs, deduplicates them against the live tracked-keyword list, and creates a two-column SEMrush import workbook without a separate keyword approval step. Teams receives that workbook when additions exist and receives the weekly position/performance workbook even when Scout promotes no new page brief. Official MCP remains read-only; this workflow prepares the import rather than writing directly to SEMrush.
+
+The existing Vercel weekly planner remains a safe queue-preparation fallback; it does not run Codex or send Teams.
 
 ## Human boundaries
 
