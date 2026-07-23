@@ -19,14 +19,17 @@ flowchart LR
   Repo[Website repo context] --> Scout
   Scout --> Brief[Versioned page brief + claim review]
   Brief --> Approval{Owner or manager approves}
-  Approval -->|approved| Build[Codex developer workflow]
-  Build --> Checks[Lint + production build]
-  Checks --> PR[Draft PR + Vercel preview]
+  Approval -->|approved| Build[Developer comparison workflow]
+  Build --> Codex[Codex primary patch]
+  Build --> Kimi[Kimi K3 optional shadow patch]
+  Codex --> Checks[Lint + production build]
+  Kimi --> Checks
+  Checks --> PR[Separate draft PRs + Vercel previews]
   PR --> Merge{Owner merge decision}
   Merge --> Monitor[Search Console + GA4 monitoring]
 ```
 
-Approval of a brief starts the developer workflow automatically. It is not approval to merge. The website repository workflow uses a read-only Codex job to create and verify a patch, then a separate job without the OpenAI key pushes the patch and opens a draft PR.
+Approval of a brief starts the developer workflow automatically. It is not approval to merge. The website repository workflow uses a read-only Codex job to create and verify the primary patch, then a separate job without the OpenAI key pushes the patch and opens a draft PR. When the optional Kimi API key is configured, Kimi K3 receives the same immutable approved brief and starting website commit in a separate read-only-credential job. Its patch must pass the same lint and production-build checks before another credential-separated job may open a comparison draft PR.
 
 ## Control-plane views
 
@@ -44,7 +47,7 @@ Every Scout card must state whether it proposes a **new page** or an **update to
 | Imports, scoring, clustering, state checks | Deterministic code | N/A | No model should perform exact comparisons or status changes. |
 | Scout research and page brief | Codex `gpt-5.6-sol` | `high` | Ephemeral, read-only website-repository session. Official SEMrush MCP through OAuth is mandatory for the scheduled run. |
 | Website developer | Codex `gpt-5.6-sol` | `high` | Runs only after approval, in the website repo, with tests and a draft PR. |
-| Kimi K3 | Shadow challenger only | Provider-specific | No automatic repository writes until it passes the same brief, claims, build, and visual-review eval set. |
+| Kimi K3 `kimi-k3` | Optional shadow challenger | `high` | Runs only after brief approval, creates a separate verified patch and draft PR, and never replaces the primary Newl Apps build record. |
 
 Model changes must be evaluated against the same saved opportunities. Compare factuality, claim violations, duplicated intent, route correctness, design fit, lint/build success, reviewer edits, latency, and cost. Do not choose a model from benchmark scores alone.
 
@@ -73,7 +76,7 @@ The initial repository research and evidence requests are recorded in `claims-re
 
 ## Capacity and cost controls
 
-The developer run belongs in GitHub Actions rather than a Vercel function. Vercel serves the control plane and preview, while repository checkout, Codex execution, lint, and production build run in GitHub. Weekly publish guides remain two core pages, four supporting items, and six quick optimizations; they are queue limits, not automatic publishing targets.
+The developer run belongs in GitHub Actions rather than a Vercel function. Vercel serves the control plane and previews, while repository checkout, agent execution, lint, and production build run in GitHub. A successful comparison creates two Preview deployments per approved build request. They may queue when the Vercel account has one concurrent build slot, but neither preview is a production deployment. Weekly publish guides remain two core pages, four supporting items, and six quick optimizations; they are queue limits, not automatic publishing targets.
 
 The OpenClaw command job runs Monday at 9:15 AM `America/Toronto`. It refreshes evidence, runs the bounded read-only Codex Scout, saves drafts, and sends Teams links. The existing Vercel weekly planner remains a safe queue-preparation fallback; it does not run Codex or send Teams.
 
@@ -81,6 +84,6 @@ The OpenClaw command job runs Monday at 9:15 AM `America/Toronto`. It refreshes 
 
 - Admin or Manager may approve a brief and start a build.
 - Sales and Operations may prepare and review opportunities but may not approve developer or publishing states.
-- Codex may edit only the isolated website branch created for the build request.
-- Vercel Preview is required for visual review.
+- Codex and Kimi may produce only isolated website patches for the approved build request; credential-separated jobs create their draft branches.
+- Vercel Preview is required for visual review. When Kimi is enabled, reviewers compare both previews; Newl Apps continues to track Codex as the primary build during the trial.
 - The owner decides whether to merge. Production deployment is never initiated by Newl Apps or Scout.
