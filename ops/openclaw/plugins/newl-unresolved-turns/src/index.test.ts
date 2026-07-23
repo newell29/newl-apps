@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   classifyToolFailure,
+  classifyVisibleResponse,
   registerUnresolvedTurnHooks
 } from "./index.js";
 
@@ -18,7 +19,7 @@ describe("Newl unresolved-turn OpenClaw plugin", () => {
     vi.stubEnv("OPENCLAW_ASSISTANT_TOKEN", "assistant-token");
   });
 
-  it("classifies only failed tool outcomes", () => {
+  it("classifies explicit failed and unavailable tool outcomes", () => {
     expect(classifyToolFailure({ details: { status: "ok" } })).toBeNull();
     expect(classifyToolFailure({
       content: [{ type: "text", text: "Teamship is not configured." }],
@@ -27,6 +28,26 @@ describe("Newl unresolved-turn OpenClaw plugin", () => {
       status: "not_configured",
       message: "Teamship is not configured."
     });
+    expect(classifyToolFailure({
+      details: { status: "unsupported" }
+    })).toEqual({
+      status: "unsupported",
+      message: "Tool returned unsupported."
+    });
+  });
+
+  it("classifies explicit capability gaps and local-only spreadsheet links", () => {
+    expect(classifyVisibleResponse("I can't verify whether that invoice is open."))
+      .toMatchObject({ failureKind: "CAPABILITY_GAP" });
+    expect(classifyVisibleResponse(
+      "Created [availability.xlsx](/Users/example/.openclaw/workspace/availability.xlsx)."
+    )).toMatchObject({ failureKind: "ARTIFACT_DELIVERY_FAILURE" });
+    expect(classifyVisibleResponse(
+      "Saved it at /tmp/nemo/availability.csv"
+    )).toMatchObject({ failureKind: "ARTIFACT_DELIVERY_FAILURE" });
+    expect(classifyVisibleResponse("I wasn't able to retrieve that customer ID."))
+      .toMatchObject({ failureKind: "CAPABILITY_GAP" });
+    expect(classifyVisibleResponse("SKU 80559 has 6 units available.")).toBeNull();
   });
 
   it("starts a Teams turn and removes it after a clean delivery", async () => {
@@ -37,13 +58,16 @@ describe("Newl unresolved-turn OpenClaw plugin", () => {
       .mockResolvedValueOnce(new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await handlers.message_received?.({
-      from: "employee",
-      content: "Where is LPN 63991?",
+    await handlers.before_agent_run?.({
+      prompt: "Where is LPN 63991?",
+      messages: [],
+      channelId: "msteams",
+      senderId: "22222222-2222-4222-8222-222222222222"
+    }, {
       runId: "run-1",
       sessionKey: "session-1",
-      senderId: "22222222-2222-4222-8222-222222222222"
-    }, { channelId: "msteams", isGroup: false });
+      messageProvider: "msteams"
+    });
     await handlers.message_sent?.({
       to: "employee",
       content: "LPN 63991 is at 0802A.",
@@ -62,13 +86,16 @@ describe("Newl unresolved-turn OpenClaw plugin", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await handlers.message_received?.({
-      from: "employee",
-      content: "Check inventory for SKU ABC",
+    await handlers.before_agent_run?.({
+      prompt: "Check inventory for SKU ABC",
+      messages: [],
+      channelId: "msteams",
+      senderId: "22222222-2222-4222-8222-222222222222"
+    }, {
       runId: "run-2",
       sessionKey: "session-2",
-      senderId: "22222222-2222-4222-8222-222222222222"
-    }, { channelId: "msteams", isGroup: false });
+      messageProvider: "msteams"
+    });
     await handlers.after_tool_call?.({
       toolName: "newl_teamship_read",
       params: { prompt: "not persisted by capture" },
@@ -96,17 +123,81 @@ describe("Newl unresolved-turn OpenClaw plugin", () => {
     expect(JSON.stringify(failureBody)).not.toContain("not persisted by capture");
   });
 
+  it("retains a delivered answer that explicitly reports a capability gap", async () => {
+    const { api, handlers } = fakeApi();
+    registerUnresolvedTurnHooks(api, config);
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await handlers.before_agent_run?.({
+      prompt: "Are there open invoices for TMG Industrial?",
+      messages: [],
+      channelId: "msteams",
+      senderId: "22222222-2222-4222-8222-222222222222"
+    }, {
+      runId: "run-3",
+      sessionKey: "session-3",
+      messageProvider: "msteams"
+    });
+    await handlers.message_sent?.({
+      to: "employee",
+      content: "I can't check open invoices from this chat.",
+      success: true,
+      sessionKey: "session-3"
+    }, { channelId: "msteams", isGroup: false });
+
+    expect(readFetchBody(fetchMock, 1)).toMatchObject({
+      action: "fail",
+      failureKind: "CAPABILITY_GAP",
+      errorCode: "assistant_capability_gap",
+      response: "I can't check open invoices from this chat."
+    });
+  });
+
+  it("retains a local spreadsheet link as an artifact delivery failure", async () => {
+    const { api, handlers } = fakeApi();
+    registerUnresolvedTurnHooks(api, config);
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await handlers.before_agent_run?.({
+      prompt: "Create a spreadsheet",
+      messages: [],
+      channelId: "msteams",
+      senderId: "22222222-2222-4222-8222-222222222222"
+    }, {
+      runId: "run-4",
+      sessionKey: "session-4",
+      messageProvider: "msteams"
+    });
+    await handlers.message_sent?.({
+      to: "employee",
+      content: "Created [availability.csv](/Users/example/.openclaw/workspace/availability.csv).",
+      success: true,
+      sessionKey: "session-4"
+    }, { channelId: "msteams", isGroup: false });
+
+    expect(readFetchBody(fetchMock, 1)).toMatchObject({
+      action: "fail",
+      failureKind: "ARTIFACT_DELIVERY_FAILURE",
+      errorCode: "local_file_not_uploaded"
+    });
+  });
+
   it("does not interrupt Nemo when capture storage is unavailable", async () => {
     const { api, handlers, warn } = fakeApi();
     registerUnresolvedTurnHooks(api, config);
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network unavailable")));
 
-    await expect(handlers.message_received?.({
-      from: "employee",
-      content: "Hello",
-      runId: "run-3",
+    await expect(handlers.before_agent_run?.({
+      prompt: "Hello",
+      messages: [],
+      channelId: "msteams",
       senderId: "22222222-2222-4222-8222-222222222222"
-    }, { channelId: "msteams", isGroup: false })).resolves.toBeUndefined();
+    }, {
+      runId: "run-5",
+      messageProvider: "msteams"
+    })).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("network unavailable"));
   });
 });

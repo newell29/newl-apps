@@ -13,14 +13,16 @@ The implementation is split between the `newl-unresolved-turns` OpenClaw plugin,
 | Condition | Signal | Stored result |
 |---|---|---|
 | Model/provider call fails | Sanitized `model_call_ended` outcome | `OPEN / MODEL_FAILURE` |
-| An OpenClaw tool throws or returns `failed`, `not_configured`, or `unauthorized` | `after_tool_call` | `OPEN / TOOL_FAILURE` after the Teams response is delivered |
+| An OpenClaw tool throws or returns a failed, unavailable, unsupported, disabled, unauthorized, or timeout status | `after_tool_call` | `OPEN / TOOL_FAILURE` after the Teams response is delivered |
 | Teams cannot deliver Nemo's response | `message_sent.success = false` | `OPEN / DELIVERY_FAILURE` |
+| Nemo explicitly says it cannot check, verify, access, retrieve, create, upload, or otherwise complete the request | Conservative phrase matcher on the delivered response | `OPEN / CAPABILITY_GAP` |
+| Nemo returns a local Mac path or local Markdown link to a spreadsheet instead of uploading it | Deterministic local-path matcher on the delivered response | `OPEN / ARTIFACT_DELIVERY_FAILURE` |
 | No outbound Teams result is observed | Inbound record remains pending beyond the review threshold (default five minutes) | Returned to reviewers as `NO_RESPONSE` |
 | Teams receives a response without a captured model/tool failure | Successful `message_sent` | Pending record is deleted |
 
-Slash commands such as `/new` are ignored. The plugin only observes `msteams` channel turns with a valid Microsoft Entra sender UUID and OpenClaw run ID.
+Slash commands such as `/new` are ignored. The plugin starts capture from `before_agent_run`, where current OpenClaw releases provide the run ID and trusted conversation context. The older inbound-message hook does not reliably provide a run ID and is not used for correlation. The plugin only observes `msteams` turns with a valid Microsoft Entra sender UUID and OpenClaw run ID.
 
-This mechanism cannot automatically prove that a fluent answer is factually wrong. Those semantic failures still require employee feedback or a deterministic comparison against an authoritative system. Adding a feedback action is intentionally outside this change.
+The phrase matcher is deliberately conservative. It captures Nemo's explicit inability statements; it does not label every qualification or clarification as a failure. This mechanism still cannot automatically prove that a fluent answer is factually wrong. Those semantic failures require employee feedback or a deterministic comparison against an authoritative system.
 
 ## Storage and privacy
 
@@ -56,4 +58,4 @@ The plugin lives in `ops/openclaw/plugins/newl-unresolved-turns`. Installation i
 - There is no resolved/dismissed workflow yet.
 - Concurrent turns in one OpenClaw session are correlated by run ID when available and session key only as a compatibility fallback; the fallback cannot perfectly distinguish simultaneous turns.
 - If the capture endpoint itself is unavailable, the plugin logs a local warning and does not interrupt Nemo's reply. That turn may therefore be missing from the Newl Apps feed.
-- Correct-but-unhelpful, incorrect, or incomplete answers need an explicit employee feedback path or deterministic evaluation before they can be captured automatically.
+- Incorrect or incomplete answers that do not contain a deterministic failure signal still need explicit employee feedback or evaluation against an authoritative system.

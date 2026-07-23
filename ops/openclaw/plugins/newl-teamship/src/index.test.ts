@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -11,6 +11,7 @@ import plugin, {
   createGarlandApproveUpdateTool,
   createGarlandExplainTool,
   createGarlandPdfReviewTool,
+  createSpreadsheetTool,
   createTeamshipReadTool,
   normalizeUuid,
   registerTrustedTeamsMediaCapture
@@ -28,14 +29,15 @@ describe("Newl Teamship OpenClaw plugin", () => {
       force: true
     })));
   });
-  it("declares identity-bound Teamship, Garland, feedback, and approval-queue tools", () => {
+  it("declares identity-bound Teamship, Garland, feedback, spreadsheet, and approval-queue tools", () => {
     expect(getToolPluginMetadata(plugin)?.tools.map((tool) => tool.name)).toEqual([
       "newl_teamship_read",
       "newl_garland_pdf_review",
       "newl_garland_approve_update",
       "newl_garland_explain",
       "newl_operational_feedback",
-      "newl_development_suggestion_digest"
+      "newl_development_suggestion_digest",
+      "newl_create_spreadsheet"
     ]);
     const tool = createTeamshipReadTool({
       config: { baseUrl: "https://preview.example.com", tenantId: "11111111-1111-4111-8111-111111111111" },
@@ -45,6 +47,68 @@ describe("Newl Teamship OpenClaw plugin", () => {
     expect(tool.description).toContain("do not ask them for numeric Teamship IDs");
     expect(tool.description).toContain("defaults Garland to Annagem");
     expect(tool.description).toContain("serial number");
+  });
+
+  it("creates a real bounded xlsx file inside the OpenClaw workspace", async () => {
+    const workspaceDir = await mkdtemp(join(tmpdir(), "newl-spreadsheet-plugin-"));
+    temporaryDirectories.push(workspaceDir);
+    const tool = createSpreadsheetTool({
+      config: {
+        baseUrl: "https://preview.example.com",
+        tenantId: "11111111-1111-4111-8111-111111111111"
+      },
+      toolContext: {
+        messageChannel: "msteams",
+        requesterSenderId: "22222222-2222-4222-8222-222222222222",
+        workspaceDir
+      }
+    });
+
+    const result = await tool.execute("spreadsheet-1", {
+      filename: "Zeal availability",
+      sheetName: "Availability",
+      columns: [
+        { key: "sku", header: "SKU" },
+        { key: "available", header: "Available" },
+        { key: "note", header: "Note" }
+      ],
+      rows: [{
+        sku: "80559",
+        available: 6,
+        note: "=HYPERLINK(\"https://unsafe.example\")"
+      }]
+    });
+
+    expect(result).toMatchObject({
+      details: {
+        status: "ok",
+        filename: "Zeal-availability.xlsx",
+        rowCount: 1,
+        columnCount: 3
+      }
+    });
+    const details = result.details as { filePath: string };
+    expect(details.filePath).toContain(`${workspaceDir}/exports/`);
+    const workbook = await readFile(details.filePath);
+    expect(workbook.subarray(0, 4)).toEqual(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+    expect(workbook.toString("utf8")).toContain("[Content_Types].xml");
+    expect(workbook.toString("utf8")).toContain("&apos;=HYPERLINK");
+  });
+
+  it("does not create spreadsheets outside an authenticated Teams turn", async () => {
+    const tool = createSpreadsheetTool({
+      config: {
+        baseUrl: "https://preview.example.com",
+        tenantId: "11111111-1111-4111-8111-111111111111"
+      },
+      toolContext: {}
+    });
+
+    await expect(tool.execute("spreadsheet-2", {
+      filename: "report",
+      columns: [{ key: "value", header: "Value" }],
+      rows: []
+    })).resolves.toMatchObject({ details: { status: "unauthorized" } });
   });
 
   it("keeps Garland explanations identity-bound too", async () => {

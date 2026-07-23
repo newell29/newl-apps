@@ -46,7 +46,12 @@ type PostAction = {
   externalConversationId?: string;
   sessionKey?: string;
   response?: string;
-  failureKind?: "MODEL_FAILURE" | "TOOL_FAILURE" | "DELIVERY_FAILURE";
+  failureKind?:
+    | "MODEL_FAILURE"
+    | "TOOL_FAILURE"
+    | "DELIVERY_FAILURE"
+    | "CAPABILITY_GAP"
+    | "ARTIFACT_DELIVERY_FAILURE";
   provider?: string;
   model?: string;
   toolName?: string;
@@ -77,22 +82,23 @@ export function registerUnresolvedTurnHooks(api: OpenClawPluginApi, config: Unre
   const byRunId = new Map<string, TurnState>();
   const runIdBySessionKey = new Map<string, string>();
 
-  api.on("message_received", async (event, context) => {
+  api.on("before_agent_run", async (event, context) => {
     pruneStaleStates(byRunId, runIdBySessionKey, Date.now() - 15 * 60 * 1_000);
     const senderId = normalizeUuid(event.senderId ?? context.senderId);
-    const runId = normalizeIdentifier(event.runId ?? context.runId);
-    const sessionKey = normalizeOptionalIdentifier(event.sessionKey ?? context.sessionKey, 500);
-    if (context.channelId !== "msteams" || !senderId || !runId || !event.content.trim()) return;
-    if (event.content.trim().startsWith("/")) return;
+    const runId = normalizeIdentifier(context.runId);
+    const sessionKey = normalizeOptionalIdentifier(context.sessionKey, 500);
+    const channelId = event.channelId ?? context.messageProvider;
+    if (channelId !== "msteams" || !senderId || !runId || !event.prompt.trim()) return;
+    if (event.prompt.trim().startsWith("/")) return;
+    if (byRunId.has(runId)) return;
 
     const state: TurnState = {
       runId,
       createdAt: Date.now(),
-      prompt: event.content,
+      prompt: event.prompt,
       senderId,
       sessionKey,
-      messageId: normalizeOptionalIdentifier(event.messageId ?? context.messageId, 300),
-      conversationId: normalizeOptionalIdentifier(event.threadId ?? context.conversationId, 300)
+      conversationId: normalizeOptionalIdentifier(context.chatId, 300)
     };
     byRunId.set(runId, state);
     if (sessionKey) runIdBySessionKey.set(sessionKey, runId);
@@ -154,10 +160,20 @@ export function registerUnresolvedTurnHooks(api: OpenClawPluginApi, config: Unre
         response: event.content
       });
     } else {
-      await safelyPost(api, config, state, {
-        action: "complete",
-        runId: state.runId
-      });
+      const visibleFailure = classifyVisibleResponse(event.content);
+      if (visibleFailure) {
+        await safelyPost(api, config, state, {
+          action: "fail",
+          ...basePayload(state),
+          ...visibleFailure,
+          response: event.content
+        });
+      } else {
+        await safelyPost(api, config, state, {
+          action: "complete",
+          runId: state.runId
+        });
+      }
     }
     clearState(byRunId, runIdBySessionKey, state);
   }, { timeoutMs: 10_000 });
@@ -171,9 +187,55 @@ export function classifyToolFailure(result: unknown, error?: string) {
   const details = (result as { details?: unknown }).details;
   if (!details || typeof details !== "object") return null;
   const status = (details as { status?: unknown }).status;
-  if (!["failed", "not_configured", "unauthorized"].includes(String(status))) return null;
+  if (![
+    "failed",
+    "not_configured",
+    "unauthorized",
+    "unavailable",
+    "unsupported",
+    "not_supported",
+    "disabled",
+    "timeout",
+    "timed_out"
+  ].includes(String(status))) return null;
   const message = readToolMessage(result) ?? `Tool returned ${String(status)}.`;
   return { status: String(status), message };
+}
+
+export function classifyVisibleResponse(response: unknown): {
+  failureKind: "CAPABILITY_GAP" | "ARTIFACT_DELIVERY_FAILURE";
+  errorCode: string;
+  errorMessage: string;
+} | null {
+  if (typeof response !== "string" || !response.trim()) return null;
+  const normalized = response.replace(/[’‘]/g, "'").trim();
+
+  if (
+    /\]\(\s*(?:file:\/\/|\/(?:Users|private|tmp|var\/folders)\/|~\/|[A-Za-z]:\\)[^)]+\)/i.test(normalized)
+    || /(?:^|[\s("'`])(?:file:\/\/|\/(?:Users|private|tmp|var\/folders)\/|~\/)[^\s)]+\.(?:xlsx|xls|csv|tsv)\b/i.test(normalized)
+  ) {
+    return {
+      failureKind: "ARTIFACT_DELIVERY_FAILURE",
+      errorCode: "local_file_not_uploaded",
+      errorMessage: "Nemo returned a local spreadsheet path instead of a downloadable Teams attachment."
+    };
+  }
+
+  if (
+    /\bI (?:can't|cannot|couldn't|could not|am unable to|wasn't able to|was not able to) (?:check|verify|confirm|access|retrieve|look up|find|create|generate|download|upload|attach|send|complete)\b/i.test(normalized)
+    || /\bUnable to (?:check|verify|confirm|access|retrieve|look up|find|create|generate|download|upload|attach|send|complete)\b/i.test(normalized)
+    || /\bI (?:don't|do not) have (?:access|the ability|a way) to\b/i.test(normalized)
+    || /\b(?:required )?(?:tool|integration|capability) (?:isn't|is not|wasn't|was not) (?:available|exposed|configured|enabled|supported)\b/i.test(normalized)
+    || /\bnot available (?:from|in) (?:this|the current) (?:chat|session|environment)\b/i.test(normalized)
+  ) {
+    return {
+      failureKind: "CAPABILITY_GAP",
+      errorCode: "assistant_capability_gap",
+      errorMessage: "Nemo explicitly reported that it could not complete or verify the employee's request."
+    };
+  }
+
+  return null;
 }
 
 export function createUnresolvedTurnsTool(

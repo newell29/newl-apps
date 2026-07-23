@@ -13,7 +13,13 @@ Approved data sources: this repository documentation, authenticated app APIs, te
 
 ## Unresolved Teams turns
 
-The optional `newl-unresolved-turns` OpenClaw plugin and tenant-scoped Newl Apps endpoint capture failed or unanswered Microsoft Teams turns for developer review. Successful turns are deleted; the capture does not retain model reasoning, full conversation history, tool parameters, or raw tool results. Detection, storage fields, developer discovery, privacy boundaries, and known limitations are defined in [openclaw-unresolved-turns.md](openclaw-unresolved-turns.md). The capture package does not include a scheduler.
+The optional `newl-unresolved-turns` OpenClaw plugin and tenant-scoped Newl Apps endpoint capture failed or unanswered Microsoft Teams turns for developer review. This includes explicit capability-gap replies and local spreadsheet paths that were not delivered as attachments. Successful turns are deleted; the capture does not retain model reasoning, full conversation history, tool parameters, or raw tool results. Detection, storage fields, developer discovery, privacy boundaries, and known limitations are defined in [openclaw-unresolved-turns.md](openclaw-unresolved-turns.md). The capture package does not include a scheduler.
+
+## Teams spreadsheet attachments
+
+The identity-bound `newl_create_spreadsheet` tool in the Newl Teamship plugin creates a bounded `.xlsx` under the active OpenClaw workspace from already-authorized current-conversation data. It neutralizes formula-like text and accepts at most 25 columns and 500 rows. The `teams-spreadsheet` skill then requires Teams' native `message(action=upload-file)` action in the same direct message; a local path or Markdown link is never a valid employee deliverable.
+
+Enabling this workflow requires adding both `newl_create_spreadsheet` and `message` to Nemo's approved tool allowlist and installing the `teams-spreadsheet` skill. The `message` permission is used only for the trusted current Teams direct-message target in this workflow. Plugin installation, live allowlist changes, and reload remain separate human-approved rollout actions.
 
 ## Approval-gated printing
 
