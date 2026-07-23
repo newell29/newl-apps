@@ -55,9 +55,11 @@ export const config = {
    *  - /api/lead-gen/apollo/status-sync  (scheduler secret auth)
    *  - /api/website-growth/scout/*       (dedicated tenant-scoped Scout token auth)
    *  - /api/website-growth/weekly-plan   (Vercel cron secret auth)
+   *  - /api/website-growth/build-requests/*
+   *                                      (website build-worker token + tenant auth)
    *  - Next.js internals and static files
    */
   matcher: [
-    "/((?!api/auth|api/integrations/trademining|api/assistant/teamship/read|api/assistant/openclaw/unresolved-turns|api/assistant/teamship/browser-jobs|api/assistant/printing|api/assistant/garland|api/shipment-documents/teamship-review/update-jobs/agent|api/shipment-documents/teamship-review/email-intake/scheduled|api/lead-gen/apollo/status-sync|api/website-growth/scout|api/website-growth/weekly-plan|api/website-inbound|_next/static|_next/image|favicon.ico|.*\\..*).*)"
+    "/((?!api/auth|api/integrations/trademining|api/assistant/teamship/read|api/assistant/openclaw/unresolved-turns|api/assistant/teamship/browser-jobs|api/assistant/printing|api/assistant/garland|api/shipment-documents/teamship-review/update-jobs/agent|api/shipment-documents/teamship-review/email-intake/scheduled|api/lead-gen/apollo/status-sync|api/website-growth/scout|api/website-growth/weekly-plan|api/website-growth/build-requests|api/website-inbound|_next/static|_next/image|favicon.ico|.*\\..*).*)"
   ]
 };
