@@ -10,7 +10,7 @@
       "additionalProperties": false,
       "required": ["queried", "summary", "rows"],
       "properties": {
-        "queried": { "const": true },
+        "queried": { "type": "boolean", "const": true },
         "summary": { "type": "string", "minLength": 1 },
         "rows": {
           "type": "array",
@@ -130,7 +130,7 @@
             "additionalProperties": false,
             "required": ["changeType", "location", "currentState", "proposedState", "exactDraftCopy", "reason", "impact"],
             "properties": {
-              "changeType": { "enum": ["meta", "hero", "section", "faq", "internal_links", "cta", "redirect", "technical"] },
+              "changeType": { "type": "string", "enum": ["meta", "hero", "section", "faq", "internal_links", "cta", "redirect", "technical"] },
               "location": { "type": "string" },
               "currentState": { "type": "string" },
               "proposedState": { "type": "string" },
@@ -149,7 +149,7 @@
       "additionalProperties": false,
       "required": ["mode", "eyebrow", "heroTitle", "heroCopy", "heroBullets", "primaryCta", "secondaryCta", "proofCards", "sections", "faqs", "internalLinks", "finalCta"],
       "properties": {
-        "mode": { "enum": ["new_page", "existing_page_update", "legacy_redirect_rebuild", "internal_link_update"] },
+        "mode": { "type": "string", "enum": ["new_page", "existing_page_update", "legacy_redirect_rebuild", "internal_link_update"] },
         "eyebrow": { "type": "string" },
         "heroTitle": { "type": "string" },
         "heroCopy": { "type": "string" },
