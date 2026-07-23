@@ -14,6 +14,7 @@ import { prisma } from "@/server/db";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 
 const JOB_TYPE = "WEBSITE_GROWTH_DEVELOPER_BUILD";
+export const WEBSITE_GROWTH_STALE_DISPATCH_MS = 45 * 60 * 1000;
 
 export type WebsiteGrowthBuildPhase =
   | "QUEUED"
@@ -49,7 +50,7 @@ export async function createAndDispatchWebsiteGrowthBuildRequest({
   brief: WebsiteGrowthBuildPackage;
 }) {
   const existing = await findWebsiteGrowthBuildRequestForDraft(context.tenantId, contentDraftId);
-  if (existing && existing.status !== JobStatus.ERROR && existing.status !== JobStatus.CANCELLED) return existing;
+  if (existing && !getWebsiteGrowthBuildRetryState(existing).canRetry) return existing;
 
   const dispatchConfig = getWebsiteGrowthDeveloperDispatchStatus();
   const input: BuildRequestInput = {
@@ -67,7 +68,14 @@ export async function createAndDispatchWebsiteGrowthBuildRequest({
   const job = existing
     ? await prisma.automationJobRun.update({
         where: { id: existing.id },
-        data: { status: JobStatus.QUEUED, input: input as unknown as Prisma.InputJsonValue, output: { phase: "QUEUED" }, errorMessage: null, finishedAt: null }
+        data: {
+          status: JobStatus.QUEUED,
+          startedAt: new Date(),
+          input: input as unknown as Prisma.InputJsonValue,
+          output: { phase: "QUEUED" },
+          errorMessage: null,
+          finishedAt: null
+        }
       })
     : await prisma.$transaction(async (tx) => {
         const created = await tx.automationJobRun.create({
@@ -175,16 +183,54 @@ export function summarizeWebsiteGrowthBuildRequest(job: {
   input: Prisma.JsonValue | null;
   output: Prisma.JsonValue | null;
   errorMessage: string | null;
+  startedAt: Date;
 }) {
   const input = parseBuildRequestInput(job.input);
+  const retry = getWebsiteGrowthBuildRetryState(job);
+
   return {
     status: job.status,
     phase: readPhase(job.output),
     model: input?.model ?? "Unknown model",
     reasoningEffort: input?.reasoningEffort ?? "unknown",
     errorMessage: job.errorMessage,
-    canRetry: job.status === JobStatus.ERROR || job.status === JobStatus.CANCELLED
+    canRetry: retry.canRetry,
+    retryReason: retry.reason
   };
+}
+
+export function getWebsiteGrowthBuildRetryState(
+  job: {
+    status: JobStatus;
+    output: Prisma.JsonValue | null;
+    startedAt: Date;
+  },
+  now = new Date()
+) {
+  if (job.status === JobStatus.ERROR) {
+    return { canRetry: true, reason: "FAILED" as const };
+  }
+
+  if (job.status === JobStatus.CANCELLED) {
+    return { canRetry: true, reason: "CANCELLED" as const };
+  }
+
+  const phase = readPhase(job.output);
+  const canBecomeStale =
+    (job.status === JobStatus.QUEUED && phase === "DISPATCHED") ||
+    (job.status === JobStatus.RUNNING && (phase === "DISPATCHED" || phase === "RUNNING"));
+  const output = readRecord(job.output);
+  const lastActivityAt =
+    readTimestamp(output.updatedAt) ??
+    readTimestamp(output.dispatchedAt) ??
+    job.startedAt;
+  const staleForMs = now.getTime() - lastActivityAt.getTime();
+
+  if (canBecomeStale && staleForMs >= WEBSITE_GROWTH_STALE_DISPATCH_MS) {
+    return { canRetry: true, reason: "STALE_DISPATCH" as const };
+  }
+
+  return { canRetry: false, reason: null };
 }
 
 export async function getWebsiteGrowthBuildRequestPackage(requestId: string, tenantSlug: string) {
@@ -344,6 +390,12 @@ function normalizeOptionalUrl(value?: string) {
   } catch {
     return undefined;
   }
+}
+
+function readTimestamp(value: unknown) {
+  if (typeof value !== "string") return null;
+  const timestamp = new Date(value);
+  return Number.isNaN(timestamp.getTime()) ? null : timestamp;
 }
 
 function readRecord(value: unknown): Record<string, unknown> {
