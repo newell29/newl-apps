@@ -13,9 +13,14 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 3. Codex `gpt-5.6-sol` with high reasoning inspects the current website repository in a read-only, ephemeral session and queries official SEMrush MCP through OAuth.
 4. `/api/website-growth/scout/complete` rejects out-of-scope candidates or malformed results, stores sanitized SEMrush evidence, and saves drafts.
 5. OpenClaw sends the returned message and direct draft links to the configured Teams target.
-6. An Admin or Manager reviews each brief. Approval starts the existing developer build; the owner still owns the merge.
+6. An Admin or Manager reviews each brief. Approval starts the website developer workflow; the owner still owns the merge.
+7. Codex builds the primary implementation. If the optional Kimi API key is configured, Kimi K3 independently builds the same immutable brief from the same website commit.
+8. Each agent output must pass the same website lint and production-build checks before a credential-separated job may open its draft PR. Vercel creates one Preview per draft PR.
+9. Newl Apps records the Codex PR and Preview as the primary build. The Kimi PR remains a shadow comparison in GitHub and cannot overwrite the primary status.
 
 The run is locked per tenant for three hours. No-candidate runs complete without sending an approval message. A Codex or SEMrush failure is recorded through `/api/website-growth/scout/fail` and does not create a draft.
+
+The Kimi comparison is optional and fails independently: a missing key, agent error, verification failure, or PR handoff failure is surfaced in the GitHub Actions summary but does not block the primary Codex build. Neither agent workflow merges or deploys production.
 
 ## Review workspace
 
