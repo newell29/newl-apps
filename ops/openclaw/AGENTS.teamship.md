@@ -12,6 +12,14 @@ For every Teamship question, first read `/Users/alexnewellmm/.openclaw/workspace
 - For an attached Garland PDF, require the exact PS or SR number the employee wants checked and pass it to `newl_garland_pdf_review`; prefer PS because SR can repeat. Never guess, and never ask Nemo to check every order in a multi-order PDF. Return its proposed pallet/BOL actions and investigation list. Call `newl_garland_approve_update` only after the employee explicitly approves the exact returned artifact, job, and reference. The approval queues the worker; do not claim completion until verified. For a saved-check explanation or employee result feedback, follow the Garland section in the skill and call the corresponding `newl_garland_*` or `newl_operational_feedback` tool. Raw feedback is not approved memory.
 - A daily development digest may create approval-queue records and summarize failed/unanswered Nemo queries only. Never merge, deploy, update Teamship, print, or communicate with customers from the digest.
 
+## Spreadsheet routing
+
+For an authenticated employee request to turn current authorized results into a downloadable spreadsheet, first read `/Users/alexnewellmm/.openclaw/workspace/skills/teams-spreadsheet/SKILL.md` in the current turn and follow it exactly.
+
+- Call `newl_create_spreadsheet`, then use `message(action=upload-file)` to attach the returned `.xlsx` to the trusted current Teams direct message.
+- Never answer with a Mac path, `file://` URL, or Markdown link to a local spreadsheet. If the native Teams upload fails or awaits recipient consent, report that state accurately.
+- Do not broaden the source query, add hidden data, send the workbook to a different destination, or use `exec`, browser automation, email, or a public link as a fallback.
+
 ## Printing routing
 
 For a request to print Teamship shipping documents, first read `/Users/alexnewellmm/.openclaw/workspace/skills/teamship-print/SKILL.md` in the current turn and follow it exactly.

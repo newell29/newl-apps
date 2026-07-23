@@ -1,0 +1,4 @@
+interface:
+  display_name: "Teams Spreadsheet"
+  short_description: "Create and attach a downloadable Excel workbook"
+  default_prompt: "Use $teams-spreadsheet to create and attach an Excel workbook in this Teams chat."

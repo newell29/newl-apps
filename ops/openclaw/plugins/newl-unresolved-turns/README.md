@@ -4,9 +4,10 @@ This plugin records only Microsoft Teams turns that Nemo could not complete. It 
 
 ## What it records
 
-- An inbound employee prompt begins a short-lived `PENDING` record.
+- An employee run with a trusted Teams sender begins a short-lived `PENDING` record from the `before_agent_run` hook.
 - A successful Teams delivery deletes that record.
 - Model, tool, or Teams delivery failures retain an `OPEN` record.
+- Explicit inability responses retain `CAPABILITY_GAP`; local spreadsheet links that were not uploaded retain `ARTIFACT_DELIVERY_FAILURE`.
 - A `PENDING` record older than five minutes is returned to reviewers as `NO_RESPONSE`.
 
 Newl Apps redacts common secret shapes before storage. External Teams message, conversation, session, and tool-call identifiers are stored only as SHA-256 hashes. The plugin does not send reasoning, model history, tool parameters, or raw tool results to Newl Apps.

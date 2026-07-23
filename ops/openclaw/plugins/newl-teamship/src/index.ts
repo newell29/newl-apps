@@ -5,6 +5,11 @@ import { Type } from "typebox";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import { defineToolPlugin } from "openclaw/plugin-sdk/tool-plugin";
 
+import {
+  writeSpreadsheetFile,
+  type SpreadsheetInput
+} from "./spreadsheet.js";
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEFAULT_TOKEN_ENV = "OPENCLAW_TEAMSHIP_READ_TOKEN";
 const DEFAULT_ASSISTANT_TOKEN_ENV = "OPENCLAW_ASSISTANT_TOKEN";
@@ -22,6 +27,7 @@ type TeamshipToolContext = {
   messageChannel?: string;
   requesterSenderId?: string;
   sessionKey?: string;
+  workspaceDir?: string;
 };
 
 type CapturedTeamsMedia = {
@@ -96,6 +102,27 @@ const garlandApproveUpdateParameters = Type.Object({
 
 const emptyParameters = Type.Object({});
 
+const spreadsheetCell = Type.Union([
+  Type.String({ maxLength: 2000 }),
+  Type.Number(),
+  Type.Boolean(),
+  Type.Null()
+]);
+
+const createSpreadsheetParameters = Type.Object({
+  filename: Type.String({
+    minLength: 1,
+    maxLength: 100,
+    description: "Short employee-facing filename. The tool always produces an .xlsx file in OpenClaw's exports directory."
+  }),
+  sheetName: Type.Optional(Type.String({ minLength: 1, maxLength: 31 })),
+  columns: Type.Array(Type.Object({
+    key: Type.String({ minLength: 1, maxLength: 80 }),
+    header: Type.String({ minLength: 1, maxLength: 120 })
+  }), { minItems: 1, maxItems: 25 }),
+  rows: Type.Array(Type.Record(Type.String(), spreadsheetCell), { maxItems: 500 })
+});
+
 const configSchema = Type.Object({
   baseUrl: Type.String({ description: "Newl Apps base URL." }),
   tenantId: Type.String({
@@ -162,6 +189,13 @@ const plugin = defineToolPlugin({
       description: "Use only for the configured daily admin review. It groups unqueued employee feedback into approval-required development suggestions and lists failed or unanswered Nemo queries. It cannot start development, merge, deploy, write Teamship, or print.",
       parameters: emptyParameters,
       factory: createDevelopmentSuggestionDigestTool
+    }),
+    tool({
+      name: "newl_create_spreadsheet",
+      label: "Create Teams Spreadsheet",
+      description: "Create a bounded Excel .xlsx file from data already authorized and returned in the current Microsoft Teams conversation. Use only when the employee explicitly asks for a downloadable spreadsheet. After this tool succeeds, upload its exact filePath with the message tool action upload-file in the same Teams conversation. Never return the local file path or a Markdown file link to the employee.",
+      parameters: createSpreadsheetParameters,
+      factory: createSpreadsheetTool
     })
   ]
 });
@@ -173,6 +207,52 @@ plugin.register = (api) => {
 };
 
 export default plugin;
+
+export function createSpreadsheetTool({
+  toolContext
+}: {
+  config: TeamshipPluginConfig;
+  toolContext: TeamshipToolContext;
+}) {
+  return {
+    name: "newl_create_spreadsheet",
+    label: "Create Teams Spreadsheet",
+    description: "Create a bounded Excel .xlsx file from data already authorized and returned in the current Microsoft Teams conversation. Use only when the employee explicitly asks for a downloadable spreadsheet. Upload the returned filePath through Teams with message(action=upload-file); never show the local path.",
+    parameters: createSpreadsheetParameters,
+    async execute(_toolCallId: string, params: unknown) {
+      const senderId = normalizeUuid(toolContext.requesterSenderId);
+      if (toolContext.messageChannel !== "msteams" || !senderId) {
+        return textResult(
+          "Spreadsheet creation requires an authenticated Microsoft Teams message with a valid Entra identity.",
+          "unauthorized"
+        );
+      }
+      if (!toolContext.workspaceDir) {
+        return textResult("OpenClaw did not provide a workspace for spreadsheet creation.", "not_configured");
+      }
+
+      try {
+        const input = readSpreadsheetInput(params);
+        const result = await writeSpreadsheetFile(toolContext.workspaceDir, input);
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Spreadsheet created as ${result.filename}. Upload it now with message(action=upload-file, filePath="${result.filePath}", filename="${result.filename}"). Do not show the local path in a Teams message.`
+          }],
+          details: {
+            status: "ok",
+            ...result
+          }
+        };
+      } catch (error) {
+        return textResult(
+          error instanceof Error ? error.message : "Spreadsheet creation failed.",
+          "failed"
+        );
+      }
+    }
+  };
+}
 
 export function createTeamshipReadTool({
   config,
@@ -758,6 +838,29 @@ function readPrompt(params: unknown) {
     throw new Error("A Teamship prompt between 1 and 4000 characters is required.");
   }
   return prompt.trim();
+}
+
+function readSpreadsheetInput(params: unknown): SpreadsheetInput {
+  if (!params || typeof params !== "object") throw new Error("Spreadsheet input is required.");
+  const input = params as Record<string, unknown>;
+  return {
+    filename: typeof input.filename === "string" ? input.filename : "nemo-spreadsheet.xlsx",
+    sheetName: typeof input.sheetName === "string" ? input.sheetName : "Data",
+    columns: Array.isArray(input.columns)
+      ? input.columns.map((column) => {
+        const value = column && typeof column === "object"
+          ? column as Record<string, unknown>
+          : {};
+        return {
+          key: typeof value.key === "string" ? value.key : "",
+          header: typeof value.header === "string" ? value.header : ""
+        };
+      })
+      : [],
+    rows: Array.isArray(input.rows)
+      ? input.rows as SpreadsheetInput["rows"]
+      : []
+  };
 }
 
 async function readResponseBody(response: Response) {

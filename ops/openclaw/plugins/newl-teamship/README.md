@@ -2,7 +2,7 @@
 
 This tool-only plugin keeps `newl_teamship_read` discoverable so the model can route Teamship questions reliably, but it executes only for Microsoft Teams turns with a trusted runtime sender ID. Calls without the Teams channel, a valid runtime sender UUID, or a valid configured tenant UUID are rejected before any network request. The model supplies only the normalized Teamship question. The plugin binds the Entra tenant and sender object ID outside model-controlled arguments and calls Newl Apps, where those claims resolve to the existing user and tenant membership.
 
-The Teamship integration remains read-only. The Garland tools may save tenant-scoped PDFs, review records, employee feedback, approved-memory candidates, and development suggestions in Newl Apps. They cannot update Teamship, print, start Codex, merge, deploy, or send customer communications.
+The Teamship integration remains read-only. The Garland tools may save tenant-scoped PDFs, review records, employee feedback, approved-memory candidates, and development suggestions in Newl Apps. The identity-bound `newl_create_spreadsheet` tool creates a bounded `.xlsx` under the active OpenClaw workspace from current authorized conversation data; the separate Teams message action performs delivery. These tools cannot update Teamship, print, start Codex, merge, deploy, or send customer communications.
 
 ## Garland tools
 
@@ -25,5 +25,7 @@ For a scheduled personal Teams digest, target the existing direct conversation a
 For a Vercel-protected Preview, set `vercelProtectionBypassEnv` to the name of an environment variable containing a dedicated Vercel Protection Bypass for Automation secret. The plugin adds that secret only as the `x-vercel-protection-bypass` request header. Leave this option unset for production or any unprotected host.
 
 After installing the plugin and `teamship-read-only` skill, append the repository's `ops/openclaw/AGENTS.teamship.md` fragment to the live OpenClaw workspace `AGENTS.md`. This makes Nemo load the skill for every Teamship question, call the read tool in the same turn for current records, and read the exact curated file for procedure questions.
+
+To enable downloadable spreadsheets, also install `ops/openclaw/skills/teams-spreadsheet` and explicitly allow both `newl_create_spreadsheet` and OpenClaw's built-in `message` tool for Nemo. The skill restricts `message(action=upload-file)` to the trusted current Teams direct message and forbids returning a local path, changing the target, or falling back to a public link. This is a reviewed permission change and must not be applied to the live runtime until separately approved.
 
 Follow `docs/ai/nemo-garland-production-rollout.md` for the reviewed production migration, deployment, plugin reload, supervised Teams PDF test, digest activation, and rollback order. The runbook does not itself authorize any live action.
