@@ -14,6 +14,10 @@ const runtimeHelperPath = path.join(
   "ops/openclaw/lib/website-growth-scout-runtime.zsh",
 );
 const installerPath = path.join(repoRoot, "ops/openclaw/install-website-growth-scout.sh");
+const backlinkInstallerPath = path.join(
+  repoRoot,
+  "ops/openclaw/install-website-growth-backlink-executor.sh",
+);
 const runnerPath = path.join(repoRoot, "ops/openclaw/run-website-growth-scout.sh");
 const runtimeRunnerPath = path.join(
   repoRoot,
@@ -62,6 +66,19 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     expect(installer).toContain('--declaration-key "newl.website-growth.scout.weekly.v1"');
     expect(installer).toContain('--declaration-key "newl.website-growth.scout.weekday-checkin.v1"');
     expect(installer).toContain('\\"--light\\"');
+  });
+
+  it("configures the backlink plugin before installing it", async () => {
+    const installer = await readFile(backlinkInstallerPath, "utf8");
+    const configureIndex = installer.indexOf(
+      "openclaw config set plugins.entries.newl-website-growth",
+    );
+    const installIndex = installer.indexOf(
+      'openclaw plugins install --force "${plugin_path}"',
+    );
+
+    expect(configureIndex).toBeGreaterThan(-1);
+    expect(installIndex).toBeGreaterThan(configureIndex);
   });
 
   it("updates the clean dedicated runtime from main before every Scout run", async () => {
@@ -114,6 +131,7 @@ describe("Website Growth Scout OpenClaw scripts", () => {
 
   it.each([
     "install-website-growth-scout.sh",
+    "install-website-growth-backlink-executor.sh",
     "run-website-growth-scout.sh",
     "run-website-growth-scout-runtime.sh",
     "lib/website-growth-scout-runtime.zsh",
