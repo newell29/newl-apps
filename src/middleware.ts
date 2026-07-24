@@ -43,6 +43,8 @@ export const config = {
    *  - /api/assistant/teamship/read      (OpenClaw Teamship token auth)
    *  - /api/assistant/openclaw/unresolved-turns
    *                                      (OpenClaw assistant token + Teams identity auth)
+   *  - /api/assistant/openclaw/development-jobs
+   *                                      (Rivet assistant token + admin Teams identity auth)
    *  - /api/assistant/garland/*          (OpenClaw assistant token + Teams identity auth)
    *  - /api/assistant/teamship/browser-jobs/*
    *                                      (Mac Mini Teamship browser worker token auth)
@@ -62,6 +64,6 @@ export const config = {
    *  - Next.js internals and static files
    */
   matcher: [
-    "/((?!api/auth|api/integrations/trademining|api/assistant/teamship/read|api/assistant/openclaw/unresolved-turns|api/assistant/teamship/browser-jobs|api/assistant/printing|api/assistant/garland|api/shipment-documents/teamship-review/update-jobs/agent|api/shipment-documents/teamship-review/email-intake/scheduled|api/lead-gen/apollo/status-sync|api/website-growth/scout|api/website-growth/backlinks/executor|api/website-growth/weekly-plan|api/website-growth/build-requests|api/website-inbound|_next/static|_next/image|favicon.ico|.*\\..*).*)"
+    "/((?!api/auth|api/integrations/trademining|api/assistant/teamship/read|api/assistant/openclaw/unresolved-turns|api/assistant/openclaw/development-jobs|api/assistant/teamship/browser-jobs|api/assistant/printing|api/assistant/garland|api/shipment-documents/teamship-review/update-jobs/agent|api/shipment-documents/teamship-review/email-intake/scheduled|api/lead-gen/apollo/status-sync|api/website-growth/scout|api/website-growth/backlinks/executor|api/website-growth/weekly-plan|api/website-growth/build-requests|api/website-inbound|_next/static|_next/image|favicon.ico|.*\\..*).*)"
   ]
 };
