@@ -283,7 +283,27 @@ function extractInstructions(lines: string[], itemHeaderIndex: number) {
     return "";
   }
 
-  return removeTrailingItemHeaderLines(lines.slice(startIndex + 1, endIndex)).join("\n").trim();
+  const instructionLines = removeTrailingItemHeaderLines(lines.slice(startIndex + 1, endIndex));
+  const wrappedContinuationLines = extractWrappedInstructionContinuation(lines, endIndex);
+  return uniqueStrings([...instructionLines, ...wrappedContinuationLines]).join("\n").trim();
+}
+
+function extractWrappedInstructionContinuation(lines: string[], headerStartIndex: number) {
+  if (headerStartIndex < 0 || !isItemTableHeaderCluster(lines, headerStartIndex)) {
+    return [];
+  }
+
+  const firstItemIndex = lines.findIndex(
+    (line, index) => index > headerStartIndex && Boolean(matchGarlandItemStart(line))
+  );
+  if (firstItemIndex <= headerStartIndex) {
+    return [];
+  }
+
+  return lines
+    .slice(headerStartIndex, firstItemIndex)
+    .filter((line) => !isItemTableHeaderFragment(line))
+    .filter((line) => !/^\d{1,2}\/\d{1,2}\/\d{4}\b/.test(line));
 }
 
 function findInstructionEndIndex(lines: string[], startIndex: number, itemHeaderIndex: number) {

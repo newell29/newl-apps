@@ -341,6 +341,48 @@ DESCRIPTION
     );
   });
 
+  it("keeps wrapped Special Instructions that PDF extraction places inside the item-header cluster", () => {
+    const orders = parseGarlandShippingOrderPages([
+      {
+        pageNumber: 1,
+        text: `Ship-To Pre-Shipper Print Date
+11906259 PS210491 7/24/2026
+Pre-Shipper
+UNITED TRIMEN LIMITED
+TORONTO, ON M6N 4C4
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Order Number SR813527 Ship To PO 98806 Frt Terms PPADD-CD
+Order Date 7/24/2026 Ship Via SPEEDY
+RECEIVING HOURS AT UNITED 7:00AM TO 2:30PM MON-FRI
+DANGEROUS GOODS - C-CLEAN-FORTE PROPER NAME: UN1814, POTASSIUM HYDROXIDE SOLUTION, CLASS 8 PG II
+24 HOUR DG NUMBER:
+Ln Item Number T
+Site
+Location
+Lot/Serial
+Ref
+Ship Qty Qty Open UM Due
+Shipped
+CHEMTREC - 1-800-424-9300 QUANTITY: 2
+1 C-CLEAN-FORTE 891210
+C-CLEAN STRONG CLEANING STRENGTH
+2.00 EA 7/24/2026`
+      }
+    ]);
+
+    expect(orders[0]?.instructions).toBe(
+      [
+        "RECEIVING HOURS AT UNITED 7:00AM TO 2:30PM MON-FRI",
+        "DANGEROUS GOODS - C-CLEAN-FORTE PROPER NAME: UN1814, POTASSIUM HYDROXIDE SOLUTION, CLASS 8 PG II",
+        "24 HOUR DG NUMBER:",
+        "CHEMTREC - 1-800-424-9300 QUANTITY: 2"
+      ].join("\n")
+    );
+    expect(orders[0]?.instructions).not.toContain("Lot/Serial");
+    expect(orders[0]?.instructions).not.toContain("Ship Qty");
+  });
+
   it("parses Teamship alert digest orders and item details", () => {
     const alerts = parseTeamshipAlertDigest(alertDigest);
 

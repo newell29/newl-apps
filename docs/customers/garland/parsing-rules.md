@@ -25,6 +25,8 @@ Emails are classified using Garland-domain, PS-range, order/page-count, attachme
 
 Garland Lot/Serial references may be all-numeric values from 8 through 16 digits, or alphanumeric values containing at least one digit. Six-digit site/location codes remain excluded from serial extraction. Confirmed employee feedback includes valid eight-digit references, so serialized items must use `SN:` commodity text rather than the non-serialized `QTY:` fallback.
 
+PDF text extraction may place the final wrapped Special Instructions line inside the split item-table header. The parser retains non-header text between the recognized header cluster and the first item row while continuing to exclude `Ln`, `Item Number`, `Site`, `Location`, `Lot/Serial`, `Ship Qty`, and related header fragments.
+
 ## Pallet and printing notes
 
 Pallet dimensions, serials, weight, and SKU observations are represented in Teamship review/update types and `GarlandProductDimensionObservation`. The UPS special dimension rule is confirmed in existing documentation and tests should be consulted before changing it. Printer mappings, duplicate print protection, and a general print service were not located; production printing requires explicit human approval.
