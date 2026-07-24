@@ -5,7 +5,7 @@ import { validateTradeMiningSearchProfile } from "@/modules/lead-gen/search-prof
 function validProfile() {
   return {
     name: "Canadian consignee leads",
-    destinationMarkets: ["Toronto | Canada"],
+    destinationMarkets: ["Ontario | Canada"],
     destinationPorts: ["Charleston, South Carolina"],
     lookbackWindowDays: 120,
     minShipmentCount: 1,
@@ -29,13 +29,24 @@ describe("TradeMining search profile validation", () => {
     ).toContain("Unsupported TradeMining destination ports: Toronto.");
   });
 
-  it("accepts a city-only Canadian profile without a U.S. arrival port", () => {
+  it("accepts a province-only Canadian profile without a U.S. arrival port", () => {
     expect(
       validateTradeMiningSearchProfile({
         ...validProfile(),
         destinationPorts: []
       })
     ).toEqual([]);
+  });
+
+  it("rejects Canadian city destinations so Hunter cannot use the U.S.-only city lookup", () => {
+    expect(
+      validateTradeMiningSearchProfile({
+        ...validProfile(),
+        destinationMarkets: ["Toronto | Canada"]
+      })
+    ).toContain(
+      "Canadian destination markets must use a province, such as Ontario | Canada: Toronto | Canada."
+    );
   });
 
   it("validates aggregate TEU and industry-pack modes independently", () => {

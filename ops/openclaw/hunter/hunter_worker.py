@@ -58,6 +58,22 @@ TRADEMINING_PORT_ALIASES = {
     "wilmington nc": "wilmington, north carolina",
 }
 
+CANADIAN_PROVINCES_AND_TERRITORIES = {
+    "alberta",
+    "british columbia",
+    "manitoba",
+    "new brunswick",
+    "newfoundland and labrador",
+    "northwest territories",
+    "nova scotia",
+    "nunavut",
+    "ontario",
+    "prince edward island",
+    "quebec",
+    "saskatchewan",
+    "yukon",
+}
+
 
 def load_profiles(base_url: str, token: str) -> list[dict[str, Any]]:
     response = api_request(base_url, token, "GET", "/api/integrations/trademining/search-profiles")
@@ -201,18 +217,32 @@ def profile_values(profile: dict[str, Any], field: str) -> list[str]:
     return [str(value).strip() for value in values if str(value).strip()]
 
 
-def profile_destination_filters(profile: dict[str, Any]) -> tuple[list[str], list[str]]:
+def profile_destination_filters(profile: dict[str, Any]) -> tuple[list[str], list[str], list[str]]:
     cities: list[str] = []
+    states: list[str] = []
     countries: list[str] = []
     for market in profile_values(profile, "destinationMarkets"):
-        city, separator, country = market.partition("|")
-        normalized_city = city.strip()
+        location, separator, country = market.partition("|")
+        normalized_location = location.strip()
         normalized_country = country.strip() if separator else ""
-        if normalized_city and normalized_city.casefold() not in {value.casefold() for value in cities}:
-            cities.append(normalized_city)
+        is_canadian_province = (
+            normalized_country.casefold() == "canada"
+            and normalized_location.casefold() in CANADIAN_PROVINCES_AND_TERRITORIES
+        )
+        if normalized_country.casefold() == "canada" and not is_canadian_province:
+            raise RuntimeError(
+                f'Canadian destination market "{market}" must use Province | Canada, '
+                "for example Ontario | Canada"
+            )
+        if is_canadian_province:
+            state_spec = f"{normalized_location} | {normalized_country}"
+            if state_spec.casefold() not in {value.casefold() for value in states}:
+                states.append(state_spec)
+        elif normalized_location and normalized_location.casefold() not in {value.casefold() for value in cities}:
+            cities.append(normalized_location)
         if normalized_country and normalized_country.casefold() not in {value.casefold() for value in countries}:
             countries.append(normalized_country)
-    return cities, countries
+    return cities, states, countries
 
 
 def profile_minimum_teu(profile: dict[str, Any]) -> Optional[float]:
@@ -343,9 +373,11 @@ def run_profile(base_url: str, token: str, profile: dict[str, Any], trigger: str
             export_command.extend(["--product-keyword", value])
         for value in profile_values(profile, "hsCodes"):
             export_command.extend(["--hs-code", value])
-        consignee_cities, consignee_countries = profile_destination_filters(profile)
+        consignee_cities, consignee_states, consignee_countries = profile_destination_filters(profile)
         for value in consignee_cities:
             export_command.extend(["--consignee-city", value])
+        for value in consignee_states:
+            export_command.extend(["--consignee-state", value])
         for value in consignee_countries:
             export_command.extend(["--consignee-country", value])
         minimum_teu = profile_minimum_teu(profile)
@@ -415,13 +447,14 @@ def build_profile_plan(profile: dict[str, Any]) -> dict[str, Any]:
     destination_ports = profile_values(profile, "destinationPorts")
     configured_ports = load_port_ids() if destination_ports else {}
     missing_ports = [name for name in destination_ports if canonical_port_key(name) not in configured_ports]
-    consignee_cities, consignee_countries = profile_destination_filters(profile)
+    consignee_cities, consignee_states, consignee_countries = profile_destination_filters(profile)
     lookback_days = profile_lookback_days(profile)
     return {
         "profileId": profile_id,
         "profileName": profile_name,
         "destinationPorts": destination_ports,
         "consigneeCities": consignee_cities,
+        "consigneeStates": consignee_states,
         "consigneeCountries": consignee_countries,
         "originCountries": profile_values(profile, "originCountries"),
         "originPorts": profile_values(profile, "originPorts"),

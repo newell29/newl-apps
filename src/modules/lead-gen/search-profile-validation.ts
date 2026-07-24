@@ -1,4 +1,8 @@
-import { canonicalizeTradeMiningDestinationPort } from "@/modules/lead-gen/search-profile-suggestions";
+import {
+  canonicalizeTradeMiningDestinationPort,
+  isCanadianDestination,
+  isTradeMiningCanadianProvinceDestination
+} from "@/modules/lead-gen/search-profile-suggestions";
 import {
   isTradeMiningIndustryFilterMode,
   isTradeMiningIndustryPackId
@@ -55,6 +59,15 @@ export function validateTradeMiningSearchProfile(input: TradeMiningSearchProfile
     if (unsupportedPorts.length > 0) {
       errors.push(`Unsupported TradeMining destination ports: ${unsupportedPorts.join(", ")}.`);
     }
+  }
+
+  const unsupportedCanadianDestinations = input.destinationMarkets.filter(
+    (market) => isCanadianDestination(market) && !isTradeMiningCanadianProvinceDestination(market)
+  );
+  if (unsupportedCanadianDestinations.length > 0) {
+    errors.push(
+      `Canadian destination markets must use a province, such as Ontario | Canada: ${unsupportedCanadianDestinations.join(", ")}.`
+    );
   }
 
   if (!Number.isInteger(input.lookbackWindowDays) || input.lookbackWindowDays < 1 || input.lookbackWindowDays > 365) {

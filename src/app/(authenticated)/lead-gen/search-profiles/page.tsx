@@ -251,11 +251,11 @@ function SearchProfileForm({
       <div className="space-y-4 rounded-md border border-border bg-background p-4">
         <h3 className="text-sm font-semibold text-foreground">Lane filters</h3>
         <MultiValueSuggestField
-          label="Consignee cities / destination markets"
+          label="Consignee cities, provinces / destination markets"
           name="destinationMarkets"
           defaultValue={defaults?.destinationMarkets}
           suggestionField="destinationMarkets"
-          description="Optional hard filter. Hunter uses an exact TradeMining city when available; Canadian markets use consignee country plus address text."
+          description="Optional hard filter. For Canada, select a province such as Ontario | Canada; Hunter submits TradeMining's country and province fields without a city."
         />
         <MultiValueSuggestField
           label="U.S. arrival ports"
