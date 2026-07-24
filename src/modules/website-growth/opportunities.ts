@@ -45,7 +45,27 @@ export type OpportunityQualificationResult = {
   skippedCount: number;
 };
 
-export type WeeklyContentLane = "CORE_PAGE" | "SUPPORTING_CONTENT" | "QUICK_OPTIMIZATION";
+export type WebsiteGrowthQuestionKind =
+  | "DEFINITION"
+  | "PROCESS"
+  | "COST"
+  | "COMPARISON"
+  | "SELECTION"
+  | "CAPABILITY"
+  | "OTHER";
+
+export type WebsiteGrowthQuestionIntent = {
+  isQuestion: true;
+  question: string;
+  kind: WebsiteGrowthQuestionKind;
+  answerStrategy: "EXISTING_PAGE_ANSWER_SECTION" | "DEDICATED_GUIDE_REVIEW";
+};
+
+export type WeeklyContentLane =
+  | "CORE_PAGE"
+  | "QUESTION_ANSWER"
+  | "SUPPORTING_CONTENT"
+  | "QUICK_OPTIMIZATION";
 
 export type WeeklyContentRecommendation = {
   lane: WeeklyContentLane;
@@ -62,6 +82,14 @@ export const weeklyContentRecommendations: WeeklyContentRecommendation[] = [
     description: "Major commercial pages or meaningful updates to existing money pages.",
     publishLimit: 2,
     actions: [WebsiteGrowthAction.CREATE_PAGE, WebsiteGrowthAction.IMPROVE_EXISTING_PAGE]
+  },
+  {
+    lane: "QUESTION_ANSWER",
+    label: "Customer question and AI answer",
+    description:
+      "Question-led answer sections on authoritative pages, with a dedicated guide only when the intent cannot be covered well on an existing page.",
+    publishLimit: 2,
+    actions: []
   },
   {
     lane: "SUPPORTING_CONTENT",
@@ -113,6 +141,13 @@ const serviceTerms = [
 
 const informationalTerms = ["what is", "meaning", "definition", "guide", "how to", "demurrage", "ddp"];
 const brandedTerms = ["newl", "newell", "newells", "newell's", "teamship"];
+const questionStarterPattern =
+  /^(?:what|why|how|when|where|who|which|can|could|do|does|is|are|should|would|will)\b/i;
+const comparisonQuestionPattern =
+  /\b(?:difference between|compare|comparison|versus|vs\.?)\b/i;
+const costQuestionPattern = /\b(?:how much|cost|costs|price|prices|pricing)\b/i;
+const selectionQuestionPattern =
+  /\b(?:best|choose|choosing|look for|questions to ask|right 3pl|which 3pl)\b/i;
 const keywordStopWords = new Set([
   "a",
   "an",
@@ -141,6 +176,10 @@ const keywordStopWords = new Set([
 export function buildOpportunityCandidate(input: OpportunityInput): OpportunityCandidate {
   const topic = cleanTopic(input.topic);
   const primaryKeyword = cleanTopic(input.primaryKeyword ?? input.topic);
+  const questionIntent = classifyWebsiteGrowthQuestion(
+    primaryKeyword || topic,
+    Boolean(input.targetPage)
+  );
   const impressions = input.impressions ?? 0;
   const clicks = input.clicks ?? 0;
   const position = input.position ?? null;
@@ -197,7 +236,8 @@ export function buildOpportunityCandidate(input: OpportunityInput): OpportunityC
     impressions,
     clicks,
     position,
-    leadCount
+    leadCount,
+    isQuestion: Boolean(questionIntent)
   });
   const score = scoreOpportunity({
     topic,
@@ -205,7 +245,8 @@ export function buildOpportunityCandidate(input: OpportunityInput): OpportunityC
     clicks,
     position,
     leadCount,
-    targetPage: input.targetPage
+    targetPage: input.targetPage,
+    isQuestion: Boolean(questionIntent)
   });
   const confidence = score >= 75 ? "High" : score >= 45 ? "Medium" : "Low";
 
@@ -218,7 +259,12 @@ export function buildOpportunityCandidate(input: OpportunityInput): OpportunityC
     score,
     confidence,
     reason: buildReason({ impressions, clicks, position, leadCount, targetPage: input.targetPage }),
-    recommendation: buildRecommendation(action, topic, input.targetPage ?? null),
+    recommendation: buildRecommendation(
+      action,
+      topic,
+      input.targetPage ?? null,
+      Boolean(questionIntent)
+    ),
     supportingKeywords: primaryKeyword ? [primaryKeyword] : [],
     evidence: {
       impressions,
@@ -226,9 +272,54 @@ export function buildOpportunityCandidate(input: OpportunityInput): OpportunityC
       position,
       leadCount,
       source: input.source ?? "manual",
+      ...(questionIntent ? { questionOpportunity: questionIntent } : {}),
       ...(input.evidence ?? {})
     }
   };
+}
+
+export function classifyWebsiteGrowthQuestion(
+  value: string | null | undefined,
+  hasTargetPage = false
+): WebsiteGrowthQuestionIntent | null {
+  const question = cleanTopic(value);
+  if (!question) return null;
+
+  const isQuestion =
+    question.endsWith("?") ||
+    questionStarterPattern.test(question) ||
+    comparisonQuestionPattern.test(question) ||
+    costQuestionPattern.test(question) ||
+    selectionQuestionPattern.test(question);
+  if (!isQuestion) return null;
+
+  return {
+    isQuestion: true,
+    question,
+    kind: classifyQuestionKind(question),
+    answerStrategy: hasTargetPage
+      ? "EXISTING_PAGE_ANSWER_SECTION"
+      : "DEDICATED_GUIDE_REVIEW"
+  };
+}
+
+export function isWebsiteGrowthQuestionOpportunity(value: {
+  topic?: string | null;
+  primaryKeyword?: string | null;
+  targetPage?: string | null;
+  evidence?: unknown;
+}) {
+  const evidence = readEvidenceRecord(value.evidence);
+  const savedQuestion = readEvidenceRecord(evidence.questionOpportunity);
+
+  if (savedQuestion.isQuestion === true) return true;
+
+  return Boolean(
+    classifyWebsiteGrowthQuestion(
+      value.primaryKeyword ?? value.topic,
+      Boolean(value.targetPage)
+    )
+  );
 }
 
 export function buildCandidatesFromMetricRows(rows: CsvRow[], source: string): OpportunityCandidate[] {
@@ -296,6 +387,7 @@ export function isQualifiedOpportunity(candidate: OpportunityCandidate) {
   const topic = candidate.topic.toLowerCase();
   const hasServiceIntent = serviceTerms.some((term) => topic.includes(term));
   const hasInformationalIntent = informationalTerms.some((term) => topic.includes(term));
+  const hasQuestionIntent = isWebsiteGrowthQuestionOpportunity(candidate);
   const isMostlyBranded = brandedTerms.some((term) => topic.includes(term)) && !hasServiceIntent;
 
   if (candidate.action === WebsiteGrowthAction.IGNORE) {
@@ -326,6 +418,17 @@ export function isQualifiedOpportunity(candidate: OpportunityCandidate) {
     return true;
   }
 
+  if (
+    hasQuestionIntent &&
+    hasServiceIntent &&
+    impressions >= 15 &&
+    position !== null &&
+    position > 3 &&
+    position <= 50
+  ) {
+    return true;
+  }
+
   return false;
 }
 
@@ -335,7 +438,8 @@ export function scoreOpportunity({
   clicks,
   position,
   leadCount,
-  targetPage
+  targetPage,
+  isQuestion = false
 }: {
   topic: string;
   impressions: number;
@@ -343,6 +447,7 @@ export function scoreOpportunity({
   position: number | null;
   leadCount: number;
   targetPage?: string | null;
+  isQuestion?: boolean;
 }) {
   const commercialScore = serviceTerms.some((term) => topic.toLowerCase().includes(term)) ? 20 : 0;
   const demandScore = Math.min(30, Math.round(impressions / 75));
@@ -350,8 +455,21 @@ export function scoreOpportunity({
   const leadScore = Math.min(25, leadCount * 12);
   const positionScore = position && position > 4 && position <= 30 ? 15 : position && position > 30 ? 8 : 0;
   const pageScore = targetPage ? 5 : 10;
+  const questionScore = isQuestion ? 10 : 0;
 
-  return Math.max(1, Math.min(100, commercialScore + demandScore + tractionScore + leadScore + positionScore + pageScore));
+  return Math.max(
+    1,
+    Math.min(
+      100,
+      commercialScore +
+        demandScore +
+        tractionScore +
+        leadScore +
+        positionScore +
+        pageScore +
+        questionScore
+    )
+  );
 }
 
 function chooseAction({
@@ -360,7 +478,8 @@ function chooseAction({
   impressions,
   clicks,
   position,
-  leadCount
+  leadCount,
+  isQuestion
 }: {
   topic: string;
   targetPage?: string | null;
@@ -368,8 +487,15 @@ function chooseAction({
   clicks: number;
   position: number | null;
   leadCount: number;
+  isQuestion: boolean;
 }) {
   const lowerTopic = topic.toLowerCase();
+
+  if (isQuestion) {
+    return targetPage
+      ? WebsiteGrowthAction.ADD_SECTION
+      : WebsiteGrowthAction.CREATE_RESOURCE_ARTICLE;
+  }
 
   if (targetPage && leadCount > 0) {
     return WebsiteGrowthAction.IMPROVE_EXISTING_PAGE;
@@ -530,7 +656,19 @@ function buildReason({
   return parts.join(", ");
 }
 
-function buildRecommendation(action: WebsiteGrowthAction, topic: string, targetPage: string | null) {
+function buildRecommendation(
+  action: WebsiteGrowthAction,
+  topic: string,
+  targetPage: string | null,
+  isQuestion = false
+) {
+  if (isQuestion && action === WebsiteGrowthAction.ADD_SECTION) {
+    return `Add a concise, evidence-backed answer for "${topic}" to ${targetPage ?? "the best matching authoritative page"}, supported by relevant detail, internal links, and a conversion path.`;
+  }
+  if (isQuestion && action === WebsiteGrowthAction.CREATE_RESOURCE_ARTICLE) {
+    return `Review "${topic}" for a substantial question-led resource article or guide only if no existing service, location, industry, or resource page can answer it completely without creating thin or duplicate content.`;
+  }
+
   switch (action) {
     case WebsiteGrowthAction.CREATE_PAGE:
       return `Create a dedicated page for ${topic} and connect it to relevant service, location, and industry pages.`;
@@ -554,4 +692,22 @@ function buildRecommendation(action: WebsiteGrowthAction, topic: string, targetP
 
 function cleanTopic(value: string | null | undefined) {
   return (value ?? "").trim().replace(/\s+/g, " ");
+}
+
+function classifyQuestionKind(value: string): WebsiteGrowthQuestionKind {
+  if (costQuestionPattern.test(value)) return "COST";
+  if (comparisonQuestionPattern.test(value)) return "COMPARISON";
+  if (selectionQuestionPattern.test(value)) return "SELECTION";
+  if (/^(?:what is|what are|meaning|define|definition)\b/i.test(value)) return "DEFINITION";
+  if (/^(?:how|when|where|why)\b/i.test(value)) return "PROCESS";
+  if (/^(?:can|could|do|does|is|are|should|would|will)\b/i.test(value)) {
+    return "CAPABILITY";
+  }
+  return "OTHER";
+}
+
+function readEvidenceRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }

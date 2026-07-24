@@ -13,6 +13,8 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - Data persistence uses tenant-scoped Prisma models where a database model exists.
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
+- Customer-question candidates are classified deterministically and receive bounded weekly and Scout-packet capacity. Scout must prefer improving an existing authoritative page over creating a new question page.
+- Question-led work must remain commercially relevant, visible to visitors, supported by available evidence, and free of guarantees about AI citations or rankings.
 
 ## Data model
 

@@ -20,6 +20,8 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - Missing report signing secret: completion fails safely unless either `WEBSITE_GROWTH_REPORT_DOWNLOAD_SECRET` or the existing `OPENCLAW_WEBSITE_GROWTH_TOKEN` contains at least 32 characters.
 - Duplicate trigger: the second run exits successfully after sending a Teams check-in; the active run remains authoritative.
 - No candidates: the job still refreshes Position Tracking and backlink research, succeeds, and sends a Teams report without a page-approval request.
+- No qualifying question candidates: the question/AI-answer lane reports zero and the remaining Scout workflow continues normally; it never creates a thin page to fill the lane.
+- Question already answered well on an existing page: Scout may return no draft. Existing-page coverage is preferred over a duplicate guide.
 - No backlink prospects: the job succeeds and the Teams summary explicitly reports zero new prospects.
 - Raw or oversized backlink output: completion is rejected; Scout may return at most 15 curated prospects and never raw backlink rows.
 - Duplicate or weak backlink prospect: Newl Apps refreshes the existing record or drops it through deterministic quality gates instead of adding another queue item.

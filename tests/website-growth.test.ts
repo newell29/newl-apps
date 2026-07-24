@@ -40,6 +40,8 @@ import {
 } from "@/modules/website-growth/integrations";
 import {
   buildOpportunityCandidate,
+  classifyWebsiteGrowthQuestion,
+  isWebsiteGrowthQuestionOpportunity,
   qualifyOpportunityCandidates,
   weeklyContentRecommendations
 } from "@/modules/website-growth/opportunities";
@@ -57,7 +59,8 @@ import { selectWeeklyWebsiteGrowthCandidates } from "@/modules/website-growth/we
 import {
   buildWebsiteGrowthScoutTeamsMessage,
   buildWebsiteGrowthScoutWeekdayCheckInMessage,
-  parseWebsiteGrowthScoutCompletion
+  parseWebsiteGrowthScoutCompletion,
+  selectWebsiteGrowthScoutPacketCandidates
 } from "@/modules/website-growth/scout-run";
 import {
   deduplicateScoutDrafts,
@@ -110,6 +113,37 @@ describe("website growth opportunity scoring", () => {
 
     expect(candidate.action).toBe(WebsiteGrowthAction.CREATE_RESOURCE_ARTICLE);
     expect(candidate.recommendation).toContain("resource article");
+  });
+
+  it("classifies customer questions and prefers an answer section on an existing page", () => {
+    const candidate = buildOpportunityCandidate({
+      topic: "how much does 3pl warehousing cost",
+      primaryKeyword: "how much does 3pl warehousing cost",
+      targetPage: "https://www.newlgroup.com/services/warehousing-services",
+      impressions: 45,
+      clicks: 0,
+      position: 17,
+      source: "google_search_console_api"
+    });
+
+    expect(candidate.action).toBe(WebsiteGrowthAction.ADD_SECTION);
+    expect(candidate.recommendation).toContain("concise, evidence-backed answer");
+    expect(isWebsiteGrowthQuestionOpportunity(candidate)).toBe(true);
+    expect(candidate.evidence.questionOpportunity).toMatchObject({
+      isQuestion: true,
+      kind: "COST",
+      answerStrategy: "EXISTING_PAGE_ANSWER_SECTION"
+    });
+  });
+
+  it("recognizes comparison and capability questions without treating ordinary keywords as questions", () => {
+    expect(classifyWebsiteGrowthQuestion("3PL vs in-house fulfillment")?.kind).toBe(
+      "COMPARISON"
+    );
+    expect(classifyWebsiteGrowthQuestion("Can a Canadian 3PL ship to the US?")?.kind).toBe(
+      "CAPABILITY"
+    );
+    expect(classifyWebsiteGrowthQuestion("warehouse logistics")).toBeNull();
   });
 
   it("filters weak Search Console rows out of the qualified queue", () => {
@@ -285,14 +319,20 @@ describe("website growth Scout workspace", () => {
 });
 
 describe("website growth weekly planning lanes", () => {
-  it("offers a balanced weekly approval slate across the three content types", () => {
-    expect(weeklyContentRecommendations).toHaveLength(3);
+  it("offers a balanced weekly approval slate with a reserved question lane", () => {
+    expect(weeklyContentRecommendations).toHaveLength(4);
     expect(weeklyContentRecommendations.map((lane) => lane.lane)).toEqual([
       "CORE_PAGE",
+      "QUESTION_ANSWER",
       "SUPPORTING_CONTENT",
       "QUICK_OPTIMIZATION"
     ]);
-    expect(weeklyContentRecommendations.map((lane) => lane.publishLimit)).toEqual([2, 4, 6]);
+    expect(weeklyContentRecommendations.map((lane) => lane.publishLimit)).toEqual([
+      2,
+      2,
+      4,
+      6
+    ]);
   });
 
   it("routes each Website Growth action into no more than one weekly lane", () => {
@@ -338,6 +378,40 @@ describe("website growth weekly planning lanes", () => {
 
     expect(result.selected.map((candidate) => candidate.id)).toEqual(["nationwide", "resource"]);
     expect(result.laneCounts.CORE_PAGE).toBe(1);
+  });
+
+  it("keeps question-led work in its own lane and reserves packet capacity for it", () => {
+    const question = weeklyCandidate({
+      id: "question",
+      action: WebsiteGrowthAction.ADD_SECTION,
+      topic: "how much does 3pl warehousing cost",
+      targetPage: "https://www.newlgroup.com/services/warehousing-services",
+      score: 58
+    });
+    const candidates = [
+      weeklyCandidate({
+        id: "core-1",
+        action: WebsiteGrowthAction.CREATE_PAGE,
+        topic: "automotive logistics",
+        targetPage: "https://www.newlgroup.com/industries/automotive-logistics",
+        score: 90
+      }),
+      weeklyCandidate({
+        id: "core-2",
+        action: WebsiteGrowthAction.CREATE_PAGE,
+        topic: "retail logistics",
+        targetPage: "https://www.newlgroup.com/industries/retail-logistics",
+        score: 85
+      }),
+      question
+    ];
+
+    const plan = selectWeeklyWebsiteGrowthCandidates(candidates);
+    const packet = selectWebsiteGrowthScoutPacketCandidates(candidates, 2);
+
+    expect(plan.laneCounts.QUESTION_ANSWER).toBe(1);
+    expect(plan.laneCounts.QUICK_OPTIMIZATION).toBe(0);
+    expect(packet.map((candidate) => candidate.id)).toEqual(["question", "core-1"]);
   });
 });
 
@@ -473,6 +547,8 @@ describe("website growth Codex Scout completion", () => {
       semrushSummary: "Found one weak commercial keyword.",
       weeklyPlan: { reviewedCount: 500, selectedCount: 12 },
       candidateCount: 6,
+      questionCandidateCount: 2,
+      questionDraftCount: 1,
       researchSignalCount: 6505,
       researchInventory: { MONITORING: 6105 },
       keywordAdditionCount: 2,
@@ -490,6 +566,9 @@ describe("website growth Codex Scout completion", () => {
     expect(message).toContain("Approval starts the developer build automatically");
     expect(message).toContain("6505 stored signals");
     expect(message).toContain("6 sent to Codex; 1 promoted");
+    expect(message).toContain(
+      "Question and AI-answer lane: 2 question-led candidates reviewed; 1 promoted"
+    );
     expect(message).toContain("SEO performance: https://newl-apps.example.com/api/seo-performance.xlsx");
     expect(message).toContain("SEMrush keyword import: https://newl-apps.example.com/api/semrush-keywords.xlsx");
   });
@@ -503,6 +582,8 @@ describe("website growth Codex Scout completion", () => {
       semrushSummary: "Position Tracking refreshed.",
       weeklyPlan: { reviewedCount: 0, selectedCount: 0 },
       candidateCount: 0,
+      questionCandidateCount: 0,
+      questionDraftCount: 0,
       researchSignalCount: 6505,
       researchInventory: { MONITORING: 6105 },
       keywordAdditionCount: 0,
@@ -528,7 +609,7 @@ describe("website growth Codex Scout completion", () => {
           { source: "GA4_API", status: "success", rowCount: 10 }
         ]
       },
-      weeklyPlan: { selectedCount: 1 },
+      weeklyPlan: { selectedCount: 1, laneCounts: { QUESTION_ANSWER: 1 } },
       researchSignalCount: 6505,
       researchInventory: { MONITORING: 6105, REVIEWING: 31 },
       semrushCache: {
@@ -546,6 +627,9 @@ describe("website growth Codex Scout completion", () => {
     expect(message).toContain("no SEMrush API units or Codex research were used");
     expect(message).toContain("SEMrush cache: current");
     expect(message).toContain("4 curated prospects currently need review");
+    expect(message).toContain(
+      "Question and AI-answer lane: 1 question-led candidate newly shortlisted"
+    );
   });
 });
 

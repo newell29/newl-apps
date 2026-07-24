@@ -86,6 +86,19 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     expect(helper).toContain('--target "${WEBSITE_GROWTH_TEAMS_TARGET}"');
   });
 
+  it("instructs Scout to review question-led AI-answer opportunities without creating thin pages", async () => {
+    const runner = await readFile(runnerPath, "utf8");
+
+    expect(runner).toContain(
+      "Treat candidates marked questionOpportunity as a dedicated customer-question and AI-answer lane."
+    );
+    expect(runner).toContain(
+      "prefer a direct answer section on the strongest relevant page"
+    );
+    expect(runner).toContain("Reject thin FAQ pages");
+    expect(runner).toContain("guarantees an AI citation or ranking");
+  });
+
   it("sends safe Teams outcomes for duplicate and failed runs", async () => {
     const [runner, runtimeRunner, helper] = await Promise.all([
       readFile(runnerPath, "utf8"),
