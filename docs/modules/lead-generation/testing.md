@@ -82,6 +82,8 @@ Port and consignee-filter regression coverage must also verify:
 8. aggregate TEUs use only the matched profile's records inside its lookback;
 9. industry-pack identifiers and modes reject unsupported values, and classification labels match the qualification packs; and
 10. invalid local configuration creates and fails a tracked run before the worker stops, preventing untracked retry loops.
+11. Found Companies defaults to 25 rendered rows, supports only 25/50/75/100, clamps invalid pages, and retains the full filtered result count.
+12. the Hunter installer pins the live service to a clean detached `origin/main` worktree and the runner cannot be redirected to a development checkout through its environment file.
 
 Scoring regression coverage must also verify:
 
