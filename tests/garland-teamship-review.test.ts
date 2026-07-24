@@ -264,6 +264,40 @@ NEWLS
     expect(orders[0]?.items[0]?.serialNumbers).not.toContain("NEWLS");
   });
 
+  it("keeps approved eight-digit Garland Lot/Serial references out of the quantity fallback", () => {
+    const orders = parseGarlandShippingOrderPages([
+      {
+        pageNumber: 1,
+        text: `Ship-To Pre-Shipper Print Date
+11906259 PS210491 7/24/2026
+Pre-Shipper
+UNITED TRIMEN LIMITED
+TORONTO, ON M6N 4C4
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Order Number SR813527 Ship To PO 98806 Frt Terms PPADD-CD
+Order Date 7/24/2026 Ship Via SPEEDY
+Ln Item Number T
+Site
+Location
+Lot/Serial
+Ref
+Ship Qty Qty Open UM Due
+Shipped
+1 UCFD36AHC-2-23 891210
+DESCRIPTION
+1.00 EA 7/24/2026
+NEWLS 15909412 1.00 (              )`
+      }
+    ]);
+
+    expect(orders[0]?.items[0]).toMatchObject({
+      sku: "UCFD36AHC-2-23",
+      quantity: 1,
+      serialNumbers: ["15909412"]
+    });
+  });
+
   it("does not leak split Garland item table headers into special instructions", () => {
     const orders = parseGarlandShippingOrderPages([
       {
