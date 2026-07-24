@@ -18,6 +18,14 @@ const backlinkInstallerPath = path.join(
   repoRoot,
   "ops/openclaw/install-website-growth-backlink-executor.sh",
 );
+const backlinkPromptPath = path.join(
+  repoRoot,
+  "ops/openclaw/prompts/website-growth-backlink-executor.md",
+);
+const backlinkSkillPath = path.join(
+  repoRoot,
+  "ops/openclaw/skills/website-growth-backlink-executor/SKILL.md",
+);
 const runnerPath = path.join(repoRoot, "ops/openclaw/run-website-growth-scout.sh");
 const runtimeRunnerPath = path.join(
   repoRoot,
@@ -79,6 +87,18 @@ describe("Website Growth Scout OpenClaw scripts", () => {
 
     expect(configureIndex).toBeGreaterThan(-1);
     expect(installIndex).toBeGreaterThan(configureIndex);
+  });
+
+  it("opens fresh backlink research tabs instead of navigating a stale active tab", async () => {
+    const [prompt, skill] = await Promise.all([
+      readFile(backlinkPromptPath, "utf8"),
+      readFile(backlinkSkillPath, "utf8"),
+    ]);
+
+    expect(prompt).toContain("openclaw browser open <url> --json");
+    expect(prompt).toContain("do not start with `openclaw browser navigate`");
+    expect(skill).toContain("open a fresh browser tab");
+    expect(skill).toContain("A failed browser probe marks the scheduled run failed");
   });
 
   it("updates the clean dedicated runtime from main before every Scout run", async () => {

@@ -9,7 +9,7 @@ Required order:
 2. Call newl_backlink_follow_ups and process only the returned first or second follow-ups.
 3. Call newl_backlink_verification and publicly check only the returned submissions.
 4. Call newl_backlink_claim and process only the returned human-approved, non-paid opportunities.
-5. Use the browser for public research, directory submission, contact discovery and live-link verification. Email only a publicly displayed business address on the approved referring organization's domain. Never scrape private data, use consumer webmail, guess an email address or bypass an access control.
+5. Use the browser for public research, directory submission, contact discovery and live-link verification. Open each approved public URL in a fresh tab with `openclaw browser open <url> --json`; do not start with `openclaw browser navigate` or rely on a stale active tab. Email only a publicly displayed business address on the approved referring organization's domain. Never scrape private data, use consumer webmail, guess an email address or bypass an access control.
 6. Use newl_backlink_send_email for every message. Never send email through another tool or browser.
 7. Use newl_backlink_report for every confirmed directory, blocked, lost or live result.
 8. Call newl_backlink_summary last and use its exact counts and review URL in the final Teams update.
