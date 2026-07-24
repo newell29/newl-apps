@@ -36,6 +36,19 @@ Expected failures include missing tenant entitlement, read-only mutation attempt
 
 Hunter retries transient TradeMining network failures and HTTP 429/5xx responses with bounded exponential backoff. Authentication errors, invalid profile filters, and ambiguous lookup values fail immediately and remain visible on the tracked job run. A failed daily run is recovered with the explicit **Run now** action; it is not silently repeated throughout the day.
 
+## A profile uses an unsupported arrival port
+
+- Symptom: the profile cannot be saved, or a legacy profile run fails with a port-mapping error.
+- Cause: TradeMining BOL Import Search accepts U.S. arrival ports. Canadian cities such as Toronto, Montreal, and Vancouver are not valid values for that field.
+- Safe recovery: select one or more supported U.S. arrival ports, move the Canadian locations to **Consignee cities / destination markets**, save, and use **Run now**.
+- Prevention: the profile editor requires a canonical supported U.S. port and normalizes common short aliases.
+
+## A Canadian consignee city is not in TradeMining's city picker
+
+- Symptom: TradeMining cannot uniquely resolve the configured consignee city.
+- Safe behavior: Hunter keeps the configured consignee-country filter and searches the city as consignee-address text in the same BOL query. It records the exact-city IDs and fallback address terms in the local run manifest.
+- Limitation: this finds only BOLs whose TradeMining record exposes the Canadian consignee country/address. A U.S. intermediary shown as consignee instead of the Canadian buyer will not match this filter.
+
 TradeMining's HS-code field uses comma-separated codes rather than Boolean syntax. Hunter checks the result count before export and treats zero matching BOLs as a successful zero-record run because TradeMining's Excel endpoint returns an error for empty result sets.
 
 ## Testing

@@ -42,6 +42,7 @@ import {
 } from "@/modules/lead-gen/score-history";
 import { recordCurrentContactScoreSnapshot as recordContactScoreSnapshot } from "@/modules/lead-gen/contact-score-snapshot";
 import { getNextApolloSyncAt } from "@/modules/lead-gen/apollo-status-sync-policy";
+import { canonicalizeTradeMiningDestinationPort } from "@/modules/lead-gen/search-profile-suggestions";
 import {
   assertValidTradeMiningSearchProfile,
   defaultTradeMiningCompanyIdentityRoles,
@@ -220,13 +221,25 @@ export async function updateTradeMiningSearchProfileAction(formData: FormData) {
 
   const profileId = readRequired(formData, "profileId");
   const payload = readSearchProfilePayload(formData);
+  const profile = await client.tradeMiningSearchProfile.findFirst({
+    where: {
+      id: profileId,
+      tenantId: context.tenantId
+    },
+    select: {
+      id: true
+    }
+  });
+
+  if (!profile) {
+    throw new Error("Search profile not found for this tenant.");
+  }
 
   await client.tradeMiningSearchProfile.update({
     where: {
       id: profileId
     },
     data: {
-      tenantId: context.tenantId,
       ...payload
     }
   });
@@ -3578,10 +3591,13 @@ function appendLeadNote(existingNotes: string | null, nextNote: string) {
 
 function readSearchProfilePayload(formData: FormData) {
   const minShipmentVolumeNumber = readOptionalNumber(formData, "minShipmentVolume");
+  const destinationPorts = readMultiValueField(formData, "destinationPorts").map(
+    (value) => canonicalizeTradeMiningDestinationPort(value) ?? value
+  );
   const payload = {
     name: readRequired(formData, "name"),
     destinationMarkets: readMultiValueField(formData, "destinationMarkets"),
-    destinationPorts: readMultiValueField(formData, "destinationPorts"),
+    destinationPorts,
     originPorts: readMultiValueField(formData, "originPorts"),
     shipFromPorts: readMultiValueField(formData, "shipFromPorts"),
     originCountries: readMultiValueField(formData, "originCountries"),

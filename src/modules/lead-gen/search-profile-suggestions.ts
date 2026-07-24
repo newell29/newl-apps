@@ -11,6 +11,79 @@ export type SearchProfileSuggestionOption = {
   searchText?: string;
 };
 
+export const tradeMiningUsDestinationPortOptions: SearchProfileSuggestionOption[] = [
+  {
+    value: "Area Port of Jacksonville, Florida",
+    label: "Area Port of Jacksonville, Florida",
+    searchText: "Jacksonville Florida JAX"
+  },
+  {
+    value: "Charleston, South Carolina",
+    label: "Charleston, South Carolina",
+    searchText: "Charleston South Carolina SC CHS"
+  },
+  {
+    value: "Freeport, Texas",
+    label: "Freeport, Texas",
+    searchText: "Freeport Texas TX"
+  },
+  {
+    value: "Houston, Texas",
+    label: "Houston, Texas",
+    searchText: "Houston Seaport Texas TX HOU"
+  },
+  {
+    value: "Norfolk-Newport News, Virginia",
+    label: "Norfolk-Newport News, Virginia",
+    searchText: "Norfolk Newport News Virginia VA"
+  },
+  {
+    value: "Savannah, Georgia",
+    label: "Savannah, Georgia",
+    searchText: "Savannah Georgia GA SAV"
+  },
+  {
+    value: "Wilmington, North Carolina",
+    label: "Wilmington, North Carolina",
+    searchText: "Wilmington North Carolina NC ILM"
+  }
+];
+
+const destinationPortAliases = new Map<string, string>(
+  [
+    ["area port of jacksonville florida", "Area Port of Jacksonville, Florida"],
+    ["jacksonville", "Area Port of Jacksonville, Florida"],
+    ["jacksonville florida", "Area Port of Jacksonville, Florida"],
+    ["jacksonville fl", "Area Port of Jacksonville, Florida"],
+    ["charleston", "Charleston, South Carolina"],
+    ["charleston south carolina", "Charleston, South Carolina"],
+    ["charleston sc", "Charleston, South Carolina"],
+    ["freeport", "Freeport, Texas"],
+    ["freeport texas", "Freeport, Texas"],
+    ["freeport tx", "Freeport, Texas"],
+    ["houston", "Houston, Texas"],
+    ["houston texas", "Houston, Texas"],
+    ["houston tx", "Houston, Texas"],
+    ["houston seaport", "Houston, Texas"],
+    ["houston seaport texas", "Houston, Texas"],
+    ["norfolk", "Norfolk-Newport News, Virginia"],
+    ["norfolk newport news", "Norfolk-Newport News, Virginia"],
+    ["norfolk newport news virginia", "Norfolk-Newport News, Virginia"],
+    ["norfolk va", "Norfolk-Newport News, Virginia"],
+    ["savannah", "Savannah, Georgia"],
+    ["savannah georgia", "Savannah, Georgia"],
+    ["savannah ga", "Savannah, Georgia"],
+    ["wilmington", "Wilmington, North Carolina"],
+    ["wilmington north carolina", "Wilmington, North Carolina"],
+    ["wilmington nc", "Wilmington, North Carolina"]
+  ].map(([alias, canonical]) => [normalizeSuggestionSearchText(alias), canonical])
+);
+
+export function canonicalizeTradeMiningDestinationPort(value: string) {
+  const undecorated = value.split("|")[0]?.trim() ?? value.trim();
+  return destinationPortAliases.get(normalizeSuggestionSearchText(undecorated)) ?? null;
+}
+
 export function filterSuggestionOptions(
   options: SearchProfileSuggestionOption[],
   query: string,
@@ -61,6 +134,14 @@ export function normalizeSearchProfileValueForWorker(
 
   if (field === "originCountries") {
     return normalized.replace(/\s+\([A-Z]{2,3}\)$/u, "").trim();
+  }
+
+  if (field === "destinationPorts") {
+    return canonicalizeTradeMiningDestinationPort(normalized) ?? normalized;
+  }
+
+  if (field === "destinationMarkets") {
+    return normalized;
   }
 
   if (!normalized.includes("|")) {

@@ -70,6 +70,15 @@ For Hunter collector validation, include a canonical export containing both a va
 
 For daily profile rules, verify a worker plan reports the profile's exact lookback, not a global collection cap. Test before/after the configured local run time and with a `lastRunAt` on the same local date. Candidate scoring tests must also prove that records outside the profile lookback or belonging to a different profile do not count toward `minShipmentCount`.
 
+Port and consignee-filter regression coverage must also verify:
+
+1. common U.S. port aliases resolve to canonical TradeMining names;
+2. Canadian cities are rejected as U.S. arrival ports;
+3. `City | Country` destination markets produce consignee-city and consignee-country filters in the worker plan;
+4. a uniquely resolved city is posted through `ConsigneeCity`, while an ambiguous or unavailable city is posted through `ConsigneeAddress`;
+5. the country, city/address, ports, and all other profile filters remain inside one BOL query; and
+6. invalid local configuration creates and fails a tracked run before the worker stops, preventing untracked retry loops.
+
 Scoring regression coverage must also verify:
 
 1. TradeMining evidence queries are tenant scoped and use an inclusive UTC-day cutoff;

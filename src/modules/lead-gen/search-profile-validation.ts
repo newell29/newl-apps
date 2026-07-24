@@ -1,3 +1,5 @@
+import { canonicalizeTradeMiningDestinationPort } from "@/modules/lead-gen/search-profile-suggestions";
+
 export const tradeMiningCompanyIdentityRoleOptions = [
   { value: "importer_name", label: "Importer" },
   { value: "consignee_name", label: "Consignee" },
@@ -39,8 +41,15 @@ export function validateTradeMiningSearchProfile(input: TradeMiningSearchProfile
     errors.push("Profile name is required.");
   }
 
-  if (input.destinationMarkets.length === 0) {
-    errors.push("At least one destination market or port is required.");
+  if (!input.destinationPorts || input.destinationPorts.length === 0) {
+    errors.push("Select at least one supported U.S. destination port.");
+  } else {
+    const unsupportedPorts = input.destinationPorts.filter(
+      (port) => canonicalizeTradeMiningDestinationPort(port) === null
+    );
+    if (unsupportedPorts.length > 0) {
+      errors.push(`Unsupported TradeMining destination ports: ${unsupportedPorts.join(", ")}.`);
+    }
   }
 
   if (!Number.isInteger(input.lookbackWindowDays) || input.lookbackWindowDays < 1 || input.lookbackWindowDays > 365) {

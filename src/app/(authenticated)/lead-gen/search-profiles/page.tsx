@@ -76,7 +76,7 @@ export default async function SearchProfilesPage() {
         <div className="grid gap-4">
           {profiles.map((profile) => (
             <article key={profile.id} className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-              <details className="group" open={Boolean(profile.pendingRunStatus)}>
+              <details className="group" open={Boolean(profile.pendingRunStatus || profile.lastRunError)}>
                 <summary className="cursor-pointer list-none bg-muted px-5 py-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
@@ -103,6 +103,11 @@ export default async function SearchProfilesPage() {
                         <p className="mt-1 text-xs text-primary">
                           Immediate run requested {profile.pendingRunRequestedAt.toLocaleString("en-US")}
                         </p>
+                      ) : null}
+                      {profile.lastRunError ? (
+                        <div className="mt-3 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-sm text-danger">
+                          <span className="font-semibold">Hunter needs attention:</span> {profile.lastRunError}
+                        </div>
                       ) : null}
                     </div>
                     <span className="mt-1 text-xs font-semibold text-mutedForeground transition-transform group-open:rotate-180">
@@ -245,17 +250,19 @@ function SearchProfileForm({
       <div className="space-y-4 rounded-md border border-border bg-background p-4">
         <h3 className="text-sm font-semibold text-foreground">Lane filters</h3>
         <MultiValueSuggestField
-          label="Destination markets"
+          label="Consignee cities / destination markets"
           name="destinationMarkets"
           defaultValue={defaults?.destinationMarkets}
           suggestionField="destinationMarkets"
-          description="Required. Select canonical values or enter one per line."
+          description="Optional hard filter. Hunter uses an exact TradeMining city when available; Canadian markets use consignee country plus address text."
         />
         <MultiValueSuggestField
-          label="Destination ports"
+          label="U.S. arrival ports"
           name="destinationPorts"
           defaultValue={defaults?.destinationPorts}
           suggestionField="destinationPorts"
+          allowCustomValues={false}
+          description="Required. Select a supported TradeMining U.S. port. Canadian cities belong in the consignee-city field above."
         />
         <MultiValueSuggestField
           label="Origin ports"

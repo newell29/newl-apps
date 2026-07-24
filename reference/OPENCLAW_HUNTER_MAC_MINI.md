@@ -72,7 +72,7 @@ HUNTER_POLL_MS=60000
 
 Do not reuse the Teamship worker token, Nemo's OpenClaw identity, or a production database credential.
 
-The checked-in template is `ops/openclaw/hunter/.env.example`. Store the real file at `~/.openclaw/agents/hunter/.env` with mode `600`; never commit it. `HUNTER_TRADEMINING_PORTS_JSON` contains TradeMining lookup IDs, not passwords, and should map the exact destination-port names returned by Newl Apps to their TradeMining IDs.
+The checked-in template is `ops/openclaw/hunter/.env.example`. Store the real file at `~/.openclaw/agents/hunter/.env` with mode `600`; never commit it. `HUNTER_TRADEMINING_PORTS_JSON` contains TradeMining lookup IDs, not passwords. Hunter has a checked-in canonical map for the supported U.S. arrival ports and treats this environment value as an override or extension. Common short aliases resolve to canonical names before lookup.
 
 ## Checked-in runtime
 
@@ -80,7 +80,8 @@ The checked-in template is `ops/openclaw/hunter/.env.example`. Store the real fi
 - `ops/openclaw/hunter/trademining_summary.py`: canonical record conversion and deduplication.
 - `ops/openclaw/hunter/hunter_ingest.py`: tenant-bound job creation, batched ingestion, completion/failure reporting.
 - `ops/openclaw/hunter/hunter_worker.py`: live active-profile lookup, manual run-request polling, once-daily eligibility, per-profile lookback/port planning, collection, and ingestion coordination.
-- Each enabled profile produces one full-lookback TradeMining BOL query. Destination ports use TradeMining's multi-select field; origin countries and foreign ports are resolved through its lookup service; ship-from ports, product keywords, and HS codes use Boolean `OR`; and `minShipmentVolume` is treated as minimum TEUs per BOL.
+- Each enabled profile produces one full-lookback TradeMining BOL query. Destination ports use TradeMining's U.S.-port multi-select field; origin countries and foreign ports are resolved through its lookup service; ship-from ports, product keywords, and HS codes use Boolean `OR`; and `minShipmentVolume` is treated as minimum TEUs per BOL.
+- Profile destination markets are hard consignee filters. `City | Country` values populate consignee country plus an exact city ID when available. Because TradeMining's city picker does not reliably expose Canadian cities, unresolved markets such as Toronto, Montreal, and Vancouver are searched as consignee-address text while retaining the Canadian country filter.
 - `ops/openclaw/run-hunter-worker.sh`: allowlisted environment loader.
 - `ops/openclaw/install-hunter-worker.sh`: LaunchAgent renderer and installer.
 - `ops/openclaw/launchd/com.newl.hunter-worker.plist.template`: persistent Mac Mini service.

@@ -16,7 +16,8 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 
 ## Hunter TradeMining query mapping
 
-- Destination ports are submitted together through TradeMining's multi-select `USPort` field.
+- Destination ports are canonical supported U.S. ports submitted together through TradeMining's multi-select `USPort` field.
+- `City | Country` destination markets are submitted as consignee filters. Hunter sends countries through `ConsigneeCountryOfOrigin`; uniquely resolved cities use `ConsigneeCity`; unresolved cities use Boolean `OR` text in `ConsigneeAddress`. This fallback allows Canadian market targeting even though TradeMining's city picker currently exposes U.S. city/state values.
 - Origin countries and foreign ports are resolved through TradeMining's lookup service and submitted as multi-select values.
 - Canonical Newl Apps labels may use explicit TradeMining aliases where its lookup vocabulary differs; for example, profile value `Busan` resolves to TradeMining's `Pusan`.
 - Ship-from ports and product keywords use TradeMining Boolean `OR` syntax in `PlaceOfReceipt` and `ContainerCommodity`. The dedicated `HTSCode` field requires comma-separated codes; Boolean syntax causes TradeMining's result endpoint to fail.

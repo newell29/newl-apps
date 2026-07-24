@@ -19,9 +19,10 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 1. Hunter polls Newl Apps for the tenant's current enabled profiles.
 2. Manual run requests are processed first. Otherwise, each profile becomes due once per local calendar day after its configured daily time.
 3. Immediately before collection, Hunter reloads the enabled profile by ID. A deleted or disabled profile fails closed.
-4. TradeMining is queried once for the profile's full `lookbackWindowDays`. Multi-value profile filters are included in the same BOL search.
+4. TradeMining is queried once for the profile's full `lookbackWindowDays`. Multi-value profile filters are included in the same BOL search. U.S. arrival ports are canonicalized before submission. Destination markets become consignee-city/country filters; unresolved Canadian city values fall back to consignee-address text inside the same query.
 5. Hunter creates a tracked job run, exports and normalizes the records, and submits tenant-bound batches.
 6. Candidate evidence is limited to the matched profile and lookback. Companies below that profile's `minShipmentCount` do not appear in Found Companies.
+7. If local profile configuration is invalid, the tracked run finishes as failed and the Search Profiles screen displays the error. Hunter does not repeat that daily attempt until the next local day; an operator can correct the profile and use **Run now**.
 
 ## Automatic Apollo reply sync
 
