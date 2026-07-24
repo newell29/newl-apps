@@ -206,6 +206,11 @@ function BacklinkCard({
             <Summary label="Relevance" value={`${opportunity.relevanceScore}/100`} />
             <Summary label="Authority" value={opportunity.authorityScore === null ? "Not available" : opportunity.authorityScore.toFixed(0)} />
             <Summary label="Spam risk" value={formatLabel(opportunity.spamRisk)} />
+            {opportunity.recipientEmail ? <Summary label="Contacted" value={opportunity.recipientEmail} /> : null}
+            {opportunity.nextFollowUpAt ? <Summary label="Next follow-up" value={formatDate(opportunity.nextFollowUpAt)} /> : null}
+            {opportunity.replySummary ? <Summary label="Reply" value={opportunity.replySummary} /> : null}
+            {opportunity.directoryUsername ? <Summary label="Directory username" value={opportunity.directoryUsername} /> : null}
+            {opportunity.acceptedTermsSummary ? <Summary label="Directory terms" value={opportunity.acceptedTermsSummary} /> : null}
           </dl>
         </div>
       ) : null}
@@ -218,6 +223,8 @@ function BacklinkCard({
         <div className="flex flex-wrap gap-2">
           {opportunity.sourceUrl ? <ExternalLink href={opportunity.sourceUrl} label="View source" /> : null}
           {opportunity.contactPage ? <ExternalLink href={opportunity.contactPage} label="Contact page" /> : null}
+          {opportunity.directoryLoginUrl ? <ExternalLink href={opportunity.directoryLoginUrl} label="Directory login" /> : null}
+          {opportunity.acceptedTermsUrl ? <ExternalLink href={opportunity.acceptedTermsUrl} label="Accepted terms" /> : null}
           {opportunity.liveUrl ? <ExternalLink href={opportunity.liveUrl} label="Open live link" /> : null}
         </div>
         {review ? (
@@ -265,6 +272,7 @@ function groupBacklinks(opportunities: Awaited<ReturnType<typeof getWebsiteGrowt
 
 function statusClassName(status: WebsiteGrowthBacklinkStatus) {
   if (status === WebsiteGrowthBacklinkStatus.LIVE) return "rounded-full border border-success/25 bg-success/10 px-2.5 py-1 text-xs font-semibold text-success";
+  if (status === WebsiteGrowthBacklinkStatus.REPLIED) return "rounded-full border border-success/25 bg-success/10 px-2.5 py-1 text-xs font-semibold text-success";
   if (status === WebsiteGrowthBacklinkStatus.BLOCKED || status === WebsiteGrowthBacklinkStatus.LOST) return "rounded-full border border-danger/25 bg-danger/10 px-2.5 py-1 text-xs font-semibold text-danger";
   if (status === WebsiteGrowthBacklinkStatus.APPROVED || status === WebsiteGrowthBacklinkStatus.IN_PROGRESS) return "rounded-full border border-warning/25 bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning";
   return "rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs font-semibold text-mutedForeground";
@@ -280,4 +288,11 @@ function readRecord(value: unknown): Record<string, unknown> {
 
 function readNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function formatDate(value: Date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    dateStyle: "medium",
+    timeZone: "America/Toronto"
+  }).format(value);
 }

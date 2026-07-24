@@ -47,6 +47,7 @@ Every Scout card must state whether it proposes a **new page** or an **update to
 | --- | --- | --- | --- |
 | Imports, scoring, clustering, state checks | Deterministic code | N/A | No model should perform exact comparisons or status changes. |
 | Scout research and page brief | Codex `gpt-5.6-sol` | `high` | Ephemeral, read-only website-repository session. Official SEMrush MCP through OAuth is mandatory for the scheduled run. |
+| Backlink outreach executor | Dedicated Scout agent with Codex `gpt-5.6-sol` | `high` | Receives constrained tools only. Newl Apps enforces approval, compliance, suppression, volume limits, and tenant scope before external actions. |
 | Website developer | Codex `gpt-5.6-sol` | `high` | Runs only after approval, in the website repo, with tests and a draft PR. |
 | Kimi K3 `kimi-k3` | Optional shadow challenger | `high` | Runs only after brief approval, creates a separate verified patch and draft PR, and never replaces the primary Newl Apps build record. |
 
@@ -86,6 +87,8 @@ The same read-only SEMrush session refreshes the Newl Group Position Tracking sn
 The weekly session also reviews Newl and competitor backlink profiles, referring domains, backlink gaps, and new/lost links. Scout may return no more than 15 curated prospects. Newl Apps rejects prospects below 60 relevance or quality, rejects high spam risk, deduplicates by referring domain and target page, caps the active queue at 50, and archives unrefreshed review items after 45 days. These are initial safe operating limits for the first rollout and should be evaluated after the first 20 reviewed prospects.
 
 Backlink approval is distinct from content approval and spending approval. Admin or Manager may approve an opportunity for execution. A dedicated executor token can claim approved free work and report submitted, contacted, blocked, live, or lost states. Paid placements are excluded from machine claims and never authorize a purchase or paid ranking link.
+
+The dedicated weekday outreach job is installed disabled. Once the supervised launch test passes, it runs at 11:00 AM `America/Toronto`, sends at most five new contacts per rolling day and 20 per rolling week, follows up on days 5 and 12, closes after day 21, and sends a Teams update even when there is no approved work. See `backlink-outreach-rollout.md`.
 
 The existing Vercel weekly planner remains a safe queue-preparation fallback; it does not run Codex or send Teams.
 

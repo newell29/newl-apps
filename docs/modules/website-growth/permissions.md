@@ -15,6 +15,9 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - Only Admin and Manager roles may approve a brief and start the existing developer workflow. Scout never receives that authority.
 - Only Admin and Manager roles may approve a backlink prospect. Scout cannot approve, claim, submit, contact, purchase, or verify its own prospect.
 - A separate backlink-executor bearer token can claim only approved, non-paid opportunities. It cannot read rejected/archived research or claim paid placements.
+- The send route rechecks the saved human approval, non-paid category, executor state, public contact evidence, consent basis, suppression list, recipient continuity, and volume limits before Microsoft Graph is called.
+- Microsoft Graph application access must be restricted to the dedicated outreach mailbox. The OpenClaw model never receives the Graph application secret or access token.
+- Automatic opportunity approval is not implemented. The owner-approved future goal requires a separate reviewed policy change after an initial supervised operating period.
 - The executor may report operational states, but it cannot approve spending. CAPTCHA, MFA, payment, contracts, unusual terms, private-data requests, and missing business-profile facts must be reported as blocked.
 
 ## Developer comparison boundary

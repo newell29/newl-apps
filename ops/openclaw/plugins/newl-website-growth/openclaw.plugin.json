@@ -1,0 +1,40 @@
+{
+  "id": "newl-website-growth",
+  "name": "Newl Website Growth",
+  "description": "Executes only human-approved, non-paid Website Growth backlink outreach and directory work.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "required": [
+      "baseUrl"
+    ],
+    "properties": {
+      "baseUrl": {
+        "type": "string",
+        "description": "Newl Apps base URL."
+      },
+      "backlinkTokenEnv": {
+        "type": "string",
+        "description": "Environment variable containing the dedicated backlink executor token."
+      },
+      "vercelProtectionBypassEnv": {
+        "type": "string",
+        "description": "Optional Vercel Preview automation bypass environment variable."
+      }
+    }
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "newl_backlink_claim",
+      "newl_backlink_follow_ups",
+      "newl_backlink_verification",
+      "newl_backlink_sync_replies",
+      "newl_backlink_summary",
+      "newl_backlink_send_email",
+      "newl_backlink_report"
+    ]
+  }
+}
