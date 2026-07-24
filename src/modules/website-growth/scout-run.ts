@@ -600,7 +600,7 @@ export function buildWebsiteGrowthScoutTeamsMessage({
   const trackedCount = tracking?.trackedKeywords.length ?? 0;
   const evidenceRefreshLine = formatEvidenceRefresh(sourceSummary);
   const lines = [
-    `Website Growth Scout weekly report: ${drafts.length} idea${drafts.length === 1 ? "" : "s"} promoted for approval.`,
+    `Website Growth Scout weekday report: ${drafts.length} idea${drafts.length === 1 ? "" : "s"} promoted for approval.`,
     `Evidence used: Search Console, GA4, first-party website forms${semrushQueried ? ", and SEMrush MCP" : ""}.`,
     evidenceRefreshLine,
     `Research funnel: ${researchSignalCount ?? 0} stored signals (${monitoringCount} monitoring); ${reviewedCount} new records reviewed; ${selectedCount} shortlisted; ${candidateCount ?? 0} sent to Codex; ${drafts.length} promoted.`,
@@ -619,10 +619,10 @@ export function buildWebsiteGrowthScoutTeamsMessage({
           `${normalizeBaseUrl(reviewBaseUrl)}/website-growth/drafts/${encodeURIComponent(draft.id)}`,
           ""
         ])
-      : ["No new page brief needs your approval this week.", ""]),
+      : ["No new page brief needs your approval today.", ""]),
     drafts.length > 0
       ? "Approve a brief only when its content, claims, route, and proposed layout are correct. Approval starts the developer build automatically; it does not merge or publish the page."
-      : "The weekly performance workbook is attached even when no new idea is promoted."
+      : "The SEO performance workbook is attached even when no new idea is promoted."
   ];
 
   return lines.filter((line): line is string => line !== null).join("\n").trim();

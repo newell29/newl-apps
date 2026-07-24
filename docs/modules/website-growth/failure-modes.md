@@ -13,8 +13,10 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - Codex output outside the stored candidate IDs: completion is rejected.
 - Malformed or oversized SEMrush output: completion is rejected; at most 200 sanitized rows are accepted.
 - Duplicate worker start: an active tenant run blocks a second run for three hours.
-- Teams delivery failure after drafts are saved: the command job fails and the links remain available in Newl Apps; an operator may resend after fixing Teams.
-- No candidates: the job succeeds without a Teams review request.
+- Dedicated runtime update failure: the protected worktree remains unchanged, a safe Teams failure notice is attempted, and Scout does not start.
+- Teams delivery failure after drafts are saved: the command job fails and the links remain available in Newl Apps; the safe failure notice is attempted through the same configured Teams target and may also fail when the channel itself is unavailable.
+- Duplicate trigger: the second run exits successfully after sending a Teams check-in; the active run remains authoritative.
+- No candidates: the job still refreshes Position Tracking and backlink research, succeeds, and sends a Teams report without a page-approval request.
 - No backlink prospects: the job succeeds and the Teams summary explicitly reports zero new prospects.
 - Raw or oversized backlink output: completion is rejected; Scout may return at most 15 curated prospects and never raw backlink rows.
 - Duplicate or weak backlink prospect: Newl Apps refreshes the existing record or drops it through deterministic quality gates instead of adding another queue item.

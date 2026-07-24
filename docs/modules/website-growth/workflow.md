@@ -6,13 +6,13 @@
 
 Website growth and SEO is documented because code, routes, schema, or tests were located. Main evidence: `src/app/(authenticated)/website-growth/*`, `src/modules/website-growth/*`, website growth Prisma models/tests.
 
-## Automated weekly workflow
+## Automated weekday workflow
 
-1. OpenClaw runs `ops/openclaw/run-website-growth-scout.sh` Monday at 9:15 AM `America/Toronto`.
+1. OpenClaw runs `ops/openclaw/run-website-growth-scout-runtime.sh` every weekday at 9:15 AM `America/Toronto`. The dedicated runtime worktree fast-forwards itself to the latest clean `origin/main` before handing off to Scout.
 2. `/api/website-growth/scout/prepare` refreshes Search Console, GA4, and aggregate form evidence and prepares up to six candidates.
 3. Codex `gpt-5.6-sol` with high reasoning inspects the current website repository in a read-only, ephemeral session and queries official SEMrush MCP through OAuth. It refreshes Position Tracking even when there are no page candidates.
 4. `/api/website-growth/scout/complete` rejects out-of-scope candidates or malformed results, stores sanitized SEMrush evidence and the tracking snapshot, saves drafts, and deterministically selects keywords from previously approved/built/published Scout briefs.
-5. OpenClaw sends the returned funnel summary and direct draft links to the configured Teams target, attaches a weekly SEO performance workbook on every completed run, and attaches the two-column SEMrush keyword import workbook when new deduplicated keywords exist.
+5. OpenClaw sends the returned funnel summary and direct draft links to the configured Teams target, attaches an SEO performance workbook on every completed run, and attaches the two-column SEMrush keyword import workbook when new deduplicated keywords exist.
 6. The same Teams message reports the backlink funnel: prospects reviewed, duplicates/weak candidates removed, curated items added or refreshed, and a direct link to `/website-growth/backlinks`. The report is sent even when zero prospects qualify.
 7. An Admin or Manager reviews each page brief and backlink prospect. Page-brief approval starts the website developer workflow; backlink approval makes free work claimable by the separate executor. The owner still owns website merge and every spending decision.
 8. Codex builds the primary implementation. If the optional Kimi API key is configured, Kimi K3 independently builds the same immutable brief from the same website commit.
@@ -24,7 +24,7 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 1. Scout queries official read-only Semrush MCP for backlink profiles, referring domains, competitor gaps, and new/lost links.
 2. Codex reviews broadly but returns no more than 15 prospects after duplicate, relevance, quality, spam, and policy screening.
 3. Newl Apps stores only passing prospects, refreshes existing matches in place, preserves prior human decisions, caps the active queue at 50, and archives stale `NEEDS_REVIEW` items after 45 days.
-4. Teams receives one combined weekly report regardless of whether any prospect qualifies.
+4. Teams receives one combined weekday report regardless of whether any prospect qualifies.
 5. Admin or Manager approves one prospect or the current review batch. Approval is not spending authority.
 6. The dedicated Scout executor runs on weekdays, first syncs replies and opt-outs, processes due follow-ups and verification, and then claims only approved non-paid work.
 7. Email outreach requires an exact public-business contact source, CA/US country, recorded consent basis, suppression check, and deterministic legal footer. Newl Apps sends through the dedicated Microsoft 365 mailbox; the model never receives a Graph token.
@@ -35,9 +35,9 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 
 The production enablement sequence and supervised one-message test are documented in `backlink-outreach-rollout.md`.
 
-The run is locked per tenant for three hours. No-candidate runs still query Position Tracking and send the weekly Teams report, but contain no approval request. A Codex or SEMrush failure is recorded through `/api/website-growth/scout/fail` and does not create a draft.
+The run is locked per tenant for three hours. No-candidate runs still query Position Tracking and send the weekday Teams report, but contain no approval request. A duplicate trigger sends a short Teams check-in and does not start a second run. A runtime-sync, dependency, Codex, SEMrush, validation, persistence, report-generation, or Teams-attachment failure sends a safe Teams failure notice. When a Newl Apps run ID exists, the failure is also recorded through `/api/website-growth/scout/fail`; no failure creates or approves a draft.
 
-The 6,000-plus records visible under Research signals are not 6,000 proposed pages. They are a durable signal inventory. Each weekly run reviews at most 500 new records, clusters duplicate query/page intent, applies qualification thresholds, selects no more than 2 core pages, 4 supporting items, and 6 quick optimizations, sends at most 6 candidates to Scout by default, and allows Codex to promote only the ideas it recommends. These funnel counts are included in the Teams report.
+The 6,000-plus records visible under Research signals are not 6,000 proposed pages. They are a durable signal inventory. The planning limits remain weekly even though Scout checks every weekday: the planner reviews at most 500 new records, clusters duplicate query/page intent, applies qualification thresholds, selects no more than 2 core pages, 4 supporting items, and 6 quick optimizations, sends at most 6 candidates to Scout by default, and allows Codex to promote only the ideas it recommends. These funnel counts are included in the Teams report.
 
 The Kimi comparison is optional and fails independently: a missing key, agent error, verification failure, or PR handoff failure is surfaced in the GitHub Actions summary but does not block the primary Codex build. Neither agent workflow merges or deploys production.
 
