@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildTradeMiningEvidenceWhere,
+  meetsSearchProfileMinimumAggregateTeu,
   meetsSearchProfileMinimumShipmentCount,
   scoreCandidate,
   summarizeTradeMiningEvidence
@@ -54,7 +55,8 @@ describe("lead-gen candidate scoring", () => {
       hsCodes: [],
       contactCadenceConfig: null,
       lookbackWindowDays: 30,
-      minShipmentCount: 2
+      minShipmentCount: 2,
+      minAggregateTeu: 3
     };
     const profiles = new Map([[profile.id, profile]]);
     const belowMinimum = summarizeTradeMiningEvidence(
@@ -70,6 +72,15 @@ describe("lead-gen candidate scoring", () => {
     expect(meetsSearchProfileMinimumShipmentCount(belowMinimum)).toBe(false);
     expect(meetsMinimum.shipmentCount).toBe(2);
     expect(meetsSearchProfileMinimumShipmentCount(meetsMinimum)).toBe(true);
+    expect(meetsMinimum.totalTeu).toBe(2);
+    expect(meetsSearchProfileMinimumAggregateTeu(meetsMinimum)).toBe(false);
+
+    const meetsAggregateTeu = summarizeTradeMiningEvidence(
+      [record(profile.id, 2), { ...record(profile.id, 10), rawJson: { searchProfileId: profile.id, teu: 2 } }],
+      profiles
+    );
+    expect(meetsAggregateTeu.totalTeu).toBe(3);
+    expect(meetsSearchProfileMinimumAggregateTeu(meetsAggregateTeu)).toBe(true);
   });
 
   it("rewards profile-aligned destination, origin, product, and role signals", () => {

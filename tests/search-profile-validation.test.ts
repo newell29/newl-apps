@@ -29,12 +29,28 @@ describe("TradeMining search profile validation", () => {
     ).toContain("Unsupported TradeMining destination ports: Toronto.");
   });
 
-  it("requires a U.S. arrival port even when a consignee market is configured", () => {
+  it("accepts a city-only Canadian profile without a U.S. arrival port", () => {
     expect(
       validateTradeMiningSearchProfile({
         ...validProfile(),
         destinationPorts: []
       })
-    ).toContain("Select at least one supported U.S. destination port.");
+    ).toEqual([]);
+  });
+
+  it("validates aggregate TEU and industry-pack modes independently", () => {
+    expect(
+      validateTradeMiningSearchProfile({
+        ...validProfile(),
+        minAggregateTeu: -1,
+        industryPackIds: [],
+        industryFilterMode: "HARD"
+      })
+    ).toEqual(
+      expect.arrayContaining([
+        "Minimum aggregate TEUs during the lookback must be zero or greater when provided.",
+        "Select at least one industry pack for hard or exclude mode."
+      ])
+    );
   });
 });

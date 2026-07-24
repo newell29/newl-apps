@@ -16,14 +16,16 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 
 ## Hunter TradeMining query mapping
 
-- Destination ports are canonical supported U.S. ports submitted together through TradeMining's multi-select `USPort` field.
+- Destination ports are optional canonical U.S. ports. When present they are submitted together through TradeMining's multi-select `USPort` field; when absent Hunter omits that field.
 - `City | Country` destination markets are submitted as consignee filters. Hunter sends countries through `ConsigneeCountryOfOrigin`; uniquely resolved cities use `ConsigneeCity`; unresolved cities use Boolean `OR` text in `ConsigneeAddress`. This fallback allows Canadian market targeting even though TradeMining's city picker currently exposes U.S. city/state values.
 - Origin countries and foreign ports are resolved through TradeMining's lookup service and submitted as multi-select values.
 - Canonical Newl Apps labels may use explicit TradeMining aliases where its lookup vocabulary differs; for example, profile value `Busan` resolves to TradeMining's `Pusan`.
 - Ship-from ports and product keywords use TradeMining Boolean `OR` syntax in `PlaceOfReceipt` and `ContainerCommodity`. The dedicated `HTSCode` field requires comma-separated codes; Boolean syntax causes TradeMining's result endpoint to fail.
 - The legacy `minShipmentVolume` profile field is treated as minimum TEUs per BOL and submitted as `TEU >= value`.
-- A normal daily profile run creates one TradeMining search log and one export. An explicit date split remains available only as manual recovery tooling.
+- A normal daily profile run starts as one TradeMining search. When the reported count exceeds the 25,000-row export ceiling, Hunter automatically creates smaller disjoint date queries and then port queries when necessary. Parent search logs are probes only; leaf search logs are exported and their disjoint counts produce coverage totals.
 - A valid search with zero matching BOLs completes successfully with zero ingested records; Hunter does not call TradeMining's Excel endpoint because that endpoint rejects empty result sets.
+- If a one-day query with one or no arrival port remains above 25,000 results, the export is retained and ingested but coverage is marked incomplete and the Newl Apps run is `PARTIAL`.
+- Industry packs and aggregate TEUs are evaluated in Newl Apps after ingestion. They do not add undocumented fields to TradeMining's form.
 
 ## Data model
 

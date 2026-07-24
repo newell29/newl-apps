@@ -44,6 +44,7 @@ vi.mock("@/server/auth/authorization", () => ({
 }));
 
 import {
+  createTradeMiningSearchProfileFormAction,
   createTradeMiningSearchProfileAction,
   deleteTradeMiningSearchProfileAction,
   requestTradeMiningSearchProfileRunAction,
@@ -84,9 +85,51 @@ describe("trade mining search profile actions", () => {
     expect(args.data.originCountries).toEqual(["Italy", "Germany"]);
     expect(args.data.allowedCompanyIdentityRoles).toEqual(["consignee_name", "importer_name"]);
     expect(args.data.excludedCompanyKeywords).toEqual(["maersk", "msc"]);
+    expect(args.data.industryPackIds).toEqual(["furniture-home"]);
+    expect(args.data.industryFilterMode).toBe("HARD");
+    expect(args.data.minAggregateTeu.toString()).toBe("3");
     expect(args.data.enabled).toBe(true);
     expect(args.data.scheduleFrequency).toBe("daily");
     expect(revalidatePath).toHaveBeenCalledWith("/lead-gen/search-profiles");
+  });
+
+  it("returns an inline-safe error instead of crashing the page", async () => {
+    const formData = buildValidFormData();
+    formData.delete("name");
+
+    await expect(
+      createTradeMiningSearchProfileFormAction({ status: "idle", message: null }, formData)
+    ).resolves.toEqual({
+      status: "error",
+      message: "Missing required field: name"
+    });
+    expect(createSearchProfile).not.toHaveBeenCalled();
+  });
+
+  it("rejects a tampered industry-pack value without writing a profile", async () => {
+    const formData = buildValidFormData();
+    formData.set("industryPackId", "unsupported-pack");
+
+    await expect(
+      createTradeMiningSearchProfileFormAction({ status: "idle", message: null }, formData)
+    ).resolves.toEqual({
+      status: "error",
+      message: "Invalid TradeMining search profile: Unsupported industry packs: unsupported-pack."
+    });
+    expect(createSearchProfile).not.toHaveBeenCalled();
+  });
+
+  it("rejects a tampered industry mode without writing a profile", async () => {
+    const formData = buildValidFormData();
+    formData.set("industryFilterMode", "MAYBE");
+
+    await expect(
+      createTradeMiningSearchProfileFormAction({ status: "idle", message: null }, formData)
+    ).resolves.toEqual({
+      status: "error",
+      message: "Invalid TradeMining search profile: Industry mode must be HARD, PREFER, or EXCLUDE."
+    });
+    expect(createSearchProfile).not.toHaveBeenCalled();
   });
 
   it("updates an existing profile", async () => {
@@ -200,12 +243,15 @@ function buildValidFormData() {
   formData.set("originCountries", "Italy\nGermany");
   formData.set("productKeywords", "furniture");
   formData.set("hsCodes", "9403");
+  formData.append("industryPackId", "furniture-home");
+  formData.set("industryFilterMode", "HARD");
   formData.append("allowedCompanyIdentityRole", "consignee_name");
   formData.append("allowedCompanyIdentityRole", "importer_name");
   formData.set("excludedCompanyKeywords", "maersk\nmsc");
   formData.set("lookbackWindowDays", "90");
   formData.set("minShipmentCount", "1");
   formData.set("minShipmentVolume", "10");
+  formData.set("minAggregateTeu", "3");
   formData.set("scheduleTimezone", "America/Toronto");
   formData.set("priorityWeight", "80");
   return formData;

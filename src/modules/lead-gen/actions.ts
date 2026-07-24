@@ -211,6 +211,21 @@ export async function createTradeMiningSearchProfileAction(formData: FormData) {
   revalidateTradeMiningProfileSurfaces();
 }
 
+export type SearchProfileFormState = {
+  status: "idle" | "success" | "error";
+  message: string | null;
+};
+
+export async function createTradeMiningSearchProfileFormAction(
+  _previousState: SearchProfileFormState,
+  formData: FormData
+): Promise<SearchProfileFormState> {
+  return runSearchProfileFormAction(
+    () => createTradeMiningSearchProfileAction(formData),
+    "Search profile created."
+  );
+}
+
 export async function updateTradeMiningSearchProfileAction(formData: FormData) {
   const context = await authorizeLeadGenAdminMutation();
   const client = prisma as SearchProfileMutationClient;
@@ -249,6 +264,16 @@ export async function updateTradeMiningSearchProfileAction(formData: FormData) {
   }
 
   revalidateTradeMiningProfileSurfaces();
+}
+
+export async function updateTradeMiningSearchProfileFormAction(
+  _previousState: SearchProfileFormState,
+  formData: FormData
+): Promise<SearchProfileFormState> {
+  return runSearchProfileFormAction(
+    () => updateTradeMiningSearchProfileAction(formData),
+    "Search profile saved."
+  );
 }
 
 export async function deleteTradeMiningSearchProfileAction(formData: FormData) {
@@ -3591,9 +3616,16 @@ function appendLeadNote(existingNotes: string | null, nextNote: string) {
 
 function readSearchProfilePayload(formData: FormData) {
   const minShipmentVolumeNumber = readOptionalNumber(formData, "minShipmentVolume");
+  const minAggregateTeuNumber = readOptionalNumber(formData, "minAggregateTeu");
+  const industryFilterModeValue = formData.get("industryFilterMode");
   const destinationPorts = readMultiValueField(formData, "destinationPorts").map(
     (value) => canonicalizeTradeMiningDestinationPort(value) ?? value
   );
+  const industryPackIds = formData
+    .getAll("industryPackId")
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter((value, index, array) => value.length > 0 && array.indexOf(value) === index);
   const payload = {
     name: readRequired(formData, "name"),
     destinationMarkets: readMultiValueField(formData, "destinationMarkets"),
@@ -3603,11 +3635,17 @@ function readSearchProfilePayload(formData: FormData) {
     originCountries: readMultiValueField(formData, "originCountries"),
     productKeywords: readStringList(formData, "productKeywords"),
     hsCodes: readStringList(formData, "hsCodes"),
+    industryPackIds,
+    industryFilterMode:
+      typeof industryFilterModeValue === "string" && industryFilterModeValue.trim()
+        ? industryFilterModeValue.trim()
+        : "PREFER",
     allowedCompanyIdentityRoles: readSelectedCompanyIdentityRoles(formData),
     excludedCompanyKeywords: readStringList(formData, "excludedCompanyKeywords"),
     lookbackWindowDays: readRequiredInteger(formData, "lookbackWindowDays", 1, 365),
     minShipmentCount: readRequiredInteger(formData, "minShipmentCount", 0, 100000),
     minShipmentVolume: minShipmentVolumeNumber,
+    minAggregateTeu: minAggregateTeuNumber,
     priorityWeight: readRequiredInteger(formData, "priorityWeight", 0, 100)
   };
 
@@ -3618,10 +3656,51 @@ function readSearchProfilePayload(formData: FormData) {
     scheduleFrequency: "daily",
     minShipmentVolume:
       minShipmentVolumeNumber === null ? null : new Prisma.Decimal(minShipmentVolumeNumber.toString()),
+    minAggregateTeu:
+      minAggregateTeuNumber === null ? null : new Prisma.Decimal(minAggregateTeuNumber.toString()),
     description: readOptional(formData, "description") ?? null,
     enabled: formData.get("enabled") === "true",
     scheduleTimezone: readOptional(formData, "scheduleTimezone") ?? "America/Toronto"
   };
+}
+
+async function runSearchProfileFormAction(
+  mutation: () => Promise<void>,
+  successMessage: string
+): Promise<SearchProfileFormState> {
+  try {
+    await mutation();
+    return {
+      status: "success",
+      message: successMessage
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: safeSearchProfileMutationMessage(error)
+    };
+  }
+}
+
+function safeSearchProfileMutationMessage(error: unknown) {
+  if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+    return "A search profile with this name already exists.";
+  }
+
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    if (
+      message.startsWith("Invalid TradeMining search profile:") ||
+      message.startsWith("Missing required field:") ||
+      message.startsWith("Invalid integer for") ||
+      message.startsWith("Invalid number for") ||
+      message === "Search profile not found for this tenant."
+    ) {
+      return message;
+    }
+  }
+
+  return "The profile could not be saved. No changes were applied.";
 }
 
 function readSelectedCompanyIdentityRoles(formData: FormData) {

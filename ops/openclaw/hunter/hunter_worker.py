@@ -225,6 +225,16 @@ def profile_minimum_teu(profile: dict[str, Any]) -> Optional[float]:
     return value
 
 
+def profile_minimum_aggregate_teu(profile: dict[str, Any]) -> Optional[float]:
+    raw = clean(profile.get("minAggregateTeu"))
+    if raw is None:
+        return None
+    value = float(raw)
+    if value < 0:
+        raise RuntimeError("profile minimum aggregate TEUs cannot be negative")
+    return value
+
+
 def profile_timezone(profile: dict[str, Any]) -> ZoneInfo:
     schedule = profile.get("schedule") if isinstance(profile.get("schedule"), dict) else {}
     timezone_name = clean(schedule.get("timezone")) or "America/Toronto"
@@ -297,9 +307,7 @@ def run_profile(base_url: str, token: str, profile: dict[str, Any], trigger: str
     job_run_id = create_job_run(base_url, token, profile, trigger)
     try:
         destination_ports = profile_values(profile, "destinationPorts")
-        if not destination_ports:
-            raise RuntimeError(f'profile "{profile_name}" has no destination ports')
-        port_ids = load_port_ids()
+        port_ids = load_port_ids() if destination_ports else {}
         missing_ports = [name for name in destination_ports if canonical_port_key(name) not in port_ids]
         if missing_ports:
             raise RuntimeError("TradeMining port IDs are not configured for: " + ", ".join(missing_ports))
@@ -377,6 +385,8 @@ def run_profile(base_url: str, token: str, profile: dict[str, Any], trigger: str
             job_run_id,
             "--canonical-csv",
             str(canonical_csv),
+            "--coverage-manifest",
+            str(run_dir / "manifest.json"),
         ]
         if destination_markets:
             ingest_command.extend(["--destination-market", destination_markets[0]])
@@ -390,7 +400,8 @@ def run_profile(base_url: str, token: str, profile: dict[str, Any], trigger: str
         "profileName": profile_name,
         "runSlug": run_slug,
         "portCount": len(destination_ports),
-        "queryCount": 1,
+        "queryCount": int(export_manifest.get("coverage", {}).get("query_count") or 1),
+        "retrievalComplete": bool(export_manifest.get("coverage", {}).get("retrieval_complete", False)),
         "lookbackDays": lookback_days,
         "configuredLookbackDays": configured_lookback_days,
         "jobRunId": job_run_id,
@@ -402,7 +413,7 @@ def build_profile_plan(profile: dict[str, Any]) -> dict[str, Any]:
     profile_id = clean(profile.get("id"))
     profile_name = clean(profile.get("name"))
     destination_ports = profile_values(profile, "destinationPorts")
-    configured_ports = load_port_ids()
+    configured_ports = load_port_ids() if destination_ports else {}
     missing_ports = [name for name in destination_ports if canonical_port_key(name) not in configured_ports]
     consignee_cities, consignee_countries = profile_destination_filters(profile)
     lookback_days = profile_lookback_days(profile)
@@ -417,14 +428,18 @@ def build_profile_plan(profile: dict[str, Any]) -> dict[str, Any]:
         "shipFromPorts": profile_values(profile, "shipFromPorts"),
         "productKeywords": profile_values(profile, "productKeywords"),
         "hsCodes": profile_values(profile, "hsCodes"),
+        "industryPackIds": profile_values(profile, "industryPackIds"),
+        "industryFilterMode": clean(profile.get("industryFilterMode")) or "PREFER",
         "minimumTeu": profile_minimum_teu(profile),
+        "minimumAggregateTeu": profile_minimum_aggregate_teu(profile),
         "missingPortMappings": missing_ports,
         "lookbackDays": lookback_days,
         "queryCount": 1,
+        "queryStrategy": "adaptive",
         "dailyRunTime": profile_daily_time(profile).strftime("%H:%M"),
         "timezone": str(profile_timezone(profile)),
         "due": is_profile_due(profile),
-        "ready": bool(profile_id and profile_name and destination_ports and not missing_ports),
+        "ready": bool(profile_id and profile_name and not missing_ports),
     }
 
 

@@ -1,12 +1,21 @@
 import { JobStatus, type Prisma } from "@prisma/client";
 
 import { classifyTradeMiningIndustryFromRecords } from "@/modules/lead-gen/industry-classification";
-import { calculateLeadPipelineScoringForCompany } from "@/modules/lead-gen/queries";
+import {
+  calculateLeadPipelineScoringForCompany,
+  getCandidateFeed
+} from "@/modules/lead-gen/queries";
 import {
   COMPANY_SCORING_MODEL_VERSION,
   recordLeadScoreSnapshot
 } from "@/modules/lead-gen/score-history";
 import { normalizeSearchProfileValueForWorker } from "@/modules/lead-gen/search-profile-suggestions";
+import {
+  normalizeTradeMiningIndustryFilterMode,
+  normalizeTradeMiningIndustryPackIds,
+  type TradeMiningIndustryFilterMode,
+  type TradeMiningIndustryPackId
+} from "@/modules/lead-gen/industry-packs";
 import {
   defaultTradeMiningCompanyIdentityRoles,
   type TradeMiningCompanyIdentityRole
@@ -41,11 +50,14 @@ type SearchProfileSummary = {
   originCountries: string[];
   productKeywords: string[];
   hsCodes: string[];
+  industryPackIds: TradeMiningIndustryPackId[];
+  industryFilterMode: TradeMiningIndustryFilterMode;
   allowedCompanyIdentityRoles: TradeMiningCompanyIdentityRole[];
   excludedCompanyKeywords: string[];
   lookbackDays: number;
   minShipmentCount: number;
   minShipmentVolume: string | null;
+  minAggregateTeu: string | null;
   schedule: {
     timezone: string;
     metadata: Prisma.JsonValue | null;
@@ -126,11 +138,14 @@ export async function getActiveTradeMiningProfilesForWorker(tenant: TenantContex
       originCountries: normalizeSearchProfileListForWorker("originCountries", asStringArray(profile.originCountries)),
       productKeywords: asStringArray(profile.productKeywords),
       hsCodes: asStringArray(profile.hsCodes),
+      industryPackIds: normalizeTradeMiningIndustryPackIds(profile.industryPackIds),
+      industryFilterMode: normalizeTradeMiningIndustryFilterMode(profile.industryFilterMode),
       allowedCompanyIdentityRoles: normalizeAllowedCompanyIdentityRoles(profile.allowedCompanyIdentityRoles),
       excludedCompanyKeywords: asStringArray(profile.excludedCompanyKeywords),
       lookbackDays: profile.lookbackWindowDays,
       minShipmentCount: profile.minShipmentCount,
       minShipmentVolume: profile.minShipmentVolume?.toString() ?? null,
+      minAggregateTeu: profile.minAggregateTeu?.toString() ?? null,
       schedule: {
         timezone: profile.scheduleTimezone,
         metadata: profile.scheduleMetadata
@@ -579,6 +594,18 @@ export async function updateTradeMiningJobRunStatus(tenant: TenantContext, jobRu
     }
   });
   const searchProfileId = readSearchProfileIdFromJobInput(existingJobRun?.input);
+  const qualifyingCompanies =
+    searchProfileId && (input.status === "COMPLETED" || input.status === "PARTIAL")
+      ? (
+          await getCandidateFeed(tenant, {
+            searchProfileId
+          })
+        ).length
+      : null;
+  const completionMetadata = {
+    ...(input.metadata ?? {}),
+    ...(qualifyingCompanies === null ? {} : { qualifyingCompanies })
+  };
 
   const jobRun = await prisma.automationJobRun.update({
     where: {
@@ -594,7 +621,7 @@ export async function updateTradeMiningJobRunStatus(tenant: TenantContext, jobRu
         recordsProcessed: input.recordsProcessed ?? null,
         recordsCreated: input.recordsCreated ?? null,
         recordsUpdated: input.recordsUpdated ?? null,
-        metadata: input.metadata ?? {},
+        metadata: completionMetadata,
         completedAt: input.completedAt ?? new Date().toISOString()
       }
     }
@@ -625,7 +652,8 @@ export async function updateTradeMiningJobRunStatus(tenant: TenantContext, jobRu
         recordsProcessed: input.recordsProcessed ?? null,
         recordsCreated: input.recordsCreated ?? null,
         recordsUpdated: input.recordsUpdated ?? null,
-        errorMessage: input.errorMessage ?? null
+        errorMessage: input.errorMessage ?? null,
+        metadata: completionMetadata
       }
     }
   });

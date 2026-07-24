@@ -74,10 +74,14 @@ Port and consignee-filter regression coverage must also verify:
 
 1. common U.S. port aliases resolve to canonical TradeMining names;
 2. Canadian cities are rejected as U.S. arrival ports;
-3. `City | Country` destination markets produce consignee-city and consignee-country filters in the worker plan;
-4. a uniquely resolved city is posted through `ConsigneeCity`, while an ambiguous or unavailable city is posted through `ConsigneeAddress`;
-5. the country, city/address, ports, and all other profile filters remain inside one BOL query; and
-6. invalid local configuration creates and fails a tracked run before the worker stops, preventing untracked retry loops.
+3. an empty U.S. arrival-port selection is valid and omits `USPort` from the TradeMining form;
+4. `City | Country` destination markets produce consignee-city and consignee-country filters in the worker plan;
+5. a uniquely resolved city is posted through `ConsigneeCity`, while an ambiguous or unavailable city is posted through `ConsigneeAddress`;
+6. the country, city/address, ports, and all other profile filters remain inside one logical BOL query;
+7. results over 25,000 split first by date and then by port, while an unsplittable capped leaf reports incomplete coverage;
+8. aggregate TEUs use only the matched profile's records inside its lookback;
+9. industry-pack identifiers and modes reject unsupported values, and classification labels match the qualification packs; and
+10. invalid local configuration creates and fails a tracked run before the worker stops, preventing untracked retry loops.
 
 Scoring regression coverage must also verify:
 
@@ -103,3 +107,4 @@ Scoring regression coverage must also verify:
 The `20260722193000_add_lead_scoring_history` migration must remain additive: it may create the two history tables, indexes, and foreign keys, but must not drop, rename, truncate, update, or backfill existing tables.
 The `20260722201500_link_lead_outcomes_to_scores` migration may only add the nullable snapshot foreign key; it must not rewrite existing outcomes.
 The `20260722214500_add_apollo_status_sync_tracking` migration may only add nullable timestamps/error text, a defaulted failure counter, and indexes to `Contact`; it must not rewrite existing contact data.
+The `20260724170000_add_hunter_profile_coverage_rules` migration may only add industry-pack JSON, the defaulted industry mode, and the nullable aggregate-TEU threshold; it must not delete, rename, update, or backfill existing data.
