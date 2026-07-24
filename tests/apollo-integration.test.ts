@@ -4,8 +4,10 @@ import {
   fetchApolloActivitySummary,
   fetchApolloContactById,
   fetchApolloContactsForCompany,
+  fetchApolloOrganizationForMapping,
   fetchApolloRepDirectory,
-  fetchApolloSequenceDirectory
+  fetchApolloSequenceDirectory,
+  parseApolloOrganizationId
 } from "@/server/integrations/apollo";
 
 describe("fetchApolloContactById", () => {
@@ -165,7 +167,7 @@ describe("fetchApolloContactsForCompany", () => {
   });
 
   it("parses contacts and preserves existing Apollo sequence history", async () => {
-    vi.spyOn(global, "fetch")
+    const fetchMock = vi.spyOn(global, "fetch")
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -216,6 +218,64 @@ describe("fetchApolloContactsForCompany", () => {
         sequenceId: "sequence-1"
       })
     ]);
+
+    const organizationRequestBody = JSON.parse(
+      String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}")
+    ) as Record<string, unknown>;
+    expect(organizationRequestBody).toEqual({
+      page: 1,
+      per_page: 10,
+      q_organization_domains_list: ["harbor-home.com"]
+    });
+  });
+
+  it("uses Apollo's documented organization-name parameter when no domain is known", async () => {
+    const fetchMock = vi
+      .spyOn(global, "fetch")
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          organizations: [
+            {
+              id: "apollo-org-novalis",
+              name: "NOVALIS US, LLC",
+              primary_domain: "novalis-intl.com"
+            }
+          ]
+        })
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({ contacts: [] })
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({ people: [] })
+      } as unknown as Response);
+
+    const result = await fetchApolloContactsForCompany(
+      {
+        companyName: "NOVALIS US, LLC"
+      },
+      {
+        keywordSearchLimit: 0
+      }
+    );
+
+    expect(result.organizationId).toBe("apollo-org-novalis");
+    const requestBody = JSON.parse(
+      String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}")
+    ) as Record<string, unknown>;
+    expect(requestBody).toEqual({
+      page: 1,
+      per_page: 10,
+      q_organization_name: "NOVALIS US, LLC"
+    });
+    expect(requestBody).not.toHaveProperty("best_company_name");
+    expect(requestBody).not.toHaveProperty("company_match_name");
   });
 
   it("parses current sequence history from Apollo contact campaign statuses", async () => {
@@ -364,8 +424,81 @@ describe("fetchApolloContactsForCompany", () => {
     ]);
 
     const contactsRequestBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body ?? "{}")) as Record<string, unknown>;
-    expect(contactsRequestBody.organization_ids).toEqual(["apollo-org-dormeo"]);
-    expect(contactsRequestBody.q_keywords).toBeUndefined();
+    expect(contactsRequestBody.organization_ids).toBeUndefined();
+    expect(contactsRequestBody.q_keywords).toBe("DORMEO NORTH AMERICA");
+  });
+
+  it("uses a confirmed Apollo organization ID without repeating organization discovery", async () => {
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ contacts: [] })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+        expect(body.organization_ids).toEqual(["5e66b6381e05b4008c8331b8"]);
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ people: [] })
+        } as unknown as Response;
+      }
+
+      throw new Error(`Unexpected Apollo URL in test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "NOVALIS US, LLC",
+      apolloOrganizationId: "5e66b6381e05b4008c8331b8"
+    });
+
+    expect(result.organizationId).toBe("5e66b6381e05b4008c8331b8");
+    expect(result.match.matchReason).toContain("manually confirmed");
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/mixed_companies/search"))).toBe(false);
+  });
+
+  it("parses and validates Apollo company URLs before mapping", async () => {
+    expect(
+      parseApolloOrganizationId(
+        "https://app.apollo.io/#/organizations/5e66b6381e05b4008c8331b8/people"
+      )
+    ).toBe("5e66b6381e05b4008c8331b8");
+    expect(() => parseApolloOrganizationId("https://example.com/5e66b6381e05b4008c8331b8")).toThrow(
+      "must be an Apollo URL"
+    );
+
+    const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        organization: {
+          id: "5e66b6381e05b4008c8331b8",
+          name: "NOVALIS US, LLC",
+          primary_domain: "novalis-intl.com"
+        }
+      })
+    } as unknown as Response);
+
+    const mapping = await fetchApolloOrganizationForMapping({
+      companyName: "NOVALIS US, LLC",
+      apolloOrganizationId: "5e66b6381e05b4008c8331b8"
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.apollo.io/api/v1/organizations/5e66b6381e05b4008c8331b8",
+      expect.objectContaining({ method: "GET", cache: "no-store" })
+    );
+    expect(mapping).toMatchObject({
+      organizationId: "5e66b6381e05b4008c8331b8",
+      companyName: "NOVALIS US, LLC",
+      domain: "novalis-intl.com"
+    });
   });
 
   it("uses targeted role queries when the organization has people but not direct contact records", async () => {

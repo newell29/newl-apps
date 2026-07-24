@@ -5,7 +5,6 @@ import {
   bulkAssignLeadOwnerAction,
   bulkQueueApolloEnrichmentAction,
   bulkUnassignLeadOwnerAction,
-  retryApolloCompanyReviewAction,
   bulkUpdateLeadStageAction,
   updateLeadStageAction
 } from "@/modules/lead-gen/actions";
@@ -133,11 +132,12 @@ export default async function PipelinePage({
       <PageHeader
         eyebrow="Lead Generation"
         title="Pipeline"
-        description="Only approved companies appear here. Contact enrichment and sequence tracking will be added after Apollo sync."
+        description="Review approved companies, enrich contacts through Apollo, and track outreach progress."
       />
 
       <div className="rounded-lg border border-accentBorder bg-accentSoft px-4 py-3 text-sm text-foreground">
-        Only approved companies appear here. Contact enrichment and sequence tracking will be added after Apollo sync.
+        Only approved companies appear here. Unsafe Apollo company matches are held for review before contact
+        enrichment can continue.
       </div>
 
       <form className="overflow-hidden rounded-lg border border-border bg-card shadow-sm" action="/lead-gen/pipeline">
@@ -426,13 +426,12 @@ export default async function PipelinePage({
           <PipelineTableClient
             leads={leads}
             stageOptions={filterOptions.stages}
-        repOptions={filterOptions.owners}
-        bulkUpdateLeadStageAction={bulkUpdateLeadStageAction}
-        bulkQueueApolloEnrichmentAction={bulkQueueApolloEnrichmentAction}
-        retryApolloCompanyReviewAction={retryApolloCompanyReviewAction}
-        bulkAssignLeadOwnerAction={bulkAssignLeadOwnerAction}
-        bulkUnassignLeadOwnerAction={bulkUnassignLeadOwnerAction}
-        updateLeadStageAction={updateLeadStageAction}
+            repOptions={filterOptions.owners}
+            bulkUpdateLeadStageAction={bulkUpdateLeadStageAction}
+            bulkQueueApolloEnrichmentAction={bulkQueueApolloEnrichmentAction}
+            bulkAssignLeadOwnerAction={bulkAssignLeadOwnerAction}
+            bulkUnassignLeadOwnerAction={bulkUnassignLeadOwnerAction}
+            updateLeadStageAction={updateLeadStageAction}
           />
         ) : (
           <div className="px-4 py-12 text-center">

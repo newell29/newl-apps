@@ -37,6 +37,11 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - The matched profile's `minAggregateTeu` is a second qualification gate. It sums the record-level `teu` values for that company, profile, and lookback window; it is distinct from minimum TEUs per BOL.
 - Contacts marked `DO_NOT_CONTACT` or `REJECTED` receive score `0`, remain `UNRANKED`, and cannot be assigned a cadence.
 - Only contacts explicitly marked `APPROVED` can be queued for Apollo. The queue worker rechecks the contact and blocks companies marked `doNotProspect`, `REJECTED`, or `DISQUALIFIED` before any external write.
+- Apollo organization discovery must use documented Apollo filters. A known domain uses `q_organization_domains_list`; a name-only search uses `q_organization_name` and no more than two deterministic variants.
+- Only `DIRECT_COMPANY` matches can proceed automatically. If the latest match is ambiguous, a logistics provider, or no match, bulk enrichment must skip the company until a rep resolves it in **Apollo Match Review**.
+- A manually supplied Apollo URL must resolve to a strong company-name match, must not already belong to another company in the same tenant, and requires explicit acknowledgement of the one-credit organization validation.
+- Confirming no Apollo match keeps the latest attempt and reviewer metadata. Automatic and bulk retry remain blocked until a rep explicitly reopens the review.
+- Resolving the company mapping can import contacts, but it never authorizes cadence enrollment; the existing contact approval and push controls still apply.
 - The Contacts directory includes both assigned and unassigned contacts attached to pipeline accounts. Unassigned contacts remain filterable and reviewable, but Apollo queueing is blocked until a sales rep is assigned.
 - Contact title and department matching uses normalized phrase boundaries. Sales, business-development, and customer-service roles are deprioritized by default, while a preferred logistics/operations match takes precedence for mixed-function titles.
 - Scoring settings reject invalid window combinations, company weights that do not total exactly 100 points, non-descending contact tiers, and incomplete or inverted mid-market TEU ranges.

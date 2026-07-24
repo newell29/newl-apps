@@ -67,6 +67,16 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 
 ## Apollo contact sequence state
 
+## Apollo company discovery and manual mapping
+
+- Organization discovery uses Apollo's documented Organization Search filters: `q_organization_domains_list` when Newl Apps has a domain, otherwise `q_organization_name`. Newl Apps does not send internal TradeMining identity-field names to Apollo.
+- A domain lookup uses one result page. A name-only lookup tries at most two deterministic name variants and stops as soon as a direct-company match is found.
+- A confirmed `apolloOrganizationId` is trusted for subsequent people searches, so the contact lookup stays constrained by `organization_ids` and never falls back to an unscoped company search.
+- Ambiguous, logistics-provider, and no-match results enter **Apollo Match Review**. Bulk enrichment skips those companies until a rep resolves the latest match explicitly.
+- A rep can paste an Apollo company URL or organization ID. Newl Apps reads that exact organization, verifies that its name is a strong match, prevents duplicate tenant mappings, records the reviewer and source, and then searches people using the confirmed organization ID.
+- Apollo's Complete Organization Info endpoint consumes one credit when a company is returned. The mapping form therefore requires explicit one-credit confirmation. An automatic name-only retry requires a separate confirmation and is capped at two organization-search pages.
+- **Confirmed no match** is an auditable archive state, not deletion. The company remains visible and protected from bulk retry until a rep reopens it.
+
 Apollo's Contacts API can return sequence membership in either the older top-level sequence fields or the newer `contact_campaign_statuses` array. Newl Apps must parse both shapes. When several campaign memberships exist, current replied, active, or paused memberships take precedence over finished history; equally ranked memberships use the newest membership timestamp.
 
 The Apollo push path remains deliberately two-phase:

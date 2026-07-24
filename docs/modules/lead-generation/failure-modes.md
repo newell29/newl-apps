@@ -91,6 +91,15 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Code guard: `src/server/integrations/apollo.ts` parses current campaign statuses and prefers active state over finished history.
 - Regression coverage: `tests/apollo-integration.test.ts` includes an active campaign membership alongside older finished history.
 
+## Apollo cannot safely match a company
+
+- Symptom: Pipeline shows **Resolve Apollo match**, or bulk enrichment reports a company as protected from retry.
+- Cause: Apollo returned no organization, a weak/ambiguous candidate, or a logistics provider rather than the TradeMining company. The previous implementation also sent internal identity-field names instead of Apollo's documented company-name filter, which could produce effectively unfiltered results.
+- Safe recovery: open **Apollo Match Review**. Paste the correct Apollo company URL when known, retry automatically only after correcting the company name/domain, or choose **Confirm no Apollo match**.
+- Credit guard: URL validation requires explicit acknowledgement of one Apollo credit. Automatic retry requires explicit acknowledgement of up to two returned organization-search pages.
+- Prevention: once the latest match is unresolved, bulk enrichment performs no Apollo lookup for that company. Confirmed-no-match rows remain visible and blocked until explicitly reopened.
+- Limitation: duplicate organization mapping is checked within the tenant in application code. A future additive unique database constraint could provide stronger protection against two simultaneous manual mappings, but requires separate migration approval.
+
 ## Automatic Apollo status sync is stale or failing
 
 - Symptom: the Contacts health panel shows **Setup required**, due contacts that are not draining, or contacts with sync errors.

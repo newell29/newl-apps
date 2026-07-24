@@ -16,6 +16,13 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 
 ## Data model
 
+Apollo match review reuses the existing tenant-scoped models and requires no schema migration:
+
+- `Company.apolloOrganizationId`, `domain`, and `linkedinUrl` store the resolved organization identity.
+- each automatic or manual attempt creates an immutable `ApolloCompanyMatch` row with classification, score, request evidence, returned payload, and reason;
+- `ApolloCompanyMatch.reviewedAt` and `reviewedByUserId` distinguish active review from **Confirmed no match**;
+- the latest unresolved match is the repeat-search guard used by Pipeline bulk enrichment.
+
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.
 
 `TradeMiningSearchProfile` stores `industryPackIds`, `industryFilterMode`, and `minAggregateTeu`. The migration that introduces them is additive: it adds nullable JSON/decimal fields and a defaulted text mode without deleting, renaming, backfilling, or rewriting existing profile data. Existing profiles therefore default to `PREFER` with no selected packs and no aggregate-TEU gate.

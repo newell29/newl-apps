@@ -106,6 +106,11 @@ Scoring regression coverage must also verify:
 16. the scheduled route returns a non-success HTTP status when any tenant run reports `error`, so the calling GitHub Actions workflow cannot appear green after an internal sync failure.
 17. Apollo reply and sequence outcomes link to a score snapshot created before the new Apollo status is persisted, preventing positive engagement from leaking into the score used to evaluate that outcome.
 18. the GitHub Actions caller does not retry a failed whole-batch HTTP request; retries remain bounded inside the per-contact Apollo client.
+19. organization search sends `q_organization_domains_list` for domains and `q_organization_name` for name-only companies, never internal TradeMining identity-field names.
+20. name-only organization discovery is capped at two deterministic queries and stops at the first direct-company match.
+21. a confirmed Apollo organization ID bypasses organization discovery, and people search stays constrained to that `organization_ids` value without an unscoped fallback.
+22. an unresolved latest `ApolloCompanyMatch` makes bulk enrichment skip the company before any Apollo or contact lookup.
+23. Apollo company URL parsing rejects non-Apollo hosts, exact mapping validates the organization ID, and manual mapping never authorizes cadence enrollment.
 
 The `20260722193000_add_lead_scoring_history` migration must remain additive: it may create the two history tables, indexes, and foreign keys, but must not drop, rename, truncate, update, or backfill existing tables.
 The `20260722201500_link_lead_outcomes_to_scores` migration may only add the nullable snapshot foreign key; it must not rewrite existing outcomes.
