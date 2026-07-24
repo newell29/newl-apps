@@ -73,7 +73,6 @@ if ! openclaw agents list --json | grep -Eq '"id"[[:space:]]*:[[:space:]]*"scout
 fi
 
 (cd "${plugin_path}" && npm ci && npm run plugin:validate)
-openclaw plugins install --force "${plugin_path}"
 
 plugin_config="$(node -e '
 console.log(JSON.stringify({
@@ -85,6 +84,7 @@ console.log(JSON.stringify({
 }));
 ' "${NEWL_APPS_URL}")"
 openclaw config set plugins.entries.newl-website-growth "${plugin_config}" --strict-json
+openclaw plugins install --force "${plugin_path}"
 
 openclaw skills install "${skill_path}" \
   --agent scout \
