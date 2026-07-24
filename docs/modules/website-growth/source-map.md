@@ -12,13 +12,16 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 |---|---|
 | Search Console, GA4, and sanitized form refresh | `src/modules/website-growth/evidence-refresh.ts` |
 | Tenant-scoped candidate upsert | `src/modules/website-growth/opportunity-store.ts` |
-| Scout run locking, packet, SEMrush evidence, draft save, Teams message | `src/modules/website-growth/scout-run.ts` |
-| Machine API | `src/app/api/website-growth/scout/prepare`, `complete`, and `fail` |
+| Scout run locking, SEMrush cache, weekday check-in, packet, draft save, Teams message | `src/modules/website-growth/scout-run.ts` |
+| Signed Excel links and stored-report validation | `src/modules/website-growth/report-download.ts` |
+| Machine API | `src/app/api/website-growth/scout/prepare`, `complete`, `check-in`, and `fail` |
+| Signed Excel download API | `src/app/api/website-growth/scout/runs/[runId]/reports/[reportName]` |
+| Bounded `.xlsx` generation shared by Newl Apps and OpenClaw | `src/server/spreadsheet.ts` |
 | Dedicated runtime synchronization and validation | `ops/openclaw/run-website-growth-scout-runtime.sh` |
 | Read-only Codex/OpenClaw runtime | `ops/openclaw/run-website-growth-scout.sh` |
 | Safe environment and fixed-target Teams helpers | `ops/openclaw/lib/website-growth-scout-runtime.zsh` |
 | Official SEMrush OAuth setup | `ops/openclaw/configure-semrush-mcp.sh` |
-| Weekday OpenClaw schedule and permanent worktree installation | `ops/openclaw/install-website-growth-scout.sh` |
+| Split Monday deep / Tuesday-Friday cache-backed schedule and permanent worktree installation | `ops/openclaw/install-website-growth-scout.sh` |
 | Structured output contract | `ops/openclaw/skills/website-growth-scout/scout-output.schema.json` |
 | Backlink parsing, quality gates, dedupe, retention, workspace query | `src/modules/website-growth/backlinks.ts` |
 | Backlink approval actions | `src/modules/website-growth/actions.ts` |

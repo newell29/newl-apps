@@ -31,7 +31,9 @@ The local `teamship-print-worker` has a dedicated credential and tenant scope. I
 
 The `newl-teamship` plugin also exposes identity-bound Garland tools for Teams PDF review, saved-check explanation, feedback capture, and an admin development-suggestion digest. Trusted inbound media is correlated by OpenClaw session and Teams sender; attachment paths are never model parameters. Newl Apps remains the persistence and authorization boundary.
 
-The daily digest only groups unqueued feedback into `AWAITING_APPROVAL` suggestions. It must state that no development has started. A separate human-approved Codex task and reviewed pull request remain required for implementation.
+The daily digest only groups unqueued feedback into focused `AWAITING_APPROVAL` suggestions. It must state that no development has started. Selecting **Approve & start Rivet** in Newl Apps is the separate human approval that queues the restricted local Codex branch-and-PR workflow described in [rivet-development-worker.md](rivet-development-worker.md).
+
+The digest remains read-only and has no Codex or GitHub write permission. A separate local OpenClaw command schedule claims approved Rivet jobs with a short-lived lease. Codex receives a deterministic required-context manifest; Garland jobs require the full customer and Shipment Documents workflow documentation before changes begin.
 
 For scheduled delivery, the plugin may use the configured administrator's Entra object ID only when the OpenClaw run has no interactive requester. Interactive calls always bind the actual Teams sender, preventing another employee from inheriting the scheduled administrator identity.
 

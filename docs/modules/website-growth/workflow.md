@@ -8,16 +8,17 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 
 ## Automated weekday workflow
 
-1. OpenClaw runs `ops/openclaw/run-website-growth-scout-runtime.sh` every weekday at 9:15 AM `America/Toronto`. The dedicated runtime worktree fast-forwards itself to the latest clean `origin/main` before handing off to Scout.
+1. OpenClaw runs the deep `ops/openclaw/run-website-growth-scout-runtime.sh` job on Monday at 9:15 AM `America/Toronto`. The dedicated runtime worktree fast-forwards itself to the latest clean `origin/main` before handing off to Scout.
 2. `/api/website-growth/scout/prepare` refreshes Search Console, GA4, and aggregate form evidence and prepares up to six candidates.
-3. Codex `gpt-5.6-sol` with high reasoning inspects the current website repository in a read-only, ephemeral session and queries official SEMrush MCP through OAuth. It refreshes Position Tracking even when there are no page candidates.
+3. Codex `gpt-5.6-sol` with high reasoning inspects the current website repository in a read-only, ephemeral session and queries official SEMrush MCP through OAuth. It refreshes Position Tracking even when there are no page candidates. If SEMrush reports insufficient units, Codex may use only the exact fresh cache in the prepared packet and must preserve its observation time.
 4. `/api/website-growth/scout/complete` rejects out-of-scope candidates or malformed results, stores sanitized SEMrush evidence and the tracking snapshot, saves drafts, and deterministically selects keywords from previously approved/built/published Scout briefs.
-5. OpenClaw sends the returned funnel summary and direct draft links to the configured Teams target, attaches an SEO performance workbook on every completed run, and attaches the two-column SEMrush keyword import workbook when new deduplicated keywords exist.
+5. OpenClaw sends the returned funnel summary, direct draft links, and seven-day signed Excel download links to the configured Teams target. The workbooks download directly from Newl Apps; Teams file consent and OneDrive are not used.
 6. The same Teams message reports the backlink funnel: prospects reviewed, duplicates/weak candidates removed, curated items added or refreshed, and a direct link to `/website-growth/backlinks`. The report is sent even when zero prospects qualify.
 7. An Admin or Manager reviews each page brief and backlink prospect. Page-brief approval starts the website developer workflow; backlink approval makes free work claimable by the separate executor. The owner still owns website merge and every spending decision.
 8. Codex builds the primary implementation. If the optional Kimi API key is configured, Kimi K3 independently builds the same immutable brief from the same website commit.
 9. Each agent output must pass the same website lint and production-build checks before a credential-separated job may open its draft PR. Vercel creates one Preview per draft PR.
 10. Newl Apps records the Codex PR and Preview as the primary build. The Kimi PR remains a shadow comparison in GitHub and cannot overwrite the primary status.
+11. Tuesday through Friday, `/api/website-growth/scout/check-in` refreshes first-party evidence and queue state, reports the stored SEMrush cache age, and sends Teams status without running Codex or calling SEMrush.
 
 ## Backlink workflow
 
@@ -35,9 +36,9 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 
 The production enablement sequence and supervised one-message test are documented in `backlink-outreach-rollout.md`.
 
-The run is locked per tenant for three hours. No-candidate runs still query Position Tracking and send the weekday Teams report, but contain no approval request. A duplicate trigger sends a short Teams check-in and does not start a second run. A runtime-sync, dependency, Codex, SEMrush, validation, persistence, report-generation, or Teams-attachment failure sends a safe Teams failure notice. When a Newl Apps run ID exists, the failure is also recorded through `/api/website-growth/scout/fail`; no failure creates or approves a draft.
+The deep run is locked per tenant for three hours. Its tracking cache remains fresh for eight days. Cache reuse never changes the original observation time, refreshes backlink recency, or duplicates keyword metrics. A duplicate trigger sends a short Teams check-in and does not start a second run. A runtime-sync, dependency, Codex, SEMrush-without-cache, validation, persistence, report-link generation, or Teams-message failure sends a safe Teams failure notice. When a Newl Apps run ID exists, the failure is also recorded through `/api/website-growth/scout/fail`; no failure creates or approves a draft.
 
-The 6,000-plus records visible under Research signals are not 6,000 proposed pages. They are a durable signal inventory. The planning limits remain weekly even though Scout checks every weekday: the planner reviews at most 500 new records, clusters duplicate query/page intent, applies qualification thresholds, selects no more than 2 core pages, 4 supporting items, and 6 quick optimizations, sends at most 6 candidates to Scout by default, and allows Codex to promote only the ideas it recommends. These funnel counts are included in the Teams report.
+The 6,000-plus records visible under Research signals are not 6,000 proposed pages. They are a durable signal inventory. The planner may refresh the deterministic shortlist every weekday, but Codex promotion remains a Monday deep-run activity: the planner reviews at most 500 new records, clusters duplicate query/page intent, applies qualification thresholds, selects no more than 2 core pages, 4 supporting items, and 6 quick optimizations, sends at most 6 candidates to Scout by default, and allows Codex to promote only the ideas it recommends. These funnel counts are included in Teams.
 
 The Kimi comparison is optional and fails independently: a missing key, agent error, verification failure, or PR handoff failure is surfaced in the GitHub Actions summary but does not block the primary Codex build. Neither agent workflow merges or deploys production.
 

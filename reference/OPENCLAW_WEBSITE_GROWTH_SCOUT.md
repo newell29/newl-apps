@@ -50,11 +50,17 @@ Kimi is not part of Scout. The Kimi key belongs in the `newl_website` developer 
 
 ## Cadence and limits
 
-Run Scout on Monday at 9:15 AM in `America/Toronto`, after the evidence refresh performed inside the same job. The initial candidate packet is capped at six items even though the queue guides remain up to two core-page items, four supporting items, and six quick optimizations. These are limits, not publishing targets. No developer build begins without a human brief approval.
+Run the deep Codex Scout on Monday at 9:15 AM in `America/Toronto`, after the evidence refresh performed inside the same job. Tuesday through Friday use a lightweight deterministic check-in at the same time: refresh Search Console, GA4, forms, and queue state; reuse the dated SEMrush cache; send Teams status; and spend no Codex tokens or SEMrush API units. The first Monday of the month may refresh broad competitor gaps; other Mondays use targeted candidate research, Position Tracking, and the bounded backlink review.
+
+The sanitized Position Tracking snapshot is cached for eight days. Live results record `observedAt` and `expiresAt`; cached use must preserve the original timestamp and must never refresh backlink `lastSeenAt` or create duplicate metric rows. When SEMrush reports insufficient units, the Monday run may use only the exact fresh cache in the prepared packet and must label it as cached in Teams.
+
+The initial candidate packet is capped at six items even though the queue guides remain up to two core-page items, four supporting items, and six quick optimizations. These are limits, not publishing targets. No developer build begins without a human brief approval.
 
 ## Secrets and tenant scope
 
 Use a dedicated Scout read/prepare token and environment file. Keep the developer callback token separate. Every request must carry the configured tenant slug, and Newl Apps must resolve that slug to a tenant before reading or changing a record. SEMrush OAuth state stays in the Codex/OpenClaw runtime; Newl Apps receives only sanitized evidence rows. Never put tokens, credentials, customer data, or the full brief in the GitHub dispatch payload.
+
+Teams summaries use the fixed `WEBSITE_GROWTH_TEAMS_TARGET`. The same deterministic summary includes seven-day, HMAC-signed Newl Apps download links for the Excel reports. The link is a bearer credential and must remain in the trusted internal Teams conversation. It downloads directly from tenant-scoped Scout output and does not invoke Teams file consent or copy the workbook into the recipient's OneDrive. `WEBSITE_GROWTH_REPORT_DOWNLOAD_SECRET` may provide a dedicated signing secret; otherwise the existing Scout token is used without exposing it in the URL.
 
 The OpenClaw scripts resolve Codex from `CODEX_BIN`, the current executable path, common user-local installations, or the Codex binary bundled with the ChatGPT application. Set `CODEX_BIN` in the protected Scout environment file when the runtime uses another location.
 

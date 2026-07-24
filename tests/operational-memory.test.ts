@@ -12,6 +12,7 @@ const prismaMock = vi.hoisted(() => ({
     update: vi.fn()
   },
   developmentSuggestion: { findMany: vi.fn(), create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
+  automationJobRun: { create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn() },
   auditLog: { create: vi.fn() },
   $transaction: vi.fn()
 }));
@@ -24,6 +25,7 @@ import {
   decideDevelopmentSuggestion,
   explainGarlandCheck,
   generateDevelopmentSuggestions,
+  retryRivetDevelopmentSuggestion,
   reviewOperationalFeedback
 } from "@/modules/assistant/operational-memory";
 import type { AuthenticatedContext } from "@/server/tenant-context";
@@ -45,6 +47,14 @@ describe("operational feedback and approved memory", () => {
     prismaMock.teamshipReviewRun.count.mockResolvedValue(1);
     prismaMock.workflowArtifact.count.mockResolvedValue(1);
     prismaMock.approvedOperationalLesson.findMany.mockResolvedValue([]);
+    prismaMock.automationJobRun.findMany.mockResolvedValue([]);
+    prismaMock.automationJobRun.create.mockResolvedValue({
+      id: "rivet-job-1",
+      status: "QUEUED",
+      input: {},
+      output: { phase: "QUEUED", attempt: 0 },
+      errorMessage: null
+    });
     prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
   });
 
@@ -153,7 +163,7 @@ describe("operational feedback and approved memory", () => {
     );
   });
 
-  it("creates approval-only development suggestions with forbidden automatic actions", async () => {
+  it("creates focused development suggestions with a restricted Rivet scope", async () => {
     prismaMock.operationalFeedback.findMany.mockResolvedValue([
       {
         id: "feedback-1",
@@ -175,7 +185,10 @@ describe("operational feedback and approved memory", () => {
         tenantId: "tenant-1",
         proposedScope: expect.objectContaining({
           requiresHumanApproval: true,
-          forbiddenAutomaticActions: expect.arrayContaining(["BUILD", "MERGE", "DEPLOY", "TEAMSHIP_WRITE", "PRINT"])
+          approvalStartsDevelopment: true,
+          issueKey: expect.any(String),
+          allowedAutomaticActions: expect.arrayContaining(["EDIT_ISOLATED_BRANCH", "OPEN_PULL_REQUEST"]),
+          forbiddenAutomaticActions: expect.arrayContaining(["MERGE", "DEPLOY", "TEAMSHIP_WRITE", "PRINT"])
         })
       })
     });
@@ -185,24 +198,185 @@ describe("operational feedback and approved memory", () => {
     );
   });
 
-  it("audits development suggestion decisions without starting development", async () => {
+  it("merges later similar feedback into the same awaiting suggestion before approval", async () => {
+    prismaMock.operationalFeedback.findMany.mockResolvedValue([
+      {
+        id: "feedback-2",
+        moduleKey: "SHIPMENT_DOCUMENTS",
+        workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+        classification: "CHECK_RESULT",
+        subjectType: "GARLAND_CHECK",
+        subjectId: "PS210492",
+        reporterStatement: "Commodity should show SN because the Lot/Serial reference exists.",
+        expectedOutcome: "PASS",
+        observedOutcome: "FAIL"
+      }
+    ]);
+    prismaMock.developmentSuggestion.findMany.mockResolvedValue([
+      {
+        id: "suggestion-1",
+        moduleKey: "SHIPMENT_DOCUMENTS",
+        workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+        title: "Garland Lot/Serial and commodity formatting",
+        summary: "The Commodity field is missing the Lot/Serial Ref.",
+        rationale: "One similar employee feedback item should be reviewed together before development begins.",
+        status: "AWAITING_APPROVAL",
+        riskLevel: "HIGH",
+        sourceFeedbackIds: ["feedback-1"],
+        feedbackCount: 1,
+        proposedScope: { issueKey: "GARLAND_LOT_SERIAL_COMMODITY" }
+      }
+    ]);
+    prismaMock.developmentSuggestion.update.mockResolvedValue({
+      id: "suggestion-1",
+      feedbackCount: 2
+    });
+
+    const suggestions = await generateDevelopmentSuggestions(context);
+
+    expect(suggestions).toHaveLength(1);
+    expect(prismaMock.developmentSuggestion.create).not.toHaveBeenCalled();
+    expect(prismaMock.developmentSuggestion.update).toHaveBeenCalledWith({
+      where: {
+        tenantId_id: {
+          tenantId: "tenant-1",
+          id: "suggestion-1"
+        }
+      },
+      data: expect.objectContaining({
+        sourceFeedbackIds: ["feedback-1", "feedback-2"],
+        feedbackCount: 2,
+        summary: expect.stringContaining("Commodity should show SN")
+      })
+    });
+    expect(prismaMock.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "assistant.development_suggestion.merge_similar"
+        })
+      })
+    );
+  });
+
+  it("atomically queues a Rivet Codex job when an administrator approves a suggestion", async () => {
     prismaMock.developmentSuggestion.findFirst.mockResolvedValue({
       id: "suggestion-1",
-      status: "AWAITING_APPROVAL"
+      moduleKey: "SHIPMENT_DOCUMENTS",
+      workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+      title: "Garland Special Instructions extraction",
+      summary: "CHEMTREC was omitted.",
+      rationale: "One similar report.",
+      status: "AWAITING_APPROVAL",
+      riskLevel: "HIGH",
+      sourceFeedbackIds: ["feedback-1"],
+      proposedScope: { issueKey: "GARLAND_SPECIAL_INSTRUCTIONS" },
+      developmentThreadId: null
     });
-    prismaMock.developmentSuggestion.update.mockResolvedValue({ id: "suggestion-1", status: "APPROVED" });
+    prismaMock.operationalFeedback.findMany.mockResolvedValue([{
+      id: "feedback-1",
+      moduleKey: "SHIPMENT_DOCUMENTS",
+      workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+      classification: "CHECK_RESULT",
+      subjectType: "GARLAND_CHECK",
+      subjectId: "PS210491",
+      reporterStatement: "Special Instructions omitted CHEMTREC.",
+      expectedOutcome: "PASS",
+      observedOutcome: "FAIL"
+    }]);
+    prismaMock.developmentSuggestion.update.mockResolvedValue({
+      id: "suggestion-1",
+      status: "APPROVED",
+      developmentThreadId: "rivet-job-1"
+    });
 
     const result = await decideDevelopmentSuggestion(context, "suggestion-1", {
       status: "APPROVED",
-      decisionNotes: "Prepare a separate reviewed task."
+      decisionNotes: "Start Rivet."
     });
 
     expect(result).toMatchObject({ status: "APPROVED" });
+    expect(prismaMock.automationJobRun.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          tenantId: "tenant-1",
+          jobType: "ASSISTANT_RIVET_DEVELOPMENT",
+          status: "QUEUED"
+        })
+      })
+    );
+    expect(prismaMock.developmentSuggestion.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "APPROVED",
+          developmentThreadId: "rivet-job-1"
+        })
+      })
+    );
     expect(prismaMock.auditLog.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           action: "assistant.development_suggestion.decide",
-          after: expect.objectContaining({ status: "APPROVED" })
+          after: expect.objectContaining({
+            status: "APPROVED",
+            developmentJobId: "rivet-job-1",
+            developmentStarted: true
+          })
+        })
+      })
+    );
+  });
+
+  it("requires a failed job before explicitly retrying Rivet", async () => {
+    prismaMock.developmentSuggestion.findFirst.mockResolvedValue({
+      id: "suggestion-1",
+      moduleKey: "SHIPMENT_DOCUMENTS",
+      workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+      title: "Garland Special Instructions extraction",
+      summary: "CHEMTREC was omitted.",
+      rationale: "One similar report.",
+      status: "APPROVED",
+      riskLevel: "HIGH",
+      sourceFeedbackIds: ["feedback-1"],
+      proposedScope: { issueKey: "GARLAND_SPECIAL_INSTRUCTIONS" },
+      developmentThreadId: "failed-job-1"
+    });
+    prismaMock.automationJobRun.findFirst.mockResolvedValue({ id: "failed-job-1" });
+    prismaMock.operationalFeedback.findMany.mockResolvedValue([{
+      id: "feedback-1",
+      moduleKey: "SHIPMENT_DOCUMENTS",
+      workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+      classification: "CHECK_RESULT",
+      subjectType: "GARLAND_CHECK",
+      subjectId: "PS210491",
+      reporterStatement: "Special Instructions omitted CHEMTREC.",
+      expectedOutcome: "PASS",
+      observedOutcome: "FAIL"
+    }]);
+    prismaMock.developmentSuggestion.update.mockResolvedValue({
+      id: "suggestion-1",
+      status: "APPROVED",
+      developmentThreadId: "rivet-job-1"
+    });
+
+    const result = await retryRivetDevelopmentSuggestion(context, "suggestion-1");
+
+    expect(result.developmentJob).toMatchObject({
+      id: "rivet-job-1",
+      status: "QUEUED",
+      phase: "QUEUED"
+    });
+    expect(prismaMock.developmentSuggestion.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          developmentThreadId: "rivet-job-1",
+          pullRequestUrl: null
+        }
+      })
+    );
+    expect(prismaMock.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "assistant.rivet_development.retry"
         })
       })
     );

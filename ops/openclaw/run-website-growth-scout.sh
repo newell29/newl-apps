@@ -21,10 +21,10 @@ packet_path="${temporary_directory}/packet.json"
 result_path="${temporary_directory}/result.json"
 completion_request_path="${temporary_directory}/completion-request.json"
 completion_response_path="${temporary_directory}/completion-response.json"
-report_manifest_path="${temporary_directory}/report-manifest.json"
 run_id=""
 completed=0
 failure_stage="validate Scout runtime configuration"
+scout_mode="${1:-deep}"
 
 cleanup() {
   rm -rf "${temporary_directory}"
@@ -58,40 +58,58 @@ trap report_failure EXIT
 
 : "${NEWL_APPS_URL:?NEWL_APPS_URL is required}"
 : "${OPENCLAW_WEBSITE_GROWTH_TOKEN:?OPENCLAW_WEBSITE_GROWTH_TOKEN is required}"
-: "${NEWL_WEBSITE_REPO_PATH:?NEWL_WEBSITE_REPO_PATH is required}"
 : "${WEBSITE_GROWTH_TEAMS_TARGET:?WEBSITE_GROWTH_TEAMS_TARGET is required}"
 
 if [[ "${NEWL_APPS_URL}" != https://* ]]; then
   echo "NEWL_APPS_URL must use HTTPS." >&2
   exit 1
 fi
-if [[ ! -e "${NEWL_WEBSITE_REPO_PATH}/.git" ]]; then
-  echo "NEWL_WEBSITE_REPO_PATH must point to the Newl website repository." >&2
-  exit 1
-fi
-
 scout_curl_headers=(--header "Authorization: Bearer ${OPENCLAW_WEBSITE_GROWTH_TOKEN}")
 if [[ -n "${VERCEL_AUTOMATION_BYPASS_SECRET:-}" ]]; then
   scout_curl_headers+=(--header "x-vercel-protection-bypass: ${VERCEL_AUTOMATION_BYPASS_SECRET}")
 fi
 
+if [[ "${scout_mode}" == "--light" ]]; then
+  failure_stage="refresh first-party evidence and read the SEMrush cache"
+  curl --fail --silent --show-error \
+    --request POST \
+    "${scout_curl_headers[@]}" \
+    "${NEWL_APPS_URL%/}/api/website-growth/scout/check-in" > "${completion_response_path}"
+  teams_message="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"]["teamsMessage"])' "${completion_response_path}")"
+  failure_stage="send the weekday Scout check-in to Teams"
+  send_website_growth_teams_message "${teams_message}"
+  completed=1
+  exit 0
+fi
+if [[ "${scout_mode}" != "deep" ]]; then
+  echo "Website Growth Scout mode must be deep or --light." >&2
+  exit 1
+fi
+
+: "${NEWL_WEBSITE_REPO_PATH:?NEWL_WEBSITE_REPO_PATH is required}"
+if [[ ! -e "${NEWL_WEBSITE_REPO_PATH}/.git" ]]; then
+  echo "NEWL_WEBSITE_REPO_PATH must point to the Newl website repository." >&2
+  exit 1
+fi
+
 failure_stage="validate Scout dependencies"
 
 resolve_codex_cli
-node_bin="$(command -v node)"
-if [[ -z "${node_bin}" ]]; then
-  echo "Node.js is required to create the Website Growth Excel reports." >&2
-  exit 1
-fi
 if ! "${codex_bin}" mcp get semrush >/dev/null 2>&1; then
   echo "Official SEMrush MCP is not configured for Codex. Run configure-semrush-mcp.sh first." >&2
   exit 1
 fi
 
 failure_stage="refresh Search Console, GA4, forms, and the review queue"
+research_scope="weekly"
+day_of_month="$((10#$(/bin/date +%d)))"
+if [[ "${day_of_month}" -le 7 ]]; then
+  research_scope="monthly"
+fi
 curl --fail --silent --show-error \
   --request POST \
   "${scout_curl_headers[@]}" \
+  --header "x-website-growth-research-scope: ${research_scope}" \
   "${NEWL_APPS_URL%/}/api/website-growth/scout/prepare" > "${prepare_path}"
 
 /usr/bin/python3 - "${prepare_path}" "${packet_path}" > "${temporary_directory}/state.txt" <<'PY'
@@ -126,9 +144,12 @@ failure_stage="run read-only Codex and official SEMrush research"
 {
   printf '%s\n' "You are the read-only Newl Website Growth Scout."
   printf '%s\n' "Review every candidate in the supplied packet against the current website repository."
-  printf '%s\n' "You must query the official SEMrush MCP server for each candidate and use only relevant, targeted rows."
+  printf '%s\n' "Query the official SEMrush MCP server for each candidate and use only relevant, targeted rows."
   printf '%s\n' "You must also inspect Newl Group's current SEMrush Position Tracking campaign, even when the packet has no page candidates."
-  printf '%s\n' "You must run a bounded backlink review on every run using SEMrush backlink profiles, referring domains, backlink gaps, and new/lost links."
+  printf '%s\n' "Run a bounded backlink review using SEMrush backlink profiles, referring domains, backlink gaps, and new/lost links."
+  printf '%s\n' "This packet contains the most recent sanitized SEMrush cache. If the official MCP reports that API units are unavailable, and only if the packet marks the cache fresh, reuse that exact cache instead of failing or inventing data."
+  printf '%s\n' "For live MCP evidence set source to LIVE_MCP, queried to true, and observedAt to the current ISO time. For cached evidence set source to CACHE, queried to false, and preserve the cache observedAt exactly."
+  printf '%s\n' "Broad competitor-gap discovery runs only when semrush.researchScope is MONTHLY. On WEEKLY runs, rely on the persisted Newl Apps opportunity/backlink queues and make only candidate-specific competitive calls."
   printf '%s\n' "Review broadly but return no more than 15 high-quality, actionable backlink prospects after deduplication and spam screening. Never return the raw backlink inventory."
   printf '%s\n' "Classify each returned prospect as directory/citation, link reclamation, partner/ecosystem, content contribution, resource page, digital PR, or paid placement."
   printf '%s\n' "Reject link farms, irrelevant directories, automated link schemes, paid dofollow offers, and HIGH-spam-risk prospects."
@@ -173,34 +194,9 @@ curl --fail --silent --show-error \
   "${NEWL_APPS_URL%/}/api/website-growth/scout/complete" > "${completion_response_path}"
 
 teams_message="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"]["teamsMessage"])' "${completion_response_path}")"
-"${node_bin}" --experimental-strip-types \
-  "${runner_directory}/lib/create-website-growth-reports.ts" \
-  "${completion_response_path}" \
-  "${temporary_directory}" > "${report_manifest_path}"
 
 failure_stage="send the Scout summary to Teams"
 send_website_growth_teams_message "${teams_message}"
-
-failure_stage="attach the SEO performance workbook in Teams"
-performance_path="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["performance"]["path"])' "${report_manifest_path}")"
-performance_filename="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["performance"]["filename"])' "${report_manifest_path}")"
-performance_arguments=(message send --channel msteams --target "${WEBSITE_GROWTH_TEAMS_TARGET}" --message "SEO performance report attached: ${performance_filename}" --media "${performance_path}")
-if [[ -n "${WEBSITE_GROWTH_TEAMS_ACCOUNT:-}" ]]; then
-  performance_arguments+=(--account "${WEBSITE_GROWTH_TEAMS_ACCOUNT}")
-fi
-openclaw "${performance_arguments[@]}"
-
-keyword_import_count="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["keywordImport"]["rowCount"])' "${report_manifest_path}")"
-if [[ "${keyword_import_count}" -gt 0 ]]; then
-  failure_stage="attach the SEMrush keyword import workbook in Teams"
-  keyword_import_path="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["keywordImport"]["path"])' "${report_manifest_path}")"
-  keyword_import_filename="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["keywordImport"]["filename"])' "${report_manifest_path}")"
-  keyword_arguments=(message send --channel msteams --target "${WEBSITE_GROWTH_TEAMS_TARGET}" --message "SEMrush keyword import attached: ${keyword_import_filename}. These keywords were selected automatically from approved Website Growth briefs and deduplicated against the live Position Tracking campaign." --media "${keyword_import_path}")
-  if [[ -n "${WEBSITE_GROWTH_TEAMS_ACCOUNT:-}" ]]; then
-    keyword_arguments+=(--account "${WEBSITE_GROWTH_TEAMS_ACCOUNT}")
-  fi
-  openclaw "${keyword_arguments[@]}"
-fi
 
 completed=1
 exit 0

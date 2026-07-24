@@ -1,6 +1,12 @@
-import { ModuleKey, PlatformRole, Prisma } from "@prisma/client";
+import { JobStatus, ModuleKey, PlatformRole, Prisma } from "@prisma/client";
 
+import { groupDevelopmentFeedback } from "@/modules/assistant/development-issue-grouping";
 import { GARLAND_WORKFLOW_KEY } from "@/modules/assistant/garland-artifacts";
+import {
+  createRivetDevelopmentJob,
+  RIVET_DEVELOPMENT_JOB_TYPE,
+  summarizeRivetDevelopmentJob
+} from "@/modules/assistant/rivet-development-jobs";
 import type { GarlandTeamshipOrderReview } from "@/modules/shipment-documents/teamship-review-types";
 import { prisma } from "@/server/db";
 import type { AuthenticatedContext } from "@/server/tenant-context";
@@ -314,58 +320,98 @@ export async function generateDevelopmentSuggestions(context: AuthenticatedConte
       moduleKey: true,
       workflowKey: true,
       classification: true,
+      subjectType: true,
+      subjectId: true,
       reporterStatement: true,
-      expectedOutcome: true
+      expectedOutcome: true,
+      observedOutcome: true
     }
   });
   const existing = await prisma.developmentSuggestion.findMany({
     where: { tenantId: context.tenantId, status: { in: ["AWAITING_APPROVAL", "APPROVED"] } },
-    select: { sourceFeedbackIds: true }
+    select: {
+      id: true,
+      moduleKey: true,
+      workflowKey: true,
+      title: true,
+      summary: true,
+      rationale: true,
+      status: true,
+      riskLevel: true,
+      sourceFeedbackIds: true,
+      feedbackCount: true,
+      proposedScope: true
+    }
   });
   const alreadyQueued = new Set(existing.flatMap((item) => jsonStringArray(item.sourceFeedbackIds)));
-  const groups = new Map<string, typeof feedback>();
-  for (const item of feedback.filter((item) => !alreadyQueued.has(item.id))) {
-    const key = `${item.moduleKey}:${item.workflowKey}:${item.classification}`;
-    groups.set(key, [...(groups.get(key) ?? []), item]);
-  }
+  const groups = groupDevelopmentFeedback(feedback.filter((item) => !alreadyQueued.has(item.id)));
 
   const created = [];
-  for (const items of groups.values()) {
+  for (const group of groups) {
+    const items = group.items;
     const first = items[0];
-    const title = `${humanize(first.classification)} feedback for ${humanize(first.workflowKey)}`.slice(0, 240);
+    const matchingAwaiting = existing.find((item) =>
+      item.status === "AWAITING_APPROVAL" &&
+      item.moduleKey === first.moduleKey &&
+      item.workflowKey === first.workflowKey &&
+      readIssueKey(item.proposedScope) === group.issueKey
+    );
     created.push(await prisma.$transaction(async (tx) => {
-      const suggestion = await tx.developmentSuggestion.create({
-        data: {
-          tenantId: context.tenantId,
-          moduleKey: first.moduleKey,
-          workflowKey: first.workflowKey,
-          title,
-          summary: items.map((item) => item.reporterStatement).join(" | ").slice(0, 4000),
-          rationale: `${items.length} employee feedback item${items.length === 1 ? "" : "s"} should be reviewed before development begins.`,
-          riskLevel: first.workflowKey === GARLAND_WORKFLOW_KEY ? "HIGH" : "MEDIUM",
-          sourceFeedbackIds: items.map((item) => item.id),
-          feedbackCount: items.length,
-          proposedScope: {
-            requiresHumanApproval: true,
-            developmentMode: "CODEX_REVIEWED_PR",
-            forbiddenAutomaticActions: ["BUILD", "MERGE", "DEPLOY", "TEAMSHIP_WRITE", "PRINT"]
-          }
-        }
-      });
+      const sourceFeedbackIds = [
+        ...(matchingAwaiting ? jsonStringArray(matchingAwaiting.sourceFeedbackIds) : []),
+        ...items.map((item) => item.id)
+      ];
+      const feedbackCount = sourceFeedbackIds.length;
+      const summary = joinDistinctStatements([
+        ...(matchingAwaiting ? matchingAwaiting.summary.split(" | ") : []),
+        ...items.map((item) => item.reporterStatement)
+      ]);
+      const suggestion = matchingAwaiting
+        ? await tx.developmentSuggestion.update({
+            where: {
+              tenantId_id: {
+                tenantId: context.tenantId,
+                id: matchingAwaiting.id
+              }
+            },
+            data: {
+              summary,
+              rationale: `${feedbackCount} similar employee feedback item${feedbackCount === 1 ? "" : "s"} should be reviewed together before development begins.`,
+              sourceFeedbackIds,
+              feedbackCount
+            }
+          })
+        : await tx.developmentSuggestion.create({
+            data: {
+              tenantId: context.tenantId,
+              moduleKey: first.moduleKey as ModuleKey,
+              workflowKey: first.workflowKey,
+              title: group.title,
+              summary,
+              rationale: `${feedbackCount} similar employee feedback item${feedbackCount === 1 ? "" : "s"} should be reviewed together before development begins.`,
+              riskLevel: first.workflowKey === GARLAND_WORKFLOW_KEY ? "HIGH" : "MEDIUM",
+              sourceFeedbackIds,
+              feedbackCount,
+              proposedScope: buildDevelopmentScope(group.issueKey)
+            }
+          });
       await tx.auditLog.create({
         data: {
           tenantId: context.tenantId,
           actorUserId: context.userId,
-          action: "assistant.development_suggestion.create",
+          action: matchingAwaiting
+            ? "assistant.development_suggestion.merge_similar"
+            : "assistant.development_suggestion.create",
           entityType: "DevelopmentSuggestion",
           entityId: suggestion.id,
           after: {
             workflowKey: first.workflowKey,
             classification: first.classification,
+            issueKey: group.issueKey,
             status: "AWAITING_APPROVAL",
             riskLevel: first.workflowKey === GARLAND_WORKFLOW_KEY ? "HIGH" : "MEDIUM",
-            feedbackCount: items.length,
-            sourceFeedbackIds: items.map((item) => item.id)
+            feedbackCount,
+            sourceFeedbackIds
           } satisfies Prisma.InputJsonValue
         }
       });
@@ -376,11 +422,36 @@ export async function generateDevelopmentSuggestions(context: AuthenticatedConte
 }
 
 export async function listDevelopmentSuggestions(context: AuthenticatedContext, limit = 100) {
-  return prisma.developmentSuggestion.findMany({
+  const suggestions = await prisma.developmentSuggestion.findMany({
     where: { tenantId: context.tenantId },
     orderBy: { generatedAt: "desc" },
     take: Math.min(Math.max(limit, 1), 200)
   });
+  const jobIds = suggestions
+    .map((item) => item.developmentThreadId)
+    .filter((id): id is string => Boolean(id));
+  const jobs = jobIds.length === 0
+    ? []
+    : await prisma.automationJobRun.findMany({
+        where: {
+          tenantId: context.tenantId,
+          id: { in: jobIds },
+          jobType: RIVET_DEVELOPMENT_JOB_TYPE
+        },
+        select: {
+          id: true,
+          status: true,
+          output: true,
+          errorMessage: true
+        }
+      });
+  const jobsById = new Map(jobs.map((job) => [job.id, summarizeRivetDevelopmentJob(job)]));
+  return suggestions.map((suggestion) => ({
+    ...suggestion,
+    developmentJob: suggestion.developmentThreadId
+      ? jobsById.get(suggestion.developmentThreadId) ?? null
+      : null
+  }));
 }
 
 export async function decideDevelopmentSuggestion(
@@ -394,7 +465,19 @@ export async function decideDevelopmentSuggestion(
   }
   const existing = await prisma.developmentSuggestion.findFirst({
     where: { tenantId: context.tenantId, id: suggestionId },
-    select: { id: true, status: true }
+    select: {
+      id: true,
+      moduleKey: true,
+      workflowKey: true,
+      title: true,
+      summary: true,
+      rationale: true,
+      status: true,
+      riskLevel: true,
+      sourceFeedbackIds: true,
+      proposedScope: true,
+      developmentThreadId: true
+    }
   });
   if (!existing) throw new OperationalMemoryError("Development suggestion was not found.", 404);
   if (existing.status !== "AWAITING_APPROVAL") {
@@ -402,14 +485,38 @@ export async function decideDevelopmentSuggestion(
   }
 
   const decisionNotes = normalizeOptionalText(input.decisionNotes, 4000);
+  const sourceFeedback = status === "APPROVED"
+    ? await prisma.operationalFeedback.findMany({
+        where: {
+          tenantId: context.tenantId,
+          id: { in: jsonStringArray(existing.sourceFeedbackIds) }
+        },
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          moduleKey: true,
+          workflowKey: true,
+          classification: true,
+          subjectType: true,
+          subjectId: true,
+          reporterStatement: true,
+          expectedOutcome: true,
+          observedOutcome: true
+        }
+      })
+    : [];
   return prisma.$transaction(async (tx) => {
+    const job = status === "APPROVED"
+      ? await createRivetDevelopmentJob(tx, context, existing, sourceFeedback)
+      : null;
     const suggestion = await tx.developmentSuggestion.update({
       where: { tenantId_id: { tenantId: context.tenantId, id: suggestionId } },
       data: {
         status,
         decisionByUserId: context.userId,
         decisionAt: new Date(),
-        decisionNotes
+        decisionNotes,
+        developmentThreadId: job?.id
       }
     });
     await tx.auditLog.create({
@@ -420,10 +527,119 @@ export async function decideDevelopmentSuggestion(
         entityType: "DevelopmentSuggestion",
         entityId: suggestionId,
         before: { status: existing.status } satisfies Prisma.InputJsonValue,
-        after: { status, decisionNotes } satisfies Prisma.InputJsonValue
+        after: {
+          status,
+          decisionNotes,
+          developmentJobId: job?.id ?? null,
+          developmentStarted: Boolean(job)
+        } satisfies Prisma.InputJsonValue
       }
     });
-    return suggestion;
+    return {
+      ...suggestion,
+      developmentJob: job
+        ? summarizeRivetDevelopmentJob({
+            id: job.id,
+            status: job.status,
+            output: job.output,
+            errorMessage: job.errorMessage
+          })
+        : null
+    };
+  });
+}
+
+export async function retryRivetDevelopmentSuggestion(
+  context: AuthenticatedContext,
+  suggestionId: string
+) {
+  const existing = await prisma.developmentSuggestion.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      id: suggestionId,
+      status: "APPROVED"
+    },
+    select: {
+      id: true,
+      moduleKey: true,
+      workflowKey: true,
+      title: true,
+      summary: true,
+      rationale: true,
+      status: true,
+      riskLevel: true,
+      sourceFeedbackIds: true,
+      proposedScope: true,
+      developmentThreadId: true
+    }
+  });
+  if (!existing?.developmentThreadId) {
+    throw new OperationalMemoryError("This suggestion does not have a failed Rivet job to retry.", 409);
+  }
+  const failedJob = await prisma.automationJobRun.findFirst({
+    where: {
+      id: existing.developmentThreadId,
+      tenantId: context.tenantId,
+      status: JobStatus.ERROR
+    },
+    select: { id: true }
+  });
+  if (!failedJob) {
+    throw new OperationalMemoryError("Only a failed Rivet job can be retried.", 409);
+  }
+  const sourceFeedback = await prisma.operationalFeedback.findMany({
+    where: {
+      tenantId: context.tenantId,
+      id: { in: jsonStringArray(existing.sourceFeedbackIds) }
+    },
+    orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      moduleKey: true,
+      workflowKey: true,
+      classification: true,
+      subjectType: true,
+      subjectId: true,
+      reporterStatement: true,
+      expectedOutcome: true,
+      observedOutcome: true
+    }
+  });
+
+  return prisma.$transaction(async (tx) => {
+    const job = await createRivetDevelopmentJob(tx, context, existing, sourceFeedback);
+    const suggestion = await tx.developmentSuggestion.update({
+      where: {
+        tenantId_id: {
+          tenantId: context.tenantId,
+          id: suggestionId
+        }
+      },
+      data: {
+        developmentThreadId: job.id,
+        pullRequestUrl: null
+      }
+    });
+    await tx.auditLog.create({
+      data: {
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        action: "assistant.rivet_development.retry",
+        entityType: "DevelopmentSuggestion",
+        entityId: suggestionId,
+        before: { developmentJobId: failedJob.id, status: "FAILED" },
+        after: { developmentJobId: job.id, status: "QUEUED" }
+      }
+    });
+    return {
+      ...suggestion,
+      developmentJob: summarizeRivetDevelopmentJob({
+        id: job.id,
+        status: job.status,
+        output: job.output,
+        errorMessage: job.errorMessage
+      })
+    };
   });
 }
 
@@ -504,8 +720,52 @@ function jsonStringArray(value: Prisma.JsonValue) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
-function humanize(value: string) {
-  return value.toLowerCase().replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+function readIssueKey(value: Prisma.JsonValue | null) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const issueKey = value.issueKey;
+  return typeof issueKey === "string" && issueKey.trim() ? issueKey.trim() : null;
+}
+
+function buildDevelopmentScope(issueKey: string): Prisma.InputJsonValue {
+  return {
+    issueKey,
+    requiresHumanApproval: true,
+    approvalStartsDevelopment: true,
+    developmentMode: "RIVET_LOCAL_CODEX_REVIEWED_PR",
+    allowedAutomaticActions: [
+      "READ_REQUIRED_CONTEXT",
+      "EDIT_ISOLATED_BRANCH",
+      "ADD_REGRESSION_TESTS",
+      "UPDATE_DOCUMENTATION",
+      "COMMIT",
+      "PUSH_FEATURE_BRANCH",
+      "OPEN_PULL_REQUEST"
+    ],
+    forbiddenAutomaticActions: [
+      "MERGE",
+      "DEPLOY",
+      "PRODUCTION_DATABASE_WRITE",
+      "DATABASE_MIGRATION_EXECUTION",
+      "TEAMSHIP_WRITE",
+      "PRINT",
+      "SHIP_OR_RELEASE_ORDER",
+      "CUSTOMER_COMMUNICATION",
+      "PERMISSION_CHANGE"
+    ]
+  };
+}
+
+function joinDistinctStatements(values: string[]) {
+  const seen = new Set<string>();
+  const statements = [];
+  for (const value of values) {
+    const normalized = value.replace(/\s+/g, " ").trim();
+    const key = normalized.toLowerCase();
+    if (!normalized || seen.has(key)) continue;
+    seen.add(key);
+    statements.push(normalized);
+  }
+  return statements.join(" | ").slice(0, 4000);
 }
 
 function describeStatus(status: string) {

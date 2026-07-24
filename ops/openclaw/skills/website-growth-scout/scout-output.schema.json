@@ -8,9 +8,11 @@
     "semrush": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["queried", "summary", "rows", "tracking"],
+      "required": ["queried", "source", "observedAt", "summary", "rows", "tracking"],
       "properties": {
-        "queried": { "type": "boolean", "const": true },
+        "queried": { "type": "boolean" },
+        "source": { "type": "string", "enum": ["LIVE_MCP", "CACHE"] },
+        "observedAt": { "type": "string", "format": "date-time" },
         "summary": { "type": "string", "minLength": 1 },
         "rows": {
           "type": "array",
@@ -77,9 +79,11 @@
     "backlinks": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["queried", "summary", "rawProspectsReviewed", "duplicatesRejected", "qualityRejected", "prospects"],
+      "required": ["queried", "source", "observedAt", "summary", "rawProspectsReviewed", "duplicatesRejected", "qualityRejected", "prospects"],
       "properties": {
-        "queried": { "type": "boolean", "const": true },
+        "queried": { "type": "boolean" },
+        "source": { "type": "string", "enum": ["LIVE_MCP", "CACHE"] },
+        "observedAt": { "type": "string", "format": "date-time" },
         "summary": { "type": "string", "minLength": 1 },
         "rawProspectsReviewed": { "type": "integer", "minimum": 0 },
         "duplicatesRejected": { "type": "integer", "minimum": 0 },
