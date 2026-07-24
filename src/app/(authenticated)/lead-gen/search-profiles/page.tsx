@@ -1,12 +1,16 @@
 import { ModuleKey } from "@prisma/client";
 import { PageHeader } from "@/components/page-header";
 import {
-  createTradeMiningSearchProfileAction,
   deleteTradeMiningSearchProfileAction,
-  requestTradeMiningSearchProfileRunAction,
-  updateTradeMiningSearchProfileAction
+  requestTradeMiningSearchProfileRunAction
 } from "@/modules/lead-gen/actions";
 import { MultiValueSuggestField } from "@/modules/lead-gen/components/multi-value-suggest-field";
+import { SearchProfileMutationForm } from "@/modules/lead-gen/components/search-profile-mutation-form";
+import {
+  TRADEMINING_INDUSTRY_FILTER_MODES,
+  TRADEMINING_INDUSTRY_PACKS,
+  type TradeMiningIndustryFilterMode
+} from "@/modules/lead-gen/industry-packs";
 import {
   defaultTradeMiningCompanyIdentityRoles,
   tradeMiningCompanyIdentityRoleOptions
@@ -50,14 +54,9 @@ export default async function SearchProfilesPage() {
           </span>
         </div>
 
-        <form action={createTradeMiningSearchProfileAction} className="mt-4">
+        <SearchProfileMutationForm mode="create">
           <SearchProfileForm />
-          <div className="mt-4">
-            <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
-              Create search profile
-            </button>
-          </div>
-        </form>
+        </SearchProfileMutationForm>
       </section>
 
       <section className="space-y-4">
@@ -96,9 +95,11 @@ export default async function SearchProfilesPage() {
                         <span>
                           {profile.lookbackWindowDays}d lookback | min {profile.minShipmentCount} shipment
                           {profile.minShipmentCount === 1 ? "" : "s"}
+                          {profile.minAggregateTeu ? ` | min ${profile.minAggregateTeu} aggregate TEUs` : ""}
                         </span>
                         <span>Runs daily in {profile.scheduleTimezone}</span>
                       </div>
+                      {profile.coverage ? <CoverageSummary coverage={profile.coverage} /> : null}
                       {profile.pendingRunRequestedAt ? (
                         <p className="mt-1 text-xs text-primary">
                           Immediate run requested {profile.pendingRunRequestedAt.toLocaleString("en-US")}
@@ -117,8 +118,7 @@ export default async function SearchProfilesPage() {
                 </summary>
 
                 <div className="border-t border-border p-5">
-                  <form action={updateTradeMiningSearchProfileAction}>
-                    <input type="hidden" name="profileId" value={profile.id} />
+                  <SearchProfileMutationForm mode="update" profileId={profile.id}>
                     <SearchProfileForm
                       defaults={{
                         name: profile.name,
@@ -131,21 +131,19 @@ export default async function SearchProfilesPage() {
                         originCountries: profile.originCountries.join("\n"),
                         productKeywords: profile.productKeywords.join("\n"),
                         hsCodes: profile.hsCodes.join("\n"),
+                        industryPackIds: profile.industryPackIds,
+                        industryFilterMode: profile.industryFilterMode,
                         allowedCompanyIdentityRoles: profile.allowedCompanyIdentityRoles,
                         excludedCompanyKeywords: profile.excludedCompanyKeywords.join("\n"),
                         lookbackWindowDays: profile.lookbackWindowDays,
                         minShipmentCount: profile.minShipmentCount,
                         minShipmentVolume: profile.minShipmentVolume ?? "",
+                        minAggregateTeu: profile.minAggregateTeu ?? "",
                         scheduleTimezone: profile.scheduleTimezone,
                         priorityWeight: profile.priorityWeight
                       }}
                     />
-                    <div className="mt-4 flex flex-wrap gap-3">
-                      <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
-                        Save profile
-                      </button>
-                    </div>
-                  </form>
+                  </SearchProfileMutationForm>
 
                   <div className="mt-3 flex flex-wrap gap-3">
                     <form action={requestTradeMiningSearchProfileRunAction}>
@@ -229,11 +227,14 @@ function SearchProfileForm({
     originCountries: string;
     productKeywords: string;
     hsCodes: string;
+    industryPackIds: string[];
+    industryFilterMode: TradeMiningIndustryFilterMode;
     allowedCompanyIdentityRoles: string[];
     excludedCompanyKeywords: string;
     lookbackWindowDays: number;
     minShipmentCount: number;
     minShipmentVolume: string;
+    minAggregateTeu: string;
     scheduleTimezone: string;
     priorityWeight: number;
   };
@@ -262,7 +263,7 @@ function SearchProfileForm({
           defaultValue={defaults?.destinationPorts}
           suggestionField="destinationPorts"
           allowCustomValues={false}
-          description="Required. Select a supported TradeMining U.S. port. Canadian cities belong in the consignee-city field above."
+          description="Optional. Select supported U.S. arrival ports only when the profile should be limited to those gateways."
         />
         <MultiValueSuggestField
           label="Origin ports"
@@ -288,6 +289,40 @@ function SearchProfileForm({
         <h3 className="text-sm font-semibold text-foreground">Product + thresholds</h3>
         <TextAreaField label="Product keywords" name="productKeywords" rows={4} defaultValue={defaults?.productKeywords} />
         <TextAreaField label="HS codes" name="hsCodes" rows={4} defaultValue={defaults?.hsCodes} />
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-foreground">Industry packs</p>
+          <p className="text-xs font-normal text-mutedForeground">
+            Choose maintained keyword and HS-code families without needing to know individual codes.
+          </p>
+          <select
+            name="industryFilterMode"
+            defaultValue={defaults?.industryFilterMode ?? "PREFER"}
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+          >
+            {TRADEMINING_INDUSTRY_FILTER_MODES.map((mode) => (
+              <option key={mode} value={mode}>
+                {formatIndustryMode(mode)}
+              </option>
+            ))}
+          </select>
+          <div className="grid gap-2">
+            {TRADEMINING_INDUSTRY_PACKS.map((pack) => (
+              <label key={pack.id} className="flex items-start gap-2 text-sm font-medium text-foreground">
+                <input
+                  type="checkbox"
+                  name="industryPackId"
+                  value={pack.id}
+                  defaultChecked={defaults?.industryPackIds.includes(pack.id) ?? false}
+                  className="mt-1"
+                />
+                <span>
+                  {pack.label}
+                  <span className="block text-xs font-normal text-mutedForeground">{pack.description}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
         <div className="space-y-2">
           <p className="text-sm font-medium text-foreground">Allowed company identity roles</p>
           <p className="text-xs font-normal text-mutedForeground">
@@ -340,11 +375,28 @@ function SearchProfileForm({
           defaultValue={defaults?.minShipmentVolume}
           description="Hunter applies this as TradeMining TEU greater than or equal to the configured value."
         />
+        <DecimalField
+          label="Minimum aggregate TEUs during lookback"
+          name="minAggregateTeu"
+          defaultValue={defaults?.minAggregateTeu}
+          description="A company must reach this total TEU across the profile's lookback window to appear in Found Companies."
+        />
         <NumberField label="Priority weight" name="priorityWeight" defaultValue={defaults?.priorityWeight ?? 50} min={0} max={100} />
         <Field label="Daily run timezone" name="scheduleTimezone" defaultValue={defaults?.scheduleTimezone ?? "America/Toronto"} required />
       </div>
     </div>
   );
+}
+
+function formatIndustryMode(mode: TradeMiningIndustryFilterMode) {
+  switch (mode) {
+    case "HARD":
+      return "Hard filter — require a selected industry";
+    case "EXCLUDE":
+      return "Exclude — remove selected industries";
+    default:
+      return "Prefer — rank selected industries higher";
+  }
 }
 
 function StatusBadge({ enabled }: { enabled: boolean }) {
@@ -366,6 +418,55 @@ function PendingRunBadge({ status }: { status: string }) {
     <span className="rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
       {label}
     </span>
+  );
+}
+
+function CoverageSummary({
+  coverage
+}: {
+  coverage: {
+    matchedRecords: number | null;
+    exportedRecords: number | null;
+    queryCount: number | null;
+    qualifyingCompanies: number | null;
+    retrievalComplete: boolean | null;
+  };
+}) {
+  const coverageTone =
+    coverage.retrievalComplete === false
+      ? "border-warning/30 bg-warning/10 text-warning"
+      : "border-success/30 bg-success/10 text-success";
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+      <span className={`rounded-full border px-2.5 py-1 font-semibold ${coverageTone}`}>
+        {coverage.retrievalComplete === false
+          ? "Retrieval incomplete"
+          : coverage.retrievalComplete === true
+            ? "Retrieval complete"
+            : "Coverage not reported"}
+      </span>
+      {coverage.matchedRecords !== null ? (
+        <span className="text-mutedForeground">
+          {coverage.matchedRecords.toLocaleString("en-US")} TradeMining matches
+        </span>
+      ) : null}
+      {coverage.exportedRecords !== null ? (
+        <span className="text-mutedForeground">
+          {coverage.exportedRecords.toLocaleString("en-US")} exported
+        </span>
+      ) : null}
+      {coverage.qualifyingCompanies !== null ? (
+        <span className="text-mutedForeground">
+          {coverage.qualifyingCompanies.toLocaleString("en-US")} qualifying companies
+        </span>
+      ) : null}
+      {coverage.queryCount !== null ? (
+        <span className="text-mutedForeground">
+          {coverage.queryCount.toLocaleString("en-US")} {coverage.queryCount === 1 ? "query" : "queries"}
+        </span>
+      ) : null}
+    </div>
   );
 }
 

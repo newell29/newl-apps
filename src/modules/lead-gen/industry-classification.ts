@@ -1,73 +1,6 @@
-const INDUSTRY_RULES = [
-  {
-    label: "Furniture & Home",
-    hsPrefixes: ["94", "4420", "4421"],
-    keywords: ["furniture", "mattress", "sofa", "chair", "table", "cabinet", "lighting", "home decor"]
-  },
-  {
-    label: "Apparel & Footwear",
-    hsPrefixes: ["61", "62", "64", "65"],
-    keywords: ["apparel", "garment", "shirt", "pants", "dress", "footwear", "shoe", "sneaker", "textile"]
-  },
-  {
-    label: "Building Materials",
-    hsPrefixes: ["44", "68", "69", "70", "73", "76"],
-    keywords: ["tile", "flooring", "lumber", "plywood", "stone", "granite", "cabinetry", "building material"]
-  },
-  {
-    label: "Industrial Equipment",
-    hsPrefixes: ["84", "85", "86"],
-    keywords: ["pump", "compressor", "machinery", "industrial", "motor", "equipment", "generator", "tooling"]
-  },
-  {
-    label: "Food & Beverage",
-    hsPrefixes: ["02", "03", "04", "07", "08", "09", "16", "17", "18", "19", "20", "21", "22"],
-    keywords: ["food", "beverage", "snack", "drink", "juice", "frozen", "seafood", "meat", "produce"]
-  },
-  {
-    label: "Consumer Goods",
-    hsPrefixes: ["39", "42", "48", "49", "95", "96"],
-    keywords: ["household", "consumer goods", "plasticware", "toy", "sporting goods", "packaging", "paper goods"]
-  },
-  {
-    label: "Automotive",
-    hsPrefixes: ["87", "4011", "4012"],
-    keywords: ["automotive", "auto parts", "vehicle", "tire", "brake", "engine", "aftermarket"]
-  },
-  {
-    label: "Electronics",
-    hsPrefixes: ["85", "90"],
-    keywords: ["electronics", "computer", "appliance", "battery", "circuit", "display", "telecom"]
-  },
-  {
-    label: "Chemicals",
-    hsPrefixes: ["28", "29", "32", "33", "34", "35", "38"],
-    keywords: ["chemical", "adhesive", "paint", "resin", "detergent", "cosmetic", "cleaner"]
-  },
-  {
-    label: "Logistics / Carrier / Forwarder",
-    hsPrefixes: [],
-    keywords: [
-      "steamship",
-      "carrier",
-      "shipping line",
-      "freight forwarder",
-      "customs broker",
-      "logistics services",
-      "logistics",
-      "distribution",
-      "warehouse",
-      "warehousing",
-      "fulfillment",
-      "transport",
-      "trucking",
-      "drayage",
-      "3pl"
-    ]
-  }
-] as const;
+import { TRADEMINING_INDUSTRY_PACKS } from "@/modules/lead-gen/industry-packs";
 
-export const INDUSTRY_OPTIONS = INDUSTRY_RULES.map((rule) => rule.label);
+export const INDUSTRY_OPTIONS = TRADEMINING_INDUSTRY_PACKS.map((rule) => rule.label);
 
 export type IndustryClassification = {
   primaryIndustry: string | null;
@@ -101,7 +34,7 @@ export function classifyTradeMiningIndustryFromRecords(
     const productText = normalizeText(record.productDescription);
     const companyText = normalizeText([record.companyName, record.domain].filter(Boolean).join(" "));
 
-    for (const rule of INDUSTRY_RULES) {
+    for (const rule of TRADEMINING_INDUSTRY_PACKS) {
       let score = 0;
 
       if (hsCode && rule.hsPrefixes.some((prefix) => hsCode.startsWith(prefix))) {

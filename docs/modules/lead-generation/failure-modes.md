@@ -40,8 +40,20 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 
 - Symptom: the profile cannot be saved, or a legacy profile run fails with a port-mapping error.
 - Cause: TradeMining BOL Import Search accepts U.S. arrival ports. Canadian cities such as Toronto, Montreal, and Vancouver are not valid values for that field.
-- Safe recovery: select one or more supported U.S. arrival ports, move the Canadian locations to **Consignee cities / destination markets**, save, and use **Run now**.
-- Prevention: the profile editor requires a canonical supported U.S. port and normalizes common short aliases.
+- Safe recovery: remove the unsupported value or select a supported U.S. port, move Canadian locations to **Consignee cities / destination markets**, save, and use **Run now**. The arrival-port field may remain blank.
+- Prevention: the profile editor accepts an empty port list but validates every supplied value and normalizes common short aliases.
+
+## TradeMining reports more records than it can export
+
+- Symptom: coverage is marked **Retrieval incomplete**, or the run finishes `PARTIAL`.
+- Safe behavior: Hunter first splits the lookback into disjoint date ranges, then splits a capped one-day multi-port query into port groups. It exports only leaf queries and records both the matched and exported totals.
+- Remaining limitation: a one-day query with one or no arrival port cannot be divided further with the supported filters. Hunter ingests the available export, marks it incomplete, and requires an operator to narrow the profile rather than claiming full coverage.
+
+## A search profile cannot be saved
+
+- Symptom: the profile editor shows an inline error.
+- Safe recovery: correct the named field and submit again. Validation errors, including duplicate profile names, remain on the form and no partial profile mutation is written.
+- Regression guard: server-action failures are converted to explicit form state instead of surfacing as a generic Next.js application error.
 
 ## A Canadian consignee city is not in TradeMining's city picker
 

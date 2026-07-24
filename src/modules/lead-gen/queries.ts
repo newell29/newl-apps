@@ -18,8 +18,17 @@ import type { TenantContext } from "@/server/tenant-context";
 import { getContactApolloAssignmentBlockReason, scoreContact } from "@/modules/lead-gen/contact-scoring";
 import {
   classifyTradeMiningIndustryFromRecords,
-  INDUSTRY_OPTIONS
+  INDUSTRY_OPTIONS,
+  type IndustryClassification
 } from "@/modules/lead-gen/industry-classification";
+import {
+  matchesTradeMiningIndustryLabels,
+  matchesTradeMiningIndustrySignals,
+  normalizeTradeMiningIndustryFilterMode,
+  normalizeTradeMiningIndustryPackIds,
+  type TradeMiningIndustryFilterMode,
+  type TradeMiningIndustryPackId
+} from "@/modules/lead-gen/industry-packs";
 import { defaultTradeMiningCompanyIdentityRoles } from "@/modules/lead-gen/search-profile-validation";
 import { recommendSequenceForContact } from "@/modules/lead-gen/sequence-catalog";
 import {
@@ -205,9 +214,12 @@ export type SearchProfileSummary = {
   originCountries: string[];
   productKeywords: string[];
   hsCodes: string[];
+  industryPackIds?: TradeMiningIndustryPackId[];
+  industryFilterMode?: TradeMiningIndustryFilterMode;
   contactCadenceConfig: unknown;
   lookbackWindowDays?: number;
   minShipmentCount?: number;
+  minAggregateTeu?: number | null;
 };
 
 type CandidateScoringConfig = TradeMiningScoringSettings;
@@ -267,6 +279,7 @@ export async function getCandidateFeed(tenant: TenantContext, filters: Candidate
         industrySource: company.industrySource,
         importRecords: company.importRecords
       });
+      const meetsProfileQualification = meetsSearchProfileQualification(evidence, industry);
 
       return {
         id: company.id,
@@ -281,8 +294,11 @@ export async function getCandidateFeed(tenant: TenantContext, filters: Candidate
         scoreReasoning: scoring.reasoning,
         importedScoreReasoning: evidence.importedScoreReasoning,
         shipmentCount: evidence.shipmentCount,
+        totalTeu: evidence.totalTeu,
         profileMinimumShipmentCount: evidence.searchProfile?.minShipmentCount ?? 0,
+        profileMinimumAggregateTeu: evidence.searchProfile?.minAggregateTeu ?? null,
         meetsProfileMinimumShipmentCount: meetsSearchProfileMinimumShipmentCount(evidence),
+        meetsProfileQualification,
         latestShipmentDate: evidence.latestShipmentDate,
         matchedSearchProfileId: evidence.searchProfile?.id ?? null,
         matchedSearchProfileName: evidence.searchProfile?.name ?? "Unmatched import",
@@ -304,7 +320,7 @@ export async function getCandidateFeed(tenant: TenantContext, filters: Candidate
         updatedAt: company.updatedAt
       };
     })
-    .filter((candidate) => candidate.meetsProfileMinimumShipmentCount)
+    .filter((candidate) => candidate.meetsProfileQualification)
     .filter((candidate) => !filters.searchProfileId || candidate.matchedSearchProfileId === filters.searchProfileId)
     .filter((candidate) => matchesIndustryFilter(candidate.primaryIndustry, candidate.secondaryIndustry, filters.industry))
     .filter((candidate) => isWithinScoreRange(candidate.candidateScore, filters.minScore, filters.maxScore))
@@ -464,6 +480,7 @@ export async function getTradeMiningSearchProfiles(tenant: TenantContext) {
           status: true,
           startedAt: true,
           input: true,
+          output: true,
           errorMessage: true
         }
       })
@@ -497,6 +514,7 @@ export async function getTradeMiningSearchProfiles(tenant: TenantContext) {
         status: string;
         startedAt: Date;
         errorMessage: string | null;
+        output: unknown;
       }
     >();
 
@@ -508,7 +526,8 @@ export async function getTradeMiningSearchProfiles(tenant: TenantContext) {
       latestRunByProfileId.set(profileId, {
         status: run.status,
         startedAt: run.startedAt,
-        errorMessage: run.errorMessage
+        errorMessage: run.errorMessage,
+        output: run.output
       });
     }
 
@@ -528,11 +547,14 @@ export async function getTradeMiningSearchProfiles(tenant: TenantContext) {
         originCountries: asStringArray(profile.originCountries),
         productKeywords: asStringArray(profile.productKeywords),
         hsCodes: asStringArray(profile.hsCodes),
+        industryPackIds: normalizeTradeMiningIndustryPackIds(profile.industryPackIds),
+        industryFilterMode: normalizeTradeMiningIndustryFilterMode(profile.industryFilterMode),
         allowedCompanyIdentityRoles: asStringArray(profile.allowedCompanyIdentityRoles ?? defaultTradeMiningCompanyIdentityRoles),
         excludedCompanyKeywords: asStringArray(profile.excludedCompanyKeywords),
         lookbackWindowDays: profile.lookbackWindowDays,
         minShipmentCount: profile.minShipmentCount,
         minShipmentVolume: profile.minShipmentVolume?.toString() ?? null,
+        minAggregateTeu: profile.minAggregateTeu?.toString() ?? null,
         scheduleTimezone: profile.scheduleTimezone,
         priorityWeight: profile.priorityWeight,
         lastRunAt: profile.lastRunAt,
@@ -540,7 +562,8 @@ export async function getTradeMiningSearchProfiles(tenant: TenantContext) {
         lastRunError:
           latestRunByProfileId.get(profile.id)?.status === JobStatus.ERROR
             ? latestRunByProfileId.get(profile.id)?.errorMessage ?? "Hunter could not complete this profile."
-            : null
+            : null,
+        coverage: readTradeMiningRunCoverage(latestRunByProfileId.get(profile.id)?.output)
       })),
       setupWarning: null
     };
@@ -1829,9 +1852,12 @@ export async function loadSearchProfileSummaries(tenant: Pick<TenantContext, "te
       originCountries: true,
       productKeywords: true,
       hsCodes: true,
+      industryPackIds: true,
+      industryFilterMode: true,
       contactCadenceConfig: true,
       lookbackWindowDays: true,
-      minShipmentCount: true
+      minShipmentCount: true,
+      minAggregateTeu: true
     }
   });
 
@@ -1849,9 +1875,12 @@ export async function loadSearchProfileSummaries(tenant: Pick<TenantContext, "te
         originCountries: asStringArray(profile.originCountries),
         productKeywords: asStringArray(profile.productKeywords),
         hsCodes: asStringArray(profile.hsCodes),
+        industryPackIds: normalizeTradeMiningIndustryPackIds(profile.industryPackIds),
+        industryFilterMode: normalizeTradeMiningIndustryFilterMode(profile.industryFilterMode),
         contactCadenceConfig: profile.contactCadenceConfig,
         lookbackWindowDays: profile.lookbackWindowDays,
-        minShipmentCount: profile.minShipmentCount
+        minShipmentCount: profile.minShipmentCount,
+        minAggregateTeu: profile.minAggregateTeu ? Number(profile.minAggregateTeu.toString()) : null
       }
     ])
   );
@@ -2001,6 +2030,35 @@ export function meetsSearchProfileMinimumShipmentCount(
   evidence: Pick<ReturnType<typeof summarizeTradeMiningEvidence>, "shipmentCount" | "searchProfile">
 ) {
   return evidence.shipmentCount >= (evidence.searchProfile?.minShipmentCount ?? 0);
+}
+
+export function meetsSearchProfileMinimumAggregateTeu(
+  evidence: Pick<ReturnType<typeof summarizeTradeMiningEvidence>, "totalTeu" | "searchProfile">
+) {
+  const minimum = evidence.searchProfile?.minAggregateTeu;
+  return minimum == null || evidence.totalTeu >= minimum;
+}
+
+function meetsSearchProfileQualification(
+  evidence: ReturnType<typeof summarizeTradeMiningEvidence>,
+  industry: Pick<IndustryClassification, "primaryIndustry" | "secondaryIndustry">
+) {
+  if (!meetsSearchProfileMinimumShipmentCount(evidence) || !meetsSearchProfileMinimumAggregateTeu(evidence)) {
+    return false;
+  }
+
+  const profile = evidence.searchProfile;
+  const industryFilterMode = profile?.industryFilterMode ?? "PREFER";
+  if (!profile || (profile.industryPackIds ?? []).length === 0 || industryFilterMode === "PREFER") {
+    return true;
+  }
+
+  const matchesIndustry = matchesTradeMiningIndustryLabels(
+    profile.industryPackIds ?? [],
+    industry.primaryIndustry,
+    industry.secondaryIndustry
+  );
+  return industryFilterMode === "HARD" ? matchesIndustry : !matchesIndustry;
 }
 
 function isRecordInSearchProfileWindow(
@@ -2334,6 +2392,50 @@ function readNumber(value: JsonObject, key: string) {
   }
 
   return 0;
+}
+
+function readTradeMiningRunCoverage(value: unknown) {
+  const output = asObject(value);
+  const metadata = asObject(output.metadata);
+  const coverage = asObject(metadata.coverage);
+  const matchedRecords = readNullableNumber(coverage, "matchedRecords");
+  const exportedRecords = readNullableNumber(coverage, "exportedRecords");
+  const queryCount = readNullableNumber(coverage, "queryCount");
+  const qualifyingCompanies =
+    readNullableNumber(metadata, "qualifyingCompanies") ??
+    readNullableNumber(coverage, "qualifyingCompanies");
+  const retrievalComplete =
+    typeof coverage.retrievalComplete === "boolean" ? coverage.retrievalComplete : null;
+
+  if (
+    matchedRecords === null &&
+    exportedRecords === null &&
+    queryCount === null &&
+    qualifyingCompanies === null &&
+    retrievalComplete === null
+  ) {
+    return null;
+  }
+
+  return {
+    matchedRecords,
+    exportedRecords,
+    queryCount,
+    qualifyingCompanies,
+    retrievalComplete
+  };
+}
+
+function readNullableNumber(value: JsonObject, key: string) {
+  const rawValue = value[key];
+  if (typeof rawValue === "number" && Number.isFinite(rawValue)) {
+    return rawValue;
+  }
+  if (typeof rawValue === "string" && rawValue.trim()) {
+    const parsed = Number(rawValue);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 }
 
 function readNumericRawValue(value: JsonObject, keys: string[]) {
@@ -2706,8 +2808,18 @@ function scoreIndustryFit(evidence: ReturnType<typeof summarizeTradeMiningEviden
   const penalizedKeywordMatch = config.penalizedIndustryKeywords.some((keyword) => productText.includes(normalizeComparableValue(keyword)));
   const preferredHsMatch = config.preferredHsCodePrefixes.some((prefix) => hsCode.startsWith(prefix.replace(/[^0-9]/g, "")));
   const penalizedHsMatch = config.penalizedHsCodePrefixes.some((prefix) => hsCode.startsWith(prefix.replace(/[^0-9]/g, "")));
-  const positive = (preferredKeywordMatch ? 0.6 : 0) + (preferredHsMatch ? 0.4 : 0);
-  const negative = (penalizedKeywordMatch ? 0.7 : 0) + (penalizedHsMatch ? 0.3 : 0);
+  const profileIndustryMatched = evidence.searchProfile
+    ? matchesTradeMiningIndustrySignals(
+        evidence.searchProfile.industryPackIds ?? [],
+        evidence.productDescription,
+        evidence.hsCode
+      )
+    : false;
+  const profileIndustryMode = evidence.searchProfile?.industryFilterMode ?? "PREFER";
+  const profilePositive = profileIndustryMatched && profileIndustryMode !== "EXCLUDE" ? 0.6 : 0;
+  const profileNegative = profileIndustryMatched && profileIndustryMode === "EXCLUDE" ? 0.7 : 0;
+  const positive = (preferredKeywordMatch ? 0.6 : 0) + (preferredHsMatch ? 0.4 : 0) + profilePositive;
+  const negative = (penalizedKeywordMatch ? 0.7 : 0) + (penalizedHsMatch ? 0.3 : 0) + profileNegative;
   const normalized = clamp(positive - negative, -1, 1);
 
   return Math.round(normalized * config.industryFitWeight);

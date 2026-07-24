@@ -171,6 +171,36 @@ def prepare_records(rows: list[dict[str, str]], destination_market: Optional[str
     return valid_records, len(records) - len(valid_records)
 
 
+def read_coverage(path: Path) -> dict[str, Any]:
+    try:
+        manifest = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError("Hunter coverage manifest could not be read") from error
+    coverage = manifest.get("coverage") if isinstance(manifest, dict) else None
+    if not isinstance(coverage, dict):
+        raise RuntimeError("Hunter coverage manifest does not contain coverage metrics")
+
+    def integer(name: str) -> int:
+        value = coverage.get(name)
+        if isinstance(value, bool):
+            raise RuntimeError(f"Hunter coverage metric {name} is invalid")
+        try:
+            normalized = int(value)
+        except (TypeError, ValueError) as error:
+            raise RuntimeError(f"Hunter coverage metric {name} is invalid") from error
+        return max(0, normalized)
+
+    return {
+        "matchedRecords": integer("matched_records"),
+        "exportedRecords": integer("exported_records"),
+        "queryCount": integer("query_count"),
+        "exportedQueryCount": integer("exported_query_count"),
+        "splitQueryCount": integer("split_query_count"),
+        "retrievalComplete": coverage.get("retrieval_complete") is True,
+        "maxExportRows": integer("max_export_rows"),
+    }
+
+
 def chunks(values: list[dict[str, Any]], size: int) -> Iterable[list[dict[str, Any]]]:
     for index in range(0, len(values), size):
         yield values[index : index + size]
@@ -182,6 +212,7 @@ def main() -> int:
     parser.add_argument("--profile-name", default="")
     parser.add_argument("--job-run-id", default="", help="Use a job run created by the coordinating worker.")
     parser.add_argument("--canonical-csv", required=True)
+    parser.add_argument("--coverage-manifest", default="")
     parser.add_argument("--destination-market", default="")
     parser.add_argument("--batch-size", type=int, default=250)
     args = parser.parse_args()
@@ -194,6 +225,7 @@ def main() -> int:
     csv_path = Path(args.canonical_csv).expanduser().resolve()
     rows = read_canonical_rows(csv_path)
     records, rejected_before_upload = prepare_records(rows, clean(args.destination_market))
+    coverage = read_coverage(Path(args.coverage_manifest).expanduser().resolve()) if args.coverage_manifest else None
 
     job_run_id = clean(args.job_run_id)
     if not job_run_id:
@@ -247,7 +279,7 @@ def main() -> int:
             "PATCH",
             f"/api/integrations/trademining/job-runs/{job_run_id}",
             {
-                "status": "COMPLETED",
+                "status": "COMPLETED" if coverage is None or coverage["retrievalComplete"] else "PARTIAL",
                 "recordsProcessed": processed,
                 "recordsCreated": created,
                 "recordsUpdated": updated,
@@ -255,6 +287,7 @@ def main() -> int:
                     "agent": "Hunter",
                     "recordsSkipped": skipped,
                     "recordsRejectedBeforeUpload": rejected_before_upload,
+                    **({"coverage": coverage} if coverage is not None else {}),
                 },
             },
         )
@@ -282,6 +315,7 @@ def main() -> int:
         "recordsUpdated": updated,
         "recordsSkipped": skipped + rejected_before_upload,
         "recordsRejectedBeforeUpload": rejected_before_upload,
+        "coverage": coverage,
     }, indent=2))
     return 0
 

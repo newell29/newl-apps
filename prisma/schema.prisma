@@ -1627,11 +1627,14 @@ model TradeMiningSearchProfile {
   originCountries             Json?
   productKeywords             Json?
   hsCodes                     Json?
+  industryPackIds             Json?
+  industryFilterMode          String    @default("PREFER")
   allowedCompanyIdentityRoles Json?
   excludedCompanyKeywords     Json?
   lookbackWindowDays          Int       @default(90)
   minShipmentCount            Int       @default(1)
   minShipmentVolume           Decimal?  @db.Decimal(12, 2)
+  minAggregateTeu             Decimal?  @db.Decimal(12, 2)
   scheduleFrequency           String    @default("daily")
   scheduleTimezone            String    @default("America/Toronto")
   scheduleMetadata            Json?

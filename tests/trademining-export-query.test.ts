@@ -57,6 +57,74 @@ describe("Hunter TradeMining profile query", () => {
     expect(parsed.busanLookup).toBe("Pusan");
   });
 
+  it("omits the U.S. port field for a consignee-city-only query", () => {
+    const source = [
+      "import datetime as dt, importlib.util, json, pathlib, sys",
+      "path = pathlib.Path(sys.argv[1])",
+      "spec = importlib.util.spec_from_file_location('trademining_export', path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "sys.modules[spec.name] = module",
+      "spec.loader.exec_module(module)",
+      "form = module.build_search_form(",
+      "  token='test-token', port_ids=[],",
+      "  start_date=dt.date(2026, 7, 1), end_date=dt.date(2026, 7, 2),",
+      "  origin_country_ids=[], origin_port_ids=[], ship_from_ports=[], product_keywords=[], hs_codes=[],",
+      "  consignee_country_ids=['CA'], consignee_city_ids=[], consignee_address_terms=['Toronto'], minimum_teu=1,",
+      ")",
+      "print(json.dumps({'hasPort': 'USPort' in form, 'country': form['ConsigneeCountryOfOrigin'], 'address': form['ConsigneeAddress']}))"
+    ].join("\n");
+
+    const result = spawnSync("python3", ["-c", source, exporterPath], {
+      encoding: "utf8",
+      env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      hasPort: false,
+      country: ["CA"],
+      address: "Toronto"
+    });
+  });
+
+  it("adaptively splits capped ranges by date and then by port", () => {
+    const source = [
+      "import datetime as dt, importlib.util, json, pathlib, sys",
+      "path = pathlib.Path(sys.argv[1])",
+      "spec = importlib.util.spec_from_file_location('trademining_export', path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "sys.modules[spec.name] = module",
+      "spec.loader.exec_module(module)",
+      "ports = [('a', 'Port A', '1'), ('b', 'Port B', '2')]",
+      "date_split = module.adaptive_query_splits(dt.date(2026, 7, 1), dt.date(2026, 7, 4), ports, 25001, 25000)",
+      "port_split = module.adaptive_query_splits(dt.date(2026, 7, 1), dt.date(2026, 7, 1), ports, 25001, 25000)",
+      "unsplittable = module.adaptive_query_splits(dt.date(2026, 7, 1), dt.date(2026, 7, 1), ports[:1], 25001, 25000)",
+      "print(json.dumps({",
+      "  'dates': [[str(start), str(end), len(group)] for start, end, group in date_split],",
+      "  'ports': [[str(start), str(end), len(group)] for start, end, group in port_split],",
+      "  'unsplittable': unsplittable,",
+      "}))"
+    ].join("\n");
+
+    const result = spawnSync("python3", ["-c", source, exporterPath], {
+      encoding: "utf8",
+      env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      dates: [
+        ["2026-07-01", "2026-07-02", 2],
+        ["2026-07-03", "2026-07-04", 2]
+      ],
+      ports: [
+        ["2026-07-01", "2026-07-01", 1],
+        ["2026-07-01", "2026-07-01", 1]
+      ],
+      unsplittable: []
+    });
+  });
+
   it("retries transient TradeMining responses but not authentication failures", () => {
     const source = [
       "import importlib.util, json, pathlib, sys, tempfile",

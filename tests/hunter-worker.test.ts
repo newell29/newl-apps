@@ -184,6 +184,38 @@ describe("Hunter daily profile worker", () => {
     expect(JSON.parse(result.stdout)).toEqual({ missing: [], ready: true });
   });
 
+  it("plans a Canadian consignee-city query without requiring a U.S. arrival port", () => {
+    const python = [
+      "import importlib.util, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "profile = {",
+      "  'id': 'profile-toronto',",
+      "  'name': 'Toronto warehouse leads',",
+      "  'destinationPorts': [],",
+      "  'destinationMarkets': ['Toronto | Canada'],",
+      "  'lookbackDays': 30,",
+      "  'schedule': {'timezone': 'America/Toronto', 'metadata': {}},",
+      "  'lastRunAt': None,",
+      "}",
+      "plan = module.build_profile_plan(profile)",
+      "print(json.dumps({'ports': plan['destinationPorts'], 'cities': plan['consigneeCities'], 'countries': plan['consigneeCountries'], 'ready': plan['ready']}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      ports: [],
+      cities: ["Toronto"],
+      countries: ["Canada"],
+      ready: true
+    });
+  });
+
   it("creates a tracked failed run before rejecting invalid port configuration", () => {
     const python = [
       "import importlib.util, json, pathlib, sys",

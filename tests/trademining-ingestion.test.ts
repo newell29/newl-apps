@@ -24,9 +24,12 @@ type SearchProfileRow = {
   originCountries: string[];
   productKeywords: string[];
   hsCodes: string[];
+  industryPackIds: string[] | null;
+  industryFilterMode: string;
   lookbackWindowDays: number;
   minShipmentCount: number;
   minShipmentVolume: { toString: () => string } | null;
+  minAggregateTeu: { toString: () => string } | null;
   scheduleFrequency: string;
   scheduleTimezone: string;
   scheduleMetadata: Record<string, unknown> | null;
@@ -173,6 +176,7 @@ const mockDb = vi.hoisted(() => {
       })
     },
     company: {
+      findMany: vi.fn(async () => []),
       findUnique: vi.fn(async ({ where, select }: { where: { id?: string; tenantId_normalizedName?: { tenantId: string; normalizedName: string } }; select?: Record<string, boolean> }) => {
         const company = where.id
           ? [...state.companies.values()].find((candidate) => candidate.id === where.id) ?? null
@@ -688,7 +692,10 @@ describe("TradeMining ingestion", () => {
         externalStatus: "PARTIAL",
         recordsProcessed: 10,
         recordsCreated: 8,
-        recordsUpdated: 2
+        recordsUpdated: 2,
+        metadata: {
+          qualifyingCompanies: 0
+        }
       }
     });
     expect(mockDb.state.auditLogs.at(-1)).toMatchObject({
@@ -762,9 +769,12 @@ function searchProfile(overrides: Partial<SearchProfileRow> = {}): SearchProfile
     originCountries: ["China"],
     productKeywords: ["furniture"],
     hsCodes: ["9403"],
+    industryPackIds: ["furniture-home"],
+    industryFilterMode: "PREFER",
     lookbackWindowDays: 90,
     minShipmentCount: 3,
     minShipmentVolume: { toString: () => "25" },
+    minAggregateTeu: { toString: () => "50" },
     scheduleFrequency: "daily",
     scheduleTimezone: "America/Toronto",
     scheduleMetadata: { preferredRunHourLocal: 7 },

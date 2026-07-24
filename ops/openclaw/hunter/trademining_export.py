@@ -237,9 +237,6 @@ def build_search_form(
     consignee_address_terms: list[str],
     minimum_teu: Optional[float],
 ) -> dict[str, str | list[str]]:
-    if not port_ids:
-        raise RuntimeError("at least one TradeMining US port is required")
-
     data: dict[str, str | list[str]] = {
         "__RequestVerificationToken": token,
         "TradeStartDate": start_date.strftime("%m/%d/%Y"),
@@ -248,11 +245,12 @@ def build_search_form(
         "BillTypeStraight": "on",
         "ContainerLoad": "All",
         "ContainerFlag": "All",
-        "USPort": port_ids,
         "ShipmentDestinationAll": "on",
         "SaveSearchId": "",
         "RollUpType": "None",
     }
+    if port_ids:
+        data["USPort"] = port_ids
     if origin_country_ids:
         data["CountryOfOrigin"] = origin_country_ids
     if origin_port_ids:
@@ -490,6 +488,33 @@ def excel_date_to_iso(value: str) -> str:
     return (base + dt.timedelta(days=int(serial))).isoformat()
 
 
+def adaptive_query_splits(
+    start_date: dt.date,
+    end_date: dt.date,
+    ports: list[tuple[str, str, str]],
+    result_count: int,
+    max_export_rows: int,
+) -> list[tuple[dt.date, dt.date, list[tuple[str, str, str]]]]:
+    if result_count <= max_export_rows:
+        return []
+
+    if start_date < end_date:
+        midpoint = start_date + dt.timedelta(days=(end_date - start_date).days // 2)
+        return [
+            (start_date, midpoint, list(ports)),
+            (midpoint + dt.timedelta(days=1), end_date, list(ports)),
+        ]
+
+    if len(ports) > 1:
+        midpoint = len(ports) // 2
+        return [
+            (start_date, end_date, list(ports[:midpoint])),
+            (start_date, end_date, list(ports[midpoint:])),
+        ]
+
+    return []
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ports", default="charleston,savannah", help="Comma-separated port keys or 'all'.")
@@ -502,7 +527,13 @@ def main() -> int:
     parser.add_argument("--days", type=int, default=7, help="Trailing day count ending at --end-date.")
     parser.add_argument("--start-date", default="", help="YYYY-MM-DD. Overrides --days when supplied.")
     parser.add_argument("--end-date", default="", help="YYYY-MM-DD. Defaults to today UTC.")
-    parser.add_argument("--chunk-days", type=int, default=0, help="Optional manual recovery split; daily profiles use one query.")
+    parser.add_argument("--chunk-days", type=int, default=0, help="Optional initial date split before adaptive coverage checks.")
+    parser.add_argument(
+        "--max-export-rows",
+        type=int,
+        default=int(os.environ.get("HUNTER_TRADEMINING_MAX_EXPORT_ROWS", "25000")),
+        help="Split queries above this TradeMining Excel export limit.",
+    )
     parser.add_argument("--origin-country", action="append", default=[])
     parser.add_argument("--origin-port", action="append", default=[])
     parser.add_argument("--ship-from-port", action="append", default=[])
@@ -524,6 +555,8 @@ def main() -> int:
         ),
     )
     args = parser.parse_args()
+    if args.max_export_rows < 1:
+        raise RuntimeError("--max-export-rows must be greater than zero")
 
     email = os.environ.get("TRADEMINING_USER")
     password = os.environ.get("TRADEMINING_PASSWORD")
@@ -557,20 +590,29 @@ def main() -> int:
             raise RuntimeError(f"unknown port key: {port_key}")
         port_name, port_id = ports[port_key]
         selected_ports.append((port_key, port_name, port_id))
-    port_ids = [port_id for _port_key, _port_name, port_id in selected_ports]
-    port_names = [port_name for _port_key, port_name, _port_id in selected_ports]
-
     manifest = {
         "run_date": end_date.isoformat(),
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
         "chunk_days": args.chunk_days,
+        "max_export_rows": args.max_export_rows,
+        "queries": [],
         "ports": [],
     }
 
-    for window_start, window_end in windows:
+    query_queue: list[tuple[dt.date, dt.date, list[tuple[str, str, str]]]] = [
+        (window_start, window_end, list(selected_ports))
+        for window_start, window_end in windows
+    ]
+    query_number = 0
+
+    while query_queue:
+        window_start, window_end, query_ports = query_queue.pop(0)
+        query_number += 1
+        port_ids = [port_id for _port_key, _port_name, port_id in query_ports]
+        port_names = [port_name for _port_key, port_name, _port_id in query_ports]
         print(
-            f"running one profile query for {len(selected_ports)} ports {window_start}..{window_end}",
+            f"running adaptive profile query {query_number} for {len(query_ports)} ports {window_start}..{window_end}",
             file=sys.stderr,
         )
         search_log_id, result_page = run_search(
@@ -589,7 +631,31 @@ def main() -> int:
             minimum_teu=args.minimum_teu,
         )
         result_count = search_result_count(session, search_log_id)
-        date_slug = f"{window_start.isoformat()}_to_{window_end.isoformat()}"
+        splits = adaptive_query_splits(
+            window_start,
+            window_end,
+            query_ports,
+            result_count,
+            args.max_export_rows,
+        )
+        query_manifest = {
+            "query_number": query_number,
+            "window_start_date": window_start.isoformat(),
+            "window_end_date": window_end.isoformat(),
+            "port_names": port_names,
+            "port_ids": port_ids,
+            "search_log_id": search_log_id,
+            "result_count": result_count,
+            "exported": not splits,
+            "split_reason": "export_limit" if splits else None,
+        }
+        manifest["queries"].append(query_manifest)
+
+        if splits:
+            query_queue = [*splits, *query_queue]
+            continue
+
+        date_slug = f"{window_start.isoformat()}_to_{window_end.isoformat()}_q{query_number}"
         xlsx_path = run_dir / f"{date_slug}_profile_{search_log_id}.xlsx"
         csv_path = run_dir / f"{date_slug}_profile_{search_log_id}.csv"
         if result_count == 0:
@@ -601,6 +667,7 @@ def main() -> int:
             rows = xlsx_to_rows(xlsx_path)
             data_rows = write_csv(rows, csv_path)
             xlsx_manifest_path = str(xlsx_path)
+        retrieval_complete = data_rows >= result_count
         manifest["ports"].append(
             {
                 "port_key": "profile-query",
@@ -615,6 +682,7 @@ def main() -> int:
                 "csv": str(csv_path),
                 "data_rows": data_rows,
                 "result_count": result_count,
+                "retrieval_complete": retrieval_complete,
                 "filters": {
                     "origin_countries": args.origin_country,
                     "origin_ports": args.origin_port,
@@ -629,6 +697,17 @@ def main() -> int:
                 },
             }
         )
+
+    exported_queries = manifest["ports"]
+    manifest["coverage"] = {
+        "matched_records": sum(int(query["result_count"]) for query in exported_queries),
+        "exported_records": sum(int(query["data_rows"]) for query in exported_queries),
+        "query_count": len(manifest["queries"]),
+        "exported_query_count": len(exported_queries),
+        "split_query_count": sum(1 for query in manifest["queries"] if query["split_reason"]),
+        "retrieval_complete": all(bool(query["retrieval_complete"]) for query in exported_queries),
+        "max_export_rows": args.max_export_rows,
+    }
 
     manifest_path = run_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")

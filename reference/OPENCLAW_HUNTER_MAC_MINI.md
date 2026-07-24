@@ -15,7 +15,7 @@ Draft operator guide for moving the existing TradeMining CSV collector from the 
 Hunter is a replaceable collector, not the sales system of record.
 
 1. Hunter reads the current enabled search profiles from Newl Apps through the ingestion API on every worker cycle and rechecks a profile immediately before it starts. Deleted or disabled profiles are not searched.
-2. After the profile's configured local daily time, Hunter searches its full profile-level lookback window, downloads the resulting CSV, normalizes rows, and posts a tenant-bound batch. Large lookbacks are split into smaller TradeMining requests without shortening the requested window.
+2. After the profile's configured local daily time, Hunter searches its full profile-level lookback window, downloads the resulting CSV, normalizes rows, and posts a tenant-bound batch. The run starts as one logical query and is adaptively split only when TradeMining reports more than 25,000 exportable results.
 3. Newl Apps validates the ingestion token and tenant slug, stores the raw record and normalized company evidence, and records a job run.
 4. Employees review Found Companies and approve accounts into Pipeline.
 5. Newl Apps owns Apollo contact selection, cadence mapping, approval, push, verification, and audit history.
@@ -65,6 +65,7 @@ HUNTER_WORKER_ID=alex-mac-mini-hunter
 HUNTER_COLLECTOR_PATH=/path/to/reviewed/collector
 HUNTER_EXPORT_DIRECTORY=/path/to/runtime/exports
 HUNTER_HTTP_MAX_ATTEMPTS=4
+HUNTER_TRADEMINING_MAX_EXPORT_ROWS=25000
 VERCEL_AUTOMATION_BYPASS_SECRET=<dedicated Preview automation bypass>
 HUNTER_DAILY_RUN_TIME=07:00
 HUNTER_POLL_MS=60000
@@ -80,7 +81,9 @@ The checked-in template is `ops/openclaw/hunter/.env.example`. Store the real fi
 - `ops/openclaw/hunter/trademining_summary.py`: canonical record conversion and deduplication.
 - `ops/openclaw/hunter/hunter_ingest.py`: tenant-bound job creation, batched ingestion, completion/failure reporting.
 - `ops/openclaw/hunter/hunter_worker.py`: live active-profile lookup, manual run-request polling, once-daily eligibility, per-profile lookback/port planning, collection, and ingestion coordination.
-- Each enabled profile produces one full-lookback TradeMining BOL query. Destination ports use TradeMining's U.S.-port multi-select field; origin countries and foreign ports are resolved through its lookup service; ship-from ports, product keywords, and HS codes use Boolean `OR`; and `minShipmentVolume` is treated as minimum TEUs per BOL.
+- Each enabled profile begins with one full-lookback TradeMining BOL query. Optional destination ports use TradeMining's U.S.-port multi-select field; leaving them empty omits that field. Origin countries and foreign ports are resolved through its lookup service; ship-from ports and product keywords use Boolean `OR`; HS codes use TradeMining's comma-separated format; and `minShipmentVolume` is treated as minimum TEUs per BOL.
+- When the reported count exceeds 25,000, Hunter splits the date range into disjoint halves. A capped one-day query with multiple arrival ports is split into port groups. If a one-day one-port/no-port query is still capped, Hunter retains the available export and reports incomplete coverage instead of silently truncating it.
+- `minAggregateTeu` and industry-pack modes are evaluated in Newl Apps over the company's matched-profile evidence. They do not change the TradeMining form post.
 - Profile destination markets are hard consignee filters. `City | Country` values populate consignee country plus an exact city ID when available. Because TradeMining's city picker does not reliably expose Canadian cities, unresolved markets such as Toronto, Montreal, and Vancouver are searched as consignee-address text while retaining the Canadian country filter.
 - `ops/openclaw/run-hunter-worker.sh`: allowlisted environment loader.
 - `ops/openclaw/install-hunter-worker.sh`: LaunchAgent renderer and installer.
@@ -143,8 +146,9 @@ Do not run the VM and Mac schedulers concurrently against the same profile durin
 ## Confirmed daily profile rules
 
 - Every enabled profile is eligible once per local calendar day after 07:00 by default. `scheduleMetadata.preferredRunHourLocal` can override the hour for an existing profile, while `HUNTER_DAILY_RUN_TIME` controls the fallback.
-- The profile's `lookbackWindowDays` is the actual TradeMining date range, and the normal daily path submits it as one query for the whole profile.
-- Found Companies counts shipment evidence from the matched profile inside that profile's lookback and excludes companies below its `minShipmentCount`.
+- The profile's `lookbackWindowDays` is the actual TradeMining date range. It remains one logical daily run even when the 25,000-row export ceiling requires physical subqueries.
+- Found Companies counts shipment evidence from the matched profile inside that profile's lookback and excludes companies below `minShipmentCount`, below optional `minAggregateTeu`, or outside a hard/exclude industry rule.
+- The Search Profiles screen shows TradeMining matches, exported records, qualifying companies, physical query count, and completeness from the latest run.
 - New and edited profiles persist the legacy database frequency field as `daily` for compatibility, but frequency is no longer an operator option or a worker decision.
 - Deleting a profile cancels queued or running manual requests, and Hunter rechecks the live enabled list before a search. An HTTP export already in flight may finish its current request, but it cannot start a later daily run from cached profile data.
 
@@ -152,3 +156,4 @@ Do not run the VM and Mac schedulers concurrently against the same profile durin
 
 - How long should Hunter retain downloaded TradeMining CSV files?
 - Who receives failure alerts when TradeMining login expires or an export returns no records?
+- Should a capped one-day, one-port/no-port profile be narrowed manually, or should Hunter gain another deterministic split dimension after observing a real occurrence?

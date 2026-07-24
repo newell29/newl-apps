@@ -18,6 +18,10 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.
 
+`TradeMiningSearchProfile` stores `industryPackIds`, `industryFilterMode`, and `minAggregateTeu`. The migration that introduces them is additive: it adds nullable JSON/decimal fields and a defaulted text mode without deleting, renaming, backfilling, or rewriting existing profile data. Existing profiles therefore default to `PREFER` with no selected packs and no aggregate-TEU gate.
+
+TradeMining run coverage is stored in the existing `AutomationJobRun.output.metadata` JSON rather than a new table. The latest profile run exposes `matchedRecords`, `exportedRecords`, `queryCount`, `qualifyingCompanies`, and `retrievalComplete` in the Search Profiles UI.
+
 ```mermaid
 flowchart LR
   UI[Authenticated UI/API] --> Auth[Auth + module guard]

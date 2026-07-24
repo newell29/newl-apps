@@ -86,4 +86,55 @@ describe("Hunter ingestion adapter", () => {
       }),
     ]);
   });
+
+  it("marks capped unsplittable retrieval as partial and sends coverage metrics", () => {
+    const python = [
+      "import importlib.util, json, os, pathlib, sys, tempfile",
+      "spec = importlib.util.spec_from_file_location('hunter_ingest', sys.argv[1])",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "calls = []",
+      "module.api_request = lambda base, token, method, path, payload=None: calls.append({'method': method, 'path': path, 'payload': payload}) or {}",
+      "os.environ['NEWL_APPS_BASE_URL'] = 'http://localhost:3000'",
+      "os.environ['INGESTION_API_TOKEN'] = 'local-test-token'",
+      "with tempfile.TemporaryDirectory() as directory:",
+      "  root = pathlib.Path(directory)",
+      "  csv_path = root / 'empty.csv'",
+      "  csv_path.write_text('')",
+      "  coverage_path = root / 'manifest.json'",
+      "  coverage_path.write_text(json.dumps({'coverage': {'matched_records': 25000, 'exported_records': 25000, 'query_count': 1, 'exported_query_count': 1, 'split_query_count': 0, 'retrieval_complete': False, 'max_export_rows': 25000}}))",
+      "  sys.argv = ['hunter_ingest.py', '--profile-id', 'profile-1', '--job-run-id', 'job-1', '--canonical-csv', str(csv_path), '--coverage-manifest', str(coverage_path)]",
+      "  status = module.main()",
+      "print(json.dumps({'status': status, 'calls': calls}))",
+    ].join("\n");
+
+    const result = spawnSync("python3", ["-c", python, adapterPath], {
+      encoding: "utf8",
+      env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" },
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const parsed = JSON.parse(result.stdout.trim().split("\n").at(-1) ?? "{}");
+    expect(parsed.status).toBe(0);
+    expect(parsed.calls).toEqual([
+      expect.objectContaining({
+        method: "PATCH",
+        path: "/api/integrations/trademining/job-runs/job-1",
+        payload: expect.objectContaining({
+          status: "PARTIAL",
+          metadata: expect.objectContaining({
+            coverage: {
+              matchedRecords: 25000,
+              exportedRecords: 25000,
+              queryCount: 1,
+              exportedQueryCount: 1,
+              splitQueryCount: 0,
+              retrievalComplete: false,
+              maxExportRows: 25000,
+            },
+          }),
+        }),
+      }),
+    ]);
+  });
 });
