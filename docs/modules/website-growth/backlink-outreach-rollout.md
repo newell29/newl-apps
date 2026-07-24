@@ -45,7 +45,7 @@ Scout uses its own OpenClaw agent and workspace with Codex `gpt-5.6-sol` at high
 
 1. Approve one known, low-risk free-directory or outreach opportunity in Newl Apps.
 2. Run the disabled job manually while watching the dedicated mailbox and Newl Apps record.
-3. Confirm the exact recipient came from a public business contact page on the approved referring organization's domain, uses that organization's business email domain, has its country and consent basis recorded, and includes no customer information.
+3. Confirm the exact recipient came from a public business contact page on the approved referring organization's domain, has its country and consent basis recorded, and includes no customer information. Newl Apps independently reads that public page before an initial send. A different corporate email domain is permitted only when the exact address is visibly published on the approved referring organization's page; consumer webmail remains blocked.
 4. Confirm the message is sent from the dedicated mailbox and includes the correct legal entity, public address, phone, website, and unsubscribe instruction.
 5. Reply from the test recipient. Confirm the reply appears as `REPLIED`; an unsubscribe reply must set `LOST`, add a suppression record, and cancel follow-ups.
 6. Confirm the Teams summary arrives even if no opportunity is available.

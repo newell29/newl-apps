@@ -1,3 +1,6 @@
+import { lookup } from "node:dns/promises";
+import { isIP, isIPv4, isIPv6 } from "node:net";
+
 import {
   WebsiteGrowthBacklinkCategory,
   WebsiteGrowthBacklinkStatus,
@@ -22,6 +25,8 @@ export const WEBSITE_GROWTH_OUTREACH_CLOSE_DAYS = 21;
 const MAX_SUBJECT_LENGTH = 180;
 const MAX_BODY_LENGTH = 4_000;
 const REPLY_LOOKBACK_DAYS = 35;
+const PUBLIC_CONTACT_FETCH_TIMEOUT_MS = 10_000;
+const MAX_PUBLIC_CONTACT_BYTES = 1_000_000;
 const PUBLIC_EMAIL_DOMAINS = new Set([
   "gmail.com",
   "googlemail.com",
@@ -129,12 +134,21 @@ export async function sendWebsiteGrowthOutreachEmail({
     throw new Error("Outreach requires a human-approved, non-paid opportunity.");
   }
 
+  const publicContactEvidence =
+    normalized.kind === WebsiteGrowthOutreachMessageKind.INITIAL
+      ? await fetchWebsiteGrowthPublicContactEvidence(normalized.contactSourceUrl)
+      : null;
   validateWebsiteGrowthContactSource({
     sourceDomain: opportunity.sourceDomain,
     sourceUrl: opportunity.sourceUrl,
     contactPage: opportunity.contactPage,
     contactSourceUrl: normalized.contactSourceUrl,
-    recipientEmail: normalized.recipientEmail
+    recipientEmail: normalized.recipientEmail,
+    publicContactEvidence,
+    previouslyVerifiedRecipientEmail:
+      normalized.kind === WebsiteGrowthOutreachMessageKind.FOLLOW_UP
+        ? opportunity.recipientEmail
+        : null
   });
   assertSafeWebsiteGrowthOutreachCopy(normalized.subject);
   assertSafeWebsiteGrowthOutreachCopy(normalized.body);
@@ -576,13 +590,17 @@ export function validateWebsiteGrowthContactSource({
   sourceUrl,
   contactPage,
   contactSourceUrl,
-  recipientEmail
+  recipientEmail,
+  publicContactEvidence,
+  previouslyVerifiedRecipientEmail
 }: {
   sourceDomain: string;
   sourceUrl?: string | null;
   contactPage?: string | null;
   contactSourceUrl: string;
   recipientEmail: string;
+  publicContactEvidence?: string | null;
+  previouslyVerifiedRecipientEmail?: string | null;
 }) {
   const sourceHost = new URL(normalizePublicUrl(contactSourceUrl)).hostname;
   const approvedHosts = [sourceDomain, sourceUrl, contactPage]
@@ -598,14 +616,174 @@ export function validateWebsiteGrowthContactSource({
   }
 
   const recipientDomain = normalizeEmailAddress(recipientEmail).split("@")[1];
-  if (
-    PUBLIC_EMAIL_DOMAINS.has(recipientDomain) ||
-    !domainsShareOrganization(sourceHost, recipientDomain)
-  ) {
+  if (PUBLIC_EMAIL_DOMAINS.has(recipientDomain)) {
     throw new Error(
       "Outreach requires a public business email on the approved referring organization's domain."
     );
   }
+  const sameOrganizationDomain = domainsShareOrganization(sourceHost, recipientDomain);
+  const exactEmailIsPublished = publicContactEvidence
+    ? publicContactEvidenceContainsEmail(publicContactEvidence, recipientEmail)
+    : false;
+  const recipientWasPreviouslyVerified =
+    previouslyVerifiedRecipientEmail !== null &&
+    previouslyVerifiedRecipientEmail !== undefined &&
+    normalizeEmailAddress(previouslyVerifiedRecipientEmail) ===
+      normalizeEmailAddress(recipientEmail);
+  if (
+    (!sameOrganizationDomain || publicContactEvidence !== undefined) &&
+    !exactEmailIsPublished &&
+    !recipientWasPreviouslyVerified
+  ) {
+    throw new Error(
+      "Outreach requires the exact public business email to be visibly published on the approved referring organization's website."
+    );
+  }
+}
+
+export async function fetchWebsiteGrowthPublicContactEvidence(
+  contactSourceUrl: string,
+  dependencies: {
+    fetcher?: typeof fetch;
+    resolveHostname?: typeof lookup;
+  } = {}
+) {
+  const normalizedUrl = normalizePublicUrl(contactSourceUrl);
+  const parsed = new URL(normalizedUrl);
+  await assertHostnameResolvesPublicly(
+    parsed.hostname,
+    dependencies.resolveHostname ?? lookup
+  );
+  const response = await (dependencies.fetcher ?? fetch)(normalizedUrl, {
+    headers: {
+      Accept: "text/html, text/plain;q=0.9",
+      "User-Agent": "Newl-Website-Growth-Contact-Verification/1.0"
+    },
+    redirect: "manual",
+    signal: AbortSignal.timeout(PUBLIC_CONTACT_FETCH_TIMEOUT_MS)
+  });
+  if (response.status >= 300 && response.status < 400) {
+    throw new Error(
+      "The public contact source redirected. Scout must supply the final approved publisher URL."
+    );
+  }
+  if (!response.ok) {
+    throw new Error(
+      `The public contact source could not be verified (${response.status}).`
+    );
+  }
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (
+    contentType &&
+    !contentType.includes("text/html") &&
+    !contentType.includes("text/plain")
+  ) {
+    throw new Error("The public contact source must be an HTML or plain-text page.");
+  }
+  const contentLength = Number(response.headers.get("content-length") ?? "0");
+  if (Number.isFinite(contentLength) && contentLength > MAX_PUBLIC_CONTACT_BYTES) {
+    throw new Error("The public contact source is too large to verify safely.");
+  }
+  if (!response.body) return "";
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let totalBytes = 0;
+  let contents = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    totalBytes += value.byteLength;
+    if (totalBytes > MAX_PUBLIC_CONTACT_BYTES) {
+      await reader.cancel();
+      throw new Error("The public contact source is too large to verify safely.");
+    }
+    contents += decoder.decode(value, { stream: true });
+  }
+  return contents + decoder.decode();
+}
+
+function publicContactEvidenceContainsEmail(value: string, recipientEmail: string) {
+  const normalizedEvidence = value
+    .toLowerCase()
+    .replace(/&#0*64;|&#x0*40;|&commat;/gi, "@")
+    .replace(/&#0*46;|&#x0*2e;|&period;/gi, ".");
+  const publishedEmails = [
+    normalizedEvidence,
+    ...Array.from(
+      normalizedEvidence.matchAll(
+        /(?:data-cfemail=["']|\/cdn-cgi\/l\/email-protection#)([0-9a-f]{6,})/gi
+      ),
+      (match) => decodeCloudflareProtectedEmail(match[1])
+    )
+  ];
+  return publishedEmails.some((evidence) =>
+    evidence.includes(normalizeEmailAddress(recipientEmail))
+  );
+}
+
+function decodeCloudflareProtectedEmail(value: string) {
+  if (value.length % 2 !== 0) return "";
+  const key = Number.parseInt(value.slice(0, 2), 16);
+  if (!Number.isFinite(key)) return "";
+  let decoded = "";
+  for (let index = 2; index < value.length; index += 2) {
+    const encodedByte = Number.parseInt(value.slice(index, index + 2), 16);
+    if (!Number.isFinite(encodedByte)) return "";
+    decoded += String.fromCharCode(encodedByte ^ key);
+  }
+  return decoded.toLowerCase();
+}
+
+async function assertHostnameResolvesPublicly(
+  hostname: string,
+  resolveHostname: typeof lookup
+) {
+  if (isIP(hostname)) {
+    throw new Error("Public contact-source URLs must use a public hostname.");
+  }
+  const addresses = await resolveHostname(hostname, {
+    all: true,
+    verbatim: true
+  });
+  if (
+    addresses.length === 0 ||
+    addresses.some(({ address }) => !isPublicIpAddress(address))
+  ) {
+    throw new Error("The public contact-source hostname did not resolve publicly.");
+  }
+}
+
+function isPublicIpAddress(address: string) {
+  const normalized = address.toLowerCase();
+  if (isIPv4(normalized)) {
+    const [first, second] = normalized.split(".").map(Number);
+    return !(
+      first === 0 ||
+      first === 10 ||
+      first === 127 ||
+      (first === 100 && second >= 64 && second <= 127) ||
+      (first === 169 && second === 254) ||
+      (first === 172 && second >= 16 && second <= 31) ||
+      (first === 192 && second === 168) ||
+      (first === 198 && (second === 18 || second === 19)) ||
+      first >= 224
+    );
+  }
+  if (isIPv6(normalized)) {
+    if (normalized.startsWith("::ffff:")) {
+      return isPublicIpAddress(normalized.slice("::ffff:".length));
+    }
+    return !(
+      normalized === "::" ||
+      normalized === "::1" ||
+      normalized.startsWith("fc") ||
+      normalized.startsWith("fd") ||
+      /^fe[89ab]/.test(normalized) ||
+      normalized.startsWith("2001:db8:")
+    );
+  }
+  return false;
 }
 
 function normalizeWebsiteGrowthOutreachSendInput(
@@ -791,6 +969,8 @@ function normalizePublicUrl(value: string) {
     throw new Error("Public outreach URLs must use HTTP or HTTPS.");
   }
   if (
+    parsed.username ||
+    parsed.password ||
     parsed.hostname === "localhost" ||
     parsed.hostname.endsWith(".local") ||
     parsed.hostname === "127.0.0.1"

@@ -3,11 +3,12 @@ import {
   WebsiteGrowthBacklinkStatus,
   WebsiteGrowthOutreachConsentBasis
 } from "@prisma/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   assertSafeWebsiteGrowthOutreachCopy,
   buildCompliantWebsiteGrowthOutreachBody,
+  fetchWebsiteGrowthPublicContactEvidence,
   isWebsiteGrowthOutreachOptOut,
   readWebsiteGrowthOutreachIdentity,
   validateWebsiteGrowthContactSource,
@@ -248,6 +249,60 @@ describe("Website Growth backlink outreach compliance", () => {
       contactSourceUrl: "https://publisher.example/contact",
       recipientEmail: "publisher@gmail.com"
     })).toThrow("public business email");
+  });
+
+  it("allows a publisher-network email only when the exact address is public on the approved site", () => {
+    expect(() => validateWebsiteGrowthContactSource({
+      sourceDomain: "publication.example",
+      contactSourceUrl: "https://publication.example/editors/max",
+      recipientEmail: "max@publisher-network.example",
+      publicContactEvidence:
+        '<a href="mailto:max@publisher-network.example">Email Max</a>'
+    })).not.toThrow();
+    expect(() => validateWebsiteGrowthContactSource({
+      sourceDomain: "supplychaindive.com",
+      contactSourceUrl: "https://www.supplychaindive.com/editors/max",
+      recipientEmail: "max@industrydive.com",
+      publicContactEvidence:
+        '<span class="__cf_email__" data-cfemail="6a070b122a03040e1f191e18130e031c0f44090507">[email protected]</span>'
+    })).not.toThrow();
+    expect(() => validateWebsiteGrowthContactSource({
+      sourceDomain: "publication.example",
+      contactSourceUrl: "https://publication.example/editors/max",
+      recipientEmail: "other@publisher-network.example",
+      publicContactEvidence:
+        '<a href="mailto:max@publisher-network.example">Email Max</a>'
+    })).toThrow("exact public business email");
+  });
+
+  it("fetches bounded public contact evidence without following redirects or private hosts", async () => {
+    const resolveHostname = vi.fn().mockResolvedValue([
+      { address: "203.0.114.10", family: 4 }
+    ]);
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response("editor@publisher-network.example", {
+        status: 200,
+        headers: { "content-type": "text/html" }
+      })
+    );
+    await expect(fetchWebsiteGrowthPublicContactEvidence(
+      "https://publication.example/contact",
+      { fetcher, resolveHostname }
+    )).resolves.toContain("editor@publisher-network.example");
+    expect(fetcher).toHaveBeenCalledWith(
+      "https://publication.example/contact",
+      expect.objectContaining({ redirect: "manual" })
+    );
+
+    await expect(fetchWebsiteGrowthPublicContactEvidence(
+      "https://publication.example/contact",
+      {
+        fetcher,
+        resolveHostname: vi.fn().mockResolvedValue([
+          { address: "127.0.0.1", family: 4 }
+        ])
+      }
+    )).rejects.toThrow("did not resolve publicly");
   });
 
   it("blocks customer proof and unbounded claims from outreach copy", () => {
