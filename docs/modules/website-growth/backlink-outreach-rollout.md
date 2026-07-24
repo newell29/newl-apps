@@ -57,6 +57,7 @@ Scout uses its own OpenClaw agent and workspace with Codex `gpt-5.6-sol` at high
 - Maximum five new contacts in a rolling 24-hour period and 20 new contacts in a rolling seven-day period.
 - First follow-up at day 5, second at day 12, and close at day 21.
 - The job first syncs replies and opt-outs, then handles due follow-ups and verification, then claims newly approved work.
+- Public research opens each approved URL in a fresh browser tab. The executor does not navigate an assumed active tab because a stale-tab failure causes OpenClaw to classify an otherwise recovered run as failed and suppress its normal Teams summary.
 - A Teams summary is sent after every run, including zero-opportunity runs. It lists recent directory usernames/login URLs and verified backlink URLs, never passwords.
 
 ## Directory-account credentials
