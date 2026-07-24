@@ -62,6 +62,8 @@ After the application PR is reviewed, merged, and deployed, and after explicit a
 
 The installer creates a clean runtime worktree and registers the `NEWL Rivet Developer` command schedule. Do not install it against Preview or before the production API route is live.
 
+The development-jobs API remains outside browser session middleware so the route can enforce its own assistant-token and administrator Teams-identity authentication. An unauthenticated request must reach that route and be rejected by its dedicated authentication instead of being redirected to `/login`.
+
 ## Failure handling
 
 An active job uses a short-lived lease. A worker error or expired lease marks the job failed and sends a safe Teams message. Failed jobs are not automatically retried. The local worktree is preserved for investigation when a failure occurs; after checking that no uncertain branch or PR action is still running, an administrator may select **Retry Rivet** to create a new job and lease. Completed worktrees are removed after the PR URL is recorded.
