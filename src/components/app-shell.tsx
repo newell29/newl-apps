@@ -40,6 +40,7 @@ const navEntries: NavNode[] = [
           { id: "lead-search-profiles", href: "/lead-gen/search-profiles", label: "Search Profiles", moduleKey: "LEAD_GEN" as ModuleKey },
           { id: "lead-candidates", href: "/lead-gen/candidates", label: "Found Companies", moduleKey: "LEAD_GEN" as ModuleKey },
           { id: "lead-pipeline", href: "/lead-gen/pipeline", label: "Pipeline", moduleKey: "LEAD_GEN" as ModuleKey },
+          { id: "lead-apollo-review", href: "/lead-gen/apollo-review", label: "Apollo Match Review", moduleKey: "LEAD_GEN" as ModuleKey },
           { id: "lead-contacts", href: "/lead-gen/contacts", label: "Contacts", moduleKey: "LEAD_GEN" as ModuleKey },
           { id: "lead-scoring-history", href: "/lead-gen/scoring-history", label: "Scoring History", moduleKey: "LEAD_GEN" as ModuleKey },
           { id: "lead-logs", href: "/operations/logs", label: "Health & Logs", moduleKey: "LEAD_GEN" as ModuleKey }

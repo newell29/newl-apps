@@ -17,6 +17,9 @@ import {
 import { revalidatePath } from "next/cache";
 import { EMPTY_APOLLO_QUEUE_SUMMARY, type ApolloQueueSummary } from "@/modules/lead-gen/apollo-queue-summary";
 import {
+  type ApolloMatchReviewActionState
+} from "@/modules/lead-gen/apollo-match-review-state";
+import {
   APOLLO_PUSH_JOB_TYPE,
   createApolloPushJobOutput,
   type ApolloPushJobInput,
@@ -70,6 +73,8 @@ import {
   ApolloRateLimitError,
   fetchApolloEmailAccountDirectory,
   fetchApolloContactsForCompany,
+  fetchApolloOrganizationForMapping,
+  parseApolloOrganizationId,
   syncApolloContactTypedCustomFields,
   type ApolloEmailAccountDirectoryEntry,
   type ApolloContactRecord,
@@ -482,6 +487,7 @@ export async function bulkQueueApolloEnrichmentAction(
       message: null,
       requestedCompanies: leadIds.length,
       processedCompanies: 0,
+      skippedReviewCompanies: 0,
       matchedCompanies: 0,
       reviewNeededCompanies: 0,
       companiesWithContacts: 0,
@@ -508,7 +514,16 @@ export async function bulkQueueApolloEnrichmentAction(
               name: true,
               domain: true,
               linkedinUrl: true,
-              apolloOrganizationId: true
+              apolloOrganizationId: true,
+              apolloCompanyMatches: {
+                orderBy: {
+                  createdAt: "desc"
+                },
+                take: 1,
+                select: {
+                  classification: true
+                }
+              }
             }
           }
         }
@@ -523,6 +538,15 @@ export async function bulkQueueApolloEnrichmentAction(
       }
 
       const assignedOwnerUserId = lead.ownerUserId;
+      const latestCompanyMatch = lead.company.apolloCompanyMatches[0] ?? null;
+      if (
+        !lead.company.apolloOrganizationId &&
+        latestCompanyMatch &&
+        latestCompanyMatch.classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY
+      ) {
+        summary.skippedReviewCompanies += 1;
+        continue;
+      }
 
       const existingContacts = await prisma.contact.findMany({
         where: {
@@ -629,7 +653,11 @@ export async function bulkQueueApolloEnrichmentAction(
 
     return {
       ...summary,
-      message: `Apollo enrichment finished for ${summary.processedCompanies} compan${summary.processedCompanies === 1 ? "y" : "ies"}.`,
+      message:
+        `Apollo enrichment finished for ${summary.processedCompanies} compan${summary.processedCompanies === 1 ? "y" : "ies"}.` +
+        (summary.skippedReviewCompanies > 0
+          ? ` ${summary.skippedReviewCompanies} compan${summary.skippedReviewCompanies === 1 ? "y was" : "ies were"} skipped because Apollo match review is already required.`
+          : ""),
       completedAt: new Date().toISOString()
     };
   } catch (error) {
@@ -801,7 +829,10 @@ export async function retryApolloCompanyReviewAction(formData: FormData) {
     });
 
     revalidateLeadGenSurfaces();
-    return;
+    return {
+      matched: false,
+      contactsImported: 0
+    };
   }
 
   const resolvedNotes = appendLeadNote(
@@ -809,7 +840,7 @@ export async function retryApolloCompanyReviewAction(formData: FormData) {
     `Apollo company review resolved on ${new Date().toISOString()}. Retried with "${suggestion.suggestedCompanyName}".`
   );
 
-  await finalizeApolloEnrichmentForLead({
+  const contactsImported = await finalizeApolloEnrichmentForLead({
     tenantId: context.tenantId,
     lead: {
       ...lead,
@@ -821,6 +852,383 @@ export async function retryApolloCompanyReviewAction(formData: FormData) {
   });
 
   revalidateLeadGenSurfaces();
+  return {
+    matched: true,
+    contactsImported
+  };
+}
+
+export async function retryApolloCompanyReviewFromQueueAction(
+  _previousState: ApolloMatchReviewActionState,
+  formData: FormData
+): Promise<ApolloMatchReviewActionState> {
+  try {
+    if (formData.get("confirmAutomaticCredits") !== "yes") {
+      throw new Error("Confirm the automatic Apollo search credit limit before retrying.");
+    }
+    const result = await retryApolloCompanyReviewAction(formData);
+    return {
+      status: "success",
+      message: result.matched
+        ? `Apollo company matched and ${result.contactsImported} contact${result.contactsImported === 1 ? "" : "s"} imported.`
+        : "Apollo still could not confirm a direct company match. The company remains in this review queue.",
+      completedAt: new Date().toISOString()
+    };
+  } catch (error) {
+    return apolloMatchReviewErrorState(error);
+  }
+}
+
+export async function confirmApolloNoMatchAction(
+  _previousState: ApolloMatchReviewActionState,
+  formData: FormData
+): Promise<ApolloMatchReviewActionState> {
+  try {
+    const context = await authorizeLeadGenMutation();
+    const leadId = readRequired(formData, "leadId");
+    const lead = await prisma.lead.findFirst({
+      where: {
+        id: leadId,
+        tenantId: context.tenantId
+      },
+      select: {
+        id: true,
+        notes: true,
+        company: {
+          select: {
+            name: true,
+            apolloCompanyMatches: {
+              orderBy: {
+                createdAt: "desc"
+              },
+              take: 1,
+              select: {
+                id: true,
+                classification: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!lead) {
+      throw new Error("Lead not found for this tenant.");
+    }
+
+    const latestMatch = lead.company.apolloCompanyMatches[0] ?? null;
+    if (!latestMatch || latestMatch.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY) {
+      throw new Error("This company no longer has an unresolved Apollo match.");
+    }
+
+    const reviewedAt = new Date();
+    await prisma.$transaction([
+      prisma.apolloCompanyMatch.update({
+        where: {
+          id: latestMatch.id
+        },
+        data: {
+          reviewedAt,
+          reviewedByUserId: context.userId
+        }
+      }),
+      prisma.lead.update({
+        where: {
+          id: lead.id
+        },
+        data: {
+          notes: appendLeadNote(
+            lead.notes,
+            `Apollo no-match confirmed by ${context.userEmail} on ${reviewedAt.toISOString()}. Automatic and bulk retries remain blocked until the review is reopened.`
+          )
+        }
+      })
+    ]);
+
+    revalidateLeadGenSurfaces();
+    return {
+      status: "success",
+      message: `${lead.company.name} was moved to Confirmed no match. Automatic and bulk retries are blocked.`,
+      completedAt: reviewedAt.toISOString()
+    };
+  } catch (error) {
+    return apolloMatchReviewErrorState(error);
+  }
+}
+
+export async function reopenApolloMatchReviewAction(
+  _previousState: ApolloMatchReviewActionState,
+  formData: FormData
+): Promise<ApolloMatchReviewActionState> {
+  try {
+    const context = await authorizeLeadGenMutation();
+    const leadId = readRequired(formData, "leadId");
+    const lead = await prisma.lead.findFirst({
+      where: {
+        id: leadId,
+        tenantId: context.tenantId
+      },
+      select: {
+        id: true,
+        notes: true,
+        company: {
+          select: {
+            name: true,
+            apolloCompanyMatches: {
+              orderBy: {
+                createdAt: "desc"
+              },
+              take: 1,
+              select: {
+                id: true,
+                classification: true,
+                reviewedAt: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!lead) {
+      throw new Error("Lead not found for this tenant.");
+    }
+
+    const latestMatch = lead.company.apolloCompanyMatches[0] ?? null;
+    if (
+      !latestMatch ||
+      !latestMatch.reviewedAt ||
+      latestMatch.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY
+    ) {
+      throw new Error("This company is not in Confirmed no match.");
+    }
+
+    const reopenedAt = new Date();
+    await prisma.$transaction([
+      prisma.apolloCompanyMatch.update({
+        where: {
+          id: latestMatch.id
+        },
+        data: {
+          reviewedAt: null,
+          reviewedByUserId: null
+        }
+      }),
+      prisma.lead.update({
+        where: {
+          id: lead.id
+        },
+        data: {
+          notes: appendLeadNote(
+            lead.notes,
+            `Apollo match review reopened by ${context.userEmail} on ${reopenedAt.toISOString()}.`
+          )
+        }
+      })
+    ]);
+
+    revalidateLeadGenSurfaces();
+    return {
+      status: "success",
+      message: `${lead.company.name} was returned to the active Apollo match review queue.`,
+      completedAt: reopenedAt.toISOString()
+    };
+  } catch (error) {
+    return apolloMatchReviewErrorState(error);
+  }
+}
+
+export async function mapApolloCompanyUrlAction(
+  _previousState: ApolloMatchReviewActionState,
+  formData: FormData
+): Promise<ApolloMatchReviewActionState> {
+  try {
+    const context = await authorizeLeadGenMutation();
+    const leadId = readRequired(formData, "leadId");
+    const apolloOrganizationId = parseApolloOrganizationId(readRequired(formData, "apolloCompanyUrl"));
+    if (formData.get("confirmApolloCredit") !== "yes") {
+      throw new Error("Confirm the one-credit Apollo company validation before mapping.");
+    }
+
+    const lead = await prisma.lead.findFirst({
+      where: {
+        id: leadId,
+        tenantId: context.tenantId
+      },
+      select: {
+        id: true,
+        companyId: true,
+        contactId: true,
+        ownerUserId: true,
+        notes: true,
+        company: {
+          select: {
+            id: true,
+            name: true,
+            domain: true,
+            linkedinUrl: true,
+            apolloOrganizationId: true,
+            apolloCompanyMatches: {
+              orderBy: {
+                createdAt: "desc"
+              },
+              take: 1,
+              select: {
+                classification: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!lead) {
+      throw new Error("Lead not found for this tenant.");
+    }
+    if (!lead.ownerUserId) {
+      throw new Error("Assign a sales rep before mapping an Apollo company.");
+    }
+    const latestMatch = lead.company.apolloCompanyMatches[0] ?? null;
+    if (
+      !latestMatch ||
+      latestMatch.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY ||
+      lead.company.apolloOrganizationId
+    ) {
+      throw new Error("This company no longer has an unresolved Apollo match.");
+    }
+
+    const duplicate = await prisma.company.findFirst({
+      where: {
+        tenantId: context.tenantId,
+        apolloOrganizationId,
+        id: {
+          not: lead.companyId
+        }
+      },
+      select: {
+        name: true
+      }
+    });
+    if (duplicate) {
+      throw new Error(`That Apollo company is already mapped to ${duplicate.name}.`);
+    }
+
+    const mapping = await fetchApolloOrganizationForMapping({
+      companyName: lead.company.name,
+      apolloOrganizationId
+    });
+    const mappedAt = new Date();
+    const mappingNote =
+      `Apollo company manually mapped by ${context.userEmail} on ${mappedAt.toISOString()}. ` +
+      `Mapped "${lead.company.name}" to "${mapping.companyName}".`;
+
+    await prisma.$transaction([
+      prisma.company.update({
+        where: {
+          id: lead.companyId
+        },
+        data: {
+          apolloOrganizationId: mapping.organizationId,
+          domain: mapping.domain ?? lead.company.domain,
+          linkedinUrl: mapping.linkedinUrl ?? lead.company.linkedinUrl
+        }
+      }),
+      prisma.apolloCompanyMatch.create({
+        data: {
+          tenantId: context.tenantId,
+          companyId: lead.companyId,
+          apolloOrganizationId: mapping.match.organizationId,
+          apolloCompanyName: mapping.match.companyName,
+          apolloDomain: mapping.match.domain,
+          apolloLinkedinUrl: mapping.match.linkedinUrl,
+          score: mapping.match.score,
+          classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
+          nameMatchType: mapping.match.nameMatchType,
+          domainMatch: mapping.match.domainMatch,
+          logisticsProviderMatch: mapping.match.logisticsProviderMatch,
+          branchLocationMatch: mapping.match.branchLocationMatch,
+          matchReason: `${mapping.match.matchReason}; manually confirmed from Apollo company URL`,
+          queryJson: toInputJsonValue({
+            ...mapping.match.query,
+            source: "manual-apollo-url"
+          }),
+          rawJson: mapping.match.rawPayload
+            ? toInputJsonValue(mapping.match.rawPayload)
+            : Prisma.JsonNull,
+          reviewedAt: mappedAt,
+          reviewedByUserId: context.userId
+        }
+      }),
+      prisma.lead.update({
+        where: {
+          id: lead.id
+        },
+        data: {
+          notes: appendLeadNote(lead.notes, mappingNote)
+        }
+      })
+    ]);
+
+    const existingContacts = await loadExistingApolloContactsForCompany(
+      context.tenantId,
+      lead.companyId
+    );
+
+    try {
+      const lookup = await fetchApolloContactsForCompany({
+        companyName: mapping.companyName,
+        domain: mapping.domain,
+        apolloOrganizationId: mapping.organizationId
+      });
+      const contactsImported = await finalizeApolloEnrichmentForLead({
+        tenantId: context.tenantId,
+        lead: {
+          ...lead,
+          ownerUserId: lead.ownerUserId,
+          company: {
+            id: lead.company.id,
+            apolloOrganizationId: mapping.organizationId,
+            domain: mapping.domain ?? lead.company.domain,
+            linkedinUrl: mapping.linkedinUrl ?? lead.company.linkedinUrl
+          }
+        },
+        existingContacts,
+        lookup,
+        baseNotes: appendLeadNote(lead.notes, mappingNote)
+      });
+
+      revalidateLeadGenSurfaces();
+      return {
+        status: "success",
+        message:
+          `${lead.company.name} was mapped to ${mapping.companyName}. ` +
+          `${contactsImported} relevant contact${contactsImported === 1 ? "" : "s"} imported.`,
+        completedAt: new Date().toISOString()
+      };
+    } catch (contactError) {
+      const warning =
+        contactError instanceof Error ? contactError.message : "Apollo contact search failed.";
+      await prisma.lead.update({
+        where: {
+          id: lead.id
+        },
+        data: {
+          notes: appendLeadNote(
+            appendLeadNote(lead.notes, mappingNote),
+            `Apollo company mapping succeeded, but contact import needs retry. ${warning}`
+          )
+        }
+      });
+      revalidateLeadGenSurfaces();
+      return {
+        status: "success",
+        message: `${lead.company.name} was mapped successfully. Contact import needs a later retry: ${warning}`,
+        completedAt: new Date().toISOString()
+      };
+    }
+  } catch (error) {
+    return apolloMatchReviewErrorState(error);
+  }
 }
 
 export async function bulkAssignLeadOwnerAction(formData: FormData) {
@@ -2034,6 +2442,7 @@ function revalidateTradeMiningProfileSurfaces() {
 function revalidateLeadGenSurfaces() {
   revalidatePath("/lead-gen/candidates");
   revalidatePath("/lead-gen/pipeline");
+  revalidatePath("/lead-gen/apollo-review");
   revalidatePath("/lead-gen/contacts");
   revalidatePath("/dashboard");
 }
@@ -4028,6 +4437,45 @@ async function finalizeApolloEnrichmentForLead({
   return syncedContacts.length;
 }
 
+async function loadExistingApolloContactsForCompany(tenantId: string, companyId: string) {
+  return prisma.contact.findMany({
+    where: {
+      tenantId,
+      companyId
+    },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      fullName: true,
+      title: true,
+      department: true,
+      seniority: true,
+      email: true,
+      phone: true,
+      linkedinUrl: true,
+      source: true,
+      contactStatus: true,
+      apolloContactId: true,
+      apolloPersonId: true,
+      apolloStatus: true,
+      sequenceStatus: true,
+      replyStatus: true,
+      recommendedSequenceName: true,
+      recommendedSequenceId: true,
+      selectedSequenceName: true,
+      selectedSequenceId: true,
+      sequenceRecommendationReason: true,
+      sequenceOverrideReason: true,
+      sequenceManuallyOverridden: true,
+      lastTouchAt: true,
+      lastReplyAt: true,
+      assignedRep: true,
+      rawJson: true
+    }
+  });
+}
+
 async function recordApolloCompanyMatch({
   tenantId,
   companyId,
@@ -4056,6 +4504,14 @@ async function recordApolloCompanyMatch({
       rawJson: lookup.match.rawPayload ? toInputJsonValue(lookup.match.rawPayload) : Prisma.JsonNull
     }
   });
+}
+
+function apolloMatchReviewErrorState(error: unknown): ApolloMatchReviewActionState {
+  return {
+    status: "error",
+    message: error instanceof Error ? error.message : "Apollo match review action failed.",
+    completedAt: new Date().toISOString()
+  };
 }
 
 function matchExistingApolloContact(

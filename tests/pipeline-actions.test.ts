@@ -1,4 +1,11 @@
-import { CandidateStatus, ContactStatus, LeadPipelineStage, ReplyStatus, SequenceStatus } from "@prisma/client";
+import {
+  ApolloCompanyMatchClassification,
+  CandidateStatus,
+  ContactStatus,
+  LeadPipelineStage,
+  ReplyStatus,
+  SequenceStatus
+} from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const leadFindFirst = vi.fn();
@@ -96,7 +103,8 @@ describe("pipeline bulk actions", () => {
         id: `company-for-${where.id}`,
         name: where.id === "lead-1" ? "Harbor Home Retail LLC" : "Carolina Outdoor Supply",
         domain: where.id === "lead-1" ? "harbor-home.com" : "carolina-outdoor.com",
-        apolloOrganizationId: null
+        apolloOrganizationId: null,
+        apolloCompanyMatches: []
       }
     }));
     leadUpdate.mockResolvedValue({});
@@ -240,6 +248,41 @@ describe("pipeline bulk actions", () => {
     expect(leadUpdate.mock.calls[0][0].data.notes).toContain("Apollo enrichment requested on");
     expect(leadUpdate.mock.calls[1][0].data.contactId).toBe("contact-jordan-demo");
     expect(leadUpdate.mock.calls[2][0].data.notes).toContain("Imported 1 contacts");
+  });
+
+  it("protects a company with an unresolved Apollo match from repeat bulk searches", async () => {
+    leadFindFirst.mockResolvedValueOnce({
+      id: "lead-1",
+      companyId: "company-for-lead-1",
+      contactId: null,
+      ownerUserId: "Zalan Riaz",
+      notes: "Apollo review needed",
+      company: {
+        id: "company-for-lead-1",
+        name: "NOVALIS US, LLC",
+        domain: null,
+        apolloOrganizationId: null,
+        apolloCompanyMatches: [
+          {
+            classification: ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW
+          }
+        ]
+      }
+    });
+    const formData = new FormData();
+    formData.append("leadId", "lead-1");
+
+    const summary = await bulkQueueApolloEnrichmentAction(formData);
+
+    expect(summary).toMatchObject({
+      status: "success",
+      requestedCompanies: 1,
+      processedCompanies: 0,
+      skippedReviewCompanies: 1
+    });
+    expect(fetchApolloContactsForCompany).not.toHaveBeenCalled();
+    expect(contactFindMany).not.toHaveBeenCalled();
+    expect(leadUpdate).not.toHaveBeenCalled();
   });
 
   it("bulk assigns selected leads and contact ownership to a rep", async () => {

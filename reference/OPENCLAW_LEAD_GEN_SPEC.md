@@ -304,6 +304,7 @@ Apollo endpoints used:
 POST https://api.apollo.io/api/v1/mixed_companies/search
 POST https://api.apollo.io/api/v1/mixed_people/api_search
 POST https://api.apollo.io/api/v1/people/match
+GET https://api.apollo.io/api/v1/organizations/{APOLLO_ORGANIZATION_ID}
 GET/PATCH/POST https://api.apollo.io/api/v1/contacts
 POST https://api.apollo.io/api/v1/contacts/search
 GET https://api.apollo.io/api/v1/typed_custom_fields
@@ -320,12 +321,15 @@ x-api-key: APOLLO_API_KEY or APOLLO_MASTER_API
 
 Company search:
 
-- Uses domain when available: `q_organization_domains`.
-- Also searches by `best_company_name`, `company_match_name`, and `company_identity_key`.
+- The Newl Apps implementation uses domain when available through Apollo's documented `q_organization_domains_list`.
+- Without a domain, Newl Apps sends at most two deterministic name variants through Apollo's documented `q_organization_name`.
+- Legacy Python artifacts may still refer to `best_company_name`, `company_match_name`, and `company_identity_key`; those are internal identity fields and must not be sent as Apollo request filters.
 - Collects `accounts`, `organizations`, and `companies` response arrays.
 - Dedupes organizations by organization ID, name, and domain.
 - Scores by token name similarity, domain presence, organization ID presence, logistics-provider penalty, and branch/location penalty.
 - Classifies matches as `direct_company`, `match_quality_review`, `logistics_provider`, or `no_match`.
+- Non-direct results enter the Newl Apps Apollo Match Review queue and are protected from repeat bulk searches.
+- A rep-provided Apollo company URL is validated through the exact organization endpoint, audited, and reused as `organization_ids` for scoped people search.
 
 People search:
 
@@ -611,7 +615,7 @@ This dry-run did not write to Sheets and should be treated as design reference, 
 Search flow:
 
 1. Search Apollo company/org by domain if present.
-2. Search by `best_company_name`, `company_match_name`, and `company_identity_key`.
+2. Otherwise search by at most two company-name variants through `q_organization_name`.
 3. Score/select best organization.
 4. Search people by domain and/or organization ID with primary title keywords.
 5. If no primary results, search fallback executive/ops titles.
@@ -622,6 +626,8 @@ Search flow:
 10. For sequence push, find existing Apollo contact or create/update contact.
 11. Apply NEWL typed custom fields.
 12. Enroll approved contact into the mapped Apollo sequence.
+
+If step 3 does not produce a direct-company match, Newl Apps stops before contact import and places the company in Apollo Match Review. Bulk enrichment skips it until a rep maps an exact Apollo company URL, deliberately retries, or confirms no match. Manual company mapping does not imply approval for step 12.
 
 Email handling:
 

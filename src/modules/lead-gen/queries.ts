@@ -1,4 +1,5 @@
 import {
+  ApolloCompanyMatchClassification,
   ApolloStatus,
   CandidateStatus,
   ContactSource,
@@ -828,6 +829,105 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
   }
 
   return filteredPipelineLeads;
+}
+
+export async function getApolloMatchReviewQueue(
+  tenant: TenantContext,
+  filters: { companyId?: string } = {}
+) {
+  const repDirectory = await getLeadPipelineRepDirectory(tenant);
+  const leads = await prisma.lead.findMany({
+    where: tenantWhere(tenant, {
+      companyId: filters.companyId,
+      company: {
+        apolloCompanyMatches: {
+          some: {}
+        }
+      }
+    }),
+    select: {
+      id: true,
+      ownerUserId: true,
+      updatedAt: true,
+      company: {
+        select: {
+          id: true,
+          name: true,
+          normalizedName: true,
+          domain: true,
+          linkedinUrl: true,
+          apolloOrganizationId: true,
+          apolloCompanyMatches: {
+            orderBy: {
+              createdAt: "desc"
+            },
+            take: 1,
+            select: {
+              id: true,
+              apolloOrganizationId: true,
+              apolloCompanyName: true,
+              apolloDomain: true,
+              score: true,
+              classification: true,
+              matchReason: true,
+              reviewedAt: true,
+              reviewedByUserId: true,
+              createdAt: true
+            }
+          }
+        }
+      }
+    },
+    orderBy: {
+      updatedAt: "desc"
+    }
+  });
+
+  return leads
+    .flatMap((lead) => {
+      const match = lead.company.apolloCompanyMatches[0] ?? null;
+      if (
+        !match ||
+        match.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY ||
+        lead.company.apolloOrganizationId
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          leadId: lead.id,
+          companyId: lead.company.id,
+          companyName: lead.company.name,
+          normalizedName: lead.company.normalizedName,
+          companyDomain: lead.company.domain,
+          companyLinkedinUrl: lead.company.linkedinUrl,
+          assignedRep:
+            (lead.ownerUserId ? repDirectory.get(lead.ownerUserId) : null) ??
+            lead.ownerUserId ??
+            "Unassigned",
+          status: match.reviewedAt ? ("CONFIRMED_NO_MATCH" as const) : ("NEEDS_REVIEW" as const),
+          latestMatch: {
+            id: match.id,
+            organizationId: match.apolloOrganizationId,
+            companyName: match.apolloCompanyName,
+            domain: match.apolloDomain,
+            score: match.score,
+            classification: match.classification,
+            reason: match.matchReason,
+            attemptedAt: match.createdAt,
+            reviewedAt: match.reviewedAt,
+            reviewedByUserId: match.reviewedByUserId
+          }
+        }
+      ];
+    })
+    .sort((left, right) => {
+      if (left.status !== right.status) {
+        return left.status === "NEEDS_REVIEW" ? -1 : 1;
+      }
+      return right.latestMatch.attemptedAt.getTime() - left.latestMatch.attemptedAt.getTime();
+    });
 }
 
 export async function getLeadPipelineFilters(tenant: TenantContext) {

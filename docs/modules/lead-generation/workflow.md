@@ -31,6 +31,15 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - Employees can page through the full matching result set and select 50, 75, or 100 rows per page from the controls below the table.
 - CSV export continues to include the full filtered result set rather than only the visible page.
 
+## Apollo company-match review
+
+1. Pipeline enrichment first searches Apollo by the stored company domain, or by at most two company-name variants when no domain is available.
+2. Only a direct-company result continues to contact discovery. Contact discovery for a direct or manually mapped company remains scoped to the confirmed Apollo organization ID.
+3. Any ambiguous, logistics-provider, or no-match result creates an `ApolloCompanyMatch` attempt and appears in **Apollo Match Review**. The same company is skipped by later bulk enrichment, preventing accidental repeat searches and credit use.
+4. A rep can resolve the row by pasting the Apollo company URL, explicitly retrying automatic matching after company data is corrected, or confirming there is no usable match.
+5. URL mapping validates the exact Apollo organization, records the reviewer and mapping evidence, stores the organization ID/domain/LinkedIn URL, and then imports relevant contacts. It does not enroll a contact in a cadence.
+6. Confirming no match keeps the row in the review archive and blocks bulk retries. Reopening returns it to the active review list; it does not itself call Apollo.
+
 ## Automatic Apollo reply sync
 
 1. GitHub Actions calls `/api/lead-gen/apollo/status-sync` hourly using the dedicated `APOLLO_STATUS_SYNC_SECRET`. The workflow also supports an approved manual dispatch for validation or recovery; it never reuses the shared `CRON_SECRET`.

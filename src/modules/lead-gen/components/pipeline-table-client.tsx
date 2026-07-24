@@ -86,7 +86,6 @@ export function PipelineTableClient({
   repOptions,
   bulkUpdateLeadStageAction,
   bulkQueueApolloEnrichmentAction,
-  retryApolloCompanyReviewAction,
   bulkAssignLeadOwnerAction,
   bulkUnassignLeadOwnerAction,
   updateLeadStageAction
@@ -99,7 +98,6 @@ export function PipelineTableClient({
     previousState: ApolloQueueSummary,
     formData: FormData
   ) => Promise<ApolloQueueSummary>;
-  retryApolloCompanyReviewAction: (formData: FormData) => Promise<void>;
   bulkAssignLeadOwnerAction: (formData: FormData) => Promise<void>;
   bulkUnassignLeadOwnerAction: (formData: FormData) => Promise<void>;
   updateLeadStageAction: (formData: FormData) => Promise<void>;
@@ -468,12 +466,12 @@ export function PipelineTableClient({
                 </button>
               </form>
               {lead.apolloStatus === "Company review needed" ? (
-                <form action={retryApolloCompanyReviewAction}>
-                  <input type="hidden" name="leadId" value={lead.id} />
-                  <button className="rounded-md border border-warning/30 bg-warning/10 px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-warning/20">
-                    Retry Apollo match
-                  </button>
-                </form>
+                <Link
+                  href={`/lead-gen/apollo-review?company=${encodeURIComponent(lead.companyId)}`}
+                  className="rounded-md border border-warning/30 bg-warning/10 px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-warning/20"
+                >
+                  Resolve Apollo match
+                </Link>
               ) : null}
               <Link
                 href="/lead-gen/contacts"
@@ -486,7 +484,7 @@ export function PipelineTableClient({
         }
       }
     ],
-    [retryApolloCompanyReviewAction, selectedSet, stageOptions, updateLeadStageAction]
+    [selectedSet, stageOptions, updateLeadStageAction]
   );
 
   const table = useReactTable({
@@ -550,9 +548,10 @@ export function PipelineTableClient({
             ) : null}
           </div>
           {apolloQueueState.status === "success" ? (
-            <div className="mt-3 grid gap-3 md:grid-cols-5">
+            <div className="mt-3 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
               <ApolloQueueMetric label="Companies matched" value={apolloQueueState.matchedCompanies} />
               <ApolloQueueMetric label="Review needed" value={apolloQueueState.reviewNeededCompanies} />
+              <ApolloQueueMetric label="Protected from retry" value={apolloQueueState.skippedReviewCompanies} />
               <ApolloQueueMetric label="Companies with contacts" value={apolloQueueState.companiesWithContacts} />
               <ApolloQueueMetric label="No contacts found" value={apolloQueueState.companiesWithoutContacts} />
               <ApolloQueueMetric label="Contacts imported" value={apolloQueueState.contactsImported} />
