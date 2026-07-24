@@ -3,9 +3,9 @@
 set -euo pipefail
 
 script_directory="${0:A:h}"
-repo_path="${script_directory:h:h}"
-template_path="${script_directory}/launchd/com.newl.hunter-worker.plist.template"
-runner_path="${script_directory}/run-hunter-worker.sh"
+source_repo_path="${script_directory:h:h}"
+runtime_repo_path="${HUNTER_RUNTIME_REPO_PATH:-${HOME}/Developer/newl-apps-hunter-runtime}"
+runtime_main_ref="refs/hunter-runtime/newl-apps-main"
 worker_env_file="${HUNTER_WORKER_ENV_FILE:-${HOME}/.openclaw/agents/hunter/.env}"
 launch_agents_directory="${HOME}/Library/LaunchAgents"
 log_directory="${HOME}/Library/Logs/newl-apps"
@@ -43,6 +43,11 @@ if [[ ! -r "${worker_env_file}" ]]; then
   echo "Hunter worker environment file is not readable." >&2
   exit 1
 fi
+env_permissions="$(stat -f "%Lp" "${worker_env_file}")"
+if [[ "${env_permissions}" != "600" ]]; then
+  echo "The Hunter environment file must have permissions 600." >&2
+  exit 1
+fi
 if [[ -n "${base_url}" && "${base_url}" != https://* ]]; then
   echo "--base-url must use HTTPS." >&2
   exit 1
@@ -66,8 +71,31 @@ for required_name in NEWL_APPS_BASE_URL INGESTION_API_TOKEN TRADEMINING_USER TRA
   fi
 done
 
+if [[ "${runtime_repo_path}" == "${source_repo_path}" ]]; then
+  echo "Hunter's runtime path must be separate from the development checkout." >&2
+  exit 1
+fi
+if [[ -e "${runtime_repo_path}" && ! -e "${runtime_repo_path}/.git" ]]; then
+  echo "HUNTER_RUNTIME_REPO_PATH exists but is not a Git worktree." >&2
+  exit 1
+fi
+if [[ ! -e "${runtime_repo_path}/.git" ]]; then
+  git -C "${source_repo_path}" fetch origin "+main:${runtime_main_ref}"
+  git -C "${source_repo_path}" worktree add --detach "${runtime_repo_path}" "${runtime_main_ref}"
+fi
+if [[ -n "$(git -C "${runtime_repo_path}" status --porcelain --untracked-files=normal)" ]]; then
+  echo "The dedicated Hunter runtime contains unexpected local changes." >&2
+  exit 1
+fi
+
+git -C "${runtime_repo_path}" fetch origin "+main:${runtime_main_ref}"
+launchctl bootout "${launch_domain}/${service_label}" >/dev/null 2>&1 || true
+git -C "${runtime_repo_path}" checkout --detach "${runtime_main_ref}"
+
+template_path="${runtime_repo_path}/ops/openclaw/launchd/com.newl.hunter-worker.plist.template"
+runner_path="${runtime_repo_path}/ops/openclaw/run-hunter-worker.sh"
 mkdir -p "${launch_agents_directory}" "${log_directory}"
-chmod +x "${runner_path}"
+chmod 700 "${runner_path}"
 
 escape_replacement() {
   print -r -- "$1" | sed 's/[&|]/\\&/g'
@@ -77,14 +105,15 @@ temporary_plist="$(mktemp)"
 sed \
   -e "s|__RUNNER_PATH__|$(escape_replacement "${runner_path}")|g" \
   -e "s|__ENV_FILE__|$(escape_replacement "${worker_env_file}")|g" \
-  -e "s|__REPO_PATH__|$(escape_replacement "${repo_path}")|g" \
+  -e "s|__REPO_PATH__|$(escape_replacement "${runtime_repo_path}")|g" \
   -e "s|__LOG_DIRECTORY__|$(escape_replacement "${log_directory}")|g" \
   "${template_path}" > "${temporary_plist}"
 plutil -lint "${temporary_plist}" >/dev/null
 install -m 600 "${temporary_plist}" "${target_path}"
 
-launchctl bootout "${launch_domain}/${service_label}" >/dev/null 2>&1 || true
 launchctl bootstrap "${launch_domain}" "${target_path}"
 launchctl kickstart -k "${launch_domain}/${service_label}"
 
 echo "Installed and started ${service_label}."
+echo "Dedicated runtime: ${runtime_repo_path}"
+echo "Runtime revision: $(git -C "${runtime_repo_path}" rev-parse --short=12 HEAD)"

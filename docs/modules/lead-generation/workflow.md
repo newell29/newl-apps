@@ -25,6 +25,12 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 7. Candidate evidence is limited to the matched profile and lookback. Companies must meet `minShipmentCount`, optional aggregate TEUs, and any hard/exclude industry mode before appearing in Found Companies. Prefer mode affects ranking only.
 8. If a capped result can no longer be divided, Hunter ingests the available export but closes the run as `PARTIAL`. If local profile configuration is invalid, the tracked run finishes as failed and the Search Profiles screen displays the error. Hunter does not repeat that daily attempt until the next local day; an operator can correct the profile and use **Run now**.
 
+## Found Companies review
+
+- The review queue retains the tenant-scoped filters and computed score ordering, then renders 25 companies by default.
+- Employees can page through the full matching result set and select 50, 75, or 100 rows per page from the controls below the table.
+- CSV export continues to include the full filtered result set rather than only the visible page.
+
 ## Automatic Apollo reply sync
 
 1. GitHub Actions calls `/api/lead-gen/apollo/status-sync` hourly using the dedicated `APOLLO_STATUS_SYNC_SECRET`. The workflow also supports an approved manual dispatch for validation or recovery; it never reuses the shared `CRON_SECRET`.

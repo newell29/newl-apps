@@ -2,6 +2,12 @@ import { CandidateStatus, ModuleKey } from "@prisma/client";
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { bulkUpdateCandidateStatusAction } from "@/modules/lead-gen/actions";
+import {
+  CANDIDATE_PAGE_SIZES,
+  paginateCandidates,
+  parseCandidatePage,
+  parseCandidatePageSize
+} from "@/modules/lead-gen/candidate-pagination";
 import { CandidateReviewTableClient } from "@/modules/lead-gen/components/candidate-review-table-client";
 import {
   getCandidateFeed,
@@ -49,6 +55,8 @@ export default async function CandidateFeedPage({
   const minScore = parseScoreParam(readParam(params.minScore));
   const maxScore = parseScoreParam(readParam(params.maxScore));
   const minShipmentCount = parseShipmentCountParam(readParam(params.minShipmentCount));
+  const pageSize = parseCandidatePageSize(readParam(params.pageSize));
+  const requestedPage = parseCandidatePage(readParam(params.page));
   const hasAdvancedFilters = Boolean(industry || minScore !== undefined || maxScore !== undefined || minShipmentCount !== undefined);
   const hasFilters = Boolean(
     query ||
@@ -60,7 +68,7 @@ export default async function CandidateFeedPage({
       status !== "ACTIVE" ||
       sort !== "score_desc"
   );
-  const [companies, filterOptions] = await Promise.all([
+  const [allCompanies, filterOptions] = await Promise.all([
     getCandidateFeed(tenant, {
       query,
       status,
@@ -73,6 +81,8 @@ export default async function CandidateFeedPage({
     }),
     getCandidateFeedFilters(tenant)
   ]);
+  const pagination = paginateCandidates(allCompanies, requestedPage, pageSize);
+  const companies = pagination.items;
   const exportHref = buildExportHref({
     query,
     status,
@@ -92,7 +102,8 @@ export default async function CandidateFeedPage({
     minScore,
     maxScore,
     minShipmentCount,
-    sort
+    sort,
+    pageSize
   });
 
   return (
@@ -109,6 +120,7 @@ export default async function CandidateFeedPage({
       </div>
 
       <form className="overflow-hidden rounded-lg border border-border bg-card shadow-sm" action="/lead-gen/candidates">
+        <input type="hidden" name="pageSize" value={pageSize} />
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border bg-muted px-4 py-3">
           <div>
             <p className="text-sm font-semibold text-foreground">Filters</p>
@@ -289,12 +301,25 @@ export default async function CandidateFeedPage({
             </p>
           </div>
           <span className="rounded-full border border-accentBorder bg-card px-2.5 py-1 text-xs font-semibold text-primary">
-            {companies.length.toLocaleString("en-US")} companies
+            {pagination.totalItems.toLocaleString("en-US")} companies
           </span>
         </div>
 
         {companies.length > 0 ? (
-          <CandidateReviewTableClient companies={companies} bulkUpdateAction={bulkUpdateCandidateStatusAction} />
+          <>
+            <CandidateReviewTableClient companies={companies} bulkUpdateAction={bulkUpdateCandidateStatusAction} />
+            <CandidatePagination
+              query={query}
+              status={status}
+              searchProfileId={searchProfileId}
+              industry={industry || undefined}
+              minScore={minScore}
+              maxScore={maxScore}
+              minShipmentCount={minShipmentCount}
+              sort={sort}
+              pagination={pagination}
+            />
+          </>
         ) : (
           <div className="px-4 py-12 text-center">
             <h2 className="text-base font-semibold text-foreground">
@@ -312,6 +337,107 @@ export default async function CandidateFeedPage({
   );
 }
 
+function CandidatePagination({
+  query,
+  status,
+  searchProfileId,
+  industry,
+  minScore,
+  maxScore,
+  minShipmentCount,
+  sort,
+  pagination
+}: {
+  query: string;
+  status: CandidateStatus | "ACTIVE";
+  searchProfileId?: string;
+  industry?: string;
+  minScore?: number;
+  maxScore?: number;
+  minShipmentCount?: number;
+  sort: CandidateFeedSort;
+  pagination: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+    firstItem: number;
+    lastItem: number;
+  };
+}) {
+  const hrefFor = (page: number, pageSize = pagination.pageSize) =>
+    buildCandidatesPageHref({
+      q: query,
+      status,
+      profile: searchProfileId,
+      industry,
+      minScore,
+      maxScore,
+      minShipmentCount,
+      sort,
+      page,
+      pageSize
+    });
+
+  return (
+    <nav
+      aria-label="Found companies pagination"
+      className="flex flex-col gap-3 border-t border-border bg-muted px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+    >
+      <p className="text-mutedForeground">
+        Showing {pagination.firstItem.toLocaleString("en-US")}–{pagination.lastItem.toLocaleString("en-US")} of{" "}
+        {pagination.totalItems.toLocaleString("en-US")}
+      </p>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-mutedForeground">Rows per page</span>
+        {CANDIDATE_PAGE_SIZES.map((size) => (
+          <Link
+            key={size}
+            href={hrefFor(1, size)}
+            aria-current={pagination.pageSize === size ? "true" : undefined}
+            className={
+              pagination.pageSize === size
+                ? "rounded-md bg-primary px-2.5 py-1.5 text-xs font-semibold text-primaryForeground"
+                : "rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-accentSoft"
+            }
+          >
+            {size}
+          </Link>
+        ))}
+
+        <span className="ml-1 text-xs text-mutedForeground">
+          Page {pagination.page} of {pagination.totalPages}
+        </span>
+        {pagination.page > 1 ? (
+          <Link
+            href={hrefFor(pagination.page - 1)}
+            className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-accentSoft"
+          >
+            Previous
+          </Link>
+        ) : (
+          <span className="cursor-not-allowed rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-mutedForeground opacity-50">
+            Previous
+          </span>
+        )}
+        {pagination.page < pagination.totalPages ? (
+          <Link
+            href={hrefFor(pagination.page + 1)}
+            className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-accentSoft"
+          >
+            Next
+          </Link>
+        ) : (
+          <span className="cursor-not-allowed rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-mutedForeground opacity-50">
+            Next
+          </span>
+        )}
+      </div>
+    </nav>
+  );
+}
+
 function buildCandidateFilterChips({
   query,
   status,
@@ -321,7 +447,8 @@ function buildCandidateFilterChips({
   minScore,
   maxScore,
   minShipmentCount,
-  sort
+  sort,
+  pageSize
 }: {
   query: string;
   status: CandidateStatus | "ACTIVE";
@@ -332,6 +459,7 @@ function buildCandidateFilterChips({
   maxScore: number | undefined;
   minShipmentCount: number | undefined;
   sort: CandidateFeedSort;
+  pageSize: number;
 }) {
   const chips: Array<{ label: string; href: string }> = [];
   const matchedProfile = searchProfiles.find((profile) => profile.id === searchProfileId);
@@ -339,49 +467,49 @@ function buildCandidateFilterChips({
   if (query) {
     chips.push({
       label: `Search: ${query}`,
-      href: buildCandidatesPageHref({ status, profile: searchProfileId, industry, minScore, maxScore, minShipmentCount, sort })
+      href: buildCandidatesPageHref({ status, profile: searchProfileId, industry, minScore, maxScore, minShipmentCount, sort, pageSize })
     });
   }
   if (status !== "ACTIVE") {
     chips.push({
       label: `Status: ${statusOptions.find((option) => option.value === status)?.label ?? status}`,
-      href: buildCandidatesPageHref({ q: query, profile: searchProfileId, industry, minScore, maxScore, minShipmentCount, sort })
+      href: buildCandidatesPageHref({ q: query, profile: searchProfileId, industry, minScore, maxScore, minShipmentCount, sort, pageSize })
     });
   }
   if (matchedProfile) {
     chips.push({
       label: `Profile: ${matchedProfile.name}`,
-      href: buildCandidatesPageHref({ q: query, status, industry, minScore, maxScore, minShipmentCount, sort })
+      href: buildCandidatesPageHref({ q: query, status, industry, minScore, maxScore, minShipmentCount, sort, pageSize })
     });
   }
   if (industry) {
     chips.push({
       label: `Industry: ${industry}`,
-      href: buildCandidatesPageHref({ q: query, status, profile: searchProfileId, minScore, maxScore, minShipmentCount, sort })
+      href: buildCandidatesPageHref({ q: query, status, profile: searchProfileId, minScore, maxScore, minShipmentCount, sort, pageSize })
     });
   }
   if (minScore !== undefined) {
     chips.push({
       label: `Min score: ${minScore}`,
-      href: buildCandidatesPageHref({ q: query, status, profile: searchProfileId, industry, maxScore, minShipmentCount, sort })
+      href: buildCandidatesPageHref({ q: query, status, profile: searchProfileId, industry, maxScore, minShipmentCount, sort, pageSize })
     });
   }
   if (maxScore !== undefined) {
     chips.push({
       label: `Max score: ${maxScore}`,
-      href: buildCandidatesPageHref({ q: query, status, profile: searchProfileId, industry, minScore, minShipmentCount, sort })
+      href: buildCandidatesPageHref({ q: query, status, profile: searchProfileId, industry, minScore, minShipmentCount, sort, pageSize })
     });
   }
   if (minShipmentCount !== undefined) {
     chips.push({
       label: `Min shipments: ${minShipmentCount}`,
-      href: buildCandidatesPageHref({ q: query, status, profile: searchProfileId, industry, minScore, maxScore, sort })
+      href: buildCandidatesPageHref({ q: query, status, profile: searchProfileId, industry, minScore, maxScore, sort, pageSize })
     });
   }
   if (sort !== "score_desc") {
     chips.push({
       label: `Sort: ${sortOptions.find((option) => option.value === sort)?.label ?? sort}`,
-      href: buildCandidatesPageHref({ q: query, status, profile: searchProfileId, industry, minScore, maxScore, minShipmentCount })
+      href: buildCandidatesPageHref({ q: query, status, profile: searchProfileId, industry, minScore, maxScore, minShipmentCount, pageSize })
     });
   }
 
@@ -397,6 +525,8 @@ function buildCandidatesPageHref(params: {
   maxScore?: number;
   minShipmentCount?: number;
   sort?: CandidateFeedSort;
+  page?: number;
+  pageSize?: number;
 }) {
   const search = new URLSearchParams();
   if (params.q) search.set("q", params.q);
@@ -407,6 +537,8 @@ function buildCandidatesPageHref(params: {
   if (params.maxScore !== undefined) search.set("maxScore", String(params.maxScore));
   if (params.minShipmentCount !== undefined) search.set("minShipmentCount", String(params.minShipmentCount));
   if (params.sort && params.sort !== "score_desc") search.set("sort", params.sort);
+  if (params.page && params.page > 1) search.set("page", String(params.page));
+  if (params.pageSize && params.pageSize !== 25) search.set("pageSize", String(params.pageSize));
   const query = search.toString();
   return query ? `/lead-gen/candidates?${query}` : "/lead-gen/candidates";
 }

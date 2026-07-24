@@ -8,7 +8,7 @@ Draft operator guide for moving the existing TradeMining CSV collector from the 
 - TradeMining remains the external source and its browser session is human-authenticated.
 - The legacy collector source was copied from the VM without credentials, exports, logs, or OpenClaw runtime state and reviewed on July 21, 2026.
 - The local Newl Apps database can be migrated and seeded for synthetic end-to-end testing.
-- A Mac-compatible Hunter exporter, summary builder, Newl Apps ingestion adapter, run-request worker, `launchd` template, and installer now live under `ops/openclaw/` on the Hunter feature branch.
+- A Mac-compatible Hunter exporter, summary builder, Newl Apps ingestion adapter, run-request worker, `launchd` template, and installer live under `ops/openclaw/`.
 
 ## Ownership boundary
 
@@ -51,6 +51,7 @@ Follow the existing Teamship worker pattern:
 - outbound-only HTTPS to Newl Apps;
 - a dedicated ingestion token bound to the Newl Group tenant slug;
 - a `launchd` service with `RunAtLoad`, `KeepAlive`, throttling, and persistent sanitized logs;
+- a dedicated clean, detached `origin/main` checkout at `~/Developer/newl-apps-hunter-runtime`, separate from every Codex development branch;
 - TradeMining browser/session material stored outside the repository and never copied into OpenClaw memory;
 - CSV exports written to a Hunter runtime directory, deleted or archived according to an owner-approved retention policy;
 - no Apollo key and no direct customer communication capability.
@@ -62,7 +63,6 @@ NEWL_APPS_BASE_URL=https://the-reviewed-preview.vercel.app
 INGESTION_API_TOKEN=<dedicated Hunter token>
 INGESTION_TENANT_SLUG=newl-group
 HUNTER_WORKER_ID=alex-mac-mini-hunter
-HUNTER_COLLECTOR_PATH=/path/to/reviewed/collector
 HUNTER_EXPORT_DIRECTORY=/path/to/runtime/exports
 HUNTER_HTTP_MAX_ATTEMPTS=4
 HUNTER_TRADEMINING_MAX_EXPORT_ROWS=25000
@@ -86,8 +86,10 @@ The checked-in template is `ops/openclaw/hunter/.env.example`. Store the real fi
 - `minAggregateTeu` and industry-pack modes are evaluated in Newl Apps over the company's matched-profile evidence. They do not change the TradeMining form post.
 - Profile destination markets are hard consignee filters. `City | Country` values populate consignee country plus an exact city ID when available. Because TradeMining's city picker does not reliably expose Canadian cities, unresolved markets such as Toronto, Montreal, and Vancouver are searched as consignee-address text while retaining the Canadian country filter.
 - `ops/openclaw/run-hunter-worker.sh`: allowlisted environment loader.
-- `ops/openclaw/install-hunter-worker.sh`: LaunchAgent renderer and installer.
+- `ops/openclaw/install-hunter-worker.sh`: LaunchAgent renderer and installer. It fetches `origin/main` into a dedicated detached runtime worktree, refuses local runtime changes, and points both the service runner and working directory at that worktree.
 - `ops/openclaw/launchd/com.newl.hunter-worker.plist.template`: persistent Mac Mini service.
+
+`HUNTER_REPO_PATH` is retired. The runner always resolves `hunter_worker.py` from its own dedicated checkout, so changing branches in a development checkout cannot alter the live process. Re-running the installer is the explicit update mechanism: it refreshes the runtime to the latest reviewed `origin/main` revision and restarts the service.
 
 Manual profile planning does not log in or export:
 
