@@ -11,6 +11,39 @@ export type SearchProfileSuggestionOption = {
   searchText?: string;
 };
 
+export const tradeMiningCanadianProvinceOptions: SearchProfileSuggestionOption[] = [
+  "Alberta",
+  "British Columbia",
+  "Manitoba",
+  "New Brunswick",
+  "Newfoundland and Labrador",
+  "Northwest Territories",
+  "Nova Scotia",
+  "Nunavut",
+  "Ontario",
+  "Prince Edward Island",
+  "Quebec",
+  "Saskatchewan",
+  "Yukon"
+].map((province) => ({
+  value: `${province} | Canada`,
+  label: `${province} | Canada (province)`,
+  searchText: `${province} Canada province`
+}));
+
+const tradeMiningCanadianProvinceValues = new Set(
+  tradeMiningCanadianProvinceOptions.map((option) => option.value.toLowerCase())
+);
+
+export function isTradeMiningCanadianProvinceDestination(value: string) {
+  return tradeMiningCanadianProvinceValues.has(value.trim().toLowerCase());
+}
+
+export function isCanadianDestination(value: string) {
+  const [, country = ""] = value.split("|");
+  return country.trim().toLowerCase() === "canada";
+}
+
 export const tradeMiningUsDestinationPortOptions: SearchProfileSuggestionOption[] = [
   {
     value: "Area Port of Jacksonville, Florida",

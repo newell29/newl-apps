@@ -75,15 +75,16 @@ Port and consignee-filter regression coverage must also verify:
 1. common U.S. port aliases resolve to canonical TradeMining names;
 2. Canadian cities are rejected as U.S. arrival ports;
 3. an empty U.S. arrival-port selection is valid and omits `USPort` from the TradeMining form;
-4. `City | Country` destination markets produce consignee-city and consignee-country filters in the worker plan;
-5. a uniquely resolved city is posted through `ConsigneeCity`, while an ambiguous or unavailable city is posted through `ConsigneeAddress`;
-6. the country, city/address, ports, and all other profile filters remain inside one logical BOL query;
-7. results over 25,000 split first by date and then by port, while an unsplittable capped leaf reports incomplete coverage;
-8. aggregate TEUs use only the matched profile's records inside its lookback;
-9. industry-pack identifiers and modes reject unsupported values, and classification labels match the qualification packs; and
-10. invalid local configuration creates and fails a tracked run before the worker stops, preventing untracked retry loops.
-11. Found Companies defaults to 25 rendered rows, supports only 25/50/75/100, clamps invalid pages, and retains the full filtered result count.
-12. the Hunter installer pins the live service to a clean detached `origin/main` worktree and the runner cannot be redirected to a development checkout through its environment file.
+4. `Ontario | Canada` produces a consignee-state and consignee-country worker plan with no city fallback, while a legacy `Toronto | Canada` value fails closed;
+5. Ontario's `State` lookup includes Canada's `countryId`, and the form posts the resolved value through `ConsigneeState`;
+6. a city is posted through `ConsigneeCity` only on an exact label match; `Vaughan` must not resolve to `VAUGHAN, MS`, and mixed unresolved cities remain together in one Boolean `ConsigneeAddress` expression;
+7. the country, state/city/address, ports, and all other profile filters remain inside one logical BOL query;
+8. results over 25,000 split first by date and then by port, while an unsplittable capped leaf reports incomplete coverage;
+9. aggregate TEUs use only the matched profile's records inside its lookback;
+10. industry-pack identifiers and modes reject unsupported values, and classification labels match the qualification packs; and
+11. invalid local configuration creates and fails a tracked run before the worker stops, preventing untracked retry loops.
+12. Found Companies defaults to 25 rendered rows, supports only 25/50/75/100, clamps invalid pages, and retains the full filtered result count.
+13. the Hunter installer pins the live service to a clean detached `origin/main` worktree and the runner cannot be redirected to a development checkout through its environment file.
 
 Scoring regression coverage must also verify:
 

@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   canonicalizeTradeMiningDestinationPort,
   filterSuggestionOptions,
+  isCanadianDestination,
+  isTradeMiningCanadianProvinceDestination,
   normalizeSearchProfileValueForWorker,
+  tradeMiningCanadianProvinceOptions,
   toTenantSuggestionOptions
 } from "@/modules/lead-gen/search-profile-suggestions";
 
@@ -52,6 +55,21 @@ describe("search profile suggestion helpers", () => {
       "Wilmington, North Carolina"
     );
     expect(canonicalizeTradeMiningDestinationPort("Toronto | Canada")).toBeNull();
+  });
+
+  it("offers canonical Canadian province destinations", () => {
+    expect(filterSuggestionOptions(tradeMiningCanadianProvinceOptions, "onta")).toEqual([
+      {
+        value: "Ontario | Canada",
+        label: "Ontario | Canada (province)"
+      }
+    ]);
+  });
+
+  it("distinguishes Canadian provinces from legacy Canadian city values", () => {
+    expect(isCanadianDestination("Toronto | Canada")).toBe(true);
+    expect(isTradeMiningCanadianProvinceDestination("Ontario | Canada")).toBe(true);
+    expect(isTradeMiningCanadianProvinceDestination("Toronto | Canada")).toBe(false);
   });
 
   it("decorates plain tenant city-state values for display", () => {

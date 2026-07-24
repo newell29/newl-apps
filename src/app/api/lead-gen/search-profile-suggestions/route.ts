@@ -2,7 +2,9 @@ import { ModuleKey } from "@prisma/client";
 import { NextResponse } from "next/server";
 import {
   filterSuggestionOptions,
+  isCanadianDestination,
   mergeSuggestionOptions,
+  tradeMiningCanadianProvinceOptions,
   tradeMiningUsDestinationPortOptions,
   toTenantSuggestionOptions
 } from "@/modules/lead-gen/search-profile-suggestions";
@@ -38,11 +40,20 @@ export async function GET(request: Request) {
 
     const canonical = getCanonicalTradeMiningReference();
     const tenantSuggestions = await getTradeMiningSearchProfileSuggestions(context);
+    const nonCanadianLocations = canonical.locations.filter(
+      (option) => !isCanadianDestination(option.value)
+    );
+    const nonCanadianTenantDestinations = toTenantSuggestionOptions(
+      tenantSuggestions.destinationMarkets
+    ).filter((option) => !isCanadianDestination(option.value));
     const source =
       field === "originCountries"
         ? mergeSuggestionOptions(canonical.countries, toTenantSuggestionOptions(tenantSuggestions.originCountries))
         : field === "destinationMarkets"
-          ? mergeSuggestionOptions(canonical.locations, toTenantSuggestionOptions(tenantSuggestions.destinationMarkets))
+          ? mergeSuggestionOptions(
+              mergeSuggestionOptions(nonCanadianLocations, tradeMiningCanadianProvinceOptions),
+              nonCanadianTenantDestinations
+            )
           : field === "destinationPorts"
             ? tradeMiningUsDestinationPortOptions
             : field === "originPorts"

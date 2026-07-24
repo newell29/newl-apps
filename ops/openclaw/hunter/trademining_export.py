@@ -195,6 +195,7 @@ def run_search(
     product_keywords: Optional[list[str]] = None,
     hs_codes: Optional[list[str]] = None,
     consignee_country_ids: Optional[list[str]] = None,
+    consignee_state_ids: Optional[list[str]] = None,
     consignee_city_ids: Optional[list[str]] = None,
     consignee_address_terms: Optional[list[str]] = None,
     minimum_teu: Optional[float] = None,
@@ -211,6 +212,7 @@ def run_search(
         product_keywords=product_keywords or [],
         hs_codes=hs_codes or [],
         consignee_country_ids=consignee_country_ids or [],
+        consignee_state_ids=consignee_state_ids or [],
         consignee_city_ids=consignee_city_ids or [],
         consignee_address_terms=consignee_address_terms or [],
         minimum_teu=minimum_teu,
@@ -233,6 +235,7 @@ def build_search_form(
     product_keywords: list[str],
     hs_codes: list[str],
     consignee_country_ids: list[str],
+    consignee_state_ids: list[str],
     consignee_city_ids: list[str],
     consignee_address_terms: list[str],
     minimum_teu: Optional[float],
@@ -263,6 +266,8 @@ def build_search_form(
         data["HTSCode"] = comma_separated_values(hs_codes)
     if consignee_country_ids:
         data["ConsigneeCountryOfOrigin"] = consignee_country_ids
+    if consignee_state_ids:
+        data["ConsigneeState"] = consignee_state_ids
     if consignee_city_ids:
         data["ConsigneeCity"] = consignee_city_ids
     if consignee_address_terms:
@@ -299,11 +304,22 @@ def comma_separated_values(values: list[str]) -> str:
     return ",".join(unique)
 
 
-def resolve_lookup_ids(session: TradeMiningSession, field: str, values: list[str]) -> list[str]:
+def resolve_lookup_ids(
+    session: TradeMiningSession,
+    field: str,
+    values: list[str],
+    *,
+    exact_only: bool = False,
+    extra_data: Optional[dict[str, str]] = None,
+) -> list[str]:
     result: list[str] = []
     for value in values:
         query = lookup_query(field, value)
-        status, _headers, body = session.request("POST", f"/AutoComplete/{field}", {"text": query})
+        status, _headers, body = session.request(
+            "POST",
+            f"/AutoComplete/{field}",
+            {"text": query, **(extra_data or {})},
+        )
         if status != 200:
             raise RuntimeError(f"TradeMining {field} lookup failed with status {status}")
         try:
@@ -320,7 +336,7 @@ def resolve_lookup_ids(session: TradeMiningSession, field: str, values: list[str
             and str(match.get("lookupName", "")).strip().casefold() == query.casefold()
             and str(match.get("lookupId", "")).strip()
         ]
-        candidates = exact or [
+        candidates = exact if exact_only else exact or [
             match
             for match in matches
             if isinstance(match, dict) and str(match.get("lookupId", "")).strip()
@@ -336,13 +352,54 @@ def resolve_consignee_city_filters(
     cities: list[str],
 ) -> tuple[list[str], list[str]]:
     city_ids: list[str] = []
-    address_terms: list[str] = []
+    has_unresolved_city = False
     for city in cities:
         try:
-            city_ids.extend(resolve_lookup_ids(session, "ConsigneeCity", [city]))
+            city_ids.extend(resolve_lookup_ids(session, "ConsigneeCity", [city], exact_only=True))
         except LookupResolutionError:
-            address_terms.append(city)
-    return city_ids, address_terms
+            has_unresolved_city = True
+
+    # TradeMining combines different form fields with AND. If even one configured
+    # market cannot use its exact city picker, keep the complete city set inside
+    # one Boolean address expression so mixed exact/fallback values remain OR.
+    return ([], cities) if has_unresolved_city else (city_ids, [])
+
+
+def resolve_consignee_state_ids(
+    session: TradeMiningSession,
+    state_specs: list[str],
+) -> list[str]:
+    state_ids: list[str] = []
+    country_id_cache: dict[str, str] = {}
+    for spec in state_specs:
+        state, separator, country = spec.partition("|")
+        normalized_state = state.strip()
+        normalized_country = country.strip() if separator else ""
+        if not normalized_state or not normalized_country:
+            raise LookupResolutionError(
+                f'TradeMining consignee state "{spec}" must use State/Province | Country format'
+            )
+
+        country_key = normalized_country.casefold()
+        if country_key not in country_id_cache:
+            country_ids = resolve_lookup_ids(
+                session,
+                "CountryOfOrigin",
+                [normalized_country],
+                exact_only=True,
+            )
+            country_id_cache[country_key] = country_ids[0]
+
+        state_ids.extend(
+            resolve_lookup_ids(
+                session,
+                "State",
+                [normalized_state],
+                exact_only=True,
+                extra_data={"countryId": country_id_cache[country_key]},
+            )
+        )
+    return state_ids
 
 
 def lookup_query(field: str, value: str) -> str:
@@ -540,6 +597,12 @@ def main() -> int:
     parser.add_argument("--product-keyword", action="append", default=[])
     parser.add_argument("--hs-code", action="append", default=[])
     parser.add_argument("--consignee-country", action="append", default=[])
+    parser.add_argument(
+        "--consignee-state",
+        action="append",
+        default=[],
+        help="Consignee state/province in State/Province | Country format.",
+    )
     parser.add_argument("--consignee-city", action="append", default=[])
     parser.add_argument("--minimum-teu", type=float)
     parser.add_argument("--run-slug", default="", help="Optional safe output directory name for this profile run.")
@@ -582,6 +645,7 @@ def main() -> int:
     origin_country_ids = resolve_lookup_ids(session, "CountryOfOrigin", args.origin_country)
     origin_port_ids = resolve_lookup_ids(session, "ForeignPort", args.origin_port)
     consignee_country_ids = resolve_lookup_ids(session, "CountryOfOrigin", args.consignee_country)
+    consignee_state_ids = resolve_consignee_state_ids(session, args.consignee_state)
     consignee_city_ids, consignee_address_terms = resolve_consignee_city_filters(session, args.consignee_city)
 
     selected_ports: list[tuple[str, str, str]] = []
@@ -626,6 +690,7 @@ def main() -> int:
             product_keywords=args.product_keyword,
             hs_codes=args.hs_code,
             consignee_country_ids=consignee_country_ids,
+            consignee_state_ids=consignee_state_ids,
             consignee_city_ids=consignee_city_ids,
             consignee_address_terms=consignee_address_terms,
             minimum_teu=args.minimum_teu,
@@ -690,6 +755,8 @@ def main() -> int:
                     "product_keywords": args.product_keyword,
                     "hs_codes": args.hs_code,
                     "consignee_countries": args.consignee_country,
+                    "consignee_states": args.consignee_state,
+                    "consignee_state_ids": consignee_state_ids,
                     "consignee_cities": args.consignee_city,
                     "consignee_city_ids": consignee_city_ids,
                     "consignee_address_terms": consignee_address_terms,

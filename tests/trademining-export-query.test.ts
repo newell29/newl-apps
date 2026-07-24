@@ -25,6 +25,7 @@ describe("Hunter TradeMining profile query", () => {
       "  product_keywords=['consumer goods', 'fixtures'],",
       "  hs_codes=['6109', '9403'],",
       "  consignee_country_ids=['CA'],",
+      "  consignee_state_ids=['ON-ID'],",
       "  consignee_city_ids=['TORONTO-ID'],",
       "  consignee_address_terms=['Toronto', 'Montreal'],",
       "  minimum_teu=10,",
@@ -48,6 +49,7 @@ describe("Hunter TradeMining profile query", () => {
       ContainerCommodity: '"consumer goods" OR fixtures',
       HTSCode: "6109,9403",
       ConsigneeCountryOfOrigin: ["CA"],
+      ConsigneeState: ["ON-ID"],
       ConsigneeCity: ["TORONTO-ID"],
       ConsigneeAddress: "Toronto OR Montreal",
       TEUFromSingle: "Greater Than Or Equals To",
@@ -69,7 +71,7 @@ describe("Hunter TradeMining profile query", () => {
       "  token='test-token', port_ids=[],",
       "  start_date=dt.date(2026, 7, 1), end_date=dt.date(2026, 7, 2),",
       "  origin_country_ids=[], origin_port_ids=[], ship_from_ports=[], product_keywords=[], hs_codes=[],",
-      "  consignee_country_ids=['CA'], consignee_city_ids=[], consignee_address_terms=['Toronto'], minimum_teu=1,",
+      "  consignee_country_ids=['CA'], consignee_state_ids=[], consignee_city_ids=[], consignee_address_terms=['Toronto'], minimum_teu=1,",
       ")",
       "print(json.dumps({'hasPort': 'USPort' in form, 'country': form['ConsigneeCountryOfOrigin'], 'address': form['ConsigneeAddress']}))"
     ].join("\n");
@@ -168,7 +170,7 @@ describe("Hunter TradeMining profile query", () => {
     });
   });
 
-  it("falls back to consignee address text when TradeMining cannot resolve a city uniquely", () => {
+  it("keeps mixed exact and unresolved cities together in one Boolean address fallback", () => {
     const source = [
       "import importlib.util, json, pathlib, sys",
       "path = pathlib.Path(sys.argv[1])",
@@ -195,8 +197,77 @@ describe("Hunter TradeMining profile query", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual({
-      cityIds: ["CLT"],
-      addressTerms: ["Toronto"]
+      cityIds: [],
+      addressTerms: ["Charlotte, NC", "Toronto"]
+    });
+  });
+
+  it("never accepts a fuzzy U.S. city for a Canadian market", () => {
+    const source = [
+      "import importlib.util, json, pathlib, sys",
+      "path = pathlib.Path(sys.argv[1])",
+      "spec = importlib.util.spec_from_file_location('trademining_export', path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "sys.modules[spec.name] = module",
+      "spec.loader.exec_module(module)",
+      "class Session:",
+      "  def request(self, method, path, data):",
+      "    return 200, {}, json.dumps([{'lookupName': 'VAUGHAN, MS', 'lookupId': '14713'}]).encode()",
+      "city_ids, address_terms = module.resolve_consignee_city_filters(Session(), ['Vaughan'])",
+      "print(json.dumps({'cityIds': city_ids, 'addressTerms': address_terms}))"
+    ].join("\n");
+
+    const result = spawnSync("python3", ["-c", source, exporterPath], {
+      encoding: "utf8",
+      env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      cityIds: [],
+      addressTerms: ["Vaughan"]
+    });
+  });
+
+  it("resolves a Canadian province with its TradeMining country ID", () => {
+    const source = [
+      "import importlib.util, json, pathlib, sys",
+      "path = pathlib.Path(sys.argv[1])",
+      "spec = importlib.util.spec_from_file_location('trademining_export', path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "sys.modules[spec.name] = module",
+      "spec.loader.exec_module(module)",
+      "calls = []",
+      "class Session:",
+      "  def request(self, method, path, data):",
+      "    calls.append({'path': path, 'data': data})",
+      "    if path.endswith('/CountryOfOrigin'):",
+      "      matches = [{'lookupName': 'Canada', 'lookupId': '37'}]",
+      "    else:",
+      "      matches = [{'lookupName': 'Ontario', 'lookupId': '685'}] if data.get('countryId') == '37' else []",
+      "    return 200, {}, json.dumps(matches).encode()",
+      "state_ids = module.resolve_consignee_state_ids(Session(), ['Ontario | Canada'])",
+      "print(json.dumps({'stateIds': state_ids, 'calls': calls}))"
+    ].join("\n");
+
+    const result = spawnSync("python3", ["-c", source, exporterPath], {
+      encoding: "utf8",
+      env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      stateIds: ["685"],
+      calls: [
+        {
+          path: "/AutoComplete/CountryOfOrigin",
+          data: { text: "Canada" }
+        },
+        {
+          path: "/AutoComplete/State",
+          data: { text: "Ontario", countryId: "37" }
+        }
+      ]
     });
   });
 

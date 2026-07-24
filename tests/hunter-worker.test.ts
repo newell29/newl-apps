@@ -60,7 +60,7 @@ describe("Hunter daily profile worker", () => {
       "  'name': 'Charlotte Warehouse Leads',",
       "  'destinationPorts': ['Charleston, South Carolina'],",
       "  'originCountries': ['Vietnam', 'Thailand'],",
-      "  'destinationMarkets': ['Toronto | Canada', 'Montreal | Canada'],",
+      "  'destinationMarkets': ['Ontario | Canada', 'Quebec | Canada'],",
       "  'originPorts': ['Ho Chi Minh City', 'Laem Chabang'],",
       "  'shipFromPorts': ['Ho Chi Minh', 'Busan'],",
       "  'productKeywords': ['consumer goods', 'fixtures'],",
@@ -81,7 +81,8 @@ describe("Hunter daily profile worker", () => {
       queryCount: 1,
       lookbackDays: 120,
       originCountries: ["Vietnam", "Thailand"],
-      consigneeCities: ["Toronto", "Montreal"],
+      consigneeCities: [],
+      consigneeStates: ["Ontario | Canada", "Quebec | Canada"],
       consigneeCountries: ["Canada"],
       originPorts: ["Ho Chi Minh City", "Laem Chabang"],
       shipFromPorts: ["Ho Chi Minh", "Busan"],
@@ -184,7 +185,7 @@ describe("Hunter daily profile worker", () => {
     expect(JSON.parse(result.stdout)).toEqual({ missing: [], ready: true });
   });
 
-  it("plans a Canadian consignee-city query without requiring a U.S. arrival port", () => {
+  it("plans a Canadian province as country plus state without a city fallback", () => {
     const python = [
       "import importlib.util, json, pathlib, sys",
       "worker_path = pathlib.Path(sys.argv[1])",
@@ -193,16 +194,16 @@ describe("Hunter daily profile worker", () => {
       "module = importlib.util.module_from_spec(spec)",
       "spec.loader.exec_module(module)",
       "profile = {",
-      "  'id': 'profile-toronto',",
-      "  'name': 'Toronto warehouse leads',",
+      "  'id': 'profile-ontario',",
+      "  'name': 'GTA leads',",
       "  'destinationPorts': [],",
-      "  'destinationMarkets': ['Toronto | Canada'],",
-      "  'lookbackDays': 30,",
+      "  'destinationMarkets': ['Ontario | Canada'],",
+      "  'lookbackDays': 120,",
       "  'schedule': {'timezone': 'America/Toronto', 'metadata': {}},",
       "  'lastRunAt': None,",
       "}",
       "plan = module.build_profile_plan(profile)",
-      "print(json.dumps({'ports': plan['destinationPorts'], 'cities': plan['consigneeCities'], 'countries': plan['consigneeCountries'], 'ready': plan['ready']}))"
+      "print(json.dumps({'ports': plan['destinationPorts'], 'cities': plan['consigneeCities'], 'states': plan['consigneeStates'], 'countries': plan['consigneeCountries'], 'ready': plan['ready']}))"
     ].join("\n");
 
     const result = runWorkerProbe(python);
@@ -210,10 +211,36 @@ describe("Hunter daily profile worker", () => {
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual({
       ports: [],
-      cities: ["Toronto"],
+      cities: [],
+      states: ["Ontario | Canada"],
       countries: ["Canada"],
       ready: true
     });
+  });
+
+  it("fails closed when a legacy Canadian city is still configured", () => {
+    const python = [
+      "import importlib.util, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "profile = {'destinationMarkets': ['Toronto | Canada']}",
+      "try:",
+      "  module.profile_destination_filters(profile)",
+      "except RuntimeError as error:",
+      "  print(str(error))",
+      "  raise SystemExit(0)",
+      "raise SystemExit(1)"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain(
+      'Canadian destination market "Toronto | Canada" must use Province | Canada'
+    );
   });
 
   it("creates a tracked failed run before rejecting invalid port configuration", () => {

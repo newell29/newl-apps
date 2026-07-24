@@ -55,11 +55,13 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 - Safe recovery: correct the named field and submit again. Validation errors, including duplicate profile names, remain on the form and no partial profile mutation is written.
 - Regression guard: server-action failures are converted to explicit form state instead of surfacing as a generic Next.js application error.
 
-## A Canadian consignee city is not in TradeMining's city picker
+## A Canadian destination is configured as a city instead of a province
 
-- Symptom: TradeMining cannot uniquely resolve the configured consignee city.
-- Safe behavior: Hunter keeps the configured consignee-country filter and searches the city as consignee-address text in the same BOL query. It records the exact-city IDs and fallback address terms in the local run manifest.
-- Limitation: this finds only BOLs whose TradeMining record exposes the Canadian consignee country/address. A U.S. intermediary shown as consignee instead of the Canadian buyer will not match this filter.
+- Symptom: a Canadian profile unexpectedly returns zero or the manifest shows a U.S. city with the same name.
+- Cause: TradeMining's `ConsigneeCity` autocomplete is U.S.-only. Its `ConsigneeState` lookup requires the selected country ID; resolving `Ontario` without Canada's ID returns no option.
+- Safe recovery: configure `Ontario | Canada` rather than individual GTA cities. Hunter submits Canada and Ontario through their dedicated TradeMining fields and records their resolved IDs in the manifest.
+- Regression guard: a sole fuzzy result such as `VAUGHAN, MS` is never accepted for `Vaughan`; province lookup must include `countryId=37` and resolve Ontario exactly.
+- Limitation: BOLs whose visible consignee is a U.S. intermediary instead of the Canadian buyer may still be outside a Canada/Ontario consignee search.
 
 TradeMining's HS-code field uses comma-separated codes rather than Boolean syntax. Hunter checks the result count before export and treats zero matching BOLs as a successful zero-record run because TradeMining's Excel endpoint returns an error for empty result sets.
 
