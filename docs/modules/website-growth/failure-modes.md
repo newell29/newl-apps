@@ -35,6 +35,7 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - Reply sync failure: no follow-up state is advanced. The next run retries the mailbox read.
 - Opt-out: the opportunity becomes `LOST`, the next follow-up is cancelled, and the normalized email is added to the tenant suppression list.
 - Expired executor claim: the item becomes `BLOCKED` instead of being silently reclaimed, because a prior external submission may have partially completed.
+- A blocked item can return to the approved executor queue only through the Admin/Manager retry action, only when the original human approval remains recorded, and only after the reviewer confirms that no email or directory submission occurred. Newl Apps refuses the retry when it has a submitted/contacted timestamp or any Microsoft message/conversation ID. Failed pre-delivery drafts remain in the audit history, do not consume the outreach volume allowance, and do not prevent a confirmed retry. The retry clears the claim and records a tenant-scoped audit event.
 
 ## Developer comparison failures
 

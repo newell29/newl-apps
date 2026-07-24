@@ -44,6 +44,7 @@ vi.mock("@/server/auth/authorization", () => ({
 }));
 
 import {
+  retryBlockedWebsiteGrowthBacklinkAction,
   returnWebsiteGrowthBacklinkToReviewAction,
   reviewWebsiteGrowthBacklinkAction
 } from "@/modules/website-growth/backlink-actions";
@@ -145,5 +146,95 @@ describe("Website Growth backlink review actions", () => {
     expect(backlinkUpdateMany).not.toHaveBeenCalled();
     expect(auditCreate).not.toHaveBeenCalled();
     expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it("retries only previously approved blocked work with no external action", async () => {
+    backlinkFindFirst.mockResolvedValue({
+      id: "supply-chain-dive-id",
+      title: "Supply Chain Dive editorial source opportunity",
+      notes: "The original send was blocked before Microsoft Graph was called."
+    });
+    const formData = new FormData();
+    formData.set("backlinkId", "supply-chain-dive-id");
+    formData.set("confirmNoExternalAction", "yes");
+
+    await retryBlockedWebsiteGrowthBacklinkAction(formData);
+
+    expect(backlinkFindFirst).toHaveBeenCalledWith({
+      where: {
+        id: "supply-chain-dive-id",
+        tenantId: "tenant-1",
+        status: WebsiteGrowthBacklinkStatus.BLOCKED,
+        approvedByUserId: { not: null },
+        approvedAt: { not: null },
+        submittedAt: null,
+        contactedAt: null,
+        messages: {
+          every: {
+            externalMessageId: null,
+            conversationId: null
+          }
+        }
+      },
+      select: { id: true, title: true, notes: true }
+    });
+    expect(backlinkUpdateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: "supply-chain-dive-id",
+        status: WebsiteGrowthBacklinkStatus.BLOCKED,
+        messages: {
+          every: {
+            externalMessageId: null,
+            conversationId: null
+          }
+        }
+      }),
+      data: {
+        status: WebsiteGrowthBacklinkStatus.APPROVED,
+        claimedAt: null,
+        notes: null
+      }
+    });
+    expect(auditCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: "website-growth.backlink.retry-approved",
+        entityId: "supply-chain-dive-id",
+        after: expect.objectContaining({
+          approvalRetained: true,
+          externalActionPreviouslyRecorded: false
+        })
+      })
+    });
+    expect(redirect).toHaveBeenCalledWith(expect.stringContaining(
+      "reviewResult=retried"
+    ));
+  });
+
+  it("refuses to retry a blocked item that has external history", async () => {
+    backlinkFindFirst.mockResolvedValue(null);
+    const formData = new FormData();
+    formData.set("backlinkId", "already-contacted-id");
+    formData.set("confirmNoExternalAction", "yes");
+
+    await expect(
+      retryBlockedWebsiteGrowthBacklinkAction(formData)
+    ).rejects.toThrow("no confirmed submission or delivered outreach");
+
+    expect(backlinkUpdateMany).not.toHaveBeenCalled();
+    expect(auditCreate).not.toHaveBeenCalled();
+    expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it("requires the administrator to confirm no external action occurred", async () => {
+    const formData = new FormData();
+    formData.set("backlinkId", "blocked-id");
+
+    await expect(
+      retryBlockedWebsiteGrowthBacklinkAction(formData)
+    ).rejects.toThrow("Confirm that no email or directory submission occurred");
+
+    expect(backlinkFindFirst).not.toHaveBeenCalled();
+    expect(backlinkUpdateMany).not.toHaveBeenCalled();
+    expect(auditCreate).not.toHaveBeenCalled();
   });
 });
