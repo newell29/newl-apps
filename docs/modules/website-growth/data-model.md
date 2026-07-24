@@ -18,6 +18,8 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.
 
+`WebsiteGrowthBacklinkOpportunity` is the curated backlink system of record. It stores one tenant-scoped prospect per deterministic referring-domain/target-page dedupe key, human/executor lifecycle status, category, source and target URLs, quality signals, approved public outreach angle, cost flag, and verification timestamps. It does not store raw Semrush backlink rows. `REJECTED` and `ARCHIVED` records are hidden from the default workspace but retain the prior decision so Scout does not repeatedly propose them.
+
 ```mermaid
 flowchart LR
   UI[Authenticated UI/API] --> Auth[Auth + module guard]

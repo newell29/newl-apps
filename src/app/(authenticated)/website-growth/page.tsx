@@ -139,6 +139,12 @@ function WorkspaceNavigation({ signalCount }: { signalCount: number }) {
         Scout workspace
       </Link>
       <Link
+        href="/website-growth/backlinks"
+        className="rounded-md px-4 py-2 text-sm font-semibold text-mutedForeground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        Backlink Scout
+      </Link>
+      <Link
         href="/website-growth/signals"
         className="rounded-md px-4 py-2 text-sm font-semibold text-mutedForeground transition-colors hover:bg-muted hover:text-foreground"
       >
@@ -148,7 +154,7 @@ function WorkspaceNavigation({ signalCount }: { signalCount: number }) {
         </span>
       </Link>
       <p className="ml-auto hidden px-3 text-xs text-mutedForeground lg:block">
-        Scout ideas are curated work. Research signals are supporting evidence.
+        Scout ideas and backlinks are curated work. Research signals are supporting evidence.
       </p>
     </nav>
   );

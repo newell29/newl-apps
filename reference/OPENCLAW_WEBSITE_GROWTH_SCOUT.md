@@ -17,6 +17,8 @@ Scout may:
 - produce or regenerate a page brief in Newl Apps;
 - flag numerical, certification, affiliation, customer, comparative, and guarantee claims;
 - report stalled or failed producer runs.
+- query backlink profiles, referring domains, backlink gaps, and new/lost links through official read-only SEMrush MCP;
+- return a bounded, deduplicated shortlist of backlink prospects after relevance, quality, spam, and policy review.
 
 Scout may not:
 
@@ -26,6 +28,7 @@ Scout may not:
 - run any Codex session with repository write access;
 - open, merge, or publish a website pull request;
 - deploy to production or request indexing for an unmerged page.
+- submit a directory, create an external account, send outreach, purchase a placement, accept terms, approve spending, or mark a backlink live.
 
 ## Handoff
 
@@ -33,7 +36,7 @@ Newl Apps is the control plane. An Admin or Manager approves the exact saved bri
 
 The website repository workflow fetches the brief through a tenant-bound bearer-token endpoint, runs Codex in a read-only GitHub job to create and verify a patch, and passes only the patch artifact to a separate GitHub job with write permission. That second job opens a draft PR. Vercel Preview reports its URL back to the same job record. The owner retains the merge decision.
 
-The scheduled Scout runtime calls `POST /api/website-growth/scout/prepare`. Newl Apps refreshes Search Console, GA4, and sanitized first-party form evidence, creates the bounded weekly slate, and returns a candidate packet. The packet also carries the versioned page-pattern library, current repository inventory, and recent approved/rejected/built/published decisions so form, hero, CTA, section, FAQ, and internal-link conventions persist across runs. The worker then runs an ephemeral Codex session with a read-only sandbox in the website repository. Codex must query the official SEMrush MCP server through OAuth and return the repository-owned JSON schema. `POST /api/website-growth/scout/complete` validates the candidate scope, stores only sanitized SEMrush evidence, saves the drafts, and returns the deterministic Teams review message. The legacy `/produce` endpoint remains available as a narrow fallback but is not the scheduled path.
+The scheduled Scout runtime calls `POST /api/website-growth/scout/prepare`. Newl Apps refreshes Search Console, GA4, and sanitized first-party form evidence, creates the bounded weekly slate, and returns a candidate packet. The packet also carries the versioned page-pattern library, current repository inventory, recent approved/rejected/built/published decisions, and existing backlink decisions so form, hero, CTA, section, FAQ, internal-link, and off-site deduplication conventions persist across runs. The worker then runs an ephemeral Codex session with a read-only sandbox in the website repository. Codex must query the official SEMrush MCP server through OAuth and return the repository-owned JSON schema, including the Position Tracking snapshot and no more than 15 curated backlink prospects even when there are no page candidates. `POST /api/website-growth/scout/complete` validates the candidate scope, stores only sanitized SEMrush evidence, saves the drafts, applies deterministic backlink quality/dedupe/retention gates, and returns the deterministic Teams review message. The legacy `/produce` endpoint remains available as a narrow fallback but is not the scheduled path.
 
 ## Model policy
 

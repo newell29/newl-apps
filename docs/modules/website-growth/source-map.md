@@ -18,6 +18,12 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 | Official SEMrush OAuth setup | `ops/openclaw/configure-semrush-mcp.sh` |
 | Weekly OpenClaw schedule | `ops/openclaw/install-website-growth-scout.sh` |
 | Structured output contract | `ops/openclaw/skills/website-growth-scout/scout-output.schema.json` |
+| Backlink parsing, quality gates, dedupe, retention, workspace query | `src/modules/website-growth/backlinks.ts` |
+| Backlink approval actions | `src/modules/website-growth/actions.ts` |
+| Backlink review UI | `src/app/(authenticated)/website-growth/backlinks/page.tsx` |
+| Approved-work executor service | `src/modules/website-growth/backlink-executor.ts` |
+| Executor machine API | `src/app/api/website-growth/backlinks/executor/claim` and `report` |
+| Executor runtime contract | `ops/openclaw/skills/website-growth-backlink-executor/SKILL.md` |
 
 ## Workflow / rules summary
 

@@ -91,6 +91,29 @@ enum WebsiteGrowthContentDraftSource {
   TEMPLATE
 }
 
+enum WebsiteGrowthBacklinkCategory {
+  DIRECTORY_CITATION
+  LINK_RECLAMATION
+  PARTNER_ECOSYSTEM
+  CONTENT_CONTRIBUTION
+  RESOURCE_PAGE
+  DIGITAL_PR
+  PAID_PLACEMENT
+}
+
+enum WebsiteGrowthBacklinkStatus {
+  NEEDS_REVIEW
+  APPROVED
+  IN_PROGRESS
+  SUBMITTED
+  CONTACTED
+  LIVE
+  LOST
+  BLOCKED
+  REJECTED
+  ARCHIVED
+}
+
 enum CreditCheckStatus {
   NEW
   IN_REVIEW
@@ -450,6 +473,7 @@ model Tenant {
   websiteGrowthContentDrafts          WebsiteGrowthContentDraft[]
   websiteGrowthDataImports            WebsiteGrowthDataImport[]
   websiteGrowthMetrics                WebsiteGrowthMetric[]
+  websiteGrowthBacklinks              WebsiteGrowthBacklinkOpportunity[]
   creditChecks                        CreditCheck[]
   assistantRuns                       AssistantRun[]
   assistantRetrievedSources           AssistantRetrievedSource[]
@@ -791,6 +815,50 @@ model WebsiteGrowthMetric {
   @@index([tenantId, page])
   @@index([tenantId, query])
   @@index([tenantId, dateRangeStart])
+}
+
+model WebsiteGrowthBacklinkOpportunity {
+  id                  String                        @id @default(cuid())
+  tenantId            String
+  dedupeKey           String
+  createdAt           DateTime                      @default(now())
+  updatedAt           DateTime                      @updatedAt
+  firstSeenAt         DateTime                      @default(now())
+  lastSeenAt          DateTime                      @default(now())
+  status              WebsiteGrowthBacklinkStatus   @default(NEEDS_REVIEW)
+  category            WebsiteGrowthBacklinkCategory
+  title               String
+  sourceDomain        String
+  sourceUrl           String?
+  contactPage         String?
+  targetPage          String
+  rationale           String
+  outreachAngle       String
+  authorityScore      Float?
+  relevanceScore      Int
+  qualityScore        Int
+  spamRisk            String
+  estimatedCostAmount Float?
+  currency            String?
+  requiresContent     Boolean                       @default(false)
+  evidence            Json?
+  notes               String?
+  approvedByUserId    String?
+  approvedAt          DateTime?
+  submittedAt         DateTime?
+  contactedAt         DateTime?
+  liveUrl             String?
+  verifiedAt          DateTime?
+  lastVerifiedAt      DateTime?
+  archivedAt          DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, dedupeKey])
+  @@index([tenantId, status, qualityScore])
+  @@index([tenantId, category, status])
+  @@index([tenantId, sourceDomain])
+  @@index([tenantId, lastSeenAt])
 }
 
 model CreditCheck {

@@ -70,6 +70,12 @@ export default async function WebsiteGrowthPage({
           Scout workspace
         </Link>
         <Link
+          href="/website-growth/backlinks"
+          className="rounded-md px-4 py-2 text-sm font-semibold text-mutedForeground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          Backlink Scout
+        </Link>
+        <Link
           href="/website-growth/signals"
           aria-current="page"
           className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground"

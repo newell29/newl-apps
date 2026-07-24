@@ -15,6 +15,9 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - The weekly runner uses Teams' native document attachment support to deliver the SEO performance workbook and, when needed, the SEMrush keyword-import workbook to the same configured target.
 - Position Tracking remains read-only through official SEMrush MCP. Newl Apps stores the sanitized weekly snapshot and automatically prepares import rows from approved/built/published Scout briefs after case-insensitive keyword deduplication. Direct SEMrush mutation requires separate Business/API access and is not part of this workflow.
 - Scout machine routes use the dedicated `OPENCLAW_WEBSITE_GROWTH_TOKEN` and configured tenant slug.
+- Backlink discovery uses the same official read-only Semrush MCP session. Newl Apps receives only the curated prospect contract and aggregate reject counts, never the raw backlink inventory.
+- Approved backlink execution uses a separate `OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN`. The executor claim route excludes paid placements and returns only tenant-scoped, human-approved records.
+- True outbound automation additionally requires an owner-approved public business profile and dedicated outreach mailbox. Those values belong in the protected OpenClaw runtime, not in Scout output, Teams, source control, or Semrush.
 
 ## Workflow / rules summary
 

@@ -3,6 +3,7 @@
 import {
   ModuleKey,
   PlatformRole,
+  WebsiteGrowthBacklinkStatus,
   WebsiteGrowthContentDraftStatus,
   WebsiteGrowthImportStatus,
   WebsiteGrowthOpportunityStatus,
@@ -419,8 +420,111 @@ export async function retryWebsiteGrowthDeveloperBuildAction(formData: FormData)
   revalidatePath(`/website-growth/drafts/${draftId}`);
 }
 
+export async function reviewWebsiteGrowthBacklinkAction(formData: FormData) {
+  const context = await getAuthenticatedContext();
+  await requireModule(context, ModuleKey.WEBSITE_GROWTH);
+  await requireMutationAccess(context);
+  requireRole(context, [PlatformRole.ADMIN, PlatformRole.MANAGER]);
+
+  const backlinkId = String(formData.get("backlinkId") ?? "").trim();
+  const decision = parseBacklinkReviewDecision(formData.get("decision"));
+  const notes = String(formData.get("notes") ?? "").trim().slice(0, 2000);
+  if (!backlinkId) throw new Error("Missing backlink opportunity ID.");
+  const now = new Date();
+
+  const result = await prisma.websiteGrowthBacklinkOpportunity.updateMany({
+    where: {
+      id: backlinkId,
+      tenantId: context.tenantId,
+      status: WebsiteGrowthBacklinkStatus.NEEDS_REVIEW
+    },
+    data: {
+      status: decision,
+      notes: notes || undefined,
+      approvedByUserId: decision === WebsiteGrowthBacklinkStatus.APPROVED ? context.userId : undefined,
+      approvedAt: decision === WebsiteGrowthBacklinkStatus.APPROVED ? now : undefined
+    }
+  });
+  if (result.count !== 1) throw new Error("This backlink opportunity is no longer waiting for review.");
+
+  await prisma.auditLog.create({
+    data: {
+      tenantId: context.tenantId,
+      actorUserId: context.userId,
+      action: decision === WebsiteGrowthBacklinkStatus.APPROVED
+        ? "website-growth.backlink.approved"
+        : "website-growth.backlink.rejected",
+      entityType: "WebsiteGrowthBacklinkOpportunity",
+      entityId: backlinkId,
+      before: { status: WebsiteGrowthBacklinkStatus.NEEDS_REVIEW },
+      after: { status: decision, notes: notes || null }
+    }
+  });
+
+  revalidatePath("/website-growth/backlinks");
+}
+
+export async function approveAllWebsiteGrowthBacklinksAction() {
+  const context = await getAuthenticatedContext();
+  await requireModule(context, ModuleKey.WEBSITE_GROWTH);
+  await requireMutationAccess(context);
+  requireRole(context, [PlatformRole.ADMIN, PlatformRole.MANAGER]);
+
+  const pending = await prisma.websiteGrowthBacklinkOpportunity.findMany({
+    where: {
+      tenantId: context.tenantId,
+      status: WebsiteGrowthBacklinkStatus.NEEDS_REVIEW
+    },
+    orderBy: [{ qualityScore: "desc" }, { createdAt: "asc" }],
+    take: 50,
+    select: { id: true }
+  });
+  if (pending.length === 0) {
+    revalidatePath("/website-growth/backlinks");
+    return;
+  }
+  const ids = pending.map((item) => item.id);
+  const now = new Date();
+
+  await prisma.$transaction(async (tx) => {
+    await tx.websiteGrowthBacklinkOpportunity.updateMany({
+      where: {
+        tenantId: context.tenantId,
+        id: { in: ids },
+        status: WebsiteGrowthBacklinkStatus.NEEDS_REVIEW
+      },
+      data: {
+        status: WebsiteGrowthBacklinkStatus.APPROVED,
+        approvedByUserId: context.userId,
+        approvedAt: now
+      }
+    });
+    await tx.auditLog.create({
+      data: {
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        action: "website-growth.backlink.batch-approved",
+        entityType: "WebsiteGrowthBacklinkOpportunity",
+        after: {
+          status: WebsiteGrowthBacklinkStatus.APPROVED,
+          opportunityIds: ids
+        }
+      }
+    });
+  });
+
+  revalidatePath("/website-growth/backlinks");
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function parseBacklinkReviewDecision(value: FormDataEntryValue | null) {
+  if (value === WebsiteGrowthBacklinkStatus.APPROVED || value === WebsiteGrowthBacklinkStatus.REJECTED) {
+    return value;
+  }
+  throw new Error("Backlink review decision must be approved or rejected.");
 }
 
 function parseOpportunityStatus(value: FormDataEntryValue | null) {
