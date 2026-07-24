@@ -810,7 +810,11 @@ function validateOutreachState(
     recipientEmail: string | null;
     nextFollowUpAt: Date | null;
     lastReplyAt: Date | null;
-    messages: Array<{ kind: WebsiteGrowthOutreachMessageKind }>;
+    messages: Array<{
+      kind: WebsiteGrowthOutreachMessageKind;
+      externalMessageId: string | null;
+      conversationId: string | null;
+    }>;
   },
   input: WebsiteGrowthOutreachSendInput,
   now: Date
@@ -818,7 +822,11 @@ function validateOutreachState(
   if (input.kind === WebsiteGrowthOutreachMessageKind.INITIAL) {
     if (
       opportunity.status !== WebsiteGrowthBacklinkStatus.IN_PROGRESS ||
-      opportunity.messages.some((message) => message.kind === WebsiteGrowthOutreachMessageKind.INITIAL)
+      opportunity.messages.some(
+        (message) =>
+          message.kind === WebsiteGrowthOutreachMessageKind.INITIAL &&
+          Boolean(message.externalMessageId || message.conversationId)
+      )
     ) {
       throw new Error("Initial outreach is no longer available for this opportunity.");
     }
@@ -858,6 +866,10 @@ async function assertWebsiteGrowthOutreachVolumeAvailable({
         where: {
           tenantId,
           kind,
+          OR: [
+            { externalMessageId: { not: null } },
+            { conversationId: { not: null } }
+          ],
           sentAt: { gte: dayStart }
         }
       }),
@@ -865,6 +877,10 @@ async function assertWebsiteGrowthOutreachVolumeAvailable({
         where: {
           tenantId,
           kind,
+          OR: [
+            { externalMessageId: { not: null } },
+            { conversationId: { not: null } }
+          ],
           sentAt: { gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) }
         }
       })
@@ -882,6 +898,10 @@ async function assertWebsiteGrowthOutreachVolumeAvailable({
     where: {
       tenantId,
       kind,
+      OR: [
+        { externalMessageId: { not: null } },
+        { conversationId: { not: null } }
+      ],
       sentAt: { gte: dayStart }
     }
   });
