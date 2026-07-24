@@ -17,7 +17,10 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - Scout machine routes use the dedicated `OPENCLAW_WEBSITE_GROWTH_TOKEN` and configured tenant slug.
 - Backlink discovery uses the same official read-only Semrush MCP session. Newl Apps receives only the curated prospect contract and aggregate reject counts, never the raw backlink inventory.
 - Approved backlink execution uses a separate `OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN`. The executor claim route excludes paid placements and returns only tenant-scoped, human-approved records.
-- True outbound automation additionally requires an owner-approved public business profile and dedicated outreach mailbox. Those values belong in the protected OpenClaw runtime, not in Scout output, Teams, source control, or Semrush.
+- Outbound mail uses Microsoft Graph application access through the dedicated outreach mailbox. Newl Apps holds the public identity configuration and Graph credential; OpenClaw receives only constrained Website Growth tools and never the Graph access token.
+- Reply sync reads the dedicated mailbox only, matches the recorded Microsoft conversation ID and recipient, and converts opt-outs into durable tenant-scoped suppression records.
+- True outbound automation additionally requires an owner-approved public business profile in the protected Scout runtime, `Mail.Send` and `Mail.Read`, and an Exchange mailbox scope. Secret values do not belong in Scout output, Teams, source control, or Semrush.
+- Weekday Teams summaries are announced by the dedicated Scout schedule even when no opportunity is available.
 
 ## Workflow / rules summary
 

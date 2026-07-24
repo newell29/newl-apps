@@ -107,11 +107,25 @@ enum WebsiteGrowthBacklinkStatus {
   IN_PROGRESS
   SUBMITTED
   CONTACTED
+  REPLIED
   LIVE
   LOST
   BLOCKED
   REJECTED
   ARCHIVED
+}
+
+enum WebsiteGrowthOutreachConsentBasis {
+  EXPRESS
+  EXISTING_RELATIONSHIP
+  CONSPICUOUSLY_PUBLISHED_BUSINESS
+  PUBLISHER_SUBMISSION
+  US_BUSINESS_OUTREACH
+}
+
+enum WebsiteGrowthOutreachMessageKind {
+  INITIAL
+  FOLLOW_UP
 }
 
 enum CreditCheckStatus {
@@ -448,122 +462,124 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships                         Membership[]
-  moduleAccess                        TenantModuleAccess[]
-  rolePolicies                        TenantRolePolicy[]
-  roleModuleAccess                    TenantRoleModuleAccess[]
-  integrationCredentials              IntegrationCredential[]
-  auditLogs                           AuditLog[]
-  jobRuns                             AutomationJobRun[]
-  companies                           Company[]
-  importRecords                       TradeMiningImportRecord[]
-  searchProfiles                      TradeMiningSearchProfile[]
-  tradeMiningScoringConfig            TradeMiningScoringConfig?
-  leadScoreSnapshots                  LeadScoreSnapshot[]
-  leadOutcomeEvents                   LeadOutcomeEvent[]
-  contacts                            Contact[]
-  leads                               Lead[]
-  contactOutreachDrafts               ContactOutreachDraft[]
-  apolloCompanyMatches                ApolloCompanyMatch[]
-  ltlBatchQuoteLanes                  LtlBatchQuoteLane[]
-  assistantThreads                    AssistantChatThread[]
-  assistantMessages                   AssistantChatMessage[]
-  websiteInboundSubmissions           WebsiteInboundSubmission[]
-  websiteGrowthOpportunities          WebsiteGrowthOpportunity[]
-  websiteGrowthContentDrafts          WebsiteGrowthContentDraft[]
-  websiteGrowthDataImports            WebsiteGrowthDataImport[]
-  websiteGrowthMetrics                WebsiteGrowthMetric[]
-  websiteGrowthBacklinks              WebsiteGrowthBacklinkOpportunity[]
-  creditChecks                        CreditCheck[]
-  assistantRuns                       AssistantRun[]
-  assistantRetrievedSources           AssistantRetrievedSource[]
-  assistantKnowledgeDocuments         AssistantKnowledgeDocument[]
-  assistantKnowledgeChunks            AssistantKnowledgeChunk[]
-  assistantMemories                   AssistantMemory[]
-  assistantMailboxSyncStates          AssistantMailboxSyncState[]
-  assistantAutomations                AssistantAutomation[]
-  assistantAutomationRuns             AssistantAutomationRun[]
-  workflowArtifacts                   WorkflowArtifact[]
-  workflowArtifactChunks              WorkflowArtifactChunk[]
-  operationalFeedback                 OperationalFeedback[]
-  approvedOperationalLessons          ApprovedOperationalLesson[]
-  developmentSuggestions              DevelopmentSuggestion[]
-  shipmentDocumentRuns                ShipmentDocumentRun[]
-  shipmentCarrierManifestRuns         ShipmentCarrierManifestRun[]
-  shipmentCarrierManifestAttachments  ShipmentCarrierManifestAttachment[]
-  teamshipReviewRuns                  TeamshipReviewRun[]
-  teamshipReviewOrders                TeamshipReviewOrder[]
-  teamshipDailySyncRuns               TeamshipDailySyncRun[]
-  teamshipSyncedOrders                TeamshipSyncedOrder[]
-  teamshipUpdateJobs                  TeamshipUpdateJob[]
-  teamshipUpdateOrders                TeamshipUpdateOrder[]
-  teamshipBrowserReadJobs             TeamshipBrowserReadJob[]
-  teamshipPrintJobs                   TeamshipPrintJob[]
-  openClawUnresolvedTurns             OpenClawUnresolvedTurn[]
-  garlandProductDimensionObservations GarlandProductDimensionObservation[]
-  garlandSourceEmails                 GarlandSourceEmail[]
-  garlandSourceAttachments            GarlandSourceAttachment[]
-  garlandEmailSyncRuns                GarlandEmailSyncRun[]
-  cashflowCustomers                   CashflowCustomer[]
-  cashflowCustomerAliases             CashflowCustomerAlias[]
-  cashflowFiles                       CashflowFile[]
-  cashflowCustomerInvoices            CashflowCustomerInvoice[]
-  cashflowVendorBills                 CashflowVendorBill[]
-  cashflowSnapshots                   CashflowCustomerSnapshot[]
-  cashflowAlerts                      CashflowAlert[]
-  cashflowFollowUps                   CashflowFollowUp[]
-  cashflowAccountingLines             CashflowAccountingLine[]
-  cashflowSettings                    CashflowSettings?
-  oceanFreightAgents                  OceanFreightAgent[]
-  oceanFreightAgentBranches           OceanFreightAgentBranch[]
-  oceanFreightAgentContacts           OceanFreightAgentContact[]
-  oceanFreightSourceEmails            OceanFreightSourceEmail[]
-  oceanFreightSourceAttachments       OceanFreightSourceAttachment[]
-  oceanFreightRateCandidates          OceanFreightRateCandidate[]
-  oceanFreightRates                   OceanFreightRate[]
-  invoiceAutomationDocuments          InvoiceAutomationDocument[]
-  invoiceAutomationBatches            InvoiceAutomationBatch[]
-  invoiceAutomationInvoices           InvoiceAutomationInvoice[]
-  invoiceAutomationQuickBooksEntities InvoiceAutomationQuickBooksEntity[]
+  memberships                             Membership[]
+  moduleAccess                            TenantModuleAccess[]
+  rolePolicies                            TenantRolePolicy[]
+  roleModuleAccess                        TenantRoleModuleAccess[]
+  integrationCredentials                  IntegrationCredential[]
+  auditLogs                               AuditLog[]
+  jobRuns                                 AutomationJobRun[]
+  companies                               Company[]
+  importRecords                           TradeMiningImportRecord[]
+  searchProfiles                          TradeMiningSearchProfile[]
+  tradeMiningScoringConfig                TradeMiningScoringConfig?
+  leadScoreSnapshots                      LeadScoreSnapshot[]
+  leadOutcomeEvents                       LeadOutcomeEvent[]
+  contacts                                Contact[]
+  leads                                   Lead[]
+  contactOutreachDrafts                   ContactOutreachDraft[]
+  apolloCompanyMatches                    ApolloCompanyMatch[]
+  ltlBatchQuoteLanes                      LtlBatchQuoteLane[]
+  assistantThreads                        AssistantChatThread[]
+  assistantMessages                       AssistantChatMessage[]
+  websiteInboundSubmissions               WebsiteInboundSubmission[]
+  websiteGrowthOpportunities              WebsiteGrowthOpportunity[]
+  websiteGrowthContentDrafts              WebsiteGrowthContentDraft[]
+  websiteGrowthDataImports                WebsiteGrowthDataImport[]
+  websiteGrowthMetrics                    WebsiteGrowthMetric[]
+  websiteGrowthBacklinks                  WebsiteGrowthBacklinkOpportunity[]
+  websiteGrowthOutreachMessages           WebsiteGrowthOutreachMessage[]
+  websiteGrowthSuppressions               WebsiteGrowthOutreachSuppression[]
+  creditChecks                            CreditCheck[]
+  assistantRuns                           AssistantRun[]
+  assistantRetrievedSources               AssistantRetrievedSource[]
+  assistantKnowledgeDocuments             AssistantKnowledgeDocument[]
+  assistantKnowledgeChunks                AssistantKnowledgeChunk[]
+  assistantMemories                       AssistantMemory[]
+  assistantMailboxSyncStates              AssistantMailboxSyncState[]
+  assistantAutomations                    AssistantAutomation[]
+  assistantAutomationRuns                 AssistantAutomationRun[]
+  workflowArtifacts                       WorkflowArtifact[]
+  workflowArtifactChunks                  WorkflowArtifactChunk[]
+  operationalFeedback                     OperationalFeedback[]
+  approvedOperationalLessons              ApprovedOperationalLesson[]
+  developmentSuggestions                  DevelopmentSuggestion[]
+  shipmentDocumentRuns                    ShipmentDocumentRun[]
+  shipmentCarrierManifestRuns             ShipmentCarrierManifestRun[]
+  shipmentCarrierManifestAttachments      ShipmentCarrierManifestAttachment[]
+  teamshipReviewRuns                      TeamshipReviewRun[]
+  teamshipReviewOrders                    TeamshipReviewOrder[]
+  teamshipDailySyncRuns                   TeamshipDailySyncRun[]
+  teamshipSyncedOrders                    TeamshipSyncedOrder[]
+  teamshipUpdateJobs                      TeamshipUpdateJob[]
+  teamshipUpdateOrders                    TeamshipUpdateOrder[]
+  teamshipBrowserReadJobs                 TeamshipBrowserReadJob[]
+  teamshipPrintJobs                       TeamshipPrintJob[]
+  openClawUnresolvedTurns                 OpenClawUnresolvedTurn[]
+  garlandProductDimensionObservations     GarlandProductDimensionObservation[]
+  garlandSourceEmails                     GarlandSourceEmail[]
+  garlandSourceAttachments                GarlandSourceAttachment[]
+  garlandEmailSyncRuns                    GarlandEmailSyncRun[]
+  cashflowCustomers                       CashflowCustomer[]
+  cashflowCustomerAliases                 CashflowCustomerAlias[]
+  cashflowFiles                           CashflowFile[]
+  cashflowCustomerInvoices                CashflowCustomerInvoice[]
+  cashflowVendorBills                     CashflowVendorBill[]
+  cashflowSnapshots                       CashflowCustomerSnapshot[]
+  cashflowAlerts                          CashflowAlert[]
+  cashflowFollowUps                       CashflowFollowUp[]
+  cashflowAccountingLines                 CashflowAccountingLine[]
+  cashflowSettings                        CashflowSettings?
+  oceanFreightAgents                      OceanFreightAgent[]
+  oceanFreightAgentBranches               OceanFreightAgentBranch[]
+  oceanFreightAgentContacts               OceanFreightAgentContact[]
+  oceanFreightSourceEmails                OceanFreightSourceEmail[]
+  oceanFreightSourceAttachments           OceanFreightSourceAttachment[]
+  oceanFreightRateCandidates              OceanFreightRateCandidate[]
+  oceanFreightRates                       OceanFreightRate[]
+  invoiceAutomationDocuments              InvoiceAutomationDocument[]
+  invoiceAutomationBatches                InvoiceAutomationBatch[]
+  invoiceAutomationInvoices               InvoiceAutomationInvoice[]
+  invoiceAutomationQuickBooksEntities     InvoiceAutomationQuickBooksEntity[]
   invoiceAutomationQuickBooksTransactions InvoiceAutomationQuickBooksTransaction[]
-  invoiceAutomationEntityAliases      InvoiceAutomationEntityAlias[]
-  invoiceAutomationCorrectionMemories InvoiceAutomationCorrectionMemory[]
+  invoiceAutomationEntityAliases          InvoiceAutomationEntityAlias[]
+  invoiceAutomationCorrectionMemories     InvoiceAutomationCorrectionMemory[]
 }
 
 model User {
-  id                       String    @id @default(cuid())
-  email                    String    @unique
-  name                     String?
+  id                     String    @id @default(cuid())
+  email                  String    @unique
+  name                   String?
   // Stable Microsoft Entra claims captured from a successful Newl Apps SSO
   // login. Teams supplies this same tenant/object pair to the trusted
   // OpenClaw tool, allowing server-side membership resolution without
   // trusting an email or identity supplied in prompt text.
-  microsoftEntraTenantId   String?
-  microsoftEntraObjectId   String?
+  microsoftEntraTenantId String?
+  microsoftEntraObjectId String?
   // Used ONLY by the dev-only local credentials login path. Production logins
   // go through Microsoft Entra ID SSO and never set this field.
-  passwordHash  String?
-  emailVerified DateTime?
-  image         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  passwordHash           String?
+  emailVerified          DateTime?
+  image                  String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
-  memberships                 Membership[]
-  accounts                    Account[]
-  sessions                    Session[]
-  assistantThreads            AssistantChatThread[]
-  assistantRuns               AssistantRun[]
-  assistantAutomations        AssistantAutomation[]
-  assistantAutomationRuns     AssistantAutomationRun[]
-  openClawUnresolvedTurns     OpenClawUnresolvedTurn[]
-  shipmentDocumentRuns        ShipmentDocumentRun[]
-  shipmentCarrierManifestRuns ShipmentCarrierManifestRun[]
+  memberships                        Membership[]
+  accounts                           Account[]
+  sessions                           Session[]
+  assistantThreads                   AssistantChatThread[]
+  assistantRuns                      AssistantRun[]
+  assistantAutomations               AssistantAutomation[]
+  assistantAutomationRuns            AssistantAutomationRun[]
+  openClawUnresolvedTurns            OpenClawUnresolvedTurn[]
+  shipmentDocumentRuns               ShipmentDocumentRun[]
+  shipmentCarrierManifestRuns        ShipmentCarrierManifestRun[]
   shipmentCarrierManifestAttachments ShipmentCarrierManifestAttachment[]
-  teamshipReviewRuns          TeamshipReviewRun[]
-  teamshipUpdateJobsCreated   TeamshipUpdateJob[]          @relation("TeamshipUpdateJobCreatedBy")
-  teamshipUpdateJobsApproved  TeamshipUpdateJob[]          @relation("TeamshipUpdateJobApprovedBy")
-  teamshipPrintJobsRequested  TeamshipPrintJob[]           @relation("TeamshipPrintJobRequestedBy")
-  teamshipPrintJobsApproved   TeamshipPrintJob[]           @relation("TeamshipPrintJobApprovedBy")
+  teamshipReviewRuns                 TeamshipReviewRun[]
+  teamshipUpdateJobsCreated          TeamshipUpdateJob[]                 @relation("TeamshipUpdateJobCreatedBy")
+  teamshipUpdateJobsApproved         TeamshipUpdateJob[]                 @relation("TeamshipUpdateJobApprovedBy")
+  teamshipPrintJobsRequested         TeamshipPrintJob[]                  @relation("TeamshipPrintJobRequestedBy")
+  teamshipPrintJobsApproved          TeamshipPrintJob[]                  @relation("TeamshipPrintJobApprovedBy")
 
   @@unique([microsoftEntraTenantId, microsoftEntraObjectId])
 }
@@ -727,7 +743,7 @@ model WebsiteGrowthOpportunity {
   approvedByUserId   String?
   publishedAt        DateTime?
 
-  tenant        Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant        Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   contentDrafts WebsiteGrowthContentDraft[]
 
   @@index([tenantId, status])
@@ -737,13 +753,13 @@ model WebsiteGrowthOpportunity {
 }
 
 model WebsiteGrowthContentDraft {
-  id               String                           @id @default(cuid())
+  id               String                          @id @default(cuid())
   tenantId         String
   opportunityId    String
-  createdAt        DateTime                         @default(now())
-  updatedAt        DateTime                         @updatedAt
-  status           WebsiteGrowthContentDraftStatus  @default(DRAFT)
-  source           WebsiteGrowthContentDraftSource  @default(TEMPLATE)
+  createdAt        DateTime                        @default(now())
+  updatedAt        DateTime                        @updatedAt
+  status           WebsiteGrowthContentDraftStatus @default(DRAFT)
+  source           WebsiteGrowthContentDraftSource @default(TEMPLATE)
   title            String
   summary          String
   contentType      String
@@ -818,47 +834,99 @@ model WebsiteGrowthMetric {
 }
 
 model WebsiteGrowthBacklinkOpportunity {
-  id                  String                        @id @default(cuid())
-  tenantId            String
-  dedupeKey           String
-  createdAt           DateTime                      @default(now())
-  updatedAt           DateTime                      @updatedAt
-  firstSeenAt         DateTime                      @default(now())
-  lastSeenAt          DateTime                      @default(now())
-  status              WebsiteGrowthBacklinkStatus   @default(NEEDS_REVIEW)
-  category            WebsiteGrowthBacklinkCategory
-  title               String
-  sourceDomain        String
-  sourceUrl           String?
-  contactPage         String?
-  targetPage          String
-  rationale           String
-  outreachAngle       String
-  authorityScore      Float?
-  relevanceScore      Int
-  qualityScore        Int
-  spamRisk            String
-  estimatedCostAmount Float?
-  currency            String?
-  requiresContent     Boolean                       @default(false)
-  evidence            Json?
-  notes               String?
-  approvedByUserId    String?
-  approvedAt          DateTime?
-  submittedAt         DateTime?
-  contactedAt         DateTime?
-  liveUrl             String?
-  verifiedAt          DateTime?
-  lastVerifiedAt      DateTime?
-  archivedAt          DateTime?
+  id                   String                             @id @default(cuid())
+  tenantId             String
+  dedupeKey            String
+  createdAt            DateTime                           @default(now())
+  updatedAt            DateTime                           @updatedAt
+  firstSeenAt          DateTime                           @default(now())
+  lastSeenAt           DateTime                           @default(now())
+  status               WebsiteGrowthBacklinkStatus        @default(NEEDS_REVIEW)
+  category             WebsiteGrowthBacklinkCategory
+  title                String
+  sourceDomain         String
+  sourceUrl            String?
+  contactPage          String?
+  targetPage           String
+  rationale            String
+  outreachAngle        String
+  authorityScore       Float?
+  relevanceScore       Int
+  qualityScore         Int
+  spamRisk             String
+  estimatedCostAmount  Float?
+  currency             String?
+  requiresContent      Boolean                            @default(false)
+  evidence             Json?
+  notes                String?
+  approvedByUserId     String?
+  approvedAt           DateTime?
+  claimedAt            DateTime?
+  submittedAt          DateTime?
+  contactedAt          DateTime?
+  recipientName        String?
+  recipientEmail       String?
+  recipientCountry     String?
+  contactSourceUrl     String?
+  consentBasis         WebsiteGrowthOutreachConsentBasis?
+  nextFollowUpAt       DateTime?
+  followUpCount        Int                                @default(0)
+  lastReplyAt          DateTime?
+  replySummary         String?
+  unsubscribedAt       DateTime?
+  directoryLoginUrl    String?
+  directoryUsername    String?
+  acceptedTermsUrl     String?
+  acceptedTermsSummary String?
+  liveUrl              String?
+  verifiedAt           DateTime?
+  lastVerifiedAt       DateTime?
+  archivedAt           DateTime?
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant   Tenant                         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  messages WebsiteGrowthOutreachMessage[]
 
   @@unique([tenantId, dedupeKey])
   @@index([tenantId, status, qualityScore])
   @@index([tenantId, category, status])
   @@index([tenantId, sourceDomain])
   @@index([tenantId, lastSeenAt])
+  @@index([tenantId, nextFollowUpAt])
+}
+
+model WebsiteGrowthOutreachMessage {
+  id                String                           @id @default(cuid())
+  tenantId          String
+  opportunityId     String
+  createdAt         DateTime                         @default(now())
+  kind              WebsiteGrowthOutreachMessageKind
+  recipientEmail    String
+  subject           String
+  body              String
+  externalMessageId String?
+  conversationId    String?
+  sentAt            DateTime                         @default(now())
+
+  tenant      Tenant                           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  opportunity WebsiteGrowthBacklinkOpportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, opportunityId, sentAt])
+  @@index([tenantId, recipientEmail])
+  @@index([tenantId, conversationId])
+}
+
+model WebsiteGrowthOutreachSuppression {
+  id              String   @id @default(cuid())
+  tenantId        String
+  normalizedEmail String
+  reason          String
+  source          String
+  createdAt       DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, normalizedEmail])
+  @@index([tenantId, createdAt])
 }
 
 model CreditCheck {
@@ -956,8 +1024,8 @@ model ShipmentCarrierManifestRun {
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
-  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  createdBy User?  @relation(fields: [createdByUserId], references: [id], onDelete: NoAction)
+  tenant      Tenant                              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy   User?                               @relation(fields: [createdByUserId], references: [id], onDelete: NoAction)
   attachments ShipmentCarrierManifestAttachment[]
 
   @@index([tenantId, workflowKey, shipmentDate])
@@ -1300,23 +1368,23 @@ model TeamshipUpdateOrder {
 }
 
 model TeamshipBrowserReadJob {
-  id              String    @id @default(cuid())
-  tenantId        String
-  status          String    @default("PENDING")
-  operation       String
-  input           Json
-  scope           Json
-  requestedBy     Json
-  result          Json?
-  errorCode       String?
-  errorMessage    String?
-  workerId        String?
-  claimedAt       DateTime?
-  completedAt     DateTime?
-  failedAt        DateTime?
-  expiresAt       DateTime
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id           String    @id @default(cuid())
+  tenantId     String
+  status       String    @default("PENDING")
+  operation    String
+  input        Json
+  scope        Json
+  requestedBy  Json
+  result       Json?
+  errorCode    String?
+  errorMessage String?
+  workerId     String?
+  claimedAt    DateTime?
+  completedAt  DateTime?
+  failedAt     DateTime?
+  expiresAt    DateTime
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -1326,31 +1394,31 @@ model TeamshipBrowserReadJob {
 }
 
 model TeamshipPrintJob {
-  id                    String    @id @default(cuid())
-  tenantId              String
-  shippingOrderNumber   String
-  teamshipOrderId       String
-  customerName          String
-  warehouseName         String
-  status                String    @default("PENDING_APPROVAL")
-  documentPlan          Json
-  printerPlan           Json
-  approvedPalletCount   Int
-  idempotencyKey        String
-  activeOrderKey        String?
-  requestedByUserId     String
-  approvedByUserId      String?
-  approvedAt            DateTime?
-  workerId              String?
-  claimedAt             DateTime?
-  completedAt           DateTime?
-  failedAt              DateTime?
-  expiresAt             DateTime
-  result                 Json?
-  errorCode              String?
-  errorMessage           String?
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
+  id                  String    @id @default(cuid())
+  tenantId            String
+  shippingOrderNumber String
+  teamshipOrderId     String
+  customerName        String
+  warehouseName       String
+  status              String    @default("PENDING_APPROVAL")
+  documentPlan        Json
+  printerPlan         Json
+  approvedPalletCount Int
+  idempotencyKey      String
+  activeOrderKey      String?
+  requestedByUserId   String
+  approvedByUserId    String?
+  approvedAt          DateTime?
+  workerId            String?
+  claimedAt           DateTime?
+  completedAt         DateTime?
+  failedAt            DateTime?
+  expiresAt           DateTime
+  result              Json?
+  errorCode           String?
+  errorMessage        String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   tenant      Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   requestedBy User   @relation("TeamshipPrintJobRequestedBy", fields: [requestedByUserId], references: [id], onDelete: NoAction)
@@ -1792,7 +1860,7 @@ model Lead {
 }
 
 model LeadScoreSnapshot {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
   tenantId          String
   companyId         String
   contactId         String?
@@ -1807,10 +1875,10 @@ model LeadScoreSnapshot {
   explanation       String?
   breakdown         Json
   evidenceAsOf      DateTime?
-  createdAt         DateTime @default(now())
+  createdAt         DateTime  @default(now())
 
-  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  company Company @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company       Company            @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
   outcomeEvents LeadOutcomeEvent[]
 
   @@index([tenantId, companyId, createdAt])
@@ -1836,8 +1904,8 @@ model LeadOutcomeEvent {
   occurredAt      DateTime @default(now())
   createdAt       DateTime @default(now())
 
-  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  company Company @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company       Company            @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
   scoreSnapshot LeadScoreSnapshot? @relation(fields: [scoreSnapshotId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, companyId, occurredAt])

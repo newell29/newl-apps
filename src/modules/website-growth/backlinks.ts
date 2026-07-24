@@ -59,6 +59,7 @@ const activeBacklinkStatuses: WebsiteGrowthBacklinkStatus[] = [
   WebsiteGrowthBacklinkStatus.IN_PROGRESS,
   WebsiteGrowthBacklinkStatus.SUBMITTED,
   WebsiteGrowthBacklinkStatus.CONTACTED,
+  WebsiteGrowthBacklinkStatus.REPLIED,
   WebsiteGrowthBacklinkStatus.BLOCKED
 ];
 

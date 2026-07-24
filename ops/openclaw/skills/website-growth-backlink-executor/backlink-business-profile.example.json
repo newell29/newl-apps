@@ -1,8 +1,18 @@
 {
   "status": "OWNER_COMPLETION_REQUIRED",
-  "legalName": "",
+  "legalEntities": {
+    "CA": {
+      "legalName": "",
+      "publicAddress": ""
+    },
+    "US": {
+      "legalName": "",
+      "publicAddress": ""
+    }
+  },
   "publicBrandName": "Newl Group",
   "website": "https://www.newlgroup.com",
+  "senderName": "",
   "publicDescriptions": {
     "short": "",
     "medium": "",
@@ -15,10 +25,21 @@
   "approvedServiceCategories": [],
   "approvedSocialProfiles": [],
   "certifications": [],
+  "forbiddenClaims": [
+    "Never mention, describe, quote, imply, or upload customer information."
+  ],
+  "outreachPolicy": {
+    "countries": ["CA", "US"],
+    "newContactsPerRollingDay": 5,
+    "newContactsPerRollingWeek": 20,
+    "followUpDays": [5, 12],
+    "closeAfterDays": 21,
+    "manualOpportunityApproval": true
+  },
   "submissionRules": {
     "freeListingsOnly": true,
-    "allowAccountCreation": false,
-    "allowTermsAcceptance": false,
+    "allowAccountCreation": true,
+    "allowOrdinaryFreeDirectoryTerms": true,
     "allowCaptchaEscalation": true,
     "allowPayment": false
   }

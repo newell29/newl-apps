@@ -1,9 +1,18 @@
 import {
   WebsiteGrowthBacklinkCategory,
-  WebsiteGrowthBacklinkStatus
+  WebsiteGrowthBacklinkStatus,
+  WebsiteGrowthOutreachConsentBasis
 } from "@prisma/client";
 import { afterEach, describe, expect, it } from "vitest";
 
+import {
+  assertSafeWebsiteGrowthOutreachCopy,
+  buildCompliantWebsiteGrowthOutreachBody,
+  isWebsiteGrowthOutreachOptOut,
+  readWebsiteGrowthOutreachIdentity,
+  validateWebsiteGrowthContactSource,
+  validateWebsiteGrowthOutreachConsent
+} from "@/modules/website-growth/backlink-outreach";
 import {
   buildWebsiteGrowthBacklinkDedupeKey,
   buildWebsiteGrowthBacklinkTeamsLines,
@@ -11,7 +20,10 @@ import {
   parseWebsiteGrowthBacklinkReview,
   type WebsiteGrowthBacklinkProspect
 } from "@/modules/website-growth/backlinks";
-import { isWebsiteGrowthBacklinkExecutorClaimable } from "@/modules/website-growth/backlink-executor";
+import {
+  assertWebsiteGrowthBacklinkReportContainsNoSecrets,
+  isWebsiteGrowthBacklinkExecutorClaimable
+} from "@/modules/website-growth/backlink-executor";
 import {
   authenticateWebsiteGrowthBacklinkExecutorRequest,
   WebsiteGrowthBacklinkExecutorAuthError
@@ -118,6 +130,18 @@ describe("Website Growth backlink curation", () => {
       category: WebsiteGrowthBacklinkCategory.LINK_RECLAMATION
     })).toBe(true);
   });
+
+  it("refuses credentials in execution reports", () => {
+    expect(() => assertWebsiteGrowthBacklinkReportContainsNoSecrets([
+      "Directory profile submitted; username is partnerships@example.com."
+    ])).not.toThrow();
+    expect(() => assertWebsiteGrowthBacklinkReportContainsNoSecrets([
+      "Temporary password: unsafe-value"
+    ])).toThrow("cannot contain passwords");
+    expect(() => assertWebsiteGrowthBacklinkReportContainsNoSecrets([
+      "https://publisher.example/login?access_token=unsafe-value"
+    ])).toThrow("cannot contain passwords");
+  });
 });
 
 describe("Website Growth backlink executor authentication", () => {
@@ -137,6 +161,118 @@ describe("Website Growth backlink executor authentication", () => {
 
     expect(() => authenticateWebsiteGrowthBacklinkExecutorRequest(new Request("https://apps.example/api")))
       .toThrow(WebsiteGrowthBacklinkExecutorAuthError);
+  });
+});
+
+describe("Website Growth backlink outreach compliance", () => {
+  const identity = {
+    mailbox: "partnerships@example.com",
+    senderName: "Partnerships",
+    publicBrandName: "Example Logistics",
+    publicPhone: "555-0100",
+    website: "https://example.com/",
+    canadianLegalName: "Example Logistics Canada Ltd.",
+    canadianAddress: "100 Example Road, Toronto, ON A1A 1A1",
+    usLegalName: "Example Logistics USA Inc.",
+    usAddress: "200 Example Road, Charlotte, NC 28273"
+  };
+
+  it("adds the country-specific legal identity, physical address, and opt-out text", () => {
+    const canadian = buildCompliantWebsiteGrowthOutreachBody({
+      body: "Would your directory consider our public company profile?",
+      country: "CA",
+      identity
+    });
+    const american = buildCompliantWebsiteGrowthOutreachBody({
+      body: "Would your directory consider our public company profile?",
+      country: "US",
+      identity
+    });
+
+    expect(canadian).toContain(identity.canadianLegalName);
+    expect(canadian).toContain(identity.canadianAddress);
+    expect(canadian).not.toContain(identity.usAddress);
+    expect(american).toContain(identity.usLegalName);
+    expect(american).toContain(identity.usAddress);
+    expect(american).toContain("reply “unsubscribe”");
+  });
+
+  it("requires a CASL-compatible basis for Canadian outreach", () => {
+    expect(() => validateWebsiteGrowthOutreachConsent({
+      recipientCountry: "CA",
+      consentBasis: WebsiteGrowthOutreachConsentBasis.US_BUSINESS_OUTREACH,
+      contactSourceUrl: "https://publisher.example/contact"
+    })).toThrow("CASL-compatible");
+
+    expect(() => validateWebsiteGrowthOutreachConsent({
+      recipientCountry: "CA",
+      consentBasis: WebsiteGrowthOutreachConsentBasis.CONSPICUOUSLY_PUBLISHED_BUSINESS,
+      contactSourceUrl: "https://publisher.example/contact"
+    })).not.toThrow();
+  });
+
+  it("rejects private or local contact-source URLs", () => {
+    expect(() => validateWebsiteGrowthOutreachConsent({
+      recipientCountry: "US",
+      consentBasis: WebsiteGrowthOutreachConsentBasis.US_BUSINESS_OUTREACH,
+      contactSourceUrl: "http://localhost/contact"
+    })).toThrow("local host");
+  });
+
+  it("recognizes common opt-out language", () => {
+    expect(isWebsiteGrowthOutreachOptOut("Please remove me from this list.")).toBe(true);
+    expect(isWebsiteGrowthOutreachOptOut("Thanks, please send the details.")).toBe(false);
+  });
+
+  it("allows only a business contact on the approved referring domain", () => {
+    expect(() => validateWebsiteGrowthContactSource({
+      sourceDomain: "publisher.example",
+      sourceUrl: "https://www.publisher.example/resources",
+      contactPage: "https://publisher.example/contact",
+      contactSourceUrl: "https://publisher.example/contact",
+      recipientEmail: "editor@publisher.example"
+    })).not.toThrow();
+    expect(() => validateWebsiteGrowthContactSource({
+      sourceDomain: "publisher.example",
+      contactSourceUrl: "https://unrelated.example/contact",
+      recipientEmail: "editor@unrelated.example"
+    })).toThrow("human-approved referring organization");
+    expect(() => validateWebsiteGrowthContactSource({
+      sourceDomain: "publisher.example",
+      contactSourceUrl: "https://publisher.example/contact",
+      recipientEmail: "publisher@gmail.com"
+    })).toThrow("public business email");
+  });
+
+  it("blocks customer proof and unbounded claims from outreach copy", () => {
+    expect(() => assertSafeWebsiteGrowthOutreachCopy(
+      "We would like to suggest a practical warehousing resource."
+    )).not.toThrow();
+    expect(() => assertSafeWebsiteGrowthOutreachCopy(
+      "Our customer names include several national brands."
+    )).toThrow("cannot mention customers");
+    expect(() => assertSafeWebsiteGrowthOutreachCopy(
+      "We are the best and guarantee every result."
+    )).toThrow("cannot mention customers");
+  });
+
+  it("refuses to start without the complete protected public identity", () => {
+    expect(() => readWebsiteGrowthOutreachIdentity({
+      NODE_ENV: "test"
+    })).toThrow("WEBSITE_GROWTH_OUTREACH_MAILBOX");
+
+    expect(readWebsiteGrowthOutreachIdentity({
+      NODE_ENV: "test",
+      WEBSITE_GROWTH_OUTREACH_MAILBOX: identity.mailbox,
+      WEBSITE_GROWTH_OUTREACH_SENDER_NAME: identity.senderName,
+      WEBSITE_GROWTH_OUTREACH_PUBLIC_BRAND: identity.publicBrandName,
+      WEBSITE_GROWTH_OUTREACH_PUBLIC_PHONE: identity.publicPhone,
+      WEBSITE_GROWTH_OUTREACH_WEBSITE: identity.website,
+      WEBSITE_GROWTH_OUTREACH_CANADA_LEGAL_NAME: identity.canadianLegalName,
+      WEBSITE_GROWTH_OUTREACH_CANADA_ADDRESS: identity.canadianAddress,
+      WEBSITE_GROWTH_OUTREACH_US_LEGAL_NAME: identity.usLegalName,
+      WEBSITE_GROWTH_OUTREACH_US_ADDRESS: identity.usAddress
+    })).toEqual(identity);
   });
 });
 

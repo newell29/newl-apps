@@ -20,6 +20,8 @@ Relevant tables and enums are in `prisma/schema.prisma`. Operationally important
 
 `WebsiteGrowthBacklinkOpportunity` is the curated backlink system of record. It stores one tenant-scoped prospect per deterministic referring-domain/target-page dedupe key, human/executor lifecycle status, category, source and target URLs, quality signals, approved public outreach angle, cost flag, and verification timestamps. It does not store raw Semrush backlink rows. `REJECTED` and `ARCHIVED` records are hidden from the default workspace but retain the prior decision so Scout does not repeatedly propose them.
 
+For approved execution it also stores the public recipient, country, exact contact-source URL, consent basis, follow-up schedule, reply/opt-out state, and non-secret directory login metadata. `WebsiteGrowthOutreachMessage` is the tenant-scoped audit history for initial and follow-up messages and Microsoft conversation identifiers. `WebsiteGrowthOutreachSuppression` is the tenant-scoped do-not-contact list. Passwords and access tokens are not stored in these models.
+
 ```mermaid
 flowchart LR
   UI[Authenticated UI/API] --> Auth[Auth + module guard]
