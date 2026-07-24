@@ -23,6 +23,14 @@ type Suggestion = {
   riskLevel: string;
   feedbackCount: number;
   generatedAt: string;
+  pullRequestUrl: string | null;
+  developmentJob: {
+    status: string;
+    phase: string;
+    progressMessage: string | null;
+    pullRequestUrls: string[];
+    errorMessage: string | null;
+  } | null;
 };
 
 export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
@@ -119,12 +127,30 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ status })
     });
+    const body = await response.json().catch(() => ({}));
     setMessage(
       response.ok
         ? status === "APPROVED"
-          ? "Suggestion approved for a separate, reviewed development task. No code was started."
+          ? `Suggestion approved. Rivet job ${String(body.data?.developmentJob?.id ?? "")} is queued for the local Codex worker.`
           : "Suggestion rejected."
-        : "The suggestion decision could not be saved."
+        : body.error ?? "The suggestion decision could not be saved."
+    );
+    await load();
+    setBusy(false);
+  }
+
+  async function retrySuggestion(id: string) {
+    setBusy(true);
+    const response = await fetch(`/api/assistant/development-suggestions/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "retry" })
+    });
+    const body = await response.json().catch(() => ({}));
+    setMessage(
+      response.ok
+        ? `Rivet job ${String(body.data?.developmentJob?.id ?? "")} was queued again.`
+        : body.error ?? "The Rivet job could not be retried."
     );
     await load();
     setBusy(false);
@@ -182,7 +208,65 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
           </div>
         </section>
 
-        {isAdmin ? <section className="rounded-lg border border-border bg-card p-5 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold text-foreground">Development suggestions</h2><p className="mt-1 text-sm text-mutedForeground">Approval is a decision only; Codex work starts separately.</p></div><button disabled={busy} onClick={() => void generateSuggestions()} className="rounded-md border border-border px-3 py-2 text-sm font-semibold">Refresh queue</button></div><div className="mt-4 space-y-3">{suggestions.length === 0 ? <p className="text-sm text-mutedForeground">No development suggestions yet.</p> : suggestions.map((item) => <article key={item.id} className="rounded-md border border-border bg-background p-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-foreground">{item.title}</p><span className="rounded-full border border-border px-2 py-0.5 text-xs font-semibold">{item.status}</span></div><p className="mt-2 text-sm text-foreground">{item.summary}</p><p className="mt-2 text-xs text-mutedForeground">{item.feedbackCount} feedback item(s) · {item.riskLevel} risk</p>{item.status === "AWAITING_APPROVAL" ? <div className="mt-3 flex gap-2"><button disabled={busy} onClick={() => void decideSuggestion(item.id, "APPROVED")} className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground">Approve suggestion</button><button disabled={busy} onClick={() => void decideSuggestion(item.id, "REJECTED")} className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold">Reject</button></div> : null}</article>)}</div></section> : null}
+        {isAdmin ? (
+          <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-foreground">Development suggestions</h2>
+                <p className="mt-1 text-sm text-mutedForeground">
+                  Similar feedback is grouped first. Approval queues Rivet to build a reviewed Codex pull request.
+                </p>
+              </div>
+              <button disabled={busy} onClick={() => void generateSuggestions()} className="rounded-md border border-border px-3 py-2 text-sm font-semibold">
+                Refresh queue
+              </button>
+            </div>
+            <div className="mt-4 space-y-3">
+              {suggestions.length === 0 ? (
+                <p className="text-sm text-mutedForeground">No development suggestions yet.</p>
+              ) : suggestions.map((item) => (
+                <article key={item.id} className="rounded-md border border-border bg-background p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-semibold text-foreground">{item.title}</p>
+                    <span className="rounded-full border border-border px-2 py-0.5 text-xs font-semibold">
+                      {item.developmentJob?.phase ?? item.status}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm text-foreground">{item.summary}</p>
+                  <p className="mt-2 text-xs text-mutedForeground">{item.feedbackCount} similar feedback item(s) · {item.riskLevel} risk</p>
+                  {item.developmentJob?.progressMessage ? (
+                    <p className="mt-2 text-xs text-mutedForeground">{item.developmentJob.progressMessage}</p>
+                  ) : null}
+                  {item.developmentJob?.pullRequestUrls.map((url) => (
+                    <a key={url} href={url} target="_blank" rel="noreferrer" className="mt-2 block text-sm font-semibold text-primary underline">
+                      Review Rivet pull request
+                    </a>
+                  ))}
+                  {item.developmentJob?.errorMessage ? (
+                    <p className="mt-2 rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+                      {item.developmentJob.errorMessage}
+                    </p>
+                  ) : null}
+                  {item.status === "AWAITING_APPROVAL" ? (
+                    <div className="mt-3 flex gap-2">
+                      <button disabled={busy} onClick={() => void decideSuggestion(item.id, "APPROVED")} className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground">
+                        Approve &amp; start Rivet
+                      </button>
+                      <button disabled={busy} onClick={() => void decideSuggestion(item.id, "REJECTED")} className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold">
+                        Reject
+                      </button>
+                    </div>
+                  ) : null}
+                  {item.developmentJob?.status === "ERROR" ? (
+                    <button disabled={busy} onClick={() => void retrySuggestion(item.id)} className="mt-3 rounded-md border border-border px-3 py-1.5 text-xs font-semibold">
+                      Retry Rivet
+                    </button>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null}
       </div>
     </div>
   );

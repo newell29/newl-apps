@@ -14,7 +14,8 @@ Company Assistant / AI chat is documented because code, routes, schema, or tests
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
 - Operational feedback is stored separately from approved assistant memory. Employee reports begin as `REPORTED` evidence and cannot affect Nemo explanations until an administrator confirms the feedback and explicitly creates an `ApprovedOperationalLesson`.
-- Development suggestions are approval-queue records only. Creating or approving one does not start Codex, create a branch or pull request, merge, deploy, update Teamship, or print.
+- Development suggestions group similar employee reports into one focused issue before approval. Creating or refreshing the queue does not start development.
+- Selecting **Approve & start Rivet** records the administrator decision and atomically queues a tenant-scoped Rivet development job. The restricted local worker may use Codex to prepare an isolated branch and draft PR; it cannot merge, deploy, execute a migration, update Teamship, print, release an order, change permissions, or contact a customer.
 - Approved memory is database-backed and tenant-scoped, so it is available across Codex/OpenClaw chat threads. Chat history is useful context but is not the source of truth for Nemo's approved workflow understanding.
 
 ## Data model
@@ -57,4 +58,4 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Which write actions should require two-person approval? Requires owner confirmation.
 - Which external integration credentials should be moved from env fallback to tenant-scoped settings first? Requires owner confirmation.
 - The daily digest target is confirmed as Alex's Teams direct conversation at 10:00 AM `America/Toronto`; runtime enablement remains blocked on the reviewed production rollout.
-- Should approved development suggestions require a second explicit approval when Codex presents its proposed scope? Recommended; requires Alex confirmation.
+- Alex confirmed that one explicit **Approve & start Rivet** decision may start the restricted Codex branch-and-PR workflow. Merge and every production or operational action remain separate approvals.

@@ -12,6 +12,6 @@ Implementation boundaries:
 - `OperationalFeedback` is the durable, tenant-scoped report and evidence record.
 - Only confirmed or resolved feedback may be promoted, and only an administrator may create an `ApprovedOperationalLesson`.
 - Nemo retrieval uses active approved lessons; it must not retrieve raw reports as business rules.
-- `DevelopmentSuggestion` is an approval queue. Approval does not itself start Codex or authorize merge, deployment, Teamship writes, printing, customer communication, or database migration.
+- `DevelopmentSuggestion` is a focused approval queue. Similar feedback is grouped before review. Selecting **Approve & start Rivet** queues a restricted local Codex branch-and-PR job; it does not authorize merge, deployment, migration execution, Teamship writes, printing, shipping, permission changes, or customer communication.
 - Every feedback review, approved lesson, suggestion creation, and suggestion decision is recorded in the tenant audit log.
 - The daily OpenClaw digest is intentionally not installed by code. The approved plan is 10:00 AM `America/Toronto` to Alex's existing Teams direct conversation using a `user:<aad-object-id>` target. It remains disabled until the production migration, deployment, distinct assistant credential, and OpenClaw reload are separately approved and complete.
