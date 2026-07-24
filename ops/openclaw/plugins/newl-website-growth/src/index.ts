@@ -70,58 +70,62 @@ const plugin = defineToolPlugin({
       label: "Claim Approved Backlink Work",
       description: "Claim up to five human-approved, non-paid Website Growth backlink opportunities. Never invent or execute work that this tool does not return.",
       parameters: emptyParameters,
-      factory: createApiTool("/api/website-growth/backlinks/executor/claim", { limit: 5 })
+      factory: createApiTool("newl_backlink_claim", "/api/website-growth/backlinks/executor/claim", { limit: 5 })
     }),
     tool({
       name: "newl_backlink_follow_ups",
       label: "Get Due Backlink Follow-ups",
       description: "Return only approved outreach whose first or second follow-up is due and which has no recorded reply or opt-out.",
       parameters: emptyParameters,
-      factory: createApiTool("/api/website-growth/backlinks/executor/follow-ups", { limit: 5 })
+      factory: createApiTool("newl_backlink_follow_ups", "/api/website-growth/backlinks/executor/follow-ups", { limit: 5 })
     }),
     tool({
       name: "newl_backlink_verification",
       label: "Get Backlinks Due for Verification",
       description: "Return submitted directory or editorial links that are due for a public browser recheck. Report LIVE only when the backlink is visible without authentication.",
       parameters: emptyParameters,
-      factory: createApiTool("/api/website-growth/backlinks/executor/verification", { limit: 5 })
+      factory: createApiTool("newl_backlink_verification", "/api/website-growth/backlinks/executor/verification", { limit: 5 })
     }),
     tool({
       name: "newl_backlink_sync_replies",
       label: "Sync Backlink Outreach Replies",
       description: "Read only the dedicated outreach mailbox through Newl Apps, match replies to sent Website Growth conversations, suppress opt-outs and stop their follow-ups.",
       parameters: emptyParameters,
-      factory: createApiTool("/api/website-growth/backlinks/executor/sync-replies", {})
+      factory: createApiTool("newl_backlink_sync_replies", "/api/website-growth/backlinks/executor/sync-replies", {})
     }),
     tool({
       name: "newl_backlink_summary",
       label: "Summarize Backlink Outreach",
       description: "Return deterministic Website Growth review and execution counts plus the Newl Apps review link for the Teams reminder.",
       parameters: emptyParameters,
-      factory: createApiTool("/api/website-growth/backlinks/executor/summary", {})
+      factory: createApiTool("newl_backlink_summary", "/api/website-growth/backlinks/executor/summary", {})
     }),
     tool({
       name: "newl_backlink_send_email",
       label: "Send Approved Backlink Outreach",
       description: "Send one personalized message through the dedicated Newl mailbox. Newl Apps rechecks human approval, recipient suppression, consent evidence, country rules and volume limits before Microsoft 365 is called.",
       parameters: sendEmailParameters,
-      factory: createParameterizedApiTool("/api/website-growth/backlinks/executor/send-email")
+      factory: createParameterizedApiTool("newl_backlink_send_email", "/api/website-growth/backlinks/executor/send-email")
     }),
     tool({
       name: "newl_backlink_report",
       label: "Report Backlink Execution",
       description: "Report a confirmed directory submission, blocked action, lost opportunity or publicly verified live backlink. Never include a password or secret in any field.",
       parameters: reportParameters,
-      factory: createParameterizedApiTool("/api/website-growth/backlinks/executor/report")
+      factory: createParameterizedApiTool("newl_backlink_report", "/api/website-growth/backlinks/executor/report")
     })
   ]
 });
 
 export default plugin;
 
-export function createApiTool(path: string, payload: Record<string, unknown>) {
+export function createApiTool(
+  name: string,
+  path: string,
+  payload: Record<string, unknown>
+) {
   return ({ config }: { config: WebsiteGrowthPluginConfig }) => ({
-    name: "newl_website_growth_api",
+    name,
     label: "Newl Website Growth API",
     description: "Calls the configured Newl Apps Website Growth executor endpoint.",
     parameters: emptyParameters,
@@ -131,9 +135,9 @@ export function createApiTool(path: string, payload: Record<string, unknown>) {
   });
 }
 
-export function createParameterizedApiTool(path: string) {
+export function createParameterizedApiTool(name: string, path: string) {
   return ({ config }: { config: WebsiteGrowthPluginConfig }) => ({
-    name: "newl_website_growth_api",
+    name,
     label: "Newl Website Growth API",
     description: "Calls the configured Newl Apps Website Growth executor endpoint.",
     parameters: Type.Record(Type.String(), Type.Unknown()),

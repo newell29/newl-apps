@@ -14,7 +14,7 @@ describe("Newl Website Growth OpenClaw plugin", () => {
   it("does not call Newl Apps when the protected token is missing", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const tool = createApiTool("/claim", { limit: 5 })({
+    const tool = createApiTool("newl_backlink_claim", "/claim", { limit: 5 })({
       config: {
         baseUrl: "https://newl-apps.example.com",
         backlinkTokenEnv: "TEST_BACKLINK_TOKEN"
@@ -36,7 +36,7 @@ describe("Newl Website Growth OpenClaw plugin", () => {
       })
     );
     vi.stubGlobal("fetch", fetchMock);
-    const tool = createParameterizedApiTool("/report")({
+    const tool = createParameterizedApiTool("newl_backlink_report", "/report")({
       config: {
         baseUrl: "https://newl-apps.example.com/",
         backlinkTokenEnv: "TEST_BACKLINK_TOKEN"
@@ -58,5 +58,18 @@ describe("Newl Website Growth OpenClaw plugin", () => {
         })
       })
     );
+  });
+
+  it("registers each factory under its declared OpenClaw tool name", () => {
+    const config = {
+      baseUrl: "https://newl-apps.example.com",
+      backlinkTokenEnv: "TEST_BACKLINK_TOKEN"
+    };
+    expect(
+      createApiTool("newl_backlink_claim", "/claim", { limit: 5 })({ config }).name
+    ).toBe("newl_backlink_claim");
+    expect(
+      createParameterizedApiTool("newl_backlink_send_email", "/send")({ config }).name
+    ).toBe("newl_backlink_send_email");
   });
 });
