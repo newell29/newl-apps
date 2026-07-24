@@ -44,9 +44,7 @@ git -C "${runtime_repo_path}" fetch origin "+main:${runtime_main_ref}"
 git -C "${runtime_repo_path}" checkout --detach "${runtime_main_ref}"
 
 runtime_runner_path="${runtime_repo_path}/ops/openclaw/run-website-growth-scout-runtime.sh"
-chmod 700 \
-  "${runtime_runner_path}" \
-  "${runtime_repo_path}/ops/openclaw/run-website-growth-scout.sh"
+chmod 700 "${runtime_repo_path}/ops/openclaw/run-website-growth-scout.sh"
 
 openclaw cron add \
   --name "NEWL Website Growth Scout" \
