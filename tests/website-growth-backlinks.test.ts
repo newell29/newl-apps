@@ -41,6 +41,8 @@ describe("Website Growth backlink curation", () => {
   it("parses the bounded structured Scout review", () => {
     const review = parseWebsiteGrowthBacklinkReview({
       queried: true,
+      source: "LIVE_MCP",
+      observedAt: "2026-07-24T15:00:00.000Z",
       summary: "Three strong logistics prospects remained after review.",
       rawProspectsReviewed: 87,
       duplicatesRejected: 21,
@@ -60,6 +62,8 @@ describe("Website Growth backlink curation", () => {
   it("refuses an oversized raw-style prospect list", () => {
     expect(() => parseWebsiteGrowthBacklinkReview({
       queried: true,
+      source: "LIVE_MCP",
+      observedAt: "2026-07-24T15:00:00.000Z",
       summary: "Too many rows",
       rawProspectsReviewed: 16,
       duplicatesRejected: 0,
@@ -97,6 +101,8 @@ describe("Website Growth backlink curation", () => {
     const lines = buildWebsiteGrowthBacklinkTeamsLines({
       review: {
         queried: true,
+        source: "LIVE_MCP",
+        observedAt: "2026-07-24T15:00:00.000Z",
         summary: "No prospects met the quality threshold.",
         rawProspectsReviewed: 42,
         duplicatesRejected: 12,

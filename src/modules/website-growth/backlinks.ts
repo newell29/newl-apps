@@ -34,7 +34,9 @@ export type WebsiteGrowthBacklinkProspect = {
 };
 
 export type WebsiteGrowthBacklinkReview = {
-  queried: true;
+  queried: boolean;
+  source: "LIVE_MCP" | "CACHE";
+  observedAt: string;
   summary: string;
   rawProspectsReviewed: number;
   duplicatesRejected: number;
@@ -66,21 +68,44 @@ const activeBacklinkStatuses: WebsiteGrowthBacklinkStatus[] = [
 export function parseWebsiteGrowthBacklinkReview(value: unknown): WebsiteGrowthBacklinkReview {
   const record = readRecord(value);
   const prospects = Array.isArray(record.prospects) ? record.prospects : null;
-  if (record.queried !== true || !prospects) {
+  const source = readRequiredString(record.source, 20);
+  const observedAt = readRequiredTimestamp(record.observedAt);
+  if (
+    typeof record.queried !== "boolean" ||
+    (source !== "LIVE_MCP" && source !== "CACHE") ||
+    !prospects
+  ) {
     throw new Error("Scout completion is missing the required backlink review.");
+  }
+  if (source === "LIVE_MCP" && record.queried !== true) {
+    throw new Error("A live backlink review must query SEMrush MCP.");
+  }
+  if (source === "CACHE" && record.queried !== false) {
+    throw new Error("A cached backlink review must not claim a live SEMrush query.");
   }
   if (prospects.length > MAX_BACKLINK_PROSPECTS_PER_RUN) {
     throw new Error(`Scout may return at most ${MAX_BACKLINK_PROSPECTS_PER_RUN} backlink prospects.`);
   }
 
   return {
-    queried: true,
+    queried: record.queried,
+    source,
+    observedAt,
     summary: readRequiredString(record.summary, 4000),
     rawProspectsReviewed: readNonNegativeInteger(record.rawProspectsReviewed),
     duplicatesRejected: readNonNegativeInteger(record.duplicatesRejected),
     qualityRejected: readNonNegativeInteger(record.qualityRejected),
     prospects: prospects.map(parseBacklinkProspect)
   };
+}
+
+function readRequiredTimestamp(value: unknown) {
+  const timestamp = readRequiredString(value, 100);
+  const parsed = Date.parse(timestamp);
+  if (!Number.isFinite(parsed)) {
+    throw new Error("Backlink observedAt must be an ISO timestamp.");
+  }
+  return new Date(parsed).toISOString();
 }
 
 export function buildWebsiteGrowthBacklinkDedupeKey({
@@ -290,6 +315,15 @@ export function buildWebsiteGrowthBacklinkTeamsLines({
   persisted: WebsiteGrowthBacklinkPersistenceSummary;
   reviewBaseUrl: string;
 }) {
+  if (review.source === "CACHE") {
+    return [
+      "",
+      `Backlink Scout: reused the curated SEMrush cache from ${formatObservedDate(review.observedAt)}; no live backlink API units were used.`,
+      `${persisted.activeQueueCount} active curated item${persisted.activeQueueCount === 1 ? "" : "s"} remain in the bounded queue; cached evidence never creates or refreshes a prospect.`,
+      review.summary,
+      `${normalizeBaseUrl(reviewBaseUrl)}/website-growth/backlinks`
+    ].join("\n");
+  }
   const lines = [
     "",
     `Backlink Scout: ${persisted.rawProspectsReviewed} prospects reviewed; ${review.duplicatesRejected} duplicates and ${review.qualityRejected + persisted.skippedByQualityGate} weak or risky prospects removed.`,
@@ -300,6 +334,13 @@ export function buildWebsiteGrowthBacklinkTeamsLines({
       : "No new backlink decision is required this week."
   ];
   return lines.join("\n");
+}
+
+function formatObservedDate(value: string) {
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime())
+    ? parsed.toLocaleDateString("en-CA", { timeZone: "America/Toronto" })
+    : "an unknown date";
 }
 
 function parseBacklinkProspect(value: unknown): WebsiteGrowthBacklinkProspect {

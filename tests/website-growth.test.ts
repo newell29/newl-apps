@@ -48,9 +48,15 @@ import {
   buildWebsiteGrowthKeywordImportReport,
   buildWebsiteGrowthPerformanceReport
 } from "@/modules/website-growth/keyword-tracking";
+import {
+  buildWebsiteGrowthReportDownloadLinks,
+  readWebsiteGrowthScoutReport,
+  verifyWebsiteGrowthReportDownload
+} from "@/modules/website-growth/report-download";
 import { selectWeeklyWebsiteGrowthCandidates } from "@/modules/website-growth/weekly-plan";
 import {
   buildWebsiteGrowthScoutTeamsMessage,
+  buildWebsiteGrowthScoutWeekdayCheckInMessage,
   parseWebsiteGrowthScoutCompletion
 } from "@/modules/website-growth/scout-run";
 import {
@@ -355,6 +361,8 @@ describe("website growth Codex Scout completion", () => {
       runSummary: "Prepared one evidence-backed page improvement.",
       semrush: {
         queried: true,
+        source: "LIVE_MCP",
+        observedAt: "2026-07-24T15:00:00.000Z",
         summary: "The existing page ranks for a relevant commercial keyword.",
         tracking: semrushTrackingSnapshot(),
         rows: [{
@@ -372,6 +380,8 @@ describe("website growth Codex Scout completion", () => {
       },
       backlinks: {
         queried: true,
+        source: "LIVE_MCP",
+        observedAt: "2026-07-24T15:00:00.000Z",
         summary: "One backlink prospect passed review.",
         rawProspectsReviewed: 20,
         duplicatesRejected: 8,
@@ -413,6 +423,8 @@ describe("website growth Codex Scout completion", () => {
       semrush: { queried: false, summary: "Unavailable", rows: [], tracking: semrushTrackingSnapshot() },
       backlinks: {
         queried: true,
+        source: "LIVE_MCP",
+        observedAt: "2026-07-24T15:00:00.000Z",
         summary: "No backlink prospects qualified.",
         rawProspectsReviewed: 0,
         duplicatesRejected: 0,
@@ -420,13 +432,44 @@ describe("website growth Codex Scout completion", () => {
         prospects: []
       },
       drafts: []
-    })).toThrow("required response structure");
+    })).toThrow("must identify live or cached SEMrush evidence");
+  });
+
+  it("accepts explicitly dated cached SEMrush evidence without claiming a live query", () => {
+    const completion = parseWebsiteGrowthScoutCompletion({
+      runSummary: "Reused the last fresh SEMrush snapshot after the account reached its API-unit limit.",
+      semrush: {
+        queried: false,
+        source: "CACHE",
+        observedAt: "2026-07-20T13:15:00.000Z",
+        summary: "Cached Position Tracking evidence remains within the eight-day freshness window.",
+        rows: [],
+        tracking: semrushTrackingSnapshot()
+      },
+      backlinks: {
+        queried: false,
+        source: "CACHE",
+        observedAt: "2026-07-20T13:15:00.000Z",
+        summary: "Reused the curated backlink queue without refreshing last-seen dates.",
+        rawProspectsReviewed: 0,
+        duplicatesRejected: 0,
+        qualityRejected: 0,
+        prospects: []
+      },
+      drafts: []
+    });
+
+    expect(completion.semrush.source).toBe("CACHE");
+    expect(completion.semrush.queried).toBe(false);
+    expect(completion.backlinks.source).toBe("CACHE");
   });
 
   it("builds a deterministic Teams approval message with direct review links", () => {
     const message = buildWebsiteGrowthScoutTeamsMessage({
       drafts: [{ id: "draft_1", title: "GTA local trucking", summary: "Improve the current commercial page." }],
       semrushQueried: true,
+      semrushSource: "LIVE_MCP",
+      semrushObservedAt: "2026-07-24T15:00:00.000Z",
       semrushSummary: "Found one weak commercial keyword.",
       weeklyPlan: { reviewedCount: 500, selectedCount: 12 },
       candidateCount: 6,
@@ -434,20 +477,29 @@ describe("website growth Codex Scout completion", () => {
       researchInventory: { MONITORING: 6105 },
       keywordAdditionCount: 2,
       tracking: semrushTrackingSnapshot(),
+      reportLinks: {
+        performance: "https://newl-apps.example.com/api/seo-performance.xlsx?signature=valid",
+        keywordImport: "https://newl-apps.example.com/api/semrush-keywords.xlsx?signature=valid",
+        expiresAt: "2026-07-31T15:00:00.000Z"
+      },
       reviewBaseUrl: "https://newl-apps.example.com/"
     });
 
-    expect(message).toContain("Search Console, GA4, first-party website forms, and SEMrush MCP");
+    expect(message).toContain("Search Console, GA4, first-party website forms, and live SEMrush MCP");
     expect(message).toContain("https://newl-apps.example.com/website-growth/drafts/draft_1");
     expect(message).toContain("Approval starts the developer build automatically");
     expect(message).toContain("6505 stored signals");
     expect(message).toContain("6 sent to Codex; 1 promoted");
+    expect(message).toContain("SEO performance: https://newl-apps.example.com/api/seo-performance.xlsx");
+    expect(message).toContain("SEMrush keyword import: https://newl-apps.example.com/api/semrush-keywords.xlsx");
   });
 
   it("sends a useful weekday Teams message when no new idea is promoted", () => {
     const message = buildWebsiteGrowthScoutTeamsMessage({
       drafts: [],
       semrushQueried: true,
+      semrushSource: "LIVE_MCP",
+      semrushObservedAt: "2026-07-24T15:00:00.000Z",
       semrushSummary: "Position Tracking refreshed.",
       weeklyPlan: { reviewedCount: 0, selectedCount: 0 },
       candidateCount: 0,
@@ -455,12 +507,131 @@ describe("website growth Codex Scout completion", () => {
       researchInventory: { MONITORING: 6105 },
       keywordAdditionCount: 0,
       tracking: semrushTrackingSnapshot(),
+      reportLinks: {
+        performance: "https://newl-apps.example.com/api/seo-performance.xlsx?signature=valid",
+        keywordImport: null,
+        expiresAt: "2026-07-31T15:00:00.000Z"
+      },
       reviewBaseUrl: "https://newl-apps.example.com"
     });
 
     expect(message).toContain("0 ideas promoted");
     expect(message).toContain("No new page brief needs your approval today");
-    expect(message).toContain("performance workbook is attached");
+    expect(message).toContain("performance workbook is available from the secure download link");
+  });
+
+  it("builds a lightweight weekday check-in without implying live SEMrush or Codex work", () => {
+    const message = buildWebsiteGrowthScoutWeekdayCheckInMessage({
+      sourceSummary: {
+        sources: [
+          { source: "GOOGLE_SEARCH_CONSOLE_API", status: "success", rowCount: 20 },
+          { source: "GA4_API", status: "success", rowCount: 10 }
+        ]
+      },
+      weeklyPlan: { selectedCount: 1 },
+      researchSignalCount: 6505,
+      researchInventory: { MONITORING: 6105, REVIEWING: 31 },
+      semrushCache: {
+        available: true,
+        fresh: true,
+        observedAt: "2026-07-20T13:15:00.000Z",
+        expiresAt: "2026-07-28T13:15:00.000Z",
+        ageDays: 4,
+        tracking: semrushTrackingSnapshot()
+      },
+      backlinkCounts: { NEEDS_REVIEW: 4 },
+      reviewBaseUrl: "https://newl-apps.example.com"
+    });
+
+    expect(message).toContain("no SEMrush API units or Codex research were used");
+    expect(message).toContain("SEMrush cache: current");
+    expect(message).toContain("4 curated prospects currently need review");
+  });
+});
+
+describe("website growth signed Excel downloads", () => {
+  const reportEnvironment = {
+    NODE_ENV: "test",
+    WEBSITE_GROWTH_REPORT_DOWNLOAD_SECRET: "website-growth-report-secret-1234567890"
+  } satisfies NodeJS.ProcessEnv;
+  const now = new Date("2026-07-24T15:00:00.000Z");
+
+  it("creates tenant-bound links and rejects a modified signature", () => {
+    const links = buildWebsiteGrowthReportDownloadLinks({
+      tenantId: "tenant_1",
+      runId: "run_1",
+      baseUrl: "https://newl-apps.example.com",
+      includeKeywordImport: true,
+      now,
+      env: reportEnvironment
+    });
+    const url = new URL(links.performance);
+    const expires = Number(url.searchParams.get("expires"));
+    const signature = url.searchParams.get("signature") ?? "";
+
+    expect(url.pathname).toBe(
+      "/api/website-growth/scout/runs/run_1/reports/seo-performance.xlsx"
+    );
+    expect(() => verifyWebsiteGrowthReportDownload({
+      tenantId: "tenant_1",
+      runId: "run_1",
+      reportName: "seo-performance.xlsx",
+      expires,
+      signature,
+      now,
+      env: reportEnvironment
+    })).not.toThrow();
+    expect(() => verifyWebsiteGrowthReportDownload({
+      tenantId: "tenant_1",
+      runId: "run_1",
+      reportName: "seo-performance.xlsx",
+      expires,
+      signature: "invalid",
+      now,
+      env: reportEnvironment
+    })).toThrow("invalid");
+  });
+
+  it("rejects expired links and reads only the selected stored report", () => {
+    const links = buildWebsiteGrowthReportDownloadLinks({
+      tenantId: "tenant_1",
+      runId: "run_1",
+      baseUrl: "https://newl-apps.example.com",
+      includeKeywordImport: false,
+      now,
+      env: reportEnvironment
+    });
+    const url = new URL(links.performance);
+
+    expect(() => verifyWebsiteGrowthReportDownload({
+      tenantId: "tenant_1",
+      runId: "run_1",
+      reportName: "seo-performance.xlsx",
+      expires: Number(url.searchParams.get("expires")),
+      signature: url.searchParams.get("signature") ?? "",
+      now: new Date("2026-08-01T15:00:01.000Z"),
+      env: reportEnvironment
+    })).toThrow("expired");
+
+    const report = readWebsiteGrowthScoutReport({
+      reports: {
+        performance: {
+          filename: "newl-seo-performance.xlsx",
+          sheetName: "Weekly SEO",
+          columns: [{ key: "item", header: "Metric" }],
+          rows: [{ item: "Visibility" }]
+        },
+        keywordImport: {
+          filename: "newl-semrush-keywords.xlsx",
+          sheetName: "SEMrush Import",
+          columns: [{ key: "keyword", header: "Keyword" }],
+          rows: [{ keyword: "kitting services" }]
+        }
+      }
+    } as Prisma.JsonObject, "seo-performance.xlsx");
+
+    expect(report.filename).toBe("newl-seo-performance.xlsx");
+    expect(report.rows).toEqual([{ item: "Visibility" }]);
   });
 });
 

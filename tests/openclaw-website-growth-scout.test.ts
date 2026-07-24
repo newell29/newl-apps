@@ -52,14 +52,16 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     expect(script).toContain("${codex_bin}");
   });
 
-  it("installs an idempotent weekday schedule against a dedicated runtime worktree", async () => {
+  it("splits the Monday deep run from cache-backed weekday check-ins", async () => {
     const installer = await readFile(installerPath, "utf8");
 
-    expect(installer).toContain('--cron "15 9 * * 1-5"');
+    expect(installer).toContain('--cron "15 9 * * 1"');
+    expect(installer).toContain('--cron "15 9 * * 2-5"');
     expect(installer).toContain("NEWL_APPS_SCOUT_RUNTIME_REPO_PATH");
     expect(installer).toContain("run-website-growth-scout-runtime.sh");
     expect(installer).toContain('--declaration-key "newl.website-growth.scout.weekly.v1"');
-    expect(installer).not.toContain('--cron "15 9 * * 1"');
+    expect(installer).toContain('--declaration-key "newl.website-growth.scout.weekday-checkin.v1"');
+    expect(installer).toContain('\\"--light\\"');
   });
 
   it("updates the clean dedicated runtime from main before every Scout run", async () => {
@@ -68,7 +70,20 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     expect(runtimeRunner).toContain('status --porcelain --untracked-files=normal');
     expect(runtimeRunner).toContain('fetch --quiet origin "+main:${runtime_main_ref}"');
     expect(runtimeRunner).toContain('checkout --quiet --detach "${runtime_main_ref}"');
-    expect(runtimeRunner).toContain('exec /bin/zsh "${runtime_repo_path}/ops/openclaw/run-website-growth-scout.sh"');
+    expect(runtimeRunner).toContain('exec /bin/zsh "${runtime_repo_path}/ops/openclaw/run-website-growth-scout.sh" "$@"');
+  });
+
+  it("delivers Excel reports as Newl Apps links without Teams media uploads", async () => {
+    const [installer, runner, helper] = await Promise.all([
+      readFile(installerPath, "utf8"),
+      readFile(runnerPath, "utf8"),
+      readFile(runtimeHelperPath, "utf8")
+    ]);
+
+    expect(helper).not.toContain("WEBSITE_GROWTH_TEAMS_FILE_TARGET");
+    expect(installer).not.toContain("WEBSITE_GROWTH_TEAMS_FILE_TARGET");
+    expect(runner).not.toContain("--media");
+    expect(helper).toContain('--target "${WEBSITE_GROWTH_TEAMS_TARGET}"');
   });
 
   it("sends safe Teams outcomes for duplicate and failed runs", async () => {
@@ -127,7 +142,7 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     expect(missingTypes).toEqual([]);
   });
 
-  it("creates valid SEO Excel attachments from the completion response", async () => {
+  it("creates valid SEO Excel workbooks from the completion response", async () => {
     const outputDirectory = await mkdtemp(path.join(tmpdir(), "newl-scout-reports-"));
     const responsePath = path.join(outputDirectory, "completion.json");
     const reportScript = path.join(

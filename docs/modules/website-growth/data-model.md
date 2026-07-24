@@ -18,6 +18,8 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.
 
+SEMrush cache metadata lives in successful tenant-scoped `WebsiteGrowthDataImport.summary` records. A tracking snapshot records its live `observedAt`, calculated `expiresAt`, campaign metadata, bounded tracked-keyword rows, and the source run ID. `WebsiteGrowthMetric` remains the historical metric ledger. Reusing a cache writes only a small audit import; it does not duplicate metric rows or alter the original evidence timestamp.
+
 `WebsiteGrowthBacklinkOpportunity` is the curated backlink system of record. It stores one tenant-scoped prospect per deterministic referring-domain/target-page dedupe key, human/executor lifecycle status, category, source and target URLs, quality signals, approved public outreach angle, cost flag, and verification timestamps. It does not store raw Semrush backlink rows. `REJECTED` and `ARCHIVED` records are hidden from the default workspace but retain the prior decision so Scout does not repeatedly propose them.
 
 For approved execution it also stores the public recipient, country, exact contact-source URL, consent basis, follow-up schedule, reply/opt-out state, and non-secret directory login metadata. `WebsiteGrowthOutreachMessage` is the tenant-scoped audit history for initial and follow-up messages and Microsoft conversation identifiers. `WebsiteGrowthOutreachSuppression` is the tenant-scoped do-not-contact list. Passwords and access tokens are not stored in these models.

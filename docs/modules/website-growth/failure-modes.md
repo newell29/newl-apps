@@ -9,12 +9,15 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 ## Scout-specific failures
 
 - Missing Google credentials: that source receives an error import, but other first-party sources continue.
-- Missing or expired SEMrush OAuth: the worker stops and marks the Scout job failed; it never silently generates a scheduled slate without SEMrush.
+- Missing or expired SEMrush OAuth, or exhausted API units: the Monday worker may continue only with the exact cache supplied by Newl Apps when that cache is no more than eight days old. It labels the result as cached and preserves the original observation date. Without a fresh cache, the run fails.
 - Codex output outside the stored candidate IDs: completion is rejected.
 - Malformed or oversized SEMrush output: completion is rejected; at most 200 sanitized rows are accepted.
 - Duplicate worker start: an active tenant run blocks a second run for three hours.
 - Dedicated runtime update failure: the protected worktree remains unchanged, a safe Teams failure notice is attempted, and Scout does not start.
 - Teams delivery failure after drafts are saved: the command job fails and the links remain available in Newl Apps; the safe failure notice is attempted through the same configured Teams target and may also fail when the channel itself is unavailable.
+- Teams/OneDrive file consent rejects Allow: Website Growth reports no longer use that transport. The Teams summary contains a signed Newl Apps download link instead.
+- Expired or modified Excel link: the download route returns no workbook. The next deep Scout report creates fresh seven-day links; changing the tenant, run, report name, expiry, or signature invalidates the link.
+- Missing report signing secret: completion fails safely unless either `WEBSITE_GROWTH_REPORT_DOWNLOAD_SECRET` or the existing `OPENCLAW_WEBSITE_GROWTH_TOKEN` contains at least 32 characters.
 - Duplicate trigger: the second run exits successfully after sending a Teams check-in; the active run remains authoritative.
 - No candidates: the job still refreshes Position Tracking and backlink research, succeeds, and sends a Teams report without a page-approval request.
 - No backlink prospects: the job succeeds and the Teams summary explicitly reports zero new prospects.
