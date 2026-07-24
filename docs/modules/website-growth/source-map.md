@@ -22,8 +22,13 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 | Backlink approval actions | `src/modules/website-growth/actions.ts` |
 | Backlink review UI | `src/app/(authenticated)/website-growth/backlinks/page.tsx` |
 | Approved-work executor service | `src/modules/website-growth/backlink-executor.ts` |
-| Executor machine API | `src/app/api/website-growth/backlinks/executor/claim` and `report` |
+| Executor machine API | `src/app/api/website-growth/backlinks/executor/*` |
 | Executor runtime contract | `ops/openclaw/skills/website-growth-backlink-executor/SKILL.md` |
+| Outbound compliance, limits, follow-ups, reply sync, suppression, Teams summary | `src/modules/website-growth/backlink-outreach.ts` |
+| Microsoft 365 draft/send helper | `src/server/integrations/microsoft-graph-mail.ts` |
+| Dedicated OpenClaw tool plugin | `ops/openclaw/plugins/newl-website-growth` |
+| Protected Scout installer and disabled weekday schedule | `ops/openclaw/install-website-growth-backlink-executor.sh` |
+| Production rollout and rollback | `docs/modules/website-growth/backlink-outreach-rollout.md` |
 
 ## Workflow / rules summary
 

@@ -51,7 +51,9 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Which status values map to employee-approved business language? Requires employee confirmation.
 - Which write actions should require two-person approval? Requires owner confirmation.
 - Which external integration credentials should be moved from env fallback to tenant-scoped settings first? Requires owner confirmation.
-- Which dedicated public mailbox should send backlink outreach? Requires owner confirmation before outbound automation.
+- Which dedicated public mailbox should send backlink outreach? Confirmed by owner on 2026-07-24: `partnerships@newlgroup.com`.
+- When may backlink opportunity approval become automatic? Requires owner confirmation after review of at least the first 20 supervised/manual approvals, response quality, opt-outs, and false-positive rate.
+- Which owner-approved password manager may store credentials for directory accounts that cannot use email-link or reset-based access? Requires owner confirmation; until then those cases remain `BLOCKED`.
 - Which exact legal name, public descriptions, locations, phone number, service categories, logos, social profiles, and current certifications may the executor use? Requires owner completion of the protected business profile.
 - Should any directory accounts be created automatically after reviewing the first 20 prospects, or should account creation remain a per-site escalation? Requires owner confirmation.
 - Which free directory terms may the executor accept, if any? Current implementation blocks terms acceptance by default and requires owner confirmation.

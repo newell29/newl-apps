@@ -22,6 +22,12 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - Missing backlink-executor token: discovery and approval continue, but approved work is not claimable.
 - CAPTCHA, MFA, payment, legal terms, missing public business facts, or access-control challenge: the executor reports `BLOCKED`; it must not bypass the control.
 - Paid placement: remains visible for a separate owner decision and is excluded from machine claims.
+- Missing or incomplete public identity: the send is refused before the database or Microsoft Graph is changed.
+- Missing Microsoft Graph mail permission or mailbox scope: the opportunity is marked `BLOCKED` and the dedicated mailbox must be checked before retrying, preventing an uncertain send from becoming a duplicate.
+- Suppressed recipient, invalid public contact source, unsupported country, Canadian recipient with a US-only basis, or reached volume limit: the send is refused.
+- Reply sync failure: no follow-up state is advanced. The next run retries the mailbox read.
+- Opt-out: the opportunity becomes `LOST`, the next follow-up is cancelled, and the normalized email is added to the tenant suppression list.
+- Expired executor claim: the item becomes `BLOCKED` instead of being silently reclaimed, because a prior external submission may have partially completed.
 
 ## Developer comparison failures
 

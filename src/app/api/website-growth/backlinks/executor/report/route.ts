@@ -26,7 +26,15 @@ export async function POST(request: Request) {
       opportunityId: body.opportunityId.trim(),
       status: parseWebsiteGrowthBacklinkExecutionStatus(body.status),
       notes: typeof body.notes === "string" ? body.notes : null,
-      liveUrl: typeof body.liveUrl === "string" ? body.liveUrl : null
+      liveUrl: typeof body.liveUrl === "string" ? body.liveUrl : null,
+      directoryLoginUrl:
+        typeof body.directoryLoginUrl === "string" ? body.directoryLoginUrl : null,
+      directoryUsername:
+        typeof body.directoryUsername === "string" ? body.directoryUsername : null,
+      acceptedTermsUrl:
+        typeof body.acceptedTermsUrl === "string" ? body.acceptedTermsUrl : null,
+      acceptedTermsSummary:
+        typeof body.acceptedTermsSummary === "string" ? body.acceptedTermsSummary : null
     });
     return NextResponse.json({ data: { updated: true } });
   } catch (error) {
