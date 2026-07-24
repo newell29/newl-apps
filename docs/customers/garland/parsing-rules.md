@@ -23,6 +23,8 @@ flowchart TB
 
 Emails are classified using Garland-domain, PS-range, order/page-count, attachment, and correction signals. Attachments are hashed for duplicate detection. Parsed PDF pages extract PS number, SR number, ship-to data, PO, freight terms, order date, ship-via, instructions, and item rows when present. Teamship review compares Garland parsed data with Teamship details.
 
+Garland Lot/Serial references may be all-numeric values from 8 through 16 digits, or alphanumeric values containing at least one digit. Six-digit site/location codes remain excluded from serial extraction. Confirmed employee feedback includes valid eight-digit references, so serialized items must use `SN:` commodity text rather than the non-serialized `QTY:` fallback.
+
 ## Pallet and printing notes
 
 Pallet dimensions, serials, weight, and SKU observations are represented in Teamship review/update types and `GarlandProductDimensionObservation`. The UPS special dimension rule is confirmed in existing documentation and tests should be consulted before changing it. Printer mappings, duplicate print protection, and a general print service were not located; production printing requires explicit human approval.

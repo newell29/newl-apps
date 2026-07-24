@@ -449,7 +449,7 @@ function isGarlandLotSerialToken(value: string) {
   }
 
   if (/^\d+$/.test(normalized)) {
-    return normalized.length >= 10 && normalized.length <= 16;
+    return normalized.length >= 8 && normalized.length <= 16;
   }
 
   return /\d/.test(normalized);
