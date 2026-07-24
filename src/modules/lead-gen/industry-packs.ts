@@ -99,6 +99,10 @@ export function isTradeMiningIndustryPackId(value: string): value is TradeMining
   return packById.has(value as TradeMiningIndustryPackId);
 }
 
+export function isTradeMiningIndustryFilterMode(value: string): value is TradeMiningIndustryFilterMode {
+  return validModes.has(value);
+}
+
 export function normalizeTradeMiningIndustryPackIds(value: unknown) {
   if (!Array.isArray(value)) {
     return [] as TradeMiningIndustryPackId[];
@@ -115,7 +119,7 @@ export function normalizeTradeMiningIndustryPackIds(value: unknown) {
 export function normalizeTradeMiningIndustryFilterMode(
   value: unknown
 ): TradeMiningIndustryFilterMode {
-  return typeof value === "string" && validModes.has(value) ? (value as TradeMiningIndustryFilterMode) : "PREFER";
+  return typeof value === "string" && isTradeMiningIndustryFilterMode(value) ? value : "PREFER";
 }
 
 export function selectedTradeMiningIndustryPacks(ids: readonly string[]) {

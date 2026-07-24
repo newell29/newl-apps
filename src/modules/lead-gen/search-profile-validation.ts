@@ -1,7 +1,7 @@
 import { canonicalizeTradeMiningDestinationPort } from "@/modules/lead-gen/search-profile-suggestions";
 import {
-  isTradeMiningIndustryPackId,
-  TRADEMINING_INDUSTRY_FILTER_MODES
+  isTradeMiningIndustryFilterMode,
+  isTradeMiningIndustryPackId
 } from "@/modules/lead-gen/industry-packs";
 
 export const tradeMiningCompanyIdentityRoleOptions = [
@@ -80,7 +80,7 @@ export function validateTradeMiningSearchProfile(input: TradeMiningSearchProfile
   }
   if (
     input.industryFilterMode &&
-    !TRADEMINING_INDUSTRY_FILTER_MODES.includes(input.industryFilterMode)
+    !isTradeMiningIndustryFilterMode(input.industryFilterMode)
   ) {
     errors.push("Industry mode must be HARD, PREFER, or EXCLUDE.");
   }
