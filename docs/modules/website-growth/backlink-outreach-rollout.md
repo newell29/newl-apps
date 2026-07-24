@@ -13,6 +13,7 @@ Scout uses its own OpenClaw agent and workspace with Codex `gpt-5.6-sol` at high
 - Scout may research and Codex-review prospects automatically.
 - Only an Admin or Manager may approve an opportunity in Newl Apps.
 - Approval authorizes the approved, non-paid outreach or ordinary free-directory action for that opportunity.
+- An Admin or Manager may move an accidentally approved opportunity back to review while it is still `APPROVED`. Once Scout claims it and execution starts, the UI no longer offers that reversal.
 - Paid placement, reciprocal-link requirements, unusual terms, content licensing/resale, MFA, CAPTCHA, and permission changes remain blocked for human review.
 - Automatic opportunity approval is not implemented. Reconsider only after reviewing the first 20 completed opportunities, reply quality, opt-outs, and false positives.
 - The owner retains all production, spending, and merge decisions.

@@ -9,17 +9,27 @@ import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import {
   approveAllWebsiteGrowthBacklinksAction,
+  returnWebsiteGrowthBacklinkToReviewAction,
   reviewWebsiteGrowthBacklinkAction
-} from "@/modules/website-growth/actions";
+} from "@/modules/website-growth/backlink-actions";
 import { getWebsiteGrowthBacklinkWorkspace } from "@/modules/website-growth/backlinks";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
 
-export default async function WebsiteGrowthBacklinksPage() {
+type SearchParams = Record<string, string | string[] | undefined>;
+
+export default async function WebsiteGrowthBacklinksPage({
+  searchParams
+}: {
+  searchParams?: Promise<SearchParams>;
+}) {
   const context = await getAuthenticatedContext();
   await requireModule(context, ModuleKey.WEBSITE_GROWTH);
+  const params = searchParams ? await searchParams : {};
+  const reviewResult = readReviewResult(readParam(params.reviewResult));
+  const reviewedOpportunity = (readParam(params.opportunity) ?? "").slice(0, 200);
   const workspace = await getWebsiteGrowthBacklinkWorkspace(context.tenantId);
   const groups = groupBacklinks(workspace.opportunities);
   const latestSummary = readRecord(readRecord(workspace.latestScoutRun?.output).backlinkSummary);
@@ -33,6 +43,22 @@ export default async function WebsiteGrowthBacklinksPage() {
       />
 
       <BacklinkNavigation />
+
+      {reviewResult && reviewedOpportunity ? (
+        <section
+          role="status"
+          className="rounded-lg border border-success/25 bg-success/10 p-5 text-sm leading-6 text-foreground"
+        >
+          <p className="font-semibold">{formatReviewResult(reviewResult, reviewedOpportunity)}</p>
+          <p className="mt-1 text-mutedForeground">
+            {reviewResult === "approved"
+              ? "It is now listed under Approved and underway and is eligible for Scout."
+              : reviewResult === "returned"
+                ? "It is back under Needs your review and Scout cannot claim it."
+                : "It has been removed from the active workspace."}
+          </p>
+        </section>
+      ) : null}
 
       <section className="grid gap-4 md:grid-cols-4">
         <MetricCard label="Needs your review" value={groups.REVIEW.length} caption="Curated—not raw Semrush rows" />
@@ -63,6 +89,7 @@ export default async function WebsiteGrowthBacklinksPage() {
       </section>
 
       <BacklinkSection
+        id="review-backlinks"
         title="Needs your review"
         description="These are the only new prospects Scout recommends. Approve the complete batch or review each one."
         emptyMessage="No backlink opportunities need your decision."
@@ -79,6 +106,7 @@ export default async function WebsiteGrowthBacklinksPage() {
       </BacklinkSection>
 
       <BacklinkSection
+        id="approved-backlinks"
         title="Approved and underway"
         description="Approved free submissions and outreach are available to the executor. Paid placements remain blocked from automated spending."
         emptyMessage="No approved backlink work is underway."
@@ -136,6 +164,7 @@ function FlowStep({ number, title, body }: { number: string; title: string; body
 }
 
 function BacklinkSection({
+  id,
   title,
   description,
   emptyMessage,
@@ -144,6 +173,7 @@ function BacklinkSection({
   compact = false,
   children
 }: {
+  id?: string;
   title: string;
   description: string;
   emptyMessage: string;
@@ -153,7 +183,7 @@ function BacklinkSection({
   children?: React.ReactNode;
 }) {
   return (
-    <section className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+    <section id={id} className="scroll-mt-6 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border p-5">
         <div>
           <h2 className="text-lg font-semibold text-foreground">{title}</h2>
@@ -232,14 +262,35 @@ function BacklinkCard({
             <form action={reviewWebsiteGrowthBacklinkAction}>
               <input type="hidden" name="backlinkId" value={opportunity.id} />
               <input type="hidden" name="decision" value={WebsiteGrowthBacklinkStatus.REJECTED} />
-              <button className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">Decline</button>
+              <button
+                aria-label={`Decline ${opportunity.title}`}
+                className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
+              >
+                Decline
+              </button>
             </form>
             <form action={reviewWebsiteGrowthBacklinkAction}>
               <input type="hidden" name="backlinkId" value={opportunity.id} />
               <input type="hidden" name="decision" value={WebsiteGrowthBacklinkStatus.APPROVED} />
-              <button className="rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">Approve</button>
+              <button
+                aria-label={`Approve ${opportunity.title}`}
+                className="max-w-sm rounded-md bg-primary px-3 py-2 text-left text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover"
+              >
+                Approve “{opportunity.title}”
+              </button>
             </form>
           </div>
+        ) : null}
+        {opportunity.status === WebsiteGrowthBacklinkStatus.APPROVED ? (
+          <form action={returnWebsiteGrowthBacklinkToReviewAction}>
+            <input type="hidden" name="backlinkId" value={opportunity.id} />
+            <button
+              aria-label={`Move ${opportunity.title} back to review`}
+              className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
+            >
+              Move back to review
+            </button>
+          </form>
         ) : null}
       </div>
     </article>
@@ -288,6 +339,25 @@ function readRecord(value: unknown): Record<string, unknown> {
 
 function readNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function readParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function readReviewResult(value: string | undefined) {
+  return value === "approved" || value === "rejected" || value === "returned"
+    ? value
+    : null;
+}
+
+function formatReviewResult(
+  result: "approved" | "rejected" | "returned",
+  opportunityTitle: string
+) {
+  if (result === "approved") return `Approved “${opportunityTitle}”.`;
+  if (result === "returned") return `Moved “${opportunityTitle}” back to review.`;
+  return `Declined “${opportunityTitle}”.`;
 }
 
 function formatDate(value: Date) {
