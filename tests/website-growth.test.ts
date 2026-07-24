@@ -370,6 +370,31 @@ describe("website growth Codex Scout completion", () => {
           note: "The existing route should be improved rather than duplicated."
         }]
       },
+      backlinks: {
+        queried: true,
+        summary: "One backlink prospect passed review.",
+        rawProspectsReviewed: 20,
+        duplicatesRejected: 8,
+        qualityRejected: 11,
+        prospects: [{
+          sourceDomain: "example.org",
+          sourceUrl: "https://example.org/resources",
+          contactPage: "https://example.org/contact",
+          targetPage: "/freight/gta-local-trucking",
+          category: "RESOURCE_PAGE",
+          title: "Canadian freight resource",
+          rationale: "The page links to relevant freight providers.",
+          outreachAngle: "Offer the improved Newl route as an additional resource.",
+          authorityScore: 50,
+          relevanceScore: 80,
+          qualityScore: 75,
+          spamRisk: "LOW",
+          estimatedCostAmount: null,
+          currency: null,
+          requiresContent: false,
+          evidence: ["Relevant competitors are linked."]
+        }]
+      },
       drafts: [{
         opportunityId: "opportunity_1",
         recommendationSummary: "Improve the current freight page.",
@@ -386,6 +411,14 @@ describe("website growth Codex Scout completion", () => {
     expect(() => parseWebsiteGrowthScoutCompletion({
       runSummary: "Skipped SEMrush.",
       semrush: { queried: false, summary: "Unavailable", rows: [], tracking: semrushTrackingSnapshot() },
+      backlinks: {
+        queried: true,
+        summary: "No backlink prospects qualified.",
+        rawProspectsReviewed: 0,
+        duplicatesRejected: 0,
+        qualityRejected: 0,
+        prospects: []
+      },
       drafts: []
     })).toThrow("required response structure");
   });

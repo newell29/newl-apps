@@ -13,6 +13,9 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - SEMrush MCP is read-only and authenticated through OAuth on the OpenClaw/Codex machine.
 - Newl Apps validates every returned opportunity ID against the exact candidate IDs stored in the tenant-scoped job.
 - Only Admin and Manager roles may approve a brief and start the existing developer workflow. Scout never receives that authority.
+- Only Admin and Manager roles may approve a backlink prospect. Scout cannot approve, claim, submit, contact, purchase, or verify its own prospect.
+- A separate backlink-executor bearer token can claim only approved, non-paid opportunities. It cannot read rejected/archived research or claim paid placements.
+- The executor may report operational states, but it cannot approve spending. CAPTCHA, MFA, payment, contracts, unusual terms, private-data requests, and missing business-profile facts must be reported as blocked.
 
 ## Developer comparison boundary
 

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["runSummary", "semrush", "drafts"],
+  "required": ["runSummary", "semrush", "backlinks", "drafts"],
   "properties": {
     "runSummary": { "type": "string", "minLength": 1 },
     "semrush": {
@@ -68,6 +68,52 @@
                   "landingPage": { "type": ["string", "null"] },
                   "searchVolume": { "type": ["integer", "null"] }
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "backlinks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["queried", "summary", "rawProspectsReviewed", "duplicatesRejected", "qualityRejected", "prospects"],
+      "properties": {
+        "queried": { "type": "boolean", "const": true },
+        "summary": { "type": "string", "minLength": 1 },
+        "rawProspectsReviewed": { "type": "integer", "minimum": 0 },
+        "duplicatesRejected": { "type": "integer", "minimum": 0 },
+        "qualityRejected": { "type": "integer", "minimum": 0 },
+        "prospects": {
+          "type": "array",
+          "maxItems": 15,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["sourceDomain", "sourceUrl", "contactPage", "targetPage", "category", "title", "rationale", "outreachAngle", "authorityScore", "relevanceScore", "qualityScore", "spamRisk", "estimatedCostAmount", "currency", "requiresContent", "evidence"],
+            "properties": {
+              "sourceDomain": { "type": "string", "minLength": 1 },
+              "sourceUrl": { "type": ["string", "null"] },
+              "contactPage": { "type": ["string", "null"] },
+              "targetPage": { "type": "string", "minLength": 1 },
+              "category": {
+                "type": "string",
+                "enum": ["DIRECTORY_CITATION", "LINK_RECLAMATION", "PARTNER_ECOSYSTEM", "CONTENT_CONTRIBUTION", "RESOURCE_PAGE", "DIGITAL_PR", "PAID_PLACEMENT"]
+              },
+              "title": { "type": "string", "minLength": 1 },
+              "rationale": { "type": "string", "minLength": 1 },
+              "outreachAngle": { "type": "string", "minLength": 1 },
+              "authorityScore": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+              "relevanceScore": { "type": "integer", "minimum": 0, "maximum": 100 },
+              "qualityScore": { "type": "integer", "minimum": 0, "maximum": 100 },
+              "spamRisk": { "type": "string", "enum": ["LOW", "MEDIUM", "HIGH"] },
+              "estimatedCostAmount": { "type": ["number", "null"], "minimum": 0 },
+              "currency": { "type": ["string", "null"] },
+              "requiresContent": { "type": "boolean" },
+              "evidence": {
+                "type": "array",
+                "maxItems": 10,
+                "items": { "type": "string", "minLength": 1 }
               }
             }
           }

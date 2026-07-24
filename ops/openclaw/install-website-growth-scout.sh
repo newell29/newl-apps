@@ -31,7 +31,7 @@ chmod 700 "${runner_path}"
 openclaw cron add \
   --name "NEWL Website Growth Scout" \
   --display-name "NEWL Website Growth Scout" \
-  --description "Refresh Search Console, GA4, and first-party form evidence; run read-only Codex Scout with official SEMrush MCP; send the approval slate to Teams." \
+  --description "Refresh Search Console, GA4, first-party form evidence, Position Tracking, and backlink opportunities; run read-only Codex Scout with official SEMrush MCP; send the curated approval slate to Teams." \
   --declaration-key "newl.website-growth.scout.weekly.v1" \
   --cron "15 9 * * 1" \
   --tz "America/Toronto" \

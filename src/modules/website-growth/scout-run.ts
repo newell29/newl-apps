@@ -10,6 +10,14 @@ import {
 } from "@prisma/client";
 
 import type { WebsiteGrowthContentDraftPayload } from "@/modules/website-growth/content-drafts";
+import {
+  buildWebsiteGrowthBacklinkTeamsLines,
+  MAX_ACTIVE_BACKLINK_QUEUE,
+  MAX_BACKLINK_PROSPECTS_PER_RUN,
+  parseWebsiteGrowthBacklinkReview,
+  persistWebsiteGrowthBacklinkReview,
+  type WebsiteGrowthBacklinkReview
+} from "@/modules/website-growth/backlinks";
 import { refreshWebsiteGrowthEvidenceForTenant } from "@/modules/website-growth/evidence-refresh";
 import {
   buildWebsiteGrowthKeywordAdditions,
@@ -50,6 +58,7 @@ export type WebsiteGrowthScoutCompletion = {
     rows: WebsiteGrowthSemrushEvidence[];
     tracking: WebsiteGrowthSemrushTrackingSnapshot;
   };
+  backlinks: WebsiteGrowthBacklinkReview;
   drafts: Array<{
     opportunityId: string;
     recommendationSummary: string;
@@ -91,7 +100,7 @@ export async function prepareWebsiteGrowthScoutRun({
       jobType: JOB_TYPE,
       status: JobStatus.RUNNING,
       input: {
-        version: 1,
+        version: 2,
         tenantSlug,
         model,
         reasoningEffort,
@@ -138,7 +147,7 @@ export async function prepareWebsiteGrowthScoutRun({
     const researchInventory = Object.fromEntries(
       opportunityStatusCounts.map((row) => [row.status, row._count._all])
     );
-    const [websiteContext, decisionHistory] = await Promise.all([
+    const [websiteContext, decisionHistory, existingBacklinkProspects] = await Promise.all([
       resolveNewlWebsiteContext(),
       prisma.websiteGrowthContentDraft.findMany({
         where: {
@@ -165,10 +174,25 @@ export async function prepareWebsiteGrowthScoutRun({
             select: { action: true, topic: true, primaryKeyword: true, targetPage: true }
           }
         }
+      }),
+      prisma.websiteGrowthBacklinkOpportunity.findMany({
+        where: { tenantId },
+        orderBy: { updatedAt: "desc" },
+        take: 200,
+        select: {
+          status: true,
+          category: true,
+          sourceDomain: true,
+          sourceUrl: true,
+          targetPage: true,
+          qualityScore: true,
+          lastSeenAt: true,
+          liveUrl: true
+        }
       })
     ]);
     const packet = {
-      version: 1,
+      version: 2,
       runId: job.id,
       tenantSlug,
       model,
@@ -182,7 +206,22 @@ export async function prepareWebsiteGrowthScoutRun({
           "Organic positions and landing pages relevant to each candidate",
           "Weak or missing keywords against no more than four relevant competitors",
           "Declined or lost keywords where the data is available",
-          "Search volume, keyword difficulty, intent, and ranking URL"
+          "Search volume, keyword difficulty, intent, and ranking URL",
+          "Newl and competitor backlink profiles, referring domains, anchor context, and backlink gaps",
+          "New and lost Newl backlinks, link-reclamation candidates, and relevant directory, partner, resource, content, digital-PR, or paid-placement prospects"
+        ]
+      },
+      backlinkProgram: {
+        maxReturnedProspects: MAX_BACKLINK_PROSPECTS_PER_RUN,
+        maxActiveQueue: MAX_ACTIVE_BACKLINK_QUEUE,
+        existingProspects: existingBacklinkProspects,
+        rules: [
+          "Review broadly but return only the strongest actionable prospects; never return raw backlink rows.",
+          "Deduplicate against existing prospects and domains already linking to the proposed target page.",
+          "Reject link farms, automated-link schemes, irrelevant directories, high-spam-risk sites, and paid dofollow offers.",
+          "Score relevance and quality from 0 to 100. Newl Apps enforces a minimum score of 60 and rejects HIGH spam risk.",
+          "Paid placements are research-only. They require a separate human spending decision and must not be represented as ranking-link purchases.",
+          "Prefer link reclamation, legitimate directories and associations, partners, resource pages, useful content contributions, and evidence-led digital PR."
         ]
       },
       evidenceRefresh,
@@ -212,7 +251,7 @@ export async function prepareWebsiteGrowthScoutRun({
       where: { id: job.id },
       data: {
         input: {
-          version: 1,
+          version: 2,
           tenantSlug,
           model,
           reasoningEffort,
@@ -280,6 +319,11 @@ export async function completeWebsiteGrowthScoutRun({
   }
 
   const semrushImport = await persistSemrushEvidence(tenantId, runId, parsed.semrush, allowed);
+  const backlinkSummary = await persistWebsiteGrowthBacklinkReview({
+    tenantId,
+    runId,
+    review: parsed.backlinks
+  });
   const savedDrafts: WebsiteGrowthContentDraft[] = [];
 
   for (const item of parsed.drafts) {
@@ -310,7 +354,7 @@ export async function completeWebsiteGrowthScoutRun({
         draftJson: {
           ...item.draft,
           scout: {
-            version: 1,
+            version: 2,
             runId,
             model: readRecord(job.input).model,
             reasoningEffort: readRecord(job.input).reasoningEffort,
@@ -383,6 +427,11 @@ export async function completeWebsiteGrowthScoutRun({
     researchInventory: readRecord(readRecord(job.output).researchInventory),
     keywordAdditionCount: keywordAdditions.length,
     tracking: parsed.semrush.tracking,
+    backlinkLines: buildWebsiteGrowthBacklinkTeamsLines({
+      review: parsed.backlinks,
+      persisted: backlinkSummary,
+      reviewBaseUrl
+    }),
     reviewBaseUrl
   });
 
@@ -399,6 +448,7 @@ export async function completeWebsiteGrowthScoutRun({
           semrushRowCount: parsed.semrush.rows.length,
           semrushTrackedKeywordCount: parsed.semrush.tracking.trackedKeywords.length,
           keywordAdditionCount: keywordAdditions.length,
+          backlinkSummary,
           draftIds: savedDrafts.map((draft) => draft.id),
           completedAt: new Date().toISOString()
         }
@@ -418,6 +468,7 @@ export async function completeWebsiteGrowthScoutRun({
           semrushRowCount: parsed.semrush.rows.length,
           semrushTrackedKeywordCount: parsed.semrush.tracking.trackedKeywords.length,
           keywordAdditionCount: keywordAdditions.length,
+          backlinkSummary,
           draftIds: savedDrafts.map((draft) => draft.id)
         }
       }
@@ -428,6 +479,7 @@ export async function completeWebsiteGrowthScoutRun({
     runId: job.id,
     draftCount: savedDrafts.length,
     draftIds: savedDrafts.map((draft) => draft.id),
+    backlinkSummary,
     teamsMessage,
     reports
   };
@@ -465,6 +517,7 @@ export function parseWebsiteGrowthScoutCompletion(value: unknown): WebsiteGrowth
   if (
     !readRequiredString(record.runSummary, 4000) ||
     semrush.queried !== true ||
+    !isRecord(record.backlinks) ||
     !rows ||
     !drafts ||
     !trackedKeywords
@@ -499,6 +552,7 @@ export function parseWebsiteGrowthScoutCompletion(value: unknown): WebsiteGrowth
         trackedKeywords: trackedKeywords.map(parseTrackedKeyword)
       }
     },
+    backlinks: parseWebsiteGrowthBacklinkReview(record.backlinks),
     drafts: drafts.map((entry) => {
       const item = readRecord(entry);
       const draft = readRecord(item.draft);
@@ -523,6 +577,7 @@ export function buildWebsiteGrowthScoutTeamsMessage({
   researchInventory,
   keywordAdditionCount,
   tracking,
+  backlinkLines,
   reviewBaseUrl
 }: {
   drafts: Array<{ id: string; title: string; summary: string }>;
@@ -535,6 +590,7 @@ export function buildWebsiteGrowthScoutTeamsMessage({
   researchInventory?: Record<string, unknown>;
   keywordAdditionCount?: number;
   tracking?: WebsiteGrowthSemrushTrackingSnapshot;
+  backlinkLines?: string;
   reviewBaseUrl: string;
 }) {
   const plan = readRecord(weeklyPlan);
@@ -554,6 +610,7 @@ export function buildWebsiteGrowthScoutTeamsMessage({
       ? `Position Tracking: ${trackedCount} keywords; visibility ${formatMetric(tracking.visibility)} (${formatSignedChange(tracking.visibility, tracking.previousVisibility)}); ${tracking.improved ?? 0} improved and ${tracking.declined ?? 0} declined.`
       : null,
     `Keyword tracking: ${keywordAdditionCount ?? 0} approved-page keyword${(keywordAdditionCount ?? 0) === 1 ? "" : "s"} are ready to add after automatic deduplication against SEMrush.`,
+    backlinkLines ?? null,
     "",
     ...(drafts.length > 0
       ? drafts.flatMap((draft, index) => [

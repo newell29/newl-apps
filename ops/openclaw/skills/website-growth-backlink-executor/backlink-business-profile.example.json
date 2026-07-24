@@ -1,0 +1,25 @@
+{
+  "status": "OWNER_COMPLETION_REQUIRED",
+  "legalName": "",
+  "publicBrandName": "Newl Group",
+  "website": "https://www.newlgroup.com",
+  "publicDescriptions": {
+    "short": "",
+    "medium": "",
+    "long": ""
+  },
+  "publicLocations": [],
+  "publicPhone": "",
+  "outreachMailbox": "",
+  "approvedLogos": [],
+  "approvedServiceCategories": [],
+  "approvedSocialProfiles": [],
+  "certifications": [],
+  "submissionRules": {
+    "freeListingsOnly": true,
+    "allowAccountCreation": false,
+    "allowTermsAcceptance": false,
+    "allowCaptchaEscalation": true,
+    "allowPayment": false
+  }
+}

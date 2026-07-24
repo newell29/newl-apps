@@ -13,10 +13,21 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 3. Codex `gpt-5.6-sol` with high reasoning inspects the current website repository in a read-only, ephemeral session and queries official SEMrush MCP through OAuth. It refreshes Position Tracking even when there are no page candidates.
 4. `/api/website-growth/scout/complete` rejects out-of-scope candidates or malformed results, stores sanitized SEMrush evidence and the tracking snapshot, saves drafts, and deterministically selects keywords from previously approved/built/published Scout briefs.
 5. OpenClaw sends the returned funnel summary and direct draft links to the configured Teams target, attaches a weekly SEO performance workbook on every completed run, and attaches the two-column SEMrush keyword import workbook when new deduplicated keywords exist.
-6. An Admin or Manager reviews each brief. Approval starts the website developer workflow; the owner still owns the merge.
-7. Codex builds the primary implementation. If the optional Kimi API key is configured, Kimi K3 independently builds the same immutable brief from the same website commit.
-8. Each agent output must pass the same website lint and production-build checks before a credential-separated job may open its draft PR. Vercel creates one Preview per draft PR.
-9. Newl Apps records the Codex PR and Preview as the primary build. The Kimi PR remains a shadow comparison in GitHub and cannot overwrite the primary status.
+6. The same Teams message reports the backlink funnel: prospects reviewed, duplicates/weak candidates removed, curated items added or refreshed, and a direct link to `/website-growth/backlinks`. The report is sent even when zero prospects qualify.
+7. An Admin or Manager reviews each page brief and backlink prospect. Page-brief approval starts the website developer workflow; backlink approval makes free work claimable by the separate executor. The owner still owns website merge and every spending decision.
+8. Codex builds the primary implementation. If the optional Kimi API key is configured, Kimi K3 independently builds the same immutable brief from the same website commit.
+9. Each agent output must pass the same website lint and production-build checks before a credential-separated job may open its draft PR. Vercel creates one Preview per draft PR.
+10. Newl Apps records the Codex PR and Preview as the primary build. The Kimi PR remains a shadow comparison in GitHub and cannot overwrite the primary status.
+
+## Backlink workflow
+
+1. Scout queries official read-only Semrush MCP for backlink profiles, referring domains, competitor gaps, and new/lost links.
+2. Codex reviews broadly but returns no more than 15 prospects after duplicate, relevance, quality, spam, and policy screening.
+3. Newl Apps stores only passing prospects, refreshes existing matches in place, preserves prior human decisions, caps the active queue at 50, and archives stale `NEEDS_REVIEW` items after 45 days.
+4. Teams receives one combined weekly report regardless of whether any prospect qualifies.
+5. Admin or Manager approves one prospect or the current review batch. Approval is not spending authority.
+6. The dedicated executor claims only approved non-paid work, completes a permitted submission or outreach step, and reports progress.
+7. A backlink becomes `LIVE` only after the public referring URL is verified. Lost links remain a short operational history; rejected and archived research stays hidden from the default workspace.
 
 The run is locked per tenant for three hours. No-candidate runs still query Position Tracking and send the weekly Teams report, but contain no approval request. A Codex or SEMrush failure is recorded through `/api/website-growth/scout/fail` and does not create a draft.
 

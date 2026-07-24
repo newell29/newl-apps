@@ -37,6 +37,7 @@ The Website Growth UI intentionally separates two different kinds of records:
 
 - **Scout workspace** is the default view. It contains only AI-curated Scout briefs and groups them into `Needs your review`, `Approved and building`, `Preview ready`, and `Completed and closed`.
 - **Research signals** contains the full GA4, Search Console, Semrush, and first-party evidence inventory. These records are inputs to Scout, not a human work queue.
+- **Backlink Scout** contains only Codex-reviewed, deduplicated prospects that pass deterministic relevance, quality, and spam-risk gates. Raw Semrush backlink rows and rejected candidates are never presented as a work queue.
 
 Every Scout card must state whether it proposes a **new page** or an **update to an existing page**, show the affected route, and summarize the primary proposed change. A draft created by the latest Scout run is labeled as new. The latest run summary remains visible even when no opportunities were selected.
 
@@ -81,6 +82,10 @@ The developer run belongs in GitHub Actions rather than a Vercel function. Verce
 The OpenClaw command job runs Monday at 9:15 AM `America/Toronto`. It refreshes evidence, runs the bounded read-only Codex Scout, saves drafts, and sends a Teams report every week. The report states how many stored signals were reviewed, shortlisted, sent to Codex, and promoted so the research inventory is not confused with the approval queue.
 
 The same read-only SEMrush session refreshes the Newl Group Position Tracking snapshot. Deterministic Newl Apps code selects primary and supporting keywords only from human-approved, built, or published Scout briefs, deduplicates them against the live tracked-keyword list, and creates a two-column SEMrush import workbook without a separate keyword approval step. Teams receives that workbook when additions exist and receives the weekly position/performance workbook even when Scout promotes no new page brief. Official MCP remains read-only; this workflow prepares the import rather than writing directly to SEMrush.
+
+The weekly session also reviews Newl and competitor backlink profiles, referring domains, backlink gaps, and new/lost links. Scout may return no more than 15 curated prospects. Newl Apps rejects prospects below 60 relevance or quality, rejects high spam risk, deduplicates by referring domain and target page, caps the active queue at 50, and archives unrefreshed review items after 45 days. These are initial safe operating limits for the first rollout and should be evaluated after the first 20 reviewed prospects.
+
+Backlink approval is distinct from content approval and spending approval. Admin or Manager may approve an opportunity for execution. A dedicated executor token can claim approved free work and report submitted, contacted, blocked, live, or lost states. Paid placements are excluded from machine claims and never authorize a purchase or paid ranking link.
 
 The existing Vercel weekly planner remains a safe queue-preparation fallback; it does not run Codex or send Teams.
 

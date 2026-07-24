@@ -15,6 +15,13 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - Duplicate worker start: an active tenant run blocks a second run for three hours.
 - Teams delivery failure after drafts are saved: the command job fails and the links remain available in Newl Apps; an operator may resend after fixing Teams.
 - No candidates: the job succeeds without a Teams review request.
+- No backlink prospects: the job succeeds and the Teams summary explicitly reports zero new prospects.
+- Raw or oversized backlink output: completion is rejected; Scout may return at most 15 curated prospects and never raw backlink rows.
+- Duplicate or weak backlink prospect: Newl Apps refreshes the existing record or drops it through deterministic quality gates instead of adding another queue item.
+- Backlink queue growth: no new item is created after the 50-active-item cap; stale unrefreshed review items are archived after 45 days.
+- Missing backlink-executor token: discovery and approval continue, but approved work is not claimable.
+- CAPTCHA, MFA, payment, legal terms, missing public business facts, or access-control challenge: the executor reports `BLOCKED`; it must not bypass the control.
+- Paid placement: remains visible for a separate owner decision and is excluded from machine claims.
 
 ## Developer comparison failures
 

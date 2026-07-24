@@ -28,6 +28,14 @@ describe("middleware machine route exemptions", () => {
     expect(config.matcher[0]).toContain("api/website-growth/weekly-plan");
   });
 
+  it("lets the approved-work backlink executor enforce its dedicated token auth", () => {
+    expect(config.matcher[0]).toContain("api/website-growth/backlinks/executor");
+    const matcher = new RegExp(`^${config.matcher[0]}$`);
+
+    expect(matcher.test("/api/website-growth/backlinks/executor/claim")).toBe(false);
+    expect(matcher.test("/api/website-growth/backlinks/executor/report")).toBe(false);
+  });
+
   it("lets Website Growth build workers enforce their tenant-bound token auth", () => {
     expect(config.matcher[0]).toContain("api/website-growth/build-requests");
     const matcher = new RegExp(`^${config.matcher[0]}$`);
