@@ -17,7 +17,8 @@ import { fetchTeamshipShippingOrdersForReview } from "@/server/integrations/team
 import type { AuthenticatedContext } from "@/server/tenant-context";
 import type { GarlandTeamshipReviewResponse } from "@/modules/shipment-documents/teamship-review-types";
 
-const READY_ATTACHMENT_STATUSES = ["PDF_METADATA_READY", "PDF_PARSE_FAILED"] as const;
+const READY_ATTACHMENT_STATUS = "PDF_METADATA_READY";
+const FAILED_ATTACHMENT_STATUS = "PDF_PARSE_FAILED";
 const DEFAULT_MAX_ATTACHMENTS = 8;
 
 export type GarlandEmailAgentAutomationResult = {
@@ -47,7 +48,11 @@ type GarlandAttachmentForProcessing = Prisma.GarlandSourceAttachmentGetPayload<{
 
 export async function processGarlandEmailAgentReadyAttachments(
   context: AuthenticatedContext,
-  options: { maxAttachments?: number | null; receivedAfter?: Date | string | null } = {}
+  options: {
+    maxAttachments?: number | null;
+    receivedAfter?: Date | string | null;
+    retryFailedAttachments?: boolean;
+  } = {}
 ): Promise<GarlandEmailAgentAutomationResult> {
   await requireModule(context, ModuleKey.SHIPMENT_DOCUMENTS);
   await requireMutationAccess(context);
@@ -62,7 +67,11 @@ export async function processGarlandEmailAgentReadyAttachments(
   const attachments = await prisma.garlandSourceAttachment.findMany({
     where: {
       tenantId: context.tenantId,
-      intakeStatus: { in: [...READY_ATTACHMENT_STATUSES] },
+      intakeStatus: {
+        in: options.retryFailedAttachments
+          ? [READY_ATTACHMENT_STATUS, FAILED_ATTACHMENT_STATUS]
+          : [READY_ATTACHMENT_STATUS]
+      },
       sourceEmail: {
         is: {
           classification: { in: ["GARLAND_DOCUMENT_BATCH", "GARLAND_DOCUMENT_CORRECTION"] },
@@ -70,7 +79,7 @@ export async function processGarlandEmailAgentReadyAttachments(
         }
       }
     },
-    orderBy: [{ createdAt: "asc" }],
+    orderBy: [{ sourceEmail: { receivedAt: "desc" } }, { createdAt: "desc" }],
     take: maxAttachments,
     include: {
       sourceEmail: {
