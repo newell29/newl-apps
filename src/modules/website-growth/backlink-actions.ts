@@ -118,6 +118,75 @@ export async function returnWebsiteGrowthBacklinkToReviewAction(formData: FormDa
   }));
 }
 
+export async function retryBlockedWebsiteGrowthBacklinkAction(formData: FormData) {
+  const context = await getBacklinkReviewContext();
+  const backlinkId = readBacklinkId(formData);
+  if (formData.get("confirmNoExternalAction") !== "yes") {
+    throw new Error("Confirm that no email or directory submission occurred before retrying.");
+  }
+  const retryableWhere = {
+    id: backlinkId,
+    tenantId: context.tenantId,
+    status: WebsiteGrowthBacklinkStatus.BLOCKED,
+    approvedByUserId: { not: null },
+    approvedAt: { not: null },
+    submittedAt: null,
+    contactedAt: null,
+    messages: {
+      every: {
+        externalMessageId: null,
+        conversationId: null
+      }
+    }
+  } as const;
+  const opportunity = await prisma.websiteGrowthBacklinkOpportunity.findFirst({
+    where: retryableWhere,
+    select: { id: true, title: true, notes: true }
+  });
+  if (!opportunity) {
+    throw new Error(
+      "Only previously approved blocked work with no confirmed submission or delivered outreach can be retried."
+    );
+  }
+
+  const result = await prisma.websiteGrowthBacklinkOpportunity.updateMany({
+    where: retryableWhere,
+    data: {
+      status: WebsiteGrowthBacklinkStatus.APPROVED,
+      claimedAt: null,
+      notes: null
+    }
+  });
+  if (result.count !== 1) {
+    throw new Error("This blocked backlink opportunity is no longer safe to retry.");
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      tenantId: context.tenantId,
+      actorUserId: context.userId,
+      action: "website-growth.backlink.retry-approved",
+      entityType: "WebsiteGrowthBacklinkOpportunity",
+      entityId: opportunity.id,
+      before: {
+        status: WebsiteGrowthBacklinkStatus.BLOCKED,
+        notes: opportunity.notes
+      },
+      after: {
+        status: WebsiteGrowthBacklinkStatus.APPROVED,
+        approvalRetained: true,
+        externalActionPreviouslyRecorded: false
+      }
+    }
+  });
+
+  revalidatePath("/website-growth/backlinks");
+  redirect(buildBacklinkReviewResultHref({
+    result: "retried",
+    opportunityTitle: opportunity.title
+  }));
+}
+
 export async function approveAllWebsiteGrowthBacklinksAction() {
   const context = await getBacklinkReviewContext();
   const pending = await prisma.websiteGrowthBacklinkOpportunity.findMany({
@@ -193,13 +262,16 @@ function buildBacklinkReviewResultHref({
   result,
   opportunityTitle
 }: {
-  result: "approved" | "rejected" | "returned";
+  result: "approved" | "rejected" | "returned" | "retried";
   opportunityTitle: string;
 }) {
   const query = new URLSearchParams({
     reviewResult: result,
     opportunity: opportunityTitle.slice(0, 200)
   });
-  const anchor = result === "approved" ? "approved-backlinks" : "review-backlinks";
+  const anchor =
+    result === "approved" || result === "retried"
+      ? "approved-backlinks"
+      : "review-backlinks";
   return `/website-growth/backlinks?${query.toString()}#${anchor}`;
 }
