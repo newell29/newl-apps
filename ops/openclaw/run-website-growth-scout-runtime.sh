@@ -51,4 +51,4 @@ runtime_stage="validate the synchronized Scout files"
 
 runtime_handed_off=1
 trap - EXIT
-exec /bin/zsh "${runtime_repo_path}/ops/openclaw/run-website-growth-scout.sh"
+exec /bin/zsh "${runtime_repo_path}/ops/openclaw/run-website-growth-scout.sh" "$@"

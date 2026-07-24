@@ -44,16 +44,13 @@ git -C "${runtime_repo_path}" fetch origin "+main:${runtime_main_ref}"
 git -C "${runtime_repo_path}" checkout --detach "${runtime_main_ref}"
 
 runtime_runner_path="${runtime_repo_path}/ops/openclaw/run-website-growth-scout-runtime.sh"
-chmod 700 \
-  "${runtime_runner_path}" \
-  "${runtime_repo_path}/ops/openclaw/run-website-growth-scout.sh"
 
 openclaw cron add \
   --name "NEWL Website Growth Scout" \
   --display-name "NEWL Website Growth Scout" \
-  --description "Every weekday, refresh Search Console, GA4, first-party form evidence, Position Tracking, and backlink opportunities; run read-only Codex Scout with official SEMrush MCP; send a success, no-op, duplicate-run, or safe failure summary to Teams." \
+  --description "Every Monday, run the deep read-only Codex Scout with official SEMrush MCP, persist a bounded cache, and send the approval/report package to Teams." \
   --declaration-key "newl.website-growth.scout.weekly.v1" \
-  --cron "15 9 * * 1-5" \
+  --cron "15 9 * * 1" \
   --tz "America/Toronto" \
   --exact \
   --command-argv "[\"/bin/zsh\",\"${runtime_runner_path}\"]" \
@@ -64,5 +61,21 @@ openclaw cron add \
   --output-max-bytes 100000 \
   --no-deliver
 
-echo "Installed the Website Growth Scout for weekdays at 9:15 AM America/Toronto."
+openclaw cron add \
+  --name "NEWL Website Growth Scout check-in" \
+  --display-name "NEWL Website Growth Scout check-in" \
+  --description "Tuesday through Friday, refresh Search Console, GA4, forms, and queue state; reuse the stored SEMrush cache; send a Teams check-in without Codex or SEMrush API calls." \
+  --declaration-key "newl.website-growth.scout.weekday-checkin.v1" \
+  --cron "15 9 * * 2-5" \
+  --tz "America/Toronto" \
+  --exact \
+  --command-argv "[\"/bin/zsh\",\"${runtime_runner_path}\",\"--light\"]" \
+  --command-cwd "${runtime_repo_path}" \
+  --command-env "WEBSITE_GROWTH_SCOUT_ENV_FILE=${scout_env_file}" \
+  --timeout-seconds 600 \
+  --no-output-timeout-seconds 300 \
+  --output-max-bytes 100000 \
+  --no-deliver
+
+echo "Installed the deep Website Growth Scout for Mondays and the cache-backed check-in for Tuesday through Friday at 9:15 AM America/Toronto."
 echo "Dedicated runtime: ${runtime_repo_path}"

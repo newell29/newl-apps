@@ -1,5 +1,6 @@
 import {
   JobStatus,
+  WebsiteGrowthBacklinkStatus,
   WebsiteGrowthContentDraftStatus,
   WebsiteGrowthContentDraftSource,
   WebsiteGrowthDataSource,
@@ -26,16 +27,32 @@ import {
   type WebsiteGrowthSemrushTrackedKeyword,
   type WebsiteGrowthSemrushTrackingSnapshot
 } from "@/modules/website-growth/keyword-tracking";
+import { buildWebsiteGrowthReportDownloadLinks } from "@/modules/website-growth/report-download";
 import { resolveNewlWebsiteContext } from "@/modules/website-growth/newl-website-context-scanner";
 import { createWeeklyWebsiteGrowthPlanForTenant } from "@/modules/website-growth/weekly-plan";
 import { prisma } from "@/server/db";
 
 const JOB_TYPE = "WEBSITE_GROWTH_SCOUT_WEEKLY";
+const CHECK_IN_JOB_TYPE = "WEBSITE_GROWTH_SCOUT_WEEKDAY_CHECKIN";
 const DEFAULT_MODEL = "gpt-5.6-sol";
 const DEFAULT_REASONING_EFFORT = "high";
 const DEFAULT_MAX_CANDIDATES = 6;
 const MAX_SEMRUSH_ROWS = 200;
 const RUN_LOCK_MS = 3 * 60 * 60 * 1000;
+const SEMRUSH_CACHE_TTL_DAYS = 8;
+const SEMRUSH_CACHE_TTL_MS = SEMRUSH_CACHE_TTL_DAYS * 24 * 60 * 60 * 1000;
+
+export type WebsiteGrowthScoutResearchScope = "WEEKLY" | "MONTHLY";
+export type WebsiteGrowthSemrushSource = "LIVE_MCP" | "CACHE";
+
+export type WebsiteGrowthSemrushCache = {
+  available: boolean;
+  fresh: boolean;
+  observedAt: string | null;
+  expiresAt: string | null;
+  ageDays: number | null;
+  tracking: WebsiteGrowthSemrushTrackingSnapshot | null;
+};
 
 export type WebsiteGrowthSemrushEvidence = {
   opportunityId: string;
@@ -54,6 +71,8 @@ export type WebsiteGrowthScoutCompletion = {
   runSummary: string;
   semrush: {
     queried: boolean;
+    source: WebsiteGrowthSemrushSource;
+    observedAt: string;
     summary: string;
     rows: WebsiteGrowthSemrushEvidence[];
     tracking: WebsiteGrowthSemrushTrackingSnapshot;
@@ -68,10 +87,12 @@ export type WebsiteGrowthScoutCompletion = {
 
 export async function prepareWebsiteGrowthScoutRun({
   tenantId,
-  tenantSlug
+  tenantSlug,
+  researchScope = "WEEKLY"
 }: {
   tenantId: string;
   tenantSlug: string;
+  researchScope?: WebsiteGrowthScoutResearchScope;
 }) {
   const active = await prisma.automationJobRun.findFirst({
     where: {
@@ -105,6 +126,7 @@ export async function prepareWebsiteGrowthScoutRun({
         model,
         reasoningEffort,
         maxCandidates,
+        researchScope,
         semrushTransport: "official_mcp_oauth"
       }
     }
@@ -113,7 +135,7 @@ export async function prepareWebsiteGrowthScoutRun({
   try {
     const evidenceRefresh = await refreshWebsiteGrowthEvidenceForTenant(tenantId);
     const weeklyPlan = await createWeeklyWebsiteGrowthPlanForTenant(tenantId, { source: "cron" });
-    const [opportunities, opportunityStatusCounts] = await Promise.all([
+    const [opportunities, opportunityStatusCounts, semrushCache] = await Promise.all([
       prisma.websiteGrowthOpportunity.findMany({
         where: {
           tenantId,
@@ -141,7 +163,8 @@ export async function prepareWebsiteGrowthScoutRun({
         by: ["status"],
         where: { tenantId },
         _count: { _all: true }
-      })
+      }),
+      loadWebsiteGrowthSemrushCache(tenantId)
     ]);
     const candidateIds = opportunities.map((opportunity) => opportunity.id);
     const researchInventory = Object.fromEntries(
@@ -202,9 +225,13 @@ export async function prepareWebsiteGrowthScoutRun({
         serverUrl: "https://mcp.semrush.com/v1/mcp",
         readOnly: true,
         maxRows: MAX_SEMRUSH_ROWS,
+        researchScope,
+        cache: semrushCache,
         requiredChecks: [
           "Organic positions and landing pages relevant to each candidate",
-          "Weak or missing keywords against no more than four relevant competitors",
+          researchScope === "MONTHLY"
+            ? "Monthly weak or missing keyword gaps against no more than four relevant competitors"
+            : "Use the cached monthly competitor-gap evidence unless a candidate-specific check is necessary",
           "Declined or lost keywords where the data is available",
           "Search volume, keyword difficulty, intent, and ranking URL",
           "Newl and competitor backlink profiles, referring domains, anchor context, and backlink gaps",
@@ -256,8 +283,10 @@ export async function prepareWebsiteGrowthScoutRun({
           model,
           reasoningEffort,
           maxCandidates,
+          researchScope,
           semrushTransport: "official_mcp_oauth",
-          candidateIds
+          candidateIds,
+          semrushCacheObservedAt: semrushCache.observedAt
         },
         output: {
           phase: "AWAITING_CODEX",
@@ -266,6 +295,13 @@ export async function prepareWebsiteGrowthScoutRun({
           researchInventory,
           researchSignalCount: opportunityStatusCounts.reduce((sum, row) => sum + row._count._all, 0),
           candidateCount: candidateIds.length,
+          semrushCache: {
+            available: semrushCache.available,
+            fresh: semrushCache.fresh,
+            observedAt: semrushCache.observedAt,
+            expiresAt: semrushCache.expiresAt,
+            ageDays: semrushCache.ageDays
+          },
           preparedAt: new Date().toISOString()
         }
       }
@@ -285,6 +321,118 @@ export async function prepareWebsiteGrowthScoutRun({
         finishedAt: new Date(),
         output: { phase: "PREPARE_FAILED" },
         errorMessage: message
+      }
+    });
+    throw error;
+  }
+}
+
+export async function runWebsiteGrowthScoutWeekdayCheckIn({
+  tenantId,
+  reviewBaseUrl
+}: {
+  tenantId: string;
+  reviewBaseUrl: string;
+}) {
+  const job = await prisma.automationJobRun.create({
+    data: {
+      tenantId,
+      jobType: CHECK_IN_JOB_TYPE,
+      status: JobStatus.RUNNING,
+      input: {
+        version: 1,
+        mode: "FIRST_PARTY_REFRESH_WITH_SEMRUSH_CACHE",
+        semrushLiveQuery: false
+      }
+    }
+  });
+
+  try {
+    const evidenceRefresh = await refreshWebsiteGrowthEvidenceForTenant(tenantId);
+    const weeklyPlan = await createWeeklyWebsiteGrowthPlanForTenant(tenantId, { source: "cron" });
+    const [opportunityStatusCounts, semrushCache, backlinkCounts] = await Promise.all([
+      prisma.websiteGrowthOpportunity.groupBy({
+        by: ["status"],
+        where: { tenantId },
+        _count: { _all: true }
+      }),
+      loadWebsiteGrowthSemrushCache(tenantId),
+      prisma.websiteGrowthBacklinkOpportunity.groupBy({
+        by: ["status"],
+        where: { tenantId },
+        _count: { _all: true }
+      })
+    ]);
+    const researchInventory = Object.fromEntries(
+      opportunityStatusCounts.map((row) => [row.status, row._count._all])
+    );
+    const backlinks = Object.fromEntries(
+      backlinkCounts.map((row) => [row.status, row._count._all])
+    );
+    const researchSignalCount = opportunityStatusCounts.reduce(
+      (sum, row) => sum + row._count._all,
+      0
+    );
+    const teamsMessage = buildWebsiteGrowthScoutWeekdayCheckInMessage({
+      sourceSummary: evidenceRefresh,
+      weeklyPlan,
+      researchInventory,
+      researchSignalCount,
+      semrushCache,
+      backlinkCounts: backlinks,
+      reviewBaseUrl
+    });
+
+    await prisma.$transaction(async (tx) => {
+      await tx.automationJobRun.update({
+        where: { id: job.id },
+        data: {
+          status: JobStatus.SUCCESS,
+          finishedAt: new Date(),
+          output: {
+            phase: "WEEKDAY_CHECK_IN_COMPLETE",
+            evidenceRefresh,
+            weeklyPlan,
+            researchInventory,
+            researchSignalCount,
+            semrushCache: {
+              available: semrushCache.available,
+              fresh: semrushCache.fresh,
+              observedAt: semrushCache.observedAt,
+              expiresAt: semrushCache.expiresAt,
+              ageDays: semrushCache.ageDays
+            },
+            backlinkCounts: backlinks,
+            completedAt: new Date().toISOString()
+          }
+        }
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId,
+          actorUserId: null,
+          action: "website-growth.scout.weekday-check-in",
+          entityType: "AutomationJobRun",
+          entityId: job.id,
+          after: {
+            semrushLiveQuery: false,
+            semrushCacheObservedAt: semrushCache.observedAt,
+            researchSignalCount,
+            selectedCount: readOptionalInteger(readRecord(weeklyPlan).selectedCount) ?? 0
+          }
+        }
+      });
+    });
+
+    return { runId: job.id, teamsMessage, semrushCache };
+  } catch (error) {
+    await prisma.automationJobRun.update({
+      where: { id: job.id },
+      data: {
+        status: JobStatus.ERROR,
+        finishedAt: new Date(),
+        output: { phase: "WEEKDAY_CHECK_IN_FAILED" },
+        errorMessage: error instanceof Error ? error.message : "Website Growth weekday check-in failed."
       }
     });
     throw error;
@@ -317,13 +465,16 @@ export async function completeWebsiteGrowthScoutRun({
   for (const row of parsed.semrush.rows) {
     if (!allowed.has(row.opportunityId)) throw new Error("SEMrush returned evidence outside the Scout candidate scope.");
   }
+  validateSemrushCacheUse({ parsed, jobInput: job.input, jobOutput: job.output });
 
   const semrushImport = await persistSemrushEvidence(tenantId, runId, parsed.semrush, allowed);
-  const backlinkSummary = await persistWebsiteGrowthBacklinkReview({
-    tenantId,
-    runId,
-    review: parsed.backlinks
-  });
+  const backlinkSummary = parsed.backlinks.source === "LIVE_MCP"
+    ? await persistWebsiteGrowthBacklinkReview({
+        tenantId,
+        runId,
+        review: parsed.backlinks
+      })
+    : await summarizeCachedWebsiteGrowthBacklinks(tenantId, parsed.backlinks);
   const savedDrafts: WebsiteGrowthContentDraft[] = [];
 
   for (const item of parsed.drafts) {
@@ -359,7 +510,9 @@ export async function completeWebsiteGrowthScoutRun({
             model: readRecord(job.input).model,
             reasoningEffort: readRecord(job.input).reasoningEffort,
             recommendationSummary: item.recommendationSummary,
-            semrushTransport: "official_mcp_oauth"
+            semrushTransport: "official_mcp_oauth",
+            semrushSource: parsed.semrush.source,
+            semrushObservedAt: parsed.semrush.observedAt
           }
         } as Prisma.InputJsonValue,
         rawResponse: {
@@ -405,20 +558,30 @@ export async function completeWebsiteGrowthScoutRun({
     drafts: trackingDrafts,
     trackedKeywords: parsed.semrush.tracking.trackedKeywords
   });
-  await persistSemrushTrackingSnapshot({
-    tenantId,
-    runId,
-    tracking: parsed.semrush.tracking,
-    keywordAdditions
-  });
+  if (parsed.semrush.source === "LIVE_MCP") {
+    await persistSemrushTrackingSnapshot({
+      tenantId,
+      runId,
+      tracking: parsed.semrush.tracking,
+      keywordAdditions
+    });
+  }
   const generatedAt = new Date();
   const reports = {
     keywordImport: buildWebsiteGrowthKeywordImportReport(keywordAdditions, generatedAt),
     performance: buildWebsiteGrowthPerformanceReport(parsed.semrush.tracking, generatedAt)
   };
+  const reportLinks = buildWebsiteGrowthReportDownloadLinks({
+    tenantId,
+    runId: job.id,
+    baseUrl: reviewBaseUrl,
+    includeKeywordImport: keywordAdditions.length > 0
+  });
   const teamsMessage = buildWebsiteGrowthScoutTeamsMessage({
     drafts: savedDrafts.map((draft) => ({ id: draft.id, title: draft.title, summary: draft.summary })),
     semrushQueried: parsed.semrush.queried,
+    semrushSource: parsed.semrush.source,
+    semrushObservedAt: parsed.semrush.observedAt,
     semrushSummary: parsed.semrush.summary,
     sourceSummary: readRecord(job.output).evidenceRefresh,
     weeklyPlan: readRecord(job.output).weeklyPlan,
@@ -432,6 +595,7 @@ export async function completeWebsiteGrowthScoutRun({
       persisted: backlinkSummary,
       reviewBaseUrl
     }),
+    reportLinks,
     reviewBaseUrl
   });
 
@@ -447,8 +611,11 @@ export async function completeWebsiteGrowthScoutRun({
           semrushImportId: semrushImport.id,
           semrushRowCount: parsed.semrush.rows.length,
           semrushTrackedKeywordCount: parsed.semrush.tracking.trackedKeywords.length,
+          semrushSource: parsed.semrush.source,
+          semrushObservedAt: parsed.semrush.observedAt,
           keywordAdditionCount: keywordAdditions.length,
           backlinkSummary,
+          reports,
           draftIds: savedDrafts.map((draft) => draft.id),
           completedAt: new Date().toISOString()
         }
@@ -465,6 +632,8 @@ export async function completeWebsiteGrowthScoutRun({
           model: readOptionalString(readRecord(job.input).model, 100) ?? "unknown",
           reasoningEffort: readOptionalString(readRecord(job.input).reasoningEffort, 20) ?? "unknown",
           semrushTransport: "official_mcp_oauth",
+          semrushSource: parsed.semrush.source,
+          semrushObservedAt: parsed.semrush.observedAt,
           semrushRowCount: parsed.semrush.rows.length,
           semrushTrackedKeywordCount: parsed.semrush.tracking.trackedKeywords.length,
           keywordAdditionCount: keywordAdditions.length,
@@ -481,7 +650,8 @@ export async function completeWebsiteGrowthScoutRun({
     draftIds: savedDrafts.map((draft) => draft.id),
     backlinkSummary,
     teamsMessage,
-    reports
+    reports,
+    reportLinks
   };
 }
 
@@ -506,6 +676,72 @@ export async function failWebsiteGrowthScoutRun({
   return result.count > 0;
 }
 
+function validateSemrushCacheUse({
+  parsed,
+  jobInput,
+  jobOutput
+}: {
+  parsed: WebsiteGrowthScoutCompletion;
+  jobInput: Prisma.JsonValue | null;
+  jobOutput: Prisma.JsonValue | null;
+}) {
+  if (parsed.semrush.source !== "CACHE" && parsed.backlinks.source !== "CACHE") return;
+  const input = readRecord(jobInput);
+  const cache = readRecord(readRecord(jobOutput).semrushCache);
+  const expectedObservedAt = readOptionalString(input.semrushCacheObservedAt, 100);
+  if (parsed.semrush.source === "CACHE" && (
+    cache.available !== true ||
+    cache.fresh !== true ||
+    !expectedObservedAt ||
+    readRequiredTimestamp(expectedObservedAt, "Cached SEMrush") !== parsed.semrush.observedAt
+  )) {
+    throw new Error("Scout may use cached SEMrush evidence only when the prepared packet contains the same fresh snapshot.");
+  }
+  if (parsed.backlinks.source === "CACHE") {
+    const observedAt = Date.parse(parsed.backlinks.observedAt);
+    if (
+      cache.available !== true ||
+      cache.fresh !== true ||
+      observedAt > Date.now() ||
+      observedAt < Date.now() - 14 * 24 * 60 * 60 * 1000
+    ) {
+      throw new Error("Scout may use cached backlink evidence only when it is no more than 14 days old.");
+    }
+  }
+}
+
+async function summarizeCachedWebsiteGrowthBacklinks(
+  tenantId: string,
+  review: WebsiteGrowthBacklinkReview
+) {
+  const activeQueueCount = await prisma.websiteGrowthBacklinkOpportunity.count({
+    where: {
+      tenantId,
+      status: {
+        in: [
+          WebsiteGrowthBacklinkStatus.NEEDS_REVIEW,
+          WebsiteGrowthBacklinkStatus.APPROVED,
+          WebsiteGrowthBacklinkStatus.IN_PROGRESS,
+          WebsiteGrowthBacklinkStatus.SUBMITTED,
+          WebsiteGrowthBacklinkStatus.CONTACTED,
+          WebsiteGrowthBacklinkStatus.REPLIED,
+          WebsiteGrowthBacklinkStatus.BLOCKED
+        ]
+      }
+    }
+  });
+  return {
+    rawProspectsReviewed: review.rawProspectsReviewed,
+    suppliedByScout: review.prospects.length,
+    created: 0,
+    refreshed: 0,
+    skippedByQualityGate: 0,
+    skippedExistingDecision: review.prospects.length,
+    archivedAsStale: 0,
+    activeQueueCount
+  };
+}
+
 export function parseWebsiteGrowthScoutCompletion(value: unknown): WebsiteGrowthScoutCompletion {
   const record = readRecord(value);
   const semrush = readRecord(record.semrush);
@@ -513,10 +749,12 @@ export function parseWebsiteGrowthScoutCompletion(value: unknown): WebsiteGrowth
   const drafts = Array.isArray(record.drafts) ? record.drafts : null;
   const rows = Array.isArray(semrush.rows) ? semrush.rows : null;
   const trackedKeywords = Array.isArray(tracking.trackedKeywords) ? tracking.trackedKeywords : null;
+  const semrushSource = readRequiredSemrushSource(semrush.source);
+  const semrushObservedAt = readRequiredTimestamp(semrush.observedAt, "SEMrush");
 
   if (
     !readRequiredString(record.runSummary, 4000) ||
-    semrush.queried !== true ||
+    typeof semrush.queried !== "boolean" ||
     !isRecord(record.backlinks) ||
     !rows ||
     !drafts ||
@@ -526,11 +764,19 @@ export function parseWebsiteGrowthScoutCompletion(value: unknown): WebsiteGrowth
   }
   if (rows.length > MAX_SEMRUSH_ROWS) throw new Error(`Scout may return at most ${MAX_SEMRUSH_ROWS} SEMrush rows.`);
   if (trackedKeywords.length > 500) throw new Error("Scout may return at most 500 tracked SEMrush keywords.");
+  if (semrushSource === "LIVE_MCP" && semrush.queried !== true) {
+    throw new Error("A live SEMrush result must query the official MCP.");
+  }
+  if (semrushSource === "CACHE" && semrush.queried !== false) {
+    throw new Error("Cached SEMrush evidence must not claim a live query.");
+  }
 
   return {
     runSummary: readRequiredString(record.runSummary, 4000),
     semrush: {
       queried: semrush.queried,
+      source: semrushSource,
+      observedAt: semrushObservedAt,
       summary: readRequiredString(semrush.summary, 4000),
       rows: rows.map(parseSemrushRow),
       tracking: {
@@ -569,6 +815,8 @@ export function parseWebsiteGrowthScoutCompletion(value: unknown): WebsiteGrowth
 export function buildWebsiteGrowthScoutTeamsMessage({
   drafts,
   semrushQueried,
+  semrushSource = semrushQueried ? "LIVE_MCP" : "CACHE",
+  semrushObservedAt,
   semrushSummary,
   sourceSummary,
   weeklyPlan,
@@ -578,10 +826,13 @@ export function buildWebsiteGrowthScoutTeamsMessage({
   keywordAdditionCount,
   tracking,
   backlinkLines,
+  reportLinks,
   reviewBaseUrl
 }: {
   drafts: Array<{ id: string; title: string; summary: string }>;
   semrushQueried: boolean;
+  semrushSource?: WebsiteGrowthSemrushSource;
+  semrushObservedAt?: string | null;
   semrushSummary: string;
   sourceSummary?: unknown;
   weeklyPlan?: unknown;
@@ -591,6 +842,11 @@ export function buildWebsiteGrowthScoutTeamsMessage({
   keywordAdditionCount?: number;
   tracking?: WebsiteGrowthSemrushTrackingSnapshot;
   backlinkLines?: string;
+  reportLinks?: {
+    performance: string;
+    keywordImport: string | null;
+    expiresAt: string;
+  };
   reviewBaseUrl: string;
 }) {
   const plan = readRecord(weeklyPlan);
@@ -599,18 +855,25 @@ export function buildWebsiteGrowthScoutTeamsMessage({
   const monitoringCount = readOptionalInteger(readRecord(researchInventory).MONITORING) ?? 0;
   const trackedCount = tracking?.trackedKeywords.length ?? 0;
   const evidenceRefreshLine = formatEvidenceRefresh(sourceSummary);
+  const semrushEvidenceLabel =
+    semrushSource === "LIVE_MCP"
+      ? "live SEMrush MCP"
+      : `cached SEMrush evidence${semrushObservedAt ? ` from ${formatReportDate(semrushObservedAt)}` : ""}`;
   const lines = [
     `Website Growth Scout weekday report: ${drafts.length} idea${drafts.length === 1 ? "" : "s"} promoted for approval.`,
-    `Evidence used: Search Console, GA4, first-party website forms${semrushQueried ? ", and SEMrush MCP" : ""}.`,
+    `Evidence used: Search Console, GA4, first-party website forms, and ${semrushEvidenceLabel}.`,
     evidenceRefreshLine,
     `Research funnel: ${researchSignalCount ?? 0} stored signals (${monitoringCount} monitoring); ${reviewedCount} new records reviewed; ${selectedCount} shortlisted; ${candidateCount ?? 0} sent to Codex; ${drafts.length} promoted.`,
     "The research inventory is intentionally much larger than the approval queue because duplicate queries are clustered by page/topic, weak or branded signals are filtered, weekly lane limits are applied, and Codex promotes only evidence-backed work.",
-    semrushQueried && semrushSummary ? `SEMrush: ${semrushSummary}` : null,
+    semrushSummary ? `SEMrush: ${semrushSummary}` : null,
     tracking
       ? `Position Tracking: ${trackedCount} keywords; visibility ${formatMetric(tracking.visibility)} (${formatSignedChange(tracking.visibility, tracking.previousVisibility)}); ${tracking.improved ?? 0} improved and ${tracking.declined ?? 0} declined.`
       : null,
     `Keyword tracking: ${keywordAdditionCount ?? 0} approved-page keyword${(keywordAdditionCount ?? 0) === 1 ? "" : "s"} are ready to add after automatic deduplication against SEMrush.`,
     backlinkLines ?? null,
+    reportLinks
+      ? `Excel downloads (available for 7 days):\nSEO performance: ${reportLinks.performance}${reportLinks.keywordImport ? `\nSEMrush keyword import: ${reportLinks.keywordImport}` : ""}`
+      : null,
     "",
     ...(drafts.length > 0
       ? drafts.flatMap((draft, index) => [
@@ -622,10 +885,153 @@ export function buildWebsiteGrowthScoutTeamsMessage({
       : ["No new page brief needs your approval today.", ""]),
     drafts.length > 0
       ? "Approve a brief only when its content, claims, route, and proposed layout are correct. Approval starts the developer build automatically; it does not merge or publish the page."
-      : "The SEO performance workbook is attached even when no new idea is promoted."
+      : "The SEO performance workbook is available from the secure download link even when no new idea is promoted."
   ];
 
   return lines.filter((line): line is string => line !== null).join("\n").trim();
+}
+
+export function buildWebsiteGrowthScoutWeekdayCheckInMessage({
+  sourceSummary,
+  weeklyPlan,
+  researchSignalCount,
+  researchInventory,
+  semrushCache,
+  backlinkCounts,
+  reviewBaseUrl
+}: {
+  sourceSummary: unknown;
+  weeklyPlan: unknown;
+  researchSignalCount: number;
+  researchInventory: Record<string, unknown>;
+  semrushCache: WebsiteGrowthSemrushCache;
+  backlinkCounts: Record<string, unknown>;
+  reviewBaseUrl: string;
+}) {
+  const plan = readRecord(weeklyPlan);
+  const reviewingCount = readOptionalInteger(researchInventory.REVIEWING) ?? 0;
+  const monitoringCount = readOptionalInteger(researchInventory.MONITORING) ?? 0;
+  const selectedCount = readOptionalInteger(plan.selectedCount) ?? 0;
+  const backlinkReviewCount = readOptionalInteger(backlinkCounts.NEEDS_REVIEW) ?? 0;
+  const cacheLine = semrushCache.available
+    ? `SEMrush cache: ${semrushCache.fresh ? "current" : "stale"}; last refreshed ${formatReportDate(semrushCache.observedAt)}; next live refresh is Monday.`
+    : "SEMrush cache: unavailable. The next Monday deep run will attempt a live refresh.";
+
+  return [
+    "Website Growth Scout weekday check-in: first-party evidence refreshed; no SEMrush API units or Codex research were used.",
+    formatEvidenceRefresh(sourceSummary),
+    `Research queue: ${researchSignalCount} stored signals (${monitoringCount} monitoring); ${reviewingCount} awaiting Scout research; ${selectedCount} newly shortlisted by deterministic planning.`,
+    cacheLine,
+    `Backlinks: ${backlinkReviewCount} curated prospect${backlinkReviewCount === 1 ? "" : "s"} currently need review.`,
+    `Review page: ${normalizeBaseUrl(reviewBaseUrl)}/website-growth`,
+    "New AI-reviewed ideas and the refreshed SEO workbook are produced by the Monday deep Scout run."
+  ].filter((line): line is string => Boolean(line)).join("\n");
+}
+
+export async function loadWebsiteGrowthSemrushCache(
+  tenantId: string,
+  now = new Date()
+): Promise<WebsiteGrowthSemrushCache> {
+  const imports = await prisma.websiteGrowthDataImport.findMany({
+    where: {
+      tenantId,
+      source: WebsiteGrowthDataSource.SEMRUSH_UPLOAD,
+      status: WebsiteGrowthImportStatus.SUCCESS
+    },
+    orderBy: { completedAt: "desc" },
+    take: 20,
+    select: {
+      completedAt: true,
+      createdAt: true,
+      summary: true
+    }
+  });
+  const trackingImport = imports.find(
+    (item) => readOptionalString(readRecord(item.summary).runType, 100) === "semrush_keyword_tracking_report"
+  );
+  if (!trackingImport) {
+    return {
+      available: false,
+      fresh: false,
+      observedAt: null,
+      expiresAt: null,
+      ageDays: null,
+      tracking: null
+    };
+  }
+
+  const summary = readRecord(trackingImport.summary);
+  const runId = readOptionalString(summary.runId, 100);
+  const observedAtDate = trackingImport.completedAt ?? trackingImport.createdAt;
+  const expiresAtDate = new Date(observedAtDate.getTime() + SEMRUSH_CACHE_TTL_MS);
+  let tracking = parseCachedTrackingSnapshot(summary.snapshot);
+
+  if (!tracking && runId) {
+    const metrics = await prisma.websiteGrowthMetric.findMany({
+      where: {
+        tenantId,
+        source: WebsiteGrowthDataSource.SEMRUSH_UPLOAD
+      },
+      orderBy: { createdAt: "desc" },
+      take: 1000,
+      select: {
+        query: true,
+        page: true,
+        position: true,
+        raw: true
+      }
+    });
+    const matching = metrics.filter(
+      (metric) => readOptionalString(readRecord(metric.raw).runId, 100) === runId &&
+        readRecord(metric.raw).tracking === true
+    );
+    const trackedKeywords = matching.map((metric) => {
+      const raw = readRecord(metric.raw);
+      return {
+        keyword: metric.query ?? "",
+        tags: readStringArray(raw.tags).slice(0, 20),
+        position: metric.position,
+        previousPosition: readOptionalNumber(raw.previousPosition),
+        landingPage: metric.page,
+        searchVolume: readOptionalInteger(raw.searchVolume)
+      };
+    }).filter((row) => Boolean(row.keyword));
+    tracking = {
+      projectId: readOptionalString(summary.projectId, 100),
+      campaignId: readOptionalString(summary.campaignId, 100),
+      domain: readOptionalString(summary.domain, 300),
+      database: readOptionalString(summary.database, 50),
+      device: readOptionalString(summary.device, 50),
+      visibility: readOptionalNumber(summary.visibility),
+      previousVisibility: readOptionalNumber(summary.previousVisibility),
+      top3: countRankingBucket(trackedKeywords, 3),
+      top10: countRankingBucket(trackedKeywords, 10),
+      top20: countRankingBucket(trackedKeywords, 20),
+      top100: countRankingBucket(trackedKeywords, 100),
+      improved: trackedKeywords.filter(
+        (row) => row.position !== null && row.previousPosition !== null && row.position < row.previousPosition
+      ).length,
+      declined: trackedKeywords.filter(
+        (row) => row.position !== null && row.previousPosition !== null && row.position > row.previousPosition
+      ).length,
+      entered: trackedKeywords.filter(
+        (row) => row.position !== null && row.previousPosition === null
+      ).length,
+      lost: trackedKeywords.filter(
+        (row) => row.position === null && row.previousPosition !== null
+      ).length,
+      trackedKeywords
+    };
+  }
+
+  return {
+    available: Boolean(tracking),
+    fresh: Boolean(tracking) && expiresAtDate.getTime() >= now.getTime(),
+    observedAt: observedAtDate.toISOString(),
+    expiresAt: expiresAtDate.toISOString(),
+    ageDays: Math.max(0, Math.floor((now.getTime() - observedAtDate.getTime()) / (24 * 60 * 60 * 1000))),
+    tracking
+  };
 }
 
 async function persistSemrushTrackingSnapshot({
@@ -677,12 +1083,20 @@ async function persistSemrushTrackingSnapshot({
         runType: "semrush_keyword_tracking_report",
         transport: "official_mcp_oauth",
         readOnly: true,
+        observedAt: now.toISOString(),
+        expiresAt: new Date(now.getTime() + SEMRUSH_CACHE_TTL_MS).toISOString(),
         runId,
         projectId: tracking.projectId,
         campaignId: tracking.campaignId,
+        domain: tracking.domain,
+        database: tracking.database,
+        device: tracking.device,
+        visibility: tracking.visibility,
+        previousVisibility: tracking.previousVisibility,
         trackedKeywordCount: tracking.trackedKeywords.length,
         keywordAdditionCount: keywordAdditions.length,
-        keywordAdditions: keywordAdditions.slice(0, 500)
+        keywordAdditions: keywordAdditions.slice(0, 500),
+        snapshot: tracking
       } as Prisma.InputJsonValue
     }
   });
@@ -694,6 +1108,31 @@ async function persistSemrushEvidence(
   semrush: WebsiteGrowthScoutCompletion["semrush"],
   allowed: Set<string>
 ) {
+  if (semrush.source === "CACHE") {
+    const now = new Date();
+    return prisma.websiteGrowthDataImport.create({
+      data: {
+        tenantId,
+        source: WebsiteGrowthDataSource.SEMRUSH_UPLOAD,
+        status: WebsiteGrowthImportStatus.SUCCESS,
+        fileName: "Cached official SEMrush MCP evidence",
+        rowCount: 0,
+        startedAt: now,
+        completedAt: now,
+        summary: {
+          runType: "semrush_cache_reuse",
+          transport: "official_mcp_oauth",
+          readOnly: true,
+          queried: false,
+          source: semrush.source,
+          observedAt: semrush.observedAt,
+          summary: semrush.summary,
+          runId
+        }
+      }
+    });
+  }
+
   const importRecord = await prisma.websiteGrowthDataImport.create({
     data: {
       tenantId,
@@ -714,7 +1153,12 @@ async function persistSemrushEvidence(
           query: row.keyword,
           page: row.page,
           position: row.position,
-          raw: { ...row, transport: "official_mcp_oauth", runId }
+          raw: {
+            ...row,
+            transport: "official_mcp_oauth",
+            runId,
+            observedAt: semrush.observedAt
+          }
         }))
       });
     }
@@ -735,6 +1179,8 @@ async function persistSemrushEvidence(
             semrush: {
               transport: "official_mcp_oauth",
               runId,
+              observedAt: semrush.observedAt,
+              expiresAt: new Date(Date.parse(semrush.observedAt) + 30 * 24 * 60 * 60 * 1000).toISOString(),
               summary: semrush.summary,
               rows: matching
             }
@@ -753,6 +1199,8 @@ async function persistSemrushEvidence(
           transport: "official_mcp_oauth",
           readOnly: true,
           queried: semrush.queried,
+          source: semrush.source,
+          observedAt: semrush.observedAt,
           summary: semrush.summary,
           runId
         }
@@ -872,6 +1320,49 @@ function formatEvidenceRefresh(value: unknown) {
   return summaries.length > 0 ? `Data refresh: ${summaries.join("; ")}.` : null;
 }
 
+function parseCachedTrackingSnapshot(value: unknown): WebsiteGrowthSemrushTrackingSnapshot | null {
+  const record = readRecord(value);
+  const trackedKeywords = Array.isArray(record.trackedKeywords)
+    ? record.trackedKeywords.map((row) => parseTrackedKeyword(row))
+    : null;
+  if (!trackedKeywords) return null;
+  return {
+    projectId: readOptionalString(record.projectId, 100),
+    campaignId: readOptionalString(record.campaignId, 100),
+    domain: readOptionalString(record.domain, 300),
+    database: readOptionalString(record.database, 50),
+    device: readOptionalString(record.device, 50),
+    visibility: readOptionalNumber(record.visibility),
+    previousVisibility: readOptionalNumber(record.previousVisibility),
+    top3: readOptionalInteger(record.top3),
+    top10: readOptionalInteger(record.top10),
+    top20: readOptionalInteger(record.top20),
+    top100: readOptionalInteger(record.top100),
+    improved: readOptionalInteger(record.improved),
+    declined: readOptionalInteger(record.declined),
+    entered: readOptionalInteger(record.entered),
+    lost: readOptionalInteger(record.lost),
+    trackedKeywords
+  };
+}
+
+function countRankingBucket(
+  rows: WebsiteGrowthSemrushTrackedKeyword[],
+  maximumPosition: number
+) {
+  return rows.filter(
+    (row) => row.position !== null && row.position > 0 && row.position <= maximumPosition
+  ).length;
+}
+
+function formatReportDate(value: string | null | undefined) {
+  if (!value) return "not available";
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime())
+    ? parsed.toLocaleDateString("en-CA", { timeZone: "America/Toronto" })
+    : "not available";
+}
+
 function readRecord(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {};
 }
@@ -899,4 +1390,16 @@ function readOptionalNumber(value: unknown) {
 
 function readOptionalInteger(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? Math.round(value) : null;
+}
+
+function readRequiredSemrushSource(value: unknown): WebsiteGrowthSemrushSource {
+  if (value === "LIVE_MCP" || value === "CACHE") return value;
+  throw new Error("Scout completion must identify live or cached SEMrush evidence.");
+}
+
+function readRequiredTimestamp(value: unknown, label: string) {
+  const timestamp = readRequiredString(value, 100);
+  const parsed = Date.parse(timestamp);
+  if (!Number.isFinite(parsed)) throw new Error(`${label} observedAt must be an ISO timestamp.`);
+  return new Date(parsed).toISOString();
 }
