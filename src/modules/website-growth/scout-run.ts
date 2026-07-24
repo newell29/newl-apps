@@ -29,6 +29,7 @@ import {
 } from "@/modules/website-growth/keyword-tracking";
 import { buildWebsiteGrowthReportDownloadLinks } from "@/modules/website-growth/report-download";
 import { resolveNewlWebsiteContext } from "@/modules/website-growth/newl-website-context-scanner";
+import { isWebsiteGrowthQuestionOpportunity } from "@/modules/website-growth/opportunities";
 import { createWeeklyWebsiteGrowthPlanForTenant } from "@/modules/website-growth/weekly-plan";
 import { prisma } from "@/server/db";
 
@@ -85,6 +86,28 @@ export type WebsiteGrowthScoutCompletion = {
   }>;
 };
 
+export function selectWebsiteGrowthScoutPacketCandidates<
+  T extends {
+    id: string;
+    topic?: string | null;
+    primaryKeyword?: string | null;
+    targetPage?: string | null;
+    evidence?: unknown;
+  }
+>(candidates: T[], maxCandidates: number) {
+  const limit = Math.max(1, maxCandidates);
+  const questionLimit = Math.min(2, limit);
+  const questionCandidates = candidates
+    .filter(isWebsiteGrowthQuestionOpportunity)
+    .slice(0, questionLimit);
+  const selectedIds = new Set(questionCandidates.map((candidate) => candidate.id));
+
+  return [
+    ...questionCandidates,
+    ...candidates.filter((candidate) => !selectedIds.has(candidate.id))
+  ].slice(0, limit);
+}
+
 export async function prepareWebsiteGrowthScoutRun({
   tenantId,
   tenantSlug,
@@ -135,7 +158,7 @@ export async function prepareWebsiteGrowthScoutRun({
   try {
     const evidenceRefresh = await refreshWebsiteGrowthEvidenceForTenant(tenantId);
     const weeklyPlan = await createWeeklyWebsiteGrowthPlanForTenant(tenantId, { source: "cron" });
-    const [opportunities, opportunityStatusCounts, semrushCache] = await Promise.all([
+    const [opportunityPool, opportunityStatusCounts, semrushCache] = await Promise.all([
       prisma.websiteGrowthOpportunity.findMany({
         where: {
           tenantId,
@@ -143,7 +166,7 @@ export async function prepareWebsiteGrowthScoutRun({
           contentDrafts: { none: {} }
         },
         orderBy: [{ score: "desc" }, { updatedAt: "asc" }],
-        take: maxCandidates,
+        take: Math.max(24, maxCandidates * 4),
         select: {
           id: true,
           action: true,
@@ -166,7 +189,14 @@ export async function prepareWebsiteGrowthScoutRun({
       }),
       loadWebsiteGrowthSemrushCache(tenantId)
     ]);
+    const opportunities = selectWebsiteGrowthScoutPacketCandidates(
+      opportunityPool,
+      maxCandidates
+    );
     const candidateIds = opportunities.map((opportunity) => opportunity.id);
+    const questionCandidateIds = opportunities
+      .filter(isWebsiteGrowthQuestionOpportunity)
+      .map((opportunity) => opportunity.id);
     const researchInventory = Object.fromEntries(
       opportunityStatusCounts.map((row) => [row.status, row._count._all])
     );
@@ -234,8 +264,21 @@ export async function prepareWebsiteGrowthScoutRun({
             : "Use the cached monthly competitor-gap evidence unless a candidate-specific check is necessary",
           "Declined or lost keywords where the data is available",
           "Search volume, keyword difficulty, intent, and ranking URL",
+          "Question-style keyword variants and answer gaps relevant to each candidate, including definition, process, cost, comparison, selection, and capability questions",
           "Newl and competitor backlink profiles, referring domains, anchor context, and backlink gaps",
           "New and lost Newl backlinks, link-reclamation candidates, and relevant directory, partner, resource, content, digital-PR, or paid-placement prospects"
+        ]
+      },
+      answerOpportunityProgram: {
+        candidateIds: questionCandidateIds,
+        rules: [
+          "Treat questionOpportunity evidence as a dedicated customer-question and AI-answer lane.",
+          "Map each question to the best existing service, location, industry, freight, or resource page before proposing a new URL.",
+          "Prefer a concise answer-first section on an authoritative existing page. Use an FAQ only when the same visible answer is useful to visitors.",
+          "Recommend a dedicated guide only when the question has distinct, substantial intent that an existing page cannot satisfy without becoming unfocused.",
+          "Reject thin question pages, duplicate intent, keyword-swapped pages, and unsupported FAQ or structured-data markup.",
+          "Make answers easy to extract and cite with a descriptive heading, direct opening answer, supporting operational detail, relevant internal links, and a clear conversion path.",
+          "Do not claim that a change guarantees an AI citation, AI Overview, ranking, lead, or referral."
         ]
       },
       backlinkProgram: {
@@ -286,6 +329,7 @@ export async function prepareWebsiteGrowthScoutRun({
           researchScope,
           semrushTransport: "official_mcp_oauth",
           candidateIds,
+          questionCandidateIds,
           semrushCacheObservedAt: semrushCache.observedAt
         },
         output: {
@@ -295,6 +339,7 @@ export async function prepareWebsiteGrowthScoutRun({
           researchInventory,
           researchSignalCount: opportunityStatusCounts.reduce((sum, row) => sum + row._count._all, 0),
           candidateCount: candidateIds.length,
+          questionCandidateCount: questionCandidateIds.length,
           semrushCache: {
             available: semrushCache.available,
             fresh: semrushCache.fresh,
@@ -457,6 +502,9 @@ export async function completeWebsiteGrowthScoutRun({
   if (!job) throw new Error("The Website Growth Scout run is not active or does not belong to this tenant.");
 
   const candidateIds = readStringArray(readRecord(job.input).candidateIds);
+  const questionCandidateIds = new Set(
+    readStringArray(readRecord(job.input).questionCandidateIds)
+  );
   const allowed = new Set(candidateIds);
 
   for (const item of parsed.drafts) {
@@ -523,6 +571,9 @@ export async function completeWebsiteGrowthScoutRun({
     });
     savedDrafts.push(saved);
   }
+  const questionDraftCount = savedDrafts.filter((draft) =>
+    questionCandidateIds.has(draft.opportunityId)
+  ).length;
 
   const trackingDrafts = await prisma.websiteGrowthContentDraft.findMany({
     where: {
@@ -586,6 +637,8 @@ export async function completeWebsiteGrowthScoutRun({
     sourceSummary: readRecord(job.output).evidenceRefresh,
     weeklyPlan: readRecord(job.output).weeklyPlan,
     candidateCount: readOptionalInteger(readRecord(job.output).candidateCount) ?? 0,
+    questionCandidateCount: questionCandidateIds.size,
+    questionDraftCount,
     researchSignalCount: readOptionalInteger(readRecord(job.output).researchSignalCount) ?? 0,
     researchInventory: readRecord(readRecord(job.output).researchInventory),
     keywordAdditionCount: keywordAdditions.length,
@@ -614,6 +667,8 @@ export async function completeWebsiteGrowthScoutRun({
           semrushSource: parsed.semrush.source,
           semrushObservedAt: parsed.semrush.observedAt,
           keywordAdditionCount: keywordAdditions.length,
+          questionCandidateCount: questionCandidateIds.size,
+          questionDraftCount,
           backlinkSummary,
           reports,
           draftIds: savedDrafts.map((draft) => draft.id),
@@ -637,6 +692,8 @@ export async function completeWebsiteGrowthScoutRun({
           semrushRowCount: parsed.semrush.rows.length,
           semrushTrackedKeywordCount: parsed.semrush.tracking.trackedKeywords.length,
           keywordAdditionCount: keywordAdditions.length,
+          questionCandidateCount: questionCandidateIds.size,
+          questionDraftCount,
           backlinkSummary,
           draftIds: savedDrafts.map((draft) => draft.id)
         }
@@ -821,6 +878,8 @@ export function buildWebsiteGrowthScoutTeamsMessage({
   sourceSummary,
   weeklyPlan,
   candidateCount,
+  questionCandidateCount,
+  questionDraftCount,
   researchSignalCount,
   researchInventory,
   keywordAdditionCount,
@@ -837,6 +896,8 @@ export function buildWebsiteGrowthScoutTeamsMessage({
   sourceSummary?: unknown;
   weeklyPlan?: unknown;
   candidateCount?: number;
+  questionCandidateCount?: number;
+  questionDraftCount?: number;
   researchSignalCount?: number;
   researchInventory?: Record<string, unknown>;
   keywordAdditionCount?: number;
@@ -864,6 +925,7 @@ export function buildWebsiteGrowthScoutTeamsMessage({
     `Evidence used: Search Console, GA4, first-party website forms, and ${semrushEvidenceLabel}.`,
     evidenceRefreshLine,
     `Research funnel: ${researchSignalCount ?? 0} stored signals (${monitoringCount} monitoring); ${reviewedCount} new records reviewed; ${selectedCount} shortlisted; ${candidateCount ?? 0} sent to Codex; ${drafts.length} promoted.`,
+    `Question and AI-answer lane: ${questionCandidateCount ?? 0} question-led candidate${(questionCandidateCount ?? 0) === 1 ? "" : "s"} reviewed; ${questionDraftCount ?? 0} promoted.`,
     "The research inventory is intentionally much larger than the approval queue because duplicate queries are clustered by page/topic, weak or branded signals are filtered, weekly lane limits are applied, and Codex promotes only evidence-backed work.",
     semrushSummary ? `SEMrush: ${semrushSummary}` : null,
     tracking
@@ -912,6 +974,8 @@ export function buildWebsiteGrowthScoutWeekdayCheckInMessage({
   const reviewingCount = readOptionalInteger(researchInventory.REVIEWING) ?? 0;
   const monitoringCount = readOptionalInteger(researchInventory.MONITORING) ?? 0;
   const selectedCount = readOptionalInteger(plan.selectedCount) ?? 0;
+  const questionSelectedCount =
+    readOptionalInteger(readRecord(plan.laneCounts).QUESTION_ANSWER) ?? 0;
   const backlinkReviewCount = readOptionalInteger(backlinkCounts.NEEDS_REVIEW) ?? 0;
   const cacheLine = semrushCache.available
     ? `SEMrush cache: ${semrushCache.fresh ? "current" : "stale"}; last refreshed ${formatReportDate(semrushCache.observedAt)}; next live refresh is Monday.`
@@ -921,6 +985,7 @@ export function buildWebsiteGrowthScoutWeekdayCheckInMessage({
     "Website Growth Scout weekday check-in: first-party evidence refreshed; no SEMrush API units or Codex research were used.",
     formatEvidenceRefresh(sourceSummary),
     `Research queue: ${researchSignalCount} stored signals (${monitoringCount} monitoring); ${reviewingCount} awaiting Scout research; ${selectedCount} newly shortlisted by deterministic planning.`,
+    `Question and AI-answer lane: ${questionSelectedCount} question-led candidate${questionSelectedCount === 1 ? "" : "s"} newly shortlisted for the next deep Scout review.`,
     cacheLine,
     `Backlinks: ${backlinkReviewCount} curated prospect${backlinkReviewCount === 1 ? "" : "s"} currently need review.`,
     `Review page: ${normalizeBaseUrl(reviewBaseUrl)}/website-growth`,

@@ -41,6 +41,14 @@ The Website Growth UI intentionally separates two different kinds of records:
 
 Every Scout card must state whether it proposes a **new page** or an **update to an existing page**, show the affected route, and summarize the primary proposed change. A draft created by the latest Scout run is labeled as new. The latest run summary remains visible even when no opportunities were selected.
 
+## Customer-question and AI-answer lane
+
+Search Console questions are classified into definition, process, cost, comparison, selection, and capability intents. The weekly planner reserves up to two shortlist positions for these question-led candidates, and the bounded Scout packet reserves up to two of its configured candidate slots so higher-scoring generic signals cannot permanently crowd them out.
+
+Scout must map each question to the strongest existing Newl service, location, industry, freight, or resource page before proposing a new URL. The default recommendation is a concise answer-first section with useful operational detail, relevant internal links, and a conversion path. A dedicated guide is allowed only when the intent is substantial and distinct. Thin FAQ pages, keyword-swapped duplicates, hidden or unsupported structured data, and guarantees of AI citations or rankings are prohibited.
+
+This lane improves answer clarity and citation readiness; it does not claim to measure or guarantee inclusion in ChatGPT, Google AI Overviews, Perplexity, or another answer engine. Teams reports state how many question-led candidates were reviewed and promoted.
+
 ## Model routing
 
 | Work | Default | Reasoning | Notes |
@@ -55,7 +63,7 @@ Model changes must be evaluated against the same saved opportunities. Compare fa
 
 ## Data sources
 
-- Search Console: query/page clicks, impressions, CTR, and position.
+- Search Console: query/page clicks, impressions, CTR, and position, including deterministic classification of customer-question queries.
 - GA4 Data API: landing page sessions, engaged sessions, engagement rate, and event count for the last 28 days.
 - Newl inbound: form submissions and lead-producing pages. These remain the source of truth for lead counts.
 - SEMrush: official read-only MCP through OAuth for rankings, keyword gaps, competitors, intent, volume, and difficulty. Results are capped and cached as sanitized evidence.
@@ -82,7 +90,7 @@ The developer run belongs in GitHub Actions rather than a Vercel function. Verce
 
 At 9:15 AM `America/Toronto`, Monday runs the bounded read-only Codex Scout and official SEMrush research; Tuesday through Friday run a deterministic check-in that refreshes Search Console, GA4, forms, and queue state while reusing the stored SEMrush snapshot. Lightweight check-ins spend no Codex tokens or SEMrush API units. Every trigger still sends a Teams outcome.
 
-The Monday read-only SEMrush session refreshes the Newl Group Position Tracking snapshot and stores it with an eight-day expiry. Deterministic Newl Apps code selects primary and supporting keywords only from human-approved, built, or published Scout briefs, deduplicates them against the tracked-keyword list, and creates a two-column SEMrush import workbook without a separate keyword approval step. Broad competitor-gap discovery runs monthly; weekly research is limited to Position Tracking, backlinks, and candidate-specific questions.
+The Monday read-only SEMrush session refreshes the Newl Group Position Tracking snapshot and stores it with an eight-day expiry. Deterministic Newl Apps code selects primary and supporting keywords only from human-approved, built, or published Scout briefs, deduplicates them against the tracked-keyword list, and creates a two-column SEMrush import workbook without a separate keyword approval step. Broad competitor-gap discovery runs monthly; weekly research is limited to Position Tracking, backlinks, candidate-specific questions, and relevant question-style keyword variants.
 
 The Monday session also reviews Newl and competitor backlink profiles, referring domains, backlink gaps, and new/lost links. Cached weekday use never refreshes backlink recency or creates prospects. Scout may return no more than 15 curated prospects. Newl Apps rejects prospects below 60 relevance or quality, rejects high spam risk, deduplicates by referring domain and target page, caps the active queue at 50, and archives unrefreshed review items after 45 days.
 

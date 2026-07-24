@@ -11,6 +11,7 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 | Responsibility | Source |
 |---|---|
 | Search Console, GA4, and sanitized form refresh | `src/modules/website-growth/evidence-refresh.ts` |
+| Question-intent classification, answer strategy, scoring, and qualification | `src/modules/website-growth/opportunities.ts` |
 | Tenant-scoped candidate upsert | `src/modules/website-growth/opportunity-store.ts` |
 | Scout run locking, SEMrush cache, weekday check-in, packet, draft save, Teams message | `src/modules/website-growth/scout-run.ts` |
 | Signed Excel links and stored-report validation | `src/modules/website-growth/report-download.ts` |

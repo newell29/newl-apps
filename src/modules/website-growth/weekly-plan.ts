@@ -6,7 +6,11 @@ import {
 } from "@prisma/client";
 
 import { getOpportunityReviewKey } from "@/modules/website-growth/legacy-rebuilds";
-import { weeklyContentRecommendations, type WeeklyContentLane } from "@/modules/website-growth/opportunities";
+import {
+  isWebsiteGrowthQuestionOpportunity,
+  weeklyContentRecommendations,
+  type WeeklyContentLane
+} from "@/modules/website-growth/opportunities";
 import { prisma } from "@/server/db";
 
 export type WeeklyWebsiteGrowthPlanResult = {
@@ -90,7 +94,12 @@ export function selectWeeklyWebsiteGrowthCandidates(candidates: WebsiteGrowthOpp
 
   for (const lane of weeklyContentRecommendations) {
     const laneCandidates = candidates
-      .filter((candidate) => lane.actions.includes(candidate.action))
+      .filter((candidate) =>
+        lane.lane === "QUESTION_ANSWER"
+          ? isWebsiteGrowthQuestionOpportunity(candidate)
+          : lane.actions.includes(candidate.action) &&
+            !isWebsiteGrowthQuestionOpportunity(candidate)
+      )
       .filter((candidate) => !selected.some((selectedCandidate) => selectedCandidate.id === candidate.id));
 
     for (const candidate of laneCandidates) {
@@ -168,6 +177,7 @@ function normalizeReviewPage(value: string) {
 function emptyLaneCounts(): Record<WeeklyContentLane, number> {
   return {
     CORE_PAGE: 0,
+    QUESTION_ANSWER: 0,
     SUPPORTING_CONTENT: 0,
     QUICK_OPTIMIZATION: 0
   };
