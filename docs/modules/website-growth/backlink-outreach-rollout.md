@@ -22,8 +22,8 @@ Scout uses its own OpenClaw agent and workspace with Codex `gpt-5.6-sol` at high
 1. Merge the reviewed pull request. Do not deploy this branch directly.
 2. Apply the included Prisma migration through the normal guarded Vercel production deployment.
 3. Confirm that the dedicated `partnerships@newlgroup.com` mailbox exists, its Microsoft 365 display name is `Vanessa`, and it can receive replies and password-reset messages.
-4. In Microsoft Entra, add Microsoft Graph **application** permissions `Mail.Send` and `Mail.Read` to the existing server application and grant admin consent.
-5. Restrict that application to the dedicated partnerships mailbox with Exchange Online Application RBAC or an Application Access Policy. Do not grant unrestricted access to all mailboxes.
+4. Prefer Exchange Online **Application RBAC** for a new setup: assign the service principal only the `Application Mail.Send` and `Application Mail.Read` roles against a management scope containing the dedicated partnerships mailbox.
+5. Do not also leave equivalent organization-wide Microsoft Graph application permissions assigned in Entra when using Application RBAC, because those grants are additive and would defeat the mailbox scope. If the tenant must use the legacy method, grant Graph application permissions `Mail.Send` and `Mail.Read` with admin consent and then restrict them with an Exchange Application Access Policy. Do not use both models or leave unrestricted access to all mailboxes.
 6. Add the following protected Vercel production values:
    - `OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN` — a new random value, different from the read-only Scout token.
    - `WEBSITE_GROWTH_OUTREACH_MAILBOX`
