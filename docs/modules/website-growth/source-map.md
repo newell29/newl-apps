@@ -14,9 +14,11 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 | Tenant-scoped candidate upsert | `src/modules/website-growth/opportunity-store.ts` |
 | Scout run locking, packet, SEMrush evidence, draft save, Teams message | `src/modules/website-growth/scout-run.ts` |
 | Machine API | `src/app/api/website-growth/scout/prepare`, `complete`, and `fail` |
+| Dedicated runtime synchronization and validation | `ops/openclaw/run-website-growth-scout-runtime.sh` |
 | Read-only Codex/OpenClaw runtime | `ops/openclaw/run-website-growth-scout.sh` |
+| Safe environment and fixed-target Teams helpers | `ops/openclaw/lib/website-growth-scout-runtime.zsh` |
 | Official SEMrush OAuth setup | `ops/openclaw/configure-semrush-mcp.sh` |
-| Weekly OpenClaw schedule | `ops/openclaw/install-website-growth-scout.sh` |
+| Weekday OpenClaw schedule and permanent worktree installation | `ops/openclaw/install-website-growth-scout.sh` |
 | Structured output contract | `ops/openclaw/skills/website-growth-scout/scout-output.schema.json` |
 | Backlink parsing, quality gates, dedupe, retention, workspace query | `src/modules/website-growth/backlinks.ts` |
 | Backlink approval actions | `src/modules/website-growth/actions.ts` |

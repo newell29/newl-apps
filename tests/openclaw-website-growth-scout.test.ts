@@ -9,6 +9,16 @@ import { describe, expect, it } from "vitest";
 const execFileAsync = promisify(execFile);
 const repoRoot = process.cwd();
 const helperPath = path.join(repoRoot, "ops/openclaw/lib/resolve-codex-cli.zsh");
+const runtimeHelperPath = path.join(
+  repoRoot,
+  "ops/openclaw/lib/website-growth-scout-runtime.zsh",
+);
+const installerPath = path.join(repoRoot, "ops/openclaw/install-website-growth-scout.sh");
+const runnerPath = path.join(repoRoot, "ops/openclaw/run-website-growth-scout.sh");
+const runtimeRunnerPath = path.join(
+  repoRoot,
+  "ops/openclaw/run-website-growth-scout-runtime.sh",
+);
 const schemaPath = path.join(
   repoRoot,
   "ops/openclaw/skills/website-growth-scout/scout-output.schema.json",
@@ -42,6 +52,52 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     expect(script).toContain("${codex_bin}");
   });
 
+  it("installs an idempotent weekday schedule against a dedicated runtime worktree", async () => {
+    const installer = await readFile(installerPath, "utf8");
+
+    expect(installer).toContain('--cron "15 9 * * 1-5"');
+    expect(installer).toContain("NEWL_APPS_SCOUT_RUNTIME_REPO_PATH");
+    expect(installer).toContain("run-website-growth-scout-runtime.sh");
+    expect(installer).toContain('--declaration-key "newl.website-growth.scout.weekly.v1"');
+    expect(installer).not.toContain('--cron "15 9 * * 1"');
+  });
+
+  it("updates the clean dedicated runtime from main before every Scout run", async () => {
+    const runtimeRunner = await readFile(runtimeRunnerPath, "utf8");
+
+    expect(runtimeRunner).toContain('status --porcelain --untracked-files=normal');
+    expect(runtimeRunner).toContain('fetch --quiet origin "+main:${runtime_main_ref}"');
+    expect(runtimeRunner).toContain('checkout --quiet --detach "${runtime_main_ref}"');
+    expect(runtimeRunner).toContain('exec /bin/zsh "${runtime_repo_path}/ops/openclaw/run-website-growth-scout.sh"');
+  });
+
+  it("sends safe Teams outcomes for duplicate and failed runs", async () => {
+    const [runner, runtimeRunner, helper] = await Promise.all([
+      readFile(runnerPath, "utf8"),
+      readFile(runtimeRunnerPath, "utf8"),
+      readFile(runtimeHelperPath, "utf8"),
+    ]);
+
+    expect(helper).toContain("send_website_growth_teams_message");
+    expect(runner).toContain("another Scout run is already active");
+    expect(runner).toContain("No website work was approved, merged, or published");
+    expect(runtimeRunner).toContain("The dedicated runtime did not reach the read-only Scout");
+  });
+
+  it.each([
+    "install-website-growth-scout.sh",
+    "run-website-growth-scout.sh",
+    "run-website-growth-scout-runtime.sh",
+    "lib/website-growth-scout-runtime.zsh",
+  ])("passes zsh syntax validation for %s", async (scriptName) => {
+    await expect(
+      execFileAsync("/bin/zsh", [
+        "-n",
+        path.join(repoRoot, "ops/openclaw", scriptName),
+      ]),
+    ).resolves.toBeDefined();
+  });
+
   it("declares an explicit type for every structured-output property", async () => {
     const schema = JSON.parse(await readFile(schemaPath, "utf8")) as Record<string, unknown>;
     const missingTypes: string[] = [];
@@ -71,7 +127,7 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     expect(missingTypes).toEqual([]);
   });
 
-  it("creates valid weekly Excel attachments from the completion response", async () => {
+  it("creates valid SEO Excel attachments from the completion response", async () => {
     const outputDirectory = await mkdtemp(path.join(tmpdir(), "newl-scout-reports-"));
     const responsePath = path.join(outputDirectory, "completion.json");
     const reportScript = path.join(

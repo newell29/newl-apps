@@ -5,8 +5,9 @@ set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 script_directory="${0:A:h}"
-repo_path="${script_directory:h:h}"
-runner_path="${script_directory}/run-website-growth-scout.sh"
+source_repo_path="${script_directory:h:h}"
+runtime_repo_path="${NEWL_APPS_SCOUT_RUNTIME_REPO_PATH:-${HOME}/Developer/newl-apps-scout-runtime}"
+runtime_main_ref="refs/scout-runtime/website-growth-main"
 scout_env_file="${WEBSITE_GROWTH_SCOUT_ENV_FILE:-${HOME}/.openclaw/agents/scout/.env}"
 source "${script_directory}/lib/resolve-codex-cli.zsh"
 resolve_codex_cli
@@ -22,26 +23,46 @@ for required_name in NEWL_APPS_URL OPENCLAW_WEBSITE_GROWTH_TOKEN NEWL_WEBSITE_RE
   fi
 done
 if ! "${codex_bin}" mcp get semrush >/dev/null 2>&1; then
-  echo "Configure the official SEMrush MCP OAuth connection before installing the weekly job." >&2
+  echo "Configure the official SEMrush MCP OAuth connection before installing the weekday job." >&2
   exit 1
 fi
 
-chmod 700 "${runner_path}"
+if [[ -e "${runtime_repo_path}" && ! -e "${runtime_repo_path}/.git" ]]; then
+  echo "NEWL_APPS_SCOUT_RUNTIME_REPO_PATH exists but is not a Git worktree." >&2
+  exit 1
+fi
+if [[ ! -e "${runtime_repo_path}/.git" ]]; then
+  git -C "${source_repo_path}" fetch origin "+main:${runtime_main_ref}"
+  git -C "${source_repo_path}" worktree add --detach "${runtime_repo_path}" "${runtime_main_ref}"
+fi
+if [[ -n "$(git -C "${runtime_repo_path}" status --porcelain --untracked-files=normal)" ]]; then
+  echo "The dedicated Website Growth Scout runtime contains unexpected local changes." >&2
+  exit 1
+fi
+
+git -C "${runtime_repo_path}" fetch origin "+main:${runtime_main_ref}"
+git -C "${runtime_repo_path}" checkout --detach "${runtime_main_ref}"
+
+runtime_runner_path="${runtime_repo_path}/ops/openclaw/run-website-growth-scout-runtime.sh"
+chmod 700 \
+  "${runtime_runner_path}" \
+  "${runtime_repo_path}/ops/openclaw/run-website-growth-scout.sh"
 
 openclaw cron add \
   --name "NEWL Website Growth Scout" \
   --display-name "NEWL Website Growth Scout" \
-  --description "Refresh Search Console, GA4, first-party form evidence, Position Tracking, and backlink opportunities; run read-only Codex Scout with official SEMrush MCP; send the curated approval slate to Teams." \
+  --description "Every weekday, refresh Search Console, GA4, first-party form evidence, Position Tracking, and backlink opportunities; run read-only Codex Scout with official SEMrush MCP; send a success, no-op, duplicate-run, or safe failure summary to Teams." \
   --declaration-key "newl.website-growth.scout.weekly.v1" \
-  --cron "15 9 * * 1" \
+  --cron "15 9 * * 1-5" \
   --tz "America/Toronto" \
   --exact \
-  --command-argv "[\"/bin/zsh\",\"${runner_path}\"]" \
-  --command-cwd "${repo_path}" \
+  --command-argv "[\"/bin/zsh\",\"${runtime_runner_path}\"]" \
+  --command-cwd "${runtime_repo_path}" \
   --command-env "WEBSITE_GROWTH_SCOUT_ENV_FILE=${scout_env_file}" \
   --timeout-seconds 1800 \
   --no-output-timeout-seconds 900 \
   --output-max-bytes 100000 \
   --no-deliver
 
-echo "Installed the Website Growth Scout for Mondays at 9:15 AM America/Toronto."
+echo "Installed the Website Growth Scout for weekdays at 9:15 AM America/Toronto."
+echo "Dedicated runtime: ${runtime_repo_path}"

@@ -444,7 +444,7 @@ describe("website growth Codex Scout completion", () => {
     expect(message).toContain("6 sent to Codex; 1 promoted");
   });
 
-  it("sends a useful weekly Teams message when no new idea is promoted", () => {
+  it("sends a useful weekday Teams message when no new idea is promoted", () => {
     const message = buildWebsiteGrowthScoutTeamsMessage({
       drafts: [],
       semrushQueried: true,
@@ -459,7 +459,7 @@ describe("website growth Codex Scout completion", () => {
     });
 
     expect(message).toContain("0 ideas promoted");
-    expect(message).toContain("No new page brief needs your approval");
+    expect(message).toContain("No new page brief needs your approval today");
     expect(message).toContain("performance workbook is attached");
   });
 });
