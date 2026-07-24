@@ -1,0 +1,51 @@
+import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { promisify } from "node:util";
+
+import { describe, expect, it } from "vitest";
+
+const execFileAsync = promisify(execFile);
+const repoRoot = process.cwd();
+const runnerPath = path.join(repoRoot, "ops/openclaw/run-rivet-development-job.sh");
+const installerPath = path.join(repoRoot, "ops/openclaw/install-rivet-development-worker.sh");
+
+describe("Rivet local Codex development worker", () => {
+  it("keeps the runner and installer valid zsh", async () => {
+    await expect(execFileAsync("/bin/zsh", ["-n", runnerPath])).resolves.toBeDefined();
+    await expect(execFileAsync("/bin/zsh", ["-n", installerPath])).resolves.toBeDefined();
+  });
+
+  it("requires Garland context, an isolated branch, and schema-validated local Codex output", async () => {
+    const runner = await readFile(runnerPath, "utf8");
+
+    expect(runner).toContain("read every requiredContextPaths entry");
+    expect(runner).toContain("For Garland work, those files are the required operating understanding");
+    expect(runner).toContain("git -C \"${RIVET_NEWL_APPS_REPO_PATH}\" worktree add");
+    expect(runner).toContain("--sandbox workspace-write");
+    expect(runner).toContain("--output-schema");
+    expect(runner).toContain("env -i");
+    expect(runner).not.toContain("OPENAI_API_KEY");
+    expect(runner).not.toContain("--dangerously-bypass-approvals-and-sandbox");
+  });
+
+  it("opens only a draft PR and reports completion without merge or deployment", async () => {
+    const runner = await readFile(runnerPath, "utf8");
+
+    expect(runner).toContain("\"draft\": True");
+    expect(runner).toContain("pullRequestUrls");
+    expect(runner).toContain("\"action\": \"complete\"");
+    expect(runner).not.toMatch(/\bgh pr merge\b/);
+    expect(runner).not.toMatch(/\bvercel deploy\b/);
+  });
+
+  it("installs a separate Rivet command schedule instead of adding Codex access to the digest", async () => {
+    const installer = await readFile(installerPath, "utf8");
+
+    expect(installer).toContain("--name \"NEWL Rivet Developer\"");
+    expect(installer).toContain("--declaration-key \"newl.rivet.developer.approved.v1\"");
+    expect(installer).toContain("--cron \"* * * * *\"");
+    expect(installer).toContain("--no-deliver");
+    expect(installer).toContain("RIVET_TEAMS_TARGET");
+  });
+});

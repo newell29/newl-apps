@@ -1,7 +1,10 @@
 import { ModuleKey } from "@prisma/client";
 import { NextResponse } from "next/server";
 
-import { decideDevelopmentSuggestion } from "@/modules/assistant/operational-memory";
+import {
+  decideDevelopmentSuggestion,
+  retryRivetDevelopmentSuggestion
+} from "@/modules/assistant/operational-memory";
 import { requireAdmin, requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
@@ -17,6 +20,11 @@ export async function PATCH(
   requireAdmin(context);
   const { suggestionId } = await params;
   const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+  if (body.action === "retry") {
+    return NextResponse.json({
+      data: await retryRivetDevelopmentSuggestion(context, suggestionId)
+    });
+  }
   const suggestion = await decideDevelopmentSuggestion(context, suggestionId, {
     status: typeof body.status === "string" ? body.status : "",
     decisionNotes: typeof body.decisionNotes === "string" ? body.decisionNotes : null
