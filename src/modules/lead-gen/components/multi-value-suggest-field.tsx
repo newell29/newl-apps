@@ -13,7 +13,8 @@ export function MultiValueSuggestField({
   defaultValue,
   suggestionField,
   description,
-  minQueryLength = 3
+  minQueryLength = 3,
+  allowCustomValues = true
 }: {
   label: string;
   name: string;
@@ -21,6 +22,7 @@ export function MultiValueSuggestField({
   suggestionField: SearchProfileSuggestionField;
   description?: string;
   minQueryLength?: number;
+  allowCustomValues?: boolean;
 }) {
   const [items, setItems] = useState(() => parseInitialItems(defaultValue));
   const [query, setQuery] = useState("");
@@ -53,7 +55,19 @@ export function MultiValueSuggestField({
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Enter" || event.key === ",") {
       event.preventDefault();
-      addItem(query);
+      if (allowCustomValues) {
+        addItem(query);
+        return;
+      }
+
+      const exactSuggestion = suggestions.find(
+        (suggestion) =>
+          suggestion.value.toLowerCase() === query.trim().toLowerCase() ||
+          suggestion.label.toLowerCase() === query.trim().toLowerCase()
+      );
+      if (exactSuggestion) {
+        addItem(exactSuggestion);
+      }
     }
   }
 
@@ -97,7 +111,9 @@ export function MultiValueSuggestField({
       ? `Type ${minQueryLength - query.trim().length} more letter${minQueryLength - query.trim().length === 1 ? "" : "s"} for canonical suggestions.`
       : description;
 
-  const placeholder = `Type ${minQueryLength}+ letters to search canonical options`;
+  const placeholder = allowCustomValues
+    ? `Type ${minQueryLength}+ letters to search canonical options`
+    : `Type ${minQueryLength}+ letters, then select an option`;
 
   function renderSuggestionLabel(option: SearchProfileSuggestionOption) {
     return option.label;
@@ -156,8 +172,8 @@ export function MultiValueSuggestField({
                 type="button"
                 onMouseDown={(event) => {
                   event.preventDefault();
-                  addItem(suggestion);
                 }}
+                onClick={() => addItem(suggestion)}
                 className="block w-full border-b border-border px-3 py-2 text-left text-sm text-foreground transition-colors last:border-b-0 hover:bg-muted"
               >
                 {renderSuggestionLabel(suggestion)}

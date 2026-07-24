@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import {
   filterSuggestionOptions,
   mergeSuggestionOptions,
+  tradeMiningUsDestinationPortOptions,
   toTenantSuggestionOptions
 } from "@/modules/lead-gen/search-profile-suggestions";
 import { getTradeMiningSearchProfileSuggestions } from "@/modules/lead-gen/queries";
@@ -43,7 +44,7 @@ export async function GET(request: Request) {
         : field === "destinationMarkets"
           ? mergeSuggestionOptions(canonical.locations, toTenantSuggestionOptions(tenantSuggestions.destinationMarkets))
           : field === "destinationPorts"
-            ? mergeSuggestionOptions(canonical.ports, toTenantSuggestionOptions(tenantSuggestions.destinationPorts))
+            ? tradeMiningUsDestinationPortOptions
             : field === "originPorts"
               ? mergeSuggestionOptions(canonical.ports, toTenantSuggestionOptions(tenantSuggestions.originPorts))
               : mergeSuggestionOptions(canonical.ports, toTenantSuggestionOptions(tenantSuggestions.shipFromPorts));

@@ -19,10 +19,13 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - Every enabled TradeMining search profile is run once daily by Hunter after its configured local run time.
 - `lookbackWindowDays` controls the full trailing TradeMining query window for that individual profile.
 - Each daily profile run submits one BOL search containing every configured destination port, origin country, origin port, ship-from port, product keyword, HS code, and minimum-TEU rule.
+- Every profile must select at least one supported TradeMining U.S. arrival port. Common short names such as `Charleston`, `Savannah`, and `Wilmington` are stored and executed as their canonical TradeMining port names. Canadian cities are consignee markets, not arrival ports.
+- `destinationMarkets` is the profile's consignee-city filter. Hunter preserves canonical `City | Country` values, applies the country to TradeMining's consignee-country field, and uses an exact consignee-city ID when TradeMining resolves one uniquely. If TradeMining's city vocabulary does not contain a unique value, Hunter uses the city as consignee-address text in the same BOL query. This fallback is required for Canadian markets such as Toronto, Montreal, and Vancouver.
 - The legacy database field `minShipmentVolume` represents minimum TEUs per BOL and is posted to TradeMining as `TEU >= value`.
 - A company qualifies for Found Companies only when its shipment evidence for the matched profile, within that profile's lookback window, meets `minShipmentCount`.
 - Search profile frequency is a legacy database compatibility field fixed to `daily`; it is not editable and does not control the worker.
 - Newl Apps is the source of truth for enabled profiles. Deleting a profile cancels its pending immediate-run requests, and Hunter reloads the enabled profile list before execution so deleted or disabled profiles do not receive future searches.
+- Hunter creates the tracked ingestion run before validating local execution configuration. A configuration failure therefore updates the profile to `FAILED`, appears on the Search Profiles screen, and counts as that day's attempt. Recovery is an explicit profile correction followed by **Run now**, rather than continuous automatic retries.
 
 ## Scoring and outreach safety
 

@@ -20,6 +20,44 @@ from hunter_ingest import api_request, clean, required_env
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
+DEFAULT_TRADEMINING_PORTS = {
+    "area port of jacksonville, florida": ("Area Port of Jacksonville, Florida", "1244"),
+    "charleston, south carolina": ("Charleston, South Carolina", "1237"),
+    "freeport, texas": ("Freeport, Texas", "1385"),
+    "houston, texas": ("Houston, Texas", "1382"),
+    "norfolk-newport news, virginia": ("Norfolk-Newport News, Virginia", "1228"),
+    "savannah, georgia": ("Savannah, Georgia", "1241"),
+    "wilmington, north carolina": ("Wilmington, North Carolina", "1233"),
+}
+
+TRADEMINING_PORT_ALIASES = {
+    "area port of jacksonville florida": "area port of jacksonville, florida",
+    "jacksonville": "area port of jacksonville, florida",
+    "jacksonville florida": "area port of jacksonville, florida",
+    "jacksonville fl": "area port of jacksonville, florida",
+    "charleston": "charleston, south carolina",
+    "charleston south carolina": "charleston, south carolina",
+    "charleston sc": "charleston, south carolina",
+    "freeport": "freeport, texas",
+    "freeport texas": "freeport, texas",
+    "freeport tx": "freeport, texas",
+    "houston": "houston, texas",
+    "houston texas": "houston, texas",
+    "houston tx": "houston, texas",
+    "houston seaport": "houston, texas",
+    "houston seaport texas": "houston, texas",
+    "norfolk": "norfolk-newport news, virginia",
+    "norfolk newport news": "norfolk-newport news, virginia",
+    "norfolk newport news virginia": "norfolk-newport news, virginia",
+    "norfolk va": "norfolk-newport news, virginia",
+    "savannah": "savannah, georgia",
+    "savannah georgia": "savannah, georgia",
+    "savannah ga": "savannah, georgia",
+    "wilmington": "wilmington, north carolina",
+    "wilmington north carolina": "wilmington, north carolina",
+    "wilmington nc": "wilmington, north carolina",
+}
+
 
 def load_profiles(base_url: str, token: str) -> list[dict[str, Any]]:
     response = api_request(base_url, token, "GET", "/api/integrations/trademining/search-profiles")
@@ -53,15 +91,32 @@ def load_port_ids() -> dict[str, str]:
         raise RuntimeError("HUNTER_TRADEMINING_PORTS_JSON must be valid JSON") from error
     if not isinstance(parsed, dict):
         raise RuntimeError("HUNTER_TRADEMINING_PORTS_JSON must be a name-to-ID object")
-    result: dict[str, str] = {}
+    result = {key: port_id for key, (_name, port_id) in DEFAULT_TRADEMINING_PORTS.items()}
     for name, port_id in parsed.items():
         if isinstance(name, str) and isinstance(port_id, (str, int)) and str(port_id).strip():
-            result[normalize_port_name(name)] = str(port_id).strip()
+            result[canonical_port_key(name)] = str(port_id).strip()
     return result
 
 
 def normalize_port_name(value: str) -> str:
-    return re.sub(r"\s+", " ", value.strip()).lower()
+    return re.sub(r"[^a-z0-9]+", " ", value.strip().lower()).strip()
+
+
+def canonical_port_key(value: str) -> str:
+    normalized = normalize_port_name(value)
+    alias = TRADEMINING_PORT_ALIASES.get(normalized)
+    if alias:
+        return alias
+    for key in DEFAULT_TRADEMINING_PORTS:
+        if normalize_port_name(key) == normalized:
+            return key
+    return normalized
+
+
+def canonical_port_name(value: str) -> str:
+    key = canonical_port_key(value)
+    configured = DEFAULT_TRADEMINING_PORTS.get(key)
+    return configured[0] if configured else re.sub(r"\s+", " ", value.strip())
 
 
 def slug(value: str) -> str:
@@ -146,6 +201,20 @@ def profile_values(profile: dict[str, Any], field: str) -> list[str]:
     return [str(value).strip() for value in values if str(value).strip()]
 
 
+def profile_destination_filters(profile: dict[str, Any]) -> tuple[list[str], list[str]]:
+    cities: list[str] = []
+    countries: list[str] = []
+    for market in profile_values(profile, "destinationMarkets"):
+        city, separator, country = market.partition("|")
+        normalized_city = city.strip()
+        normalized_country = country.strip() if separator else ""
+        if normalized_city and normalized_city.casefold() not in {value.casefold() for value in cities}:
+            cities.append(normalized_city)
+        if normalized_country and normalized_country.casefold() not in {value.casefold() for value in countries}:
+            countries.append(normalized_country)
+    return cities, countries
+
+
 def profile_minimum_teu(profile: dict[str, Any]) -> Optional[float]:
     raw = clean(profile.get("minShipmentVolume"))
     if raw is None:
@@ -217,14 +286,6 @@ def run_profile(base_url: str, token: str, profile: dict[str, Any], trigger: str
     if not profile_name:
         raise RuntimeError("TradeMining profile is missing its name")
 
-    destination_ports = profile_values(profile, "destinationPorts")
-    if not destination_ports:
-        raise RuntimeError(f'profile "{profile_name}" has no destination ports')
-    port_ids = load_port_ids()
-    missing_ports = [name for name in destination_ports if normalize_port_name(name) not in port_ids]
-    if missing_ports:
-        raise RuntimeError("TradeMining port IDs are not configured for: " + ", ".join(missing_ports))
-
     configured_lookback_days = profile_lookback_days(profile)
     lookback_days = query_lookback_days(profile)
     end_date_override = clean(os.environ.get("HUNTER_END_DATE"))
@@ -233,15 +294,24 @@ def run_profile(base_url: str, token: str, profile: dict[str, Any], trigger: str
     export_root = Path(required_env("HUNTER_EXPORT_DIRECTORY")).expanduser().resolve()
     processed_root = Path(required_env("HUNTER_PROCESSED_DIRECTORY")).expanduser().resolve() / slug(profile_id)
 
-    port_keys: list[str] = []
-    port_specs: list[str] = []
-    for index, port_name in enumerate(destination_ports, start=1):
-        key = f"profile-port-{index}"
-        port_keys.append(key)
-        port_specs.extend(["--port-spec", f"{key}|{port_name}|{port_ids[normalize_port_name(port_name)]}"])
-
     job_run_id = create_job_run(base_url, token, profile, trigger)
     try:
+        destination_ports = profile_values(profile, "destinationPorts")
+        if not destination_ports:
+            raise RuntimeError(f'profile "{profile_name}" has no destination ports')
+        port_ids = load_port_ids()
+        missing_ports = [name for name in destination_ports if canonical_port_key(name) not in port_ids]
+        if missing_ports:
+            raise RuntimeError("TradeMining port IDs are not configured for: " + ", ".join(missing_ports))
+
+        port_keys: list[str] = []
+        port_specs: list[str] = []
+        for index, port_name in enumerate(destination_ports, start=1):
+            key = f"profile-port-{index}"
+            port_keys.append(key)
+            canonical_name = canonical_port_name(port_name)
+            port_specs.extend(["--port-spec", f"{key}|{canonical_name}|{port_ids[canonical_port_key(port_name)]}"])
+
         export_command = [
             sys.executable,
             str(SCRIPT_DIR / "trademining_export.py"),
@@ -265,6 +335,11 @@ def run_profile(base_url: str, token: str, profile: dict[str, Any], trigger: str
             export_command.extend(["--product-keyword", value])
         for value in profile_values(profile, "hsCodes"):
             export_command.extend(["--hs-code", value])
+        consignee_cities, consignee_countries = profile_destination_filters(profile)
+        for value in consignee_cities:
+            export_command.extend(["--consignee-city", value])
+        for value in consignee_countries:
+            export_command.extend(["--consignee-country", value])
         minimum_teu = profile_minimum_teu(profile)
         if minimum_teu is not None:
             export_command.extend(["--minimum-teu", format(minimum_teu, "g")])
@@ -328,12 +403,15 @@ def build_profile_plan(profile: dict[str, Any]) -> dict[str, Any]:
     profile_name = clean(profile.get("name"))
     destination_ports = profile_values(profile, "destinationPorts")
     configured_ports = load_port_ids()
-    missing_ports = [name for name in destination_ports if normalize_port_name(name) not in configured_ports]
+    missing_ports = [name for name in destination_ports if canonical_port_key(name) not in configured_ports]
+    consignee_cities, consignee_countries = profile_destination_filters(profile)
     lookback_days = profile_lookback_days(profile)
     return {
         "profileId": profile_id,
         "profileName": profile_name,
         "destinationPorts": destination_ports,
+        "consigneeCities": consignee_cities,
+        "consigneeCountries": consignee_countries,
         "originCountries": profile_values(profile, "originCountries"),
         "originPorts": profile_values(profile, "originPorts"),
         "shipFromPorts": profile_values(profile, "shipFromPorts"),

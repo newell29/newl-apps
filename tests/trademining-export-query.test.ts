@@ -24,6 +24,9 @@ describe("Hunter TradeMining profile query", () => {
       "  ship_from_ports=['Ho Chi Minh', 'Busan'],",
       "  product_keywords=['consumer goods', 'fixtures'],",
       "  hs_codes=['6109', '9403'],",
+      "  consignee_country_ids=['CA'],",
+      "  consignee_city_ids=['TORONTO-ID'],",
+      "  consignee_address_terms=['Toronto', 'Montreal'],",
       "  minimum_teu=10,",
       ")",
       "encoded = urllib.parse.urlencode(form, doseq=True)",
@@ -44,6 +47,9 @@ describe("Hunter TradeMining profile query", () => {
       PlaceOfReceipt: '"Ho Chi Minh" OR Busan',
       ContainerCommodity: '"consumer goods" OR fixtures',
       HTSCode: "6109,9403",
+      ConsigneeCountryOfOrigin: ["CA"],
+      ConsigneeCity: ["TORONTO-ID"],
+      ConsigneeAddress: "Toronto OR Montreal",
       TEUFromSingle: "Greater Than Or Equals To",
       TEUToSingle: "10"
     });
@@ -91,6 +97,38 @@ describe("Hunter TradeMining profile query", () => {
       transientStatus: 200,
       authCalls: 1,
       authStatus: 401
+    });
+  });
+
+  it("falls back to consignee address text when TradeMining cannot resolve a city uniquely", () => {
+    const source = [
+      "import importlib.util, json, pathlib, sys",
+      "path = pathlib.Path(sys.argv[1])",
+      "spec = importlib.util.spec_from_file_location('trademining_export', path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "sys.modules[spec.name] = module",
+      "spec.loader.exec_module(module)",
+      "class Session:",
+      "  def request(self, method, path, data):",
+      "    query = data['text']",
+      "    matches = [{'lookupName': 'CHARLOTTE, NC', 'lookupId': 'CLT'}] if query == 'Charlotte, NC' else [",
+      "      {'lookupName': 'TORONTO, SD', 'lookupId': 'SD'},",
+      "      {'lookupName': 'TORONTO, KS', 'lookupId': 'KS'},",
+      "    ]",
+      "    return 200, {}, json.dumps(matches).encode()",
+      "city_ids, address_terms = module.resolve_consignee_city_filters(Session(), ['Charlotte, NC', 'Toronto'])",
+      "print(json.dumps({'cityIds': city_ids, 'addressTerms': address_terms}))"
+    ].join("\n");
+
+    const result = spawnSync("python3", ["-c", source, exporterPath], {
+      encoding: "utf8",
+      env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      cityIds: ["CLT"],
+      addressTerms: ["Toronto"]
     });
   });
 

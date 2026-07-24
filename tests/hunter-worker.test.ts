@@ -60,6 +60,7 @@ describe("Hunter daily profile worker", () => {
       "  'name': 'Charlotte Warehouse Leads',",
       "  'destinationPorts': ['Charleston, South Carolina'],",
       "  'originCountries': ['Vietnam', 'Thailand'],",
+      "  'destinationMarkets': ['Toronto | Canada', 'Montreal | Canada'],",
       "  'originPorts': ['Ho Chi Minh City', 'Laem Chabang'],",
       "  'shipFromPorts': ['Ho Chi Minh', 'Busan'],",
       "  'productKeywords': ['consumer goods', 'fixtures'],",
@@ -80,6 +81,8 @@ describe("Hunter daily profile worker", () => {
       queryCount: 1,
       lookbackDays: 120,
       originCountries: ["Vietnam", "Thailand"],
+      consigneeCities: ["Toronto", "Montreal"],
+      consigneeCountries: ["Canada"],
       originPorts: ["Ho Chi Minh City", "Laem Chabang"],
       shipFromPorts: ["Ho Chi Minh", "Busan"],
       productKeywords: ["consumer goods", "fixtures"],
@@ -153,5 +156,69 @@ describe("Hunter daily profile worker", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("not enabled");
+  });
+
+  it("resolves common U.S. port aliases to canonical TradeMining ports", () => {
+    const python = [
+      "import importlib.util, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "profile = {",
+      "  'id': 'profile-charlotte',",
+      "  'name': 'Charlotte leads',",
+      "  'destinationPorts': ['Charleston', 'Savannah', 'Wilmington'],",
+      "  'lookbackDays': 1,",
+      "  'schedule': {'timezone': 'America/Toronto', 'metadata': {}},",
+      "  'lastRunAt': None,",
+      "}",
+      "plan = module.build_profile_plan(profile)",
+      "print(json.dumps({'missing': plan['missingPortMappings'], 'ready': plan['ready']}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ missing: [], ready: true });
+  });
+
+  it("creates a tracked failed run before rejecting invalid port configuration", () => {
+    const python = [
+      "import importlib.util, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "profile = {",
+      "  'id': 'profile-toronto',",
+      "  'name': 'Toronto leads',",
+      "  'destinationPorts': ['Toronto'],",
+      "  'destinationMarkets': ['Toronto | Canada'],",
+      "  'lookbackDays': 1,",
+      "}",
+      "calls = []",
+      "module.resolve_current_profile = lambda *_args: profile",
+      "module.required_env = lambda name: '/tmp/hunter-test'",
+      "module.load_port_ids = lambda: {}",
+      "module.create_job_run = lambda *_args: calls.append('created') or 'job-1'",
+      "module.fail_job_run = lambda *_args: calls.append('failed')",
+      "try:",
+      "  module.run_profile('https://example.com', 'token', profile, 'daily')",
+      "except RuntimeError as error:",
+      "  print(json.dumps({'calls': calls, 'error': str(error)}))",
+      "else:",
+      "  raise RuntimeError('invalid profile unexpectedly ran')"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      calls: ["created", "failed"],
+      error: "TradeMining port IDs are not configured for: Toronto"
+    });
   });
 });

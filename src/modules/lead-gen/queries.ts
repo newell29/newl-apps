@@ -420,7 +420,7 @@ export async function getTradeMiningSearchProfiles(tenant: TenantContext) {
   }
 
   try {
-    const [profiles, pendingRunRequests] = await Promise.all([
+    const [profiles, pendingRunRequests, recentProfileRuns] = await Promise.all([
       searchProfileClient.tradeMiningSearchProfile.findMany({
         where: tenantWhere(tenant),
         orderBy: [
@@ -451,6 +451,21 @@ export async function getTradeMiningSearchProfiles(tenant: TenantContext) {
           createdAt: true,
           input: true
         }
+      }),
+      prisma.automationJobRun.findMany({
+        where: tenantWhere(tenant, {
+          jobType: "trademining.ingestion"
+        }),
+        orderBy: {
+          startedAt: "desc"
+        },
+        take: 200,
+        select: {
+          status: true,
+          startedAt: true,
+          input: true,
+          errorMessage: true
+        }
       })
     ]);
 
@@ -473,6 +488,27 @@ export async function getTradeMiningSearchProfiles(tenant: TenantContext) {
         id: request.id,
         status: request.status,
         createdAt: request.createdAt
+      });
+    }
+
+    const latestRunByProfileId = new Map<
+      string,
+      {
+        status: string;
+        startedAt: Date;
+        errorMessage: string | null;
+      }
+    >();
+
+    for (const run of recentProfileRuns) {
+      const profileId = readSearchProfileIdFromJson(run.input);
+      if (!profileId || latestRunByProfileId.has(profileId)) {
+        continue;
+      }
+      latestRunByProfileId.set(profileId, {
+        status: run.status,
+        startedAt: run.startedAt,
+        errorMessage: run.errorMessage
       });
     }
 
@@ -500,7 +536,11 @@ export async function getTradeMiningSearchProfiles(tenant: TenantContext) {
         scheduleTimezone: profile.scheduleTimezone,
         priorityWeight: profile.priorityWeight,
         lastRunAt: profile.lastRunAt,
-        lastRunStatus: profile.lastRunStatus ?? "Not run yet"
+        lastRunStatus: profile.lastRunStatus ?? "Not run yet",
+        lastRunError:
+          latestRunByProfileId.get(profile.id)?.status === JobStatus.ERROR
+            ? latestRunByProfileId.get(profile.id)?.errorMessage ?? "Hunter could not complete this profile."
+            : null
       })),
       setupWarning: null
     };

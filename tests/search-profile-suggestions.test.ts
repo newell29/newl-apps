@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canonicalizeTradeMiningDestinationPort,
   filterSuggestionOptions,
   normalizeSearchProfileValueForWorker,
   toTenantSuggestionOptions
@@ -37,12 +38,20 @@ describe("search profile suggestion helpers", () => {
 
   it("normalizes decorated values before sending them to the worker", () => {
     expect(normalizeSearchProfileValueForWorker("destinationMarkets", "Houston, TX | United States")).toBe(
-      "Houston, TX"
+      "Houston, TX | United States"
     );
     expect(normalizeSearchProfileValueForWorker("destinationPorts", "Savannah, GA | United States")).toBe(
-      "Savannah, GA"
+      "Savannah, Georgia"
     );
     expect(normalizeSearchProfileValueForWorker("originCountries", "Germany (DE)")).toBe("Germany");
+  });
+
+  it("canonicalizes common U.S. port aliases and rejects Canadian cities as arrival ports", () => {
+    expect(canonicalizeTradeMiningDestinationPort("Charleston")).toBe("Charleston, South Carolina");
+    expect(canonicalizeTradeMiningDestinationPort("Wilmington, NC | United States")).toBe(
+      "Wilmington, North Carolina"
+    );
+    expect(canonicalizeTradeMiningDestinationPort("Toronto | Canada")).toBeNull();
   });
 
   it("decorates plain tenant city-state values for display", () => {

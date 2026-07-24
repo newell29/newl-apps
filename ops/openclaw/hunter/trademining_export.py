@@ -40,6 +40,10 @@ LOOKUP_ALIASES = {
 }
 
 
+class LookupResolutionError(RuntimeError):
+    """A TradeMining autocomplete value could not be resolved uniquely."""
+
+
 @dataclass
 class TradeMiningSession:
     cookie_file: Path
@@ -190,6 +194,9 @@ def run_search(
     ship_from_ports: Optional[list[str]] = None,
     product_keywords: Optional[list[str]] = None,
     hs_codes: Optional[list[str]] = None,
+    consignee_country_ids: Optional[list[str]] = None,
+    consignee_city_ids: Optional[list[str]] = None,
+    consignee_address_terms: Optional[list[str]] = None,
     minimum_teu: Optional[float] = None,
 ) -> tuple[str, str]:
     page = session.get_text("/ImportSearch")
@@ -203,6 +210,9 @@ def run_search(
         ship_from_ports=ship_from_ports or [],
         product_keywords=product_keywords or [],
         hs_codes=hs_codes or [],
+        consignee_country_ids=consignee_country_ids or [],
+        consignee_city_ids=consignee_city_ids or [],
+        consignee_address_terms=consignee_address_terms or [],
         minimum_teu=minimum_teu,
     )
     result = session.post_follow("/ImportSearch/Data", data)
@@ -222,6 +232,9 @@ def build_search_form(
     ship_from_ports: list[str],
     product_keywords: list[str],
     hs_codes: list[str],
+    consignee_country_ids: list[str],
+    consignee_city_ids: list[str],
+    consignee_address_terms: list[str],
     minimum_teu: Optional[float],
 ) -> dict[str, str | list[str]]:
     if not port_ids:
@@ -250,6 +263,12 @@ def build_search_form(
         data["ContainerCommodity"] = boolean_or_expression(product_keywords)
     if hs_codes:
         data["HTSCode"] = comma_separated_values(hs_codes)
+    if consignee_country_ids:
+        data["ConsigneeCountryOfOrigin"] = consignee_country_ids
+    if consignee_city_ids:
+        data["ConsigneeCity"] = consignee_city_ids
+    if consignee_address_terms:
+        data["ConsigneeAddress"] = boolean_or_expression(consignee_address_terms)
     if minimum_teu is not None:
         data["TEUSingle"] = "TEUSingle"
         data["TEUFromSingle"] = "Greater Than Or Equals To"
@@ -309,9 +328,23 @@ def resolve_lookup_ids(session: TradeMiningSession, field: str, values: list[str
             if isinstance(match, dict) and str(match.get("lookupId", "")).strip()
         ]
         if len(candidates) != 1:
-            raise RuntimeError(f'TradeMining {field} lookup for "{value}" was not uniquely resolved')
+            raise LookupResolutionError(f'TradeMining {field} lookup for "{value}" was not uniquely resolved')
         result.append(str(candidates[0]["lookupId"]).strip())
     return result
+
+
+def resolve_consignee_city_filters(
+    session: TradeMiningSession,
+    cities: list[str],
+) -> tuple[list[str], list[str]]:
+    city_ids: list[str] = []
+    address_terms: list[str] = []
+    for city in cities:
+        try:
+            city_ids.extend(resolve_lookup_ids(session, "ConsigneeCity", [city]))
+        except LookupResolutionError:
+            address_terms.append(city)
+    return city_ids, address_terms
 
 
 def lookup_query(field: str, value: str) -> str:
@@ -475,6 +508,8 @@ def main() -> int:
     parser.add_argument("--ship-from-port", action="append", default=[])
     parser.add_argument("--product-keyword", action="append", default=[])
     parser.add_argument("--hs-code", action="append", default=[])
+    parser.add_argument("--consignee-country", action="append", default=[])
+    parser.add_argument("--consignee-city", action="append", default=[])
     parser.add_argument("--minimum-teu", type=float)
     parser.add_argument("--run-slug", default="", help="Optional safe output directory name for this profile run.")
     parser.add_argument(
@@ -513,6 +548,8 @@ def main() -> int:
     login(session, email, password)
     origin_country_ids = resolve_lookup_ids(session, "CountryOfOrigin", args.origin_country)
     origin_port_ids = resolve_lookup_ids(session, "ForeignPort", args.origin_port)
+    consignee_country_ids = resolve_lookup_ids(session, "CountryOfOrigin", args.consignee_country)
+    consignee_city_ids, consignee_address_terms = resolve_consignee_city_filters(session, args.consignee_city)
 
     selected_ports: list[tuple[str, str, str]] = []
     for port_key in requested_ports:
@@ -546,6 +583,9 @@ def main() -> int:
             ship_from_ports=args.ship_from_port,
             product_keywords=args.product_keyword,
             hs_codes=args.hs_code,
+            consignee_country_ids=consignee_country_ids,
+            consignee_city_ids=consignee_city_ids,
+            consignee_address_terms=consignee_address_terms,
             minimum_teu=args.minimum_teu,
         )
         result_count = search_result_count(session, search_log_id)
@@ -581,6 +621,10 @@ def main() -> int:
                     "ship_from_ports": args.ship_from_port,
                     "product_keywords": args.product_keyword,
                     "hs_codes": args.hs_code,
+                    "consignee_countries": args.consignee_country,
+                    "consignee_cities": args.consignee_city,
+                    "consignee_city_ids": consignee_city_ids,
+                    "consignee_address_terms": consignee_address_terms,
                     "minimum_teu": args.minimum_teu,
                 },
             }

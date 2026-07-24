@@ -402,7 +402,7 @@ describe("TradeMining ingestion", () => {
     expect(result[0]).toMatchObject({
       id: "profile-a",
       name: "Houston Leads",
-      destinationMarkets: ["Houston, TX"],
+      destinationMarkets: ["Houston, TX | United States"],
       destinationPorts: ["Charleston, South Carolina", "Savannah, Georgia"],
       originCountries: ["China"],
       allowedCompanyIdentityRoles: ["consignee_name"],

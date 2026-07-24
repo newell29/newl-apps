@@ -99,6 +99,27 @@ describe("trade mining search profile actions", () => {
     const args = updateSearchProfile.mock.calls[0][0];
     expect(args.where).toEqual({ id: "profile-123" });
     expect(args.data.priorityWeight).toBe(80);
+    expect(args.data).not.toHaveProperty("tenantId");
+    expect(findSearchProfile).toHaveBeenCalledWith({
+      where: {
+        id: "profile-123",
+        tenantId: "tenant-1"
+      },
+      select: {
+        id: true
+      }
+    });
+  });
+
+  it("refuses to update a profile outside the authenticated tenant", async () => {
+    findSearchProfile.mockResolvedValueOnce(null);
+    const formData = buildValidFormData();
+    formData.set("profileId", "profile-other-tenant");
+
+    await expect(updateTradeMiningSearchProfileAction(formData)).rejects.toThrow(
+      "Search profile not found for this tenant."
+    );
+    expect(updateSearchProfile).not.toHaveBeenCalled();
   });
 
   it("cancels pending runs when a profile is disabled", async () => {
@@ -173,7 +194,7 @@ function buildValidFormData() {
   formData.set("description", "Trial pull for Houston-area importers");
   formData.set("enabled", "true");
   formData.set("destinationMarkets", "Houston\nDallas");
-  formData.set("destinationPorts", "Houston, Texas");
+  formData.set("destinationPorts", "Houston");
   formData.set("originPorts", "Genoa");
   formData.set("shipFromPorts", "Genoa");
   formData.set("originCountries", "Italy\nGermany");
