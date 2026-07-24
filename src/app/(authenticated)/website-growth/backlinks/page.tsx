@@ -9,6 +9,7 @@ import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import {
   approveAllWebsiteGrowthBacklinksAction,
+  retryBlockedWebsiteGrowthBacklinkAction,
   returnWebsiteGrowthBacklinkToReviewAction,
   reviewWebsiteGrowthBacklinkAction
 } from "@/modules/website-growth/backlink-actions";
@@ -51,7 +52,7 @@ export default async function WebsiteGrowthBacklinksPage({
         >
           <p className="font-semibold">{formatReviewResult(reviewResult, reviewedOpportunity)}</p>
           <p className="mt-1 text-mutedForeground">
-            {reviewResult === "approved"
+            {reviewResult === "approved" || reviewResult === "retried"
               ? "It is now listed under Approved and underway and is eligible for Scout."
               : reviewResult === "returned"
                 ? "It is back under Needs your review and Scout cannot claim it."
@@ -292,6 +293,21 @@ function BacklinkCard({
             </button>
           </form>
         ) : null}
+        {opportunity.status === WebsiteGrowthBacklinkStatus.BLOCKED &&
+        opportunity.approvedAt &&
+        !opportunity.submittedAt &&
+        !opportunity.contactedAt ? (
+          <form action={retryBlockedWebsiteGrowthBacklinkAction}>
+            <input type="hidden" name="backlinkId" value={opportunity.id} />
+            <input type="hidden" name="confirmNoExternalAction" value="yes" />
+            <button
+              aria-label={`Retry approved opportunity ${opportunity.title}`}
+              className="rounded-md border border-primary px-3 py-2 text-sm font-semibold text-primary transition-colors hover:bg-accentSoft"
+            >
+              Confirm nothing was sent, then retry
+            </button>
+          </form>
+        ) : null}
       </div>
     </article>
   );
@@ -346,16 +362,20 @@ function readParam(value: string | string[] | undefined) {
 }
 
 function readReviewResult(value: string | undefined) {
-  return value === "approved" || value === "rejected" || value === "returned"
+  return value === "approved" ||
+    value === "rejected" ||
+    value === "returned" ||
+    value === "retried"
     ? value
     : null;
 }
 
 function formatReviewResult(
-  result: "approved" | "rejected" | "returned",
+  result: "approved" | "rejected" | "returned" | "retried",
   opportunityTitle: string
 ) {
   if (result === "approved") return `Approved “${opportunityTitle}”.`;
+  if (result === "retried") return `Retry approved for “${opportunityTitle}”.`;
   if (result === "returned") return `Moved “${opportunityTitle}” back to review.`;
   return `Declined “${opportunityTitle}”.`;
 }
