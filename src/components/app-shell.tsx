@@ -113,6 +113,12 @@ const navEntries: NavNode[] = [
             moduleKey: "OCEAN_FREIGHT_PRICING" as ModuleKey
           },
           {
+            id: "ocean-freight-review",
+            href: "/ocean-freight-pricing/review",
+            label: "Review Queue",
+            moduleKey: "OCEAN_FREIGHT_PRICING" as ModuleKey
+          },
+          {
             id: "ocean-freight-agents",
             href: "/ocean-freight-pricing/agents",
             label: "Agents",

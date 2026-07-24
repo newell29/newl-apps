@@ -1,13 +1,18 @@
 "use server";
 
-import { IntegrationProvider, IntegrationStatus, ModuleKey, OceanEquipmentType, OceanRateSourceType, OceanRateStatus, Prisma } from "@prisma/client";
+import { IntegrationProvider, IntegrationStatus, ModuleKey, OceanEquipmentType, OceanExtractionStatus, OceanRateSourceType, OceanRateStatus, Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { triggerOceanFreightEmailIngestion } from "@/modules/ocean-freight-pricing/ingestion";
 import {
   buildOceanFreightMicrosoftGraphConfig,
   OCEAN_FREIGHT_MICROSOFT_GRAPH_CREDENTIAL_NAME
 } from "@/modules/ocean-freight-pricing/microsoft-graph-settings";
+import {
+  DEFAULT_OCEAN_FREIGHT_AUTOMATION_SETTINGS,
+  parseOceanFreightAutomationSettings
+} from "@/modules/ocean-freight-pricing/automation-settings";
 import { prisma } from "@/server/db";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
@@ -81,8 +86,13 @@ async function refreshAgentCounts(tenantId: string, agentId: string) {
 function revalidateOceanFreightPricing() {
   revalidatePath("/ocean-freight-pricing");
   revalidatePath("/ocean-freight-pricing/agents");
+  revalidatePath("/ocean-freight-pricing/review");
   revalidatePath("/ocean-freight-pricing/sources");
   revalidatePath("/ocean-freight-pricing/jobs");
+}
+function emailDomain(value: string | null) {
+  const domain = value?.split("@")[1]?.trim().toLowerCase();
+  return domain || null;
 }
 
 export async function createOceanFreightAgentAction(formData: FormData) {
@@ -342,10 +352,191 @@ export async function inactivateOceanFreightRateAction(formData: FormData) {
   revalidateOceanFreightPricing();
 }
 
+export async function createOceanFreightRateCandidateFromSourceAction(formData: FormData) {
+  const ctx = await authorize();
+  const sourceEmailId = requiredText(formData, "sourceEmailId");
+  const source = await prisma.oceanFreightSourceEmail.findUniqueOrThrow({
+    where: { tenantId_id: { tenantId: ctx.tenantId, id: sourceEmailId } }
+  });
+
+  if (source.fromAddress && source.fromAddress.toLowerCase() === source.mailboxAddress.toLowerCase()) {
+    throw new Error("This email was sent from the configured pricing mailbox, so it looks like an outbound customer quote/RFQ instead of an inbound agent rate.");
+  }
+
+  const existing = await prisma.oceanFreightRateCandidate.findFirst({
+    where: {
+      tenantId: ctx.tenantId,
+      sourceEmailId,
+      status: { in: [OceanExtractionStatus.NEW, OceanExtractionStatus.NEEDS_REVIEW] }
+    },
+    select: { id: true }
+  });
+
+  if (!existing) {
+    const domain = emailDomain(source.fromAddress);
+    const agent = domain
+      ? await prisma.oceanFreightAgent.findFirst({
+          where: { tenantId: ctx.tenantId, primaryEmailDomain: { equals: domain, mode: "insensitive" } },
+          select: { id: true }
+        })
+      : null;
+    const contact = source.fromAddress
+      ? await prisma.oceanFreightAgentContact.findFirst({
+          where: { tenantId: ctx.tenantId, email: { equals: source.fromAddress.toLowerCase(), mode: "insensitive" } },
+          select: { id: true, agentId: true }
+        })
+      : null;
+    const candidate = await prisma.oceanFreightRateCandidate.create({
+      data: {
+        tenantId: ctx.tenantId,
+        sourceType: OceanRateSourceType.EMAIL_BODY,
+        sourceEmailId: source.id,
+        agentId: contact?.agentId ?? agent?.id ?? null,
+        agentContactId: contact?.id ?? null,
+        status: OceanExtractionStatus.NEEDS_REVIEW,
+        agentCompanyNameRaw: source.fromName ?? domain,
+        agentContactEmailRaw: source.fromAddress,
+        notes: [`Source subject: ${source.subject}`, source.bodyPreview ? `Preview: ${source.bodyPreview}` : null].filter(Boolean).join("\n\n"),
+        confidence: source.rateDetected ? 40 : 15,
+        rawExtractionJson: {
+          sourceEmailId: source.id,
+          graphMessageId: source.graphMessageId,
+          detectionReason: source.detectionReason,
+          createdBy: "manual-source-review"
+        }
+      }
+    });
+    await prisma.auditLog.create({ data: { tenantId: ctx.tenantId, actorUserId: ctx.userId, action: "ocean-freight.rate-candidate.created-from-source", entityType: "OceanFreightRateCandidate", entityId: candidate.id, after: candidate } });
+  }
+
+  revalidateOceanFreightPricing();
+  redirect("/ocean-freight-pricing/review");
+}
+
+export async function markOceanFreightSourceNotAgentRateAction(formData: FormData) {
+  const ctx = await authorize();
+  const sourceEmailId = requiredText(formData, "sourceEmailId");
+  const before = await prisma.oceanFreightSourceEmail.findUniqueOrThrow({
+    where: { tenantId_id: { tenantId: ctx.tenantId, id: sourceEmailId } }
+  });
+  const after = await prisma.oceanFreightSourceEmail.update({
+    where: { tenantId_id: { tenantId: ctx.tenantId, id: sourceEmailId } },
+    data: {
+      rateDetected: false,
+      detectionReason: "Manually marked as not an inbound overseas agent rate."
+    }
+  });
+  await prisma.auditLog.create({ data: { tenantId: ctx.tenantId, actorUserId: ctx.userId, action: "ocean-freight.source-email.marked-not-agent-rate", entityType: "OceanFreightSourceEmail", entityId: sourceEmailId, before, after } });
+  revalidateOceanFreightPricing();
+}
+
+export async function approveOceanFreightRateCandidateAction(formData: FormData) {
+  const ctx = await authorize();
+  const candidateId = requiredText(formData, "candidateId");
+  const candidate = await prisma.oceanFreightRateCandidate.findUniqueOrThrow({
+    where: { tenantId_id: { tenantId: ctx.tenantId, id: candidateId } }
+  });
+  const agentId = requiredText(formData, "agentId");
+  const equipmentType = requiredText(formData, "equipmentType") as OceanEquipmentType;
+
+  const rate = await prisma.oceanFreightRate.create({
+    data: {
+      tenantId: ctx.tenantId,
+      agentId,
+      agentContactId: text(formData, "agentContactId"),
+      sourceType: candidate.sourceType,
+      sourceEmailId: candidate.sourceEmailId,
+      sourceAttachmentId: candidate.sourceAttachmentId,
+      sourceCandidateId: candidate.id,
+      originPort: requiredText(formData, "originPort"),
+      originCountry: text(formData, "originCountry"),
+      originRegion: text(formData, "originRegion"),
+      destinationPort: requiredText(formData, "destinationPort"),
+      destinationCountry: text(formData, "destinationCountry"),
+      destinationRegion: text(formData, "destinationRegion"),
+      equipmentType,
+      equipmentLabel: text(formData, "equipmentLabel") ?? equipmentType,
+      rateAmount: requiredText(formData, "rateAmount"),
+      currency: requiredText(formData, "currency").toUpperCase(),
+      shippingLine: text(formData, "shippingLine"),
+      validityStartDate: dateValue(formData, "validityStartDate"),
+      validityEndDate: dateValue(formData, "validityEndDate"),
+      freeTimeNotes: text(formData, "freeTimeNotes"),
+      detentionDemurrageNotes: text(formData, "detentionDemurrageNotes"),
+      transitTimeDays: text(formData, "transitTimeDays") ? Number(text(formData, "transitTimeDays")) : null,
+      transitTimeNotes: text(formData, "transitTimeNotes"),
+      scheduleNotes: text(formData, "scheduleNotes") ?? "Schedule not provided",
+      notes: text(formData, "notes") ?? candidate.notes,
+      correctionNotes: text(formData, "correctionNotes"),
+      createdByUserId: ctx.userId,
+      updatedByUserId: ctx.userId,
+      approvedByUserId: ctx.userId,
+      approvedAt: new Date()
+    }
+  });
+
+  const after = await prisma.oceanFreightRateCandidate.update({
+    where: { tenantId_id: { tenantId: ctx.tenantId, id: candidateId } },
+    data: {
+      status: OceanExtractionStatus.APPROVED,
+      reviewedAt: new Date(),
+      reviewedByUserId: ctx.userId,
+      approvedRateId: rate.id,
+      agentId,
+      agentContactId: text(formData, "agentContactId"),
+      originPort: requiredText(formData, "originPort"),
+      originCountry: text(formData, "originCountry"),
+      destinationPort: requiredText(formData, "destinationPort"),
+      destinationCountry: text(formData, "destinationCountry"),
+      equipmentType,
+      equipmentLabelRaw: text(formData, "equipmentLabel") ?? equipmentType,
+      rateAmount: requiredText(formData, "rateAmount"),
+      currency: requiredText(formData, "currency").toUpperCase(),
+      shippingLine: text(formData, "shippingLine"),
+      validityStartDate: dateValue(formData, "validityStartDate"),
+      validityEndDate: dateValue(formData, "validityEndDate"),
+      notes: text(formData, "notes") ?? candidate.notes
+    }
+  });
+
+  await refreshAgentCounts(ctx.tenantId, agentId);
+  await prisma.auditLog.create({ data: { tenantId: ctx.tenantId, actorUserId: ctx.userId, action: "ocean-freight.rate-candidate.approved", entityType: "OceanFreightRateCandidate", entityId: candidateId, before: candidate, after } });
+  await prisma.auditLog.create({ data: { tenantId: ctx.tenantId, actorUserId: ctx.userId, action: "ocean-freight.rate.created-from-candidate", entityType: "OceanFreightRate", entityId: rate.id, after: rate } });
+  revalidateOceanFreightPricing();
+  redirect("/ocean-freight-pricing");
+}
+
+export async function rejectOceanFreightRateCandidateAction(formData: FormData) {
+  const ctx = await authorize();
+  const candidateId = requiredText(formData, "candidateId");
+  const before = await prisma.oceanFreightRateCandidate.findUniqueOrThrow({
+    where: { tenantId_id: { tenantId: ctx.tenantId, id: candidateId } }
+  });
+  const after = await prisma.oceanFreightRateCandidate.update({
+    where: { tenantId_id: { tenantId: ctx.tenantId, id: candidateId } },
+    data: {
+      status: OceanExtractionStatus.REJECTED,
+      reviewedAt: new Date(),
+      reviewedByUserId: ctx.userId,
+      rejectionReason: requiredText(formData, "rejectionReason")
+    }
+  });
+  await prisma.auditLog.create({ data: { tenantId: ctx.tenantId, actorUserId: ctx.userId, action: "ocean-freight.rate-candidate.rejected", entityType: "OceanFreightRateCandidate", entityId: candidateId, before, after } });
+  revalidateOceanFreightPricing();
+}
+
 export async function triggerOceanFreightEmailIngestionAction() {
   const ctx = await authorize();
-  await triggerOceanFreightEmailIngestion(ctx);
+  try {
+    await triggerOceanFreightEmailIngestion(ctx);
+  } catch (error) {
+    revalidateOceanFreightPricing();
+    const message = error instanceof Error ? error.message : "Ocean freight ingestion failed.";
+    redirect(`/ocean-freight-pricing/jobs?ingestion=error&message=${encodeURIComponent(message)}`);
+  }
+
   revalidateOceanFreightPricing();
+  redirect("/ocean-freight-pricing/jobs?ingestion=success");
 }
 
 export async function saveOceanFreightMicrosoftGraphSettingsAction(formData: FormData) {
@@ -366,8 +557,24 @@ export async function saveOceanFreightMicrosoftGraphSettingsAction(formData: For
       name: OCEAN_FREIGHT_MICROSOFT_GRAPH_CREDENTIAL_NAME
     },
     orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
-    select: { id: true }
+    select: { id: true, provider: true, status: true, publicConfig: true }
   });
+  const existingAutomationSettings = parseOceanFreightAutomationSettings(existing);
+  const automationSettings = {
+    classificationEnabled: formData.get("oceanClassificationEnabled") === "true",
+    extractionEnabled: formData.get("oceanExtractionEnabled") === "true",
+    exceptionOnlyReview: formData.get("oceanExceptionOnlyReview") === "true",
+    highConfidenceThreshold: integerValue(formData, "oceanHighConfidenceThreshold", existingAutomationSettings.highConfidenceThreshold, 1, 100),
+    autoPostEnabled: formData.get("oceanAutoPostEnabled") === "true",
+    autoPostMinimumConfidence: integerValue(formData, "oceanAutoPostMinimumConfidence", existingAutomationSettings.autoPostMinimumConfidence, 1, 100),
+    trustedAgentOnlyAutoPost: formData.get("oceanTrustedAgentOnlyAutoPost") === "true",
+    requireValidityEndDate: formData.get("oceanRequireValidityEndDate") === "true",
+    classificationModel: text(formData, "oceanClassificationModel") ?? DEFAULT_OCEAN_FREIGHT_AUTOMATION_SETTINGS.classificationModel
+  };
+
+  if (automationSettings.autoPostEnabled && automationSettings.autoPostMinimumConfidence < automationSettings.highConfidenceThreshold) {
+    throw new Error("Auto-post minimum confidence must be greater than or equal to the high-confidence review threshold.");
+  }
 
   const data = {
     tenantId: ctx.tenantId,
@@ -378,7 +585,8 @@ export async function saveOceanFreightMicrosoftGraphSettingsAction(formData: For
       adminMailboxTargets,
       mailLookbackDays,
       maxMailMessagesPerMailbox,
-      mailSyncEnabled
+      mailSyncEnabled,
+      automationSettings
     })
   };
 
@@ -397,7 +605,8 @@ export async function saveOceanFreightMicrosoftGraphSettingsAction(formData: For
         mailSyncEnabled,
         mailLookbackDays,
         maxMailMessagesPerMailbox,
-        adminMailboxTargetCount: adminMailboxTargets.length
+        adminMailboxTargetCount: adminMailboxTargets.length,
+        automationSettings
       }
     }
   });

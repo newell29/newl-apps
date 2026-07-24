@@ -6,6 +6,7 @@ import {
   OCEAN_FREIGHT_MICROSOFT_GRAPH_CREDENTIAL_NAME,
   parseOceanFreightMicrosoftGraphSettings
 } from "@/modules/ocean-freight-pricing/microsoft-graph-settings";
+import { parseOceanFreightAutomationSettings } from "@/modules/ocean-freight-pricing/automation-settings";
 import { prisma } from "@/server/db";
 import { getMicrosoftGraphApplicationAccessToken } from "@/server/integrations/microsoft-graph-application";
 import {
@@ -38,6 +39,7 @@ type IngestMessagesInput = {
   jobRunId: string;
   mailboxes: string[];
   messages: GraphMailMessage[];
+  classificationEnabled?: boolean;
   attachmentFetcher?: AttachmentFetcher;
 };
 
@@ -64,17 +66,44 @@ const RATE_TERMS = [
   "rate sheet"
 ];
 
-export function detectOceanFreightRateEmail(input: { subject?: string | null; bodyPreview?: string | null; bodyText?: string | null }): OceanFreightRateDetection {
+const CURRENCY_AMOUNT_PATTERN = /(?:\$|usd|cad|eur|cny|rmb)\s*\d{2,}(?:[,.]\d{2,3})*(?:\.\d{2})?|\d{2,}(?:[,.]\d{2,3})*(?:\.\d{2})?\s*(?:usd|cad|eur|cny|rmb)/i;
+const OUTBOUND_RFQ_TERMS = ["rfq", "request for quotation", "quote request", "new booking", "please quote"];
+
+export function detectOceanFreightRateEmail(input: {
+  subject?: string | null;
+  bodyPreview?: string | null;
+  bodyText?: string | null;
+  fromAddress?: string | null;
+  mailboxAddresses?: string[];
+}): OceanFreightRateDetection {
   const haystack = `${input.subject ?? ""}\n${input.bodyPreview ?? ""}\n${input.bodyText ?? ""}`.toLowerCase();
+  const fromAddress = input.fromAddress?.trim().toLowerCase() ?? null;
+  const mailboxAddresses = new Set((input.mailboxAddresses ?? []).map((mailbox) => mailbox.trim().toLowerCase()).filter(Boolean));
+  if (fromAddress && mailboxAddresses.has(fromAddress)) {
+    const matchedOutboundTerms = OUTBOUND_RFQ_TERMS.filter((term) => haystack.includes(term));
+    return {
+      rateDetected: false,
+      matchedTerms: matchedOutboundTerms,
+      detectionReason: matchedOutboundTerms.length > 0
+        ? `Sent from configured pricing mailbox and matched outbound/RFQ term(s): ${matchedOutboundTerms.join(", ")}. Not an inbound agent rate.`
+        : "Sent from configured pricing mailbox. Not an inbound overseas agent rate."
+    };
+  }
+
   const matchedTerms = RATE_TERMS.filter((term) => new RegExp(`(^|[^a-z0-9])${escapeRegex(term)}([^a-z0-9]|$)`, "i").test(haystack));
-  const rateDetected = matchedTerms.length >= 2 || matchedTerms.some((term) => ["ocean rate", "freight rate", "rate sheet"].includes(term));
+  const hasPriceEvidence = CURRENCY_AMOUNT_PATTERN.test(haystack);
+  const hasStrongRateSheetEvidence = matchedTerms.some((term) => ["ocean rate", "freight rate", "rate sheet"].includes(term));
+  const hasLaneEvidence = matchedTerms.includes("pol") || matchedTerms.includes("pod") || matchedTerms.includes("port to port");
+  const hasEquipmentEvidence = matchedTerms.some((term) => ["fcl", "lcl", "20gp", "40gp", "40hq", "45hq"].includes(term));
+  const rateDetected = hasStrongRateSheetEvidence || (hasPriceEvidence && matchedTerms.length >= 2) || (hasPriceEvidence && hasLaneEvidence && hasEquipmentEvidence);
+  const detectionEvidence = hasPriceEvidence ? [...matchedTerms, "rate amount"] : matchedTerms;
   return {
     rateDetected,
-    matchedTerms,
+    matchedTerms: detectionEvidence,
     detectionReason: rateDetected
-      ? `Matched ocean freight pricing term(s): ${matchedTerms.join(", ")}.`
+      ? `Matched inbound ocean freight pricing evidence: ${detectionEvidence.join(", ")}.`
       : matchedTerms.length > 0
-        ? `Insufficient ocean pricing evidence; matched only: ${matchedTerms.join(", ")}.`
+        ? `Insufficient inbound agent rate evidence; matched only: ${matchedTerms.join(", ")}${hasPriceEvidence ? " plus rate amount" : ""}.`
         : "No ocean freight pricing terms matched."
   };
 }
@@ -126,6 +155,7 @@ export async function runOceanFreightEmailIngestionJob(ctx: TenantContext & { us
       jobRunId,
       mailboxes: settings.adminMailboxTargets,
       messages: mailboxResults.messages,
+      classificationEnabled: settings.automationSettings.classificationEnabled,
       attachmentFetcher: async (message, sourceEmail) =>
         fetchMicrosoftGraphMessageAttachments(accessToken, sourceEmail.mailboxAddress, message.id)
     });
@@ -157,8 +187,20 @@ export async function persistOceanFreightSourceEmails(input: IngestMessagesInput
 
   for (const message of input.messages) {
     const bodyText = normalizeEmailBodyText(message.body?.content ?? message.bodyPreview ?? "");
-    const detection = detectOceanFreightRateEmail({ subject: message.subject, bodyPreview: message.bodyPreview, bodyText });
     const mailboxAddress = (message.mailboxAddress || input.mailboxes[0] || "unknown").toLowerCase();
+    const detection = input.classificationEnabled === false
+      ? {
+          rateDetected: false,
+          matchedTerms: [],
+          detectionReason: "Ocean freight email classification is disabled for this tenant."
+        }
+      : detectOceanFreightRateEmail({
+          subject: message.subject,
+          bodyPreview: message.bodyPreview,
+          bodyText,
+          fromAddress: message.from?.emailAddress?.address,
+          mailboxAddresses: input.mailboxes
+        });
     const bodyContentHash = bodyText ? createHash("sha256").update(bodyText).digest("hex") : null;
     const data = {
       tenantId: input.tenantId,
@@ -240,7 +282,10 @@ async function getOceanGraphSettings(tenantId: string) {
     orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
     select: { provider: true, status: true, publicConfig: true }
   });
-  return parseOceanFreightMicrosoftGraphSettings(credential);
+  return {
+    ...parseOceanFreightMicrosoftGraphSettings(credential),
+    automationSettings: parseOceanFreightAutomationSettings(credential)
+  };
 }
 
 async function fetchSelectedMailboxMessages(accessToken: string, mailboxes: string[], options: MailFetchOptions) {

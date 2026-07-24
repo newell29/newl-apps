@@ -1,4 +1,4 @@
-import { JobStatus, OceanRateStatus, PlatformRole } from "@prisma/client";
+import { IntegrationProvider, IntegrationStatus, JobStatus, OceanEquipmentType, OceanRateStatus, PlatformRole } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const prismaMock = vi.hoisted(() => ({
@@ -6,7 +6,7 @@ const prismaMock = vi.hoisted(() => ({
   oceanFreightSourceAttachment: { upsert: vi.fn() },
   oceanFreightRateCandidate: { create: vi.fn() },
   oceanFreightRate: { create: vi.fn() },
-  automationJobRun: { create: vi.fn(), findMany: vi.fn() },
+  automationJobRun: { create: vi.fn(), findMany: vi.fn(), updateMany: vi.fn() },
   integrationCredential: { findFirst: vi.fn() },
   auditLog: { create: vi.fn() },
   tenantModuleAccess: { findFirst: vi.fn() },
@@ -24,6 +24,11 @@ import {
   persistOceanFreightSourceEmails,
   triggerOceanFreightEmailIngestion
 } from "@/modules/ocean-freight-pricing/ingestion";
+import {
+  DEFAULT_OCEAN_FREIGHT_AUTOMATION_SETTINGS,
+  getOceanFreightReviewDisposition,
+  parseOceanFreightAutomationSettings
+} from "@/modules/ocean-freight-pricing/automation-settings";
 import { getComputedOceanRateStatus, getOceanFreightJobsShell, getOceanFreightSourcesShell } from "@/modules/ocean-freight-pricing/queries";
 import { resolveMicrosoftGraphMailboxMessagesPath } from "@/server/integrations/microsoft-graph-mail";
 
@@ -43,6 +48,70 @@ describe("ocean freight pricing status", () => {
   });
 });
 
+describe("ocean freight pricing automation settings", () => {
+  it("parses automation settings from the tenant-scoped ocean Microsoft Graph config", () => {
+    const settings = parseOceanFreightAutomationSettings({
+      provider: IntegrationProvider.MICROSOFT_GRAPH,
+      status: IntegrationStatus.ACTIVE,
+      publicConfig: {
+        oceanClassificationEnabled: true,
+        oceanExtractionEnabled: true,
+        oceanExceptionOnlyReview: true,
+        oceanHighConfidenceThreshold: 82,
+        oceanAutoPostEnabled: true,
+        oceanAutoPostMinimumConfidence: 94,
+        oceanTrustedAgentOnlyAutoPost: true,
+        oceanRequireValidityEndDate: true,
+        oceanClassificationModel: "gpt-5-nano"
+      }
+    });
+
+    expect(settings).toMatchObject({
+      extractionEnabled: true,
+      highConfidenceThreshold: 82,
+      autoPostEnabled: true,
+      autoPostMinimumConfidence: 94,
+      classificationModel: "gpt-5-nano"
+    });
+  });
+
+  it("flags incomplete candidates as exceptions and complete trusted candidates as autopost eligible", () => {
+    const incomplete = getOceanFreightReviewDisposition({
+      status: "NEEDS_REVIEW",
+      confidence: 93,
+      agentId: null,
+      originPort: "Shanghai",
+      destinationPort: null,
+      equipmentType: null,
+      rateAmount: null,
+      currency: null,
+      validityEndDate: null,
+      sourceEmail: { rateDetected: true, fromAddress: "agent@example.com", mailboxAddress: "pricing@example.com" }
+    }, { ...DEFAULT_OCEAN_FREIGHT_AUTOMATION_SETTINGS, autoPostEnabled: true });
+
+    expect(incomplete.isException).toBe(true);
+    expect(incomplete.isAutoPostEligible).toBe(false);
+    expect(incomplete.reasons).toContain("agent is not matched");
+
+    const complete = getOceanFreightReviewDisposition({
+      status: "NEEDS_REVIEW",
+      confidence: 95,
+      agentId: "agent-1",
+      originPort: "Shanghai",
+      destinationPort: "Los Angeles",
+      equipmentType: OceanEquipmentType.FORTY_HQ,
+      rateAmount: "2450",
+      currency: "USD",
+      validityEndDate: new Date("2026-07-31T00:00:00.000Z"),
+      sourceEmail: { rateDetected: true, fromAddress: "agent@example.com", mailboxAddress: "pricing@example.com" }
+    }, { ...DEFAULT_OCEAN_FREIGHT_AUTOMATION_SETTINGS, autoPostEnabled: true });
+
+    expect(complete.isException).toBe(false);
+    expect(complete.isAutoPostEligible).toBe(true);
+    expect(complete.reasons).toEqual([]);
+  });
+});
+
 describe("ocean freight pricing email ingestion", () => {
   const ctx = { tenantId: "tenant-a", userId: "user-a", role: PlatformRole.MANAGER };
 
@@ -53,6 +122,7 @@ describe("ocean freight pricing email ingestion", () => {
     prismaMock.tenantRoleModuleAccess.findMany.mockResolvedValue([]);
     prismaMock.tenantRolePolicy.findUnique.mockResolvedValue(null);
     prismaMock.integrationCredential.findFirst.mockResolvedValue(null);
+    prismaMock.automationJobRun.updateMany.mockResolvedValue({ count: 0 });
     prismaMock.oceanFreightSourceEmail.upsert.mockImplementation(async ({ create }) => ({ id: `source-${create.graphMessageId}`, ...create }));
     prismaMock.oceanFreightSourceAttachment.upsert.mockResolvedValue({});
     prismaMock.auditLog.create.mockResolvedValue({});
@@ -62,6 +132,28 @@ describe("ocean freight pricing email ingestion", () => {
     const result = detectOceanFreightRateEmail({ subject: "July FCL ocean rate sheet", bodyText: "40HQ validity valid until August. POL Shanghai POD LA." });
     expect(result.rateDetected).toBe(true);
     expect(result.detectionReason).toContain("rate sheet");
+  });
+
+  it("does not detect outbound quotes sent from the configured pricing mailbox as agent rates", () => {
+    const result = detectOceanFreightRateEmail({
+      subject: "NEW BOOKING RFQ // TASTE OF NATURE FOOD INC / 1X20GP",
+      bodyText: "Hi, we can offer ocean rate pricing valid until July. POL Shanghai POD Newark.",
+      fromAddress: "pricing@example.com",
+      mailboxAddresses: ["pricing@example.com"]
+    });
+    expect(result.rateDetected).toBe(false);
+    expect(result.detectionReason).toContain("Not an inbound agent rate");
+  });
+
+  it("detects inbound agent rate offers with price evidence", () => {
+    const result = detectOceanFreightRateEmail({
+      subject: "Shanghai FCL rates",
+      bodyText: "POL Shanghai POD LA 40HQ USD 2450 valid until July 31. Carrier ONE.",
+      fromAddress: "agent@forwarder.example",
+      mailboxAddresses: ["pricing@example.com"]
+    });
+    expect(result.rateDetected).toBe(true);
+    expect(result.matchedTerms).toContain("rate amount");
   });
 
   it("keeps non-rate emails with a negative detection reason", () => {
