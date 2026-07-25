@@ -10,6 +10,7 @@ import {
   buildCompliantWebsiteGrowthOutreachBody,
   fetchWebsiteGrowthPublicContactEvidence,
   isWebsiteGrowthOutreachOptOut,
+  isWebsiteGrowthOutreachReplyMatch,
   readWebsiteGrowthOutreachIdentity,
   validateWebsiteGrowthContactSource,
   validateWebsiteGrowthOutreachConsent
@@ -229,6 +230,65 @@ describe("Website Growth backlink outreach compliance", () => {
   it("recognizes common opt-out language", () => {
     expect(isWebsiteGrowthOutreachOptOut("Please remove me from this list.")).toBe(true);
     expect(isWebsiteGrowthOutreachOptOut("Thanks, please send the details.")).toBe(false);
+  });
+
+  it("matches replies by conversation ID or normalized thread subject", () => {
+    const contactedAt = new Date("2026-07-25T12:00:00.000Z");
+    const outboundMessages = [{
+      conversationId: "conversation-1",
+      subject: "Briefing idea: coordinating Canada-U.S. warehouse inventory",
+      sentAt: contactedAt
+    }];
+
+    expect(isWebsiteGrowthOutreachReplyMatch({
+      recipientEmail: "editor@publisher.example",
+      contactedAt,
+      outboundMessages,
+      inboundMessage: {
+        id: "reply-by-conversation",
+        conversationId: "conversation-1",
+        subject: "A rewritten subject",
+        receivedDateTime: "2026-07-25T13:00:00.000Z",
+        from: {
+          emailAddress: {
+            address: "editor@publisher.example"
+          }
+        }
+      }
+    })).toBe(true);
+    expect(isWebsiteGrowthOutreachReplyMatch({
+      recipientEmail: "editor@publisher.example",
+      contactedAt,
+      outboundMessages: outboundMessages.map((message) => ({
+        ...message,
+        conversationId: null
+      })),
+      inboundMessage: {
+        id: "reply-1",
+        subject: "RE: Briefing idea: coordinating Canada-U.S. warehouse inventory",
+        receivedDateTime: "2026-07-25T13:00:00.000Z",
+        from: {
+          emailAddress: {
+            address: "editor@publisher.example"
+          }
+        }
+      }
+    })).toBe(true);
+    expect(isWebsiteGrowthOutreachReplyMatch({
+      recipientEmail: "editor@publisher.example",
+      contactedAt,
+      outboundMessages,
+      inboundMessage: {
+        id: "unrelated-1",
+        subject: "A different topic",
+        receivedDateTime: "2026-07-25T13:00:00.000Z",
+        from: {
+          emailAddress: {
+            address: "editor@publisher.example"
+          }
+        }
+      }
+    })).toBe(false);
   });
 
   it("allows only a business contact on the approved referring domain", () => {

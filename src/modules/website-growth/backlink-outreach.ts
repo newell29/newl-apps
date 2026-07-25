@@ -12,7 +12,8 @@ import { prisma } from "@/server/db";
 import { getMicrosoftGraphApplicationAccessToken } from "@/server/integrations/microsoft-graph-application";
 import {
   createAndSendMicrosoftGraphMailboxMessage,
-  fetchMicrosoftGraphMailboxMessages
+  fetchMicrosoftGraphMailboxMessages,
+  type MicrosoftGraphMailMessage
 } from "@/server/integrations/microsoft-graph-mail";
 
 export const WEBSITE_GROWTH_OUTREACH_DAILY_NEW_CONTACT_LIMIT = 5;
@@ -205,7 +206,8 @@ export async function sendWebsiteGrowthOutreachEmail({
       prisma.websiteGrowthOutreachMessage.update({
         where: { id: message.id },
         data: {
-          externalMessageId: sent.id,
+          externalMessageId:
+            sent.id ?? `graph-sendmail-accepted:${message.id}`,
           conversationId: sent.conversationId
         }
       }),
@@ -347,8 +349,11 @@ export async function syncWebsiteGrowthOutreachReplies({
     },
     include: {
       messages: {
-        where: { conversationId: { not: null } },
-        select: { conversationId: true }
+        select: {
+          conversationId: true,
+          subject: true,
+          sentAt: true
+        }
       }
     }
   });
@@ -369,23 +374,17 @@ export async function syncWebsiteGrowthOutreachReplies({
   let unsubscribes = 0;
 
   for (const opportunity of tracked) {
-    const conversationIds = new Set(
-      opportunity.messages
-        .map((message) => message.conversationId)
-        .filter((value): value is string => Boolean(value))
-    );
     const recipientEmail = opportunity.recipientEmail?.trim().toLowerCase();
-    if (!recipientEmail || conversationIds.size === 0) continue;
+    if (!recipientEmail) continue;
 
-    const reply = messages.find((message) => {
-      const sender = message.from?.emailAddress?.address?.trim().toLowerCase();
-      const receivedAt = message.receivedDateTime ? new Date(message.receivedDateTime) : null;
-      return (
-        sender === recipientEmail &&
-        Boolean(message.conversationId && conversationIds.has(message.conversationId)) &&
-        Boolean(receivedAt && opportunity.contactedAt && receivedAt > opportunity.contactedAt)
-      );
-    });
+    const reply = messages.find((message) =>
+      isWebsiteGrowthOutreachReplyMatch({
+        recipientEmail,
+        contactedAt: opportunity.contactedAt,
+        outboundMessages: opportunity.messages,
+        inboundMessage: message
+      })
+    );
     if (!reply) continue;
 
     const replyText = `${reply.subject ?? ""}\n${reply.bodyPreview ?? ""}`.trim();
@@ -445,6 +444,71 @@ export async function syncWebsiteGrowthOutreachReplies({
   }
 
   return { replies, unsubscribes };
+}
+
+export function isWebsiteGrowthOutreachReplyMatch({
+  recipientEmail,
+  contactedAt,
+  outboundMessages,
+  inboundMessage
+}: {
+  recipientEmail: string;
+  contactedAt: Date | null;
+  outboundMessages: Array<{
+    conversationId: string | null;
+    subject: string;
+    sentAt: Date;
+  }>;
+  inboundMessage: MicrosoftGraphMailMessage;
+}) {
+  const sender =
+    inboundMessage.from?.emailAddress?.address?.trim().toLowerCase() ?? null;
+  const receivedAt = inboundMessage.receivedDateTime
+    ? new Date(inboundMessage.receivedDateTime)
+    : null;
+  if (
+    sender !== recipientEmail.trim().toLowerCase() ||
+    !receivedAt ||
+    !contactedAt ||
+    receivedAt <= contactedAt
+  ) {
+    return false;
+  }
+
+  const conversationIds = new Set(
+    outboundMessages
+      .map((message) => message.conversationId)
+      .filter((value): value is string => Boolean(value))
+  );
+  if (
+    inboundMessage.conversationId &&
+    conversationIds.has(inboundMessage.conversationId)
+  ) {
+    return true;
+  }
+
+  const replySubject = normalizeWebsiteGrowthOutreachThreadSubject(
+    inboundMessage.subject
+  );
+  return Boolean(
+    replySubject &&
+    outboundMessages.some(
+      (message) =>
+        message.sentAt < receivedAt &&
+        normalizeWebsiteGrowthOutreachThreadSubject(message.subject) ===
+          replySubject
+    )
+  );
+}
+
+function normalizeWebsiteGrowthOutreachThreadSubject(
+  value: string | null | undefined
+) {
+  return value
+    ?.trim()
+    .replace(/^(?:(?:re|fw|fwd)\s*:\s*)+/i, "")
+    .replace(/\s+/g, " ")
+    .toLowerCase() || null;
 }
 
 export async function buildWebsiteGrowthOutreachTeamsSummary({
