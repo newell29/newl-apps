@@ -25,6 +25,7 @@ Scout uses its own OpenClaw agent and workspace with Codex `gpt-5.6-sol` at high
 3. Confirm that the dedicated `partnerships@newlgroup.com` mailbox exists, its Microsoft 365 display name is `Vanessa`, and it can receive replies and password-reset messages.
 4. Prefer Exchange Online **Application RBAC** for a new setup: assign the service principal only the `Application Mail.Send` and `Application Mail.Read` roles against a management scope containing the dedicated partnerships mailbox.
 5. Do not also leave equivalent organization-wide Microsoft Graph application permissions assigned in Entra when using Application RBAC, because those grants are additive and would defeat the mailbox scope. If the tenant must use the legacy method, grant Graph application permissions `Mail.Send` and `Mail.Read` with admin consent and then restrict them with an Exchange Application Access Policy. Do not use both models or leave unrestricted access to all mailboxes.
+   Newl Apps sends through the direct Microsoft Graph `sendMail` action, which requires `Mail.Send` but not `Mail.ReadWrite`. It records Graph's accepted response and matches later replies by conversation ID when available, with a recipient-and-normalized-subject fallback for direct-send messages.
 6. Add the following protected Vercel production values:
    - `OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN` — a new random value, different from the read-only Scout token.
    - `WEBSITE_GROWTH_OUTREACH_MAILBOX`

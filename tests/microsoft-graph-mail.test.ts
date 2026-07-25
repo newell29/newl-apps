@@ -35,22 +35,15 @@ describe("Microsoft Graph outbound mail", () => {
     vi.unstubAllGlobals();
   });
 
-  it("creates an immutable draft and sends that exact draft", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        id: "immutable-message-1",
-        conversationId: "conversation-1",
-        internetMessageId: "<message-1@example.com>"
-      }), {
-        status: 201,
-        headers: { "content-type": "application/json" }
-      }))
-      .mockResolvedValueOnce(new Response(null, { status: 202 }));
+  it("sends directly with Mail.Send instead of requiring draft write access", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, { status: 202 })
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(createAndSendMicrosoftGraphMailboxMessage(
       "token",
-      "me",
+      "partnerships@example.com",
       {
         recipientEmail: "editor@publisher.example",
         recipientName: "Editor",
@@ -58,50 +51,42 @@ describe("Microsoft Graph outbound mail", () => {
         body: "A short, reviewed message."
       }
     )).resolves.toEqual({
-      id: "immutable-message-1",
-      conversationId: "conversation-1",
-      internetMessageId: "<message-1@example.com>"
+      id: null,
+      conversationId: null,
+      internetMessageId: null
     });
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      "https://graph.microsoft.com/v1.0/me/messages",
+      "https://graph.microsoft.com/v1.0/users/partnerships%40example.com/sendMail",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
-          Authorization: "Bearer token",
-          Prefer: 'IdType="ImmutableId"'
+          Authorization: "Bearer token"
         })
       })
     );
-    const createRequest = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(String(createRequest.body))).toMatchObject({
-      subject: "Resource suggestion",
-      body: {
-        contentType: "Text",
-        content: "A short, reviewed message."
+    const sendRequest = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(sendRequest.body))).toMatchObject({
+      message: {
+        subject: "Resource suggestion",
+        body: {
+          contentType: "Text",
+          content: "A short, reviewed message."
+        },
+        toRecipients: [{
+          emailAddress: {
+            address: "editor@publisher.example",
+            name: "Editor"
+          }
+        }]
       },
-      toRecipients: [{
-        emailAddress: {
-          address: "editor@publisher.example",
-          name: "Editor"
-        }
-      }]
+      saveToSentItems: true
     });
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      "https://graph.microsoft.com/v1.0/me/messages/immutable-message-1/send",
-      expect.objectContaining({
-        method: "POST",
-        headers: expect.objectContaining({
-          Authorization: "Bearer token",
-          Prefer: 'IdType="ImmutableId"'
-        })
-      })
-    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("does not call send when draft creation fails", async () => {
+  it("surfaces a direct send failure without making a second request", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         error: {

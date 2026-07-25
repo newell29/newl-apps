@@ -132,62 +132,36 @@ export async function createAndSendMicrosoftGraphMailboxMessage(
   mailbox: string,
   message: MicrosoftGraphOutboundMessage
 ) {
-  const messagePath =
+  const sendPath =
     mailbox === "me"
-      ? "me/messages"
-      : await resolveMicrosoftGraphMailboxMessagesPath(accessToken, mailbox);
-  const createResponse = await fetch(`https://graph.microsoft.com/v1.0/${messagePath}`, {
+      ? "me/sendMail"
+      : `users/${encodeURIComponent(mailbox)}/sendMail`;
+  const sendResponse = await fetch(`https://graph.microsoft.com/v1.0/${sendPath}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      Prefer: 'IdType="ImmutableId"'
+      "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      subject: message.subject,
-      body: {
-        contentType: "Text",
-        content: message.body
+      message: {
+        subject: message.subject,
+        body: {
+          contentType: "Text",
+          content: message.body
+        },
+        toRecipients: [{
+          emailAddress: {
+            address: message.recipientEmail,
+            ...(message.recipientName ? { name: message.recipientName } : {})
+          }
+        }]
       },
-      toRecipients: [{
-        emailAddress: {
-          address: message.recipientEmail,
-          ...(message.recipientName ? { name: message.recipientName } : {})
-        }
-      }]
+      saveToSentItems: true
     }),
     cache: "no-store",
     signal: AbortSignal.timeout(MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS)
   });
 
-  if (!createResponse.ok) {
-    throw new Error(
-      (await extractMicrosoftGraphResponseError(createResponse)) ??
-        `Microsoft Graph draft creation failed for ${mailbox} with status ${createResponse.status}.`
-    );
-  }
-
-  const draft = (await createResponse.json()) as {
-    id?: string;
-    conversationId?: string | null;
-    internetMessageId?: string | null;
-  };
-  if (!draft.id) {
-    throw new Error("Microsoft Graph did not return an outbound message ID.");
-  }
-
-  const sendResponse = await fetch(
-    `https://graph.microsoft.com/v1.0/${messagePath}/${encodeURIComponent(draft.id)}/send`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Prefer: 'IdType="ImmutableId"'
-      },
-      cache: "no-store",
-      signal: AbortSignal.timeout(MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS)
-    }
-  );
   if (!sendResponse.ok) {
     throw new Error(
       (await extractMicrosoftGraphResponseError(sendResponse)) ??
@@ -196,9 +170,9 @@ export async function createAndSendMicrosoftGraphMailboxMessage(
   }
 
   return {
-    id: draft.id,
-    conversationId: draft.conversationId ?? null,
-    internetMessageId: draft.internetMessageId ?? null
+    id: null,
+    conversationId: null,
+    internetMessageId: null
   };
 }
 
