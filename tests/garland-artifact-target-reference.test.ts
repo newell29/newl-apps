@@ -162,7 +162,8 @@ describe("Garland artifact target-reference enforcement", () => {
     expect(teamshipFetchMock).toHaveBeenCalledWith({
       tenantId: "tenant-1",
       shipmentDate: "2026-07-21",
-      srNumbers: ["SR810264"]
+      srNumbers: ["SR810264"],
+      psNumbers: ["PS210236"]
     });
     expect(reviewMock.mock.calls[0]?.[0]).toEqual([
       expect.objectContaining({ psNumber: "PS210236", srNumber: "SR810264" })

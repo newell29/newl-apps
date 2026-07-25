@@ -1282,6 +1282,76 @@ NEWLS 2604816191908 1.00 ( )`
     );
   });
 
+  it("retrieves an exact PS match when the Teamship list row does not expose its SR", async () => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_MAX_LIST_PAGES = "1";
+
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+
+      if (url.endsWith("/v1/login")) {
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/v1/ship-inventories?")) {
+        return Response.json({
+          data: [
+            {
+              id: 10,
+              record_no: "PS210206",
+              customer: { company: "Garland Canada Distribution" }
+            }
+          ]
+        });
+      }
+
+      if (url.endsWith("/v1/ship-inventories/10")) {
+        return Response.json({
+          data: {
+            id: 10,
+            shipment_id: "SR808478",
+            record_no: "PS210206",
+            carrier: "Midland Transport",
+            po_number: "0000037656",
+            edi_field_3: "PPADD-CD",
+            ship_to_name: "J.R. MAHONEY LTD.",
+            ship_to_address_1: "1810 KINGS ROAD",
+            ship_to_city: "SYDNEY",
+            ship_to_state: "NS",
+            ship_to_zip: "B1L 1C5",
+            ship_to_country: "CA",
+            shipping_instructions:
+              "MIDLAND THIRD PARTY ACCOUNT #129083 GARLAND ATTN. RECEIVING FREIGHT QUOTE 97068",
+            items: [{ sku: "E1SGHMV6XHU3US", inventory_count: 1 }],
+            custom_fields: [
+              { label: "Commodity", value: "SKU: E1SGHMV6XHU3US, SN: 2604816191908" }
+            ]
+          }
+        });
+      }
+
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      srNumbers: ["SR808478"],
+      psNumbers: ["PS210206"],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+    const [pdfOrder] = parseGarlandShippingOrderPages([{ pageNumber: 1, text: pageOne }]);
+    const review = buildGarlandTeamshipReview([pdfOrder!], orders);
+
+    expect(orders).toHaveLength(1);
+    expect(review.reviews[0]).toMatchObject({
+      psNumber: "PS210206",
+      srNumber: "SR808478",
+      status: "PASS",
+      issueCount: 0
+    });
+  });
+
   it("parses Teamship UI page inventory serials from hidden order data", () => {
     const parsed = parseTeamshipShippingOrderUiPage(
       sampleTeamshipUiPageHtml({

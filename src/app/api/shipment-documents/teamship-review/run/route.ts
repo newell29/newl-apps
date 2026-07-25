@@ -82,6 +82,7 @@ export async function POST(request: Request) {
               tenantId: context.tenantId,
               shipmentDate: shipmentDateInput,
               srNumbers: ordersToReview.map((order) => order.srNumber),
+              psNumbers: ordersToReview.map((order) => order.psNumber),
               credentials: runtimeCredentials
             })
           : [];

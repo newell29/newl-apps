@@ -269,7 +269,8 @@ export async function finalizeGarlandArtifact(
     const teamshipOrders = await fetchTeamshipShippingOrdersForReview({
       tenantId: context.tenantId,
       shipmentDate: requestedShipmentDate ?? "",
-      srNumbers: selectedOrders.map((order) => order.srNumber)
+      srNumbers: selectedOrders.map((order) => order.srNumber),
+      psNumbers: selectedOrders.map((order) => order.psNumber)
     });
     const shipmentDateInput = resolveGarlandReviewShipmentDate(
       requestedShipmentDate,

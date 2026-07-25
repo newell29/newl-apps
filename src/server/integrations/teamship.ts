@@ -12,6 +12,7 @@ type TeamshipFetchOptions = {
   tenantId?: string | null;
   shipmentDate?: string | null;
   srNumbers?: string[];
+  psNumbers?: string[];
   credentials?: TeamshipRuntimeCredentials | null;
   fetchImpl?: typeof fetch;
 };
@@ -122,6 +123,7 @@ export async function fetchTeamshipShippingOrdersForReview({
   tenantId,
   shipmentDate,
   srNumbers = [],
+  psNumbers = [],
   credentials = null,
   fetchImpl = fetch
 }: TeamshipFetchOptions): Promise<TeamshipShippingOrderDetail[]> {
@@ -130,7 +132,10 @@ export async function fetchTeamshipShippingOrdersForReview({
   const webBaseUrl = resolveTeamshipWebBaseUrl(apiBaseUrl);
   const token = await loginToTeamship(fetchImpl, resolvedCredentials, apiBaseUrl);
   const targetSrNumbers = new Set(srNumbers.map(normalizeIdentifier).filter(Boolean));
-  const shouldEnrichFromUiPage = targetSrNumbers.size > 0;
+  const targetPsNumbers = new Set(psNumbers.map(normalizeIdentifier).filter(Boolean));
+  const targetOrderCount = Math.max(targetSrNumbers.size, targetPsNumbers.size);
+  const shouldEnrichFromUiPage = targetOrderCount > 0;
+  const matchedTargetOrderIds = new Set<string>();
   let webCookieHeader: string | null | undefined;
   const details = new Map<string, TeamshipShippingOrderDetail>();
   const pageLimit = getTeamshipPageLimit();
@@ -142,11 +147,14 @@ export async function fetchTeamshipShippingOrdersForReview({
 
     for (const row of rows) {
       const shipmentId = normalizeTeamshipShipmentId(row);
-      const shouldFetchBySr = targetSrNumbers.size > 0 && targetSrNumbers.has(shipmentId);
+      const psNumber = normalizeTeamshipPsNumber(row);
+      const shouldFetchByReference =
+        targetOrderCount > 0 &&
+        (targetSrNumbers.has(shipmentId) || targetPsNumbers.has(psNumber));
       const shouldFetchByDailyGarland =
-        targetSrNumbers.size === 0 && isGarlandOrder(row) && (!shipmentDate || hasMatchingDate(row, shipmentDate));
+        targetOrderCount === 0 && isGarlandOrder(row) && (!shipmentDate || hasMatchingDate(row, shipmentDate));
 
-      if (!shouldFetchBySr && !shouldFetchByDailyGarland) {
+      if (!shouldFetchByReference && !shouldFetchByDailyGarland) {
         continue;
       }
 
@@ -184,9 +192,12 @@ export async function fetchTeamshipShippingOrdersForReview({
 
       const detailShipmentId = normalizeTeamshipShipmentId(mergedDetail);
       details.set(detailShipmentId || String(orderId), mergedDetail);
+      if (shouldFetchByReference) {
+        matchedTargetOrderIds.add(String(orderId));
+      }
     }
 
-    if (targetSrNumbers.size > 0 && Array.from(targetSrNumbers).every((srNumber) => details.has(srNumber))) {
+    if (targetOrderCount > 0 && matchedTargetOrderIds.size >= targetOrderCount) {
       break;
     }
 
@@ -723,6 +734,19 @@ function normalizeIdentifier(value: unknown) {
 
 function normalizeTeamshipShipmentId(order: TeamshipShippingOrderSummary) {
   return normalizeIdentifier(order.shipment_id ?? order.amazon_shipment_id1 ?? order.edi_field_1);
+}
+
+function normalizeTeamshipPsNumber(order: TeamshipShippingOrderSummary) {
+  const candidates = [order.record_no, order.edi_field_2, order.order_number, order.display_id];
+
+  for (const candidate of candidates) {
+    const match = String(candidate ?? "").match(/PS\d{6}/i);
+    if (match?.[0]) {
+      return normalizeIdentifier(match[0]);
+    }
+  }
+
+  return "";
 }
 
 function normalizeText(value: unknown) {
