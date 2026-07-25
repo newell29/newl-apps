@@ -97,7 +97,13 @@ describe("Website Growth Scout OpenClaw scripts", () => {
 
     expect(prompt).toContain("openclaw browser open <url> --json");
     expect(prompt).toContain("do not start with `openclaw browser navigate`");
+    expect(prompt).toContain("openclaw browser --json focus <suggestedTargetId>");
+    expect(prompt).toContain("openclaw browser --json snapshot --format aria --limit 300");
+    expect(prompt).toContain("Never use the unsupported `snapshot --refs` or `snapshot --target-id`");
     expect(skill).toContain("open a fresh browser tab");
+    expect(skill).toContain("openclaw browser --json focus <suggestedTargetId>");
+    expect(skill).toContain("openclaw browser --json snapshot --format aria --limit 300");
+    expect(skill).toContain("does not support `snapshot --refs` or `snapshot --target-id`");
     expect(skill).toContain("A failed browser probe marks the scheduled run failed");
   });
 
