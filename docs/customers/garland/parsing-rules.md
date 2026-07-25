@@ -23,7 +23,7 @@ flowchart TB
 
 Emails are classified using Garland-domain, PS-range, order/page-count, attachment, and correction signals. Attachments are hashed for duplicate detection. Parsed PDF pages extract PS number, SR number, ship-to data, PO, freight terms, order date, ship-via, instructions, and item rows when present. Teamship review compares Garland parsed data with Teamship details.
 
-Garland Lot/Serial references may be all-numeric values from 8 through 16 digits, or alphanumeric values containing at least one digit. Six-digit site/location codes remain excluded from serial extraction. Confirmed employee feedback includes valid eight-digit references, so serialized items must use `SN:` commodity text rather than the non-serialized `QTY:` fallback.
+Garland Lot/Serial references may be all-numeric values from 8 through 16 digits, or alphanumeric values containing at least one digit. Six-digit site/location codes remain excluded from serial extraction. Multiple valid Lot/Serial references can share one extracted PDF text line and must remain attached to the current item. Serialized commodity text uses `SKU: <sku>, SN: <serials>` rather than the non-serialized `QTY:` fallback.
 
 PDF text extraction may place the final wrapped Special Instructions line inside the split item-table header. The parser retains non-header text between the recognized header cluster and the first item row while continuing to exclude `Ln`, `Item Number`, `Site`, `Location`, `Lot/Serial`, `Ship Qty`, and related header fragments.
 

@@ -23,7 +23,7 @@ describe("Teamship Phase 2 agent execution", () => {
         width: 40,
         height: 50,
         weight: 500,
-        commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908"
+        commodity: "SKU: E1SGHMV6XHU3US, SN: 2604816191908"
       }),
       expect.objectContaining({
         quantity: 4,
@@ -106,7 +106,7 @@ PROPER NAME: UN1814`;
           height: 50,
           weight: 500,
           weight_unit: "lbs",
-          commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908"
+          commodity: "SKU: E1SGHMV6XHU3US, SN: 2604816191908"
         }),
         apiInstruction: expect.objectContaining({
           preferredExecution: "TEAMSHIP_API",
