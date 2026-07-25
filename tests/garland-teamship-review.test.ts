@@ -172,6 +172,40 @@ X16 TOP PANINI GRILL PLATE
     });
   });
 
+  it("extracts ship-to city and postal code when PDF text omits the city comma", () => {
+    const orders = parseGarlandShippingOrderPages([
+      {
+        pageNumber: 1,
+        text: `Ship-To Pre-Shipper Print Date
+10018968 PS210497 7/24/2026
+Pre-Shipper
+GARLAND CUSTOMER
+123 TEST STREET
+QUEBEFC QC G1P 2H3
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Order Number SR812997 Ship To PO 12345 Frt Terms PPDG
+Order Date 7/24/2026 Ship Via SPEEDY
+Ln Item Number T Site
+Location
+Lot/Serial
+Ref Ship Qty Qty Open UM Due
+ Shipped
+1 TEST-SKU 891210
+TEST PRODUCT
+1.00 EA 7/24/2026`
+      }
+    ]);
+
+    expect(orders[0]).toMatchObject({
+      psNumber: "PS210497",
+      shipToAddress1: "123 TEST STREET",
+      shipToCity: "QUEBEFC",
+      shipToState: "QC",
+      shipToPostalCode: "G1P 2H3"
+    });
+  });
+
   it("extracts alphanumeric lot/serial values without treating site locations as serials", () => {
     const orders = parseGarlandShippingOrderPages([
       {

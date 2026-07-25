@@ -27,6 +27,8 @@ Garland Lot/Serial references may be all-numeric values from 8 through 16 digits
 
 PDF text extraction may place the final wrapped Special Instructions line inside the split item-table header. The parser retains non-header text between the recognized header cluster and the first item row while continuing to exclude `Ln`, `Item Number`, `Site`, `Location`, `Lot/Serial`, `Ship Qty`, and related header fragments.
 
+Garland ship-to city, province/state, and postal code extraction accepts both `CITY, ST POSTAL` and `CITY ST POSTAL` text layouts. The PDF text layer can omit the visual comma, and that omission must not move the location line into ship-to address line 1 or leave city and postal code blank.
+
 ## Pallet and printing notes
 
 Pallet dimensions, serials, weight, and SKU observations are represented in Teamship review/update types and `GarlandProductDimensionObservation`. The UPS special dimension rule is confirmed in existing documentation and tests should be consulted before changing it. Printer mappings, duplicate print protection, and a general print service were not located; production printing requires explicit human approval.
