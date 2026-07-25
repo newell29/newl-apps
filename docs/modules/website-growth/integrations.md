@@ -19,9 +19,10 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - Backlink discovery uses the same official read-only Semrush MCP session. Newl Apps receives only the curated prospect contract and aggregate reject counts, never the raw backlink inventory.
 - Approved backlink execution uses a separate `OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN`. The executor claim route excludes paid placements and returns only tenant-scoped, human-approved records.
 - Outbound mail uses Microsoft Graph application access through the dedicated outreach mailbox. Newl Apps holds the public identity configuration and Graph credential; OpenClaw receives only constrained Website Growth tools and never the Graph access token.
-- Reply sync reads the dedicated mailbox only, matches the recorded Microsoft conversation ID and recipient, and converts opt-outs into durable tenant-scoped suppression records.
+- Reply sync reads the dedicated mailbox only, matches the recorded Microsoft conversation ID and recipient, and converts opt-outs into durable tenant-scoped suppression records. A unique active exact-sender match is retained as a review-labelled reply when a publisher starts a new thread or changes the subject; ambiguous shared-recipient matches still require the thread ID or normalized subject.
 - True outbound automation additionally requires an owner-approved public business profile in the protected Scout runtime, `Mail.Send` and `Mail.Read`, and an Exchange mailbox scope. Secret values do not belong in Scout output, Teams, source control, or Semrush.
 - Weekday Teams summaries are announced by the dedicated Scout schedule even when no opportunity is available.
+- The Rivet failure monitor uses the same tenant-scoped backlink executor token only to report sanitized OpenClaw run metadata. It polls every 15 minutes without a model call, stores deduplicated incidents in `AutomationJobRun`, and sends Teams only for a newly recorded failure. The optional one-time `WEBSITE_GROWTH_RIVET_AUTO_TRIAGE_APPROVAL=OWNER_APPROVED_WEBSITE_GROWTH_FAILURE_TRIAGE` setting permits code-defect diagnosis and a draft PR; it never permits outreach retry, merge, deployment, or permission changes.
 
 ## Workflow / rules summary
 

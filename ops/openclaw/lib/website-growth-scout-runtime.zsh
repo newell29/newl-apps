@@ -13,7 +13,7 @@ load_website_growth_scout_env() {
     scout_env_name="${scout_env_line%%=*}"
     scout_env_value="${scout_env_line#*=}"
     case "${scout_env_name}" in
-      NEWL_APPS_URL|OPENCLAW_WEBSITE_GROWTH_TOKEN|NEWL_WEBSITE_REPO_PATH|WEBSITE_GROWTH_TEAMS_TARGET|WEBSITE_GROWTH_TEAMS_ACCOUNT|VERCEL_AUTOMATION_BYPASS_SECRET|CODEX_BIN)
+      NEWL_APPS_URL|OPENCLAW_WEBSITE_GROWTH_TOKEN|OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN|NEWL_WEBSITE_REPO_PATH|WEBSITE_GROWTH_TEAMS_TARGET|WEBSITE_GROWTH_TEAMS_ACCOUNT|VERCEL_AUTOMATION_BYPASS_SECRET|CODEX_BIN)
         if [[ "${scout_env_value}" == \"*\" && "${scout_env_value}" == *\" ]]; then
           scout_env_value="${scout_env_value:1:-1}"
         elif [[ "${scout_env_value}" == \'*\' && "${scout_env_value}" == *\' ]]; then
