@@ -214,7 +214,9 @@ function extractAddressLines(lines: string[]) {
 
 function parseCityStatePostal(lines: string[]) {
   for (const line of lines) {
-    const match = line.match(/^(.+?),\s*([A-Z]{2})\s+([A-Z]\d[A-Z]\s?\d[A-Z]\d|\d{5}(?:-\d{4})?)$/i);
+    const match = line.match(
+      /^(.+?)[,\s]+([A-Z]{2})[,\s]+([A-Z]\d[A-Z]\s?\d[A-Z]\d|\d{5}(?:-\d{4})?)$/i
+    );
     if (match) {
       return {
         city: match[1]?.trim() ?? null,
