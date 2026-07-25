@@ -447,11 +447,18 @@ function isGarlandSerialCandidateLine(line: string) {
     return true;
   }
 
-  if (/^\d{10,16}$/.test(trimmed)) {
+  if (/^\d{8,16}$/.test(trimmed)) {
     return true;
   }
 
-  return extractSerialNumbers([trimmed]).length > 0 && /\b\d+(?:\.\d+)?\s*\(/.test(trimmed);
+  const serialNumbers = extractSerialNumbers([trimmed]);
+
+  if (serialNumbers.length > 0 && /\b\d+(?:\.\d+)?\s*\(/.test(trimmed)) {
+    return true;
+  }
+
+  const tokens = trimmed.split(/[\s,;/]+/).filter(Boolean);
+  return serialNumbers.length > 1 && tokens.every(isGarlandLotSerialToken);
 }
 
 function extractSerialNumbers(lines: string[]) {

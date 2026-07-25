@@ -298,6 +298,40 @@ NEWLS
     expect(orders[0]?.items[0]?.serialNumbers).not.toContain("NEWLS");
   });
 
+  it("extracts multiple Garland Lot/Serial references placed on one PDF text line", () => {
+    const orders = parseGarlandShippingOrderPages([
+      {
+        pageNumber: 1,
+        text: `Ship-To Pre-Shipper Print Date
+11906259 PS210506 7/24/2026
+Pre-Shipper
+GARLAND CUSTOMER
+TORONTO, ON M6N 4C4
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Order Number SR813506 Ship To PO 98806 Frt Terms PPADD-CD
+Order Date 7/24/2026 Ship Via SPEEDY
+Ln Item Number T
+Site
+Location
+Lot/Serial
+Ref
+Ship Qty Qty Open UM Due
+Shipped
+1 GTBG36-AR36-5001 891210
+DESCRIPTION
+1.00 EA 7/24/2026
+2606891101389 2606891101823`
+      }
+    ]);
+
+    expect(orders[0]?.items[0]).toMatchObject({
+      sku: "GTBG36-AR36-5001",
+      quantity: 1,
+      serialNumbers: ["2606891101389", "2606891101823"]
+    });
+  });
+
   it("keeps approved eight-digit Garland Lot/Serial references out of the quantity fallback", () => {
     const orders = parseGarlandShippingOrderPages([
       {

@@ -437,7 +437,7 @@ function buildCommodity(item: GarlandShippingOrderItem, quantity: number) {
   const serialNumbers = Array.from(new Set(item.serialNumbers.map((serialNumber) => serialNumber.trim()).filter(Boolean)));
 
   if (serialNumbers.length > 0) {
-    return `SKU: ${sku} SN: ${serialNumbers.join(", ")}`;
+    return `SKU: ${sku}, SN: ${serialNumbers.join(", ")}`;
   }
 
   return `SKU: ${sku} QTY: ${quantity}`;

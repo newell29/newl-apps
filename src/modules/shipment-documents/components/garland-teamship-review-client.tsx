@@ -2623,7 +2623,7 @@ function ProductDimensionsTable({
                           value={row.item.commodityOverride ?? buildCommodityPreview(row.item)}
                           onChange={(event) => onPalletCommodityChange(srNumber, row.itemIndex, event.target.value)}
                           className="mt-1.5 min-h-14 w-full rounded-md border border-input bg-background px-2 py-1.5 font-mono text-xs font-semibold text-foreground"
-                          placeholder="SKU: XXXXX SN: XXXXX"
+                          placeholder="SKU: XXXXX, SN: XXXXX"
                         />
                         <p className="mt-1.5 text-xs text-mutedForeground">
                           Edit this before creating the bot draft if Teamship should receive different pallet commodity text.
@@ -4350,7 +4350,7 @@ function buildCommodityPreview(item: GarlandPdfShippingOrder["items"][number]) {
   const serialNumbers = uniqueClientStrings(item.serialNumbers);
 
   if (serialNumbers.length > 0) {
-    return `SKU: ${sku} SN: ${serialNumbers.join(", ")}`;
+    return `SKU: ${sku}, SN: ${serialNumbers.join(", ")}`;
   }
 
   return `SKU: ${sku} QTY: ${quantity}`;

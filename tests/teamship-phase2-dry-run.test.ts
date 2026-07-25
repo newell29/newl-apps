@@ -38,7 +38,7 @@ describe("Teamship Phase 2 dry-run planner", () => {
       expect.objectContaining({
         rowNumber: 1,
         sku: "E1SGHMV6XHU3US",
-        commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908",
+        commodity: "SKU: E1SGHMV6XHU3US, SN: 2604816191908",
         lengthIn: 48,
         widthIn: 40,
         heightIn: 50,
@@ -51,7 +51,7 @@ describe("Teamship Phase 2 dry-run planner", () => {
           pallet_1_height: 50,
           pallet_1_weight: 500,
           pallet_1_weight_unit: "lbs",
-          pallet_1_commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908"
+          pallet_1_commodity: "SKU: E1SGHMV6XHU3US, SN: 2604816191908"
         })
       }),
       expect.objectContaining({
@@ -105,14 +105,15 @@ describe("Teamship Phase 2 dry-run planner", () => {
 
   it("formats multiple serials under one SKU in the commodity line", () => {
     const review = sampleReview();
-    review.pdfOrders[0]!.items[0]!.serialNumbers = ["2604816191908", "2604816191909"];
+    review.pdfOrders[0]!.items[0]!.sku = "GTBG36-AR36-5001";
+    review.pdfOrders[0]!.items[0]!.serialNumbers = ["2606891101389", "2606891101823"];
 
     const plan = buildTeamshipPhase2DryRunPlan(review);
 
     expect(plan.orders[0]?.plannedPalletRows[0]).toMatchObject({
-      commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908, 2604816191909",
+      commodity: "SKU: GTBG36-AR36-5001, SN: 2606891101389, 2606891101823",
       teamshipFields: expect.objectContaining({
-        pallet_1_commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908, 2604816191909"
+        pallet_1_commodity: "SKU: GTBG36-AR36-5001, SN: 2606891101389, 2606891101823"
       })
     });
   });
@@ -158,7 +159,7 @@ describe("Teamship Phase 2 dry-run planner", () => {
     expect(plan.orders[0]?.plannedPalletRows[2]).toMatchObject({
       rowNumber: 3,
       sku: "C-CARE-P",
-      commodity: "SKU: C-CARE-P SN: CSR-SERIAL-1",
+      commodity: "SKU: C-CARE-P, SN: CSR-SERIAL-1",
       hasUsableDimensions: false,
       dimensionSource: "MISSING",
       teamshipFields: {
@@ -169,7 +170,7 @@ describe("Teamship Phase 2 dry-run planner", () => {
         pallet_3_height: 1,
         pallet_3_weight: 1,
         pallet_3_weight_unit: "lbs",
-        pallet_3_commodity: "SKU: C-CARE-P SN: CSR-SERIAL-1"
+        pallet_3_commodity: "SKU: C-CARE-P, SN: CSR-SERIAL-1"
       }
     });
   });
