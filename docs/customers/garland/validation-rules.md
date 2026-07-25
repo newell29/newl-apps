@@ -23,7 +23,7 @@ flowchart TB
 
 Emails are classified using Garland-domain, PS-range, order/page-count, attachment, and correction signals. Attachments are hashed for duplicate detection. Parsed PDF pages extract PS number, SR number, ship-to data, PO, freight terms, order date, ship-via, instructions, and item rows when present. Teamship review compares Garland parsed data with Teamship details.
 
-Targeted Garland reviews query Teamship with both the exact PS number and the PDF SR number. The PS number is the preferred unique retrieval fallback when a Teamship list row does not expose its SR until the detail response; retrieving by PS does not bypass the normal full field comparison required for a pass.
+Targeted Garland reviews keep each PDF PS/SR pair together while querying Teamship. An exact PS match is preferred whenever a Teamship row exposes PS; SR is used only when that row does not expose PS. When multiple requested PS orders share an SR and Teamship does not expose enough PS evidence to distinguish them, the lookup leaves them unmatched instead of guessing. Paging stops only after every requested pair is matched, so duplicate Teamship rows for one PS cannot hide another requested order. The same paired lookup is required for post-update verification, and retrieval never bypasses the normal full field comparison required for a pass.
 
 ## Pallet and printing notes
 

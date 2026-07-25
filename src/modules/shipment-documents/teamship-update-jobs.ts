@@ -620,11 +620,13 @@ async function findTenantJob(context: Pick<TenantContext, "tenantId">, jobId: st
 
 async function verifyTeamshipUpdateJob(context: Pick<TenantContext, "tenantId">, job: TeamshipUpdateJobRecord) {
   const pdfOrders = readJsonArray<GarlandPdfShippingOrder>(job.sourcePdfOrders);
-  const srNumbers = pdfOrders.map((order) => order.srNumber);
   const teamshipOrders = await fetchTeamshipShippingOrdersForReview({
     tenantId: context.tenantId,
     shipmentDate: formatInputDate(job.shipmentDate),
-    srNumbers
+    orderReferences: pdfOrders.map((order) => ({
+      srNumber: order.srNumber,
+      psNumber: order.psNumber
+    }))
   });
   const learnedProductDimensions = await getGarlandLearnedProductDimensionRecommendations({
     tenantId: context.tenantId,

@@ -81,8 +81,10 @@ export async function POST(request: Request) {
           ? await fetchTeamshipShippingOrdersForReview({
               tenantId: context.tenantId,
               shipmentDate: shipmentDateInput,
-              srNumbers: ordersToReview.map((order) => order.srNumber),
-              psNumbers: ordersToReview.map((order) => order.psNumber),
+              orderReferences: ordersToReview.map((order) => ({
+                srNumber: order.srNumber,
+                psNumber: order.psNumber
+              })),
               credentials: runtimeCredentials
             })
           : [];

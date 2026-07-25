@@ -111,7 +111,7 @@ describe("Teamship update jobs", () => {
       expect.objectContaining({
         tenantId: "tenant-1",
         shipmentDate: "2026-07-11",
-        srNumbers: ["SR808478"]
+        orderReferences: [{ srNumber: "SR808478", psNumber: "PS210206" }]
       })
     );
     expect(prismaMock.teamshipUpdateJob.update).toHaveBeenCalledWith(

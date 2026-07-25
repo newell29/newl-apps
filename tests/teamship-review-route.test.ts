@@ -85,8 +85,7 @@ describe("Teamship review route", () => {
     expect(response.status).toBe(200);
     expect(fetchTeamshipShippingOrdersForReviewMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        srNumbers: ["SR808478"],
-        psNumbers: ["PS210206"]
+        orderReferences: [{ srNumber: "SR808478", psNumber: "PS210206" }]
       })
     );
     expect(json.reviews[0]).toMatchObject({

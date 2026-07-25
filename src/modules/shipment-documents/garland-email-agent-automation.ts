@@ -251,8 +251,10 @@ async function buildAutomatedReview(
   const teamshipOrders = await fetchTeamshipShippingOrdersForReview({
     tenantId: context.tenantId,
     shipmentDate: input.shipmentDateInput,
-    srNumbers: input.orders.map((order) => order.srNumber),
-    psNumbers: input.orders.map((order) => order.psNumber)
+    orderReferences: input.orders.map((order) => ({
+      srNumber: order.srNumber,
+      psNumber: order.psNumber
+    }))
   });
   const learnedProductDimensions = await getGarlandLearnedProductDimensionRecommendations({
     tenantId: context.tenantId,

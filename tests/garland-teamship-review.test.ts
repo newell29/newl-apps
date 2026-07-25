@@ -1336,8 +1336,7 @@ NEWLS 2604816191908 1.00 ( )`
     });
 
     const orders = await fetchTeamshipShippingOrdersForReview({
-      srNumbers: ["SR808478"],
-      psNumbers: ["PS210206"],
+      orderReferences: [{ srNumber: "SR808478", psNumber: "PS210206" }],
       fetchImpl: fetchMock as unknown as typeof fetch
     });
     const [pdfOrder] = parseGarlandShippingOrderPages([{ pageNumber: 1, text: pageOne }]);
@@ -1350,6 +1349,182 @@ NEWLS 2604816191908 1.00 ( )`
       status: "PASS",
       issueCount: 0
     });
+  });
+
+  it("does not stop paging when duplicate rows match only the first requested PS number", async () => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_LIST_PAGE_LIMIT = "2";
+    process.env.TEAMSHIP_MAX_LIST_PAGES = "2";
+
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+
+      if (url.endsWith("/v1/login")) {
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/v1/ship-inventories?")) {
+        const offset = new URL(url).searchParams.get("offset");
+        return Response.json({
+          data:
+            offset === "0"
+              ? [
+                  { id: 10, record_no: "PS210206" },
+                  { id: 11, record_no: "PS210206" }
+                ]
+              : [{ id: 12, record_no: "PS210207" }]
+        });
+      }
+
+      if (url.endsWith("/v1/ship-inventories/10")) {
+        return Response.json({
+          data: { id: 10, shipment_id: "SR808478", record_no: "PS210206" }
+        });
+      }
+
+      if (url.endsWith("/v1/ship-inventories/11")) {
+        return Response.json({
+          data: { id: 11, shipment_id: "SR-DUPLICATE", record_no: "PS210206" }
+        });
+      }
+
+      if (url.endsWith("/v1/ship-inventories/12")) {
+        return Response.json({
+          data: { id: 12, shipment_id: "SR808479", record_no: "PS210207" }
+        });
+      }
+
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      orderReferences: [
+        { srNumber: "SR808478", psNumber: "PS210206" },
+        { srNumber: "SR808479", psNumber: "PS210207" }
+      ],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(orders.map((order) => order.record_no)).toEqual(["PS210206", "PS210207"]);
+  });
+
+  it("prefers exact PS when a repeated SR belongs to a different Teamship PS", async () => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_MAX_LIST_PAGES = "1";
+
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+
+      if (url.endsWith("/v1/login")) {
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/v1/ship-inventories?")) {
+        return Response.json({
+          data: [
+            { id: 10, shipment_id: "SR808478", record_no: "PS210206" },
+            { id: 11, shipment_id: "SR808478", record_no: "PS210207" }
+          ]
+        });
+      }
+
+      if (url.endsWith("/v1/ship-inventories/11")) {
+        return Response.json({
+          data: { id: 11, shipment_id: "SR808478", record_no: "PS210207" }
+        });
+      }
+
+      throw new Error(`The wrong PS must not be fetched for a repeated SR: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      orderReferences: [{ srNumber: "SR808478", psNumber: "PS210207" }],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(orders).toEqual([
+      expect.objectContaining({ shipment_id: "SR808478", record_no: "PS210207" })
+    ]);
+  });
+
+  it("keeps distinct targeted PS orders that share the same SR number", async () => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_MAX_LIST_PAGES = "1";
+
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+
+      if (url.endsWith("/v1/login")) {
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/v1/ship-inventories?")) {
+        return Response.json({
+          data: [
+            { id: 10, shipment_id: "SR808478", record_no: "PS210206" },
+            { id: 11, shipment_id: "SR808478", record_no: "PS210207" }
+          ]
+        });
+      }
+
+      if (url.endsWith("/v1/ship-inventories/10")) {
+        return Response.json({
+          data: { id: 10, shipment_id: "SR808478", record_no: "PS210206" }
+        });
+      }
+
+      if (url.endsWith("/v1/ship-inventories/11")) {
+        return Response.json({
+          data: { id: 11, shipment_id: "SR808478", record_no: "PS210207" }
+        });
+      }
+
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      orderReferences: [
+        { srNumber: "SR808478", psNumber: "PS210206" },
+        { srNumber: "SR808478", psNumber: "PS210207" }
+      ],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(orders.map((order) => order.record_no)).toEqual(["PS210206", "PS210207"]);
+  });
+
+  it("does not partially match a longer PS number", async () => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_MAX_LIST_PAGES = "1";
+
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+
+      if (url.endsWith("/v1/login")) {
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/v1/ship-inventories?")) {
+        return Response.json({ data: [{ id: 10, record_no: "PS2102067" }] });
+      }
+
+      throw new Error(`A longer PS number must not be fetched for PS210206: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      orderReferences: [{ srNumber: "SR808478", psNumber: "PS210206" }],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(orders).toEqual([]);
   });
 
   it("parses Teamship UI page inventory serials from hidden order data", () => {
