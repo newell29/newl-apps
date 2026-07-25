@@ -6,7 +6,7 @@
 
 The code supports automated directory submissions, owner-approved outreach, two follow-ups, reply/opt-out handling, verification, and Teams reporting. The installer deliberately creates the weekday OpenClaw job in a **disabled** state. Do not enable it until the production migration, protected configuration, Microsoft 365 permissions, and one supervised message have passed.
 
-Scout uses its own OpenClaw agent and workspace with Codex `gpt-5.6-sol` at high reasoning. Nemo and Rivet are not used for this workflow.
+Scout uses its own OpenClaw agent and workspace with Codex `gpt-5.6-sol` at high reasoning. Nemo is not used. Rivet is restricted to failure diagnosis and draft code-fix PRs after the owner enables the standing approval; Rivet cannot perform outreach or operational retries.
 
 ## Human approval boundary
 
@@ -37,9 +37,10 @@ Scout uses its own OpenClaw agent and workspace with Codex `gpt-5.6-sol` at high
    - `WEBSITE_GROWTH_OUTREACH_CANADA_ADDRESS`
    - `WEBSITE_GROWTH_OUTREACH_US_LEGAL_NAME`
    - `WEBSITE_GROWTH_OUTREACH_US_ADDRESS`
+   - `WEBSITE_GROWTH_RIVET_AUTO_TRIAGE_APPROVAL=OWNER_APPROVED_WEBSITE_GROWTH_FAILURE_TRIAGE` — optional one-time standing approval for code-defect diagnosis and draft PRs only.
 7. Put the same executor token in the protected OpenClaw gateway environment as `OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN`. Do not put it in an agent prompt, Teams, source control, or the business-profile JSON.
 8. Keep the owner-approved public business profile outside source control with file mode `600`.
-9. Run `ops/openclaw/install-website-growth-backlink-executor.sh`. It installs the dedicated Scout agent, plugin, skill, protected profile, and disabled weekday schedule.
+9. Run `ops/openclaw/install-website-growth-backlink-executor.sh`. It installs the dedicated Scout agent, plugin, skill, protected profile, disabled weekday schedule, and model-free Rivet failure monitor.
 10. Restart or reload the OpenClaw gateway if required by the installed OpenClaw version, then validate that only Scout has the Website Growth executor tools.
 
 ## Supervised launch test
@@ -50,7 +51,7 @@ Scout uses its own OpenClaw agent and workspace with Codex `gpt-5.6-sol` at high
 4. Confirm the message is sent from the dedicated mailbox and includes the correct legal entity, public address, phone, website, and unsubscribe instruction.
 5. Reply from the test recipient. Confirm the reply appears as `REPLIED`; an unsubscribe reply must set `LOST`, add a suppression record, and cancel follow-ups.
 6. Confirm the Teams summary arrives even if no opportunity is available.
-7. Enable the weekday schedule only after these checks pass.
+7. Enable the weekday schedule only after these checks pass by running `ops/openclaw/enable-website-growth-backlink-executor.sh`.
 
 ## Normal schedule
 
@@ -60,6 +61,7 @@ Scout uses its own OpenClaw agent and workspace with Codex `gpt-5.6-sol` at high
 - The job first syncs replies and opt-outs, then handles due follow-ups and verification, then claims newly approved work.
 - Public research opens each approved URL in a fresh browser tab. The executor focuses the returned stable tab handle before taking an accessibility snapshot and never uses the unsupported `snapshot --refs` or `snapshot --target-id` options. It does not navigate an assumed active tab because any browser-command failure causes OpenClaw to classify an otherwise recovered run as failed and suppress its normal Teams summary.
 - A Teams summary is sent after every run, including zero-opportunity runs. It lists recent directory usernames/login URLs and verified backlink URLs, never passwords.
+- The model-free failure monitor polls every 15 minutes, records each failed source run once, and sends a separate Teams alert. Code defects can queue Rivet for a draft PR; uncertain sends and permission failures never retry automatically. The second identical failure within seven days disables the executor.
 
 ## Directory-account credentials
 

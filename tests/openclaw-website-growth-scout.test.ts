@@ -89,6 +89,25 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     expect(installIndex).toBeGreaterThan(configureIndex);
   });
 
+  it("installs a deterministic Rivet failure monitor beside the disabled outreach schedule", async () => {
+    const installer = await readFile(backlinkInstallerPath, "utf8");
+    const monitor = await readFile(
+      path.join(repoRoot, "ops/openclaw/run-rivet-backlink-failure-monitor.sh"),
+      "utf8"
+    );
+
+    expect(installer).toContain(
+      '--declaration-key "newl.rivet.website-growth.backlink-failure-monitor.v1"'
+    );
+    expect(installer).toContain('--every "15m"');
+    expect(installer).toContain("--command-argv");
+    expect(monitor).toContain(
+      "/api/website-growth/backlinks/executor/failures"
+    );
+    expect(monitor).toContain("openclaw cron disable");
+    expect(monitor).toContain("send_website_growth_teams_message");
+  });
+
   it("opens fresh backlink research tabs instead of navigating a stale active tab", async () => {
     const [prompt, skill] = await Promise.all([
       readFile(backlinkPromptPath, "utf8"),
@@ -158,6 +177,8 @@ describe("Website Growth Scout OpenClaw scripts", () => {
   it.each([
     "install-website-growth-scout.sh",
     "install-website-growth-backlink-executor.sh",
+    "enable-website-growth-backlink-executor.sh",
+    "run-rivet-backlink-failure-monitor.sh",
     "run-website-growth-scout.sh",
     "run-website-growth-scout-runtime.sh",
     "lib/website-growth-scout-runtime.zsh",

@@ -193,6 +193,21 @@ export function getDevelopmentContextPaths(workflowKey: string) {
     "docs/ai/openclaw-integration.md",
     "reference/CODEX_PR_WORKFLOW.md"
   ];
+  if (workflowKey === "WEBSITE_GROWTH_BACKLINK_OUTREACH") {
+    return [
+      ...common,
+      "docs/modules/website-growth/overview.md",
+      "docs/modules/website-growth/workflow.md",
+      "docs/modules/website-growth/failure-modes.md",
+      "docs/modules/website-growth/integrations.md",
+      "docs/modules/website-growth/testing.md",
+      "src/modules/website-growth/backlink-executor.ts",
+      "src/modules/website-growth/backlink-outreach.ts",
+      "ops/openclaw/install-website-growth-backlink-executor.sh",
+      "ops/openclaw/prompts/website-growth-backlink-executor.md",
+      "ops/openclaw/skills/website-growth-backlink-executor/SKILL.md"
+    ];
+  }
   if (workflowKey !== GARLAND_WORKFLOW_KEY) return common;
   return [
     ...common,

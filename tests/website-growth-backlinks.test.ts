@@ -289,6 +289,38 @@ describe("Website Growth backlink outreach compliance", () => {
         }
       }
     })).toBe(false);
+    expect(isWebsiteGrowthOutreachReplyMatch({
+      recipientEmail: "editor@publisher.example",
+      contactedAt,
+      outboundMessages,
+      inboundMessage: {
+        id: "sender-fallback-1",
+        subject: "A different topic",
+        receivedDateTime: "2026-07-25T13:00:00.000Z",
+        from: {
+          emailAddress: {
+            address: "editor@publisher.example"
+          }
+        }
+      },
+      allowSenderOnlyFallback: true
+    })).toBe(true);
+    expect(isWebsiteGrowthOutreachReplyMatch({
+      recipientEmail: "editor@publisher.example",
+      contactedAt,
+      outboundMessages,
+      inboundMessage: {
+        id: "wrong-sender-1",
+        subject: "A different topic",
+        receivedDateTime: "2026-07-25T13:00:00.000Z",
+        from: {
+          emailAddress: {
+            address: "someone-else@publisher.example"
+          }
+        }
+      },
+      allowSenderOnlyFallback: true
+    })).toBe(false);
   });
 
   it("allows only a business contact on the approved referring domain", () => {

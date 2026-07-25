@@ -27,12 +27,13 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 3. Newl Apps stores only passing prospects, refreshes existing matches in place, preserves prior human decisions, caps the active queue at 50, and archives stale `NEEDS_REVIEW` items after 45 days.
 4. Teams receives one combined weekday report regardless of whether any prospect qualifies.
 5. Admin or Manager approves one prospect or the current review batch. Approval is not spending authority.
-6. The dedicated Scout executor runs on weekdays, first syncs replies and opt-outs, processes due follow-ups and verification, and then claims only approved non-paid work.
+6. After the supervised launch test, the dedicated Scout executor runs at 11:00 AM `America/Toronto` on weekdays. Approval makes a non-paid item claimable; it does not send immediately. An item approved after the daily run waits for the next weekday run, and daily/rolling-week volume caps may defer it further.
 7. Email outreach requires an exact public-business contact source, CA/US country, recorded consent basis, suppression check, and deterministic legal footer. Newl Apps sends through the dedicated Microsoft 365 mailbox; the model never receives a Graph token.
 8. Directory work may accept only ordinary free terms. Payment, reciprocal-link requirements, unusual legal terms, content resale, CAPTCHA, and MFA move the item to `BLOCKED`.
-9. New contacts are capped at five per rolling day and 20 per rolling week. Follow-ups are due on days 5 and 12 and close after day 21 without a reply.
+9. New contacts are capped at five per rolling day and 20 per rolling week. The executor first syncs replies and opt-outs, then processes due follow-ups and verification, and finally claims newly approved work. Follow-ups are due on days 5 and 12 and close after day 21 without a reply.
 10. The weekday Teams summary is sent even when no approved work is available. It includes recent directory usernames/login URLs and verified backlink URLs, never passwords, and links back to the curated Newl Apps workspace.
 11. A backlink becomes `LIVE` only after the public referring URL is verified. Lost links remain a short operational history; rejected and archived research stays hidden from the default workspace.
+12. A deterministic monitor checks completed outreach runs every 15 minutes. It deduplicates failures in tenant-scoped job history, classifies unsafe external-action and permission failures for owner review, and may queue Rivet for a draft code-fix PR only when the one-time owner standing-approval setting is enabled. A second identical failure within seven days disables the outreach schedule.
 
 The production enablement sequence and supervised one-message test are documented in `backlink-outreach-rollout.md`.
 

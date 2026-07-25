@@ -84,7 +84,7 @@ type RivetJobOutput = {
 
 export async function createRivetDevelopmentJob(
   tx: Prisma.TransactionClient,
-  context: AuthenticatedContext,
+  context: Pick<AuthenticatedContext, "tenantId" | "userId">,
   suggestion: DevelopmentSuggestionForJob,
   sourceFeedback: SourceFeedbackForJob[]
 ) {

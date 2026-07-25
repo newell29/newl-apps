@@ -9,6 +9,7 @@ repo_path="${script_directory:h:h}"
 plugin_path="${script_directory}/plugins/newl-website-growth"
 skill_path="${script_directory}/skills/website-growth-backlink-executor"
 prompt_path="${script_directory}/prompts/website-growth-backlink-executor.md"
+failure_monitor_path="${script_directory}/run-rivet-backlink-failure-monitor.sh"
 scout_env_file="${WEBSITE_GROWTH_SCOUT_ENV_FILE:-${HOME}/.openclaw/agents/scout/.env}"
 profile_source="${WEBSITE_GROWTH_BACKLINK_PROFILE_SOURCE:-}"
 profile_target="${HOME}/.openclaw/agents/scout/backlink-business-profile.json"
@@ -117,5 +118,22 @@ if [[ -n "${WEBSITE_GROWTH_TEAMS_ACCOUNT:-}" ]]; then
 fi
 openclaw "${cron_arguments[@]}"
 
-echo "Installed the dedicated Scout agent, Website Growth plugin, protected profile and disabled weekday outreach job."
-echo "Complete the reviewed Newl Apps deployment and supervised one-message test before enabling the cron."
+failure_monitor_argv="$(node -e '
+console.log(JSON.stringify(["/bin/zsh", process.argv[1]]));
+' "${failure_monitor_path}")"
+openclaw cron add \
+  --name "NEWL Rivet Backlink Failure Monitor" \
+  --display-name "NEWL Rivet Backlink Failure Monitor" \
+  --description "Record failed backlink runs, start approved Rivet code triage, notify the owner and stop repeated identical failures." \
+  --declaration-key "newl.rivet.website-growth.backlink-failure-monitor.v1" \
+  --every "15m" \
+  --exact \
+  --command-argv "${failure_monitor_argv}" \
+  --command-env "WEBSITE_GROWTH_SCOUT_ENV_FILE=${scout_env_file}" \
+  --command-env "OPENCLAW_GATEWAY_ENV_FILE=${HOME}/.openclaw/.env" \
+  --command-cwd "${repo_path}" \
+  --timeout-seconds 120 \
+  --no-deliver
+
+echo "Installed the dedicated Scout agent, Website Growth plugin, protected profile, Rivet failure monitor and disabled weekday outreach job."
+echo "After the supervised send succeeds, run ops/openclaw/enable-website-growth-backlink-executor.sh once."

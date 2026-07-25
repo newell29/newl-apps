@@ -372,22 +372,45 @@ export async function syncWebsiteGrowthOutreachReplies({
   );
   let replies = 0;
   let unsubscribes = 0;
+  const trackedByRecipient = new Map<string, number>();
+  for (const opportunity of tracked) {
+    const recipientEmail = opportunity.recipientEmail?.trim().toLowerCase();
+    if (!recipientEmail) continue;
+    trackedByRecipient.set(
+      recipientEmail,
+      (trackedByRecipient.get(recipientEmail) ?? 0) + 1
+    );
+  }
 
   for (const opportunity of tracked) {
     const recipientEmail = opportunity.recipientEmail?.trim().toLowerCase();
     if (!recipientEmail) continue;
 
-    const reply = messages.find((message) =>
-      isWebsiteGrowthOutreachReplyMatch({
-        recipientEmail,
-        contactedAt: opportunity.contactedAt,
-        outboundMessages: opportunity.messages,
-        inboundMessage: message
-      })
-    );
+    const allowSenderOnlyFallback =
+      trackedByRecipient.get(recipientEmail) === 1;
+    const matched = messages
+      .map((message) => ({
+        message,
+        strict: isWebsiteGrowthOutreachReplyMatch({
+          recipientEmail,
+          contactedAt: opportunity.contactedAt,
+          outboundMessages: opportunity.messages,
+          inboundMessage: message
+        }),
+        senderOnly: isWebsiteGrowthOutreachReplyMatch({
+          recipientEmail,
+          contactedAt: opportunity.contactedAt,
+          outboundMessages: opportunity.messages,
+          inboundMessage: message,
+          allowSenderOnlyFallback
+        })
+      }))
+      .find((candidate) => candidate.strict || candidate.senderOnly);
+    const reply = matched?.message;
     if (!reply) continue;
 
     const replyText = `${reply.subject ?? ""}\n${reply.bodyPreview ?? ""}`.trim();
+    const senderOnlyFallback = Boolean(matched?.senderOnly && !matched.strict);
     const optedOut = isWebsiteGrowthOutreachOptOut(replyText);
     const receivedAt = reply.receivedDateTime ? new Date(reply.receivedDateTime) : now;
     await prisma.$transaction(async (tx) => {
@@ -398,7 +421,15 @@ export async function syncWebsiteGrowthOutreachReplies({
             ? WebsiteGrowthBacklinkStatus.LOST
             : WebsiteGrowthBacklinkStatus.REPLIED,
           lastReplyAt: receivedAt,
-          replySummary: replyText.slice(0, 1_000),
+          replySummary: [
+            senderOnlyFallback
+              ? "Possible reply matched by the exact sender after outreach even though the thread subject changed. Review before responding."
+              : null,
+            replyText
+          ]
+            .filter(Boolean)
+            .join("\n")
+            .slice(0, 1_000),
           nextFollowUpAt: null,
           unsubscribedAt: optedOut ? receivedAt : null
         }
@@ -434,7 +465,10 @@ export async function syncWebsiteGrowthOutreachReplies({
           entityId: opportunity.id,
           after: {
             receivedAt: receivedAt.toISOString(),
-            optedOut
+            optedOut,
+            matchMethod: senderOnlyFallback
+              ? "EXACT_SENDER_FALLBACK"
+              : "THREAD"
           }
         }
       });
@@ -450,7 +484,8 @@ export function isWebsiteGrowthOutreachReplyMatch({
   recipientEmail,
   contactedAt,
   outboundMessages,
-  inboundMessage
+  inboundMessage,
+  allowSenderOnlyFallback = false
 }: {
   recipientEmail: string;
   contactedAt: Date | null;
@@ -460,6 +495,7 @@ export function isWebsiteGrowthOutreachReplyMatch({
     sentAt: Date;
   }>;
   inboundMessage: MicrosoftGraphMailMessage;
+  allowSenderOnlyFallback?: boolean;
 }) {
   const sender =
     inboundMessage.from?.emailAddress?.address?.trim().toLowerCase() ?? null;
@@ -491,13 +527,15 @@ export function isWebsiteGrowthOutreachReplyMatch({
     inboundMessage.subject
   );
   return Boolean(
-    replySubject &&
-    outboundMessages.some(
-      (message) =>
-        message.sentAt < receivedAt &&
-        normalizeWebsiteGrowthOutreachThreadSubject(message.subject) ===
-          replySubject
-    )
+    (replySubject &&
+      outboundMessages.some(
+        (message) =>
+          message.sentAt < receivedAt &&
+          normalizeWebsiteGrowthOutreachThreadSubject(message.subject) ===
+            replySubject
+      )) ||
+      (allowSenderOnlyFallback &&
+        outboundMessages.some((message) => message.sentAt < receivedAt))
   );
 }
 
