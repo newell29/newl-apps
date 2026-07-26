@@ -39,6 +39,14 @@ Roles and defaults are in `src/server/auth/role-policy.ts`. Runtime checks are i
   the company/customer/contact suppression rules.
 - Company-research evidence and health are read through the authenticated Hunter page. Phase 3 has no
   Apollo, pipeline-stage, cadence, email, LinkedIn, or other communication action.
+- The Hunter quality endpoint requires the distinct OpenClaw assistant token, Alex's mapped Microsoft
+  Entra identity, tenant administrator role, and mutation access. Every query and incident retains that
+  authenticated tenant ID.
+- The owner-approved standing value authorizes only reproducible Hunter/TradeMining code defects to
+  enter Rivet's existing restricted draft-PR queue. It does not authorize lead reclassification,
+  production data repair, TradeMining retry, outreach retry, merge, deployment, permissions, or
+  prospect communication.
+- Quality results and Rivet outcomes are sent only to the protected `RIVET_TEAMS_TARGET`.
 
 ## Failure modes
 

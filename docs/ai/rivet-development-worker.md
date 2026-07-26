@@ -35,6 +35,14 @@ The local Codex prompt requires every listed document to be read before any file
 
 The worker uses a fine-grained GitHub token only to open the pull request. That token is removed from the environment passed to Codex. Git push continues through the workstation's trusted repository credential.
 
+## Hunter quality-triggered development
+
+The same dedicated Rivet runtime also schedules `ops/openclaw/run-rivet-hunter-quality-audit.sh` daily at 11:30 America/Toronto. It asks Newl Apps for a tenant-scoped five-company stratified sample plus deterministic TradeMining run-health findings. Codex independently researches the public web in read-only mode and returns schema-validated findings.
+
+Only reproducible evidence-retrieval, evidence-handoff, deterministic-rule, or TradeMining code defects can enter the development queue, and only when the application environment contains the exact owner-approved value `HUNTER_RIVET_AUTO_TRIAGE_APPROVAL=OWNER_APPROVED_HUNTER_QUALITY_TRIAGE`. Subjective model judgment, credentials, transient runtime failures, and business configuration are Teams alerts, not automatic code changes.
+
+The daily audit sends its own summary through `RIVET_TEAMS_TARGET`. If a development job is queued, the normal Rivet worker later sends the same PR-completion or failure notification used for other approved fixes.
+
 ## Permissions
 
 Approval permits Rivet and Codex to read required repository context, edit an isolated feature branch, add tests and documentation, commit, push the feature branch, and open a draft PR.
@@ -60,7 +68,9 @@ After the application PR is reviewed, merged, and deployed, and after explicit a
 /bin/zsh ops/openclaw/install-rivet-development-worker.sh
 ```
 
-The installer creates a clean runtime worktree and registers the `NEWL Rivet Developer` command schedule. Do not install it against Preview or before the production API route is live.
+The installer creates a clean runtime worktree and registers the `NEWL Rivet Developer` and `NEWL Hunter Quality Auditor` command schedules. Do not install it against Preview or before the production API route is live.
+
+Production auto-triage additionally requires the exact non-secret standing-approval value above in the Newl Apps application environment. The protected local Rivet file continues to supply the assistant identity, repository, and Teams target; it must not contain production database credentials.
 
 The development-jobs API remains outside browser session middleware so the route can enforce its own assistant-token and administrator Teams-identity authentication. An unauthenticated request must reach that route and be rejected by its dedicated authentication instead of being redirected to `/login`.
 

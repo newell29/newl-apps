@@ -53,8 +53,10 @@ git -C "${runtime_repo_path}" fetch origin "+main:${runtime_main_ref}"
 git -C "${runtime_repo_path}" checkout --detach "${runtime_main_ref}"
 
 runtime_runner_path="${runtime_repo_path}/ops/openclaw/run-rivet-development-job.sh"
+quality_runner_path="${runtime_repo_path}/ops/openclaw/run-rivet-hunter-quality-audit.sh"
 chmod 700 \
   "${runtime_runner_path}" \
+  "${quality_runner_path}" \
   "${runtime_repo_path}/ops/openclaw/install-rivet-development-worker.sh"
 
 openclaw cron add \
@@ -73,5 +75,22 @@ openclaw cron add \
   --output-max-bytes 200000 \
   --no-deliver
 
+openclaw cron add \
+  --name "NEWL Hunter Quality Auditor" \
+  --display-name "NEWL Hunter Quality Auditor" \
+  --description "Audit a five-company stratified Hunter sample with read-only Codex web research; verify every enabled TradeMining profile completed; queue restricted Rivet draft-PR work only for reproducible code defects; report the result to Alex in Teams. Never reclassify, retry a search or outreach, merge, deploy, or communicate with customers." \
+  --declaration-key "newl.hunter.quality-auditor.daily.v1" \
+  --cron "30 11 * * *" \
+  --tz "America/Toronto" \
+  --exact \
+  --command-argv "[\"/bin/zsh\",\"${quality_runner_path}\"]" \
+  --command-cwd "${runtime_repo_path}" \
+  --command-env "RIVET_DEVELOPMENT_ENV_FILE=${rivet_env_file}" \
+  --timeout-seconds 1800 \
+  --no-output-timeout-seconds 900 \
+  --output-max-bytes 200000 \
+  --no-deliver
+
 echo "Installed the restricted Rivet developer worker to check for approved jobs every minute."
+echo "Installed the Hunter quality auditor for 11:30 America/Toronto each day."
 echo "Dedicated runtime: ${runtime_repo_path}"

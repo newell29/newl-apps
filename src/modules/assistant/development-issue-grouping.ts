@@ -208,6 +208,26 @@ export function getDevelopmentContextPaths(workflowKey: string) {
       "ops/openclaw/skills/website-growth-backlink-executor/SKILL.md"
     ];
   }
+  if (
+    workflowKey === "HUNTER_COMPANY_RESEARCH_QUALITY" ||
+    workflowKey === "HUNTER_TRADEMINING_PROFILE_QUALITY"
+  ) {
+    return [
+      ...common,
+      "docs/modules/lead-generation/overview.md",
+      "docs/modules/lead-generation/workflow.md",
+      "docs/modules/lead-generation/business-rules.md",
+      "docs/modules/lead-generation/permissions.md",
+      "docs/modules/lead-generation/failure-modes.md",
+      "docs/modules/lead-generation/testing.md",
+      "reference/PRODUCT_OPERATING_BRIEF.md",
+      "reference/OPENCLAW_LEAD_GEN_SPEC.md",
+      "src/modules/lead-gen/hunter-company-research.ts",
+      "src/modules/trademining/ingestion.ts",
+      "ops/openclaw/hunter/hunter_company_research.py",
+      "ops/openclaw/hunter/hunter_worker.py"
+    ];
+  }
   if (workflowKey !== GARLAND_WORKFLOW_KEY) return common;
   return [
     ...common,
