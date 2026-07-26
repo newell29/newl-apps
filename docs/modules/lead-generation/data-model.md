@@ -39,6 +39,14 @@ Hunter Phase 1 adds only new tables and enums:
 
 Migration `20260725120000_add_hunter_dry_run_control_plane` is additive. It creates these enums, tables, indexes, and tenant-safe foreign keys; it does not delete, rename, update, backfill, or otherwise rewrite existing records.
 
+Hunter Phase 2 requires no database migration:
+
+- accepted and below-threshold classifications reuse `HunterOpportunitySignal`;
+- classifier provider, model, prompt version, rationale, lens, and evidence statements are stored in its existing `evidence` JSON;
+- bounded raw headline metadata uses the existing `rawJson`;
+- source failures, rejected samples, counts, and model details use the existing `AutomationJobRun.input` and `output`;
+- every read, upsert, job completion, and audit row carries `tenantId`.
+
 ```mermaid
 flowchart LR
   UI[Authenticated UI/API] --> Auth[Auth + module guard]

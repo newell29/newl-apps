@@ -58,6 +58,17 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - Scheduled Apollo sync only runs for tenants with Lead Generation enabled and an active Apollo integration. It reads saved contacts by Apollo contact ID, uses bounded batches and retries, stops the current batch after sustained rate limiting, and records contact-level failures plus an `AutomationJobRun` and audit entry.
 - The scoring-history migration is additive and performs no score backfill. Historical reporting begins after the migration is deployed; current Company, Contact, Lead, and TradeMining records are not rewritten.
 
+## External signal classification
+
+- Public-news discovery is opt-in and disabled by default. Enabling a source is a business/compliance decision, not a model decision.
+- Discovery is bounded to a recent window and at most 40 unique, previously unseen source URLs per daily run.
+- A source outage cannot become a false successful zero-result run. If every configured query transport fails, the job is `ERROR`.
+- Model output is advisory evidence. Deterministic validation controls enums, HTTPS URLs, dates, field sizes, source mapping, dedupe, tenant scope, and the minimum confidence gate.
+- `relevant=true` requires an explicit company and confidence of at least 50. The tenant's `minimumSignalConfidence` remains the final activation threshold.
+- Local Qwen is the bulk classifier. A hosted model is not required for this phase and cannot independently authorize Apollo or outreach.
+- The prompt/model/provider/version, classification rationale, source lens, and supporting headline statements are retained with accepted signals.
+- The local classifier receives public headline metadata only. It does not receive contacts, emails, Apollo payloads, TradeMining raw rows, tenant credentials, or customer records.
+
 ## Data model
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.

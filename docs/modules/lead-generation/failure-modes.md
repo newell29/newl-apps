@@ -36,6 +36,15 @@ Expected failures include missing tenant entitlement, read-only mutation attempt
 
 Hunter retries transient TradeMining network failures and HTTP 429/5xx responses with bounded exponential backoff. Authentication errors, invalid profile filters, and ambiguous lookup values fail immediately and remain visible on the tracked job run. A failed daily run is recovered with the explicit **Run now** action; it is not silently repeated throughout the day.
 
+## External signal discovery or classification fails
+
+- A GDELT 429/5xx response receives bounded retries and is recorded before the worker tries the RSS fallback.
+- If every configured discovery transport fails, the tracked run becomes `ERROR`; it must not be recorded as a successful zero-result day.
+- If Ollama is unavailable, returns non-JSON output, omits source rows, invents an unsupported enum, or emits a confidence below 50, the affected classifications fail closed.
+- A failed daily attempt is not retried every minute. The operator can diagnose the run and use `--signal-scout-now` for one explicit rerun.
+- Turning off `HUNTER_SIGNAL_SCOUT_ENABLED`, the Hunter policy, or the Hunter kill switch prevents the automatic scout from creating new signals.
+- Discovery-source licensing and acceptable-use review remains an enablement prerequisite. The code and example environment default the scout to off.
+
 ## A profile uses an unsupported arrival port
 
 - Symptom: the profile cannot be saved, or a legacy profile run fails with a port-mapping error.

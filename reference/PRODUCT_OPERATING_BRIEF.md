@@ -85,6 +85,7 @@ Lead score should consider:
 ## 9A. Hunter automation phases
 
 - Phase 1 is a dry-run control plane: combine TradeMining and external signals, produce the daily 60/30/10 prospecting plan, preserve evidence and recommendations, and perform no Apollo or communication writes.
+- Phase 2 may add an opt-in Mac-mini signal scout that discovers a bounded recent public-news set and classifies public headline metadata locally. It must retain source/model/prompt evidence, fail closed, remain disabled until the exact sources are approved, and perform no Apollo or communication writes.
 - Later phases may add contact research, personalized draft generation, human approval queues, controlled Apollo handoff, result synchronization, and learning from outcomes.
 - Automation mode and a tenant kill switch must remain explicit. Transitioning from dry run to assisted or automatic outreach requires a reviewed code change and owner approval.
 

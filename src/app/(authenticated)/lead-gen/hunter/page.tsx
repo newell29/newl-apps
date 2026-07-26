@@ -38,16 +38,47 @@ export default async function HunterPage() {
       <section className="rounded-lg border border-warning/25 bg-warning/10 p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h2 className="font-semibold text-foreground">Phase 1 is dry-run only</h2>
+            <h2 className="font-semibold text-foreground">Hunter remains dry-run only</h2>
             <p className="mt-1 max-w-3xl text-sm leading-6 text-mutedForeground">
-              Hunter ranks who it would pursue and why. It does not enrich contacts, write to Apollo,
-              enroll cadences, or send messages.
+              The Mac mini can now discover and classify public opportunity signals before Hunter ranks
+              who it would pursue and why. It still does not enrich contacts, write to Apollo, enroll
+              cadences, or send messages.
             </p>
           </div>
           <span className="rounded-full border border-warning/30 bg-card px-3 py-1 text-xs font-semibold text-warning">
             {policy.killSwitch ? "Kill switch active" : policy.mode.replace("_", " ")}
           </span>
         </div>
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">External signal scout</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-mutedForeground">
+              When enabled, Hunter searches recent public expansion, facility, retail-rollout,
+              manufacturing, and leadership news, then classifies a bounded evidence set on the Mac
+              mini with structured output. The local default is Qwen 3 30B Instruct.
+            </p>
+          </div>
+          <span className="rounded-full border border-border bg-muted px-3 py-1 text-xs font-semibold text-foreground">
+            {data.latestSignalScoutRun
+              ? `${data.latestSignalScoutRun.status} ${data.latestSignalScoutRun.startedAt.toLocaleString("en-US")}`
+              : "Not run yet"}
+          </span>
+        </div>
+        {data.latestSignalScoutRun ? (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <Metric label="Candidates" value={jobOutputNumber(data.latestSignalScoutRun.output, "candidateCount")} />
+            <Metric label="Accepted" value={jobOutputNumber(data.latestSignalScoutRun.output, "acceptedCount")} />
+            <Metric
+              label="Below threshold"
+              value={jobOutputNumber(data.latestSignalScoutRun.output, "belowThresholdCount")}
+            />
+            <Metric label="Rejected" value={jobOutputNumber(data.latestSignalScoutRun.output, "rejectedCount")} />
+            <Metric label="Model" value={jobOutputModel(data.latestSignalScoutRun.output)} />
+          </div>
+        ) : null}
       </section>
 
       <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
@@ -340,4 +371,27 @@ function formatEnum(value: string) {
 
 function jsonStringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function jobOutputNumber(value: unknown, key: string) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "—";
+  const field = (value as Record<string, unknown>)[key];
+  return typeof field === "number" ? String(field) : "—";
+}
+
+function jobOutputModel(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "—";
+  const model = (value as Record<string, unknown>).model;
+  if (!model || typeof model !== "object" || Array.isArray(model)) return "—";
+  const name = (model as Record<string, unknown>).name;
+  return typeof name === "string" ? name : "—";
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-border bg-muted/40 p-3">
+      <p className="text-xs uppercase tracking-wide text-mutedForeground">{label}</p>
+      <p className="mt-1 break-words text-sm font-semibold text-foreground">{value}</p>
+    </div>
+  );
 }
