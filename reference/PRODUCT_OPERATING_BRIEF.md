@@ -22,6 +22,8 @@ This file is the high-level product direction for Newl Apps so future Codex PRs 
 - OpenClaw acts as a replaceable data collector/worker.
 - n8n may schedule or orchestrate jobs.
 - Newl Apps is the source of truth for configuration, scoring, candidate review, pipeline, approvals, and audit history.
+- Hunter should develop beyond TradeMining into a source-agnostic opportunity engine. Expansion announcements, facility openings, retail rollouts, hiring, leadership changes, leases/construction, funding/acquisition, referrals, and relevant news may all become evidence-backed prospecting signals.
+- Owner-approved opportunity allocation is 60% warehousing, 30% ocean/air, and 10% trucking. Quality thresholds take precedence over filling a quota.
 
 ## 4. Data Flow
 
@@ -78,6 +80,13 @@ Lead score should consider:
 - For the Company Assistant, the long-term model strategy is to run the AI bot on a local model hosted on Newl-controlled server/network infrastructure.
 - Until the local model is proven and reliable, use a cost-effective OpenAI model behind a provider abstraction so model providers can be swapped without rewriting assistant workflows.
 - Assistant prompts, retrieved sources, memory updates, and tool calls must stay tenant-scoped and auditable regardless of whether the active model provider is OpenAI or a local server-hosted model.
+- For Hunter, deterministic code must first deduplicate, suppress, score, and constrain the candidate set. A lower-cost hosted model or local Qwen model may later summarize large evidence sets and propose hypotheses, but model output must remain auditable and cannot independently authorize outreach.
+
+## 9A. Hunter automation phases
+
+- Phase 1 is a dry-run control plane: combine TradeMining and external signals, produce the daily 60/30/10 prospecting plan, preserve evidence and recommendations, and perform no Apollo or communication writes.
+- Later phases may add contact research, personalized draft generation, human approval queues, controlled Apollo handoff, result synchronization, and learning from outcomes.
+- Automation mode and a tenant kill switch must remain explicit. Transitioning from dry run to assisted or automatic outreach requires a reviewed code change and owner approval.
 
 ## 10. What Not To Build Yet
 

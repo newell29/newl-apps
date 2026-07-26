@@ -31,6 +31,10 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 
 ## Scoring and outreach safety
 
+- Hunter's owner-approved target mix is 60% warehousing, 30% ocean/air, and 10% trucking. The planner may backfill a weak or empty bucket from the strongest remaining service line; it must not lower score or confidence thresholds merely to fill the daily limit.
+- TradeMining is one Hunter evidence source, not a prerequisite. A sufficiently confident tenant-scoped external signal can create a dry-run decision without an existing Company row.
+- Phase 1 planning excludes active customers, any existing pipeline lead, replies, prior sequence history, do-not-contact/do-not-prospect records, rejected/disqualified companies, and active suppression entries.
+- `OFF` and the kill switch both prevent planning. `ASSISTED` and `AUTOMATIC` are reserved schema states and cannot be selected through the Phase 1 policy action.
 - Company scoring uses only tenant-scoped TradeMining evidence inside the matched search profile's own `lookbackWindowDays`. The scoring-level lookback is a fallback for unmatched or legacy imports and must cover the recent plus comparison windows.
 - Shipment evidence queries are date bounded but not row capped. This prevents arbitrary 25-, 100-, or 250-record limits from changing a score for high-volume companies.
 - The matched profile's `minShipmentCount` is a qualification gate for Found Companies; it is not replaced by the fallback scoring lookback.
