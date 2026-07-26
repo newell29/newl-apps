@@ -27,7 +27,7 @@ describe("Hunter company deep research", () => {
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL).toBe("qwen3.5:35b");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL).toBe("kimi-k2.6");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL).toBe("kimi-k3");
-    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v7");
+    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v8");
     expect(HUNTER_COMPANY_RESEARCH_SAFETY).toEqual({
       externalWrites: false,
       apollo: false,
@@ -137,25 +137,39 @@ describe("Hunter company deep research", () => {
     );
   });
 
-  it("blocks ambiguous identities, logistics providers, stable exclusive providers, and thin evidence", () => {
+  it("blocks uncorroborated identities and evidence-backed disqualifiers, but not unsupported model labels", () => {
     const parsed = parseHunterCompanyResearchCompletion(completion());
     const company = parsed.companies[0];
 
     expect(
       evaluateResearchGate({
         ...company,
-        synthesis: { ...company.synthesis, identityDisposition: "AMBIGUOUS" }
+        synthesis: { ...company.synthesis, identityDisposition: "AMBIGUOUS" },
+        evidence: company.evidence.map((item) => ({
+          ...item,
+          firstParty: false,
+          sourceType: item.sourceType === "FIRST_PARTY" ? "OTHER" as const : item.sourceType
+        }))
       }).passed
     ).toBe(false);
     expect(
       evaluateResearchGate({
         ...company,
         synthesis: { ...company.synthesis, logisticsProvider: true }
-      }).blockers
-    ).toContain("The company is itself a logistics provider.");
+      }).passed
+    ).toBe(true);
     expect(
       evaluateResearchGate({
         ...company,
+        evidence: company.evidence.map((item, index) =>
+          index === 1
+            ? {
+                ...item,
+                excerpt:
+                  "The company signed a long-term warehousing provider contract for all North American distribution."
+              }
+            : item
+        ),
         synthesis: {
           ...company.synthesis,
           namedExternalLogisticsProvider: true,
@@ -165,6 +179,28 @@ describe("Hunter company deep research", () => {
       }).blockers
     ).toContain("Evidence shows a stable exclusive provider relationship without a credible displacement trigger.");
     expect(evaluateResearchGate({ ...company, evidence: company.evidence.slice(0, 1) }).passed).toBe(false);
+  });
+
+  it("retains stale or missing opportunity evidence on the watchlist instead of blocking the company", () => {
+    const company = parseHunterCompanyResearchCompletion(completion()).companies[0];
+    const staleCompany = {
+      ...company,
+      synthesis: {
+        ...company.synthesis,
+        freshness: "STALE" as const
+      }
+    };
+    const gate = evaluateResearchGate(staleCompany);
+    const result = classifyResearchOpportunity(staleCompany, gate, {
+      minimumPriorityScore: 35,
+      minimumSignalConfidence: 50
+    });
+
+    expect(gate.passed).toBe(true);
+    expect(result.tier).toBe("WATCHLIST");
+    expect(result.tierReasons).toContain(
+      "Current opportunity evidence was not established; retained for later research instead of being permanently blocked."
+    );
   });
 
   it("blocks explicit provider-service evidence even when Qwen misses the provider classification", () => {
@@ -208,19 +244,42 @@ describe("Hunter company deep research", () => {
     );
   });
 
-  it("blocks fresh claims whose event evidence is missing a recent publication date", () => {
+  it("evaluates unsupported fresh claims as current accounts instead of blocking them", () => {
     const company = parseHunterCompanyResearchCompletion(completion()).companies[0];
-    const result = evaluateResearchGate({
+    const unsupportedFresh = {
       ...company,
       evidence: company.evidence.map((item) =>
         item.pass === "FRESH_EVENTS"
           ? { ...item, publishedAt: "2010-02-10T00:00:00.000Z" }
           : item
       )
+    };
+    const gate = evaluateResearchGate(unsupportedFresh);
+    const result = classifyResearchOpportunity(unsupportedFresh, gate, {
+      minimumPriorityScore: 35,
+      minimumSignalConfidence: 50
     });
 
-    expect(result.blockers).toContain(
-      "The fresh opportunity claim has no verifiable event date within the last 18 months."
+    expect(gate.passed).toBe(true);
+    expect(result.tier).toBe("QUALIFIED_CURRENT_ACCOUNT");
+    expect(result.tierReasons).toContain(
+      "The claimed fresh event lacked a recent dated source and was evaluated as current account fit instead."
+    );
+  });
+
+  it("does not block an ambiguous model label when matching first-party identity evidence corroborates it", () => {
+    const company = parseHunterCompanyResearchCompletion(completion()).companies[0];
+    const corroborated = {
+      ...company,
+      synthesis: {
+        ...company.synthesis,
+        identityDisposition: "AMBIGUOUS" as const,
+        identityConfidence: 45
+      }
+    };
+
+    expect(evaluateResearchGate(corroborated).blockers).not.toContain(
+      "Company identity was not confirmed at 70% or better."
     );
   });
 
@@ -315,9 +374,77 @@ describe("Hunter company deep research", () => {
       "IDENTITY",
       "FRESH_EVENTS",
       "CAREERS",
-      "DISTRIBUTION_FOOTPRINT"
+      "DISTRIBUTION_FOOTPRINT",
+      "IDENTITY",
+      "FRESH_EVENTS"
     ]);
-    expect(rows.every((row) => row.query.includes("Example Retailer"))).toBe(true);
+    expect(rows.slice(0, 4).every((row) => row.query.includes("Example Retailer"))).toBe(true);
+    expect(rows.some((row) => row.query.includes("site:example.com"))).toBe(true);
+  });
+
+  it("uses legal-name aliases and recognizes matching official domains as first party", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "aalberts={'companyName':'AALBERTS IPS AMERICAS','domain':None}",
+      "as_colour={'companyName':'AS COLOUR INC.','domain':None}",
+      "three_f={'companyName':'3F NORTH AMERICA INC.','domain':None}",
+      "barnhardt={'companyName':'BARNHARDT MANUFACTURING CO.','domain':None}",
+      "atlas={'companyName':'ATLAS COPCO COMPRESSORS LLC','domain':None}",
+      "print(json.dumps({'aalberts':r.company_search_aliases(aalberts),'asColour':r.company_search_aliases(as_colour),'threeF':r.company_search_aliases(three_f),'barnhardt':r.company_search_aliases(barnhardt),'atlas':r.company_search_aliases(atlas),'official':r.is_likely_first_party(barnhardt,'barnhardt.net'),'directory':r.is_likely_first_party(barnhardt,'zoominfo.com')}))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual({
+      aalberts: ["AALBERTS IPS AMERICAS", "AALBERTS IPS", "AALBERTS"],
+      asColour: ["AS COLOUR INC.", "AS COLOUR"],
+      threeF: ["3F NORTH AMERICA INC.", "3F NORTH AMERICA"],
+      barnhardt: ["BARNHARDT MANUFACTURING CO.", "BARNHARDT MANUFACTURING", "BARNHARDT"],
+      atlas: ["ATLAS COPCO COMPRESSORS LLC", "ATLAS COPCO COMPRESSORS", "ATLAS COPCO"],
+      official: true,
+      directory: false
+    });
+  });
+
+  it("normalizes undated fresh claims and corroborated first-party identities before Kimi scoring", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'BARNHARDT MANUFACTURING CO.','companyKey':'barnhardt-manufacturing-co'}",
+      "evidence=[{'pass':'IDENTITY','firstParty':True,'sourceType':'FIRST_PARTY','title':'Barnhardt Manufacturing Company','excerpt':'Barnhardt Manufacturing Company is based in Charlotte.'},{'pass':'FRESH_EVENTS','firstParty':False,'sourceType':'OTHER','title':'Company profile','excerpt':'Current operations','publishedAt':None}]",
+      "synthesis={'identityDisposition':'AMBIGUOUS','identityConfidence':45,'identityReason':'Directory conflict.','confidence':40,'freshness':'FRESH','triggerEvidenceIndices':[1],'missingEvidence':[],'rationale':'Undated activity.','logisticsProvider':True,'stableExclusiveProviderEvidence':True}",
+      "print(json.dumps(r.normalize_synthesis_for_evidence(candidate,evidence,synthesis)))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+    const normalized = JSON.parse(stdout) as {
+      freshness: string;
+      identityDisposition: string;
+      identityConfidence: number;
+      confidence: number;
+      logisticsProvider: boolean;
+      stableExclusiveProviderEvidence: boolean;
+    };
+
+    expect(normalized).toMatchObject({
+      freshness: "CURRENT",
+      identityDisposition: "PASS",
+      identityConfidence: 70,
+      confidence: 60,
+      logisticsProvider: false,
+      stableExclusiveProviderEvidence: false
+    });
   });
 
   it("sends a compact, pass-diverse evidence packet to the models", async () => {
@@ -450,7 +577,7 @@ function completion() {
       synthesis: {
         provider: "OLLAMA",
         name: "qwen3.5:35b",
-        promptVersion: "hunter-company-research-v7",
+        promptVersion: "hunter-company-research-v8",
         structuredOutput: true,
         inputTokens: 2000,
         outputTokens: 700,
@@ -459,7 +586,7 @@ function completion() {
       scoring: {
         provider: "KIMI",
         name: "kimi-k2.6",
-        promptVersion: "hunter-company-research-v7",
+        promptVersion: "hunter-company-research-v8",
         structuredOutput: true,
         inputTokens: 1800,
         cachedInputTokens: 200,
@@ -470,7 +597,7 @@ function completion() {
       validation: {
         provider: "KIMI",
         name: "kimi-k3",
-        promptVersion: "hunter-company-research-v7",
+        promptVersion: "hunter-company-research-v8",
         structuredOutput: true,
         status: "SUCCESS",
         reasoningEffort: "LOW",

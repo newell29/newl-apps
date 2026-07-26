@@ -83,7 +83,7 @@ Port and consignee-filter regression coverage must also verify:
 9. aggregate TEUs use only the matched profile's records inside its lookback;
 10. industry-pack identifiers and modes reject unsupported values, and classification labels match the qualification packs; and
 11. invalid local configuration creates and fails a tracked run before the worker stops, preventing untracked retry loops.
-12. Found Companies defaults to 25 rendered rows, supports only 25/50/75/100, clamps invalid pages, and retains the full filtered result count.
+12. Found Companies queries at most the top 100 human-review candidates, defaults to 25 rendered rows, supports only 25/50/75/100, clamps invalid pages, and limits CSV export to the same bounded review queue.
 13. the Hunter installer pins the live service to a clean detached `origin/main` worktree and the runner cannot be redirected to a development checkout through its environment file.
 
 Scoring regression coverage must also verify:
@@ -156,9 +156,10 @@ Regression coverage must prove:
 4. identity, fresh-event, careers, and distribution-footprint queries are generated for every company;
 5. evidence URLs are HTTPS, source domains match their URLs, redirects cannot reach local/private addresses, and query/evidence sizes are bounded;
 6. Qwen runs locally with structured output and thinking disabled, while K2.6 and bounded K3 usage, cached-token counts, reasoning effort, status, and cost estimates remain auditable;
-7. ambiguous identity, companies that are themselves logistics providers, narrow explicit provider-service evidence even when the model misses it, explicitly evidenced stable/exclusive external-provider relationships without displacement evidence, thin evidence, incomplete pass coverage, stale/no opportunity evidence, and `FRESH` claims whose cited trigger evidence has missing or older-than-18-month publication dates fail deterministic gates;
+7. uncorroborated ambiguous identity, explicit provider-service evidence even when the model misses it, explicitly evidenced stable/exclusive external-provider relationships without displacement evidence, thin evidence, and incomplete pass coverage fail deterministic gates; matching first-party identity can correct unsupported ambiguity; unsupported provider/incumbent labels cannot block; stale/no-opportunity evidence remains Watchlist; and an undated/old `FRESH` claim is evaluated as current fit rather than Hot;
 8. five 0-20 K2.6 dimensions must equal the reported total; K3 cannot raise that score, promote a blocked candidate, or create Hot without citing the same recent dated trigger;
 9. public identity evidence, never shipment origin, determines company country; other foreign entities without a verified U.S. division receive a 10-point penalty and Watchlist cap, while mainland-China entities without one are blocked;
 10. completion stores tenant-scoped evidence and refreshes only the dry-run plan; and
-11. a retrieval/Qwen checkpoint resumes only against an identical newly prepared tenant cohort; and
-12. no company-research module or route imports or calls Apollo, pipeline-stage mutation, cadence enrollment, email, LinkedIn, or customer-communication code.
+11. a retrieval/Qwen checkpoint resumes only against an identical newly prepared tenant cohort;
+12. legal-name, regional, and brand aliases cover known false-negative shapes such as Aalberts IPS Americas, AS Colour, 3F North America, Barnhardt Manufacturing, and Atlas Copco Compressors; and
+13. no company-research module or route imports or calls Apollo, pipeline-stage mutation, cadence enrollment, email, LinkedIn, or customer-communication code.

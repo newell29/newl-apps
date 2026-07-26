@@ -26,7 +26,7 @@ DEFAULT_QWEN_MODEL = "qwen3.5:35b"
 DEFAULT_KIMI_URL = "https://api.moonshot.ai/v1"
 DEFAULT_KIMI_MODEL = "kimi-k2.6"
 DEFAULT_KIMI_VALIDATOR_MODEL = "kimi-k3"
-PROMPT_VERSION = "hunter-company-research-v7"
+PROMPT_VERSION = "hunter-company-research-v8"
 ALLOWED_SERVICE_LINES = {"WAREHOUSING", "OCEAN_AIR", "TRUCKING"}
 ALLOWED_OPERATING_REGIONS = {"NORTH_AMERICA", "CHINA", "OTHER_FOREIGN", "UNKNOWN"}
 ALLOWED_SIGNAL_TYPES = {
@@ -44,6 +44,39 @@ ALLOWED_PASSES = {"IDENTITY", "FRESH_EVENTS", "CAREERS", "DISTRIBUTION_FOOTPRINT
 SOURCE_TYPES = {"FIRST_PARTY", "GOVERNMENT", "NEWS", "CAREERS", "DIRECTORY", "OTHER"}
 MAX_RESPONSE_BYTES = 2_000_000
 MAX_PAGE_BYTES = 400_000
+LEGAL_SUFFIXES = {
+    "co",
+    "company",
+    "corp",
+    "corporation",
+    "inc",
+    "incorporated",
+    "llc",
+    "ltd",
+    "limited",
+    "lp",
+    "plc",
+}
+GENERIC_IDENTITY_MARKERS = {
+    "americas",
+    "compressors",
+    "distribution",
+    "holdings",
+    "industries",
+    "ips",
+    "manufacturing",
+    "north",
+    "solutions",
+    "systems",
+}
+REGIONAL_IDENTITY_MARKERS = {
+    "america",
+    "americas",
+    "canada",
+    "north america",
+    "usa",
+    "us",
+}
 
 
 SYNTHESIS_SCHEMA = {
@@ -494,37 +527,111 @@ def fetch_page_evidence(url: str) -> tuple[Optional[str], Optional[str]]:
     return bounded_text(" ".join(parser.parts), "", 3_000) or None, parse_page_published_at(document)
 
 
+def company_search_aliases(candidate: dict[str, Any]) -> list[str]:
+    company = bounded_text(candidate.get("companyName"), "", 300)
+    words = re.findall(r"[A-Za-z0-9]+", company)
+    aliases = [company] if company else []
+    without_suffix = list(words)
+    while without_suffix and without_suffix[-1].lower() in LEGAL_SUFFIXES:
+        without_suffix.pop()
+    if without_suffix:
+        aliases.append(" ".join(without_suffix))
+    without_region = list(without_suffix)
+    while without_region:
+        last_two = " ".join(word.lower() for word in without_region[-2:])
+        if len(without_region) >= 2 and last_two in REGIONAL_IDENTITY_MARKERS:
+            without_region = without_region[:-2]
+            continue
+        if without_region[-1].lower() in REGIONAL_IDENTITY_MARKERS:
+            without_region.pop()
+            continue
+        break
+    if without_region and len("".join(without_region)) >= 5:
+        aliases.append(" ".join(without_region))
+    brand_words: list[str] = []
+    for word in without_region:
+        if brand_words and word.lower() in GENERIC_IDENTITY_MARKERS:
+            break
+        brand_words.append(word)
+        if len(brand_words) >= 2:
+            break
+    if brand_words and len("".join(brand_words)) >= 5:
+        aliases.append(" ".join(brand_words))
+    return list(dict.fromkeys(alias for alias in aliases if alias))
+
+
+def search_subject(candidate: dict[str, Any]) -> str:
+    aliases = company_search_aliases(candidate)
+    return "(" + " OR ".join(f'"{alias}"' for alias in aliases) + ")"
+
+
+def is_likely_first_party(candidate: dict[str, Any], hostname: str) -> bool:
+    normalized_host = hostname.lower().removeprefix("www.")
+    company_domain = (clean(candidate.get("domain")) or "").lower().removeprefix("www.")
+    if company_domain and (
+        normalized_host == company_domain or normalized_host.endswith(f".{company_domain}")
+    ):
+        return True
+    labels = normalized_host.split(".")
+    if len(labels) < 2:
+        return False
+    registrable_label = re.sub(r"[^a-z0-9]+", "", labels[-2])
+    if len(registrable_label) < 5:
+        return False
+    return any(
+        re.sub(r"[^a-z0-9]+", "", alias.lower()) == registrable_label
+        for alias in company_search_aliases(candidate)
+    )
+
+
 def build_research_queries(candidate: dict[str, Any]) -> list[dict[str, str]]:
-    company = str(candidate["companyName"])
+    subject = search_subject(candidate)
     domain = clean(candidate.get("domain"))
     year = dt.datetime.now(dt.timezone.utc).year
-    return [
+    queries = [
         {
             "pass": "IDENTITY",
-            "query": f'"{company}" official company about parent ownership',
+            "query": f"{subject} official company about parent ownership",
         },
         {
             "pass": "FRESH_EVENTS",
             "query": (
-                f'"{company}" (expansion OR "new facility" OR warehouse OR distribution OR investment '
+                f'{subject} (expansion OR "new facility" OR warehouse OR distribution OR investment '
                 f'OR launch OR hiring) ({year - 1} OR {year})'
             ),
         },
         {
             "pass": "CAREERS",
             "query": (
-                f'{"site:" + domain + " " if domain else ""}"{company}" '
+                f'{"site:" + domain + " " if domain else ""}{subject} '
                 "(careers OR jobs) (warehouse OR distribution OR logistics OR supply chain OR import)"
             ),
         },
         {
             "pass": "DISTRIBUTION_FOOTPRINT",
             "query": (
-                f'"{company}" ("distribution center" OR warehouse OR locations OR markets OR 3PL '
+                f'{subject} ("distribution center" OR warehouse OR locations OR markets OR 3PL '
                 'OR "logistics provider")'
             ),
         },
     ]
+    if domain:
+        queries.extend(
+            [
+                {
+                    "pass": "IDENTITY",
+                    "query": f"site:{domain} (about OR company OR ownership OR locations)",
+                },
+                {
+                    "pass": "FRESH_EVENTS",
+                    "query": (
+                        f'site:{domain} (expansion OR "new facility" OR warehouse OR distribution '
+                        f"OR investment OR launch OR hiring) ({year - 1} OR {year})"
+                    ),
+                },
+            ]
+        )
+    return queries
 
 
 def source_type_for(url: str, pass_id: str, first_party: bool) -> str:
@@ -552,7 +659,6 @@ def collect_company_evidence(
     query_log: list[dict[str, Any]] = []
     fetched_pages = 0
     seen_urls: set[str] = set()
-    company_domain = (clean(candidate.get("domain")) or "").lower().removeprefix("www.")
     for query_row in build_research_queries(candidate):
         query = query_row["query"]
         pass_id = query_row["pass"]
@@ -569,10 +675,7 @@ def collect_company_evidence(
                 continue
             seen_urls.add(canonical)
             hostname = normalized_hostname(url)
-            first_party = bool(company_domain) and (
-                hostname.removeprefix("www.") == company_domain
-                or hostname.removeprefix("www.").endswith(f".{company_domain}")
-            )
+            first_party = is_likely_first_party(candidate, hostname)
             excerpt = row.get("snippet") or row["title"]
             published_at = row.get("publishedAt")
             if fetched_pages < pages_per_company and (first_party or pass_id in {"FRESH_EVENTS", "CAREERS"}):
@@ -1156,7 +1259,11 @@ def synthesize_companies(
             row = rows_by_key.get(key)
             if not row:
                 raise RuntimeError(f"Qwen did not return companyKey {key}.")
-            results[key] = validate_synthesis(row, key)
+            results[key] = normalize_synthesis_for_evidence(
+                candidate,
+                evidence_by_key.get(key, []),
+                validate_synthesis(row, key),
+            )
         for name in usage:
             usage[name] += batch_usage[name]
     return results, usage
@@ -1254,6 +1361,118 @@ def is_recent_trigger(
         if cutoff <= parsed.astimezone(dt.timezone.utc) <= latest:
             return True
     return False
+
+
+def has_corroborating_first_party_identity(
+    candidate: dict[str, Any],
+    evidence: list[dict[str, Any]],
+) -> bool:
+    aliases = [
+        re.sub(r"[^a-z0-9]+", "", alias.lower())
+        for alias in company_search_aliases(candidate)
+        if len(re.sub(r"[^a-z0-9]+", "", alias.lower())) >= 5
+    ]
+    for row in evidence:
+        if (
+            row.get("pass") != "IDENTITY"
+            or row.get("firstParty") is not True
+            or row.get("sourceType") != "FIRST_PARTY"
+        ):
+            continue
+        text = re.sub(
+            r"[^a-z0-9]+",
+            "",
+            f"{row.get('title') or ''} {row.get('excerpt') or ''}".lower(),
+        )
+        if any(alias in text for alias in aliases):
+            return True
+    return False
+
+
+def has_explicit_provider_service_evidence(evidence: list[dict[str, Any]]) -> bool:
+    direct_provider_pattern = re.compile(
+        r"\b(provider|provides?|providing|offers?|offering)\b[^.\n]{0,120}"
+        r"\b(logistics services?|warehousing services?|transportation management|"
+        r"freight forwarding|customs brokerage|fulfillment services?|cross[- ]docking)\b",
+        re.IGNORECASE,
+    )
+    on_behalf_pattern = re.compile(
+        r"\b(warehousing|warehouse|packaging|distribution|transportation)\b"
+        r"[^.\n]{0,120}\bon behalf of\b",
+        re.IGNORECASE,
+    )
+    for row in evidence:
+        if row.get("pass") == "CAREERS" and row.get("firstParty") is not True:
+            continue
+        text = f"{row.get('title') or ''}\n{row.get('excerpt') or ''}"
+        if direct_provider_pattern.search(text) or on_behalf_pattern.search(text):
+            return True
+    return False
+
+
+def has_explicit_stable_provider_evidence(evidence: list[dict[str, Any]]) -> bool:
+    patterns = [
+        re.compile(
+            r"\b(exclusive|sole|long[- ]term|multi[- ]year|strategic)\b[^.\n]{0,120}"
+            r"\b(logistics|warehousing|freight|fulfillment|transportation|3pl)\b"
+            r"[^.\n]{0,80}\b(provider|partner|agreement|contract)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(logistics|warehousing|freight|fulfillment|transportation|3pl)\b"
+            r"[^.\n]{0,80}\b(provider|partner)\b[^.\n]{0,120}"
+            r"\b(exclusive|sole|long[- ]term|multi[- ]year|strategic)\b",
+            re.IGNORECASE,
+        ),
+    ]
+    return any(
+        pattern.search(f"{row.get('title') or ''}\n{row.get('excerpt') or ''}")
+        for row in evidence
+        for pattern in patterns
+    )
+
+
+def normalize_synthesis_for_evidence(
+    candidate: dict[str, Any],
+    evidence: list[dict[str, Any]],
+    synthesis: dict[str, Any],
+) -> dict[str, Any]:
+    normalized = dict(synthesis)
+    missing_evidence = list(normalized.get("missingEvidence") or [])
+    rationale = clean(normalized.get("rationale")) or ""
+    if normalized.get("freshness") == "FRESH" and not is_recent_trigger(normalized, evidence):
+        normalized["freshness"] = "CURRENT"
+        message = "No cited trigger has a verifiable publication date within 18 months; evaluated as current fit."
+        if message not in missing_evidence:
+            missing_evidence.append(message)
+        rationale = f"{rationale} {message}".strip()
+    if (
+        normalized.get("identityDisposition") != "PASS"
+        and has_corroborating_first_party_identity(candidate, evidence)
+    ):
+        normalized["identityDisposition"] = "PASS"
+        normalized["identityConfidence"] = max(70, int(normalized.get("identityConfidence") or 0))
+        normalized["confidence"] = max(60, int(normalized.get("confidence") or 0))
+        identity_reason = clean(normalized.get("identityReason")) or ""
+        normalized["identityReason"] = (
+            f"{identity_reason} The candidate identity is directly corroborated by matching first-party evidence."
+        ).strip()
+    if normalized.get("logisticsProvider") is True and not has_explicit_provider_service_evidence(evidence):
+        normalized["logisticsProvider"] = False
+        message = "The provider label lacked explicit evidence that the company sells logistics services to others."
+        if message not in missing_evidence:
+            missing_evidence.append(message)
+    if (
+        normalized.get("stableExclusiveProviderEvidence") is True
+        and not has_explicit_stable_provider_evidence(evidence)
+    ):
+        normalized["stableExclusiveProviderEvidence"] = False
+        message = "The incumbent-provider label lacked explicit evidence of a stable or exclusive agreement."
+        if message not in missing_evidence:
+            missing_evidence.append(message)
+    normalized["missingEvidence"] = missing_evidence[:10]
+    normalized["rationale"] = rationale
+    return normalized
 
 
 def effective_operating_region(synthesis: dict[str, Any]) -> str:
