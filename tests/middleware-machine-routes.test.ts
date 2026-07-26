@@ -23,6 +23,16 @@ describe("middleware machine route exemptions", () => {
     expect(matcher.test("/assistant/nemo-feedback")).toBe(true);
   });
 
+  it("lets Hunter quality enforce assistant token and admin Teams identity auth", () => {
+    expect(config.matcher[0]).toContain(
+      "api/assistant/openclaw/hunter-quality"
+    );
+    const matcher = new RegExp(`^${config.matcher[0]}$`);
+
+    expect(matcher.test("/api/assistant/openclaw/hunter-quality")).toBe(false);
+    expect(matcher.test("/lead-gen/hunter")).toBe(true);
+  });
+
   it("lets the Mac Mini browser worker endpoints enforce their dedicated token auth", () => {
     expect(config.matcher[0]).toContain("api/assistant/teamship/browser-jobs");
   });
