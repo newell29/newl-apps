@@ -75,6 +75,18 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - Hunter's background planning and research paths retain tenant-scoped access to the complete eligible company corpus through bounded database batches.
 - CSV export contains the bounded filtered review queue, not every company in the database.
 
+## Automated sales workspace
+
+The employee-facing layout follows the lifecycle of a prospect rather than the underlying database tables:
+
+1. **Daily Opportunities** shows Hunter-researched Hot, Qualified current account, and Watchlist recommendations. Raw source candidates and blocked research remain collapsed audit material.
+2. **Outreach Queue** contains active contact discovery, drafting, approval, Apollo enrollment, and unanswered follow-up work. Terminal, unsafe, and positively engaged contacts do not clutter this queue.
+3. **Sales Opportunities** begins only after genuine engagement. It includes `REPLIED`, `MEETING_BOOKED`, `QUOTED`, `WON`, and `LOST`; an Apollo positive reply or meeting-booked status is also surfaced immediately even before the stored lead stage is manually confirmed. Earlier pipeline records remain stored but are not displayed in this revenue-focused view.
+4. **Apollo Exceptions** contains ambiguous and missing company mappings.
+5. TradeMining searches and Found Companies live under **Data Sources**. Automation controls, scoring/outcomes, and health/logs live under **Admin & Quality**.
+
+The layout is non-destructive: it does not migrate, delete, or rewrite existing Company, Contact, Lead, Hunter, TradeMining, Apollo, scoring, or outcome data.
+
 ## Apollo company-match review
 
 1. Pipeline enrichment first searches Apollo by the stored company domain, or by at most two company-name variants when no domain is available.

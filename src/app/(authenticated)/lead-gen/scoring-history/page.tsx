@@ -15,10 +15,19 @@ export default async function LeadScoringHistoryPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Lead Generation"
-        title="Scoring History & Outcomes"
-        description="Audit how company and contact scores changed, which scoring version produced them, and what happened afterward."
+        eyebrow="Admin & Quality"
+        title="Scoring & Outcomes"
+        description="Audit how automated scores changed, which version produced them, and whether later sales outcomes support the model's reasoning."
       />
+
+      <section className="rounded-lg border border-accentBorder bg-accentSoft p-4 text-sm">
+        <p className="font-semibold text-foreground">This is an audit workspace, not a daily sales queue.</p>
+        <p className="mt-1 leading-6 text-mutedForeground">
+          TradeMining fit scores rank shipment-based company evidence. Hunter tiers combine that fit with fresh public
+          signals and research. Contact scores rank likely buyers. Outcome events record what happened later so the
+          models can be calibrated without mixing those meanings.
+        </p>
+      </section>
 
       <div className="grid gap-3 md:grid-cols-3">
         <SummaryCard label="Score snapshots" value={history.snapshots.length} />
