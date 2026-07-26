@@ -24,7 +24,7 @@ describe("Hunter company deep research", () => {
   it("keeps the two-model pipeline dry-run only", () => {
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL).toBe("qwen3.5:35b");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL).toBe("kimi-k2.6");
-    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v4");
+    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v6");
     expect(HUNTER_COMPANY_RESEARCH_SAFETY).toEqual({
       externalWrites: false,
       apollo: false,
@@ -94,6 +94,43 @@ describe("Hunter company deep research", () => {
     );
   });
 
+  it("does not treat unrelated third-party careers text as provider-service evidence", () => {
+    const company = parseHunterCompanyResearchCompletion(completion()).companies[0];
+    const result = evaluateResearchGate({
+      ...company,
+      evidence: company.evidence.map((item, index) =>
+        index === 0
+          ? {
+              ...item,
+              pass: "CAREERS",
+              firstParty: false,
+              excerpt: "A job aggregator also advertises another employer that provides freight forwarding services."
+            }
+          : item
+      )
+    });
+
+    expect(result.blockers).not.toContain(
+      "Public evidence explicitly describes the company providing logistics services to others."
+    );
+  });
+
+  it("blocks fresh claims whose event evidence is missing a recent publication date", () => {
+    const company = parseHunterCompanyResearchCompletion(completion()).companies[0];
+    const result = evaluateResearchGate({
+      ...company,
+      evidence: company.evidence.map((item) =>
+        item.pass === "FRESH_EVENTS"
+          ? { ...item, publishedAt: "2010-02-10T00:00:00.000Z" }
+          : item
+      )
+    });
+
+    expect(result.blockers).toContain(
+      "The fresh opportunity claim has no verifiable event date within the last 18 months."
+    );
+  });
+
   it("rejects forged domains and model arithmetic", () => {
     const forged = completion();
     forged.companies[0].evidence[0].sourceDomain = "different.example";
@@ -124,7 +161,21 @@ describe("Hunter company deep research", () => {
     expect(research).toContain("ordinary internal operations");
     expect(research).toContain("Do not silently substitute a plausible parent");
     expect(research).toContain("separate customers or member companies");
+    expect(research).toContain("parse_brave_published_at");
+    expect(research).toContain("parse_page_published_at");
+    expect(research).toContain("triggerEvidenceIndices");
+    expect(research).toContain("must cite one to five trigger evidence records");
+    expect(research).toContain("whose supplied publishedAt value is within 18 months");
+    expect(research).toContain('"thinking": {"type": "disabled"}');
+    expect(research).toContain('"temperature": 0.6');
+    expect(research).toContain('"max_tokens": 16_000');
+    expect(research).toContain('"submit_hunter_company_scores"');
+    expect(research).toContain('"tool_choice"');
+    expect(research).toContain('HUNTER_RESEARCH_KIMI_BATCH_SIZE", "5"');
     expect(research).not.toContain("api.apollo.io");
+    expect(
+      await readFile(path.join(repoRoot, "src/modules/lead-gen/hunter-company-research.ts"), "utf8")
+    ).toContain("company.evidence[company.synthesis.triggerEvidenceIndices[0]]");
     expect(runner).toContain("HUNTER_COMPANY_RESEARCH_ENABLED");
     expect(runner).toContain("HUNTER_RESEARCH_SEARCH_PROVIDER");
   });
@@ -192,6 +243,76 @@ describe("Hunter company deep research", () => {
     expect(rows.every((row) => row.excerpt.length <= 700)).toBe(true);
     expect(rows.every((row) => Number.isInteger(row.evidenceIndex))).toBe(true);
   });
+
+  it("parses a Kimi JSON object wrapped in explanatory text", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "print(json.dumps(r.parse_json_object('Result follows: {\"companies\": []} done.')))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual({ companies: [] });
+  });
+
+  it("bounds evidence excerpts using the server's UTF-16 length semantics", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "value=r.bounded_utf16_text('😀'*1500,'',2000)",
+      "print(json.dumps({'characters':len(value),'utf16Units':len(value.encode('utf-16-le'))//2}))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual({ characters: 1000, utf16Units: 2000 });
+  });
+
+  it("normalizes Brave page ages into auditable UTC publication dates", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "print(json.dumps(r.parse_brave_published_at('2010-02-10T00:00:00')))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toBe("2010-02-10T00:00:00+00:00");
+  });
+
+  it("prefers an article's original publication date over a later page update", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "html='<meta property=\"article:published_time\" content=\"2022-02-25T12:38:00Z\"><meta property=\"article:modified_time\" content=\"2025-12-11T14:33:48Z\">'",
+      "print(json.dumps(r.parse_page_published_at(html)))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toBe("2022-02-25T12:38:00+00:00");
+  });
 });
 
 function completion() {
@@ -200,7 +321,7 @@ function completion() {
       synthesis: {
         provider: "OLLAMA",
         name: "qwen3.5:35b",
-        promptVersion: "hunter-company-research-v4",
+        promptVersion: "hunter-company-research-v6",
         structuredOutput: true,
         inputTokens: 2000,
         outputTokens: 700,
@@ -209,7 +330,7 @@ function completion() {
       scoring: {
         provider: "KIMI",
         name: "kimi-k2.6",
-        promptVersion: "hunter-company-research-v4",
+        promptVersion: "hunter-company-research-v6",
         structuredOutput: true,
         inputTokens: 1800,
         cachedInputTokens: 200,
@@ -264,6 +385,7 @@ function completion() {
           providerDisplacementEvidence: false,
           freshness: "FRESH",
           opportunitySummary: "A new North Carolina distribution center creates a warehousing trigger.",
+          triggerEvidenceIndices: [1],
           geography: "North Carolina",
           serviceLine: "WAREHOUSING",
           signalType: "FACILITY_OPENING",

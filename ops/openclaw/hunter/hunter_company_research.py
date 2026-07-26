@@ -25,7 +25,7 @@ DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_QWEN_MODEL = "qwen3.5:35b"
 DEFAULT_KIMI_URL = "https://api.moonshot.ai/v1"
 DEFAULT_KIMI_MODEL = "kimi-k2.6"
-PROMPT_VERSION = "hunter-company-research-v4"
+PROMPT_VERSION = "hunter-company-research-v6"
 ALLOWED_SERVICE_LINES = {"WAREHOUSING", "OCEAN_AIR", "TRUCKING"}
 ALLOWED_SIGNAL_TYPES = {
     "EXPANSION",
@@ -68,6 +68,12 @@ SYNTHESIS_SCHEMA = {
                         "enum": ["FRESH", "CURRENT", "STALE", "NONE"],
                     },
                     "opportunitySummary": {"type": "string"},
+                    "triggerEvidenceIndices": {
+                        "type": "array",
+                        "items": {"type": "integer", "minimum": 0},
+                        "minItems": 1,
+                        "maxItems": 5,
+                    },
                     "geography": {"type": ["string", "null"]},
                     "serviceLine": {
                         "type": "string",
@@ -101,6 +107,7 @@ SYNTHESIS_SCHEMA = {
                     "providerDisplacementEvidence",
                     "freshness",
                     "opportunitySummary",
+                    "triggerEvidenceIndices",
                     "geography",
                     "serviceLine",
                     "signalType",
@@ -254,6 +261,14 @@ def bounded_text(value: Any, fallback: str, maximum: int) -> str:
     return " ".join(str(normalized).split())[:maximum]
 
 
+def bounded_utf16_text(value: Any, fallback: str, maximum_code_units: int) -> str:
+    normalized = " ".join(str(clean(value) or fallback).split())
+    encoded = normalized.encode("utf-16-le")
+    if len(encoded) <= maximum_code_units * 2:
+        return normalized
+    return encoded[:maximum_code_units * 2].decode("utf-16-le", "ignore")
+
+
 def normalized_hostname(value: str) -> str:
     return urllib.parse.urlparse(value).hostname.lower() if urllib.parse.urlparse(value).hostname else ""
 
@@ -287,7 +302,20 @@ def fetch_bytes(request: urllib.request.Request, timeout: int, maximum: int) -> 
     return body, final_url, content_type
 
 
-def search_brave(query: str, api_key: str, limit: int) -> list[dict[str, str]]:
+def parse_brave_published_at(value: Any) -> Optional[str]:
+    normalized = clean(value)
+    if not normalized:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc).isoformat()
+
+
+def search_brave(query: str, api_key: str, limit: int) -> list[dict[str, Any]]:
     parameters = urllib.parse.urlencode(
         {"q": query, "count": str(limit), "search_lang": "en", "safesearch": "moderate"}
     )
@@ -304,7 +332,7 @@ def search_brave(query: str, api_key: str, limit: int) -> list[dict[str, str]]:
     rows = payload.get("web", {}).get("results", [])
     if not isinstance(rows, list):
         return []
-    results: list[dict[str, str]] = []
+    results: list[dict[str, Any]] = []
     for row in rows[:limit]:
         if not isinstance(row, dict):
             continue
@@ -318,11 +346,18 @@ def search_brave(query: str, api_key: str, limit: int) -> list[dict[str, str]]:
             continue
         extra = row.get("extra_snippets") if isinstance(row.get("extra_snippets"), list) else []
         snippet = " ".join([clean(row.get("description")) or "", *[clean(item) or "" for item in extra]])
-        results.append({"url": url, "title": title, "snippet": bounded_text(snippet, title, 1_500)})
+        results.append(
+            {
+                "url": url,
+                "title": title,
+                "snippet": bounded_text(snippet, title, 1_500),
+                "publishedAt": parse_brave_published_at(row.get("page_age")),
+            }
+        )
     return results
 
 
-def search_duckduckgo(query: str, limit: int) -> list[dict[str, str]]:
+def search_duckduckgo(query: str, limit: int) -> list[dict[str, Any]]:
     request = urllib.request.Request(
         "https://html.duckduckgo.com/html/",
         data=urllib.parse.urlencode({"q": query}).encode(),
@@ -336,7 +371,7 @@ def search_duckduckgo(query: str, limit: int) -> list[dict[str, str]]:
     body, _, _ = fetch_bytes(request, timeout=60, maximum=MAX_RESPONSE_BYTES)
     parser = DuckDuckGoParser()
     parser.feed(body.decode("utf-8", "replace"))
-    results: list[dict[str, str]] = []
+    results: list[dict[str, Any]] = []
     for row in parser.results:
         try:
             ensure_public_https_url(row["url"])
@@ -348,7 +383,7 @@ def search_duckduckgo(query: str, limit: int) -> list[dict[str, str]]:
     return results
 
 
-def search_web(provider: str, query: str, limit: int) -> list[dict[str, str]]:
+def search_web(provider: str, query: str, limit: int) -> list[dict[str, Any]]:
     if provider == "BRAVE":
         return search_brave(query, required_env("HUNTER_BRAVE_SEARCH_API_KEY"), limit)
     if provider == "DUCKDUCKGO":
@@ -356,7 +391,22 @@ def search_web(provider: str, query: str, limit: int) -> list[dict[str, str]]:
     raise RuntimeError("HUNTER_RESEARCH_SEARCH_PROVIDER must be BRAVE or DUCKDUCKGO.")
 
 
-def fetch_page_excerpt(url: str) -> Optional[str]:
+def parse_page_published_at(value: str) -> Optional[str]:
+    patterns = (
+        r'<meta\b[^>]*(?:property|name)\s*=\s*["\'](?:article:published_time|datepublished)["\'][^>]*content\s*=\s*["\']([^"\']+)',
+        r'<meta\b[^>]*content\s*=\s*["\']([^"\']+)["\'][^>]*(?:property|name)\s*=\s*["\'](?:article:published_time|datepublished)["\']',
+        r'["\']datePublished["\']\s*:\s*["\']([^"\']+)',
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if match:
+            published_at = parse_brave_published_at(html.unescape(match.group(1)))
+            if published_at:
+                return published_at
+    return None
+
+
+def fetch_page_evidence(url: str) -> tuple[Optional[str], Optional[str]]:
     safe_url = ensure_public_https_url(url)
     request = urllib.request.Request(
         safe_url,
@@ -368,15 +418,16 @@ def fetch_page_excerpt(url: str) -> Optional[str]:
     try:
         body, _, content_type = fetch_bytes(request, timeout=30, maximum=MAX_PAGE_BYTES)
     except Exception:
-        return None
+        return None, None
     if "html" not in content_type.lower():
-        return None
+        return None, None
+    document = body.decode("utf-8", "replace")
     parser = VisibleTextParser()
     try:
-        parser.feed(body.decode("utf-8", "replace"))
+        parser.feed(document)
     except Exception:
-        return None
-    return bounded_text(" ".join(parser.parts), "", 3_000) or None
+        return None, parse_page_published_at(document)
+    return bounded_text(" ".join(parser.parts), "", 3_000) or None, parse_page_published_at(document)
 
 
 def build_research_queries(candidate: dict[str, Any]) -> list[dict[str, str]]:
@@ -459,11 +510,14 @@ def collect_company_evidence(
                 or hostname.removeprefix("www.").endswith(f".{company_domain}")
             )
             excerpt = row.get("snippet") or row["title"]
+            published_at = row.get("publishedAt")
             if fetched_pages < pages_per_company and (first_party or pass_id in {"FRESH_EVENTS", "CAREERS"}):
-                page_excerpt = fetch_page_excerpt(url)
+                page_excerpt, page_published_at = fetch_page_evidence(url)
                 if page_excerpt:
                     excerpt = page_excerpt
                     fetched_pages += 1
+                if page_published_at:
+                    published_at = page_published_at
             evidence.append(
                 {
                     "pass": pass_id,
@@ -472,8 +526,8 @@ def collect_company_evidence(
                     "url": url,
                     "sourceDomain": hostname,
                     "sourceType": source_type_for(url, pass_id, first_party),
-                    "publishedAt": None,
-                    "excerpt": bounded_text(excerpt, row["title"], 2_000),
+                    "publishedAt": published_at,
+                    "excerpt": bounded_utf16_text(excerpt, row["title"], 2_000),
                     "firstParty": first_party,
                 }
             )
@@ -514,7 +568,12 @@ def ollama_synthesis_request(
         "relationship is current, stable, and exclusive or contractually committed; never infer it from "
         "ordinary internal operations. providerDisplacementEvidence is true when a disruption, service gap, "
         "rebid, outsourcing change, capacity need, or other credible reason to reconsider that provider is "
-        "supported. FRESH means a dated material event within 18 months. CURRENT means current "
+        "supported. FRESH means a material event whose supplied publishedAt value is within 18 months. "
+        "The year in a search query and current crawl time are not event-date evidence. If a material event "
+        "has no supplied publishedAt date, classify it as CURRENT at most. triggerEvidenceIndices must "
+        "cite one to five supplied evidenceIndex values that directly support the opportunity summary. "
+        "For FRESH, at least one cited item must describe that same material event and carry a recent "
+        "publishedAt value; a recent generic company profile cannot date an unrelated old event. CURRENT means current "
         "operating footprint or hiring evidence without a discrete trigger. STALE or NONE must not be "
         "described as a near-term trigger. Never invent a location, facility, buyer, event, or relationship. "
         "identityConfidence and confidence measure evidence reliability even when the opportunity is weak; "
@@ -598,8 +657,24 @@ def kimi_scoring_request(
     )
     payload = {
         "model": model,
+        # Deterministic scoring uses K2.6 instant mode so a specified schema tool can be forced.
+        "thinking": {"type": "disabled"},
         "temperature": 0.6,
-        "response_format": {"type": "json_object"},
+        "max_tokens": 16_000,
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "submit_hunter_company_scores",
+                    "description": "Submit the complete structured Hunter scoring batch.",
+                    "parameters": SCORING_SCHEMA,
+                },
+            }
+        ],
+        "tool_choice": {
+            "type": "function",
+            "function": {"name": "submit_hunter_company_scores"},
+        },
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -626,11 +701,27 @@ def kimi_scoring_request(
         raise RuntimeError(f"Kimi request failed: {error.reason}") from error
     try:
         envelope = json.loads(body)
-        content = envelope["choices"][0]["message"]["content"]
-        parsed = json.loads(strip_json_fence(content))
+        choice = envelope["choices"][0]
+        message = choice["message"]
+        tool_calls = message.get("tool_calls")
+        if isinstance(tool_calls, list) and tool_calls:
+            function = tool_calls[0].get("function")
+            arguments = function.get("arguments") if isinstance(function, dict) else None
+            parsed = parse_json_object(arguments)
+            content = arguments
+        else:
+            content = message["content"]
+            parsed = parse_json_object(content)
         rows = parsed["companies"]
     except (json.JSONDecodeError, KeyError, TypeError, IndexError) as error:
-        raise RuntimeError("Kimi returned invalid structured company scoring.") from error
+        finish_reason = clean(choice.get("finish_reason")) if isinstance(locals().get("choice"), dict) else None
+        content_type = type(locals().get("content")).__name__
+        content_length = len(content) if isinstance(locals().get("content"), str) else 0
+        raise RuntimeError(
+            "Kimi returned invalid structured company scoring "
+            f"(finishReason={finish_reason or 'unknown'}, contentType={content_type}, "
+            f"contentLength={content_length})."
+        ) from error
     if not isinstance(rows, list):
         raise RuntimeError("Kimi scoring did not contain a companies array.")
     usage = envelope.get("usage") if isinstance(envelope.get("usage"), dict) else {}
@@ -652,6 +743,23 @@ def strip_json_fence(value: str) -> str:
     return normalized
 
 
+def parse_json_object(value: Any) -> dict[str, Any]:
+    if not isinstance(value, str):
+        raise json.JSONDecodeError("Model content is not text.", "", 0)
+    normalized = strip_json_fence(value)
+    try:
+        parsed = json.loads(normalized)
+    except json.JSONDecodeError:
+        start = normalized.find("{")
+        end = normalized.rfind("}")
+        if start < 0 or end <= start:
+            raise
+        parsed = json.loads(normalized[start:end + 1])
+    if not isinstance(parsed, dict):
+        raise json.JSONDecodeError("Model content is not a JSON object.", normalized, 0)
+    return parsed
+
+
 def validate_synthesis(row: dict[str, Any], company_key: str) -> dict[str, Any]:
     if clean(row.get("companyKey")) != company_key:
         raise RuntimeError(f"Qwen omitted or changed companyKey {company_key}.")
@@ -665,6 +773,13 @@ def validate_synthesis(row: dict[str, Any], company_key: str) -> dict[str, Any]:
         raise RuntimeError(f"Qwen returned invalid freshness for {company_key}.")
     if service_line not in ALLOWED_SERVICE_LINES or signal_type not in ALLOWED_SIGNAL_TYPES:
         raise RuntimeError(f"Qwen returned invalid Hunter enums for {company_key}.")
+    raw_trigger_indices = row.get("triggerEvidenceIndices")
+    if not isinstance(raw_trigger_indices, list) or not 1 <= len(raw_trigger_indices) <= 5:
+        raise RuntimeError(f"Qwen must cite one to five trigger evidence records for {company_key}.")
+    trigger_indices = [
+        bounded_integer(item, 0, 23)
+        for item in raw_trigger_indices
+    ]
     return {
         "identityDisposition": disposition,
         "identityConfidence": bounded_integer(row.get("identityConfidence"), 0, 100),
@@ -681,6 +796,7 @@ def validate_synthesis(row: dict[str, Any], company_key: str) -> dict[str, Any]:
         "confidence": bounded_integer(row.get("confidence"), 0, 100),
         "rationale": bounded_text(row.get("rationale"), "No rationale returned.", 2_000),
         "missingEvidence": bounded_string_list(row.get("missingEvidence"), 10, 300),
+        "triggerEvidenceIndices": trigger_indices,
         "followUpQueries": bounded_string_list(row.get("followUpQueries"), 2, 500),
     }
 
@@ -874,7 +990,11 @@ def score_companies(
             }
             for candidate in batch
         ]
-        rows, batch_usage = kimi_scoring_request(kimi_url, api_key, model, packet)
+        try:
+            rows, batch_usage = kimi_scoring_request(kimi_url, api_key, model, packet)
+        except RuntimeError as error:
+            batch_keys = ", ".join(str(candidate["companyKey"]) for candidate in batch)
+            raise RuntimeError(f"Kimi scoring failed for [{batch_keys}]: {error}") from error
         rows_by_key = {
             clean(row.get("companyKey")): row
             for row in rows
@@ -951,8 +1071,8 @@ def collect_follow_up_evidence(
                         "url": url,
                         "sourceDomain": hostname,
                         "sourceType": source_type_for(url, "FOLLOW_UP", False),
-                        "publishedAt": None,
-                        "excerpt": bounded_text(row.get("snippet"), row["title"], 2_000),
+                        "publishedAt": row.get("publishedAt"),
+                        "excerpt": bounded_utf16_text(row.get("snippet"), row["title"], 2_000),
                         "firstParty": False,
                     }
                 )
@@ -1016,6 +1136,8 @@ def validate_checkpoint_cohort(
     received = checkpoint.get("candidateKeys")
     if not isinstance(received, list) or received != expected:
         raise RuntimeError("Hunter research checkpoint does not match the newly prepared tenant cohort.")
+    if checkpoint.get("promptVersion") != PROMPT_VERSION:
+        raise RuntimeError("Hunter research checkpoint uses a different prompt contract.")
 
 
 def run_company_research(
@@ -1050,7 +1172,7 @@ def run_company_research(
             1, min(8, int(os.environ.get("HUNTER_RESEARCH_QWEN_BATCH_SIZE", "4")))
         )
         kimi_batch_size = max(
-            1, min(20, int(os.environ.get("HUNTER_RESEARCH_KIMI_BATCH_SIZE", "10")))
+            1, min(20, int(os.environ.get("HUNTER_RESEARCH_KIMI_BATCH_SIZE", "5")))
         )
         follow_up_limit = max(
             0, min(2, int(os.environ.get("HUNTER_RESEARCH_FOLLOW_UP_QUERIES", "2")))
@@ -1103,6 +1225,7 @@ def run_company_research(
                 {
                     "stage": "RETRIEVAL_COMPLETE",
                     "version": 1,
+                    "promptVersion": PROMPT_VERSION,
                     "candidateKeys": [candidate["companyKey"] for candidate in candidates],
                     "provider": provider,
                     "evidenceByKey": evidence_by_key,
@@ -1154,6 +1277,7 @@ def run_company_research(
                 {
                     "stage": "SYNTHESIS_COMPLETE",
                     "version": 1,
+                    "promptVersion": PROMPT_VERSION,
                     "candidateKeys": [candidate["companyKey"] for candidate in candidates],
                     "provider": provider,
                     "evidenceByKey": evidence_by_key,

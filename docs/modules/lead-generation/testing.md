@@ -156,7 +156,7 @@ Regression coverage must prove:
 4. identity, fresh-event, careers, and distribution-footprint queries are generated for every company;
 5. evidence URLs are HTTPS, source domains match their URLs, redirects cannot reach local/private addresses, and query/evidence sizes are bounded;
 6. Qwen runs locally with structured output and thinking disabled, while Kimi usage and cached-token counts remain auditable;
-7. ambiguous identity, companies that are themselves logistics providers, narrow explicit provider-service evidence even when the model misses it, explicitly evidenced stable/exclusive external-provider relationships without displacement evidence, thin evidence, incomplete pass coverage, and stale/no opportunity evidence fail deterministic gates;
+7. ambiguous identity, companies that are themselves logistics providers, narrow explicit provider-service evidence even when the model misses it, explicitly evidenced stable/exclusive external-provider relationships without displacement evidence, thin evidence, incomplete pass coverage, stale/no opportunity evidence, and `FRESH` claims whose cited trigger evidence has missing or older-than-18-month publication dates fail deterministic gates;
 8. five 0-20 Kimi dimensions must equal the reported total, and a model score cannot override a blocker;
 9. completion stores tenant-scoped evidence and refreshes only the dry-run plan; and
 10. a retrieval/Qwen checkpoint resumes only against an identical newly prepared tenant cohort; and

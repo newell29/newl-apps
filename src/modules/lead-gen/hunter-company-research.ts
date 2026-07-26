@@ -17,7 +17,7 @@ import { DEFAULT_HUNTER_POLICY, runHunterDryPlan } from "@/modules/lead-gen/hunt
 import { prisma } from "@/server/db";
 
 export const HUNTER_COMPANY_RESEARCH_JOB_TYPE = "HUNTER_COMPANY_DEEP_RESEARCH";
-export const HUNTER_COMPANY_RESEARCH_PROMPT_VERSION = "hunter-company-research-v4";
+export const HUNTER_COMPANY_RESEARCH_PROMPT_VERSION = "hunter-company-research-v6";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL = "qwen3.5:35b";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL = "kimi-k2.6";
 
@@ -76,6 +76,7 @@ type ResearchResult = {
     providerDisplacementEvidence: boolean;
     freshness: Freshness;
     opportunitySummary: string;
+    triggerEvidenceIndices: number[];
     geography: string | null;
     serviceLine: HunterServiceLine;
     signalType: HunterSignalType;
@@ -456,7 +457,8 @@ export async function completeHunterCompanyResearchRun({
       if (status === HunterSignalStatus.NEW) acceptedCount += 1;
       if (!gate.passed) blockedCount += 1;
 
-      const primaryEvidence = company.evidence[0];
+      const primaryEvidence =
+        company.evidence[company.synthesis.triggerEvidenceIndices[0]] ?? company.evidence[0];
       const sourceUrl = primaryEvidence?.url ?? null;
       const dedupeKey = createHash("sha256")
         .update([
@@ -668,7 +670,26 @@ export function evaluateResearchGate(company: ResearchResult) {
   if (company.synthesis.freshness === "STALE" || company.synthesis.freshness === "NONE") {
     blockers.push("No current or fresh opportunity evidence was found.");
   }
+  if (
+    company.synthesis.freshness === "FRESH" &&
+    !hasRecentDatedTriggerEvidence(company.evidence, company.synthesis.triggerEvidenceIndices)
+  ) {
+    blockers.push("The fresh opportunity claim has no verifiable event date within the last 18 months.");
+  }
   return { passed: blockers.length === 0, blockers };
+}
+
+function hasRecentDatedTriggerEvidence(evidence: Evidence[], triggerEvidenceIndices: number[]) {
+  const now = Date.now();
+  const cutoff = now - 548 * 24 * 60 * 60 * 1_000;
+  const latestAccepted = now + 24 * 60 * 60 * 1_000;
+  return triggerEvidenceIndices.some((index) => {
+    const item = evidence[index];
+    if (!item) return false;
+    if (!["FRESH_EVENTS", "FOLLOW_UP"].includes(item.pass) || !item.publishedAt) return false;
+    const publishedAt = new Date(item.publishedAt).getTime();
+    return publishedAt >= cutoff && publishedAt <= latestAccepted;
+  });
 }
 
 function hasExplicitProviderServiceEvidence(evidence: Evidence[]) {
@@ -677,6 +698,7 @@ function hasExplicitProviderServiceEvidence(evidence: Evidence[]) {
   const onBehalfPattern =
     /\b(warehousing|warehouse|packaging|distribution|transportation)\b[^.\n]{0,120}\bon behalf of\b/i;
   return evidence.some((item) => {
+    if (item.pass === "CAREERS" && !item.firstParty) return false;
     const text = `${item.title}\n${item.excerpt}`;
     return directProviderPattern.test(text) || onBehalfPattern.test(text);
   });
@@ -691,6 +713,27 @@ function parseResearchResult(value: unknown, index: number): ResearchResult {
   const evidenceRows = array(company.evidence, `${path}.evidence`);
   if (evidenceRows.length > MAX_EVIDENCE_PER_COMPANY) {
     throw new Error(`${path}.evidence cannot exceed ${MAX_EVIDENCE_PER_COMPANY} items.`);
+  }
+  const parsedEvidence = evidenceRows.map((row, evidenceIndex) =>
+    parseEvidence(row, `${path}.evidence[${evidenceIndex}]`)
+  );
+  const triggerEvidenceIndices = array(
+    synthesis.triggerEvidenceIndices,
+    `${path}.synthesis.triggerEvidenceIndices`
+  ).map((item, triggerIndex) => {
+    const evidenceIndex = integer(
+      item,
+      0,
+      Math.max(0, parsedEvidence.length - 1),
+      `${path}.synthesis.triggerEvidenceIndices[${triggerIndex}]`
+    );
+    if (!parsedEvidence[evidenceIndex]) {
+      throw new Error(`${path}.synthesis.triggerEvidenceIndices[${triggerIndex}] is out of range.`);
+    }
+    return evidenceIndex;
+  });
+  if (triggerEvidenceIndices.length < 1 || triggerEvidenceIndices.length > 5) {
+    throw new Error(`${path}.synthesis.triggerEvidenceIndices must contain 1 to 5 items.`);
   }
   const dimensions = {
     demandTrigger: integer(rawDimensions.demandTrigger, 0, 20, `${path}.scoring.dimensionScores.demandTrigger`),
@@ -712,7 +755,7 @@ function parseResearchResult(value: unknown, index: number): ResearchResult {
     companyId: text(company.companyId, 200, `${path}.companyId`),
     companyKey: text(company.companyKey, 300, `${path}.companyKey`),
     companyName: text(company.companyName, 300, `${path}.companyName`),
-    evidence: evidenceRows.map((row, evidenceIndex) => parseEvidence(row, `${path}.evidence[${evidenceIndex}]`)),
+    evidence: parsedEvidence,
     synthesis: {
       identityDisposition: enumValue(
         synthesis.identityDisposition,
@@ -740,6 +783,7 @@ function parseResearchResult(value: unknown, index: number): ResearchResult {
         `${path}.synthesis.freshness`
       ),
       opportunitySummary: text(synthesis.opportunitySummary, 2_000, `${path}.synthesis.opportunitySummary`),
+      triggerEvidenceIndices,
       geography: nullableText(synthesis.geography, 300, `${path}.synthesis.geography`),
       serviceLine: enumValue(
         synthesis.serviceLine,
