@@ -121,6 +121,7 @@ export type CandidateFeedFilters = {
   maxScore?: number;
   minShipmentCount?: number;
   sort?: CandidateFeedSort;
+  limit?: number;
 };
 
 export type LeadPipelineSort = "score_desc" | "updated_desc" | "approved_desc" | "company_name_asc";
@@ -234,32 +235,7 @@ export async function getCandidateFeed(tenant: TenantContext, filters: Candidate
     tenant,
     resolveEvidenceLookbackDays(scoringConfig, searchProfiles)
   );
-  const companies = await prisma.company.findMany({
-    where: tenantWhere(tenant, buildCandidateWhere(filters, evidenceWhere)),
-    include: {
-      importRecords: {
-        where: evidenceWhere,
-        orderBy: [
-          {
-            arrivalDate: "desc"
-          },
-          {
-            createdAt: "desc"
-          }
-        ]
-      },
-      leads: {
-        where: tenantWhere(tenant),
-        orderBy: {
-          updatedAt: "desc"
-        },
-        take: 1
-      }
-    },
-    orderBy: {
-      updatedAt: "desc"
-    }
-  });
+  const companies = await loadCandidateCompanies(tenant, filters, evidenceWhere);
 
   const candidates = companies
     .map((company) => {
@@ -328,7 +304,91 @@ export async function getCandidateFeed(tenant: TenantContext, filters: Candidate
     .filter((candidate) => filters.minShipmentCount === undefined || candidate.shipmentCount >= filters.minShipmentCount)
     .filter((candidate) => matchesFoundCompanyQuery(candidate, filters.query));
 
-  return sortCandidates(candidates, filters.sort ?? "score_desc");
+  const sorted = sortCandidates(candidates, filters.sort ?? "score_desc");
+  return filters.limit === undefined ? sorted : sorted.slice(0, normalizeCandidateLimit(filters.limit));
+}
+
+async function loadCandidateCompanies(
+  tenant: TenantContext,
+  filters: CandidateFeedFilters,
+  evidenceWhere: ReturnType<typeof buildTradeMiningEvidenceWhere>
+) {
+  const take = filters.limit === undefined ? 200 : normalizeCandidateLimit(filters.limit);
+  const rows: Awaited<ReturnType<typeof queryCandidateCompanyBatch>> = [];
+  let cursor: string | undefined;
+
+  do {
+    const batch = await queryCandidateCompanyBatch({
+      tenant,
+      filters,
+      evidenceWhere,
+      take,
+      cursor
+    });
+    rows.push(...batch);
+    if (filters.limit !== undefined || batch.length < take) {
+      break;
+    }
+    cursor = batch[batch.length - 1]?.id;
+  } while (cursor);
+
+  return rows;
+}
+
+function queryCandidateCompanyBatch({
+  tenant,
+  filters,
+  evidenceWhere,
+  take,
+  cursor
+}: {
+  tenant: TenantContext;
+  filters: CandidateFeedFilters;
+  evidenceWhere: ReturnType<typeof buildTradeMiningEvidenceWhere>;
+  take: number;
+  cursor?: string;
+}) {
+  return prisma.company.findMany({
+    where: tenantWhere(tenant, buildCandidateWhere(filters, evidenceWhere)),
+    include: {
+      importRecords: {
+        where: evidenceWhere,
+        orderBy: [
+          {
+            arrivalDate: "desc"
+          },
+          {
+            createdAt: "desc"
+          }
+        ]
+      },
+      leads: {
+        where: tenantWhere(tenant),
+        orderBy: {
+          updatedAt: "desc"
+        },
+        take: 1
+      }
+    },
+    orderBy: [
+      {
+        priorityScore: "desc"
+      },
+      {
+        updatedAt: "desc"
+      },
+      {
+        id: "asc"
+      }
+    ],
+    take,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {})
+  });
+}
+
+function normalizeCandidateLimit(limit: number) {
+  if (!Number.isFinite(limit)) return 100;
+  return Math.min(100, Math.max(1, Math.floor(limit)));
 }
 
 export async function calculateLeadPipelineScoreForCompany(

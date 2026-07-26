@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/page-header";
 import { bulkUpdateCandidateStatusAction } from "@/modules/lead-gen/actions";
 import {
   CANDIDATE_PAGE_SIZES,
+  CANDIDATE_REVIEW_QUEUE_LIMIT,
   paginateCandidates,
   parseCandidatePage,
   parseCandidatePageSize
@@ -77,7 +78,8 @@ export default async function CandidateFeedPage({
       minScore,
       maxScore,
       minShipmentCount,
-      sort
+      sort,
+      limit: CANDIDATE_REVIEW_QUEUE_LIMIT
     }),
     getCandidateFeedFilters(tenant)
   ]);
@@ -115,8 +117,9 @@ export default async function CandidateFeedPage({
       />
 
       <div className="rounded-lg border border-accentBorder bg-accentSoft px-4 py-3 text-sm text-foreground">
-        Found Companies are not sales leads yet. This active review queue shows New and Reviewing companies by default;
-        approved accounts move to Pipeline.
+        Found Companies are not sales leads yet. This page shows Hunter&apos;s top{" "}
+        {CANDIDATE_REVIEW_QUEUE_LIMIT} New and Reviewing companies for human review; approved accounts move to
+        Pipeline while Hunter retains tenant-scoped access to the complete company record set.
       </div>
 
       <form className="overflow-hidden rounded-lg border border-border bg-card shadow-sm" action="/lead-gen/candidates">
@@ -301,7 +304,7 @@ export default async function CandidateFeedPage({
             </p>
           </div>
           <span className="rounded-full border border-accentBorder bg-card px-2.5 py-1 text-xs font-semibold text-primary">
-            {pagination.totalItems.toLocaleString("en-US")} companies
+            {pagination.totalItems.toLocaleString("en-US")} in review queue
           </span>
         </div>
 

@@ -17,7 +17,7 @@ import { DEFAULT_HUNTER_POLICY, runHunterDryPlan } from "@/modules/lead-gen/hunt
 import { prisma } from "@/server/db";
 
 export const HUNTER_COMPANY_RESEARCH_JOB_TYPE = "HUNTER_COMPANY_DEEP_RESEARCH";
-export const HUNTER_COMPANY_RESEARCH_PROMPT_VERSION = "hunter-company-research-v7";
+export const HUNTER_COMPANY_RESEARCH_PROMPT_VERSION = "hunter-company-research-v8";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL = "qwen3.5:35b";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL = "kimi-k2.6";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL = "kimi-k3";
@@ -821,16 +821,19 @@ export function parseHunterCompanyResearchCompletion(value: unknown): HunterComp
 
 export function evaluateResearchGate(company: ResearchResult) {
   const blockers: string[] = [];
-  if (company.synthesis.identityDisposition !== "PASS" || company.synthesis.identityConfidence < 70) {
+  if (
+    (company.synthesis.identityDisposition !== "PASS" || company.synthesis.identityConfidence < 70) &&
+    !hasCorroboratingFirstPartyIdentity(company)
+  ) {
     blockers.push("Company identity was not confirmed at 70% or better.");
   }
-  if (company.synthesis.logisticsProvider) blockers.push("The company is itself a logistics provider.");
   if (hasExplicitProviderServiceEvidence(company.evidence)) {
     blockers.push("Public evidence explicitly describes the company providing logistics services to others.");
   }
   if (
     company.synthesis.stableExclusiveProviderEvidence &&
-    !company.synthesis.providerDisplacementEvidence
+    !company.synthesis.providerDisplacementEvidence &&
+    hasExplicitStableProviderEvidence(company.evidence)
   ) {
     blockers.push("Evidence shows a stable exclusive provider relationship without a credible displacement trigger.");
   }
@@ -838,15 +841,6 @@ export function evaluateResearchGate(company: ResearchResult) {
   const passes = new Set(company.evidence.map((item) => item.pass));
   if (!passes.has("IDENTITY")) blockers.push("The mandatory identity pass has no evidence.");
   if (passes.size < 2) blockers.push("Evidence covers fewer than two independent research passes.");
-  if (company.synthesis.freshness === "STALE" || company.synthesis.freshness === "NONE") {
-    blockers.push("No current or fresh opportunity evidence was found.");
-  }
-  if (
-    company.synthesis.freshness === "FRESH" &&
-    !hasRecentDatedTriggerEvidence(company.evidence, company.synthesis.triggerEvidenceIndices)
-  ) {
-    blockers.push("The fresh opportunity claim has no verifiable event date within the last 18 months.");
-  }
   if (
     company.synthesis.verifiedUsDivision &&
     !hasCitedUsDivisionEvidence(company)
@@ -869,6 +863,12 @@ export function classifyResearchOpportunity(
 ) {
   const reasons: string[] = [];
   const operatingRegion = effectiveOperatingRegion(company);
+  const freshness = effectiveResearchFreshness(company);
+  if (company.synthesis.freshness === "FRESH" && freshness === "CURRENT") {
+    reasons.push(
+      "The claimed fresh event lacked a recent dated source and was evaluated as current account fit instead."
+    );
+  }
   if (!gate.passed) {
     return {
       tier: "BLOCKED" as const,
@@ -917,6 +917,19 @@ export function classifyResearchOpportunity(
       operatingRegion
     };
   }
+  if (freshness === "STALE" || freshness === "NONE") {
+    reasons.push(
+      "Current opportunity evidence was not established; retained for later research instead of being permanently blocked."
+    );
+    return {
+      tier: "WATCHLIST" as const,
+      tierReasons: reasons,
+      finalScore,
+      finalConfidence,
+      foreignPriorityAdjustment,
+      operatingRegion
+    };
+  }
   if (
     finalScore < thresholds.minimumPriorityScore ||
     finalConfidence < thresholds.minimumSignalConfidence
@@ -933,7 +946,7 @@ export function classifyResearchOpportunity(
       operatingRegion
     };
   }
-  if (company.synthesis.freshness === "FRESH") {
+  if (freshness === "FRESH") {
     const validatorSupportsRecentTrigger =
       company.validation.supportingEvidenceIndices.some((index) =>
         company.synthesis.triggerEvidenceIndices.includes(index)
@@ -985,6 +998,33 @@ export function classifyResearchOpportunity(
   };
 }
 
+function effectiveResearchFreshness(company: ResearchResult): Freshness {
+  if (
+    company.synthesis.freshness === "FRESH" &&
+    !hasRecentDatedTriggerEvidence(company.evidence, company.synthesis.triggerEvidenceIndices)
+  ) {
+    return "CURRENT";
+  }
+  return company.synthesis.freshness;
+}
+
+function hasCorroboratingFirstPartyIdentity(company: ResearchResult) {
+  const aliases = company.companyName
+    .toLowerCase()
+    .replace(/\b(incorporated|corporation|company|limited|holdings|industries|manufacturing|solutions|systems|compressors|americas|inc|corp|llc|ltd|co|plc|lp)\b/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  const identityNeedle = aliases.join("").replace(/[^a-z0-9]+/g, "");
+  if (identityNeedle.length < 5) return false;
+  return company.evidence.some((item) => {
+    if (item.pass !== "IDENTITY" || !item.firstParty || item.sourceType !== "FIRST_PARTY") {
+      return false;
+    }
+    const text = `${item.title} ${item.excerpt}`.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    return text.includes(identityNeedle);
+  });
+}
+
 function hasRecentDatedTriggerEvidence(evidence: Evidence[], triggerEvidenceIndices: number[]) {
   const now = Date.now();
   const cutoff = now - 548 * 24 * 60 * 60 * 1_000;
@@ -1007,6 +1047,17 @@ function hasExplicitProviderServiceEvidence(evidence: Evidence[]) {
     if (item.pass === "CAREERS" && !item.firstParty) return false;
     const text = `${item.title}\n${item.excerpt}`;
     return directProviderPattern.test(text) || onBehalfPattern.test(text);
+  });
+}
+
+function hasExplicitStableProviderEvidence(evidence: Evidence[]) {
+  const stableProviderPattern =
+    /\b(exclusive|sole|long[- ]term|multi[- ]year|strategic)\b[^.\n]{0,120}\b(logistics|warehousing|freight|fulfillment|transportation|3pl)\b[^.\n]{0,80}\b(provider|partner|agreement|contract)\b/i;
+  const reverseStableProviderPattern =
+    /\b(logistics|warehousing|freight|fulfillment|transportation|3pl)\b[^.\n]{0,80}\b(provider|partner)\b[^.\n]{0,120}\b(exclusive|sole|long[- ]term|multi[- ]year|strategic)\b/i;
+  return evidence.some((item) => {
+    const text = `${item.title}\n${item.excerpt}`;
+    return stableProviderPattern.test(text) || reverseStableProviderPattern.test(text);
   });
 }
 

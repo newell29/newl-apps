@@ -36,6 +36,13 @@ Expected failures include missing tenant entitlement, read-only mutation attempt
 
 Hunter retries transient TradeMining network failures and HTTP 429/5xx responses with bounded exponential backoff. Authentication errors, invalid profile filters, and ambiguous lookup values fail immediately and remain visible on the tracked job run. A failed daily run is recovered with the explicit **Run now** action; it is not silently repeated throughout the day.
 
+## Found Companies returns an application error
+
+- Symptom: `/lead-gen/candidates` fails server-side as the company corpus grows.
+- Confirmed cause: the prior query loaded every matching company and every matching TradeMining relation before applying browser pagination. PostgreSQL could terminate the generated relation query with `54001: stack depth limit exceeded`.
+- Prevention: the human screen and CSV export request only the top 100 review candidates. Background Hunter paths that need exact corpus coverage read tenant-scoped companies in bounded batches.
+- Limitation: company, score, and shipment filters on Found Companies operate inside the bounded human review queue. Hunter remains the complete-corpus workflow.
+
 ## External signal discovery or classification fails
 
 - A GDELT 429/5xx response receives bounded retries and is recorded before the worker tries the RSS fallback.
@@ -53,8 +60,15 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 - A failed completion is not partially persisted and does not refresh the prospecting plan. The
   operator may use the exact-cohort dry run and local replay ledger to diagnose it.
 - Individual query failures remain visible in a valid completion, but deterministic evidence-count,
-  pass-coverage, identity, logistics-provider, stable/exclusive external-provider, and freshness gates fail closed. Transport success
+  pass-coverage, identity, logistics-provider, stable/exclusive external-provider, and geography gates fail closed. Transport success
   with weak evidence cannot become a high-priority opportunity.
+- Legal-name-only retrieval can miss first-party material for regional subsidiaries. Hunter therefore
+  queries bounded legal-name, brand, and regional aliases and adds official-domain queries when a
+  domain is known. Matching first-party identity evidence can correct an unsupported ambiguous
+  synthesis label.
+- A model's provider or incumbent label cannot block an account without explicit supporting language
+  in the saved evidence. An undated claimed trigger is treated as current fit. Stale/no-opportunity
+  research is retained on Watchlist for later research instead of becoming a permanent block.
 - A K3 validation outage does not discard completed retrieval, Qwen synthesis, or K2.6 scoring.
   Selected fresh-event candidates are retained as Watchlist and cannot become Hot until a later
   successful validation. Current-account qualifications and deterministic blockers continue normally.
