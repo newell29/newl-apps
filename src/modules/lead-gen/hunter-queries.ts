@@ -1,5 +1,6 @@
 import { HunterDecisionStatus } from "@prisma/client";
 import { DEFAULT_HUNTER_POLICY, HUNTER_DRY_RUN_JOB_TYPE } from "@/modules/lead-gen/hunter-planner";
+import { HUNTER_COMPANY_RESEARCH_JOB_TYPE } from "@/modules/lead-gen/hunter-company-research";
 import { HUNTER_SIGNAL_SCOUT_JOB_TYPE } from "@/modules/lead-gen/hunter-signal-scout";
 import { prisma } from "@/server/db";
 import type { TenantContext } from "@/server/tenant-context";
@@ -9,6 +10,7 @@ export async function getHunterControlPlane(tenant: Pick<TenantContext, "tenantI
     storedPolicy,
     latestRuns,
     signalScoutRuns,
+    companyResearchRuns,
     signals,
     decisionCount,
     activeSuppressionCount
@@ -33,6 +35,14 @@ export async function getHunterControlPlane(tenant: Pick<TenantContext, "tenantI
       where: {
         tenantId: tenant.tenantId,
         jobType: HUNTER_SIGNAL_SCOUT_JOB_TYPE
+      },
+      orderBy: { startedAt: "desc" },
+      take: 10
+    }),
+    prisma.automationJobRun.findMany({
+      where: {
+        tenantId: tenant.tenantId,
+        jobType: HUNTER_COMPANY_RESEARCH_JOB_TYPE
       },
       orderBy: { startedAt: "desc" },
       take: 10
@@ -71,6 +81,8 @@ export async function getHunterControlPlane(tenant: Pick<TenantContext, "tenantI
     latestRun: latestRuns[0] ?? null,
     signalScoutRuns,
     latestSignalScoutRun: signalScoutRuns[0] ?? null,
+    companyResearchRuns,
+    latestCompanyResearchRun: companyResearchRuns[0] ?? null,
     signals,
     decisionCount,
     activeSuppressionCount

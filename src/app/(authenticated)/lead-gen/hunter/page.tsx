@@ -81,6 +81,63 @@ export default async function HunterPage() {
         ) : null}
       </section>
 
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Company deep research</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-mutedForeground">
+              Hunter researches the policy-sized daily company queue through identity, fresh-event,
+              first-party careers, and distribution-footprint passes. Local Qwen synthesizes the
+              evidence, deterministic rules block unsafe candidates, and Kimi scores only the
+              survivors. Kimi K3 then validates only the strongest fresh-event candidates before they
+              can become Hot. Every query, source, excerpt, model version, token count, tier, and gate
+              result is retained. This stage still cannot contact Apollo or change a pipeline stage.
+            </p>
+          </div>
+          <span className="rounded-full border border-border bg-muted px-3 py-1 text-xs font-semibold text-foreground">
+            {data.latestCompanyResearchRun
+              ? `${data.latestCompanyResearchRun.status} ${data.latestCompanyResearchRun.startedAt.toLocaleString("en-US")}`
+              : "Not run yet"}
+          </span>
+        </div>
+        {data.latestCompanyResearchRun ? (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+            <Metric
+              label="Researched"
+              value={jobOutputNumber(data.latestCompanyResearchRun.output, "researchedCount")}
+            />
+            <Metric
+              label="Hot"
+              value={jobOutputTierNumber(data.latestCompanyResearchRun.output, "HOT_OPPORTUNITY")}
+            />
+            <Metric
+              label="Qualified"
+              value={jobOutputTierNumber(data.latestCompanyResearchRun.output, "QUALIFIED_CURRENT_ACCOUNT")}
+            />
+            <Metric
+              label="Watchlist"
+              value={jobOutputTierNumber(data.latestCompanyResearchRun.output, "WATCHLIST")}
+            />
+            <Metric
+              label="Blocked"
+              value={jobOutputNumber(data.latestCompanyResearchRun.output, "blockedCount")}
+            />
+            <Metric
+              label="Evidence"
+              value={jobOutputNumber(data.latestCompanyResearchRun.output, "evidenceCount")}
+            />
+            <Metric
+              label="Missing"
+              value={jobOutputNumber(data.latestCompanyResearchRun.output, "missingCompanyCount")}
+            />
+            <Metric
+              label="Models"
+              value={jobOutputResearchModels(data.latestCompanyResearchRun.output)}
+            />
+          </div>
+        ) : null}
+      </section>
+
       <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
         <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
           <div className="border-b border-border pb-4">
@@ -316,6 +373,7 @@ export default async function HunterPage() {
                   <p className="mt-1 max-w-4xl text-xs leading-5 text-mutedForeground">{signal.summary}</p>
                 </div>
                 <span className="rounded-full border border-border bg-card px-2.5 py-1 text-xs font-semibold">
+                  {researchTier(signal.evidence) ? `${formatEnum(researchTier(signal.evidence) ?? "")} · ` : ""}
                   {signal.confidence}% · {formatEnum(signal.serviceLine)}
                 </span>
               </div>
@@ -331,6 +389,7 @@ export default async function HunterPage() {
                   </>
                 ) : null}
               </p>
+              <ResearchEvidencePanel value={signal.evidence} />
             </article>
           ))}
           {data.signals.length === 0 ? (
@@ -387,6 +446,31 @@ function jobOutputModel(value: unknown) {
   return typeof name === "string" ? name : "—";
 }
 
+function jobOutputResearchModels(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "—";
+  const models = (value as Record<string, unknown>).models;
+  if (!models || typeof models !== "object" || Array.isArray(models)) return "—";
+  const synthesis = (models as Record<string, unknown>).synthesis;
+  const scoring = (models as Record<string, unknown>).scoring;
+  const validation = (models as Record<string, unknown>).validation;
+  const name = (model: unknown) =>
+    model && typeof model === "object" && !Array.isArray(model)
+      ? (model as Record<string, unknown>).name
+      : null;
+  const names = [name(synthesis), name(scoring), name(validation)].filter(
+    (item): item is string => typeof item === "string"
+  );
+  return names.length ? names.join(" + ") : "—";
+}
+
+function jobOutputTierNumber(value: unknown, tier: string) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "—";
+  const tierCounts = (value as Record<string, unknown>).tierCounts;
+  if (!tierCounts || typeof tierCounts !== "object" || Array.isArray(tierCounts)) return "—";
+  const count = (tierCounts as Record<string, unknown>)[tier];
+  return typeof count === "number" ? String(count) : "—";
+}
+
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md border border-border bg-muted/40 p-3">
@@ -394,4 +478,147 @@ function Metric({ label, value }: { label: string; value: string }) {
       <p className="mt-1 break-words text-sm font-semibold text-foreground">{value}</p>
     </div>
   );
+}
+
+function ResearchEvidencePanel({ value }: { value: unknown }) {
+  const research = researchRecord(value);
+  if (!research) return null;
+  const evidence = Array.isArray(research.evidence)
+    ? research.evidence.filter((item): item is Record<string, unknown> =>
+        Boolean(item) && typeof item === "object" && !Array.isArray(item)
+      )
+    : [];
+  const gate = researchRecord(research.deterministicGate);
+  const synthesis = researchRecord(research.synthesis);
+  const scoring = researchRecord(research.scoring);
+  const validation = researchRecord(research.validation);
+  const models = researchRecord(research.models);
+  const synthesisModel = researchRecord(models?.synthesis);
+  const scoringModel = researchRecord(models?.scoring);
+  const validationModel = researchRecord(models?.validation);
+  const blockers = gate && Array.isArray(gate.blockers)
+    ? gate.blockers.filter((item): item is string => typeof item === "string")
+    : [];
+
+  return (
+    <details className="mt-3 rounded-md border border-border bg-card p-3">
+      <summary className="cursor-pointer text-xs font-semibold text-primary">
+        Show research ledger ({evidence.length} evidence records)
+      </summary>
+      <div className="mt-3 grid gap-3 text-xs">
+        <div className="flex flex-wrap gap-2">
+          <span className="rounded-full border border-border bg-muted px-2 py-1">
+            Gate: {gate?.passed === true ? "passed" : "blocked"}
+          </span>
+          <span className="rounded-full border border-border bg-muted px-2 py-1">
+            Final score: {typeof research.finalScore === "number" ? research.finalScore : "—"}
+          </span>
+          <span className="rounded-full border border-border bg-muted px-2 py-1">
+            Tier: {typeof research.opportunityTier === "string" ? formatEnum(research.opportunityTier) : "—"}
+          </span>
+          <span className="rounded-full border border-border bg-muted px-2 py-1">
+            Models: {typeof synthesisModel?.name === "string" ? synthesisModel.name : "—"} +{" "}
+            {typeof scoringModel?.name === "string" ? scoringModel.name : "—"} +{" "}
+            {typeof validationModel?.name === "string" ? validationModel.name : "—"}
+          </span>
+          <span className="rounded-full border border-border bg-muted px-2 py-1">
+            Kimi tokens: {modelTokenTotal(scoringModel)}
+          </span>
+          <span className="rounded-full border border-border bg-muted px-2 py-1">
+            K3 tokens: {modelTokenTotal(validationModel)}
+          </span>
+          <span className="rounded-full border border-border bg-muted px-2 py-1">
+            K3: {typeof validation?.status === "string" ? formatEnum(validation.status) : "—"}
+          </span>
+          <span className="rounded-full border border-border bg-muted px-2 py-1">
+            Company country: {typeof synthesis?.companyCountry === "string" ? synthesis.companyCountry : "unknown"}
+          </span>
+          {synthesis?.verifiedUsDivision === true ? (
+            <span className="rounded-full border border-border bg-muted px-2 py-1">
+              U.S. division: {typeof synthesis.usDivisionName === "string" ? synthesis.usDivisionName : "verified"}
+            </span>
+          ) : null}
+        </div>
+        {jsonStringArray(research.tierReasons).length ? (
+          <ul className="list-disc space-y-1 pl-5 text-mutedForeground">
+            {jsonStringArray(research.tierReasons).map((reason) => <li key={reason}>{reason}</li>)}
+          </ul>
+        ) : null}
+        {typeof validation?.rationale === "string" ? (
+          <p className="leading-5 text-mutedForeground">
+            K3 validation: {validation.rationale}
+          </p>
+        ) : null}
+        {typeof scoring?.rationale === "string" ? (
+          <p className="leading-5 text-mutedForeground">{scoring.rationale}</p>
+        ) : null}
+        {blockers.length ? (
+          <div className="rounded-md border border-warning/30 bg-warning/10 p-3">
+            <p className="font-semibold text-foreground">Deterministic blockers</p>
+            <ul className="mt-1 list-disc space-y-1 pl-5 text-mutedForeground">
+              {blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}
+            </ul>
+          </div>
+        ) : null}
+        <div className="grid gap-2">
+          {evidence.map((item, index) => {
+            const url = typeof item.url === "string" && item.url.startsWith("https://") ? item.url : null;
+            return (
+              <article key={`${url ?? "evidence"}-${index}`} className="rounded-md border border-border bg-muted/40 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold text-foreground">
+                    {typeof item.pass === "string" ? formatEnum(item.pass) : "Evidence"}
+                  </span>
+                  {typeof item.sourceType === "string" ? (
+                    <span className="rounded-full border border-border bg-card px-2 py-0.5">
+                      {formatEnum(item.sourceType)}
+                    </span>
+                  ) : null}
+                </div>
+                {typeof item.query === "string" ? (
+                  <p className="mt-2 break-words font-mono text-[11px] text-mutedForeground">
+                    Query: {item.query}
+                  </p>
+                ) : null}
+                <p className="mt-2 font-medium text-foreground">
+                  {url ? (
+                    <a href={url} target="_blank" rel="noreferrer" className="text-primary underline">
+                      {typeof item.title === "string" ? item.title : url}
+                    </a>
+                  ) : typeof item.title === "string" ? item.title : "Evidence source"}
+                </p>
+                {typeof item.excerpt === "string" ? (
+                  <p className="mt-1 leading-5 text-mutedForeground">{item.excerpt}</p>
+                ) : null}
+              </article>
+            );
+          })}
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function researchRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if ("research" in record) {
+    const nested = record.research;
+    return nested && typeof nested === "object" && !Array.isArray(nested)
+      ? nested as Record<string, unknown>
+      : null;
+  }
+  return record;
+}
+
+function researchTier(value: unknown) {
+  const research = researchRecord(value);
+  return typeof research?.opportunityTier === "string" ? research.opportunityTier : null;
+}
+
+function modelTokenTotal(value: Record<string, unknown> | null) {
+  if (!value) return "—";
+  const input = typeof value.inputTokens === "number" ? value.inputTokens : 0;
+  const output = typeof value.outputTokens === "number" ? value.outputTokens : 0;
+  return input || output ? String(input + output) : "—";
 }

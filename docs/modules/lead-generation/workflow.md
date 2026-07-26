@@ -46,6 +46,18 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 7. The next dry-run planner automatically considers accepted signals. No signal-scout path performs Apollo search, cadence mutation, enrollment, email, LinkedIn, or other customer communication.
 8. `--signal-scout-now` provides an explicit operator rerun. `--signal-scout-dry-run` exercises discovery and classification, then closes the prepared job as intentionally failed without persisting signals.
 
+## Company deep research
+
+1. After `HUNTER_COMPANY_RESEARCH_DAILY_TIME`, the existing Mac-mini service requests a tenant-scoped cohort from Newl Apps. The default limit is the saved Hunter policy limit; a new unsaved policy uses 30.
+2. The server applies the same customer, pipeline, reply, sequence, do-not-contact, do-not-prospect, suppression, and recency exclusions before returning company facts. No contact or Apollo payload is returned.
+3. Hunter runs four query passes per company: identity/parent, fresh events, first-party careers, and distribution footprint/named external providers. Brave Search is the approved production provider; Hunter normalizes Brave's `page_age` as a fallback `publishedAt`, replaces it with the page's original `datePublished` metadata when available, and requires Qwen to cite the exact evidence behind a trigger. DuckDuckGo HTML remains a bounded trial fallback without reliable search-result publication dates.
+4. The worker stores HTTPS URLs, matching source domains, queries, excerpts, first-party labels, retrieval failures, and limited page text. URL resolution and redirects reject local, private, and non-global network destinations.
+5. Local Qwen 3.5 35B synthesizes small structured batches with thinking disabled. It can propose at most two precise follow-up queries per company; Hunter retrieves them and reruns synthesis once.
+6. Kimi K2.6 scores demand trigger, service fit, timing, accessibility, and evidence quality from 0-20. Its reported total must equal the dimensions. Kimi K3 then conservatively validates at most five provisional fresh-event leaders with low reasoning and strict JSON output; it may confirm or downgrade but never promote.
+7. Newl Apps revalidates the tenant cohort and complete payload, then applies deterministic identity, logistics-provider, stable/exclusive external-provider, evidence-count, pass-coverage, freshness, company-country, and U.S.-division gates. Company country must come from public identity evidence, not shipment origin. Mainland-China entities without a cited U.S. division are blocked; other foreign entities without one receive a 10-point penalty and are capped at Watchlist.
+8. Newl Apps assigns Hot opportunity, Qualified current account, Watchlist, or Blocked. Hot/Qualified signals refresh the dry-run plan; Watchlist/Blocked signals remain visible in the audit inbox but are dismissed from planning. No Apollo lookup, pipeline mutation, cadence write, email, LinkedIn action, or other customer communication exists in this path.
+9. `--company-research-now` runs the queue explicitly. `--company-research-dry-run` stops before persistence. `--company-research-cohort <json>` replays an exact bounded company list for model comparisons. A redacted `--company-research-output` checkpoint is written after retrieval and Qwen; `--company-research-resume` can reuse it only when the newly prepared tenant cohort matches exactly, avoiding duplicate search traffic after a Kimi outage.
+
 ## Found Companies review
 
 - The review queue retains the tenant-scoped filters and computed score ordering, then renders 25 companies by default.

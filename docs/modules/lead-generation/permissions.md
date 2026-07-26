@@ -34,6 +34,11 @@ Roles and defaults are in `src/server/auth/role-policy.ts`. Runtime checks are i
 - Adding an opportunity signal and manually generating a dry-run plan require module mutation access.
 - Changing Hunter policy, allocation, mode, thresholds, jurisdictions, or kill switch requires tenant administrator access.
 - The daily machine route requires the existing Vercel `CRON_SECRET`, selects only Lead Generation-enabled tenants with a stored dry-run policy, and has no external-write capability.
+- Signal-scout and company-research machine routes require the tenant-bound ingestion credential and
+  resolve the tenant server-side. An explicit research cohort cannot select another tenant or bypass
+  the company/customer/contact suppression rules.
+- Company-research evidence and health are read through the authenticated Hunter page. Phase 3 has no
+  Apollo, pipeline-stage, cadence, email, LinkedIn, or other communication action.
 
 ## Failure modes
 

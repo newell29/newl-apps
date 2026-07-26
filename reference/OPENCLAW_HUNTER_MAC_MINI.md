@@ -22,6 +22,10 @@ Hunter is a replaceable collector, not the sales system of record.
 
 Hunter must not store Apollo credentials or enroll contacts directly.
 
+The opt-in company-research phase may store a dedicated local Brave search key and Kimi key in
+Hunter's protected `0600` environment. It never sends either value to Newl Apps or writes the values
+to a run ledger. Local Qwen remains on loopback.
+
 ## Safe VM source transfer
 
 Run this from the Mac Mini, not from inside the VM shell:
@@ -81,6 +85,7 @@ The checked-in template is `ops/openclaw/hunter/.env.example`. Store the real fi
 - `ops/openclaw/hunter/trademining_summary.py`: canonical record conversion and deduplication.
 - `ops/openclaw/hunter/hunter_ingest.py`: tenant-bound job creation, batched ingestion, completion/failure reporting.
 - `ops/openclaw/hunter/hunter_worker.py`: live active-profile lookup, manual run-request polling, once-daily eligibility, per-profile lookback/port planning, collection, and ingestion coordination.
+- `ops/openclaw/hunter/hunter_company_research.py`: bounded four-pass web retrieval, local Qwen synthesis, Kimi scoring, replay ledger generation, and tenant-bound completion reporting. It has no Apollo or outreach integration.
 - Each enabled profile begins with one full-lookback TradeMining BOL query. Optional destination ports use TradeMining's U.S.-port multi-select field; leaving them empty omits that field. Origin countries and foreign ports are resolved through its lookup service; ship-from ports and product keywords use Boolean `OR`; HS codes use TradeMining's comma-separated format; and `minShipmentVolume` is treated as minimum TEUs per BOL.
 - When the reported count exceeds 25,000, Hunter splits the date range into disjoint halves. A capped one-day query with multiple arrival ports is split into port groups. If a one-day one-port/no-port query is still capped, Hunter retains the available export and reports incomplete coverage instead of silently truncating it.
 - `minAggregateTeu` and industry-pack modes are evaluated in Newl Apps over the company's matched-profile evidence. They do not change the TradeMining form post.
@@ -90,6 +95,44 @@ The checked-in template is `ops/openclaw/hunter/.env.example`. Store the real fi
 - `ops/openclaw/launchd/com.newl.hunter-worker.plist.template`: persistent Mac Mini service.
 
 `HUNTER_REPO_PATH` is retired. The runner always resolves `hunter_worker.py` from its own dedicated checkout, so changing branches in a development checkout cannot alter the live process. Re-running the installer is the explicit update mechanism: it refreshes the runtime to the latest reviewed `origin/main` revision and restarts the service.
+
+Company research stays disabled until its reviewed code reaches the dedicated runtime checkout and
+the following local-only values are configured:
+
+```text
+HUNTER_COMPANY_RESEARCH_ENABLED=false
+HUNTER_COMPANY_RESEARCH_DAILY_TIME=09:15
+HUNTER_COMPANY_RESEARCH_TIMEZONE=America/Toronto
+HUNTER_RESEARCH_SEARCH_PROVIDER=BRAVE
+HUNTER_BRAVE_SEARCH_API_KEY=<dedicated read-only search key>
+HUNTER_RESEARCH_QWEN_MODEL=qwen3.5:35b
+HUNTER_KIMI_API_KEY=<dedicated Kimi key>
+HUNTER_KIMI_BASE_URL=https://api.moonshot.ai/v1
+HUNTER_KIMI_MODEL=kimi-k2.6
+HUNTER_KIMI_VALIDATOR_MODEL=kimi-k3
+HUNTER_RESEARCH_K3_VALIDATOR_LIMIT=5
+HUNTER_RESEARCH_K3_REASONING_EFFORT=LOW
+```
+
+Before enabling the schedule, replay a reviewed cohort:
+
+```bash
+python3 ops/openclaw/hunter/hunter_worker.py \
+  --company-research-dry-run \
+  --company-research-cohort /absolute/path/to/company-cohort.json \
+  --company-research-output /absolute/path/to/research-ledger.json
+```
+
+If Kimi is unavailable after retrieval/Qwen, the output is a redacted `SYNTHESIS_COMPLETE`
+checkpoint. Resume only against a newly prepared identical tenant cohort:
+
+```bash
+python3 ops/openclaw/hunter/hunter_worker.py \
+  --company-research-now \
+  --company-research-cohort /absolute/path/to/company-cohort.json \
+  --company-research-resume /absolute/path/to/research-ledger.json \
+  --company-research-output /absolute/path/to/research-ledger.json
+```
 
 Manual profile planning does not log in or export:
 

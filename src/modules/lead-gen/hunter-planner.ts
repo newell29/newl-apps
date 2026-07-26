@@ -18,7 +18,7 @@ export const HUNTER_DRY_RUN_JOB_TYPE = "HUNTER_DAILY_PROSPECTING_PLAN";
 export const DEFAULT_HUNTER_POLICY = {
   mode: HunterAutomationMode.DRY_RUN,
   killSwitch: false,
-  dailyCompanyLimit: 20,
+  dailyCompanyLimit: 30,
   maxContactsPerCompany: 2,
   warehousingPercent: 60,
   oceanAirPercent: 30,
@@ -50,7 +50,7 @@ export async function runHunterDryPlan({
 }: {
   tenantId: string;
   actorUserId: string | null;
-  trigger?: "MANUAL" | "SCHEDULED";
+  trigger?: "MANUAL" | "SCHEDULED" | "RESEARCH";
 }) {
   const policy = await prisma.hunterAutomationPolicy.findUnique({ where: { tenantId } });
   const effective = policy ?? DEFAULT_HUNTER_POLICY;
@@ -176,9 +176,12 @@ export async function runHunterDryPlan({
       if (suppressedCompanyIds.has(company.id) || suppressedValues.has(company.normalizedName.toLowerCase())) continue;
       const matchedSignals = signalsByKey.get(company.normalizedName) ?? [];
       if (company.importRecords.length === 0 && matchedSignals.length === 0) continue;
-      const strongest = matchedSignals[0];
+      const strongest = [...matchedSignals].sort(
+        (left, right) => hunterSignalPriority(right) - hunterSignalPriority(left)
+      )[0];
       const serviceLine = strongest?.serviceLine ?? HunterServiceLine.WAREHOUSING;
-      const confidence = Math.max(company.priorityScore, strongest?.confidence ?? 0);
+      const confidence = strongest?.confidence ?? company.priorityScore;
+      const strongestSignalScore = strongest ? hunterSignalPriority(strongest) : 0;
       const sourceTypes = [
         ...(company.importRecords.length > 0 ? ["TRADEMINING"] : []),
         ...matchedSignals.map((signal) => signal.signalType)
@@ -189,7 +192,10 @@ export async function runHunterDryPlan({
         companyKey: company.normalizedName,
         companyName: company.name,
         serviceLine,
-        priorityScore: Math.min(100, Math.max(company.priorityScore, confidence) + (sourceTypes.length > 1 ? 5 : 0)),
+        priorityScore: Math.min(
+          100,
+          Math.max(company.priorityScore, strongestSignalScore) + (sourceTypes.length > 1 ? 5 : 0)
+        ),
         confidence,
         opportunityType: strongest?.title ?? inferTradeMiningOpportunity(serviceLine),
         rationale: strongest?.summary ?? buildTradeMiningRationale(company.importRecords.length, latestShipment),
@@ -232,7 +238,7 @@ export async function runHunterDryPlan({
         companyKey: signal.normalizedCompanyName,
         companyName: signal.companyName,
         serviceLine: signal.serviceLine,
-        priorityScore: signal.confidence,
+        priorityScore: hunterSignalPriority(signal),
         confidence: signal.confidence,
         opportunityType: signal.title,
         rationale: signal.summary,
@@ -338,6 +344,17 @@ export async function runHunterDryPlan({
     });
     throw error;
   }
+}
+
+function hunterSignalPriority(signal: { confidence: number; evidence: Prisma.JsonValue | null }) {
+  const evidence = signal.evidence;
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) return signal.confidence;
+  const research = (evidence as Prisma.JsonObject).research;
+  if (!research || typeof research !== "object" || Array.isArray(research)) return signal.confidence;
+  const finalScore = (research as Prisma.JsonObject).finalScore;
+  return typeof finalScore === "number" && Number.isFinite(finalScore)
+    ? Math.max(0, Math.min(100, Math.round(finalScore)))
+    : signal.confidence;
 }
 
 export async function runDueHunterDryPlans(now = new Date()) {

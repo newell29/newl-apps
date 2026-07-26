@@ -45,6 +45,22 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 - Turning off `HUNTER_SIGNAL_SCOUT_ENABLED`, the Hunter policy, or the Hunter kill switch prevents the automatic scout from creating new signals.
 - Discovery-source licensing and acceptable-use review remains an enablement prerequisite. The code and example environment default the scout to off.
 
+## Company deep research fails
+
+- A missing search or Kimi credential, unavailable local Qwen, total search-provider failure,
+  incomplete structured output, company outside the prepared tenant cohort, forged URL/domain pair,
+  or invalid score arithmetic closes the tracked run as `ERROR`.
+- A failed completion is not partially persisted and does not refresh the prospecting plan. The
+  operator may use the exact-cohort dry run and local replay ledger to diagnose it.
+- Individual query failures remain visible in a valid completion, but deterministic evidence-count,
+  pass-coverage, identity, logistics-provider, stable/exclusive external-provider, and freshness gates fail closed. Transport success
+  with weak evidence cannot become a high-priority opportunity.
+- A K3 validation outage does not discard completed retrieval, Qwen synthesis, or K2.6 scoring.
+  Selected fresh-event candidates are retained as Watchlist and cannot become Hot until a later
+  successful validation. Current-account qualifications and deterministic blockers continue normally.
+- Automatic research remains disabled unless `HUNTER_COMPANY_RESEARCH_ENABLED=true`. The Hunter kill
+  switch or `OFF` mode prevents the server from preparing a cohort.
+
 ## A profile uses an unsupported arrival port
 
 - Symptom: the profile cannot be saved, or a legacy profile run fails with a port-mapping error.
