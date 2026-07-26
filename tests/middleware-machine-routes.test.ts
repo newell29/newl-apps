@@ -36,6 +36,14 @@ describe("middleware machine route exemptions", () => {
     expect(config.matcher[0]).toContain("api/website-growth/weekly-plan");
   });
 
+  it("lets the Hunter daily planner enforce Vercel cron authentication", () => {
+    expect(config.matcher[0]).toContain("api/lead-gen/hunter/daily-plan");
+    const matcher = new RegExp(`^${config.matcher[0]}$`);
+
+    expect(matcher.test("/api/lead-gen/hunter/daily-plan")).toBe(false);
+    expect(matcher.test("/lead-gen/hunter")).toBe(true);
+  });
+
   it("lets the approved-work backlink executor enforce its dedicated token auth", () => {
     expect(config.matcher[0]).toContain("api/website-growth/backlinks/executor");
     const matcher = new RegExp(`^${config.matcher[0]}$`);

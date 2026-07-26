@@ -30,6 +30,11 @@ flowchart LR
 
 Roles and defaults are in `src/server/auth/role-policy.ts`. Runtime checks are in `src/server/auth/authorization.ts`; gaps should be treated as requiring code review before enabling production writes.
 
+- Reading Hunter requires authenticated Lead Generation module access.
+- Adding an opportunity signal and manually generating a dry-run plan require module mutation access.
+- Changing Hunter policy, allocation, mode, thresholds, jurisdictions, or kill switch requires tenant administrator access.
+- The daily machine route requires the existing Vercel `CRON_SECRET`, selects only Lead Generation-enabled tenants with a stored dry-run policy, and has no external-write capability.
+
 ## Failure modes
 
 Expected failures include missing tenant entitlement, read-only mutation attempts, validation errors, missing integration credentials, duplicate records, empty parser results, external API errors, timeouts, and partial job completion. Recovery should use module UI review screens, audit/job records, and documented dry-run scripts before live writes.

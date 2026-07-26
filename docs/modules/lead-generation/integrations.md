@@ -27,6 +27,12 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - If a one-day query with one or no arrival port remains above 25,000 results, the export is retained and ingested but coverage is marked incomplete and the Newl Apps run is `PARTIAL`.
 - Industry packs and aggregate TEUs are evaluated in Newl Apps after ingestion. They do not add undocumented fields to TradeMining's form.
 
+## Hunter planning integration boundary
+
+- `/api/lead-gen/hunter/daily-plan` is invoked daily by Vercel Cron and authenticates with the existing `CRON_SECRET`; Phase 1 introduces no new environment variable.
+- Opportunity signals use a source-agnostic database contract. Manual entry is enabled first; automatic news, hiring, expansion, construction, and other collectors require a separate reviewed integration.
+- No Kimi, Qwen, OpenAI, Apollo, LinkedIn, email, or browser-automation call is made by the Phase 1 planner. Provider selection belongs in the later evidence-analysis stage after deterministic filtering and a measured quality/cost comparison.
+
 ## Data model
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.

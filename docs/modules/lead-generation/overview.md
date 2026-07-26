@@ -14,6 +14,12 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
 
+## Hunter dry-run control plane
+
+Hunter Phase 1 creates a daily, tenant-scoped prospecting plan without performing enrichment or outreach. It combines existing TradeMining company evidence with source-agnostic opportunity signals such as expansion, facility openings, retail rollouts, hiring, leadership changes, leases/construction, funding/acquisition, referrals, and manually researched news.
+
+The owner-approved planning allocation is 60% warehousing, 30% ocean/air, and 10% trucking. If one service-line bucket does not contain enough qualified companies, Hunter backfills with the highest-ranked remaining opportunities rather than padding the plan with weak records. The Hunter page exposes the effective policy, external-signal inbox, kill switch, manual dry-run control, and latest ranked plan. No Phase 1 path calls Apollo or sends a customer communication.
+
 ## Data model
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.

@@ -211,6 +211,54 @@ enum ContactTier {
   TIER_3
 }
 
+enum HunterAutomationMode {
+  OFF
+  DRY_RUN
+  ASSISTED
+  AUTOMATIC
+}
+
+enum HunterServiceLine {
+  WAREHOUSING
+  OCEAN_AIR
+  TRUCKING
+}
+
+enum HunterSignalType {
+  TRADEMINING
+  EXPANSION
+  FACILITY_OPENING
+  RETAIL_ROLLOUT
+  HIRING
+  LEADERSHIP_CHANGE
+  LEASE_OR_CONSTRUCTION
+  FUNDING_OR_ACQUISITION
+  NEWS
+  REFERRAL
+  MANUAL
+  OTHER
+}
+
+enum HunterSignalStatus {
+  NEW
+  ACTIVE
+  DISMISSED
+  EXPIRED
+}
+
+enum HunterDecisionStatus {
+  WOULD_PURSUE
+  NEEDS_RESEARCH
+  BLOCKED
+}
+
+enum HunterSuppressionScope {
+  COMPANY
+  CONTACT
+  EMAIL
+  DOMAIN
+}
+
 enum ApolloStatus {
   NOT_STARTED
   ENRICHED
@@ -475,6 +523,10 @@ model Tenant {
   tradeMiningScoringConfig                TradeMiningScoringConfig?
   leadScoreSnapshots                      LeadScoreSnapshot[]
   leadOutcomeEvents                       LeadOutcomeEvent[]
+  hunterAutomationPolicy                  HunterAutomationPolicy?
+  hunterOpportunitySignals                HunterOpportunitySignal[]
+  hunterProspectingDecisions              HunterProspectingDecision[]
+  hunterOutreachSuppressions              HunterOutreachSuppression[]
   contacts                                Contact[]
   leads                                   Lead[]
   contactOutreachDrafts                   ContactOutreachDraft[]
@@ -1512,9 +1564,11 @@ model AutomationJobRun {
   errorMessage String?
   createdAt    DateTime  @default(now())
 
-  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  ltlBatchQuoteLanes LtlBatchQuoteLane[]
+  tenant                     Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ltlBatchQuoteLanes         LtlBatchQuoteLane[]
+  hunterProspectingDecisions HunterProspectingDecision[]
 
+  @@unique([tenantId, id])
   @@index([tenantId, jobType, startedAt])
   @@index([tenantId, status])
 }
@@ -1562,16 +1616,19 @@ model Company {
   createdAt                DateTime        @default(now())
   updatedAt                DateTime        @updatedAt
 
-  tenant                  Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  importRecords           TradeMiningImportRecord[]
-  contacts                Contact[]
-  leads                   Lead[]
-  contactOutreachDrafts   ContactOutreachDraft[]
-  apolloCompanyMatches    ApolloCompanyMatch[]
-  leadScoreSnapshots      LeadScoreSnapshot[]
-  leadOutcomeEvents       LeadOutcomeEvent[]
-  cashflowCustomers       CashflowCustomer[]
-  cashflowCustomerAliases CashflowCustomerAlias[]
+  tenant                     Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  importRecords              TradeMiningImportRecord[]
+  contacts                   Contact[]
+  leads                      Lead[]
+  contactOutreachDrafts      ContactOutreachDraft[]
+  apolloCompanyMatches       ApolloCompanyMatch[]
+  leadScoreSnapshots         LeadScoreSnapshot[]
+  leadOutcomeEvents          LeadOutcomeEvent[]
+  cashflowCustomers          CashflowCustomer[]
+  cashflowCustomerAliases    CashflowCustomerAlias[]
+  hunterOpportunitySignals   HunterOpportunitySignal[]
+  hunterProspectingDecisions HunterProspectingDecision[]
+  hunterOutreachSuppressions HunterOutreachSuppression[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, normalizedName])
@@ -1916,6 +1973,115 @@ model LeadOutcomeEvent {
   @@index([tenantId, leadId, occurredAt])
   @@index([tenantId, outcomeType, occurredAt])
   @@index([tenantId, scoreSnapshotId])
+}
+
+model HunterAutomationPolicy {
+  id                      String               @id @default(cuid())
+  tenantId                String               @unique
+  mode                    HunterAutomationMode @default(DRY_RUN)
+  killSwitch              Boolean              @default(false)
+  dailyCompanyLimit       Int                  @default(20)
+  maxContactsPerCompany   Int                  @default(2)
+  warehousingPercent      Int                  @default(60)
+  oceanAirPercent         Int                  @default(30)
+  truckingPercent         Int                  @default(10)
+  minimumPriorityScore    Int                  @default(35)
+  minimumSignalConfidence Int                  @default(50)
+  allowedJurisdictions    Json?
+  scheduleTimezone        String               @default("America/Toronto")
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model HunterOpportunitySignal {
+  id                    String             @id @default(cuid())
+  tenantId              String
+  companyId             String?
+  companyName           String
+  normalizedCompanyName String
+  signalType            HunterSignalType
+  serviceLine           HunterServiceLine
+  status                HunterSignalStatus @default(NEW)
+  title                 String
+  summary               String
+  geography             String?
+  sourceName            String?
+  sourceUrl             String?
+  sourcePublishedAt     DateTime?
+  observedAt            DateTime           @default(now())
+  expiresAt             DateTime?
+  confidence            Int                @default(50)
+  dedupeKey             String
+  evidence              Json?
+  rawJson               Json?
+  createdByUserId       String?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company Company? @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: NoAction)
+
+  @@unique([tenantId, dedupeKey])
+  @@index([tenantId, status, serviceLine])
+  @@index([tenantId, normalizedCompanyName])
+  @@index([tenantId, observedAt])
+}
+
+model HunterProspectingDecision {
+  id                 String               @id @default(cuid())
+  tenantId           String
+  jobRunId           String
+  companyId          String?
+  companyKey         String
+  companyName        String
+  serviceLine        HunterServiceLine
+  status             HunterDecisionStatus
+  rank               Int
+  priorityScore      Int
+  confidence         Int
+  opportunityType    String
+  rationale          String
+  recommendedPersona String?
+  recommendedSender  String?
+  recommendedCadence String?
+  sourceTypes        Json
+  evidence           Json
+  blockers           Json?
+  configSnapshot     Json
+  createdAt          DateTime             @default(now())
+
+  tenant  Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  jobRun  AutomationJobRun @relation(fields: [tenantId, jobRunId], references: [tenantId, id], onDelete: Cascade)
+  company Company?         @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: NoAction)
+
+  @@unique([tenantId, jobRunId, companyKey])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, serviceLine, createdAt])
+  @@index([tenantId, companyId, createdAt])
+}
+
+model HunterOutreachSuppression {
+  id              String                 @id @default(cuid())
+  tenantId        String
+  companyId       String?
+  scope           HunterSuppressionScope
+  value           String
+  reason          String
+  source          String
+  active          Boolean                @default(true)
+  expiresAt       DateTime?
+  createdByUserId String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company Company? @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: NoAction)
+
+  @@unique([tenantId, scope, value])
+  @@index([tenantId, active, scope])
+  @@index([tenantId, companyId])
 }
 
 model CashflowCustomer {

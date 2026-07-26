@@ -116,3 +116,17 @@ The `20260722193000_add_lead_scoring_history` migration must remain additive: it
 The `20260722201500_link_lead_outcomes_to_scores` migration may only add the nullable snapshot foreign key; it must not rewrite existing outcomes.
 The `20260722214500_add_apollo_status_sync_tracking` migration may only add nullable timestamps/error text, a defaulted failure counter, and indexes to `Contact`; it must not rewrite existing contact data.
 The `20260724170000_add_hunter_profile_coverage_rules` migration may only add industry-pack JSON, the defaulted industry mode, and the nullable aggregate-TEU threshold; it must not delete, rename, update, or backfill existing data.
+
+## Hunter dry-run planning
+
+Regression coverage must prove:
+
+1. a limit of 20 produces 12 warehousing, 6 ocean/air, and 2 trucking positions when every bucket is supplied;
+2. an undersupplied service bucket is backfilled with the highest-ranked remaining qualified opportunities;
+3. allocations outside 0-100 or not totaling exactly 100 are rejected;
+4. every company, signal, suppression, policy, decision, and run query remains tenant scoped;
+5. existing pipeline leads, replies, prior sequence history, do-not-contact, do-not-prospect, cashflow customers, and active suppressions are excluded;
+6. the scheduled route rejects an absent or invalid `CRON_SECRET`, runs at most once per tenant local calendar date, and records tenant failures without authorizing external writes;
+7. the Hunter UI and planner contain no Apollo enrollment or communication action.
+
+Migration `20260725120000_add_hunter_dry_run_control_plane` must remain additive and may not rewrite existing company, contact, lead, TradeMining, Apollo, scoring, or outreach records.

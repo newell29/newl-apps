@@ -29,6 +29,16 @@ Relevant tables and enums are in `prisma/schema.prisma`. Operationally important
 
 TradeMining run coverage is stored in the existing `AutomationJobRun.output.metadata` JSON rather than a new table. The latest profile run exposes `matchedRecords`, `exportedRecords`, `queryCount`, `qualifyingCompanies`, and `retrievalComplete` in the Search Profiles UI.
 
+Hunter Phase 1 adds only new tables and enums:
+
+- `HunterAutomationPolicy` stores one tenant policy, kill switch, daily limits, the 60/30/10 allocation, thresholds, and planning timezone. Its nullable jurisdiction JSON is reserved for a later, explicitly defined geographic policy and is not treated as an active Phase 1 filter.
+- `HunterOpportunitySignal` stores normalized, deduplicated external evidence and may optionally link to an existing tenant company.
+- `HunterProspectingDecision` is an immutable decision per company and planning job. It preserves the scores, explanation, sources, recommendations, evidence, and configuration used at decision time.
+- `HunterOutreachSuppression` stores tenant-scoped company/contact/email/domain exclusions for use before planning or future outreach.
+- `AutomationJobRun` remains the run ledger and links to its Hunter decisions.
+
+Migration `20260725120000_add_hunter_dry_run_control_plane` is additive. It creates these enums, tables, indexes, and tenant-safe foreign keys; it does not delete, rename, update, backfill, or otherwise rewrite existing records.
+
 ```mermaid
 flowchart LR
   UI[Authenticated UI/API] --> Auth[Auth + module guard]

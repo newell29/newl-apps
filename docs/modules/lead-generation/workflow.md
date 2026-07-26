@@ -25,6 +25,16 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 7. Candidate evidence is limited to the matched profile and lookback. Companies must meet `minShipmentCount`, optional aggregate TEUs, and any hard/exclude industry mode before appearing in Found Companies. Prefer mode affects ranking only.
 8. If a capped result can no longer be divided, Hunter ingests the available export but closes the run as `PARTIAL`. If local profile configuration is invalid, the tracked run finishes as failed and the Search Profiles screen displays the error. Hunter does not repeat that daily attempt until the next local day; an operator can correct the profile and use **Run now**.
 
+## Daily Hunter prospecting plan
+
+1. TradeMining ingestion remains one opportunity source. Employees or future collectors can add independent signals for expansions, new facilities, retail rollouts, hiring, leadership changes, leases/construction, funding/acquisition, referrals, and news.
+2. The daily planner considers tenant-owned companies plus active external signals. An external signal can be planned even when no TradeMining company exists yet.
+3. Hunter excludes do-not-prospect, rejected/disqualified, existing cashflow-customer, actively suppressed, any existing pipeline lead, replied, do-not-contact, and previously sequenced records before ranking.
+4. Qualified opportunities are selected at 60% warehousing, 30% ocean/air, and 10% trucking. Empty service buckets are filled with the strongest remaining qualified opportunities.
+5. Every decision stores the opportunity type, rationale, confidence, evidence sources, recommended buyer persona, recommended cadence category, and effective policy snapshot.
+6. The manual action and `/api/lead-gen/hunter/daily-plan` both run the same deterministic planner. The Vercel route uses the existing `CRON_SECRET` and skips tenants already planned on their local calendar date.
+7. Phase 1 stops after persisting and displaying the plan. It does not search Apollo, create contacts, draft emails, change a cadence, enroll a contact, or send a message.
+
 ## Found Companies review
 
 - The review queue retains the tenant-scoped filters and computed score ordering, then renders 25 companies by default.

@@ -32,6 +32,7 @@ const navEntries: NavNode[] = [
     id: "sales",
     label: "Sales",
     children: [
+      { id: "lead-hunter", href: "/lead-gen/hunter", label: "Hunter", moduleKey: "LEAD_GEN" as ModuleKey },
       {
         id: "trademining",
         label: "TradeMining",
