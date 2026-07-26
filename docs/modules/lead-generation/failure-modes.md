@@ -86,6 +86,23 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 - Automatic research remains disabled unless `HUNTER_COMPANY_RESEARCH_ENABLED=true`. The Hunter kill
   switch or `OFF` mode prevents the server from preparing a cohort.
 
+## Hunter quality control finds or misses a defect
+
+- The auditor returns exactly one structured finding for each sampled signal. A missing, duplicate, or
+  out-of-cohort signal fails the whole audit instead of partially recording a misleading result.
+- A worker/Codex/schema failure marks the audit failed and sends a safe Teams alert. It does not
+  reclassify a lead or queue a Rivet job from an incomplete audit.
+- Model-judgment, credential, runtime, and configuration findings are recorded and reported but do not
+  auto-create code work.
+- Reproducible retrieval, handoff, rule, or TradeMining code defects create Rivet work only when the
+  exact standing-approval value is present. Without it, the Teams message says the defect was recorded
+  but not queued.
+- Repeated identical incidents trip the seven-day circuit breaker. Review the existing Rivet job or
+  underlying runtime before another automated development attempt.
+- The auditor is a bounded daily sample, not proof that every classification is correct. The tiered
+  sample, independent web research, deterministic TradeMining checks, and stored evidence make misses
+  more likely to surface without pretending to eliminate all model or search-index risk.
+
 ## A profile uses an unsupported arrival port
 
 - Symptom: the profile cannot be saved, or a legacy profile run fails with a port-mapping error.

@@ -58,6 +58,16 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 8. Newl Apps assigns Hot opportunity, Qualified current account, Watchlist, or Blocked. Hot/Qualified signals refresh the dry-run plan; Watchlist/Blocked signals remain visible in the audit inbox but are dismissed from planning. No Apollo lookup, pipeline mutation, cadence write, email, LinkedIn action, or other customer communication exists in this path.
 9. `--company-research-now` runs the queue explicitly. `--company-research-dry-run` stops before persistence. `--company-research-cohort <json>` replays an exact bounded company list for model comparisons. A redacted `--company-research-output` checkpoint is written after retrieval and Qwen; `--company-research-resume` can reuse it only when the newly prepared tenant cohort matches exactly, avoiding duplicate search traffic after a Kimi outage.
 
+## Hunter quality control and Rivet
+
+1. At 11:30 America/Toronto, after the normal TradeMining and company-research windows, the dedicated Rivet runtime starts a separate quality audit.
+2. Newl Apps selects at most five recent tenant-scoped Hunter research signals: one Hot, one Qualified current account, one Watchlist, one Blocked, then the newest remaining signal. The saved ledger and tier are treated as claims, not truth.
+3. Read-only Codex performs bounded current web research and returns one schema-validated result per company. It distinguishes missing retrieval, evidence lost between model stages, deterministic rule defects, subjective model judgment, and data/configuration issues.
+4. The same run deterministically checks that every enabled TradeMining profile ran once that local day, removed/disabled profiles did not run, active runs do not overlap or remain stuck, adaptive retrieval completed, and exported/ingested counts reconcile. A zero-result run is an anomaly only when that profile has recent positive history.
+5. Reproducible evidence-retrieval, handoff, deterministic-rule, and TradeMining code defects can create a tenant-scoped approved Rivet development job only when `HUNTER_RIVET_AUTO_TRIAGE_APPROVAL` exactly equals `OWNER_APPROVED_HUNTER_QUALITY_TRIAGE`.
+6. Rivet may inspect the frozen evidence, edit an isolated branch, add tests/docs, push, and open a draft PR. It may not reclassify a lead, retry TradeMining or outreach, merge, deploy, write production data, change permissions, or contact a prospect.
+7. The daily audit result is sent to Alex through the existing protected Rivet Teams target. Rivet's normal completion/failure message later reports the draft PR outcome. A repeated identical defect trips a circuit breaker and is not queued again.
+
 ## Found Companies review
 
 - The human review screen is a bounded queue of at most the 100 highest-priority tenant-scoped companies, rather than a browser for the entire company corpus.

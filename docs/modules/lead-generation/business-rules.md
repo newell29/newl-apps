@@ -81,6 +81,17 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - Completion refreshes the dry-run prospecting plan. It cannot search Apollo, change a company or lead stage, enroll a cadence, draft/send email, or perform LinkedIn activity.
 - Research data reuses the additive Hunter signal and `AutomationJobRun` JSON ledgers. Phase 3 requires no database migration and does not rewrite existing company, contact, lead, TradeMining, Apollo, scoring, or outreach records.
 
+## Hunter quality and TradeMining run assurance
+
+- The daily quality audit samples at most five recent classifications and deliberately covers Hot, Qualified current account, Watchlist, and Blocked before filling any remaining slot.
+- Codex auditing is read-only. Its output cannot directly change a signal, company, score, pipeline stage, contact, cadence, or outreach record.
+- A missing source is a retrieval defect only when independent public research verifies a material source that existed for the audited run. Evidence already present in the saved ledger but absent from a downstream model decision is a handoff defect. A disagreement after the evidence reached the model is model judgment and is not auto-fixed.
+- Every enabled TradeMining profile must have a tracked ingestion attempt once per local day after the monitoring grace hour. A run for a removed or disabled profile, overlapping active runs, missing coverage metrics, incomplete adaptive retrieval, or exported/processed count mismatch is a deterministic alert.
+- Zero TradeMining matches are not automatically an error. They become a review anomaly only when the same profile has recent positive run history.
+- Only reproducible code defects may use the owner-enabled Hunter Rivet standing approval. Credentials, authorization, transient runtime failures, configuration issues, and subjective scoring always require review.
+- The second identical incident within seven days trips the incident circuit breaker. It reuses the existing Rivet job when present and does not create another automatic draft-PR job.
+- Teams notifications always state that no lead was reclassified, no search/outreach was retried, and nothing was merged or deployed.
+
 ## Data model
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.

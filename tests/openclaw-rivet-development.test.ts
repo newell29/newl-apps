@@ -8,11 +8,18 @@ import { describe, expect, it } from "vitest";
 const execFileAsync = promisify(execFile);
 const repoRoot = process.cwd();
 const runnerPath = path.join(repoRoot, "ops/openclaw/run-rivet-development-job.sh");
+const hunterQualityRunnerPath = path.join(
+  repoRoot,
+  "ops/openclaw/run-rivet-hunter-quality-audit.sh"
+);
 const installerPath = path.join(repoRoot, "ops/openclaw/install-rivet-development-worker.sh");
 
 describe("Rivet local Codex development worker", () => {
   it("keeps the runner and installer valid zsh", async () => {
     await expect(execFileAsync("/bin/zsh", ["-n", runnerPath])).resolves.toBeDefined();
+    await expect(
+      execFileAsync("/bin/zsh", ["-n", hunterQualityRunnerPath])
+    ).resolves.toBeDefined();
     await expect(execFileAsync("/bin/zsh", ["-n", installerPath])).resolves.toBeDefined();
   });
 
@@ -47,5 +54,22 @@ describe("Rivet local Codex development worker", () => {
     expect(installer).toContain("--cron \"* * * * *\"");
     expect(installer).toContain("--no-deliver");
     expect(installer).toContain("RIVET_TEAMS_TARGET");
+    expect(installer).toContain("--name \"NEWL Hunter Quality Auditor\"");
+    expect(installer).toContain(
+      "--declaration-key \"newl.hunter.quality-auditor.daily.v1\""
+    );
+    expect(installer).toContain("--cron \"30 11 * * *\"");
+  });
+
+  it("keeps Hunter quality research read-only and sends only the bounded result to Teams", async () => {
+    const runner = await readFile(hunterQualityRunnerPath, "utf8");
+
+    expect(runner).toContain("--sandbox read-only");
+    expect(runner).toContain("--output-schema");
+    expect(runner).toContain("send_rivet_teams_message");
+    expect(runner).toContain("No lead was reclassified");
+    expect(runner).not.toMatch(/\bgh pr merge\b/);
+    expect(runner).not.toMatch(/\bvercel deploy\b/);
+    expect(runner).not.toContain("INGESTION_API_TOKEN");
   });
 });

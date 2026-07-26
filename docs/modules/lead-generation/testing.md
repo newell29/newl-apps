@@ -163,3 +163,20 @@ Regression coverage must prove:
 11. a retrieval/Qwen checkpoint resumes only against an identical newly prepared tenant cohort;
 12. legal-name, regional, and brand aliases cover known false-negative shapes such as Aalberts IPS Americas, AS Colour, 3F North America, Barnhardt Manufacturing, and Atlas Copco Compressors; and
 13. no company-research module or route imports or calls Apollo, pipeline-stage mutation, cadence enrollment, email, LinkedIn, or customer-communication code.
+
+## Hunter quality audit and Rivet triage
+
+Regression coverage must prove:
+
+1. the sample selects one Hot, Qualified current account, Watchlist, and Blocked signal before filling the fifth slot;
+2. prepare/complete/fail require the authenticated administrator's tenant and mutation access;
+3. completion returns exactly one result for every prepared tenant-scoped signal and rejects duplicates or foreign IDs;
+4. Codex output accepts only the documented categories, tiers, severities, booleans, and HTTPS evidence URLs;
+5. model judgment and data/configuration issues notify but never auto-queue Rivet;
+6. reproducible retrieval, handoff, and deterministic-rule defects require the exact owner standing-approval value;
+7. a Rivet suggestion forbids reclassification, TradeMining/outreach retry, merge, deploy, production writes, permissions, and customer communication;
+8. a second identical seven-day incident trips the circuit breaker and does not create another development job;
+9. enabled TradeMining profiles without a due run, removed/disabled profiles that ran, overlap, stuck/failed runs, missing/incomplete coverage, and exported/processed count drift are detected;
+10. a zero-result profile is only an anomaly when recent positive history exists;
+11. shell/schema tests preserve a read-only Codex audit, the 11:30 America/Toronto schedule, and Teams delivery through `RIVET_TEAMS_TARGET`; and
+12. no schema migration is required because audit, incident, feedback, suggestion, and Rivet state use existing tenant-scoped tables.
