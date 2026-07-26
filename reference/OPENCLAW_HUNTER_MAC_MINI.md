@@ -109,6 +109,9 @@ HUNTER_RESEARCH_QWEN_MODEL=qwen3.5:35b
 HUNTER_KIMI_API_KEY=<dedicated Kimi key>
 HUNTER_KIMI_BASE_URL=https://api.moonshot.ai/v1
 HUNTER_KIMI_MODEL=kimi-k2.6
+HUNTER_KIMI_VALIDATOR_MODEL=kimi-k3
+HUNTER_RESEARCH_K3_VALIDATOR_LIMIT=5
+HUNTER_RESEARCH_K3_REASONING_EFFORT=LOW
 ```
 
 Before enabling the schedule, replay a reviewed cohort:

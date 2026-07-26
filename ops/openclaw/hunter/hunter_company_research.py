@@ -25,8 +25,10 @@ DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_QWEN_MODEL = "qwen3.5:35b"
 DEFAULT_KIMI_URL = "https://api.moonshot.ai/v1"
 DEFAULT_KIMI_MODEL = "kimi-k2.6"
-PROMPT_VERSION = "hunter-company-research-v6"
+DEFAULT_KIMI_VALIDATOR_MODEL = "kimi-k3"
+PROMPT_VERSION = "hunter-company-research-v7"
 ALLOWED_SERVICE_LINES = {"WAREHOUSING", "OCEAN_AIR", "TRUCKING"}
+ALLOWED_OPERATING_REGIONS = {"NORTH_AMERICA", "CHINA", "OTHER_FOREIGN", "UNKNOWN"}
 ALLOWED_SIGNAL_TYPES = {
     "EXPANSION",
     "FACILITY_OPENING",
@@ -75,6 +77,18 @@ SYNTHESIS_SCHEMA = {
                         "maxItems": 5,
                     },
                     "geography": {"type": ["string", "null"]},
+                    "companyCountry": {"type": ["string", "null"]},
+                    "operatingRegion": {
+                        "type": "string",
+                        "enum": sorted(ALLOWED_OPERATING_REGIONS),
+                    },
+                    "verifiedUsDivision": {"type": "boolean"},
+                    "usDivisionName": {"type": ["string", "null"]},
+                    "usDivisionEvidenceIndices": {
+                        "type": "array",
+                        "items": {"type": "integer", "minimum": 0},
+                        "maxItems": 5,
+                    },
                     "serviceLine": {
                         "type": "string",
                         "enum": sorted(ALLOWED_SERVICE_LINES),
@@ -109,12 +123,62 @@ SYNTHESIS_SCHEMA = {
                     "opportunitySummary",
                     "triggerEvidenceIndices",
                     "geography",
+                    "companyCountry",
+                    "operatingRegion",
+                    "verifiedUsDivision",
+                    "usDivisionName",
+                    "usDivisionEvidenceIndices",
                     "serviceLine",
                     "signalType",
                     "confidence",
                     "rationale",
                     "missingEvidence",
                     "followUpQueries",
+                ],
+            },
+        }
+    },
+    "required": ["companies"],
+}
+
+VALIDATION_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "companies": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "companyKey": {"type": "string"},
+                    "disposition": {
+                        "type": "string",
+                        "enum": ["CONFIRM", "DOWNGRADE_TO_WATCHLIST"],
+                    },
+                    "validatedScore": {"type": "integer", "minimum": 0, "maximum": 100},
+                    "confidence": {"type": "integer", "minimum": 0, "maximum": 100},
+                    "rationale": {"type": "string"},
+                    "riskFlags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": 5,
+                    },
+                    "supportingEvidenceIndices": {
+                        "type": "array",
+                        "items": {"type": "integer", "minimum": 0},
+                        "minItems": 1,
+                        "maxItems": 5,
+                    },
+                },
+                "required": [
+                    "companyKey",
+                    "disposition",
+                    "validatedScore",
+                    "confidence",
+                    "rationale",
+                    "riskFlags",
+                    "supportingEvidenceIndices",
                 ],
             },
         }
@@ -576,6 +640,16 @@ def ollama_synthesis_request(
         "publishedAt value; a recent generic company profile cannot date an unrelated old event. CURRENT means current "
         "operating footprint or hiring evidence without a discrete trigger. STALE or NONE must not be "
         "described as a near-term trigger. Never invent a location, facility, buyer, event, or relationship. "
+        "Determine companyCountry and operatingRegion only from public identity evidence about the company "
+        "or its verified parent, never from TradeMining shipment origin, foreign port, product, or routing "
+        "facts. companyCountry must be the full human country name such as United States, Canada, France, "
+        "or China; never return a region name or schema enum in companyCountry. NORTH_AMERICA means the United States or Canada. CHINA means a mainland-China operating "
+        "company. OTHER_FOREIGN means a verified country outside the United States, Canada, and mainland "
+        "China. Use UNKNOWN when public identity evidence does not establish the country. "
+        "verifiedUsDivision is true only when supplied public evidence explicitly identifies a named U.S. "
+        "operating subsidiary or division of the same company. A U.S. customer, shipment, distributor, "
+        "port, address listing, or market presence alone is not a verified U.S. division. When true, provide "
+        "usDivisionName and one to five exact evidenceIndex values; otherwise return null and an empty array. "
         "identityConfidence and confidence measure evidence reliability even when the opportunity is weak; "
         "do not set them to zero merely because no buying trigger or outsourcing evidence was found. A PASS "
         "identity should normally have identityConfidence of at least 70. Mark identity AMBIGUOUS when the "
@@ -734,6 +808,86 @@ def kimi_scoring_request(
         "estimatedCostUsd": None,
     }
 
+def kimi_validation_request(
+    base_url: str,
+    api_key: str,
+    model: str,
+    reasoning_effort: str,
+    company_packets: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    system_prompt = (
+        "You are the conservative final validator for Hunter's highest-ranked logistics opportunities. "
+        "Use only the supplied public evidence, local synthesis, and K2.6 score. You cannot browse, promote "
+        "a candidate, override any deterministic blocker, or raise the K2.6 score. CONFIRM only when the "
+        "same cited evidence proves a material event within 18 months, the event has a concrete logistics "
+        "implication, the company identity is exact, and the score is defensible. Otherwise choose "
+        "DOWNGRADE_TO_WATCHLIST. validatedScore must be less than or equal to the supplied K2.6 score. "
+        "supportingEvidenceIndices must cite the exact supplied evidenceIndex values used for the decision. "
+        "Treat missing dates, weak company identity, generic growth language, ordinary operations, inaccessible "
+        "foreign ownership, and unclear outsourcing need as downgrade risks. Never invent."
+    )
+    payload = {
+        "model": model,
+        "reasoning_effort": reasoning_effort.lower(),
+        "max_tokens": 8_000,
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "hunter_k3_opportunity_validation",
+                "strict": True,
+                "schema": VALIDATION_SCHEMA,
+            },
+        },
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": (
+                    f"Prompt version: {PROMPT_VERSION}\n"
+                    "Validate every supplied company conservatively. Return only the schema result.\n\n"
+                    f"{json.dumps(company_packets, ensure_ascii=False)}"
+                ),
+            },
+        ],
+    }
+    started = time.monotonic()
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}/chat/completions",
+        data=json.dumps(payload).encode(),
+        method="POST",
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=900) as response:
+            body = response.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as error:
+        detail = error.read(2_000).decode("utf-8", "replace") if error.fp else ""
+        raise RuntimeError(f"Kimi K3 returned HTTP {error.code}: {detail[:500]}") from error
+    except urllib.error.URLError as error:
+        raise RuntimeError(f"Kimi K3 request failed: {error.reason}") from error
+    try:
+        envelope = json.loads(body)
+        choice = envelope["choices"][0]
+        parsed = parse_json_object(choice["message"]["content"])
+        rows = parsed["companies"]
+    except (json.JSONDecodeError, KeyError, TypeError, IndexError) as error:
+        raise RuntimeError("Kimi K3 returned invalid structured validation.") from error
+    if not isinstance(rows, list):
+        raise RuntimeError("Kimi K3 validation did not contain a companies array.")
+    usage = envelope.get("usage") if isinstance(envelope.get("usage"), dict) else {}
+    prompt_details = usage.get("prompt_tokens_details") if isinstance(usage.get("prompt_tokens_details"), dict) else {}
+    return rows, {
+        "inputTokens": int(usage.get("prompt_tokens") or 0),
+        "cachedInputTokens": int(prompt_details.get("cached_tokens") or 0),
+        "outputTokens": int(usage.get("completion_tokens") or 0),
+        "durationMs": round((time.monotonic() - started) * 1000),
+        "estimatedCostUsd": None,
+    }
+
 
 def strip_json_fence(value: str) -> str:
     normalized = value.strip()
@@ -767,12 +921,15 @@ def validate_synthesis(row: dict[str, Any], company_key: str) -> dict[str, Any]:
     freshness = clean(row.get("freshness"))
     service_line = clean(row.get("serviceLine"))
     signal_type = clean(row.get("signalType"))
+    operating_region = clean(row.get("operatingRegion"))
     if disposition not in {"PASS", "AMBIGUOUS", "BLOCK"}:
         raise RuntimeError(f"Qwen returned an invalid identity disposition for {company_key}.")
     if freshness not in {"FRESH", "CURRENT", "STALE", "NONE"}:
         raise RuntimeError(f"Qwen returned invalid freshness for {company_key}.")
     if service_line not in ALLOWED_SERVICE_LINES or signal_type not in ALLOWED_SIGNAL_TYPES:
         raise RuntimeError(f"Qwen returned invalid Hunter enums for {company_key}.")
+    if operating_region not in ALLOWED_OPERATING_REGIONS:
+        raise RuntimeError(f"Qwen returned an invalid operating region for {company_key}.")
     raw_trigger_indices = row.get("triggerEvidenceIndices")
     if not isinstance(raw_trigger_indices, list) or not 1 <= len(raw_trigger_indices) <= 5:
         raise RuntimeError(f"Qwen must cite one to five trigger evidence records for {company_key}.")
@@ -780,6 +937,19 @@ def validate_synthesis(row: dict[str, Any], company_key: str) -> dict[str, Any]:
         bounded_integer(item, 0, 23)
         for item in raw_trigger_indices
     ]
+    verified_us_division = row.get("verifiedUsDivision") is True
+    us_division_name = bounded_text(row.get("usDivisionName"), "", 300) or None
+    raw_us_division_indices = row.get("usDivisionEvidenceIndices")
+    if not isinstance(raw_us_division_indices, list) or len(raw_us_division_indices) > 5:
+        raise RuntimeError(f"Qwen returned invalid U.S. division evidence for {company_key}.")
+    us_division_indices = [
+        bounded_integer(item, 0, 23)
+        for item in raw_us_division_indices
+    ]
+    if verified_us_division and (not us_division_name or not us_division_indices):
+        raise RuntimeError(f"Qwen must name and cite a verified U.S. division for {company_key}.")
+    if not verified_us_division and us_division_indices:
+        raise RuntimeError(f"Qwen cited a U.S. division without verifying one for {company_key}.")
     return {
         "identityDisposition": disposition,
         "identityConfidence": bounded_integer(row.get("identityConfidence"), 0, 100),
@@ -791,6 +961,11 @@ def validate_synthesis(row: dict[str, Any], company_key: str) -> dict[str, Any]:
         "freshness": freshness,
         "opportunitySummary": bounded_text(row.get("opportunitySummary"), "No opportunity summary.", 2_000),
         "geography": bounded_text(row.get("geography"), "", 300) or None,
+        "companyCountry": bounded_text(row.get("companyCountry"), "", 200) or None,
+        "operatingRegion": operating_region,
+        "verifiedUsDivision": verified_us_division,
+        "usDivisionName": us_division_name,
+        "usDivisionEvidenceIndices": us_division_indices,
         "serviceLine": service_line,
         "signalType": signal_type,
         "confidence": bounded_integer(row.get("confidence"), 0, 100),
@@ -798,6 +973,35 @@ def validate_synthesis(row: dict[str, Any], company_key: str) -> dict[str, Any]:
         "missingEvidence": bounded_string_list(row.get("missingEvidence"), 10, 300),
         "triggerEvidenceIndices": trigger_indices,
         "followUpQueries": bounded_string_list(row.get("followUpQueries"), 2, 500),
+    }
+
+def validate_k3_validation(
+    row: dict[str, Any],
+    company_key: str,
+    maximum_score: int,
+) -> dict[str, Any]:
+    if clean(row.get("companyKey")) != company_key:
+        raise RuntimeError(f"Kimi K3 omitted or changed companyKey {company_key}.")
+    disposition = clean(row.get("disposition"))
+    if disposition not in {"CONFIRM", "DOWNGRADE_TO_WATCHLIST"}:
+        raise RuntimeError(f"Kimi K3 returned an invalid disposition for {company_key}.")
+    validated_score = bounded_integer(row.get("validatedScore"), 0, 100)
+    if validated_score > maximum_score:
+        raise RuntimeError(f"Kimi K3 attempted to promote the score for {company_key}.")
+    raw_indices = row.get("supportingEvidenceIndices")
+    if not isinstance(raw_indices, list) or not 1 <= len(raw_indices) <= 5:
+        raise RuntimeError(f"Kimi K3 must cite one to five evidence records for {company_key}.")
+    return {
+        "status": "VALIDATED",
+        "disposition": disposition,
+        "validatedScore": validated_score,
+        "confidence": bounded_integer(row.get("confidence"), 0, 100),
+        "rationale": bounded_text(row.get("rationale"), "No validation rationale returned.", 2_000),
+        "riskFlags": bounded_string_list(row.get("riskFlags"), 5, 300),
+        "supportingEvidenceIndices": [
+            bounded_integer(item, 0, 23)
+            for item in raw_indices
+        ],
     }
 
 
@@ -1017,7 +1221,197 @@ def score_companies(
 def estimate_kimi_cost(input_tokens: int, cached_tokens: int, output_tokens: int) -> float:
     # Operator estimate only. Pricing changes; the stored token counts remain authoritative.
     uncached = max(0, input_tokens - cached_tokens)
-    return round((uncached * 0.60 + cached_tokens * 0.15 + output_tokens * 2.50) / 1_000_000, 6)
+    return round((uncached * 0.95 + cached_tokens * 0.16 + output_tokens * 4.00) / 1_000_000, 6)
+
+
+def estimate_k3_cost(input_tokens: int, cached_tokens: int, output_tokens: int) -> float:
+    # Operator estimate only. Pricing changes; the stored token counts remain authoritative.
+    uncached = max(0, input_tokens - cached_tokens)
+    return round((uncached * 3.00 + cached_tokens * 0.30 + output_tokens * 15.00) / 1_000_000, 6)
+
+
+def is_recent_trigger(
+    synthesis: dict[str, Any],
+    evidence: list[dict[str, Any]],
+) -> bool:
+    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=548)
+    latest = dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=1)
+    for index in synthesis.get("triggerEvidenceIndices", []):
+        if not isinstance(index, int) or index < 0 or index >= len(evidence):
+            continue
+        row = evidence[index]
+        if row.get("pass") not in {"FRESH_EVENTS", "FOLLOW_UP"}:
+            continue
+        published_at = clean(row.get("publishedAt"))
+        if not published_at:
+            continue
+        try:
+            parsed = dt.datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt.timezone.utc)
+        if cutoff <= parsed.astimezone(dt.timezone.utc) <= latest:
+            return True
+    return False
+
+
+def effective_operating_region(synthesis: dict[str, Any]) -> str:
+    country = re.sub(
+        r"[^a-z]+",
+        " ",
+        str(synthesis.get("companyCountry") or "").lower(),
+    ).strip()
+    if not country:
+        return str(synthesis.get("operatingRegion") or "UNKNOWN")
+    if country in {
+        "united states",
+        "united states of america",
+        "usa",
+        "us",
+        "canada",
+        "north america",
+    }:
+        return "NORTH_AMERICA"
+    if country in {"china", "mainland china", "people s republic of china", "prc"}:
+        return "CHINA"
+    if country in {"unknown", "unclear"}:
+        return "UNKNOWN"
+    return "OTHER_FOREIGN"
+
+
+def select_k3_candidates(
+    candidates: list[dict[str, Any]],
+    evidence_by_key: dict[str, list[dict[str, Any]]],
+    synthesis_by_key: dict[str, dict[str, Any]],
+    scoring_by_key: dict[str, dict[str, Any]],
+    limit: int,
+    minimum_score: int,
+    minimum_confidence: int,
+) -> list[dict[str, Any]]:
+    eligible: list[dict[str, Any]] = []
+    for candidate in candidates:
+        key = candidate["companyKey"]
+        synthesis = synthesis_by_key[key]
+        scoring = scoring_by_key[key]
+        evidence = evidence_by_key.get(key, [])
+        passes = {str(row.get("pass")) for row in evidence}
+        accessible_region = (
+            effective_operating_region(synthesis) == "NORTH_AMERICA"
+            or synthesis["verifiedUsDivision"] is True
+        )
+        if not (
+            synthesis["identityDisposition"] == "PASS"
+            and synthesis["identityConfidence"] >= 70
+            and synthesis["logisticsProvider"] is False
+            and not (
+                synthesis["stableExclusiveProviderEvidence"]
+                and not synthesis["providerDisplacementEvidence"]
+            )
+            and synthesis["freshness"] == "FRESH"
+            and len(evidence) >= 2
+            and "IDENTITY" in passes
+            and len(passes) >= 2
+            and is_recent_trigger(synthesis, evidence)
+            and accessible_region
+            and scoring["totalScore"] >= minimum_score
+            and min(synthesis["confidence"], scoring["confidence"]) >= minimum_confidence
+        ):
+            continue
+        eligible.append(candidate)
+    return sorted(
+        eligible,
+        key=lambda candidate: (
+            scoring_by_key[candidate["companyKey"]]["totalScore"],
+            min(
+                synthesis_by_key[candidate["companyKey"]]["confidence"],
+                scoring_by_key[candidate["companyKey"]]["confidence"],
+            ),
+            int(candidate.get("priorityScore") or 0),
+        ),
+        reverse=True,
+    )[:limit]
+
+
+def validate_top_companies(
+    kimi_url: str,
+    api_key: str,
+    model: str,
+    reasoning_effort: str,
+    candidates: list[dict[str, Any]],
+    evidence_by_key: dict[str, list[dict[str, Any]]],
+    synthesis_by_key: dict[str, dict[str, Any]],
+    scoring_by_key: dict[str, dict[str, Any]],
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    if not candidates:
+        return {}, {
+            "status": "SKIPPED",
+            "candidateCount": 0,
+            "inputTokens": 0,
+            "cachedInputTokens": 0,
+            "outputTokens": 0,
+            "durationMs": 0,
+            "estimatedCostUsd": 0.0,
+            "errorMessage": None,
+        }
+    packet = [
+        {
+            "companyKey": candidate["companyKey"],
+            "companyName": candidate["companyName"],
+            "evidence": select_model_evidence(evidence_by_key[candidate["companyKey"]]),
+            "synthesis": synthesis_by_key[candidate["companyKey"]],
+            "k2Scoring": scoring_by_key[candidate["companyKey"]],
+        }
+        for candidate in candidates
+    ]
+    validation_started = time.monotonic()
+    try:
+        rows, usage = kimi_validation_request(
+            kimi_url, api_key, model, reasoning_effort, packet
+        )
+        rows_by_key = {
+            clean(row.get("companyKey")): row
+            for row in rows
+            if isinstance(row, dict) and clean(row.get("companyKey"))
+        }
+        results: dict[str, dict[str, Any]] = {}
+        for candidate in candidates:
+            key = candidate["companyKey"]
+            row = rows_by_key.get(key)
+            if not row:
+                raise RuntimeError(f"Kimi K3 did not return companyKey {key}.")
+            results[key] = validate_k3_validation(
+                row, key, scoring_by_key[key]["totalScore"]
+            )
+        usage["status"] = "SUCCESS"
+        usage["candidateCount"] = len(candidates)
+        usage["estimatedCostUsd"] = estimate_k3_cost(
+            usage["inputTokens"], usage["cachedInputTokens"], usage["outputTokens"]
+        )
+        usage["errorMessage"] = None
+        return results, usage
+    except Exception as error:
+        return {
+            candidate["companyKey"]: {
+                "status": "ERROR",
+                "disposition": None,
+                "validatedScore": None,
+                "confidence": None,
+                "rationale": "Kimi K3 validation was unavailable; this candidate cannot become Hot.",
+                "riskFlags": ["VALIDATOR_UNAVAILABLE"],
+                "supportingEvidenceIndices": [],
+            }
+            for candidate in candidates
+        }, {
+            "status": "ERROR",
+            "candidateCount": len(candidates),
+            "inputTokens": 0,
+            "cachedInputTokens": 0,
+            "outputTokens": 0,
+            "durationMs": round((time.monotonic() - validation_started) * 1000),
+            "estimatedCostUsd": None,
+            "errorMessage": bounded_text(error, "Kimi K3 validation failed.", 1_000),
+        }
 
 
 def collect_follow_up_evidence(
@@ -1174,6 +1568,14 @@ def run_company_research(
         kimi_batch_size = max(
             1, min(20, int(os.environ.get("HUNTER_RESEARCH_KIMI_BATCH_SIZE", "5")))
         )
+        k3_validator_limit = max(
+            0, min(10, int(os.environ.get("HUNTER_RESEARCH_K3_VALIDATOR_LIMIT", "5")))
+        )
+        k3_reasoning_effort = (
+            clean(os.environ.get("HUNTER_RESEARCH_K3_REASONING_EFFORT")) or "LOW"
+        ).upper()
+        if k3_reasoning_effort not in {"LOW", "HIGH", "MAX"}:
+            raise RuntimeError("HUNTER_RESEARCH_K3_REASONING_EFFORT must be LOW, HIGH, or MAX.")
         follow_up_limit = max(
             0, min(2, int(os.environ.get("HUNTER_RESEARCH_FOLLOW_UP_QUERIES", "2")))
         )
@@ -1188,6 +1590,10 @@ def run_company_research(
             raise RuntimeError("HUNTER_KIMI_BASE_URL must use the approved Moonshot API endpoint.")
         kimi_model = clean(os.environ.get("HUNTER_KIMI_MODEL")) or str(
             packet.get("models", {}).get("scoring", {}).get("recommended") or DEFAULT_KIMI_MODEL
+        )
+        kimi_validator_model = clean(os.environ.get("HUNTER_KIMI_VALIDATOR_MODEL")) or str(
+            packet.get("models", {}).get("validation", {}).get("recommended")
+            or DEFAULT_KIMI_VALIDATOR_MODEL
         )
 
         checkpoint = read_checkpoint(resume_checkpoint)
@@ -1316,6 +1722,26 @@ def run_company_research(
             synthesis_by_key,
             kimi_batch_size,
         )
+        thresholds = packet.get("thresholds") if isinstance(packet.get("thresholds"), dict) else {}
+        k3_candidates = select_k3_candidates(
+            candidates,
+            evidence_by_key,
+            synthesis_by_key,
+            scoring_by_key,
+            k3_validator_limit,
+            int(thresholds.get("minimumPriorityScore") or 35),
+            int(thresholds.get("minimumSignalConfidence") or 50),
+        )
+        validation_by_key, k3_usage = validate_top_companies(
+            kimi_url,
+            kimi_api_key,
+            kimi_validator_model,
+            k3_reasoning_effort,
+            k3_candidates,
+            evidence_by_key,
+            synthesis_by_key,
+            scoring_by_key,
+        )
         completion = {
             "models": {
                 "synthesis": {
@@ -1331,6 +1757,14 @@ def run_company_research(
                     "promptVersion": PROMPT_VERSION,
                     "structuredOutput": True,
                     **kimi_usage,
+                },
+                "validation": {
+                    "provider": "KIMI",
+                    "name": kimi_validator_model,
+                    "promptVersion": PROMPT_VERSION,
+                    "structuredOutput": True,
+                    "reasoningEffort": k3_reasoning_effort,
+                    **k3_usage,
                 },
             },
             "search": {
@@ -1352,6 +1786,18 @@ def run_company_research(
                         if key != "followUpQueries"
                     },
                     "scoring": scoring_by_key[candidate["companyKey"]],
+                    "validation": validation_by_key.get(
+                        candidate["companyKey"],
+                        {
+                            "status": "NOT_SELECTED",
+                            "disposition": None,
+                            "validatedScore": None,
+                            "confidence": None,
+                            "rationale": None,
+                            "riskFlags": [],
+                            "supportingEvidenceIndices": [],
+                        },
+                    ),
                 }
                 for candidate in candidates
             ],

@@ -55,6 +55,9 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 - Individual query failures remain visible in a valid completion, but deterministic evidence-count,
   pass-coverage, identity, logistics-provider, stable/exclusive external-provider, and freshness gates fail closed. Transport success
   with weak evidence cannot become a high-priority opportunity.
+- A K3 validation outage does not discard completed retrieval, Qwen synthesis, or K2.6 scoring.
+  Selected fresh-event candidates are retained as Watchlist and cannot become Hot until a later
+  successful validation. Current-account qualifications and deterministic blockers continue normally.
 - Automatic research remains disabled unless `HUNTER_COMPANY_RESEARCH_ENABLED=true`. The Hunter kill
   switch or `OFF` mode prevents the server from preparing a cohort.
 

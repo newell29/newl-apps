@@ -17,9 +17,10 @@ import { DEFAULT_HUNTER_POLICY, runHunterDryPlan } from "@/modules/lead-gen/hunt
 import { prisma } from "@/server/db";
 
 export const HUNTER_COMPANY_RESEARCH_JOB_TYPE = "HUNTER_COMPANY_DEEP_RESEARCH";
-export const HUNTER_COMPANY_RESEARCH_PROMPT_VERSION = "hunter-company-research-v6";
+export const HUNTER_COMPANY_RESEARCH_PROMPT_VERSION = "hunter-company-research-v7";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL = "qwen3.5:35b";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL = "kimi-k2.6";
+export const HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL = "kimi-k3";
 
 const ACTIVE_RUN_WINDOW_MS = 4 * 60 * 60 * 1000;
 const RECENT_RESEARCH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
@@ -48,6 +49,13 @@ export const HUNTER_RESEARCH_PASSES = [
 type ResearchPass = typeof HUNTER_RESEARCH_PASSES[number]["id"] | "FOLLOW_UP";
 type IdentityDisposition = "PASS" | "AMBIGUOUS" | "BLOCK";
 type Freshness = "FRESH" | "CURRENT" | "STALE" | "NONE";
+type OperatingRegion = "NORTH_AMERICA" | "CHINA" | "OTHER_FOREIGN" | "UNKNOWN";
+type ValidatorDisposition = "CONFIRM" | "DOWNGRADE_TO_WATCHLIST";
+export type HunterResearchOpportunityTier =
+  | "HOT_OPPORTUNITY"
+  | "QUALIFIED_CURRENT_ACCOUNT"
+  | "WATCHLIST"
+  | "BLOCKED";
 
 type Evidence = {
   pass: ResearchPass;
@@ -78,6 +86,11 @@ type ResearchResult = {
     opportunitySummary: string;
     triggerEvidenceIndices: number[];
     geography: string | null;
+    companyCountry: string | null;
+    operatingRegion: OperatingRegion;
+    verifiedUsDivision: boolean;
+    usDivisionName: string | null;
+    usDivisionEvidenceIndices: number[];
     serviceLine: HunterServiceLine;
     signalType: HunterSignalType;
     confidence: number;
@@ -99,6 +112,15 @@ type ResearchResult = {
     };
     totalScore: number;
     confidence: number;
+  };
+  validation: {
+    status: "VALIDATED" | "NOT_SELECTED" | "ERROR";
+    disposition: ValidatorDisposition | null;
+    validatedScore: number | null;
+    confidence: number | null;
+    rationale: string | null;
+    riskFlags: string[];
+    supportingEvidenceIndices: number[];
   };
 };
 
@@ -123,6 +145,21 @@ export type HunterCompanyResearchCompletion = {
       outputTokens: number;
       durationMs: number;
       estimatedCostUsd: number | null;
+    };
+    validation: {
+      provider: "KIMI";
+      name: string;
+      promptVersion: string;
+      structuredOutput: boolean;
+      status: "SUCCESS" | "SKIPPED" | "ERROR";
+      reasoningEffort: "LOW" | "HIGH" | "MAX";
+      candidateCount: number;
+      inputTokens: number;
+      cachedInputTokens: number;
+      outputTokens: number;
+      durationMs: number;
+      estimatedCostUsd: number | null;
+      errorMessage: string | null;
     };
   };
   search: {
@@ -332,7 +369,8 @@ export async function prepareHunterCompanyResearchRun({
         dailyCompanyLimit: limit,
         promptVersion: HUNTER_COMPANY_RESEARCH_PROMPT_VERSION,
         qwenModel: HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL,
-        kimiModel: HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL
+        kimiModel: HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL,
+        validatorModel: HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL
       }
     }
   });
@@ -359,6 +397,13 @@ export async function prepareHunterCompanyResearchRun({
           promptVersion: HUNTER_COMPANY_RESEARCH_PROMPT_VERSION,
           structuredOutput: true,
           temperature: 0.6
+        },
+        validation: {
+          provider: "KIMI",
+          recommended: HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL,
+          promptVersion: HUNTER_COMPANY_RESEARCH_PROMPT_VERSION,
+          structuredOutput: true,
+          reasoningEffort: "LOW"
         }
       },
       limits: {
@@ -368,6 +413,10 @@ export async function prepareHunterCompanyResearchRun({
         resultsPerQuery: 5,
         evidencePerCompany: MAX_EVIDENCE_PER_COMPANY
       },
+      thresholds: {
+        minimumPriorityScore: effective.minimumPriorityScore,
+        minimumSignalConfidence: effective.minimumSignalConfidence
+      },
       rules: {
         noApollo: true,
         noOutreach: true,
@@ -376,7 +425,9 @@ export async function prepareHunterCompanyResearchRun({
         evidenceOnly: true,
         blockLogisticsProviders: true,
         blockIncumbentsWithoutOutsourceEvidence: true,
-        requireIdentityPass: true
+        requireIdentityPass: true,
+        blockChinaWithoutVerifiedUsDivision: true,
+        deprioritizeOtherForeignWithoutVerifiedUsDivision: true
       }
     }
   };
@@ -424,29 +475,33 @@ export async function completeHunterCompanyResearchRun({
   const effective = policy ?? DEFAULT_HUNTER_POLICY;
   const decisions = completion.companies.map((company) => {
     const gate = evaluateResearchGate(company);
-    const finalScore = gate.passed ? company.scoring.totalScore : 0;
-    const finalConfidence = gate.passed
-      ? Math.min(company.synthesis.confidence, company.scoring.confidence)
-      : 0;
-    const wouldPursue =
-      gate.passed &&
-      finalScore >= effective.minimumPriorityScore &&
-      finalConfidence >= effective.minimumSignalConfidence;
+    const classification = classifyResearchOpportunity(company, gate, {
+      minimumPriorityScore: effective.minimumPriorityScore,
+      minimumSignalConfidence: effective.minimumSignalConfidence
+    });
+    const wouldPursue = ["HOT_OPPORTUNITY", "QUALIFIED_CURRENT_ACCOUNT"].includes(
+      classification.tier
+    );
     return {
       company,
       gate,
-      finalScore,
-      finalConfidence,
+      ...classification,
       status: wouldPursue ? HunterSignalStatus.NEW : HunterSignalStatus.DISMISSED
     };
   });
 
   let acceptedCount = 0;
   let blockedCount = 0;
+  const tierCounts: Record<HunterResearchOpportunityTier, number> = {
+    HOT_OPPORTUNITY: 0,
+    QUALIFIED_CURRENT_ACCOUNT: 0,
+    WATCHLIST: 0,
+    BLOCKED: 0
+  };
   const savedSignalIds: string[] = [];
   await prisma.$transaction(async (tx) => {
     for (const decision of decisions) {
-      const { company, gate, status, finalScore, finalConfidence } = decision;
+      const { company, gate, status, finalScore, finalConfidence, tier, tierReasons } = decision;
       const tenantCompany = await tx.company.findFirst({
         where: { id: company.companyId, tenantId },
         select: { id: true, normalizedName: true, name: true }
@@ -455,7 +510,8 @@ export async function completeHunterCompanyResearchRun({
         throw new Error("Hunter company research failed tenant or company identity validation.");
       }
       if (status === HunterSignalStatus.NEW) acceptedCount += 1;
-      if (!gate.passed) blockedCount += 1;
+      if (tier === "BLOCKED") blockedCount += 1;
+      tierCounts[tier] += 1;
 
       const primaryEvidence =
         company.evidence[company.synthesis.triggerEvidenceIndices[0]] ?? company.evidence[0];
@@ -484,9 +540,19 @@ export async function completeHunterCompanyResearchRun({
           sourceUrl,
           confidence: finalConfidence,
           dedupeKey,
-          evidence: researchEvidenceJson(company, gate, finalScore, completion),
+          evidence: researchEvidenceJson(
+            company,
+            gate,
+            finalScore,
+            finalConfidence,
+            tier,
+            tierReasons,
+            decision.foreignPriorityAdjustment,
+            decision.operatingRegion,
+            completion
+          ),
           rawJson: {
-            researchVersion: 1,
+            researchVersion: 2,
             runId,
             evidenceCount: company.evidence.length,
             queryPasses: [...new Set(company.evidence.map((item) => item.pass))]
@@ -502,9 +568,19 @@ export async function completeHunterCompanyResearchRun({
           sourceUrl,
           confidence: finalConfidence,
           observedAt: new Date(),
-          evidence: researchEvidenceJson(company, gate, finalScore, completion),
+          evidence: researchEvidenceJson(
+            company,
+            gate,
+            finalScore,
+            finalConfidence,
+            tier,
+            tierReasons,
+            decision.foreignPriorityAdjustment,
+            decision.operatingRegion,
+            completion
+          ),
           rawJson: {
-            researchVersion: 1,
+            researchVersion: 2,
             runId,
             evidenceCount: company.evidence.length,
             queryPasses: [...new Set(company.evidence.map((item) => item.pass))]
@@ -526,6 +602,7 @@ export async function completeHunterCompanyResearchRun({
           missingCompanyCount: expectedCompanyIds.size - returnedCompanyIds.size,
           acceptedCount,
           blockedCount,
+          tierCounts,
           belowThresholdCount: decisions.length - acceptedCount - blockedCount,
           evidenceCount: completion.companies.reduce((sum, company) => sum + company.evidence.length, 0),
           search: completion.search,
@@ -545,9 +622,12 @@ export async function completeHunterCompanyResearchRun({
           researchedCount: completion.companies.length,
           acceptedCount,
           blockedCount,
+          tierCounts,
           searchProvider: completion.search.provider,
           qwenModel: completion.models.synthesis.name,
-          kimiModel: completion.models.scoring.name
+          kimiModel: completion.models.scoring.name,
+          validatorModel: completion.models.validation.name,
+          validatorStatus: completion.models.validation.status
         }
       }
     });
@@ -563,6 +643,7 @@ export async function completeHunterCompanyResearchRun({
     researchedCount: completion.companies.length,
     acceptedCount,
     blockedCount,
+    tierCounts,
     missingCompanyCount: expectedCompanyIds.size - returnedCompanyIds.size,
     plan
   };
@@ -599,12 +680,13 @@ export function parseHunterCompanyResearchCompletion(value: unknown): HunterComp
   const models = record(root.models, "completion.models");
   const synthesisModel = record(models.synthesis, "completion.models.synthesis");
   const scoringModel = record(models.scoring, "completion.models.scoring");
+  const validationModel = record(models.validation, "completion.models.validation");
   const search = record(root.search, "completion.search");
   const companies = array(root.companies, "completion.companies");
   if (companies.length > MAX_RESEARCH_COMPANIES) {
     throw new Error(`completion.companies cannot exceed ${MAX_RESEARCH_COMPANIES} items.`);
   }
-  return {
+  const parsed: HunterCompanyResearchCompletion = {
     models: {
       synthesis: {
         provider: enumValue(synthesisModel.provider, ["OLLAMA"] as const, "completion.models.synthesis.provider"),
@@ -635,6 +717,70 @@ export function parseHunterCompanyResearchCompletion(value: unknown): HunterComp
           10_000,
           "completion.models.scoring.estimatedCostUsd"
         )
+      },
+      validation: {
+        provider: enumValue(validationModel.provider, ["KIMI"] as const, "completion.models.validation.provider"),
+        name: text(validationModel.name, 200, "completion.models.validation.name"),
+        promptVersion: text(
+          validationModel.promptVersion,
+          100,
+          "completion.models.validation.promptVersion"
+        ),
+        structuredOutput: boolean(
+          validationModel.structuredOutput,
+          "completion.models.validation.structuredOutput"
+        ),
+        status: enumValue(
+          validationModel.status,
+          ["SUCCESS", "SKIPPED", "ERROR"] as const,
+          "completion.models.validation.status"
+        ),
+        reasoningEffort: enumValue(
+          validationModel.reasoningEffort,
+          ["LOW", "HIGH", "MAX"] as const,
+          "completion.models.validation.reasoningEffort"
+        ),
+        candidateCount: integer(
+          validationModel.candidateCount,
+          0,
+          MAX_RESEARCH_COMPANIES,
+          "completion.models.validation.candidateCount"
+        ),
+        inputTokens: integer(
+          validationModel.inputTokens,
+          0,
+          10_000_000,
+          "completion.models.validation.inputTokens"
+        ),
+        cachedInputTokens: integer(
+          validationModel.cachedInputTokens,
+          0,
+          10_000_000,
+          "completion.models.validation.cachedInputTokens"
+        ),
+        outputTokens: integer(
+          validationModel.outputTokens,
+          0,
+          10_000_000,
+          "completion.models.validation.outputTokens"
+        ),
+        durationMs: integer(
+          validationModel.durationMs,
+          0,
+          86_400_000,
+          "completion.models.validation.durationMs"
+        ),
+        estimatedCostUsd: nullableNumber(
+          validationModel.estimatedCostUsd,
+          0,
+          10_000,
+          "completion.models.validation.estimatedCostUsd"
+        ),
+        errorMessage: nullableText(
+          validationModel.errorMessage,
+          1_000,
+          "completion.models.validation.errorMessage"
+        )
       }
     },
     search: {
@@ -646,6 +792,31 @@ export function parseHunterCompanyResearchCompletion(value: unknown): HunterComp
     },
     companies: companies.map((company, index) => parseResearchResult(company, index))
   };
+  const validatedCount = parsed.companies.filter(
+    (company) => company.validation.status === "VALIDATED"
+  ).length;
+  const validationErrorCount = parsed.companies.filter(
+    (company) => company.validation.status === "ERROR"
+  ).length;
+  if (
+    parsed.models.validation.status === "SUCCESS" &&
+    (validatedCount !== parsed.models.validation.candidateCount || validationErrorCount > 0)
+  ) {
+    throw new Error("completion.models.validation SUCCESS counts do not match company validation results.");
+  }
+  if (
+    parsed.models.validation.status === "SKIPPED" &&
+    (parsed.models.validation.candidateCount !== 0 || validatedCount > 0 || validationErrorCount > 0)
+  ) {
+    throw new Error("completion.models.validation SKIPPED cannot contain selected company validations.");
+  }
+  if (
+    parsed.models.validation.status === "ERROR" &&
+    validationErrorCount !== parsed.models.validation.candidateCount
+  ) {
+    throw new Error("completion.models.validation ERROR counts do not match company validation results.");
+  }
+  return parsed;
 }
 
 export function evaluateResearchGate(company: ResearchResult) {
@@ -676,7 +847,142 @@ export function evaluateResearchGate(company: ResearchResult) {
   ) {
     blockers.push("The fresh opportunity claim has no verifiable event date within the last 18 months.");
   }
+  if (
+    company.synthesis.verifiedUsDivision &&
+    !hasCitedUsDivisionEvidence(company)
+  ) {
+    blockers.push("The claimed U.S. division is not verified by the cited public identity evidence.");
+  }
+  const isChinaEntity =
+    effectiveOperatingRegion(company) === "CHINA" ||
+    hasExplicitChinaHeadquartersEvidence(company.evidence);
+  if (isChinaEntity && !company.synthesis.verifiedUsDivision) {
+    blockers.push("Mainland-China company has no verified U.S. operating division.");
+  }
   return { passed: blockers.length === 0, blockers };
+}
+
+export function classifyResearchOpportunity(
+  company: ResearchResult,
+  gate: { passed: boolean; blockers: string[] },
+  thresholds: { minimumPriorityScore: number; minimumSignalConfidence: number }
+) {
+  const reasons: string[] = [];
+  const operatingRegion = effectiveOperatingRegion(company);
+  if (!gate.passed) {
+    return {
+      tier: "BLOCKED" as const,
+      tierReasons: [...gate.blockers],
+      finalScore: 0,
+      finalConfidence: 0,
+      foreignPriorityAdjustment: 0,
+      operatingRegion
+    };
+  }
+
+  const validatedScore =
+    company.validation.status === "VALIDATED" && company.validation.validatedScore !== null
+      ? Math.min(company.scoring.totalScore, company.validation.validatedScore)
+      : company.scoring.totalScore;
+  let foreignPriorityAdjustment = 0;
+  let foreignWatchlist = false;
+  if (
+    operatingRegion === "OTHER_FOREIGN" &&
+    !company.synthesis.verifiedUsDivision
+  ) {
+    foreignPriorityAdjustment = -10;
+    foreignWatchlist = true;
+    reasons.push("Foreign company without a verified U.S. division is deprioritized by 10 points.");
+  } else if (operatingRegion === "UNKNOWN") {
+    foreignWatchlist = true;
+    reasons.push("Company operating country is not sufficiently verified for active prioritization.");
+  }
+
+  const finalScore = Math.max(0, validatedScore + foreignPriorityAdjustment);
+  const finalConfidence = Math.min(
+    company.synthesis.confidence,
+    company.scoring.confidence,
+    company.validation.status === "VALIDATED" && company.validation.confidence !== null
+      ? company.validation.confidence
+      : 100
+  );
+
+  if (foreignWatchlist) {
+    return {
+      tier: "WATCHLIST" as const,
+      tierReasons: reasons,
+      finalScore,
+      finalConfidence,
+      foreignPriorityAdjustment,
+      operatingRegion
+    };
+  }
+  if (
+    finalScore < thresholds.minimumPriorityScore ||
+    finalConfidence < thresholds.minimumSignalConfidence
+  ) {
+    reasons.push(
+      `Score or confidence is below the active threshold (${thresholds.minimumPriorityScore}/${thresholds.minimumSignalConfidence}).`
+    );
+    return {
+      tier: "WATCHLIST" as const,
+      tierReasons: reasons,
+      finalScore,
+      finalConfidence,
+      foreignPriorityAdjustment,
+      operatingRegion
+    };
+  }
+  if (company.synthesis.freshness === "FRESH") {
+    const validatorSupportsRecentTrigger =
+      company.validation.supportingEvidenceIndices.some((index) =>
+        company.synthesis.triggerEvidenceIndices.includes(index)
+      ) &&
+      hasRecentDatedTriggerEvidence(
+        company.evidence,
+        company.validation.supportingEvidenceIndices
+      );
+    if (
+      company.validation.status === "VALIDATED" &&
+      company.validation.disposition === "CONFIRM" &&
+      validatorSupportsRecentTrigger
+    ) {
+      reasons.push("Kimi K3 confirmed the verified recent event and conservative score.");
+      return {
+        tier: "HOT_OPPORTUNITY" as const,
+        tierReasons: reasons,
+        finalScore,
+        finalConfidence,
+        foreignPriorityAdjustment,
+        operatingRegion
+      };
+    }
+    reasons.push(
+      company.validation.disposition === "DOWNGRADE_TO_WATCHLIST"
+        ? "Kimi K3 downgraded the fresh-event candidate."
+        : company.validation.disposition === "CONFIRM"
+          ? "Kimi K3 did not cite the same recent dated trigger, so the candidate remains on the watchlist."
+        : "Fresh-event candidate was not successfully validated by Kimi K3."
+    );
+    return {
+      tier: "WATCHLIST" as const,
+      tierReasons: reasons,
+      finalScore,
+      finalConfidence,
+      foreignPriorityAdjustment,
+      operatingRegion
+    };
+  }
+
+  reasons.push("Strong current fit cleared deterministic score and confidence thresholds.");
+  return {
+    tier: "QUALIFIED_CURRENT_ACCOUNT" as const,
+    tierReasons: reasons,
+    finalScore,
+    finalConfidence,
+    foreignPriorityAdjustment,
+    operatingRegion
+  };
 }
 
 function hasRecentDatedTriggerEvidence(evidence: Evidence[], triggerEvidenceIndices: number[]) {
@@ -704,11 +1010,59 @@ function hasExplicitProviderServiceEvidence(evidence: Evidence[]) {
   });
 }
 
+function hasExplicitChinaHeadquartersEvidence(evidence: Evidence[]) {
+  const chinaEntityPattern =
+    /\b(?:china[- ]based|chinese (?:company|manufacturer|retailer|importer|business)|(?:headquartered|based|founded|incorporated) in (?:mainland )?china)\b/i;
+  return evidence.some(
+    (item) =>
+      item.pass === "IDENTITY" &&
+      chinaEntityPattern.test(`${item.title}\n${item.excerpt}`)
+  );
+}
+
+function hasCitedUsDivisionEvidence(company: ResearchResult) {
+  const divisionName = normalizeEvidenceText(company.synthesis.usDivisionName ?? "");
+  if (!divisionName) return false;
+  const jurisdictionPattern = /\b(?:u s|usa|united states|north america)\b/;
+  return company.synthesis.usDivisionEvidenceIndices.some((index) => {
+    const item = company.evidence[index];
+    if (!item || item.pass !== "IDENTITY") return false;
+    const evidenceText = normalizeEvidenceText(`${item.title} ${item.excerpt}`);
+    return evidenceText.includes(divisionName) && jurisdictionPattern.test(evidenceText);
+  });
+}
+
+function normalizeEvidenceText(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function effectiveOperatingRegion(company: ResearchResult): OperatingRegion {
+  const country = company.synthesis.companyCountry
+    ?.trim()
+    .toLowerCase()
+    .replace(/[^a-z]+/g, " ")
+    .trim();
+  if (!country) return company.synthesis.operatingRegion;
+  if (
+    ["united states", "united states of america", "usa", "us", "canada", "north america"].includes(
+      country
+    )
+  ) {
+    return "NORTH_AMERICA";
+  }
+  if (["china", "mainland china", "people s republic of china", "prc"].includes(country)) {
+    return "CHINA";
+  }
+  if (["unknown", "unclear"].includes(country)) return "UNKNOWN";
+  return "OTHER_FOREIGN";
+}
+
 function parseResearchResult(value: unknown, index: number): ResearchResult {
   const path = `completion.companies[${index}]`;
   const company = record(value, path);
   const synthesis = record(company.synthesis, `${path}.synthesis`);
   const scoring = record(company.scoring, `${path}.scoring`);
+  const validation = record(company.validation, `${path}.validation`);
   const rawDimensions = record(scoring.dimensionScores, `${path}.scoring.dimensionScores`);
   const evidenceRows = array(company.evidence, `${path}.evidence`);
   if (evidenceRows.length > MAX_EVIDENCE_PER_COMPANY) {
@@ -735,6 +1089,59 @@ function parseResearchResult(value: unknown, index: number): ResearchResult {
   if (triggerEvidenceIndices.length < 1 || triggerEvidenceIndices.length > 5) {
     throw new Error(`${path}.synthesis.triggerEvidenceIndices must contain 1 to 5 items.`);
   }
+  const usDivisionEvidenceIndices = parseEvidenceIndices(
+    synthesis.usDivisionEvidenceIndices,
+    parsedEvidence,
+    `${path}.synthesis.usDivisionEvidenceIndices`,
+    0,
+    5
+  );
+  const supportingEvidenceIndices = parseEvidenceIndices(
+    validation.supportingEvidenceIndices,
+    parsedEvidence,
+    `${path}.validation.supportingEvidenceIndices`,
+    0,
+    5
+  );
+  const verifiedUsDivision = boolean(
+    synthesis.verifiedUsDivision,
+    `${path}.synthesis.verifiedUsDivision`
+  );
+  if (
+    verifiedUsDivision &&
+    (!nullableText(synthesis.usDivisionName, 300, `${path}.synthesis.usDivisionName`) ||
+      usDivisionEvidenceIndices.length === 0)
+  ) {
+    throw new Error(`${path}.synthesis must cite a named U.S. division when verifiedUsDivision is true.`);
+  }
+  if (!verifiedUsDivision && usDivisionEvidenceIndices.length > 0) {
+    throw new Error(`${path}.synthesis.usDivisionEvidenceIndices must be empty when no U.S. division is verified.`);
+  }
+  const validationStatus = enumValue(
+    validation.status,
+    ["VALIDATED", "NOT_SELECTED", "ERROR"] as const,
+    `${path}.validation.status`
+  );
+  const validationDisposition = nullableEnumValue(
+    validation.disposition,
+    ["CONFIRM", "DOWNGRADE_TO_WATCHLIST"] as const,
+    `${path}.validation.disposition`
+  );
+  if (
+    validationStatus === "VALIDATED" &&
+    (!validationDisposition ||
+      supportingEvidenceIndices.length === 0 ||
+      validation.validatedScore === null ||
+      validation.validatedScore === undefined ||
+      validation.confidence === null ||
+      validation.confidence === undefined ||
+      !nullableText(validation.rationale, 2_000, `${path}.validation.rationale`))
+  ) {
+    throw new Error(`${path}.validation must include a complete cited decision when validated.`);
+  }
+  if (validationStatus !== "VALIDATED" && validationDisposition) {
+    throw new Error(`${path}.validation.disposition must be null unless validation succeeded.`);
+  }
   const dimensions = {
     demandTrigger: integer(rawDimensions.demandTrigger, 0, 20, `${path}.scoring.dimensionScores.demandTrigger`),
     serviceFit: integer(rawDimensions.serviceFit, 0, 20, `${path}.scoring.dimensionScores.serviceFit`),
@@ -751,6 +1158,21 @@ function parseResearchResult(value: unknown, index: number): ResearchResult {
   if (Object.values(dimensions).reduce((sum, score) => sum + score, 0) !== totalScore) {
     throw new Error(`${path}.scoring.totalScore must equal the five deterministic dimension scores.`);
   }
+  const validatorScore = nullableInteger(
+    validation.validatedScore,
+    0,
+    100,
+    `${path}.validation.validatedScore`
+  );
+  if (validatorScore !== null && validatorScore > totalScore) {
+    throw new Error(`${path}.validation.validatedScore cannot exceed the K2.6 score.`);
+  }
+  const validatorConfidence = nullableInteger(
+    validation.confidence,
+    0,
+    100,
+    `${path}.validation.confidence`
+  );
   return {
     companyId: text(company.companyId, 200, `${path}.companyId`),
     companyKey: text(company.companyKey, 300, `${path}.companyKey`),
@@ -785,6 +1207,19 @@ function parseResearchResult(value: unknown, index: number): ResearchResult {
       opportunitySummary: text(synthesis.opportunitySummary, 2_000, `${path}.synthesis.opportunitySummary`),
       triggerEvidenceIndices,
       geography: nullableText(synthesis.geography, 300, `${path}.synthesis.geography`),
+      companyCountry: nullableText(synthesis.companyCountry, 200, `${path}.synthesis.companyCountry`),
+      operatingRegion: enumValue(
+        synthesis.operatingRegion,
+        ["NORTH_AMERICA", "CHINA", "OTHER_FOREIGN", "UNKNOWN"] as const,
+        `${path}.synthesis.operatingRegion`
+      ),
+      verifiedUsDivision,
+      usDivisionName: nullableText(
+        synthesis.usDivisionName,
+        300,
+        `${path}.synthesis.usDivisionName`
+      ),
+      usDivisionEvidenceIndices,
       serviceLine: enumValue(
         synthesis.serviceLine,
         Object.values(HunterServiceLine),
@@ -810,6 +1245,17 @@ function parseResearchResult(value: unknown, index: number): ResearchResult {
       dimensionScores: dimensions,
       totalScore,
       confidence: integer(scoring.confidence, 0, 100, `${path}.scoring.confidence`)
+    },
+    validation: {
+      status: validationStatus,
+      disposition: validationDisposition,
+      validatedScore: validatorScore,
+      confidence: validatorConfidence,
+      rationale: nullableText(validation.rationale, 2_000, `${path}.validation.rationale`),
+      riskFlags: array(validation.riskFlags, `${path}.validation.riskFlags`)
+        .map((item, riskIndex) => text(item, 300, `${path}.validation.riskFlags[${riskIndex}]`))
+        .slice(0, 10),
+      supportingEvidenceIndices
     }
   };
 }
@@ -846,6 +1292,11 @@ function researchEvidenceJson(
   company: ResearchResult,
   gate: { passed: boolean; blockers: string[] },
   finalScore: number,
+  finalConfidence: number,
+  tier: HunterResearchOpportunityTier,
+  tierReasons: string[],
+  foreignPriorityAdjustment: number,
+  operatingRegion: OperatingRegion,
   completion: HunterCompanyResearchCompletion
 ): Prisma.InputJsonValue {
   return {
@@ -856,8 +1307,14 @@ function researchEvidenceJson(
       evidence: company.evidence,
       synthesis: company.synthesis,
       scoring: company.scoring,
+      validation: company.validation,
       deterministicGate: gate,
+      opportunityTier: tier,
+      tierReasons,
       finalScore,
+      finalConfidence,
+      foreignPriorityAdjustment,
+      effectiveOperatingRegion: operatingRegion,
       models: completion.models
     }
   } as Prisma.InputJsonObject;
@@ -919,6 +1376,29 @@ function array(value: unknown, path: string) {
   return value;
 }
 
+function parseEvidenceIndices(
+  value: unknown,
+  evidence: Evidence[],
+  path: string,
+  minimumItems: number,
+  maximumItems: number
+) {
+  const indices = array(value, path).map((item, itemIndex) => {
+    const evidenceIndex = integer(
+      item,
+      0,
+      Math.max(0, evidence.length - 1),
+      `${path}[${itemIndex}]`
+    );
+    if (!evidence[evidenceIndex]) throw new Error(`${path}[${itemIndex}] is out of range.`);
+    return evidenceIndex;
+  });
+  if (indices.length < minimumItems || indices.length > maximumItems) {
+    throw new Error(`${path} must contain ${minimumItems} to ${maximumItems} items.`);
+  }
+  return [...new Set(indices)];
+}
+
 function text(value: unknown, maximum: number, path: string) {
   if (typeof value !== "string" || !value.trim() || value.trim().length > maximum) {
     throw new Error(`${path} must be a non-empty string of ${maximum} characters or fewer.`);
@@ -951,11 +1431,25 @@ function nullableNumber(value: unknown, minimum: number, maximum: number, path: 
   return value;
 }
 
+function nullableInteger(value: unknown, minimum: number, maximum: number, path: string) {
+  if (value === null || value === undefined) return null;
+  return integer(value, minimum, maximum, path);
+}
+
 function enumValue<T extends string>(value: unknown, values: readonly T[], path: string): T {
   if (typeof value !== "string" || !values.includes(value as T)) {
     throw new Error(`${path} must be one of: ${values.join(", ")}.`);
   }
   return value as T;
+}
+
+function nullableEnumValue<T extends string>(
+  value: unknown,
+  values: readonly T[],
+  path: string
+): T | null {
+  if (value === null || value === undefined) return null;
+  return enumValue(value, values, path);
 }
 
 function httpsUrl(value: unknown, path: string) {

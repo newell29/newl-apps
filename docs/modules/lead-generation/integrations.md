@@ -47,7 +47,9 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - Public page retrieval accepts HTTPS only, validates DNS as globally routable, revalidates redirects,
   caps response sizes, and rejects local/private destinations.
 - Ollama is restricted to loopback and defaults to `qwen3.5:35b` for synthesis. The Kimi client is
-  restricted to `https://api.moonshot.ai/v1` and defaults to `kimi-k2.6` for scoring.
+  restricted to `https://api.moonshot.ai/v1`, defaults to `kimi-k2.6` for scoring, and uses `kimi-k3`
+  with low reasoning and strict JSON Schema for at most five top fresh-event validators. Both use the
+  same protected local Kimi credential; no Kimi secret is sent to Newl Apps.
 - The company-research worker and machine routes contain no Apollo, pipeline-stage, cadence, email,
   LinkedIn, or customer-communication client.
 

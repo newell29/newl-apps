@@ -155,9 +155,10 @@ Regression coverage must prove:
 3. the default queue follows the saved daily company limit and excludes recently researched companies for seven days;
 4. identity, fresh-event, careers, and distribution-footprint queries are generated for every company;
 5. evidence URLs are HTTPS, source domains match their URLs, redirects cannot reach local/private addresses, and query/evidence sizes are bounded;
-6. Qwen runs locally with structured output and thinking disabled, while Kimi usage and cached-token counts remain auditable;
+6. Qwen runs locally with structured output and thinking disabled, while K2.6 and bounded K3 usage, cached-token counts, reasoning effort, status, and cost estimates remain auditable;
 7. ambiguous identity, companies that are themselves logistics providers, narrow explicit provider-service evidence even when the model misses it, explicitly evidenced stable/exclusive external-provider relationships without displacement evidence, thin evidence, incomplete pass coverage, stale/no opportunity evidence, and `FRESH` claims whose cited trigger evidence has missing or older-than-18-month publication dates fail deterministic gates;
-8. five 0-20 Kimi dimensions must equal the reported total, and a model score cannot override a blocker;
-9. completion stores tenant-scoped evidence and refreshes only the dry-run plan; and
-10. a retrieval/Qwen checkpoint resumes only against an identical newly prepared tenant cohort; and
-11. no company-research module or route imports or calls Apollo, pipeline-stage mutation, cadence enrollment, email, LinkedIn, or customer-communication code.
+8. five 0-20 K2.6 dimensions must equal the reported total; K3 cannot raise that score, promote a blocked candidate, or create Hot without citing the same recent dated trigger;
+9. public identity evidence, never shipment origin, determines company country; other foreign entities without a verified U.S. division receive a 10-point penalty and Watchlist cap, while mainland-China entities without one are blocked;
+10. completion stores tenant-scoped evidence and refreshes only the dry-run plan; and
+11. a retrieval/Qwen checkpoint resumes only against an identical newly prepared tenant cohort; and
+12. no company-research module or route imports or calls Apollo, pipeline-stage mutation, cadence enrollment, email, LinkedIn, or customer-communication code.
