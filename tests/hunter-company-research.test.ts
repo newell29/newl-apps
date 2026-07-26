@@ -27,7 +27,7 @@ describe("Hunter company deep research", () => {
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL).toBe("qwen3.5:35b");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL).toBe("kimi-k2.6");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL).toBe("kimi-k3");
-    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v8");
+    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v9");
     expect(HUNTER_COMPANY_RESEARCH_SAFETY).toEqual({
       externalWrites: false,
       apollo: false,
@@ -134,6 +134,32 @@ describe("Hunter company deep research", () => {
     };
     expect(evaluateResearchGate(unsupportedDivision).blockers).toContain(
       "The claimed U.S. division is not verified by the cited public identity evidence."
+    );
+  });
+
+  it("does not let incidental China text override a verified North American company identity", () => {
+    const company = parseHunterCompanyResearchCompletion(completion()).companies[0];
+    const verifiedUsCompany = {
+      ...company,
+      synthesis: {
+        ...company.synthesis,
+        companyCountry: "United States",
+        operatingRegion: "NORTH_AMERICA" as const,
+        verifiedUsDivision: false
+      },
+      evidence: company.evidence.map((item, index) =>
+        index === 0
+          ? {
+              ...item,
+              excerpt:
+                "Example Retailer is incorporated in North Carolina. A separate supplier mentioned later is based in China."
+            }
+          : item
+      )
+    };
+
+    expect(evaluateResearchGate(verifiedUsCompany).blockers).not.toContain(
+      "Mainland-China company has no verified U.S. operating division."
     );
   });
 
@@ -447,6 +473,30 @@ describe("Hunter company deep research", () => {
     });
   });
 
+  it("promotes exact-company recent material expansions that Qwen overlooked", async () => {
+    const program = [
+      "import datetime as d,json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'AALBERTS IPS AMERICAS','companyKey':'aalberts-ips-americas'}",
+      "recent=(d.datetime.now(d.timezone.utc)-d.timedelta(days=30)).isoformat()",
+      "evidence=[{'pass':'IDENTITY','firstParty':True,'sourceType':'FIRST_PARTY','title':'Aalberts IPS Americas','excerpt':'Aalberts IPS Americas is a US manufacturer.','publishedAt':None},{'pass':'FRESH_EVENTS','firstParty':False,'sourceType':'NEWS','title':'Aalberts brings PowerPress manufacturing to the United States','excerpt':'Aalberts announced a major investment that expands production capabilities at its South Carolina facility, increasing manufacturing capacity through 2027.','publishedAt':recent},{'pass':'FRESH_EVENTS','firstParty':False,'sourceType':'DIRECTORY','title':'Aalberts directory expansion profile','excerpt':'Aalberts expands manufacturing capacity.','publishedAt':recent}]",
+      "synthesis={'identityDisposition':'PASS','identityConfidence':85,'identityReason':'Verified.','confidence':80,'freshness':'CURRENT','triggerEvidenceIndices':[],'missingEvidence':[],'rationale':'No fresh event selected.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
+      "print(json.dumps(r.normalize_synthesis_for_evidence(candidate,evidence,synthesis)))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toMatchObject({
+      freshness: "FRESH",
+      triggerEvidenceIndices: [1]
+    });
+  });
+
   it("sends a compact, pass-diverse evidence packet to the models", async () => {
     const program = [
       "import json",
@@ -577,7 +627,7 @@ function completion() {
       synthesis: {
         provider: "OLLAMA",
         name: "qwen3.5:35b",
-        promptVersion: "hunter-company-research-v8",
+        promptVersion: "hunter-company-research-v9",
         structuredOutput: true,
         inputTokens: 2000,
         outputTokens: 700,
@@ -586,7 +636,7 @@ function completion() {
       scoring: {
         provider: "KIMI",
         name: "kimi-k2.6",
-        promptVersion: "hunter-company-research-v8",
+        promptVersion: "hunter-company-research-v9",
         structuredOutput: true,
         inputTokens: 1800,
         cachedInputTokens: 200,
@@ -597,7 +647,7 @@ function completion() {
       validation: {
         provider: "KIMI",
         name: "kimi-k3",
-        promptVersion: "hunter-company-research-v8",
+        promptVersion: "hunter-company-research-v9",
         structuredOutput: true,
         status: "SUCCESS",
         reasoningEffort: "LOW",

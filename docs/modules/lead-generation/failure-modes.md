@@ -69,6 +69,13 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 - A model's provider or incumbent label cannot block an account without explicit supporting language
   in the saved evidence. An undated claimed trigger is treated as current fit. Stale/no-opportunity
   research is retained on Watchlist for later research instead of becoming a permanent block.
+- Long identity pages can mention unrelated Chinese operations or suppliers. Text-based China
+  inference is applied only when the company's operating country remains unknown, so it cannot
+  override a verified U.S. or Canadian identity.
+- Qwen can overlook a strong result even when retrieval succeeded. Hunter deterministically restores
+  a fresh trigger only when a non-directory result names the exact company, has a verifiable date
+  inside 18 months, and contains strict material expansion language. The result must still pass Kimi
+  scoring and K3 validation before becoming Hot.
 - A K3 validation outage does not discard completed retrieval, Qwen synthesis, or K2.6 scoring.
   Selected fresh-event candidates are retained as Watchlist and cannot become Hot until a later
   successful validation. Current-account qualifications and deterministic blockers continue normally.
