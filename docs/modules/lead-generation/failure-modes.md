@@ -76,6 +76,10 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
   a fresh trigger only when a non-directory result names the exact company, has a verifiable date
   inside 18 months, and contains strict material expansion language. The result must still pass Kimi
   scoring and K3 validation before becoming Hot.
+- Qwen can label a company `FRESH` while citing an undated careers record even though the same evidence
+  bundle contains a qualifying expansion article. Hunter repairs the trigger citations before applying
+  the recent-date downgrade and pins the repaired evidence into both Kimi packets; otherwise the valid
+  expansion could be silently demoted or omitted from hosted validation.
 - A K3 validation outage does not discard completed retrieval, Qwen synthesis, or K2.6 scoring.
   Selected fresh-event candidates are retained as Watchlist and cannot become Hot until a later
   successful validation. Current-account qualifications and deterministic blockers continue normally.
