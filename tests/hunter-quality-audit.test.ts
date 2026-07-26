@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -86,6 +88,38 @@ describe("Hunter quality audit", () => {
       proposedScope: {}
     });
     mocks.createRivetDevelopmentJob.mockResolvedValue({ id: "rivet-job-1" });
+  });
+
+  it("uses a Codex-compatible HTTPS evidence URL schema", () => {
+    const schema = JSON.parse(
+      readFileSync(
+        path.join(
+          process.cwd(),
+          "ops/openclaw/skills/rivet-developer/hunter-quality-output.schema.json"
+        ),
+        "utf8"
+      )
+    ) as {
+      properties: {
+        findings: {
+          items: {
+            properties: {
+              evidenceUrls: {
+                items: Record<string, unknown>;
+              };
+            };
+          };
+        };
+      };
+    };
+    const evidenceUrlSchema =
+      schema.properties.findings.items.properties.evidenceUrls.items;
+
+    expect(evidenceUrlSchema).toEqual({
+      type: "string",
+      pattern: "^https://"
+    });
+    expect(evidenceUrlSchema).not.toHaveProperty("format");
   });
 
   it("selects one signal from each opportunity tier before filling the fifth slot", () => {

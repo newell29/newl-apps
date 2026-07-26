@@ -70,7 +70,6 @@
             "maxItems": 10,
             "items": {
               "type": "string",
-              "format": "uri",
               "pattern": "^https://"
             }
           }
