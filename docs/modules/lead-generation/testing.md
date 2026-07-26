@@ -130,3 +130,18 @@ Regression coverage must prove:
 7. the Hunter UI and planner contain no Apollo enrollment or communication action.
 
 Migration `20260725120000_add_hunter_dry_run_control_plane` must remain additive and may not rewrite existing company, contact, lead, TradeMining, Apollo, scoring, or outreach records.
+
+## Hunter external signal scout
+
+Regression coverage must prove:
+
+1. prepare, complete, and fail routes resolve tenant scope through machine ingestion authentication;
+2. a completion cannot write without an active tenant-owned run ID;
+3. every accepted source URL is HTTPS and every relevant result has an explicit company;
+4. model and prompt version, source provider/lens, confidence, rationale, and evidence remain auditable;
+5. invalid enums, oversized batches, missing fields, omitted source rows, and confidence below 50 fail closed;
+6. GDELT 429/5xx responses receive bounded retry, the RSS fallback remains available, and total source failure makes the run fail visibly;
+7. the live runner allows only loopback Ollama endpoints and reads its model settings from the protected Hunter environment;
+8. the installed Hunter service remains pinned to the dedicated clean runtime checkout;
+9. no scout module or route imports or calls Apollo, cadence enrollment, email, LinkedIn, or customer-communication code; and
+10. Python, zsh, TypeScript, and structured-output contract tests pass without a database migration.

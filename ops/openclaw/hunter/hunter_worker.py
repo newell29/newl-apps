@@ -16,6 +16,7 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from hunter_ingest import api_request, clean, required_env
+from hunter_signal_scout import run_signal_scout
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -517,10 +518,40 @@ def process_once(base_url: str, token: str, explicit_profile_id: Optional[str], 
     return attempted_profile
 
 
+def signal_scout_due_now(now: Optional[dt.datetime] = None) -> bool:
+    enabled = os.environ.get("HUNTER_SIGNAL_SCOUT_ENABLED", "false").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return False
+    timezone_name = os.environ.get("HUNTER_SIGNAL_SCOUT_TIMEZONE", "America/Toronto").strip()
+    try:
+        timezone = ZoneInfo(timezone_name)
+    except Exception as error:
+        raise RuntimeError("HUNTER_SIGNAL_SCOUT_TIMEZONE must be a valid IANA timezone") from error
+    configured = os.environ.get("HUNTER_SIGNAL_SCOUT_DAILY_TIME", "08:30").strip()
+    try:
+        daily_time = dt.time.fromisoformat(configured)
+    except ValueError as error:
+        raise RuntimeError("HUNTER_SIGNAL_SCOUT_DAILY_TIME must use HH:MM format") from error
+    current = now or dt.datetime.now(dt.timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=dt.timezone.utc)
+    return current.astimezone(timezone).time() >= daily_time
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--plan", action="store_true", help="Validate one profile without logging in or exporting.")
+    parser.add_argument(
+        "--signal-scout-now",
+        action="store_true",
+        help="Run external signal discovery/classification now, even if today was already attempted.",
+    )
+    parser.add_argument(
+        "--signal-scout-dry-run",
+        action="store_true",
+        help="Run external signal discovery/classification without persisting signals.",
+    )
     parser.add_argument("--end-date", help="Use a specific YYYY-MM-DD TradeMining end date for a controlled run.")
     parser.add_argument("--test-days", type=int, help="Temporarily shorten an explicit profile run without changing it.")
     profile = parser.add_mutually_exclusive_group()
@@ -540,6 +571,10 @@ def main() -> int:
     token = required_env("INGESTION_API_TOKEN")
     poll_ms = max(5000, int(os.environ.get("HUNTER_POLL_MS", "60000")))
 
+    if args.signal_scout_now or args.signal_scout_dry_run:
+        print(json.dumps(run_signal_scout(force=True, dry_run=args.signal_scout_dry_run), indent=2))
+        return 0
+
     if args.plan:
         if not args.profile_id and not args.profile_name:
             raise RuntimeError("--plan requires --profile-id or --profile-name")
@@ -547,8 +582,18 @@ def main() -> int:
         print(json.dumps(build_profile_plan(resolve_profile(profiles, clean(args.profile_id), clean(args.profile_name))), indent=2))
         return 0
 
+    last_signal_scout_check_date: Optional[dt.date] = None
     while True:
         process_once(base_url, token, clean(args.profile_id), clean(args.profile_name))
+        if not args.profile_id and not args.profile_name and signal_scout_due_now():
+            local_timezone = ZoneInfo(os.environ.get("HUNTER_SIGNAL_SCOUT_TIMEZONE", "America/Toronto").strip())
+            local_date = dt.datetime.now(dt.timezone.utc).astimezone(local_timezone).date()
+            if last_signal_scout_check_date != local_date:
+                last_signal_scout_check_date = local_date
+                try:
+                    print(json.dumps(run_signal_scout(), indent=2))
+                except Exception as error:
+                    print(f"Hunter daily signal scout failed: {error}", file=sys.stderr)
         if args.once or args.profile_id or args.profile_name:
             return 0
         time.sleep(poll_ms / 1000)

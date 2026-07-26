@@ -27,6 +27,17 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - If a one-day query with one or no arrival port remains above 25,000 results, the export is retained and ingested but coverage is marked incomplete and the Newl Apps run is `PARTIAL`.
 - Industry packs and aggregate TEUs are evaluated in Newl Apps after ingestion. They do not add undocumented fields to TradeMining's form.
 
+## Hunter public-signal discovery and local classification
+
+- GDELT DOC 2 article-list JSON is the first read-only discovery transport.
+- Google News RSS is the fallback when a GDELT query is unavailable or empty.
+- Both endpoints are fixed in the server-issued packet; the worker refuses arbitrary discovery endpoints.
+- Only HTTPS article links and bounded public headline metadata are processed.
+- Ollama is restricted to `http://127.0.0.1` or `http://localhost`; the default model is `qwen3:30b-instruct`.
+- Ollama structured output receives the same JSON Schema represented in the application validator. Invalid, omitted, weak, or unmapped classifications fail closed.
+- The machine prepare, complete, and fail routes reuse ingestion authentication and resolve the configured ingestion tenant server-side.
+- The scout does not use Apollo credentials and has no Apollo, cadence, or messaging client.
+
 ## Hunter planning integration boundary
 
 - `/api/lead-gen/hunter/daily-plan` is invoked daily by Vercel Cron and authenticates with the existing `CRON_SECRET`; Phase 1 introduces no new environment variable.

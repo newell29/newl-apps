@@ -35,6 +35,17 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 6. The manual action and `/api/lead-gen/hunter/daily-plan` both run the same deterministic planner. The Vercel route uses the existing `CRON_SECRET` and skips tenants already planned on their local calendar date.
 7. Phase 1 stops after persisting and displaying the plan. It does not search Apollo, create contacts, draft emails, change a cadence, enroll a contact, or send a message.
 
+## External signal scout
+
+1. The existing Mac-mini Hunter launch service checks once per local day after `HUNTER_SIGNAL_SCOUT_DAILY_TIME`. Automatic checks remain off unless `HUNTER_SIGNAL_SCOUT_ENABLED=true` is explicitly configured.
+2. The worker authenticates through the existing tenant-bound ingestion context. Newl Apps rejects overlap and returns the fixed discovery lenses, recent source-URL dedupe set, policy threshold, recommended local model, and no-outreach rules.
+3. The worker queries a bounded recent window, reserving the 40-item discovery cap as 24 warehousing, 12 ocean/air, and 4 trucking items before classification. GDELT DOC 2 is attempted first; HTTP 429 and transient failures receive bounded retries. Google News RSS is a read-only fallback. The run records each provider, result count, and error.
+4. Only HTTPS link, source, published date, headline, lens, and service hint are supplied to the local classifier. Article bodies, Apollo data, contacts, and customer records are not sent.
+5. Ollama enforces a JSON schema. The default `qwen3:30b-instruct` prompt requires an explicit non-logistics prospect, concrete event, evidence-only summary, service line, and calibrated 0-100 confidence. Missing records and scores below 50 fail closed.
+6. Newl Apps validates the complete response again. Relevant classifications are upserted by tenant and deterministic source key. Signals below the tenant confidence threshold are saved as dismissed; irrelevant records remain as a bounded rejected sample in the run ledger.
+7. The next dry-run planner automatically considers accepted signals. No signal-scout path performs Apollo search, cadence mutation, enrollment, email, LinkedIn, or other customer communication.
+8. `--signal-scout-now` provides an explicit operator rerun. `--signal-scout-dry-run` exercises discovery and classification, then closes the prepared job as intentionally failed without persisting signals.
+
 ## Found Companies review
 
 - The review queue retains the tenant-scoped filters and computed score ordering, then renders 25 companies by default.
