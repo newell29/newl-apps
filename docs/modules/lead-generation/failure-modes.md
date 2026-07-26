@@ -92,6 +92,8 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
   out-of-cohort signal fails the whole audit instead of partially recording a misleading result.
 - A worker/Codex/schema failure marks the audit failed and sends a safe Teams alert. It does not
   reclassify a lead or queue a Rivet job from an incomplete audit.
+- Evidence URLs use an HTTPS pattern in the Codex output schema. Do not add JSON Schema's `uri`
+  format: the Codex structured-output endpoint rejects that format before research begins.
 - Model-judgment, credential, runtime, and configuration findings are recorded and reported but do not
   auto-create code work.
 - Reproducible retrieval, handoff, rule, or TradeMining code defects create Rivet work only when the
