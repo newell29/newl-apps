@@ -190,4 +190,5 @@ Regression coverage must prove:
 3. Outreach Queue includes approved, drafted, ready, enrolled, paused, and unanswered active work;
 4. rejected, do-not-contact, bounced, finished, positive, meeting-booked, and negative contacts are excluded from Outreach Queue;
 5. the legacy `/lead-gen/contacts` route redirects to `/lead-gen/outreach`; and
-6. every underlying query remains tenant scoped and the redesign requires no database migration.
+6. Outreach Queue starts with secondary audit columns hidden and links companies back to Found Companies; and
+7. every underlying query remains tenant scoped and the redesign requires no database migration.

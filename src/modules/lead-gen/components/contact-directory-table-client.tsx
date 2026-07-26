@@ -79,6 +79,14 @@ type ContactDirectoryRow = {
   updatedAt: Date;
 };
 
+const OUTREACH_DEFAULT_COLUMN_VISIBILITY = {
+  recommendedSequenceName: false,
+  lastTouchAt: false,
+  lastReplyAt: false,
+  source: false,
+  updatedAt: false
+};
+
 export function ContactDirectoryTableClient({
   contacts,
   initialApolloPushJobs,
@@ -146,7 +154,10 @@ export function ContactDirectoryTableClient({
     setColumnVisibility,
     columnSizing,
     setColumnSizing
-  } = usePersistedTableState("newl-apps:lead-gen:contacts-grid");
+  } = usePersistedTableState(
+    "newl-apps:lead-gen:outreach-grid",
+    OUTREACH_DEFAULT_COLUMN_VISIBILITY
+  );
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
@@ -248,9 +259,9 @@ export function ContactDirectoryTableClient({
           return (
             <div className="max-w-[220px]">
               <Link
-                href={`/lead-gen/pipeline?company=${contact.companyId}&companyName=${encodeURIComponent(contact.companyName)}`}
+                href={`/lead-gen/candidates?q=${encodeURIComponent(contact.companyName)}`}
                 className="font-medium text-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
-                title={`Open ${contact.companyName} in Pipeline`}
+                title={`Open ${contact.companyName} in Found Companies`}
               >
                 {contact.companyName}
               </Link>
