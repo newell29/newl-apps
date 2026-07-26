@@ -26,7 +26,7 @@ DEFAULT_QWEN_MODEL = "qwen3.5:35b"
 DEFAULT_KIMI_URL = "https://api.moonshot.ai/v1"
 DEFAULT_KIMI_MODEL = "kimi-k2.6"
 DEFAULT_KIMI_VALIDATOR_MODEL = "kimi-k3"
-PROMPT_VERSION = "hunter-company-research-v8"
+PROMPT_VERSION = "hunter-company-research-v9"
 ALLOWED_SERVICE_LINES = {"WAREHOUSING", "OCEAN_AIR", "TRUCKING"}
 ALLOWED_OPERATING_REGIONS = {"NORTH_AMERICA", "CHINA", "OTHER_FOREIGN", "UNKNOWN"}
 ALLOWED_SIGNAL_TYPES = {
@@ -1432,6 +1432,41 @@ def has_explicit_stable_provider_evidence(evidence: list[dict[str, Any]]) -> boo
     )
 
 
+def recent_material_trigger_indices(
+    candidate: dict[str, Any],
+    evidence: list[dict[str, Any]],
+) -> list[int]:
+    aliases = [
+        re.sub(r"[^a-z0-9]+", "", alias.lower())
+        for alias in company_search_aliases(candidate)
+        if len(re.sub(r"[^a-z0-9]+", "", alias.lower())) >= 5
+    ]
+    material_pattern = re.compile(
+        r"\b(major investment|breaks? ground|broke ground|"
+        r"new (?:facility|warehouse|distribution cent(?:er|re)|manufacturing site)|"
+        r"expands? (?:its |the )?(?:production|manufacturing|warehouse|distribution|facility)|"
+        r"increas(?:e|es|ed|ing) (?:its )?(?:manufacturing |production )?capacity|"
+        r"(?:facility|warehouse|distribution cent(?:er|re)) expansion|"
+        r"establish(?:es|ed|ing)? .{0,60} manufacturing)\b",
+        re.IGNORECASE,
+    )
+    indices: list[int] = []
+    for index, row in enumerate(evidence):
+        if row.get("pass") not in {"FRESH_EVENTS", "FOLLOW_UP"}:
+            continue
+        if row.get("sourceType") in {"CAREERS", "DIRECTORY"}:
+            continue
+        if not is_recent_trigger({"triggerEvidenceIndices": [index]}, evidence):
+            continue
+        text = f"{row.get('title') or ''} {row.get('excerpt') or ''}"
+        normalized_text = re.sub(r"[^a-z0-9]+", "", text.lower())
+        if not any(alias in normalized_text for alias in aliases):
+            continue
+        if material_pattern.search(text):
+            indices.append(index)
+    return indices[:3]
+
+
 def normalize_synthesis_for_evidence(
     candidate: dict[str, Any],
     evidence: list[dict[str, Any]],
@@ -1440,6 +1475,19 @@ def normalize_synthesis_for_evidence(
     normalized = dict(synthesis)
     missing_evidence = list(normalized.get("missingEvidence") or [])
     rationale = clean(normalized.get("rationale")) or ""
+    material_trigger_indices = recent_material_trigger_indices(candidate, evidence)
+    if normalized.get("freshness") != "FRESH" and material_trigger_indices:
+        normalized["freshness"] = "FRESH"
+        normalized["triggerEvidenceIndices"] = list(
+            dict.fromkeys(
+                material_trigger_indices + list(normalized.get("triggerEvidenceIndices") or [])
+            )
+        )[:5]
+        message = (
+            "Deterministic evidence review found an exact-company, recent, dated material expansion "
+            "that the synthesis did not classify as fresh."
+        )
+        rationale = f"{rationale} {message}".strip()
     if normalized.get("freshness") == "FRESH" and not is_recent_trigger(normalized, evidence):
         normalized["freshness"] = "CURRENT"
         message = "No cited trigger has a verifiable publication date within 18 months; evaluated as current fit."
