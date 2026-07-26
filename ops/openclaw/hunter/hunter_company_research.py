@@ -26,7 +26,7 @@ DEFAULT_QWEN_MODEL = "qwen3.5:35b"
 DEFAULT_KIMI_URL = "https://api.moonshot.ai/v1"
 DEFAULT_KIMI_MODEL = "kimi-k2.6"
 DEFAULT_KIMI_VALIDATOR_MODEL = "kimi-k3"
-PROMPT_VERSION = "hunter-company-research-v9"
+PROMPT_VERSION = "hunter-company-research-v10"
 ALLOWED_SERVICE_LINES = {"WAREHOUSING", "OCEAN_AIR", "TRUCKING"}
 ALLOWED_OPERATING_REGIONS = {"NORTH_AMERICA", "CHINA", "OTHER_FOREIGN", "UNKNOWN"}
 ALLOWED_SIGNAL_TYPES = {
@@ -1170,8 +1170,9 @@ def select_model_evidence(
     evidence: list[dict[str, Any]],
     maximum_items: int = 5,
     maximum_excerpt_length: int = 700,
+    preferred_indices: Optional[list[int]] = None,
 ) -> list[dict[str, Any]]:
-    """Choose a small, diverse evidence packet while preserving the full ledger elsewhere."""
+    """Choose a small, diverse packet and preserve deterministically selected evidence."""
     source_priority = {
         "FIRST_PARTY": 0,
         "GOVERNMENT": 1,
@@ -1195,12 +1196,29 @@ def select_model_evidence(
     )
     selected: list[dict[str, Any]] = []
     selected_indexes: set[int] = set()
+    indexed_by_position = {
+        int(row["evidenceIndex"]): row
+        for row in indexed
+    }
+    for index in preferred_indices or []:
+        row = indexed_by_position.get(index)
+        if row is None or index in selected_indexes:
+            continue
+        selected.append(row)
+        selected_indexes.add(index)
+        if len(selected) >= maximum_items:
+            break
     for pass_id in ("IDENTITY", "FRESH_EVENTS", "CAREERS", "DISTRIBUTION_FOOTPRINT", "FOLLOW_UP"):
+        if any(row.get("pass") == pass_id for row in selected):
+            continue
         match = next((row for row in ranked if row.get("pass") == pass_id), None)
         if match is None:
             continue
+        match_index = int(match["evidenceIndex"])
+        if match_index in selected_indexes:
+            continue
         selected.append(match)
-        selected_indexes.add(int(match["evidenceIndex"]))
+        selected_indexes.add(match_index)
         if len(selected) >= maximum_items:
             break
     for row in ranked:
@@ -1295,7 +1313,10 @@ def score_companies(
                 "primaryIndustry": candidate.get("primaryIndustry"),
                 "shipmentEvidence": candidate.get("shipmentEvidence", []),
                 "evidence": select_model_evidence(
-                    evidence_by_key.get(candidate["companyKey"], [])
+                    evidence_by_key.get(candidate["companyKey"], []),
+                    preferred_indices=synthesis_by_key[candidate["companyKey"]].get(
+                        "triggerEvidenceIndices", []
+                    ),
                 ),
                 "synthesis": synthesis_by_key[candidate["companyKey"]],
             }
@@ -1476,16 +1497,29 @@ def normalize_synthesis_for_evidence(
     missing_evidence = list(normalized.get("missingEvidence") or [])
     rationale = clean(normalized.get("rationale")) or ""
     material_trigger_indices = recent_material_trigger_indices(candidate, evidence)
-    if normalized.get("freshness") != "FRESH" and material_trigger_indices:
+    cited_recent_trigger = is_recent_trigger(normalized, evidence)
+    if material_trigger_indices and (
+        normalized.get("freshness") != "FRESH" or not cited_recent_trigger
+    ):
+        repaired_existing_freshness = normalized.get("freshness") == "FRESH"
         normalized["freshness"] = "FRESH"
-        normalized["triggerEvidenceIndices"] = list(
-            dict.fromkeys(
-                material_trigger_indices + list(normalized.get("triggerEvidenceIndices") or [])
-            )
-        )[:5]
+        normalized["triggerEvidenceIndices"] = (
+            material_trigger_indices
+            if repaired_existing_freshness
+            else list(
+                dict.fromkeys(
+                    material_trigger_indices + list(normalized.get("triggerEvidenceIndices") or [])
+                )
+            )[:5]
+        )
         message = (
-            "Deterministic evidence review found an exact-company, recent, dated material expansion "
-            "that the synthesis did not classify as fresh."
+            "Deterministic evidence review replaced unsupported trigger citations with an "
+            "exact-company, recent, dated material expansion."
+            if repaired_existing_freshness
+            else (
+                "Deterministic evidence review found an exact-company, recent, dated material expansion "
+                "that the synthesis did not classify as fresh."
+            )
         )
         rationale = f"{rationale} {message}".strip()
     if normalized.get("freshness") == "FRESH" and not is_recent_trigger(normalized, evidence):
@@ -1625,7 +1659,12 @@ def validate_top_companies(
         {
             "companyKey": candidate["companyKey"],
             "companyName": candidate["companyName"],
-            "evidence": select_model_evidence(evidence_by_key[candidate["companyKey"]]),
+            "evidence": select_model_evidence(
+                evidence_by_key[candidate["companyKey"]],
+                preferred_indices=synthesis_by_key[candidate["companyKey"]].get(
+                    "triggerEvidenceIndices", []
+                ),
+            ),
             "synthesis": synthesis_by_key[candidate["companyKey"]],
             "k2Scoring": scoring_by_key[candidate["companyKey"]],
         }

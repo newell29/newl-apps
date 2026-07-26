@@ -27,7 +27,7 @@ describe("Hunter company deep research", () => {
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL).toBe("qwen3.5:35b");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL).toBe("kimi-k2.6");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL).toBe("kimi-k3");
-    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v9");
+    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v10");
     expect(HUNTER_COMPANY_RESEARCH_SAFETY).toEqual({
       externalWrites: false,
       apollo: false,
@@ -497,6 +497,55 @@ describe("Hunter company deep research", () => {
     });
   });
 
+  it("repairs a fresh synthesis that cites the wrong trigger before applying the date gate", async () => {
+    const program = [
+      "import datetime as d,json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'AALBERTS IPS AMERICAS','companyKey':'aalberts-ips-americas'}",
+      "recent=(d.datetime.now(d.timezone.utc)-d.timedelta(days=30)).isoformat()",
+      "evidence=[{'pass':'IDENTITY','firstParty':True,'sourceType':'FIRST_PARTY','title':'Aalberts IPS Americas','excerpt':'Aalberts IPS Americas is a US manufacturer.','publishedAt':None},{'pass':'FRESH_EVENTS','firstParty':False,'sourceType':'OTHER','title':'Aalberts brings PowerPress manufacturing to the United States','excerpt':'Aalberts announced a major investment that expands production capabilities at its South Carolina facility, increasing manufacturing capacity through 2027. Aalberts IPS Americas operates the facility.','publishedAt':recent},{'pass':'CAREERS','firstParty':True,'sourceType':'CAREERS','title':'Aalberts IPS careers','excerpt':'Current logistics jobs.','publishedAt':None}]",
+      "synthesis={'identityDisposition':'PASS','identityConfidence':85,'identityReason':'Verified.','confidence':85,'freshness':'FRESH','triggerEvidenceIndices':[2],'missingEvidence':[],'rationale':'Fresh hiring signal.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
+      "print(json.dumps(r.normalize_synthesis_for_evidence(candidate,evidence,synthesis)))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toMatchObject({
+      freshness: "FRESH",
+      triggerEvidenceIndices: [1]
+    });
+  });
+
+  it("guarantees reconciled trigger evidence into compact Kimi packets", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "rows=[{'pass':'IDENTITY','sourceType':'FIRST_PARTY','firstParty':True,'title':'Identity'},{'pass':'FRESH_EVENTS','sourceType':'OTHER','firstParty':False,'title':'Undated vacancies'},{'pass':'FRESH_EVENTS','sourceType':'OTHER','firstParty':False,'title':'Expansion one'},{'pass':'FRESH_EVENTS','sourceType':'OTHER','firstParty':False,'title':'Expansion two'},{'pass':'CAREERS','sourceType':'CAREERS','firstParty':True,'title':'Careers'},{'pass':'DISTRIBUTION_FOOTPRINT','sourceType':'FIRST_PARTY','firstParty':True,'title':'Distribution'}]",
+      "print(json.dumps(r.select_model_evidence(rows,preferred_indices=[2,3])))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+    const evidence = JSON.parse(stdout) as Array<{
+      evidenceIndex: number;
+      pass: string;
+    }>;
+
+    expect(evidence.map((row) => row.evidenceIndex)).toEqual([2, 3, 0, 4, 5]);
+    expect(new Set(evidence.map((row) => row.pass))).toEqual(
+      new Set(["IDENTITY", "FRESH_EVENTS", "CAREERS", "DISTRIBUTION_FOOTPRINT"])
+    );
+  });
+
   it("sends a compact, pass-diverse evidence packet to the models", async () => {
     const program = [
       "import json",
@@ -627,7 +676,7 @@ function completion() {
       synthesis: {
         provider: "OLLAMA",
         name: "qwen3.5:35b",
-        promptVersion: "hunter-company-research-v9",
+        promptVersion: "hunter-company-research-v10",
         structuredOutput: true,
         inputTokens: 2000,
         outputTokens: 700,
@@ -636,7 +685,7 @@ function completion() {
       scoring: {
         provider: "KIMI",
         name: "kimi-k2.6",
-        promptVersion: "hunter-company-research-v9",
+        promptVersion: "hunter-company-research-v10",
         structuredOutput: true,
         inputTokens: 1800,
         cachedInputTokens: 200,
@@ -647,7 +696,7 @@ function completion() {
       validation: {
         provider: "KIMI",
         name: "kimi-k3",
-        promptVersion: "hunter-company-research-v9",
+        promptVersion: "hunter-company-research-v10",
         structuredOutput: true,
         status: "SUCCESS",
         reasoningEffort: "LOW",
