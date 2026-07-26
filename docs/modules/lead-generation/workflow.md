@@ -46,6 +46,18 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 7. The next dry-run planner automatically considers accepted signals. No signal-scout path performs Apollo search, cadence mutation, enrollment, email, LinkedIn, or other customer communication.
 8. `--signal-scout-now` provides an explicit operator rerun. `--signal-scout-dry-run` exercises discovery and classification, then closes the prepared job as intentionally failed without persisting signals.
 
+## Company deep research
+
+1. After `HUNTER_COMPANY_RESEARCH_DAILY_TIME`, the existing Mac-mini service requests a tenant-scoped cohort from Newl Apps. The default limit is the saved Hunter policy limit; a new unsaved policy uses 30.
+2. The server applies the same customer, pipeline, reply, sequence, do-not-contact, do-not-prospect, suppression, and recency exclusions before returning company facts. No contact or Apollo payload is returned.
+3. Hunter runs four query passes per company: identity/parent, fresh events, first-party careers, and distribution footprint/named external providers. Brave Search is the approved production provider; DuckDuckGo HTML is a bounded trial fallback.
+4. The worker stores HTTPS URLs, matching source domains, queries, excerpts, first-party labels, retrieval failures, and limited page text. URL resolution and redirects reject local, private, and non-global network destinations.
+5. Local Qwen 3.5 35B synthesizes small structured batches with thinking disabled. It can propose at most two precise follow-up queries per company; Hunter retrieves them and reruns synthesis once.
+6. Kimi K2.6 scores demand trigger, service fit, timing, accessibility, and evidence quality from 0-20. Its reported total must equal the dimensions, and usage/cost telemetry is retained.
+7. Newl Apps revalidates the tenant cohort and the complete payload, then applies deterministic identity, logistics-provider, stable/exclusive external-provider, evidence-count, pass-coverage, and freshness gates. Blocked candidates receive no usable research score.
+8. Accepted research is stored as a Hunter signal and immediately refreshes the dry-run plan. No Apollo lookup, pipeline mutation, cadence write, email, LinkedIn action, or other customer communication exists in this path.
+9. `--company-research-now` runs the queue explicitly. `--company-research-dry-run` stops before persistence. `--company-research-cohort <json>` replays an exact bounded company list for model comparisons. A redacted `--company-research-output` checkpoint is written after retrieval and Qwen; `--company-research-resume` can reuse it only when the newly prepared tenant cohort matches exactly, avoiding duplicate search traffic after a Kimi outage.
+
 ## Found Companies review
 
 - The review queue retains the tenant-scoped filters and computed score ordering, then renders 25 companies by default.

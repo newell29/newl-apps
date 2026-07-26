@@ -47,6 +47,13 @@ Hunter Phase 2 requires no database migration:
 - source failures, rejected samples, counts, and model details use the existing `AutomationJobRun.input` and `output`;
 - every read, upsert, job completion, and audit row carries `tenantId`.
 
+Hunter Phase 3 also requires no database migration:
+
+- `AutomationJobRun` stores the prepared tenant cohort and aggregate retrieval/model telemetry;
+- `HunterOpportunitySignal.evidence` stores the complete per-company search ledger, Qwen synthesis, deterministic gate result, Kimi dimensions, final score, and model usage;
+- `HunterOpportunitySignal.rawJson` stores bounded non-secret replay metadata;
+- the refreshed `HunterProspectingDecision` keeps the scored signal in the existing immutable daily-plan ledger.
+
 ```mermaid
 flowchart LR
   UI[Authenticated UI/API] --> Auth[Auth + module guard]

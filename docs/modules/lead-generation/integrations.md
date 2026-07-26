@@ -38,6 +38,19 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - The machine prepare, complete, and fail routes reuse ingestion authentication and resolve the configured ingestion tenant server-side.
 - The scout does not use Apollo credentials and has no Apollo, cadence, or messaging client.
 
+## Hunter company-research providers
+
+- Brave Search is the approved production retrieval provider. A bounded DuckDuckGo HTML adapter is
+  available for trial/replay use but is not an availability-guaranteed production contract.
+- Search and Kimi credentials remain only in Hunter's protected local environment. Newl Apps receives
+  bounded public evidence and usage metadata, never either credential.
+- Public page retrieval accepts HTTPS only, validates DNS as globally routable, revalidates redirects,
+  caps response sizes, and rejects local/private destinations.
+- Ollama is restricted to loopback and defaults to `qwen3.5:35b` for synthesis. The Kimi client is
+  restricted to `https://api.moonshot.ai/v1` and defaults to `kimi-k2.6` for scoring.
+- The company-research worker and machine routes contain no Apollo, pipeline-stage, cadence, email,
+  LinkedIn, or customer-communication client.
+
 ## Hunter planning integration boundary
 
 - `/api/lead-gen/hunter/daily-plan` is invoked daily by Vercel Cron and authenticates with the existing `CRON_SECRET`; Phase 1 introduces no new environment variable.

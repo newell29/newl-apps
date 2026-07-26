@@ -16,6 +16,7 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from hunter_ingest import api_request, clean, required_env
+from hunter_company_research import run_company_research
 from hunter_signal_scout import run_signal_scout
 
 
@@ -538,6 +539,26 @@ def signal_scout_due_now(now: Optional[dt.datetime] = None) -> bool:
     return current.astimezone(timezone).time() >= daily_time
 
 
+def company_research_due_now(now: Optional[dt.datetime] = None) -> bool:
+    enabled = os.environ.get("HUNTER_COMPANY_RESEARCH_ENABLED", "false").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return False
+    timezone_name = os.environ.get("HUNTER_COMPANY_RESEARCH_TIMEZONE", "America/Toronto").strip()
+    try:
+        timezone = ZoneInfo(timezone_name)
+    except Exception as error:
+        raise RuntimeError("HUNTER_COMPANY_RESEARCH_TIMEZONE must be a valid IANA timezone") from error
+    configured = os.environ.get("HUNTER_COMPANY_RESEARCH_DAILY_TIME", "09:15").strip()
+    try:
+        daily_time = dt.time.fromisoformat(configured)
+    except ValueError as error:
+        raise RuntimeError("HUNTER_COMPANY_RESEARCH_DAILY_TIME must use HH:MM format") from error
+    current = now or dt.datetime.now(dt.timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=dt.timezone.utc)
+    return current.astimezone(timezone).time() >= daily_time
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true")
@@ -551,6 +572,33 @@ def main() -> int:
         "--signal-scout-dry-run",
         action="store_true",
         help="Run external signal discovery/classification without persisting signals.",
+    )
+    parser.add_argument(
+        "--company-research-now",
+        action="store_true",
+        help="Run evidence-first company research now, even if today was already attempted.",
+    )
+    parser.add_argument(
+        "--company-research-dry-run",
+        action="store_true",
+        help="Run evidence-first company research without persisting signals or a refreshed plan.",
+    )
+    parser.add_argument(
+        "--company-research-cohort",
+        help="Optional JSON array of company names/keys for an exact replay cohort.",
+    )
+    parser.add_argument(
+        "--company-research-output",
+        help="Optional local JSON path for the redacted research completion ledger.",
+    )
+    parser.add_argument(
+        "--company-research-resume",
+        help="Resume a matching company-research retrieval or synthesis checkpoint.",
+    )
+    parser.add_argument(
+        "--company-research-only",
+        action="store_true",
+        help="Stop after web retrieval and local Qwen without calling Kimi.",
     )
     parser.add_argument("--end-date", help="Use a specific YYYY-MM-DD TradeMining end date for a controlled run.")
     parser.add_argument("--test-days", type=int, help="Temporarily shorten an explicit profile run without changing it.")
@@ -574,6 +622,28 @@ def main() -> int:
     if args.signal_scout_now or args.signal_scout_dry_run:
         print(json.dumps(run_signal_scout(force=True, dry_run=args.signal_scout_dry_run), indent=2))
         return 0
+    if (
+        args.company_research_now
+        or args.company_research_dry_run
+        or args.company_research_only
+        or args.company_research_resume
+    ):
+        from hunter_company_research import read_company_keys
+
+        print(
+            json.dumps(
+                run_company_research(
+                    force=True,
+                    dry_run=args.company_research_dry_run,
+                    company_keys=read_company_keys(args.company_research_cohort),
+                    replay_output=args.company_research_output,
+                    resume_checkpoint=args.company_research_resume,
+                    research_only=args.company_research_only,
+                ),
+                indent=2,
+            )
+        )
+        return 0
 
     if args.plan:
         if not args.profile_id and not args.profile_name:
@@ -583,6 +653,7 @@ def main() -> int:
         return 0
 
     last_signal_scout_check_date: Optional[dt.date] = None
+    last_company_research_check_date: Optional[dt.date] = None
     while True:
         process_once(base_url, token, clean(args.profile_id), clean(args.profile_name))
         if not args.profile_id and not args.profile_name and signal_scout_due_now():
@@ -594,6 +665,17 @@ def main() -> int:
                     print(json.dumps(run_signal_scout(), indent=2))
                 except Exception as error:
                     print(f"Hunter daily signal scout failed: {error}", file=sys.stderr)
+        if not args.profile_id and not args.profile_name and company_research_due_now():
+            local_timezone = ZoneInfo(
+                os.environ.get("HUNTER_COMPANY_RESEARCH_TIMEZONE", "America/Toronto").strip()
+            )
+            local_date = dt.datetime.now(dt.timezone.utc).astimezone(local_timezone).date()
+            if last_company_research_check_date != local_date:
+                last_company_research_check_date = local_date
+                try:
+                    print(json.dumps(run_company_research(), indent=2))
+                except Exception as error:
+                    print(f"Hunter daily company research failed: {error}", file=sys.stderr)
         if args.once or args.profile_id or args.profile_name:
             return 0
         time.sleep(poll_ms / 1000)

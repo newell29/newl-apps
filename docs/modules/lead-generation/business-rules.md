@@ -69,6 +69,17 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - The prompt/model/provider/version, classification rationale, source lens, and supporting headline statements are retained with accepted signals.
 - The local classifier receives public headline metadata only. It does not receive contacts, emails, Apollo payloads, TradeMining raw rows, tenant credentials, or customer records.
 
+## Hunter company deep research
+
+- Company deep research is opt-in and disabled by default. It processes the tenant policy's `dailyCompanyLimit`, which defaults to 30 for a new, unsaved policy and remains editable from 1 to 100.
+- The default queue excludes do-not-prospect, rejected/disqualified, cashflow-customer, existing-pipeline, replied, previously sequenced, do-not-contact, and recently researched companies. An explicit operator replay may name at most 100 company keys, and every key is still resolved inside the authenticated tenant and through the same exclusion rules.
+- Every company receives identity/parent, fresh-event, first-party-careers, and distribution-footprint queries. Local Qwen may request at most two evidence-gap follow-ups. Search results, queries, source URLs/domains, excerpts, pass labels, retrieval counts, and failures remain auditable.
+- Local Qwen 3.5 35B synthesizes evidence with thinking disabled and structured output. Kimi K2.6 scores five 0-20 dimensions only after synthesis. Token counts, cached tokens, durations, model names, prompt version, and a non-authoritative cost estimate are retained.
+- Deterministic server code, not either model, blocks an ambiguous identity, a company that is itself a logistics provider, narrow explicit language showing that the company provides logistics services to other customers or members, an explicitly evidenced stable/exclusive external-provider relationship without displacement evidence, fewer than two evidence records, missing identity evidence, coverage of fewer than two passes, and stale/no current opportunity evidence. Ordinary manufacturers, retailers, importers, or distributors with internal logistics staff are prospects and do not trip the provider gate.
+- Kimi's five dimension scores must sum exactly to its total. The final priority score is used by the dry-run planner only when every deterministic gate passes; a model cannot override a blocker.
+- Completion refreshes the dry-run prospecting plan. It cannot search Apollo, change a company or lead stage, enroll a cadence, draft/send email, or perform LinkedIn activity.
+- Research data reuses the additive Hunter signal and `AutomationJobRun` JSON ledgers. Phase 3 requires no database migration and does not rewrite existing company, contact, lead, TradeMining, Apollo, scoring, or outreach records.
+
 ## Data model
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.

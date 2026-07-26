@@ -145,3 +145,19 @@ Regression coverage must prove:
 8. the installed Hunter service remains pinned to the dedicated clean runtime checkout;
 9. no scout module or route imports or calls Apollo, cadence enrollment, email, LinkedIn, or customer-communication code; and
 10. Python, zsh, TypeScript, and structured-output contract tests pass without a database migration.
+
+## Hunter company deep research
+
+Regression coverage must prove:
+
+1. prepare, complete, and fail routes resolve tenant scope through machine ingestion authentication;
+2. an explicit cohort is bounded to 100 keys and still resolves only eligible companies inside the authenticated tenant;
+3. the default queue follows the saved daily company limit and excludes recently researched companies for seven days;
+4. identity, fresh-event, careers, and distribution-footprint queries are generated for every company;
+5. evidence URLs are HTTPS, source domains match their URLs, redirects cannot reach local/private addresses, and query/evidence sizes are bounded;
+6. Qwen runs locally with structured output and thinking disabled, while Kimi usage and cached-token counts remain auditable;
+7. ambiguous identity, companies that are themselves logistics providers, narrow explicit provider-service evidence even when the model misses it, explicitly evidenced stable/exclusive external-provider relationships without displacement evidence, thin evidence, incomplete pass coverage, and stale/no opportunity evidence fail deterministic gates;
+8. five 0-20 Kimi dimensions must equal the reported total, and a model score cannot override a blocker;
+9. completion stores tenant-scoped evidence and refreshes only the dry-run plan; and
+10. a retrieval/Qwen checkpoint resumes only against an identical newly prepared tenant cohort; and
+11. no company-research module or route imports or calls Apollo, pipeline-stage mutation, cadence enrollment, email, LinkedIn, or customer-communication code.
