@@ -28,7 +28,7 @@ describe("Hunter company deep research", () => {
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL).toBe("qwen3.5:35b");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL).toBe("kimi-k2.6");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL).toBe("kimi-k3");
-    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v12");
+    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v13");
     expect(HUNTER_COMPANY_RESEARCH_TRANSACTION_TIMEOUT_MS).toBe(30_000);
     expect(HUNTER_COMPANY_RESEARCH_SAFETY).toEqual({
       externalWrites: false,
@@ -162,6 +162,84 @@ describe("Hunter company deep research", () => {
 
     expect(evaluateResearchGate(verifiedUsCompany).blockers).not.toContain(
       "Mainland-China company has no verified U.S. operating division."
+    );
+  });
+
+  it("does not require an exact legal division phrase for corroborated North American operators", () => {
+    const company = parseHunterCompanyResearchCompletion(completion()).companies[0];
+    const silfab = {
+      ...company,
+      companyName: "SILFAB SOLAR PV SC INC",
+      synthesis: {
+        ...company.synthesis,
+        companyCountry: "United States",
+        operatingRegion: "NORTH_AMERICA" as const,
+        verifiedUsDivision: true,
+        usDivisionName: "Silfab Solar PV SC Inc.",
+        usDivisionEvidenceIndices: [0]
+      },
+      evidence: company.evidence.map((item, index) =>
+        index === 0
+          ? {
+              ...item,
+              title: "Silfab Solar - North American-Made Solar Panels",
+              excerpt:
+                "Silfab Solar operates U.S. manufacturing facilities and makes solar panels exclusively in the USA."
+            }
+          : item
+      )
+    };
+
+    expect(evaluateResearchGate(silfab).blockers).not.toContain(
+      "The claimed U.S. division is not verified by the cited public identity evidence."
+    );
+  });
+
+  it("accepts legal-suffix variants but keeps foreign U.S. division evidence explicit", () => {
+    const company = parseHunterCompanyResearchCompletion(completion()).companies[0];
+    const foreign = {
+      ...company,
+      companyName: "DNP IMAGINGCOMM AMERICA CORPORATION",
+      synthesis: {
+        ...company.synthesis,
+        companyCountry: "Japan",
+        operatingRegion: "OTHER_FOREIGN" as const,
+        verifiedUsDivision: true,
+        usDivisionName:
+          "DNP Imagingcomm America Corporation (U.S. subsidiary of Dai Nippon Printing Co., Ltd.)",
+        usDivisionEvidenceIndices: [0]
+      },
+      evidence: company.evidence.map((item, index) =>
+        index === 0
+          ? {
+              ...item,
+              title: "DNP Imagingcomm America",
+              excerpt:
+                "DNP Imagingcomm America Corporation is a wholly owned U.S. subsidiary operating manufacturing facilities in the United States."
+            }
+          : item
+      )
+    };
+
+    expect(evaluateResearchGate(foreign).blockers).not.toContain(
+      "The claimed U.S. division is not verified by the cited public identity evidence."
+    );
+
+    const unrelated = {
+      ...foreign,
+      evidence: foreign.evidence.map((item, index) =>
+        index === 0
+          ? {
+              ...item,
+              title: "Different Imaging Company",
+              excerpt:
+                "A different imaging company operates a manufacturing facility in the United States."
+            }
+          : item
+      )
+    };
+    expect(evaluateResearchGate(unrelated).blockers).toContain(
+      "The claimed U.S. division is not verified by the cited public identity evidence."
     );
   });
 
@@ -344,6 +422,7 @@ describe("Hunter company deep research", () => {
     expect(research).toContain("kimi-k2.6");
     expect(research).toContain("select_model_evidence");
     expect(research).toContain("ordinary internal operations");
+    expect(research).toContain("confidence measures the reliability of the score and identity evidence");
     expect(research).toContain("Do not silently substitute a plausible parent");
     expect(research).toContain("separate customers or member companies");
     expect(research).toContain("parse_brave_published_at");
@@ -530,6 +609,64 @@ describe("Hunter company deep research", () => {
       official: true,
       directory: false
     });
+  });
+
+  it("pivots from a discovered brand domain to first-party legal identity evidence", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'ZOE BABY PRODUCTS, LLC','companyKey':'zoe-baby-products-llc','domain':None}",
+      "evidence=[{'pass':'IDENTITY','query':'identity','title':'Zoe Baby social profile','url':'https://www.facebook.com/zoestrollers','sourceDomain':'www.facebook.com','sourceType':'OTHER','publishedAt':None,'excerpt':'ZOE Baby Products, LLC operates zoebaby.com','firstParty':False}]",
+      "synthesis={'identityDisposition':'AMBIGUOUS','identityConfidence':45}",
+      "calls=[]",
+      "def fake_search(provider,query,limit):",
+      " calls.append(query)",
+      " if query.startswith('site:zoebaby.com'):",
+      "  return [{'url':'https://zoebaby.com/pages/privacy-policy','title':'Privacy Policy','snippet':'ZOE Baby Products LLC operates this website from Charlotte, NC.','publishedAt':None}]",
+      " return [{'url':'https://zoebaby.com/','title':'Zoe Baby','snippet':'Official stroller company website.','publishedAt':None}]",
+      "r.search_web=fake_search",
+      "r.fetch_page_evidence=lambda url: (('ZOE Baby Products, LLC operates this website from 4710 Belle Oaks Dr, Charlotte, NC.' if 'privacy' in url else 'Zoe makes lightweight strollers for families.'),None)",
+      "by_key={'zoe-baby-products-llc':evidence}",
+      "logs=[]",
+      "added,pages=r.collect_identity_discovery_evidence('BRAVE',[candidate],{'zoe-baby-products-llc':synthesis},by_key,logs,5)",
+      "print(json.dumps({'domains':r.discovered_candidate_domains(candidate,evidence),'calls':calls,'added':added,'pages':pages,'evidence':by_key['zoe-baby-products-llc']}))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+    const result = JSON.parse(stdout) as {
+      domains: string[];
+      calls: string[];
+      added: number;
+      pages: number;
+      evidence: Array<{
+        pass: string;
+        sourceDomain: string;
+        sourceType: string;
+        firstParty: boolean;
+        excerpt: string;
+      }>;
+    };
+
+    expect(result.domains).toEqual(["zoebaby.com"]);
+    expect(result.calls).toEqual([
+      '"ZOE BABY" official website',
+      'site:zoebaby.com ("ZOE BABY PRODUCTS, LLC" OR privacy OR terms OR contact OR about)'
+    ]);
+    expect(result).toMatchObject({ added: 2, pages: 2 });
+    expect(result.evidence).toContainEqual(
+      expect.objectContaining({
+        pass: "IDENTITY",
+        sourceDomain: "zoebaby.com",
+        sourceType: "FIRST_PARTY",
+        firstParty: true,
+        excerpt: expect.stringContaining("Charlotte")
+      })
+    );
   });
 
   it("normalizes undated fresh claims and corroborated first-party identities before Kimi scoring", async () => {
@@ -869,7 +1006,7 @@ function completion() {
       synthesis: {
         provider: "OLLAMA",
         name: "qwen3.5:35b",
-        promptVersion: "hunter-company-research-v12",
+        promptVersion: "hunter-company-research-v13",
         structuredOutput: true,
         inputTokens: 2000,
         outputTokens: 700,
@@ -878,7 +1015,7 @@ function completion() {
       scoring: {
         provider: "KIMI",
         name: "kimi-k2.6",
-        promptVersion: "hunter-company-research-v12",
+        promptVersion: "hunter-company-research-v13",
         structuredOutput: true,
         inputTokens: 1800,
         cachedInputTokens: 200,
@@ -889,7 +1026,7 @@ function completion() {
       validation: {
         provider: "KIMI",
         name: "kimi-k3",
-        promptVersion: "hunter-company-research-v12",
+        promptVersion: "hunter-company-research-v13",
         structuredOutput: true,
         status: "SUCCESS",
         reasoningEffort: "LOW",

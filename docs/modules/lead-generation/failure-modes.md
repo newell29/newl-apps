@@ -222,6 +222,20 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Prevention: the manual generation action, automatic generation path, Apollo queue action, and Apollo worker all
   evaluate the same tenant-scoped handoff. A model cannot override the required service line.
 
+## Valid North American companies are blocked for unverified U.S. divisions
+
+- Symptom: a U.S. or Canadian operating company is marked Blocked with `The claimed U.S. division is not verified by the cited public identity evidence`, even though first-party evidence confirms the local operator.
+- Cause: the legacy deterministic check required the complete model-returned legal division name to appear literally on one identity page. Brand-only sites, omitted legal suffixes, and explanatory parentheticals produced false negatives.
+- Prevention: apply the foreign U.S.-division proof only outside an already corroborated North American identity. For foreign/China entities, compare bounded aliases without legal suffixes or parenthetical annotations and still require explicit U.S. jurisdiction plus operating-relationship language.
+- Recovery: after deployment, force a tenant-scoped exact-cohort company-research replay for affected companies. The run reuses normal safety gates, refreshes the prospecting plan, and queues a handoff only when the tenant is explicitly in Assisted mode.
+
+## Hunter reports no first-party site for an obvious consumer brand
+
+- Symptom: a legitimate importer is blocked as ambiguous although a public brand site exists and another saved result may even mention its domain.
+- Cause: legal-name search results were dominated by directories and the worker did not pivot from a candidate-matching discovered domain into the brand's legal/about/contact pages before scoring.
+- Prevention: low-confidence, ambiguous, or uncorroborated identities receive a bounded identity-discovery pass. Candidate-matching domains found in saved evidence are searched for first-party legal, privacy, terms, contact, and about pages; added evidence forces a second Qwen synthesis.
+- Recovery: rerun only the exact affected company cohort after the worker and server fixes are deployed. Do not manually promote the account without saved first-party evidence.
+
 ## Assisted handoff stops after research
 
 - Symptom: research and the Daily Opportunity are complete, but no contact or Outreach Plan appears.
