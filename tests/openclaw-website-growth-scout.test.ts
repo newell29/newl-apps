@@ -35,6 +35,10 @@ const schemaPath = path.join(
   repoRoot,
   "ops/openclaw/skills/website-growth-scout/scout-output.schema.json",
 );
+const backlinkDiscoveryPath = path.join(
+  repoRoot,
+  "ops/openclaw/website_growth_backlink_discovery.py",
+);
 
 describe("Website Growth Scout OpenClaw scripts", () => {
   it("honors an explicit executable CODEX_BIN", async () => {
@@ -173,6 +177,23 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     );
     expect(runner).toContain("Reject thin FAQ pages");
     expect(runner).toContain("guarantees an AI citation or ranking");
+  });
+
+  it("runs a bounded Brave, Qwen, then Codex backlink funnel", async () => {
+    const [runner, installer, discovery] = await Promise.all([
+      readFile(runnerPath, "utf8"),
+      readFile(installerPath, "utf8"),
+      readFile(backlinkDiscoveryPath, "utf8")
+    ]);
+
+    expect(installer).toContain("HUNTER_BRAVE_SEARCH_API_KEY");
+    expect(runner).toContain("website_growth_backlink_discovery.py");
+    expect(runner).toContain("no more than 5 high-quality");
+    expect(runner).toContain("backlinks.source to WEB_DISCOVERY");
+    expect(discovery).toContain('search_web("BRAVE", query, 10)');
+    expect(discovery).toContain('limits.get("fetches") or 40');
+    expect(discovery).toContain('limits.get("pagesPerDomain") or 2');
+    expect(discovery).toContain('limits.get("finalists") or 15');
   });
 
   it("sends safe Teams outcomes for duplicate and failed runs", async () => {
