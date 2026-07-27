@@ -199,7 +199,7 @@ describe("Hunter assisted handoff queueing", () => {
     expect(prisma.automationJobRun.findFirst).toHaveBeenCalledWith({
       where: {
         tenantId: "tenant-a",
-        jobType: "HUNTER_COMPANY_RESEARCH",
+        jobType: "HUNTER_COMPANY_DEEP_RESEARCH",
         status: "SUCCESS"
       },
       orderBy: { finishedAt: "desc" },
