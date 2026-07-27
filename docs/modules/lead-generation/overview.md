@@ -31,6 +31,12 @@ company/contact Outreach Plan from a bounded Hunter and TradeMining evidence led
 sequence, and run both deterministic and model grounding checks. Generation does not approve, enroll, or send. A
 current plan blocks Apollo push until QA passes and an authenticated employee approves it.
 
+When an administrator explicitly selects **Assisted** mode, completed company research also queues a durable
+post-research handoff. The Mac-mini worker processes one eligible Hot or Qualified company per authenticated request:
+it verifies the latest Apollo company match, imports a bounded set of buyer contacts in `REVIEWING`, ranks them,
+and creates grounded Outreach Plans. Ambiguous/missing Apollo matches are recorded for review and are not searched
+again automatically. Assisted mode never approves a contact or plan, enrolls a cadence, or sends communication.
+
 ## Data model
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.

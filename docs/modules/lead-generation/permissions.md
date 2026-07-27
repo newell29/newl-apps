@@ -53,6 +53,9 @@ Roles and defaults are in `src/server/auth/role-policy.ts`. Runtime checks are i
   user ID and is rejected for an unapproved contact or unsafe company.
 - No plan-generation or plan-approval action performs Apollo enrollment or customer communication. The existing
   explicit Apollo push permission and validation boundary remains separate.
+- Only a tenant administrator can select `ASSISTED`. Processing requires the tenant-bound ingestion credential and
+  rechecks the stored mode and kill switch on every request. Assisted processing may create `REVIEWING` contacts
+  and unapproved plans; it cannot approve, assign, enroll, create a Sales Opportunity, or send.
 
 ## Failure modes
 

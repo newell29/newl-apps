@@ -3,6 +3,7 @@ import { normalizeCompanyName } from "@/server/integrations/apollo";
 import type { HunterOutreachDirective } from "@/modules/lead-gen/hunter-outreach-eligibility";
 import {
   type GeneratedOutreachSequence,
+  type HunterContactFitReview,
   type ModelOutreachQaResult,
   type OutreachEvidenceRecord,
   type OutreachStrategy,
@@ -86,6 +87,30 @@ export type OutreachSequenceQaContext = {
   strategy: OutreachStrategy;
   sequence: GeneratedOutreachSequence;
   evidence: OutreachEvidenceRecord[];
+};
+
+export type HunterContactFitReviewContext = {
+  model: string;
+  company: {
+    name: string;
+    domain: string | null;
+  };
+  opportunity: {
+    serviceLine: HunterServiceLine;
+    opportunityType: string;
+    rationale: string;
+    recommendedPersona: string | null;
+  };
+  contacts: Array<{
+    contactId: string;
+    fullName: string;
+    title: string | null;
+    department: string | null;
+    seniority: string | null;
+    hasEmail: boolean;
+    hasPhone: boolean;
+    hasLinkedin: boolean;
+  }>;
 };
 
 export type OpenAiStructuredUsage = {
@@ -254,6 +279,48 @@ const OUTREACH_STRATEGY_SCHEMA = {
   }
 } as const;
 
+const HUNTER_CONTACT_FIT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["reviews"],
+  properties: {
+    reviews: {
+      type: "array",
+      minItems: 1,
+      maxItems: 10,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "contactId",
+          "disposition",
+          "confidence",
+          "responsibilityHypothesis",
+          "rationale",
+          "recommendedApproach",
+          "riskFlags"
+        ],
+        properties: {
+          contactId: { type: "string", minLength: 1, maxLength: 100 },
+          disposition: {
+            type: "string",
+            enum: ["PRIMARY", "SECONDARY", "REVIEW", "REJECT"]
+          },
+          confidence: { type: "integer", minimum: 0, maximum: 100 },
+          responsibilityHypothesis: { type: "string", minLength: 2, maxLength: 400 },
+          rationale: { type: "string", minLength: 2, maxLength: 500 },
+          recommendedApproach: { type: "string", minLength: 2, maxLength: 300 },
+          riskFlags: {
+            type: "array",
+            maxItems: 8,
+            items: { type: "string", minLength: 2, maxLength: 160 }
+          }
+        }
+      }
+    }
+  }
+} as const;
+
 const OUTREACH_SEQUENCE_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -414,6 +481,29 @@ export async function generateOutreachStrategy(
 
   return {
     strategy,
+    usage: response.usage
+  };
+}
+
+export async function reviewHunterContactFit(
+  context: HunterContactFitReviewContext
+): Promise<{ reviews: HunterContactFitReview[]; usage: OpenAiStructuredUsage }> {
+  const response = await requestStructuredOpenAiResponse({
+    model: context.model,
+    reasoningEffort: "low",
+    schemaName: "newl_hunter_contact_fit",
+    schema: HUNTER_CONTACT_FIT_SCHEMA,
+    system:
+      "You are the conservative buyer-role gate for Newl Group logistics outreach. Decide whether each supplied contact is plausibly responsible for the specific saved Hunter opportunity. Use only company identity, title, department, seniority, contactability booleans, the required service line, opportunity rationale, and recommended persona. PRIMARY means likely owns or materially influences the decision. SECONDARY means a credible adjacent stakeholder or route to the owner. REVIEW means the role is uncertain and must not receive automatic outreach. REJECT means clearly irrelevant, too junior, seller-side, or unrelated. Never infer responsibilities merely from seniority. Do not promote sales, business-development, marketing, HR, finance, customer-service, or administrative roles unless the opportunity specifically makes that function relevant. Return exactly one review for every supplied contactId and do not invent IDs.",
+    user: JSON.stringify({
+      company: context.company,
+      opportunity: context.opportunity,
+      contacts: context.contacts
+    })
+  });
+
+  return {
+    reviews: parseHunterContactFitReviews(response.output),
     usage: response.usage
   };
 }
@@ -1028,6 +1118,37 @@ function parseOutreachStrategy(parsed: Record<string, unknown>): OutreachStrateg
     confidence,
     evidenceRefs
   };
+}
+
+function parseHunterContactFitReviews(parsed: Record<string, unknown>): HunterContactFitReview[] {
+  const reviews = readObjectArray(parsed.reviews).map((review) => ({
+    contactId: readNonEmptyString(review.contactId),
+    disposition: readEnumValue(
+      review.disposition,
+      ["PRIMARY", "SECONDARY", "REVIEW", "REJECT"] as const
+    ),
+    confidence: readInteger(review.confidence),
+    responsibilityHypothesis: readNonEmptyString(review.responsibilityHypothesis),
+    rationale: readNonEmptyString(review.rationale),
+    recommendedApproach: readNonEmptyString(review.recommendedApproach),
+    riskFlags: readStringArray(review.riskFlags)
+  }));
+  if (
+    reviews.length === 0 ||
+    reviews.some((review) =>
+      !review.contactId ||
+      !review.disposition ||
+      review.confidence === null ||
+      review.confidence < 0 ||
+      review.confidence > 100 ||
+      !review.responsibilityHypothesis ||
+      !review.rationale ||
+      !review.recommendedApproach
+    )
+  ) {
+    throw new Error("OpenAI returned an incomplete Hunter contact-fit review.");
+  }
+  return reviews as HunterContactFitReview[];
 }
 
 function parseOutreachSequence(parsed: Record<string, unknown>): GeneratedOutreachSequence {
