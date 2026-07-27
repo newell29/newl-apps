@@ -15,9 +15,10 @@ import {
 
 import { DEFAULT_HUNTER_POLICY, runHunterDryPlan } from "@/modules/lead-gen/hunter-planner";
 import { enqueueHunterOutreachHandoff } from "@/modules/lead-gen/hunter-outreach-handoff";
+import { HUNTER_COMPANY_RESEARCH_JOB_TYPE } from "@/modules/lead-gen/hunter-job-types";
 import { prisma } from "@/server/db";
 
-export const HUNTER_COMPANY_RESEARCH_JOB_TYPE = "HUNTER_COMPANY_DEEP_RESEARCH";
+export { HUNTER_COMPANY_RESEARCH_JOB_TYPE };
 export const HUNTER_COMPANY_RESEARCH_PROMPT_VERSION = "hunter-company-research-v13";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL = "qwen3.5:35b";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL = "kimi-k2.6";

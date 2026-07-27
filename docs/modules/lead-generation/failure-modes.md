@@ -257,6 +257,8 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - An HTTP 307 from the Mac-mini handoff worker means session middleware intercepted the machine route before
   ingestion authentication. `/api/lead-gen/hunter/outreach-handoff/*` is exempt from session middleware and must
   enforce its own tenant-bound ingestion token; regression coverage preserves that boundary.
+- If the manual contact action says company research is missing despite completed runs, verify that every producer
+  and consumer imports the shared `HUNTER_COMPANY_DEEP_RESEARCH` job-type constant instead of duplicating a string.
 
 ## Apollo cannot safely match a company
 
