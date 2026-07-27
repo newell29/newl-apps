@@ -103,6 +103,54 @@ describe("Teamship Phase 2 dry-run planner", () => {
     });
   });
 
+  it("selects an approved Garland SKU prefix rule ahead of learned dimensions", () => {
+    const review = sampleReview();
+    review.pdfOrders[0]!.items[0]!.sku = "SUME-100-CUSTOM";
+    review.pdfOrders[0]!.items[0]!.serialNumbers = [];
+    review.reviews[0]!.pdfItems[0]!.sku = "SUME-100-CUSTOM";
+    review.reviews[0]!.pdfItems[0]!.serialNumbers = [];
+    review.reviews[0]!.productDimensions = [
+      {
+        sku: "SUME-100-CUSTOM",
+        source: "TEAMSHIP_LEARNED",
+        productType: null,
+        quantity: null,
+        lengthIn: 10,
+        widthIn: 20,
+        heightIn: 30,
+        weightLb: 40,
+        weightUnit: "lbs",
+        confidence: "HIGH",
+        note: "Conflicting learned dimensions."
+      },
+      {
+        sku: "SUME-100-CUSTOM",
+        source: "GARLAND_SKU_PREFIX_RULE",
+        productType: "Convection Oven",
+        quantity: null,
+        lengthIn: 45,
+        widthIn: 55,
+        heightIn: 42,
+        weightLb: 510,
+        weightUnit: "lbs",
+        confidence: "HIGH",
+        note: "Garland SKU prefix rule SUME-100."
+      },
+      ...review.reviews[0]!.productDimensions.filter((dimension) => dimension.sku !== "E1SGHMV6XHU3US")
+    ];
+
+    const plan = buildTeamshipPhase2DryRunPlan(review);
+
+    expect(plan.orders[0]?.plannedPalletRows[0]).toMatchObject({
+      sku: "SUME-100-CUSTOM",
+      dimensionSource: "GARLAND_SKU_PREFIX_RULE",
+      lengthIn: 45,
+      widthIn: 55,
+      heightIn: 42,
+      weightLb: 510
+    });
+  });
+
   it("formats multiple serials under one SKU in the commodity line", () => {
     const review = sampleReview();
     review.pdfOrders[0]!.items[0]!.sku = "GTBG36-AR36-5001";

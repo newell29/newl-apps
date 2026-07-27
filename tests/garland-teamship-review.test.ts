@@ -1245,6 +1245,59 @@ NEWLS 2604816191908 1.00 ( )`
     });
   });
 
+  it("applies the fixed SUME-100 and SUMG-100 dimensions to every matching SKU prefix", () => {
+    const pdfOrder = samplePdfOrder({
+      psNumber: "PS210503",
+      srNumber: "SR812503",
+      pageNumbers: [1],
+      shipVia: "MIDLAND",
+      shipToName: "PREFIX DIM TEST CUSTOMER",
+      shipToPo: "PO-PREFIX-DIMS",
+      freightTerms: "PPADD-CD",
+      itemSkus: ["sume-100-custom", "SUMG-100-9999"],
+      serialNumbers: []
+    });
+
+    const review = buildGarlandTeamshipReview([pdfOrder], [], [], {
+      learnedProductDimensions: [
+        {
+          sku: "SUME-100-CUSTOM",
+          source: "TEAMSHIP_LEARNED",
+          productType: null,
+          quantity: null,
+          lengthIn: 1,
+          widthIn: 2,
+          heightIn: 3,
+          weightLb: 4,
+          weightUnit: "lbs",
+          confidence: "HIGH",
+          note: "Conflicting learned dimensions."
+        }
+      ]
+    });
+
+    expect(review.reviews[0]?.productDimensions).toEqual([
+      expect.objectContaining({
+        sku: "SUME-100-CUSTOM",
+        source: "GARLAND_SKU_PREFIX_RULE",
+        lengthIn: 45,
+        widthIn: 55,
+        heightIn: 42,
+        weightLb: 510,
+        confidence: "HIGH"
+      }),
+      expect.objectContaining({
+        sku: "SUMG-100-9999",
+        source: "GARLAND_SKU_PREFIX_RULE",
+        lengthIn: 44,
+        widthIn: 55,
+        heightIn: 42,
+        weightLb: 515,
+        confidence: "HIGH"
+      })
+    ]);
+  });
+
   it("uses the Garland UPS placeholder dimension rule instead of SKU-specific dimensions", () => {
     const pdfOrder = samplePdfOrder({
       psNumber: "PS210501",

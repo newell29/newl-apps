@@ -221,7 +221,14 @@ export type GarlandTeamshipReviewField = {
 
 export type GarlandProductDimensionRecommendation = {
   sku: string;
-  source: "UPS_RULE" | "CSR_OVERRIDE" | "CSR_LEARNED" | "TEAMSHIP_PALLET" | "TEAMSHIP_LEARNED" | "GARLAND_REFERENCE";
+  source:
+    | "UPS_RULE"
+    | "GARLAND_SKU_PREFIX_RULE"
+    | "CSR_OVERRIDE"
+    | "CSR_LEARNED"
+    | "TEAMSHIP_PALLET"
+    | "TEAMSHIP_LEARNED"
+    | "GARLAND_REFERENCE";
   productType: string | null;
   quantity: number | null;
   lengthIn: number | null;
