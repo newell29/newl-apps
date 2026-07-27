@@ -78,6 +78,10 @@ REGIONAL_IDENTITY_MARKERS = {
     "usa",
     "us",
 }
+PRODUCTION_LINE_EXPANSION_PATTERN = re.compile(
+    r"\bnew(?:\s+[a-z][a-z-]*){0,3}\s+(?:production|manufacturing)\s+lines?\b",
+    re.IGNORECASE,
+)
 
 
 SYNTHESIS_SCHEMA = {
@@ -1505,7 +1509,7 @@ def recent_material_trigger_indices(
         normalized_text = re.sub(r"[^a-z0-9]+", "", text.lower())
         if not any(alias in normalized_text for alias in aliases):
             continue
-        if material_pattern.search(text):
+        if material_pattern.search(text) or PRODUCTION_LINE_EXPANSION_PATTERN.search(text):
             indices.append(index)
     return indices[:2]
 
@@ -1581,15 +1585,20 @@ def normalize_synthesis_for_evidence(
     ):
         repaired_existing_freshness = normalized.get("freshness") == "FRESH"
         normalized["freshness"] = "FRESH"
-        normalized["triggerEvidenceIndices"] = (
-            material_trigger_indices
-            if repaired_existing_freshness
-            else list(
-                dict.fromkeys(
-                    material_trigger_indices + list(normalized.get("triggerEvidenceIndices") or [])
-                )
-            )[:5]
+        normalized["triggerEvidenceIndices"] = material_trigger_indices
+        trigger_evidence = evidence[material_trigger_indices[0]]
+        trigger_text = (
+            f"{trigger_evidence.get('title') or ''} "
+            f"{trigger_evidence.get('excerpt') or ''}"
         )
+        normalized["opportunitySummary"] = bounded_utf16_text(
+            f"{trigger_evidence.get('title') or 'Material expansion'}: "
+            f"{trigger_evidence.get('excerpt') or ''}",
+            "Recent material expansion evidence was found.",
+            2_000,
+        )
+        if PRODUCTION_LINE_EXPANSION_PATTERN.search(trigger_text):
+            normalized["signalType"] = "EXPANSION"
         message = (
             "Deterministic evidence review replaced unsupported trigger citations with an "
             "exact-company, recent, dated material expansion."
