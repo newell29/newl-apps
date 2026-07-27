@@ -18,6 +18,10 @@ import { tenantWhere } from "@/server/tenant-query";
 import type { TenantContext } from "@/server/tenant-context";
 import { getContactApolloAssignmentBlockReason, scoreContact } from "@/modules/lead-gen/contact-scoring";
 import {
+  isOutreachQueueContact,
+  resolveSalesOpportunityStage
+} from "@/modules/lead-gen/automation-workflow";
+import {
   classifyTradeMiningIndustryFromRecords,
   INDUSTRY_OPTIONS,
   type IndustryClassification
@@ -153,6 +157,7 @@ export type LeadPipelineSequenceStatusFilter =
   | "REPLIED";
 
 export type LeadPipelineFilters = {
+  scope?: "ALL" | "SALES_OPPORTUNITIES";
   companyId?: string;
   stage?: LeadPipelineStage | "ALL";
   ownerUserId?: string | "ALL" | "UNASSIGNED";
@@ -800,6 +805,13 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
       industrySource: lead.company.industrySource,
       importRecords: lead.company.importRecords
     });
+    const salesOpportunityStage = resolveSalesOpportunityStage({
+      leadStage: lead.stage,
+      replyStatuses: [
+        ...(lead.contact ? [lead.contact.replyStatus] : []),
+        ...contacts.map((contact) => contact.replyStatus)
+      ]
+    });
     const nextStep = getPipelineNextStep({
       stage: lead.stage,
       contactCount,
@@ -823,6 +835,7 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
       companyLinkedinUrl: lead.company.linkedinUrl ?? selectedOrFirstContact?.linkedinUrl ?? null,
       contactName: lead.contact?.fullName,
       stage: lead.stage,
+      salesOpportunityStage,
       candidateStatus: lead.company.candidateStatus,
       score: scoring.score,
       companyScore: lead.company.priorityScore,
@@ -864,6 +877,13 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
   });
 
   const filteredPipelineLeads = pipelineLeads
+    .filter((lead) => filters.scope !== "SALES_OPPORTUNITIES" || Boolean(lead.salesOpportunityStage))
+    .filter((lead) =>
+      filters.scope !== "SALES_OPPORTUNITIES" ||
+      !filters.stage ||
+      filters.stage === "ALL" ||
+      lead.salesOpportunityStage === filters.stage
+    )
     .filter((lead) => matchesLeadPipelineCandidateStatus(lead.candidateStatus, filters.candidateStatus))
     .filter((lead) => matchesLeadPipelineContactStatus(lead.contactStatus, filters.contactStatus))
     .filter((lead) => matchesLeadPipelineApolloStatus(lead.apolloStatus, filters.apolloStatus))
@@ -1333,6 +1353,11 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
   );
 }
 
+export async function getOutreachQueue(tenant: TenantContext, filters: ContactDirectoryFilters = {}) {
+  const contacts = await getContactDirectory(tenant, filters);
+  return contacts.filter(isOutreachQueueContact);
+}
+
 export async function getContactDirectoryFilters(tenant: TenantContext) {
   const [pipelineAccounts, owners, approvedAccountCount, apolloCredentials, searchProfiles] = await Promise.all([
     prisma.lead.findMany({
@@ -1549,18 +1574,10 @@ function buildContactDirectoryOrder(sort: ContactDirectorySort) {
   ];
 }
 
-function buildLeadPipelineWhere(filters: LeadPipelineFilters) {
-  const where: {
-    companyId?: string;
-    stage?: LeadPipelineStage;
-    ownerUserId?: string | null;
-    score?: {
-      gte?: number;
-      lte?: number;
-    };
-  } = {};
+export function buildLeadPipelineWhere(filters: LeadPipelineFilters): Prisma.LeadWhereInput {
+  const where: Prisma.LeadWhereInput = {};
 
-  if (filters.stage && filters.stage !== "ALL") {
+  if (filters.stage && filters.stage !== "ALL" && filters.scope !== "SALES_OPPORTUNITIES") {
     where.stage = filters.stage;
   }
 

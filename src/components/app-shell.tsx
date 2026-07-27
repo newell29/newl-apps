@@ -32,18 +32,26 @@ const navEntries: NavNode[] = [
     id: "sales",
     label: "Sales",
     children: [
-      { id: "lead-hunter", href: "/lead-gen/hunter", label: "Hunter", moduleKey: "LEAD_GEN" as ModuleKey },
+      { id: "lead-hunter", href: "/lead-gen/hunter", label: "Daily Opportunities", moduleKey: "LEAD_GEN" as ModuleKey },
+      { id: "lead-outreach", href: "/lead-gen/outreach", label: "Outreach Queue", moduleKey: "LEAD_GEN" as ModuleKey },
+      { id: "lead-pipeline", href: "/lead-gen/pipeline", label: "Sales Opportunities", moduleKey: "LEAD_GEN" as ModuleKey },
+      { id: "lead-apollo-review", href: "/lead-gen/apollo-review", label: "Apollo Exceptions", moduleKey: "LEAD_GEN" as ModuleKey },
       {
-        id: "trademining",
-        label: "TradeMining",
+        id: "lead-data-sources",
+        label: "Data Sources",
         moduleKey: "LEAD_GEN" as ModuleKey,
         children: [
-          { id: "lead-search-profiles", href: "/lead-gen/search-profiles", label: "Search Profiles", moduleKey: "LEAD_GEN" as ModuleKey },
-          { id: "lead-candidates", href: "/lead-gen/candidates", label: "Found Companies", moduleKey: "LEAD_GEN" as ModuleKey },
-          { id: "lead-pipeline", href: "/lead-gen/pipeline", label: "Pipeline", moduleKey: "LEAD_GEN" as ModuleKey },
-          { id: "lead-apollo-review", href: "/lead-gen/apollo-review", label: "Apollo Match Review", moduleKey: "LEAD_GEN" as ModuleKey },
-          { id: "lead-contacts", href: "/lead-gen/contacts", label: "Contacts", moduleKey: "LEAD_GEN" as ModuleKey },
-          { id: "lead-scoring-history", href: "/lead-gen/scoring-history", label: "Scoring History", moduleKey: "LEAD_GEN" as ModuleKey },
+          { id: "lead-search-profiles", href: "/lead-gen/search-profiles", label: "TradeMining Searches", moduleKey: "LEAD_GEN" as ModuleKey },
+          { id: "lead-candidates", href: "/lead-gen/candidates", label: "Found Companies", moduleKey: "LEAD_GEN" as ModuleKey }
+        ]
+      },
+      {
+        id: "lead-admin-quality",
+        label: "Admin & Quality",
+        moduleKey: "LEAD_GEN" as ModuleKey,
+        children: [
+          { id: "lead-automation-settings", href: "/lead-gen/automation-settings", label: "Automation Settings", moduleKey: "LEAD_GEN" as ModuleKey },
+          { id: "lead-scoring-history", href: "/lead-gen/scoring-history", label: "Scoring & Outcomes", moduleKey: "LEAD_GEN" as ModuleKey },
           { id: "lead-logs", href: "/operations/logs", label: "Health & Logs", moduleKey: "LEAD_GEN" as ModuleKey }
         ]
       },

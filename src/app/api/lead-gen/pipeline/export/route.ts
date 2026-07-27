@@ -31,8 +31,10 @@ export async function GET(request: Request) {
     const minScore = parseScoreParam(url.searchParams.get("minScore"));
     const maxScore = parseScoreParam(url.searchParams.get("maxScore"));
     const sort = parseSortParam(url.searchParams.get("sort"));
+    const scope = url.searchParams.get("scope") === "sales" ? "SALES_OPPORTUNITIES" : "ALL";
 
     const leads = await getLeadPipeline(context, {
+      scope,
       stage,
       ownerUserId,
       industry: industry ?? undefined,
@@ -53,8 +55,7 @@ export async function GET(request: Request) {
       [
         "Company",
         "Normalized Name",
-        "Pipeline Stage",
-        "Candidate Status",
+        "Sales Stage",
         "Industry",
         "Shipments 30d",
         "Shipments 90d",
@@ -74,8 +75,7 @@ export async function GET(request: Request) {
       ...leads.map((lead) => [
         lead.companyName,
         lead.normalizedName,
-        lead.stage,
-        lead.candidateStatus,
+        lead.salesOpportunityStage ?? lead.stage,
         lead.primaryIndustry ?? "",
         String(lead.shipmentCount30d),
         String(lead.shipmentCount90d),
@@ -98,7 +98,7 @@ export async function GET(request: Request) {
       status: 200,
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": 'attachment; filename="pipeline_export.csv"'
+        "Content-Disposition": `attachment; filename="${scope === "SALES_OPPORTUNITIES" ? "sales_opportunities_export.csv" : "pipeline_export.csv"}"`
       }
     });
   } catch (error) {

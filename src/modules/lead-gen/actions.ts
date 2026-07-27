@@ -2444,6 +2444,7 @@ function revalidateLeadGenSurfaces() {
   revalidatePath("/lead-gen/pipeline");
   revalidatePath("/lead-gen/apollo-review");
   revalidatePath("/lead-gen/contacts");
+  revalidatePath("/lead-gen/outreach");
   revalidatePath("/dashboard");
 }
 

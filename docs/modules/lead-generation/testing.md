@@ -180,3 +180,15 @@ Regression coverage must prove:
 10. a zero-result profile is only an anomaly when recent positive history exists;
 11. shell/schema tests preserve a read-only Codex audit, the 11:30 America/Toronto schedule, and Teams delivery through `RIVET_TEAMS_TARGET`; and
 12. no schema migration is required because audit, incident, feedback, suggestion, and Rivet state use existing tenant-scoped tables.
+
+## Automated sales workspace
+
+Regression coverage must prove:
+
+1. Sales Opportunities contains only engaged, meeting, proposal, won, and lost stages;
+2. New, researching, enriched, qualified, and contacted leads remain stored but do not appear in the revenue view unless a saved Apollo positive reply or meeting-booked status supplies the corresponding effective sales stage;
+3. Outreach Queue includes approved, drafted, ready, enrolled, paused, and unanswered active work;
+4. rejected, do-not-contact, bounced, finished, positive, meeting-booked, and negative contacts are excluded from Outreach Queue;
+5. the legacy `/lead-gen/contacts` route redirects to `/lead-gen/outreach`; and
+6. Outreach Queue starts with secondary audit columns hidden and links companies back to Found Companies; and
+7. every underlying query remains tenant scoped and the redesign requires no database migration.

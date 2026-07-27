@@ -474,7 +474,7 @@ export function PipelineTableClient({
                 </Link>
               ) : null}
               <Link
-                href="/lead-gen/contacts"
+                href="/lead-gen/outreach"
                 className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-accentSoft"
               >
                 View contacts

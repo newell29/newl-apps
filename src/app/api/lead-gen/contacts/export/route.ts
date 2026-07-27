@@ -11,6 +11,7 @@ import {
 import { NextResponse } from "next/server";
 import {
   getContactDirectory,
+  getOutreachQueue,
   type ContactBooleanFilter,
   type ContactDraftStatusFilter,
   type ContactDirectoryFilters,
@@ -44,7 +45,9 @@ export async function GET(request: Request) {
       sort: parseSortParam(url.searchParams.get("sort"))
     };
 
-    const contacts = await getContactDirectory(context, filters);
+    const contacts = url.searchParams.get("scope") === "outreach"
+      ? await getOutreachQueue(context, filters)
+      : await getContactDirectory(context, filters);
     const csv = toCsv([
       [
         "Contact Name",
