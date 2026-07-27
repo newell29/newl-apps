@@ -1268,18 +1268,26 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
         : apolloSequenceMapping,
       directory: apolloSequenceDirectory
     });
+    const hunterEligibility = evaluateHunterOutreachEligibility({
+      researchSignal: contact.company.hunterOpportunitySignals[0] ?? null,
+      prospectingDecision: contact.company.hunterProspectingDecisions[0] ?? null,
+      maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
+    });
     const recommendation = recommendSequenceForContact({
       contactTier: scoring.tier,
       title: contact.title,
       department: contact.department,
       companyName: contact.company.name,
       sequenceMappings: effectiveSequenceMappings,
-      sequenceDirectory: apolloSequenceDirectory
+      sequenceDirectory: apolloSequenceDirectory,
+      hunterManaged: hunterEligibility.status === "ELIGIBLE"
     });
     const draft = contact.outreachDrafts[0] ?? null;
     const outreachPlan = contact.outreachPlans[0] ?? null;
     const tierMapping = effectiveSequenceMappings.find((entry) => entry.tier === scoring.tier) ?? null;
-    const requiresAiDraft = tierMapping?.requiresAiDraft ?? false;
+    const requiresAiDraft = hunterEligibility.status === "ELIGIBLE" || (tierMapping?.requiresAiDraft ?? false);
+    const useHunterRecommendation =
+      hunterEligibility.status === "ELIGIBLE" && !contact.sequenceManuallyOverridden;
     const openAiRuntimeReady = isOpenAiDraftGenerationConfigured();
     const draftGenerationConfigured = openAiRuntimeReady && scoringConfig.aiClassificationEnabled;
     const draftGenerationDisabledReason = draftGenerationConfigured
@@ -1287,11 +1295,6 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
       : !openAiRuntimeReady
         ? ("OPENAI_KEY_MISSING" satisfies ContactDraftGenerationDisabledReason)
         : ("LEAD_GEN_AI_DISABLED" satisfies ContactDraftGenerationDisabledReason);
-    const hunterEligibility = evaluateHunterOutreachEligibility({
-      researchSignal: contact.company.hunterOpportunitySignals[0] ?? null,
-      prospectingDecision: contact.company.hunterProspectingDecisions[0] ?? null,
-      maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
-    });
     const rawJson = asObject(contact.rawJson);
     const apolloJson = asObject(rawJson.apollo);
     const pushBlocker = asObject(apolloJson.pushBlocker);
@@ -1330,11 +1333,11 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
       apolloPushBlockedAt: readString(pushBlocker, "blockedAt"),
       effectiveSequenceStatus,
       replyStatus: contact.replyStatus,
-      recommendedSequenceId: contact.recommendedSequenceId ?? recommendation.id,
-      recommendedSequenceName: contact.recommendedSequenceName ?? recommendation.name,
-      selectedSequenceId: contact.selectedSequenceId ?? contact.recommendedSequenceId ?? recommendation.id,
-      selectedSequenceName: contact.selectedSequenceName ?? contact.recommendedSequenceName ?? recommendation.name,
-      sequenceRecommendationReason: contact.sequenceRecommendationReason ?? recommendation.reason,
+      recommendedSequenceId: useHunterRecommendation ? recommendation.id : contact.recommendedSequenceId ?? recommendation.id,
+      recommendedSequenceName: useHunterRecommendation ? recommendation.name : contact.recommendedSequenceName ?? recommendation.name,
+      selectedSequenceId: useHunterRecommendation ? recommendation.id : contact.selectedSequenceId ?? contact.recommendedSequenceId ?? recommendation.id,
+      selectedSequenceName: useHunterRecommendation ? recommendation.name : contact.selectedSequenceName ?? contact.recommendedSequenceName ?? recommendation.name,
+      sequenceRecommendationReason: useHunterRecommendation ? recommendation.reason : contact.sequenceRecommendationReason ?? recommendation.reason,
       sequenceOverrideReason: contact.sequenceOverrideReason,
       sequenceManuallyOverridden: contact.sequenceManuallyOverridden,
       requiresAiDraft,

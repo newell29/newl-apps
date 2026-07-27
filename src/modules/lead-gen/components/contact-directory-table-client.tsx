@@ -1117,7 +1117,11 @@ function OutreachPlanPanel({
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Complete sequence</p>
           {plan.steps.map((step) => (
-            <details key={step.id} className="rounded-md border border-border bg-card p-3">
+            <details
+              key={step.id}
+              open={step.channel === "EMAIL"}
+              className="rounded-md border border-border bg-card p-3"
+            >
               <summary className="cursor-pointer text-xs font-semibold text-foreground">
                 Step {step.stepNumber} · Day {step.delayDays} · {formatEnum(step.channel)}
               </summary>

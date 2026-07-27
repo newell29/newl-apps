@@ -44,6 +44,9 @@ export const HUNTER_OUTREACH_HANDOFF_JOB_TYPE = "HUNTER_OUTREACH_HANDOFF";
 const ACTIVE_JOB_WINDOW_MS = 4 * 60 * 60 * 1_000;
 const PROCESSING_LEASE_MS = 15 * 60 * 1_000;
 const MAX_COMPANY_ATTEMPTS = 3;
+const HUNTER_CONTACT_REVIEW_POOL_MIN = 5;
+const HUNTER_CONTACT_REVIEW_POOL_MAX = 10;
+const HUNTER_SELECTED_CONTACT_MAX = 3;
 
 type HandoffItem = {
   companyId: string;
@@ -267,7 +270,7 @@ export async function enqueueHunterOutreachHandoff({
         version: 1,
         researchRunId,
         prospectingPlanRunId,
-        maxContactsPerCompany: Math.min(5, Math.max(1, policy.maxContactsPerCompany)),
+        maxContactsPerCompany: Math.min(3, Math.max(1, policy.maxContactsPerCompany)),
         items
       },
       output: emptyOutput()
@@ -283,7 +286,7 @@ export async function enqueueHunterOutreachHandoff({
         researchRunId,
         prospectingPlanRunId,
         companyCount: items.length,
-        maxContactsPerCompany: Math.min(5, Math.max(1, policy.maxContactsPerCompany))
+        maxContactsPerCompany: Math.min(3, Math.max(1, policy.maxContactsPerCompany))
       }
     }
   });
@@ -506,16 +509,6 @@ async function processCompany({
       domain: true,
       linkedinUrl: true,
       apolloOrganizationId: true,
-      contacts: {
-        where: {
-          contactStatus: { notIn: [ContactStatus.REJECTED, ContactStatus.DO_NOT_CONTACT] },
-          replyStatus: ReplyStatus.NO_REPLY,
-          sequenceStatus: { in: [SequenceStatus.NOT_STARTED, SequenceStatus.READY] }
-        },
-        orderBy: [{ contactScore: "desc" }, { updatedAt: "desc" }],
-        take: maxContactsPerCompany,
-        select: { id: true }
-      },
       apolloCompanyMatches: {
         orderBy: { createdAt: "desc" },
         take: 1,
@@ -576,74 +569,79 @@ async function processCompany({
     );
   }
 
-  let contactIds = company.contacts.map((contact) => contact.id);
+  let contactIds: string[] = [];
   let contactsImported = 0;
   let classification: ApolloCompanyMatchClassification | null =
     company.apolloOrganizationId ? ApolloCompanyMatchClassification.DIRECT_COMPANY : null;
-  if (contactIds.length === 0) {
-    const latestMatch = company.apolloCompanyMatches[0] ?? null;
-    if (
-      !company.apolloOrganizationId &&
-      latestMatch &&
-      latestMatch.classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY
-    ) {
-      return terminal(
-        item,
-        "REVIEW_REQUIRED",
-        latestMatch.classification,
-        0,
-        0,
-        0,
-        "The latest Apollo company match requires review; automatic repeat search was blocked."
-      );
-    }
-
-    const lookup = await fetchApolloContactsForCompany({
-      companyName: company.name,
-      domain: company.domain,
-      apolloOrganizationId: company.apolloOrganizationId
-    });
-    classification = lookup.match.classification;
-    await recordCompanyMatch(tenantId, company.id, lookup, {
-      domain: company.domain,
-      linkedinUrl: company.linkedinUrl
-    });
-    if (classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY) {
-      return terminal(
-        item,
-        "REVIEW_REQUIRED",
-        classification,
-        0,
-        0,
-        0,
-        lookup.match.matchReason || "Apollo could not verify a direct company match."
-      );
-    }
-
-    const ranked = rankHunterContacts(lookup.contacts, item.recommendedPersona)
-      .slice(0, maxContactsPerCompany);
-    if (lookup.contacts.length === 0) {
-      return terminal(item, "NO_CONTACTS", classification, 0, 0, 0, "Apollo returned no contacts.");
-    }
-    if (ranked.length === 0) {
-      return terminal(
-        item,
-        "NO_QUALIFYING_CONTACTS",
-        classification,
-        0,
-        0,
-        0,
-        "Apollo returned contacts, but none matched Hunter's buyer criteria."
-      );
-    }
-    contactIds = await upsertContacts({
-      tenantId,
-      jobId,
-      companyId: company.id,
-      contacts: ranked
-    });
-    contactsImported = contactIds.length;
+  const latestMatch = company.apolloCompanyMatches[0] ?? null;
+  if (
+    !company.apolloOrganizationId &&
+    latestMatch &&
+    latestMatch.classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY
+  ) {
+    return terminal(
+      item,
+      "REVIEW_REQUIRED",
+      latestMatch.classification,
+      0,
+      0,
+      0,
+      "The latest Apollo company match requires review; automatic repeat search was blocked."
+    );
   }
+
+  const lookup = await fetchApolloContactsForCompany({
+    companyName: company.name,
+    domain: company.domain,
+    apolloOrganizationId: company.apolloOrganizationId
+  });
+  classification = lookup.match.classification;
+  await recordCompanyMatch(tenantId, company.id, lookup, {
+    domain: company.domain,
+    linkedinUrl: company.linkedinUrl
+  });
+  if (classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY) {
+    return terminal(
+      item,
+      "REVIEW_REQUIRED",
+      classification,
+      0,
+      0,
+      0,
+      lookup.match.matchReason || "Apollo could not verify a direct company match."
+    );
+  }
+
+  const reviewPoolSize = Math.min(
+    HUNTER_CONTACT_REVIEW_POOL_MAX,
+    Math.max(HUNTER_CONTACT_REVIEW_POOL_MIN, maxContactsPerCompany * 3)
+  );
+  const ranked = rankHunterContacts(
+    lookup.contacts,
+    item.recommendedPersona,
+    eligibility.directive.rationale
+  ).slice(0, reviewPoolSize);
+  if (lookup.contacts.length === 0) {
+    return terminal(item, "NO_CONTACTS", classification, 0, 0, 0, "Apollo returned no contacts.");
+  }
+  if (ranked.length === 0) {
+    return terminal(
+      item,
+      "NO_QUALIFYING_CONTACTS",
+      classification,
+      0,
+      0,
+      0,
+      "Apollo returned contacts, but none matched Hunter's buyer criteria."
+    );
+  }
+  contactIds = await upsertContacts({
+    tenantId,
+    jobId,
+    companyId: company.id,
+    contacts: ranked
+  });
+  contactsImported = contactIds.length;
 
   let plansGenerated = 0;
   let qaFailedPlans = 0;
@@ -656,7 +654,8 @@ async function processCompany({
       domain: company.domain
     },
     directive: eligibility.directive,
-    contactIds: contactIds.slice(0, maxContactsPerCompany)
+    contactIds,
+    selectionLimit: Math.min(HUNTER_SELECTED_CONTACT_MAX, maxContactsPerCompany)
   });
   if (fit.acceptedContactIds.length === 0) {
     return terminal(
@@ -719,7 +718,8 @@ async function reviewAndPersistHunterContactFit({
   jobId,
   company,
   directive,
-  contactIds
+  contactIds,
+  selectionLimit
 }: {
   tenantId: string;
   jobId: string;
@@ -732,6 +732,7 @@ async function reviewAndPersistHunterContactFit({
     recommendedPersona: string | null;
   };
   contactIds: string[];
+  selectionLimit: number;
 }) {
   const contacts = await prisma.contact.findMany({
     where: {
@@ -749,6 +750,11 @@ async function reviewAndPersistHunterContactFit({
       email: true,
       phone: true,
       linkedinUrl: true,
+      sequenceStatus: true,
+      replyStatus: true,
+      selectedSequenceName: true,
+      lastTouchAt: true,
+      lastReplyAt: true,
       rawJson: true
     }
   });
@@ -787,6 +793,7 @@ async function reviewAndPersistHunterContactFit({
         recommendedPersona: directive.recommendedPersona
       },
       contacts: contactsNeedingReview.map((contact) => ({
+        ...readStoredApolloContactContext(contact.rawJson),
         contactId: contact.id,
         fullName: contact.fullName,
         title: contact.title,
@@ -794,7 +801,12 @@ async function reviewAndPersistHunterContactFit({
         seniority: contact.seniority,
         hasEmail: Boolean(contact.email),
         hasPhone: Boolean(contact.phone),
-        hasLinkedin: Boolean(contact.linkedinUrl)
+        hasLinkedin: Boolean(contact.linkedinUrl),
+        sequenceStatus: contact.sequenceStatus,
+        replyStatus: contact.replyStatus,
+        existingSequenceName: contact.selectedSequenceName,
+        lastTouchAt: contact.lastTouchAt?.toISOString() ?? null,
+        lastReplyAt: contact.lastReplyAt?.toISOString() ?? null
       }))
     });
     validateExactContactFitCohort(
@@ -858,6 +870,7 @@ async function reviewAndPersistHunterContactFit({
         contactFitPriority(left.disposition) - contactFitPriority(right.disposition);
       return dispositionDelta || right.confidence - left.confidence;
     })
+    .slice(0, Math.max(1, Math.min(HUNTER_SELECTED_CONTACT_MAX, selectionLimit)))
     .map((review) => review.contactId);
   return {
     acceptedContactIds,
@@ -1069,7 +1082,8 @@ async function upsertContacts({
 
 export function rankHunterContacts(
   contacts: ApolloContactRecord[],
-  recommendedPersona: string | null
+  recommendedPersona: string | null,
+  opportunityGeography: string | null = null
 ) {
   const personaTokens = new Set(
     (recommendedPersona ?? "")
@@ -1080,7 +1094,7 @@ export function rankHunterContacts(
   return contacts
     .map((contact) => ({
       contact,
-      score: contactFitScore(contact, personaTokens)
+      score: contactFitScore(contact, personaTokens, opportunityGeography)
     }))
     .filter(({ contact, score }) =>
       score >= 20 &&
@@ -1093,8 +1107,13 @@ export function rankHunterContacts(
     .map(({ contact }) => contact);
 }
 
-function contactFitScore(contact: ApolloContactRecord, personaTokens: Set<string>) {
+function contactFitScore(
+  contact: ApolloContactRecord,
+  personaTokens: Set<string>,
+  opportunityGeography: string | null
+) {
   const text = `${contact.title ?? ""} ${contact.department ?? ""}`.toLowerCase();
+  const geography = opportunityGeography?.toLowerCase() ?? "";
   let score = contact.email ? 30 : 0;
   if (contact.linkedinUrl) score += 10;
   if (/\b(vp|vice president|head|director|chief|president|owner)\b/i.test(text)) score += 25;
@@ -1103,7 +1122,56 @@ function contactFitScore(contact: ApolloContactRecord, personaTokens: Set<string
     score += 25;
   }
   score += Math.min(20, [...personaTokens].filter((token) => text.includes(token)).length * 5);
+  const locationParts = [contact.city, contact.state, contact.country]
+    .map((value) => value?.trim().toLowerCase())
+    .filter((value): value is string => Boolean(value));
+  if (locationParts.some((value) => value.length >= 3 && geography.includes(value))) {
+    score += 15;
+  } else if (contact.country && /\b(united states|usa|us)\b/i.test(contact.country)) {
+    score += 4;
+  }
+  if (contact.replyStatus !== ReplyStatus.NO_REPLY) score -= 100;
+  if (
+    contact.sequenceStatus !== SequenceStatus.NOT_STARTED &&
+    contact.sequenceStatus !== SequenceStatus.READY
+  ) {
+    score -= 30;
+  }
+  if (isApolloUnresponsive(contact.rawPayload)) score -= 25;
   return score;
+}
+
+function isApolloUnresponsive(rawPayload: Record<string, unknown>) {
+  const stage = [
+    rawPayload.stage,
+    rawPayload.contact_stage,
+    rawPayload.account_stage,
+    rawPayload.status
+  ]
+    .map((value) => {
+      if (typeof value === "string") return value;
+      if (isObject(value) && typeof value.name === "string") return value.name;
+      return "";
+    })
+    .join(" ");
+  return /\bunresponsive\b/i.test(stage);
+}
+
+function readStoredApolloContactContext(rawJson: Prisma.JsonValue | null) {
+  const root = isObject(rawJson) ? rawJson : {};
+  const apollo = isObject(root.apollo) ? root.apollo : {};
+  const record = isObject(apollo.record) ? apollo.record : {};
+  return {
+    city: typeof record.city === "string" ? record.city : null,
+    state:
+      typeof record.state === "string"
+        ? record.state
+        : typeof record.region === "string"
+          ? record.region
+          : null,
+    country: typeof record.country === "string" ? record.country : null,
+    priorActivityStatus: isApolloUnresponsive(record) ? "UNRESPONSIVE" : null
+  };
 }
 
 function findExistingContact(
@@ -1213,7 +1281,7 @@ function parseInput(value: Prisma.JsonValue | null) {
   return {
     maxContactsPerCompany:
       typeof root.maxContactsPerCompany === "number"
-        ? Math.min(5, Math.max(1, Math.round(root.maxContactsPerCompany)))
+        ? Math.min(3, Math.max(1, Math.round(root.maxContactsPerCompany)))
         : 2,
     items
   };

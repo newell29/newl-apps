@@ -198,7 +198,8 @@ describe("fetchApolloContactsForCompany", () => {
             }
           ]
         })
-      } as unknown as Response);
+      } as unknown as Response)
+      .mockResolvedValue(emptyApolloPeopleResponse());
 
     const result = await fetchApolloContactsForCompany({
       companyName: "Harbor Home Retail LLC",
@@ -315,7 +316,8 @@ describe("fetchApolloContactsForCompany", () => {
             }
           ]
         })
-      } as unknown as Response);
+      } as unknown as Response)
+      .mockResolvedValue(emptyApolloPeopleResponse());
 
     const result = await fetchApolloContactsForCompany({
       companyName: "Dormeo North America",
@@ -461,6 +463,59 @@ describe("fetchApolloContactsForCompany", () => {
     expect(result.organizationId).toBe("5e66b6381e05b4008c8331b8");
     expect(result.match.matchReason).toContain("manually confirmed");
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/mixed_companies/search"))).toBe(false);
+  });
+
+  it("merges saved and employee-search contacts while rejecting a sibling organization", async () => {
+    vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            contacts: [{
+              id: "saved-contact",
+              name: "Saved Buyer",
+              title: "Supply Chain Manager",
+              organization: { id: "exact-org", name: "Hyosung USA" }
+            }]
+          })
+        } as unknown as Response;
+      }
+      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            people: [
+              {
+                id: "exact-person",
+                name: "Exact Logistics",
+                title: "Logistics Director",
+                organization: { id: "exact-org", name: "Hyosung USA" }
+              },
+              {
+                id: "sibling-person",
+                name: "Sibling Buyer",
+                title: "Supply Chain Manager",
+                organization: { id: "sibling-org", name: "Hyosung Holdings USA" }
+              }
+            ]
+          })
+        } as unknown as Response;
+      }
+      throw new Error(`Unexpected Apollo URL in test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "Hyosung USA",
+      apolloOrganizationId: "exact-org"
+    });
+
+    expect(result.contacts.map((contact) => contact.fullName)).toEqual([
+      "Exact Logistics",
+      "Saved Buyer"
+    ]);
   });
 
   it("parses and validates Apollo company URLs before mapping", async () => {
@@ -710,7 +765,8 @@ describe("fetchApolloContactsForCompany", () => {
             }
           ]
         })
-      } as unknown as Response);
+      } as unknown as Response)
+      .mockResolvedValue(emptyApolloPeopleResponse());
 
     const result = await fetchApolloContactsForCompany({
       companyName: "Siemens Energy",
@@ -810,7 +866,8 @@ describe("fetchApolloContactsForCompany", () => {
             }
           ]
         })
-      } as unknown as Response);
+      } as unknown as Response)
+      .mockResolvedValue(emptyApolloPeopleResponse());
 
     const result = await fetchApolloContactsForCompany({
       companyName: "SIEMENS ENERGY INC."
@@ -864,13 +921,14 @@ describe("fetchApolloContactsForCompany", () => {
             }
           ]
         })
-      } as unknown as Response);
+      } as unknown as Response)
+      .mockResolvedValue(emptyApolloPeopleResponse());
 
     const result = await fetchApolloContactsForCompany({
       companyName: "SIEMENS ENERGY INC. C/O PROCUREMENT TEAM"
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(result.match.classification).toBe("DIRECT_COMPANY");
     expect(result.organizationId).toBe("apollo-org-siemens-4");
     expect(result.contacts).toEqual([
@@ -1161,3 +1219,11 @@ describe("fetchApolloSequenceDirectory", () => {
     ]);
   });
 });
+
+function emptyApolloPeopleResponse() {
+  return {
+    ok: true,
+    status: 200,
+    json: vi.fn().mockResolvedValue({ people: [] })
+  } as unknown as Response;
+}

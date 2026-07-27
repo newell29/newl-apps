@@ -73,7 +73,7 @@ export default async function AutomationSettingsPage({
                   <input name="dailyCompanyLimit" type="number" min={1} max={100} defaultValue={policy.dailyCompanyLimit} className={inputClass} />
                 </Field>
                 <Field label="Max contacts per company">
-                  <input name="maxContactsPerCompany" type="number" min={1} max={10} defaultValue={policy.maxContactsPerCompany} className={inputClass} />
+                  <input name="maxContactsPerCompany" type="number" min={1} max={3} defaultValue={Math.min(3, policy.maxContactsPerCompany)} className={inputClass} />
                 </Field>
                 <Field label="Schedule timezone">
                   <input name="scheduleTimezone" defaultValue={policy.scheduleTimezone} className={inputClass} />

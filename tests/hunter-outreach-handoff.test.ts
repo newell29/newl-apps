@@ -85,6 +85,32 @@ describe("Hunter assisted outreach handoff", () => {
     expect(ranked).toEqual([]);
   });
 
+  it("prefers opportunity geography and penalizes prior cadence history", () => {
+    const ranked = rankHunterContacts([
+      contact({
+        apolloContactId: "old-executive",
+        fullName: "Old Executive",
+        title: "Vice President of Supply Chain",
+        city: "New York",
+        state: "New York",
+        sequenceStatus: SequenceStatus.FINISHED,
+        rawPayload: { stage: { name: "Unresponsive" } }
+      }),
+      contact({
+        apolloContactId: "local-manager",
+        fullName: "Local Manager",
+        title: "Warehouse Operations Manager",
+        city: "Fort Mill",
+        state: "South Carolina"
+      })
+    ], "warehouse operations", "Fort Mill expansion beside Charlotte");
+
+    expect(ranked.map((item) => item.apolloContactId)).toEqual([
+      "local-manager",
+      "old-executive"
+    ]);
+  });
+
   it("automates only confident primary and strong secondary model reviews", () => {
     const review = {
       contactId: "contact-1",

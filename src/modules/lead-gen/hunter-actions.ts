@@ -37,7 +37,7 @@ export async function saveHunterPolicyAction(formData: FormData) {
     mode,
     killSwitch: formData.get("killSwitch") === "on",
     dailyCompanyLimit: parseBoundedInteger(formData, "dailyCompanyLimit", 1, 100),
-    maxContactsPerCompany: parseBoundedInteger(formData, "maxContactsPerCompany", 1, 10),
+    maxContactsPerCompany: parseBoundedInteger(formData, "maxContactsPerCompany", 1, 3),
     warehousingPercent: allocation[HunterServiceLine.WAREHOUSING],
     oceanAirPercent: allocation[HunterServiceLine.OCEAN_AIR],
     truckingPercent: allocation[HunterServiceLine.TRUCKING],

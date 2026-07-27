@@ -59,7 +59,7 @@ Assisted outreach planning adds only new records and one enum value:
 - `OutreachPlan` is a tenant/company/contact-scoped, versioned strategy record. It freezes the service line,
   opportunity hypothesis, buyer hypothesis, value proposition, objection, CTA, evidence ledger/fingerprint,
   model/prompt versions, QA result, and human approval.
-- `OutreachSequenceStep` stores the five ordered email, LinkedIn-task, and call-task touches with delays, angles,
+- `OutreachSequenceStep` stores the three ordered email touches and, for Hot opportunities only, an optional call task with delays, angles,
   evidence references, and step-level QA findings.
 - the existing `ContactOutreachDraft` remains the Apollo compatibility record for the first email; `OPENAI` identifies
   the real provider instead of the legacy `MOCK_AI` label.

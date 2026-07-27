@@ -38,10 +38,9 @@ describe("OpenAI structured outreach workflow", () => {
         sequenceName: "Warehouse Capacity Outreach",
         steps: [
           emailStep(1, 0),
-          taskStep(2, 2, "LINKEDIN_TASK"),
-          emailStep(3, 4),
-          taskStep(4, 7, "CALL_TASK"),
-          emailStep(5, 10)
+          emailStep(2, 4),
+          taskStep(3, 7, "CALL_TASK"),
+          emailStep(4, 10)
         ]
       }))
       .mockResolvedValueOnce(responseWithOutput({
@@ -93,7 +92,8 @@ describe("OpenAI structured outreach workflow", () => {
       contact,
       selectedSequenceName: "Warehouse Capacity Outreach",
       strategy: strategyGeneration.strategy,
-      evidence
+      evidence,
+      allowCallTask: true
     });
     const qaReview = await reviewOutreachSequenceGrounding({
       model: "gpt-5.6-luna",
@@ -105,8 +105,8 @@ describe("OpenAI structured outreach workflow", () => {
     });
 
     expect(strategyGeneration.strategy.serviceLine).toBe(HunterServiceLine.WAREHOUSING);
-    expect(sequenceGeneration.sequence.steps).toHaveLength(5);
-    expect(sequenceGeneration.sequence.steps[1]?.channel).toBe(OutreachChannel.LINKEDIN_TASK);
+    expect(sequenceGeneration.sequence.steps).toHaveLength(4);
+    expect(sequenceGeneration.sequence.steps[2]?.channel).toBe(OutreachChannel.CALL_TASK);
     expect(qaReview.result).toEqual({ passed: true, issues: [] });
     expect(strategyGeneration.usage).toEqual({
       inputTokens: 0,
@@ -207,9 +207,18 @@ describe("OpenAI structured outreach workflow", () => {
         title: "Director of Supply Chain",
         department: "Logistics",
         seniority: "director",
-        hasEmail: true,
-        hasPhone: false,
-        hasLinkedin: true
+          hasEmail: true,
+          hasPhone: false,
+          hasLinkedin: true,
+          city: "Charlotte",
+          state: "North Carolina",
+          country: "United States",
+          sequenceStatus: "NOT_STARTED",
+          replyStatus: "NO_REPLY",
+          existingSequenceName: null,
+          lastTouchAt: null,
+          lastReplyAt: null,
+          priorActivityStatus: null
       }]
     });
 
