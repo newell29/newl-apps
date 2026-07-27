@@ -264,6 +264,37 @@ describe("Teamship Phase 2 dry-run planner", () => {
     ]);
   });
 
+  it("blocks Special Instructions updates that contain Garland item-detail text", () => {
+    const review = sampleReview();
+    review.reviews[0]!.fields = [
+      {
+        key: "shipping_instructions",
+        label: "Shipping instructions",
+        status: "DISCREPANCY",
+        pdfValue: [
+          "FOR PICKUP PLEASE CONTACT: TEST RECEIVING",
+          "Top Section 2 Two Open Burners",
+          "End of Comments",
+          "ITEM: 24",
+          "NEWLS 2600000000001 1.00 ( )"
+        ].join("\n"),
+        teamshipValue: "FOR PICKUP PLEASE CONTACT: TEST RECEIVING",
+        message: "PDF and Teamship values do not match.",
+        botActionEnabled: true
+      }
+    ];
+
+    const plan = buildTeamshipPhase2DryRunPlan(review);
+
+    expect(plan.orders[0]).toMatchObject({
+      status: "BLOCKED",
+      plannedFieldUpdates: [],
+      validationIssues: [
+        expect.stringContaining("probable Garland item-detail text")
+      ]
+    });
+  });
+
   it("auto-enables email-agent ship-to address updates before creating an approved job", () => {
     const review = sampleReview();
     review.reviews[0]!.fields = [

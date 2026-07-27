@@ -451,6 +451,79 @@ C-CLEAN STRONG CLEANING STRENGTH
     expect(orders[0]?.instructions).not.toContain("Ship Qty");
   });
 
+  it("does not treat continuation-page item configuration as Special Instructions", () => {
+    const orders = parseGarlandShippingOrderPages([
+      {
+        pageNumber: 1,
+        text: `Ship-To Pre-Shipper Print Date
+15023 PS219914 7/27/2026
+Pre-Shipper
+TEST CUSTOMER
+100 TEST STREET
+TEST CITY, ON A1A 1A1
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Order Number SR819914 Ship To PO TEST-PO Frt Terms PU
+Order Date 6/26/2026 Ship Via P/U
+FOR PICKUP PLEASE CONTACT:
+1. TEST CONTACT - 555-0100
+2. TEST RECEIVING - 555-0101
+Ln Item Number T
+Site
+Location
+Lot/Serial
+Ref
+Ship Qty Qty Open UM Due
+Shipped
+1 TEST-RANGE-5003 891210
+TEST RANGE
+Top Section 1 Two Open Burners`
+      },
+      {
+        pageNumber: 2,
+        text: `Ship-To Pre-Shipper Print Date
+15023 PS219914 7/27/2026
+Pre-Shipper
+TEST CUSTOMER
+100 TEST STREET
+TEST CITY, ON A1A 1A1
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Sales Order SR819914 Order Date 6/26/2026 Ship To PO TEST-PO
+Ln Item Number T
+Site
+Location
+Lot/Serial
+Ref
+Ship Qty Qty Open UM Due
+Shipped
+Top Section 2 Two Open Burners
+Dial Type Fahrenheit
+WallClear Combust CLEAR
+Open Top Input = 33000, Injector = 36
+---------------------------End of Comments------------------------
+ITEM: 24
+1.00 EA 7/27/2026
+NEWLS 2600000000001 1.00 ( )
+3 TEST-FRYER-0053 891210
+TEST FRYER
+2.00 EA 7/27/2026`
+      }
+    ]);
+
+    expect(orders[0]?.instructions).toBe(
+      [
+        "FOR PICKUP PLEASE CONTACT:",
+        "1. TEST CONTACT - 555-0100",
+        "2. TEST RECEIVING - 555-0101"
+      ].join("\n")
+    );
+    expect(orders[0]?.instructions).not.toContain("Top Section");
+    expect(orders[0]?.instructions).not.toContain("End of Comments");
+    expect(orders[0]?.instructions).not.toContain("ITEM: 24");
+    expect(orders[0]?.instructions).not.toContain("2600000000001");
+  });
+
   it("parses Teamship alert digest orders and item details", () => {
     const alerts = parseTeamshipAlertDigest(alertDigest);
 

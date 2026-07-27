@@ -8,6 +8,7 @@ import {
   type TeamshipPhase2OrderPlan
 } from "@/modules/shipment-documents/teamship-phase2-dry-run";
 import {
+  assertSafeGarlandSpecialInstructionUpdates,
   buildDryRunEvidence,
   buildTeamshipUpdatePayload,
   type TeamshipPhase2AgentCredentials,
@@ -168,6 +169,7 @@ export async function executeTeamshipPhase2BrowserJob({
     throw new Error("Live Teamship browser updates require TEAMSHIP_ALLOW_LIVE_UPDATES=true or --allow-live-updates on the VM worker.");
   }
 
+  assertSafeGarlandSpecialInstructionUpdates(plan);
   assertLiveAllowlist(plan, options.liveAllowlistSrNumbers);
 
   const appBaseUrl = resolveTeamshipAppBaseUrl(credentials);
@@ -340,6 +342,8 @@ export async function executeTeamshipPhase2BolCleanupJob({
   >;
   eligibleSrNumbers?: string[];
 }): Promise<TeamshipBolCleanupJobResult> {
+  assertSafeGarlandSpecialInstructionUpdates(plan);
+
   const appBaseUrl = resolveTeamshipAppBaseUrl(credentials);
   const screenshotRootDir = options.screenshotRootDir?.trim() || path.join("tmp", "teamship-browser-agent", job.id);
   const eligible = eligibleSrNumbers ? new Set(eligibleSrNumbers.map(normalizeIdentifier).filter(Boolean)) : null;

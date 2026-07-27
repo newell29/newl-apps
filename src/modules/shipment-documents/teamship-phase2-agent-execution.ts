@@ -1,4 +1,8 @@
-import type { TeamshipPhase2DryRunPlan, TeamshipPhase2OrderPlan } from "@/modules/shipment-documents/teamship-phase2-dry-run";
+import {
+  findGarlandItemDetailEvidence,
+  type TeamshipPhase2DryRunPlan,
+  type TeamshipPhase2OrderPlan
+} from "@/modules/shipment-documents/teamship-phase2-dry-run";
 
 export type TeamshipPhase2AgentMode = "DRY_RUN" | "LIVE_API";
 export type TeamshipPhase2ExecutionMode = TeamshipPhase2AgentMode | "LIVE_BROWSER";
@@ -151,6 +155,7 @@ export async function executeTeamshipPhase2Job({
     throw new Error("Live Teamship updates require TEAMSHIP_ALLOW_LIVE_UPDATES=true or --allow-live-updates on the VM worker.");
   }
 
+  assertSafeGarlandSpecialInstructionUpdates(plan);
   assertLiveAllowlist(plan, options.liveAllowlistSrNumbers);
 
   return executeLiveApiUpdates({ job, plan, credentials, options });
@@ -504,6 +509,39 @@ export function buildTeamshipUpdatePayload(order: TeamshipPhase2OrderPlan): Reco
       commodity: row.commodity
     }))
   };
+}
+
+export function assertSafeGarlandSpecialInstructionUpdates(plan: TeamshipPhase2DryRunPlan) {
+  const unsafeOrders = plan.orders.flatMap((order) =>
+    order.plannedFieldUpdates
+      .filter(
+        (field) =>
+          field.reviewFieldKey === "shipping_instructions" ||
+          field.teamshipField === "edi_field_4"
+      )
+      .map((field) => ({
+        order,
+        evidence: findGarlandItemDetailEvidence(field.proposedValue)
+      }))
+      .filter(
+        (
+          candidate
+        ): candidate is {
+          order: TeamshipPhase2OrderPlan;
+          evidence: string;
+        } => Boolean(candidate.evidence)
+      )
+  );
+
+  if (unsafeOrders.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    `Live Teamship update blocked because Special Instructions contain probable Garland item-detail text: ${unsafeOrders
+      .map(({ order, evidence }) => `${order.psNumber || order.srNumber} (${evidence})`)
+      .join(", ")}. Rebuild the job from the corrected PDF review.`
+  );
 }
 
 function mapTeamshipApiFieldName(teamshipField: string) {

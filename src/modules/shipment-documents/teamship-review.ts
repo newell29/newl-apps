@@ -286,12 +286,25 @@ function extractInstructions(lines: string[], itemHeaderIndex: number) {
   }
 
   const instructionLines = removeTrailingItemHeaderLines(lines.slice(startIndex + 1, endIndex));
-  const wrappedContinuationLines = extractWrappedInstructionContinuation(lines, endIndex);
+  const wrappedContinuationLines = extractWrappedInstructionContinuation(
+    lines,
+    endIndex,
+    instructionLines
+  );
   return uniqueStrings([...instructionLines, ...wrappedContinuationLines]).join("\n").trim();
 }
 
-function extractWrappedInstructionContinuation(lines: string[], headerStartIndex: number) {
-  if (headerStartIndex < 0 || !isItemTableHeaderCluster(lines, headerStartIndex)) {
+function extractWrappedInstructionContinuation(
+  lines: string[],
+  headerStartIndex: number,
+  instructionLines: string[]
+) {
+  const precedingInstruction = instructionLines.at(-1)?.trim() ?? "";
+  if (
+    headerStartIndex < 0 ||
+    !isItemTableHeaderCluster(lines, headerStartIndex) ||
+    !/:\s*$/.test(precedingInstruction)
+  ) {
     return [];
   }
 
@@ -302,10 +315,12 @@ function extractWrappedInstructionContinuation(lines: string[], headerStartIndex
     return [];
   }
 
-  return lines
+  const candidates = lines
     .slice(headerStartIndex, firstItemIndex)
     .filter((line) => !isItemTableHeaderFragment(line))
     .filter((line) => !/^\d{1,2}\/\d{1,2}\/\d{4}\b/.test(line));
+
+  return candidates.slice(0, 1);
 }
 
 function findInstructionEndIndex(lines: string[], startIndex: number, itemHeaderIndex: number) {
