@@ -1470,7 +1470,7 @@ export async function getOutreachQueue(tenant: TenantContext, filters: ContactDi
 }
 
 export async function getContactDirectoryFilters(tenant: TenantContext) {
-  const [pipelineAccounts, owners, approvedAccountCount, apolloCredentials, searchProfiles] = await Promise.all([
+  const [pipelineAccounts, outreachPlanCompanies, owners, approvedAccountCount, apolloCredentials, searchProfiles] = await Promise.all([
     prisma.lead.findMany({
       where: tenantWhere(tenant),
       distinct: ["companyId"],
@@ -1484,6 +1484,26 @@ export async function getContactDirectoryFilters(tenant: TenantContext) {
       },
       orderBy: {
         createdAt: "desc"
+      }
+    }),
+    prisma.company.findMany({
+      where: tenantWhere(tenant, {
+        contacts: {
+          some: tenantWhere(tenant, {
+            outreachPlans: {
+              some: tenantWhere(tenant, {
+                status: { not: OutreachPlanStatus.ARCHIVED }
+              })
+            }
+          })
+        }
+      }),
+      select: {
+        id: true,
+        name: true
+      },
+      orderBy: {
+        name: "asc"
       }
     }),
     prisma.contact.findMany({
@@ -1531,9 +1551,12 @@ export async function getContactDirectoryFilters(tenant: TenantContext) {
     })
   ]);
   const sequenceOptions = mapApolloSequenceOptions(parseApolloSequenceDirectory(apolloCredentials[0]?.publicConfig));
+  const companies = new Map<string, { id: string; name: string }>();
+  for (const account of pipelineAccounts) companies.set(account.company.id, account.company);
+  for (const company of outreachPlanCompanies) companies.set(company.id, company);
 
   return {
-    companies: pipelineAccounts.map((lead) => lead.company),
+    companies: [...companies.values()].sort((left, right) => left.name.localeCompare(right.name)),
     searchProfiles,
     owners: owners.flatMap((owner) => (owner.assignedRep ? [owner.assignedRep] : [])),
     approvedAccountCount,
@@ -1620,43 +1643,60 @@ function sortSuggestions(values: Set<string>) {
 
 export function buildContactDirectoryWhere(tenant: TenantContext, filters: ContactDirectoryFilters) {
   const where: Prisma.ContactWhereInput = {
-    company: {
-      leads: {
-        some: tenantWhere(tenant)
+    AND: [
+      {
+        OR: [
+          {
+            company: {
+              leads: {
+                some: tenantWhere(tenant)
+              }
+            }
+          },
+          {
+            outreachPlans: {
+              some: tenantWhere(tenant, {
+                status: { not: OutreachPlanStatus.ARCHIVED }
+              })
+            }
+          }
+        ]
       }
-    }
+    ]
   };
 
   if (filters.query?.trim()) {
     const query = filters.query.trim();
-    where.OR = [
-      {
-        fullName: {
-          contains: query,
-          mode: "insensitive"
-        }
-      },
-      {
-        title: {
-          contains: query,
-          mode: "insensitive"
-        }
-      },
-      {
-        email: {
-          contains: query,
-          mode: "insensitive"
-        }
-      },
-      {
-        company: {
-          name: {
+    (where.AND as Prisma.ContactWhereInput[]).push({
+      OR: [
+        {
+          fullName: {
             contains: query,
             mode: "insensitive"
           }
+        },
+        {
+          title: {
+            contains: query,
+            mode: "insensitive"
+          }
+        },
+        {
+          email: {
+            contains: query,
+            mode: "insensitive"
+          }
+        },
+        {
+          company: {
+            name: {
+              contains: query,
+              mode: "insensitive"
+            }
+          }
         }
-      }
-    ];
+      ]
+    });
   }
 
   if (filters.companyId) {

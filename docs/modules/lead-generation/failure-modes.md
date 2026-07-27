@@ -259,6 +259,9 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   enforce its own tenant-bound ingestion token; regression coverage preserves that boundary.
 - If the manual contact action says company research is missing despite completed runs, verify that every producer
   and consumer imports the shared `HUNTER_COMPANY_DEEP_RESEARCH` job-type constant instead of duplicating a string.
+- If the handoff reports imported contacts and generated plans but Outreach Queue is empty, verify that the contact
+  audience accepts a current non-archived Outreach Plan without requiring a Sales Lead, and that queue visibility
+  treats the complete Outreach Plan as actionable work rather than requiring a legacy single-message draft.
 
 ## Apollo cannot safely match a company
 
