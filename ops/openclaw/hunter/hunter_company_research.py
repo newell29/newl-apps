@@ -664,6 +664,7 @@ def collect_company_evidence(
     query_log: list[dict[str, Any]] = []
     fetched_pages = 0
     seen_urls: set[str] = set()
+    query_results: list[tuple[dict[str, str], list[dict[str, Any]]]] = []
     for query_row in build_research_queries(candidate):
         query = query_row["query"]
         pass_id = query_row["pass"]
@@ -673,7 +674,16 @@ def collect_company_evidence(
         except Exception as error:
             query_log.append({"query": query, "pass": pass_id, "resultCount": 0, "error": str(error)[:500]})
             continue
-        for row in results:
+        query_results.append((query_row, results))
+
+    result_index = 0
+    while len(evidence) < 24 and any(result_index < len(results) for _, results in query_results):
+        for query_row, results in query_results:
+            if result_index >= len(results):
+                continue
+            row = results[result_index]
+            query = query_row["query"]
+            pass_id = query_row["pass"]
             url = row["url"]
             canonical = canonical_url(url)
             if canonical in seen_urls:
@@ -705,8 +715,7 @@ def collect_company_evidence(
             )
             if len(evidence) >= 24:
                 break
-        if len(evidence) >= 24:
-            break
+        result_index += 1
     return evidence, query_log, fetched_pages
 
 

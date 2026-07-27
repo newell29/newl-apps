@@ -408,6 +408,54 @@ describe("Hunter company deep research", () => {
     expect(rows.some((row) => row.query.includes("site:example.com"))).toBe(true);
   });
 
+  it("preserves the Barnhardt first-party expansion query when generic results fill the evidence cap", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'BARNHARDT MANUFACTURING CO.','companyKey':'barnhardt-manufacturing-co','domain':'barnhardt.net'}",
+      "queries=r.build_research_queries(candidate)",
+      "positions={row['query']:index for index,row in enumerate(queries)}",
+      "def fake_search(provider,query,limit):",
+      " position=positions[query]",
+      " host='barnhardt.net' if query.startswith('site:barnhardt.net') else f'source-{position}.example'",
+      " rows=[{'url':f'https://{host}/{position}/result-{index}','title':f'Generic result {position}-{index}','snippet':'Generic company evidence.','publishedAt':None} for index in range(limit)]",
+      " if query.startswith('site:barnhardt.net') and 'expansion OR' in query:",
+      "  rows[0]={'url':'https://barnhardt.net/ncfi-breaks-ground-on-50m-nc-plant-due-to-surging-demand/','title':'NCFI Breaks Ground on $50M+ NC Plant Due to Surging Demand','snippet':'NCFI opened a new 140,000-square-foot manufacturing facility. Barnhardt Manufacturing Company is NCFI parent.','publishedAt':'2025-07-31T00:00:00+00:00'}",
+      " return rows",
+      "r.search_web=fake_search",
+      "r.fetch_page_evidence=lambda url:(None,None)",
+      "evidence,query_log,_=r.collect_company_evidence(candidate,'BRAVE',5,0)",
+      "target=[row for row in evidence if row['url'].startswith('https://barnhardt.net/ncfi-breaks-ground')]",
+      "print(json.dumps({'queryCount':len(query_log),'evidenceCount':len(evidence),'queryEvidenceCounts':[sum(1 for item in evidence if item['query']==row['query']) for row in query_log],'target':target}))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+    const result = JSON.parse(stdout) as {
+      queryCount: number;
+      evidenceCount: number;
+      queryEvidenceCounts: number[];
+      target: Array<{ firstParty: boolean; sourceType: string; publishedAt: string }>;
+    };
+
+    expect(result).toMatchObject({
+      queryCount: 6,
+      evidenceCount: 24,
+      queryEvidenceCounts: [4, 4, 4, 4, 4, 4]
+    });
+    expect(result.target).toEqual([
+      expect.objectContaining({
+        firstParty: true,
+        sourceType: "FIRST_PARTY",
+        publishedAt: "2025-07-31T00:00:00+00:00"
+      })
+    ]);
+  });
+
   it("uses legal-name aliases and recognizes matching official domains as first party", async () => {
     const program = [
       "import json",
