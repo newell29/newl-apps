@@ -9,11 +9,13 @@ Scout is a dedicated website-research and brief-preparation worker. It is separa
 1. Call `POST /api/website-growth/scout/prepare` with the dedicated Scout bearer token.
 2. Newl Apps refreshes tenant-scoped Search Console, GA4, and aggregate website-form evidence, classifies question intent, then prepares the bounded weekly candidate packet.
 3. Run Codex with `gpt-5.6-sol`, high reasoning, an ephemeral session, and a read-only sandbox in the Newl website repository.
-4. Codex must query `https://mcp.semrush.com/v1/mcp` through the official OAuth connection and return the repository-owned output schema, including the current Position Tracking campaign, tracked-keyword snapshot, and a bounded, deduplicated backlink review even when no page candidates exist.
+4. The runner performs bounded Brave Search discovery, records every canonical URL in the tenant-scoped automation ledger, skips URLs seen in prior runs, uses local Qwen for bulk triage, and gives Codex no more than 15 finalists.
+5. Codex performs the final backlink review and may promote no more than five public-web prospects to Newl Apps. Raw and rejected search results never appear in the normal Backlinks workspace.
+6. SEMrush is optional supporting evidence. Use the official OAuth MCP or the prepared fresh cache when available; return `UNAVAILABLE` without failing the run when API units and a fresh cache are unavailable.
 5. Call `POST /api/website-growth/scout/complete` with only the run ID and structured completion. Newl Apps validates candidate scope, stores sanitized SEMrush evidence, saves drafts, retains only backlink prospects that pass deterministic quality gates, deduplicates approved-page keywords against the live tracking snapshot, and returns the deterministic Teams report plus spreadsheet payloads.
 6. Send the report to the configured Microsoft Teams target with seven-day signed Newl Apps workbook links. The owner or authorized manager reviews each saved brief in Newl Apps; keyword tracking additions do not have a separate approval step.
 
-The repository runner `ops/openclaw/run-website-growth-scout.sh` implements this flow. Install it with `ops/openclaw/install-website-growth-scout.sh` only after `ops/openclaw/configure-semrush-mcp.sh` completes the official SEMrush OAuth approval.
+The repository runner `ops/openclaw/run-website-growth-scout.sh` implements this flow. Install it with `ops/openclaw/install-website-growth-scout.sh` after the protected Scout environment contains the existing Hunter Brave Search key. SEMrush OAuth may remain configured for optional supporting research.
 
 ## Customer-question and AI-answer lane
 

@@ -25,6 +25,8 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 | Split Monday deep / Tuesday-Friday cache-backed schedule and permanent worktree installation | `ops/openclaw/install-website-growth-scout.sh` |
 | Structured output contract | `ops/openclaw/skills/website-growth-scout/scout-output.schema.json` |
 | Backlink parsing, quality gates, dedupe, retention, workspace query | `src/modules/website-growth/backlinks.ts` |
+| Rotating public-web query plan, canonical URL history, ingest and Qwen-finalist scope | `src/modules/website-growth/backlink-discovery.ts`, `src/app/api/website-growth/scout/backlink-discovery/*` |
+| Brave Search, safe bounded page retrieval, and local Qwen triage worker | `ops/openclaw/website_growth_backlink_discovery.py` |
 | Backlink approval actions | `src/modules/website-growth/actions.ts` |
 | Backlink review UI | `src/app/(authenticated)/website-growth/backlinks/page.tsx` |
 | Approved-work executor service | `src/modules/website-growth/backlink-executor.ts` |

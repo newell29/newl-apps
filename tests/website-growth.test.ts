@@ -519,7 +519,52 @@ describe("website growth Codex Scout completion", () => {
         prospects: []
       },
       drafts: []
-    })).toThrow("must identify live or cached SEMrush evidence");
+    })).toThrow("must identify live, cached, or unavailable SEMrush evidence");
+  });
+
+  it("continues with first-party and public-web research when SEMrush units are unavailable", () => {
+    const completion = parseWebsiteGrowthScoutCompletion({
+      runSummary: "SEMrush was unavailable; the bounded public-web backlink funnel still completed.",
+      semrush: {
+        queried: false,
+        source: "UNAVAILABLE",
+        observedAt: "2026-07-27T15:00:00.000Z",
+        summary: "SEMrush API units and a fresh cache were unavailable.",
+        rows: [],
+        tracking: {
+          projectId: null,
+          campaignId: null,
+          domain: null,
+          database: null,
+          device: null,
+          visibility: null,
+          previousVisibility: null,
+          top3: null,
+          top10: null,
+          top20: null,
+          top100: null,
+          improved: null,
+          declined: null,
+          entered: null,
+          lost: null,
+          trackedKeywords: []
+        }
+      },
+      backlinks: {
+        queried: true,
+        source: "WEB_DISCOVERY",
+        observedAt: "2026-07-27T15:00:00.000Z",
+        summary: "No public-web finalist passed Codex review.",
+        rawProspectsReviewed: 120,
+        duplicatesRejected: 80,
+        qualityRejected: 40,
+        prospects: []
+      },
+      drafts: []
+    });
+
+    expect(completion.semrush.source).toBe("UNAVAILABLE");
+    expect(completion.backlinks.source).toBe("WEB_DISCOVERY");
   });
 
   it("accepts explicitly dated cached SEMrush evidence without claiming a live query", () => {

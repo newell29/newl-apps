@@ -11,7 +11,7 @@
       "required": ["queried", "source", "observedAt", "summary", "rows", "tracking"],
       "properties": {
         "queried": { "type": "boolean" },
-        "source": { "type": "string", "enum": ["LIVE_MCP", "CACHE"] },
+        "source": { "type": "string", "enum": ["LIVE_MCP", "CACHE", "UNAVAILABLE"] },
         "observedAt": { "type": "string", "format": "date-time" },
         "summary": { "type": "string", "minLength": 1 },
         "rows": {
@@ -82,7 +82,7 @@
       "required": ["queried", "source", "observedAt", "summary", "rawProspectsReviewed", "duplicatesRejected", "qualityRejected", "prospects"],
       "properties": {
         "queried": { "type": "boolean" },
-        "source": { "type": "string", "enum": ["LIVE_MCP", "CACHE"] },
+        "source": { "type": "string", "enum": ["LIVE_MCP", "CACHE", "WEB_DISCOVERY"] },
         "observedAt": { "type": "string", "format": "date-time" },
         "summary": { "type": "string", "minLength": 1 },
         "rawProspectsReviewed": { "type": "integer", "minimum": 0 },

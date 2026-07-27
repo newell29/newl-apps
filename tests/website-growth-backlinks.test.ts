@@ -79,6 +79,19 @@ describe("Website Growth backlink curation", () => {
     })).toThrow("at most 15");
   });
 
+  it("allows Codex to promote at most five Qwen finalists from public-web research", () => {
+    expect(() => parseWebsiteGrowthBacklinkReview({
+      queried: true,
+      source: "WEB_DISCOVERY",
+      observedAt: "2026-07-27T15:00:00.000Z",
+      summary: "Too many finalists were promoted.",
+      rawProspectsReviewed: 120,
+      duplicatesRejected: 80,
+      qualityRejected: 34,
+      prospects: Array.from({ length: 6 }, () => buildProspect())
+    })).toThrow("at most 5");
+  });
+
   it("deduplicates hostname variants and target URL variants", () => {
     const left = buildWebsiteGrowthBacklinkDedupeKey({
       sourceDomain: "https://www.Example.org/",

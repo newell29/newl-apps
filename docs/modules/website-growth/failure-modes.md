@@ -9,7 +9,7 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 ## Scout-specific failures
 
 - Missing Google credentials: that source receives an error import, but other first-party sources continue.
-- Missing or expired SEMrush OAuth, or exhausted API units: the Monday worker may continue only with the exact cache supplied by Newl Apps when that cache is no more than eight days old. It labels the result as cached and preserves the original observation date. Without a fresh cache, the run fails.
+- Missing or expired SEMrush OAuth, or exhausted API units: the Monday worker uses the exact fresh cache when available and otherwise records SEMrush as `UNAVAILABLE`. First-party evidence, Brave/Qwen backlink discovery, website review, Teams reporting, and page briefs continue.
 - Codex output outside the stored candidate IDs: completion is rejected.
 - Malformed or oversized SEMrush output: completion is rejected; at most 200 sanitized rows are accepted.
 - Duplicate worker start: an active tenant run blocks a second run for three hours.
@@ -22,8 +22,10 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - No candidates: the job still refreshes Position Tracking and backlink research, succeeds, and sends a Teams report without a page-approval request.
 - No qualifying question candidates: the question/AI-answer lane reports zero and the remaining Scout workflow continues normally; it never creates a thin page to fill the lane.
 - Question already answered well on an existing page: Scout may return no draft. Existing-page coverage is preferred over a duplicate guide.
+- Missing Brave key or unavailable local Qwen: the deep run fails safely before Codex promotion and sends the normal failure notice. URL hashes already registered by ingest remain in the tenant job ledger.
+- Repeated search result: canonical host/path/query normalization removes tracking parameters, and the historical tenant job ledger prevents another fetch or queue addition even if Brave returns the page for a different query or week.
 - No backlink prospects: the job succeeds and the Teams summary explicitly reports zero new prospects.
-- Raw or oversized backlink output: completion is rejected; Scout may return at most 15 curated prospects and never raw backlink rows.
+- Raw or oversized backlink output: ingest rejects more than 120 search rows, Qwen is limited to 15 finalists, and Codex may promote at most five public-web prospects.
 - Duplicate or weak backlink prospect: Newl Apps refreshes the existing record or drops it through deterministic quality gates instead of adding another queue item.
 - Backlink queue growth: no new item is created after the 50-active-item cap; stale unrefreshed review items are archived after 45 days.
 - Missing backlink-executor token: discovery and approval continue, but approved work is not claimable.
