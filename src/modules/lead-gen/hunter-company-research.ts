@@ -868,7 +868,7 @@ export function evaluateResearchGate(company: ResearchResult) {
   ) {
     blockers.push("Company identity was not confirmed at 70% or better.");
   }
-  if (hasExplicitProviderServiceEvidence(company.evidence)) {
+  if (hasExplicitProviderServiceEvidence(company)) {
     blockers.push("Public evidence explicitly describes the company providing logistics services to others.");
   }
   if (
@@ -1081,14 +1081,21 @@ function hasRecentDatedTriggerEvidence(evidence: Evidence[], triggerEvidenceIndi
   });
 }
 
-function hasExplicitProviderServiceEvidence(evidence: Evidence[]) {
+function hasExplicitProviderServiceEvidence(company: ResearchResult) {
   const directProviderPattern =
     /\b(provider|provides?|providing|offers?|offering)\b[^.\n]{0,120}\b(logistics services?|warehousing services?|transportation management|freight forwarding|customs brokerage|fulfillment services?|cross[- ]docking)\b/i;
   const onBehalfPattern =
     /\b(warehousing|warehouse|packaging|distribution|transportation)\b[^.\n]{0,120}\bon behalf of\b/i;
-  return evidence.some((item) => {
+  const identityAliases = companyIdentityAliases(company.companyName);
+  return company.evidence.some((item) => {
     if (item.pass === "CAREERS" && !item.firstParty) return false;
     const text = `${item.title}\n${item.excerpt}`;
+    if (
+      !item.firstParty &&
+      !identityAliases.some((alias) => normalizeEvidenceText(text).includes(alias))
+    ) {
+      return false;
+    }
     return directProviderPattern.test(text) || onBehalfPattern.test(text);
   });
 }
