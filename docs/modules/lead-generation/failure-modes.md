@@ -81,6 +81,11 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
   synthesis checkpoint is resynthesized against its bounded evidence so saved indices remain valid.
 - A failed completion is not partially persisted and does not refresh the prospecting plan. The
   operator may use the exact-cohort dry run and local replay ledger to diagnose it.
+- A 30-company completion can exceed Prisma's default five-second interactive-transaction timeout
+  when tenant identity is re-read one company at a time before each evidence upsert. Completion
+  preloads the complete tenant-scoped company identity map in one query and uses an explicit
+  30-second transaction timeout, still below the route's 60-second execution limit. A timeout rolls
+  back every signal and the run update; the saved synthesis checkpoint can then be resumed.
 - Individual query failures remain visible in a valid completion, but deterministic evidence-count,
   pass-coverage, identity, logistics-provider, stable/exclusive external-provider, and geography gates fail closed. Transport success
   with weak evidence cannot become a high-priority opportunity.

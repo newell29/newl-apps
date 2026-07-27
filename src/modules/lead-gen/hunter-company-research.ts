@@ -27,6 +27,7 @@ const ACTIVE_RUN_WINDOW_MS = 4 * 60 * 60 * 1000;
 const RECENT_RESEARCH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_RESEARCH_COMPANIES = 100;
 const MAX_EVIDENCE_PER_COMPANY = 24;
+export const HUNTER_COMPANY_RESEARCH_TRANSACTION_TIMEOUT_MS = 30_000;
 
 export const HUNTER_RESEARCH_PASSES = [
   {
@@ -501,12 +502,19 @@ export async function completeHunterCompanyResearchRun({
   };
   const savedSignalIds: string[] = [];
   await prisma.$transaction(async (tx) => {
+    const tenantCompanies = await tx.company.findMany({
+      where: {
+        tenantId,
+        id: { in: decisions.map((decision) => decision.company.companyId) }
+      },
+      select: { id: true, normalizedName: true, name: true }
+    });
+    const tenantCompanyById = new Map(
+      tenantCompanies.map((company) => [company.id, company])
+    );
     for (const decision of decisions) {
       const { company, gate, status, finalScore, finalConfidence, tier, tierReasons } = decision;
-      const tenantCompany = await tx.company.findFirst({
-        where: { id: company.companyId, tenantId },
-        select: { id: true, normalizedName: true, name: true }
-      });
+      const tenantCompany = tenantCompanyById.get(company.companyId);
       if (!tenantCompany || tenantCompany.normalizedName !== company.companyKey) {
         throw new Error("Hunter company research failed tenant or company identity validation.");
       }
@@ -632,6 +640,8 @@ export async function completeHunterCompanyResearchRun({
         }
       }
     });
+  }, {
+    timeout: HUNTER_COMPANY_RESEARCH_TRANSACTION_TIMEOUT_MS
   });
 
   const plan = await runHunterDryPlan({
