@@ -191,6 +191,19 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Prevention: the manual generation action, automatic generation path, Apollo queue action, and Apollo worker all
   evaluate the same tenant-scoped handoff. A model cannot override the required service line.
 
+## Assisted handoff stops after research
+
+- Symptom: research and the Daily Opportunity are complete, but no contact or Outreach Plan appears.
+- Check Automation Settings first. `DRY_RUN`, `OFF`, or the kill switch intentionally prevents automatic handoff.
+- Inspect the latest `HUNTER_OUTREACH_HANDOFF` job. `REVIEW_REQUIRED` means the immutable Apollo match must be
+  resolved manually; `NO_CONTACTS` and `NO_QUALIFYING_CONTACTS` are terminal for that saved run.
+- Transient Apollo/model failures receive at most three server-owned attempts. The Mac worker resumes queued jobs
+  during its normal loop, so research should not be rerun merely to retry the handoff.
+- A QA-failed plan is preserved for inspection and cannot advance. It must not be silently regenerated until its
+  evidence or generation defect is understood.
+- `CONTACT_REVIEW_REQUIRED` means Apollo contacts were found but none cleared the buyer-role threshold. Inspect the
+  saved `hunterContactFit` rationale and risks; do not lower the deterministic safety filter to force generation.
+
 ## Apollo cannot safely match a company
 
 - Symptom: Pipeline shows **Resolve Apollo match**, or bulk enrichment reports a company as protected from retry.

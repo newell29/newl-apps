@@ -3,6 +3,7 @@ import { HunterServiceLine, OutreachChannel } from "@prisma/client";
 import {
   generateCompleteOutreachSequence,
   generateOutreachStrategy,
+  reviewHunterContactFit,
   reviewOutreachSequenceGrounding
 } from "@/server/integrations/openai";
 
@@ -171,6 +172,60 @@ describe("OpenAI structured outreach workflow", () => {
         }]
       })
     ).rejects.toThrow("changed Hunter's required service line");
+  });
+
+  it("uses a strict, bounded buyer-role review before drafting", async () => {
+    const fetchMock = vi.spyOn(global, "fetch").mockResolvedValueOnce(
+      responseWithOutput({
+        reviews: [{
+          contactId: "contact-1",
+          disposition: "PRIMARY",
+          confidence: 88,
+          responsibilityHypothesis:
+            "A supply-chain director likely influences external warehousing capacity.",
+          rationale:
+            "The title and department align directly with Hunter's saved warehousing persona.",
+          recommendedApproach:
+            "Lead with the verified capacity trigger and ask who owns overflow warehousing.",
+          riskFlags: ["Exact budget ownership is not verified."]
+        }]
+      })
+    );
+
+    const result = await reviewHunterContactFit({
+      model: "gpt-5.6-luna",
+      company: { name: "Harbor Home", domain: "harborhome.example" },
+      opportunity: {
+        serviceLine: HunterServiceLine.WAREHOUSING,
+        opportunityType: "Warehouse expansion",
+        rationale: "Verified expansion may create temporary capacity pressure.",
+        recommendedPersona: "Director of Supply Chain"
+      },
+      contacts: [{
+        contactId: "contact-1",
+        fullName: "Jordan Demo",
+        title: "Director of Supply Chain",
+        department: "Logistics",
+        seniority: "director",
+        hasEmail: true,
+        hasPhone: false,
+        hasLinkedin: true
+      }]
+    });
+
+    expect(result.reviews).toEqual([
+      expect.objectContaining({
+        contactId: "contact-1",
+        disposition: "PRIMARY",
+        confidence: 88
+      })
+    ]);
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string
+    );
+    expect(body.text.format.name).toBe("newl_hunter_contact_fit");
+    expect(body.text.format.strict).toBe(true);
+    expect(body.input[1].content).not.toContain("test-openai-key");
   });
 });
 

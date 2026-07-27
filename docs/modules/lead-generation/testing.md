@@ -193,6 +193,23 @@ Regression coverage must prove:
 6. Outreach Queue starts with secondary audit columns hidden and links companies back to Found Companies; and
 7. every underlying query remains tenant scoped and the redesign requires no database migration.
 
+## Assisted post-research handoff
+
+Regression coverage must prove:
+
+1. only explicit `ASSISTED` mode with the kill switch off can queue or process a handoff;
+2. the queued cohort contains only fresh Hot/Qualified companies with the exact tenant-owned `WOULD_PURSUE` decision produced by the completed plan;
+3. machine routes ignore caller-supplied tenant identifiers and use ingestion authentication;
+4. each request processes at most one company and persisted leases, results, attempts, and retry dates survive worker restart;
+5. an unresolved latest Apollo company match blocks repeat discovery and remains review-required;
+6. deterministic ranking excludes seller-side and unidentifiable contacts and caps imports at `maxContactsPerCompany`;
+7. buyer-role review uses strict structured output, returns the exact requested contact IDs, and accepts only Primary 70+ or Secondary 80+;
+8. the same prompt version and prospecting decision reuse a cached review, while a new decision requires fresh review;
+9. imported contacts remain `REVIEWING`, unapproved, unassigned, and unenrolled;
+10. plan generation uses the saved Hunter/TradeMining evidence ledger and persists QA failure rather than bypassing it;
+11. no assisted-handoff path creates a lead, changes a pipeline stage, approves a plan/contact, writes an Apollo cadence, or sends communication; and
+12. the Mac worker drains the queue after research and resumes unfinished jobs during its normal loop.
+
 ## Outreach Plans and grounded sequence generation
 
 Regression coverage must prove:

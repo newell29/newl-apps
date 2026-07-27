@@ -10,6 +10,20 @@ export const OUTREACH_PLAN_PROMPT_VERSION = "outreach-plan-v1.0";
 export const DEFAULT_OUTREACH_STRATEGY_MODEL = "gpt-5.6-terra";
 export const DEFAULT_OUTREACH_DRAFT_MODEL = "gpt-5.6-luna";
 export const DEFAULT_OUTREACH_QA_MODEL = "gpt-5.6-luna";
+export const DEFAULT_HUNTER_CONTACT_FIT_MODEL = "gpt-5.6-luna";
+export const HUNTER_CONTACT_FIT_PROMPT_VERSION = "hunter-contact-fit-v1.0";
+
+export type HunterContactFitDisposition = "PRIMARY" | "SECONDARY" | "REVIEW" | "REJECT";
+
+export type HunterContactFitReview = {
+  contactId: string;
+  disposition: HunterContactFitDisposition;
+  confidence: number;
+  responsibilityHypothesis: string;
+  rationale: string;
+  recommendedApproach: string;
+  riskFlags: string[];
+};
 
 export type OutreachEvidenceRecord = {
   id: string;

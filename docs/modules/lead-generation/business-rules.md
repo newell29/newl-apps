@@ -78,7 +78,9 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - Deterministic server code, not either model alone, blocks an uncorroborated ambiguous identity, explicit language showing that the company provides logistics services to other customers or members, an explicitly evidenced stable/exclusive external-provider relationship without displacement evidence, fewer than two evidence records, missing identity evidence, coverage of fewer than two passes, and mainland-China identity without a verified U.S. division. Provider and incumbent labels require explicit saved evidence; unsupported model labels are cleared before scoring. Matching first-party identity evidence can correct an unsupported ambiguous label. A strict evidence check restores `FRESH` when Qwen overlooks an exact-company, recent, dated material expansion in a non-directory source, including when Qwen selected `FRESH` but cited an unsupported careers or directory record instead of the qualifying event. A `FRESH` claim whose cited trigger lacks a publication date inside the trailing 18 months is evaluated as current fit instead of being blocked, and stale/no-opportunity results remain on Watchlist for later research. Hunter prefers the page's original `datePublished` metadata over Brave's later page-update age. A current year in the search query, a generic recently updated company profile, or a crawl timestamp is not event-date evidence. Ordinary manufacturers, retailers, importers, or distributors with internal logistics staff are prospects and do not trip the provider gate.
 - Kimi's five dimension scores must sum exactly to its total. K3 may confirm or downgrade a candidate and may never raise the K2.6 score or override a deterministic blocker. A fresh event becomes **Hot opportunity** only when K3 confirms the same recent dated evidence. A strong fit with current evidence but no discrete recent trigger becomes **Qualified current account**. Lower-accessibility, uncertain-timing, below-threshold, stale/no-opportunity, foreign-without-U.S.-division, or unvalidated fresh candidates become **Watchlist**. Explicit logistics providers, uncorroborated ambiguous identities, explicitly stable/exclusive incumbent relationships without displacement evidence, and mainland-China entities without a verified U.S. division become **Blocked**.
 - Company-country rules use public identity evidence only. TradeMining origin countries, foreign ports, and shipment routing are never treated as the company's country. A verified U.S. or Canadian identity cannot be reversed by an incidental China reference elsewhere in a long identity page; text-based China inference is used only while operating country remains unknown. U.S. and Canadian companies are prioritized normally. Other foreign companies without a verified U.S. division remain eligible evidence but receive a fixed 10-point penalty and cannot rise above Watchlist. A mainland-China company is Blocked unless exact cited evidence verifies a named U.S. operating division.
-- Completion refreshes the dry-run prospecting plan. It cannot search Apollo, change a company or lead stage, enroll a cadence, draft/send email, or perform LinkedIn activity.
+- Completion refreshes the prospecting plan. The research/model stage itself cannot search Apollo, change a company
+  or lead stage, enroll a cadence, draft/send email, or perform LinkedIn activity. An explicitly enabled Assisted
+  policy may then queue the separate post-research handoff below.
 - Research data reuses the additive Hunter signal and `AutomationJobRun` JSON ledgers. Phase 3 requires no database migration and does not rewrite existing company, contact, lead, TradeMining, Apollo, scoring, or outreach records.
 
 ## Hunter quality and TradeMining run assurance
@@ -130,6 +132,18 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - Both Apollo queueing and the worker re-evaluate the same current Hunter handoff. When a current Outreach Plan
   exists, Apollo push is also blocked until that exact plan is approved. Approval alone does not enroll or send; the
   existing explicit Apollo push action remains a separate human-controlled external write.
+- `ASSISTED` mode automatically queues only fresh Hot/Qualified `WOULD_PURSUE` companies after research. `DRY_RUN`
+  and `OFF` never queue this work, and the kill switch prevents both queue creation and processing.
+- Company matching, contact ranking, and plan generation are durable preparation steps, not outreach authorization.
+  New contacts remain `REVIEWING`, no rep is assigned, no lead is created, and no approval, Apollo enrollment, or
+  communication occurs.
+- A latest unresolved Apollo match blocks automatic repeat lookup. Transient processing failures receive at most
+  three attempts; research remains completed and the handoff job records the independent failure.
+- Deterministic buyer filtering runs before model review and cannot be overridden. The contact-fit model may only
+  advance a `PRIMARY` result at confidence 70 or above or a `SECONDARY` result at confidence 80 or above.
+  `REVIEW` and `REJECT` remain visible without automatic sequence generation.
+- Contact-fit results are tied to the exact Hunter prospecting decision and prompt version. They are reused on an
+  identical retry and invalidated automatically when a new research decision changes the opportunity.
 
 ## Data model
 

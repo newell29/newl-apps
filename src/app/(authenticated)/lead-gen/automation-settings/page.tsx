@@ -52,6 +52,7 @@ export default async function AutomationSettingsPage() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="Mode">
                   <select name="mode" defaultValue={policy.mode} className={inputClass}>
+                    <option value={HunterAutomationMode.ASSISTED}>Assisted</option>
                     <option value={HunterAutomationMode.DRY_RUN}>Dry run</option>
                     <option value={HunterAutomationMode.OFF}>Off</option>
                   </select>
@@ -83,6 +84,9 @@ export default async function AutomationSettingsPage() {
                 Save policy
               </button>
               {!data.policyIsStored ? <p className="text-xs text-mutedForeground">Safe defaults are active until the first save.</p> : null}
+              <p className="text-xs text-mutedForeground">
+                Assisted mode automatically finds and ranks Apollo contacts and creates QA-checked outreach plans after research. It never approves, enrolls, or sends.
+              </p>
             </form>
           ) : (
             <p className="mt-4 text-sm text-mutedForeground">Only tenant admins can change this policy.</p>

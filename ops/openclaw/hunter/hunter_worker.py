@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 
 from hunter_ingest import api_request, clean, required_env
 from hunter_company_research import run_company_research
+from hunter_outreach_handoff import drain_outreach_handoff
 from hunter_signal_scout import run_signal_scout
 
 
@@ -656,6 +657,13 @@ def main() -> int:
     last_company_research_check_date: Optional[dt.date] = None
     while True:
         process_once(base_url, token, clean(args.profile_id), clean(args.profile_name))
+        if not args.profile_id and not args.profile_name:
+            try:
+                handoff = drain_outreach_handoff(base_url, token)
+                if handoff.get("state") not in {"idle", "disabled"}:
+                    print(json.dumps({"hunterOutreachHandoff": handoff}, indent=2))
+            except Exception as error:
+                print(f"Hunter outreach handoff failed: {error}", file=sys.stderr)
         if not args.profile_id and not args.profile_name and signal_scout_due_now():
             local_timezone = ZoneInfo(os.environ.get("HUNTER_SIGNAL_SCOUT_TIMEZONE", "America/Toronto").strip())
             local_date = dt.datetime.now(dt.timezone.utc).astimezone(local_timezone).date()
