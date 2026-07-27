@@ -604,6 +604,35 @@ describe("Hunter company deep research", () => {
     expect(rows.every((row) => Number.isInteger(row.evidenceIndex))).toBe(true);
   });
 
+  it("preserves Aalberts' dated production expansion and multi-center logistics role in compact model packets", async () => {
+    const program = [
+      "import datetime as d,json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'AALBERTS IPS AMERICAS','companyKey':'aalberts-ips-americas'}",
+      "recent=(d.datetime.now(d.timezone.utc)-d.timedelta(days=30)).isoformat()",
+      "evidence=[{'pass':'IDENTITY','sourceType':'FIRST_PARTY','firstParty':True,'title':'Aalberts IPS Americas','excerpt':'Aalberts IPS Americas is a U.S. manufacturer.','publishedAt':None},{'pass':'FRESH_EVENTS','sourceType':'FIRST_PARTY','firstParty':True,'title':'Aalberts products','excerpt':'Current product information for Aalberts IPS Americas.','publishedAt':None},{'pass':'CAREERS','sourceType':'CAREERS','firstParty':True,'title':'Careers at Aalberts','excerpt':'Explore open positions.','publishedAt':None},{'pass':'DISTRIBUTION_FOOTPRINT','sourceType':'FIRST_PARTY','firstParty':True,'title':'Aalberts locations','excerpt':'North American locations.','publishedAt':None},{'pass':'CAREERS','sourceType':'CAREERS','firstParty':True,'title':'Distribution Logistics Manager','excerpt':'Aalberts seeks a logistics manager responsible for multiple distribution centers.','publishedAt':None},{'pass':'FRESH_EVENTS','sourceType':'OTHER','firstParty':False,'title':'Aalberts brings manufacturing to the United States','excerpt':'Aalberts is making an investment to install two advanced production lines at its Pageland facility, with phased work through 2027 to shorten lead times and support significant North American growth ambitions.','publishedAt':recent},{'pass':'FRESH_EVENTS','sourceType':'NEWS','firstParty':False,'title':'Aalberts expands Pageland production','excerpt':'Aalberts announced additional production lines in Pageland as part of its North American production expansion.','publishedAt':recent}]",
+      "preferred=r.preferred_model_evidence_indices(candidate,evidence)",
+      "packet=r.select_company_model_evidence(candidate,evidence)",
+      "synthesis={'identityDisposition':'PASS','identityConfidence':85,'identityReason':'Verified.','confidence':80,'freshness':'CURRENT','triggerEvidenceIndices':[1],'missingEvidence':[],'rationale':'No dated trigger or specific hiring role.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
+      "normalized=r.normalize_synthesis_for_evidence(candidate,evidence,synthesis)",
+      "print(json.dumps({'preferred':preferred,'packet':[row['evidenceIndex'] for row in packet],'freshness':normalized['freshness'],'triggers':normalized['triggerEvidenceIndices']}))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual({
+      preferred: [5, 6, 4],
+      packet: [5, 6, 4, 0, 3],
+      freshness: "FRESH",
+      triggers: [5, 6]
+    });
+  });
+
   it("parses a Kimi JSON object wrapped in explanatory text", async () => {
     const program = [
       "import json",
