@@ -43,7 +43,17 @@ export async function POST(request: Request) {
         tests: readStringArray(body.tests, 20, 500),
         knownLimitations: readStringArray(body.knownLimitations, 20, 500),
         errorCode: readOptionalString(body.errorCode, 80),
-        errorMessage: readOptionalString(body.errorMessage, 1000)
+        errorMessage: readOptionalString(body.errorMessage, 1000),
+        reviewAttempt: readOptionalInteger(body.reviewAttempt),
+        reviewStartedAt: readOptionalString(body.reviewStartedAt, 100),
+        reviewVerdict: readOptionalString(body.reviewVerdict, 40),
+        reviewRiskLevel: readOptionalString(body.reviewRiskLevel, 40),
+        reviewSummary: readOptionalString(body.reviewSummary, 4000),
+        reviewFindings: body.reviewFindings,
+        ticketCoverage: body.ticketCoverage,
+        reviewChecks: body.reviewChecks,
+        reviewTests: body.reviewTests,
+        businessQuestions: readStringArray(body.businessQuestions, 30, 500)
       })
     });
   } catch (error) {
@@ -51,8 +61,14 @@ export async function POST(request: Request) {
   }
 }
 
-function readAction(value: unknown): "claim" | "progress" | "complete" | "fail" {
-  if (value === "claim" || value === "progress" || value === "complete" || value === "fail") {
+function readAction(value: unknown): "claim" | "progress" | "review" | "complete" | "fail" {
+  if (
+    value === "claim" ||
+    value === "progress" ||
+    value === "review" ||
+    value === "complete" ||
+    value === "fail"
+  ) {
     return value;
   }
   throw new RequestError("Unsupported Rivet development action.");
@@ -76,6 +92,10 @@ function readOptionalString(value: unknown, maxLength: number) {
   return typeof value === "string"
     ? value.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, maxLength) || null
     : null;
+}
+
+function readOptionalInteger(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
 }
 
 function readStringArray(value: unknown, limit: number, maxLength: number) {

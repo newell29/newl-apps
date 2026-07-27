@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "verdict",
+    "riskLevel",
+    "summary",
+    "findings",
+    "ticketCoverage",
+    "checks",
+    "tests",
+    "businessQuestions"
+  ],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["PASS", "NEEDS_CHANGES", "BLOCKED"]
+    },
+    "riskLevel": {
+      "type": "string",
+      "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "findings": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "severity",
+          "category",
+          "file",
+          "line",
+          "summary",
+          "requiredFix",
+          "autoFixable",
+          "businessDecisionRequired"
+        ],
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "TICKET_COVERAGE",
+              "BUSINESS_SCOPE",
+              "PRIVACY",
+              "SECRETS",
+              "TENANT_ISOLATION",
+              "AUTHORIZATION",
+              "APPROVAL_BOUNDARY",
+              "CORRECTNESS",
+              "REGRESSION_TEST",
+              "DOCUMENTATION",
+              "MERGEABILITY",
+              "SIBLING_CONFLICT",
+              "PR_BODY_ACCURACY"
+            ]
+          },
+          "file": {
+            "type": ["string", "null"],
+            "maxLength": 500
+          },
+          "line": {
+            "type": ["integer", "null"],
+            "minimum": 1
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "requiredFix": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "autoFixable": {
+            "type": "boolean"
+          },
+          "businessDecisionRequired": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "ticketCoverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["implemented", "missing", "outOfScope"],
+      "properties": {
+        "implemented": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "type": "string", "maxLength": 500 }
+        },
+        "missing": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "type": "string", "maxLength": 500 }
+        },
+        "outOfScope": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "type": "string", "maxLength": 500 }
+        }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "privacy",
+        "tenantIsolation",
+        "approvalBoundaries",
+        "tests",
+        "documentation",
+        "mergeability",
+        "prBodyAccuracy"
+      ],
+      "properties": {
+        "privacy": { "$ref": "#/$defs/check" },
+        "tenantIsolation": { "$ref": "#/$defs/check" },
+        "approvalBoundaries": { "$ref": "#/$defs/check" },
+        "tests": { "$ref": "#/$defs/check" },
+        "documentation": { "$ref": "#/$defs/check" },
+        "mergeability": { "$ref": "#/$defs/check" },
+        "prBodyAccuracy": { "$ref": "#/$defs/check" }
+      }
+    },
+    "tests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "passed", "knownFailures"],
+      "properties": {
+        "required": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "type": "string", "maxLength": 500 }
+        },
+        "passed": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "type": "string", "maxLength": 500 }
+        },
+        "knownFailures": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "type": "string", "maxLength": 500 }
+        }
+      }
+    },
+    "businessQuestions": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      }
+    }
+  },
+  "$defs": {
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "note"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "NOT_APPLICABLE"]
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      }
+    }
+  }
+}

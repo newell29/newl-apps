@@ -31,6 +31,17 @@ This repository is the source of truth for the Newl Apps platform. Future agents
 
 OpenClaw may coordinate and prepare actions, but Newl Apps must enforce authentication, permission checks, validation, approval records, and audit logging. Deterministic code must perform exact comparisons, calculations, Teamship field updates, and printing. Codex changes code only through branches and reviewed pull requests.
 
+## Code Review Rules
+
+- Flag any production customer, order, address, email, serial, credential, token, or other live data added to code, tests, fixtures, documentation, generated output, or pull-request text. Safe path: use clearly synthetic reserved examples such as `PS123456`, `SR812345`, and `user@example.com`.
+- Flag scope that is not traceable to the approved ticket or its confirmed root cause. Safe path: keep unrelated feedback in a separate suggestion and pull request.
+- Flag Teamship writes, printing, shipping/releasing orders, migrations, deployments, financial posting, customer communication, or permission changes without a distinct human approval enforced by deterministic code.
+- Flag shared data access that does not carry authenticated `tenantId` filtering through every layer.
+- Flag fixes for missing or partial external data unless regression tests cover both partially populated and completely missing evidence.
+- Flag a pull request whose description, tests, limitations, business questions, or reported commit do not match the actual diff and commands run.
+- Flag overlapping open pull requests when they modify the same behaviour or files without an explicit compatibility check against current `main`.
+- For Garland changes, require the repository Garland and Shipment Documents documentation to be read and updated when behaviour changes; generic WMS assumptions are not approved business rules.
+
 ## Reference documentation
 
 Start with `docs/README.md`, `docs/architecture/overview.md`, `docs/modules/README.md`, and the relevant module folder. For product or lead-gen implementation work, also read `reference/PRODUCT_OPERATING_BRIEF.md` and `reference/OPENCLAW_LEAD_GEN_SPEC.md`.

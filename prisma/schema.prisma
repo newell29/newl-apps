@@ -579,6 +579,7 @@ model Tenant {
   operationalFeedback                     OperationalFeedback[]
   approvedOperationalLessons              ApprovedOperationalLesson[]
   developmentSuggestions                  DevelopmentSuggestion[]
+  codexReviewRuns                         CodexReviewRun[]
   shipmentDocumentRuns                    ShipmentDocumentRun[]
   shipmentCarrierManifestRuns             ShipmentCarrierManifestRun[]
   shipmentCarrierManifestAttachments      ShipmentCarrierManifestAttachment[]
@@ -1590,6 +1591,7 @@ model AutomationJobRun {
   tenant                     Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   ltlBatchQuoteLanes         LtlBatchQuoteLane[]
   hunterProspectingDecisions HunterProspectingDecision[]
+  codexReviewRuns            CodexReviewRun[]
 
   @@unique([tenantId, id])
   @@index([tenantId, jobType, startedAt])
@@ -3368,9 +3370,43 @@ model DevelopmentSuggestion {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  codexReviewRuns CodexReviewRun[]
 
   @@unique([tenantId, id])
   @@index([tenantId, status, generatedAt])
   @@index([tenantId, workflowKey, generatedAt])
+}
+
+model CodexReviewRun {
+  id                      String   @id @default(cuid())
+  tenantId                String
+  developmentSuggestionId String
+  developmentJobId        String
+  commitSha               String
+  attempt                 Int
+  status                  String
+  verdict                 String
+  riskLevel               String
+  summary                 String
+  findings                Json
+  ticketCoverage          Json
+  checks                  Json
+  tests                   Json
+  businessQuestions       Json
+  reviewerModel           String
+  reviewerReasoningEffort String
+  startedAt               DateTime
+  finishedAt              DateTime
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  tenant                Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  developmentSuggestion DevelopmentSuggestion @relation(fields: [tenantId, developmentSuggestionId], references: [tenantId, id], onDelete: Cascade)
+  developmentJob        AutomationJobRun      @relation(fields: [tenantId, developmentJobId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, developmentJobId, commitSha, attempt])
+  @@index([tenantId, developmentSuggestionId, createdAt])
+  @@index([tenantId, verdict, createdAt])
 }

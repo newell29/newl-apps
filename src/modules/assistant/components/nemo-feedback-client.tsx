@@ -30,6 +30,11 @@ type Suggestion = {
     progressMessage: string | null;
     pullRequestUrls: string[];
     errorMessage: string | null;
+    reviewVerdict: string | null;
+    reviewAttempt: number | null;
+    reviewRiskLevel: string | null;
+    reviewSummary: string | null;
+    unresolvedFindingCount: number;
   } | null;
 };
 
@@ -214,7 +219,7 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
               <div>
                 <h2 className="text-lg font-semibold text-foreground">Development suggestions</h2>
                 <p className="mt-1 text-sm text-mutedForeground">
-                  Similar feedback is grouped first. Approval queues Rivet to build a reviewed Codex pull request.
+                  Similar feedback is grouped first. Rivet builds a draft PR, independently reviews the exact commit, and only marks a passing result ready for you.
                 </p>
               </div>
               <button disabled={busy} onClick={() => void generateSuggestions()} className="rounded-md border border-border px-3 py-2 text-sm font-semibold">
@@ -236,6 +241,19 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
                   <p className="mt-2 text-xs text-mutedForeground">{item.feedbackCount} similar feedback item(s) · {item.riskLevel} risk</p>
                   {item.developmentJob?.progressMessage ? (
                     <p className="mt-2 text-xs text-mutedForeground">{item.developmentJob.progressMessage}</p>
+                  ) : null}
+                  {item.developmentJob?.reviewVerdict ? (
+                    <div className="mt-2 rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground">
+                      <p className="font-semibold">
+                        Independent Codex review: {item.developmentJob.reviewVerdict}
+                        {item.developmentJob.reviewRiskLevel ? ` · ${item.developmentJob.reviewRiskLevel} risk` : ""}
+                        {item.developmentJob.reviewAttempt ? ` · round ${item.developmentJob.reviewAttempt}` : ""}
+                      </p>
+                      {item.developmentJob.reviewSummary ? <p className="mt-1">{item.developmentJob.reviewSummary}</p> : null}
+                      {item.developmentJob.unresolvedFindingCount > 0 ? (
+                        <p className="mt-1 font-semibold">{item.developmentJob.unresolvedFindingCount} unresolved finding(s)</p>
+                      ) : null}
+                    </div>
                   ) : null}
                   {item.developmentJob?.pullRequestUrls.map((url) => (
                     <a key={url} href={url} target="_blank" rel="noreferrer" className="mt-2 block text-sm font-semibold text-primary underline">

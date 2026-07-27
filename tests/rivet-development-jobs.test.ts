@@ -12,6 +12,9 @@ const prismaMock = vi.hoisted(() => ({
   developmentSuggestion: {
     updateMany: vi.fn()
   },
+  codexReviewRun: {
+    create: vi.fn()
+  },
   auditLog: {
     create: vi.fn()
   },
@@ -77,6 +80,7 @@ describe("Rivet approved development jobs", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
+    prismaMock.codexReviewRun.create.mockResolvedValue({ id: "review-1" });
   });
 
   it("queues a tenant-scoped local Codex packet with required Garland context and hard safety boundaries", async () => {
@@ -224,6 +228,75 @@ describe("Rivet approved development jobs", () => {
       output: claimedOutput
     });
 
+    const review = await updateRivetDevelopmentJob(context, {
+      action: "review",
+      jobId: "job-1",
+      leaseToken: claim.leaseToken,
+      commitSha: "a".repeat(40),
+      reviewAttempt: 1,
+      reviewStartedAt: new Date().toISOString(),
+      reviewVerdict: "PASS",
+      reviewRiskLevel: "LOW",
+      reviewSummary: "The exact commit passed the independent review.",
+      reviewFindings: [],
+      ticketCoverage: {
+        implemented: ["Preserved wrapped Special Instructions."],
+        missing: [],
+        outOfScope: []
+      },
+      reviewChecks: {
+        privacy: { status: "PASS", note: "Synthetic fixtures only." }
+      },
+      reviewTests: {
+        required: ["Focused Garland tests"],
+        passed: ["Focused Garland tests"],
+        knownFailures: []
+      },
+      businessQuestions: []
+    });
+
+    expect(review).toMatchObject({
+      state: "reviewed",
+      verdict: "PASS",
+      findingCount: 0
+    });
+    expect(prismaMock.codexReviewRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        tenantId: "tenant-1",
+        developmentSuggestionId: "suggestion-1",
+        developmentJobId: "job-1",
+        commitSha: "a".repeat(40),
+        attempt: 1,
+        verdict: "PASS"
+      })
+    });
+
+    const reviewedOutput = prismaMock.automationJobRun.update.mock.calls.at(-1)?.[0]?.data?.output;
+    prismaMock.automationJobRun.findFirst.mockResolvedValue({
+      id: "job-1",
+      tenantId: "tenant-1",
+      jobType: RIVET_DEVELOPMENT_JOB_TYPE,
+      status: JobStatus.RUNNING,
+      input: storedInput,
+      output: reviewedOutput
+    });
+
+    await expect(updateRivetDevelopmentJob(context, {
+      action: "review",
+      jobId: "job-1",
+      leaseToken: claim.leaseToken,
+      commitSha: "a".repeat(40),
+      reviewAttempt: 1,
+      reviewVerdict: "PASS",
+      reviewRiskLevel: "LOW",
+      reviewSummary: "Duplicate review.",
+      reviewFindings: [],
+      ticketCoverage: { implemented: [], missing: [], outOfScope: [] },
+      reviewChecks: {},
+      reviewTests: {},
+      businessQuestions: []
+    })).rejects.toThrow("out of sequence");
+
     const result = await updateRivetDevelopmentJob(context, {
       action: "complete",
       jobId: "job-1",
@@ -245,6 +318,7 @@ describe("Rivet approved development jobs", () => {
       },
       data: { pullRequestUrl: "https://github.com/newell29/newl-apps/pull/999" }
     });
+    expect(result.teamsMessage).toContain("READY_FOR_ALEX");
     expect(prismaMock.auditLog.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -254,6 +328,119 @@ describe("Rivet approved development jobs", () => {
             deployed: true
           })
         })
+      })
+    );
+  });
+
+  it("refuses to mark a PR ready when the exact commit has not passed independent review", async () => {
+    prismaMock.automationJobRun.findFirst.mockResolvedValueOnce({
+      id: "job-1",
+      tenantId: "tenant-1",
+      jobType: RIVET_DEVELOPMENT_JOB_TYPE,
+      status: JobStatus.QUEUED,
+      input: storedInput,
+      output: { phase: "QUEUED", attempt: 0 }
+    });
+    prismaMock.automationJobRun.updateMany.mockResolvedValue({ count: 1 });
+    const claim = await claimRivetDevelopmentJob(context);
+    if (claim.state !== "claimed") throw new Error("Expected a claimed job.");
+    const claimedOutput = prismaMock.automationJobRun.updateMany.mock.calls[0][0].data.output;
+    prismaMock.automationJobRun.findFirst.mockResolvedValue({
+      id: "job-1",
+      tenantId: "tenant-1",
+      jobType: RIVET_DEVELOPMENT_JOB_TYPE,
+      status: JobStatus.RUNNING,
+      input: storedInput,
+      output: claimedOutput
+    });
+
+    await expect(updateRivetDevelopmentJob(context, {
+      action: "complete",
+      jobId: "job-1",
+      leaseToken: claim.leaseToken,
+      branchName: claim.packet.branchName,
+      commitSha: "b".repeat(40),
+      pullRequestUrls: ["https://github.com/newell29/newl-apps/pull/999"],
+      summary: "Unreviewed change.",
+      tests: [],
+      knownLimitations: []
+    })).rejects.toThrow("independent Codex review passes the exact commit");
+  });
+
+  it("stores blocked review evidence and preserves the draft PR for Alex", async () => {
+    prismaMock.automationJobRun.findFirst.mockResolvedValueOnce({
+      id: "job-1",
+      tenantId: "tenant-1",
+      jobType: RIVET_DEVELOPMENT_JOB_TYPE,
+      status: JobStatus.QUEUED,
+      input: storedInput,
+      output: { phase: "QUEUED", attempt: 0 }
+    });
+    prismaMock.automationJobRun.updateMany.mockResolvedValue({ count: 1 });
+    const claim = await claimRivetDevelopmentJob(context);
+    if (claim.state !== "claimed") throw new Error("Expected a claimed job.");
+    const claimedOutput = prismaMock.automationJobRun.updateMany.mock.calls[0][0].data.output;
+    prismaMock.automationJobRun.findFirst.mockResolvedValue({
+      id: "job-1",
+      tenantId: "tenant-1",
+      jobType: RIVET_DEVELOPMENT_JOB_TYPE,
+      status: JobStatus.RUNNING,
+      input: storedInput,
+      output: claimedOutput
+    });
+
+    await updateRivetDevelopmentJob(context, {
+      action: "review",
+      jobId: "job-1",
+      leaseToken: claim.leaseToken,
+      commitSha: "c".repeat(40),
+      reviewAttempt: 1,
+      reviewVerdict: "BLOCKED",
+      reviewRiskLevel: "HIGH",
+      reviewSummary: "The change requires a new business decision.",
+      reviewFindings: [{
+        severity: "HIGH",
+        category: "BUSINESS_SCOPE",
+        file: "src/example.ts",
+        line: 10,
+        summary: "The change broadens the approved rule.",
+        requiredFix: "Ask the owner to approve the broader behaviour.",
+        autoFixable: false,
+        businessDecisionRequired: true
+      }],
+      ticketCoverage: { implemented: [], missing: ["Approved rule"], outOfScope: ["New rule"] },
+      reviewChecks: {},
+      reviewTests: { required: [], passed: [], knownFailures: [] },
+      businessQuestions: ["Should the broader rule be approved?"]
+    });
+    const blockedOutput = prismaMock.automationJobRun.update.mock.calls.at(-1)?.[0]?.data?.output;
+    prismaMock.automationJobRun.findFirst.mockResolvedValue({
+      id: "job-1",
+      tenantId: "tenant-1",
+      jobType: RIVET_DEVELOPMENT_JOB_TYPE,
+      status: JobStatus.RUNNING,
+      input: storedInput,
+      output: blockedOutput
+    });
+
+    const result = await updateRivetDevelopmentJob(context, {
+      action: "fail",
+      jobId: "job-1",
+      leaseToken: claim.leaseToken,
+      branchName: claim.packet.branchName,
+      commitSha: "c".repeat(40),
+      pullRequestUrls: ["https://github.com/newell29/newl-apps/pull/999"],
+      errorCode: "RIVET_REVIEW_BLOCKED",
+      errorMessage: "Independent review needs an owner decision."
+    });
+
+    expect(result).toMatchObject({
+      state: "blocked",
+      pullRequestUrls: ["https://github.com/newell29/newl-apps/pull/999"]
+    });
+    expect(prismaMock.developmentSuggestion.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { pullRequestUrl: "https://github.com/newell29/newl-apps/pull/999" }
       })
     );
   });
