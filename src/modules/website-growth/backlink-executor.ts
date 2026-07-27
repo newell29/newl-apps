@@ -129,6 +129,11 @@ export async function reportWebsiteGrowthBacklinkExecution({
   if (status === WebsiteGrowthBacklinkStatus.LIVE && !liveUrl) {
     throw new Error("A verified live backlink must include its public URL.");
   }
+  if (status === WebsiteGrowthBacklinkStatus.BLOCKED && !notes?.trim()) {
+    throw new Error(
+      "A blocked backlink report must include the specific blocker reason."
+    );
+  }
   assertWebsiteGrowthBacklinkReportContainsNoSecrets([
     notes,
     directoryLoginUrl,

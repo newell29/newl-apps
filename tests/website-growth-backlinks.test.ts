@@ -11,10 +11,14 @@ import {
   fetchWebsiteGrowthPublicContactEvidence,
   isWebsiteGrowthOutreachOptOut,
   isWebsiteGrowthOutreachReplyMatch,
+  parseWebsiteGrowthOutreachRunStartedAt,
   readWebsiteGrowthOutreachIdentity,
   validateWebsiteGrowthContactSource,
   validateWebsiteGrowthOutreachConsent
 } from "@/modules/website-growth/backlink-outreach";
+import {
+  describeWebsiteGrowthBacklinkBlocker
+} from "@/modules/website-growth/backlink-blockers";
 import {
   buildWebsiteGrowthBacklinkDedupeKey,
   buildWebsiteGrowthBacklinkTeamsLines,
@@ -24,7 +28,8 @@ import {
 } from "@/modules/website-growth/backlinks";
 import {
   assertWebsiteGrowthBacklinkReportContainsNoSecrets,
-  isWebsiteGrowthBacklinkExecutorClaimable
+  isWebsiteGrowthBacklinkExecutorClaimable,
+  reportWebsiteGrowthBacklinkExecution
 } from "@/modules/website-growth/backlink-executor";
 import {
   authenticateWebsiteGrowthBacklinkExecutorRequest,
@@ -149,6 +154,91 @@ describe("Website Growth backlink curation", () => {
     expect(() => assertWebsiteGrowthBacklinkReportContainsNoSecrets([
       "https://publisher.example/login?access_token=unsafe-value"
     ])).toThrow("cannot contain passwords");
+  });
+
+  it("requires a specific reason whenever Scout reports a block", async () => {
+    await expect(reportWebsiteGrowthBacklinkExecution({
+      tenantId: "tenant-1",
+      opportunityId: "opportunity-1",
+      status: WebsiteGrowthBacklinkStatus.BLOCKED,
+      notes: " "
+    })).rejects.toThrow("specific blocker reason");
+  });
+});
+
+describe("Website Growth backlink blocker guidance", () => {
+  it.each([
+    {
+      notes: "The directory requires CAPTCHA and phone verification.",
+      category: "MANUAL_SETUP",
+      retryWillHelpNow: false
+    },
+    {
+      notes: "No publicly displayed business email or submission method was found.",
+      category: "NO_CONTACT_METHOD",
+      retryWillHelpNow: false
+    },
+    {
+      notes: "The publisher requires unusual terms and owner confirmation.",
+      category: "NEEDS_OWNER_CONFIRMATION",
+      retryWillHelpNow: false
+    },
+    {
+      notes: "Microsoft Graph permission check failed before delivery.",
+      category: "TECHNICAL",
+      retryWillHelpNow: true
+    }
+  ])("classifies $category blockers and gives retry guidance", ({
+    notes,
+    category,
+    retryWillHelpNow
+  }) => {
+    const blocker = describeWebsiteGrowthBacklinkBlocker({
+      status: WebsiteGrowthBacklinkStatus.BLOCKED,
+      category: WebsiteGrowthBacklinkCategory.DIRECTORY_CITATION,
+      notes,
+      submittedAt: null,
+      contactedAt: null,
+      directoryLoginUrl: null
+    });
+
+    expect(blocker).toMatchObject({
+      category,
+      reason: notes,
+      retryWillHelpNow
+    });
+    expect(blocker?.nextAction).toBeTruthy();
+    expect(blocker?.retryGuidance).toBeTruthy();
+  });
+
+  it("blocks automatic retry guidance when external history exists", () => {
+    const blocker = describeWebsiteGrowthBacklinkBlocker({
+      status: WebsiteGrowthBacklinkStatus.BLOCKED,
+      category: WebsiteGrowthBacklinkCategory.CONTENT_CONTRIBUTION,
+      notes: "Microsoft Graph did not confirm the response.",
+      submittedAt: null,
+      contactedAt: new Date("2026-07-27T12:00:00.000Z"),
+      directoryLoginUrl: null
+    });
+
+    expect(blocker?.retryWillHelpNow).toBe(false);
+    expect(blocker?.retryGuidance).toContain("Do not retry automatically");
+  });
+
+  it("accepts a recent run start time with a bounded legacy fallback", () => {
+    const now = new Date("2026-07-27T16:00:00.000Z");
+    expect(parseWebsiteGrowthOutreachRunStartedAt({
+      value: "2026-07-27T15:55:00.000Z",
+      now
+    })).toEqual(new Date("2026-07-27T15:55:00.000Z"));
+    expect(() => parseWebsiteGrowthOutreachRunStartedAt({
+      value: "2026-07-25T15:55:00.000Z",
+      now
+    })).toThrow("last 24 hours");
+    expect(parseWebsiteGrowthOutreachRunStartedAt({
+      value: null,
+      now
+    })).toEqual(new Date("2026-07-27T14:00:00.000Z"));
   });
 });
 

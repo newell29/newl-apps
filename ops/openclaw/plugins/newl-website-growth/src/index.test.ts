@@ -72,4 +72,34 @@ describe("Newl Website Growth OpenClaw plugin", () => {
       createParameterizedApiTool("newl_backlink_send_email", "/send")({ config }).name
     ).toBe("newl_backlink_send_email");
   });
+
+  it("passes the executor run start time to the deterministic summary", async () => {
+    process.env.TEST_BACKLINK_TOKEN = "protected-token";
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: { blockedThisRun: 1, blockedTotal: 5 } }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const tool = createParameterizedApiTool("newl_backlink_summary", "/summary")({
+      config: {
+        baseUrl: "https://newl-apps.example.com",
+        backlinkTokenEnv: "TEST_BACKLINK_TOKEN"
+      }
+    });
+
+    await tool.execute("call-summary", {
+      runStartedAt: "2026-07-27T14:00:00.000Z"
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://newl-apps.example.com/summary",
+      expect.objectContaining({
+        body: JSON.stringify({
+          runStartedAt: "2026-07-27T14:00:00.000Z"
+        })
+      })
+    );
+  });
 });

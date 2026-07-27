@@ -13,6 +13,10 @@ import {
   returnWebsiteGrowthBacklinkToReviewAction,
   reviewWebsiteGrowthBacklinkAction
 } from "@/modules/website-growth/backlink-actions";
+import {
+  describeWebsiteGrowthBacklinkBlocker,
+  formatWebsiteGrowthBacklinkBlockerCategory
+} from "@/modules/website-growth/backlink-blockers";
 import { getWebsiteGrowthBacklinkWorkspace } from "@/modules/website-growth/backlinks";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -34,6 +38,13 @@ export default async function WebsiteGrowthBacklinksPage({
   const workspace = await getWebsiteGrowthBacklinkWorkspace(context.tenantId);
   const groups = groupBacklinks(workspace.opportunities);
   const latestSummary = readRecord(readRecord(workspace.latestScoutRun?.output).backlinkSummary);
+  const latestOutreachSummary = readRecord(
+    readRecord(workspace.latestOutreachRun?.output).summary
+  );
+  const blockedThisRun = readNumber(latestOutreachSummary.blockedThisRun);
+  const blockedTotal =
+    workspace.statusCounts[WebsiteGrowthBacklinkStatus.BLOCKED] ?? 0;
+  const hasRecordedOutreachRun = Boolean(workspace.latestOutreachRun);
 
   return (
     <div className="space-y-6">
@@ -61,11 +72,30 @@ export default async function WebsiteGrowthBacklinksPage({
         </section>
       ) : null}
 
-      <section className="grid gap-4 md:grid-cols-4">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <MetricCard label="Needs your review" value={groups.REVIEW.length} caption="Curated—not raw Semrush rows" />
         <MetricCard label="Approved / underway" value={groups.ACTIVE.length} caption="Ready for the execution worker" />
+        <MetricCard label="Blocked this run" value={blockedThisRun} caption="New blocks from the latest executor cycle" />
+        <MetricCard label="Blocked total" value={blockedTotal} caption="All unresolved blocked opportunities" />
         <MetricCard label="Verified live" value={groups.LIVE.length} caption="Durable backlink wins" />
-        <MetricCard label="Blocked / lost" value={groups.CLOSED.length} caption="Kept out of the active queue" />
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+          Latest outreach run
+        </p>
+        <h2 className="mt-2 text-lg font-semibold text-foreground">
+          {hasRecordedOutreachRun
+            ? `${blockedThisRun} blocked this run; ${blockedTotal} blocked total.`
+            : `No outreach run has been recorded with the new reporting yet; ${blockedTotal} blocked total.`}
+        </h2>
+        <p className="mt-2 max-w-4xl text-sm leading-6 text-mutedForeground">
+          {hasRecordedOutreachRun
+            ? "“Blocked this run” counts only items stopped during the latest recorded executor cycle. "
+            : "The next executor cycle will establish the first run-specific count. "}
+          “Blocked total” is the unresolved lifetime queue. Each blocked card below
+          explains the reason, category, next action and whether retrying will help.
+        </p>
       </section>
 
       <section className="rounded-lg border border-success/25 bg-success/10 p-5">
@@ -123,10 +153,17 @@ export default async function WebsiteGrowthBacklinksPage({
       />
 
       <BacklinkSection
-        title="Blocked or lost"
+        title="Blocked"
+        description="Unresolved work requiring a technical fix, owner confirmation, manual setup, or a valid public contact method."
+        emptyMessage="No backlink work is currently blocked."
+        opportunities={groups.BLOCKED}
+      />
+
+      <BacklinkSection
+        title="Lost or closed"
         description="A short operational history. Rejected and stale research is hidden from this workspace."
-        emptyMessage="No blocked or lost backlinks."
-        opportunities={groups.CLOSED.slice(0, 20)}
+        emptyMessage="No lost backlink opportunities."
+        opportunities={groups.LOST.slice(0, 20)}
         compact
       />
     </div>
@@ -218,6 +255,7 @@ function BacklinkCard({
   compact: boolean;
 }) {
   const paid = opportunity.category === WebsiteGrowthBacklinkCategory.PAID_PLACEMENT;
+  const blocker = describeWebsiteGrowthBacklinkBlocker(opportunity);
   return (
     <article className="flex h-full flex-col rounded-lg border border-border bg-background p-5">
       <div className="flex flex-wrap items-center gap-2">
@@ -249,6 +287,31 @@ function BacklinkCard({
         <p className="mt-4 rounded-md border border-warning/25 bg-warning/10 p-3 text-xs leading-5 text-warning">
           Paid opportunity. Approval adds it to the plan but does not authorize payment or automated purchase.
         </p>
+      ) : null}
+      {blocker ? (
+        <div className="mt-4 rounded-md border border-danger/25 bg-danger/10 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-danger">
+              Blocker reason
+            </p>
+            <span className="rounded-full border border-danger/25 bg-background px-2.5 py-1 text-xs font-semibold text-danger">
+              {formatWebsiteGrowthBacklinkBlockerCategory(blocker.category)}
+            </span>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-foreground">
+            {blocker.reason}
+          </p>
+          <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+            <div>
+              <dt className="font-semibold text-foreground">Recommended next action</dt>
+              <dd className="mt-1 leading-6 text-mutedForeground">{blocker.nextAction}</dd>
+            </div>
+            <div>
+              <dt className="font-semibold text-foreground">Will retrying help?</dt>
+              <dd className="mt-1 leading-6 text-mutedForeground">{blocker.retryGuidance}</dd>
+            </div>
+          </dl>
+        </div>
       ) : null}
       <div className="mt-auto flex flex-wrap items-end justify-between gap-3 pt-5">
         <div className="flex flex-wrap gap-2">
@@ -304,7 +367,9 @@ function BacklinkCard({
               aria-label={`Retry approved opportunity ${opportunity.title}`}
               className="rounded-md border border-primary px-3 py-2 text-sm font-semibold text-primary transition-colors hover:bg-accentSoft"
             >
-              Confirm nothing was sent, then retry
+              {blocker?.retryWillHelpNow
+                ? "Confirm issue fixed, then retry"
+                : "Complete next action, then retry"}
             </button>
           </form>
         ) : null}
@@ -326,12 +391,14 @@ function groupBacklinks(opportunities: Awaited<ReturnType<typeof getWebsiteGrowt
     REVIEW: [] as typeof opportunities,
     ACTIVE: [] as typeof opportunities,
     LIVE: [] as typeof opportunities,
-    CLOSED: [] as typeof opportunities
+    BLOCKED: [] as typeof opportunities,
+    LOST: [] as typeof opportunities
   };
   for (const opportunity of opportunities) {
     if (opportunity.status === WebsiteGrowthBacklinkStatus.NEEDS_REVIEW) groups.REVIEW.push(opportunity);
     else if (opportunity.status === WebsiteGrowthBacklinkStatus.LIVE) groups.LIVE.push(opportunity);
-    else if (opportunity.status === WebsiteGrowthBacklinkStatus.LOST || opportunity.status === WebsiteGrowthBacklinkStatus.BLOCKED) groups.CLOSED.push(opportunity);
+    else if (opportunity.status === WebsiteGrowthBacklinkStatus.BLOCKED) groups.BLOCKED.push(opportunity);
+    else if (opportunity.status === WebsiteGrowthBacklinkStatus.LOST) groups.LOST.push(opportunity);
     else groups.ACTIVE.push(opportunity);
   }
   return groups;

@@ -13,6 +13,8 @@ export const MAX_ACTIVE_BACKLINK_QUEUE = 50;
 export const BACKLINK_REVIEW_RETENTION_DAYS = 45;
 export const MIN_BACKLINK_RELEVANCE_SCORE = 60;
 export const MIN_BACKLINK_QUALITY_SCORE = 60;
+export const WEBSITE_GROWTH_BACKLINK_OUTREACH_JOB_TYPE =
+  "WEBSITE_GROWTH_BACKLINK_OUTREACH";
 
 export type WebsiteGrowthBacklinkProspect = {
   sourceDomain: string;
@@ -273,6 +275,7 @@ export async function getWebsiteGrowthBacklinkWorkspace(tenantId: string) {
   const [
     opportunities,
     latestScoutRun,
+    latestOutreachRun,
     statusCounts
   ] = await Promise.all([
     prisma.websiteGrowthBacklinkOpportunity.findMany({
@@ -292,6 +295,13 @@ export async function getWebsiteGrowthBacklinkWorkspace(tenantId: string) {
       where: { tenantId, jobType: "WEBSITE_GROWTH_SCOUT_WEEKLY" },
       orderBy: { startedAt: "desc" }
     }),
+    prisma.automationJobRun.findFirst({
+      where: {
+        tenantId,
+        jobType: WEBSITE_GROWTH_BACKLINK_OUTREACH_JOB_TYPE
+      },
+      orderBy: { startedAt: "desc" }
+    }),
     prisma.websiteGrowthBacklinkOpportunity.groupBy({
       by: ["status"],
       where: { tenantId },
@@ -302,6 +312,7 @@ export async function getWebsiteGrowthBacklinkWorkspace(tenantId: string) {
   return {
     opportunities,
     latestScoutRun,
+    latestOutreachRun,
     statusCounts: Object.fromEntries(statusCounts.map((row) => [row.status, row._count._all]))
   };
 }

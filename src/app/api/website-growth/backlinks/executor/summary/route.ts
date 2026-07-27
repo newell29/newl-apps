@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 
-import { buildWebsiteGrowthOutreachTeamsSummary } from "@/modules/website-growth/backlink-outreach";
+import {
+  buildWebsiteGrowthOutreachTeamsSummary,
+  parseWebsiteGrowthOutreachRunStartedAt
+} from "@/modules/website-growth/backlink-outreach";
 import { prisma } from "@/server/db";
 import {
   authenticateWebsiteGrowthBacklinkExecutorRequest,
@@ -22,10 +25,18 @@ export async function POST(request: Request) {
         { status: 404 }
       );
     }
+    const payload = await request.json().catch(() => ({}));
+    const runStartedAt = parseWebsiteGrowthOutreachRunStartedAt({
+      value:
+        payload && typeof payload === "object" && !Array.isArray(payload)
+          ? (payload as Record<string, unknown>).runStartedAt
+          : null
+    });
     const baseUrl = new URL(request.url).origin;
     const summary = await buildWebsiteGrowthOutreachTeamsSummary({
       tenantId: tenant.id,
-      baseUrl
+      baseUrl,
+      runStartedAt
     });
     return NextResponse.json({ data: summary });
   } catch (error) {
