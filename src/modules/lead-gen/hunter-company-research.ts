@@ -18,7 +18,7 @@ import { enqueueHunterOutreachHandoff } from "@/modules/lead-gen/hunter-outreach
 import { prisma } from "@/server/db";
 
 export const HUNTER_COMPANY_RESEARCH_JOB_TYPE = "HUNTER_COMPANY_DEEP_RESEARCH";
-export const HUNTER_COMPANY_RESEARCH_PROMPT_VERSION = "hunter-company-research-v12";
+export const HUNTER_COMPANY_RESEARCH_PROMPT_VERSION = "hunter-company-research-v13";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL = "qwen3.5:35b";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL = "kimi-k2.6";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL = "kimi-k3";
@@ -882,13 +882,14 @@ export function evaluateResearchGate(company: ResearchResult) {
   const passes = new Set(company.evidence.map((item) => item.pass));
   if (!passes.has("IDENTITY")) blockers.push("The mandatory identity pass has no evidence.");
   if (passes.size < 2) blockers.push("Evidence covers fewer than two independent research passes.");
+  const operatingRegion = effectiveOperatingRegion(company);
   if (
     company.synthesis.verifiedUsDivision &&
+    operatingRegion !== "NORTH_AMERICA" &&
     !hasCitedUsDivisionEvidence(company)
   ) {
     blockers.push("The claimed U.S. division is not verified by the cited public identity evidence.");
   }
-  const operatingRegion = effectiveOperatingRegion(company);
   const isChinaEntity =
     operatingRegion === "CHINA" ||
     (operatingRegion === "UNKNOWN" && hasExplicitChinaHeadquartersEvidence(company.evidence));
@@ -1114,15 +1115,52 @@ function hasExplicitChinaHeadquartersEvidence(evidence: Evidence[]) {
 }
 
 function hasCitedUsDivisionEvidence(company: ResearchResult) {
-  const divisionName = normalizeEvidenceText(company.synthesis.usDivisionName ?? "");
-  if (!divisionName) return false;
+  const divisionAliases = companyIdentityAliases(company.synthesis.usDivisionName ?? "");
+  if (divisionAliases.length === 0) return false;
   const jurisdictionPattern = /\b(?:u s|usa|united states|north america)\b/;
+  const operatingRelationshipPattern =
+    /\b(?:subsidiar(?:y|ies)|division|branch|facility|facilities|manufactur(?:e|es|ing)|operat(?:e|es|ing)|based|headquarter(?:ed|s))\b/;
   return company.synthesis.usDivisionEvidenceIndices.some((index) => {
     const item = company.evidence[index];
-    if (!item || item.pass !== "IDENTITY") return false;
+    if (
+      !item ||
+      !["IDENTITY", "FOLLOW_UP"].includes(item.pass) ||
+      item.sourceType === "DIRECTORY"
+    ) {
+      return false;
+    }
     const evidenceText = normalizeEvidenceText(`${item.title} ${item.excerpt}`);
-    return evidenceText.includes(divisionName) && jurisdictionPattern.test(evidenceText);
+    return (
+      divisionAliases.some((alias) => evidenceText.includes(alias)) &&
+      jurisdictionPattern.test(evidenceText) &&
+      operatingRelationshipPattern.test(evidenceText)
+    );
   });
+}
+
+function companyIdentityAliases(value: string) {
+  const withoutParenthetical = value.replace(/\([^)]*\)/g, " ");
+  const normalized = normalizeEvidenceText(withoutParenthetical);
+  if (!normalized) return [];
+  const legalSuffixes = new Set([
+    "co",
+    "company",
+    "corp",
+    "corporation",
+    "inc",
+    "incorporated",
+    "llc",
+    "limited",
+    "lp",
+    "ltd",
+    "plc"
+  ]);
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  while (tokens.length > 0 && legalSuffixes.has(tokens[tokens.length - 1]!)) {
+    tokens.pop();
+  }
+  const withoutSuffix = tokens.join(" ");
+  return [...new Set([normalized, withoutSuffix].filter((alias) => alias.length >= 5))];
 }
 
 function normalizeEvidenceText(value: string) {

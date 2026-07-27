@@ -27,7 +27,7 @@ DEFAULT_QWEN_MODEL = "qwen3.5:35b"
 DEFAULT_KIMI_URL = "https://api.moonshot.ai/v1"
 DEFAULT_KIMI_MODEL = "kimi-k2.6"
 DEFAULT_KIMI_VALIDATOR_MODEL = "kimi-k3"
-PROMPT_VERSION = "hunter-company-research-v12"
+PROMPT_VERSION = "hunter-company-research-v13"
 ALLOWED_SERVICE_LINES = {"WAREHOUSING", "OCEAN_AIR", "TRUCKING"}
 ALLOWED_OPERATING_REGIONS = {"NORTH_AMERICA", "CHINA", "OTHER_FOREIGN", "UNKNOWN"}
 ALLOWED_SIGNAL_TYPES = {
@@ -81,6 +81,11 @@ REGIONAL_IDENTITY_MARKERS = {
 }
 PRODUCTION_LINE_EXPANSION_PATTERN = re.compile(
     r"\bnew(?:\s+[a-z][a-z-]*){0,3}\s+(?:production|manufacturing)\s+lines?\b",
+    re.IGNORECASE,
+)
+PUBLIC_DOMAIN_PATTERN = re.compile(
+    r"(?<![@A-Za-z0-9.-])(?:https?://)?(?:www\.)?"
+    r"([A-Za-z0-9](?:[A-Za-z0-9-]{0,62}\.)+[A-Za-z]{2,24})\b",
     re.IGNORECASE,
 )
 
@@ -640,6 +645,166 @@ def build_research_queries(candidate: dict[str, Any]) -> list[dict[str, str]]:
     return queries
 
 
+def discovered_candidate_domains(
+    candidate: dict[str, Any],
+    evidence: list[dict[str, Any]],
+) -> list[str]:
+    domains: list[str] = []
+    configured = clean(candidate.get("domain"))
+    if configured:
+        domains.append(configured.lower().removeprefix("www."))
+    for row in evidence:
+        source_domain = clean(row.get("sourceDomain"))
+        if source_domain and is_likely_first_party(candidate, source_domain):
+            domains.append(source_domain.lower().removeprefix("www."))
+        text = f"{row.get('title') or ''} {row.get('excerpt') or ''}"
+        for match in PUBLIC_DOMAIN_PATTERN.finditer(text):
+            domain = match.group(1).lower().removeprefix("www.")
+            if is_likely_first_party(candidate, domain):
+                domains.append(domain)
+    return list(dict.fromkeys(domain for domain in domains if domain))[:2]
+
+
+def needs_identity_discovery(
+    candidate: dict[str, Any],
+    evidence: list[dict[str, Any]],
+    synthesis: dict[str, Any],
+) -> bool:
+    return (
+        synthesis.get("identityDisposition") != "PASS"
+        or int(synthesis.get("identityConfidence") or 0) < 70
+        or not has_corroborating_first_party_identity(candidate, evidence)
+    )
+
+
+def build_identity_discovery_queries(
+    candidate: dict[str, Any],
+    evidence: list[dict[str, Any]],
+) -> list[str]:
+    aliases = company_search_aliases(candidate)
+    brand = aliases[-1] if aliases else bounded_text(candidate.get("companyName"), "", 300)
+    legal_name = bounded_text(candidate.get("companyName"), brand, 300)
+    queries = [f'"{brand}" official website'] if brand else []
+    for domain in discovered_candidate_domains(candidate, evidence):
+        queries.append(
+            f'site:{domain} ("{legal_name}" OR privacy OR terms OR contact OR about)'
+        )
+    return list(dict.fromkeys(query for query in queries if query))[:3]
+
+
+def add_identity_discovery_evidence(
+    evidence: list[dict[str, Any]],
+    row: dict[str, Any],
+) -> bool:
+    if len(evidence) < MAX_EVIDENCE_PER_COMPANY:
+        evidence.append(row)
+        return True
+    if row.get("firstParty") is not True:
+        return False
+    replace_index = next(
+        (
+            index
+            for index in range(len(evidence) - 1, -1, -1)
+            if evidence[index].get("firstParty") is not True
+            and evidence[index].get("pass") not in {"FRESH_EVENTS", "FOLLOW_UP"}
+            and evidence[index].get("sourceType") in {"DIRECTORY", "OTHER", "CAREERS"}
+        ),
+        None,
+    )
+    if replace_index is None:
+        return False
+    evidence[replace_index] = row
+    return True
+
+
+def collect_identity_discovery_evidence(
+    provider: str,
+    candidates: list[dict[str, Any]],
+    synthesis_by_key: dict[str, dict[str, Any]],
+    evidence_by_key: dict[str, list[dict[str, Any]]],
+    query_log: list[dict[str, Any]],
+    results_per_query: int,
+) -> tuple[int, int]:
+    added_count = 0
+    fetched_pages = 0
+    for candidate in candidates:
+        key = candidate["companyKey"]
+        company_evidence = evidence_by_key.setdefault(key, [])
+        if not needs_identity_discovery(
+            candidate,
+            company_evidence,
+            synthesis_by_key[key],
+        ):
+            continue
+        seen = {canonical_url(item["url"]) for item in company_evidence}
+        queries = build_identity_discovery_queries(candidate, company_evidence)
+        query_index = 0
+        while query_index < len(queries) and query_index < 3:
+            query = queries[query_index]
+            query_index += 1
+            try:
+                results = search_web(provider, query, results_per_query)
+                query_log.append(
+                    {
+                        "companyKey": key,
+                        "query": query,
+                        "pass": "IDENTITY",
+                        "resultCount": len(results),
+                        "error": None,
+                        "identityDiscovery": True,
+                    }
+                )
+            except Exception as error:
+                query_log.append(
+                    {
+                        "companyKey": key,
+                        "query": query,
+                        "pass": "IDENTITY",
+                        "resultCount": 0,
+                        "error": str(error)[:500],
+                        "identityDiscovery": True,
+                    }
+                )
+                continue
+            first_party_results = [
+                row
+                for row in results
+                if is_likely_first_party(candidate, normalized_hostname(row["url"]))
+            ]
+            for row in first_party_results[:2]:
+                canonical = canonical_url(row["url"])
+                if canonical in seen:
+                    continue
+                seen.add(canonical)
+                page_excerpt, page_published_at = fetch_page_evidence(row["url"])
+                if page_excerpt:
+                    fetched_pages += 1
+                evidence_row = {
+                    "pass": "IDENTITY",
+                    "query": query[:500],
+                    "title": bounded_text(row.get("title"), "Official company result", 500),
+                    "url": row["url"],
+                    "sourceDomain": normalized_hostname(row["url"]),
+                    "sourceType": "FIRST_PARTY",
+                    "publishedAt": page_published_at or row.get("publishedAt"),
+                    "excerpt": bounded_utf16_text(
+                        page_excerpt or row.get("snippet"),
+                        row["title"],
+                        2_000,
+                    ),
+                    "firstParty": True,
+                }
+                if add_identity_discovery_evidence(company_evidence, evidence_row):
+                    added_count += 1
+            for discovered_query in build_identity_discovery_queries(
+                candidate,
+                company_evidence,
+            ):
+                if discovered_query not in queries and len(queries) < 3:
+                    queries.append(discovered_query)
+    return added_count, fetched_pages
+
+
 def source_type_for(url: str, pass_id: str, first_party: bool) -> str:
     hostname = normalized_hostname(url)
     if pass_id == "CAREERS":
@@ -845,7 +1010,10 @@ def kimi_scoring_request(
         "priority without inflating weak evidence), timing, accessibility (plausible buyer and approachable "
         "mid-market account), and evidenceQuality. totalScore must equal their sum. A shipment alone proves "
         "trade activity, not outsourcing intent. Current careers or footprint can support a moderate score; "
-        "a specific logistics, supply-chain, warehouse, or distribution management role is stronger current "
+        "confidence measures the reliability of the score and identity evidence, not sales enthusiasm. A "
+        "verified current account can have high confidence even when its total score is moderate because it "
+        "has no fresh trigger; do not lower confidence merely because no expansion or displacement was found. "
+        "A specific logistics, supply-chain, warehouse, or distribution management role is stronger current "
         "accessibility evidence than a generic careers page, especially when it covers multiple facilities. "
         "A fresh first-party expansion with a logistics implication can support a high score. Never invent."
     )
@@ -2104,6 +2272,15 @@ def run_company_research(
             synthesis_by_key, qwen_usage = synthesize_companies(
                 ollama_url, qwen_model, candidates, evidence_by_key, qwen_batch_size
             )
+            identity_evidence_added, identity_page_count = collect_identity_discovery_evidence(
+                provider,
+                candidates,
+                synthesis_by_key,
+                evidence_by_key,
+                query_log,
+                results_per_query,
+            )
+            page_fetch_count += identity_page_count
             has_follow_ups = follow_up_limit > 0 and any(
                 row["followUpQueries"] for row in synthesis_by_key.values()
             )
@@ -2121,6 +2298,7 @@ def run_company_research(
                     key: bounded_company_evidence(rows)
                     for key, rows in evidence_by_key.items()
                 }
+            if identity_evidence_added > 0 or has_follow_ups:
                 final_synthesis, final_usage = synthesize_companies(
                     ollama_url, qwen_model, candidates, evidence_by_key, qwen_batch_size
                 )
