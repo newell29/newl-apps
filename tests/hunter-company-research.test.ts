@@ -11,6 +11,7 @@ import {
   HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL,
   HUNTER_COMPANY_RESEARCH_PROMPT_VERSION,
   HUNTER_COMPANY_RESEARCH_SAFETY,
+  HUNTER_COMPANY_RESEARCH_TRANSACTION_TIMEOUT_MS,
   classifyResearchOpportunity,
   evaluateResearchGate,
   parseHunterCompanyResearchCompletion
@@ -28,6 +29,7 @@ describe("Hunter company deep research", () => {
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL).toBe("kimi-k2.6");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL).toBe("kimi-k3");
     expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v12");
+    expect(HUNTER_COMPANY_RESEARCH_TRANSACTION_TIMEOUT_MS).toBe(30_000);
     expect(HUNTER_COMPANY_RESEARCH_SAFETY).toEqual({
       externalWrites: false,
       apollo: false,
@@ -324,10 +326,11 @@ describe("Hunter company deep research", () => {
   });
 
   it("schedules the bounded local worker and contains no outreach integration", async () => {
-    const [research, worker, runner] = await Promise.all([
+    const [research, worker, runner, serverResearch] = await Promise.all([
       readFile(researchPath, "utf8"),
       readFile(workerPath, "utf8"),
-      readFile(runnerPath, "utf8")
+      readFile(runnerPath, "utf8"),
+      readFile(path.join(repoRoot, "src/modules/lead-gen/hunter-company-research.ts"), "utf8")
     ]);
 
     expect(worker).toContain("company_research_due_now");
@@ -361,9 +364,9 @@ describe("Hunter company deep research", () => {
     expect(research).toContain("companyCountry");
     expect(research).toContain("never from TradeMining shipment origin");
     expect(research).not.toContain("api.apollo.io");
-    expect(
-      await readFile(path.join(repoRoot, "src/modules/lead-gen/hunter-company-research.ts"), "utf8")
-    ).toContain("company.evidence[company.synthesis.triggerEvidenceIndices[0]]");
+    expect(serverResearch).toContain("tenantCompanies = await tx.company.findMany");
+    expect(serverResearch).toContain("timeout: HUNTER_COMPANY_RESEARCH_TRANSACTION_TIMEOUT_MS");
+    expect(serverResearch).toContain("company.evidence[company.synthesis.triggerEvidenceIndices[0]]");
     expect(runner).toContain("HUNTER_COMPANY_RESEARCH_ENABLED");
     expect(runner).toContain("HUNTER_RESEARCH_SEARCH_PROVIDER");
   });
