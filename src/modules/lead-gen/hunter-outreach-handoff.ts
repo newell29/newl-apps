@@ -20,6 +20,11 @@ import {
   generateOutreachPlanForContact,
   loadOutreachPlanContactContext
 } from "@/modules/lead-gen/outreach-plan-generation";
+import {
+  DEFAULT_HUNTER_CONTACT_FIT_MODEL,
+  HUNTER_CONTACT_FIT_PROMPT_VERSION,
+  type HunterContactFitReview
+} from "@/modules/lead-gen/outreach-plan";
 import { prisma } from "@/server/db";
 import {
   ApolloRateLimitError,
@@ -27,7 +32,10 @@ import {
   type ApolloContactLookupResult,
   type ApolloContactRecord
 } from "@/server/integrations/apollo";
-import { isOpenAiDraftGenerationConfigured } from "@/server/integrations/openai";
+import {
+  isOpenAiDraftGenerationConfigured,
+  reviewHunterContactFit
+} from "@/server/integrations/openai";
 
 export const HUNTER_OUTREACH_HANDOFF_JOB_TYPE = "HUNTER_OUTREACH_HANDOFF";
 
@@ -51,6 +59,7 @@ type HandoffResult = {
     | "REVIEW_REQUIRED"
     | "NO_CONTACTS"
     | "NO_QUALIFYING_CONTACTS"
+    | "CONTACT_REVIEW_REQUIRED"
     | "SKIPPED_INELIGIBLE"
     | "ERROR";
   matchClassification: ApolloCompanyMatchClassification | null;
@@ -511,7 +520,7 @@ async function processCompany({
     prospectingDecision: company.hunterProspectingDecisions[0] ?? null,
     maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
   });
-  if (eligibility.status !== "ELIGIBLE") {
+  if (eligibility.status !== "ELIGIBLE" || !eligibility.directive) {
     return terminal(
       item,
       "SKIPPED_INELIGIBLE",
@@ -594,7 +603,30 @@ async function processCompany({
 
   let plansGenerated = 0;
   let qaFailedPlans = 0;
-  for (const contactId of contactIds.slice(0, maxContactsPerCompany)) {
+  const fit = await reviewAndPersistHunterContactFit({
+    tenantId,
+    jobId,
+    company: {
+      id: company.id,
+      name: company.name,
+      domain: company.domain
+    },
+    directive: eligibility.directive,
+    contactIds: contactIds.slice(0, maxContactsPerCompany)
+  });
+  if (fit.acceptedContactIds.length === 0) {
+    return terminal(
+      item,
+      "CONTACT_REVIEW_REQUIRED",
+      classification,
+      contactsImported,
+      0,
+      0,
+      `${fit.reviewCount} contact${fit.reviewCount === 1 ? "" : "s"} evaluated; none cleared the AI buyer-role gate for automatic drafting.`
+    );
+  }
+
+  for (const contactId of fit.acceptedContactIds) {
     const context = await loadOutreachPlanContactContext({ tenantId, contactId });
     if (!context || context.contactTier === "UNRANKED") continue;
     await prisma.contact.updateMany({
@@ -636,6 +668,238 @@ async function processCompany({
     qaFailedPlans,
     `${plansGenerated} grounded outreach plan${plansGenerated === 1 ? "" : "s"} created for human review.`
   );
+}
+
+async function reviewAndPersistHunterContactFit({
+  tenantId,
+  jobId,
+  company,
+  directive,
+  contactIds
+}: {
+  tenantId: string;
+  jobId: string;
+  company: { id: string; name: string; domain: string | null };
+  directive: {
+    prospectingDecisionId: string;
+    requiredServiceLine: "WAREHOUSING" | "OCEAN_AIR" | "TRUCKING";
+    opportunityType: string;
+    rationale: string;
+    recommendedPersona: string | null;
+  };
+  contactIds: string[];
+}) {
+  const contacts = await prisma.contact.findMany({
+    where: {
+      tenantId,
+      companyId: company.id,
+      id: { in: contactIds }
+    },
+    orderBy: [{ contactScore: "desc" }, { updatedAt: "desc" }],
+    select: {
+      id: true,
+      fullName: true,
+      title: true,
+      department: true,
+      seniority: true,
+      email: true,
+      phone: true,
+      linkedinUrl: true,
+      rawJson: true
+    }
+  });
+  if (contacts.length !== new Set(contactIds).size) {
+    throw new Error("Hunter contact-fit review could not resolve the complete tenant contact cohort.");
+  }
+
+  const reviewByContactId = new Map<string, HunterContactFitReview>();
+  const contactsNeedingReview = [];
+  for (const contact of contacts) {
+    const cached = readCachedContactFitReview(
+      contact.rawJson,
+      directive.prospectingDecisionId
+    );
+    if (cached) {
+      reviewByContactId.set(contact.id, cached);
+    } else {
+      contactsNeedingReview.push(contact);
+    }
+  }
+
+  const model =
+    process.env.HUNTER_CONTACT_FIT_MODEL?.trim() ||
+    DEFAULT_HUNTER_CONTACT_FIT_MODEL;
+  if (contactsNeedingReview.length > 0) {
+    const generated = await reviewHunterContactFit({
+      model,
+      company: {
+        name: company.name,
+        domain: company.domain
+      },
+      opportunity: {
+        serviceLine: directive.requiredServiceLine,
+        opportunityType: directive.opportunityType,
+        rationale: directive.rationale,
+        recommendedPersona: directive.recommendedPersona
+      },
+      contacts: contactsNeedingReview.map((contact) => ({
+        contactId: contact.id,
+        fullName: contact.fullName,
+        title: contact.title,
+        department: contact.department,
+        seniority: contact.seniority,
+        hasEmail: Boolean(contact.email),
+        hasPhone: Boolean(contact.phone),
+        hasLinkedin: Boolean(contact.linkedinUrl)
+      }))
+    });
+    validateExactContactFitCohort(
+      contactsNeedingReview.map((contact) => contact.id),
+      generated.reviews
+    );
+
+    const generatedById = new Map(
+      generated.reviews.map((review) => [review.contactId, review])
+    );
+    await prisma.$transaction(
+      contactsNeedingReview.map((contact) => {
+        const review = generatedById.get(contact.id);
+        if (!review) {
+          throw new Error("OpenAI contact-fit review omitted a required contact.");
+        }
+        reviewByContactId.set(contact.id, review);
+        const existingRaw = isObject(contact.rawJson) ? contact.rawJson : {};
+        return prisma.contact.updateMany({
+          where: { id: contact.id, tenantId, companyId: company.id },
+          data: {
+            rawJson: toInputJsonValue({
+              ...existingRaw,
+              hunterContactFit: {
+                ...review,
+                model,
+                promptVersion: HUNTER_CONTACT_FIT_PROMPT_VERSION,
+                prospectingDecisionId: directive.prospectingDecisionId,
+                reviewedAt: new Date().toISOString(),
+                handoffJobId: jobId,
+                usage: generated.usage
+              }
+            })
+          }
+        });
+      })
+    );
+    await prisma.auditLog.create({
+      data: {
+        tenantId,
+        action: "lead-gen.hunter-contact-fit.reviewed",
+        entityType: "Company",
+        entityId: company.id,
+        after: {
+          handoffJobId: jobId,
+          prospectingDecisionId: directive.prospectingDecisionId,
+          model,
+          promptVersion: HUNTER_CONTACT_FIT_PROMPT_VERSION,
+          contactCount: generated.reviews.length,
+          dispositions: dispositionCounts(generated.reviews),
+          usage: generated.usage
+        }
+      }
+    });
+  }
+
+  const acceptedContactIds = [...reviewByContactId.values()]
+    .filter(isContactFitAutoEligible)
+    .sort((left, right) => {
+      const dispositionDelta =
+        contactFitPriority(left.disposition) - contactFitPriority(right.disposition);
+      return dispositionDelta || right.confidence - left.confidence;
+    })
+    .map((review) => review.contactId);
+  return {
+    acceptedContactIds,
+    reviewCount: reviewByContactId.size
+  };
+}
+
+export function isContactFitAutoEligible(review: HunterContactFitReview) {
+  return (
+    (review.disposition === "PRIMARY" && review.confidence >= 70) ||
+    (review.disposition === "SECONDARY" && review.confidence >= 80)
+  );
+}
+
+export function validateExactContactFitCohort(
+  expectedContactIds: string[],
+  reviews: HunterContactFitReview[]
+) {
+  const expectedIds = new Set(expectedContactIds);
+  const returnedIds = new Set(reviews.map((review) => review.contactId));
+  if (
+    returnedIds.size !== expectedIds.size ||
+    reviews.length !== expectedIds.size ||
+    reviews.some((review) => !expectedIds.has(review.contactId))
+  ) {
+    throw new Error("OpenAI contact-fit review did not return the exact tenant contact cohort.");
+  }
+}
+
+export function readCachedContactFitReview(
+  rawJson: Prisma.JsonValue | null,
+  prospectingDecisionId: string
+) {
+  const root = isObject(rawJson) ? rawJson : {};
+  const cached = isObject(root.hunterContactFit) ? root.hunterContactFit : null;
+  if (
+    !cached ||
+    cached.promptVersion !== HUNTER_CONTACT_FIT_PROMPT_VERSION ||
+    cached.prospectingDecisionId !== prospectingDecisionId
+  ) {
+    return null;
+  }
+  const disposition = cached.disposition;
+  const confidence = cached.confidence;
+  if (
+    typeof cached.contactId !== "string" ||
+    !["PRIMARY", "SECONDARY", "REVIEW", "REJECT"].includes(String(disposition)) ||
+    typeof confidence !== "number" ||
+    !Number.isInteger(confidence) ||
+    typeof cached.responsibilityHypothesis !== "string" ||
+    typeof cached.rationale !== "string" ||
+    typeof cached.recommendedApproach !== "string" ||
+    !Array.isArray(cached.riskFlags)
+  ) {
+    return null;
+  }
+  return {
+    contactId: cached.contactId,
+    disposition: disposition as HunterContactFitReview["disposition"],
+    confidence,
+    responsibilityHypothesis: cached.responsibilityHypothesis,
+    rationale: cached.rationale,
+    recommendedApproach: cached.recommendedApproach,
+    riskFlags: cached.riskFlags.filter(
+      (value): value is string => typeof value === "string"
+    )
+  } satisfies HunterContactFitReview;
+}
+
+function dispositionCounts(reviews: HunterContactFitReview[]) {
+  return Object.fromEntries(
+    ["PRIMARY", "SECONDARY", "REVIEW", "REJECT"].map((disposition) => [
+      disposition,
+      reviews.filter((review) => review.disposition === disposition).length
+    ])
+  );
+}
+
+function contactFitPriority(disposition: HunterContactFitReview["disposition"]) {
+  return disposition === "PRIMARY"
+    ? 0
+    : disposition === "SECONDARY"
+      ? 1
+      : disposition === "REVIEW"
+        ? 2
+        : 3;
 }
 
 async function recordCompanyMatch(

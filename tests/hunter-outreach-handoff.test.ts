@@ -1,7 +1,16 @@
 import { ReplyStatus, SequenceStatus } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
-import { rankHunterContacts } from "@/modules/lead-gen/hunter-outreach-handoff";
+import {
+  isContactFitAutoEligible,
+  readCachedContactFitReview,
+  rankHunterContacts,
+  validateExactContactFitCohort
+} from "@/modules/lead-gen/hunter-outreach-handoff";
+import {
+  HUNTER_CONTACT_FIT_PROMPT_VERSION,
+  type HunterContactFitReview
+} from "@/modules/lead-gen/outreach-plan";
 import type { ApolloContactRecord } from "@/server/integrations/apollo";
 
 function contact(overrides: Partial<ApolloContactRecord>): ApolloContactRecord {
@@ -74,5 +83,76 @@ describe("Hunter assisted outreach handoff", () => {
     ], null);
 
     expect(ranked).toEqual([]);
+  });
+
+  it("automates only confident primary and strong secondary model reviews", () => {
+    const review = {
+      contactId: "contact-1",
+      responsibilityHypothesis: "Likely capacity owner.",
+      rationale: "Role aligns.",
+      recommendedApproach: "Ask a bounded ownership question.",
+      riskFlags: []
+    };
+
+    expect(isContactFitAutoEligible({
+      ...review,
+      disposition: "PRIMARY",
+      confidence: 70
+    })).toBe(true);
+    expect(isContactFitAutoEligible({
+      ...review,
+      disposition: "PRIMARY",
+      confidence: 69
+    })).toBe(false);
+    expect(isContactFitAutoEligible({
+      ...review,
+      disposition: "SECONDARY",
+      confidence: 80
+    })).toBe(true);
+    expect(isContactFitAutoEligible({
+      ...review,
+      disposition: "SECONDARY",
+      confidence: 79
+    })).toBe(false);
+    expect(isContactFitAutoEligible({
+      ...review,
+      disposition: "REVIEW",
+      confidence: 100
+    })).toBe(false);
+    expect(isContactFitAutoEligible({
+      ...review,
+      disposition: "REJECT",
+      confidence: 100
+    })).toBe(false);
+  });
+
+  it("requires the exact contact cohort and reuses only the current decision review", () => {
+    const review: HunterContactFitReview = {
+      contactId: "contact-1",
+      disposition: "PRIMARY",
+      confidence: 88,
+      responsibilityHypothesis: "Likely capacity owner.",
+      rationale: "Role aligns.",
+      recommendedApproach: "Ask a bounded ownership question.",
+      riskFlags: []
+    };
+    expect(() => validateExactContactFitCohort(
+      ["contact-1", "contact-2"],
+      [review, { ...review, contactId: "contact-1" }]
+    )).toThrow("exact tenant contact cohort");
+    expect(() => validateExactContactFitCohort(
+      ["contact-1"],
+      [{ ...review, contactId: "foreign-contact" }]
+    )).toThrow("exact tenant contact cohort");
+
+    const rawJson = {
+      hunterContactFit: {
+        ...review,
+        promptVersion: HUNTER_CONTACT_FIT_PROMPT_VERSION,
+        prospectingDecisionId: "decision-1"
+      }
+    };
+    expect(readCachedContactFitReview(rawJson, "decision-1")).toEqual(review);
+    expect(readCachedContactFitReview(rawJson, "decision-2")).toBeNull();
   });
 });

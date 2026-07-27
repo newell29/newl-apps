@@ -201,6 +201,8 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   during its normal loop, so research should not be rerun merely to retry the handoff.
 - A QA-failed plan is preserved for inspection and cannot advance. It must not be silently regenerated until its
   evidence or generation defect is understood.
+- `CONTACT_REVIEW_REQUIRED` means Apollo contacts were found but none cleared the buyer-role threshold. Inspect the
+  saved `hunterContactFit` rationale and risks; do not lower the deterministic safety filter to force generation.
 
 ## Apollo cannot safely match a company
 

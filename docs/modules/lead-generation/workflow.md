@@ -66,9 +66,11 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 4. The service rechecks do-not-prospect, rejected/disqualified, research freshness, tier, and current planning decision immediately before Apollo access.
 5. A known Apollo organization is used directly. Otherwise Apollo organization discovery is bounded and an immutable match record is saved. An ambiguous or missing latest match stops in Apollo Exceptions and blocks automatic repeat lookup.
 6. Apollo contacts are deterministically ranked against Hunter's recommended persona and logistics/operations buyer roles. At most the saved `maxContactsPerCompany` are upserted as tenant-scoped `REVIEWING` contacts; no contact is approved or assigned.
-7. Each ranked contact receives a score, cadence recommendation (falling back to Hunter's recommended cadence), five-touch Outreach Plan, deterministic grounding check, and model QA check. QA failures remain visible and cannot advance.
-8. Transient failures retry at most three times with rate-limit delay. Permanent company failures are recorded in the job output and audit log without invalidating the completed research.
-9. This handoff never creates a Sales Opportunity, approves a contact or plan, enrolls Apollo, sends email, posts to LinkedIn, or communicates with a prospect.
+7. A low-cost structured buyer-role model compares every surviving contact with the exact Hunter service line, opportunity rationale, and recommended persona. It returns `PRIMARY`, `SECONDARY`, `REVIEW`, or `REJECT`, a bounded confidence, responsibility hypothesis, rationale, recommended approach, and risk flags. Only `PRIMARY` at 70+ confidence or `SECONDARY` at 80+ advances automatically. The deterministic filter remains authoritative and the model cannot rescue an excluded contact.
+8. The contact-fit result is stored in the contact audit JSON against the exact prospecting decision and prompt version. A retry reuses that review rather than paying for another model call; new research/decisions force a fresh review.
+9. Each accepted contact receives a score, cadence recommendation (falling back to Hunter's recommended cadence), five-touch Outreach Plan, deterministic grounding check, and model QA check. QA failures remain visible and cannot advance.
+10. Transient failures retry at most three times with rate-limit delay. Permanent company failures are recorded in the job output and audit log without invalidating the completed research.
+11. This handoff never creates a Sales Opportunity, approves a contact or plan, enrolls Apollo, sends email, posts to LinkedIn, or communicates with a prospect.
 
 ## Hunter quality control and Rivet
 

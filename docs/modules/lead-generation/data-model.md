@@ -71,6 +71,9 @@ The automated post-research handoff requires no migration. It reuses `Automation
 `HUNTER_OUTREACH_HANDOFF`; `input` freezes the research/plan IDs and eligible company cohort, while `output` stores
 the lease, per-company attempts, retry date, match disposition, imported-contact count, QA results, and completion
 summary. Contacts, immutable Apollo matches, plans, drafts, and audit rows use their existing tenant-scoped tables.
+The buyer-role review reuses `Contact.rawJson.hunterContactFit` for its disposition, confidence, explanation,
+model/prompt version, exact prospecting-decision ID, usage, and review time. This is audit metadata only: it does not
+change `ContactStatus`, assign a rep, approve the contact, or require a schema migration.
 
 ```mermaid
 flowchart LR

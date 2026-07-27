@@ -76,6 +76,10 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - In Hunter `ASSISTED` mode, the Mac worker invokes the tenant-bound handoff processor after research. Apollo
   organization/contact reads occur server-side with the existing tenant credential; no Apollo credential is sent
   to the Mac. Each request handles one company and the server persists retries and results.
+- `HUNTER_CONTACT_FIT_MODEL` optionally selects the buyer-role validator and defaults to the existing
+  `gpt-5.6-luna` outreach model. The model receives bounded company identity, Hunter opportunity context, contact
+  role fields, and contactability booleans; it does not receive Apollo credentials, raw Apollo payloads, email
+  content, phone numbers, or unrelated tenant data.
 
 ## Data model
 

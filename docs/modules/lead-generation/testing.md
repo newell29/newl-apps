@@ -203,10 +203,12 @@ Regression coverage must prove:
 4. each request processes at most one company and persisted leases, results, attempts, and retry dates survive worker restart;
 5. an unresolved latest Apollo company match blocks repeat discovery and remains review-required;
 6. deterministic ranking excludes seller-side and unidentifiable contacts and caps imports at `maxContactsPerCompany`;
-7. imported contacts remain `REVIEWING`, unapproved, unassigned, and unenrolled;
-8. plan generation uses the saved Hunter/TradeMining evidence ledger and persists QA failure rather than bypassing it;
-9. no assisted-handoff path creates a lead, changes a pipeline stage, approves a plan/contact, writes an Apollo cadence, or sends communication; and
-10. the Mac worker drains the queue after research and resumes unfinished jobs during its normal loop.
+7. buyer-role review uses strict structured output, returns the exact requested contact IDs, and accepts only Primary 70+ or Secondary 80+;
+8. the same prompt version and prospecting decision reuse a cached review, while a new decision requires fresh review;
+9. imported contacts remain `REVIEWING`, unapproved, unassigned, and unenrolled;
+10. plan generation uses the saved Hunter/TradeMining evidence ledger and persists QA failure rather than bypassing it;
+11. no assisted-handoff path creates a lead, changes a pipeline stage, approves a plan/contact, writes an Apollo cadence, or sends communication; and
+12. the Mac worker drains the queue after research and resumes unfinished jobs during its normal loop.
 
 ## Outreach Plans and grounded sequence generation
 
