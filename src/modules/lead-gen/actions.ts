@@ -78,6 +78,9 @@ import {
 } from "@/modules/lead-gen/outreach-plan";
 import { persistOutreachPlanWithSteps } from "@/modules/lead-gen/outreach-plan-persistence";
 import {
+  generateOutreachPlanForContact as generateSharedOutreachPlanForContact
+} from "@/modules/lead-gen/outreach-plan-generation";
+import {
   buildApolloSequenceMappingsWithDefaults,
   parseApolloSequenceDirectory,
   parseApolloSequenceMapping,
@@ -2696,7 +2699,7 @@ export async function generateContactDraftAction(formData: FormData) {
   }
 
   const contactId = readRequired(formData, "contactId");
-  await generateAiDraftForContact({
+  await generateSharedOutreachPlanForContact({
     tenantId: context.tenantId,
     contactId,
     forceRegenerate: true

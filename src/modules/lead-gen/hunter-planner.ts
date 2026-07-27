@@ -360,7 +360,7 @@ function hunterSignalPriority(signal: { confidence: number; evidence: Prisma.Jso
 export async function runDueHunterDryPlans(now = new Date()) {
   const policies = await prisma.hunterAutomationPolicy.findMany({
     where: {
-      mode: HunterAutomationMode.DRY_RUN,
+      mode: { in: [HunterAutomationMode.DRY_RUN, HunterAutomationMode.ASSISTED] },
       killSwitch: false,
       tenant: {
         moduleAccess: {

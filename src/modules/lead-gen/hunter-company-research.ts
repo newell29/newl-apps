@@ -14,6 +14,7 @@ import {
 } from "@prisma/client";
 
 import { DEFAULT_HUNTER_POLICY, runHunterDryPlan } from "@/modules/lead-gen/hunter-planner";
+import { enqueueHunterOutreachHandoff } from "@/modules/lead-gen/hunter-outreach-handoff";
 import { prisma } from "@/server/db";
 
 export const HUNTER_COMPANY_RESEARCH_JOB_TYPE = "HUNTER_COMPANY_DEEP_RESEARCH";
@@ -638,6 +639,35 @@ export async function completeHunterCompanyResearchRun({
     actorUserId: null,
     trigger: "RESEARCH"
   });
+  let handoff:
+    | Awaited<ReturnType<typeof enqueueHunterOutreachHandoff>>
+    | { state: "error"; message: string };
+  try {
+    handoff = plan.state === "completed"
+      ? await enqueueHunterOutreachHandoff({
+          tenantId,
+          researchRunId: runId,
+          prospectingPlanRunId: plan.runId
+        })
+      : {
+          state: "error",
+          message: "Hunter did not create a completed prospecting plan for this research run."
+        };
+  } catch (error) {
+    const message = error instanceof Error
+      ? error.message.slice(0, 500)
+      : "Hunter could not queue the assisted outreach handoff.";
+    await prisma.auditLog.create({
+      data: {
+        tenantId,
+        action: "lead-gen.hunter-outreach-handoff.enqueue-failed",
+        entityType: "AutomationJobRun",
+        entityId: runId,
+        after: { message }
+      }
+    });
+    handoff = { state: "error", message };
+  }
   return {
     runId,
     researchedCount: completion.companies.length,
@@ -645,7 +675,8 @@ export async function completeHunterCompanyResearchRun({
     blockedCount,
     tierCounts,
     missingCompanyCount: expectedCompanyIds.size - returnedCompanyIds.size,
-    plan
+    plan,
+    handoff
   };
 }
 

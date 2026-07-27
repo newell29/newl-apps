@@ -67,6 +67,11 @@ Assisted outreach planning adds only new records and one enum value:
   adds an enum value. It does not delete, rename, backfill, or rewrite existing company, contact, lead, draft, Hunter,
   TradeMining, Apollo, score, or outcome data.
 
+The automated post-research handoff requires no migration. It reuses `AutomationJobRun` with job type
+`HUNTER_OUTREACH_HANDOFF`; `input` freezes the research/plan IDs and eligible company cohort, while `output` stores
+the lease, per-company attempts, retry date, match disposition, imported-contact count, QA results, and completion
+summary. Contacts, immutable Apollo matches, plans, drafts, and audit rows use their existing tenant-scoped tables.
+
 ```mermaid
 flowchart LR
   UI[Authenticated UI/API] --> Auth[Auth + module guard]

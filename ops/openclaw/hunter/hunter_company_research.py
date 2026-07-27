@@ -19,6 +19,7 @@ from html.parser import HTMLParser
 from typing import Any, Optional
 
 from hunter_ingest import api_request, clean, required_env
+from hunter_outreach_handoff import drain_outreach_handoff
 
 
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
@@ -2136,7 +2137,19 @@ def run_company_research(
             "/api/lead-gen/hunter/company-research/complete",
             {"runId": run_id, "completion": completion},
         )
-        return response.get("data") if isinstance(response.get("data"), dict) else response
+        result = response.get("data") if isinstance(response.get("data"), dict) else response
+        handoff = result.get("handoff") if isinstance(result, dict) else None
+        if (
+            isinstance(handoff, dict)
+            and handoff.get("state") in {"queued", "already_queued"}
+            and clean(handoff.get("runId"))
+        ):
+            result["handoffProcessing"] = drain_outreach_handoff(
+                base_url,
+                token,
+                clean(handoff.get("runId")),
+            )
+        return result
     except Exception as error:
         report_failure(base_url, token, run_id, error)
         raise

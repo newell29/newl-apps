@@ -23,7 +23,7 @@ export async function saveHunterPolicyAction(formData: FormData) {
   await requireModule(context, ModuleKey.LEAD_GEN);
   requireAdmin(context);
 
-  const mode = parseDryRunMode(formData.get("mode"));
+  const mode = parseHunterMode(formData.get("mode"));
   const allocation = {
     [HunterServiceLine.WAREHOUSING]: parseBoundedInteger(formData, "warehousingPercent", 0, 100),
     [HunterServiceLine.OCEAN_AIR]: parseBoundedInteger(formData, "oceanAirPercent", 0, 100),
@@ -157,10 +157,11 @@ export async function runHunterDryPlanAction() {
   revalidatePath(HUNTER_PATH);
 }
 
-function parseDryRunMode(value: FormDataEntryValue | null) {
+function parseHunterMode(value: FormDataEntryValue | null) {
   if (value === HunterAutomationMode.OFF) return HunterAutomationMode.OFF;
   if (value === HunterAutomationMode.DRY_RUN) return HunterAutomationMode.DRY_RUN;
-  throw new Error("Phase 1 supports only OFF or DRY_RUN.");
+  if (value === HunterAutomationMode.ASSISTED) return HunterAutomationMode.ASSISTED;
+  throw new Error("Select OFF, DRY_RUN, or ASSISTED.");
 }
 
 function parseBoundedInteger(formData: FormData, key: string, minimum: number, maximum: number) {

@@ -58,6 +58,18 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 8. Newl Apps assigns Hot opportunity, Qualified current account, Watchlist, or Blocked. Hot/Qualified signals refresh the dry-run plan; Watchlist/Blocked signals remain visible in the audit inbox but are dismissed from planning. No Apollo lookup, pipeline mutation, cadence write, email, LinkedIn action, or other customer communication exists in this path.
 9. `--company-research-now` runs the queue explicitly. `--company-research-dry-run` stops before persistence. `--company-research-cohort <json>` replays an exact bounded company list for model comparisons. A redacted `--company-research-output` checkpoint is written after retrieval and Qwen; `--company-research-resume` can reuse it only when the newly prepared tenant cohort matches exactly, avoiding duplicate search traffic after a Kimi outage.
 
+## Assisted post-research handoff
+
+1. **Assisted** is an explicit administrator-selected Hunter mode. `OFF` and `DRY_RUN` retain their existing no-handoff behavior.
+2. After research persistence and the refreshed prospecting plan complete, Newl Apps snapshots only fresh Hot or Qualified companies with a current `WOULD_PURSUE` decision into a tenant-scoped `HUNTER_OUTREACH_HANDOFF` job.
+3. The Mac-mini worker drains that durable queue through ingestion authentication. Every request leases and processes at most one company, so a timeout or restart does not require research to run again.
+4. The service rechecks do-not-prospect, rejected/disqualified, research freshness, tier, and current planning decision immediately before Apollo access.
+5. A known Apollo organization is used directly. Otherwise Apollo organization discovery is bounded and an immutable match record is saved. An ambiguous or missing latest match stops in Apollo Exceptions and blocks automatic repeat lookup.
+6. Apollo contacts are deterministically ranked against Hunter's recommended persona and logistics/operations buyer roles. At most the saved `maxContactsPerCompany` are upserted as tenant-scoped `REVIEWING` contacts; no contact is approved or assigned.
+7. Each ranked contact receives a score, cadence recommendation (falling back to Hunter's recommended cadence), five-touch Outreach Plan, deterministic grounding check, and model QA check. QA failures remain visible and cannot advance.
+8. Transient failures retry at most three times with rate-limit delay. Permanent company failures are recorded in the job output and audit log without invalidating the completed research.
+9. This handoff never creates a Sales Opportunity, approves a contact or plan, enrolls Apollo, sends email, posts to LinkedIn, or communicates with a prospect.
+
 ## Hunter quality control and Rivet
 
 1. At 11:30 America/Toronto, after the normal TradeMining and company-research windows, the dedicated Rivet runtime starts a separate quality audit.
