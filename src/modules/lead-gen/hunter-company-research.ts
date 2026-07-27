@@ -18,7 +18,7 @@ import { enqueueHunterOutreachHandoff } from "@/modules/lead-gen/hunter-outreach
 import { prisma } from "@/server/db";
 
 export const HUNTER_COMPANY_RESEARCH_JOB_TYPE = "HUNTER_COMPANY_DEEP_RESEARCH";
-export const HUNTER_COMPANY_RESEARCH_PROMPT_VERSION = "hunter-company-research-v11";
+export const HUNTER_COMPANY_RESEARCH_PROMPT_VERSION = "hunter-company-research-v12";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL = "qwen3.5:35b";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL = "kimi-k2.6";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL = "kimi-k3";

@@ -27,7 +27,7 @@ describe("Hunter company deep research", () => {
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL).toBe("qwen3.5:35b");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL).toBe("kimi-k2.6");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL).toBe("kimi-k3");
-    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v11");
+    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v12");
     expect(HUNTER_COMPANY_RESEARCH_SAFETY).toEqual({
       externalWrites: false,
       apollo: false,
@@ -598,6 +598,45 @@ describe("Hunter company deep research", () => {
     expect(normalized.opportunitySummary).not.toContain("No concrete expansion");
   });
 
+  it("prefers Atlas Copco Compressors' distribution center over an affiliate expansion", async () => {
+    const program = [
+      "import datetime as d,json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'ATLAS COPCO COMPRESSORS LLC','companyKey':'atlas-copco-compressors-llc'}",
+      "recent=(d.datetime.now(d.timezone.utc)-d.timedelta(days=60)).isoformat()",
+      "evidence=[{'pass':'IDENTITY','sourceType':'FIRST_PARTY','firstParty':True,'title':'Atlas Copco Compressors','excerpt':'Atlas Copco Compressors LLC supplies industrial air compressors.','publishedAt':None},{'pass':'CAREERS','sourceType':'CAREERS','firstParty':True,'title':'Careers','excerpt':'Explore jobs.','publishedAt':None},{'pass':'DISTRIBUTION_FOOTPRINT','sourceType':'FIRST_PARTY','firstParty':True,'title':'Locations','excerpt':'Atlas Copco locations.','publishedAt':None},{'pass':'FRESH_EVENTS','sourceType':'NEWS','firstParty':False,'title':'Atlas Copco Comptec expands Voorheesville manufacturing','excerpt':'Atlas Copco Comptec announced a manufacturing expansion at its Voorheesville facility.','publishedAt':recent},{'pass':'FRESH_EVENTS','sourceType':'OTHER','firstParty':False,'title':'Generic result','excerpt':'Atlas Copco products.','publishedAt':recent},{'pass':'CAREERS','sourceType':'CAREERS','firstParty':False,'title':'Jobs','excerpt':'Open roles.','publishedAt':None},{'pass':'DISTRIBUTION_FOOTPRINT','sourceType':'OTHER','firstParty':False,'title':'Footprint','excerpt':'Atlas Copco footprint.','publishedAt':None},{'pass':'FRESH_EVENTS','sourceType':'GOVERNMENT','firstParty':False,'title':'Atlas Copco Compressors establishing Lancaster County distribution center','excerpt':'Atlas Copco Compressors is establishing a 400,000-square-foot air-compressor distribution center with a $51 million first phase and 163 jobs.','publishedAt':recent}]",
+      "synthesis={'identityDisposition':'PASS','identityConfidence':90,'identityReason':'Verified.','confidence':88,'freshness':'FRESH','triggerEvidenceIndices':[3],'opportunitySummary':'Atlas Copco Comptec is expanding manufacturing in Voorheesville.','signalType':'EXPANSION','missingEvidence':[],'rationale':'Affiliate expansion selected.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
+      "material=r.recent_material_trigger_indices(candidate,evidence)",
+      "preferred=r.preferred_model_evidence_indices(candidate,evidence,synthesis)",
+      "packet=r.select_company_model_evidence(candidate,evidence,synthesis)",
+      "normalized=r.normalize_synthesis_for_evidence(candidate,evidence,synthesis)",
+      "print(json.dumps({'material':material,'preferred':preferred,'packet':[row['evidenceIndex'] for row in packet],'triggers':normalized['triggerEvidenceIndices'],'summary':normalized['opportunitySummary']}))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+    const result = JSON.parse(stdout) as {
+      material: number[];
+      preferred: number[];
+      packet: number[];
+      triggers: number[];
+      summary: string;
+    };
+
+    expect(result).toMatchObject({
+      material: [7, 3],
+      preferred: [7, 3],
+      packet: [7, 3, 0, 1, 2],
+      triggers: [7, 3]
+    });
+    expect(result.summary).toContain("400,000-square-foot air-compressor distribution center");
+    expect(result.summary).not.toContain("Voorheesville");
+  });
+
   it("repairs a fresh synthesis that cites the wrong trigger before applying the date gate", async () => {
     const program = [
       "import datetime as d,json",
@@ -827,7 +866,7 @@ function completion() {
       synthesis: {
         provider: "OLLAMA",
         name: "qwen3.5:35b",
-        promptVersion: "hunter-company-research-v11",
+        promptVersion: "hunter-company-research-v12",
         structuredOutput: true,
         inputTokens: 2000,
         outputTokens: 700,
@@ -836,7 +875,7 @@ function completion() {
       scoring: {
         provider: "KIMI",
         name: "kimi-k2.6",
-        promptVersion: "hunter-company-research-v11",
+        promptVersion: "hunter-company-research-v12",
         structuredOutput: true,
         inputTokens: 1800,
         cachedInputTokens: 200,
@@ -847,7 +886,7 @@ function completion() {
       validation: {
         provider: "KIMI",
         name: "kimi-k3",
-        promptVersion: "hunter-company-research-v11",
+        promptVersion: "hunter-company-research-v12",
         structuredOutput: true,
         status: "SUCCESS",
         reasoningEffort: "LOW",
