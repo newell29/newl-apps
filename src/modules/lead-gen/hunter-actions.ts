@@ -9,6 +9,8 @@ import {
   ModuleKey
 } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { queueCurrentHunterOutreachHandoff } from "@/modules/lead-gen/hunter-outreach-handoff";
 import { runHunterDryPlan } from "@/modules/lead-gen/hunter-planner";
 import { validateHunterAllocation } from "@/modules/lead-gen/hunter-planning-policy";
 import { requireAdmin, requireModule, requireMutationAccess } from "@/server/auth/authorization";
@@ -17,6 +19,7 @@ import { normalizeCompanyName } from "@/server/integrations/apollo";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
 const HUNTER_PATH = "/lead-gen/hunter";
+const HUNTER_SETTINGS_PATH = "/lead-gen/automation-settings";
 
 export async function saveHunterPolicyAction(formData: FormData) {
   const context = await getAuthenticatedContext();
@@ -155,6 +158,23 @@ export async function runHunterDryPlanAction() {
     trigger: "MANUAL"
   });
   revalidatePath(HUNTER_PATH);
+}
+
+export async function queueCurrentHunterOutreachHandoffAction() {
+  const context = await getAuthenticatedContext();
+  await requireModule(context, ModuleKey.LEAD_GEN);
+  requireAdmin(context);
+
+  const result = await queueCurrentHunterOutreachHandoff({
+    tenantId: context.tenantId,
+    actorUserId: context.userId
+  });
+  revalidatePath(HUNTER_PATH);
+  revalidatePath(HUNTER_SETTINGS_PATH);
+  revalidatePath("/lead-gen/outreach");
+
+  const count = "companyCount" in result ? `&count=${result.companyCount}` : "";
+  redirect(`${HUNTER_SETTINGS_PATH}?handoff=${encodeURIComponent(result.state)}${count}`);
 }
 
 function parseHunterMode(value: FormDataEntryValue | null) {

@@ -5,6 +5,7 @@ const prisma = vi.hoisted(() => ({
   hunterAutomationPolicy: { findUnique: vi.fn() },
   tradeMiningScoringConfig: { findUnique: vi.fn() },
   automationJobRun: {
+    findFirst: vi.fn(),
     findMany: vi.fn(),
     create: vi.fn()
   },
@@ -13,6 +14,7 @@ const prisma = vi.hoisted(() => ({
 }));
 const evaluateHunterOutreachEligibility = vi.hoisted(() => vi.fn());
 const isOpenAiDraftGenerationConfigured = vi.hoisted(() => vi.fn());
+const runHunterDryPlan = vi.hoisted(() => vi.fn());
 
 vi.mock("@/server/db", () => ({ prisma }));
 vi.mock("@/server/integrations/openai", () => ({
@@ -26,12 +28,19 @@ vi.mock("@/modules/lead-gen/outreach-plan-generation", () => ({
   generateOutreachPlanForContact: vi.fn(),
   loadOutreachPlanContactContext: vi.fn()
 }));
+vi.mock("@/modules/lead-gen/hunter-planner", () => ({
+  HUNTER_DRY_RUN_JOB_TYPE: "HUNTER_PROSPECTING_DRY_RUN",
+  runHunterDryPlan
+}));
 vi.mock("@/server/integrations/apollo", () => ({
   ApolloRateLimitError: class ApolloRateLimitError extends Error {},
   fetchApolloContactsForCompany: vi.fn()
 }));
 
-import { enqueueHunterOutreachHandoff } from "@/modules/lead-gen/hunter-outreach-handoff";
+import {
+  enqueueHunterOutreachHandoff,
+  queueCurrentHunterOutreachHandoff
+} from "@/modules/lead-gen/hunter-outreach-handoff";
 
 describe("Hunter assisted handoff queueing", () => {
   beforeEach(() => {
@@ -42,6 +51,10 @@ describe("Hunter assisted handoff queueing", () => {
     });
     prisma.automationJobRun.findMany.mockResolvedValue([]);
     prisma.auditLog.create.mockResolvedValue({ id: "audit-1" });
+    runHunterDryPlan.mockResolvedValue({
+      state: "completed",
+      runId: "plan-current"
+    });
   });
 
   it("does nothing unless the administrator explicitly selected Assisted", async () => {
@@ -134,5 +147,87 @@ describe("Hunter assisted handoff queueing", () => {
         })
       })
     });
+  });
+
+  it("refreshes a plan from saved research before queueing current eligible opportunities", async () => {
+    prisma.automationJobRun.findFirst.mockResolvedValue({ id: "research-current" });
+    prisma.hunterAutomationPolicy.findUnique.mockResolvedValue({
+      mode: HunterAutomationMode.ASSISTED,
+      killSwitch: false,
+      maxContactsPerCompany: 2
+    });
+    prisma.hunterProspectingDecision.findMany.mockResolvedValue([{
+      id: "decision-current",
+      status: "WOULD_PURSUE",
+      companyId: "company-1",
+      companyName: "Example Importer",
+      recommendedPersona: "Director of Supply Chain",
+      serviceLine: "WAREHOUSING",
+      opportunityType: "Expansion",
+      rationale: "Verified expansion",
+      recommendedSender: "Alex",
+      recommendedCadence: "Warehousing expansion",
+      createdAt: new Date(),
+      company: {
+        hunterOpportunitySignals: [{
+          id: "signal-1",
+          sourceName: "Hunter company research",
+          serviceLine: "WAREHOUSING",
+          observedAt: new Date(),
+          evidence: {}
+        }]
+      }
+    }]);
+    evaluateHunterOutreachEligibility.mockReturnValue({
+      status: "ELIGIBLE",
+      directive: {
+        researchSignalId: "signal-1",
+        prospectingDecisionId: "decision-current",
+        recommendedPersona: "Director of Supply Chain"
+      }
+    });
+    prisma.automationJobRun.create.mockResolvedValue({ id: "handoff-current" });
+
+    await expect(queueCurrentHunterOutreachHandoff({
+      tenantId: "tenant-a",
+      actorUserId: "user-a"
+    })).resolves.toEqual({
+      state: "queued",
+      runId: "handoff-current",
+      companyCount: 1
+    });
+    expect(prisma.automationJobRun.findFirst).toHaveBeenCalledWith({
+      where: {
+        tenantId: "tenant-a",
+        jobType: "HUNTER_COMPANY_RESEARCH",
+        status: "SUCCESS"
+      },
+      orderBy: { finishedAt: "desc" },
+      select: { id: true }
+    });
+    expect(runHunterDryPlan).toHaveBeenCalledWith({
+      tenantId: "tenant-a",
+      actorUserId: "user-a",
+      trigger: "MANUAL"
+    });
+    expect(prisma.automationJobRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        input: expect.objectContaining({
+          researchRunId: "research-current",
+          prospectingPlanRunId: "plan-current"
+        })
+      })
+    });
+  });
+
+  it("does not create a plan or handoff without completed company research", async () => {
+    prisma.automationJobRun.findFirst.mockResolvedValue(null);
+
+    await expect(queueCurrentHunterOutreachHandoff({
+      tenantId: "tenant-a",
+      actorUserId: "user-a"
+    })).resolves.toMatchObject({ state: "research_required" });
+    expect(runHunterDryPlan).not.toHaveBeenCalled();
+    expect(prisma.automationJobRun.create).not.toHaveBeenCalled();
   });
 });
