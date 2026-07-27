@@ -103,6 +103,11 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
   records and the strongest specific logistics-management vacancy before filling the remaining packet
   by pass diversity. Production-line investment/expansion language is included in the strict trigger
   repair; generic growth claims, directories, and undated pages still cannot create a fresh trigger.
+- A parent or affiliate expansion can otherwise win merely because it appeared earlier in the ledger,
+  while wording such as “establishing a distribution center” can evade a manufacturing-focused trigger
+  pattern. Hunter recognizes that facility language, orders material events by the most specific
+  candidate-name match, and replaces the saved summary/citation when the model selected a weaker
+  related-company event.
 - A K3 validation outage does not discard completed retrieval, Qwen synthesis, or K2.6 scoring.
   Selected fresh-event candidates are retained as Watchlist and cannot become Hot until a later
   successful validation. Current-account qualifications and deterministic blockers continue normally.
