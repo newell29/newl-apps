@@ -27,7 +27,7 @@ describe("Hunter company deep research", () => {
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL).toBe("qwen3.5:35b");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL).toBe("kimi-k2.6");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL).toBe("kimi-k3");
-    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v10");
+    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v11");
     expect(HUNTER_COMPANY_RESEARCH_SAFETY).toEqual({
       externalWrites: false,
       apollo: false,
@@ -473,14 +473,14 @@ describe("Hunter company deep research", () => {
     });
   });
 
-  it("promotes exact-company recent material expansions that Qwen overlooked", async () => {
+  it("preserves an existing-facility production-line expansion that Qwen overlooked", async () => {
     const program = [
       "import datetime as d,json",
       "import hunter_company_research as r",
       "candidate={'companyName':'AALBERTS IPS AMERICAS','companyKey':'aalberts-ips-americas'}",
       "recent=(d.datetime.now(d.timezone.utc)-d.timedelta(days=30)).isoformat()",
-      "evidence=[{'pass':'IDENTITY','firstParty':True,'sourceType':'FIRST_PARTY','title':'Aalberts IPS Americas','excerpt':'Aalberts IPS Americas is a US manufacturer.','publishedAt':None},{'pass':'FRESH_EVENTS','firstParty':False,'sourceType':'NEWS','title':'Aalberts brings PowerPress manufacturing to the United States','excerpt':'Aalberts announced a major investment that expands production capabilities at its South Carolina facility, increasing manufacturing capacity through 2027.','publishedAt':recent},{'pass':'FRESH_EVENTS','firstParty':False,'sourceType':'DIRECTORY','title':'Aalberts directory expansion profile','excerpt':'Aalberts expands manufacturing capacity.','publishedAt':recent}]",
-      "synthesis={'identityDisposition':'PASS','identityConfidence':85,'identityReason':'Verified.','confidence':80,'freshness':'CURRENT','triggerEvidenceIndices':[],'missingEvidence':[],'rationale':'No fresh event selected.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
+      "evidence=[{'pass':'IDENTITY','firstParty':True,'sourceType':'FIRST_PARTY','title':'Aalberts IPS Americas','excerpt':'Aalberts IPS Americas is a US manufacturer.','publishedAt':None},{'pass':'FRESH_EVENTS','firstParty':False,'sourceType':'NEWS','title':'Aalberts brings PowerPress manufacturing to the United States','excerpt':'Aalberts confirms new advanced production lines at its Pageland, South Carolina facility, with phased implementation through 2027, shorter North American lead times, and an ambition to significantly grow its North American business.','publishedAt':recent},{'pass':'DISTRIBUTION_FOOTPRINT','firstParty':True,'sourceType':'FIRST_PARTY','title':'Aalberts IPS website','excerpt':'Integrated piping systems and products.','publishedAt':None}]",
+      "synthesis={'identityDisposition':'PASS','identityConfidence':85,'identityReason':'Verified.','confidence':80,'freshness':'CURRENT','triggerEvidenceIndices':[2],'opportunitySummary':'No concrete expansion or investment exists.','signalType':'NEWS','missingEvidence':[],'rationale':'No fresh event selected.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
       "print(json.dumps(r.normalize_synthesis_for_evidence(candidate,evidence,synthesis)))"
     ].join(";");
     const { stdout } = await execFileAsync("python3", ["-c", program], {
@@ -491,10 +491,20 @@ describe("Hunter company deep research", () => {
       }
     });
 
-    expect(JSON.parse(stdout)).toMatchObject({
+    const normalized = JSON.parse(stdout) as {
+      freshness: string;
+      triggerEvidenceIndices: number[];
+      opportunitySummary: string;
+      signalType: string;
+    };
+
+    expect(normalized).toMatchObject({
       freshness: "FRESH",
-      triggerEvidenceIndices: [1]
+      triggerEvidenceIndices: [1],
+      signalType: "EXPANSION"
     });
+    expect(normalized.opportunitySummary).toContain("new advanced production lines");
+    expect(normalized.opportunitySummary).not.toContain("No concrete expansion");
   });
 
   it("repairs a fresh synthesis that cites the wrong trigger before applying the date gate", async () => {
@@ -546,6 +556,27 @@ describe("Hunter company deep research", () => {
     );
   });
 
+  it("rejects synthesis checkpoints created before the production-line repair", async () => {
+    const program = [
+      "import hunter_company_research as r",
+      "checkpoint={'candidateKeys':['aalberts-ips-americas'],'promptVersion':'hunter-company-research-v10'}",
+      "candidates=[{'companyKey':'aalberts-ips-americas'}]",
+      "try:",
+      " r.validate_checkpoint_cohort(checkpoint,candidates)",
+      "except RuntimeError as error:",
+      " print(str(error))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(stdout).toContain("different prompt contract");
+  });
+
   it("sends a compact, pass-diverse evidence packet to the models", async () => {
     const program = [
       "import json",
@@ -571,6 +602,35 @@ describe("Hunter company deep research", () => {
     );
     expect(rows.every((row) => row.excerpt.length <= 700)).toBe(true);
     expect(rows.every((row) => Number.isInteger(row.evidenceIndex))).toBe(true);
+  });
+
+  it("preserves Aalberts' dated production expansion and multi-center logistics role in compact model packets", async () => {
+    const program = [
+      "import datetime as d,json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'AALBERTS IPS AMERICAS','companyKey':'aalberts-ips-americas'}",
+      "recent=(d.datetime.now(d.timezone.utc)-d.timedelta(days=30)).isoformat()",
+      "evidence=[{'pass':'IDENTITY','sourceType':'FIRST_PARTY','firstParty':True,'title':'Aalberts IPS Americas','excerpt':'Aalberts IPS Americas is a U.S. manufacturer.','publishedAt':None},{'pass':'FRESH_EVENTS','sourceType':'FIRST_PARTY','firstParty':True,'title':'Aalberts products','excerpt':'Current product information for Aalberts IPS Americas.','publishedAt':None},{'pass':'CAREERS','sourceType':'CAREERS','firstParty':True,'title':'Careers at Aalberts','excerpt':'Explore open positions.','publishedAt':None},{'pass':'DISTRIBUTION_FOOTPRINT','sourceType':'FIRST_PARTY','firstParty':True,'title':'Aalberts locations','excerpt':'North American locations.','publishedAt':None},{'pass':'CAREERS','sourceType':'CAREERS','firstParty':True,'title':'Distribution Logistics Manager','excerpt':'Aalberts seeks a logistics manager responsible for multiple distribution centers.','publishedAt':None},{'pass':'FRESH_EVENTS','sourceType':'OTHER','firstParty':False,'title':'Aalberts brings manufacturing to the United States','excerpt':'Aalberts is making an investment to install two advanced production lines at its Pageland facility, with phased work through 2027 to shorten lead times and support significant North American growth ambitions.','publishedAt':recent},{'pass':'FRESH_EVENTS','sourceType':'NEWS','firstParty':False,'title':'Aalberts expands Pageland production','excerpt':'Aalberts announced additional production lines in Pageland as part of its North American production expansion.','publishedAt':recent}]",
+      "preferred=r.preferred_model_evidence_indices(candidate,evidence)",
+      "packet=r.select_company_model_evidence(candidate,evidence)",
+      "synthesis={'identityDisposition':'PASS','identityConfidence':85,'identityReason':'Verified.','confidence':80,'freshness':'CURRENT','triggerEvidenceIndices':[1],'missingEvidence':[],'rationale':'No dated trigger or specific hiring role.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
+      "normalized=r.normalize_synthesis_for_evidence(candidate,evidence,synthesis)",
+      "print(json.dumps({'preferred':preferred,'packet':[row['evidenceIndex'] for row in packet],'freshness':normalized['freshness'],'triggers':normalized['triggerEvidenceIndices']}))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual({
+      preferred: [5, 6, 4],
+      packet: [5, 6, 4, 0, 3],
+      freshness: "FRESH",
+      triggers: [5, 6]
+    });
   });
 
   it("parses a Kimi JSON object wrapped in explanatory text", async () => {
@@ -676,7 +736,7 @@ function completion() {
       synthesis: {
         provider: "OLLAMA",
         name: "qwen3.5:35b",
-        promptVersion: "hunter-company-research-v10",
+        promptVersion: "hunter-company-research-v11",
         structuredOutput: true,
         inputTokens: 2000,
         outputTokens: 700,
@@ -685,7 +745,7 @@ function completion() {
       scoring: {
         provider: "KIMI",
         name: "kimi-k2.6",
-        promptVersion: "hunter-company-research-v10",
+        promptVersion: "hunter-company-research-v11",
         structuredOutput: true,
         inputTokens: 1800,
         cachedInputTokens: 200,
@@ -696,7 +756,7 @@ function completion() {
       validation: {
         provider: "KIMI",
         name: "kimi-k3",
-        promptVersion: "hunter-company-research-v10",
+        promptVersion: "hunter-company-research-v11",
         structuredOutput: true,
         status: "SUCCESS",
         reasoningEffort: "LOW",

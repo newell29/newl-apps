@@ -27,7 +27,7 @@ DEFAULT_QWEN_MODEL = "qwen3.5:35b"
 DEFAULT_KIMI_URL = "https://api.moonshot.ai/v1"
 DEFAULT_KIMI_MODEL = "kimi-k2.6"
 DEFAULT_KIMI_VALIDATOR_MODEL = "kimi-k3"
-PROMPT_VERSION = "hunter-company-research-v10"
+PROMPT_VERSION = "hunter-company-research-v11"
 ALLOWED_SERVICE_LINES = {"WAREHOUSING", "OCEAN_AIR", "TRUCKING"}
 ALLOWED_OPERATING_REGIONS = {"NORTH_AMERICA", "CHINA", "OTHER_FOREIGN", "UNKNOWN"}
 ALLOWED_SIGNAL_TYPES = {
@@ -78,6 +78,10 @@ REGIONAL_IDENTITY_MARKERS = {
     "usa",
     "us",
 }
+PRODUCTION_LINE_EXPANSION_PATTERN = re.compile(
+    r"\bnew(?:\s+[a-z][a-z-]*){0,3}\s+(?:production|manufacturing)\s+lines?\b",
+    re.IGNORECASE,
+)
 
 
 SYNTHESIS_SCHEMA = {
@@ -825,7 +829,9 @@ def kimi_scoring_request(
         "priority without inflating weak evidence), timing, accessibility (plausible buyer and approachable "
         "mid-market account), and evidenceQuality. totalScore must equal their sum. A shipment alone proves "
         "trade activity, not outsourcing intent. Current careers or footprint can support a moderate score; "
-        "a fresh first-party expansion with a logistics implication can support a high score. Never invent."
+        "a specific logistics, supply-chain, warehouse, or distribution management role is stronger current "
+        "accessibility evidence than a generic careers page, especially when it covers multiple facilities. "
+        "A fresh first-party expansion with a logistics implication can support a high score. Never invent."
     )
     user_prompt = (
         f"Prompt version: {PROMPT_VERSION}\n"
@@ -1242,6 +1248,21 @@ def select_model_evidence(
     ]
 
 
+def select_company_model_evidence(
+    candidate: dict[str, Any],
+    evidence: list[dict[str, Any]],
+    synthesis: Optional[dict[str, Any]] = None,
+) -> list[dict[str, Any]]:
+    return select_model_evidence(
+        evidence,
+        preferred_indices=preferred_model_evidence_indices(
+            candidate,
+            evidence,
+            synthesis,
+        ),
+    )
+
+
 def synthesize_companies(
     ollama_url: str,
     model: str,
@@ -1261,8 +1282,9 @@ def synthesize_companies(
                 "primaryIndustry": candidate.get("primaryIndustry"),
                 "shipmentEvidence": candidate.get("shipmentEvidence", []),
                 "existingSignals": candidate.get("existingSignals", []),
-                "publicEvidence": select_model_evidence(
-                    evidence_by_key.get(candidate["companyKey"], [])
+                "publicEvidence": select_company_model_evidence(
+                    candidate,
+                    evidence_by_key.get(candidate["companyKey"], []),
                 ),
             }
             for candidate in batch
@@ -1313,11 +1335,10 @@ def score_companies(
                 "priorityScore": candidate.get("priorityScore"),
                 "primaryIndustry": candidate.get("primaryIndustry"),
                 "shipmentEvidence": candidate.get("shipmentEvidence", []),
-                "evidence": select_model_evidence(
+                "evidence": select_company_model_evidence(
+                    candidate,
                     evidence_by_key.get(candidate["companyKey"], []),
-                    preferred_indices=synthesis_by_key[candidate["companyKey"]].get(
-                        "triggerEvidenceIndices", []
-                    ),
+                    synthesis_by_key[candidate["companyKey"]],
                 ),
                 "synthesis": synthesis_by_key[candidate["companyKey"]],
             }
@@ -1465,9 +1486,13 @@ def recent_material_trigger_indices(
     ]
     material_pattern = re.compile(
         r"\b(major investment|breaks? ground|broke ground|"
+        r"invest(?:s|ed|ing|ment) .{0,100}(?:new|advanced|additional) "
+        r".{0,50}(?:production|manufacturing) (?:lines?|capacity)|"
+        r"(?:new|advanced|additional) (?:production|manufacturing) lines?|"
         r"new (?:facility|warehouse|distribution cent(?:er|re)|manufacturing site)|"
         r"expands? (?:its |the )?(?:production|manufacturing|warehouse|distribution|facility)|"
         r"increas(?:e|es|ed|ing) (?:its )?(?:manufacturing |production )?capacity|"
+        r"(?:production|manufacturing) expansion|"
         r"(?:facility|warehouse|distribution cent(?:er|re)) expansion|"
         r"establish(?:es|ed|ing)? .{0,60} manufacturing)\b",
         re.IGNORECASE,
@@ -1484,9 +1509,65 @@ def recent_material_trigger_indices(
         normalized_text = re.sub(r"[^a-z0-9]+", "", text.lower())
         if not any(alias in normalized_text for alias in aliases):
             continue
-        if material_pattern.search(text):
+        if material_pattern.search(text) or PRODUCTION_LINE_EXPANSION_PATTERN.search(text):
             indices.append(index)
-    return indices[:3]
+    return indices[:2]
+
+
+def specific_logistics_management_role_indices(
+    evidence: list[dict[str, Any]],
+) -> list[int]:
+    management_role_patterns = (
+        re.compile(
+            r"\b(?:chief|vice president|vp|head|director|manager|supervisor|lead)\b"
+            r"[^.\n]{0,100}\b(?:supply chain|logistics|distribution(?: cent(?:er|re))?|"
+            r"warehouse|transportation|fulfillment|operations)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:supply chain|logistics|distribution(?: cent(?:er|re))?|warehouse|"
+            r"transportation|fulfillment|operations)\b[^.\n]{0,100}"
+            r"\b(?:chief|vice president|vp|head|director|manager|supervisor|lead)\b",
+            re.IGNORECASE,
+        ),
+    )
+    multi_facility_pattern = re.compile(
+        r"\b(?:multiple|several|multi[- ](?:site|location)|network of|across (?:all|our|the)|"
+        r"distribution cent(?:er|re)s)\b",
+        re.IGNORECASE,
+    )
+    matches: list[tuple[int, int, int]] = []
+    for index, row in enumerate(evidence):
+        if row.get("pass") != "CAREERS" and row.get("sourceType") != "CAREERS":
+            continue
+        text = f"{row.get('title') or ''}\n{row.get('excerpt') or ''}"
+        if not any(pattern.search(text) for pattern in management_role_patterns):
+            continue
+        matches.append(
+            (
+                0 if multi_facility_pattern.search(text) else 1,
+                0 if row.get("firstParty") is True else 1,
+                index,
+            )
+        )
+    return [index for _multi_site, _first_party, index in sorted(matches)[:1]]
+
+
+def preferred_model_evidence_indices(
+    candidate: dict[str, Any],
+    evidence: list[dict[str, Any]],
+    synthesis: Optional[dict[str, Any]] = None,
+) -> list[int]:
+    material_triggers = recent_material_trigger_indices(candidate, evidence)
+    specific_roles = specific_logistics_management_role_indices(evidence)
+    preferred = list(dict.fromkeys(material_triggers + specific_roles))
+    if not material_triggers and synthesis:
+        preferred.extend(
+            index
+            for index in synthesis.get("triggerEvidenceIndices", [])[:2]
+            if isinstance(index, int) and index not in preferred
+        )
+    return preferred[:3]
 
 
 def normalize_synthesis_for_evidence(
@@ -1504,15 +1585,20 @@ def normalize_synthesis_for_evidence(
     ):
         repaired_existing_freshness = normalized.get("freshness") == "FRESH"
         normalized["freshness"] = "FRESH"
-        normalized["triggerEvidenceIndices"] = (
-            material_trigger_indices
-            if repaired_existing_freshness
-            else list(
-                dict.fromkeys(
-                    material_trigger_indices + list(normalized.get("triggerEvidenceIndices") or [])
-                )
-            )[:5]
+        normalized["triggerEvidenceIndices"] = material_trigger_indices
+        trigger_evidence = evidence[material_trigger_indices[0]]
+        trigger_text = (
+            f"{trigger_evidence.get('title') or ''} "
+            f"{trigger_evidence.get('excerpt') or ''}"
         )
+        normalized["opportunitySummary"] = bounded_utf16_text(
+            f"{trigger_evidence.get('title') or 'Material expansion'}: "
+            f"{trigger_evidence.get('excerpt') or ''}",
+            "Recent material expansion evidence was found.",
+            2_000,
+        )
+        if PRODUCTION_LINE_EXPANSION_PATTERN.search(trigger_text):
+            normalized["signalType"] = "EXPANSION"
         message = (
             "Deterministic evidence review replaced unsupported trigger citations with an "
             "exact-company, recent, dated material expansion."
@@ -1660,11 +1746,10 @@ def validate_top_companies(
         {
             "companyKey": candidate["companyKey"],
             "companyName": candidate["companyName"],
-            "evidence": select_model_evidence(
+            "evidence": select_company_model_evidence(
+                candidate,
                 evidence_by_key[candidate["companyKey"]],
-                preferred_indices=synthesis_by_key[candidate["companyKey"]].get(
-                    "triggerEvidenceIndices", []
-                ),
+                synthesis_by_key[candidate["companyKey"]],
             ),
             "synthesis": synthesis_by_key[candidate["companyKey"]],
             "k2Scoring": scoring_by_key[candidate["companyKey"]],
