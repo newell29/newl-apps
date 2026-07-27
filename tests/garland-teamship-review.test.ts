@@ -5,6 +5,7 @@ import {
   parseGarlandShippingOrderPages,
   parseTeamshipAlertDigest
 } from "@/modules/shipment-documents/teamship-review";
+import { buildTeamshipPhase2DryRunPlan } from "@/modules/shipment-documents/teamship-phase2-dry-run";
 import { buildTeamshipPayloadInspection } from "@/modules/shipment-documents/teamship-payload-inspector";
 import type { GarlandPdfShippingOrder, TeamshipShippingOrderDetail } from "@/modules/shipment-documents/teamship-review-types";
 import {
@@ -329,6 +330,69 @@ DESCRIPTION
       sku: "GTBG36-AR36-5001",
       quantity: 1,
       serialNumbers: ["2606891101389", "2606891101823"]
+    });
+  });
+
+  it("keeps serialized Garland item evidence in the review and planned commodity", () => {
+    const orders = parseGarlandShippingOrderPages([
+      {
+        pageNumber: 1,
+        text: `Ship-To Pre-Shipper Print Date
+99999999 PS999916 12/31/2099
+Pre-Shipper
+SYNTHETIC GARLAND CUSTOMER
+TEST CITY, ON A1A 1A1
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Order Number SR999916 Ship To PO TEST-PO Frt Terms PPADD-CD
+Order Date 12/31/2099 Ship Via TEST CARRIER
+Ln Item Number T
+Site
+Location
+Lot/Serial
+Ref
+Ship Qty Qty Open UM Due
+Shipped
+1 TESTITEM-A 999999
+DESCRIPTION
+1.00 EA 12/31/2099
+NEWLS 9900000000001 1.00 (              )`
+      }
+    ]);
+    const review = buildGarlandTeamshipReview(
+      orders,
+      [
+        {
+          ...sampleTeamshipOrder(
+            "SR999916",
+            "PS999916",
+            "TEST CARRIER",
+            "SYNTHETIC GARLAND CUSTOMER",
+            "TEST-PO",
+            "PPADD-CD",
+            ["SKU: TESTITEM-A QTY: 1"]
+          ),
+          id: 39916
+        }
+      ]
+    );
+    const plan = buildTeamshipPhase2DryRunPlan(review);
+
+    expect(orders[0]?.items[0]).toMatchObject({
+      sku: "TESTITEM-A",
+      quantity: 1,
+      serialNumbers: ["9900000000001"]
+    });
+    expect(review.reviews[0]?.fields.find((field) => field.key === "serialNumbers")).toMatchObject({
+      status: "DISCREPANCY",
+      pdfValue: "9900000000001",
+      teamshipValue: "No serials found in fetched Teamship detail"
+    });
+    expect(plan.orders[0]?.plannedPalletRows[0]).toMatchObject({
+      commodity: "SKU: TESTITEM-A, SN: 9900000000001",
+      teamshipFields: expect.objectContaining({
+        pallet_1_commodity: "SKU: TESTITEM-A, SN: 9900000000001"
+      })
     });
   });
 
