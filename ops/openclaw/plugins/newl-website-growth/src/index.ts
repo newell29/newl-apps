@@ -10,6 +10,13 @@ type WebsiteGrowthPluginConfig = {
 };
 
 const emptyParameters = Type.Object({});
+const summaryParameters = Type.Object({
+  runStartedAt: Type.String({
+    format: "date-time",
+    description:
+      "UTC timestamp recorded immediately before this outreach cycle began."
+  })
+});
 const sendEmailParameters = Type.Object({
   opportunityId: Type.String({ minLength: 1, maxLength: 100 }),
   kind: Type.Union([
@@ -96,9 +103,9 @@ const plugin = defineToolPlugin({
     tool({
       name: "newl_backlink_summary",
       label: "Summarize Backlink Outreach",
-      description: "Return deterministic Website Growth review and execution counts plus the Newl Apps review link for the Teams reminder.",
-      parameters: emptyParameters,
-      factory: createApiTool("newl_backlink_summary", "/api/website-growth/backlinks/executor/summary", {})
+      description: "Return deterministic current-run and lifetime Website Growth execution counts, blocker reasons and the Newl Apps review link for the Teams reminder.",
+      parameters: summaryParameters,
+      factory: createParameterizedApiTool("newl_backlink_summary", "/api/website-growth/backlinks/executor/summary")
     }),
     tool({
       name: "newl_backlink_send_email",

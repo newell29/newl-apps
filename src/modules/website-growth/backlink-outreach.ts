@@ -2,12 +2,19 @@ import { lookup } from "node:dns/promises";
 import { isIP, isIPv4, isIPv6 } from "node:net";
 
 import {
+  JobStatus,
   WebsiteGrowthBacklinkCategory,
   WebsiteGrowthBacklinkStatus,
   WebsiteGrowthOutreachConsentBasis,
-  WebsiteGrowthOutreachMessageKind
+  WebsiteGrowthOutreachMessageKind,
+  type Prisma
 } from "@prisma/client";
 
+import {
+  describeWebsiteGrowthBacklinkBlocker,
+  formatWebsiteGrowthBacklinkBlockerCategory
+} from "@/modules/website-growth/backlink-blockers";
+import { WEBSITE_GROWTH_BACKLINK_OUTREACH_JOB_TYPE } from "@/modules/website-growth/backlinks";
 import { prisma } from "@/server/db";
 import { getMicrosoftGraphApplicationAccessToken } from "@/server/integrations/microsoft-graph-application";
 import {
@@ -552,13 +559,15 @@ function normalizeWebsiteGrowthOutreachThreadSubject(
 export async function buildWebsiteGrowthOutreachTeamsSummary({
   tenantId,
   baseUrl,
+  runStartedAt,
   now = new Date()
 }: {
   tenantId: string;
   baseUrl: string;
+  runStartedAt: Date;
   now?: Date;
 }) {
-  const [counts, recentOutcomes] = await Promise.all([
+  const [counts, recentOutcomes, blockedThisRunRecords] = await Promise.all([
     prisma.websiteGrowthBacklinkOpportunity.groupBy({
       by: ["status"],
       where: { tenantId },
@@ -584,6 +593,24 @@ export async function buildWebsiteGrowthOutreachTeamsSummary({
       },
       orderBy: { updatedAt: "desc" },
       take: 10
+    }),
+    prisma.websiteGrowthBacklinkOpportunity.findMany({
+      where: {
+        tenantId,
+        status: WebsiteGrowthBacklinkStatus.BLOCKED,
+        updatedAt: { gte: runStartedAt, lte: now }
+      },
+      select: {
+        id: true,
+        title: true,
+        category: true,
+        notes: true,
+        submittedAt: true,
+        contactedAt: true,
+        directoryLoginUrl: true
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 20
     })
   ]);
   const byStatus = Object.fromEntries(counts.map((row) => [row.status, row._count._all]));
@@ -593,7 +620,16 @@ export async function buildWebsiteGrowthOutreachTeamsSummary({
   const replied = byStatus[WebsiteGrowthBacklinkStatus.REPLIED] ?? 0;
   const submitted = byStatus[WebsiteGrowthBacklinkStatus.SUBMITTED] ?? 0;
   const live = byStatus[WebsiteGrowthBacklinkStatus.LIVE] ?? 0;
-  const blocked = byStatus[WebsiteGrowthBacklinkStatus.BLOCKED] ?? 0;
+  const blockedTotal = byStatus[WebsiteGrowthBacklinkStatus.BLOCKED] ?? 0;
+  const blockedThisRun = blockedThisRunRecords
+    .map((opportunity) => {
+      const blocker = describeWebsiteGrowthBacklinkBlocker({
+        ...opportunity,
+        status: WebsiteGrowthBacklinkStatus.BLOCKED
+      });
+      return blocker ? { ...opportunity, blocker } : null;
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
 
   const recentLines = recentOutcomes.map((outcome) => {
     if (outcome.status === WebsiteGrowthBacklinkStatus.LIVE && outcome.liveUrl) {
@@ -606,18 +642,145 @@ export async function buildWebsiteGrowthOutreachTeamsSummary({
     ].filter(Boolean).join(" — ");
   });
 
-  return {
-    needsAttention: needsReview > 0 || replied > 0 || blocked > 0,
-    message: [
-      "Website Growth outreach update",
-      `${needsReview} prospect${needsReview === 1 ? "" : "s"} need your approval; ${approved} approved item${approved === 1 ? "" : "s"} ${approved === 1 ? "is" : "are"} ready for Scout.`,
-      `${contacted} contacted; ${replied} replied; ${submitted} directory submissions; ${live} verified live; ${blocked} blocked.`,
+  const blockedLines = blockedThisRun.slice(0, 5).map(({ title, blocker }) =>
+    [
+      `Blocked: ${title}`,
+      `(${formatWebsiteGrowthBacklinkBlockerCategory(blocker.category)})`,
+      blocker.reason.replace(/\s+/g, " "),
+      `Next: ${blocker.nextAction}`,
+      `Retry: ${blocker.retryGuidance}`
+    ].join(" — ")
+  );
+  const message = [
+    "Website Growth outreach update",
+    `${needsReview} prospect${needsReview === 1 ? "" : "s"} need your approval; ${approved} approved item${approved === 1 ? "" : "s"} ${approved === 1 ? "is" : "are"} ready for Scout.`,
+    `${contacted} contacted; ${replied} replied; ${submitted} directory submissions; ${live} verified live; ${blockedThisRun.length} blocked this run; ${blockedTotal} blocked total.`,
+    ...(blockedLines.length > 0
+      ? [
+          "Blocked this run:",
+          ...blockedLines,
+          ...(blockedThisRun.length > blockedLines.length
+            ? [`${blockedThisRun.length - blockedLines.length} more blocked item${blockedThisRun.length - blockedLines.length === 1 ? "" : "s"} are listed in Newl Apps.`]
+            : [])
+        ]
+      : ["No items were blocked in this run."]),
       ...(recentLines.length > 0
         ? ["Recent directory and backlink results:", ...recentLines]
         : ["No new directory accounts or verified backlinks in the last seven days."]),
       `${baseUrl.replace(/\/+$/, "")}/website-growth/backlinks`
-    ].join("\n")
+  ].join("\n");
+  const output: Prisma.InputJsonObject = {
+    runType: "website_growth_backlink_outreach",
+    summary: {
+      needsReview,
+      approved,
+      contacted,
+      replied,
+      submitted,
+      live,
+      blockedThisRun: blockedThisRun.length,
+      blockedTotal
+    },
+    blockedItems: blockedThisRun.map(({ id, title, blocker }) => ({
+      id,
+      title,
+      category: blocker.category,
+      reason: blocker.reason,
+      nextAction: blocker.nextAction,
+      retryGuidance: blocker.retryGuidance
+    }))
   };
+
+  await recordWebsiteGrowthBacklinkOutreachRun({
+    tenantId,
+    runStartedAt,
+    now,
+    output
+  });
+
+  return {
+    needsAttention:
+      needsReview > 0 ||
+      replied > 0 ||
+      blockedTotal > 0,
+    blockedThisRun: blockedThisRun.length,
+    blockedTotal,
+    message
+  };
+}
+
+export function parseWebsiteGrowthOutreachRunStartedAt({
+  value,
+  now = new Date()
+}: {
+  value: unknown;
+  now?: Date;
+}) {
+  if (typeof value !== "string" || !value.trim()) {
+    return new Date(now.getTime() - 2 * 60 * 60 * 1000);
+  }
+  const parsed = new Date(value);
+  const earliestAllowed = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const latestAllowed = new Date(now.getTime() + 5 * 60 * 1000);
+  if (
+    !Number.isFinite(parsed.getTime()) ||
+    parsed < earliestAllowed ||
+    parsed > latestAllowed
+  ) {
+    throw new Error(
+      "Backlink outreach run start time must be a valid timestamp from the last 24 hours."
+    );
+  }
+  return parsed;
+}
+
+async function recordWebsiteGrowthBacklinkOutreachRun({
+  tenantId,
+  runStartedAt,
+  now,
+  output
+}: {
+  tenantId: string;
+  runStartedAt: Date;
+  now: Date;
+  output: Prisma.InputJsonObject;
+}) {
+  const existing = await prisma.automationJobRun.findFirst({
+    where: {
+      tenantId,
+      jobType: WEBSITE_GROWTH_BACKLINK_OUTREACH_JOB_TYPE,
+      startedAt: runStartedAt
+    },
+    select: { id: true }
+  });
+  if (existing) {
+    await prisma.automationJobRun.updateMany({
+      where: {
+        id: existing.id,
+        tenantId,
+        jobType: WEBSITE_GROWTH_BACKLINK_OUTREACH_JOB_TYPE
+      },
+      data: {
+        status: JobStatus.SUCCESS,
+        finishedAt: now,
+        output
+      }
+    });
+    return;
+  }
+  await prisma.automationJobRun.create({
+    data: {
+      tenantId,
+      jobType: WEBSITE_GROWTH_BACKLINK_OUTREACH_JOB_TYPE,
+      status: JobStatus.SUCCESS,
+      startedAt: runStartedAt,
+      finishedAt: now,
+      input: {
+        source: "OPENCLAW_BACKLINK_EXECUTOR"
+      },
+      output
+    }
+  });
 }
 
 export function buildCompliantWebsiteGrowthOutreachBody({

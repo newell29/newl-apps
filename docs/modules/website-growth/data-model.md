@@ -22,6 +22,8 @@ SEMrush cache metadata lives in successful tenant-scoped `WebsiteGrowthDataImpor
 
 `WebsiteGrowthBacklinkOpportunity` is the curated backlink system of record. It stores one tenant-scoped prospect per deterministic referring-domain/target-page dedupe key, human/executor lifecycle status, category, source and target URLs, quality signals, approved public outreach angle, cost flag, and verification timestamps. It does not store raw Semrush backlink rows. `REJECTED` and `ARCHIVED` records are hidden from the default workspace but retain the prior decision so Scout does not repeatedly propose them.
 
+Successful outreach summaries are stored as tenant-scoped `AutomationJobRun` records with job type `WEBSITE_GROWTH_BACKLINK_OUTREACH`. Their sanitized output contains current-run and lifetime counts plus blocked opportunity IDs, categories, reasons, next actions, and retry guidance. Blocker categories are derived from the recorded reason at read time; no model-controlled status comparison is used.
+
 For approved execution it also stores the public recipient, country, exact contact-source URL, consent basis, follow-up schedule, reply/opt-out state, and non-secret directory login metadata. `WebsiteGrowthOutreachMessage` is the tenant-scoped audit history for initial and follow-up messages and Microsoft conversation identifiers. `WebsiteGrowthOutreachSuppression` is the tenant-scoped do-not-contact list. Passwords and access tokens are not stored in these models.
 
 ```mermaid

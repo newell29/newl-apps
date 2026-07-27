@@ -35,6 +35,8 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 10. The weekday Teams summary is sent even when no approved work is available. It includes recent directory usernames/login URLs and verified backlink URLs, never passwords, and links back to the curated Newl Apps workspace.
 11. A backlink becomes `LIVE` only after the public referring URL is verified. Lost links remain a short operational history; rejected and archived research stays hidden from the default workspace.
 12. A deterministic monitor checks completed outreach runs every 15 minutes. It deduplicates failures in tenant-scoped job history, classifies unsafe external-action and permission failures for owner review, and may queue Rivet for a draft code-fix PR only when the one-time owner standing-approval setting is enabled. A second identical failure within seven days disables the outreach schedule.
+13. The executor records its UTC start time and passes it to the final deterministic summary. Newl Apps stores the cycle in `AutomationJobRun`, reports "blocked this run" separately from "blocked total", and displays the recorded reason, deterministic blocker category, next action, and retry guidance on every blocked card.
+14. Free form-based directory signups use the dedicated partnerships mailbox. Scout may complete ordinary forms and email verification, but CAPTCHA, MFA, phone verification, and password creation without an approved password-manager integration are marked Manual setup for a human to complete before retry.
 
 The production enablement sequence and supervised one-message test are documented in `backlink-outreach-rollout.md`.
 

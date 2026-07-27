@@ -104,6 +104,10 @@ Backlink approval is distinct from content approval and spending approval. Admin
 
 The dedicated weekday outreach job is installed disabled. Once the supervised launch test passes, it runs at 11:00 AM `America/Toronto`, sends at most five new contacts per rolling day and 20 per rolling week, follows up on days 5 and 12, closes after day 21, and sends a Teams update even when there is no approved work. See `backlink-outreach-rollout.md`.
 
+Each executor cycle records its own sanitized run summary. Teams and the Newl Apps workspace distinguish blockers created in the latest run from the unresolved lifetime blocker total. Blocked records are classified deterministically as Technical, Needs owner confirmation, Manual setup, or No contact method and show the recorded reason, recommended next action, and whether a retry will help.
+
+Free directory accounts use `partnerships@newlgroup.com`. Magic links, Microsoft sign-in, and publisher-managed password setup are preferred. Newl Apps may store the public login URL and username but never a password. CAPTCHA, MFA, phone verification, and password creation without an approved password-manager path remain manual setup blockers; they are not bypassed or repeatedly retried.
+
 The existing Vercel weekly planner remains a safe queue-preparation fallback; it does not run Codex or send Teams.
 
 ## Human boundaries
