@@ -1092,22 +1092,24 @@ async function searchApolloRelevantPeople({
     })) ?? [];
   collected.push(...contactsWithoutKeyword);
 
-  const relevantContactsWithoutKeyword = rankApolloRelevantContacts(collected);
-  if (relevantContactsWithoutKeyword.length > 0) {
-    return relevantContactsWithoutKeyword;
-  }
-
   if (!allowPeopleSearchFallback) {
     return dedupeApolloContacts(collected);
   }
 
-  const peopleWithoutKeyword = await searchApolloPeople({
-    apiKey,
-    companyName,
-    domain,
-    organizationId,
-    queryKeywords: null
-  });
+  const peopleWithoutKeyword = filterApolloContactsForExpectedOrganization(
+    await searchApolloPeople({
+      apiKey,
+      companyName,
+      domain,
+      organizationId,
+      queryKeywords: null
+    }),
+    {
+      companyName,
+      normalizedDomain: normalizeDomain(domain),
+      organizationId
+    }
+  );
   collected.push(...peopleWithoutKeyword);
 
   const relevantPeopleWithoutKeyword = rankApolloRelevantContacts(collected);
@@ -1121,13 +1123,20 @@ async function searchApolloRelevantPeople({
   );
 
   for (const keyword of keywordQueries) {
-    const people = await searchApolloPeople({
-      apiKey,
-      companyName,
-      domain,
-      organizationId,
-      queryKeywords: keyword
-    });
+    const people = filterApolloContactsForExpectedOrganization(
+      await searchApolloPeople({
+        apiKey,
+        companyName,
+        domain,
+        organizationId,
+        queryKeywords: keyword
+      }),
+      {
+        companyName,
+        normalizedDomain: normalizeDomain(domain),
+        organizationId
+      }
+    );
     collected.push(...people);
   }
 
@@ -1727,15 +1736,17 @@ function filterApolloContactsForExpectedOrganization(
   return contacts.filter((contact) => {
     const organization = readApolloOrganizationFromContact(contact);
     if (!organization) {
+      // Apollo may omit organization details from a response that was already
+      // scoped by organization_ids/domain. Reject explicit mismatches below.
       return true;
     }
 
-    if (organizationId && organization.id === organizationId) {
-      return true;
+    if (organizationId) {
+      return organization.id === organizationId;
     }
 
-    if (normalizedDomain && organization.domain === normalizedDomain) {
-      return true;
+    if (normalizedDomain) {
+      return organization.domain === normalizedDomain;
     }
 
     const candidateAliases = buildCompanyNameAliases(organization.name ?? "");

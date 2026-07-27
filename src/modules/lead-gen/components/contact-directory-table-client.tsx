@@ -163,6 +163,7 @@ const OUTREACH_DEFAULT_COLUMN_VISIBILITY = {
 export function ContactDirectoryTableClient({
   contacts,
   initialApolloPushJobs,
+  initialActiveApolloPushJobId,
   sequenceOptions,
   bulkUpdateContactSequenceAction,
   bulkRemoveContactsAction,
@@ -175,6 +176,7 @@ export function ContactDirectoryTableClient({
 }: {
   contacts: ContactDirectoryRow[];
   initialApolloPushJobs: ApolloPushJobSummary[];
+  initialActiveApolloPushJobId: string | null;
   sequenceOptions: readonly SequenceCatalogItem[];
   bulkUpdateContactSequenceAction: (
     previousState: ContactBulkActionSummary,
@@ -217,7 +219,9 @@ export function ContactDirectoryTableClient({
   );
   const [apolloPushJobs, setApolloPushJobs] = useState(initialApolloPushJobs);
   const [activeApolloPushJobId, setActiveApolloPushJobId] = useState<string | null>(
-    initialApolloPushJobs.find((job) => job.status === "QUEUED" || job.status === "RUNNING")?.id ?? null
+    initialActiveApolloPushJobId ??
+      initialApolloPushJobs.find((job) => job.status === "QUEUED" || job.status === "RUNNING")?.id ??
+      null
   );
   const startedApolloPushJobIdsRef = useRef<Set<string>>(new Set());
   const {
@@ -579,6 +583,7 @@ export function ContactDirectoryTableClient({
                 <OutreachPlanPanel
                   contact={contact}
                   approveOutreachPlanAction={approveOutreachPlanAction}
+                  generateContactDraftAction={generateContactDraftAction}
                 />
               ) : null}
               {contact.draft ? (
@@ -1054,10 +1059,12 @@ export function ContactDirectoryTableClient({
 
 function OutreachPlanPanel({
   contact,
-  approveOutreachPlanAction
+  approveOutreachPlanAction,
+  generateContactDraftAction
 }: {
   contact: ContactDirectoryRow;
   approveOutreachPlanAction: (formData: FormData) => Promise<void>;
+  generateContactDraftAction: (formData: FormData) => Promise<void>;
 }) {
   const plan = contact.outreachPlan;
   if (!plan) return null;
@@ -1065,7 +1072,8 @@ function OutreachPlanPanel({
   const canApprove =
     plan.status === OutreachPlanStatus.QA_PASSED &&
     plan.qaStatus === OutreachQaStatus.PASSED &&
-    contact.contactStatus === ContactStatus.APPROVED;
+    contact.contactStatus !== ContactStatus.REJECTED &&
+    contact.contactStatus !== ContactStatus.DO_NOT_CONTACT;
 
   return (
     <details className="rounded-md border border-accentBorder bg-accentSoft/40 p-3">
@@ -1117,7 +1125,11 @@ function OutreachPlanPanel({
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Complete sequence</p>
           {plan.steps.map((step) => (
-            <details key={step.id} className="rounded-md border border-border bg-card p-3">
+            <details
+              key={step.id}
+              open={step.channel === "EMAIL"}
+              className="rounded-md border border-border bg-card p-3"
+            >
               <summary className="cursor-pointer text-xs font-semibold text-foreground">
                 Step {step.stepNumber} · Day {step.delayDays} · {formatEnum(step.channel)}
               </summary>
@@ -1161,9 +1173,38 @@ function OutreachPlanPanel({
           {plan.promptVersion}
         </p>
 
+        <form action={generateContactDraftAction} className="space-y-2 rounded-md border border-border bg-card p-3">
+          <input type="hidden" name="contactId" value={contact.id} />
+          <label className="block text-xs font-semibold text-foreground" htmlFor={`outreach-feedback-${contact.id}`}>
+            Feedback for regeneration
+          </label>
+          <textarea
+            id={`outreach-feedback-${contact.id}`}
+            name="reviewerFeedback"
+            maxLength={2000}
+            rows={3}
+            placeholder="Example: Make the opening more direct, emphasize Charlotte warehousing, and shorten every email."
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-xs text-foreground"
+          />
+          <button
+            disabled={
+              !contact.draftGenerationConfigured ||
+              plan.status === OutreachPlanStatus.APPROVED ||
+              (contact.sequenceStatus !== SequenceStatus.NOT_STARTED &&
+                contact.sequenceStatus !== SequenceStatus.READY)
+            }
+            className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-accentSoft disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Regenerate emails with feedback
+          </button>
+          <p className="text-[11px] leading-4 text-mutedForeground">
+            Feedback can change tone and emphasis before approval, but the evidence and grounded QA gates still apply.
+          </p>
+        </form>
+
         {plan.status === OutreachPlanStatus.APPROVED ? (
           <p className="rounded-md border border-success/20 bg-success/5 px-3 py-2 text-xs font-semibold text-success">
-            Approved for the existing Apollo push workflow. No message has been sent by this approval.
+            Approved. Apollo enrollment was queued automatically and remains visible in the job status above.
           </p>
         ) : (
           <form action={approveOutreachPlanAction}>
@@ -1172,13 +1213,13 @@ function OutreachPlanPanel({
               disabled={!canApprove}
               className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Approve Outreach Plan
+              Approve and enroll in Apollo
             </button>
             {!canApprove ? (
               <p className="mt-2 text-xs text-mutedForeground">
                 {plan.qaStatus !== OutreachQaStatus.PASSED
                   ? "Regenerate the plan until the grounded QA gate passes."
-                  : "Approve the contact before approving this outreach plan."}
+                  : "This plan is not currently eligible for approval."}
               </p>
             ) : null}
           </form>

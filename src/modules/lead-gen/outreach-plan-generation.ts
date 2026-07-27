@@ -3,7 +3,8 @@ import {
   ContactOutreachDraftStatus,
   OutreachPlanStatus,
   OutreachQaStatus,
-  Prisma
+  Prisma,
+  SequenceStatus
 } from "@prisma/client";
 
 import {
@@ -46,17 +47,27 @@ export async function generateOutreachPlanForContact({
   tenantId,
   contactId,
   forceRegenerate,
-  generateWhenNotRequired = false
+  generateWhenNotRequired = false,
+  reviewerFeedback = null
 }: {
   tenantId: string;
   contactId: string;
   forceRegenerate: boolean;
   generateWhenNotRequired?: boolean;
+  reviewerFeedback?: string | null;
 }) {
   const draftContext = await loadOutreachPlanContactContext({ tenantId, contactId });
 
   if (!draftContext) {
     throw new Error("Contact not found for this tenant.");
+  }
+  if (
+    forceRegenerate &&
+    (draftContext.existingOutreachPlan?.status === OutreachPlanStatus.APPROVED ||
+      (draftContext.contact.sequenceStatus !== SequenceStatus.NOT_STARTED &&
+        draftContext.contact.sequenceStatus !== SequenceStatus.READY))
+  ) {
+    throw new Error("Emails cannot be regenerated after outreach approval or Apollo cadence enrollment.");
   }
   if (!draftContext.requiresAiDraft && !forceRegenerate && !generateWhenNotRequired) {
     return { state: "not_required" as const };
@@ -87,7 +98,10 @@ export async function generateOutreachPlanForContact({
     }
     return { state: "evidence_missing" as const };
   }
-  if (draftContext.existingOutreachPlan && !forceRegenerate) {
+  if (
+    draftContext.existingOutreachPlan?.promptVersion === OUTREACH_PLAN_PROMPT_VERSION &&
+    !forceRegenerate
+  ) {
     return {
       state: "already_generated" as const,
       planId: draftContext.existingOutreachPlan.id
@@ -111,7 +125,8 @@ export async function generateOutreachPlanForContact({
     recommendedPersona: hunterDirective.recommendedPersona,
     recommendedCadence: hunterDirective.recommendedCadence,
     hunterDirective,
-    evidence: evidenceLedger
+    evidence: evidenceLedger,
+    reviewerFeedback
   });
   const strategy = strategyGeneration.strategy;
   const sequenceGeneration = await generateCompleteOutreachSequence({
@@ -126,13 +141,16 @@ export async function generateOutreachPlanForContact({
     },
     selectedSequenceName: draftContext.selectedSequenceName,
     strategy,
-    evidence: evidenceLedger
+    evidence: evidenceLedger,
+    allowCallTask: hunterDirective.opportunityTier === "HOT_OPPORTUNITY",
+    reviewerFeedback
   });
   const sequence = sequenceGeneration.sequence;
   const deterministicQa = runDeterministicOutreachQa({
     evidence: evidenceLedger,
     strategy,
-    sequence
+    sequence,
+    allowCallTask: hunterDirective.opportunityTier === "HOT_OPPORTUNITY"
   });
   let modelQa;
   let qaUsage = null;
@@ -186,6 +204,7 @@ export async function generateOutreachPlanForContact({
     contactTier: draftContext.contactTier,
     selectedSequenceName: draftContext.selectedSequenceName,
     selectedSequenceId: draftContext.selectedSequenceId,
+    reviewerFeedback,
     hunterDirective,
     strategy,
     evidenceLedger
@@ -455,7 +474,7 @@ export async function loadOutreachPlanContactContext({
           where: { tenantId, status: { not: OutreachPlanStatus.ARCHIVED } },
           orderBy: { version: "desc" },
           take: 1,
-          select: { id: true, status: true, qaStatus: true, version: true }
+          select: { id: true, status: true, qaStatus: true, version: true, promptVersion: true }
         }
       }
     }),
@@ -493,21 +512,23 @@ export async function loadOutreachPlanContactContext({
       : defaultMappings,
     directory: sequenceDirectory
   });
+  const hunterEligibility = evaluateHunterOutreachEligibility({
+    researchSignal: contact.company.hunterOpportunitySignals[0] ?? null,
+    prospectingDecision: contact.company.hunterProspectingDecisions[0] ?? null,
+    maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
+  });
   const recommendation = recommendSequenceForContact({
     contactTier: scoring.tier,
     title: contact.title,
     department: contact.department,
     companyName: contact.company.name,
     sequenceMappings: effectiveMappings,
-    sequenceDirectory
+    sequenceDirectory,
+    hunterManaged: hunterEligibility.status === "ELIGIBLE"
   });
   const tierMapping = effectiveMappings.find((entry) => entry.tier === scoring.tier) ?? null;
-  const hunterEligibility = evaluateHunterOutreachEligibility({
-    researchSignal: contact.company.hunterOpportunitySignals[0] ?? null,
-    prospectingDecision: contact.company.hunterProspectingDecisions[0] ?? null,
-    maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
-  });
-
+  const useHunterRecommendation =
+    hunterEligibility.status === "ELIGIBLE" && !contact.sequenceManuallyOverridden;
   return {
     contact,
     contactScore: scoring.score,
@@ -517,15 +538,21 @@ export async function loadOutreachPlanContactContext({
     evidence,
     shipmentDraftContext: buildShipmentDraftContext(contact.company.importRecords),
     selectedSequenceName:
-      contact.selectedSequenceName
-      ?? contact.recommendedSequenceName
-      ?? recommendation.name
-      ?? hunterEligibility.directive?.recommendedCadence
-      ?? null,
+      useHunterRecommendation
+        ? recommendation.name
+        : contact.selectedSequenceName
+          ?? contact.recommendedSequenceName
+          ?? recommendation.name
+          ?? null,
     selectedSequenceId:
-      contact.selectedSequenceId ?? contact.recommendedSequenceId ?? recommendation.id ?? null,
-    selectedSequenceReason: contact.sequenceRecommendationReason ?? recommendation.reason,
-    requiresAiDraft: tierMapping?.requiresAiDraft ?? false,
+      useHunterRecommendation
+        ? recommendation.id
+        : contact.selectedSequenceId ?? contact.recommendedSequenceId ?? recommendation.id ?? null,
+    selectedSequenceReason:
+      useHunterRecommendation
+        ? recommendation.reason
+        : contact.sequenceRecommendationReason ?? recommendation.reason,
+    requiresAiDraft: hunterEligibility.status === "ELIGIBLE" || (tierMapping?.requiresAiDraft ?? false),
     hunterEligibility,
     existingDraft: contact.outreachDrafts[0] ?? null,
     existingOutreachPlan: contact.outreachPlans[0] ?? null,

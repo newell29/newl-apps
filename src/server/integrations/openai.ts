@@ -69,6 +69,7 @@ export type OutreachStrategyGenerationContext = {
   recommendedCadence: string | null;
   hunterDirective: HunterOutreachDirective;
   evidence: OutreachEvidenceRecord[];
+  reviewerFeedback: string | null;
 };
 
 export type OutreachSequenceGenerationContext = {
@@ -78,6 +79,8 @@ export type OutreachSequenceGenerationContext = {
   selectedSequenceName: string;
   strategy: OutreachStrategy;
   evidence: OutreachEvidenceRecord[];
+  allowCallTask: boolean;
+  reviewerFeedback: string | null;
 };
 
 export type OutreachSequenceQaContext = {
@@ -110,6 +113,15 @@ export type HunterContactFitReviewContext = {
     hasEmail: boolean;
     hasPhone: boolean;
     hasLinkedin: boolean;
+    city: string | null;
+    state: string | null;
+    country: string | null;
+    sequenceStatus: string;
+    replyStatus: string;
+    existingSequenceName: string | null;
+    lastTouchAt: string | null;
+    lastReplyAt: string | null;
+    priorActivityStatus: string | null;
   }>;
 };
 
@@ -329,14 +341,14 @@ const OUTREACH_SEQUENCE_SCHEMA = {
     sequenceName: { type: "string", minLength: 2, maxLength: 160 },
     steps: {
       type: "array",
-      minItems: 5,
-      maxItems: 5,
+      minItems: 3,
+      maxItems: 4,
       items: {
         type: "object",
         additionalProperties: false,
         required: ["stepNumber", "channel", "delayDays", "subject", "body", "angle", "evidenceRefs"],
         properties: {
-          stepNumber: { type: "integer", minimum: 1, maximum: 5 },
+          stepNumber: { type: "integer", minimum: 1, maximum: 4 },
           channel: {
             type: "string",
             enum: ["EMAIL", "LINKEDIN_TASK", "CALL_TASK"]
@@ -457,7 +469,7 @@ export async function generateOutreachStrategy(
     schemaName: "newl_outreach_strategy",
     schema: OUTREACH_STRATEGY_SCHEMA,
     system:
-      "You are Newl Group's B2B logistics outreach strategist. Build a concise, evidence-grounded plan for one specific buyer. Newl provides warehousing, ocean and air freight, port drayage, and trucking support. Hunter has already ranked the opportunity and selected the required service line. Use hunterDirective.requiredServiceLine exactly; do not reconsider or substitute another service line. Use the directive's opportunity type and rationale as the point of attack, refining copy only where the supplied evidence supports it. Do not invent company events, shipment facts, incumbent relationships, locations, volumes, capabilities, or contact responsibilities. Every factual strategy claim must cite one or more supplied evidence IDs.",
+      "You are Newl Group's B2B logistics outreach strategist. Build a concise, evidence-grounded plan for one specific buyer. Newl provides warehousing, ocean and air freight, port drayage, and trucking support. Hunter has already ranked the opportunity and selected the required service line. Use hunterDirective.requiredServiceLine exactly; do not reconsider or substitute another service line. Use the directive's opportunity type and rationale as the point of attack, refining copy only where the supplied evidence supports it. Apply reviewerFeedback to tone, emphasis, phrasing, and approach when supplied, but never let feedback override evidence, the saved service line, contact identity, safety rules, or QA requirements. Do not invent company events, shipment facts, incumbent relationships, locations, volumes, capabilities, or contact responsibilities. Every factual strategy claim must cite one or more supplied evidence IDs.",
     user: JSON.stringify({
       company: {
         name: context.companyName,
@@ -468,6 +480,7 @@ export async function generateOutreachStrategy(
       recommendedPersona: context.recommendedPersona,
       recommendedCadence: context.recommendedCadence,
       hunterDirective: context.hunterDirective,
+      reviewerFeedback: context.reviewerFeedback,
       evidenceLedger: context.evidence
     })
   });
@@ -494,7 +507,7 @@ export async function reviewHunterContactFit(
     schemaName: "newl_hunter_contact_fit",
     schema: HUNTER_CONTACT_FIT_SCHEMA,
     system:
-      "You are the conservative buyer-role gate for Newl Group logistics outreach. Decide whether each supplied contact is plausibly responsible for the specific saved Hunter opportunity. Use only company identity, title, department, seniority, contactability booleans, the required service line, opportunity rationale, and recommended persona. PRIMARY means likely owns or materially influences the decision. SECONDARY means a credible adjacent stakeholder or route to the owner. REVIEW means the role is uncertain and must not receive automatic outreach. REJECT means clearly irrelevant, too junior, seller-side, or unrelated. Never infer responsibilities merely from seniority. Do not promote sales, business-development, marketing, HR, finance, customer-service, or administrative roles unless the opportunity specifically makes that function relevant. Return exactly one review for every supplied contactId and do not invent IDs.",
+      "You are the conservative buyer-role gate for Newl Group logistics outreach. Review the complete supplied candidate cohort and decide which 1-3 people are best aligned to the specific saved Hunter opportunity. Use only exact company identity, title, department, seniority, geography, contactability, prior sequence/reply history, the required service line, opportunity rationale, and recommended persona. Prefer people located at or responsible for the opportunity geography when that is supported. PRIMARY means likely owns or materially influences the decision. SECONDARY means a credible adjacent stakeholder or route to the owner. REVIEW means the role is uncertain and must not receive automatic outreach. REJECT means clearly irrelevant, too junior, seller-side, unrelated, already replied, or inappropriate to re-contact. Treat UNRESPONSIVE and prior sequence activity as meaningful risk: prefer a fresh relevant stakeholder, but do not claim the person is permanently invalid solely because an old sequence finished. Never infer responsibilities merely from seniority. Do not promote sales, business-development, marketing, HR, finance, customer-service, or administrative roles unless the opportunity specifically makes that function relevant. Return exactly one review for every supplied contactId and do not invent IDs.",
     user: JSON.stringify({
       company: context.company,
       opportunity: context.opportunity,
@@ -517,11 +530,13 @@ export async function generateCompleteOutreachSequence(
     schemaName: "newl_outreach_sequence",
     schema: OUTREACH_SEQUENCE_SCHEMA,
     system:
-      "You write concise, credible B2B logistics outreach for Newl Group. Return exactly five coordinated touches: EMAIL on day 0, LINKEDIN_TASK on day 2, EMAIL on day 4, CALL_TASK on day 7, and EMAIL on day 10. Each email must advance a different angle and aim for a low-friction reply. Manual tasks must be instructions for a person, never claims that an action already occurred. Use only the supplied evidence and strategy. Do not fabricate facts. Every step must cite at least one supplied evidence ID. Plain text only; no markdown, HTML, hype, fake familiarity, or generic AI phrasing.",
+      "You write concise, credible B2B logistics outreach for Newl Group. Return three coordinated EMAIL touches on days 0, 4, and 10. If allowCallTask is true, also return one CALL_TASK on day 7; otherwise return no call task. Never return a LinkedIn task. For the Hunter - Executive Referral cadence, write respectfully to a senior stakeholder and make it easy to refer Newl to the operating owner; do not presume the executive owns the work. For Hunter - Email Only, address the likely operational buyer directly. Each email must advance a different angle and aim for a low-friction reply. A call task must be an instruction for a person, never a claim that a call occurred. Use only the supplied evidence and strategy. Do not fabricate facts. Every step must cite at least one supplied evidence ID. Plain text only; no markdown, HTML, hype, fake familiarity, or generic AI phrasing.",
     user: JSON.stringify({
       companyName: context.companyName,
       contact: context.contact,
       selectedSequenceName: context.selectedSequenceName,
+      allowCallTask: context.allowCallTask,
+      reviewerFeedback: context.reviewerFeedback,
       strategy: context.strategy,
       evidenceLedger: context.evidence
     })

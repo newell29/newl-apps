@@ -66,14 +66,16 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 3. The Mac-mini worker drains that durable queue through ingestion authentication. Every request leases and processes at most one company, so a timeout or restart does not require research to run again.
 4. The service rechecks do-not-prospect, rejected/disqualified, research freshness, tier, and current planning decision immediately before Apollo access.
 5. A known Apollo organization is used directly. Otherwise Apollo organization discovery is bounded and an immutable match record is saved. An ambiguous or missing latest match stops in Apollo Exceptions and blocks automatic repeat lookup.
-6. Apollo contacts are deterministically ranked against Hunter's recommended persona and logistics/operations buyer roles. At most the saved `maxContactsPerCompany` are upserted as tenant-scoped `REVIEWING` contacts; no contact is approved or assigned.
-7. A low-cost structured buyer-role model compares every surviving contact with the exact Hunter service line, opportunity rationale, and recommended persona. It returns `PRIMARY`, `SECONDARY`, `REVIEW`, or `REJECT`, a bounded confidence, responsibility hypothesis, rationale, recommended approach, and risk flags. Only `PRIMARY` at 70+ confidence or `SECONDARY` at 80+ advances automatically. The deterministic filter remains authoritative and the model cannot rescue an excluded contact.
+6. Hunter always combines saved Apollo contacts with a full employee search scoped to the confirmed Apollo organization. Explicit sibling organizations are rejected. Deterministic ranking builds a 5-10-person review pool using buyer role, opportunity geography, contactability, prior sequence history, replies, and Apollo's Unresponsive stage.
+7. A low-cost structured buyer-role model compares the complete pool with the exact Hunter service line, opportunity rationale, geography, and recommended persona. It returns `PRIMARY`, `SECONDARY`, `REVIEW`, or `REJECT`, a bounded confidence, responsibility hypothesis, rationale, recommended approach, and risk flags. Only `PRIMARY` at 70+ confidence or `SECONDARY` at 80+ can advance, and only the best 1-3 contacts are selected.
 8. The contact-fit result is stored in the contact audit JSON against the exact prospecting decision and prompt version. A retry reuses that review rather than paying for another model call; new research/decisions force a fresh review.
-9. Each accepted contact receives a score, cadence recommendation (falling back to Hunter's recommended cadence), five-touch Outreach Plan, deterministic grounding check, and model QA check. QA failures remain visible and cannot advance.
-10. Transient failures retry at most three times with rate-limit delay. Permanent company failures are recorded in the job output and audit log without invalidating the completed research.
-11. This handoff never creates a Sales Opportunity, approves a contact or plan, enrolls Apollo, sends email, posts to LinkedIn, or communicates with a prospect.
-12. An administrator can select **Find contacts for eligible opportunities** after enabling Assisted mode. The action creates a fresh deterministic plan from already-saved research and queues the same protected handoff without rerunning web retrieval, Qwen, Kimi, or K3.
-13. A `REVIEWING` contact with a current, non-archived Outreach Plan appears in Outreach Queue even when Hunter has not created a Sales Lead. Creating a Sales Lead remains reserved for later pipeline graduation.
+9. Hunter uses `Hunter - Email Only` for operating buyers and `Hunter - Executive Referral` for senior stakeholders; legacy tier cadence mappings do not control Hunter handoffs.
+10. Each accepted contact receives a score, three-email Outreach Plan, deterministic grounding check, and model QA check. Only Hot opportunities may also receive a separate call task. QA failures remain visible and cannot advance.
+11. Transient failures retry at most three times with rate-limit delay. Permanent company failures are recorded in the job output and audit log without invalidating the completed research.
+12. The handoff never approves or communicates with a prospect. When a person approves a QA-passed Outreach Plan, that single approval also approves the selected contact, assigns the approver as sender when no sender is already assigned, and queues Apollo enrollment automatically. Apollo revalidates every guard before enrollment.
+13. An administrator can select **Find contacts for eligible opportunities** after enabling Assisted mode. The action creates a fresh deterministic plan from already-saved research and queues the same protected handoff without rerunning web retrieval, Qwen, Kimi, or K3.
+14. A `REVIEWING` contact with a current, non-archived Outreach Plan appears in Outreach Queue even when Hunter has not created a Sales Lead. Creating a Sales Lead remains reserved for later pipeline graduation.
+15. Before approval, a reviewer may enter bounded feedback and regenerate the complete email sequence. Feedback can change tone, emphasis, and approach, but cannot override the saved evidence, service line, contact identity, channel policy, or deterministic/model QA gates. Regeneration is blocked after plan approval or Apollo sequence activity begins.
 
 ## Hunter quality control and Rivet
 
@@ -116,7 +118,7 @@ The layout is non-destructive: it does not migrate, delete, or rewrite existing 
 5. The strategy model receives Hunter's required service line and saved point of attack. It creates the buyer
    hypothesis, trigger, value proposition, objection, CTA, sender recommendation, confidence, and citations without
    reconsidering the service line. A different model-returned service line fails closed.
-6. The drafting model creates exactly five coordinated email/manual touches. Every touch cites the frozen ledger.
+6. The drafting model creates three coordinated emails on days 0, 4, and 10. A fourth, separate call task on day 7 is allowed only for a saved Hot opportunity. LinkedIn tasks are not part of the managed Apollo cadence. Every touch cites the frozen ledger.
 7. Deterministic QA and a separate model critic evaluate the plan. An unavailable critic fails closed and is recorded
    as a QA error instead of silently approving the draft.
 8. Newl Apps archives the prior active version, saves the plan and all steps, and updates the legacy first-email draft

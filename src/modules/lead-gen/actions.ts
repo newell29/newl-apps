@@ -17,6 +17,7 @@ import {
   SequenceStatus
 } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { EMPTY_APOLLO_QUEUE_SUMMARY, type ApolloQueueSummary } from "@/modules/lead-gen/apollo-queue-summary";
 import {
   type ApolloMatchReviewActionState
@@ -77,6 +78,7 @@ import {
   type OutreachQaIssue
 } from "@/modules/lead-gen/outreach-plan";
 import { persistOutreachPlanWithSteps } from "@/modules/lead-gen/outreach-plan-persistence";
+import { buildApprovedOutreachEnrollment } from "@/modules/lead-gen/outreach-enrollment";
 import {
   generateOutreachPlanForContact as generateSharedOutreachPlanForContact
 } from "@/modules/lead-gen/outreach-plan-generation";
@@ -1618,18 +1620,18 @@ export async function bulkPushContactsToApolloAction(
         throw new Error("The contact's company is blocked from prospecting.");
       }
 
+      const assignmentBlockReason = getContactApolloAssignmentBlockReason(contact.assignedRep);
+      if (assignmentBlockReason) {
+        throw new Error(assignmentBlockReason);
+      }
+
       const hunterEligibility = evaluateHunterOutreachEligibility({
-        researchSignal: contact.company.hunterOpportunitySignals[0] ?? null,
-        prospectingDecision: contact.company.hunterProspectingDecisions[0] ?? null,
+        researchSignal: contact.company.hunterOpportunitySignals?.[0] ?? null,
+        prospectingDecision: contact.company.hunterProspectingDecisions?.[0] ?? null,
         maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
       });
       if (hunterEligibility.status !== "ELIGIBLE") {
         throw new Error(`${hunterEligibility.label}: ${hunterEligibility.reason}`);
-      }
-
-      const assignmentBlockReason = getContactApolloAssignmentBlockReason(contact.assignedRep);
-      if (assignmentBlockReason) {
-        throw new Error(assignmentBlockReason);
       }
     }
 
@@ -2587,7 +2589,8 @@ export async function approveOutreachPlanAction(formData: FormData) {
       contact: {
         select: {
           id: true,
-          contactStatus: true
+          contactStatus: true,
+          assignedRep: true
         }
       }
     }
@@ -2606,11 +2609,22 @@ export async function approveOutreachPlanAction(formData: FormData) {
   ) {
     throw new Error("This company is blocked from prospecting.");
   }
-  if (plan.contact.contactStatus !== ContactStatus.APPROVED) {
-    throw new Error("The contact must be approved before the outreach plan can be approved.");
+  if (
+    plan.contact.contactStatus === ContactStatus.REJECTED ||
+    plan.contact.contactStatus === ContactStatus.DO_NOT_CONTACT
+  ) {
+    throw new Error("This contact is blocked from outreach.");
   }
 
-  await prisma.$transaction([
+  const requestedAt = new Date();
+  const enrollment = buildApprovedOutreachEnrollment({
+    tenantId: context.tenantId,
+    contactId: plan.contactId,
+    assignedRep: plan.contact.assignedRep,
+    actorUserId: context.userId,
+    requestedAt
+  });
+  const transactionResult = await prisma.$transaction([
     prisma.outreachPlan.update({
       where: {
         id: plan.id
@@ -2632,6 +2646,21 @@ export async function approveOutreachPlanAction(formData: FormData) {
         approvedAt: new Date()
       }
     }),
+    prisma.contact.update({
+      where: {
+        id: plan.contactId
+      },
+      data: {
+        ...enrollment.contactUpdate
+      }
+    }),
+    prisma.automationJobRun.create({
+      data: {
+        ...enrollment.job,
+        input: toInputJsonValue(enrollment.job.input),
+        output: toInputJsonValue(enrollment.job.output)
+      }
+    }),
     prisma.auditLog.create({
       data: {
         tenantId: context.tenantId,
@@ -2644,13 +2673,16 @@ export async function approveOutreachPlanAction(formData: FormData) {
           companyId: plan.companyId,
           version: plan.version,
           qaStatus: plan.qaStatus,
-          evidenceFingerprint: plan.evidenceFingerprint
+          evidenceFingerprint: plan.evidenceFingerprint,
+          apolloEnrollment: "QUEUED"
         })
       }
     })
   ]);
+  const enrollmentJob = transactionResult[3] as { id: string };
 
   revalidateLeadGenSurfaces();
+  redirect(`/lead-gen/outreach?apolloJob=${encodeURIComponent(enrollmentJob.id)}`);
 }
 
 export async function approveContactDraftAction(formData: FormData) {
@@ -2699,10 +2731,15 @@ export async function generateContactDraftAction(formData: FormData) {
   }
 
   const contactId = readRequired(formData, "contactId");
+  const reviewerFeedback = readOptional(formData, "reviewerFeedback");
+  if (reviewerFeedback && reviewerFeedback.length > 2_000) {
+    throw new Error("Email feedback must be 2,000 characters or fewer.");
+  }
   await generateSharedOutreachPlanForContact({
     tenantId: context.tenantId,
     contactId,
-    forceRegenerate: true
+    forceRegenerate: true,
+    reviewerFeedback
   });
 
   revalidateLeadGenSurfaces();
@@ -3241,9 +3278,18 @@ async function validateApolloPushCandidate({
     return { ok: false, reason: "The contact's company is blocked from prospecting." };
   }
 
+  const assignedRep = contact.assignedRep?.trim() ?? null;
+  const assignmentBlockReason = getContactApolloAssignmentBlockReason(assignedRep);
+  if (!assignedRep || assignmentBlockReason) {
+    return {
+      ok: false,
+      reason: assignmentBlockReason ?? "Assign a sales rep before pushing this contact to Apollo."
+    };
+  }
+
   const hunterEligibility = evaluateHunterOutreachEligibility({
-    researchSignal: contact.company.hunterOpportunitySignals[0] ?? null,
-    prospectingDecision: contact.company.hunterProspectingDecisions[0] ?? null,
+    researchSignal: contact.company.hunterOpportunitySignals?.[0] ?? null,
+    prospectingDecision: contact.company.hunterProspectingDecisions?.[0] ?? null,
     maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
   });
   if (hunterEligibility.status !== "ELIGIBLE") {
@@ -3296,15 +3342,6 @@ async function validateApolloPushCandidate({
         reason: "This contact already shows Apollo sequence history. Review it before pushing again."
       };
     }
-  }
-
-  const assignedRep = contact.assignedRep?.trim() ?? null;
-  const assignmentBlockReason = getContactApolloAssignmentBlockReason(assignedRep);
-  if (!assignedRep || assignmentBlockReason) {
-    return {
-      ok: false,
-      reason: assignmentBlockReason ?? "Assign a sales rep before pushing this contact to Apollo."
-    };
   }
 
   const localOwner = await resolveAssignedRepUser({
@@ -5129,7 +5166,10 @@ async function generateAiDraftForContact({
     return;
   }
 
-  if (draftContext.existingOutreachPlan && !forceRegenerate) {
+  if (
+    draftContext.existingOutreachPlan?.promptVersion === OUTREACH_PLAN_PROMPT_VERSION &&
+    !forceRegenerate
+  ) {
     return;
   }
 
@@ -5150,7 +5190,8 @@ async function generateAiDraftForContact({
     recommendedPersona: hunterDirective.recommendedPersona,
     recommendedCadence: hunterDirective.recommendedCadence,
     hunterDirective,
-    evidence: evidenceLedger
+    evidence: evidenceLedger,
+    reviewerFeedback: null
   });
   const strategy = strategyGeneration.strategy;
 
@@ -5166,13 +5207,16 @@ async function generateAiDraftForContact({
     },
     selectedSequenceName: draftContext.selectedSequenceName,
     strategy,
-    evidence: evidenceLedger
+    evidence: evidenceLedger,
+    allowCallTask: hunterDirective.opportunityTier === "HOT_OPPORTUNITY",
+    reviewerFeedback: null
   });
   const sequence = sequenceGeneration.sequence;
   const deterministicQa = runDeterministicOutreachQa({
     evidence: evidenceLedger,
     strategy,
-    sequence
+    sequence,
+    allowCallTask: hunterDirective.opportunityTier === "HOT_OPPORTUNITY"
   });
   let modelQa;
   let qaUsage = null;
@@ -5559,7 +5603,17 @@ async function loadAiDraftContactContext({
             id: true,
             status: true,
             qaStatus: true,
-            version: true
+            version: true,
+            promptVersion: true,
+            steps: {
+              orderBy: { stepNumber: "asc" },
+              select: {
+                stepNumber: true,
+                channel: true,
+                subject: true,
+                body: true
+              }
+            }
           }
         }
       }
@@ -5611,20 +5665,23 @@ async function loadAiDraftContactContext({
       : defaultSequenceMapping,
     directory: apolloSequenceDirectory
   });
+  const hunterEligibility = evaluateHunterOutreachEligibility({
+    researchSignal: contact.company.hunterOpportunitySignals?.[0] ?? null,
+    prospectingDecision: contact.company.hunterProspectingDecisions?.[0] ?? null,
+    maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
+  });
   const recommendation = recommendSequenceForContact({
     contactTier: scoring.tier,
     title: contact.title,
     department: contact.department,
     companyName: contact.company.name,
     sequenceMappings: effectiveSequenceMappings,
-    sequenceDirectory: apolloSequenceDirectory
+    sequenceDirectory: apolloSequenceDirectory,
+    hunterManaged: hunterEligibility.status === "ELIGIBLE"
   });
   const tierMapping = effectiveSequenceMappings.find((entry) => entry.tier === scoring.tier) ?? null;
-  const hunterEligibility = evaluateHunterOutreachEligibility({
-    researchSignal: contact.company.hunterOpportunitySignals[0] ?? null,
-    prospectingDecision: contact.company.hunterProspectingDecisions[0] ?? null,
-    maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
-  });
+  const useHunterRecommendation =
+    hunterEligibility.status === "ELIGIBLE" && !contact.sequenceManuallyOverridden;
 
   return {
     model,
@@ -5635,10 +5692,19 @@ async function loadAiDraftContactContext({
     scoringConfig,
     evidence,
     shipmentDraftContext: buildShipmentDraftContext(contact.company.importRecords),
-    selectedSequenceName: contact.selectedSequenceName ?? contact.recommendedSequenceName ?? recommendation.name ?? null,
-    selectedSequenceId: contact.selectedSequenceId ?? contact.recommendedSequenceId ?? recommendation.id ?? null,
-    selectedSequenceReason: contact.sequenceRecommendationReason ?? recommendation.reason,
-    requiresAiDraft: tierMapping?.requiresAiDraft ?? false,
+    selectedSequenceName:
+      useHunterRecommendation
+        ? recommendation.name
+        : contact.selectedSequenceName ?? contact.recommendedSequenceName ?? recommendation.name ?? null,
+    selectedSequenceId:
+      useHunterRecommendation
+        ? recommendation.id
+        : contact.selectedSequenceId ?? contact.recommendedSequenceId ?? recommendation.id ?? null,
+    selectedSequenceReason:
+      useHunterRecommendation
+        ? recommendation.reason
+        : contact.sequenceRecommendationReason ?? recommendation.reason,
+    requiresAiDraft: hunterEligibility.status === "ELIGIBLE" || (tierMapping?.requiresAiDraft ?? false),
     hunterEligibility,
     existingDraft: contact.outreachDrafts[0] ?? null,
     existingOutreachPlan: contact.outreachPlans[0] ?? null,
@@ -5720,7 +5786,7 @@ function buildOutreachEvidenceLedger(
     });
   }
 
-  const researchSignal = draftContext.contact.company.hunterOpportunitySignals[0] ?? null;
+  const researchSignal = draftContext.contact.company.hunterOpportunitySignals?.[0] ?? null;
   if (researchSignal) {
     const research = asObject(asObject(researchSignal.evidence).research);
     const researchEvidence = Array.isArray(research.evidence) ? research.evidence : [];
@@ -5747,7 +5813,7 @@ function buildOutreachEvidenceLedger(
   }
 
   const directive = draftContext.hunterEligibility.directive;
-  const decision = draftContext.contact.company.hunterProspectingDecisions[0] ?? null;
+  const decision = draftContext.contact.company.hunterProspectingDecisions?.[0] ?? null;
   if (directive && decision) {
     records.push({
       id: `hunter-decision:${decision.id}`,
@@ -5790,10 +5856,29 @@ async function syncApolloCustomFieldsForContactPush({
   await persistContactScoreSnapshot(draftContext, "APOLLO_PUSH");
 
   const customFieldValues = buildApolloCustomFieldValues(draftContext);
-  return syncApolloContactTypedCustomFields({
+  const syncResult = await syncApolloContactTypedCustomFields({
     apolloContactId,
     fieldValues: customFieldValues
   });
+  if (draftContext.selectedSequenceName?.startsWith("Hunter - ")) {
+    const requiredFields = [
+      "NEWL Email 1 Subject",
+      "NEWL Email 1 Body",
+      "NEWL Email 2 Subject",
+      "NEWL Email 2 Body",
+      "NEWL Email 3 Subject",
+      "NEWL Email 3 Body"
+    ];
+    const missingRequired = requiredFields.filter(
+      (field) => !(field in customFieldValues) || syncResult.missingFields.includes(field)
+    );
+    if (missingRequired.length > 0) {
+      throw new Error(
+        `Hunter sequence push is blocked until Apollo has every generated email field: ${missingRequired.join(", ")}.`
+      );
+    }
+  }
+  return syncResult;
 }
 
 async function persistContactScoreSnapshot(
@@ -5867,6 +5952,21 @@ function buildApolloCustomFieldValues(
 
   if (draftContext.existingDraft?.body) {
     values["NEWL Email Body Draft"] = draftContext.existingDraft.body;
+  }
+
+  const emailSteps = draftContext.existingOutreachPlan?.steps?.filter(
+    (step) => step.channel === "EMAIL"
+  ) ?? [];
+  emailSteps.slice(0, 3).forEach((step, index) => {
+    const number = index + 1;
+    if (step.subject) values[`NEWL Email ${number} Subject`] = step.subject;
+    values[`NEWL Email ${number} Body`] = step.body;
+  });
+  const callStep = draftContext.existingOutreachPlan?.steps?.find(
+    (step) => step.channel === "CALL_TASK"
+  );
+  if (callStep) {
+    values["NEWL Hot Opportunity Call Brief"] = callStep.body;
   }
 
   return values;

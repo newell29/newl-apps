@@ -54,6 +54,7 @@ export default async function OutreachQueuePage({
   await requireModule(context, ModuleKey.LEAD_GEN);
   const tenant = context;
   const params = searchParams ? await searchParams : {};
+  const requestedApolloJobId = readParam(params.apolloJob);
   const query = readParam(params.q) ?? "";
   const companyId = readParam(params.company);
   const searchProfileId = readParam(params.searchProfile);
@@ -416,6 +417,16 @@ export default async function OutreachQueuePage({
           <ContactDirectoryTableClient
             contacts={contacts}
             initialApolloPushJobs={apolloPushJobs}
+            initialActiveApolloPushJobId={
+              requestedApolloJobId &&
+              apolloPushJobs.some(
+                (job) =>
+                  job.id === requestedApolloJobId &&
+                  (job.status === "QUEUED" || job.status === "RUNNING")
+              )
+                ? requestedApolloJobId
+                : null
+            }
             sequenceOptions={filterOptions.sequenceOptions.length > 0 ? filterOptions.sequenceOptions : sequenceOptions}
             bulkUpdateContactSequenceAction={bulkUpdateContactSequenceAction}
             bulkRemoveContactsAction={bulkRemoveContactsAction}

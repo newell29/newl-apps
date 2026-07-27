@@ -66,16 +66,6 @@ const sequence: GeneratedOutreachSequence = {
     },
     {
       stepNumber: 2,
-      channel: OutreachChannel.LINKEDIN_TASK,
-      delayDays: 2,
-      subject: null,
-      body:
-        "Review Jordan's current role and send a short connection request that mentions inbound inventory planning without quoting private shipment details.",
-      angle: "Role-aware connection",
-      evidenceRefs: ["company:identity"]
-    },
-    {
-      stepNumber: 3,
       channel: OutreachChannel.EMAIL,
       delayDays: 4,
       subject: "Warehousing around the Houston lane",
@@ -85,7 +75,7 @@ const sequence: GeneratedOutreachSequence = {
       evidenceRefs: ["company:identity", "trademining:summary"]
     },
     {
-      stepNumber: 4,
+      stepNumber: 3,
       channel: OutreachChannel.CALL_TASK,
       delayDays: 7,
       subject: null,
@@ -95,7 +85,7 @@ const sequence: GeneratedOutreachSequence = {
       evidenceRefs: ["company:identity"]
     },
     {
-      stepNumber: 5,
+      stepNumber: 4,
       channel: OutreachChannel.EMAIL,
       delayDays: 10,
       subject: "Worth comparing capacity?",
@@ -108,8 +98,8 @@ const sequence: GeneratedOutreachSequence = {
 };
 
 describe("outreach plan grounding", () => {
-  it("passes a complete five-touch sequence with valid evidence citations", () => {
-    const result = runDeterministicOutreachQa({ evidence, strategy, sequence });
+  it("passes a complete hot-opportunity email sequence with one call task", () => {
+    const result = runDeterministicOutreachQa({ evidence, strategy, sequence, allowCallTask: true });
 
     expect(result.passed).toBe(true);
     expect(result.issues).toEqual([]);
@@ -119,6 +109,7 @@ describe("outreach plan grounding", () => {
     const result = runDeterministicOutreachQa({
       evidence,
       strategy,
+      allowCallTask: true,
       sequence: {
         ...sequence,
         steps: sequence.steps.map((step) =>
@@ -141,7 +132,7 @@ describe("outreach plan grounding", () => {
   });
 
   it("fails closed when the model critic returns a blocking issue", () => {
-    const deterministic = runDeterministicOutreachQa({ evidence, strategy, sequence });
+    const deterministic = runDeterministicOutreachQa({ evidence, strategy, sequence, allowCallTask: true });
     const result = mergeOutreachQaResults(deterministic, {
       passed: false,
       issues: [
@@ -149,7 +140,7 @@ describe("outreach plan grounding", () => {
           code: "BUYER_RESPONSIBILITY_UNSUPPORTED",
           severity: "ERROR",
           message: "The evidence does not prove that this contact owns warehouse capacity.",
-          stepNumber: 3
+          stepNumber: 2
         }
       ]
     });

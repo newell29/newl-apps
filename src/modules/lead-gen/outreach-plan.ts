@@ -6,12 +6,12 @@ import {
   OutreachQaStatus
 } from "@prisma/client";
 
-export const OUTREACH_PLAN_PROMPT_VERSION = "outreach-plan-v1.0";
+export const OUTREACH_PLAN_PROMPT_VERSION = "outreach-plan-v2.0";
 export const DEFAULT_OUTREACH_STRATEGY_MODEL = "gpt-5.6-terra";
 export const DEFAULT_OUTREACH_DRAFT_MODEL = "gpt-5.6-luna";
 export const DEFAULT_OUTREACH_QA_MODEL = "gpt-5.6-luna";
 export const DEFAULT_HUNTER_CONTACT_FIT_MODEL = "gpt-5.6-luna";
-export const HUNTER_CONTACT_FIT_PROMPT_VERSION = "hunter-contact-fit-v1.0";
+export const HUNTER_CONTACT_FIT_PROMPT_VERSION = "hunter-contact-fit-v2.0";
 
 export type HunterContactFitDisposition = "PRIMARY" | "SECONDARY" | "REVIEW" | "REJECT";
 
@@ -106,11 +106,13 @@ export function fingerprintOutreachEvidence(evidence: OutreachEvidenceRecord[]) 
 export function runDeterministicOutreachQa({
   evidence,
   strategy,
-  sequence
+  sequence,
+  allowCallTask = false
 }: {
   evidence: OutreachEvidenceRecord[];
   strategy: OutreachStrategy;
   sequence: GeneratedOutreachSequence;
+  allowCallTask?: boolean;
 }) {
   const issues: OutreachQaIssue[] = [];
   const evidenceIds = new Set(evidence.map((record) => record.id));
@@ -119,11 +121,12 @@ export function runDeterministicOutreachQa({
     .join(" ")
     .toLowerCase();
 
-  if (sequence.steps.length !== 5) {
+  const expectedStepCount = allowCallTask ? 4 : 3;
+  if (sequence.steps.length !== expectedStepCount) {
     issues.push({
       code: "STEP_COUNT",
       severity: "ERROR",
-      message: "A complete outreach sequence must contain exactly five coordinated touches.",
+      message: `This Hunter cadence must contain exactly ${expectedStepCount} coordinated touches.`,
       stepNumber: null
     });
   }
@@ -134,7 +137,7 @@ export function runDeterministicOutreachQa({
     issues.push({
       code: "STEP_ORDER",
       severity: "ERROR",
-      message: "Sequence step numbers must be unique and contiguous from one through five.",
+      message: `Sequence step numbers must be unique and contiguous from one through ${expectedStepCount}.`,
       stepNumber: null
     });
   }
@@ -163,11 +166,17 @@ export function runDeterministicOutreachQa({
   const linkedinCount = orderedSteps.filter((step) => step.channel === OutreachChannel.LINKEDIN_TASK).length;
   const callCount = orderedSteps.filter((step) => step.channel === OutreachChannel.CALL_TASK).length;
 
-  if (emailCount !== 3 || linkedinCount !== 1 || callCount !== 1) {
+  if (
+    emailCount !== 3 ||
+    linkedinCount !== 0 ||
+    callCount !== (allowCallTask ? 1 : 0)
+  ) {
     issues.push({
       code: "CHANNEL_MIX",
       severity: "ERROR",
-      message: "The Phase 1 sequence must contain three emails, one LinkedIn task, and one call task.",
+      message: allowCallTask
+        ? "A Hot Hunter opportunity must contain three emails and one call task."
+        : "A Hunter email cadence must contain three emails and no LinkedIn or call tasks.",
       stepNumber: null
     });
   }
