@@ -45,6 +45,7 @@ ALLOWED_PASSES = {"IDENTITY", "FRESH_EVENTS", "CAREERS", "DISTRIBUTION_FOOTPRINT
 SOURCE_TYPES = {"FIRST_PARTY", "GOVERNMENT", "NEWS", "CAREERS", "DIRECTORY", "OTHER"}
 MAX_RESPONSE_BYTES = 2_000_000
 MAX_PAGE_BYTES = 400_000
+MAX_EVIDENCE_PER_COMPANY = 24
 LEGAL_SUFFIXES = {
     "co",
     "company",
@@ -677,7 +678,9 @@ def collect_company_evidence(
         query_results.append((query_row, results))
 
     result_index = 0
-    while len(evidence) < 24 and any(result_index < len(results) for _, results in query_results):
+    while len(evidence) < MAX_EVIDENCE_PER_COMPANY and any(
+        result_index < len(results) for _, results in query_results
+    ):
         for query_row, results in query_results:
             if result_index >= len(results):
                 continue
@@ -713,10 +716,14 @@ def collect_company_evidence(
                     "firstParty": first_party,
                 }
             )
-            if len(evidence) >= 24:
+            if len(evidence) >= MAX_EVIDENCE_PER_COMPANY:
                 break
         result_index += 1
     return evidence, query_log, fetched_pages
+
+
+def bounded_company_evidence(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return evidence[:MAX_EVIDENCE_PER_COMPANY]
 
 
 def canonical_url(value: str) -> str:
@@ -1827,8 +1834,11 @@ def collect_follow_up_evidence(
     fetched_pages = 0
     for candidate in candidates:
         key = candidate["companyKey"]
-        seen = {canonical_url(item["url"]) for item in evidence_by_key.get(key, [])}
+        company_evidence = evidence_by_key.setdefault(key, [])
+        seen = {canonical_url(item["url"]) for item in company_evidence}
         for query in synthesis_by_key[key]["followUpQueries"][:follow_up_limit]:
+            if len(company_evidence) >= MAX_EVIDENCE_PER_COMPANY:
+                break
             try:
                 results = search_web(provider, query, results_per_query)
                 query_log.append(
@@ -1852,13 +1862,15 @@ def collect_follow_up_evidence(
                 )
                 continue
             for row in results:
+                if len(company_evidence) >= MAX_EVIDENCE_PER_COMPANY:
+                    break
                 url = row["url"]
                 canonical = canonical_url(url)
                 if canonical in seen:
                     continue
                 seen.add(canonical)
                 hostname = normalized_hostname(url)
-                evidence_by_key[key].append(
+                company_evidence.append(
                     {
                         "pass": "FOLLOW_UP",
                         "query": query[:500],
@@ -1871,7 +1883,7 @@ def collect_follow_up_evidence(
                         "firstParty": False,
                     }
                 )
-                if len(evidence_by_key[key]) >= 24:
+                if len(company_evidence) >= MAX_EVIDENCE_PER_COMPANY:
                     break
     return fetched_pages
 
@@ -2006,11 +2018,17 @@ def run_company_research(
             raw_queries = checkpoint.get("queryLog")
             if not isinstance(raw_evidence, dict) or not isinstance(raw_queries, list):
                 raise RuntimeError("Hunter research checkpoint is missing retrieval data.")
+            checkpoint_evidence_overflow = any(
+                isinstance(value, list) and len(value) > MAX_EVIDENCE_PER_COMPANY
+                for value in raw_evidence.values()
+            )
             evidence_by_key = {
-                str(key): value
+                str(key): bounded_company_evidence(value)
                 for key, value in raw_evidence.items()
                 if isinstance(value, list)
             }
+            if checkpoint_stage == "SYNTHESIS_COMPLETE" and checkpoint_evidence_overflow:
+                checkpoint_stage = "RETRIEVAL_COMPLETE"
             query_log = [row for row in raw_queries if isinstance(row, dict)]
             page_fetch_count = int(checkpoint.get("pageFetchCount") or 0)
         else:
@@ -2073,6 +2091,10 @@ def run_company_research(
                     results_per_query,
                     follow_up_limit,
                 )
+                evidence_by_key = {
+                    key: bounded_company_evidence(rows)
+                    for key, rows in evidence_by_key.items()
+                }
                 final_synthesis, final_usage = synthesize_companies(
                     ollama_url, qwen_model, candidates, evidence_by_key, qwen_batch_size
                 )
@@ -2180,7 +2202,9 @@ def run_company_research(
                     "companyId": candidate["companyId"],
                     "companyKey": candidate["companyKey"],
                     "companyName": candidate["companyName"],
-                    "evidence": evidence_by_key[candidate["companyKey"]],
+                    "evidence": bounded_company_evidence(
+                        evidence_by_key[candidate["companyKey"]]
+                    ),
                     "synthesis": {
                         key: value
                         for key, value in synthesis_by_key[candidate["companyKey"]].items()

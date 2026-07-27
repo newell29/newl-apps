@@ -456,6 +456,49 @@ describe("Hunter company deep research", () => {
     ]);
   });
 
+  it("never searches or appends follow-up evidence beyond the company evidence cap", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'Example Retailer','companyKey':'example-retailer'}",
+      "def evidence(index):",
+      " return {'pass':'IDENTITY','query':'identity','title':f'Existing {index}','url':f'https://example.com/existing-{index}','sourceDomain':'example.com','sourceType':'FIRST_PARTY','publishedAt':None,'excerpt':'Existing evidence.','firstParty':True}",
+      "calls=[]",
+      "def fake_search(provider,query,limit):",
+      " calls.append(query)",
+      " return [{'url':f'https://news.example/{query}-{index}','title':f'Follow-up {index}','snippet':'New evidence.','publishedAt':None} for index in range(3)]",
+      "r.search_web=fake_search",
+      "full={'example-retailer':[evidence(index) for index in range(r.MAX_EVIDENCE_PER_COMPANY)]}",
+      "full_log=[]",
+      "r.collect_follow_up_evidence('BRAVE',[candidate],{'example-retailer':{'followUpQueries':['first','second']}},full,full_log,3,2)",
+      "full_result={'calls':len(calls),'evidence':len(full['example-retailer']),'queries':len(full_log)}",
+      "calls.clear()",
+      "one_slot={'example-retailer':[evidence(index) for index in range(r.MAX_EVIDENCE_PER_COMPANY-1)]}",
+      "one_slot_log=[]",
+      "r.collect_follow_up_evidence('BRAVE',[candidate],{'example-retailer':{'followUpQueries':['first','second']}},one_slot,one_slot_log,3,2)",
+      "bounded=r.bounded_company_evidence([evidence(index) for index in range(r.MAX_EVIDENCE_PER_COMPANY+2)])",
+      "print(json.dumps({'full':full_result,'oneSlot':{'calls':len(calls),'evidence':len(one_slot['example-retailer']),'queries':len(one_slot_log)},'bounded':len(bounded)}))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+    const result = JSON.parse(stdout) as {
+      full: { calls: number; evidence: number; queries: number };
+      oneSlot: { calls: number; evidence: number; queries: number };
+      bounded: number;
+    };
+
+    expect(result).toEqual({
+      full: { calls: 0, evidence: 24, queries: 0 },
+      oneSlot: { calls: 1, evidence: 24, queries: 1 },
+      bounded: 24
+    });
+  });
+
   it("uses legal-name aliases and recognizes matching official domains as first party", async () => {
     const program = [
       "import json",

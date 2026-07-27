@@ -162,8 +162,9 @@ Regression coverage must prove:
 10. completion stores tenant-scoped evidence and refreshes only the dry-run plan; and
 11. a retrieval/Qwen checkpoint resumes only against an identical newly prepared tenant cohort;
 12. legal-name, regional, and brand aliases cover known false-negative shapes such as Aalberts IPS Americas, AS Colour, 3F North America, Barnhardt Manufacturing, and Atlas Copco Compressors;
-13. saturated generic results cannot prevent a known-domain identity or fresh-event query from executing or contributing evidence, including Barnhardt's first-party NCFI expansion; and
-14. no company-research module or route imports or calls Apollo, pipeline-stage mutation, cadence enrollment, email, LinkedIn, or customer-communication code.
+13. saturated generic results cannot prevent a known-domain identity or fresh-event query from executing or contributing evidence, including Barnhardt's first-party NCFI expansion;
+14. a full evidence ledger executes no follow-up search, a partially full ledger appends only to the remaining capacity, resumed evidence is bounded, and no completion company can exceed 24 evidence records; and
+15. no company-research module or route imports or calls Apollo, pipeline-stage mutation, cadence enrollment, email, LinkedIn, or customer-communication code.
 
 ## Hunter quality audit and Rivet triage
 

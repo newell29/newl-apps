@@ -75,6 +75,10 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 - A missing search or Kimi credential, unavailable local Qwen, total search-provider failure,
   incomplete structured output, company outside the prepared tenant cohort, forged URL/domain pair,
   or invalid score arithmetic closes the tracked run as `ERROR`.
+- The completion API accepts at most 24 evidence records per company and validates the cohort atomically.
+  Follow-up queries therefore stop before a full evidence ledger, append only into remaining capacity,
+  and the worker bounds both resumed checkpoints and the final completion payload. A legacy over-cap
+  synthesis checkpoint is resynthesized against its bounded evidence so saved indices remain valid.
 - A failed completion is not partially persisted and does not refresh the prospecting plan. The
   operator may use the exact-cohort dry run and local replay ledger to diagnose it.
 - Individual query failures remain visible in a valid completion, but deterministic evidence-count,
