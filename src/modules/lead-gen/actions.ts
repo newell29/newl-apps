@@ -47,6 +47,10 @@ import {
 } from "@/modules/lead-gen/score-history";
 import { recordCurrentContactScoreSnapshot as recordContactScoreSnapshot } from "@/modules/lead-gen/contact-score-snapshot";
 import { getNextApolloSyncAt } from "@/modules/lead-gen/apollo-status-sync-policy";
+import {
+  evaluateHunterOutreachEligibility,
+  getHunterOutreachResearchMaxAgeDays
+} from "@/modules/lead-gen/hunter-outreach-eligibility";
 import { canonicalizeTradeMiningDestinationPort } from "@/modules/lead-gen/search-profile-suggestions";
 import {
   assertValidTradeMiningSearchProfile,
@@ -1550,7 +1554,44 @@ export async function bulkPushContactsToApolloAction(
         company: {
           select: {
             candidateStatus: true,
-            doNotProspect: true
+            doNotProspect: true,
+            hunterOpportunitySignals: {
+              where: {
+                tenantId: context.tenantId,
+                sourceName: "Hunter company research"
+              },
+              orderBy: {
+                observedAt: "desc"
+              },
+              take: 1,
+              select: {
+                id: true,
+                sourceName: true,
+                serviceLine: true,
+                observedAt: true,
+                evidence: true
+              }
+            },
+            hunterProspectingDecisions: {
+              where: {
+                tenantId: context.tenantId
+              },
+              orderBy: {
+                createdAt: "desc"
+              },
+              take: 1,
+              select: {
+                id: true,
+                status: true,
+                serviceLine: true,
+                opportunityType: true,
+                rationale: true,
+                recommendedPersona: true,
+                recommendedSender: true,
+                recommendedCadence: true,
+                createdAt: true
+              }
+            }
           }
         }
       }
@@ -1572,6 +1613,15 @@ export async function bulkPushContactsToApolloAction(
         contact.company.candidateStatus === CandidateStatus.DISQUALIFIED
       ) {
         throw new Error("The contact's company is blocked from prospecting.");
+      }
+
+      const hunterEligibility = evaluateHunterOutreachEligibility({
+        researchSignal: contact.company.hunterOpportunitySignals[0] ?? null,
+        prospectingDecision: contact.company.hunterProspectingDecisions[0] ?? null,
+        maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
+      });
+      if (hunterEligibility.status !== "ELIGIBLE") {
+        throw new Error(`${hunterEligibility.label}: ${hunterEligibility.reason}`);
       }
 
       const assignmentBlockReason = getContactApolloAssignmentBlockReason(contact.assignedRep);
@@ -1682,7 +1732,44 @@ export async function runApolloPushJob({
             linkedinUrl: true,
             apolloOrganizationId: true,
             candidateStatus: true,
-            doNotProspect: true
+            doNotProspect: true,
+            hunterOpportunitySignals: {
+              where: {
+                tenantId,
+                sourceName: "Hunter company research"
+              },
+              orderBy: {
+                observedAt: "desc"
+              },
+              take: 1,
+              select: {
+                id: true,
+                sourceName: true,
+                serviceLine: true,
+                observedAt: true,
+                evidence: true
+              }
+            },
+            hunterProspectingDecisions: {
+              where: {
+                tenantId
+              },
+              orderBy: {
+                createdAt: "desc"
+              },
+              take: 1,
+              select: {
+                id: true,
+                status: true,
+                serviceLine: true,
+                opportunityType: true,
+                rationale: true,
+                recommendedPersona: true,
+                recommendedSender: true,
+                recommendedCadence: true,
+                createdAt: true
+              }
+            }
           }
         },
         outreachDrafts: {
@@ -2956,6 +3043,24 @@ type ApolloPushContactRecord = {
     apolloOrganizationId: string | null;
     candidateStatus: CandidateStatus;
     doNotProspect: boolean;
+    hunterOpportunitySignals: Array<{
+      id: string;
+      sourceName: string | null;
+      serviceLine: import("@prisma/client").HunterServiceLine;
+      observedAt: Date;
+      evidence: Prisma.JsonValue | null;
+    }>;
+    hunterProspectingDecisions: Array<{
+      id: string;
+      status: import("@prisma/client").HunterDecisionStatus;
+      serviceLine: import("@prisma/client").HunterServiceLine;
+      opportunityType: string;
+      rationale: string;
+      recommendedPersona: string | null;
+      recommendedSender: string | null;
+      recommendedCadence: string | null;
+      createdAt: Date;
+    }>;
   };
   outreachDrafts: Array<{
     id: string;
@@ -3131,6 +3236,18 @@ async function validateApolloPushCandidate({
     contact.company.candidateStatus === CandidateStatus.DISQUALIFIED
   ) {
     return { ok: false, reason: "The contact's company is blocked from prospecting." };
+  }
+
+  const hunterEligibility = evaluateHunterOutreachEligibility({
+    researchSignal: contact.company.hunterOpportunitySignals[0] ?? null,
+    prospectingDecision: contact.company.hunterProspectingDecisions[0] ?? null,
+    maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
+  });
+  if (hunterEligibility.status !== "ELIGIBLE") {
+    return {
+      ok: false,
+      reason: `${hunterEligibility.label}: ${hunterEligibility.reason}`
+    };
   }
 
   if (!contact.apolloContactId) {
@@ -4985,6 +5102,14 @@ async function generateAiDraftForContact({
     }
     return;
   }
+  if (draftContext.hunterEligibility.status !== "ELIGIBLE" || !draftContext.hunterEligibility.directive) {
+    if (forceRegenerate) {
+      throw new Error(
+        `${draftContext.hunterEligibility.label}: ${draftContext.hunterEligibility.reason}`
+      );
+    }
+    return;
+  }
 
   if (!draftContext.selectedSequenceName) {
     if (forceRegenerate) {
@@ -5006,7 +5131,7 @@ async function generateAiDraftForContact({
   }
 
   const models = loadOutreachModels();
-  const latestDecision = draftContext.contact.company.hunterProspectingDecisions[0] ?? null;
+  const hunterDirective = draftContext.hunterEligibility.directive;
   const strategyGeneration = await generateOutreachStrategy({
     model: models.strategy,
     companyName: draftContext.contact.company.name,
@@ -5019,8 +5144,9 @@ async function generateAiDraftForContact({
       seniority: draftContext.contact.seniority
     },
     selectedSequenceName: draftContext.selectedSequenceName,
-    recommendedPersona: latestDecision?.recommendedPersona ?? null,
-    recommendedCadence: latestDecision?.recommendedCadence ?? null,
+    recommendedPersona: hunterDirective.recommendedPersona,
+    recommendedCadence: hunterDirective.recommendedCadence,
+    hunterDirective,
     evidence: evidenceLedger
   });
   const strategy = strategyGeneration.strategy;
@@ -5099,6 +5225,7 @@ async function generateAiDraftForContact({
     contactTier: draftContext.contactTier,
     selectedSequenceName: draftContext.selectedSequenceName,
     selectedSequenceId: draftContext.selectedSequenceId,
+    hunterDirective,
     strategy,
     evidenceLedger
   };
@@ -5360,7 +5487,8 @@ async function loadAiDraftContactContext({
             },
             hunterOpportunitySignals: {
               where: {
-                tenantId
+                tenantId,
+                sourceName: "Hunter company research"
               },
               orderBy: {
                 observedAt: "desc"
@@ -5375,6 +5503,7 @@ async function loadAiDraftContactContext({
                 sourceName: true,
                 sourceUrl: true,
                 sourcePublishedAt: true,
+                observedAt: true,
                 confidence: true,
                 evidence: true
               }
@@ -5389,6 +5518,7 @@ async function loadAiDraftContactContext({
               take: 3,
               select: {
                 id: true,
+                status: true,
                 serviceLine: true,
                 opportunityType: true,
                 rationale: true,
@@ -5487,6 +5617,11 @@ async function loadAiDraftContactContext({
     sequenceDirectory: apolloSequenceDirectory
   });
   const tierMapping = effectiveSequenceMappings.find((entry) => entry.tier === scoring.tier) ?? null;
+  const hunterEligibility = evaluateHunterOutreachEligibility({
+    researchSignal: contact.company.hunterOpportunitySignals[0] ?? null,
+    prospectingDecision: contact.company.hunterProspectingDecisions[0] ?? null,
+    maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
+  });
 
   return {
     model,
@@ -5501,6 +5636,7 @@ async function loadAiDraftContactContext({
     selectedSequenceId: contact.selectedSequenceId ?? contact.recommendedSequenceId ?? recommendation.id ?? null,
     selectedSequenceReason: contact.sequenceRecommendationReason ?? recommendation.reason,
     requiresAiDraft: tierMapping?.requiresAiDraft ?? false,
+    hunterEligibility,
     existingDraft: contact.outreachDrafts[0] ?? null,
     existingOutreachPlan: contact.outreachPlans[0] ?? null,
     leadId: contact.company.leads[0]?.id ?? null,
@@ -5581,62 +5717,53 @@ function buildOutreachEvidenceLedger(
     });
   }
 
-  for (const signal of draftContext.contact.company.hunterOpportunitySignals) {
-    records.push({
-      id: `hunter-signal:${signal.id}`,
-      kind: "HUNTER_SIGNAL",
-      title: signal.title,
-      summary: signal.summary,
-      sourceUrl: signal.sourceUrl,
-      publishedAt: signal.sourcePublishedAt?.toISOString() ?? null,
-      facts: [
-        `Signal type: ${signal.signalType}`,
-        `Service line: ${signal.serviceLine}`,
-        `Confidence: ${signal.confidence}`,
-        ...flattenEvidenceStrings(signal.evidence, 5)
-      ]
-    });
+  const researchSignal = draftContext.contact.company.hunterOpportunitySignals[0] ?? null;
+  if (researchSignal) {
+    const research = asObject(asObject(researchSignal.evidence).research);
+    const researchEvidence = Array.isArray(research.evidence) ? research.evidence : [];
+    for (const [index, rawEvidence] of researchEvidence.slice(0, 7).entries()) {
+      const evidence = asObject(rawEvidence);
+      const sourceUrl = readString(evidence, "url");
+      const title = readString(evidence, "title");
+      const excerpt = readString(evidence, "excerpt");
+      if (!sourceUrl || !title || !excerpt) continue;
+      records.push({
+        id: `hunter-research:${researchSignal.id}:${index + 1}`,
+        kind: "HUNTER_RESEARCH",
+        title,
+        summary: excerpt,
+        sourceUrl,
+        publishedAt: readString(evidence, "publishedAt"),
+        facts: [
+          readString(evidence, "pass") ? `Research pass: ${readString(evidence, "pass")}` : null,
+          readString(evidence, "sourceType") ? `Source type: ${readString(evidence, "sourceType")}` : null,
+          excerpt
+        ].filter((value): value is string => Boolean(value))
+      });
+    }
   }
 
-  for (const decision of draftContext.contact.company.hunterProspectingDecisions) {
+  const directive = draftContext.hunterEligibility.directive;
+  const decision = draftContext.contact.company.hunterProspectingDecisions[0] ?? null;
+  if (directive && decision) {
     records.push({
       id: `hunter-decision:${decision.id}`,
       kind: "HUNTER_DECISION",
-      title: `${decision.opportunityType} prospecting decision`,
-      summary: decision.rationale,
+      title: `${directive.opportunityTier.replaceAll("_", " ")}: ${directive.opportunityType}`,
+      summary: directive.rationale,
       sourceUrl: null,
       publishedAt: decision.createdAt.toISOString(),
       facts: [
-        `Service line: ${decision.serviceLine}`,
-        `Decision confidence: ${decision.confidence}`,
-        decision.recommendedPersona ? `Recommended persona: ${decision.recommendedPersona}` : null,
-        decision.recommendedCadence ? `Recommended cadence: ${decision.recommendedCadence}` : null,
-        ...flattenEvidenceStrings(decision.evidence, 5)
+        `Hunter-required service line: ${directive.requiredServiceLine}`,
+        `Hunter final score: ${directive.finalScore}`,
+        `Hunter final confidence: ${directive.finalConfidence}`,
+        directive.recommendedPersona ? `Recommended persona: ${directive.recommendedPersona}` : null,
+        directive.recommendedCadence ? `Recommended cadence: ${directive.recommendedCadence}` : null
       ].filter((value): value is string => Boolean(value))
     });
   }
 
   return records.slice(0, 12);
-}
-
-function flattenEvidenceStrings(value: unknown, limit: number) {
-  const output: string[] = [];
-  const visit = (candidate: unknown) => {
-    if (output.length >= limit) return;
-    if (typeof candidate === "string" && candidate.trim()) {
-      output.push(candidate.trim().slice(0, 500));
-      return;
-    }
-    if (Array.isArray(candidate)) {
-      for (const item of candidate) visit(item);
-      return;
-    }
-    if (candidate && typeof candidate === "object") {
-      for (const item of Object.values(candidate as Record<string, unknown>)) visit(item);
-    }
-  };
-  visit(value);
-  return output;
 }
 
 async function syncApolloCustomFieldsForContactPush({

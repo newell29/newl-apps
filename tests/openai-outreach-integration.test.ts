@@ -83,6 +83,7 @@ describe("OpenAI structured outreach workflow", () => {
       selectedSequenceName: "Warehouse Capacity Outreach",
       recommendedPersona: "Supply-chain leader",
       recommendedCadence: "Warehouse Capacity Outreach",
+      hunterDirective: hunterDirective(),
       evidence
     });
     const sequenceGeneration = await generateCompleteOutreachSequence({
@@ -119,8 +120,76 @@ describe("OpenAI structured outreach workflow", () => {
       expect(body.text.format.type).toBe("json_schema");
       expect(body.text.format.strict).toBe(true);
     }
+    const strategyRequest = JSON.parse(
+      (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string
+    );
+    expect(strategyRequest.input[1].content).toContain(
+      '"requiredServiceLine":"WAREHOUSING"'
+    );
+  });
+
+  it("rejects a strategy that changes Hunter's required service line", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValueOnce(responseWithOutput({
+      serviceLine: "TRUCKING",
+      opportunityType: "Recent inbound inventory",
+      objective: "Confirm whether flexible warehousing is useful.",
+      triggerSummary: "Saved evidence shows Houston-bound activity.",
+      buyerHypothesis: "The supply-chain director may influence capacity planning.",
+      valueProposition: "Newl can review warehouse and freight handoffs.",
+      likelyObjection: "Capacity may already be covered.",
+      callToAction: "Ask for a short comparison.",
+      channelStrategy: ["Evidence-led email"],
+      senderRecommendation: "Operations sender",
+      confidence: 82,
+      evidenceRefs: ["company:identity"]
+    }));
+
+    await expect(
+      generateOutreachStrategy({
+        model: "gpt-5.6-terra",
+        companyName: "Harbor Home",
+        companyDomain: "harborhome.example",
+        contact: {
+          firstName: "Jordan",
+          fullName: "Jordan Demo",
+          title: "Director of Supply Chain",
+          department: "Logistics",
+          seniority: "director"
+        },
+        selectedSequenceName: "Warehouse Capacity Outreach",
+        recommendedPersona: "Supply-chain leader",
+        recommendedCadence: "Warehouse Capacity Outreach",
+        hunterDirective: hunterDirective(),
+        evidence: [{
+          id: "company:identity",
+          kind: "COMPANY",
+          title: "Company identity",
+          summary: "Jordan Demo is Director of Supply Chain at Harbor Home.",
+          sourceUrl: "https://harborhome.example",
+          publishedAt: null,
+          facts: ["Contact title: Director of Supply Chain"]
+        }]
+      })
+    ).rejects.toThrow("changed Hunter's required service line");
   });
 });
+
+function hunterDirective() {
+  return {
+    researchSignalId: "signal-1",
+    prospectingDecisionId: "decision-1",
+    opportunityTier: "HOT_OPPORTUNITY" as const,
+    requiredServiceLine: HunterServiceLine.WAREHOUSING,
+    opportunityType: "Recent inbound inventory",
+    rationale: "Lead with flexible warehouse capacity.",
+    recommendedPersona: "Supply-chain leader",
+    recommendedSender: "Operations sender",
+    recommendedCadence: "Warehouse Capacity Outreach",
+    finalScore: 86,
+    finalConfidence: 82,
+    researchRetrievedAt: "2026-07-26T12:00:00.000Z"
+  };
+}
 
 function responseWithOutput(payload: Record<string, unknown>) {
   return {

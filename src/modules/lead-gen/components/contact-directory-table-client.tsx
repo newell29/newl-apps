@@ -65,6 +65,21 @@ type ContactDirectoryRow = {
   sequenceManuallyOverridden: boolean;
   requiresAiDraft: boolean;
   canGenerateOutreachPlan: boolean;
+  hunterEligibility: {
+    status:
+      | "ELIGIBLE"
+      | "NEEDS_HUNTER_ASSESSMENT"
+      | "WATCHLIST"
+      | "BLOCKED"
+      | "STALE_RESEARCH"
+      | "NOT_SELECTED"
+      | "INVALID_HANDOFF";
+    label: string;
+    reason: string;
+    opportunityTier: string | null;
+    serviceLine: string | null;
+    researchRetrievedAt: string | null;
+  };
   draftGenerationConfigured: boolean;
   draftGenerationDisabledReason: string | null;
   draft: {
@@ -551,6 +566,15 @@ export function ContactDirectoryTableClient({
                   Change Sequence
                 </button>
               </form>
+              <div className="rounded-md border border-border bg-background px-3 py-2 text-xs">
+                <div className="font-semibold text-foreground">{contact.hunterEligibility.label}</div>
+                <div className="mt-1 text-mutedForeground">
+                  {contact.hunterEligibility.serviceLine
+                    ? `${formatEnum(contact.hunterEligibility.serviceLine)} · `
+                    : ""}
+                  {contact.hunterEligibility.reason}
+                </div>
+              </div>
               {contact.outreachPlan ? (
                 <OutreachPlanPanel
                   contact={contact}
@@ -622,8 +646,18 @@ export function ContactDirectoryTableClient({
                   <p className="text-xs text-mutedForeground">
                     {contact.canGenerateOutreachPlan
                       ? "Generate a grounded Newl outreach plan and complete five-touch sequence."
-                      : "This contact must be ranked before Newl can generate an outreach plan."}
+                      : contact.hunterEligibility.status === "ELIGIBLE"
+                        ? "This contact must be ranked before Newl can generate an outreach plan."
+                        : `${contact.hunterEligibility.label}: ${contact.hunterEligibility.reason}`}
                   </p>
+                  {!contact.canGenerateOutreachPlan ? (
+                    <Link
+                      href="/lead-gen/hunter"
+                      className="inline-flex text-xs font-semibold text-primary hover:underline"
+                    >
+                      Review in Hunter
+                    </Link>
+                  ) : null}
                   {contact.canGenerateOutreachPlan ? (
                     <div className="space-y-2">
                       <form action={generateContactDraftAction}>

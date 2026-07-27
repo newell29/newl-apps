@@ -28,6 +28,10 @@ import {
   type IndustryClassification
 } from "@/modules/lead-gen/industry-classification";
 import {
+  evaluateHunterOutreachEligibility,
+  getHunterOutreachResearchMaxAgeDays
+} from "@/modules/lead-gen/hunter-outreach-eligibility";
+import {
   matchesTradeMiningIndustryLabels,
   matchesTradeMiningIndustrySignals,
   normalizeTradeMiningIndustryFilterMode,
@@ -1170,6 +1174,40 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
               score: true
             },
             take: 1
+          },
+          hunterOpportunitySignals: {
+            where: tenantWhere(tenant, {
+              sourceName: "Hunter company research"
+            }),
+            orderBy: {
+              observedAt: "desc"
+            },
+            take: 1,
+            select: {
+              id: true,
+              sourceName: true,
+              serviceLine: true,
+              observedAt: true,
+              evidence: true
+            }
+          },
+          hunterProspectingDecisions: {
+            where: tenantWhere(tenant),
+            orderBy: {
+              createdAt: "desc"
+            },
+            take: 1,
+            select: {
+              id: true,
+              status: true,
+              serviceLine: true,
+              opportunityType: true,
+              rationale: true,
+              recommendedPersona: true,
+              recommendedSender: true,
+              recommendedCadence: true,
+              createdAt: true
+            }
           }
         }
       },
@@ -1249,6 +1287,11 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
       : !openAiRuntimeReady
         ? ("OPENAI_KEY_MISSING" satisfies ContactDraftGenerationDisabledReason)
         : ("LEAD_GEN_AI_DISABLED" satisfies ContactDraftGenerationDisabledReason);
+    const hunterEligibility = evaluateHunterOutreachEligibility({
+      researchSignal: contact.company.hunterOpportunitySignals[0] ?? null,
+      prospectingDecision: contact.company.hunterProspectingDecisions[0] ?? null,
+      maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
+    });
     const rawJson = asObject(contact.rawJson);
     const apolloJson = asObject(rawJson.apollo);
     const pushBlocker = asObject(apolloJson.pushBlocker);
@@ -1295,7 +1338,16 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
       sequenceOverrideReason: contact.sequenceOverrideReason,
       sequenceManuallyOverridden: contact.sequenceManuallyOverridden,
       requiresAiDraft,
-      canGenerateOutreachPlan: scoring.tier !== ContactTier.UNRANKED,
+      canGenerateOutreachPlan:
+        scoring.tier !== ContactTier.UNRANKED && hunterEligibility.status === "ELIGIBLE",
+      hunterEligibility: {
+        status: hunterEligibility.status,
+        label: hunterEligibility.label,
+        reason: hunterEligibility.reason,
+        opportunityTier: hunterEligibility.opportunityTier,
+        serviceLine: hunterEligibility.serviceLine,
+        researchRetrievedAt: hunterEligibility.researchRetrievedAt
+      },
       draftGenerationConfigured,
       draftGenerationDisabledReason,
       draft: draft

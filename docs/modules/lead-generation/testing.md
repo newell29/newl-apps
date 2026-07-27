@@ -206,4 +206,9 @@ Regression coverage must prove:
 6. generated drafts are not auto-approved, plan approval requires QA plus contact/company safety, and a current
    unapproved plan blocks Apollo;
 7. editing generated copy invalidates QA and approval; and
-8. the migration is additive and preserves every existing lead-generation record.
+8. the migration is additive and preserves every existing lead-generation record;
+9. legacy/unassessed, Watchlist, Blocked, stale, unselected, or inconsistent Hunter handoffs cannot generate or push;
+10. a Hot opportunity requires K3 confirmation while a Qualified current account may retain `NOT_SELECTED`;
+11. a current selected handoff exposes Hunter's saved service line, point of attack, score, confidence, and provenance;
+12. the strategy request includes that directive and rejects any model response that changes the service line; and
+13. the evidence ledger preserves individual Hunter research URLs and excerpts rather than only flattened JSON text.

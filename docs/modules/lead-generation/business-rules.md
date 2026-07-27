@@ -102,13 +102,21 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 
 ## Assisted outreach planning and grounding
 
-- A manually requested plan may be generated for any ranked contact with a selected cadence and at least one saved
-  company, Hunter, or TradeMining evidence record. Existing automatic generation remains limited to tiers explicitly
-  configured to require an AI draft.
+- Outreach generation requires both a ranked contact and a current company-level Hunter handoff. The latest Hunter
+  company-research signal must be Hot or Qualified current account, pass the deterministic research gate, and have a
+  newer `WOULD_PURSUE` planner decision with the same service line. Watchlist, Blocked, unassessed, stale, unselected,
+  or inconsistent handoffs cannot generate or push outreach.
+- Hot opportunities additionally require a saved Kimi K3 `CONFIRM` validation. Qualified current accounts may use
+  the normal `NOT_SELECTED` validator state because K3 is reserved for the strongest fresh-event candidates.
+- Research freshness defaults to 30 days through `HUNTER_OUTREACH_RESEARCH_MAX_AGE_DAYS`. The duration is inferred
+  operating policy and still requires business-owner confirmation; changing it does not rewrite saved research.
 - Strategy uses the configured Terra-class model; drafting and model QA use the configured Luna-class model. Model
   names remain server environment configuration and every saved plan records the actual names and prompt version.
-- Every plan freezes a bounded evidence ledger and SHA-256 fingerprint. Company/contact identity, Hunter signals and
-  decisions, and TradeMining summaries have stable evidence IDs.
+- Hunter's selected service line is authoritative. The strategy model receives the saved opportunity tier, point of
+  attack, service line, score, confidence, persona, sender, cadence, and research time. It may refine messaging but
+  cannot substitute another service line; a mismatch fails before persistence.
+- Every plan freezes a bounded evidence ledger and SHA-256 fingerprint. Company/contact identity, each exact Hunter
+  research article URL/excerpt, the selected Hunter decision, and TradeMining summaries have stable evidence IDs.
 - A complete Phase 1 sequence is exactly five touches: email day 0, LinkedIn task day 2, email day 4, call task day 7,
   and email day 10. LinkedIn and call steps are manual instructions; the agent does not perform those actions.
 - Every strategy and step must cite a saved evidence ID. Deterministic QA validates citations, ordering, channel mix,
@@ -119,8 +127,9 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
   that is not rejected, disqualified, or do-not-prospect.
 - Editing the first email after QA invalidates the plan and Apollo readiness. Regeneration creates a new plan version,
   archives the previous active version, and reruns strategy, drafting, and QA.
-- When a current Outreach Plan exists, Apollo push is blocked until that exact plan is approved. Approval alone does
-  not enroll or send; the existing explicit Apollo push action remains a separate human-controlled external write.
+- Both Apollo queueing and the worker re-evaluate the same current Hunter handoff. When a current Outreach Plan
+  exists, Apollo push is also blocked until that exact plan is approved. Approval alone does not enroll or send; the
+  existing explicit Apollo push action remains a separate human-controlled external write.
 
 ## Data model
 
