@@ -98,6 +98,11 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
   bundle contains a qualifying expansion article. Hunter repairs the trigger citations before applying
   the recent-date downgrade and pins the repaired evidence into both Kimi packets; otherwise the valid
   expansion could be silently demoted or omitted from hosted validation.
+- Compact packet selection can otherwise favor a generic first-party page over later, more material
+  records from the same pass. Hunter deterministically pins up to two exact-company dated expansion
+  records and the strongest specific logistics-management vacancy before filling the remaining packet
+  by pass diversity. Production-line investment/expansion language is included in the strict trigger
+  repair; generic growth claims, directories, and undated pages still cannot create a fresh trigger.
 - A K3 validation outage does not discard completed retrieval, Qwen synthesis, or K2.6 scoring.
   Selected fresh-event candidates are retained as Watchlist and cannot become Hot until a later
   successful validation. Current-account qualifications and deterministic blockers continue normally.
