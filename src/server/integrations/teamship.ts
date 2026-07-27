@@ -196,7 +196,10 @@ export async function fetchTeamshipShippingOrdersForReview({
         continue;
       }
 
-      if (shouldEnrichFromUiPage && !hasTeamshipSerialEvidence(mergedDetail)) {
+      if (
+        shouldEnrichFromUiPage &&
+        (!hasTeamshipSerialEvidence(mergedDetail) || hasIncompleteTeamshipShipToEvidence(mergedDetail))
+      ) {
         if (webCookieHeader === undefined) {
           webCookieHeader = await loginToTeamshipWeb(fetchImpl, resolvedCredentials, webBaseUrl).catch(() => null);
         }
@@ -454,6 +457,15 @@ function hasTeamshipSerialEvidence(value: unknown) {
   return visit(value);
 }
 
+function hasIncompleteTeamshipShipToEvidence(order: TeamshipShippingOrderDetail) {
+  const city = firstString([order.ship_to_city, order.ship_city]);
+  const state = firstString([order.ship_to_state, order.ship_state]);
+  const postalCode = firstString([order.ship_to_zip, order.ship_zip]);
+  const hasShipToEvidence = Boolean(city || state || postalCode);
+
+  return hasShipToEvidence && !(city && state && postalCode);
+}
+
 function isSerialEvidenceKey(key: string) {
   const normalized = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
 
@@ -472,10 +484,31 @@ export function parseTeamshipShippingOrderUiPage(html: string): Partial<Teamship
     .map(readTeamshipUiInventoryItem)
     .filter((item): item is NonNullable<ReturnType<typeof readTeamshipUiInventoryItem>> => Boolean(item));
   const pallets = readTeamshipUiPallets(html);
+  const shipFirstName = readTeamshipUiFormValue(html, "ship_first_name");
+  const shipLastName = readTeamshipUiFormValue(html, "ship_last_name");
+  const shipToName = [shipFirstName, shipLastName].filter((value) => value?.trim()).join(" ").trim() || null;
+  const shipAddress = readTeamshipUiFormValue(html, "ship_address_1");
+  const shipCity = readTeamshipUiFormValue(html, "ship_city");
+  const shipState = readTeamshipUiFormValue(html, "ship_state");
+  const shipZip = readTeamshipUiFormValue(html, "ship_zip");
+  const shipCountry = readTeamshipUiFormValue(html, "ship_country");
 
   return {
     items,
-    pallet_dims: pallets
+    pallet_dims: pallets,
+    ship_to_name: shipToName,
+    ship_first_name: shipFirstName,
+    ship_last_name: shipLastName,
+    ship_to_address_1: shipAddress,
+    ship_address_1: shipAddress,
+    ship_to_city: shipCity,
+    ship_city: shipCity,
+    ship_to_state: shipState,
+    ship_state: shipState,
+    ship_to_zip: shipZip,
+    ship_zip: shipZip,
+    ship_to_country: shipCountry,
+    ship_country: shipCountry
   };
 }
 
@@ -669,6 +702,19 @@ function mergeTeamshipUiDetail(
 ): TeamshipShippingOrderDetail {
   return {
     ...detail,
+    ship_to_name: uiDetail.ship_to_name ?? detail.ship_to_name,
+    ship_first_name: uiDetail.ship_first_name ?? detail.ship_first_name,
+    ship_last_name: uiDetail.ship_last_name ?? detail.ship_last_name,
+    ship_to_address_1: uiDetail.ship_to_address_1 ?? detail.ship_to_address_1,
+    ship_address_1: uiDetail.ship_address_1 ?? detail.ship_address_1,
+    ship_to_city: uiDetail.ship_to_city ?? detail.ship_to_city,
+    ship_city: uiDetail.ship_city ?? detail.ship_city,
+    ship_to_state: uiDetail.ship_to_state ?? detail.ship_to_state,
+    ship_state: uiDetail.ship_state ?? detail.ship_state,
+    ship_to_zip: uiDetail.ship_to_zip ?? detail.ship_to_zip,
+    ship_zip: uiDetail.ship_zip ?? detail.ship_zip,
+    ship_to_country: uiDetail.ship_to_country ?? detail.ship_to_country,
+    ship_country: uiDetail.ship_country ?? detail.ship_country,
     items: mergeArrayValues(detail.items, uiDetail.items),
     pallet_dims: mergeArrayValues(detail.pallet_dims, uiDetail.pallet_dims),
     url: uiDetail.url ?? detail.url
@@ -994,6 +1040,10 @@ function readHtmlFormValueById(html: string, id: string) {
 
 function readHtmlFormValueByName(html: string, name: string) {
   return readHtmlFormValue(html, "name", name);
+}
+
+function readTeamshipUiFormValue(html: string, field: string) {
+  return readHtmlFormValueByName(html, field) ?? readHtmlFormValueById(html, field);
 }
 
 function readHtmlFormValue(html: string, attributeName: "id" | "name", expectedValue: string) {

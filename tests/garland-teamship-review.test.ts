@@ -1728,6 +1728,102 @@ NEWLS 2604816191908 1.00 ( )`
     });
   });
 
+  it("uses exact Teamship page ship-to values when API aliases are incomplete", async () => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_MAX_LIST_PAGES = "1";
+
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/v1/login")) {
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/api/v1/ship-inventories?")) {
+        return Response.json({
+          data: [{ id: 30512, shipment_id: "SR813512", record_no: "PS210512" }]
+        });
+      }
+
+      if (url.endsWith("/api/v1/ship-inventories/30512")) {
+        return Response.json({
+          data: {
+            id: 30512,
+            shipment_id: "SR813512",
+            record_no: "PS210512",
+            ship_city: "Mississauga",
+            ship_state: "NS",
+            ship_zip: "",
+            items: [{ sku: "TEST-SKU", inventory_stock: { serial_number: "2606891101512" } }]
+          }
+        });
+      }
+
+      if (url.endsWith("/login") && (init?.method ?? "GET") === "GET") {
+        return new Response('<input type="hidden" name="_token" value="csrf-1">', {
+          headers: {
+            "set-cookie": "teamship_session=before-login; Path=/"
+          }
+        });
+      }
+
+      if (url.endsWith("/login") && init?.method === "POST") {
+        return new Response("", {
+          status: 302,
+          headers: {
+            "set-cookie": "teamship_session=after-login; Path=/"
+          }
+        });
+      }
+
+      if (url.endsWith("/ship-inventories/30512")) {
+        return new Response(`
+          <input name="ship_city" value="TRURO">
+          <input name="ship_state" value="NS">
+          <input name="ship_zip" value="B2N 3K3">
+        `);
+      }
+
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      orderReferences: [{ srNumber: "SR813512", psNumber: "PS210512" }],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+    const pdfOrder = samplePdfOrder({
+      psNumber: "PS210512",
+      srNumber: "SR813512",
+      pageNumbers: [1],
+      shipVia: "MIDLAND",
+      shipToName: "GARLAND CUSTOMER",
+      shipToPo: "PO-1",
+      freightTerms: "PPADD-CD",
+      itemSkus: ["TEST-SKU"],
+      serialNumbers: ["2606891101512"]
+    });
+    pdfOrder.shipToCity = "TRURO";
+    pdfOrder.shipToState = "NS";
+    pdfOrder.shipToPostalCode = "B2N 3K3";
+
+    const review = buildGarlandTeamshipReview([pdfOrder], orders);
+    const fieldsByKey = new Map(review.reviews[0]?.fields.map((field) => [field.key, field]));
+
+    expect(orders[0]).toMatchObject({
+      ship_to_city: "TRURO",
+      ship_to_state: "NS",
+      ship_to_zip: "B2N 3K3",
+      ship_city: "TRURO",
+      ship_state: "NS",
+      ship_zip: "B2N 3K3"
+    });
+    expect(fieldsByKey.get("ship_to_city")).toMatchObject({ status: "MATCH", teamshipValue: "TRURO" });
+    expect(fieldsByKey.get("ship_to_state")).toMatchObject({ status: "MATCH", teamshipValue: "NS" });
+    expect(fieldsByKey.get("ship_to_zip")).toMatchObject({ status: "MATCH", teamshipValue: "B2N 3K3" });
+  });
+
   it("uses Teamship API detail serials without falling back to the UI page", async () => {
     process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
     process.env.TEAMSHIP_PASSWORD = "configured-in-env";
