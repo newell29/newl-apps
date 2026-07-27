@@ -72,6 +72,7 @@ import {
   type OutreachEvidenceRecord,
   type OutreachQaIssue
 } from "@/modules/lead-gen/outreach-plan";
+import { persistOutreachPlanWithSteps } from "@/modules/lead-gen/outreach-plan-persistence";
 import {
   buildApolloSequenceMappingsWithDefaults,
   parseApolloSequenceDirectory,
@@ -5128,8 +5129,9 @@ async function generateAiDraftForContact({
         archivedAt: new Date()
       }
     });
-    const plan = await transaction.outreachPlan.create({
-      data: {
+    const plan = await persistOutreachPlanWithSteps({
+      transaction,
+      plan: {
         tenantId,
         companyId: draftContext.contact.companyId,
         contactId: draftContext.contact.id,
@@ -5156,23 +5158,21 @@ async function generateAiDraftForContact({
         qaModel: models.qa,
         promptVersion: OUTREACH_PLAN_PROMPT_VERSION,
         qaIssues: toInputJsonValue(qa.issues),
-        qaCheckedAt: new Date(),
-        steps: {
-          create: sequence.steps.map((step) => ({
-            tenantId,
-            stepNumber: step.stepNumber,
-            channel: step.channel,
-            delayDays: step.delayDays,
-            subject: step.subject,
-            body: step.body,
-            angle: step.angle,
-            evidenceRefs: toInputJsonValue(step.evidenceRefs),
-            qaIssues: toInputJsonValue(
-              qa.issues.filter((issue) => issue.stepNumber === null || issue.stepNumber === step.stepNumber)
-            )
-          }))
-        }
-      }
+        qaCheckedAt: new Date()
+      },
+      steps: sequence.steps.map((step) => ({
+        tenantId,
+        stepNumber: step.stepNumber,
+        channel: step.channel,
+        delayDays: step.delayDays,
+        subject: step.subject,
+        body: step.body,
+        angle: step.angle,
+        evidenceRefs: toInputJsonValue(step.evidenceRefs),
+        qaIssues: toInputJsonValue(
+          qa.issues.filter((issue) => issue.stepNumber === null || issue.stepNumber === step.stepNumber)
+        )
+      }))
     });
 
     await transaction.contactOutreachDraft.upsert({
