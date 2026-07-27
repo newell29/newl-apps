@@ -122,6 +122,13 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 - The auditor is a bounded daily sample, not proof that every classification is correct. The tiered
   sample, independent web research, deterministic TradeMining checks, and stored evidence make misses
   more likely to surface without pretending to eliminate all model or search-index risk.
+- If every queued Rivet job fails while preparing its branch, inspect the worker diagnostics before
+  treating the underlying Hunter findings as four separate implementation failures. Rivet uses its
+  dedicated runtime as the trusted Git source, validates required context against the fetched base
+  branch, and exits immediately on an invalid packet. It never falls through with a blank base branch.
+- Absence of a routine TradeMining Teams digest does not prove that the searches failed. Health & Logs
+  remains authoritative. With `HUNTER_TEAMS_TARGET` configured, the current worker sends one settled
+  daily digest and an immediate generic alert for each failed profile without exposing raw errors.
 
 ## A profile uses an unsupported arrival port
 
@@ -203,6 +210,9 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   evidence or generation defect is understood.
 - `CONTACT_REVIEW_REQUIRED` means Apollo contacts were found but none cleared the buyer-role threshold. Inspect the
   saved `hunterContactFit` rationale and risks; do not lower the deterministic safety filter to force generation.
+- An HTTP 307 from the Mac-mini handoff worker means session middleware intercepted the machine route before
+  ingestion authentication. `/api/lead-gen/hunter/outreach-handoff/*` is exempt from session middleware and must
+  enforce its own tenant-bound ingestion token; regression coverage preserves that boundary.
 
 ## Apollo cannot safely match a company
 

@@ -316,6 +316,88 @@ def resolve_current_profile(base_url: str, token: str, profile_id: str) -> dict[
     return resolve_profile(load_profiles(base_url, token), profile_id, None)
 
 
+def send_teams_message(message: str) -> bool:
+    target = clean(os.environ.get("HUNTER_TEAMS_TARGET"))
+    if not target:
+        return False
+    command = [
+        "openclaw",
+        "message",
+        "send",
+        "--channel",
+        "msteams",
+        "--target",
+        target,
+        "--message",
+        message,
+    ]
+    account = clean(os.environ.get("HUNTER_TEAMS_ACCOUNT"))
+    if account:
+        command.extend(["--account", account])
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+        return True
+    except Exception as error:
+        print(f"Hunter could not send its Teams status message: {type(error).__name__}", file=sys.stderr)
+        return False
+
+
+def read_job_run_summary(base_url: str, token: str, job_run_id: str) -> dict[str, Any]:
+    response = api_request(
+        base_url,
+        token,
+        "GET",
+        f"/api/integrations/trademining/job-runs/{job_run_id}",
+    )
+    data = response.get("data") if isinstance(response.get("data"), dict) else {}
+    job_run = data.get("jobRun") if isinstance(data.get("jobRun"), dict) else {}
+    output = job_run.get("output") if isinstance(job_run.get("output"), dict) else {}
+    metadata = output.get("metadata") if isinstance(output.get("metadata"), dict) else {}
+    coverage = metadata.get("coverage") if isinstance(metadata.get("coverage"), dict) else {}
+    return {
+        "status": clean(job_run.get("status")) or "UNKNOWN",
+        "matchedRecords": coverage.get("matchedRecords"),
+        "exportedRecords": coverage.get("exportedRecords"),
+        "queryCount": coverage.get("queryCount"),
+        "retrievalComplete": coverage.get("retrievalComplete"),
+        "qualifyingCompanies": metadata.get("qualifyingCompanies"),
+        "recordsProcessed": output.get("recordsProcessed"),
+    }
+
+
+def format_count(value: Any) -> str:
+    if isinstance(value, bool):
+        return "unknown"
+    if isinstance(value, (int, float)):
+        return f"{int(value):,}"
+    return "unknown"
+
+
+def build_daily_trade_mining_message(
+    successes: list[dict[str, Any]],
+    failures: list[dict[str, str]],
+) -> str:
+    total = len(successes) + len(failures)
+    lines = [
+        f"Hunter TradeMining daily run finished: {len(successes)}/{total} profiles completed successfully."
+    ]
+    for result in successes:
+        completeness = "retrieval complete" if result.get("retrievalComplete") is True else "retrieval incomplete"
+        lines.append(
+            " • "
+            f"{result['profileName']}: {format_count(result.get('matchedRecords'))} matches, "
+            f"{format_count(result.get('exportedRecords'))} exported, "
+            f"{format_count(result.get('recordsProcessed'))} processed, "
+            f"{format_count(result.get('qualifyingCompanies'))} qualifying companies, "
+            f"{format_count(result.get('queryCount'))} queries, {completeness}."
+        )
+    for failure in failures:
+        lines.append(f" • {failure['profileName']}: failed. Review Admin & Quality → Health & Logs.")
+    if failures:
+        lines.append("One or more profiles require review; Hunter did not silently retry them.")
+    return "\n".join(lines)
+
+
 def run_profile(base_url: str, token: str, profile: dict[str, Any], trigger: str) -> dict[str, Any]:
     profile_id = clean(profile.get("id"))
     profile_name = clean(profile.get("name"))
@@ -425,7 +507,17 @@ def run_profile(base_url: str, token: str, profile: dict[str, Any], trigger: str
         ]
         if destination_markets:
             ingest_command.extend(["--destination-market", destination_markets[0]])
-        subprocess.run(ingest_command, check=True)
+        ingest_result = subprocess.run(
+            ingest_command,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        try:
+            ingestion_summary = json.loads(ingest_result.stdout)
+        except json.JSONDecodeError as error:
+            raise RuntimeError("Hunter ingestion did not return its expected JSON summary") from error
+        job_summary = read_job_run_summary(base_url, token, job_run_id)
     except Exception as error:
         fail_job_run(base_url, token, job_run_id, error)
         raise
@@ -437,6 +529,10 @@ def run_profile(base_url: str, token: str, profile: dict[str, Any], trigger: str
         "portCount": len(destination_ports),
         "queryCount": int(export_manifest.get("coverage", {}).get("query_count") or 1),
         "retrievalComplete": bool(export_manifest.get("coverage", {}).get("retrieval_complete", False)),
+        "matchedRecords": job_summary.get("matchedRecords"),
+        "exportedRecords": job_summary.get("exportedRecords"),
+        "recordsProcessed": job_summary.get("recordsProcessed") or ingestion_summary.get("recordsProcessed"),
+        "qualifyingCompanies": job_summary.get("qualifyingCompanies"),
         "lookbackDays": lookback_days,
         "configuredLookbackDays": configured_lookback_days,
         "jobRunId": job_run_id,
@@ -505,18 +601,29 @@ def process_once(base_url: str, token: str, explicit_profile_id: Optional[str], 
         return True
 
     attempted_profile = False
+    successes: list[dict[str, Any]] = []
+    failures: list[dict[str, str]] = []
     for profile in profiles:
         if not is_profile_due(profile):
             continue
         attempted_profile = True
         try:
             result = run_profile(base_url, token, profile, "daily")
+            successes.append(result)
             print(json.dumps(result, indent=2))
         except Exception as error:
-            print(f'Hunter daily profile "{clean(profile.get("name")) or "unknown"}" failed: {error}', file=sys.stderr)
+            profile_name = clean(profile.get("name")) or "unknown"
+            failures.append({"profileName": profile_name})
+            print(f'Hunter daily profile "{profile_name}" failed: {error}', file=sys.stderr)
+            send_teams_message(
+                f'Hunter TradeMining profile "{profile_name}" failed. '
+                "The remaining due profiles will continue. Review Admin & Quality → Health & Logs."
+            )
 
     if not attempted_profile:
         print("No enabled TradeMining profile is due for its daily run.")
+    else:
+        send_teams_message(build_daily_trade_mining_message(successes, failures))
     return attempted_profile
 
 

@@ -18,15 +18,15 @@ fi
 : "${OPENCLAW_ASSISTANT_TOKEN:?OPENCLAW_ASSISTANT_TOKEN is required}"
 : "${NEWL_TEAMS_TENANT_ID:?NEWL_TEAMS_TENANT_ID is required}"
 : "${RIVET_DEVELOPER_OBJECT_ID:?RIVET_DEVELOPER_OBJECT_ID is required}"
-: "${RIVET_NEWL_APPS_REPO_PATH:?RIVET_NEWL_APPS_REPO_PATH is required}"
 : "${RIVET_TEAMS_TARGET:?RIVET_TEAMS_TARGET is required}"
 
 if [[ "${NEWL_APPS_URL}" != https://* ]]; then
   echo "NEWL_APPS_URL must use HTTPS." >&2
   exit 1
 fi
-if [[ ! -e "${RIVET_NEWL_APPS_REPO_PATH}/.git" ]]; then
-  echo "RIVET_NEWL_APPS_REPO_PATH must point to the trusted Newl Apps Git repository." >&2
+rivet_repo_path="${runner_directory:h:h}"
+if [[ ! -e "${rivet_repo_path}/.git" ]]; then
+  echo "Rivet's dedicated runtime is not a trusted Newl Apps Git repository." >&2
   exit 1
 fi
 
@@ -158,7 +158,7 @@ else
     --model "${audit_model}" \
     --config "model_reasoning_effort=\"${audit_effort}\"" \
     --sandbox read-only \
-    --cd "${RIVET_NEWL_APPS_REPO_PATH}" \
+    --cd "${rivet_repo_path}" \
     --output-schema "${schema_path}" \
     --output-last-message "${result_path}" \
     --color never \

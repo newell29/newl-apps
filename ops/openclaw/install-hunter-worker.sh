@@ -13,6 +13,7 @@ service_label="com.newl.hunter-worker"
 target_path="${launch_agents_directory}/${service_label}.plist"
 launch_domain="gui/$(id -u)"
 base_url=""
+teams_target=""
 temporary_env_file=""
 temporary_plist=""
 
@@ -30,6 +31,14 @@ while (( $# > 0 )); do
         exit 1
       fi
       base_url="$2"
+      shift 2
+      ;;
+    --teams-target)
+      if (( $# < 2 )) || [[ -z "$2" ]]; then
+        echo "--teams-target requires an OpenClaw Microsoft Teams target." >&2
+        exit 1
+      fi
+      teams_target="$2"
       shift 2
       ;;
     *)
@@ -62,6 +71,21 @@ if [[ -n "${base_url}" ]]; then
     END { if (!replaced) print replacement }
   ' "${worker_env_file}" > "${temporary_env_file}"
   install -m 600 "${temporary_env_file}" "${worker_env_file}"
+  rm -f "${temporary_env_file}"
+  temporary_env_file=""
+fi
+
+if [[ -n "${teams_target}" ]]; then
+  temporary_env_file="$(mktemp)"
+  awk -v replacement="HUNTER_TEAMS_TARGET=${teams_target}" '
+    BEGIN { replaced = 0 }
+    /^HUNTER_TEAMS_TARGET=/ { print replacement; replaced = 1; next }
+    { print }
+    END { if (!replaced) print replacement }
+  ' "${worker_env_file}" > "${temporary_env_file}"
+  install -m 600 "${temporary_env_file}" "${worker_env_file}"
+  rm -f "${temporary_env_file}"
+  temporary_env_file=""
 fi
 
 for required_name in NEWL_APPS_BASE_URL INGESTION_API_TOKEN TRADEMINING_USER TRADEMINING_PASSWORD HUNTER_WORKER_ID HUNTER_EXPORT_DIRECTORY HUNTER_PROCESSED_DIRECTORY HUNTER_TRADEMINING_PORTS_JSON; do

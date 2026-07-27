@@ -70,7 +70,14 @@ describe("Hunter quality audit", () => {
       id: "audit-run-1",
       input: {
         signalIds: ["signal-1"],
-        tradeMiningFindings: []
+        tradeMiningFindings: [],
+        tradeMiningRunState: {
+          enabledProfiles: 3,
+          completed: 3,
+          active: 0,
+          failed: 0,
+          missing: 0
+        }
       }
     });
     mocks.automationJobRun.findMany.mockResolvedValue([]);
@@ -230,6 +237,7 @@ describe("Hunter quality audit", () => {
     expect(mocks.createRivetDevelopmentJob).toHaveBeenCalled();
     expect(result.developmentJobIds).toEqual(["rivet-job-1"]);
     expect(result.teamsMessage).toContain("Rivet queued 1 restricted development job");
+    expect(result.teamsMessage).toContain("TradeMining status at audit time: 3/3 completed");
     expect(result.teamsMessage).toContain("No lead was reclassified");
   });
 

@@ -34,4 +34,15 @@ describe("Hunter launchd runtime", () => {
     expect(runner).not.toContain("HUNTER_REPO_PATH|");
     expect(runner).not.toContain('worker_repo_path="${HUNTER_REPO_PATH');
   });
+
+  it("persists an optional Teams target without putting it in the launch plist", async () => {
+    const [installer, runner] = await Promise.all([
+      readFile(installerPath, "utf8"),
+      readFile(runnerPath, "utf8")
+    ]);
+
+    expect(installer).toContain("--teams-target");
+    expect(installer).toContain("HUNTER_TEAMS_TARGET=");
+    expect(runner).toContain("HUNTER_TEAMS_TARGET|HUNTER_TEAMS_ACCOUNT");
+  });
 });
