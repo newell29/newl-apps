@@ -47,6 +47,9 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 
 - Missing OpenAI configuration, an unranked contact, missing selected cadence, no saved evidence, invalid structured
   model output, or strategy/drafting transport failure stops generation and creates no partial active plan.
+- Plan and sequence-step persistence uses two ordered writes inside the same transaction. Prisma nested relation input
+  cannot safely mix the plan's tenant foreign-key scalars with nested tenant-scoped step creation; a failure rolls back
+  both records rather than leaving a partial plan.
 - Lead-generation AI runtime enablement is saved independently from scoring weights. An unrelated invalid scoring total
   cannot block the runtime toggle or silently rewrite scoring configuration.
 - If drafting succeeds but the model critic is unavailable, Newl Apps saves the version as `QA_FAILED` with a
