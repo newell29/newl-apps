@@ -3968,6 +3968,10 @@ function formatDimensionSource(source: GarlandTeamshipOrderReview["productDimens
     return "UPS rule";
   }
 
+  if (source === "GARLAND_SKU_PREFIX_RULE") {
+    return "Garland SKU prefix rule";
+  }
+
   if (source === "TEAMSHIP_LEARNED") {
     return "Teamship learned";
   }
