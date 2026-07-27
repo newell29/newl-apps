@@ -35,6 +35,8 @@ Approval of a brief starts the developer workflow automatically. It is not appro
 
 After the owner merges the primary Codex PR, Newl Apps marks the brief and opportunity as published only when Vercel reports a successful production deployment for that merged `codex/website-growth-*` branch. The authenticated callback is tenant scoped, idempotent, and cannot merge or deploy the website.
 
+When Scout has stored more than one brief for the same opportunity, the opportunity-level published status closes every duplicate brief in the curated workspace so an older version cannot remain under `Approved and building`.
+
 ## Control-plane views
 
 The Website Growth UI intentionally separates two different kinds of records:
