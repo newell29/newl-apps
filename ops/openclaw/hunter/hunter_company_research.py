@@ -27,7 +27,7 @@ DEFAULT_QWEN_MODEL = "qwen3.5:35b"
 DEFAULT_KIMI_URL = "https://api.moonshot.ai/v1"
 DEFAULT_KIMI_MODEL = "kimi-k2.6"
 DEFAULT_KIMI_VALIDATOR_MODEL = "kimi-k3"
-PROMPT_VERSION = "hunter-company-research-v11"
+PROMPT_VERSION = "hunter-company-research-v12"
 ALLOWED_SERVICE_LINES = {"WAREHOUSING", "OCEAN_AIR", "TRUCKING"}
 ALLOWED_OPERATING_REGIONS = {"NORTH_AMERICA", "CHINA", "OTHER_FOREIGN", "UNKNOWN"}
 ALLOWED_SIGNAL_TYPES = {
@@ -45,6 +45,7 @@ ALLOWED_PASSES = {"IDENTITY", "FRESH_EVENTS", "CAREERS", "DISTRIBUTION_FOOTPRINT
 SOURCE_TYPES = {"FIRST_PARTY", "GOVERNMENT", "NEWS", "CAREERS", "DIRECTORY", "OTHER"}
 MAX_RESPONSE_BYTES = 2_000_000
 MAX_PAGE_BYTES = 400_000
+MAX_EVIDENCE_PER_COMPANY = 24
 LEGAL_SUFFIXES = {
     "co",
     "company",
@@ -677,7 +678,9 @@ def collect_company_evidence(
         query_results.append((query_row, results))
 
     result_index = 0
-    while len(evidence) < 24 and any(result_index < len(results) for _, results in query_results):
+    while len(evidence) < MAX_EVIDENCE_PER_COMPANY and any(
+        result_index < len(results) for _, results in query_results
+    ):
         for query_row, results in query_results:
             if result_index >= len(results):
                 continue
@@ -713,10 +716,14 @@ def collect_company_evidence(
                     "firstParty": first_party,
                 }
             )
-            if len(evidence) >= 24:
+            if len(evidence) >= MAX_EVIDENCE_PER_COMPANY:
                 break
         result_index += 1
     return evidence, query_log, fetched_pages
+
+
+def bounded_company_evidence(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return evidence[:MAX_EVIDENCE_PER_COMPANY]
 
 
 def canonical_url(value: str) -> str:
@@ -1503,10 +1510,15 @@ def recent_material_trigger_indices(
         r"increas(?:e|es|ed|ing) (?:its )?(?:manufacturing |production )?capacity|"
         r"(?:production|manufacturing) expansion|"
         r"(?:facility|warehouse|distribution cent(?:er|re)) expansion|"
-        r"establish(?:es|ed|ing)? .{0,60} manufacturing)\b",
+        r"establish(?:es|ed|ing)? .{0,100}(?:facility|warehouse|"
+        r"distribution cent(?:er|re)|manufacturing(?: site| facility)?))\b",
         re.IGNORECASE,
     )
-    indices: list[int] = []
+    logistics_facility_pattern = re.compile(
+        r"\b(?:distribution cent(?:er|re)|warehouse|fulfillment cent(?:er|re))\b",
+        re.IGNORECASE,
+    )
+    matches: list[tuple[int, int, int]] = []
     for index, row in enumerate(evidence):
         if row.get("pass") not in {"FRESH_EVENTS", "FOLLOW_UP"}:
             continue
@@ -1516,11 +1528,21 @@ def recent_material_trigger_indices(
             continue
         text = f"{row.get('title') or ''} {row.get('excerpt') or ''}"
         normalized_text = re.sub(r"[^a-z0-9]+", "", text.lower())
-        if not any(alias in normalized_text for alias in aliases):
+        alias_rank = next(
+            (rank for rank, alias in enumerate(aliases) if alias in normalized_text),
+            None,
+        )
+        if alias_rank is None:
             continue
         if material_pattern.search(text) or PRODUCTION_LINE_EXPANSION_PATTERN.search(text):
-            indices.append(index)
-    return indices[:2]
+            matches.append(
+                (
+                    alias_rank,
+                    0 if logistics_facility_pattern.search(text) else 1,
+                    index,
+                )
+            )
+    return [index for _alias, _logistics, index in sorted(matches)[:2]]
 
 
 def specific_logistics_management_role_indices(
@@ -1589,8 +1611,19 @@ def normalize_synthesis_for_evidence(
     rationale = clean(normalized.get("rationale")) or ""
     material_trigger_indices = recent_material_trigger_indices(candidate, evidence)
     cited_recent_trigger = is_recent_trigger(normalized, evidence)
+    cited_trigger_indices = [
+        index
+        for index in normalized.get("triggerEvidenceIndices", [])
+        if isinstance(index, int)
+    ]
+    strongest_material_trigger_missing = bool(
+        material_trigger_indices
+        and material_trigger_indices[0] not in cited_trigger_indices
+    )
     if material_trigger_indices and (
-        normalized.get("freshness") != "FRESH" or not cited_recent_trigger
+        normalized.get("freshness") != "FRESH"
+        or not cited_recent_trigger
+        or strongest_material_trigger_missing
     ):
         repaired_existing_freshness = normalized.get("freshness") == "FRESH"
         normalized["freshness"] = "FRESH"
@@ -1609,9 +1642,9 @@ def normalize_synthesis_for_evidence(
         if PRODUCTION_LINE_EXPANSION_PATTERN.search(trigger_text):
             normalized["signalType"] = "EXPANSION"
         message = (
-            "Deterministic evidence review replaced unsupported trigger citations with an "
-            "exact-company, recent, dated material expansion."
-            if repaired_existing_freshness
+            "Deterministic evidence review replaced weaker or unsupported trigger citations with the "
+            "strongest exact-company, recent, dated material expansion."
+            if repaired_existing_freshness or strongest_material_trigger_missing
             else (
                 "Deterministic evidence review found an exact-company, recent, dated material expansion "
                 "that the synthesis did not classify as fresh."
@@ -1827,8 +1860,11 @@ def collect_follow_up_evidence(
     fetched_pages = 0
     for candidate in candidates:
         key = candidate["companyKey"]
-        seen = {canonical_url(item["url"]) for item in evidence_by_key.get(key, [])}
+        company_evidence = evidence_by_key.setdefault(key, [])
+        seen = {canonical_url(item["url"]) for item in company_evidence}
         for query in synthesis_by_key[key]["followUpQueries"][:follow_up_limit]:
+            if len(company_evidence) >= MAX_EVIDENCE_PER_COMPANY:
+                break
             try:
                 results = search_web(provider, query, results_per_query)
                 query_log.append(
@@ -1852,13 +1888,15 @@ def collect_follow_up_evidence(
                 )
                 continue
             for row in results:
+                if len(company_evidence) >= MAX_EVIDENCE_PER_COMPANY:
+                    break
                 url = row["url"]
                 canonical = canonical_url(url)
                 if canonical in seen:
                     continue
                 seen.add(canonical)
                 hostname = normalized_hostname(url)
-                evidence_by_key[key].append(
+                company_evidence.append(
                     {
                         "pass": "FOLLOW_UP",
                         "query": query[:500],
@@ -1871,7 +1909,7 @@ def collect_follow_up_evidence(
                         "firstParty": False,
                     }
                 )
-                if len(evidence_by_key[key]) >= 24:
+                if len(company_evidence) >= MAX_EVIDENCE_PER_COMPANY:
                     break
     return fetched_pages
 
@@ -2006,11 +2044,17 @@ def run_company_research(
             raw_queries = checkpoint.get("queryLog")
             if not isinstance(raw_evidence, dict) or not isinstance(raw_queries, list):
                 raise RuntimeError("Hunter research checkpoint is missing retrieval data.")
+            checkpoint_evidence_overflow = any(
+                isinstance(value, list) and len(value) > MAX_EVIDENCE_PER_COMPANY
+                for value in raw_evidence.values()
+            )
             evidence_by_key = {
-                str(key): value
+                str(key): bounded_company_evidence(value)
                 for key, value in raw_evidence.items()
                 if isinstance(value, list)
             }
+            if checkpoint_stage == "SYNTHESIS_COMPLETE" and checkpoint_evidence_overflow:
+                checkpoint_stage = "RETRIEVAL_COMPLETE"
             query_log = [row for row in raw_queries if isinstance(row, dict)]
             page_fetch_count = int(checkpoint.get("pageFetchCount") or 0)
         else:
@@ -2073,6 +2117,10 @@ def run_company_research(
                     results_per_query,
                     follow_up_limit,
                 )
+                evidence_by_key = {
+                    key: bounded_company_evidence(rows)
+                    for key, rows in evidence_by_key.items()
+                }
                 final_synthesis, final_usage = synthesize_companies(
                     ollama_url, qwen_model, candidates, evidence_by_key, qwen_batch_size
                 )
@@ -2180,7 +2228,9 @@ def run_company_research(
                     "companyId": candidate["companyId"],
                     "companyKey": candidate["companyKey"],
                     "companyName": candidate["companyName"],
-                    "evidence": evidence_by_key[candidate["companyKey"]],
+                    "evidence": bounded_company_evidence(
+                        evidence_by_key[candidate["companyKey"]]
+                    ),
                     "synthesis": {
                         key: value
                         for key, value in synthesis_by_key[candidate["companyKey"]].items()

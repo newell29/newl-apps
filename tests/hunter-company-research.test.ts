@@ -27,7 +27,7 @@ describe("Hunter company deep research", () => {
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL).toBe("qwen3.5:35b");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL).toBe("kimi-k2.6");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL).toBe("kimi-k3");
-    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v11");
+    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v12");
     expect(HUNTER_COMPANY_RESEARCH_SAFETY).toEqual({
       externalWrites: false,
       apollo: false,
@@ -456,6 +456,49 @@ describe("Hunter company deep research", () => {
     ]);
   });
 
+  it("never searches or appends follow-up evidence beyond the company evidence cap", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'Example Retailer','companyKey':'example-retailer'}",
+      "def evidence(index):",
+      " return {'pass':'IDENTITY','query':'identity','title':f'Existing {index}','url':f'https://example.com/existing-{index}','sourceDomain':'example.com','sourceType':'FIRST_PARTY','publishedAt':None,'excerpt':'Existing evidence.','firstParty':True}",
+      "calls=[]",
+      "def fake_search(provider,query,limit):",
+      " calls.append(query)",
+      " return [{'url':f'https://news.example/{query}-{index}','title':f'Follow-up {index}','snippet':'New evidence.','publishedAt':None} for index in range(3)]",
+      "r.search_web=fake_search",
+      "full={'example-retailer':[evidence(index) for index in range(r.MAX_EVIDENCE_PER_COMPANY)]}",
+      "full_log=[]",
+      "r.collect_follow_up_evidence('BRAVE',[candidate],{'example-retailer':{'followUpQueries':['first','second']}},full,full_log,3,2)",
+      "full_result={'calls':len(calls),'evidence':len(full['example-retailer']),'queries':len(full_log)}",
+      "calls.clear()",
+      "one_slot={'example-retailer':[evidence(index) for index in range(r.MAX_EVIDENCE_PER_COMPANY-1)]}",
+      "one_slot_log=[]",
+      "r.collect_follow_up_evidence('BRAVE',[candidate],{'example-retailer':{'followUpQueries':['first','second']}},one_slot,one_slot_log,3,2)",
+      "bounded=r.bounded_company_evidence([evidence(index) for index in range(r.MAX_EVIDENCE_PER_COMPANY+2)])",
+      "print(json.dumps({'full':full_result,'oneSlot':{'calls':len(calls),'evidence':len(one_slot['example-retailer']),'queries':len(one_slot_log)},'bounded':len(bounded)}))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+    const result = JSON.parse(stdout) as {
+      full: { calls: number; evidence: number; queries: number };
+      oneSlot: { calls: number; evidence: number; queries: number };
+      bounded: number;
+    };
+
+    expect(result).toEqual({
+      full: { calls: 0, evidence: 24, queries: 0 },
+      oneSlot: { calls: 1, evidence: 24, queries: 1 },
+      bounded: 24
+    });
+  });
+
   it("uses legal-name aliases and recognizes matching official domains as first party", async () => {
     const program = [
       "import json",
@@ -553,6 +596,45 @@ describe("Hunter company deep research", () => {
     });
     expect(normalized.opportunitySummary).toContain("new advanced production lines");
     expect(normalized.opportunitySummary).not.toContain("No concrete expansion");
+  });
+
+  it("prefers Atlas Copco Compressors' distribution center over an affiliate expansion", async () => {
+    const program = [
+      "import datetime as d,json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'ATLAS COPCO COMPRESSORS LLC','companyKey':'atlas-copco-compressors-llc'}",
+      "recent=(d.datetime.now(d.timezone.utc)-d.timedelta(days=60)).isoformat()",
+      "evidence=[{'pass':'IDENTITY','sourceType':'FIRST_PARTY','firstParty':True,'title':'Atlas Copco Compressors','excerpt':'Atlas Copco Compressors LLC supplies industrial air compressors.','publishedAt':None},{'pass':'CAREERS','sourceType':'CAREERS','firstParty':True,'title':'Careers','excerpt':'Explore jobs.','publishedAt':None},{'pass':'DISTRIBUTION_FOOTPRINT','sourceType':'FIRST_PARTY','firstParty':True,'title':'Locations','excerpt':'Atlas Copco locations.','publishedAt':None},{'pass':'FRESH_EVENTS','sourceType':'NEWS','firstParty':False,'title':'Atlas Copco Comptec expands Voorheesville manufacturing','excerpt':'Atlas Copco Comptec announced a manufacturing expansion at its Voorheesville facility.','publishedAt':recent},{'pass':'FRESH_EVENTS','sourceType':'OTHER','firstParty':False,'title':'Generic result','excerpt':'Atlas Copco products.','publishedAt':recent},{'pass':'CAREERS','sourceType':'CAREERS','firstParty':False,'title':'Jobs','excerpt':'Open roles.','publishedAt':None},{'pass':'DISTRIBUTION_FOOTPRINT','sourceType':'OTHER','firstParty':False,'title':'Footprint','excerpt':'Atlas Copco footprint.','publishedAt':None},{'pass':'FRESH_EVENTS','sourceType':'GOVERNMENT','firstParty':False,'title':'Atlas Copco Compressors establishing Lancaster County distribution center','excerpt':'Atlas Copco Compressors is establishing a 400,000-square-foot air-compressor distribution center with a $51 million first phase and 163 jobs.','publishedAt':recent}]",
+      "synthesis={'identityDisposition':'PASS','identityConfidence':90,'identityReason':'Verified.','confidence':88,'freshness':'FRESH','triggerEvidenceIndices':[3],'opportunitySummary':'Atlas Copco Comptec is expanding manufacturing in Voorheesville.','signalType':'EXPANSION','missingEvidence':[],'rationale':'Affiliate expansion selected.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
+      "material=r.recent_material_trigger_indices(candidate,evidence)",
+      "preferred=r.preferred_model_evidence_indices(candidate,evidence,synthesis)",
+      "packet=r.select_company_model_evidence(candidate,evidence,synthesis)",
+      "normalized=r.normalize_synthesis_for_evidence(candidate,evidence,synthesis)",
+      "print(json.dumps({'material':material,'preferred':preferred,'packet':[row['evidenceIndex'] for row in packet],'triggers':normalized['triggerEvidenceIndices'],'summary':normalized['opportunitySummary']}))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+    const result = JSON.parse(stdout) as {
+      material: number[];
+      preferred: number[];
+      packet: number[];
+      triggers: number[];
+      summary: string;
+    };
+
+    expect(result).toMatchObject({
+      material: [7, 3],
+      preferred: [7, 3],
+      packet: [7, 3, 0, 1, 2],
+      triggers: [7, 3]
+    });
+    expect(result.summary).toContain("400,000-square-foot air-compressor distribution center");
+    expect(result.summary).not.toContain("Voorheesville");
   });
 
   it("repairs a fresh synthesis that cites the wrong trigger before applying the date gate", async () => {
@@ -784,7 +866,7 @@ function completion() {
       synthesis: {
         provider: "OLLAMA",
         name: "qwen3.5:35b",
-        promptVersion: "hunter-company-research-v11",
+        promptVersion: "hunter-company-research-v12",
         structuredOutput: true,
         inputTokens: 2000,
         outputTokens: 700,
@@ -793,7 +875,7 @@ function completion() {
       scoring: {
         provider: "KIMI",
         name: "kimi-k2.6",
-        promptVersion: "hunter-company-research-v11",
+        promptVersion: "hunter-company-research-v12",
         structuredOutput: true,
         inputTokens: 1800,
         cachedInputTokens: 200,
@@ -804,7 +886,7 @@ function completion() {
       validation: {
         provider: "KIMI",
         name: "kimi-k3",
-        promptVersion: "hunter-company-research-v11",
+        promptVersion: "hunter-company-research-v12",
         structuredOutput: true,
         status: "SUCCESS",
         reasoningEffort: "LOW",
