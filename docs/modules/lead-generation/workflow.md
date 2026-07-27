@@ -72,6 +72,7 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 9. Each accepted contact receives a score, cadence recommendation (falling back to Hunter's recommended cadence), five-touch Outreach Plan, deterministic grounding check, and model QA check. QA failures remain visible and cannot advance.
 10. Transient failures retry at most three times with rate-limit delay. Permanent company failures are recorded in the job output and audit log without invalidating the completed research.
 11. This handoff never creates a Sales Opportunity, approves a contact or plan, enrolls Apollo, sends email, posts to LinkedIn, or communicates with a prospect.
+12. An administrator can select **Find contacts for eligible opportunities** after enabling Assisted mode. The action creates a fresh deterministic plan from already-saved research and queues the same protected handoff without rerunning web retrieval, Qwen, Kimi, or K3.
 
 ## Hunter quality control and Rivet
 

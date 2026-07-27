@@ -16,6 +16,7 @@ import {
   evaluateHunterOutreachEligibility,
   getHunterOutreachResearchMaxAgeDays
 } from "@/modules/lead-gen/hunter-outreach-eligibility";
+import { runHunterDryPlan } from "@/modules/lead-gen/hunter-planner";
 import {
   generateOutreachPlanForContact,
   loadOutreachPlanContactContext
@@ -38,6 +39,7 @@ import {
 } from "@/server/integrations/openai";
 
 export const HUNTER_OUTREACH_HANDOFF_JOB_TYPE = "HUNTER_OUTREACH_HANDOFF";
+const HUNTER_COMPANY_RESEARCH_JOB_TYPE = "HUNTER_COMPANY_RESEARCH";
 
 const ACTIVE_JOB_WINDOW_MS = 4 * 60 * 60 * 1_000;
 const PROCESSING_LEASE_MS = 15 * 60 * 1_000;
@@ -79,6 +81,48 @@ type HandoffOutput = {
   results: HandoffResult[];
   completedAt: string | null;
 };
+
+export async function queueCurrentHunterOutreachHandoff({
+  tenantId,
+  actorUserId
+}: {
+  tenantId: string;
+  actorUserId: string;
+}) {
+  const latestResearch = await prisma.automationJobRun.findFirst({
+    where: {
+      tenantId,
+      jobType: HUNTER_COMPANY_RESEARCH_JOB_TYPE,
+      status: JobStatus.SUCCESS
+    },
+    orderBy: { finishedAt: "desc" },
+    select: { id: true }
+  });
+  if (!latestResearch) {
+    return {
+      state: "research_required" as const,
+      message: "Hunter has no completed company research to hand off."
+    };
+  }
+
+  const plan = await runHunterDryPlan({
+    tenantId,
+    actorUserId,
+    trigger: "MANUAL"
+  });
+  if (plan.state !== "completed") {
+    return {
+      state: "plan_failed" as const,
+      message: "Hunter could not refresh the current opportunity plan."
+    };
+  }
+
+  return enqueueHunterOutreachHandoff({
+    tenantId,
+    researchRunId: latestResearch.id,
+    prospectingPlanRunId: plan.runId
+  });
+}
 
 export async function enqueueHunterOutreachHandoff({
   tenantId,

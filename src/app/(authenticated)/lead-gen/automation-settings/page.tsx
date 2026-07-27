@@ -9,6 +9,7 @@ import type { ReactNode } from "react";
 import { PageHeader } from "@/components/page-header";
 import {
   addHunterOpportunitySignalAction,
+  queueCurrentHunterOutreachHandoffAction,
   runHunterDryPlanAction,
   saveHunterPolicyAction
 } from "@/modules/lead-gen/hunter-actions";
@@ -18,11 +19,17 @@ import { getAuthenticatedContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
 
-export default async function AutomationSettingsPage() {
+export default async function AutomationSettingsPage({
+  searchParams
+}: {
+  searchParams: Promise<{ handoff?: string; count?: string }>;
+}) {
   const context = await getAuthenticatedContext();
   await requireModule(context, ModuleKey.LEAD_GEN);
+  const query = await searchParams;
   const data = await getHunterControlPlane(context);
   const policy = data.policy;
+  const handoffMessage = formatHandoffMessage(query.handoff, query.count);
 
   return (
     <div className="space-y-6">
@@ -40,6 +47,11 @@ export default async function AutomationSettingsPage() {
           These controls plan and research opportunities. They do not authorize customer communication.
         </p>
       </section>
+      {handoffMessage ? (
+        <section className="rounded-lg border border-success/30 bg-success/10 p-4 text-sm text-foreground">
+          {handoffMessage}
+        </section>
+      ) : null}
 
       <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
         <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
@@ -87,6 +99,18 @@ export default async function AutomationSettingsPage() {
               <p className="text-xs text-mutedForeground">
                 Assisted mode automatically finds and ranks Apollo contacts and creates QA-checked outreach plans after research. It never approves, enrolls, or sends.
               </p>
+              <div className="border-t border-border pt-4">
+                <button
+                  formAction={queueCurrentHunterOutreachHandoffAction}
+                  disabled={policy.killSwitch || policy.mode !== HunterAutomationMode.ASSISTED}
+                  className="rounded-md border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Find contacts for eligible opportunities
+                </button>
+                <p className="mt-2 text-xs text-mutedForeground">
+                  Refreshes the current saved-evidence plan and queues eligible Hot and Qualified companies for Apollo matching, AI contact review, and grounded outreach-plan generation. It does not rerun company research or send outreach.
+                </p>
+              </div>
             </form>
           ) : (
             <p className="mt-4 text-sm text-mutedForeground">Only tenant admins can change this policy.</p>
@@ -145,6 +169,20 @@ export default async function AutomationSettingsPage() {
       </section>
     </div>
   );
+}
+
+function formatHandoffMessage(state: string | undefined, countValue: string | undefined) {
+  const count = Number(countValue);
+  if (state === "queued") {
+    return `${Number.isInteger(count) && count > 0 ? count : "Eligible"} compan${count === 1 ? "y was" : "ies were"} queued for contact discovery and outreach-plan preparation.`;
+  }
+  if (state === "already_queued") return "The current eligible-opportunity handoff is already queued.";
+  if (state === "nothing_eligible") return "No current Hot or Qualified opportunity cleared the outreach handoff.";
+  if (state === "research_required") return "Complete Hunter company research before finding contacts.";
+  if (state === "configuration_required") return "Apollo or outreach-model configuration must be completed first.";
+  if (state === "disabled") return "Enable Assisted mode and turn off the kill switch before finding contacts.";
+  if (state === "plan_failed") return "Hunter could not refresh the current opportunity plan.";
+  return null;
 }
 
 const inputClass = "mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm";

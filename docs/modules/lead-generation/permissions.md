@@ -56,6 +56,9 @@ Roles and defaults are in `src/server/auth/role-policy.ts`. Runtime checks are i
 - Only a tenant administrator can select `ASSISTED`. Processing requires the tenant-bound ingestion credential and
   rechecks the stored mode and kill switch on every request. Assisted processing may create `REVIEWING` contacts
   and unapproved plans; it cannot approve, assign, enroll, create a Sales Opportunity, or send.
+- Only a tenant administrator can manually queue current eligible opportunities for contact discovery. The action
+  reuses current tenant-scoped research, refreshes deterministic planning, and remains subject to Assisted mode,
+  the kill switch, Apollo match review, contact-fit review, and plan QA.
 
 ## Failure modes
 
