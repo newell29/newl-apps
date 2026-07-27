@@ -20,6 +20,10 @@
       "vercelProtectionBypassEnv": {
         "type": "string",
         "description": "Optional Vercel Preview automation bypass environment variable."
+      },
+      "directoryPasswordMasterEnv": {
+        "type": "string",
+        "description": "Protected local environment variable containing the directory credential master."
       }
     }
   },
@@ -32,8 +36,10 @@
       "newl_backlink_follow_ups",
       "newl_backlink_verification",
       "newl_backlink_sync_replies",
+      "newl_backlink_sync_directory_verifications",
       "newl_backlink_summary",
       "newl_backlink_send_email",
+      "newl_backlink_fill_directory_credentials",
       "newl_backlink_report"
     ]
   }

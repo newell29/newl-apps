@@ -39,9 +39,10 @@ Scout uses its own OpenClaw agent and workspace with Codex `gpt-5.6-sol` at high
    - `WEBSITE_GROWTH_OUTREACH_US_ADDRESS`
    - `WEBSITE_GROWTH_RIVET_AUTO_TRIAGE_APPROVAL=OWNER_APPROVED_WEBSITE_GROWTH_FAILURE_TRIAGE` — optional one-time standing approval for code-defect diagnosis and draft PRs only.
 7. Put the same executor token in the protected OpenClaw gateway environment as `OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN`. Do not put it in an agent prompt, Teams, source control, or the business-profile JSON.
-8. Keep the owner-approved public business profile outside source control with file mode `600`.
-9. Run `ops/openclaw/install-website-growth-backlink-executor.sh`. It installs the dedicated Scout agent, plugin, skill, protected profile, disabled weekday schedule, and model-free Rivet failure monitor.
-10. Restart or reload the OpenClaw gateway if required by the installed OpenClaw version, then validate that only Scout has the Website Growth executor tools.
+8. Generate the local directory credential master once with `openssl rand -base64 48`. Add the result only to `~/.openclaw/.env` as `NEWL_DIRECTORY_PASSWORD_MASTER_V1=...`; do not add it to Vercel, Newl Apps, source control, an agent prompt, or Teams. Back up this single master in the owner's existing Apple Passwords/iCloud Keychain account. Losing it prevents deterministic recovery of directory passwords.
+9. Re-run `ops/openclaw/install-website-growth-backlink-executor.sh` so the installed plugin and weekday job include `newl_backlink_fill_directory_credentials` and `newl_backlink_sync_directory_verifications`.
+10. Keep the owner-approved public business profile outside source control with file mode `600`.
+11. Restart or reload the OpenClaw gateway if required by the installed OpenClaw version, then validate that only Scout has the Website Growth executor tools.
 
 ## Supervised launch test
 
@@ -65,7 +66,7 @@ Scout uses its own OpenClaw agent and workspace with Codex `gpt-5.6-sol` at high
 
 ## Directory-account credentials
 
-Scout may create an ordinary free directory account using the dedicated mailbox. Newl Apps stores the login URL and username, never a password. Email-link, password-reset, CAPTCHA, MFA, payment, or non-standard terms that cannot be completed safely move the opportunity to `BLOCKED`. Any credential that must be retained requires an owner-approved password manager before this step can be automated.
+Scout may create an ordinary free directory account using the dedicated mailbox. Newl Apps stores the login URL, username, credential reference/version, and account/challenge state—never a password. The local OpenClaw plugin deterministically derives a different password for every directory from the one protected owner-backed-up master, so no paid password-manager integration is required. Strict same-organization verification emails can activate automatically without exposing their tokenized URL. CAPTCHA, MFA, phone verification, payment, non-standard terms, or ambiguous email verification move the opportunity to the human-action queue with an exact next step.
 
 ## Rollback
 

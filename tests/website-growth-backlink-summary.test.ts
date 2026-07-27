@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const backlinkGroupBy = vi.fn();
 const backlinkFindMany = vi.fn();
+const backlinkCount = vi.fn();
 const jobFindFirst = vi.fn();
 const jobCreate = vi.fn();
 const jobUpdateMany = vi.fn();
@@ -14,7 +15,8 @@ vi.mock("@/server/db", () => ({
   prisma: {
     websiteGrowthBacklinkOpportunity: {
       groupBy: (...args: unknown[]) => backlinkGroupBy(...args),
-      findMany: (...args: unknown[]) => backlinkFindMany(...args)
+      findMany: (...args: unknown[]) => backlinkFindMany(...args),
+      count: (...args: unknown[]) => backlinkCount(...args)
     },
     automationJobRun: {
       findFirst: (...args: unknown[]) => jobFindFirst(...args),
@@ -54,6 +56,7 @@ describe("Website Growth backlink execution summary", () => {
           directoryLoginUrl: null
         }
       ]);
+    backlinkCount.mockResolvedValue(0);
     jobFindFirst.mockResolvedValue(null);
     jobCreate.mockResolvedValue({ id: "run-1" });
   });

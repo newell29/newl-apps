@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 
 import {
   parseWebsiteGrowthBacklinkExecutionStatus,
+  parseWebsiteGrowthDirectoryAccountState,
+  parseWebsiteGrowthDirectoryChallengeType,
   reportWebsiteGrowthBacklinkExecution
 } from "@/modules/website-growth/backlink-executor";
 import { prisma } from "@/server/db";
@@ -31,6 +33,14 @@ export async function POST(request: Request) {
         typeof body.directoryLoginUrl === "string" ? body.directoryLoginUrl : null,
       directoryUsername:
         typeof body.directoryUsername === "string" ? body.directoryUsername : null,
+      directoryAccountState:
+        parseWebsiteGrowthDirectoryAccountState(body.directoryAccountState),
+      directoryChallengeType:
+        parseWebsiteGrowthDirectoryChallengeType(body.directoryChallengeType),
+      directoryChallengeDetail:
+        typeof body.directoryChallengeDetail === "string"
+          ? body.directoryChallengeDetail
+          : null,
       acceptedTermsUrl:
         typeof body.acceptedTermsUrl === "string" ? body.acceptedTermsUrl : null,
       acceptedTermsSummary:

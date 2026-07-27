@@ -1,7 +1,8 @@
 import {
   ModuleKey,
   WebsiteGrowthBacklinkCategory,
-  WebsiteGrowthBacklinkStatus
+  WebsiteGrowthBacklinkStatus,
+  WebsiteGrowthDirectoryAccountState
 } from "@prisma/client";
 import Link from "next/link";
 
@@ -279,6 +280,18 @@ function BacklinkCard({
             {opportunity.nextFollowUpAt ? <Summary label="Next follow-up" value={formatDate(opportunity.nextFollowUpAt)} /> : null}
             {opportunity.replySummary ? <Summary label="Reply" value={opportunity.replySummary} /> : null}
             {opportunity.directoryUsername ? <Summary label="Directory username" value={opportunity.directoryUsername} /> : null}
+            {opportunity.category === WebsiteGrowthBacklinkCategory.DIRECTORY_CITATION ? (
+              <Summary
+                label="Directory account"
+                value={formatDirectoryAccountState(opportunity.directoryAccountState)}
+              />
+            ) : null}
+            {opportunity.directoryChallengeType ? (
+              <Summary
+                label="Action needed"
+                value={formatLabel(opportunity.directoryChallengeType)}
+              />
+            ) : null}
             {opportunity.acceptedTermsSummary ? <Summary label="Directory terms" value={opportunity.acceptedTermsSummary} /> : null}
           </dl>
         </div>
@@ -312,6 +325,14 @@ function BacklinkCard({
             </div>
           </dl>
         </div>
+      ) : null}
+      {opportunity.directoryAccountState ===
+      WebsiteGrowthDirectoryAccountState.EMAIL_VERIFICATION_PENDING ? (
+        <p className="mt-4 rounded-md border border-warning/25 bg-warning/10 p-3 text-sm leading-6 text-foreground">
+          The directory account was created and its verification email is pending.
+          Scout will check the dedicated partnerships mailbox without exposing the
+          verification link or account password.
+        </p>
       ) : null}
       <div className="mt-auto flex flex-wrap items-end justify-between gap-3 pt-5">
         <div className="flex flex-wrap gap-2">
@@ -384,6 +405,30 @@ function ExternalLink({ href, label }: { href: string; label: string }) {
 
 function Summary({ label, value }: { label: string; value: string }) {
   return <div><dt className="font-semibold uppercase tracking-wide">{label}</dt><dd className="mt-1 break-all text-foreground">{value}</dd></div>;
+}
+
+function formatDirectoryAccountState(
+  state: WebsiteGrowthDirectoryAccountState
+) {
+  if (state === WebsiteGrowthDirectoryAccountState.NOT_REQUIRED) {
+    return "Not required";
+  }
+  if (state === WebsiteGrowthDirectoryAccountState.NEEDS_ACCOUNT) {
+    return "Account needed";
+  }
+  if (state === WebsiteGrowthDirectoryAccountState.CREDENTIAL_READY) {
+    return "Secure credentials ready";
+  }
+  if (
+    state === WebsiteGrowthDirectoryAccountState.EMAIL_VERIFICATION_PENDING
+  ) {
+    return "Email verification pending";
+  }
+  if (state === WebsiteGrowthDirectoryAccountState.HUMAN_ACTION_REQUIRED) {
+    return "Needs your help";
+  }
+  if (state === WebsiteGrowthDirectoryAccountState.ACTIVE) return "Active";
+  return "Failed";
 }
 
 function groupBacklinks(opportunities: Awaited<ReturnType<typeof getWebsiteGrowthBacklinkWorkspace>>["opportunities"]) {

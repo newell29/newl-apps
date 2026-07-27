@@ -26,6 +26,8 @@ Successful outreach summaries are stored as tenant-scoped `AutomationJobRun` rec
 
 For approved execution it also stores the public recipient, country, exact contact-source URL, consent basis, follow-up schedule, reply/opt-out state, and non-secret directory login metadata. `WebsiteGrowthOutreachMessage` is the tenant-scoped audit history for initial and follow-up messages and Microsoft conversation identifiers. `WebsiteGrowthOutreachSuppression` is the tenant-scoped do-not-contact list. Passwords and access tokens are not stored in these models.
 
+Directory-account execution stores only an opaque credential reference/version and the lifecycle state (`NEEDS_ACCOUNT`, `CREDENTIAL_READY`, `EMAIL_VERIFICATION_PENDING`, `HUMAN_ACTION_REQUIRED`, `ACTIVE`, or `FAILED`). Challenge records contain a bounded category and sanitized explanation, never a CAPTCHA response, MFA code, password, magic link, or tokenized verification URL. The corresponding password is deterministically derived inside the local OpenClaw plugin from a protected master secret and is never persisted in Newl Apps.
+
 ```mermaid
 flowchart LR
   UI[Authenticated UI/API] --> Auth[Auth + module guard]

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createApiTool,
+  createDirectoryCredentialFillTool,
   createParameterizedApiTool
 } from "./index.js";
 
@@ -9,6 +10,7 @@ describe("Newl Website Growth OpenClaw plugin", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     delete process.env.TEST_BACKLINK_TOKEN;
+    delete process.env.TEST_DIRECTORY_MASTER;
   });
 
   it("does not call Newl Apps when the protected token is missing", async () => {
@@ -101,5 +103,46 @@ describe("Newl Website Growth OpenClaw plugin", () => {
         })
       })
     );
+  });
+
+  it("never substitutes a model-provided directory master", async () => {
+    process.env.TEST_BACKLINK_TOKEN = "protected-token";
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        data: {
+          opportunityId: "opportunity-1",
+          credentialRef: "directory:v1:opaque",
+          sourceOrigin: "https://directory.example",
+          username: "partnerships@newlgroup.com",
+          version: 1
+        }
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const tool = createDirectoryCredentialFillTool()({
+      config: {
+        baseUrl: "https://newl-apps.example.com",
+        backlinkTokenEnv: "TEST_BACKLINK_TOKEN",
+        directoryPasswordMasterEnv: "TEST_DIRECTORY_MASTER"
+      }
+    });
+
+    const result = await tool.execute("call-directory", {
+      opportunityId: "opportunity-1",
+      targetId: "target-1",
+      usernameRef: "username-ref",
+      passwordRef: "password-ref",
+      confirmPasswordRef: "confirm-ref",
+      master: "model-controlled-value"
+    });
+
+    expect(result.details.status).toBe("failed");
+    expect(result.content[0].text).toContain(
+      "protected directory credential master"
+    );
+    expect(result.content[0].text).not.toContain("model-controlled-value");
   });
 });
