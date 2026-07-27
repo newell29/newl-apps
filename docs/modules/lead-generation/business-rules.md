@@ -133,6 +133,10 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - Reviewer feedback may be supplied before enrollment and is saved with the generated-plan inputs. It can guide
   tone and emphasis but cannot override evidence or QA. Regeneration is blocked once the plan is approved or sequence
   activity starts.
+- A Newl Apps rep may route through multiple active Apollo mailboxes owned by the same Apollo user. Mailbox allocation
+  is deterministic by company and weighted by admin configuration, so contacts at one company do not receive outreach
+  from different Newl identities. Newly synced secondary mailboxes remain inactive with zero weight until an admin
+  explicitly enables them.
 - Editing the first email after QA invalidates the plan and Apollo readiness. Regeneration creates a new plan version,
   archives the previous active version, and reruns strategy, drafting, and QA.
 - Both Apollo queueing and the worker re-evaluate the same current Hunter handoff. When a current Outreach Plan

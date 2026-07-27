@@ -1012,16 +1012,16 @@ export default async function SettingsPage() {
           <div>
             <h2 className="text-base font-semibold text-foreground">Apollo Rep Mapping</h2>
             <p className="mt-1 text-sm leading-6 text-mutedForeground">
-              Sync Apollo teammates into a tenant-scoped ownership directory, then maintain send-from email routing here for Pipeline assignment and sequence prep.
+              Sync Apollo teammates and every connected mailbox, then control which sender identities Hunter can use under each Apollo owner.
             </p>
           </div>
           <div className="flex items-center gap-3">
             <span className="rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-xs font-semibold text-primary">
-              {settings.apolloRepMapping.length.toLocaleString("en-US")} synced reps
+              {settings.apolloRepMapping.length.toLocaleString("en-US")} synced mailboxes
             </span>
             <form action={syncApolloRepMappingAction}>
               <button className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
-                Sync Apollo reps
+                Sync Apollo mailboxes
               </button>
             </form>
           </div>
@@ -1033,16 +1033,18 @@ export default async function SettingsPage() {
               <thead className="bg-muted text-left text-xs font-semibold uppercase text-mutedForeground">
                 <tr>
                   <th className="px-3 py-3">Active</th>
+                  <th className="px-3 py-3">Sender identity</th>
                   <th className="px-3 py-3">Owner name</th>
-                  <th className="px-3 py-3">Apollo user ID</th>
                   <th className="px-3 py-3">Send-from email</th>
-                  <th className="px-3 py-3">Apollo email account ID</th>
+                  <th className="px-3 py-3">Routing weight</th>
+                  <th className="px-3 py-3">Apollo IDs</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border bg-background">
                 {buildApolloRepRows(settings.apolloRepMapping).map((entry, index) => (
                   <tr key={entry.id}>
                     <td className="px-3 py-3">
+                      <input type="hidden" name="apolloRepMappingId" defaultValue={entry.id} />
                       <input
                         type="checkbox"
                         name="apolloRepActiveIndex"
@@ -1052,15 +1054,17 @@ export default async function SettingsPage() {
                       />
                     </td>
                     <td className="px-3 py-3">
+                      <input
+                        name="apolloRepSenderLabel"
+                        defaultValue={entry.senderLabel}
+                        placeholder="Alex"
+                        className="w-36 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+                      />
+                    </td>
+                    <td className="px-3 py-3">
                       <input type="hidden" name="apolloRepSequenceOwnerName" defaultValue={entry.sequenceOwnerName} />
                       <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-foreground">
                         {entry.sequenceOwnerName}
-                      </div>
-                    </td>
-                    <td className="px-3 py-3">
-                      <input type="hidden" name="apolloRepUserId" defaultValue={entry.apolloUserId ?? ""} />
-                      <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-mutedForeground">
-                        {entry.apolloUserId ?? "Missing Apollo user ID"}
                       </div>
                     </td>
                     <td className="px-3 py-3">
@@ -1073,11 +1077,25 @@ export default async function SettingsPage() {
                     </td>
                     <td className="px-3 py-3">
                       <input
+                        name="apolloRepRoutingWeight"
+                        type="number"
+                        min={0}
+                        max={100}
+                        defaultValue={entry.routingWeight}
+                        className="w-24 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+                      />
+                    </td>
+                    <td className="px-3 py-3">
+                      <input type="hidden" name="apolloRepUserId" defaultValue={entry.apolloUserId ?? ""} />
+                      <input
                         name="apolloRepSendFromEmailAccountId"
                         defaultValue={entry.sendFromEmailAccountId ?? ""}
                         placeholder="Auto-filled from Apollo sync"
-                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+                        className="w-52 rounded-md border border-border bg-background px-3 py-2 text-xs text-mutedForeground"
                       />
+                      <p className="mt-1 max-w-52 truncate text-[11px] text-mutedForeground">
+                        Owner: {entry.apolloUserId ?? "missing"}
+                      </p>
                     </td>
                   </tr>
                 ))}
@@ -1087,7 +1105,7 @@ export default async function SettingsPage() {
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-mutedForeground">
-              Owner name and Apollo user ID are synced from Apollo. The Apollo email account ID should resolve from the send-from mailbox during sync and is not usually the plain email address itself. Only active reps appear in Pipeline assignment.
+              Multiple mailboxes may share one Apollo owner. Active mailboxes with a weight above zero form that owner&apos;s pool; Hunter keeps every company on one deterministic sender. Use a larger weight for the mailbox that should receive most new companies.
             </p>
             <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
               Save Apollo rep mapping
@@ -1096,7 +1114,7 @@ export default async function SettingsPage() {
         </form>
         {settings.apolloRepMapping.length === 0 ? (
           <p className="mt-4 text-sm text-mutedForeground">
-            No Apollo reps are synced yet. Use <span className="font-medium text-foreground">Sync Apollo reps</span> to import teammate records from Apollo first.
+            No Apollo mailboxes are synced yet. Use <span className="font-medium text-foreground">Sync Apollo mailboxes</span> after connecting at least one mailbox in Apollo.
           </p>
         ) : null}
       </section>
@@ -2220,9 +2238,11 @@ function buildApolloRepRows(
   entries: Array<{
     id: string;
     sequenceOwnerName: string;
+    senderLabel: string;
     apolloUserId: string | null;
     sendFromEmail: string | null;
     sendFromEmailAccountId: string | null;
+    routingWeight: number;
     active: boolean;
   }>
 ) {

@@ -2,6 +2,7 @@ import { ReplyStatus, SequenceStatus } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
+  isContactEligibleForFreshOutreach,
   isContactFitAutoEligible,
   readCachedContactFitReview,
   rankHunterContacts,
@@ -149,6 +150,25 @@ describe("Hunter assisted outreach handoff", () => {
       ...review,
       disposition: "REJECT",
       confidence: 100
+    })).toBe(false);
+  });
+
+  it("hard-excludes replied and previously enrolled contacts from fresh outreach", () => {
+    expect(isContactEligibleForFreshOutreach({
+      sequenceStatus: SequenceStatus.NOT_STARTED,
+      replyStatus: ReplyStatus.NO_REPLY
+    })).toBe(true);
+    expect(isContactEligibleForFreshOutreach({
+      sequenceStatus: SequenceStatus.READY,
+      replyStatus: ReplyStatus.NO_REPLY
+    })).toBe(true);
+    expect(isContactEligibleForFreshOutreach({
+      sequenceStatus: SequenceStatus.ENROLLED,
+      replyStatus: ReplyStatus.NO_REPLY
+    })).toBe(false);
+    expect(isContactEligibleForFreshOutreach({
+      sequenceStatus: SequenceStatus.NOT_STARTED,
+      replyStatus: ReplyStatus.REPLIED
     })).toBe(false);
   });
 
