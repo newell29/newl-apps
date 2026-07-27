@@ -38,16 +38,16 @@ describe("Teamship Phase 2 agent execution", () => {
 
   it("maps the approved full Garland ship-to name to Teamship First Name", () => {
     const review = sampleReview();
-    review.pdfOrders[0]!.psNumber = "PS210510";
-    review.pdfOrders[0]!.shipToName = "CENTRE DE DISTRIBUTION #2 DOYON";
-    review.reviews[0]!.psNumber = "PS210510";
+    review.pdfOrders[0]!.psNumber = "PS999910";
+    review.pdfOrders[0]!.shipToName = "SYNTHETIC GARLAND CUSTOMER DISTRIBUTION CENTRE";
+    review.reviews[0]!.psNumber = "PS999910";
     review.reviews[0]!.fields = [
       {
         key: "ship_to_name",
         label: "Ship-to name",
         status: "DISCREPANCY",
-        pdfValue: "CENTRE DE DISTRIBUTION #2 DOYON",
-        teamshipValue: "CENTRE DE DISTR #2 DOYON",
+        pdfValue: "SYNTHETIC GARLAND CUSTOMER DISTRIBUTION CENTRE",
+        teamshipValue: "SYNTHETIC GARLAND CUSTOMER",
         message: "PDF and Teamship values do not match.",
         botActionEnabled: true
       }
@@ -62,8 +62,9 @@ describe("Teamship Phase 2 agent execution", () => {
     });
 
     expect(payload).toMatchObject({
-      ship_first_name: "CENTRE DE DISTRIBUTION #2 DOYON"
+      ship_first_name: "SYNTHETIC GARLAND CUSTOMER DISTRIBUTION CENTRE"
     });
+    expect(payload).not.toHaveProperty("ship_last_name");
     expect(evidence.orders[0]?.fieldActions[0]?.browserInstruction).toMatchObject({
       fieldLabel: "First Name",
       primaryLocator: {

@@ -23,7 +23,7 @@ flowchart TB
 
 Emails are classified using Garland-domain, PS-range, order/page-count, attachment, and correction signals. Attachments are hashed for duplicate detection. Parsed PDF pages extract PS number, SR number, ship-to data, PO, freight terms, order date, ship-via, instructions, and item rows when present. Teamship review compares Garland parsed data with Teamship details.
 
-When the Garland PDF ship-to name differs from Teamship, an approved update uses the complete PDF ship-to name for Teamship `ship_first_name` (the field labelled **First Name**). The planner must not abbreviate values such as `CENTRE DE DISTRIBUTION #2 DOYON`; the existing review and update approval gates still apply before any Teamship write.
+When the Garland PDF ship-to name differs from Teamship, an approved update uses the complete PDF ship-to name for Teamship `ship_first_name` (the field labelled **First Name**). The planner must preserve the complete business name without abbreviating it. This approved rule does not silently clear or rewrite Teamship `ship_last_name`; any separate Last Name correction requires its own reviewed rule. The existing review and update approval gates still apply before any Teamship write.
 
 ## Pallet and printing notes
 

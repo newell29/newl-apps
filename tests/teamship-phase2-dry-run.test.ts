@@ -323,16 +323,16 @@ describe("Teamship Phase 2 dry-run planner", () => {
 
   it("auto-enables the full Garland ship-to name for Teamship First Name", () => {
     const review = sampleReview();
-    review.pdfOrders[0]!.psNumber = "PS210510";
-    review.pdfOrders[0]!.shipToName = "CENTRE DE DISTRIBUTION #2 DOYON";
-    review.reviews[0]!.psNumber = "PS210510";
+    review.pdfOrders[0]!.psNumber = "PS999910";
+    review.pdfOrders[0]!.shipToName = "SYNTHETIC GARLAND CUSTOMER DISTRIBUTION CENTRE";
+    review.reviews[0]!.psNumber = "PS999910";
     review.reviews[0]!.fields = [
       {
         key: "ship_to_name",
         label: "Ship-to name",
         status: "DISCREPANCY",
-        pdfValue: "CENTRE DE DISTRIBUTION #2 DOYON",
-        teamshipValue: "CENTRE DE DISTR #2 DOYON",
+        pdfValue: "SYNTHETIC GARLAND CUSTOMER DISTRIBUTION CENTRE",
+        teamshipValue: "SYNTHETIC GARLAND CUSTOMER",
         message: "PDF and Teamship values do not match."
       }
     ];
@@ -345,8 +345,8 @@ describe("Teamship Phase 2 dry-run planner", () => {
       expect.objectContaining({
         reviewFieldKey: "ship_to_name",
         teamshipField: "ship_first_name",
-        currentValue: "CENTRE DE DISTR #2 DOYON",
-        proposedValue: "CENTRE DE DISTRIBUTION #2 DOYON"
+        currentValue: "SYNTHETIC GARLAND CUSTOMER",
+        proposedValue: "SYNTHETIC GARLAND CUSTOMER DISTRIBUTION CENTRE"
       })
     ]);
   });
