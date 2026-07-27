@@ -196,7 +196,10 @@ export async function fetchTeamshipShippingOrdersForReview({
         continue;
       }
 
-      if (shouldEnrichFromUiPage && !hasTeamshipSerialEvidence(mergedDetail)) {
+      if (
+        shouldEnrichFromUiPage &&
+        (!hasTeamshipSerialEvidence(mergedDetail) || hasIncompleteTeamshipShipToEvidence(mergedDetail))
+      ) {
         if (webCookieHeader === undefined) {
           webCookieHeader = await loginToTeamshipWeb(fetchImpl, resolvedCredentials, webBaseUrl).catch(() => null);
         }
@@ -454,6 +457,14 @@ function hasTeamshipSerialEvidence(value: unknown) {
   return visit(value);
 }
 
+function hasIncompleteTeamshipShipToEvidence(order: TeamshipShippingOrderDetail) {
+  const city = firstString([order.ship_to_city, order.ship_city]);
+  const state = firstString([order.ship_to_state, order.ship_state]);
+  const postalCode = firstString([order.ship_to_zip, order.ship_zip]);
+
+  return !(city && state && postalCode);
+}
+
 function isSerialEvidenceKey(key: string) {
   const normalized = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
 
@@ -472,10 +483,19 @@ export function parseTeamshipShippingOrderUiPage(html: string): Partial<Teamship
     .map(readTeamshipUiInventoryItem)
     .filter((item): item is NonNullable<ReturnType<typeof readTeamshipUiInventoryItem>> => Boolean(item));
   const pallets = readTeamshipUiPallets(html);
+  const shipCity = readTeamshipUiFormValue(html, "ship_city");
+  const shipState = readTeamshipUiFormValue(html, "ship_state");
+  const shipZip = readTeamshipUiFormValue(html, "ship_zip");
 
   return {
     items,
-    pallet_dims: pallets
+    pallet_dims: pallets,
+    ship_to_city: shipCity,
+    ship_city: shipCity,
+    ship_to_state: shipState,
+    ship_state: shipState,
+    ship_to_zip: shipZip,
+    ship_zip: shipZip
   };
 }
 
@@ -669,6 +689,12 @@ function mergeTeamshipUiDetail(
 ): TeamshipShippingOrderDetail {
   return {
     ...detail,
+    ship_to_city: uiDetail.ship_to_city ?? detail.ship_to_city,
+    ship_city: uiDetail.ship_city ?? detail.ship_city,
+    ship_to_state: uiDetail.ship_to_state ?? detail.ship_to_state,
+    ship_state: uiDetail.ship_state ?? detail.ship_state,
+    ship_to_zip: uiDetail.ship_to_zip ?? detail.ship_to_zip,
+    ship_zip: uiDetail.ship_zip ?? detail.ship_zip,
     items: mergeArrayValues(detail.items, uiDetail.items),
     pallet_dims: mergeArrayValues(detail.pallet_dims, uiDetail.pallet_dims),
     url: uiDetail.url ?? detail.url
@@ -994,6 +1020,10 @@ function readHtmlFormValueById(html: string, id: string) {
 
 function readHtmlFormValueByName(html: string, name: string) {
   return readHtmlFormValue(html, "name", name);
+}
+
+function readTeamshipUiFormValue(html: string, field: string) {
+  return readHtmlFormValueByName(html, field) ?? readHtmlFormValueById(html, field);
 }
 
 function readHtmlFormValue(html: string, attributeName: "id" | "name", expectedValue: string) {

@@ -1728,6 +1728,119 @@ NEWLS 2604816191908 1.00 ( )`
     });
   });
 
+  it.each([
+    {
+      label: "partially populated",
+      apiCity: "STALE API CITY",
+      apiState: "ON",
+      apiPostalCode: ""
+    },
+    {
+      label: "entirely absent",
+      apiCity: "",
+      apiState: "",
+      apiPostalCode: ""
+    }
+  ])("uses exact Teamship page ship-to values when API aliases are $label", async ({
+    apiCity,
+    apiState,
+    apiPostalCode
+  }) => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_MAX_LIST_PAGES = "1";
+
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/v1/login")) {
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/api/v1/ship-inventories?")) {
+        return Response.json({
+          data: [{ id: 39912, shipment_id: "SR999912", record_no: "PS999912" }]
+        });
+      }
+
+      if (url.endsWith("/api/v1/ship-inventories/39912")) {
+        return Response.json({
+          data: {
+            id: 39912,
+            shipment_id: "SR999912",
+            record_no: "PS999912",
+            ship_city: apiCity,
+            ship_state: apiState,
+            ship_zip: apiPostalCode,
+            items: [{ sku: "SYNTHETIC-SKU", inventory_stock: { serial_number: "9900000000012" } }]
+          }
+        });
+      }
+
+      if (url.endsWith("/login") && (init?.method ?? "GET") === "GET") {
+        return new Response('<input type="hidden" name="_token" value="csrf-1">', {
+          headers: {
+            "set-cookie": "teamship_session=before-login; Path=/"
+          }
+        });
+      }
+
+      if (url.endsWith("/login") && init?.method === "POST") {
+        return new Response("", {
+          status: 302,
+          headers: {
+            "set-cookie": "teamship_session=after-login; Path=/"
+          }
+        });
+      }
+
+      if (url.endsWith("/ship-inventories/39912")) {
+        return new Response(`
+          <input name="ship_city" value="SYNTHETIC CITY">
+          <input name="ship_state" value="ON">
+          <input name="ship_zip" value="A1A 1A1">
+        `);
+      }
+
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      orderReferences: [{ srNumber: "SR999912", psNumber: "PS999912" }],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+    const pdfOrder = samplePdfOrder({
+      psNumber: "PS999912",
+      srNumber: "SR999912",
+      pageNumbers: [1],
+      shipVia: "MIDLAND",
+      shipToName: "SYNTHETIC GARLAND CUSTOMER",
+      shipToPo: "PO-SYNTHETIC",
+      freightTerms: "PPADD-CD",
+      itemSkus: ["SYNTHETIC-SKU"],
+      serialNumbers: ["9900000000012"]
+    });
+    pdfOrder.shipToCity = "SYNTHETIC CITY";
+    pdfOrder.shipToState = "ON";
+    pdfOrder.shipToPostalCode = "A1A 1A1";
+
+    const review = buildGarlandTeamshipReview([pdfOrder], orders);
+    const fieldsByKey = new Map(review.reviews[0]?.fields.map((field) => [field.key, field]));
+
+    expect(orders[0]).toMatchObject({
+      ship_to_city: "SYNTHETIC CITY",
+      ship_to_state: "ON",
+      ship_to_zip: "A1A 1A1",
+      ship_city: "SYNTHETIC CITY",
+      ship_state: "ON",
+      ship_zip: "A1A 1A1"
+    });
+    expect(fieldsByKey.get("ship_to_city")).toMatchObject({ status: "MATCH", teamshipValue: "SYNTHETIC CITY" });
+    expect(fieldsByKey.get("ship_to_state")).toMatchObject({ status: "MATCH", teamshipValue: "ON" });
+    expect(fieldsByKey.get("ship_to_zip")).toMatchObject({ status: "MATCH", teamshipValue: "A1A 1A1" });
+  });
+
   it("uses Teamship API detail serials without falling back to the UI page", async () => {
     process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
     process.env.TEAMSHIP_PASSWORD = "configured-in-env";
@@ -1753,6 +1866,9 @@ NEWLS 2604816191908 1.00 ( )`
             id: 30202,
             shipment_id: "SR808478",
             edi_field_2: "PS210206-SR808478",
+            ship_city: "MATCHING CITY",
+            ship_state: "ON",
+            ship_zip: "A1A 1A1",
             items: [
               {
                 sku: "E1SGHMV6XHU3US",
