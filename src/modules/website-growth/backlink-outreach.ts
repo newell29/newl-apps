@@ -5,6 +5,7 @@ import {
   JobStatus,
   WebsiteGrowthBacklinkCategory,
   WebsiteGrowthBacklinkStatus,
+  WebsiteGrowthDirectoryAccountState,
   WebsiteGrowthOutreachConsentBasis,
   WebsiteGrowthOutreachMessageKind,
   type Prisma
@@ -567,7 +568,13 @@ export async function buildWebsiteGrowthOutreachTeamsSummary({
   runStartedAt: Date;
   now?: Date;
 }) {
-  const [counts, recentOutcomes, blockedThisRunRecords] = await Promise.all([
+  const [
+    counts,
+    recentOutcomes,
+    blockedThisRunRecords,
+    humanDirectoryActions,
+    pendingDirectoryVerifications
+  ] = await Promise.all([
     prisma.websiteGrowthBacklinkOpportunity.groupBy({
       by: ["status"],
       where: { tenantId },
@@ -611,6 +618,20 @@ export async function buildWebsiteGrowthOutreachTeamsSummary({
       },
       orderBy: { updatedAt: "desc" },
       take: 20
+    }),
+    prisma.websiteGrowthBacklinkOpportunity.count({
+      where: {
+        tenantId,
+        directoryAccountState:
+          WebsiteGrowthDirectoryAccountState.HUMAN_ACTION_REQUIRED
+      }
+    }),
+    prisma.websiteGrowthBacklinkOpportunity.count({
+      where: {
+        tenantId,
+        directoryAccountState:
+          WebsiteGrowthDirectoryAccountState.EMAIL_VERIFICATION_PENDING
+      }
     })
   ]);
   const byStatus = Object.fromEntries(counts.map((row) => [row.status, row._count._all]));
@@ -655,6 +676,7 @@ export async function buildWebsiteGrowthOutreachTeamsSummary({
     "Website Growth outreach update",
     `${needsReview} prospect${needsReview === 1 ? "" : "s"} need your approval; ${approved} approved item${approved === 1 ? "" : "s"} ${approved === 1 ? "is" : "are"} ready for Scout.`,
     `${contacted} contacted; ${replied} replied; ${submitted} directory submissions; ${live} verified live; ${blockedThisRun.length} blocked this run; ${blockedTotal} blocked total.`,
+    `${humanDirectoryActions} directory account${humanDirectoryActions === 1 ? "" : "s"} need your help; ${pendingDirectoryVerifications} email verification${pendingDirectoryVerifications === 1 ? "" : "s"} pending.`,
     ...(blockedLines.length > 0
       ? [
           "Blocked this run:",
@@ -679,7 +701,9 @@ export async function buildWebsiteGrowthOutreachTeamsSummary({
       submitted,
       live,
       blockedThisRun: blockedThisRun.length,
-      blockedTotal
+      blockedTotal,
+      humanDirectoryActions,
+      pendingDirectoryVerifications
     },
     blockedItems: blockedThisRun.map(({ id, title, blocker }) => ({
       id,

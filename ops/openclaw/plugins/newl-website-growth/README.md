@@ -9,3 +9,5 @@ The executor records a UTC `runStartedAt` timestamp before its first action and 
 Configure `baseUrl` with the production Newl Apps HTTPS URL. `backlinkTokenEnv` defaults to `OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN`; it names the protected environment variable and never contains the token itself. A Vercel Preview bypass may be configured only for supervised preview tests.
 
 Install this plugin together with the repository-owned `website-growth-backlink-executor` skill. The weekday executor cron must remain disabled until the database migration, reviewed Newl Apps deployment, Microsoft 365 mailbox scope, public outreach profile and supervised one-message test are complete.
+
+Free directory accounts use `newl_backlink_fill_directory_credentials`. The plugin reads the dedicated local `NEWL_DIRECTORY_PASSWORD_MASTER_V1`, derives a stable unique 28-character password for the approved directory/account, fills it through OpenClaw's private `--fields-file` browser path, deletes the file, and returns no password. The master belongs only in the protected OpenClaw gateway environment; it must never be placed in Vercel, Newl Apps, prompts, Teams, Git, or the business profile.

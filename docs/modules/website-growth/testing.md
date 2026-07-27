@@ -14,6 +14,8 @@ Backlink regression coverage verifies the structured Scout parser, 15-item cap, 
 
 Blocker-reporting coverage verifies the four deterministic blocker categories, external-history retry protection, required block reasons, bounded run-start timestamps, separate current-run/lifetime counts, persisted run summaries, Teams next-action/retry wording, and the corresponding Newl Apps card labels.
 
+Directory-account coverage verifies deterministic per-directory password uniqueness, required character classes, weak-master rejection, opaque credential references, private temporary-file permissions, password-free tool results, exact verification recipients, same-organization verification links, unrelated-link rejection, challenge-state reporting, and human-safe retry behaviour. Tests do not use a real master secret, mailbox, directory account, CAPTCHA, or live verification link.
+
 The OpenClaw Website Growth plugin has its own build and tests under `ops/openclaw/plugins/newl-website-growth`. Validation confirms that the executor token is injected from the protected environment rather than accepted from model-controlled arguments. The production rollout still requires the supervised one-message test in `backlink-outreach-rollout.md`.
 
 The website repository validates the optional Kimi workflow with GitHub Actions syntax checks plus the same changed-file lint and production build used for Codex. The controlled model evaluation must start both agents from the same approved brief and website commit, then compare claim compliance, route correctness, design fit, build success, reviewer edits, latency, and cost across their separate Vercel Previews. A missing or failed Kimi run must leave the Codex callback and primary build state unchanged.

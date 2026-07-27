@@ -1,4 +1,5 @@
 import {
+  WebsiteGrowthBacklinkCategory,
   WebsiteGrowthBacklinkStatus
 } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -152,7 +153,9 @@ describe("Website Growth backlink review actions", () => {
     backlinkFindFirst.mockResolvedValue({
       id: "supply-chain-dive-id",
       title: "Supply Chain Dive editorial source opportunity",
-      notes: "The original send was blocked before Microsoft Graph was called."
+      notes: "The original send was blocked before Microsoft Graph was called.",
+      category: WebsiteGrowthBacklinkCategory.CONTENT_CONTRIBUTION,
+      directoryCredentialRef: null
     });
     const formData = new FormData();
     formData.set("backlinkId", "supply-chain-dive-id");
@@ -176,7 +179,13 @@ describe("Website Growth backlink review actions", () => {
           }
         }
       },
-      select: { id: true, title: true, notes: true }
+      select: {
+        id: true,
+        title: true,
+        notes: true,
+        category: true,
+        directoryCredentialRef: true
+      }
     });
     expect(backlinkUpdateMany).toHaveBeenCalledWith({
       where: expect.objectContaining({
@@ -192,7 +201,11 @@ describe("Website Growth backlink review actions", () => {
       data: {
         status: WebsiteGrowthBacklinkStatus.APPROVED,
         claimedAt: null,
-        notes: null
+        notes: null,
+        directoryAccountState: "NOT_REQUIRED",
+        directoryChallengeType: null,
+        directoryChallengeDetail: null,
+        directoryChallengeAt: null
       }
     });
     expect(auditCreate).toHaveBeenCalledWith({

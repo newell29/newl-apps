@@ -18,5 +18,8 @@ describe("Website Growth backlink blocker workspace", () => {
     expect(source).toContain("Recommended next action");
     expect(source).toContain("Will retrying help?");
     expect(source).toContain("formatWebsiteGrowthBacklinkBlockerCategory");
+    expect(source).toContain("Directory account");
+    expect(source).toContain("Email verification pending");
+    expect(source).toContain("Needs your help");
   });
 });

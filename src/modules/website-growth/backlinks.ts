@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import {
   WebsiteGrowthBacklinkCategory,
   WebsiteGrowthBacklinkStatus,
+  WebsiteGrowthDirectoryAccountState,
   type Prisma
 } from "@prisma/client";
 
@@ -223,6 +224,10 @@ export async function persistWebsiteGrowthBacklinkReview({
         firstSeenAt: now,
         lastSeenAt: now,
         category: prospect.category,
+        directoryAccountState:
+          prospect.category === WebsiteGrowthBacklinkCategory.DIRECTORY_CITATION
+            ? WebsiteGrowthDirectoryAccountState.NEEDS_ACCOUNT
+            : WebsiteGrowthDirectoryAccountState.NOT_REQUIRED,
         title: prospect.title,
         sourceDomain: prospect.sourceDomain,
         sourceUrl: prospect.sourceUrl,

@@ -1,6 +1,8 @@
 import {
   WebsiteGrowthBacklinkCategory,
-  WebsiteGrowthBacklinkStatus
+  WebsiteGrowthBacklinkStatus,
+  WebsiteGrowthDirectoryAccountState,
+  WebsiteGrowthDirectoryChallengeType
 } from "@prisma/client";
 
 import { prisma } from "@/server/db";
@@ -103,6 +105,9 @@ export async function reportWebsiteGrowthBacklinkExecution({
   liveUrl,
   directoryLoginUrl,
   directoryUsername,
+  directoryAccountState,
+  directoryChallengeType,
+  directoryChallengeDetail,
   acceptedTermsUrl,
   acceptedTermsSummary
 }: {
@@ -113,6 +118,9 @@ export async function reportWebsiteGrowthBacklinkExecution({
   liveUrl?: string | null;
   directoryLoginUrl?: string | null;
   directoryUsername?: string | null;
+  directoryAccountState?: WebsiteGrowthDirectoryAccountState | null;
+  directoryChallengeType?: WebsiteGrowthDirectoryChallengeType | null;
+  directoryChallengeDetail?: string | null;
   acceptedTermsUrl?: string | null;
   acceptedTermsSummary?: string | null;
 }) {
@@ -134,10 +142,17 @@ export async function reportWebsiteGrowthBacklinkExecution({
       "A blocked backlink report must include the specific blocker reason."
     );
   }
+  validateDirectoryAccountReport({
+    status,
+    directoryAccountState,
+    directoryChallengeType,
+    directoryChallengeDetail
+  });
   assertWebsiteGrowthBacklinkReportContainsNoSecrets([
     notes,
     directoryLoginUrl,
     directoryUsername,
+    directoryChallengeDetail,
     acceptedTermsUrl,
     acceptedTermsSummary
   ]);
@@ -146,12 +161,31 @@ export async function reportWebsiteGrowthBacklinkExecution({
     where: { id: opportunityId, tenantId },
     select: {
       status: true,
-      submittedAt: true
+      submittedAt: true,
+      category: true
     }
   });
   if (!current) {
     throw new Error("The backlink opportunity was not found.");
   }
+  const isDirectory =
+    current.category === WebsiteGrowthBacklinkCategory.DIRECTORY_CITATION;
+  if (
+    !isDirectory &&
+    (directoryAccountState ||
+      directoryChallengeType ||
+      directoryChallengeDetail)
+  ) {
+    throw new Error(
+      "Directory account fields may be reported only for a directory opportunity."
+    );
+  }
+  const nextDirectoryAccountState = isDirectory
+    ? getReportedDirectoryAccountState({
+        status,
+        requested: directoryAccountState
+      })
+    : undefined;
   const result = await prisma.websiteGrowthBacklinkOpportunity.updateMany({
     where: {
       id: opportunityId,
@@ -178,6 +212,30 @@ export async function reportWebsiteGrowthBacklinkExecution({
       liveUrl: status === WebsiteGrowthBacklinkStatus.LIVE ? normalizePublicUrl(liveUrl) : undefined,
       directoryLoginUrl: directoryLoginUrl ? normalizePublicUrl(directoryLoginUrl) : undefined,
       directoryUsername: directoryUsername?.trim().slice(0, 320) || undefined,
+      directoryAccountState: nextDirectoryAccountState,
+      directoryAccountVerifiedAt:
+        nextDirectoryAccountState === WebsiteGrowthDirectoryAccountState.ACTIVE
+          ? now
+          : undefined,
+      directoryChallengeType:
+        isDirectory && status === WebsiteGrowthBacklinkStatus.BLOCKED
+          ? directoryChallengeType ?? WebsiteGrowthDirectoryChallengeType.OTHER
+          : isDirectory
+            ? null
+            : undefined,
+      directoryChallengeDetail:
+        isDirectory && status === WebsiteGrowthBacklinkStatus.BLOCKED
+          ? directoryChallengeDetail?.trim().slice(0, 1000) ||
+            notes?.trim().slice(0, 1000)
+          : isDirectory
+            ? null
+            : undefined,
+      directoryChallengeAt:
+        isDirectory && status === WebsiteGrowthBacklinkStatus.BLOCKED
+          ? now
+          : isDirectory
+            ? null
+            : undefined,
       acceptedTermsUrl: acceptedTermsUrl ? normalizePublicUrl(acceptedTermsUrl) : undefined,
       acceptedTermsSummary: acceptedTermsSummary?.trim().slice(0, 1000) || undefined,
       verifiedAt: status === WebsiteGrowthBacklinkStatus.LIVE ? now : undefined,
@@ -204,10 +262,79 @@ export async function reportWebsiteGrowthBacklinkExecution({
         notes: notes?.trim().slice(0, 2000) || null,
         directoryLoginUrl: directoryLoginUrl ? normalizePublicUrl(directoryLoginUrl) : null,
         directoryUsername: directoryUsername?.trim().slice(0, 320) || null,
+        directoryAccountState: nextDirectoryAccountState ?? null,
+        directoryChallengeType:
+          isDirectory && status === WebsiteGrowthBacklinkStatus.BLOCKED
+            ? directoryChallengeType ?? WebsiteGrowthDirectoryChallengeType.OTHER
+            : null,
         acceptedTermsUrl: acceptedTermsUrl ? normalizePublicUrl(acceptedTermsUrl) : null
       }
     }
   });
+}
+
+function validateDirectoryAccountReport({
+  status,
+  directoryAccountState,
+  directoryChallengeType,
+  directoryChallengeDetail
+}: {
+  status: WebsiteGrowthBacklinkStatus;
+  directoryAccountState?: WebsiteGrowthDirectoryAccountState | null;
+  directoryChallengeType?: WebsiteGrowthDirectoryChallengeType | null;
+  directoryChallengeDetail?: string | null;
+}) {
+  if (
+    directoryChallengeType &&
+    status !== WebsiteGrowthBacklinkStatus.BLOCKED
+  ) {
+    throw new Error("Directory challenge types may be reported only with BLOCKED.");
+  }
+  if (
+    directoryChallengeType &&
+    !directoryChallengeDetail?.trim()
+  ) {
+    throw new Error("A directory challenge must include a sanitized detail.");
+  }
+  if (!directoryAccountState) return;
+  const allowed =
+    (status === WebsiteGrowthBacklinkStatus.SUBMITTED &&
+      directoryAccountState ===
+        WebsiteGrowthDirectoryAccountState.EMAIL_VERIFICATION_PENDING) ||
+    (status === WebsiteGrowthBacklinkStatus.BLOCKED &&
+      (directoryAccountState ===
+        WebsiteGrowthDirectoryAccountState.HUMAN_ACTION_REQUIRED ||
+        directoryAccountState === WebsiteGrowthDirectoryAccountState.FAILED)) ||
+    (status === WebsiteGrowthBacklinkStatus.LIVE &&
+      directoryAccountState === WebsiteGrowthDirectoryAccountState.ACTIVE);
+  if (!allowed) {
+    throw new Error(
+      "The reported directory account state does not match the backlink result."
+    );
+  }
+}
+
+function getReportedDirectoryAccountState({
+  status,
+  requested
+}: {
+  status: WebsiteGrowthBacklinkStatus;
+  requested?: WebsiteGrowthDirectoryAccountState | null;
+}) {
+  if (requested) return requested;
+  if (status === WebsiteGrowthBacklinkStatus.SUBMITTED) {
+    return WebsiteGrowthDirectoryAccountState.EMAIL_VERIFICATION_PENDING;
+  }
+  if (status === WebsiteGrowthBacklinkStatus.BLOCKED) {
+    return WebsiteGrowthDirectoryAccountState.HUMAN_ACTION_REQUIRED;
+  }
+  if (status === WebsiteGrowthBacklinkStatus.LIVE) {
+    return WebsiteGrowthDirectoryAccountState.ACTIVE;
+  }
+  if (status === WebsiteGrowthBacklinkStatus.LOST) {
+    return WebsiteGrowthDirectoryAccountState.FAILED;
+  }
+  return undefined;
 }
 
 export async function getWebsiteGrowthBacklinkVerificationQueue({
@@ -254,6 +381,32 @@ export function parseWebsiteGrowthBacklinkExecutionStatus(value: unknown) {
     return value as WebsiteGrowthBacklinkStatus;
   }
   throw new Error("Backlink execution status is invalid.");
+}
+
+export function parseWebsiteGrowthDirectoryAccountState(value: unknown) {
+  if (value === undefined || value === null || value === "") return null;
+  if (
+    typeof value !== "string" ||
+    !Object.values(WebsiteGrowthDirectoryAccountState).includes(
+      value as WebsiteGrowthDirectoryAccountState
+    )
+  ) {
+    throw new Error("The directory account state is invalid.");
+  }
+  return value as WebsiteGrowthDirectoryAccountState;
+}
+
+export function parseWebsiteGrowthDirectoryChallengeType(value: unknown) {
+  if (value === undefined || value === null || value === "") return null;
+  if (
+    typeof value !== "string" ||
+    !Object.values(WebsiteGrowthDirectoryChallengeType).includes(
+      value as WebsiteGrowthDirectoryChallengeType
+    )
+  ) {
+    throw new Error("The directory challenge type is invalid.");
+  }
+  return value as WebsiteGrowthDirectoryChallengeType;
 }
 
 export function assertWebsiteGrowthBacklinkReportContainsNoSecrets(

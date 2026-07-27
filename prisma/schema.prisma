@@ -115,6 +115,26 @@ enum WebsiteGrowthBacklinkStatus {
   ARCHIVED
 }
 
+enum WebsiteGrowthDirectoryAccountState {
+  NOT_REQUIRED
+  NEEDS_ACCOUNT
+  CREDENTIAL_READY
+  EMAIL_VERIFICATION_PENDING
+  HUMAN_ACTION_REQUIRED
+  ACTIVE
+  FAILED
+}
+
+enum WebsiteGrowthDirectoryChallengeType {
+  CAPTCHA
+  MFA
+  PHONE_VERIFICATION
+  EMAIL_VERIFICATION
+  PASSWORD_POLICY
+  TERMS
+  OTHER
+}
+
 enum WebsiteGrowthOutreachConsentBasis {
   EXPRESS
   EXISTING_RELATIONSHIP
@@ -910,54 +930,62 @@ model WebsiteGrowthMetric {
 }
 
 model WebsiteGrowthBacklinkOpportunity {
-  id                   String                             @id @default(cuid())
-  tenantId             String
-  dedupeKey            String
-  createdAt            DateTime                           @default(now())
-  updatedAt            DateTime                           @updatedAt
-  firstSeenAt          DateTime                           @default(now())
-  lastSeenAt           DateTime                           @default(now())
-  status               WebsiteGrowthBacklinkStatus        @default(NEEDS_REVIEW)
-  category             WebsiteGrowthBacklinkCategory
-  title                String
-  sourceDomain         String
-  sourceUrl            String?
-  contactPage          String?
-  targetPage           String
-  rationale            String
-  outreachAngle        String
-  authorityScore       Float?
-  relevanceScore       Int
-  qualityScore         Int
-  spamRisk             String
-  estimatedCostAmount  Float?
-  currency             String?
-  requiresContent      Boolean                            @default(false)
-  evidence             Json?
-  notes                String?
-  approvedByUserId     String?
-  approvedAt           DateTime?
-  claimedAt            DateTime?
-  submittedAt          DateTime?
-  contactedAt          DateTime?
-  recipientName        String?
-  recipientEmail       String?
-  recipientCountry     String?
-  contactSourceUrl     String?
-  consentBasis         WebsiteGrowthOutreachConsentBasis?
-  nextFollowUpAt       DateTime?
-  followUpCount        Int                                @default(0)
-  lastReplyAt          DateTime?
-  replySummary         String?
-  unsubscribedAt       DateTime?
-  directoryLoginUrl    String?
-  directoryUsername    String?
-  acceptedTermsUrl     String?
-  acceptedTermsSummary String?
-  liveUrl              String?
-  verifiedAt           DateTime?
-  lastVerifiedAt       DateTime?
-  archivedAt           DateTime?
+  id                          String                               @id @default(cuid())
+  tenantId                    String
+  dedupeKey                   String
+  createdAt                   DateTime                             @default(now())
+  updatedAt                   DateTime                             @updatedAt
+  firstSeenAt                 DateTime                             @default(now())
+  lastSeenAt                  DateTime                             @default(now())
+  status                      WebsiteGrowthBacklinkStatus          @default(NEEDS_REVIEW)
+  category                    WebsiteGrowthBacklinkCategory
+  title                       String
+  sourceDomain                String
+  sourceUrl                   String?
+  contactPage                 String?
+  targetPage                  String
+  rationale                   String
+  outreachAngle               String
+  authorityScore              Float?
+  relevanceScore              Int
+  qualityScore                Int
+  spamRisk                    String
+  estimatedCostAmount         Float?
+  currency                    String?
+  requiresContent             Boolean                              @default(false)
+  evidence                    Json?
+  notes                       String?
+  approvedByUserId            String?
+  approvedAt                  DateTime?
+  claimedAt                   DateTime?
+  submittedAt                 DateTime?
+  contactedAt                 DateTime?
+  recipientName               String?
+  recipientEmail              String?
+  recipientCountry            String?
+  contactSourceUrl            String?
+  consentBasis                WebsiteGrowthOutreachConsentBasis?
+  nextFollowUpAt              DateTime?
+  followUpCount               Int                                  @default(0)
+  lastReplyAt                 DateTime?
+  replySummary                String?
+  unsubscribedAt              DateTime?
+  directoryLoginUrl           String?
+  directoryUsername           String?
+  directoryCredentialRef      String?
+  directoryCredentialVersion  Int?
+  directoryAccountState       WebsiteGrowthDirectoryAccountState   @default(NOT_REQUIRED)
+  directoryAccountRequestedAt DateTime?
+  directoryAccountVerifiedAt  DateTime?
+  directoryChallengeType      WebsiteGrowthDirectoryChallengeType?
+  directoryChallengeDetail    String?
+  directoryChallengeAt        DateTime?
+  acceptedTermsUrl            String?
+  acceptedTermsSummary        String?
+  liveUrl                     String?
+  verifiedAt                  DateTime?
+  lastVerifiedAt              DateTime?
+  archivedAt                  DateTime?
 
   tenant   Tenant                         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   messages WebsiteGrowthOutreachMessage[]
@@ -968,6 +996,7 @@ model WebsiteGrowthBacklinkOpportunity {
   @@index([tenantId, sourceDomain])
   @@index([tenantId, lastSeenAt])
   @@index([tenantId, nextFollowUpAt])
+  @@index([tenantId, directoryAccountState])
 }
 
 model WebsiteGrowthOutreachMessage {

@@ -1,12 +1,21 @@
 import { Type } from "typebox";
 import { defineToolPlugin } from "openclaw/plugin-sdk/tool-plugin";
 
-const DEFAULT_TOKEN_ENV = "OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN";
+import {
+  fillProtectedDirectoryCredentials,
+  type DirectoryCredentialContext,
+  type DirectoryCredentialFillInput
+} from "./directory-credentials.js";
 
-type WebsiteGrowthPluginConfig = {
+const DEFAULT_TOKEN_ENV = "OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN";
+const DEFAULT_DIRECTORY_PASSWORD_MASTER_ENV =
+  "NEWL_DIRECTORY_PASSWORD_MASTER_V1";
+
+export type WebsiteGrowthPluginConfig = {
   baseUrl: string;
   backlinkTokenEnv?: string;
   vercelProtectionBypassEnv?: string;
+  directoryPasswordMasterEnv?: string;
 };
 
 const emptyParameters = Type.Object({});
@@ -52,8 +61,31 @@ const reportParameters = Type.Object({
   liveUrl: Type.Optional(Type.String({ format: "uri", maxLength: 1000 })),
   directoryLoginUrl: Type.Optional(Type.String({ format: "uri", maxLength: 1000 })),
   directoryUsername: Type.Optional(Type.String({ maxLength: 320 })),
+  directoryAccountState: Type.Optional(Type.Union([
+    Type.Literal("EMAIL_VERIFICATION_PENDING"),
+    Type.Literal("HUMAN_ACTION_REQUIRED"),
+    Type.Literal("ACTIVE"),
+    Type.Literal("FAILED")
+  ])),
+  directoryChallengeType: Type.Optional(Type.Union([
+    Type.Literal("CAPTCHA"),
+    Type.Literal("MFA"),
+    Type.Literal("PHONE_VERIFICATION"),
+    Type.Literal("EMAIL_VERIFICATION"),
+    Type.Literal("PASSWORD_POLICY"),
+    Type.Literal("TERMS"),
+    Type.Literal("OTHER")
+  ])),
+  directoryChallengeDetail: Type.Optional(Type.String({ maxLength: 1000 })),
   acceptedTermsUrl: Type.Optional(Type.String({ format: "uri", maxLength: 1000 })),
   acceptedTermsSummary: Type.Optional(Type.String({ maxLength: 1000 }))
+});
+const directoryCredentialFillParameters = Type.Object({
+  opportunityId: Type.String({ minLength: 1, maxLength: 100 }),
+  targetId: Type.String({ minLength: 1, maxLength: 200 }),
+  usernameRef: Type.String({ minLength: 1, maxLength: 100 }),
+  passwordRef: Type.String({ minLength: 1, maxLength: 100 }),
+  confirmPasswordRef: Type.String({ minLength: 1, maxLength: 100 })
 });
 
 const configSchema = Type.Object({
@@ -63,6 +95,10 @@ const configSchema = Type.Object({
   })),
   vercelProtectionBypassEnv: Type.Optional(Type.String({
     description: "Optional Vercel Preview automation bypass environment variable."
+  })),
+  directoryPasswordMasterEnv: Type.Optional(Type.String({
+    description:
+      "Protected local environment variable containing the directory credential master. It is never sent to Newl Apps or the model."
   }))
 });
 
@@ -101,6 +137,18 @@ const plugin = defineToolPlugin({
       factory: createApiTool("newl_backlink_sync_replies", "/api/website-growth/backlinks/executor/sync-replies", {})
     }),
     tool({
+      name: "newl_backlink_sync_directory_verifications",
+      label: "Sync Directory Verification Emails",
+      description:
+        "Check only pending directory accounts in the dedicated partnerships mailbox. Safely activates same-organization verification links without returning their URLs; ambiguous cases become human-action items.",
+      parameters: emptyParameters,
+      factory: createApiTool(
+        "newl_backlink_sync_directory_verifications",
+        "/api/website-growth/backlinks/executor/sync-directory-verifications",
+        {}
+      )
+    }),
+    tool({
       name: "newl_backlink_summary",
       label: "Summarize Backlink Outreach",
       description: "Return deterministic current-run and lifetime Website Growth execution counts, blocker reasons and the Newl Apps review link for the Teams reminder.",
@@ -113,6 +161,14 @@ const plugin = defineToolPlugin({
       description: "Send one personalized message through the dedicated Newl mailbox. Newl Apps rechecks human approval, recipient suppression, consent evidence, country rules and volume limits before Microsoft 365 is called.",
       parameters: sendEmailParameters,
       factory: createParameterizedApiTool("newl_backlink_send_email", "/api/website-growth/backlinks/executor/send-email")
+    }),
+    tool({
+      name: "newl_backlink_fill_directory_credentials",
+      label: "Fill Protected Directory Credentials",
+      description:
+        "Prepare the approved directory account in Newl Apps, derive its unique password outside the model, and fill only the username/password browser fields. Never returns the password.",
+      parameters: directoryCredentialFillParameters,
+      factory: createDirectoryCredentialFillTool()
     }),
     tool({
       name: "newl_backlink_report",
@@ -154,6 +210,56 @@ export function createParameterizedApiTool(name: string, path: string) {
           ? params as Record<string, unknown>
           : {};
       return callNewlApps(config, path, payload);
+    }
+  });
+}
+
+export function createDirectoryCredentialFillTool() {
+  return ({ config }: { config: WebsiteGrowthPluginConfig }) => ({
+    name: "newl_backlink_fill_directory_credentials",
+    label: "Fill Protected Directory Credentials",
+    description:
+      "Derives and fills a unique directory password without exposing it to the model, logs, Teams, or Newl Apps.",
+    parameters: directoryCredentialFillParameters,
+    async execute(_toolCallId: string, params: unknown) {
+      try {
+        const input = parseDirectoryCredentialFillInput(params);
+        const context = await callNewlAppsData<DirectoryCredentialContext>(
+          config,
+          "/api/website-growth/backlinks/executor/directory-account",
+          { opportunityId: input.opportunityId }
+        );
+        const masterEnv =
+          config.directoryPasswordMasterEnv?.trim() ||
+          DEFAULT_DIRECTORY_PASSWORD_MASTER_ENV;
+        const workerEnvironment = { ...process.env };
+        const masterValue = process.env[masterEnv]?.trim();
+        delete workerEnvironment[masterEnv];
+        workerEnvironment.NEWL_DIRECTORY_PASSWORD_MASTER_V1 =
+          masterValue;
+        const result = await fillProtectedDirectoryCredentials({
+          input,
+          context,
+          env: workerEnvironment
+        });
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify(result)
+          }],
+          details: {
+            status: "ok",
+            data: result
+          }
+        };
+      } catch (error) {
+        return textResult(
+          error instanceof Error
+            ? error.message
+            : "Protected directory credential fill failed.",
+          "failed"
+        );
+      }
     }
   });
 }
@@ -213,6 +319,66 @@ async function callNewlApps(
       "failed"
     );
   }
+}
+
+async function callNewlAppsData<T>(
+  config: WebsiteGrowthPluginConfig,
+  path: string,
+  payload: Record<string, unknown>
+) {
+  const tokenEnv = config.backlinkTokenEnv?.trim() || DEFAULT_TOKEN_ENV;
+  const token = process.env[tokenEnv]?.trim();
+  if (!token) {
+    throw new Error(
+      `Website Growth backlink execution is not configured. ${tokenEnv} is missing.`
+    );
+  }
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json"
+  };
+  if (config.vercelProtectionBypassEnv) {
+    const bypass = process.env[config.vercelProtectionBypassEnv]?.trim();
+    if (bypass) headers["x-vercel-protection-bypass"] = bypass;
+  }
+  const response = await fetch(`${normalizeBaseUrl(config.baseUrl)}${path}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(60_000)
+  });
+  const json = (await response.json().catch(() => null)) as
+    | { data?: T; error?: string }
+    | null;
+  if (!response.ok || !json?.data) {
+    throw new Error(
+      json?.error ?? `Newl Apps returned ${response.status}.`
+    );
+  }
+  return json.data;
+}
+
+function parseDirectoryCredentialFillInput(
+  value: unknown
+): DirectoryCredentialFillInput {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Directory credential field references are required.");
+  }
+  const record = value as Record<string, unknown>;
+  const read = (name: keyof DirectoryCredentialFillInput) => {
+    const result = record[name];
+    if (typeof result !== "string" || !result.trim()) {
+      throw new Error(`Directory credential ${name} is required.`);
+    }
+    return result.trim();
+  };
+  return {
+    opportunityId: read("opportunityId"),
+    targetId: read("targetId"),
+    usernameRef: read("usernameRef"),
+    passwordRef: read("passwordRef"),
+    confirmPasswordRef: read("confirmPasswordRef")
+  };
 }
 
 function normalizeBaseUrl(value: string) {

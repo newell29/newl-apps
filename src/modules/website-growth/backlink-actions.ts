@@ -3,7 +3,9 @@
 import {
   ModuleKey,
   PlatformRole,
-  WebsiteGrowthBacklinkStatus
+  WebsiteGrowthBacklinkCategory,
+  WebsiteGrowthBacklinkStatus,
+  WebsiteGrowthDirectoryAccountState
 } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -141,7 +143,13 @@ export async function retryBlockedWebsiteGrowthBacklinkAction(formData: FormData
   } as const;
   const opportunity = await prisma.websiteGrowthBacklinkOpportunity.findFirst({
     where: retryableWhere,
-    select: { id: true, title: true, notes: true }
+    select: {
+      id: true,
+      title: true,
+      notes: true,
+      category: true,
+      directoryCredentialRef: true
+    }
   });
   if (!opportunity) {
     throw new Error(
@@ -154,7 +162,16 @@ export async function retryBlockedWebsiteGrowthBacklinkAction(formData: FormData
     data: {
       status: WebsiteGrowthBacklinkStatus.APPROVED,
       claimedAt: null,
-      notes: null
+      notes: null,
+      directoryAccountState:
+        opportunity.category === WebsiteGrowthBacklinkCategory.DIRECTORY_CITATION
+          ? opportunity.directoryCredentialRef
+            ? WebsiteGrowthDirectoryAccountState.CREDENTIAL_READY
+            : WebsiteGrowthDirectoryAccountState.NEEDS_ACCOUNT
+          : WebsiteGrowthDirectoryAccountState.NOT_REQUIRED,
+      directoryChallengeType: null,
+      directoryChallengeDetail: null,
+      directoryChallengeAt: null
     }
   });
   if (result.count !== 1) {

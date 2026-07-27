@@ -52,6 +52,10 @@ if ! grep -Eq '^OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN=.+' "${HOME}/.openclaw/.e
   echo "OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN must be configured in the protected OpenClaw gateway environment." >&2
   exit 1
 fi
+if ! grep -Eq '^NEWL_DIRECTORY_PASSWORD_MASTER_V1=.+' "${HOME}/.openclaw/.env"; then
+  echo "NEWL_DIRECTORY_PASSWORD_MASTER_V1 must be configured in the protected OpenClaw gateway environment." >&2
+  exit 1
+fi
 
 node -e '
 const fs = require("node:fs");
@@ -80,7 +84,8 @@ console.log(JSON.stringify({
   enabled: true,
   config: {
     baseUrl: process.argv[1],
-    backlinkTokenEnv: "OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN"
+    backlinkTokenEnv: "OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN",
+    directoryPasswordMasterEnv: "NEWL_DIRECTORY_PASSWORD_MASTER_V1"
   }
 }));
 ' "${NEWL_APPS_URL}")"
@@ -106,7 +111,7 @@ cron_arguments=(
   --exact
   --session isolated
   --message "$(cat "${prompt_path}")"
-  --tools "browser,newl_backlink_sync_replies,newl_backlink_follow_ups,newl_backlink_verification,newl_backlink_claim,newl_backlink_send_email,newl_backlink_report,newl_backlink_summary,read"
+  --tools "browser,newl_backlink_sync_replies,newl_backlink_sync_directory_verifications,newl_backlink_follow_ups,newl_backlink_verification,newl_backlink_claim,newl_backlink_send_email,newl_backlink_fill_directory_credentials,newl_backlink_report,newl_backlink_summary,read"
   --announce
   --channel msteams
   --to "${WEBSITE_GROWTH_TEAMS_TARGET}"
