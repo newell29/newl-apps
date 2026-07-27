@@ -306,6 +306,45 @@ PROPER NAME: UN1814`;
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("blocks a previously saved live plan containing Garland item-detail instructions", async () => {
+    const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
+    plan.orders[0]!.plannedFieldUpdates = [
+      {
+        reviewFieldKey: "shipping_instructions",
+        label: "Shipping instructions",
+        teamshipField: "edi_field_4",
+        currentValue: null,
+        proposedValue:
+          "FOR PICKUP PLEASE CONTACT TEST RECEIVING Top Section 2 Two Open Burners End of Comments ITEM: 24",
+        reason: "Previously saved plan."
+      }
+    ];
+    const fetchImpl = vi.fn();
+
+    await expect(
+      executeTeamshipPhase2Job({
+        job: {
+          id: "job_1",
+          agentMode: "LIVE_API",
+          dryRun: false
+        },
+        plan,
+        credentials: {
+          email: "teamship@example.com",
+          password: "secret",
+          apiBaseUrl: "https://teamship.example/api"
+        },
+        options: {
+          agentId: "agent",
+          allowLiveUpdates: true,
+          liveAllowlistSrNumbers: ["SR808478"],
+          fetchImpl: fetchImpl as unknown as typeof fetch
+        }
+      })
+    ).rejects.toThrow("Special Instructions contain probable Garland item-detail text");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("allows live jobs when the VM allowlist is explicitly opened for all SRs", async () => {
     const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
     const fetchImpl = vi

@@ -150,7 +150,8 @@ function buildOrderPlan({
     };
   }
 
-  const plannedFieldUpdates = buildFieldUpdates(orderReview.fields);
+  const fieldUpdatePlan = buildFieldUpdates(orderReview.fields);
+  const plannedFieldUpdates = fieldUpdatePlan.updates;
   const includedPalletItems = pdfOrder.items.filter((item) => item.botActionEnabled !== false);
   const plannedPalletRows = includedPalletItems.map((item, index) =>
     buildPalletRowPlan({
@@ -160,7 +161,10 @@ function buildOrderPlan({
       pdfOrder
     })
   );
-  const validationIssues = validateOrderPlan({ palletItems: includedPalletItems, plannedPalletRows });
+  const validationIssues = [
+    ...fieldUpdatePlan.validationIssues,
+    ...validateOrderPlan({ palletItems: includedPalletItems, plannedPalletRows })
+  ];
   const status = validationIssues.length === 0 ? "READY" : "BLOCKED";
   const plannedBolCleanup = buildBolCleanupPlan({ plannedFieldUpdates });
 
@@ -191,6 +195,7 @@ function buildBolCleanupPlan({ plannedFieldUpdates }: { plannedFieldUpdates: Tea
 
 function buildFieldUpdates(fields: GarlandTeamshipReviewField[]) {
   const updates: TeamshipPhase2FieldUpdate[] = [];
+  const validationIssues: string[] = [];
 
   for (const field of fields) {
     const teamshipField = FIELD_UPDATE_DESTINATIONS[field.key];
@@ -203,6 +208,17 @@ function buildFieldUpdates(fields: GarlandTeamshipReviewField[]) {
       Boolean(proposedValue) &&
       currentValue !== proposedValue &&
       (hasGarlandInstructionNoise(rawProposedValue) || hasGarlandInstructionNoise(currentValue));
+    const itemDetailEvidence =
+      field.key === "shipping_instructions"
+        ? findGarlandItemDetailEvidence(rawProposedValue)
+        : null;
+
+    if (field.botActionEnabled === true && proposedValue && itemDetailEvidence) {
+      validationIssues.push(
+        `Special Instructions contain probable Garland item-detail text (${itemDetailEvidence}) and require review before any Teamship update.`
+      );
+      continue;
+    }
 
     if (
       field.botActionEnabled !== true ||
@@ -223,7 +239,7 @@ function buildFieldUpdates(fields: GarlandTeamshipReviewField[]) {
     });
   }
 
-  return updates;
+  return { updates, validationIssues };
 }
 
 function normalizeProposedFieldValue(fieldKey: GarlandTeamshipReviewField["key"], value: string | null | undefined) {
@@ -247,6 +263,28 @@ export function compactGarlandSpecialInstructions(value: string | null | undefin
 
 function hasGarlandInstructionNoise(value: string | null | undefined) {
   return Boolean(value && (/\*{3,}/.test(value) || /\r?\n/.test(value)));
+}
+
+export function findGarlandItemDetailEvidence(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const markers: Array<{ label: string; pattern: RegExp }> = [
+    { label: "End of Comments marker", pattern: /\bEND OF COMMENTS\b/i },
+    { label: "item-number marker", pattern: /\bITEM\s*:\s*\d+\b/i },
+    {
+      label: "product-configuration fields",
+      pattern:
+        /\b(?:QUESTION\s+ANSWER|TOP SECTION\s+\d+|WALLCLEAR\s+(?:COMBUST|NONCOMB)|GRIDDLE THERMOSTAT|OPEN TOP\s+INPUT|OVEN\s+INPUT|TOP MODEL TYPE)\b/i
+    },
+    {
+      label: "inventory serial row",
+      pattern: /\b(?:NEWLS|MACKIE)\s+[A-Z0-9-]{8,}\s+\d+(?:\.\d+)?\s*\(/i
+    }
+  ];
+
+  return markers.find((marker) => marker.pattern.test(value))?.label ?? null;
 }
 
 function buildFieldUpdateReason({
