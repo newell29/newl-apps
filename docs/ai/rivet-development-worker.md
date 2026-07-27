@@ -31,7 +31,10 @@ The local Codex prompt requires every listed document to be read before any file
 4. The worker creates a fresh `codex/rivet-*` Git worktree from the approved base branch.
 5. Codex reads the required context, implements only the approved cohesive issue, adds regression tests, updates documentation, and returns schema-validated results.
 6. The wrapper rejects blocked paths, checks the diff, commits, pushes the isolated branch, and opens a draft pull request.
-7. Newl Apps records the branch, commit, PR URL, tests, limitations, and audit evidence. Rivet messages only the configured Teams target.
+7. A fresh ephemeral Codex session reviews the exact commit in a read-only sandbox. It receives the approved packet, deterministic current-main mergeability result, changed-file overlaps with open sibling pull requests, and the exact generated PR body.
+8. Newl Apps stores an immutable, tenant-scoped `CodexReviewRun` for every reviewed commit. A pull request cannot become `READY_FOR_ALEX` unless the latest review verdict is `PASS` for the same commit SHA.
+9. When every finding is explicitly safe to fix without a business decision, Rivet may run at most two fresh remediation sessions on the same branch. Each new commit receives a new independent review. A business question, approval-boundary issue, privacy issue, scope expansion, or unresolved finding after two corrections marks the job `BLOCKED`.
+10. Newl Apps records the branch, commit, PR URL, tests, limitations, review result, and audit evidence. Rivet messages only the configured Teams target when the PR is ready or blocked.
 
 The worker uses a fine-grained GitHub token only to open the pull request. That token is removed from the environment passed to Codex. Git push continues through the workstation's trusted repository credential.
 
@@ -56,6 +59,22 @@ Approval never permits Rivet or Codex to:
 - change permissions;
 - contact a customer.
 
+The independent reviewer never receives the GitHub token and always runs with `--sandbox read-only`. The builder and remediation sessions run with workspace-only write access. All Codex sessions are ephemeral and reuse the protected local Codex CLI authentication.
+
+## Review gate
+
+The review gate combines deterministic checks with semantic Codex review:
+
+- `git diff --check` and current-main mergeability;
+- blocked-path and high-confidence credential detection;
+- production-looking PS/SR references and non-example emails in added lines;
+- open sibling pull-request changed-file overlaps;
+- approved-ticket and root-cause coverage;
+- live-data, tenant-isolation, authorization, and approval-boundary review;
+- regression-test, documentation, and PR-description accuracy.
+
+`PASS` requires zero unresolved findings, business questions, missing ticket coverage, or out-of-scope changes. `NEEDS_CHANGES` permits automatic correction only when every finding is marked auto-fixable and no business decision is needed. All other results are `BLOCKED`. Rivet never approves its own GitHub pull request and never merges it.
+
 The existing 10:00 AM digest remains read-only and cannot claim development work. The Rivet development worker is a separate OpenClaw command schedule with a protected environment file.
 
 ## Configuration and installation
@@ -76,6 +95,6 @@ The development-jobs API remains outside browser session middleware so the route
 
 ## Failure handling
 
-An active job uses a short-lived lease. A worker error or expired lease marks the job failed and sends a safe Teams message. Failed jobs are not automatically retried. The local worktree is preserved for investigation when a failure occurs; after checking that no uncertain branch or PR action is still running, an administrator may select **Retry Rivet** to create a new job and lease. Completed worktrees are removed after the PR URL is recorded.
+An active job uses a short-lived lease. A worker error or expired lease marks the job failed and sends a safe Teams message. Failed and blocked jobs are not automatically retried. The local worktree is preserved for investigation when a failure occurs; after checking that no uncertain branch or PR action is still running, an administrator may select **Retry Rivet** to create a new job and lease. Completed worktrees are removed only after an exact-commit review passes and the PR is recorded as `READY_FOR_ALEX`.
 
 Existing suggestions approved before this workflow are not automatically queued. Link or close their already-created PR work before enabling the worker so Rivet does not rebuild historical fixes.

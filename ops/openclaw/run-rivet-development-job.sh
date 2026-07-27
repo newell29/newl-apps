@@ -38,6 +38,15 @@ temporary_directory="$(mktemp -d)"
 claim_response_path="${temporary_directory}/claim-response.json"
 packet_path="${temporary_directory}/packet.json"
 result_path="${temporary_directory}/codex-result.json"
+review_result_path="${temporary_directory}/codex-review-result.json"
+remediation_result_path="${temporary_directory}/codex-remediation-result.json"
+review_request_path="${temporary_directory}/review-request.json"
+preflight_report_path="${temporary_directory}/preflight-report.json"
+sibling_report_path="${temporary_directory}/sibling-report.json"
+open_pulls_path="${temporary_directory}/open-pulls.json"
+open_pull_numbers_path="${temporary_directory}/open-pull-numbers.txt"
+pull_files_path="${temporary_directory}/pull-files.json"
+diff_path="${temporary_directory}/review.diff"
 completion_request_path="${temporary_directory}/completion-request.json"
 completion_response_path="${temporary_directory}/completion-response.json"
 pull_request_path="${temporary_directory}/pull-request.json"
@@ -51,26 +60,136 @@ job_worktree=""
 node_modules_linked=0
 completed=0
 pull_request_url=""
+pull_request_number=""
+commit_sha=""
+review_attempt=0
+autofix_attempt=0
+max_autofix_attempts=2
 failure_stage="claim the next approved suggestion"
 
 cleanup() {
   rm -rf "${temporary_directory}"
 }
 
+write_pull_request_payload() {
+  local mode="$1"
+  /usr/bin/python3 - \
+    "${packet_path}" \
+    "${result_path}" \
+    "${commit_sha}" \
+    "${pull_request_path}" \
+    "${mode}" \
+    "${review_result_path}" \
+    "${changed_paths_file}" <<'PY'
+import json, os, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    packet = json.load(handle)
+with open(sys.argv[2], encoding="utf-8") as handle:
+    result = json.load(handle)
+review = None
+if os.path.isfile(sys.argv[6]):
+    with open(sys.argv[6], encoding="utf-8") as handle:
+        review = json.load(handle)
+with open(sys.argv[7], encoding="utf-8") as handle:
+    changed_paths = [line.strip() for line in handle if line.strip()]
+review_lines = [
+    "## Independent Codex review",
+    "",
+    (
+        f"- Verdict: **{review['verdict']}**"
+        if review
+        else "- Verdict: **PENDING**"
+    ),
+    *(
+        [
+            f"- Risk: {review['riskLevel']}",
+            f"- Summary: {review['summary']}",
+        ]
+        if review
+        else ["- Rivet will not mark this PR ready until a fresh read-only Codex review passes the exact commit."]
+    ),
+]
+body = "\n".join([
+    "## Approved Rivet development job",
+    "",
+    f"- Job: `{packet['jobId']}`",
+    f"- Issue key: `{packet['issueKey']}`",
+    f"- Approved feedback items: {len(packet.get('sourceFeedback', []))}",
+    "",
+    "## What changed",
+    "",
+    result["summary"],
+    "",
+    "## Root cause",
+    "",
+    result["rootCause"],
+    "",
+    "## Files changed",
+    "",
+    *[f"- `{item}`" for item in changed_paths],
+    "",
+    "## Verification",
+    "",
+    *[f"- {item}" for item in result["tests"]],
+    "",
+    "## Known limitations",
+    "",
+    *([f"- {item}" for item in result["knownLimitations"]] or ["- None reported."]),
+    "",
+    "## Business questions",
+    "",
+    *([f"- {item}" for item in result["businessQuestions"]] or ["- None."]),
+    "",
+    *review_lines,
+    "",
+    "## Safety",
+    "",
+    "Rivet prepared this branch and pull request after explicit approval. It did not merge, deploy, execute a migration, update Teamship, print, release an order, change permissions, or contact a customer.",
+    "",
+    f"Commit: `{sys.argv[3]}`"
+])
+payload = {"body": body}
+if sys.argv[5] == "create":
+    payload.update({
+        "title": packet["title"],
+        "head": packet["branchName"],
+        "base": packet["baseBranch"],
+        "draft": True,
+        "maintainer_can_modify": True
+    })
+with open(sys.argv[4], "w", encoding="utf-8") as handle:
+    json.dump(payload, handle)
+PY
+}
+
 report_failure() {
   local exit_status=$?
   trap - EXIT
   if [[ ${exit_status} -ne 0 && ${completed} -eq 0 && -n "${job_id}" && -n "${lease_token}" ]]; then
-    /usr/bin/python3 - "${job_id}" "${lease_token}" "${failure_stage}" "${completion_request_path}" <<'PY'
+    /usr/bin/python3 - \
+      "${job_id}" \
+      "${lease_token}" \
+      "${failure_stage}" \
+      "${completion_request_path}" \
+      "${branch_name:-}" \
+      "${commit_sha}" \
+      "${pull_request_url}" <<'PY'
 import json, sys
 with open(sys.argv[4], "w", encoding="utf-8") as handle:
-    json.dump({
+    payload = {
         "action": "fail",
         "jobId": sys.argv[1],
         "leaseToken": sys.argv[2],
         "errorCode": "RIVET_WORKER_FAILED",
         "errorMessage": f"Rivet failed while attempting to {sys.argv[3]}. Review the protected local worker log."
-    }, handle)
+    }
+    if sys.argv[5]:
+        payload["branchName"] = sys.argv[5]
+    if sys.argv[6]:
+        payload["commitSha"] = sys.argv[6]
+    if sys.argv[7]:
+        payload["pullRequestUrls"] = [sys.argv[7]]
+    json.dump(payload, handle)
 PY
     curl --fail --silent --show-error \
       --request POST \
@@ -218,6 +337,7 @@ schema_path="${runner_directory}/skills/rivet-developer/development-output.schem
   printf '%s\n' "Inspect the existing implementation across UI, API, services, database, permissions, tests, and documentation."
   printf '%s\n' "Similar employee reports have already been grouped. Confirm they share one root cause; do not broaden the task to unrelated feedback."
   printf '%s\n' "Implement the smallest complete fix, add regression tests for the confirmed failure, and update the relevant documentation."
+  printf '%s\n' "Never copy production customer, order, address, email, serial, credential, token, or other live data from the packet into code, tests, fixtures, documentation, commit messages, or your structured result. Use clearly synthetic reserved examples."
   printf '%s\n' "Preserve tenant filtering and authorization. Never use production credentials or perform production writes."
   printf '%s\n' "Do not merge, deploy, execute a database migration, update Teamship, print, ship/release an order, change permissions, or contact a customer."
   printf '%s\n' "Do not commit, push, or open a pull request; the trusted wrapper performs those actions after validating the result."
@@ -279,60 +399,8 @@ commit_sha="$(git -C "${job_worktree}" rev-parse HEAD)"
 failure_stage="push the isolated branch"
 git -C "${job_worktree}" push -u origin "${branch_name}"
 
-failure_stage="open the reviewed pull request"
-/usr/bin/python3 - "${packet_path}" "${result_path}" "${commit_sha}" "${pull_request_path}" <<'PY'
-import json, sys
-with open(sys.argv[1], encoding="utf-8") as handle:
-    packet = json.load(handle)
-with open(sys.argv[2], encoding="utf-8") as handle:
-    result = json.load(handle)
-body = "\n".join([
-    "## Approved Rivet development job",
-    "",
-    f"- Job: `{packet['jobId']}`",
-    f"- Issue key: `{packet['issueKey']}`",
-    f"- Approved feedback items: {len(packet.get('sourceFeedback', []))}",
-    "",
-    "## What changed",
-    "",
-    result["summary"],
-    "",
-    "## Root cause",
-    "",
-    result["rootCause"],
-    "",
-    "## Files changed",
-    "",
-    *[f"- `{item}`" for item in result["filesChanged"]],
-    "",
-    "## Verification",
-    "",
-    *[f"- {item}" for item in result["tests"]],
-    "",
-    "## Known limitations",
-    "",
-    *([f"- {item}" for item in result["knownLimitations"]] or ["- None reported."]),
-    "",
-    "## Business questions",
-    "",
-    *([f"- {item}" for item in result["businessQuestions"]] or ["- None."]),
-    "",
-    "## Safety",
-    "",
-    "Rivet prepared this branch and pull request after explicit approval. It did not merge, deploy, execute a migration, update Teamship, print, release an order, change permissions, or contact a customer.",
-    "",
-    f"Commit: `{sys.argv[3]}`"
-])
-with open(sys.argv[4], "w", encoding="utf-8") as handle:
-    json.dump({
-        "title": packet["title"],
-        "head": packet["branchName"],
-        "base": packet["baseBranch"],
-        "body": body,
-        "draft": True,
-        "maintainer_can_modify": True
-    }, handle)
-PY
+failure_stage="open the draft pull request"
+write_pull_request_payload "create"
 curl --fail --silent --show-error \
   --request POST \
   --header "Accept: application/vnd.github+json" \
@@ -342,6 +410,400 @@ curl --fail --silent --show-error \
   --data-binary "@${pull_request_path}" \
   "https://api.github.com/repos/${repository}/pulls" > "${pull_response_path}"
 pull_request_url="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["html_url"])' "${pull_response_path}")"
+pull_request_number="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["number"])' "${pull_response_path}")"
+
+while true; do
+  review_attempt=$((review_attempt + 1))
+  review_started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  failure_stage="prepare independent Codex review round ${review_attempt}"
+
+  git -C "${job_worktree}" fetch origin "${base_branch}"
+  git -C "${job_worktree}" diff --check "origin/${base_branch}...HEAD"
+  git -C "${job_worktree}" diff --name-only "origin/${base_branch}...HEAD" | sort -u > "${changed_paths_file}"
+  git -C "${job_worktree}" diff --unified=0 --no-color "origin/${base_branch}...HEAD" > "${diff_path}"
+
+  mergeable_with_main=1
+  if ! git -C "${job_worktree}" merge-tree --write-tree "origin/${base_branch}" HEAD \
+    > "${temporary_directory}/merge-tree.txt" 2>&1; then
+    mergeable_with_main=0
+  fi
+
+  /usr/bin/python3 \
+    "${runner_directory}/rivet-review-preflight.py" \
+    "${diff_path}" \
+    "${preflight_report_path}" \
+    "${mergeable_with_main}"
+
+  curl --fail --silent --show-error \
+    --request GET \
+    --header "Accept: application/vnd.github+json" \
+    --header "Authorization: Bearer ${RIVET_GITHUB_TOKEN}" \
+    --header "X-GitHub-Api-Version: 2022-11-28" \
+    "https://api.github.com/repos/${repository}/pulls?state=open&base=${base_branch}&per_page=50" \
+    > "${open_pulls_path}"
+  /usr/bin/python3 - \
+    "${open_pulls_path}" \
+    "${pull_request_number}" \
+    "${open_pull_numbers_path}" \
+    "${sibling_report_path}" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    pulls = json.load(handle)
+current = int(sys.argv[2])
+numbers = [
+    item["number"]
+    for item in pulls
+    if isinstance(item, dict) and isinstance(item.get("number"), int) and item["number"] != current
+][:25]
+with open(sys.argv[3], "w", encoding="utf-8") as handle:
+    handle.write("\n".join(str(number) for number in numbers))
+with open(sys.argv[4], "w", encoding="utf-8") as handle:
+    json.dump({"checkedPullRequests": numbers, "overlaps": []}, handle)
+PY
+  while IFS= read -r sibling_number || [[ -n "${sibling_number}" ]]; do
+    [[ -z "${sibling_number}" ]] && continue
+    curl --fail --silent --show-error \
+      --request GET \
+      --header "Accept: application/vnd.github+json" \
+      --header "Authorization: Bearer ${RIVET_GITHUB_TOKEN}" \
+      --header "X-GitHub-Api-Version: 2022-11-28" \
+      "https://api.github.com/repos/${repository}/pulls/${sibling_number}/files?per_page=100" \
+      > "${pull_files_path}"
+    /usr/bin/python3 - \
+      "${changed_paths_file}" \
+      "${pull_files_path}" \
+      "${sibling_report_path}" \
+      "${sibling_number}" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    changed = {line.strip() for line in handle if line.strip()}
+with open(sys.argv[2], encoding="utf-8") as handle:
+    files = {
+        item.get("filename")
+        for item in json.load(handle)
+        if isinstance(item, dict) and isinstance(item.get("filename"), str)
+    }
+with open(sys.argv[3], encoding="utf-8") as handle:
+    report = json.load(handle)
+overlap = sorted(changed & files)
+if overlap:
+    report["overlaps"].append({
+        "pullRequestNumber": int(sys.argv[4]),
+        "paths": overlap
+    })
+with open(sys.argv[3], "w", encoding="utf-8") as handle:
+    json.dump(report, handle)
+PY
+  done < "${open_pull_numbers_path}"
+
+  preflight_status="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "${preflight_report_path}")"
+  if [[ "${preflight_status}" != "PASS" ]]; then
+    /usr/bin/python3 - \
+      "${preflight_report_path}" \
+      "${review_result_path}" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    preflight = json.load(handle)
+with open(sys.argv[2], "w", encoding="utf-8") as handle:
+    json.dump({
+        "verdict": preflight["status"],
+        "riskLevel": "CRITICAL" if any(item["severity"] == "CRITICAL" for item in preflight["findings"]) else "HIGH",
+        "summary": (
+            "Deterministic Rivet preflight found safe corrections."
+            if preflight["status"] == "NEEDS_CHANGES"
+            else "Deterministic Rivet preflight blocked the independent review."
+        ),
+        "findings": preflight["findings"],
+        "ticketCoverage": {"implemented": [], "missing": [], "outOfScope": []},
+        "checks": {
+            "privacy": {
+                "status": (
+                    "FAIL"
+                    if any(item["category"] in {"PRIVACY", "SECRETS"} for item in preflight["findings"])
+                    else "PASS"
+                ),
+                "note": "High-confidence protected-data and credential patterns were checked."
+            },
+            "tenantIsolation": {"status": "NOT_APPLICABLE", "note": "Not evaluated because preflight blocked the review."},
+            "approvalBoundaries": {"status": "NOT_APPLICABLE", "note": "Not evaluated because preflight blocked the review."},
+            "tests": {"status": "NOT_APPLICABLE", "note": "Not evaluated because preflight blocked the review."},
+            "documentation": {"status": "NOT_APPLICABLE", "note": "Not evaluated because preflight blocked the review."},
+            "mergeability": {
+                "status": "PASS" if preflight["mergeableWithCurrentMain"] else "FAIL",
+                "note": "Current-main mergeability was checked deterministically."
+            },
+            "prBodyAccuracy": {"status": "NOT_APPLICABLE", "note": "Not evaluated because preflight blocked the review."}
+        },
+        "tests": {"required": [], "passed": [], "knownFailures": []},
+        "businessQuestions": []
+    }, handle)
+PY
+  else
+    failure_stage="run independent read-only Codex review round ${review_attempt}"
+    review_schema_path="${runner_directory}/skills/rivet-developer/review-output.schema.json"
+    {
+      /bin/cat "${runner_directory}/prompts/rivet-code-review.md"
+      printf '\nAPPROVED_DEVELOPMENT_PACKET_JSON:\n'
+      /bin/cat "${packet_path}"
+      printf '\nDETERMINISTIC_PREFLIGHT_JSON:\n'
+      /bin/cat "${preflight_report_path}"
+      printf '\nOPEN_SIBLING_PULL_REQUEST_OVERLAPS_JSON:\n'
+      /bin/cat "${sibling_report_path}"
+      printf '\nCURRENT_PULL_REQUEST_PAYLOAD_JSON:\n'
+      /bin/cat "${pull_request_path}"
+    } | env -i \
+      HOME="${HOME}" \
+      USER="${USER}" \
+      PATH="${PATH}" \
+      TMPDIR="${TMPDIR:-/tmp}" \
+      LANG="${LANG:-en_US.UTF-8}" \
+      CODEX_HOME="${CODEX_HOME:-${HOME}/.codex}" \
+      "${codex_bin}" exec \
+      --ephemeral \
+      --model "${codex_model}" \
+      --config "model_reasoning_effort=\"${codex_effort}\"" \
+      --sandbox read-only \
+      --cd "${job_worktree}" \
+      --output-schema "${review_schema_path}" \
+      --output-last-message "${review_result_path}" \
+      --color never \
+      -
+  fi
+
+  if [[ ! -r "${review_result_path}" ]]; then
+    echo "The independent Codex reviewer did not return the required structured result." >&2
+    exit 1
+  fi
+  /usr/bin/python3 - "${review_result_path}" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    result = json.load(handle)
+verdict = result.get("verdict")
+findings = result.get("findings") or []
+questions = result.get("businessQuestions") or []
+coverage = result.get("ticketCoverage") or {}
+if verdict == "PASS" and (
+    findings or questions or coverage.get("missing") or coverage.get("outOfScope")
+):
+    raise SystemExit("A PASS review cannot contain unresolved findings, questions, missing scope, or out-of-scope changes.")
+if verdict in {"NEEDS_CHANGES", "BLOCKED"} and not findings and not questions:
+    raise SystemExit("A non-passing review must contain a finding or business question.")
+PY
+
+  /usr/bin/python3 - \
+    "${job_id}" \
+    "${lease_token}" \
+    "${commit_sha}" \
+    "${review_attempt}" \
+    "${review_started_at}" \
+    "${review_result_path}" \
+    "${review_request_path}" <<'PY'
+import json, sys
+with open(sys.argv[6], encoding="utf-8") as handle:
+    review = json.load(handle)
+with open(sys.argv[7], "w", encoding="utf-8") as handle:
+    json.dump({
+        "action": "review",
+        "jobId": sys.argv[1],
+        "leaseToken": sys.argv[2],
+        "commitSha": sys.argv[3],
+        "reviewAttempt": int(sys.argv[4]),
+        "reviewStartedAt": sys.argv[5],
+        "reviewVerdict": review["verdict"],
+        "reviewRiskLevel": review["riskLevel"],
+        "reviewSummary": review["summary"],
+        "reviewFindings": review["findings"],
+        "ticketCoverage": review["ticketCoverage"],
+        "reviewChecks": review["checks"],
+        "reviewTests": review["tests"],
+        "businessQuestions": review["businessQuestions"]
+    }, handle)
+PY
+  curl --fail --silent --show-error \
+    --request POST \
+    "${rivet_request_headers[@]}" \
+    --header "Content-Type: application/json" \
+    --data-binary "@${review_request_path}" \
+    "${NEWL_APPS_URL%/}/api/assistant/openclaw/development-jobs" >/dev/null
+
+  /usr/bin/python3 - "${review_result_path}" > "${temporary_directory}/review-decision.txt" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    review = json.load(handle)
+findings = review.get("findings") or []
+questions = review.get("businessQuestions") or []
+can_fix = (
+    review.get("verdict") == "NEEDS_CHANGES"
+    and bool(findings)
+    and not questions
+    and all(
+        item.get("autoFixable") is True
+        and item.get("businessDecisionRequired") is not True
+        for item in findings
+    )
+)
+print(review.get("verdict") or "BLOCKED")
+print("1" if can_fix else "0")
+print(" ".join(str(review.get("summary") or "").split())[:900])
+PY
+  review_verdict="$(sed -n '1p' "${temporary_directory}/review-decision.txt")"
+  can_auto_fix="$(sed -n '2p' "${temporary_directory}/review-decision.txt")"
+  review_summary="$(sed -n '3p' "${temporary_directory}/review-decision.txt")"
+
+  if [[ "${review_verdict}" == "PASS" ]]; then
+    failure_stage="update the pull request with the passing independent review"
+    write_pull_request_payload "update"
+    curl --fail --silent --show-error \
+      --request PATCH \
+      --header "Accept: application/vnd.github+json" \
+      --header "Authorization: Bearer ${RIVET_GITHUB_TOKEN}" \
+      --header "Content-Type: application/json" \
+      --header "X-GitHub-Api-Version: 2022-11-28" \
+      --data-binary "@${pull_request_path}" \
+      "https://api.github.com/repos/${repository}/pulls/${pull_request_number}" >/dev/null
+    break
+  fi
+
+  if [[ "${can_auto_fix}" == "1" && ${autofix_attempt} -lt ${max_autofix_attempts} ]]; then
+    autofix_attempt=$((autofix_attempt + 1))
+    failure_stage="apply safe Rivet review corrections ${autofix_attempt} of ${max_autofix_attempts}"
+
+    /usr/bin/python3 - "${job_id}" "${lease_token}" "${autofix_attempt}" "${completion_request_path}" <<'PY'
+import json, sys
+with open(sys.argv[4], "w", encoding="utf-8") as handle:
+    json.dump({
+        "action": "progress",
+        "jobId": sys.argv[1],
+        "leaseToken": sys.argv[2],
+        "progressMessage": f"Rivet is correcting safe independent-review findings (attempt {sys.argv[3]} of 2)."
+    }, handle)
+PY
+    curl --fail --silent --show-error \
+      --request POST \
+      "${rivet_request_headers[@]}" \
+      --header "Content-Type: application/json" \
+      --data-binary "@${completion_request_path}" \
+      "${NEWL_APPS_URL%/}/api/assistant/openclaw/development-jobs" >/dev/null
+
+    if [[ -d "${rivet_repo_path}/node_modules" && ! -e "${job_worktree}/node_modules" ]]; then
+      ln -s "${rivet_repo_path}/node_modules" "${job_worktree}/node_modules"
+      node_modules_linked=1
+    fi
+    {
+      /bin/cat "${runner_directory}/prompts/rivet-review-remediation.md"
+      printf '\nAPPROVED_DEVELOPMENT_PACKET_JSON:\n'
+      /bin/cat "${packet_path}"
+      printf '\nINDEPENDENT_REVIEW_JSON:\n'
+      /bin/cat "${review_result_path}"
+    } | env -i \
+      HOME="${HOME}" \
+      USER="${USER}" \
+      PATH="${PATH}" \
+      TMPDIR="${TMPDIR:-/tmp}" \
+      LANG="${LANG:-en_US.UTF-8}" \
+      CODEX_HOME="${CODEX_HOME:-${HOME}/.codex}" \
+      "${codex_bin}" exec \
+      --ephemeral \
+      --model "${codex_model}" \
+      --config "model_reasoning_effort=\"${codex_effort}\"" \
+      --sandbox workspace-write \
+      --cd "${job_worktree}" \
+      --output-schema "${schema_path}" \
+      --output-last-message "${remediation_result_path}" \
+      --color never \
+      -
+    if [[ ${node_modules_linked} -eq 1 && -L "${job_worktree}/node_modules" ]]; then
+      unlink "${job_worktree}/node_modules"
+      node_modules_linked=0
+    fi
+    if [[ ! -r "${remediation_result_path}" ]]; then
+      echo "Codex did not return the required remediation result." >&2
+      exit 1
+    fi
+
+    git -C "${job_worktree}" diff --check
+    {
+      git -C "${job_worktree}" diff --name-only
+      git -C "${job_worktree}" ls-files --others --exclude-standard
+    } | sort -u > "${changed_paths_file}"
+    if [[ ! -s "${changed_paths_file}" ]]; then
+      echo "Codex reported remediation without changing the branch." >&2
+      exit 1
+    fi
+    /usr/bin/python3 - "${changed_paths_file}" <<'PY'
+import re, sys
+blocked = re.compile(r"(^|/)(?:\.env(?:\.|$)|node_modules(?:/|$)|outputs?(?:/|$)|.*\.(?:pem|key|p12|pfx)$)", re.I)
+with open(sys.argv[1], encoding="utf-8") as handle:
+    paths = [line.strip() for line in handle if line.strip()]
+for path in paths:
+    if path.startswith("/") or ".." in path.split("/") or blocked.search(path):
+        raise SystemExit(f"Codex produced a blocked remediation path: {path}")
+PY
+
+    /bin/cp "${remediation_result_path}" "${result_path}"
+    git -C "${job_worktree}" add -A
+    git -C "${job_worktree}" commit -m "Address Rivet review findings (${autofix_attempt})"
+    commit_sha="$(git -C "${job_worktree}" rev-parse HEAD)"
+    git -C "${job_worktree}" push origin "${branch_name}"
+
+    git -C "${job_worktree}" diff --name-only "origin/${base_branch}...HEAD" | sort -u > "${changed_paths_file}"
+    unlink "${review_result_path}"
+    write_pull_request_payload "update"
+    curl --fail --silent --show-error \
+      --request PATCH \
+      --header "Accept: application/vnd.github+json" \
+      --header "Authorization: Bearer ${RIVET_GITHUB_TOKEN}" \
+      --header "Content-Type: application/json" \
+      --header "X-GitHub-Api-Version: 2022-11-28" \
+      --data-binary "@${pull_request_path}" \
+      "https://api.github.com/repos/${repository}/pulls/${pull_request_number}" >/dev/null
+    continue
+  fi
+
+  failure_stage="record the independent review blocker"
+  write_pull_request_payload "update"
+  curl --fail --silent --show-error \
+    --request PATCH \
+    --header "Accept: application/vnd.github+json" \
+    --header "Authorization: Bearer ${RIVET_GITHUB_TOKEN}" \
+    --header "Content-Type: application/json" \
+    --header "X-GitHub-Api-Version: 2022-11-28" \
+    --data-binary "@${pull_request_path}" \
+    "https://api.github.com/repos/${repository}/pulls/${pull_request_number}" >/dev/null
+  /usr/bin/python3 - \
+    "${job_id}" \
+    "${lease_token}" \
+    "${branch_name}" \
+    "${commit_sha}" \
+    "${pull_request_url}" \
+    "${review_summary}" \
+    "${completion_request_path}" <<'PY'
+import json, sys
+with open(sys.argv[7], "w", encoding="utf-8") as handle:
+    json.dump({
+        "action": "fail",
+        "jobId": sys.argv[1],
+        "leaseToken": sys.argv[2],
+        "branchName": sys.argv[3],
+        "commitSha": sys.argv[4],
+        "pullRequestUrls": [sys.argv[5]],
+        "errorCode": "RIVET_REVIEW_BLOCKED",
+        "errorMessage": f"Independent Codex review blocked this PR: {sys.argv[6]}"
+    }, handle)
+PY
+  curl --fail --silent --show-error \
+    --request POST \
+    "${rivet_request_headers[@]}" \
+    --header "Content-Type: application/json" \
+    --data-binary "@${completion_request_path}" \
+    "${NEWL_APPS_URL%/}/api/assistant/openclaw/development-jobs" > "${completion_response_path}"
+  teams_message="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"]["teamsMessage"])' "${completion_response_path}")"
+  send_rivet_teams_message "${teams_message}"
+  completed=1
+  cleanup
+  trap - EXIT
+  exit 0
+done
 
 /usr/bin/python3 - "${job_id}" "${lease_token}" "${branch_name}" "${commit_sha}" "${pull_request_url}" "${result_path}" "${completion_request_path}" <<'PY'
 import json, sys

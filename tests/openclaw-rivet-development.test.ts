@@ -38,6 +38,13 @@ describe("Rivet local Codex development worker", () => {
     expect(runner).toContain("env -i");
     expect(runner).not.toContain("OPENAI_API_KEY");
     expect(runner).not.toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(runner).toContain("prompts/rivet-code-review.md");
+    expect(runner).toContain("review-output.schema.json");
+    expect(runner).toContain("rivet-review-preflight.py");
+    expect(runner).toContain("--sandbox read-only");
+    expect(runner).toContain("max_autofix_attempts=2");
+    expect(runner).toContain("OPEN_SIBLING_PULL_REQUEST_OVERLAPS_JSON");
+    expect(runner).toContain("RIVET_REVIEW_BLOCKED");
   });
 
   it("opens only a draft PR and reports completion without merge or deployment", async () => {
@@ -46,6 +53,7 @@ describe("Rivet local Codex development worker", () => {
     expect(runner).toContain("\"draft\": True");
     expect(runner).toContain("pullRequestUrls");
     expect(runner).toContain("\"action\": \"complete\"");
+    expect(runner).toContain("\"action\": \"review\"");
     expect(runner).not.toMatch(/\bgh pr merge\b/);
     expect(runner).not.toMatch(/\bvercel deploy\b/);
   });

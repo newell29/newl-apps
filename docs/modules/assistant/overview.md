@@ -15,6 +15,7 @@ Company Assistant / AI chat is documented because code, routes, schema, or tests
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
 - Operational feedback is stored separately from approved assistant memory. Employee reports begin as `REPORTED` evidence and cannot affect Nemo explanations until an administrator confirms the feedback and explicitly creates an `ApprovedOperationalLesson`.
 - Development suggestions group similar employee reports into one focused issue before approval. Creating or refreshing the queue does not start development.
+- Every Rivet PR must pass a fresh read-only Codex review of the exact commit. Review results are stored in tenant-scoped `CodexReviewRun` records. Only a zero-finding `PASS` for the current commit may produce `READY_FOR_ALEX`.
 - Selecting **Approve & start Rivet** records the administrator decision and atomically queues a tenant-scoped Rivet development job. The restricted local worker may use Codex to prepare an isolated branch and draft PR; it cannot merge, deploy, execute a migration, update Teamship, print, release an order, change permissions, or contact a customer.
 - Approved memory is database-backed and tenant-scoped, so it is available across Codex/OpenClaw chat threads. Chat history is useful context but is not the source of truth for Nemo's approved workflow understanding.
 
@@ -22,7 +23,7 @@ Company Assistant / AI chat is documented because code, routes, schema, or tests
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.
 
-Phase 1 operational-learning tables are `OperationalFeedback`, `ApprovedOperationalLesson`, and `DevelopmentSuggestion`. `WorkflowArtifact` and `WorkflowArtifactChunk` retain workflow evidence such as Teams PDFs.
+Operational-learning and development-control tables are `OperationalFeedback`, `ApprovedOperationalLesson`, `DevelopmentSuggestion`, and `CodexReviewRun`. `WorkflowArtifact` and `WorkflowArtifactChunk` retain workflow evidence such as Teams PDFs.
 
 ```mermaid
 flowchart LR

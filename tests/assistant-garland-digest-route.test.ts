@@ -46,7 +46,19 @@ describe("Garland developer digest route", () => {
     vi.clearAllMocks();
     mocks.authenticate.mockResolvedValue(context);
     mocks.listSuggestions.mockResolvedValue([
-      { id: "suggestion-1", status: "AWAITING_APPROVAL", title: "Improve Garland parser" }
+      { id: "suggestion-1", status: "AWAITING_APPROVAL", title: "Improve Garland parser", developmentJob: null },
+      {
+        id: "suggestion-2",
+        status: "APPROVED",
+        title: "Ready Garland fix",
+        developmentJob: { phase: "READY_FOR_ALEX" }
+      },
+      {
+        id: "suggestion-3",
+        status: "APPROVED",
+        title: "Blocked Garland fix",
+        developmentJob: { phase: "BLOCKED" }
+      }
     ]);
     mocks.listUnresolved.mockResolvedValue([
       { id: "issue-1", failureKind: "TOOL_FAILURE", promptText: "Check PS210235" }
@@ -63,6 +75,8 @@ describe("Garland developer digest route", () => {
 
     expect(response.status).toBe(200);
     expect(body.data.awaitingApproval).toHaveLength(1);
+    expect(body.data.readyForAlex).toHaveLength(1);
+    expect(body.data.blockedRivetReviews).toHaveLength(1);
     expect(body.data.unresolvedQueries).toEqual([
       expect.objectContaining({ failureKind: "TOOL_FAILURE" })
     ]);

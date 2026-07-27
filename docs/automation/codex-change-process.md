@@ -5,6 +5,12 @@
 
 This document records operational guardrails from `AGENTS.md`, `reference/CODEX_PR_WORKFLOW.md`, auth docs, package scripts, and implementation files. Production behaviour must not be changed by documentation-only work.
 
+## Rivet review gate
+
+Approved Rivet work uses separate Codex sessions for building and reviewing. The builder works only in the isolated feature branch. The reviewer is fresh, ephemeral, and read-only, and evaluates the exact commit against the approved packet, repository instructions, required workflow documentation, deterministic preflight evidence, sibling-PR overlap report, and generated PR body.
+
+The worker records every review as a tenant-scoped `CodexReviewRun`. It may automatically remediate no more than two rounds, and only when every finding is explicitly auto-fixable within the approved scope. Business ambiguity, protected-data risk, approval-boundary changes, or exhausted remediation attempts produce `BLOCKED`. A successful exact-commit review produces `READY_FOR_ALEX`; Alex remains responsible for the merge and any deployment approval.
+
 ## Why task worktrees are required
 
 All Codex chats for this repository share the same Git object database and branch references. Reusing the root checkout, creating branches from a stale local `main`, or leaving temporary worktrees registered can cause:
