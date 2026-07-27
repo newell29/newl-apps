@@ -23,6 +23,8 @@ flowchart TB
 
 Emails are classified using Garland-domain, PS-range, order/page-count, attachment, and correction signals. Attachments are hashed for duplicate detection. Parsed PDF pages extract PS number, SR number, ship-to data, PO, freight terms, order date, ship-via, instructions, and item rows when present. Teamship review compares Garland parsed data with Teamship details.
 
+When the Garland PDF ship-to name differs from Teamship, an approved update uses the complete PDF ship-to name for Teamship `ship_first_name` (the field labelled **First Name**). The planner must preserve the complete business name without abbreviating it. This approved rule does not silently clear or rewrite Teamship `ship_last_name`; any separate Last Name correction requires its own reviewed rule. The existing review and update approval gates still apply before any Teamship write.
+
 ## Pallet and printing notes
 
 Pallet dimensions, serials, weight, and SKU observations are represented in Teamship review/update types and `GarlandProductDimensionObservation`. The UPS special dimension rule is confirmed in existing documentation and tests should be consulted before changing it. Printer mappings, duplicate print protection, and a general print service were not located; production printing requires explicit human approval.

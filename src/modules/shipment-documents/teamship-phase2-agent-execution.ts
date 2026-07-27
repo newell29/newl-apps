@@ -384,6 +384,18 @@ function buildFieldBrowserInstruction(teamshipField: string): TeamshipBrowserFie
 }
 
 const FIELD_BROWSER_INSTRUCTIONS: Record<string, TeamshipBrowserFieldInstruction> = {
+  ship_first_name: {
+    preferredExecution: "TEAMSHIP_API",
+    browserFallbackPage: "TEAMSHIP_SHIPPING_ORDER",
+    routeTemplate: "/ship-inventories/{teamshipOrderId}",
+    fieldLabel: "First Name",
+    primaryLocator: {
+      strategy: "LABEL_OR_NAME",
+      label: "First Name"
+    },
+    editInstruction: "Open the Teamship shipping order, find First Name, replace it with the approved Garland ship-to name, then save.",
+    saveInstruction: buildShippingOrderSaveInstruction()
+  },
   poNumber: {
     preferredExecution: "TEAMSHIP_API",
     browserFallbackPage: "TEAMSHIP_SHIPPING_ORDER",
