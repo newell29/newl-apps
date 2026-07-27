@@ -84,6 +84,9 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
   queries bounded legal-name, brand, and regional aliases and adds official-domain queries when a
   domain is known. Matching first-party identity evidence can correct an unsupported ambiguous
   synthesis label.
+- A full generic result set can otherwise consume the bounded evidence ledger before a later
+  official-domain event query runs. Hunter executes every enabled query first and samples their
+  results in rounds, preserving targeted first-party evidence without increasing the 24-record cap.
 - A model's provider or incumbent label cannot block an account without explicit supporting language
   in the saved evidence. An undated claimed trigger is treated as current fit. Stale/no-opportunity
   research is retained on Watchlist for later research instead of becoming a permanent block.

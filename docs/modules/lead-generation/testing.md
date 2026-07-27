@@ -161,8 +161,9 @@ Regression coverage must prove:
 9. public identity evidence, never shipment origin, determines company country; other foreign entities without a verified U.S. division receive a 10-point penalty and Watchlist cap, while mainland-China entities without one are blocked;
 10. completion stores tenant-scoped evidence and refreshes only the dry-run plan; and
 11. a retrieval/Qwen checkpoint resumes only against an identical newly prepared tenant cohort;
-12. legal-name, regional, and brand aliases cover known false-negative shapes such as Aalberts IPS Americas, AS Colour, 3F North America, Barnhardt Manufacturing, and Atlas Copco Compressors; and
-13. no company-research module or route imports or calls Apollo, pipeline-stage mutation, cadence enrollment, email, LinkedIn, or customer-communication code.
+12. legal-name, regional, and brand aliases cover known false-negative shapes such as Aalberts IPS Americas, AS Colour, 3F North America, Barnhardt Manufacturing, and Atlas Copco Compressors;
+13. saturated generic results cannot prevent a known-domain identity or fresh-event query from executing or contributing evidence, including Barnhardt's first-party NCFI expansion; and
+14. no company-research module or route imports or calls Apollo, pipeline-stage mutation, cadence enrollment, email, LinkedIn, or customer-communication code.
 
 ## Hunter quality audit and Rivet triage
 
