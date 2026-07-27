@@ -192,3 +192,18 @@ Regression coverage must prove:
 5. the legacy `/lead-gen/contacts` route redirects to `/lead-gen/outreach`; and
 6. Outreach Queue starts with secondary audit columns hidden and links companies back to Found Companies; and
 7. every underlying query remains tenant scoped and the redesign requires no database migration.
+
+## Outreach Plans and grounded sequence generation
+
+Regression coverage must prove:
+
+1. evidence fingerprints are stable regardless of input ordering;
+2. a valid sequence contains three emails, one LinkedIn task, one call task, contiguous steps, and increasing delays;
+3. missing/unknown evidence references, generic banned phrasing, unsupported URLs, and unsupported quantified claims
+   fail deterministic QA;
+4. any blocking model-critic issue fails the combined gate even when deterministic checks pass;
+5. OpenAI strategy, sequence, and QA calls use the Responses API with strict JSON Schema;
+6. generated drafts are not auto-approved, plan approval requires QA plus contact/company safety, and a current
+   unapproved plan blocks Apollo;
+7. editing generated copy invalidates QA and approval; and
+8. the migration is additive and preserves every existing lead-generation record.

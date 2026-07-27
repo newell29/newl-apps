@@ -301,10 +301,31 @@ enum ContactOutreachDraftStatus {
 }
 
 enum ContactOutreachDraftSource {
+  OPENAI
   MOCK_AI
   MANUAL
   TEMPLATE
   UNKNOWN
+}
+
+enum OutreachPlanStatus {
+  DRAFT
+  QA_FAILED
+  QA_PASSED
+  APPROVED
+  ARCHIVED
+}
+
+enum OutreachQaStatus {
+  PENDING
+  FAILED
+  PASSED
+}
+
+enum OutreachChannel {
+  EMAIL
+  LINKEDIN_TASK
+  CALL_TASK
 }
 
 enum OceanRateSourceType {
@@ -530,6 +551,8 @@ model Tenant {
   contacts                                Contact[]
   leads                                   Lead[]
   contactOutreachDrafts                   ContactOutreachDraft[]
+  outreachPlans                           OutreachPlan[]
+  outreachSequenceSteps                   OutreachSequenceStep[]
   apolloCompanyMatches                    ApolloCompanyMatch[]
   ltlBatchQuoteLanes                      LtlBatchQuoteLane[]
   assistantThreads                        AssistantChatThread[]
@@ -1621,6 +1644,7 @@ model Company {
   contacts                   Contact[]
   leads                      Lead[]
   contactOutreachDrafts      ContactOutreachDraft[]
+  outreachPlans              OutreachPlan[]
   apolloCompanyMatches       ApolloCompanyMatch[]
   leadScoreSnapshots         LeadScoreSnapshot[]
   leadOutcomeEvents          LeadOutcomeEvent[]
@@ -1836,6 +1860,7 @@ model Contact {
   company                      Company                @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
   leads                        Lead[]
   outreachDrafts               ContactOutreachDraft[]
+  outreachPlans                OutreachPlan[]
   salesCashflowCustomers       CashflowCustomer[]     @relation("CashflowSalesContact")
   collectionsCashflowCustomers CashflowCustomer[]     @relation("CashflowCollectionsContact")
 
@@ -1893,6 +1918,76 @@ model ContactOutreachDraft {
   @@index([tenantId, status])
   @@index([tenantId, source])
   @@index([tenantId, sequenceId])
+}
+
+model OutreachPlan {
+  id                    String             @id @default(cuid())
+  tenantId              String
+  companyId             String
+  contactId             String
+  version               Int                @default(1)
+  status                OutreachPlanStatus @default(DRAFT)
+  qaStatus              OutreachQaStatus   @default(PENDING)
+  serviceLine           HunterServiceLine
+  opportunityType       String
+  objective             String
+  triggerSummary        String
+  buyerHypothesis       String
+  valueProposition      String
+  likelyObjection       String
+  callToAction          String
+  channelStrategy       Json
+  senderRecommendation  String?
+  sequenceName          String
+  sequenceId            String?
+  confidence            Int
+  evidence              Json
+  evidenceFingerprint   String
+  strategyModel         String
+  draftingModel         String
+  qaModel               String?
+  promptVersion         String
+  qaIssues              Json?
+  generatedAt           DateTime           @default(now())
+  qaCheckedAt           DateTime?
+  approvedAt            DateTime?
+  approvedByUserId      String?
+  archivedAt            DateTime?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  tenant  Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company Company                @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  contact Contact                @relation(fields: [tenantId, companyId, contactId], references: [tenantId, companyId, id], onDelete: Cascade)
+  steps   OutreachSequenceStep[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, contactId, version])
+  @@index([tenantId, companyId, status])
+  @@index([tenantId, contactId, createdAt])
+  @@index([tenantId, qaStatus, status])
+}
+
+model OutreachSequenceStep {
+  id             String          @id @default(cuid())
+  tenantId       String
+  outreachPlanId String
+  stepNumber     Int
+  channel        OutreachChannel
+  delayDays      Int
+  subject        String?
+  body           String
+  angle          String
+  evidenceRefs   Json
+  qaIssues       Json?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan   OutreachPlan @relation(fields: [tenantId, outreachPlanId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, outreachPlanId, stepNumber])
+  @@index([tenantId, outreachPlanId])
 }
 
 model Lead {

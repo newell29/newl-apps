@@ -54,4 +54,9 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Should a future search-profile experiment agent be allowed to propose bounded profile variants in a sandbox ledger? It must not mutate active profiles or trigger TradeMining queries until the owner approves an experiment budget, success metric, holdout design, and automatic rollback rule. Requires owner confirmation.
 - May Hunter automatically collect headline links from GDELT DOC 2 and Google News RSS, and what licensing/terms apply to retained metadata? Requires owner and legal/compliance confirmation before `HUNTER_SIGNAL_SCOUT_ENABLED` is switched on.
 - Which jurisdictions, sender identities, daily mailbox volumes, and review thresholds should govern later outreach? Requires owner confirmation before moving beyond dry run.
+- Which named sender should be preferred for each service line/persona, and which mailbox caps should apply? The
+  Phase 1 plan records a recommendation only; automatic sender allocation requires owner confirmation.
+- Should later assisted automation generate plans for all ranked contacts automatically or only Hot/Qualified
+  opportunities selected by Hunter? Current automatic generation preserves the existing `requiresAiDraft` tier gate;
+  employees can manually generate for any ranked contact.
 - Should external-signal discovery use a low-cost hosted model, the local Qwen endpoint, or a tiered provider strategy after deterministic filtering? This requires a measured quality/cost evaluation; Phase 1 does not require a new model credential.

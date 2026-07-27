@@ -87,6 +87,25 @@ The employee-facing layout follows the lifecycle of a prospect rather than the u
 
 The layout is non-destructive: it does not migrate, delete, or rewrite existing Company, Contact, Lead, Hunter, TradeMining, Apollo, scoring, or outcome data.
 
+## Assisted Outreach Plan workflow
+
+1. An employee selects or accepts the contact's cadence and requests an Outreach Plan from Outreach Queue.
+2. Newl Apps loads only that tenant's contact, company, recent Hunter signals/decisions, and bounded TradeMining
+   evidence. It creates stable evidence IDs and fingerprints the frozen ledger.
+3. The strategy model creates the service-line plan, buyer hypothesis, trigger, value proposition, objection, CTA,
+   sender recommendation, confidence, and citations.
+4. The drafting model creates exactly five coordinated email/manual touches. Every touch cites the frozen ledger.
+5. Deterministic QA and a separate model critic evaluate the plan. An unavailable critic fails closed and is recorded
+   as a QA error instead of silently approving the draft.
+6. Newl Apps archives the prior active version, saves the plan and all steps, and updates the legacy first-email draft
+   as `AVAILABLE` only when QA passes. No Apollo call occurs.
+7. An authenticated employee reviews the strategy, sequence, citations, evidence sources, QA findings, and model
+   versions. Approval requires an approved contact and a safe company. It marks the first-email compatibility draft
+   approved but still performs no customer communication.
+8. The existing explicit **Push to Apollo** action rechecks plan approval, draft requirements, suppression, contact
+   approval, sender mapping, email, company safety, and existing sequence history before any external write.
+9. A manual email edit invalidates QA. The employee must regenerate a new version before approval and push.
+
 ## Apollo company-match review
 
 1. Pipeline enrichment first searches Apollo by the stored company domain, or by at most two company-name variants when no domain is available.

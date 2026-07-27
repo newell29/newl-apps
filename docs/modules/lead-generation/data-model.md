@@ -54,6 +54,19 @@ Hunter Phase 3 also requires no database migration:
 - `HunterOpportunitySignal.rawJson` stores bounded non-secret replay metadata;
 - the refreshed `HunterProspectingDecision` keeps the scored signal in the existing immutable daily-plan ledger.
 
+Assisted outreach planning adds only new records and one enum value:
+
+- `OutreachPlan` is a tenant/company/contact-scoped, versioned strategy record. It freezes the service line,
+  opportunity hypothesis, buyer hypothesis, value proposition, objection, CTA, evidence ledger/fingerprint,
+  model/prompt versions, QA result, and human approval.
+- `OutreachSequenceStep` stores the five ordered email, LinkedIn-task, and call-task touches with delays, angles,
+  evidence references, and step-level QA findings.
+- the existing `ContactOutreachDraft` remains the Apollo compatibility record for the first email; `OPENAI` identifies
+  the real provider instead of the legacy `MOCK_AI` label.
+- migration `20260726120000_add_outreach_plans` is additive. It creates enums, tables, indexes, and foreign keys and
+  adds an enum value. It does not delete, rename, backfill, or rewrite existing company, contact, lead, draft, Hunter,
+  TradeMining, Apollo, score, or outcome data.
+
 ```mermaid
 flowchart LR
   UI[Authenticated UI/API] --> Auth[Auth + module guard]

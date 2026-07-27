@@ -26,6 +26,11 @@ The Sales navigation is arranged around operational intent: Daily Opportunities,
 and Apollo Exceptions are daily work; TradeMining Searches and Found Companies are source data; Automation Settings,
 Scoring & Outcomes, and Health & Logs are administrative and quality-control surfaces. Existing records are preserved.
 
+Phase 4 begins the assisted outreach-intelligence layer. For a ranked contact, Newl Apps can create a versioned
+company/contact Outreach Plan from a bounded Hunter and TradeMining evidence ledger, generate a complete five-touch
+sequence, and run both deterministic and model grounding checks. Generation does not approve, enroll, or send. A
+current plan blocks Apollo push until QA passes and an authenticated employee approves it.
+
 ## Data model
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.

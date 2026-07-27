@@ -10,6 +10,8 @@ import {
   JobStatus,
   LeadPipelineStage,
   ModuleKey,
+  OutreachPlanStatus,
+  OutreachQaStatus,
   Prisma,
   ReplyStatus,
   SequenceStatus
@@ -59,6 +61,18 @@ import {
 } from "@/modules/lead-gen/contact-scoring";
 import { buildSequenceCatalogItems, recommendSequenceForContact } from "@/modules/lead-gen/sequence-catalog";
 import {
+  DEFAULT_OUTREACH_DRAFT_MODEL,
+  DEFAULT_OUTREACH_QA_MODEL,
+  DEFAULT_OUTREACH_STRATEGY_MODEL,
+  fingerprintOutreachEvidence,
+  getOutreachPlanApolloBlockReason,
+  mergeOutreachQaResults,
+  OUTREACH_PLAN_PROMPT_VERSION,
+  runDeterministicOutreachQa,
+  type OutreachEvidenceRecord,
+  type OutreachQaIssue
+} from "@/modules/lead-gen/outreach-plan";
+import {
   buildApolloSequenceMappingsWithDefaults,
   parseApolloSequenceDirectory,
   parseApolloSequenceMapping,
@@ -83,8 +97,10 @@ import {
 } from "@/server/integrations/apollo";
 import {
   generateApolloCompanyNameSuggestion,
-  generateTier1SequenceDraft,
-  isOpenAiDraftGenerationConfigured
+  generateCompleteOutreachSequence,
+  generateOutreachStrategy,
+  isOpenAiDraftGenerationConfigured,
+  reviewOutreachSequenceGrounding
 } from "@/server/integrations/openai";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
@@ -1676,6 +1692,23 @@ export async function runApolloPushJob({
             updatedAt: "desc"
           },
           take: 1
+        },
+        outreachPlans: {
+          where: {
+            tenantId,
+            status: {
+              not: OutreachPlanStatus.ARCHIVED
+            }
+          },
+          orderBy: {
+            version: "desc"
+          },
+          take: 1,
+          select: {
+            id: true,
+            status: true,
+            qaStatus: true
+          }
         }
       }
     });
@@ -2345,15 +2378,18 @@ export async function syncSelectedApolloStatusesAction(
 
 export async function saveContactDraftAction(formData: FormData) {
   const context = await authorizeLeadGenMutation();
-  const client = prisma as SearchProfileMutationClient;
   const draftId = readRequired(formData, "draftId");
-  const draft = await client.contactOutreachDraft.findFirst({
+  const subject = readRequired(formData, "subject");
+  const body = readRequired(formData, "body");
+  const draft = await prisma.contactOutreachDraft.findFirst({
     where: {
       id: draftId,
       tenantId: context.tenantId
     },
     select: {
-      id: true
+      id: true,
+      contactId: true,
+      sequenceName: true
     }
   });
 
@@ -2361,18 +2397,167 @@ export async function saveContactDraftAction(formData: FormData) {
     throw new Error("Draft not found for this tenant.");
   }
 
-  await client.contactOutreachDraft.update({
+  const outreachPlan = await prisma.outreachPlan.findFirst({
     where: {
-      id: draftId
+      tenantId: context.tenantId,
+      contactId: draft.contactId,
+      sequenceName: draft.sequenceName,
+      status: {
+        not: OutreachPlanStatus.ARCHIVED
+      }
     },
-    data: {
-      subject: readRequired(formData, "subject"),
-      body: readRequired(formData, "body"),
-      status: ContactOutreachDraftStatus.APPROVED,
-      editedAt: new Date(),
-      approvedAt: new Date()
+    orderBy: {
+      version: "desc"
+    },
+    select: {
+      id: true
     }
   });
+
+  if (outreachPlan) {
+    const qaIssue: OutreachQaIssue = {
+      code: "MANUAL_EDIT_REQUIRES_QA",
+      severity: "ERROR",
+      message: "The first email changed after QA. Regenerate the outreach plan to run grounding checks again.",
+      stepNumber: 1
+    };
+    await prisma.$transaction([
+      prisma.contactOutreachDraft.update({
+        where: {
+          id: draftId
+        },
+        data: {
+          subject,
+          body,
+          status: ContactOutreachDraftStatus.EDITED,
+          editedAt: new Date(),
+          approvedAt: null
+        }
+      }),
+      prisma.outreachPlan.update({
+        where: {
+          id: outreachPlan.id
+        },
+        data: {
+          status: OutreachPlanStatus.QA_FAILED,
+          qaStatus: OutreachQaStatus.FAILED,
+          qaIssues: toInputJsonValue([qaIssue]),
+          qaCheckedAt: new Date(),
+          approvedAt: null,
+          approvedByUserId: null
+        }
+      }),
+      prisma.outreachSequenceStep.updateMany({
+        where: {
+          tenantId: context.tenantId,
+          outreachPlanId: outreachPlan.id,
+          stepNumber: 1
+        },
+        data: {
+          subject,
+          body,
+          qaIssues: toInputJsonValue([qaIssue])
+        }
+      })
+    ]);
+  } else {
+    await prisma.contactOutreachDraft.update({
+      where: {
+        id: draftId
+      },
+      data: {
+        subject,
+        body,
+        status: ContactOutreachDraftStatus.APPROVED,
+        editedAt: new Date(),
+        approvedAt: new Date()
+      }
+    });
+  }
+
+  revalidateLeadGenSurfaces();
+}
+
+export async function approveOutreachPlanAction(formData: FormData) {
+  const context = await authorizeLeadGenMutation();
+  const planId = readRequired(formData, "planId");
+  const plan = await prisma.outreachPlan.findFirst({
+    where: {
+      id: planId,
+      tenantId: context.tenantId
+    },
+    include: {
+      company: {
+        select: {
+          candidateStatus: true,
+          doNotProspect: true
+        }
+      },
+      contact: {
+        select: {
+          id: true,
+          contactStatus: true
+        }
+      }
+    }
+  });
+
+  if (!plan) {
+    throw new Error("Outreach plan not found for this tenant.");
+  }
+  if (plan.status !== OutreachPlanStatus.QA_PASSED || plan.qaStatus !== OutreachQaStatus.PASSED) {
+    throw new Error("This outreach plan must pass the grounded QA gate before approval.");
+  }
+  if (
+    plan.company.doNotProspect ||
+    plan.company.candidateStatus === CandidateStatus.REJECTED ||
+    plan.company.candidateStatus === CandidateStatus.DISQUALIFIED
+  ) {
+    throw new Error("This company is blocked from prospecting.");
+  }
+  if (plan.contact.contactStatus !== ContactStatus.APPROVED) {
+    throw new Error("The contact must be approved before the outreach plan can be approved.");
+  }
+
+  await prisma.$transaction([
+    prisma.outreachPlan.update({
+      where: {
+        id: plan.id
+      },
+      data: {
+        status: OutreachPlanStatus.APPROVED,
+        approvedAt: new Date(),
+        approvedByUserId: context.userId
+      }
+    }),
+    prisma.contactOutreachDraft.updateMany({
+      where: {
+        tenantId: context.tenantId,
+        contactId: plan.contactId,
+        sequenceName: plan.sequenceName
+      },
+      data: {
+        status: ContactOutreachDraftStatus.APPROVED,
+        approvedAt: new Date()
+      }
+    }),
+    prisma.auditLog.create({
+      data: {
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        action: "OUTREACH_PLAN_APPROVED",
+        entityType: "OUTREACH_PLAN",
+        entityId: plan.id,
+        after: toInputJsonValue({
+          contactId: plan.contactId,
+          companyId: plan.companyId,
+          version: plan.version,
+          qaStatus: plan.qaStatus,
+          evidenceFingerprint: plan.evidenceFingerprint
+        })
+      }
+    })
+  ]);
 
   revalidateLeadGenSurfaces();
 }
@@ -2775,6 +2960,11 @@ type ApolloPushContactRecord = {
     id: string;
     status: ContactOutreachDraftStatus;
   }>;
+  outreachPlans: Array<{
+    id: string;
+    status: OutreachPlanStatus;
+    qaStatus: OutreachQaStatus;
+  }>;
 };
 
 type ApolloSyncContactRecord = {
@@ -3044,7 +3234,16 @@ async function validateApolloPushCandidate({
   }
 
   const latestDraft = contact.outreachDrafts[0] ?? null;
+  const latestOutreachPlan = contact.outreachPlans?.[0] ?? null;
   const requiresAiDraft = await contactRequiresApprovedDraft(tenantId, contact.id);
+
+  const outreachPlanBlockReason = getOutreachPlanApolloBlockReason(latestOutreachPlan);
+  if (outreachPlanBlockReason) {
+    return {
+      ok: false,
+      reason: outreachPlanBlockReason
+    };
+  }
 
   if (requiresAiDraft && latestDraft?.status !== ContactOutreachDraftStatus.APPROVED) {
     return {
@@ -4776,9 +4975,12 @@ async function generateAiDraftForContact({
     throw new Error("Contact not found for this tenant.");
   }
 
-  if (!draftContext.requiresAiDraft) {
+  if (!draftContext.requiresAiDraft && !forceRegenerate) {
+    return;
+  }
+  if (draftContext.contactTier === "UNRANKED") {
     if (forceRegenerate) {
-      throw new Error("This tier does not currently require a Newl Apps AI draft.");
+      throw new Error("This contact must be ranked before generating an outreach plan.");
     }
     return;
   }
@@ -4790,55 +4992,105 @@ async function generateAiDraftForContact({
     return;
   }
 
-  if (draftContext.contact.company.importRecords.length === 0) {
+  const evidenceLedger = buildOutreachEvidenceLedger(draftContext);
+  if (evidenceLedger.length === 0) {
     if (forceRegenerate) {
-      throw new Error("No TradeMining shipment history is available for this company yet.");
+      throw new Error("No saved Hunter or TradeMining evidence is available for this company yet.");
     }
     return;
   }
 
-  if (draftContext.existingDraft && !forceRegenerate) {
+  if (draftContext.existingOutreachPlan && !forceRegenerate) {
     return;
   }
 
-  const generatedDraft = await generateTier1SequenceDraft({
-    model: draftContext.model,
+  const models = loadOutreachModels();
+  const latestDecision = draftContext.contact.company.hunterProspectingDecisions[0] ?? null;
+  const strategyGeneration = await generateOutreachStrategy({
+    model: models.strategy,
     companyName: draftContext.contact.company.name,
-    contactFirstName: draftContext.contact.firstName,
-    contactFullName: draftContext.contact.fullName,
-    contactTitle: draftContext.contact.title,
-    contactDepartment: draftContext.contact.department,
-    contactSeniority: draftContext.contact.seniority,
+    companyDomain: draftContext.contact.company.domain,
+    contact: {
+      firstName: draftContext.contact.firstName,
+      fullName: draftContext.contact.fullName,
+      title: draftContext.contact.title,
+      department: draftContext.contact.department,
+      seniority: draftContext.contact.seniority
+    },
     selectedSequenceName: draftContext.selectedSequenceName,
-    shipmentCount: draftContext.evidence.shipmentCount,
-    latestShipmentDate: draftContext.evidence.latestShipmentDate?.toISOString() ?? null,
-    arrivalPort: draftContext.evidence.destinationPort,
-    destinationCity: draftContext.evidence.destinationCity,
-    destinationState: draftContext.evidence.destinationState,
-    destinationMarket: draftContext.evidence.destinationMarket,
-    originCountry: draftContext.evidence.originCountry,
-    originPort: draftContext.evidence.originPort,
-    foreignPort: draftContext.evidence.foreignPort,
-    shipFromPort: draftContext.evidence.shipFromPort,
-    placeOfReceipt: draftContext.evidence.placeOfReceipt,
-    productDescription: draftContext.evidence.productDescription,
-    hsCode: draftContext.evidence.hsCode,
-    totalTeu: draftContext.evidence.totalTeu,
-    carrier: draftContext.evidence.carrier,
-    vessel: draftContext.evidence.vessel,
-    voyage: draftContext.evidence.voyage,
-    searchProfileName: draftContext.evidence.searchProfile?.name ?? null,
-    profileDestinationMarkets: draftContext.evidence.searchProfile?.destinationMarkets ?? [],
-    profileProductKeywords: draftContext.evidence.searchProfile?.productKeywords ?? [],
-    recurringOrigins: draftContext.shipmentDraftContext.recurringOrigins,
-    recurringDestinationPorts: draftContext.shipmentDraftContext.recurringDestinationPorts,
-    recurringCarriers: draftContext.shipmentDraftContext.recurringCarriers,
-    recurringProducts: draftContext.shipmentDraftContext.recurringProducts,
-    recentShipmentHighlights: draftContext.shipmentDraftContext.recentShipmentHighlights
+    recommendedPersona: latestDecision?.recommendedPersona ?? null,
+    recommendedCadence: latestDecision?.recommendedCadence ?? null,
+    evidence: evidenceLedger
   });
+  const strategy = strategyGeneration.strategy;
+
+  const sequenceGeneration = await generateCompleteOutreachSequence({
+    model: models.drafting,
+    companyName: draftContext.contact.company.name,
+    contact: {
+      firstName: draftContext.contact.firstName,
+      fullName: draftContext.contact.fullName,
+      title: draftContext.contact.title,
+      department: draftContext.contact.department,
+      seniority: draftContext.contact.seniority
+    },
+    selectedSequenceName: draftContext.selectedSequenceName,
+    strategy,
+    evidence: evidenceLedger
+  });
+  const sequence = sequenceGeneration.sequence;
+  const deterministicQa = runDeterministicOutreachQa({
+    evidence: evidenceLedger,
+    strategy,
+    sequence
+  });
+  let modelQa;
+  let qaUsage = null;
+  try {
+    const qaReview = await reviewOutreachSequenceGrounding({
+      model: models.qa,
+      companyName: draftContext.contact.company.name,
+      contact: {
+        firstName: draftContext.contact.firstName,
+        fullName: draftContext.contact.fullName,
+        title: draftContext.contact.title,
+        department: draftContext.contact.department,
+        seniority: draftContext.contact.seniority
+      },
+      strategy,
+      sequence,
+      evidence: evidenceLedger
+    });
+    modelQa = qaReview.result;
+    qaUsage = qaReview.usage;
+  } catch (error) {
+    modelQa = {
+      passed: false,
+      issues: [
+        {
+          code: "MODEL_QA_UNAVAILABLE",
+          severity: "ERROR" as const,
+          message: error instanceof Error ? error.message : "The model QA check could not be completed.",
+          stepNumber: null
+        }
+      ]
+    };
+  }
+  const qa = mergeOutreachQaResults(deterministicQa, modelQa);
+  const firstEmail = sequence.steps.find((step) => step.channel === "EMAIL");
+  if (!firstEmail?.subject) {
+    throw new Error("The generated outreach sequence did not include a valid first email.");
+  }
+  const firstEmailSubject = firstEmail.subject;
 
   const rawInputs = {
-    model: draftContext.model,
+    models,
+    promptVersion: OUTREACH_PLAN_PROMPT_VERSION,
+    modelUsage: {
+      strategy: strategyGeneration.usage,
+      drafting: sequenceGeneration.usage,
+      qa: qaUsage
+    },
     generatedAt: new Date().toISOString(),
     companyName: draftContext.contact.company.name,
     companyPriorityScore: draftContext.contact.company.priorityScore,
@@ -4846,79 +5098,149 @@ async function generateAiDraftForContact({
     contactTier: draftContext.contactTier,
     selectedSequenceName: draftContext.selectedSequenceName,
     selectedSequenceId: draftContext.selectedSequenceId,
-    evidence: {
-      shipmentCount: draftContext.evidence.shipmentCount,
-      latestShipmentDate: draftContext.evidence.latestShipmentDate?.toISOString() ?? null,
-      arrivalPort: draftContext.evidence.destinationPort,
-      destinationCity: draftContext.evidence.destinationCity,
-      destinationState: draftContext.evidence.destinationState,
-      destinationMarket: draftContext.evidence.destinationMarket,
-      originCountry: draftContext.evidence.originCountry,
-      originPort: draftContext.evidence.originPort,
-      foreignPort: draftContext.evidence.foreignPort,
-      shipFromPort: draftContext.evidence.shipFromPort,
-      placeOfReceipt: draftContext.evidence.placeOfReceipt,
-      productDescription: draftContext.evidence.productDescription,
-      hsCode: draftContext.evidence.hsCode,
-      totalTeu: draftContext.evidence.totalTeu,
-      sourceRole: draftContext.evidence.sourceRole,
-      carrier: draftContext.evidence.carrier,
-      vessel: draftContext.evidence.vessel,
-      voyage: draftContext.evidence.voyage,
-      searchProfileName: draftContext.evidence.searchProfile?.name ?? null,
-      recurringOrigins: draftContext.shipmentDraftContext.recurringOrigins,
-      recurringDestinationPorts: draftContext.shipmentDraftContext.recurringDestinationPorts,
-      recurringCarriers: draftContext.shipmentDraftContext.recurringCarriers,
-      recurringProducts: draftContext.shipmentDraftContext.recurringProducts,
-      recentShipmentHighlights: draftContext.shipmentDraftContext.recentShipmentHighlights
-    }
+    strategy,
+    evidenceLedger
   };
 
-  await prisma.contactOutreachDraft.upsert({
-    where: {
-      tenantId_contactId_sequenceName: {
+  await prisma.$transaction(async (transaction) => {
+    const latestPlan = await transaction.outreachPlan.findFirst({
+      where: {
+        tenantId,
+        contactId: draftContext.contact.id
+      },
+      orderBy: {
+        version: "desc"
+      },
+      select: {
+        version: true
+      }
+    });
+    await transaction.outreachPlan.updateMany({
+      where: {
         tenantId,
         contactId: draftContext.contact.id,
-        sequenceName: draftContext.selectedSequenceName
+        status: {
+          not: OutreachPlanStatus.ARCHIVED
+        }
+      },
+      data: {
+        status: OutreachPlanStatus.ARCHIVED,
+        archivedAt: new Date()
       }
-    },
-    update: {
-      companyId: draftContext.contact.companyId,
-      leadId: draftContext.leadId,
-      sequenceId: draftContext.selectedSequenceId,
-      subject: generatedDraft.subject,
-      body: generatedDraft.body,
-      status: ContactOutreachDraftStatus.APPROVED,
-      source: ContactOutreachDraftSource.MOCK_AI,
-      aiGenerated: true,
-      personalizationNotes: generatedDraft.personalizationNotes,
-      approvedAt: new Date(),
-      rawInputs: toInputJsonValue(rawInputs),
-      rawJson: toInputJsonValue({
-        provider: "openai",
-        response: generatedDraft.rawResponse
-      })
-    },
-    create: {
-      tenantId,
-      contactId: draftContext.contact.id,
-      companyId: draftContext.contact.companyId,
-      leadId: draftContext.leadId,
-      sequenceName: draftContext.selectedSequenceName,
-      sequenceId: draftContext.selectedSequenceId,
-      subject: generatedDraft.subject,
-      body: generatedDraft.body,
-      status: ContactOutreachDraftStatus.APPROVED,
-      source: ContactOutreachDraftSource.MOCK_AI,
-      aiGenerated: true,
-      personalizationNotes: generatedDraft.personalizationNotes,
-      approvedAt: new Date(),
-      rawInputs: toInputJsonValue(rawInputs),
-      rawJson: toInputJsonValue({
-        provider: "openai",
-        response: generatedDraft.rawResponse
-      })
-    }
+    });
+    const plan = await transaction.outreachPlan.create({
+      data: {
+        tenantId,
+        companyId: draftContext.contact.companyId,
+        contactId: draftContext.contact.id,
+        version: (latestPlan?.version ?? 0) + 1,
+        status: qa.passed ? OutreachPlanStatus.QA_PASSED : OutreachPlanStatus.QA_FAILED,
+        qaStatus: qa.passed ? OutreachQaStatus.PASSED : OutreachQaStatus.FAILED,
+        serviceLine: strategy.serviceLine,
+        opportunityType: strategy.opportunityType,
+        objective: strategy.objective,
+        triggerSummary: strategy.triggerSummary,
+        buyerHypothesis: strategy.buyerHypothesis,
+        valueProposition: strategy.valueProposition,
+        likelyObjection: strategy.likelyObjection,
+        callToAction: strategy.callToAction,
+        channelStrategy: toInputJsonValue(strategy.channelStrategy),
+        senderRecommendation: strategy.senderRecommendation,
+        sequenceName: draftContext.selectedSequenceName,
+        sequenceId: draftContext.selectedSequenceId,
+        confidence: strategy.confidence,
+        evidence: toInputJsonValue(evidenceLedger),
+        evidenceFingerprint: fingerprintOutreachEvidence(evidenceLedger),
+        strategyModel: models.strategy,
+        draftingModel: models.drafting,
+        qaModel: models.qa,
+        promptVersion: OUTREACH_PLAN_PROMPT_VERSION,
+        qaIssues: toInputJsonValue(qa.issues),
+        qaCheckedAt: new Date(),
+        steps: {
+          create: sequence.steps.map((step) => ({
+            tenantId,
+            stepNumber: step.stepNumber,
+            channel: step.channel,
+            delayDays: step.delayDays,
+            subject: step.subject,
+            body: step.body,
+            angle: step.angle,
+            evidenceRefs: toInputJsonValue(step.evidenceRefs),
+            qaIssues: toInputJsonValue(
+              qa.issues.filter((issue) => issue.stepNumber === null || issue.stepNumber === step.stepNumber)
+            )
+          }))
+        }
+      }
+    });
+
+    await transaction.contactOutreachDraft.upsert({
+      where: {
+        tenantId_contactId_sequenceName: {
+          tenantId,
+          contactId: draftContext.contact.id,
+          sequenceName: draftContext.selectedSequenceName
+        }
+      },
+      update: {
+        companyId: draftContext.contact.companyId,
+        leadId: draftContext.leadId,
+        sequenceId: draftContext.selectedSequenceId,
+        subject: firstEmailSubject,
+        body: firstEmail.body,
+        status: qa.passed ? ContactOutreachDraftStatus.AVAILABLE : ContactOutreachDraftStatus.DRAFT,
+        source: ContactOutreachDraftSource.OPENAI,
+        aiGenerated: true,
+        personalizationNotes: `${strategy.triggerSummary} Evidence: ${firstEmail.evidenceRefs.join(", ")}.`,
+        approvedAt: null,
+        rawInputs: toInputJsonValue(rawInputs),
+        rawJson: toInputJsonValue({
+          provider: "openai",
+          outreachPlanId: plan.id,
+          qa
+        })
+      },
+      create: {
+        tenantId,
+        contactId: draftContext.contact.id,
+        companyId: draftContext.contact.companyId,
+        leadId: draftContext.leadId,
+        sequenceName: draftContext.selectedSequenceName,
+        sequenceId: draftContext.selectedSequenceId,
+        subject: firstEmailSubject,
+        body: firstEmail.body,
+        status: qa.passed ? ContactOutreachDraftStatus.AVAILABLE : ContactOutreachDraftStatus.DRAFT,
+        source: ContactOutreachDraftSource.OPENAI,
+        aiGenerated: true,
+        personalizationNotes: `${strategy.triggerSummary} Evidence: ${firstEmail.evidenceRefs.join(", ")}.`,
+        rawInputs: toInputJsonValue(rawInputs),
+        rawJson: toInputJsonValue({
+          provider: "openai",
+          outreachPlanId: plan.id,
+          qa
+        })
+      }
+    });
+
+    await transaction.auditLog.create({
+      data: {
+        tenantId,
+        actorUserId: null,
+        action: "OUTREACH_PLAN_GENERATED",
+        entityType: "OUTREACH_PLAN",
+        entityId: plan.id,
+        after: toInputJsonValue({
+          contactId: draftContext.contact.id,
+          companyId: draftContext.contact.companyId,
+          version: (latestPlan?.version ?? 0) + 1,
+          qaPassed: qa.passed,
+          issueCount: qa.issues.length,
+          promptVersion: OUTREACH_PLAN_PROMPT_VERSION,
+          models
+        })
+      }
+    });
   });
 }
 
@@ -5035,6 +5357,48 @@ async function loadAiDraftContactContext({
                 id: true,
                 score: true
               }
+            },
+            hunterOpportunitySignals: {
+              where: {
+                tenantId
+              },
+              orderBy: {
+                observedAt: "desc"
+              },
+              take: 5,
+              select: {
+                id: true,
+                signalType: true,
+                serviceLine: true,
+                title: true,
+                summary: true,
+                sourceName: true,
+                sourceUrl: true,
+                sourcePublishedAt: true,
+                confidence: true,
+                evidence: true
+              }
+            },
+            hunterProspectingDecisions: {
+              where: {
+                tenantId
+              },
+              orderBy: {
+                createdAt: "desc"
+              },
+              take: 3,
+              select: {
+                id: true,
+                serviceLine: true,
+                opportunityType: true,
+                rationale: true,
+                recommendedPersona: true,
+                recommendedSender: true,
+                recommendedCadence: true,
+                evidence: true,
+                confidence: true,
+                createdAt: true
+              }
             }
           }
         },
@@ -5046,6 +5410,24 @@ async function loadAiDraftContactContext({
             updatedAt: "desc"
           },
           take: 1
+        },
+        outreachPlans: {
+          where: {
+            tenantId,
+            status: {
+              not: OutreachPlanStatus.ARCHIVED
+            }
+          },
+          orderBy: {
+            version: "desc"
+          },
+          take: 1,
+          select: {
+            id: true,
+            status: true,
+            qaStatus: true,
+            version: true
+          }
         }
       }
     }),
@@ -5120,9 +5502,141 @@ async function loadAiDraftContactContext({
     selectedSequenceReason: contact.sequenceRecommendationReason ?? recommendation.reason,
     requiresAiDraft: tierMapping?.requiresAiDraft ?? false,
     existingDraft: contact.outreachDrafts[0] ?? null,
+    existingOutreachPlan: contact.outreachPlans[0] ?? null,
     leadId: contact.company.leads[0]?.id ?? null,
     leadScore: companyLeadScore
   };
+}
+
+function loadOutreachModels() {
+  return {
+    strategy:
+      process.env.LEAD_GEN_OUTREACH_STRATEGY_MODEL?.trim() ||
+      DEFAULT_OUTREACH_STRATEGY_MODEL,
+    drafting:
+      process.env.LEAD_GEN_OUTREACH_DRAFT_MODEL?.trim() ||
+      DEFAULT_OUTREACH_DRAFT_MODEL,
+    qa:
+      process.env.LEAD_GEN_OUTREACH_QA_MODEL?.trim() ||
+      DEFAULT_OUTREACH_QA_MODEL
+  };
+}
+
+function buildOutreachEvidenceLedger(
+  draftContext: NonNullable<Awaited<ReturnType<typeof loadAiDraftContactContext>>>
+): OutreachEvidenceRecord[] {
+  const records: OutreachEvidenceRecord[] = [
+    {
+      id: "company:identity",
+      kind: "COMPANY",
+      title: `${draftContext.contact.company.name} identity and buyer context`,
+      summary: `${draftContext.contact.fullName} is saved as ${
+        draftContext.contact.title ?? "a contact with an unconfirmed title"
+      } at ${draftContext.contact.company.name}.`,
+      sourceUrl: draftContext.contact.company.domain
+        ? `https://${draftContext.contact.company.domain.replace(/^https?:\/\//i, "")}`
+        : null,
+      publishedAt: null,
+      facts: [
+        `Company: ${draftContext.contact.company.name}`,
+        `Contact: ${draftContext.contact.fullName}`,
+        draftContext.contact.title ? `Contact title: ${draftContext.contact.title}` : "Contact title is unknown",
+        draftContext.contact.department
+          ? `Contact department: ${draftContext.contact.department}`
+          : "Contact department is unknown"
+      ]
+    }
+  ];
+
+  if (draftContext.contact.company.importRecords.length > 0) {
+    const shipmentFacts = [
+      `${draftContext.evidence.shipmentCount} shipments during the saved evidence lookback`,
+      draftContext.evidence.totalTeu > 0 ? `${formatDecimalValue(draftContext.evidence.totalTeu)} TEUs` : null,
+      draftContext.evidence.latestShipmentDate
+        ? `Latest saved arrival date: ${draftContext.evidence.latestShipmentDate.toISOString().slice(0, 10)}`
+        : null,
+      draftContext.evidence.destinationPort
+        ? `Arrival port: ${draftContext.evidence.destinationPort}`
+        : null,
+      draftContext.evidence.destinationMarket
+        ? `Destination market: ${draftContext.evidence.destinationMarket}`
+        : null,
+      draftContext.evidence.originCountry
+        ? `Origin country: ${draftContext.evidence.originCountry}`
+        : null,
+      draftContext.evidence.productDescription
+        ? `Product description: ${draftContext.evidence.productDescription}`
+        : null,
+      ...draftContext.shipmentDraftContext.recentShipmentHighlights.slice(0, 4)
+    ].filter((value): value is string => Boolean(value));
+
+    records.push({
+      id: "trademining:summary",
+      kind: "TRADEMINING",
+      title: `${draftContext.contact.company.name} saved TradeMining activity`,
+      summary: shipmentFacts.join(". "),
+      sourceUrl: null,
+      publishedAt: draftContext.evidence.latestShipmentDate?.toISOString() ?? null,
+      facts: shipmentFacts
+    });
+  }
+
+  for (const signal of draftContext.contact.company.hunterOpportunitySignals) {
+    records.push({
+      id: `hunter-signal:${signal.id}`,
+      kind: "HUNTER_SIGNAL",
+      title: signal.title,
+      summary: signal.summary,
+      sourceUrl: signal.sourceUrl,
+      publishedAt: signal.sourcePublishedAt?.toISOString() ?? null,
+      facts: [
+        `Signal type: ${signal.signalType}`,
+        `Service line: ${signal.serviceLine}`,
+        `Confidence: ${signal.confidence}`,
+        ...flattenEvidenceStrings(signal.evidence, 5)
+      ]
+    });
+  }
+
+  for (const decision of draftContext.contact.company.hunterProspectingDecisions) {
+    records.push({
+      id: `hunter-decision:${decision.id}`,
+      kind: "HUNTER_DECISION",
+      title: `${decision.opportunityType} prospecting decision`,
+      summary: decision.rationale,
+      sourceUrl: null,
+      publishedAt: decision.createdAt.toISOString(),
+      facts: [
+        `Service line: ${decision.serviceLine}`,
+        `Decision confidence: ${decision.confidence}`,
+        decision.recommendedPersona ? `Recommended persona: ${decision.recommendedPersona}` : null,
+        decision.recommendedCadence ? `Recommended cadence: ${decision.recommendedCadence}` : null,
+        ...flattenEvidenceStrings(decision.evidence, 5)
+      ].filter((value): value is string => Boolean(value))
+    });
+  }
+
+  return records.slice(0, 12);
+}
+
+function flattenEvidenceStrings(value: unknown, limit: number) {
+  const output: string[] = [];
+  const visit = (candidate: unknown) => {
+    if (output.length >= limit) return;
+    if (typeof candidate === "string" && candidate.trim()) {
+      output.push(candidate.trim().slice(0, 500));
+      return;
+    }
+    if (Array.isArray(candidate)) {
+      for (const item of candidate) visit(item);
+      return;
+    }
+    if (candidate && typeof candidate === "object") {
+      for (const item of Object.values(candidate as Record<string, unknown>)) visit(item);
+    }
+  };
+  visit(value);
+  return output;
 }
 
 async function syncApolloCustomFieldsForContactPush({

@@ -100,6 +100,28 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - Sales Opportunities is a revenue view over existing lead stages, limited to `REPLIED`, `MEETING_BOOKED`, `QUOTED`, `WON`, and `LOST`. A saved Apollo positive reply infers `REPLIED` for the view, while meeting-booked infers `MEETING_BOOKED`, so engagement cannot disappear between queues before a human confirms the lead stage. This layout rule does not change the Prisma enum or delete earlier-stage leads.
 - Apollo/customer communication approval boundaries are unchanged by this presentation redesign.
 
+## Assisted outreach planning and grounding
+
+- A manually requested plan may be generated for any ranked contact with a selected cadence and at least one saved
+  company, Hunter, or TradeMining evidence record. Existing automatic generation remains limited to tiers explicitly
+  configured to require an AI draft.
+- Strategy uses the configured Terra-class model; drafting and model QA use the configured Luna-class model. Model
+  names remain server environment configuration and every saved plan records the actual names and prompt version.
+- Every plan freezes a bounded evidence ledger and SHA-256 fingerprint. Company/contact identity, Hunter signals and
+  decisions, and TradeMining summaries have stable evidence IDs.
+- A complete Phase 1 sequence is exactly five touches: email day 0, LinkedIn task day 2, email day 4, call task day 7,
+  and email day 10. LinkedIn and call steps are manual instructions; the agent does not perform those actions.
+- Every strategy and step must cite a saved evidence ID. Deterministic QA validates citations, ordering, channel mix,
+  lengths, unsupported URLs, banned generic phrases, and unsupported quantified shipment/TEU/store/facility/location
+  claims. A conservative model critic separately checks semantic grounding and buyer-responsibility assumptions.
+- Any deterministic or model error fails closed. A failed plan remains reviewable but cannot be approved or pushed.
+- Generation never marks a draft approved. Human approval requires QA `PASSED`, an approved contact, and a company
+  that is not rejected, disqualified, or do-not-prospect.
+- Editing the first email after QA invalidates the plan and Apollo readiness. Regeneration creates a new plan version,
+  archives the previous active version, and reruns strategy, drafting, and QA.
+- When a current Outreach Plan exists, Apollo push is blocked until that exact plan is approved. Approval alone does
+  not enroll or send; the existing explicit Apollo push action remains a separate human-controlled external write.
+
 ## Data model
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.

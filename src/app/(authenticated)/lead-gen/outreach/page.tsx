@@ -11,6 +11,7 @@ import {
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import {
+  approveOutreachPlanAction,
   bulkPushContactsToApolloAction,
   bulkRemoveContactsAction,
   syncSelectedApolloStatusesAction,
@@ -403,7 +404,7 @@ export default async function OutreachQueuePage({
           <div>
             <p className="text-sm font-semibold text-foreground">Contact cadence foundation</p>
             <p className="text-xs text-mutedForeground">
-              Review selected cadences, shipment-aware draft copy, Apollo push readiness, and synced sequence status in one place.
+              Review evidence-grounded Outreach Plans, complete sequences, QA, Apollo readiness, and synced results in one place.
             </p>
           </div>
           <span className="rounded-full border border-accentBorder bg-card px-2.5 py-1 text-xs font-semibold text-primary">
@@ -423,6 +424,7 @@ export default async function OutreachQueuePage({
             updateContactSequenceAction={updateContactSequenceAction}
             saveContactDraftAction={saveContactDraftAction}
             generateContactDraftAction={generateContactDraftAction}
+            approveOutreachPlanAction={approveOutreachPlanAction}
           />
         ) : (
           <div className="px-4 py-12 text-center">

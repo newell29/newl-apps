@@ -43,6 +43,19 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 - Prevention: the human screen and CSV export request only the top 100 review candidates. Background Hunter paths that need exact corpus coverage read tenant-scoped companies in bounded batches.
 - Limitation: company, score, and shipment filters on Found Companies operate inside the bounded human review queue. Hunter remains the complete-corpus workflow.
 
+## Outreach Plan generation or QA fails
+
+- Missing OpenAI configuration, an unranked contact, missing selected cadence, no saved evidence, invalid structured
+  model output, or strategy/drafting transport failure stops generation and creates no partial active plan.
+- If drafting succeeds but the model critic is unavailable, Newl Apps saves the version as `QA_FAILED` with a
+  `MODEL_QA_UNAVAILABLE` error. It cannot be approved or pushed.
+- Unknown evidence citations, unsupported quantified claims, unsupported URLs, invalid sequence structure, or semantic
+  grounding errors fail closed and remain visible on the plan.
+- Editing the first email changes the plan to `QA_FAILED`, clears approval, and blocks Apollo. Regenerate to produce a
+  new immutable version and rerun every check.
+- A current unapproved plan blocks Apollo even when the contact's legacy cadence tier would not normally require a
+  Newl draft. Correct or regenerate and approve the plan instead of bypassing the gate.
+
 ## External signal discovery or classification fails
 
 - A GDELT 429/5xx response receives bounded retries and is recorded before the worker tries the RSS fallback.
