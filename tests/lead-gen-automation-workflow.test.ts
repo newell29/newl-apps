@@ -60,6 +60,15 @@ describe("automated sales workflow", () => {
     ).toBe(true);
     expect(
       isOutreachQueueContact({
+        contactStatus: ContactStatus.REVIEWING,
+        sequenceStatus: SequenceStatus.NOT_STARTED,
+        replyStatus: ReplyStatus.NO_REPLY,
+        draft: null,
+        outreachPlan: { id: "plan-1" }
+      })
+    ).toBe(true);
+    expect(
+      isOutreachQueueContact({
         contactStatus: ContactStatus.NEW,
         sequenceStatus: SequenceStatus.NOT_STARTED,
         replyStatus: ReplyStatus.NO_REPLY,

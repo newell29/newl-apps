@@ -71,6 +71,7 @@ export function isOutreachQueueContact(contact: {
   sequenceStatus: SequenceStatus;
   replyStatus: ReplyStatus;
   draft: unknown | null;
+  outreachPlan?: unknown | null;
 }) {
   if (
     contact.contactStatus === ContactStatus.REJECTED ||
@@ -90,6 +91,7 @@ export function isOutreachQueueContact(contact: {
     contact.sequenceStatus === SequenceStatus.ENROLLED ||
     contact.sequenceStatus === SequenceStatus.PAUSED ||
     contact.sequenceStatus === SequenceStatus.REPLIED ||
-    Boolean(contact.draft)
+    Boolean(contact.draft) ||
+    Boolean(contact.outreachPlan)
   );
 }

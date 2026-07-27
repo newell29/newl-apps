@@ -73,6 +73,7 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 10. Transient failures retry at most three times with rate-limit delay. Permanent company failures are recorded in the job output and audit log without invalidating the completed research.
 11. This handoff never creates a Sales Opportunity, approves a contact or plan, enrolls Apollo, sends email, posts to LinkedIn, or communicates with a prospect.
 12. An administrator can select **Find contacts for eligible opportunities** after enabling Assisted mode. The action creates a fresh deterministic plan from already-saved research and queues the same protected handoff without rerunning web retrieval, Qwen, Kimi, or K3.
+13. A `REVIEWING` contact with a current, non-archived Outreach Plan appears in Outreach Queue even when Hunter has not created a Sales Lead. Creating a Sales Lead remains reserved for later pipeline graduation.
 
 ## Hunter quality control and Rivet
 
