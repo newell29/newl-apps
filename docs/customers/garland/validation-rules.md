@@ -25,7 +25,7 @@ Emails are classified using Garland-domain, PS-range, order/page-count, attachme
 
 Targeted Garland reviews keep each PDF PS/SR pair together while querying Teamship. An exact PS match is preferred whenever a Teamship row exposes PS; SR is used only when that row does not expose PS. When multiple requested PS orders share an SR and Teamship does not expose enough PS evidence to distinguish them, the lookup leaves them unmatched instead of guessing. Paging stops only after every requested pair is matched, so duplicate Teamship rows for one PS cannot hide another requested order. The same paired lookup is required for post-update verification, and retrieval never bypasses the normal full field comparison required for a pass.
 
-When the Teamship API returns a partial ship-to location for a targeted order, the read-only review opens that exact order page and uses its `ship_city`, `ship_state`, and `ship_zip` form values for the comparison. This prevents stale or blank API aliases from replacing the ship-to location visibly saved on the exact Teamship order.
+When the Teamship API returns a partial or entirely absent city, state, or postal code for a targeted order, the read-only review opens that exact order page and uses only its `ship_city`, `ship_state`, and `ship_zip` form values for the comparison. This prevents stale or blank API location aliases from replacing the location visibly saved on the exact Teamship order without changing the evidence source for unrelated ship-to fields.
 
 ## Pallet and printing notes
 
