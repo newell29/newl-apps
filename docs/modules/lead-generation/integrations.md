@@ -67,6 +67,10 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - The strategy call receives bounded contact role data and the frozen evidence ledger. The drafting and critic calls
   receive the saved strategy and the same ledger. No Apollo secret, tenant credential, raw customer record, or
   unrelated tenant data is included.
+- The strategy call also receives the tenant-scoped Hunter handoff. Its required service line and opportunity thesis
+  are authoritative; server code rejects a returned strategy that changes that service line.
+- `HUNTER_OUTREACH_RESEARCH_MAX_AGE_DAYS` controls how long saved Hunter research can authorize outreach. The default
+  is 30 days and is an inferred operating value pending owner confirmation.
 - OpenAI output cannot authorize Apollo, email, LinkedIn, calls, or any customer communication. Apollo remains the
   separately approved execution integration; LinkedIn and call steps are reviewable manual tasks only.
 

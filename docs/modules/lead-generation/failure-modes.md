@@ -178,6 +178,19 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Code guard: `src/server/integrations/apollo.ts` parses current campaign statuses and prefers active state over finished history.
 - Regression coverage: `tests/apollo-integration.test.ts` includes an active campaign membership alongside older finished history.
 
+## Outreach is blocked by Hunter eligibility
+
+- Symptom: Outreach Queue shows **Needs Hunter assessment**, **Hunter watchlist**, **Blocked by Hunter**,
+  **Refresh Hunter research**, **Not selected by Hunter**, or **Hunter handoff incomplete**.
+- Cause: the company has no current deep-research result, is not Hot/Qualified, is older than the configured freshness
+  window, lacks a current `WOULD_PURSUE` decision, lacks K3 confirmation for a Hot opportunity, or has inconsistent
+  service lines between research and planning.
+- Safe recovery: do not reuse a legacy draft or force Apollo. Run Hunter company research and its dry-plan refresh,
+  then review the resulting Daily Opportunity. Watchlist and Blocked records require new evidence or an explicit
+  research replay; editing contact score or cadence cannot override the company gate.
+- Prevention: the manual generation action, automatic generation path, Apollo queue action, and Apollo worker all
+  evaluate the same tenant-scoped handoff. A model cannot override the required service line.
+
 ## Apollo cannot safely match a company
 
 - Symptom: Pipeline shows **Resolve Apollo match**, or bulk enrichment reports a company as protected from retry.

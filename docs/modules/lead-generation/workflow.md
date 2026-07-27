@@ -89,22 +89,27 @@ The layout is non-destructive: it does not migrate, delete, or rewrite existing 
 
 ## Assisted Outreach Plan workflow
 
-1. An employee selects or accepts the contact's cadence and requests an Outreach Plan from Outreach Queue.
-2. Newl Apps loads only that tenant's contact, company, recent Hunter signals/decisions, and bounded TradeMining
-   evidence. It creates stable evidence IDs and fingerprints the frozen ledger.
-3. The strategy model creates the service-line plan, buyer hypothesis, trigger, value proposition, objection, CTA,
-   sender recommendation, confidence, and citations.
-4. The drafting model creates exactly five coordinated email/manual touches. Every touch cites the frozen ledger.
-5. Deterministic QA and a separate model critic evaluate the plan. An unavailable critic fails closed and is recorded
+1. Hunter completes company research, assigns Hot/Qualified/Watchlist/Blocked, and refreshes the prospecting plan.
+2. Only a fresh Hot or Qualified company with a current `WOULD_PURSUE` decision advances to outreach eligibility.
+   Legacy or unassessed contacts remain visible for audit but show **Needs Hunter assessment** and cannot generate.
+3. An employee selects or accepts the contact's cadence and requests an Outreach Plan from Outreach Queue.
+4. Newl Apps loads only that tenant's contact, company, latest Hunter research/decision, and bounded TradeMining
+   evidence. It creates stable IDs for the exact Hunter article records and fingerprints the frozen ledger.
+5. The strategy model receives Hunter's required service line and saved point of attack. It creates the buyer
+   hypothesis, trigger, value proposition, objection, CTA, sender recommendation, confidence, and citations without
+   reconsidering the service line. A different model-returned service line fails closed.
+6. The drafting model creates exactly five coordinated email/manual touches. Every touch cites the frozen ledger.
+7. Deterministic QA and a separate model critic evaluate the plan. An unavailable critic fails closed and is recorded
    as a QA error instead of silently approving the draft.
-6. Newl Apps archives the prior active version, saves the plan and all steps, and updates the legacy first-email draft
+8. Newl Apps archives the prior active version, saves the plan and all steps, and updates the legacy first-email draft
    as `AVAILABLE` only when QA passes. No Apollo call occurs.
-7. An authenticated employee reviews the strategy, sequence, citations, evidence sources, QA findings, and model
+9. An authenticated employee reviews the strategy, sequence, citations, evidence sources, QA findings, and model
    versions. Approval requires an approved contact and a safe company. It marks the first-email compatibility draft
    approved but still performs no customer communication.
-8. The existing explicit **Push to Apollo** action rechecks plan approval, draft requirements, suppression, contact
-   approval, sender mapping, email, company safety, and existing sequence history before any external write.
-9. A manual email edit invalidates QA. The employee must regenerate a new version before approval and push.
+10. The existing explicit **Push to Apollo** action and the background worker both recheck the current Hunter handoff,
+    plan approval, draft requirements, suppression, contact approval, sender mapping, email, company safety, and
+    existing sequence history before any external write.
+11. A manual email edit invalidates QA. The employee must regenerate a new version before approval and push.
 
 ## Apollo company-match review
 

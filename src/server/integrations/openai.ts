@@ -1,5 +1,6 @@
 import { HunterServiceLine, OutreachChannel } from "@prisma/client";
 import { normalizeCompanyName } from "@/server/integrations/apollo";
+import type { HunterOutreachDirective } from "@/modules/lead-gen/hunter-outreach-eligibility";
 import {
   type GeneratedOutreachSequence,
   type ModelOutreachQaResult,
@@ -65,6 +66,7 @@ export type OutreachStrategyGenerationContext = {
   selectedSequenceName: string;
   recommendedPersona: string | null;
   recommendedCadence: string | null;
+  hunterDirective: HunterOutreachDirective;
   evidence: OutreachEvidenceRecord[];
 };
 
@@ -388,7 +390,7 @@ export async function generateOutreachStrategy(
     schemaName: "newl_outreach_strategy",
     schema: OUTREACH_STRATEGY_SCHEMA,
     system:
-      "You are Newl Group's B2B logistics outreach strategist. Build a concise, evidence-grounded plan for one specific buyer. Newl provides warehousing, ocean and air freight, port drayage, and trucking support. Use only the supplied evidence. Do not invent company events, shipment facts, incumbent relationships, locations, volumes, capabilities, or contact responsibilities. Select exactly one serviceLine enum. Every factual strategy claim must cite one or more supplied evidence IDs.",
+      "You are Newl Group's B2B logistics outreach strategist. Build a concise, evidence-grounded plan for one specific buyer. Newl provides warehousing, ocean and air freight, port drayage, and trucking support. Hunter has already ranked the opportunity and selected the required service line. Use hunterDirective.requiredServiceLine exactly; do not reconsider or substitute another service line. Use the directive's opportunity type and rationale as the point of attack, refining copy only where the supplied evidence supports it. Do not invent company events, shipment facts, incumbent relationships, locations, volumes, capabilities, or contact responsibilities. Every factual strategy claim must cite one or more supplied evidence IDs.",
     user: JSON.stringify({
       company: {
         name: context.companyName,
@@ -398,12 +400,20 @@ export async function generateOutreachStrategy(
       selectedSequenceName: context.selectedSequenceName,
       recommendedPersona: context.recommendedPersona,
       recommendedCadence: context.recommendedCadence,
+      hunterDirective: context.hunterDirective,
       evidenceLedger: context.evidence
     })
   });
 
+  const strategy = parseOutreachStrategy(response.output);
+  if (strategy.serviceLine !== context.hunterDirective.requiredServiceLine) {
+    throw new Error(
+      `OpenAI outreach strategy changed Hunter's required service line from ${context.hunterDirective.requiredServiceLine} to ${strategy.serviceLine}.`
+    );
+  }
+
   return {
-    strategy: parseOutreachStrategy(response.output),
+    strategy,
     usage: response.usage
   };
 }

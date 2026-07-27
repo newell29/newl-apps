@@ -13,7 +13,7 @@ export const DEFAULT_OUTREACH_QA_MODEL = "gpt-5.6-luna";
 
 export type OutreachEvidenceRecord = {
   id: string;
-  kind: "TRADEMINING" | "HUNTER_SIGNAL" | "HUNTER_DECISION" | "COMPANY";
+  kind: "TRADEMINING" | "HUNTER_RESEARCH" | "HUNTER_SIGNAL" | "HUNTER_DECISION" | "COMPANY";
   title: string;
   summary: string;
   sourceUrl: string | null;
