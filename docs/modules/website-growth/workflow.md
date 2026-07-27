@@ -18,7 +18,8 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 8. Codex builds the primary implementation. If the optional Kimi API key is configured, Kimi K3 independently builds the same immutable brief from the same website commit.
 9. Each agent output must pass the same website lint and production-build checks before a credential-separated job may open its draft PR. Vercel creates one Preview per draft PR.
 10. Newl Apps records the Codex PR and Preview as the primary build. The Kimi PR remains a shadow comparison in GitHub and cannot overwrite the primary status.
-11. Tuesday through Friday, `/api/website-growth/scout/check-in` refreshes first-party evidence and queue state, reports the stored SEMrush cache age, and sends Teams status without running Codex or calling SEMrush.
+11. After the owner merges the primary Codex PR, the website repository waits for a successful Vercel production deployment. Its tenant-scoped worker callback then marks the build, brief, and opportunity as published so the Scout workspace moves the item to `Completed and closed`.
+12. Tuesday through Friday, `/api/website-growth/scout/check-in` refreshes first-party evidence and queue state, reports the stored SEMrush cache age, and sends Teams status without running Codex or calling SEMrush.
 
 ## Backlink workflow
 
@@ -52,7 +53,8 @@ The Kimi comparison is optional and fails independently: a missing key, agent er
 3. Open the brief for the complete current-page comparison, proposed copy, layout, claims review, and approval action.
 4. After approval, follow the same item through `Approved and building` and then `Preview ready`.
 5. Open the Vercel website preview for visual review. The owner makes the final GitHub merge decision.
-6. Use `/website-growth/signals` only when investigating the underlying analytics and imported evidence. Signal counts are not counts of approved or active ideas.
+6. After the merged primary PR deploys successfully to Vercel production, the item moves automatically to `Completed and closed`.
+7. Use `/website-growth/signals` only when investigating the underlying analytics and imported evidence. Signal counts are not counts of approved or active ideas.
 
 ## Workflow / rules summary
 
