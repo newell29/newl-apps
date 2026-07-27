@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const upsertTradeMiningScoringConfig = vi.fn();
+const updateTradeMiningScoringConfig = vi.fn();
 const findIntegrationCredential = vi.fn();
 const createIntegrationCredential = vi.fn();
 const updateIntegrationCredential = vi.fn();
@@ -28,7 +29,8 @@ vi.mock("@/server/db", () => ({
       update: (...args: unknown[]) => updateTradeMiningSearchProfile(...args)
     },
     tradeMiningScoringConfig: {
-      upsert: (...args: unknown[]) => upsertTradeMiningScoringConfig(...args)
+      upsert: (...args: unknown[]) => upsertTradeMiningScoringConfig(...args),
+      update: (...args: unknown[]) => updateTradeMiningScoringConfig(...args)
     }
   }
 }));
@@ -56,6 +58,7 @@ import {
   saveMicrosoftGraphSettingsAction,
   saveApolloRepMappingAction,
   saveApolloSequenceMappingAction,
+  saveLeadGenAiRuntimeSettingsAction,
   saveSearchProfileApolloSequenceMappingAction,
   saveTradeMiningScoringSettingsAction,
   syncApolloRepMappingAction,
@@ -129,6 +132,7 @@ describe("saveTradeMiningScoringSettingsAction", () => {
       tenantName: "Newl Group"
     });
     upsertTradeMiningScoringConfig.mockResolvedValue({});
+    updateTradeMiningScoringConfig.mockResolvedValue({});
     findIntegrationCredential.mockResolvedValue(null);
     createIntegrationCredential.mockResolvedValue({});
     updateIntegrationCredential.mockResolvedValue({});
@@ -237,6 +241,28 @@ describe("saveTradeMiningScoringSettingsAction", () => {
       "Company scoring weights must total exactly 100 points."
     );
     expect(upsertTradeMiningScoringConfig).not.toHaveBeenCalled();
+  });
+
+  it("saves lead-generation AI runtime settings without rewriting scoring weights", async () => {
+    const formData = new FormData();
+    formData.set("aiClassificationEnabled", "true");
+    formData.set("aiModel", "gpt-5.4-mini");
+
+    await saveLeadGenAiRuntimeSettingsAction(formData);
+
+    expect(updateTradeMiningScoringConfig).toHaveBeenCalledWith({
+      where: {
+        tenantId: "tenant-1"
+      },
+      data: {
+        aiClassificationEnabled: true,
+        aiModel: "gpt-5.4-mini"
+      }
+    });
+    expect(upsertTradeMiningScoringConfig).not.toHaveBeenCalled();
+    expect(revalidatePath).toHaveBeenCalledWith("/settings");
+    expect(revalidatePath).toHaveBeenCalledWith("/lead-gen/outreach");
+    expect(revalidatePath).toHaveBeenCalledWith("/lead-gen/contacts");
   });
 
   it("rejects incomplete or inverted mid-market TEU ranges", async () => {

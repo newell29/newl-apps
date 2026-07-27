@@ -47,6 +47,8 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 
 - Missing OpenAI configuration, an unranked contact, missing selected cadence, no saved evidence, invalid structured
   model output, or strategy/drafting transport failure stops generation and creates no partial active plan.
+- Lead-generation AI runtime enablement is saved independently from scoring weights. An unrelated invalid scoring total
+  cannot block the runtime toggle or silently rewrite scoring configuration.
 - If drafting succeeds but the model critic is unavailable, Newl Apps saves the version as `QA_FAILED` with a
   `MODEL_QA_UNAVAILABLE` error. It cannot be approved or pushed.
 - Unknown evidence citations, unsupported quantified claims, unsupported URLs, invalid sequence structure, or semantic

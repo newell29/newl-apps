@@ -12,6 +12,7 @@ import {
   saveAssistantProviderSettingsAction,
   saveApolloRepMappingAction,
   saveApolloSequenceMappingAction,
+  saveLeadGenAiRuntimeSettingsAction,
   saveRoleModuleAccessAction,
   saveTenantUserAccessAction,
   saveTeamshipSettingsAction,
@@ -1458,6 +1459,16 @@ export default async function SettingsPage() {
             </div>
           </div>
 
+          <button
+            type="submit"
+            disabled={Boolean(settings.tradeMiningScoringConfigWarning)}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-primary"
+          >
+            {settings.tradeMiningScoringConfigWarning ? "Scoring table migration required" : "Save scoring settings"}
+          </button>
+        </form>
+
+        <form action={saveLeadGenAiRuntimeSettingsAction} className="mt-6">
           <div className="rounded-md border border-border bg-background p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -1506,15 +1517,14 @@ export default async function SettingsPage() {
                 </p>
               </div>
             </div>
+            <button
+              type="submit"
+              disabled={Boolean(settings.tradeMiningScoringConfigWarning)}
+              className="mt-4 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-primary"
+            >
+              {settings.tradeMiningScoringConfigWarning ? "Scoring table migration required" : "Save AI runtime"}
+            </button>
           </div>
-
-          <button
-            type="submit"
-            disabled={Boolean(settings.tradeMiningScoringConfigWarning)}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-primary"
-          >
-            {settings.tradeMiningScoringConfigWarning ? "Scoring table migration required" : "Save scoring settings"}
-          </button>
         </form>
 
         <div className="mt-6 rounded-md border border-border bg-background p-4">
