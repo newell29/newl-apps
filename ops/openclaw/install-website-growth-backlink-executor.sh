@@ -67,7 +67,11 @@ if (value.submissionRules?.allowPayment !== false) throw new Error("Payment must
 ' "${profile_source}"
 
 mkdir -p "${HOME}/.openclaw/agents/scout"
-install -m 600 "${profile_source}" "${profile_target}"
+if [[ "${profile_source:A}" == "${profile_target:A}" ]]; then
+  chmod 600 "${profile_target}"
+else
+  install -m 600 "${profile_source}" "${profile_target}"
+fi
 
 if ! openclaw agents list --json | grep -Eq '"id"[[:space:]]*:[[:space:]]*"scout"'; then
   openclaw agents add scout \
@@ -132,7 +136,6 @@ openclaw cron add \
   --description "Record failed backlink runs, start approved Rivet code triage, notify the owner and stop repeated identical failures." \
   --declaration-key "newl.rivet.website-growth.backlink-failure-monitor.v1" \
   --every "15m" \
-  --exact \
   --command-argv "${failure_monitor_argv}" \
   --command-env "WEBSITE_GROWTH_SCOUT_ENV_FILE=${scout_env_file}" \
   --command-env "OPENCLAW_GATEWAY_ENV_FILE=${HOME}/.openclaw/.env" \

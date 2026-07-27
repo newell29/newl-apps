@@ -89,6 +89,15 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     expect(installIndex).toBeGreaterThan(configureIndex);
   });
 
+  it("allows the protected backlink profile to already be installed at its target path", async () => {
+    const installer = await readFile(backlinkInstallerPath, "utf8");
+
+    expect(installer).toContain(
+      'if [[ "${profile_source:A}" == "${profile_target:A}" ]]; then'
+    );
+    expect(installer).toContain('chmod 600 "${profile_target}"');
+  });
+
   it("installs a deterministic Rivet failure monitor beside the disabled outreach schedule", async () => {
     const installer = await readFile(backlinkInstallerPath, "utf8");
     const monitor = await readFile(
@@ -100,6 +109,11 @@ describe("Website Growth Scout OpenClaw scripts", () => {
       '--declaration-key "newl.rivet.website-growth.backlink-failure-monitor.v1"'
     );
     expect(installer).toContain('--every "15m"');
+    const failureMonitorBlock = installer.slice(
+      installer.indexOf('openclaw cron add \\\n  --name "NEWL Rivet Backlink Failure Monitor"'),
+      installer.indexOf('echo "Installed the dedicated Scout agent')
+    );
+    expect(failureMonitorBlock).not.toContain("--exact");
     expect(installer).toContain("--command-argv");
     expect(monitor).toContain(
       "/api/website-growth/backlinks/executor/failures"
