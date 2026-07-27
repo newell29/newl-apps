@@ -14,7 +14,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ req
     const { requestId } = await params;
     const body = await request.json().catch(() => null) as Record<string, unknown> | null;
     const status = body?.status;
-    if (status !== "RUNNING" && status !== "PR_OPEN" && status !== "PREVIEW_READY" && status !== "FAILED") {
+    if (
+      status !== "RUNNING" &&
+      status !== "PR_OPEN" &&
+      status !== "PREVIEW_READY" &&
+      status !== "PUBLISHED" &&
+      status !== "FAILED"
+    ) {
       return NextResponse.json({ error: "Website Growth build status is invalid." }, { status: 400 });
     }
     const updated = await updateWebsiteGrowthBuildRequestFromWorker({

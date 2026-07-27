@@ -48,6 +48,7 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - Kimi PR handoff failure: the verified shadow patch is not treated as the primary build and cannot overwrite Newl Apps status.
 - Codex build or PR handoff failure: Newl Apps records the existing primary failure callback; a Kimi result is not promoted automatically.
 - Either Vercel Preview failure: production remains unchanged and the owner does not merge until the intended preview passes visual review.
+- Production deployment or published-status callback failure: the item remains in Preview ready or its last safe state. The website workflow may be rerun after Newl Apps is available; repeated callbacks are idempotent and cannot create another deployment or merge.
 
 ## Workflow / rules summary
 

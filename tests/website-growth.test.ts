@@ -289,6 +289,19 @@ describe("website growth Scout workspace", () => {
     ).toBe("PREVIEW_READY");
   });
 
+  it("treats every saved brief for a published opportunity as completed", () => {
+    expect(
+      getWebsiteGrowthWorkflowStage({
+        ...existingPageDraft,
+        status: WebsiteGrowthContentDraftStatus.APPROVED,
+        opportunity: {
+          ...existingPageDraft.opportunity,
+          status: WebsiteGrowthOpportunityStatus.PUBLISHED
+        }
+      })
+    ).toBe("COMPLETED");
+  });
+
   it("reads the latest Scout batch without treating raw signals as ideas", () => {
     expect(
       readScoutRunSummary({

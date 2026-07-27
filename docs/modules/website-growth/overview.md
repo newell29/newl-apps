@@ -26,10 +26,16 @@ flowchart LR
   Kimi --> Checks
   Checks --> PR[Separate draft PRs + Vercel previews]
   PR --> Merge{Owner merge decision}
-  Merge --> Monitor[Search Console + GA4 monitoring]
+  Merge --> Production[Vercel production deployment]
+  Production --> Complete[Published / completed]
+  Complete --> Monitor[Search Console + GA4 monitoring]
 ```
 
 Approval of a brief starts the developer workflow automatically. It is not approval to merge. The website repository workflow uses a read-only Codex job to create and verify the primary patch, then a separate job without the OpenAI key pushes the patch and opens a draft PR. When the optional Kimi API key is configured, Kimi K3 receives the same immutable approved brief and starting website commit in a separate read-only-credential job. Its patch must pass the same lint and production-build checks before another credential-separated job may open a comparison draft PR.
+
+After the owner merges the primary Codex PR, Newl Apps marks the brief and opportunity as published only when Vercel reports a successful production deployment for that merged `codex/website-growth-*` branch. The authenticated callback is tenant scoped, idempotent, and cannot merge or deploy the website.
+
+When Scout has stored more than one brief for the same opportunity, the opportunity-level published status closes every duplicate brief in the curated workspace so an older version cannot remain under `Approved and building`.
 
 ## Control-plane views
 

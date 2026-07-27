@@ -42,7 +42,8 @@ type DraftLike = {
 export function getWebsiteGrowthWorkflowStage(draft: DraftLike): WebsiteGrowthWorkflowStage {
   if (
     draft.status === WebsiteGrowthContentDraftStatus.PUBLISHED ||
-    draft.status === WebsiteGrowthContentDraftStatus.REJECTED
+    draft.status === WebsiteGrowthContentDraftStatus.REJECTED ||
+    draft.opportunity.status === WebsiteGrowthOpportunityStatus.PUBLISHED
   ) {
     return "COMPLETED";
   }
