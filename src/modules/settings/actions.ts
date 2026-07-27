@@ -439,6 +439,38 @@ export async function saveTradeMiningScoringSettingsAction(formData: FormData) {
   revalidatePath("/dashboard");
 }
 
+export async function saveLeadGenAiRuntimeSettingsAction(formData: FormData) {
+  const context = await authorizeSettingsMutation();
+  const aiClassificationEnabled = formData.get("aiClassificationEnabled") === "true";
+  const aiModel = readOptional(formData, "aiModel") ?? null;
+
+  try {
+    await prisma.tradeMiningScoringConfig.update({
+      where: {
+        tenantId: context.tenantId
+      },
+      data: {
+        aiClassificationEnabled,
+        aiModel
+      }
+    });
+  } catch (error) {
+    if (isMissingTradeMiningScoringSchemaError(error)) {
+      throw new Error("The database is missing the latest TradeMining scoring migration. Run the Prisma migration, then save again.");
+    }
+
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+      throw new Error("Save the tenant's TradeMining scoring settings before enabling lead-generation AI.");
+    }
+
+    throw error;
+  }
+
+  revalidateSettingsSurfaces();
+  revalidatePath("/lead-gen/outreach");
+  revalidatePath("/lead-gen/contacts");
+}
+
 export async function saveAssistantProviderSettingsAction(formData: FormData) {
   const context = await authorizeSettingsMutation();
   const rawProvider = readRequired(formData, "assistantProvider");
