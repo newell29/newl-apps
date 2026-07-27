@@ -84,7 +84,8 @@ describe("OpenAI structured outreach workflow", () => {
       recommendedPersona: "Supply-chain leader",
       recommendedCadence: "Warehouse Capacity Outreach",
       hunterDirective: hunterDirective(),
-      evidence
+      evidence,
+      reviewerFeedback: "Use a more direct opening."
     });
     const sequenceGeneration = await generateCompleteOutreachSequence({
       model: "gpt-5.6-luna",
@@ -93,7 +94,8 @@ describe("OpenAI structured outreach workflow", () => {
       selectedSequenceName: "Warehouse Capacity Outreach",
       strategy: strategyGeneration.strategy,
       evidence,
-      allowCallTask: true
+      allowCallTask: true,
+      reviewerFeedback: "Use a more direct opening."
     });
     const qaReview = await reviewOutreachSequenceGrounding({
       model: "gpt-5.6-luna",
@@ -108,6 +110,8 @@ describe("OpenAI structured outreach workflow", () => {
     expect(sequenceGeneration.sequence.steps).toHaveLength(4);
     expect(sequenceGeneration.sequence.steps[2]?.channel).toBe(OutreachChannel.CALL_TASK);
     expect(qaReview.result).toEqual({ passed: true, issues: [] });
+    expect(String(fetchMock.mock.calls[0]?.[1]?.body)).toContain("Use a more direct opening.");
+    expect(String(fetchMock.mock.calls[1]?.[1]?.body)).toContain("Use a more direct opening.");
     expect(strategyGeneration.usage).toEqual({
       inputTokens: 0,
       outputTokens: 0,
@@ -169,7 +173,8 @@ describe("OpenAI structured outreach workflow", () => {
           sourceUrl: "https://harborhome.example",
           publishedAt: null,
           facts: ["Contact title: Director of Supply Chain"]
-        }]
+        }],
+        reviewerFeedback: null
       })
     ).rejects.toThrow("changed Hunter's required service line");
   });

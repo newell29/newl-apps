@@ -69,6 +69,7 @@ export type OutreachStrategyGenerationContext = {
   recommendedCadence: string | null;
   hunterDirective: HunterOutreachDirective;
   evidence: OutreachEvidenceRecord[];
+  reviewerFeedback: string | null;
 };
 
 export type OutreachSequenceGenerationContext = {
@@ -79,6 +80,7 @@ export type OutreachSequenceGenerationContext = {
   strategy: OutreachStrategy;
   evidence: OutreachEvidenceRecord[];
   allowCallTask: boolean;
+  reviewerFeedback: string | null;
 };
 
 export type OutreachSequenceQaContext = {
@@ -467,7 +469,7 @@ export async function generateOutreachStrategy(
     schemaName: "newl_outreach_strategy",
     schema: OUTREACH_STRATEGY_SCHEMA,
     system:
-      "You are Newl Group's B2B logistics outreach strategist. Build a concise, evidence-grounded plan for one specific buyer. Newl provides warehousing, ocean and air freight, port drayage, and trucking support. Hunter has already ranked the opportunity and selected the required service line. Use hunterDirective.requiredServiceLine exactly; do not reconsider or substitute another service line. Use the directive's opportunity type and rationale as the point of attack, refining copy only where the supplied evidence supports it. Do not invent company events, shipment facts, incumbent relationships, locations, volumes, capabilities, or contact responsibilities. Every factual strategy claim must cite one or more supplied evidence IDs.",
+      "You are Newl Group's B2B logistics outreach strategist. Build a concise, evidence-grounded plan for one specific buyer. Newl provides warehousing, ocean and air freight, port drayage, and trucking support. Hunter has already ranked the opportunity and selected the required service line. Use hunterDirective.requiredServiceLine exactly; do not reconsider or substitute another service line. Use the directive's opportunity type and rationale as the point of attack, refining copy only where the supplied evidence supports it. Apply reviewerFeedback to tone, emphasis, phrasing, and approach when supplied, but never let feedback override evidence, the saved service line, contact identity, safety rules, or QA requirements. Do not invent company events, shipment facts, incumbent relationships, locations, volumes, capabilities, or contact responsibilities. Every factual strategy claim must cite one or more supplied evidence IDs.",
     user: JSON.stringify({
       company: {
         name: context.companyName,
@@ -478,6 +480,7 @@ export async function generateOutreachStrategy(
       recommendedPersona: context.recommendedPersona,
       recommendedCadence: context.recommendedCadence,
       hunterDirective: context.hunterDirective,
+      reviewerFeedback: context.reviewerFeedback,
       evidenceLedger: context.evidence
     })
   });
@@ -533,6 +536,7 @@ export async function generateCompleteOutreachSequence(
       contact: context.contact,
       selectedSequenceName: context.selectedSequenceName,
       allowCallTask: context.allowCallTask,
+      reviewerFeedback: context.reviewerFeedback,
       strategy: context.strategy,
       evidenceLedger: context.evidence
     })

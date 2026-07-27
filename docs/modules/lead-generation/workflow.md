@@ -72,9 +72,10 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 9. Hunter uses `Hunter - Email Only` for operating buyers and `Hunter - Executive Referral` for senior stakeholders; legacy tier cadence mappings do not control Hunter handoffs.
 10. Each accepted contact receives a score, three-email Outreach Plan, deterministic grounding check, and model QA check. Only Hot opportunities may also receive a separate call task. QA failures remain visible and cannot advance.
 11. Transient failures retry at most three times with rate-limit delay. Permanent company failures are recorded in the job output and audit log without invalidating the completed research.
-12. This handoff never creates a Sales Opportunity, approves a contact or plan, enrolls Apollo, sends email, posts to LinkedIn, or communicates with a prospect.
+12. The handoff never approves or communicates with a prospect. When a person approves a QA-passed Outreach Plan, that single approval also approves the selected contact, assigns the approver as sender when no sender is already assigned, and queues Apollo enrollment automatically. Apollo revalidates every guard before enrollment.
 13. An administrator can select **Find contacts for eligible opportunities** after enabling Assisted mode. The action creates a fresh deterministic plan from already-saved research and queues the same protected handoff without rerunning web retrieval, Qwen, Kimi, or K3.
 14. A `REVIEWING` contact with a current, non-archived Outreach Plan appears in Outreach Queue even when Hunter has not created a Sales Lead. Creating a Sales Lead remains reserved for later pipeline graduation.
+15. Before approval, a reviewer may enter bounded feedback and regenerate the complete email sequence. Feedback can change tone, emphasis, and approach, but cannot override the saved evidence, service line, contact identity, channel policy, or deterministic/model QA gates. Regeneration is blocked after plan approval or Apollo sequence activity begins.
 
 ## Hunter quality control and Rivet
 

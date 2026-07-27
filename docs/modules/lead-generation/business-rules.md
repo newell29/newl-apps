@@ -127,8 +127,12 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
   lengths, unsupported URLs, banned generic phrases, and unsupported quantified shipment/TEU/store/facility/location
   claims. A conservative model critic separately checks semantic grounding and buyer-responsibility assumptions.
 - Any deterministic or model error fails closed. A failed plan remains reviewable but cannot be approved or pushed.
-- Generation never marks a draft approved. Human approval requires QA `PASSED`, an approved contact, and a company
-  that is not rejected, disqualified, or do-not-prospect.
+- Generation never marks a draft approved. Human plan approval requires QA `PASSED` and a company/contact that is
+  not rejected, disqualified, or do-not-prospect. That single approval approves the selected contact and queues
+  Apollo enrollment; there is no second manual push step.
+- Reviewer feedback may be supplied before enrollment and is saved with the generated-plan inputs. It can guide
+  tone and emphasis but cannot override evidence or QA. Regeneration is blocked once the plan is approved or sequence
+  activity starts.
 - Editing the first email after QA invalidates the plan and Apollo readiness. Regeneration creates a new plan version,
   archives the previous active version, and reruns strategy, drafting, and QA.
 - Both Apollo queueing and the worker re-evaluate the same current Hunter handoff. When a current Outreach Plan

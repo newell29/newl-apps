@@ -17,6 +17,7 @@ import {
   SequenceStatus
 } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { EMPTY_APOLLO_QUEUE_SUMMARY, type ApolloQueueSummary } from "@/modules/lead-gen/apollo-queue-summary";
 import {
   type ApolloMatchReviewActionState
@@ -77,6 +78,7 @@ import {
   type OutreachQaIssue
 } from "@/modules/lead-gen/outreach-plan";
 import { persistOutreachPlanWithSteps } from "@/modules/lead-gen/outreach-plan-persistence";
+import { buildApprovedOutreachEnrollment } from "@/modules/lead-gen/outreach-enrollment";
 import {
   generateOutreachPlanForContact as generateSharedOutreachPlanForContact
 } from "@/modules/lead-gen/outreach-plan-generation";
@@ -2587,7 +2589,8 @@ export async function approveOutreachPlanAction(formData: FormData) {
       contact: {
         select: {
           id: true,
-          contactStatus: true
+          contactStatus: true,
+          assignedRep: true
         }
       }
     }
@@ -2606,11 +2609,22 @@ export async function approveOutreachPlanAction(formData: FormData) {
   ) {
     throw new Error("This company is blocked from prospecting.");
   }
-  if (plan.contact.contactStatus !== ContactStatus.APPROVED) {
-    throw new Error("The contact must be approved before the outreach plan can be approved.");
+  if (
+    plan.contact.contactStatus === ContactStatus.REJECTED ||
+    plan.contact.contactStatus === ContactStatus.DO_NOT_CONTACT
+  ) {
+    throw new Error("This contact is blocked from outreach.");
   }
 
-  await prisma.$transaction([
+  const requestedAt = new Date();
+  const enrollment = buildApprovedOutreachEnrollment({
+    tenantId: context.tenantId,
+    contactId: plan.contactId,
+    assignedRep: plan.contact.assignedRep,
+    actorUserId: context.userId,
+    requestedAt
+  });
+  const transactionResult = await prisma.$transaction([
     prisma.outreachPlan.update({
       where: {
         id: plan.id
@@ -2632,6 +2646,21 @@ export async function approveOutreachPlanAction(formData: FormData) {
         approvedAt: new Date()
       }
     }),
+    prisma.contact.update({
+      where: {
+        id: plan.contactId
+      },
+      data: {
+        ...enrollment.contactUpdate
+      }
+    }),
+    prisma.automationJobRun.create({
+      data: {
+        ...enrollment.job,
+        input: toInputJsonValue(enrollment.job.input),
+        output: toInputJsonValue(enrollment.job.output)
+      }
+    }),
     prisma.auditLog.create({
       data: {
         tenantId: context.tenantId,
@@ -2644,13 +2673,16 @@ export async function approveOutreachPlanAction(formData: FormData) {
           companyId: plan.companyId,
           version: plan.version,
           qaStatus: plan.qaStatus,
-          evidenceFingerprint: plan.evidenceFingerprint
+          evidenceFingerprint: plan.evidenceFingerprint,
+          apolloEnrollment: "QUEUED"
         })
       }
     })
   ]);
+  const enrollmentJob = transactionResult[3] as { id: string };
 
   revalidateLeadGenSurfaces();
+  redirect(`/lead-gen/outreach?apolloJob=${encodeURIComponent(enrollmentJob.id)}`);
 }
 
 export async function approveContactDraftAction(formData: FormData) {
@@ -2699,10 +2731,15 @@ export async function generateContactDraftAction(formData: FormData) {
   }
 
   const contactId = readRequired(formData, "contactId");
+  const reviewerFeedback = readOptional(formData, "reviewerFeedback");
+  if (reviewerFeedback && reviewerFeedback.length > 2_000) {
+    throw new Error("Email feedback must be 2,000 characters or fewer.");
+  }
   await generateSharedOutreachPlanForContact({
     tenantId: context.tenantId,
     contactId,
-    forceRegenerate: true
+    forceRegenerate: true,
+    reviewerFeedback
   });
 
   revalidateLeadGenSurfaces();
@@ -5153,7 +5190,8 @@ async function generateAiDraftForContact({
     recommendedPersona: hunterDirective.recommendedPersona,
     recommendedCadence: hunterDirective.recommendedCadence,
     hunterDirective,
-    evidence: evidenceLedger
+    evidence: evidenceLedger,
+    reviewerFeedback: null
   });
   const strategy = strategyGeneration.strategy;
 
@@ -5170,7 +5208,8 @@ async function generateAiDraftForContact({
     selectedSequenceName: draftContext.selectedSequenceName,
     strategy,
     evidence: evidenceLedger,
-    allowCallTask: hunterDirective.opportunityTier === "HOT_OPPORTUNITY"
+    allowCallTask: hunterDirective.opportunityTier === "HOT_OPPORTUNITY",
+    reviewerFeedback: null
   });
   const sequence = sequenceGeneration.sequence;
   const deterministicQa = runDeterministicOutreachQa({

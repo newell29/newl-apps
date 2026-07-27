@@ -2,6 +2,8 @@
 
 Hunter uses two email-delivery shells. Newl Apps remains the source of truth for evidence, contact selection, generated copy, QA, approval, and audit history. Apollo supplies the mailbox, scheduling, unsubscribe handling, and delivery.
 
+Approving a QA-passed Outreach Plan is the sole human authorization. Newl Apps then approves the selected contact, preserves its existing sender or assigns the approver, syncs every generated field, and queues Apollo enrollment automatically. Any sender, field, cadence, identity, reply-history, or QA failure stops enrollment and remains visible in the Apollo job result.
+
 ## Hunter - Email Only
 
 - Audience: operations, warehousing, logistics, supply-chain, distribution, procurement, and import buyers.

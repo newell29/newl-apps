@@ -97,7 +97,7 @@ export default async function AutomationSettingsPage({
               </button>
               {!data.policyIsStored ? <p className="text-xs text-mutedForeground">Safe defaults are active until the first save.</p> : null}
               <p className="text-xs text-mutedForeground">
-                Assisted mode automatically finds and ranks Apollo contacts and creates QA-checked outreach plans after research. It never approves, enrolls, or sends.
+                Assisted mode automatically finds and ranks Apollo contacts and creates QA-checked outreach plans after research. One human approval then enrolls the contact in Apollo automatically.
               </p>
               <div className="border-t border-border pt-4">
                 <button
@@ -105,10 +105,10 @@ export default async function AutomationSettingsPage({
                   disabled={policy.killSwitch || policy.mode !== HunterAutomationMode.ASSISTED}
                   className="rounded-md border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Find contacts for eligible opportunities
+                  Recheck contacts for eligible opportunities
                 </button>
                 <p className="mt-2 text-xs text-mutedForeground">
-                  Refreshes the current saved-evidence plan and queues eligible Hot and Qualified companies for Apollo matching, AI contact review, and grounded outreach-plan generation. It does not rerun company research or send outreach.
+                  Reruns exact-organization Apollo employee searches for the current eligible Hot and Qualified companies, repeats AI contact review, and creates plans for newly selected contacts. It does not rerun company research or send outreach without plan approval.
                 </p>
               </div>
             </form>

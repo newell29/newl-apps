@@ -3,7 +3,8 @@ import {
   ContactOutreachDraftStatus,
   OutreachPlanStatus,
   OutreachQaStatus,
-  Prisma
+  Prisma,
+  SequenceStatus
 } from "@prisma/client";
 
 import {
@@ -46,17 +47,27 @@ export async function generateOutreachPlanForContact({
   tenantId,
   contactId,
   forceRegenerate,
-  generateWhenNotRequired = false
+  generateWhenNotRequired = false,
+  reviewerFeedback = null
 }: {
   tenantId: string;
   contactId: string;
   forceRegenerate: boolean;
   generateWhenNotRequired?: boolean;
+  reviewerFeedback?: string | null;
 }) {
   const draftContext = await loadOutreachPlanContactContext({ tenantId, contactId });
 
   if (!draftContext) {
     throw new Error("Contact not found for this tenant.");
+  }
+  if (
+    forceRegenerate &&
+    (draftContext.existingOutreachPlan?.status === OutreachPlanStatus.APPROVED ||
+      (draftContext.contact.sequenceStatus !== SequenceStatus.NOT_STARTED &&
+        draftContext.contact.sequenceStatus !== SequenceStatus.READY))
+  ) {
+    throw new Error("Emails cannot be regenerated after outreach approval or Apollo cadence enrollment.");
   }
   if (!draftContext.requiresAiDraft && !forceRegenerate && !generateWhenNotRequired) {
     return { state: "not_required" as const };
@@ -114,7 +125,8 @@ export async function generateOutreachPlanForContact({
     recommendedPersona: hunterDirective.recommendedPersona,
     recommendedCadence: hunterDirective.recommendedCadence,
     hunterDirective,
-    evidence: evidenceLedger
+    evidence: evidenceLedger,
+    reviewerFeedback
   });
   const strategy = strategyGeneration.strategy;
   const sequenceGeneration = await generateCompleteOutreachSequence({
@@ -130,7 +142,8 @@ export async function generateOutreachPlanForContact({
     selectedSequenceName: draftContext.selectedSequenceName,
     strategy,
     evidence: evidenceLedger,
-    allowCallTask: hunterDirective.opportunityTier === "HOT_OPPORTUNITY"
+    allowCallTask: hunterDirective.opportunityTier === "HOT_OPPORTUNITY",
+    reviewerFeedback
   });
   const sequence = sequenceGeneration.sequence;
   const deterministicQa = runDeterministicOutreachQa({
@@ -191,6 +204,7 @@ export async function generateOutreachPlanForContact({
     contactTier: draftContext.contactTier,
     selectedSequenceName: draftContext.selectedSequenceName,
     selectedSequenceId: draftContext.selectedSequenceId,
+    reviewerFeedback,
     hunterDirective,
     strategy,
     evidenceLedger
