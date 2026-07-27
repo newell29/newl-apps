@@ -227,6 +227,12 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Symptom: a U.S. or Canadian operating company is marked Blocked with `The claimed U.S. division is not verified by the cited public identity evidence`, even though first-party evidence confirms the local operator.
 - Cause: the legacy deterministic check required the complete model-returned legal division name to appear literally on one identity page. Brand-only sites, omitted legal suffixes, and explanatory parentheticals produced false negatives.
 - Prevention: apply the foreign U.S.-division proof only outside an already corroborated North American identity. For foreign/China entities, compare bounded aliases without legal suffixes or parenthetical annotations and still require explicit U.S. jurisdiction plus operating-relationship language.
+
+## An unrelated similarly named logistics provider blocks a prospect
+
+- Symptom: a manufacturer or retailer is marked Blocked because a search result for a different company with a similar short name describes freight, warehousing, or 3PL services.
+- Cause: the provider-service gate evaluated explicit logistics language without first tying a non-first-party result back to the researched company identity.
+- Prevention: first-party evidence may establish provider status directly. Non-first-party evidence must also contain a normalized alias of the researched company before it can trigger the provider block.
 - Recovery: after deployment, force a tenant-scoped exact-cohort company-research replay for affected companies. The run reuses normal safety gates, refreshes the prospecting plan, and queues a handoff only when the tenant is explicitly in Assisted mode.
 
 ## Hunter reports no first-party site for an obvious consumer brand

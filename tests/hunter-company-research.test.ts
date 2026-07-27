@@ -350,6 +350,30 @@ describe("Hunter company deep research", () => {
     );
   });
 
+  it("does not let an unrelated similarly named logistics provider block the researched company", () => {
+    const company = parseHunterCompanyResearchCompletion(completion()).companies[0];
+    const result = evaluateResearchGate({
+      ...company,
+      companyName: "DNP IMAGINGCOMM AMERICA CORPORATION",
+      evidence: [
+        ...company.evidence,
+        {
+          ...company.evidence[0],
+          pass: "FOLLOW_UP",
+          sourceType: "OTHER",
+          firstParty: false,
+          title: "DNP Shipping",
+          excerpt:
+            "DNP Shipping provides freight forwarding, warehousing services, and transportation management."
+        }
+      ]
+    });
+
+    expect(result.blockers).not.toContain(
+      "Public evidence explicitly describes the company providing logistics services to others."
+    );
+  });
+
   it("evaluates unsupported fresh claims as current accounts instead of blocking them", () => {
     const company = parseHunterCompanyResearchCompletion(completion()).companies[0];
     const unsupportedFresh = {
