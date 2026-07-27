@@ -321,6 +321,36 @@ describe("Teamship Phase 2 dry-run planner", () => {
     ]);
   });
 
+  it("auto-enables the full Garland ship-to name for Teamship First Name", () => {
+    const review = sampleReview();
+    review.pdfOrders[0]!.psNumber = "PS210510";
+    review.pdfOrders[0]!.shipToName = "CENTRE DE DISTRIBUTION #2 DOYON";
+    review.reviews[0]!.psNumber = "PS210510";
+    review.reviews[0]!.fields = [
+      {
+        key: "ship_to_name",
+        label: "Ship-to name",
+        status: "DISCREPANCY",
+        pdfValue: "CENTRE DE DISTRIBUTION #2 DOYON",
+        teamshipValue: "CENTRE DE DISTR #2 DOYON",
+        message: "PDF and Teamship values do not match."
+      }
+    ];
+
+    const preparedReview = prepareReviewForAutomatedTeamshipUpdates(review);
+    const plan = buildTeamshipPhase2DryRunPlan(preparedReview);
+
+    expect(preparedReview.reviews[0]?.fields[0]?.botActionEnabled).toBe(true);
+    expect(plan.orders[0]?.plannedFieldUpdates).toEqual([
+      expect.objectContaining({
+        reviewFieldKey: "ship_to_name",
+        teamshipField: "ship_first_name",
+        currentValue: "CENTRE DE DISTR #2 DOYON",
+        proposedValue: "CENTRE DE DISTRIBUTION #2 DOYON"
+      })
+    ]);
+  });
+
   it("creates a field update for a matching Teamship field when CSR enters a bot action", () => {
     const review = sampleReview();
     review.reviews[0]!.status = "PASS";
