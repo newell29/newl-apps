@@ -6,6 +6,9 @@ import {
   ContactOutreachDraftStatus,
   ContactStatus,
   ContactTier,
+  OutreachChannel,
+  OutreachPlanStatus,
+  OutreachQaStatus,
   ReplyStatus,
   SequenceStatus
 } from "@prisma/client";
@@ -61,6 +64,7 @@ type ContactDirectoryRow = {
   sequenceOverrideReason: string | null;
   sequenceManuallyOverridden: boolean;
   requiresAiDraft: boolean;
+  canGenerateOutreachPlan: boolean;
   draftGenerationConfigured: boolean;
   draftGenerationDisabledReason: string | null;
   draft: {
@@ -69,6 +73,60 @@ type ContactDirectoryRow = {
     body: string;
     personalizationNotes: string | null;
     status: ContactOutreachDraftStatus;
+  } | null;
+  outreachPlan: {
+    id: string;
+    version: number;
+    status: OutreachPlanStatus;
+    qaStatus: OutreachQaStatus;
+    serviceLine: string;
+    opportunityType: string;
+    objective: string;
+    triggerSummary: string;
+    buyerHypothesis: string;
+    valueProposition: string;
+    likelyObjection: string;
+    callToAction: string;
+    senderRecommendation: string | null;
+    confidence: number;
+    qaIssues: Array<{
+      code: string;
+      severity: "ERROR" | "WARNING";
+      message: string;
+      stepNumber: number | null;
+    }>;
+    evidence: Array<{
+      id: string;
+      kind: string;
+      title: string;
+      summary: string;
+      sourceUrl: string | null;
+      publishedAt: string | null;
+      facts: string[];
+    }>;
+    models: {
+      strategy: string;
+      drafting: string;
+      qa: string | null;
+    };
+    promptVersion: string;
+    approvedAt: Date | null;
+    steps: Array<{
+      id: string;
+      stepNumber: number;
+      channel: OutreachChannel;
+      delayDays: number;
+      subject: string | null;
+      body: string;
+      angle: string;
+      evidenceRefs: string[];
+      qaIssues: Array<{
+        code: string;
+        severity: "ERROR" | "WARNING";
+        message: string;
+        stepNumber: number | null;
+      }>;
+    }>;
   } | null;
   draftStatus: string;
   lastTouchAt: Date | null;
@@ -97,7 +155,8 @@ export function ContactDirectoryTableClient({
   syncSelectedApolloStatusesAction,
   updateContactSequenceAction,
   saveContactDraftAction,
-  generateContactDraftAction
+  generateContactDraftAction,
+  approveOutreachPlanAction
 }: {
   contacts: ContactDirectoryRow[];
   initialApolloPushJobs: ApolloPushJobSummary[];
@@ -121,6 +180,7 @@ export function ContactDirectoryTableClient({
   updateContactSequenceAction: (formData: FormData) => Promise<void>;
   saveContactDraftAction: (formData: FormData) => Promise<void>;
   generateContactDraftAction: (formData: FormData) => Promise<void>;
+  approveOutreachPlanAction: (formData: FormData) => Promise<void>;
 }) {
   const router = useRouter();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -173,7 +233,7 @@ export function ContactDirectoryTableClient({
 
   function getDraftButtonLabel(contact: ContactDirectoryRow, hasDraft: boolean) {
     if (contact.draftGenerationConfigured) {
-      return hasDraft ? "Regenerate AI Draft" : "Generate AI Draft";
+      return hasDraft || contact.outreachPlan ? "Regenerate Plan + Sequence" : "Generate Outreach Plan";
     }
 
     if (contact.draftGenerationDisabledReason === "LEAD_GEN_AI_DISABLED") {
@@ -353,6 +413,17 @@ export function ContactDirectoryTableClient({
           return (
             <div className="max-w-[300px]">
               <StatusBadge value={contact.draftStatus} tone={draftStatusTone(contact.draftStatus)} />
+              {contact.outreachPlan ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <StatusBadge
+                    value={contact.outreachPlan.status}
+                    tone={outreachPlanStatusTone(contact.outreachPlan.status)}
+                  />
+                  <span className="text-xs text-mutedForeground">
+                    {contact.outreachPlan.steps.length} touches · QA {formatEnum(contact.outreachPlan.qaStatus)}
+                  </span>
+                </div>
+              ) : null}
               {contact.draft ? (
                 <div className="mt-2 rounded-md border border-border bg-background p-3">
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-mutedForeground">Subject</p>
@@ -480,10 +551,16 @@ export function ContactDirectoryTableClient({
                   Change Sequence
                 </button>
               </form>
+              {contact.outreachPlan ? (
+                <OutreachPlanPanel
+                  contact={contact}
+                  approveOutreachPlanAction={approveOutreachPlanAction}
+                />
+              ) : null}
               {contact.draft ? (
                 <details className="rounded-md border border-border bg-background p-3">
                   <summary className="cursor-pointer text-xs font-semibold text-primary">View Draft</summary>
-                  {contact.requiresAiDraft ? (
+                  {contact.canGenerateOutreachPlan ? (
                     <>
                       <form action={generateContactDraftAction} className="mt-3">
                         <input type="hidden" name="contactId" value={contact.id} />
@@ -527,16 +604,15 @@ export function ContactDirectoryTableClient({
                       value={contact.draft.personalizationNotes ?? "No notes recorded"}
                     />
                     <p className="text-xs text-mutedForeground">
-                      Saving keeps the draft ready for Apollo push. The actual enrollment still happens only when you use
-                      Push to Apollo.
+                      Saving changes the first email and invalidates the previous QA result. Regenerate the plan to run
+                      the grounded QA gate again before approval or Apollo push.
                     </p>
                     <p className="text-xs text-mutedForeground">
-                      If you want a different angle, use Regenerate AI Draft and Newl Apps will write a fresh version
-                      from the shipment context.
+                      Regeneration creates a new immutable plan version from the saved Hunter and TradeMining evidence.
                     </p>
                     <div className="flex flex-wrap gap-2">
                       <button className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
-                        Save Draft
+                        Save edits
                       </button>
                     </div>
                   </form>
@@ -544,13 +620,11 @@ export function ContactDirectoryTableClient({
               ) : (
                 <div className="space-y-2">
                   <p className="text-xs text-mutedForeground">
-                    {contact.requiresAiDraft
-                      ? "This tier requires a Newl Apps draft before Apollo push."
-                      : contact.contactTier === ContactTier.TIER_1
-                        ? "No Newl draft available yet."
-                        : "Tier 2+ contacts use Apollo/template drafting later."}
+                    {contact.canGenerateOutreachPlan
+                      ? "Generate a grounded Newl outreach plan and complete five-touch sequence."
+                      : "This contact must be ranked before Newl can generate an outreach plan."}
                   </p>
-                  {contact.requiresAiDraft ? (
+                  {contact.canGenerateOutreachPlan ? (
                     <div className="space-y-2">
                       <form action={generateContactDraftAction}>
                         <input type="hidden" name="contactId" value={contact.id} />
@@ -576,7 +650,8 @@ export function ContactDirectoryTableClient({
       sequenceOptions,
       updateContactSequenceAction,
       saveContactDraftAction,
-      generateContactDraftAction
+      generateContactDraftAction,
+      approveOutreachPlanAction
     ]
   );
 
@@ -940,6 +1015,142 @@ export function ContactDirectoryTableClient({
         </table>
       </div>
     </>
+  );
+}
+
+function OutreachPlanPanel({
+  contact,
+  approveOutreachPlanAction
+}: {
+  contact: ContactDirectoryRow;
+  approveOutreachPlanAction: (formData: FormData) => Promise<void>;
+}) {
+  const plan = contact.outreachPlan;
+  if (!plan) return null;
+
+  const canApprove =
+    plan.status === OutreachPlanStatus.QA_PASSED &&
+    plan.qaStatus === OutreachQaStatus.PASSED &&
+    contact.contactStatus === ContactStatus.APPROVED;
+
+  return (
+    <details className="rounded-md border border-accentBorder bg-accentSoft/40 p-3">
+      <summary className="cursor-pointer text-xs font-semibold text-primary">
+        Outreach Plan v{plan.version} · {formatEnum(plan.serviceLine)}
+      </summary>
+
+      <div className="mt-3 space-y-3">
+        <div className="flex flex-wrap gap-2">
+          <StatusBadge value={plan.status} tone={outreachPlanStatusTone(plan.status)} />
+          <StatusBadge
+            value={`QA_${plan.qaStatus}`}
+            tone={plan.qaStatus === OutreachQaStatus.PASSED ? "success" : "danger"}
+          />
+          <span className="rounded-full border border-border bg-card px-2.5 py-1 text-xs font-semibold text-foreground">
+            {plan.confidence}% confidence
+          </span>
+        </div>
+
+        <div className="grid gap-2">
+          <DraftMeta label="Opportunity" value={plan.opportunityType} />
+          <DraftMeta label="Objective" value={plan.objective} />
+          <DraftMeta label="Trigger" value={plan.triggerSummary} />
+          <DraftMeta label="Buyer hypothesis" value={plan.buyerHypothesis} />
+          <DraftMeta label="Value proposition" value={plan.valueProposition} />
+          <DraftMeta label="Likely objection" value={plan.likelyObjection} />
+          <DraftMeta label="Call to action" value={plan.callToAction} />
+          <DraftMeta label="Recommended sender" value={plan.senderRecommendation ?? "No sender recommendation"} />
+        </div>
+
+        {plan.qaIssues.length > 0 ? (
+          <div className="rounded-md border border-danger/20 bg-danger/5 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-danger">QA findings</p>
+            <ul className="mt-2 space-y-1 text-xs leading-5 text-foreground">
+              {plan.qaIssues.map((issue, index) => (
+                <li key={`${issue.code}-${issue.stepNumber ?? "plan"}-${index}`}>
+                  {issue.stepNumber ? `Step ${issue.stepNumber}: ` : ""}
+                  {issue.message}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <p className="rounded-md border border-success/20 bg-success/5 px-3 py-2 text-xs text-success">
+            Deterministic and model grounding checks passed with no recorded issues.
+          </p>
+        )}
+
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Complete sequence</p>
+          {plan.steps.map((step) => (
+            <details key={step.id} className="rounded-md border border-border bg-card p-3">
+              <summary className="cursor-pointer text-xs font-semibold text-foreground">
+                Step {step.stepNumber} · Day {step.delayDays} · {formatEnum(step.channel)}
+              </summary>
+              <div className="mt-2 space-y-2 text-xs">
+                <DraftMeta label="Angle" value={step.angle} />
+                {step.subject ? <DraftMeta label="Subject" value={step.subject} /> : null}
+                <p className="whitespace-pre-wrap leading-5 text-foreground">{step.body}</p>
+                <p className="text-mutedForeground">Evidence: {step.evidenceRefs.join(", ")}</p>
+              </div>
+            </details>
+          ))}
+        </div>
+
+        <details className="rounded-md border border-border bg-card p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-foreground">
+            Evidence ledger ({plan.evidence.length})
+          </summary>
+          <div className="mt-2 space-y-2">
+            {plan.evidence.map((record) => (
+              <div key={record.id} className="rounded-md border border-border/70 p-2 text-xs">
+                <p className="font-semibold text-foreground">{record.title}</p>
+                <p className="mt-1 leading-5 text-mutedForeground">{record.summary}</p>
+                <p className="mt-1 font-mono text-[10px] text-mutedForeground">{record.id}</p>
+                {record.sourceUrl ? (
+                  <a
+                    href={record.sourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-1 inline-block font-semibold text-primary hover:underline"
+                  >
+                    Open source
+                  </a>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </details>
+
+        <p className="text-[11px] leading-5 text-mutedForeground">
+          Strategy {plan.models.strategy} · Drafting {plan.models.drafting} · QA {plan.models.qa ?? "not recorded"} ·{" "}
+          {plan.promptVersion}
+        </p>
+
+        {plan.status === OutreachPlanStatus.APPROVED ? (
+          <p className="rounded-md border border-success/20 bg-success/5 px-3 py-2 text-xs font-semibold text-success">
+            Approved for the existing Apollo push workflow. No message has been sent by this approval.
+          </p>
+        ) : (
+          <form action={approveOutreachPlanAction}>
+            <input type="hidden" name="planId" value={plan.id} />
+            <button
+              disabled={!canApprove}
+              className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Approve Outreach Plan
+            </button>
+            {!canApprove ? (
+              <p className="mt-2 text-xs text-mutedForeground">
+                {plan.qaStatus !== OutreachQaStatus.PASSED
+                  ? "Regenerate the plan until the grounded QA gate passes."
+                  : "Approve the contact before approving this outreach plan."}
+              </p>
+            ) : null}
+          </form>
+        )}
+      </div>
+    </details>
   );
 }
 
@@ -1312,6 +1523,13 @@ function requiresSequenceOverrideConfirmation(sequenceStatus: SequenceStatus) {
 function draftStatusTone(status: string) {
   if (status === ContactOutreachDraftStatus.APPROVED || status === ContactOutreachDraftStatus.EDITED) return "success";
   if (status === ContactOutreachDraftStatus.AVAILABLE || status === ContactOutreachDraftStatus.DRAFT) return "warning";
+  return "neutral";
+}
+
+function outreachPlanStatusTone(status: OutreachPlanStatus) {
+  if (status === OutreachPlanStatus.APPROVED || status === OutreachPlanStatus.QA_PASSED) return "success";
+  if (status === OutreachPlanStatus.QA_FAILED) return "danger";
+  if (status === OutreachPlanStatus.DRAFT) return "warning";
   return "neutral";
 }
 

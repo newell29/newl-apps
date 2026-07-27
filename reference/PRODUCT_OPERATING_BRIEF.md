@@ -88,6 +88,15 @@ Lead score should consider:
 - Phase 2 may add an opt-in Mac-mini signal scout that discovers a bounded recent public-news set and classifies public headline metadata locally. It must retain source/model/prompt evidence, fail closed, remain disabled until the exact sources are approved, and perform no Apollo or communication writes.
 - Phase 3 may add opt-in, evidence-first company research over the tenant's bounded daily Hunter queue. Research must cover identity/parent, fresh events, first-party careers, and distribution footprint; preserve every query/source/excerpt; use local Qwen for synthesis, deterministic code for hard gates, and a low-cost hosted model for scoring. It remains a shadow workflow with no Apollo, pipeline-stage, cadence, or communication writes.
 - Later phases may add contact research, personalized draft generation, human approval queues, controlled Apollo handoff, result synchronization, and learning from outcomes.
+- The approved target architecture is one coordinated Hunter sales system with bounded strategy, writing/QA, and
+  results-analysis roles. Deterministic services, not models, own suppression, approval, sender limits, Apollo writes,
+  retries, and audit state.
+- Phase 4 starts with tenant-scoped, versioned Outreach Plans: freeze the Hunter/TradeMining evidence packet, create a
+  company/contact strategy, generate a complete five-touch email/manual sequence, require deterministic plus model
+  grounding QA, and require explicit human approval. Plan generation and approval do not send or enroll.
+- The intended model routing is local Qwen for research synthesis, Kimi K2.6/K3 for opportunity scoring/validation,
+  GPT-5.6 Terra for outreach strategy, GPT-5.6 Luna for sequence drafting and QA, and deterministic metrics before a
+  later Terra results-analysis review. Model names stay configurable and every plan records the actual model/prompt.
 - Automation mode and a tenant kill switch must remain explicit. Transitioning from dry run to assisted or automatic outreach requires a reviewed code change and owner approval.
 
 ## 10. What Not To Build Yet

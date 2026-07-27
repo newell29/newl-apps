@@ -9,6 +9,7 @@ import {
   IntegrationProvider,
   JobStatus,
   LeadPipelineStage,
+  OutreachPlanStatus,
   Prisma,
   ReplyStatus,
   SequenceStatus
@@ -1185,6 +1186,24 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
           updatedAt: "desc"
         },
         take: 1
+      },
+      outreachPlans: {
+        where: tenantWhere(tenant, {
+          status: {
+            not: OutreachPlanStatus.ARCHIVED
+          }
+        }),
+        orderBy: {
+          version: "desc"
+        },
+        take: 1,
+        include: {
+          steps: {
+            orderBy: {
+              stepNumber: "asc"
+            }
+          }
+        }
       }
     },
     orderBy: buildContactDirectoryOrder(filters.sort ?? "score_desc")
@@ -1220,6 +1239,7 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
       sequenceDirectory: apolloSequenceDirectory
     });
     const draft = contact.outreachDrafts[0] ?? null;
+    const outreachPlan = contact.outreachPlans[0] ?? null;
     const tierMapping = effectiveSequenceMappings.find((entry) => entry.tier === scoring.tier) ?? null;
     const requiresAiDraft = tierMapping?.requiresAiDraft ?? false;
     const openAiRuntimeReady = isOpenAiDraftGenerationConfigured();
@@ -1275,6 +1295,7 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
       sequenceOverrideReason: contact.sequenceOverrideReason,
       sequenceManuallyOverridden: contact.sequenceManuallyOverridden,
       requiresAiDraft,
+      canGenerateOutreachPlan: scoring.tier !== ContactTier.UNRANKED,
       draftGenerationConfigured,
       draftGenerationDisabledReason,
       draft: draft
@@ -1290,6 +1311,44 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
             personalizationNotes: draft.personalizationNotes,
             editedAt: draft.editedAt,
             updatedAt: draft.updatedAt
+          }
+        : null,
+      outreachPlan: outreachPlan
+        ? {
+            id: outreachPlan.id,
+            version: outreachPlan.version,
+            status: outreachPlan.status,
+            qaStatus: outreachPlan.qaStatus,
+            serviceLine: outreachPlan.serviceLine,
+            opportunityType: outreachPlan.opportunityType,
+            objective: outreachPlan.objective,
+            triggerSummary: outreachPlan.triggerSummary,
+            buyerHypothesis: outreachPlan.buyerHypothesis,
+            valueProposition: outreachPlan.valueProposition,
+            likelyObjection: outreachPlan.likelyObjection,
+            callToAction: outreachPlan.callToAction,
+            senderRecommendation: outreachPlan.senderRecommendation,
+            confidence: outreachPlan.confidence,
+            qaIssues: readOutreachQaIssues(outreachPlan.qaIssues),
+            evidence: readOutreachEvidence(outreachPlan.evidence),
+            models: {
+              strategy: outreachPlan.strategyModel,
+              drafting: outreachPlan.draftingModel,
+              qa: outreachPlan.qaModel
+            },
+            promptVersion: outreachPlan.promptVersion,
+            approvedAt: outreachPlan.approvedAt,
+            steps: outreachPlan.steps.map((step) => ({
+              id: step.id,
+              stepNumber: step.stepNumber,
+              channel: step.channel,
+              delayDays: step.delayDays,
+              subject: step.subject,
+              body: step.body,
+              angle: step.angle,
+              evidenceRefs: asStringArray(step.evidenceRefs),
+              qaIssues: readOutreachQaIssues(step.qaIssues)
+            }))
           }
         : null,
       draftStatus: readDraftStatus(scoring.tier, draft?.status ?? null, requiresAiDraft),
@@ -1445,6 +1504,43 @@ export async function getContactDirectoryFilters(tenant: TenantContext) {
 
 function asStringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function readOutreachQaIssues(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    const code = typeof record.code === "string" ? record.code : null;
+    const severity: "ERROR" | "WARNING" | null =
+      record.severity === "ERROR" || record.severity === "WARNING" ? record.severity : null;
+    const message = typeof record.message === "string" ? record.message : null;
+    const stepNumber = typeof record.stepNumber === "number" ? record.stepNumber : null;
+    return code && severity && message ? [{ code, severity, message, stepNumber }] : [];
+  });
+}
+
+function readOutreachEvidence(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    const id = typeof record.id === "string" ? record.id : null;
+    const title = typeof record.title === "string" ? record.title : null;
+    const summary = typeof record.summary === "string" ? record.summary : null;
+    if (!id || !title || !summary) return [];
+    return [
+      {
+        id,
+        kind: typeof record.kind === "string" ? record.kind : "UNKNOWN",
+        title,
+        summary,
+        sourceUrl: typeof record.sourceUrl === "string" ? record.sourceUrl : null,
+        publishedAt: typeof record.publishedAt === "string" ? record.publishedAt : null,
+        facts: asStringArray(record.facts)
+      }
+    ];
+  });
 }
 
 function addSuggestion(set: Set<string>, value: string | null | undefined) {

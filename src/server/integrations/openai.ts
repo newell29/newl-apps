@@ -1,4 +1,12 @@
+import { HunterServiceLine, OutreachChannel } from "@prisma/client";
 import { normalizeCompanyName } from "@/server/integrations/apollo";
+import {
+  type GeneratedOutreachSequence,
+  type ModelOutreachQaResult,
+  type OutreachEvidenceRecord,
+  type OutreachStrategy,
+  type OutreachQaIssue
+} from "@/modules/lead-gen/outreach-plan";
 
 type Tier1DraftContext = {
   model: string;
@@ -41,6 +49,48 @@ type Tier1DraftResult = {
   body: string;
   personalizationNotes: string;
   rawResponse: Record<string, unknown>;
+};
+
+export type OutreachStrategyGenerationContext = {
+  model: string;
+  companyName: string;
+  companyDomain: string | null;
+  contact: {
+    firstName: string | null;
+    fullName: string;
+    title: string | null;
+    department: string | null;
+    seniority: string | null;
+  };
+  selectedSequenceName: string;
+  recommendedPersona: string | null;
+  recommendedCadence: string | null;
+  evidence: OutreachEvidenceRecord[];
+};
+
+export type OutreachSequenceGenerationContext = {
+  model: string;
+  companyName: string;
+  contact: OutreachStrategyGenerationContext["contact"];
+  selectedSequenceName: string;
+  strategy: OutreachStrategy;
+  evidence: OutreachEvidenceRecord[];
+};
+
+export type OutreachSequenceQaContext = {
+  model: string;
+  companyName: string;
+  contact: OutreachStrategyGenerationContext["contact"];
+  strategy: OutreachStrategy;
+  sequence: GeneratedOutreachSequence;
+  evidence: OutreachEvidenceRecord[];
+};
+
+export type OpenAiStructuredUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  totalTokens: number;
 };
 
 export type WebsiteGrowthDraftContext = {
@@ -156,6 +206,119 @@ export type ApolloCompanySuggestionResult = {
 
 const OPENAI_API_BASE_URL = "https://api.openai.com/v1";
 
+const OUTREACH_STRATEGY_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "serviceLine",
+    "opportunityType",
+    "objective",
+    "triggerSummary",
+    "buyerHypothesis",
+    "valueProposition",
+    "likelyObjection",
+    "callToAction",
+    "channelStrategy",
+    "senderRecommendation",
+    "confidence",
+    "evidenceRefs"
+  ],
+  properties: {
+    serviceLine: {
+      type: "string",
+      enum: ["WAREHOUSING", "OCEAN_AIR", "TRUCKING"]
+    },
+    opportunityType: { type: "string", minLength: 2, maxLength: 120 },
+    objective: { type: "string", minLength: 2, maxLength: 300 },
+    triggerSummary: { type: "string", minLength: 2, maxLength: 500 },
+    buyerHypothesis: { type: "string", minLength: 2, maxLength: 500 },
+    valueProposition: { type: "string", minLength: 2, maxLength: 500 },
+    likelyObjection: { type: "string", minLength: 2, maxLength: 300 },
+    callToAction: { type: "string", minLength: 2, maxLength: 240 },
+    channelStrategy: {
+      type: "array",
+      minItems: 1,
+      maxItems: 6,
+      items: { type: "string", minLength: 2, maxLength: 240 }
+    },
+    senderRecommendation: { type: "string", minLength: 2, maxLength: 160 },
+    confidence: { type: "integer", minimum: 0, maximum: 100 },
+    evidenceRefs: {
+      type: "array",
+      minItems: 1,
+      maxItems: 12,
+      items: { type: "string", minLength: 1, maxLength: 120 }
+    }
+  }
+} as const;
+
+const OUTREACH_SEQUENCE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["sequenceName", "steps"],
+  properties: {
+    sequenceName: { type: "string", minLength: 2, maxLength: 160 },
+    steps: {
+      type: "array",
+      minItems: 5,
+      maxItems: 5,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["stepNumber", "channel", "delayDays", "subject", "body", "angle", "evidenceRefs"],
+        properties: {
+          stepNumber: { type: "integer", minimum: 1, maximum: 5 },
+          channel: {
+            type: "string",
+            enum: ["EMAIL", "LINKEDIN_TASK", "CALL_TASK"]
+          },
+          delayDays: { type: "integer", minimum: 0, maximum: 30 },
+          subject: {
+            type: ["string", "null"],
+            maxLength: 80
+          },
+          body: { type: "string", minLength: 20, maxLength: 900 },
+          angle: { type: "string", minLength: 2, maxLength: 240 },
+          evidenceRefs: {
+            type: "array",
+            minItems: 1,
+            maxItems: 8,
+            items: { type: "string", minLength: 1, maxLength: 120 }
+          }
+        }
+      }
+    }
+  }
+} as const;
+
+const OUTREACH_QA_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["passed", "issues"],
+  properties: {
+    passed: { type: "boolean" },
+    issues: {
+      type: "array",
+      maxItems: 30,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["code", "severity", "message", "stepNumber"],
+        properties: {
+          code: { type: "string", minLength: 2, maxLength: 80 },
+          severity: { type: "string", enum: ["ERROR", "WARNING"] },
+          message: { type: "string", minLength: 2, maxLength: 500 },
+          stepNumber: {
+            type: ["integer", "null"],
+            minimum: 1,
+            maximum: 5
+          }
+        }
+      }
+    }
+  }
+} as const;
+
 export function isOpenAiDraftGenerationConfigured() {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   return Boolean(apiKey && apiKey !== "OPENAI_API_KEY_PLACEHOLDER");
@@ -213,6 +376,85 @@ export async function generateTier1SequenceDraft(context: Tier1DraftContext): Pr
   return {
     ...parsed,
     rawResponse: json
+  };
+}
+
+export async function generateOutreachStrategy(
+  context: OutreachStrategyGenerationContext
+): Promise<{ strategy: OutreachStrategy; usage: OpenAiStructuredUsage }> {
+  const response = await requestStructuredOpenAiResponse({
+    model: context.model,
+    reasoningEffort: "medium",
+    schemaName: "newl_outreach_strategy",
+    schema: OUTREACH_STRATEGY_SCHEMA,
+    system:
+      "You are Newl Group's B2B logistics outreach strategist. Build a concise, evidence-grounded plan for one specific buyer. Newl provides warehousing, ocean and air freight, port drayage, and trucking support. Use only the supplied evidence. Do not invent company events, shipment facts, incumbent relationships, locations, volumes, capabilities, or contact responsibilities. Select exactly one serviceLine enum. Every factual strategy claim must cite one or more supplied evidence IDs.",
+    user: JSON.stringify({
+      company: {
+        name: context.companyName,
+        domain: context.companyDomain
+      },
+      contact: context.contact,
+      selectedSequenceName: context.selectedSequenceName,
+      recommendedPersona: context.recommendedPersona,
+      recommendedCadence: context.recommendedCadence,
+      evidenceLedger: context.evidence
+    })
+  });
+
+  return {
+    strategy: parseOutreachStrategy(response.output),
+    usage: response.usage
+  };
+}
+
+export async function generateCompleteOutreachSequence(
+  context: OutreachSequenceGenerationContext
+): Promise<{ sequence: GeneratedOutreachSequence; usage: OpenAiStructuredUsage }> {
+  const response = await requestStructuredOpenAiResponse({
+    model: context.model,
+    reasoningEffort: "low",
+    schemaName: "newl_outreach_sequence",
+    schema: OUTREACH_SEQUENCE_SCHEMA,
+    system:
+      "You write concise, credible B2B logistics outreach for Newl Group. Return exactly five coordinated touches: EMAIL on day 0, LINKEDIN_TASK on day 2, EMAIL on day 4, CALL_TASK on day 7, and EMAIL on day 10. Each email must advance a different angle and aim for a low-friction reply. Manual tasks must be instructions for a person, never claims that an action already occurred. Use only the supplied evidence and strategy. Do not fabricate facts. Every step must cite at least one supplied evidence ID. Plain text only; no markdown, HTML, hype, fake familiarity, or generic AI phrasing.",
+    user: JSON.stringify({
+      companyName: context.companyName,
+      contact: context.contact,
+      selectedSequenceName: context.selectedSequenceName,
+      strategy: context.strategy,
+      evidenceLedger: context.evidence
+    })
+  });
+
+  return {
+    sequence: parseOutreachSequence(response.output),
+    usage: response.usage
+  };
+}
+
+export async function reviewOutreachSequenceGrounding(
+  context: OutreachSequenceQaContext
+): Promise<{ result: ModelOutreachQaResult; usage: OpenAiStructuredUsage }> {
+  const response = await requestStructuredOpenAiResponse({
+    model: context.model,
+    reasoningEffort: "low",
+    schemaName: "newl_outreach_qa",
+    schema: OUTREACH_QA_SCHEMA,
+    system:
+      "You are the conservative QA gate for Newl Group outbound logistics messaging. Compare every factual claim with the saved evidence ledger. Fail unsupported events, shipment claims, quantities, geography, buyer responsibilities, incumbent-provider assumptions, Newl capabilities not listed in the strategy context, deceptive familiarity, or messages that imply a LinkedIn/call action already happened. Style preferences alone are warnings. Return passed=false whenever any ERROR exists.",
+    user: JSON.stringify({
+      companyName: context.companyName,
+      contact: context.contact,
+      strategy: context.strategy,
+      sequence: context.sequence,
+      evidenceLedger: context.evidence
+    })
+  });
+
+  return {
+    result: parseOutreachQaResult(response.output),
+    usage: response.usage
   };
 }
 
@@ -607,6 +849,260 @@ function parseDraftPayload(content: string) {
     body,
     personalizationNotes
   };
+}
+
+async function requestStructuredOpenAiResponse({
+  model,
+  reasoningEffort,
+  schemaName,
+  schema,
+  system,
+  user
+}: {
+  model: string;
+  reasoningEffort: "low" | "medium";
+  schemaName: string;
+  schema: Record<string, unknown>;
+  system: string;
+  user: string;
+}) {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey || apiKey === "OPENAI_API_KEY_PLACEHOLDER") {
+    throw new Error("OPENAI_API_KEY is not configured. Add it to enable outreach generation.");
+  }
+
+  const response = await fetch(`${OPENAI_API_BASE_URL}/responses`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model,
+      reasoning: {
+        effort: reasoningEffort
+      },
+      input: [
+        {
+          role: "system",
+          content: system
+        },
+        {
+          role: "user",
+          content: user
+        }
+      ],
+      text: {
+        format: {
+          type: "json_schema",
+          name: schemaName,
+          strict: true,
+          schema
+        }
+      }
+    }),
+    cache: "no-store"
+  });
+
+  const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!response.ok || !json) {
+    throw new Error(extractOpenAiError(json) ?? `OpenAI outreach generation failed with status ${response.status}.`);
+  }
+
+  const content = readResponsesOutputText(json);
+  try {
+    return {
+      output: JSON.parse(content) as Record<string, unknown>,
+      usage: readStructuredUsage(json)
+    };
+  } catch {
+    throw new Error("OpenAI returned outreach output that was not valid JSON.");
+  }
+}
+
+function readStructuredUsage(payload: Record<string, unknown>): OpenAiStructuredUsage {
+  const usage =
+    payload.usage && typeof payload.usage === "object" && !Array.isArray(payload.usage)
+      ? (payload.usage as Record<string, unknown>)
+      : {};
+  const inputDetails =
+    usage.input_tokens_details &&
+    typeof usage.input_tokens_details === "object" &&
+    !Array.isArray(usage.input_tokens_details)
+      ? (usage.input_tokens_details as Record<string, unknown>)
+      : {};
+  const inputTokens = readNonNegativeInteger(usage.input_tokens);
+  const outputTokens = readNonNegativeInteger(usage.output_tokens);
+  return {
+    inputTokens,
+    outputTokens,
+    cachedInputTokens: readNonNegativeInteger(inputDetails.cached_tokens),
+    totalTokens: readNonNegativeInteger(usage.total_tokens) || inputTokens + outputTokens
+  };
+}
+
+function readNonNegativeInteger(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
+function readResponsesOutputText(payload: Record<string, unknown>) {
+  if (typeof payload.output_text === "string" && payload.output_text.trim()) {
+    return payload.output_text.trim();
+  }
+
+  const output = Array.isArray(payload.output) ? payload.output : [];
+  for (const item of output) {
+    if (!item || typeof item !== "object") continue;
+    const content = Array.isArray((item as Record<string, unknown>).content)
+      ? ((item as Record<string, unknown>).content as unknown[])
+      : [];
+    for (const part of content) {
+      if (!part || typeof part !== "object") continue;
+      const text = (part as Record<string, unknown>).text;
+      if (typeof text === "string" && text.trim()) {
+        return text.trim();
+      }
+    }
+  }
+
+  throw new Error("OpenAI returned no structured outreach output.");
+}
+
+function parseOutreachStrategy(parsed: Record<string, unknown>): OutreachStrategy {
+  const serviceLine = readEnumValue(parsed.serviceLine, Object.values(HunterServiceLine));
+  const opportunityType = readNonEmptyString(parsed.opportunityType);
+  const objective = readNonEmptyString(parsed.objective);
+  const triggerSummary = readNonEmptyString(parsed.triggerSummary);
+  const buyerHypothesis = readNonEmptyString(parsed.buyerHypothesis);
+  const valueProposition = readNonEmptyString(parsed.valueProposition);
+  const likelyObjection = readNonEmptyString(parsed.likelyObjection);
+  const callToAction = readNonEmptyString(parsed.callToAction);
+  const channelStrategy = readStringArray(parsed.channelStrategy);
+  const senderRecommendation = readNonEmptyString(parsed.senderRecommendation);
+  const confidence =
+    typeof parsed.confidence === "number" && Number.isInteger(parsed.confidence)
+      ? parsed.confidence
+      : null;
+  const evidenceRefs = readStringArray(parsed.evidenceRefs);
+
+  if (
+    !serviceLine ||
+    !opportunityType ||
+    !objective ||
+    !triggerSummary ||
+    !buyerHypothesis ||
+    !valueProposition ||
+    !likelyObjection ||
+    !callToAction ||
+    channelStrategy.length === 0 ||
+    !senderRecommendation ||
+    confidence === null ||
+    confidence < 0 ||
+    confidence > 100 ||
+    evidenceRefs.length === 0
+  ) {
+    throw new Error("OpenAI returned an incomplete outreach strategy.");
+  }
+
+  return {
+    serviceLine,
+    opportunityType,
+    objective,
+    triggerSummary,
+    buyerHypothesis,
+    valueProposition,
+    likelyObjection,
+    callToAction,
+    channelStrategy,
+    senderRecommendation,
+    confidence,
+    evidenceRefs
+  };
+}
+
+function parseOutreachSequence(parsed: Record<string, unknown>): GeneratedOutreachSequence {
+  const sequenceName = readNonEmptyString(parsed.sequenceName);
+  const steps = readObjectArray(parsed.steps).map((step) => ({
+    stepNumber: readInteger(step.stepNumber),
+    channel: readEnumValue(step.channel, Object.values(OutreachChannel)),
+    delayDays: readInteger(step.delayDays),
+    subject: typeof step.subject === "string" && step.subject.trim() ? step.subject.trim() : null,
+    body: readNonEmptyString(step.body),
+    angle: readNonEmptyString(step.angle),
+    evidenceRefs: readStringArray(step.evidenceRefs)
+  }));
+
+  if (
+    !sequenceName ||
+    steps.some(
+      (step) =>
+        step.stepNumber === null ||
+        !step.channel ||
+        step.delayDays === null ||
+        !step.body ||
+        !step.angle ||
+        step.evidenceRefs.length === 0
+    )
+  ) {
+    throw new Error("OpenAI returned an incomplete outreach sequence.");
+  }
+
+  return {
+    sequenceName,
+    steps: steps.map((step) => ({
+      stepNumber: step.stepNumber as number,
+      channel: step.channel as OutreachChannel,
+      delayDays: step.delayDays as number,
+      subject: step.subject,
+      body: step.body as string,
+      angle: step.angle as string,
+      evidenceRefs: step.evidenceRefs
+    }))
+  };
+}
+
+function parseOutreachQaResult(parsed: Record<string, unknown>): ModelOutreachQaResult {
+  const passed = typeof parsed.passed === "boolean" ? parsed.passed : null;
+  const issues = readObjectArray(parsed.issues).map((issue) => ({
+    code: readNonEmptyString(issue.code),
+    severity: readEnumValue(issue.severity, ["ERROR", "WARNING"] as const),
+    message: readNonEmptyString(issue.message),
+    stepNumber: issue.stepNumber === null ? null : readInteger(issue.stepNumber)
+  }));
+
+  if (
+    passed === null ||
+    issues.some((issue) => !issue.code || !issue.severity || !issue.message || issue.stepNumber === undefined)
+  ) {
+    throw new Error("OpenAI returned an incomplete outreach QA result.");
+  }
+
+  const normalizedIssues = issues.map(
+    (issue) =>
+      ({
+        code: issue.code as string,
+        severity: issue.severity as OutreachQaIssue["severity"],
+        message: issue.message as string,
+        stepNumber: issue.stepNumber
+      }) satisfies OutreachQaIssue
+  );
+
+  if (passed && normalizedIssues.some((issue) => issue.severity === "ERROR")) {
+    throw new Error("OpenAI outreach QA marked a sequence passed while returning blocking errors.");
+  }
+
+  return {
+    passed,
+    issues: normalizedIssues
+  };
+}
+
+function readInteger(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
+}
+
+function readEnumValue<T extends string>(value: unknown, allowed: readonly T[]) {
+  return typeof value === "string" && allowed.includes(value as T) ? (value as T) : null;
 }
 
 function parseApolloCompanySuggestionPayload(content: string) {

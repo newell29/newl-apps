@@ -47,6 +47,12 @@ Roles and defaults are in `src/server/auth/role-policy.ts`. Runtime checks are i
   production data repair, TradeMining retry, outreach retry, merge, deployment, permissions, or
   prospect communication.
 - Quality results and Rivet outcomes are sent only to the protected `RIVET_TEAMS_TARGET`.
+- Reading Outreach Plans requires authenticated Lead Generation access and remains tenant scoped through the contact
+  and company relations.
+- Generating, editing, or approving a plan requires Lead Generation mutation access. Approval records the authenticated
+  user ID and is rejected for an unapproved contact or unsafe company.
+- No plan-generation or plan-approval action performs Apollo enrollment or customer communication. The existing
+  explicit Apollo push permission and validation boundary remains separate.
 
 ## Failure modes
 

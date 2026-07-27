@@ -1637,3 +1637,15 @@ Phase 6: Decommission/cleanup
 - What performance metrics can Apollo expose for the weekly cadence review through API versus manual export?
 - Should sequence push default status be `active` or `paused` in production?
 - What are the target SLAs for daily import completion, Apollo batch size, and sequence push retry behavior?
+
+## 28. Newl Apps Assisted Outreach Addendum (2026-07-26)
+
+The approved next architecture keeps Hunter as the acquisition/research agent and introduces one coordinated outreach
+workflow rather than independent autonomous agents. A strategy role, sequence writer/critic, and later results analyst
+operate behind deterministic Newl Apps state and approval rules.
+
+The first implemented slice creates tenant-scoped, versioned `OutreachPlan` and `OutreachSequenceStep` records. It
+combines bounded Hunter and TradeMining evidence, generates a company/contact strategy and five-touch email/manual
+sequence, records evidence citations and model/prompt versions, and requires deterministic plus model grounding QA.
+Generation never approves, enrolls, sends, calls, or performs LinkedIn activity. Human approval remains separate from
+the existing Apollo push action, and a current unapproved plan blocks that push.

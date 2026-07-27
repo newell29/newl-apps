@@ -59,6 +59,17 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - Opportunity signals use a source-agnostic database contract. Manual entry is enabled first; automatic news, hiring, expansion, construction, and other collectors require a separate reviewed integration.
 - No Kimi, Qwen, OpenAI, Apollo, LinkedIn, email, or browser-automation call is made by the Phase 1 planner. Provider selection belongs in the later evidence-analysis stage after deterministic filtering and a measured quality/cost comparison.
 
+## Assisted outreach model boundary
+
+- `OPENAI_API_KEY` remains server-only. Outreach generation uses the Responses API with strict JSON Schema output.
+- `LEAD_GEN_OUTREACH_STRATEGY_MODEL`, `LEAD_GEN_OUTREACH_DRAFT_MODEL`, and `LEAD_GEN_OUTREACH_QA_MODEL` select the
+  bounded strategy, drafting, and critic models. Defaults are `gpt-5.6-terra`, `gpt-5.6-luna`, and `gpt-5.6-luna`.
+- The strategy call receives bounded contact role data and the frozen evidence ledger. The drafting and critic calls
+  receive the saved strategy and the same ledger. No Apollo secret, tenant credential, raw customer record, or
+  unrelated tenant data is included.
+- OpenAI output cannot authorize Apollo, email, LinkedIn, calls, or any customer communication. Apollo remains the
+  separately approved execution integration; LinkedIn and call steps are reviewable manual tasks only.
+
 ## Data model
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.
