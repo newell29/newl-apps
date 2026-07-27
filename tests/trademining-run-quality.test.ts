@@ -1,10 +1,48 @@
 import { describe, expect, it } from "vitest";
 
-import { evaluateTradeMiningRunQuality } from "@/modules/trademining/run-quality";
+import {
+  evaluateTradeMiningRunQuality,
+  summarizeTradeMiningRunState
+} from "@/modules/trademining/run-quality";
 
 const now = new Date("2026-07-26T16:00:00.000Z");
 
 describe("evaluateTradeMiningRunQuality", () => {
+  it("separates completed, active, failed, and missing current-day profiles", () => {
+    const profiles = ["complete", "active", "failed", "missing"].map((id) => ({
+      id,
+      name: id,
+      enabled: true,
+      scheduleTimezone: "America/Toronto",
+      updatedAt: new Date("2026-07-20T12:00:00.000Z")
+    }));
+    const summary = summarizeTradeMiningRunState({
+      profiles,
+      runs: [
+        buildRun({ id: "complete-run", input: { searchProfileId: "complete" } }),
+        buildRun({
+          id: "active-run",
+          status: "RUNNING",
+          input: { searchProfileId: "active" }
+        }),
+        buildRun({
+          id: "failed-run",
+          status: "ERROR",
+          input: { searchProfileId: "failed" }
+        })
+      ],
+      now
+    });
+
+    expect(summary).toEqual({
+      enabledProfiles: 4,
+      completed: 1,
+      active: 1,
+      failed: 1,
+      missing: 1
+    });
+  });
+
   it("requires every enabled profile to complete once per local day", () => {
     const findings = evaluateTradeMiningRunQuality({
       profiles: [

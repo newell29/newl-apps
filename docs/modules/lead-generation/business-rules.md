@@ -93,6 +93,8 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - Only reproducible code defects may use the owner-enabled Hunter Rivet standing approval. Credentials, authorization, transient runtime failures, configuration issues, and subjective scoring always require review.
 - The second identical incident within seven days trips the incident circuit breaker. It reuses the existing Rivet job when present and does not create another automatic draft-PR job.
 - Teams notifications always state that no lead was reclassified, no search/outreach was retried, and nothing was merged or deployed.
+- The routine TradeMining digest is separate from quality control. It reports the settled daily profile batch once, while a failed profile sends an immediate safe alert and the remaining profiles continue.
+- Rivet validates approved packets and required context against the fetched base branch in its dedicated runtime. A missing context file or blank packet field must stop before `git worktree add`; it cannot fall through to an empty `origin/` reference.
 
 ## Automated sales workspace boundaries
 

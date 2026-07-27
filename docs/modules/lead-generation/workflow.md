@@ -24,6 +24,7 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 6. Hunter creates a tracked job run, exports and normalizes the leaf records, and submits tenant-bound batches. Coverage metadata reports matches, exported records, query count, and completeness.
 7. Candidate evidence is limited to the matched profile and lookback. Companies must meet `minShipmentCount`, optional aggregate TEUs, and any hard/exclude industry mode before appearing in Found Companies. Prefer mode affects ranking only.
 8. If a capped result can no longer be divided, Hunter ingests the available export but closes the run as `PARTIAL`. If local profile configuration is invalid, the tracked run finishes as failed and the Search Profiles screen displays the error. Hunter does not repeat that daily attempt until the next local day; an operator can correct the profile and use **Run now**.
+9. When the due-profile batch settles, Hunter sends one Teams digest with the completed/attempted count and each profile's matches, exported rows, processed rows, qualifying companies, physical query count, and retrieval completeness. A failed profile also sends an immediate safe alert while Hunter continues the remaining due profiles. The notification never includes credentials or raw external error text.
 
 ## Daily Hunter prospecting plan
 
@@ -74,13 +75,14 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 
 ## Hunter quality control and Rivet
 
-1. At 11:30 America/Toronto, after the normal TradeMining and company-research windows, the dedicated Rivet runtime starts a separate quality audit.
+1. At 13:30 America/Toronto, after the observed TradeMining and company-research windows, the dedicated Rivet runtime starts a separate quality audit.
 2. Newl Apps selects at most five recent tenant-scoped Hunter research signals: one Hot, one Qualified current account, one Watchlist, one Blocked, then the newest remaining signal. The saved ledger and tier are treated as claims, not truth.
 3. Read-only Codex performs bounded current web research and returns one schema-validated result per company. It distinguishes missing retrieval, evidence lost between model stages, deterministic rule defects, subjective model judgment, and data/configuration issues.
 4. The same run deterministically checks that every enabled TradeMining profile ran once that local day, removed/disabled profiles did not run, active runs do not overlap or remain stuck, adaptive retrieval completed, and exported/ingested counts reconcile. A zero-result run is an anomaly only when that profile has recent positive history.
 5. Reproducible evidence-retrieval, handoff, deterministic-rule, and TradeMining code defects can create a tenant-scoped approved Rivet development job only when `HUNTER_RIVET_AUTO_TRIAGE_APPROVAL` exactly equals `OWNER_APPROVED_HUNTER_QUALITY_TRIAGE`.
 6. Rivet may inspect the frozen evidence, edit an isolated branch, add tests/docs, push, and open a draft PR. It may not reclassify a lead, retry TradeMining or outreach, merge, deploy, write production data, change permissions, or contact a prospect.
-7. The daily audit result is sent to Alex through the existing protected Rivet Teams target. Rivet's normal completion/failure message later reports the draft PR outcome. A repeated identical defect trips a circuit breaker and is not queued again.
+7. The daily audit result is sent to Alex through the existing protected Rivet Teams target. It states how many enabled profiles were completed, active, failed, or missing at audit time instead of treating a still-running profile as confirmed complete. Rivet's normal completion/failure message later reports the draft PR outcome. A repeated identical defect trips a circuit breaker and is not queued again.
+8. The worker always resolves its trusted Git source from the dedicated Rivet runtime checkout. It fetches the approved base branch, validates every required context path against that remote branch, and stops before branch creation when packet validation fails. The active developer checkout cannot change Rivet's live source tree.
 
 ## Found Companies review
 

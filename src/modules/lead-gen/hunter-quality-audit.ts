@@ -5,6 +5,8 @@ import { JobStatus, ModuleKey, Prisma } from "@prisma/client";
 import { createRivetDevelopmentJob } from "@/modules/assistant/rivet-development-jobs";
 import {
   evaluateTradeMiningRunQuality,
+  summarizeTradeMiningRunState,
+  type TradeMiningRunStateSummary,
   type TradeMiningQualityFinding
 } from "@/modules/trademining/run-quality";
 import { prisma } from "@/server/db";
@@ -167,6 +169,11 @@ export async function prepareHunterQualityAudit(
     runs: tradeRuns,
     now
   });
+  const tradeMiningRunState = summarizeTradeMiningRunState({
+    profiles,
+    runs: tradeRuns,
+    now
+  });
   const run = await prisma.automationJobRun.create({
     data: {
       tenantId: context.tenantId,
@@ -177,6 +184,7 @@ export async function prepareHunterQualityAudit(
         localDate,
         signalIds: sample.map((signal) => signal.id),
         tradeMiningFindings,
+        tradeMiningRunState,
         model: "gpt-5.6-sol",
         reasoningEffort: "high"
       } as Prisma.InputJsonObject
@@ -196,6 +204,7 @@ export async function prepareHunterQualityAudit(
         "Independently audit Hunter classifications and evidence retrieval. The audit is read-only and cannot reclassify a lead.",
       sample: sample.map(toAuditPacketSignal),
       tradeMiningFindings,
+      tradeMiningRunState,
       rules: {
         researchCurrentPublicWeb: true,
         frozenLedgerIsUntrusted: true,
@@ -248,6 +257,7 @@ export async function completeHunterQualityAudit({
     returnedSignalIds.add(finding.signalId);
   }
   const tradeMiningFindings = readTradeMiningFindings(run.input);
+  const tradeMiningRunState = readTradeMiningRunState(run.input);
   const issueInputs = [
     ...completion.findings
       .filter((finding) => finding.category !== "NO_ISSUE")
@@ -349,6 +359,7 @@ export async function completeHunterQualityAudit({
       sampleSize: completion.findings.length,
       findings: completion.findings,
       tradeMiningFindings,
+      tradeMiningRunState,
       incidents
     })
   };
@@ -717,11 +728,13 @@ function buildHunterQualityTeamsMessage({
   sampleSize,
   findings,
   tradeMiningFindings,
+  tradeMiningRunState,
   incidents
 }: {
   sampleSize: number;
   findings: HunterQualityAuditCompletion["findings"];
   tradeMiningFindings: TradeMiningQualityFinding[];
+  tradeMiningRunState: TradeMiningRunStateSummary;
   incidents: Array<{
     developmentJobId: string | null;
     developmentJobQueued: boolean;
@@ -740,7 +753,7 @@ function buildHunterQualityTeamsMessage({
     ).length +
     tradeMiningFindings.filter((finding) => finding.category !== "CODE_DEFECT").length;
   return [
-    `Hunter quality control audited ${sampleSize} company classifications and ${tradeMiningFindings.length === 0 ? "found no TradeMining run issues" : `found ${tradeMiningFindings.length} TradeMining run issue(s)`}.`,
+    `Hunter quality control audited ${sampleSize} company classifications. TradeMining status at audit time: ${tradeMiningRunState.completed}/${tradeMiningRunState.enabledProfiles} completed, ${tradeMiningRunState.active} active, ${tradeMiningRunState.failed} failed, ${tradeMiningRunState.missing} missing; ${tradeMiningFindings.length === 0 ? "no run defects were detected" : `${tradeMiningFindings.length} run issue(s) were detected`}.`,
     leadIssues.length === 0
       ? "The independent company sample found no classification or evidence defect."
       : `The independent company sample found ${leadIssues.length} issue(s): ${summarizeCategories(leadIssues.map((finding) => finding.category))}.`,
@@ -785,6 +798,21 @@ function readTradeMiningFindings(value: Prisma.JsonValue | null) {
   const raw = objectOrEmpty(value).tradeMiningFindings;
   if (!Array.isArray(raw)) return [];
   return raw.filter(isTradeMiningFinding).slice(0, 100);
+}
+
+function readTradeMiningRunState(value: Prisma.JsonValue | null): TradeMiningRunStateSummary {
+  const raw = objectOrEmpty(objectOrEmpty(value).tradeMiningRunState);
+  return {
+    enabledProfiles: readSafeCount(raw.enabledProfiles),
+    completed: readSafeCount(raw.completed),
+    active: readSafeCount(raw.active),
+    failed: readSafeCount(raw.failed),
+    missing: readSafeCount(raw.missing)
+  };
+}
+
+function readSafeCount(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;
 }
 
 function isTradeMiningFinding(value: unknown): value is TradeMiningQualityFinding {

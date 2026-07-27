@@ -17,6 +17,14 @@ export type TradeMiningQualityFinding = {
   evidence: Record<string, string | number | boolean | null>;
 };
 
+export type TradeMiningRunStateSummary = {
+  enabledProfiles: number;
+  completed: number;
+  active: number;
+  failed: number;
+  missing: number;
+};
+
 type Profile = {
   id: string;
   name: string;
@@ -36,6 +44,44 @@ type Run = {
 };
 
 const STUCK_RUN_MS = 2 * 60 * 60 * 1000;
+
+export function summarizeTradeMiningRunState({
+  profiles,
+  runs,
+  now = new Date()
+}: {
+  profiles: Profile[];
+  runs: Run[];
+  now?: Date;
+}): TradeMiningRunStateSummary {
+  const summary: TradeMiningRunStateSummary = {
+    enabledProfiles: 0,
+    completed: 0,
+    active: 0,
+    failed: 0,
+    missing: 0
+  };
+  for (const profile of profiles.filter((item) => item.enabled)) {
+    summary.enabledProfiles += 1;
+    const latest = runs
+      .filter(
+        (run) =>
+          readString(run.input, "searchProfileId") === profile.id &&
+          isSameLocalDate(run.startedAt, now, profile.scheduleTimezone)
+      )
+      .sort((left, right) => right.startedAt.getTime() - left.startedAt.getTime())[0];
+    if (!latest) {
+      summary.missing += 1;
+    } else if (latest.status === "SUCCESS") {
+      summary.completed += 1;
+    } else if (latest.status === "RUNNING" || latest.status === "QUEUED") {
+      summary.active += 1;
+    } else {
+      summary.failed += 1;
+    }
+  }
+  return summary;
+}
 
 export function evaluateTradeMiningRunQuality({
   profiles,

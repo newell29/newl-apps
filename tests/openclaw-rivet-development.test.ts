@@ -28,7 +28,11 @@ describe("Rivet local Codex development worker", () => {
 
     expect(runner).toContain("read every requiredContextPaths entry");
     expect(runner).toContain("For Garland work, those files are the required operating understanding");
-    expect(runner).toContain("git -C \"${RIVET_NEWL_APPS_REPO_PATH}\" worktree add");
+    expect(runner).toContain('rivet_repo_path="${runner_directory:h:h}"');
+    expect(runner).toContain('git -C "${rivet_repo_path}" worktree add');
+    expect(runner).toContain('git -C "${rivet_repo_path}" cat-file -e "origin/${base_branch}:${context_path}"');
+    expect(runner).toContain('if ! /usr/bin/python3 - "${packet_path}"');
+    expect(runner).not.toContain('IFS=$\'\\t\' read -r repository base_branch branch_name codex_model codex_effort title issue_key <<EOF');
     expect(runner).toContain("--sandbox workspace-write");
     expect(runner).toContain("--output-schema");
     expect(runner).toContain("env -i");
@@ -58,7 +62,7 @@ describe("Rivet local Codex development worker", () => {
     expect(installer).toContain(
       "--declaration-key \"newl.hunter.quality-auditor.daily.v1\""
     );
-    expect(installer).toContain("--cron \"30 11 * * *\"");
+    expect(installer).toContain("--cron \"30 13 * * *\"");
   });
 
   it("keeps Hunter quality research read-only and sends only the bounded result to Teams", async () => {

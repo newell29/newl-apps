@@ -280,4 +280,75 @@ describe("Hunter daily profile worker", () => {
       error: "TradeMining port IDs are not configured for: Toronto"
     });
   });
+
+  it("builds one daily Teams summary with coverage for every attempted profile", () => {
+    const python = [
+      "import importlib.util, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "message = module.build_daily_trade_mining_message([{",
+      "  'profileName': 'GTA Leads',",
+      "  'matchedRecords': 184,",
+      "  'exportedRecords': 180,",
+      "  'recordsProcessed': 180,",
+      "  'qualifyingCompanies': 24,",
+      "  'queryCount': 3,",
+      "  'retrievalComplete': True,",
+      "}], [{'profileName': 'Charlotte Leads'}])",
+      "print(json.dumps({'message': message}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).message).toContain(
+      "Hunter TradeMining daily run finished: 1/2 profiles completed successfully."
+    );
+    expect(JSON.parse(result.stdout).message).toContain(
+      "GTA Leads: 184 matches, 180 exported, 180 processed, 24 qualifying companies, 3 queries, retrieval complete."
+    );
+    expect(JSON.parse(result.stdout).message).toContain(
+      "Charlotte Leads: failed. Review Admin & Quality → Health & Logs."
+    );
+  });
+
+  it("sends an immediate failure alert and one final digest while continuing other due profiles", () => {
+    const python = [
+      "import importlib.util, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "profiles = [",
+      "  {'id': 'failed', 'name': 'Failed profile'},",
+      "  {'id': 'ok', 'name': 'Healthy profile'},",
+      "]",
+      "module.load_profiles = lambda *_args: profiles",
+      "module.load_run_requests = lambda *_args: []",
+      "module.is_profile_due = lambda _profile: True",
+      "def run_profile(_base_url, _token, profile, _trigger):",
+      "  if profile['id'] == 'failed': raise RuntimeError('secret external detail')",
+      "  return {'profileName': profile['name'], 'matchedRecords': 10, 'exportedRecords': 10, 'recordsProcessed': 10, 'qualifyingCompanies': 2, 'queryCount': 1, 'retrievalComplete': True}",
+      "module.run_profile = run_profile",
+      "messages = []",
+      "module.send_teams_message = lambda message: messages.append(message) or True",
+      "attempted = module.process_once('https://example.com', 'token', None, None)",
+      "print(json.dumps({'attempted': attempted, 'messages': messages}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+
+    expect(result.status, result.stderr).toBe(0);
+    const output = JSON.parse(result.stdout.trim().split("\n").at(-1) ?? "{}");
+    expect(output.attempted).toBe(true);
+    expect(output.messages).toHaveLength(2);
+    expect(output.messages[0]).toContain('profile "Failed profile" failed');
+    expect(output.messages[0]).not.toContain("secret external detail");
+    expect(output.messages[1]).toContain("1/2 profiles completed successfully");
+    expect(output.messages[1]).toContain("Healthy profile");
+  });
 });

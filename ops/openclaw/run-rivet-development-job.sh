@@ -19,15 +19,15 @@ fi
 : "${NEWL_TEAMS_TENANT_ID:?NEWL_TEAMS_TENANT_ID is required}"
 : "${RIVET_DEVELOPER_OBJECT_ID:?RIVET_DEVELOPER_OBJECT_ID is required}"
 : "${RIVET_GITHUB_TOKEN:?RIVET_GITHUB_TOKEN is required}"
-: "${RIVET_NEWL_APPS_REPO_PATH:?RIVET_NEWL_APPS_REPO_PATH is required}"
 : "${RIVET_TEAMS_TARGET:?RIVET_TEAMS_TARGET is required}"
 
 if [[ "${NEWL_APPS_URL}" != https://* ]]; then
   echo "NEWL_APPS_URL must use HTTPS." >&2
   exit 1
 fi
-if [[ ! -e "${RIVET_NEWL_APPS_REPO_PATH}/.git" ]]; then
-  echo "RIVET_NEWL_APPS_REPO_PATH must point to the trusted Newl Apps Git repository." >&2
+rivet_repo_path="${runner_directory:h:h}"
+if [[ ! -e "${rivet_repo_path}/.git" ]]; then
+  echo "Rivet's dedicated runtime is not a trusted Newl Apps Git repository." >&2
   exit 1
 fi
 
@@ -43,6 +43,8 @@ completion_response_path="${temporary_directory}/completion-response.json"
 pull_request_path="${temporary_directory}/pull-request.json"
 pull_response_path="${temporary_directory}/pull-response.json"
 changed_paths_file="${temporary_directory}/changed-paths.txt"
+packet_fields_path="${temporary_directory}/packet-fields.txt"
+required_context_path="${temporary_directory}/required-context.txt"
 job_id=""
 lease_token=""
 job_worktree=""
@@ -130,8 +132,7 @@ if [[ "${claim_state}" != "claimed" || -z "${job_id}" || -z "${lease_token}" || 
 fi
 
 failure_stage="validate the approved development packet"
-IFS=$'\t' read -r repository base_branch branch_name codex_model codex_effort title issue_key <<EOF
-$(/usr/bin/python3 - "${packet_path}" "${RIVET_NEWL_APPS_REPO_PATH}" <<'PY'
+if ! /usr/bin/python3 - "${packet_path}" "${packet_fields_path}" "${required_context_path}" <<'PY'
 import json, os, re, sys
 with open(sys.argv[1], encoding="utf-8") as handle:
     packet = json.load(handle)
@@ -145,20 +146,28 @@ if not re.fullmatch(r"codex/[A-Za-z0-9][A-Za-z0-9._/-]{2,119}", packet["branchNa
 for path in packet.get("requiredContextPaths", []):
     if not isinstance(path, str) or path.startswith("/") or ".." in path.split("/"):
         raise SystemExit("The approved context manifest contains an unsafe path.")
-    if not os.path.isfile(os.path.join(sys.argv[2], path)):
-        raise SystemExit(f"Required context is missing: {path}")
-print("\t".join([
-    packet["repository"],
-    packet["baseBranch"],
-    packet["branchName"],
-    packet["model"],
-    packet["reasoningEffort"],
-    packet["title"].replace("\n", " ").replace("\t", " ")[:120],
-    packet["issueKey"]
-]))
+with open(sys.argv[2], "w", encoding="utf-8") as handle:
+    handle.write("\t".join([
+        packet["repository"],
+        packet["baseBranch"],
+        packet["branchName"],
+        packet["model"],
+        packet["reasoningEffort"],
+        packet["title"].replace("\n", " ").replace("\t", " ")[:120],
+        packet["issueKey"]
+    ]) + "\n")
+with open(sys.argv[3], "w", encoding="utf-8") as handle:
+    for path in packet.get("requiredContextPaths", []):
+        handle.write(path + "\n")
 PY
-)
-EOF
+then
+  exit 1
+fi
+IFS=$'\t' read -r repository base_branch branch_name codex_model codex_effort title issue_key < "${packet_fields_path}"
+if [[ -z "${repository}" || -z "${base_branch}" || -z "${branch_name}" || -z "${codex_model}" || -z "${codex_effort}" || -z "${title}" || -z "${issue_key}" ]]; then
+  echo "The approved development packet did not produce complete validated fields." >&2
+  exit 1
+fi
 
 failure_stage="prepare the isolated Codex branch"
 jobs_root="${RIVET_DEVELOPMENT_JOBS_ROOT:-${HOME}/.openclaw/rivet/jobs}"
@@ -168,10 +177,17 @@ if [[ -e "${job_worktree}" ]]; then
   echo "The Rivet job worktree already exists; refusing to overwrite it." >&2
   exit 1
 fi
-git -C "${RIVET_NEWL_APPS_REPO_PATH}" fetch origin "${base_branch}"
-git -C "${RIVET_NEWL_APPS_REPO_PATH}" worktree add -b "${branch_name}" "${job_worktree}" "origin/${base_branch}"
-if [[ -d "${RIVET_NEWL_APPS_REPO_PATH}/node_modules" && ! -e "${job_worktree}/node_modules" ]]; then
-  ln -s "${RIVET_NEWL_APPS_REPO_PATH}/node_modules" "${job_worktree}/node_modules"
+git -C "${rivet_repo_path}" fetch origin "${base_branch}"
+while IFS= read -r context_path || [[ -n "${context_path}" ]]; do
+  [[ -z "${context_path}" ]] && continue
+  if ! git -C "${rivet_repo_path}" cat-file -e "origin/${base_branch}:${context_path}"; then
+    echo "Required context is missing from origin/${base_branch}: ${context_path}" >&2
+    exit 1
+  fi
+done < "${required_context_path}"
+git -C "${rivet_repo_path}" worktree add -b "${branch_name}" "${job_worktree}" "origin/${base_branch}"
+if [[ -d "${rivet_repo_path}/node_modules" && ! -e "${job_worktree}/node_modules" ]]; then
+  ln -s "${rivet_repo_path}/node_modules" "${job_worktree}/node_modules"
   node_modules_linked=1
 fi
 
@@ -355,7 +371,7 @@ teams_message="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.
 send_rivet_teams_message "${teams_message}"
 
 failure_stage="clean up the completed worktree"
-git -C "${RIVET_NEWL_APPS_REPO_PATH}" worktree remove "${job_worktree}"
+git -C "${rivet_repo_path}" worktree remove "${job_worktree}"
 completed=1
 cleanup
 trap - EXIT

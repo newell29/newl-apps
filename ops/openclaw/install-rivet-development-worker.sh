@@ -22,7 +22,6 @@ for required_name in \
   NEWL_TEAMS_TENANT_ID \
   RIVET_DEVELOPER_OBJECT_ID \
   RIVET_GITHUB_TOKEN \
-  RIVET_NEWL_APPS_REPO_PATH \
   RIVET_TEAMS_TARGET; do
   if ! grep -Eq "^${required_name}=.+" "${rivet_env_file}"; then
     echo "${required_name} is not configured in the Rivet environment file." >&2
@@ -78,9 +77,9 @@ openclaw cron add \
 openclaw cron add \
   --name "NEWL Hunter Quality Auditor" \
   --display-name "NEWL Hunter Quality Auditor" \
-  --description "Audit a five-company stratified Hunter sample with read-only Codex web research; verify every enabled TradeMining profile completed; queue restricted Rivet draft-PR work only for reproducible code defects; report the result to Alex in Teams. Never reclassify, retry a search or outreach, merge, deploy, or communicate with customers." \
+  --description "Audit a five-company stratified Hunter sample with read-only Codex web research after the daily TradeMining window; verify every enabled profile completed; queue restricted Rivet draft-PR work only for reproducible code defects; report the result to Alex in Teams. Never reclassify, retry a search or outreach, merge, deploy, or communicate with customers." \
   --declaration-key "newl.hunter.quality-auditor.daily.v1" \
-  --cron "30 11 * * *" \
+  --cron "30 13 * * *" \
   --tz "America/Toronto" \
   --exact \
   --command-argv "[\"/bin/zsh\",\"${quality_runner_path}\"]" \
@@ -92,5 +91,5 @@ openclaw cron add \
   --no-deliver
 
 echo "Installed the restricted Rivet developer worker to check for approved jobs every minute."
-echo "Installed the Hunter quality auditor for 11:30 America/Toronto each day."
+echo "Installed the Hunter quality auditor for 13:30 America/Toronto each day."
 echo "Dedicated runtime: ${runtime_repo_path}"
