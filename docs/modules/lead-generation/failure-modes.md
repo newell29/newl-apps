@@ -92,8 +92,10 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
   override a verified U.S. or Canadian identity.
 - Qwen can overlook a strong result even when retrieval succeeded. Hunter deterministically restores
   a fresh trigger only when a non-directory result names the exact company, has a verifiable date
-  inside 18 months, and contains strict material expansion language. The result must still pass Kimi
-  scoring and K3 validation before becoming Hot.
+  inside 18 months, and contains strict material expansion language. That language includes new
+  manufacturing or production lines at an existing facility; the repaired summary is grounded in the
+  saved event instead of preserving a contradictory generic conclusion. The result must still pass
+  Kimi scoring and K3 validation before becoming Hot.
 - Qwen can label a company `FRESH` while citing an undated careers record even though the same evidence
   bundle contains a qualifying expansion article. Hunter repairs the trigger citations before applying
   the recent-date downgrade and pins the repaired evidence into both Kimi packets; otherwise the valid

@@ -27,7 +27,7 @@ describe("Hunter company deep research", () => {
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL).toBe("qwen3.5:35b");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL).toBe("kimi-k2.6");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL).toBe("kimi-k3");
-    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v10");
+    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v11");
     expect(HUNTER_COMPANY_RESEARCH_SAFETY).toEqual({
       externalWrites: false,
       apollo: false,
@@ -473,14 +473,14 @@ describe("Hunter company deep research", () => {
     });
   });
 
-  it("promotes exact-company recent material expansions that Qwen overlooked", async () => {
+  it("preserves an existing-facility production-line expansion that Qwen overlooked", async () => {
     const program = [
       "import datetime as d,json",
       "import hunter_company_research as r",
       "candidate={'companyName':'AALBERTS IPS AMERICAS','companyKey':'aalberts-ips-americas'}",
       "recent=(d.datetime.now(d.timezone.utc)-d.timedelta(days=30)).isoformat()",
-      "evidence=[{'pass':'IDENTITY','firstParty':True,'sourceType':'FIRST_PARTY','title':'Aalberts IPS Americas','excerpt':'Aalberts IPS Americas is a US manufacturer.','publishedAt':None},{'pass':'FRESH_EVENTS','firstParty':False,'sourceType':'NEWS','title':'Aalberts brings PowerPress manufacturing to the United States','excerpt':'Aalberts announced a major investment that expands production capabilities at its South Carolina facility, increasing manufacturing capacity through 2027.','publishedAt':recent},{'pass':'FRESH_EVENTS','firstParty':False,'sourceType':'DIRECTORY','title':'Aalberts directory expansion profile','excerpt':'Aalberts expands manufacturing capacity.','publishedAt':recent}]",
-      "synthesis={'identityDisposition':'PASS','identityConfidence':85,'identityReason':'Verified.','confidence':80,'freshness':'CURRENT','triggerEvidenceIndices':[],'missingEvidence':[],'rationale':'No fresh event selected.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
+      "evidence=[{'pass':'IDENTITY','firstParty':True,'sourceType':'FIRST_PARTY','title':'Aalberts IPS Americas','excerpt':'Aalberts IPS Americas is a US manufacturer.','publishedAt':None},{'pass':'FRESH_EVENTS','firstParty':False,'sourceType':'NEWS','title':'Aalberts brings PowerPress manufacturing to the United States','excerpt':'Aalberts confirms new advanced production lines at its Pageland, South Carolina facility, with phased implementation through 2027, shorter North American lead times, and an ambition to significantly grow its North American business.','publishedAt':recent},{'pass':'DISTRIBUTION_FOOTPRINT','firstParty':True,'sourceType':'FIRST_PARTY','title':'Aalberts IPS website','excerpt':'Integrated piping systems and products.','publishedAt':None}]",
+      "synthesis={'identityDisposition':'PASS','identityConfidence':85,'identityReason':'Verified.','confidence':80,'freshness':'CURRENT','triggerEvidenceIndices':[2],'opportunitySummary':'No concrete expansion or investment exists.','signalType':'NEWS','missingEvidence':[],'rationale':'No fresh event selected.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
       "print(json.dumps(r.normalize_synthesis_for_evidence(candidate,evidence,synthesis)))"
     ].join(";");
     const { stdout } = await execFileAsync("python3", ["-c", program], {
@@ -491,10 +491,20 @@ describe("Hunter company deep research", () => {
       }
     });
 
-    expect(JSON.parse(stdout)).toMatchObject({
+    const normalized = JSON.parse(stdout) as {
+      freshness: string;
+      triggerEvidenceIndices: number[];
+      opportunitySummary: string;
+      signalType: string;
+    };
+
+    expect(normalized).toMatchObject({
       freshness: "FRESH",
-      triggerEvidenceIndices: [1]
+      triggerEvidenceIndices: [1],
+      signalType: "EXPANSION"
     });
+    expect(normalized.opportunitySummary).toContain("new advanced production lines");
+    expect(normalized.opportunitySummary).not.toContain("No concrete expansion");
   });
 
   it("repairs a fresh synthesis that cites the wrong trigger before applying the date gate", async () => {
@@ -544,6 +554,27 @@ describe("Hunter company deep research", () => {
     expect(new Set(evidence.map((row) => row.pass))).toEqual(
       new Set(["IDENTITY", "FRESH_EVENTS", "CAREERS", "DISTRIBUTION_FOOTPRINT"])
     );
+  });
+
+  it("rejects synthesis checkpoints created before the production-line repair", async () => {
+    const program = [
+      "import hunter_company_research as r",
+      "checkpoint={'candidateKeys':['aalberts-ips-americas'],'promptVersion':'hunter-company-research-v10'}",
+      "candidates=[{'companyKey':'aalberts-ips-americas'}]",
+      "try:",
+      " r.validate_checkpoint_cohort(checkpoint,candidates)",
+      "except RuntimeError as error:",
+      " print(str(error))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(stdout).toContain("different prompt contract");
   });
 
   it("sends a compact, pass-diverse evidence packet to the models", async () => {
@@ -676,7 +707,7 @@ function completion() {
       synthesis: {
         provider: "OLLAMA",
         name: "qwen3.5:35b",
-        promptVersion: "hunter-company-research-v10",
+        promptVersion: "hunter-company-research-v11",
         structuredOutput: true,
         inputTokens: 2000,
         outputTokens: 700,
@@ -685,7 +716,7 @@ function completion() {
       scoring: {
         provider: "KIMI",
         name: "kimi-k2.6",
-        promptVersion: "hunter-company-research-v10",
+        promptVersion: "hunter-company-research-v11",
         structuredOutput: true,
         inputTokens: 1800,
         cachedInputTokens: 200,
@@ -696,7 +727,7 @@ function completion() {
       validation: {
         provider: "KIMI",
         name: "kimi-k3",
-        promptVersion: "hunter-company-research-v10",
+        promptVersion: "hunter-company-research-v11",
         structuredOutput: true,
         status: "SUCCESS",
         reasoningEffort: "LOW",
