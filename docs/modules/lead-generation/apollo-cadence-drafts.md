@@ -4,6 +4,14 @@ Hunter uses two email-delivery shells. Newl Apps remains the source of truth for
 
 Approving a QA-passed Outreach Plan is the sole human authorization. Newl Apps then approves the selected contact, preserves its existing sender or assigns the approver, syncs every generated field, and queues Apollo enrollment automatically. Any sender, field, cadence, identity, reply-history, or QA failure stops enrollment and remains visible in the Apollo job result.
 
+## Mailbox pools
+
+- One Apollo user may own multiple connected mailboxes. Newl Apps synchronizes each Apollo email account as a separate sender identity without requiring an additional Apollo teammate.
+- Every mailbox is configured with an active flag and routing weight from 0–100. Newly discovered default mailboxes start active at weight 100; additional mailboxes start inactive at weight 0 so a sync cannot silently expand live sending.
+- The contact remains assigned to the Newl Apps rep/Apollo owner. At enrollment, Newl Apps chooses one eligible mailbox from that owner's pool using a deterministic company-level allocation. Every contact at the same company therefore stays on the same sender.
+- A weight of 80/10/10 makes the first mailbox the dominant sender while allowing two secondary identities to share a small portion of new companies. Weight 0 excludes a mailbox without deleting its mapping.
+- Existing in-flight Apollo enrollments are never reassigned when weights change. Mailbox display names, signatures, authentication, sending limits, and warm-up remain Apollo/mail-provider responsibilities.
+
 ## Hunter - Email Only
 
 - Audience: operations, warehousing, logistics, supply-chain, distribution, procurement, and import buyers.

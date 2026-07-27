@@ -1006,25 +1006,52 @@ export async function syncApolloRepMappingAction() {
   });
 
   const existingEntries = parseApolloRepMapping(existing?.publicConfig);
-  const entries = syncedUsers.map((user) => {
-    const existingEntry = findExistingApolloRepEntry(existingEntries, user);
-    const resolvedEmailAccountId = resolveApolloEmailAccountId({
-      apolloUserId: user.apolloUserId,
-      sendFromEmail: existingEntry?.sendFromEmail ?? user.email,
-      syncedEmailAccounts
-    });
+  const entries = syncedUsers.flatMap((user) => {
+    const ownedEmailAccounts = syncedEmailAccounts.filter(
+      (account) =>
+        account.active &&
+        !account.revokedAt &&
+        (account.userId === user.apolloUserId ||
+          (!account.userId &&
+            account.email &&
+            user.email &&
+            account.email.toLowerCase() === user.email.toLowerCase()))
+    );
+    if (ownedEmailAccounts.length === 0) {
+      const existingEntry = findExistingApolloRepEntry(existingEntries, user);
+      const resolvedEmailAccountId = resolveApolloEmailAccountId({
+        apolloUserId: user.apolloUserId,
+        sendFromEmail: existingEntry?.sendFromEmail ?? user.email,
+        syncedEmailAccounts
+      });
+      return [{
+        id: existingEntry?.id ?? `apollo-rep-${user.apolloUserId}`,
+        sequenceOwnerName: user.sequenceOwnerName,
+        senderLabel: existingEntry?.senderLabel ?? user.sequenceOwnerName,
+        apolloUserId: user.apolloUserId,
+        sendFromEmail: existingEntry?.sendFromEmail ?? user.email,
+        sendFromEmailAccountId:
+          isLikelyApolloEmailAccountId(existingEntry?.sendFromEmailAccountId)
+            ? existingEntry?.sendFromEmailAccountId ?? null
+            : resolvedEmailAccountId,
+        routingWeight: existingEntry?.routingWeight ?? 100,
+        active: existingEntry?.active ?? true
+      }];
+    }
 
-    return {
-      id: existingEntry?.id ?? `apollo-rep-${user.apolloUserId}`,
-      sequenceOwnerName: user.sequenceOwnerName,
-      apolloUserId: user.apolloUserId,
-      sendFromEmail: existingEntry?.sendFromEmail ?? user.email,
-      sendFromEmailAccountId:
-        isLikelyApolloEmailAccountId(existingEntry?.sendFromEmailAccountId)
-          ? existingEntry?.sendFromEmailAccountId ?? null
-          : resolvedEmailAccountId,
-      active: existingEntry?.active ?? true
-    };
+    return ownedEmailAccounts.map((account) => {
+      const existingEntry = findExistingApolloRepEntry(existingEntries, user, account);
+      return {
+        id: existingEntry?.id ?? `apollo-mailbox-${account.id}`,
+        sequenceOwnerName: user.sequenceOwnerName,
+        senderLabel: existingEntry?.senderLabel ?? account.email ?? user.sequenceOwnerName,
+        apolloUserId: user.apolloUserId,
+        sendFromEmail: account.email,
+        sendFromEmailAccountId: account.id,
+        routingWeight: existingEntry?.routingWeight ?? (account.isDefault ? 100 : 0),
+        active: existingEntry?.active ?? account.isDefault
+      };
+    });
   });
 
   const publicConfig = mergeApolloPublicConfig(existing?.publicConfig, buildApolloRepMappingConfig(entries));
@@ -1310,9 +1337,25 @@ export async function syncApolloSequenceMappingAction() {
 
 function findExistingApolloRepEntry(
   entries: ReturnType<typeof parseApolloRepMapping>,
-  user: { apolloUserId: string; sequenceOwnerName: string }
+  user: { apolloUserId: string; sequenceOwnerName: string },
+  emailAccount?: { id: string; email: string | null }
 ) {
-  const idMatch = entries.find((entry) => entry.apolloUserId === user.apolloUserId);
+  if (emailAccount) {
+    const accountMatch = entries.find(
+      (entry) =>
+        (entry.apolloUserId === user.apolloUserId ||
+          (!entry.apolloUserId && entry.sequenceOwnerName === user.sequenceOwnerName)) &&
+        (entry.sendFromEmailAccountId === emailAccount.id ||
+          (entry.sendFromEmail &&
+            emailAccount.email &&
+            entry.sendFromEmail.toLowerCase() === emailAccount.email.toLowerCase()))
+    );
+    if (accountMatch) return accountMatch;
+    return null;
+  }
+
+  const userEntries = entries.filter((entry) => entry.apolloUserId === user.apolloUserId);
+  const idMatch = userEntries.length === 1 ? userEntries[0] : null;
   if (idMatch) {
     return idMatch;
   }
@@ -1448,6 +1491,9 @@ function isMissingTradeMiningScoringSchemaError(error: unknown) {
 }
 
 function readApolloRepMappingEntries(formData: FormData) {
+  const ids = formData
+    .getAll("apolloRepMappingId")
+    .filter((value): value is string => typeof value === "string");
   const names = formData
     .getAll("apolloRepSequenceOwnerName")
     .filter((value): value is string => typeof value === "string");
@@ -1460,6 +1506,12 @@ function readApolloRepMappingEntries(formData: FormData) {
   const emailAccountIds = formData
     .getAll("apolloRepSendFromEmailAccountId")
     .filter((value): value is string => typeof value === "string");
+  const senderLabels = formData
+    .getAll("apolloRepSenderLabel")
+    .filter((value): value is string => typeof value === "string");
+  const routingWeights = formData
+    .getAll("apolloRepRoutingWeight")
+    .filter((value): value is string => typeof value === "string");
   const actives = new Set(
     formData
       .getAll("apolloRepActiveIndex")
@@ -1468,14 +1520,24 @@ function readApolloRepMappingEntries(formData: FormData) {
 
   return names
     .map((name, index) => ({
-      id: `apollo-rep-${index + 1}`,
+      id: ids[index]?.trim() || `apollo-rep-${index + 1}`,
       sequenceOwnerName: name.trim(),
+      senderLabel: senderLabels[index]?.trim() || emails[index]?.trim() || name.trim(),
       apolloUserId: userIds[index]?.trim() || null,
       sendFromEmail: emails[index]?.trim() || null,
       sendFromEmailAccountId: emailAccountIds[index]?.trim() || null,
+      routingWeight: readBoundedApolloRoutingWeight(routingWeights[index]),
       active: actives.has(String(index))
     }))
     .filter((entry) => entry.sequenceOwnerName.length > 0);
+}
+
+function readBoundedApolloRoutingWeight(value: string | undefined) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 100) {
+    throw new Error("Apollo mailbox routing weight must be a whole number between 0 and 100.");
+  }
+  return parsed;
 }
 
 function readApolloSequenceMappingEntries(

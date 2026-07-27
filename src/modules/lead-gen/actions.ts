@@ -89,6 +89,7 @@ import {
   parseSearchProfileApolloSequenceMapping,
   resolveApolloSequenceMappings
 } from "@/modules/settings/apollo-sequence-mapping";
+import { selectApolloMailboxForCompany } from "@/modules/settings/apollo-mailbox-routing";
 import { parseApolloRepMapping } from "@/modules/settings/apollo-rep-mapping";
 import { DEFAULT_TRADEMINING_SCORING_SETTINGS } from "@/modules/settings/types";
 import { requireAdmin, requireModule, requireMutationAccess } from "@/server/auth/authorization";
@@ -3364,12 +3365,11 @@ async function validateApolloPushCandidate({
     });
   }
 
-  const repMapping = repMappings.find(
-    (entry) =>
-      entry.active &&
-      ((entry.sendFromEmail && localOwner.email && entry.sendFromEmail.toLowerCase() === localOwner.email.toLowerCase()) ||
-        (entry.sequenceOwnerName && localOwner.name && entry.sequenceOwnerName.toLowerCase() === localOwner.name.toLowerCase()))
-  );
+  const repMapping = selectApolloMailboxForCompany({
+    entries: repMappings,
+    owner: localOwner,
+    companyId: contact.companyId
+  });
 
   if (!repMapping?.apolloUserId) {
     return {
@@ -3529,10 +3529,12 @@ async function persistApolloRepEmailAccountId({
         apolloUserMapping: updatedEntries.map((entry) => ({
           id: entry.id,
           sequence_owner_name: entry.sequenceOwnerName,
+          sender_label: entry.senderLabel,
           active: entry.active,
           apollo_user_id: entry.apolloUserId,
           send_from_email: entry.sendFromEmail,
-          send_from_email_account_id: entry.sendFromEmailAccountId
+          send_from_email_account_id: entry.sendFromEmailAccountId,
+          routing_weight: entry.routingWeight
         }))
       }
     }

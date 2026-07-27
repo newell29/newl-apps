@@ -76,6 +76,7 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 13. An administrator can select **Find contacts for eligible opportunities** after enabling Assisted mode. The action creates a fresh deterministic plan from already-saved research and queues the same protected handoff without rerunning web retrieval, Qwen, Kimi, or K3.
 14. A `REVIEWING` contact with a current, non-archived Outreach Plan appears in Outreach Queue even when Hunter has not created a Sales Lead. Creating a Sales Lead remains reserved for later pipeline graduation.
 15. Before approval, a reviewer may enter bounded feedback and regenerate the complete email sequence. Feedback can change tone, emphasis, and approach, but cannot override the saved evidence, service line, contact identity, channel policy, or deterministic/model QA gates. Regeneration is blocked after plan approval or Apollo sequence activity begins.
+16. Each assigned rep may have a pool of Apollo send-from mailboxes. Enrollment chooses one active, positive-weight mailbox deterministically from the company ID; this keeps all contacts at the same company on one sender while allowing controlled distribution across real Newl identities.
 
 ## Hunter quality control and Rivet
 

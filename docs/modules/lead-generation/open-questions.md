@@ -54,8 +54,9 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Should a future search-profile experiment agent be allowed to propose bounded profile variants in a sandbox ledger? It must not mutate active profiles or trigger TradeMining queries until the owner approves an experiment budget, success metric, holdout design, and automatic rollback rule. Requires owner confirmation.
 - May Hunter automatically collect headline links from GDELT DOC 2 and Google News RSS, and what licensing/terms apply to retained metadata? Requires owner and legal/compliance confirmation before `HUNTER_SIGNAL_SCOUT_ENABLED` is switched on.
 - Which jurisdictions, sender identities, daily mailbox volumes, and review thresholds should govern later outreach? Requires owner confirmation before moving beyond dry run.
-- Which named sender should be preferred for each service line/persona, and which mailbox caps should apply? The
-  Phase 1 plan records a recommendation only; automatic sender allocation requires owner confirmation.
+- Which named sender should be preferred for each service line/persona, and which mailbox caps should apply? Weighted
+  mailbox pools now support deterministic company-level allocation, but the initial Alex/Faisal/Aaron weights and
+  service-line overrides still require owner confirmation before secondary mailboxes are activated.
 - How long should a Hunter assessment remain valid for outreach? The implemented default is 30 days through
   `HUNTER_OUTREACH_RESEARCH_MAX_AGE_DAYS`; business-owner confirmation is still required.
 - Should external-signal discovery use a low-cost hosted model, the local Qwen endpoint, or a tiered provider strategy after deterministic filtering? This requires a measured quality/cost evaluation; Phase 1 does not require a new model credential.

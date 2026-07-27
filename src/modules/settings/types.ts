@@ -83,9 +83,11 @@ export type TradeMiningScoringSettings = {
 export type ApolloRepMappingEntry = {
   id: string;
   sequenceOwnerName: string;
+  senderLabel: string;
   apolloUserId: string | null;
   sendFromEmail: string | null;
   sendFromEmailAccountId: string | null;
+  routingWeight: number;
   active: boolean;
 };
 
