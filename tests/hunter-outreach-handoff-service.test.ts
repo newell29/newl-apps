@@ -137,6 +137,7 @@ describe("Hunter assisted handoff queueing", () => {
           researchRunId: "research-1",
           prospectingPlanRunId: "plan-1",
           maxContactsPerCompany: 2,
+          forceContactReview: false,
           items: [{
             companyId: "company-1",
             companyName: "Example Importer",
@@ -214,7 +215,8 @@ describe("Hunter assisted handoff queueing", () => {
       data: expect.objectContaining({
         input: expect.objectContaining({
           researchRunId: "research-current",
-          prospectingPlanRunId: "plan-current"
+          prospectingPlanRunId: "plan-current",
+          forceContactReview: true
         })
       })
     });

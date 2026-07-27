@@ -123,18 +123,21 @@ export async function queueCurrentHunterOutreachHandoff({
   return enqueueHunterOutreachHandoff({
     tenantId,
     researchRunId: latestResearch.id,
-    prospectingPlanRunId: plan.runId
+    prospectingPlanRunId: plan.runId,
+    forceContactReview: true
   });
 }
 
 export async function enqueueHunterOutreachHandoff({
   tenantId,
   researchRunId,
-  prospectingPlanRunId
+  prospectingPlanRunId,
+  forceContactReview = false
 }: {
   tenantId: string;
   researchRunId: string;
   prospectingPlanRunId: string;
+  forceContactReview?: boolean;
 }) {
   const policy = await prisma.hunterAutomationPolicy.findUnique({
     where: { tenantId },
@@ -271,6 +274,7 @@ export async function enqueueHunterOutreachHandoff({
         researchRunId,
         prospectingPlanRunId,
         maxContactsPerCompany: Math.min(3, Math.max(1, policy.maxContactsPerCompany)),
+        forceContactReview,
         items
       },
       output: emptyOutput()
@@ -389,7 +393,8 @@ export async function processNextHunterOutreachHandoff({
       tenantId,
       jobId: job.id,
       item,
-      maxContactsPerCompany: input.maxContactsPerCompany
+      maxContactsPerCompany: input.maxContactsPerCompany,
+      forceContactReview: input.forceContactReview
     });
     const nextOutput: HandoffOutput = {
       ...output,
@@ -489,12 +494,14 @@ async function processCompany({
   tenantId,
   jobId,
   item,
-  maxContactsPerCompany
+  maxContactsPerCompany,
+  forceContactReview
 }: {
   tenantId: string;
   jobId: string;
   item: HandoffItem;
   maxContactsPerCompany: number;
+  forceContactReview: boolean;
 }): Promise<HandoffResult> {
   const company = await prisma.company.findFirst({
     where: {
@@ -655,7 +662,8 @@ async function processCompany({
     },
     directive: eligibility.directive,
     contactIds,
-    selectionLimit: Math.min(HUNTER_SELECTED_CONTACT_MAX, maxContactsPerCompany)
+    selectionLimit: Math.min(HUNTER_SELECTED_CONTACT_MAX, maxContactsPerCompany),
+    forceContactReview
   });
   if (fit.acceptedContactIds.length === 0) {
     return terminal(
@@ -719,7 +727,8 @@ async function reviewAndPersistHunterContactFit({
   company,
   directive,
   contactIds,
-  selectionLimit
+  selectionLimit,
+  forceContactReview
 }: {
   tenantId: string;
   jobId: string;
@@ -733,6 +742,7 @@ async function reviewAndPersistHunterContactFit({
   };
   contactIds: string[];
   selectionLimit: number;
+  forceContactReview: boolean;
 }) {
   const contacts = await prisma.contact.findMany({
     where: {
@@ -765,10 +775,12 @@ async function reviewAndPersistHunterContactFit({
   const reviewByContactId = new Map<string, HunterContactFitReview>();
   const contactsNeedingReview = [];
   for (const contact of contacts) {
-    const cached = readCachedContactFitReview(
-      contact.rawJson,
-      directive.prospectingDecisionId
-    );
+    const cached = forceContactReview
+      ? null
+      : readCachedContactFitReview(
+          contact.rawJson,
+          directive.prospectingDecisionId
+        );
     if (cached) {
       reviewByContactId.set(contact.id, cached);
     } else {
@@ -863,8 +875,16 @@ async function reviewAndPersistHunterContactFit({
     });
   }
 
+  const contactById = new Map(contacts.map((contact) => [contact.id, contact]));
   const acceptedContactIds = [...reviewByContactId.values()]
-    .filter(isContactFitAutoEligible)
+    .filter((review) => {
+      const contact = contactById.get(review.contactId);
+      return Boolean(
+        contact &&
+        isContactFitAutoEligible(review) &&
+        isContactEligibleForFreshOutreach(contact)
+      );
+    })
     .sort((left, right) => {
       const dispositionDelta =
         contactFitPriority(left.disposition) - contactFitPriority(right.disposition);
@@ -882,6 +902,17 @@ export function isContactFitAutoEligible(review: HunterContactFitReview) {
   return (
     (review.disposition === "PRIMARY" && review.confidence >= 70) ||
     (review.disposition === "SECONDARY" && review.confidence >= 80)
+  );
+}
+
+export function isContactEligibleForFreshOutreach(contact: {
+  sequenceStatus: SequenceStatus;
+  replyStatus: ReplyStatus;
+}) {
+  return (
+    contact.replyStatus === ReplyStatus.NO_REPLY &&
+    (contact.sequenceStatus === SequenceStatus.NOT_STARTED ||
+      contact.sequenceStatus === SequenceStatus.READY)
   );
 }
 
@@ -1283,6 +1314,7 @@ function parseInput(value: Prisma.JsonValue | null) {
       typeof root.maxContactsPerCompany === "number"
         ? Math.min(3, Math.max(1, Math.round(root.maxContactsPerCompany)))
         : 2,
+    forceContactReview: root.forceContactReview === true,
     items
   };
 }
