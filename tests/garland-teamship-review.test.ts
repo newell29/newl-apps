@@ -5,6 +5,7 @@ import {
   parseGarlandShippingOrderPages,
   parseTeamshipAlertDigest
 } from "@/modules/shipment-documents/teamship-review";
+import { buildTeamshipPhase2DryRunPlan } from "@/modules/shipment-documents/teamship-phase2-dry-run";
 import { buildTeamshipPayloadInspection } from "@/modules/shipment-documents/teamship-payload-inspector";
 import type { GarlandPdfShippingOrder, TeamshipShippingOrderDetail } from "@/modules/shipment-documents/teamship-review-types";
 import {
@@ -329,6 +330,69 @@ DESCRIPTION
       sku: "GTBG36-AR36-5001",
       quantity: 1,
       serialNumbers: ["2606891101389", "2606891101823"]
+    });
+  });
+
+  it("keeps PS210516 Lot/Serial evidence in the review and planned commodity", () => {
+    const orders = parseGarlandShippingOrderPages([
+      {
+        pageNumber: 1,
+        text: `Ship-To Pre-Shipper Print Date
+11906259 PS210516 7/24/2026
+Pre-Shipper
+GARLAND CUSTOMER
+TORONTO, ON M6N 4C4
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Order Number SR813516 Ship To PO 98806 Frt Terms PPADD-CD
+Order Date 7/24/2026 Ship Via SPEEDY
+Ln Item Number T
+Site
+Location
+Lot/Serial
+Ref
+Ship Qty Qty Open UM Due
+Shipped
+1 GTGG24-GT24M-5034 891210
+DESCRIPTION
+1.00 EA 7/24/2026
+NEWLS 2605891101538 1.00 (              )`
+      }
+    ]);
+    const review = buildGarlandTeamshipReview(
+      orders,
+      [
+        {
+          ...sampleTeamshipOrder(
+            "SR813516",
+            "PS210516",
+            "SPEEDY",
+            "GARLAND CUSTOMER",
+            "98806",
+            "PPADD-CD",
+            ["SKU: GTGG24-GT24M-5034 QTY: 1"]
+          ),
+          id: 30516
+        }
+      ]
+    );
+    const plan = buildTeamshipPhase2DryRunPlan(review);
+
+    expect(orders[0]?.items[0]).toMatchObject({
+      sku: "GTGG24-GT24M-5034",
+      quantity: 1,
+      serialNumbers: ["2605891101538"]
+    });
+    expect(review.reviews[0]?.fields.find((field) => field.key === "serialNumbers")).toMatchObject({
+      status: "DISCREPANCY",
+      pdfValue: "2605891101538",
+      teamshipValue: "No serials found in fetched Teamship detail"
+    });
+    expect(plan.orders[0]?.plannedPalletRows[0]).toMatchObject({
+      commodity: "SKU: GTGG24-GT24M-5034, SN: 2605891101538",
+      teamshipFields: expect.objectContaining({
+        pallet_1_commodity: "SKU: GTGG24-GT24M-5034, SN: 2605891101538"
+      })
     });
   });
 

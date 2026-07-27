@@ -25,6 +25,8 @@ Emails are classified using Garland-domain, PS-range, order/page-count, attachme
 
 Targeted Garland reviews keep each PDF PS/SR pair together while querying Teamship. An exact PS match is preferred whenever a Teamship row exposes PS; SR is used only when that row does not expose PS. When multiple requested PS orders share an SR and Teamship does not expose enough PS evidence to distinguish them, the lookup leaves them unmatched instead of guessing. Paging stops only after every requested pair is matched, so duplicate Teamship rows for one PS cannot hide another requested order. The same paired lookup is required for post-update verification, and retrieval never bypasses the normal full field comparison required for a pass.
 
+When a PDF item contains a valid Lot/Serial reference, a Teamship commodity that contains only `SKU: <sku> QTY: <quantity>` is a serial discrepancy and cannot pass the review. The planned pallet commodity retains the serial as `SKU: <sku>, SN: <serials>`; the `QTY:` format remains only for non-serialized items.
+
 ## Pallet and printing notes
 
 Pallet dimensions, serials, weight, and SKU observations are represented in Teamship review/update types and `GarlandProductDimensionObservation`. The UPS special dimension rule is confirmed in existing documentation and tests should be consulted before changing it. Printer mappings, duplicate print protection, and a general print service were not located; production printing requires explicit human approval.
