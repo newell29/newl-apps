@@ -142,6 +142,7 @@ describe("OpenAI structured outreach workflow", () => {
     expect(qaRequest.input[1].content).toContain('"outboundSequence"');
     expect(qaRequest.input[1].content).not.toContain('"sequenceName"');
     expect(qaRequest.input[1].content).not.toContain('"evidenceRefs"');
+    expect(qaRequest.input[1].content).not.toContain('"channelStrategy"');
   });
 
   it("rejects a strategy that changes Hunter's required service line", async () => {

@@ -565,7 +565,7 @@ export async function reviewOutreachSequenceGrounding(
     schemaName: "newl_outreach_qa",
     schema: OUTREACH_QA_SCHEMA,
     system:
-      "You are the conservative QA gate for Newl Group outbound logistics messaging. Inspect only customer-visible subject/body text and the human-visible call-task instruction for prohibited outbound wording. Internal sequence names, evidenceRefs, evidence-ledger IDs, database labels, and other grounding metadata are not outbound copy and must never be reported as outbound violations. Compare every factual claim in the customer-visible copy with the saved evidence ledger. Fail unsupported events, shipment claims, quantities, geography, buyer responsibilities, incumbent-provider assumptions, Newl capabilities not listed in the strategy context, deceptive familiarity, or messages that imply a LinkedIn/call action already happened. Also fail any customer-visible use of the word Hunter, any internal evidence ID or research-system reference, any sender placeholder or generic Newl Group signature, any email that does not end with senderFirstName on its own final line, and any mismatch between allowCallTask and the outbound channel strategy. Style preferences alone are warnings. Return passed=false whenever any ERROR exists.",
+      "You are the conservative QA gate for Newl Group outbound logistics messaging. Inspect only customer-visible subject/body text and the human-visible call-task instruction for prohibited outbound wording. Internal sequence names, evidenceRefs, evidence-ledger IDs, database labels, and other grounding metadata are not outbound copy and must never be reported as outbound violations. Compare every factual claim in the customer-visible copy with the saved evidence ledger. Fail unsupported events, shipment claims, quantities, geography, buyer responsibilities, incumbent-provider assumptions, Newl capabilities not listed in the strategy context, deceptive familiarity, or messages that imply a LinkedIn/call action already happened. Also fail any customer-visible use of the word Hunter, any internal evidence ID or research-system reference, any sender placeholder or generic Newl Group signature, any email that does not end with senderFirstName on its own final line, and any mismatch between allowCallTask and the actual outbound channels. The supplied outboundSequence schedule is authoritative; do not invent or enforce different timing from strategy prose. Style preferences alone are warnings. Return passed=false whenever any ERROR exists.",
     user: JSON.stringify({
       companyName: context.companyName,
       contact: context.contact,
@@ -578,7 +578,6 @@ export async function reviewOutreachSequenceGrounding(
         valueProposition: context.strategy.valueProposition,
         likelyObjection: context.strategy.likelyObjection,
         callToAction: context.strategy.callToAction,
-        channelStrategy: context.strategy.channelStrategy,
         senderRecommendation: context.strategy.senderRecommendation,
         confidence: context.strategy.confidence
       },

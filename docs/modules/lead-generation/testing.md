@@ -227,7 +227,7 @@ Regression coverage must prove:
 3. machine routes ignore caller-supplied tenant identifiers and use ingestion authentication;
 4. each request processes at most one company and persisted leases, results, attempts, and retry dates survive worker restart;
 5. an unresolved latest Apollo company match blocks repeat discovery and remains review-required;
-6. saved contacts, a 100-result organization-scoped employee search, and an always-run multi-title search are merged and deduplicated before ranking; Apollo account IDs are resolved to the nested global organization ID before employee search (with saved-contact recovery as a fallback), an exact saved account omitted by name search is recovered through zero-credit Account View, an exact saved account with no nested organization ID retries by its trusted domain, one partial account result cannot be treated as complete, and sibling/parent organizations remain excluded;
+6. saved contacts, a 100-result organization-scoped employee search, and an always-run multi-title search are merged and deduplicated before ranking; Apollo account IDs are resolved to the nested global organization ID before employee search (with saved-contact recovery as a fallback), an exact saved account omitted by name search is recovered through zero-credit Account View, an exact saved account with no nested organization ID retries by its trusted account domain, and an unresolved partial result may use the one unique domain carried by an exact-identity saved contact; one partial account result cannot be treated as complete, acronym-expanded operating names are accepted only inside the confirmed ID/domain scope, and sibling/parent organizations remain excluded;
 7. deterministic ranking excludes seller-side and unidentifiable contacts, gives the buyer-role model the best 10 candidates, and caps final selection at `maxContactsPerCompany`;
 8. buyer-role review uses strict structured output and returns the exact requested contact IDs; model-qualified contacts rank first, while an explicit manager-or-higher physical logistics or facility-operations buyer remains eligible for an unapproved human-review plan; digital/franchise/general back-office operations and explicit geography mismatches do not receive that fallback;
 9. the manual current-opportunity handoff requires completed company research, creates a deterministic plan scoped
@@ -264,7 +264,9 @@ Regression coverage must prove:
    LinkedIn task, uses contiguous steps, and has increasing delays;
 3. missing/unknown evidence references, generic banned phrasing, unsupported URLs, and unsupported quantified claims
    fail deterministic QA;
-4. any blocking model-critic issue fails the combined gate even when deterministic checks pass;
+4. any blocking model-critic issue fails the combined gate even when deterministic checks pass; a repairable
+   deterministic or model issue triggers at most one full-sequence redraft with the exact findings, after which both
+   gates rerun and any remaining failure stays blocked;
 5. OpenAI strategy, sequence, and QA calls use the Responses API with strict JSON Schema;
 6. generated drafts are not auto-approved, plan approval requires QA plus contact/company safety, and a current
    unapproved plan blocks Apollo;

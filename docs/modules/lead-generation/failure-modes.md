@@ -356,6 +356,21 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   operation can consume Apollo credits and remains a separate approved workflow.
 - Regression coverage: `tests/apollo-integration.test.ts` uses Apollo's obfuscated People Search response shape,
   verifies person/contact ID separation, rejects a sibling name, and preserves saved-contact data during deduplication.
+- Partial mapped-account recovery: when the mapped account ID returns at most one person and Apollo does not expose
+  the nested organization ID, Hunter may repeat zero-credit People Search against the one unique organization domain
+  carried by an exact-identity saved contact. Multiple domains, unrelated names, explicit organization-ID mismatches,
+  and sibling identities still fail closed.
+
+### Generated Hunter plans repeatedly fail QA for correctable formatting or provenance wording
+
+- Hunter treats the saved cadence schedule as authoritative instead of accepting model-invented days.
+- A repairable deterministic or model finding receives one automatic full-sequence regeneration in the same job.
+  The repair prompt includes the exact findings, required channels/days, sender signature, valid evidence-reference
+  rule, and a prohibition on customer-visible phrases such as “saved shipment activity.”
+- The repaired sequence reruns deterministic and model QA. Hunter never loops beyond that one retry; a remaining
+  failure is persisted with its final reason for human review.
+- `MODEL_QA_UNAVAILABLE` is not retried as a copy repair. Transient provider retry belongs to the integration layer
+  and must not create repeated drafting spend.
 
 ## Hunter queues fewer companies or shows fewer contacts than the page counters suggest
 
