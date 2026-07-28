@@ -993,9 +993,10 @@ export function ContactDirectoryTableClient({
         </div>
 
         <div className="border-b border-border bg-card px-4 py-2 text-xs text-mutedForeground">
-          Contacts already enrolled, paused, replied, bounced, or finished can still be assigned a new selected cadence, but
-          the user must explicitly confirm that override first. Live Apollo push still blocks contacts that already show
-          Apollo sequence history, so re-enrollment stays deliberate.
+          Contacts with prior cadence history can still be assigned a new selected cadence, but the user must explicitly
+          confirm that change first. After a Hunter plan is approved, no-reply contacts can move from an old active or
+          paused cadence into the selected Hunter cadence automatically. Replies, bounces, rejected contacts, and
+          do-not-contact records remain blocked.
         </div>
       </form>
       <div className="overflow-x-auto">
