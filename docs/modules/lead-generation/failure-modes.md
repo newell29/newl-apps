@@ -125,6 +125,11 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
   queries bounded legal-name, brand, and regional aliases and adds official-domain queries when a
   domain is known. Matching first-party identity evidence can correct an unsupported ambiguous
   synthesis label.
+- A dated filing may describe a new facility through “commercial production” or “commercial
+  operations” commencement without using the words expansion or opening. Hunter includes those
+  phrases in both general and official-domain fresh-event queries and recognizes the exact-company,
+  recent, dated operating start during deterministic trigger reconciliation. An undated facility plan
+  alone still cannot become a fresh trigger.
 - A full generic result set can otherwise consume the bounded evidence ledger before a later
   official-domain event query runs. Hunter executes every enabled query first and samples their
   results in rounds, preserving targeted first-party evidence without increasing the 24-record cap.

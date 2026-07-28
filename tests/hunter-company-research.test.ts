@@ -28,7 +28,7 @@ describe("Hunter company deep research", () => {
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL).toBe("qwen3.5:35b");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL).toBe("kimi-k2.6");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL).toBe("kimi-k3");
-    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v15");
+    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v16");
     expect(HUNTER_COMPANY_RESEARCH_TRANSACTION_TIMEOUT_MS).toBe(30_000);
     expect(HUNTER_COMPANY_RESEARCH_SAFETY).toEqual({
       externalWrites: false,
@@ -725,6 +725,52 @@ describe("Hunter company deep research", () => {
     ]);
     expect(rows.slice(0, 4).every((row) => row.query.includes("Example Retailer"))).toBe(true);
     expect(rows.some((row) => row.query.includes("site:example.com"))).toBe(true);
+    expect(rows.filter((row) => row.pass === "FRESH_EVENTS").every(
+      (row) => row.query.includes('"commercial production"') &&
+        row.query.includes('"commercial operations"') &&
+        row.query.includes('"greenfield facility"')
+    )).toBe(true);
+  });
+
+  it("retrieves a dated production-start filing when the earlier facility evidence is undated", async () => {
+    const program = [
+      "import datetime as d,json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'EXAMPLE BEDDING INC.','companyKey':'example-bedding-inc','domain':'example-bedding.test'}",
+      "queries=r.build_research_queries(candidate)",
+      "recent=(d.datetime.now(d.timezone.utc)-d.timedelta(days=30)).isoformat()",
+      "def fake_search(provider,query,limit):",
+      " rows=[{'url':f'https://source-{index}.test/result','title':f'Generic result {index}','snippet':'General company evidence.','publishedAt':None} for index in range(limit)]",
+      " if 'commercial production' in query and not query.startswith('site:'):",
+      "  rows[0]={'url':'https://exchange.test/filings/example-bedding-production.pdf','title':'Example Bedding begins commercial production at greenfield facility','snippet':'Example Bedding started commercial operations at its new greenfield manufacturing facility.','publishedAt':recent}",
+      " return rows",
+      "r.search_web=fake_search",
+      "r.fetch_page_evidence=lambda _url:(None,None)",
+      "evidence,query_log,_=r.collect_company_evidence(candidate,'BRAVE',5,0)",
+      "filings=[row for row in evidence if row['sourceDomain']=='exchange.test']",
+      "print(json.dumps({'queryCount':len(query_log),'filings':filings,'material':r.recent_material_trigger_indices(candidate,evidence)}))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+    const result = JSON.parse(stdout) as {
+      queryCount: number;
+      filings: Array<{ publishedAt: string; excerpt: string }>;
+      material: number[];
+    };
+
+    expect(result.queryCount).toBe(6);
+    expect(result.filings).toEqual([
+      expect.objectContaining({
+        publishedAt: expect.any(String),
+        excerpt: expect.stringContaining("started commercial operations")
+      })
+    ]);
+    expect(result.material).toHaveLength(1);
   });
 
   it("preserves the Barnhardt first-party expansion query when generic results fill the evidence cap", async () => {
@@ -973,6 +1019,44 @@ describe("Hunter company deep research", () => {
     });
     expect(normalized.opportunitySummary).toContain("new advanced production lines");
     expect(normalized.opportunitySummary).not.toContain("No concrete expansion");
+  });
+
+  it("restores a dated commercial-production start but does not invent one when that evidence is missing", async () => {
+    const program = [
+      "import datetime as d,json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'EXAMPLE BEDDING INC.','companyKey':'example-bedding-inc'}",
+      "base=[{'pass':'IDENTITY','firstParty':True,'sourceType':'FIRST_PARTY','title':'Example Bedding','excerpt':'Example Bedding is a U.S. manufacturer.','publishedAt':None},{'pass':'FRESH_EVENTS','firstParty':False,'sourceType':'NEWS','title':'Example Bedding plans a greenfield facility','excerpt':'Example Bedding plans a future manufacturing facility.','publishedAt':None}]",
+      "recent=(d.datetime.now(d.timezone.utc)-d.timedelta(days=30)).isoformat()",
+      "filing={'pass':'FRESH_EVENTS','firstParty':False,'sourceType':'OTHER','title':'Example Bedding begins commercial production at greenfield facility','excerpt':'Example Bedding started commercial operations at its new greenfield manufacturing facility.','publishedAt':recent}",
+      "synthesis={'identityDisposition':'PASS','identityConfidence':90,'identityReason':'Verified.','confidence':82,'freshness':'CURRENT','triggerEvidenceIndices':[1],'opportunitySummary':'Only an undated future facility plan was found.','signalType':'NEWS','missingEvidence':[],'rationale':'No dated operating event selected.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
+      "with_filing=r.normalize_synthesis_for_evidence(candidate,base+[filing],synthesis)",
+      "without_filing=r.normalize_synthesis_for_evidence(candidate,base,synthesis)",
+      "print(json.dumps({'withFiling':{'material':r.recent_material_trigger_indices(candidate,base+[filing]),'freshness':with_filing['freshness'],'triggers':with_filing['triggerEvidenceIndices'],'summary':with_filing['opportunitySummary']},'withoutFiling':{'material':r.recent_material_trigger_indices(candidate,base),'freshness':without_filing['freshness'],'triggers':without_filing['triggerEvidenceIndices'],'summary':without_filing['opportunitySummary']}}))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual({
+      withFiling: {
+        material: [2],
+        freshness: "FRESH",
+        triggers: [2],
+        summary:
+          "Example Bedding begins commercial production at greenfield facility: Example Bedding started commercial operations at its new greenfield manufacturing facility."
+      },
+      withoutFiling: {
+        material: [],
+        freshness: "CURRENT",
+        triggers: [1],
+        summary: "Only an undated future facility plan was found."
+      }
+    });
   });
 
   it("prefers Atlas Copco Compressors' distribution center over an affiliate expansion", async () => {
@@ -1436,7 +1520,7 @@ function completion() {
       synthesis: {
         provider: "OLLAMA",
         name: "qwen3.5:35b",
-        promptVersion: "hunter-company-research-v15",
+        promptVersion: "hunter-company-research-v16",
         structuredOutput: true,
         inputTokens: 2000,
         outputTokens: 700,
@@ -1445,7 +1529,7 @@ function completion() {
       scoring: {
         provider: "KIMI",
         name: "kimi-k2.6",
-        promptVersion: "hunter-company-research-v15",
+        promptVersion: "hunter-company-research-v16",
         structuredOutput: true,
         inputTokens: 1800,
         cachedInputTokens: 200,
@@ -1456,7 +1540,7 @@ function completion() {
       validation: {
         provider: "KIMI",
         name: "kimi-k3",
-        promptVersion: "hunter-company-research-v15",
+        promptVersion: "hunter-company-research-v16",
         structuredOutput: true,
         status: "SUCCESS",
         reasoningEffort: "LOW",

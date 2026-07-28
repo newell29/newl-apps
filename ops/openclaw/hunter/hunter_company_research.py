@@ -28,7 +28,7 @@ DEFAULT_QWEN_MODEL = "qwen3.5:35b"
 DEFAULT_KIMI_URL = "https://api.moonshot.ai/v1"
 DEFAULT_KIMI_MODEL = "kimi-k2.6"
 DEFAULT_KIMI_VALIDATOR_MODEL = "kimi-k3"
-PROMPT_VERSION = "hunter-company-research-v15"
+PROMPT_VERSION = "hunter-company-research-v16"
 ALLOWED_SERVICE_LINES = {"WAREHOUSING", "OCEAN_AIR", "TRUCKING"}
 ALLOWED_OPERATING_REGIONS = {"NORTH_AMERICA", "CHINA", "OTHER_FOREIGN", "UNKNOWN"}
 ALLOWED_SIGNAL_TYPES = {
@@ -82,6 +82,17 @@ REGIONAL_IDENTITY_MARKERS = {
 }
 PRODUCTION_LINE_EXPANSION_PATTERN = re.compile(
     r"\bnew(?:\s+[a-z][a-z-]*){0,3}\s+(?:production|manufacturing)\s+lines?\b",
+    re.IGNORECASE,
+)
+PRODUCTION_COMMENCEMENT_PATTERN = re.compile(
+    r"\b(?:"
+    r"(?:begins?|began|commences?|commenced|starts?|started)\s+"
+    r"(?:commercial\s+)?(?:production|operations?)|"
+    r"commencement\s+of\s+(?:(?:its|our|the)\s+)?"
+    r"(?:commercial\s+)?(?:production|operations?)|"
+    r"(?:commercial\s+)?(?:production|operations?)\s+"
+    r"(?:begins?|began|commences?|commenced|starts?|started)"
+    r")\b",
     re.IGNORECASE,
 )
 PUBLIC_DOMAIN_PATTERN = re.compile(
@@ -610,8 +621,9 @@ def build_research_queries(candidate: dict[str, Any]) -> list[dict[str, str]]:
         {
             "pass": "FRESH_EVENTS",
             "query": (
-                f'{subject} (expansion OR "new facility" OR warehouse OR distribution OR investment '
-                f'OR launch OR hiring) ({year - 1} OR {year})'
+                f'{subject} (expansion OR "new facility" OR "greenfield facility" '
+                f'OR "commercial production" OR "commercial operations" OR warehouse '
+                f'OR distribution OR investment OR launch OR hiring) ({year - 1} OR {year})'
             ),
         },
         {
@@ -639,8 +651,9 @@ def build_research_queries(candidate: dict[str, Any]) -> list[dict[str, str]]:
                 {
                     "pass": "FRESH_EVENTS",
                     "query": (
-                        f'site:{domain} (expansion OR "new facility" OR warehouse OR distribution '
-                        f"OR investment OR launch OR hiring) ({year - 1} OR {year})"
+                        f'site:{domain} (expansion OR "new facility" OR "greenfield facility" '
+                        f'OR "commercial production" OR "commercial operations" OR warehouse '
+                        f"OR distribution OR investment OR launch OR hiring) ({year - 1} OR {year})"
                     ),
                 },
             ]
@@ -1784,7 +1797,11 @@ def recent_material_trigger_indices(
         )
         if alias_rank is None:
             continue
-        if material_pattern.search(text) or PRODUCTION_LINE_EXPANSION_PATTERN.search(text):
+        if (
+            material_pattern.search(text)
+            or PRODUCTION_LINE_EXPANSION_PATTERN.search(text)
+            or PRODUCTION_COMMENCEMENT_PATTERN.search(text)
+        ):
             matches.append(
                 (
                     alias_rank,
