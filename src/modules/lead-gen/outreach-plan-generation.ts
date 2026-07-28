@@ -11,6 +11,7 @@ import {
   buildTradeMiningEvidenceWhere,
   summarizeTradeMiningEvidence
 } from "@/modules/lead-gen/queries";
+import { resolveConfiguredApolloSender } from "@/modules/lead-gen/apollo-sender-routing";
 import { scoreContact } from "@/modules/lead-gen/contact-scoring";
 import {
   evaluateHunterOutreachEligibility,
@@ -35,6 +36,7 @@ import {
   parseSearchProfileApolloSequenceMapping,
   resolveApolloSequenceMappings
 } from "@/modules/settings/apollo-sequence-mapping";
+import { parseApolloRepMapping } from "@/modules/settings/apollo-rep-mapping";
 import { DEFAULT_TRADEMINING_SCORING_SETTINGS } from "@/modules/settings/types";
 import { prisma } from "@/server/db";
 import {
@@ -90,6 +92,14 @@ export async function generateOutreachPlanForContact({
     }
     return { state: "sequence_missing" as const };
   }
+  if (!draftContext.senderIdentity) {
+    if (forceRegenerate) {
+      throw new Error(
+        "No active Apollo sender mailbox is mapped to this contact's assigned rep."
+      );
+    }
+    return { state: "sender_missing" as const };
+  }
 
   const evidenceLedger = buildOutreachEvidenceLedger(draftContext);
   if (evidenceLedger.length === 0) {
@@ -104,12 +114,16 @@ export async function generateOutreachPlanForContact({
   ) {
     return {
       state: "already_generated" as const,
-      planId: draftContext.existingOutreachPlan.id
+      planId: draftContext.existingOutreachPlan.id,
+      planStatus: draftContext.existingOutreachPlan.status,
+      qaStatus: draftContext.existingOutreachPlan.qaStatus
     };
   }
 
   const models = loadOutreachModels();
   const hunterDirective = draftContext.hunterEligibility.directive;
+  const allowCallTask =
+    hunterDirective.opportunityTier === "HOT_OPPORTUNITY";
   const strategyGeneration = await generateOutreachStrategy({
     model: models.strategy,
     companyName: draftContext.contact.company.name,
@@ -125,10 +139,15 @@ export async function generateOutreachPlanForContact({
     recommendedPersona: hunterDirective.recommendedPersona,
     recommendedCadence: hunterDirective.recommendedCadence,
     hunterDirective,
+    senderFirstName: draftContext.senderIdentity.firstName,
+    allowCallTask,
     evidence: evidenceLedger,
     reviewerFeedback
   });
-  const strategy = strategyGeneration.strategy;
+  const strategy = {
+    ...strategyGeneration.strategy,
+    senderRecommendation: draftContext.senderIdentity.firstName
+  };
   const sequenceGeneration = await generateCompleteOutreachSequence({
     model: models.drafting,
     companyName: draftContext.contact.company.name,
@@ -141,8 +160,9 @@ export async function generateOutreachPlanForContact({
     },
     selectedSequenceName: draftContext.selectedSequenceName,
     strategy,
+    senderFirstName: draftContext.senderIdentity.firstName,
     evidence: evidenceLedger,
-    allowCallTask: hunterDirective.opportunityTier === "HOT_OPPORTUNITY",
+    allowCallTask,
     reviewerFeedback
   });
   const sequence = sequenceGeneration.sequence;
@@ -150,7 +170,8 @@ export async function generateOutreachPlanForContact({
     evidence: evidenceLedger,
     strategy,
     sequence,
-    allowCallTask: hunterDirective.opportunityTier === "HOT_OPPORTUNITY"
+    senderFirstName: draftContext.senderIdentity.firstName,
+    allowCallTask
   });
   let modelQa;
   let qaUsage = null;
@@ -167,7 +188,9 @@ export async function generateOutreachPlanForContact({
       },
       strategy,
       sequence,
-      evidence: evidenceLedger
+      evidence: evidenceLedger,
+      senderFirstName: draftContext.senderIdentity.firstName,
+      allowCallTask
     });
     modelQa = qaReview.result;
     qaUsage = qaReview.usage;
@@ -204,6 +227,7 @@ export async function generateOutreachPlanForContact({
     contactTier: draftContext.contactTier,
     selectedSequenceName: draftContext.selectedSequenceName,
     selectedSequenceId: draftContext.selectedSequenceId,
+    senderIdentity: draftContext.senderIdentity,
     reviewerFeedback,
     hunterDirective,
     strategy,
@@ -390,7 +414,7 @@ export async function loadOutreachPlanContactContext({
     }
   ]));
 
-  const [contact, apolloCredential] = await Promise.all([
+  const [contact, apolloCredential, memberships] = await Promise.all([
     prisma.contact.findFirst({
       where: { id: contactId, tenantId },
       include: {
@@ -481,6 +505,18 @@ export async function loadOutreachPlanContactContext({
     prisma.integrationCredential.findFirst({
       where: { tenantId, provider: "APOLLO" },
       select: { publicConfig: true }
+    }),
+    prisma.membership.findMany({
+      where: { tenantId },
+      select: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            name: true
+          }
+        }
+      }
     })
   ]);
   if (!contact) return null;
@@ -529,6 +565,12 @@ export async function loadOutreachPlanContactContext({
   const tierMapping = effectiveMappings.find((entry) => entry.tier === scoring.tier) ?? null;
   const useHunterRecommendation =
     hunterEligibility.status === "ELIGIBLE" && !contact.sequenceManuallyOverridden;
+  const senderIdentity = resolveConfiguredApolloSender({
+    entries: parseApolloRepMapping(apolloCredential?.publicConfig),
+    users: memberships.map((membership) => membership.user),
+    assignedRep: contact.assignedRep,
+    companyId: contact.companyId
+  });
   return {
     contact,
     contactScore: scoring.score,
@@ -553,6 +595,7 @@ export async function loadOutreachPlanContactContext({
         ? recommendation.reason
         : contact.sequenceRecommendationReason ?? recommendation.reason,
     requiresAiDraft: hunterEligibility.status === "ELIGIBLE" || (tierMapping?.requiresAiDraft ?? false),
+    senderIdentity,
     hunterEligibility,
     existingDraft: contact.outreachDrafts[0] ?? null,
     existingOutreachPlan: contact.outreachPlans[0] ?? null,

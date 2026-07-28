@@ -68,6 +68,8 @@ export type OutreachStrategyGenerationContext = {
   recommendedPersona: string | null;
   recommendedCadence: string | null;
   hunterDirective: HunterOutreachDirective;
+  senderFirstName?: string;
+  allowCallTask?: boolean;
   evidence: OutreachEvidenceRecord[];
   reviewerFeedback: string | null;
 };
@@ -78,6 +80,7 @@ export type OutreachSequenceGenerationContext = {
   contact: OutreachStrategyGenerationContext["contact"];
   selectedSequenceName: string;
   strategy: OutreachStrategy;
+  senderFirstName?: string;
   evidence: OutreachEvidenceRecord[];
   allowCallTask: boolean;
   reviewerFeedback: string | null;
@@ -90,6 +93,8 @@ export type OutreachSequenceQaContext = {
   strategy: OutreachStrategy;
   sequence: GeneratedOutreachSequence;
   evidence: OutreachEvidenceRecord[];
+  senderFirstName?: string;
+  allowCallTask?: boolean;
 };
 
 export type HunterContactFitReviewContext = {
@@ -469,7 +474,7 @@ export async function generateOutreachStrategy(
     schemaName: "newl_outreach_strategy",
     schema: OUTREACH_STRATEGY_SCHEMA,
     system:
-      "You are Newl Group's B2B logistics outreach strategist. Build a concise, evidence-grounded plan for one specific buyer. Newl provides warehousing, ocean and air freight, port drayage, and trucking support. Hunter has already ranked the opportunity and selected the required service line. Use hunterDirective.requiredServiceLine exactly; do not reconsider or substitute another service line. Use the directive's opportunity type and rationale as the point of attack, refining copy only where the supplied evidence supports it. Apply reviewerFeedback to tone, emphasis, phrasing, and approach when supplied, but never let feedback override evidence, the saved service line, contact identity, safety rules, or QA requirements. Do not invent company events, shipment facts, incumbent relationships, locations, volumes, capabilities, or contact responsibilities. Every factual strategy claim must cite one or more supplied evidence IDs.",
+      "You are Newl Group's B2B logistics outreach strategist. Build a concise, evidence-grounded plan for one specific buyer. Newl provides warehousing, ocean and air freight, port drayage, and trucking support. An internal research system has already ranked the opportunity and selected the required service line. Use hunterDirective.requiredServiceLine exactly; do not reconsider or substitute another service line. Use the directive's opportunity type and rationale as the point of attack, refining copy only where the supplied evidence supports it. Treat evidence IDs and internal system names as private metadata that must never appear in outbound copy. Set senderRecommendation to senderFirstName. When allowCallTask is true, channelStrategy must include one separate human day-7 call task alongside the three emails; when false it must be email-only and must not mention a call. Apply reviewerFeedback to tone, emphasis, phrasing, and approach when supplied, but never let feedback override evidence, the saved service line, contact identity, safety rules, or QA requirements. Do not invent company events, shipment facts, incumbent relationships, locations, volumes, capabilities, or contact responsibilities. Every factual strategy claim must cite one or more supplied evidence IDs.",
     user: JSON.stringify({
       company: {
         name: context.companyName,
@@ -480,6 +485,8 @@ export async function generateOutreachStrategy(
       recommendedPersona: context.recommendedPersona,
       recommendedCadence: context.recommendedCadence,
       hunterDirective: context.hunterDirective,
+      senderFirstName: context.senderFirstName,
+      allowCallTask: context.allowCallTask,
       reviewerFeedback: context.reviewerFeedback,
       evidenceLedger: context.evidence
     })
@@ -507,7 +514,7 @@ export async function reviewHunterContactFit(
     schemaName: "newl_hunter_contact_fit",
     schema: HUNTER_CONTACT_FIT_SCHEMA,
     system:
-      "You are the conservative buyer-role gate for Newl Group logistics outreach. Review the complete supplied candidate cohort and decide which 1-3 people are best aligned to the specific saved Hunter opportunity. Use only exact company identity, title, department, seniority, geography, contactability, prior sequence/reply history, the required service line, opportunity rationale, and recommended persona. Prefer people located at or responsible for the opportunity geography when that is supported. PRIMARY means likely owns or materially influences the decision. SECONDARY means a credible adjacent stakeholder or route to the owner. REVIEW means the role is uncertain and must not receive automatic outreach. REJECT means clearly irrelevant, too junior, seller-side, unrelated, already replied, or inappropriate to re-contact. Treat UNRESPONSIVE and prior sequence activity as meaningful risk: prefer a fresh relevant stakeholder, but do not claim the person is permanently invalid solely because an old sequence finished. Never infer responsibilities merely from seniority. Do not promote sales, business-development, marketing, HR, finance, customer-service, or administrative roles unless the opportunity specifically makes that function relevant. Return exactly one review for every supplied contactId and do not invent IDs.",
+      "You are the conservative buyer-role gate for Newl Group logistics outreach. Review the complete supplied candidate cohort and decide which 1-3 people are best aligned to the specific saved opportunity. Use only exact company identity, title, department, seniority, geography, contactability, prior sequence/reply history, the required service line, opportunity rationale, and recommended persona. Prefer people located at or responsible for the opportunity geography when that is supported. A contact clearly based outside the opportunity geography without a global, North American, Americas, U.S., or otherwise relevant remit must be REVIEW or REJECT and must include the exact risk flag GEOGRAPHY_MISMATCH. PRIMARY means likely owns or materially influences the decision. SECONDARY means a credible adjacent stakeholder or route to the owner. REVIEW means the role is uncertain and must not receive automatic outreach. REJECT means clearly irrelevant, too junior, seller-side, unrelated, already replied, or inappropriate to re-contact. Treat UNRESPONSIVE and prior sequence activity as meaningful risk: prefer a fresh relevant stakeholder, but do not claim the person is permanently invalid solely because an old sequence finished. Never infer responsibilities merely from seniority. Generic digital, franchise, revenue, people, finance, clinical, sales, marketing, customer-service, or administrative operations roles are not physical logistics buyers. Do not promote those roles unless the opportunity specifically makes that function relevant. Return exactly one review for every supplied contactId and do not invent IDs.",
     user: JSON.stringify({
       company: context.company,
       opportunity: context.opportunity,
@@ -530,12 +537,13 @@ export async function generateCompleteOutreachSequence(
     schemaName: "newl_outreach_sequence",
     schema: OUTREACH_SEQUENCE_SCHEMA,
     system:
-      "You write concise, credible B2B logistics outreach for Newl Group. Return three coordinated EMAIL touches on days 0, 4, and 10. If allowCallTask is true, also return one CALL_TASK on day 7; otherwise return no call task. Never return a LinkedIn task. For the Hunter - Executive Referral cadence, write respectfully to a senior stakeholder and make it easy to refer Newl to the operating owner; do not presume the executive owns the work. For Hunter - Email Only, address the likely operational buyer directly. Each email must advance a different angle and aim for a low-friction reply. A call task must be an instruction for a person, never a claim that a call occurred. Use only the supplied evidence and strategy. Do not fabricate facts. Every step must cite at least one supplied evidence ID. Plain text only; no markdown, HTML, hype, fake familiarity, or generic AI phrasing.",
+      "You write concise, credible B2B logistics outreach for Newl Group. Return three coordinated EMAIL touches on days 0, 4, and 10. If allowCallTask is true, also return one CALL_TASK on day 7; otherwise return no call task. Never return a LinkedIn task. For the Hunter - Executive Referral cadence, write respectfully to a senior stakeholder and make it easy to refer Newl to the operating owner; do not presume the executive owns the work. For Hunter - Email Only, address the likely operational buyer directly. Each email must advance a different angle and aim for a low-friction reply. End every email body with senderFirstName on its own final line. Never use a sender placeholder, a generic company signature, the word Hunter, an evidence ID, or any internal system/research reference in the subject or body. Evidence IDs belong only in evidenceRefs. A call task must be an instruction for a person, never a claim that a call occurred. Use only the supplied evidence and strategy. Do not fabricate facts. Every step must cite at least one supplied evidence ID. Plain text only; no markdown, HTML, hype, fake familiarity, or generic AI phrasing.",
     user: JSON.stringify({
       companyName: context.companyName,
       contact: context.contact,
       selectedSequenceName: context.selectedSequenceName,
       allowCallTask: context.allowCallTask,
+      senderFirstName: context.senderFirstName,
       reviewerFeedback: context.reviewerFeedback,
       strategy: context.strategy,
       evidenceLedger: context.evidence
@@ -557,12 +565,14 @@ export async function reviewOutreachSequenceGrounding(
     schemaName: "newl_outreach_qa",
     schema: OUTREACH_QA_SCHEMA,
     system:
-      "You are the conservative QA gate for Newl Group outbound logistics messaging. Compare every factual claim with the saved evidence ledger. Fail unsupported events, shipment claims, quantities, geography, buyer responsibilities, incumbent-provider assumptions, Newl capabilities not listed in the strategy context, deceptive familiarity, or messages that imply a LinkedIn/call action already happened. Style preferences alone are warnings. Return passed=false whenever any ERROR exists.",
+      "You are the conservative QA gate for Newl Group outbound logistics messaging. Compare every factual claim with the saved evidence ledger. Fail unsupported events, shipment claims, quantities, geography, buyer responsibilities, incumbent-provider assumptions, Newl capabilities not listed in the strategy context, deceptive familiarity, or messages that imply a LinkedIn/call action already happened. Also fail any outbound use of the word Hunter, any internal evidence ID or research-system reference, any sender placeholder or generic Newl Group signature, any email that does not end with senderFirstName on its own final line, and any mismatch between allowCallTask and the sequence or channel strategy. Style preferences alone are warnings. Return passed=false whenever any ERROR exists.",
     user: JSON.stringify({
       companyName: context.companyName,
       contact: context.contact,
       strategy: context.strategy,
       sequence: context.sequence,
+      senderFirstName: context.senderFirstName,
+      allowCallTask: context.allowCallTask,
       evidenceLedger: context.evidence
     })
   });

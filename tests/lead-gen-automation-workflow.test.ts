@@ -61,6 +61,15 @@ describe("automated sales workflow", () => {
     expect(
       isOutreachQueueContact({
         contactStatus: ContactStatus.REVIEWING,
+        sequenceStatus: SequenceStatus.FINISHED,
+        replyStatus: ReplyStatus.NO_REPLY,
+        draft: null,
+        outreachPlan: { id: "current-hunter-plan" }
+      })
+    ).toBe(true);
+    expect(
+      isOutreachQueueContact({
+        contactStatus: ContactStatus.REVIEWING,
         sequenceStatus: SequenceStatus.NOT_STARTED,
         replyStatus: ReplyStatus.NO_REPLY,
         draft: null,
@@ -87,6 +96,11 @@ describe("automated sales workflow", () => {
 
     expect(isOutreachQueueContact({ ...base, contactStatus: ContactStatus.DO_NOT_CONTACT })).toBe(false);
     expect(isOutreachQueueContact({ ...base, sequenceStatus: SequenceStatus.BOUNCED })).toBe(false);
+    expect(isOutreachQueueContact({
+      ...base,
+      sequenceStatus: SequenceStatus.FINISHED,
+      contactStatus: ContactStatus.REVIEWING
+    })).toBe(false);
     expect(isOutreachQueueContact({ ...base, replyStatus: ReplyStatus.POSITIVE })).toBe(false);
     expect(isOutreachQueueContact({ ...base, replyStatus: ReplyStatus.MEETING_BOOKED })).toBe(false);
   });

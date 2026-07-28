@@ -583,7 +583,14 @@ export async function fetchApolloContactsForCompany(
     const recoveredDomain = savedAccountOrganization?.domain ?? domainForSearch;
     const recoveryChangesScope =
       Boolean(recoveredOrganizationId && recoveredOrganizationId !== organizationIdForSearch) ||
-      Boolean(!recoveredOrganizationId && recoveredDomain && recoveredDomain !== domainForSearch);
+      Boolean(
+        !recoveredOrganizationId &&
+        recoveredDomain &&
+        (
+          recoveredDomain !== domainForSearch ||
+          organizationIdForSearch === providedOrganizationId
+        )
+      );
 
     if (savedAccountOrganization && recoveryChangesScope) {
       trustedMatchedOrganization = savedAccountOrganization;

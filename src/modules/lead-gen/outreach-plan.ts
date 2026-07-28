@@ -6,12 +6,12 @@ import {
   OutreachQaStatus
 } from "@prisma/client";
 
-export const OUTREACH_PLAN_PROMPT_VERSION = "outreach-plan-v2.0";
+export const OUTREACH_PLAN_PROMPT_VERSION = "outreach-plan-v2.1";
 export const DEFAULT_OUTREACH_STRATEGY_MODEL = "gpt-5.6-terra";
 export const DEFAULT_OUTREACH_DRAFT_MODEL = "gpt-5.6-luna";
 export const DEFAULT_OUTREACH_QA_MODEL = "gpt-5.6-luna";
 export const DEFAULT_HUNTER_CONTACT_FIT_MODEL = "gpt-5.6-luna";
-export const HUNTER_CONTACT_FIT_PROMPT_VERSION = "hunter-contact-fit-v2.0";
+export const HUNTER_CONTACT_FIT_PROMPT_VERSION = "hunter-contact-fit-v2.1";
 
 export type HunterContactFitDisposition = "PRIMARY" | "SECONDARY" | "REVIEW" | "REJECT";
 
@@ -107,14 +107,25 @@ export function runDeterministicOutreachQa({
   evidence,
   strategy,
   sequence,
+  senderFirstName,
   allowCallTask = false
 }: {
   evidence: OutreachEvidenceRecord[];
   strategy: OutreachStrategy;
   sequence: GeneratedOutreachSequence;
+  senderFirstName?: string;
   allowCallTask?: boolean;
 }) {
   const issues: OutreachQaIssue[] = [];
+  const requiredSenderFirstName = senderFirstName?.trim() ?? "";
+  if (!requiredSenderFirstName) {
+    issues.push({
+      code: "SENDER_IDENTITY_MISSING",
+      severity: "ERROR",
+      message: "A routed Apollo mailbox first name is required before outbound QA.",
+      stepNumber: null
+    });
+  }
   const evidenceIds = new Set(evidence.map((record) => record.id));
   const evidenceText = evidence
     .flatMap((record) => [record.title, record.summary, ...record.facts])
@@ -122,6 +133,26 @@ export function runDeterministicOutreachQa({
     .toLowerCase();
 
   const expectedStepCount = allowCallTask ? 4 : 3;
+  const channelStrategyText = strategy.channelStrategy.join(" ");
+  const strategyMentionsCall = /\bcall\b/i.test(channelStrategyText);
+  if (allowCallTask !== strategyMentionsCall) {
+    issues.push({
+      code: "CHANNEL_STRATEGY_MISMATCH",
+      severity: "ERROR",
+      message: allowCallTask
+        ? "A Hot opportunity strategy must include the separate human call task."
+        : "An email-only opportunity strategy must not include a call.",
+      stepNumber: null
+    });
+  }
+  if (/\blinkedin\b/i.test(channelStrategyText)) {
+    issues.push({
+      code: "LINKEDIN_STRATEGY",
+      severity: "ERROR",
+      message: "Hunter-managed outreach does not include LinkedIn tasks.",
+      stepNumber: null
+    });
+  }
   if (sequence.steps.length !== expectedStepCount) {
     issues.push({
       code: "STEP_COUNT",
@@ -205,6 +236,21 @@ export function runDeterministicOutreachQa({
           stepNumber: step.stepNumber
         });
       }
+      const signature = step.body
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .at(-1);
+      if (!requiredSenderFirstName || signature !== requiredSenderFirstName) {
+        issues.push({
+          code: "SENDER_SIGNATURE",
+          severity: "ERROR",
+          message: requiredSenderFirstName
+            ? `Every email must end with ${requiredSenderFirstName} on its own final line.`
+            : "Every email must end with the routed mailbox first name on its own final line.",
+          stepNumber: step.stepNumber
+        });
+      }
     } else {
       if (step.subject) {
         issues.push({
@@ -222,6 +268,42 @@ export function runDeterministicOutreachQa({
           stepNumber: step.stepNumber
         });
       }
+    }
+
+    if (
+      /\bhunter\b/i.test(combinedCopy) ||
+      /\b(?:hunter-research|hunter-decision|trademining:summary|company:identity)\b/i.test(
+        combinedCopy
+      )
+    ) {
+      issues.push({
+        code: "INTERNAL_REFERENCE",
+        severity: "ERROR",
+        message: "Outbound copy must not reference Hunter, internal research, or evidence IDs.",
+        stepNumber: step.stepNumber
+      });
+    }
+    if (
+      /<\s*sender(?:\s+name)?\s*>|\[\s*sender(?:\s+name)?\s*\]/i.test(
+        combinedCopy
+      ) ||
+      (
+        step.channel === OutreachChannel.EMAIL &&
+        /\bnewl group\b/i.test(
+          step.body
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .at(-1) ?? ""
+        )
+      )
+    ) {
+      issues.push({
+        code: "SENDER_PLACEHOLDER",
+        severity: "ERROR",
+        message: "Replace sender placeholders or a generic company signature with the routed mailbox first name.",
+        stepNumber: step.stepNumber
+      });
     }
 
     for (const phrase of BANNED_PHRASES) {

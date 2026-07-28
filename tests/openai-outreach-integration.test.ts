@@ -84,6 +84,8 @@ describe("OpenAI structured outreach workflow", () => {
       recommendedPersona: "Supply-chain leader",
       recommendedCadence: "Warehouse Capacity Outreach",
       hunterDirective: hunterDirective(),
+      senderFirstName: "Alex",
+      allowCallTask: true,
       evidence,
       reviewerFeedback: "Use a more direct opening."
     });
@@ -93,6 +95,7 @@ describe("OpenAI structured outreach workflow", () => {
       contact,
       selectedSequenceName: "Warehouse Capacity Outreach",
       strategy: strategyGeneration.strategy,
+      senderFirstName: "Alex",
       evidence,
       allowCallTask: true,
       reviewerFeedback: "Use a more direct opening."
@@ -103,7 +106,9 @@ describe("OpenAI structured outreach workflow", () => {
       contact,
       strategy: strategyGeneration.strategy,
       sequence: sequenceGeneration.sequence,
-      evidence
+      evidence,
+      senderFirstName: "Alex",
+      allowCallTask: true
     });
 
     expect(strategyGeneration.strategy.serviceLine).toBe(HunterServiceLine.WAREHOUSING);
@@ -165,6 +170,8 @@ describe("OpenAI structured outreach workflow", () => {
         recommendedPersona: "Supply-chain leader",
         recommendedCadence: "Warehouse Capacity Outreach",
         hunterDirective: hunterDirective(),
+        senderFirstName: "Alex",
+        allowCallTask: true,
         evidence: [{
           id: "company:identity",
           kind: "COMPANY",
@@ -277,7 +284,7 @@ function emailStep(stepNumber: number, delayDays: number) {
     delayDays,
     subject: "Houston inbound capacity",
     body:
-      "Hi Jordan,\n\nYour team has recent inbound activity through Houston. Would a quick comparison of warehousing options be useful?",
+      "Hi Jordan,\n\nYour team has recent inbound activity through Houston. Would a quick comparison of warehousing options be useful?\n\nAlex",
     angle: "Evidence-led question",
     evidenceRefs: ["company:identity", "trademining:summary"]
   };

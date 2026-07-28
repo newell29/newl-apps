@@ -141,7 +141,13 @@ export function summarizeHunterOutreachHandoffRun(
         result.contactsRanked ?? result.contactsImported
       ),
       contactsEvaluated: readCount(result.contactsImported),
-      plansCreated: readCount(result.plansGenerated),
+      plansCreated: readCount(
+        result.plansCreated ?? result.plansGenerated
+      ),
+      existingPlansFound: readCount(result.existingPlansFound),
+      actionablePlans: readCount(
+        result.actionablePlans ?? result.plansGenerated
+      ),
       qaFailedPlans: readCount(result.qaFailedPlans),
       message: readText(result.message, "No result detail was recorded.")
     }));
@@ -168,6 +174,14 @@ export function summarizeHunterOutreachHandoffRun(
     ),
     plansCreated: results.reduce(
       (sum, result) => sum + result.plansCreated,
+      0
+    ),
+    existingPlansFound: results.reduce(
+      (sum, result) => sum + result.existingPlansFound,
+      0
+    ),
+    actionablePlans: results.reduce(
+      (sum, result) => sum + result.actionablePlans,
       0
     ),
     qaFailedPlans: results.reduce(

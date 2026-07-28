@@ -218,6 +218,14 @@ describe("Hunter assisted outreach handoff", () => {
       title: "Warehouse Associate",
       department: "Operations"
     })).toBe(false);
+    expect(isStrongHunterBuyerRole({
+      title: "Digital Operations Manager",
+      department: "Ecommerce"
+    })).toBe(false);
+    expect(isStrongHunterBuyerRole({
+      title: "Franchise Operations Manager",
+      department: "Operations"
+    })).toBe(false);
 
     expect(shouldAdvanceHunterContactReview({
       contactId: "contact-1",
@@ -249,6 +257,22 @@ describe("Hunter assisted outreach handoff", () => {
       contactStatus: ContactStatus.REVIEWING,
       sequenceStatus: SequenceStatus.FINISHED,
       replyStatus: ReplyStatus.REPLIED
+    })).toBe(false);
+
+    expect(shouldAdvanceHunterContactReview({
+      contactId: "contact-3",
+      disposition: "PRIMARY",
+      confidence: 95,
+      responsibilityHypothesis: "Role may own operations.",
+      rationale: "Title is senior.",
+      recommendedApproach: "Ask about the expansion.",
+      riskFlags: ["GEOGRAPHY_MISMATCH"]
+    }, {
+      title: "Franchise Operations Manager",
+      department: "Operations",
+      contactStatus: ContactStatus.REVIEWING,
+      sequenceStatus: SequenceStatus.NOT_STARTED,
+      replyStatus: ReplyStatus.NO_REPLY
     })).toBe(false);
   });
 

@@ -224,9 +224,9 @@ Regression coverage must prove:
 3. machine routes ignore caller-supplied tenant identifiers and use ingestion authentication;
 4. each request processes at most one company and persisted leases, results, attempts, and retry dates survive worker restart;
 5. an unresolved latest Apollo company match blocks repeat discovery and remains review-required;
-6. saved contacts, a 100-result organization-scoped employee search, and an always-run multi-title search are merged and deduplicated before ranking; Apollo account IDs are resolved to the nested global organization ID before employee search (with saved-contact recovery as a fallback), one partial account result cannot be treated as complete, and sibling/parent organizations remain excluded;
+6. saved contacts, a 100-result organization-scoped employee search, and an always-run multi-title search are merged and deduplicated before ranking; Apollo account IDs are resolved to the nested global organization ID before employee search (with saved-contact recovery as a fallback), an exact saved account with no nested organization ID retries by its trusted domain, one partial account result cannot be treated as complete, and sibling/parent organizations remain excluded;
 7. deterministic ranking excludes seller-side and unidentifiable contacts, gives the buyer-role model the best 10 candidates, and caps final selection at `maxContactsPerCompany`;
-8. buyer-role review uses strict structured output and returns the exact requested contact IDs; model-qualified contacts rank first, while an explicit manager-or-higher logistics/operations buyer remains eligible for an unapproved human-review plan;
+8. buyer-role review uses strict structured output and returns the exact requested contact IDs; model-qualified contacts rank first, while an explicit manager-or-higher physical logistics or facility-operations buyer remains eligible for an unapproved human-review plan; digital/franchise/general back-office operations and explicit geography mismatches do not receive that fallback;
 9. the manual current-opportunity handoff requires completed company research, creates a deterministic plan scoped
    to the current researched Hot/Qualified cohort, and queues the same bounded Assisted-mode job without rerunning
    research;
@@ -240,7 +240,7 @@ Regression coverage must prove:
     requiring review, positive replies, and meetings remain company-level stops; contact-level do-not-contact,
     reply, and bounce safety is enforced on each selected contact.
 16. Automation Settings reports the latest handoff's queued companies, processed companies, Apollo people found,
-    deterministic buyer-role candidates, evaluated contacts, created plans, QA failures, and per-company terminal
+    deterministic buyer-role candidates, evaluated contacts, newly created plans, already-current plans, total actionable plans, QA failures, and per-company terminal
     reason as separate values.
 17. same-domain regional brand shortening such as `SALICE AMERICA INC` to Apollo organization `Salice` is accepted,
     while different-domain parents and sibling companies still fail closed.
@@ -255,17 +255,20 @@ Regression coverage must prove:
 Regression coverage must prove:
 
 1. evidence fingerprints are stable regardless of input ordering;
-2. a valid sequence contains three emails, one LinkedIn task, one call task, contiguous steps, and increasing delays;
+2. a valid sequence contains three emails and, only for a Hot opportunity, one separate call task; it contains no
+   LinkedIn task, uses contiguous steps, and has increasing delays;
 3. missing/unknown evidence references, generic banned phrasing, unsupported URLs, and unsupported quantified claims
    fail deterministic QA;
 4. any blocking model-critic issue fails the combined gate even when deterministic checks pass;
 5. OpenAI strategy, sequence, and QA calls use the Responses API with strict JSON Schema;
 6. generated drafts are not auto-approved, plan approval requires QA plus contact/company safety, and a current
    unapproved plan blocks Apollo;
-7. editing generated copy invalidates QA and approval; and
-8. the migration is additive and preserves every existing lead-generation record;
-9. legacy/unassessed, Watchlist, Blocked, stale, unselected, or inconsistent Hunter handoffs cannot generate or push;
-10. a Hot opportunity requires K3 confirmation while a Qualified current account may retain `NOT_SELECTED`;
-11. a current selected handoff exposes Hunter's saved service line, point of attack, score, confidence, and provenance;
-12. the strategy request includes that directive and rejects any model response that changes the service line; and
-13. the evidence ledger preserves individual Hunter research URLs and excerpts rather than only flattened JSON text.
+7. editing generated copy invalidates QA and approval;
+8. every email ends with the routed Apollo mailbox first name, while sender placeholders, generic company signatures,
+   Hunter/internal references, and evidence IDs fail deterministic QA; and
+9. the migration is additive and preserves every existing lead-generation record;
+10. legacy/unassessed, Watchlist, Blocked, stale, unselected, or inconsistent Hunter handoffs cannot generate or push;
+11. a Hot opportunity requires K3 confirmation while a Qualified current account may retain `NOT_SELECTED`;
+12. a current selected handoff exposes Hunter's saved service line, point of attack, score, confidence, and provenance;
+13. the strategy request includes that directive and rejects any model response that changes the service line; and
+14. the evidence ledger preserves individual Hunter research URLs and excerpts rather than only flattened JSON text.

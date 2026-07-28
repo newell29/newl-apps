@@ -79,9 +79,13 @@ export function isOutreachQueueContact(contact: {
     contact.replyStatus === ReplyStatus.POSITIVE ||
     contact.replyStatus === ReplyStatus.MEETING_BOOKED ||
     contact.replyStatus === ReplyStatus.NEGATIVE ||
-    contact.sequenceStatus === SequenceStatus.BOUNCED ||
-    contact.sequenceStatus === SequenceStatus.FINISHED
+    contact.sequenceStatus === SequenceStatus.BOUNCED
   ) {
+    return false;
+  }
+
+  const hasCurrentOutreachWork = Boolean(contact.draft) || Boolean(contact.outreachPlan);
+  if (contact.sequenceStatus === SequenceStatus.FINISHED && !hasCurrentOutreachWork) {
     return false;
   }
 
@@ -91,7 +95,6 @@ export function isOutreachQueueContact(contact: {
     contact.sequenceStatus === SequenceStatus.ENROLLED ||
     contact.sequenceStatus === SequenceStatus.PAUSED ||
     contact.sequenceStatus === SequenceStatus.REPLIED ||
-    Boolean(contact.draft) ||
-    Boolean(contact.outreachPlan)
+    hasCurrentOutreachWork
   );
 }
