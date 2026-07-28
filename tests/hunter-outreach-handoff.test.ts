@@ -2,6 +2,7 @@ import { ContactStatus, ReplyStatus, SequenceStatus } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
+  hasUsableHunterEmail,
   isActionableHunterPlanState,
   isClearlyIndividualContributor,
   isContactEligibleForFreshOutreach,
@@ -97,7 +98,7 @@ describe("Hunter assisted outreach handoff", () => {
     expect(ranked).toEqual([]);
   });
 
-  it("uses People Search availability without treating the person as an enriched contact", () => {
+  it("does not select or persist a People Search result without an actual email address", () => {
     const ranked = rankHunterContacts([
       contact({
         recordSource: "PEOPLE_SEARCH",
@@ -114,13 +115,29 @@ describe("Hunter assisted outreach handoff", () => {
       })
     ], "Director of Operations");
 
-    expect(ranked).toEqual([
-      expect.objectContaining({
-        recordSource: "PEOPLE_SEARCH",
-        apolloContactId: null,
-        apolloPersonId: "apollo-person-operations",
+    expect(ranked).toEqual([]);
+  });
+
+  it("requires a concrete, usable email instead of Apollo availability metadata", () => {
+    expect(hasUsableHunterEmail({ email: "buyer@example.com" })).toBe(true);
+    expect(hasUsableHunterEmail({ email: " buyer@example.com " })).toBe(true);
+    expect(hasUsableHunterEmail({ email: null })).toBe(false);
+    expect(hasUsableHunterEmail({ email: "available-but-hidden" })).toBe(false);
+    expect(rankHunterContacts([
+      contact({
+        apolloPersonId: "person-with-hidden-email",
+        title: "Director of Supply Chain",
+        email: null,
+        hasEmailAvailable: true
+      }),
+      contact({
+        apolloPersonId: "person-with-email",
+        title: "Director of Supply Chain",
+        email: "director@example.com",
         hasEmailAvailable: true
       })
+    ], "Director of Supply Chain").map((item) => item.apolloPersonId)).toEqual([
+      "person-with-email"
     ]);
   });
 

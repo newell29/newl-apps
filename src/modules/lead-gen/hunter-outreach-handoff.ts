@@ -1149,7 +1149,7 @@ async function reviewAndPersistHunterContactFit({
           title: contact.title,
           department: contact.department,
           seniority: contact.seniority,
-          hasEmail: Boolean(contact.email) || apolloContext.hasEmailAvailable,
+          hasEmail: hasUsableHunterEmail(contact),
           hasPhone: Boolean(contact.phone) || apolloContext.hasPhoneAvailable,
           hasLinkedin:
             Boolean(contact.linkedinUrl) ||
@@ -1588,6 +1588,7 @@ export function rankHunterContacts(
     }))
     .filter(({ contact, score }) =>
       score >= 20 &&
+      hasUsableHunterEmail(contact) &&
       Boolean(contact.apolloContactId || contact.apolloPersonId) &&
       !/\b(sales|business development|customer service|account executive)\b/i.test(
         `${contact.title ?? ""} ${contact.department ?? ""}`
@@ -1604,7 +1605,7 @@ function contactFitScore(
 ) {
   const text = `${contact.title ?? ""} ${contact.department ?? ""}`.toLowerCase();
   const geography = opportunityGeography?.toLowerCase() ?? "";
-  let score = contact.hasEmailAvailable ? 30 : 0;
+  let score = hasUsableHunterEmail(contact) ? 30 : 0;
   if (contact.hasLinkedinAvailable) score += 10;
   if (/\b(vp|vice president|head|director|chief|president|owner)\b/i.test(text)) score += 25;
   else if (/\bmanager\b/i.test(text)) score += 12;
@@ -1636,6 +1637,11 @@ function contactFitScore(
   }
   if (isApolloUnresponsive(contact.rawPayload)) score -= 15;
   return score;
+}
+
+export function hasUsableHunterEmail(contact: { email: string | null }) {
+  const email = contact.email?.trim() ?? "";
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
 function isApolloUnresponsive(rawPayload: Record<string, unknown>) {
