@@ -45,7 +45,7 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 
 ## Outreach Plan generation or QA fails
 
-- Missing OpenAI configuration, an unranked contact, missing selected cadence, no saved evidence, invalid structured
+- Missing OpenAI configuration, an unranked contact, missing selected cadence, missing active Apollo sender routing, no saved evidence, invalid structured
   model output, or strategy/drafting transport failure stops generation and creates no partial active plan.
 - Plan and sequence-step persistence uses two ordered writes inside the same transaction. Prisma nested relation input
   cannot safely mix the plan's tenant foreign-key scalars with nested tenant-scoped step creation; a failure rolls back
@@ -54,7 +54,8 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
   cannot block the runtime toggle or silently rewrite scoring configuration.
 - If drafting succeeds but the model critic is unavailable, Newl Apps saves the version as `QA_FAILED` with a
   `MODEL_QA_UNAVAILABLE` error. It cannot be approved or pushed.
-- Unknown evidence citations, unsupported quantified claims, unsupported URLs, invalid sequence structure, or semantic
+- Unknown evidence citations, unsupported quantified claims, unsupported URLs, invalid sequence structure, sender
+  placeholders, generic company signatures, Hunter/internal references, an incorrect mailbox-first-name signature, or semantic
   grounding errors fail closed and remain visible on the plan.
 - Editing the first email changes the plan to `QA_FAILED`, clears approval, and blocks Apollo. Regenerate to produce a
   new immutable version and rerun every check.
@@ -299,7 +300,8 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   already-saved accounts from that endpoint. When a mapped account produces at most one employee and Organization
   Search cannot resolve it, Hunter uses Apollo's zero-credit saved-account search to require the exact account ID and
   legal-company identity, reads its nested canonical organization ID, and repeats both employee requests against
-  that ID alone. The expected domain validates the returned people instead of being combined with
+  that ID alone. When Apollo exposes no nested ID, the exact saved account's trusted domain is used for the retry
+  instead of repeating the stale account ID. The expected domain validates the returned people instead of being combined with
   `organization_ids`, which could over-constrain a legal subsidiary mapped to an operating parent/brand. Saved-contact
   and People Search organization metadata remain a fallback for older records. Hunter filters every candidate back
   to the resolved organization and lets the existing direct-match transaction replace the stale identifier.
@@ -308,7 +310,8 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   results alone cannot authorize a match.
 - Regression coverage: `tests/apollo-integration.test.ts` covers an Atlas Copco account omitted from Organization
   Search but present in the saved-account directory, domainless Stabilus and Salice account IDs, a Silfab legal-entity
-  account resolving through its explicit Apollo parent relationship, and an unrelated Hyosung parent-company result
+  account resolving through its explicit Apollo parent relationship, a Dansons saved account with only a trusted
+  domain, and an unrelated Hyosung parent-company result
   failing closed.
 
 ### Apollo People Search returns employees but Hunter still keeps the same saved contacts
@@ -335,7 +338,7 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - “Contacts evaluated” is the bounded employee cohort submitted to buyer-role review. Only selected contacts with a
   generated Outreach Plan become actionable rows in Outreach Queue.
 - The latest contact-discovery panel on Automation Settings records queued and processed companies, evaluated
-  contacts, generated plans, QA failures, and each company's terminal reason. Use that panel instead of inferring a
+  contacts, newly generated plans, already-current plans, total actionable plans, QA failures, and each company's terminal reason. Use that panel instead of inferring a
   run result from unrelated counters.
 - A historical `Lead` row from the retired workflow must not suppress a researched account. Current-customer,
   blocked-company, do-not-contact, reply, and prior-sequence evidence still prevent duplicate outreach.

@@ -45,7 +45,7 @@ const strategy: OutreachStrategy = {
   valueProposition: "Newl can review warehousing and freight handoff options.",
   likelyObjection: "The company may already have adequate capacity.",
   callToAction: "Ask whether a short capacity discussion is useful.",
-  channelStrategy: ["Lead with evidence", "Use manual LinkedIn and call tasks", "Close with a low-friction question"],
+  channelStrategy: ["Lead with evidence", "Use one manual call task", "Close with a low-friction question"],
   senderRecommendation: "Operations-led Newl sender",
   confidence: 82,
   evidenceRefs: ["company:identity", "trademining:summary"]
@@ -60,7 +60,7 @@ const sequence: GeneratedOutreachSequence = {
       delayDays: 0,
       subject: "Houston inbound capacity",
       body:
-        "Hi Jordan,\n\nYour team has recent inbound activity through Houston. Would it be useful to compare overflow warehousing options near the lane?",
+        "Hi Jordan,\n\nYour team has recent inbound activity through Houston. Would it be useful to compare overflow warehousing options near the lane?\n\nAlex",
       angle: "Recent inbound activity",
       evidenceRefs: ["company:identity", "trademining:summary"]
     },
@@ -70,7 +70,7 @@ const sequence: GeneratedOutreachSequence = {
       delayDays: 4,
       subject: "Warehousing around the Houston lane",
       body:
-        "Hi Jordan,\n\nNewl can review warehousing and freight handoffs around Houston when inbound inventory needs flexibility. Is that relevant to your planning?",
+        "Hi Jordan,\n\nNewl can review warehousing and freight handoffs around Houston when inbound inventory needs flexibility. Is that relevant to your planning?\n\nAlex",
       angle: "Operational flexibility",
       evidenceRefs: ["company:identity", "trademining:summary"]
     },
@@ -90,7 +90,7 @@ const sequence: GeneratedOutreachSequence = {
       delayDays: 10,
       subject: "Worth comparing capacity?",
       body:
-        "Hi Jordan,\n\nIf warehousing around the Houston lane is already covered, I can close the loop. If flexibility is useful, would a brief comparison help?",
+        "Hi Jordan,\n\nIf warehousing around the Houston lane is already covered, I can close the loop. If flexibility is useful, would a brief comparison help?\n\nAlex",
       angle: "Low-friction close",
       evidenceRefs: ["company:identity", "trademining:summary"]
     }
@@ -99,7 +99,13 @@ const sequence: GeneratedOutreachSequence = {
 
 describe("outreach plan grounding", () => {
   it("passes a complete hot-opportunity email sequence with one call task", () => {
-    const result = runDeterministicOutreachQa({ evidence, strategy, sequence, allowCallTask: true });
+    const result = runDeterministicOutreachQa({
+      evidence,
+      strategy,
+      sequence,
+      senderFirstName: "Alex",
+      allowCallTask: true
+    });
 
     expect(result.passed).toBe(true);
     expect(result.issues).toEqual([]);
@@ -109,6 +115,7 @@ describe("outreach plan grounding", () => {
     const result = runDeterministicOutreachQa({
       evidence,
       strategy,
+      senderFirstName: "Alex",
       allowCallTask: true,
       sequence: {
         ...sequence,
@@ -132,7 +139,13 @@ describe("outreach plan grounding", () => {
   });
 
   it("fails closed when the model critic returns a blocking issue", () => {
-    const deterministic = runDeterministicOutreachQa({ evidence, strategy, sequence, allowCallTask: true });
+    const deterministic = runDeterministicOutreachQa({
+      evidence,
+      strategy,
+      sequence,
+      senderFirstName: "Alex",
+      allowCallTask: true
+    });
     const result = mergeOutreachQaResults(deterministic, {
       passed: false,
       issues: [
@@ -147,6 +160,36 @@ describe("outreach plan grounding", () => {
 
     expect(result.passed).toBe(false);
     expect(result.issues[0]?.code).toBe("BUYER_RESPONSIBILITY_UNSUPPORTED");
+  });
+
+  it("blocks internal references and incorrect sender signatures", () => {
+    const result = runDeterministicOutreachQa({
+      evidence,
+      strategy,
+      senderFirstName: "Alex",
+      allowCallTask: true,
+      sequence: {
+        ...sequence,
+        steps: sequence.steps.map((step) =>
+          step.stepNumber === 1
+            ? {
+                ...step,
+                body:
+                  "Hi Jordan,\n\nHunter research shows recent activity [hunter-research:signal-1:1].\n\nNewl Group"
+              }
+            : step
+        )
+      }
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.issues.map((issue) => issue.code)).toEqual(
+      expect.arrayContaining([
+        "INTERNAL_REFERENCE",
+        "SENDER_PLACEHOLDER",
+        "SENDER_SIGNATURE"
+      ])
+    );
   });
 
   it("creates a stable evidence fingerprint independent of input ordering", () => {

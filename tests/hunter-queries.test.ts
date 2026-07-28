@@ -26,6 +26,9 @@ describe("Hunter contact-discovery run summary", () => {
             contactsRanked: 10,
             contactsImported: 10,
             plansGenerated: 2,
+            plansCreated: 1,
+            existingPlansFound: 1,
+            actionablePlans: 2,
             qaFailedPlans: 1,
             message: "Two plans created."
           },
@@ -36,6 +39,9 @@ describe("Hunter contact-discovery run summary", () => {
             contactsRanked: 9,
             contactsImported: 9,
             plansGenerated: 0,
+            plansCreated: 0,
+            existingPlansFound: 0,
+            actionablePlans: 0,
             qaFailedPlans: 0,
             message: "No contact cleared buyer-role review."
           }
@@ -49,7 +55,9 @@ describe("Hunter contact-discovery run summary", () => {
       apolloContactsFound: 159,
       contactsRanked: 19,
       contactsEvaluated: 19,
-      plansCreated: 2,
+      plansCreated: 1,
+      existingPlansFound: 1,
+      actionablePlans: 2,
       qaFailedPlans: 1
     });
     expect(summary?.results).toEqual([
@@ -58,12 +66,16 @@ describe("Hunter contact-discovery run summary", () => {
         apolloContactsFound: 100,
         contactsRanked: 10,
         contactsEvaluated: 10,
-        plansCreated: 2
+        plansCreated: 1,
+        existingPlansFound: 1,
+        actionablePlans: 2
       }),
       expect.objectContaining({
         companyName: "Company Two",
         contactsEvaluated: 9,
-        plansCreated: 0
+        plansCreated: 0,
+        existingPlansFound: 0,
+        actionablePlans: 0
       })
     ]);
   });
@@ -84,6 +96,8 @@ describe("Hunter contact-discovery run summary", () => {
       companiesProcessed: 0,
       contactsEvaluated: 0,
       plansCreated: 0,
+      existingPlansFound: 0,
+      actionablePlans: 0,
       results: []
     });
   });

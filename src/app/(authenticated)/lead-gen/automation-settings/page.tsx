@@ -203,13 +203,14 @@ function LatestContactDiscoveryRun({
           {formatEnum(run.status)}
         </span>
       </div>
-      <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-6">
+      <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-7">
         <RunMetric label="Companies queued" value={run.companiesQueued} />
         <RunMetric label="Companies processed" value={run.companiesProcessed} />
         <RunMetric label="Apollo people found" value={run.apolloContactsFound} />
         <RunMetric label="Buyer-role candidates" value={run.contactsRanked} />
         <RunMetric label="Contacts evaluated" value={run.contactsEvaluated} />
-        <RunMetric label="Outreach plans created" value={run.plansCreated} />
+        <RunMetric label="New plans created" value={run.plansCreated} />
+        <RunMetric label="Actionable plans" value={run.actionablePlans} />
       </div>
       {run.errorMessage ? (
         <p className="border-t border-danger/20 bg-danger/5 px-5 py-3 text-sm text-danger">
@@ -235,8 +236,9 @@ function LatestContactDiscoveryRun({
                 {result.apolloContactsFound} found in Apollo ·{" "}
                 {result.contactsRanked} buyer-role candidate
                 {result.contactsRanked === 1 ? "" : "s"} ·{" "}
-                {result.contactsEvaluated} evaluated · {result.plansCreated} plan
-                {result.plansCreated === 1 ? "" : "s"} created
+                {result.contactsEvaluated} evaluated · {result.actionablePlans} actionable plan
+                {result.actionablePlans === 1 ? "" : "s"} ({result.plansCreated} new,{" "}
+                {result.existingPlansFound} already current)
                 {result.qaFailedPlans > 0
                   ? ` · ${result.qaFailedPlans} failed QA`
                   : ""}

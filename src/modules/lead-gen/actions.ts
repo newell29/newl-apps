@@ -5192,10 +5192,11 @@ async function autoGenerateAiDraftsForContacts({
 
   for (const contactId of [...new Set(contactIds)]) {
     try {
-      await generateAiDraftForContact({
+      await generateSharedOutreachPlanForContact({
         tenantId,
         contactId,
-        forceRegenerate: false
+        forceRegenerate: false,
+        generateWhenNotRequired: true
       });
     } catch {
       // Keep Apollo enrichment resilient; contacts can still be reviewed and
@@ -5204,6 +5205,9 @@ async function autoGenerateAiDraftsForContacts({
   }
 }
 
+// Retained temporarily for legacy draft payload compatibility; all callers use
+// the shared Outreach Plan generator above.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function generateAiDraftForContact({
   tenantId,
   contactId,

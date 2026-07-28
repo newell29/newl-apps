@@ -101,7 +101,7 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 
 - Daily Opportunities is the researched decision surface; Found Companies remains a bounded source-data review screen.
 - Outreach Queue includes an active contact when it is approved, ready/enrolled/paused/replied in a sequence, or has a Newl outreach draft.
-- Outreach Queue excludes rejected and do-not-contact records, bounced or finished sequences, and positive, meeting-booked, or negative reply outcomes.
+- Outreach Queue excludes rejected and do-not-contact records, bounced sequences, finished sequences without current outreach work, and positive, meeting-booked, or negative reply outcomes. A current non-archived Outreach Plan keeps a no-reply contact visible even when an older cadence is finished.
 - A legacy `Lead` row by itself does not remove a researched company from Hunter planning. Hunter blocks a company
   for current-customer, do-not-prospect, rejected/disqualified, do-not-contact, reply, or prior-sequence evidence.
   This preserves duplicate-outreach protection without letting the retired pipeline workflow suppress otherwise
@@ -139,7 +139,7 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
   activity starts.
 - A Newl Apps rep may route through multiple active Apollo mailboxes owned by the same Apollo user. Mailbox allocation
   is deterministic by company and weighted by admin configuration, so contacts at one company do not receive outreach
-  from different Newl identities. Newly synced secondary mailboxes remain inactive with zero weight until an admin
+  from different Newl identities. The routed mailbox first name is also the required final signature on every generated email; placeholders, generic company signatures, Hunter/internal references, and evidence IDs fail deterministic QA. Newly synced secondary mailboxes remain inactive with zero weight until an admin
   explicitly enables them.
 - Editing the first email after QA invalidates the plan and Apollo readiness. Regeneration creates a new plan version,
   archives the previous active version, and reruns strategy, drafting, and QA.

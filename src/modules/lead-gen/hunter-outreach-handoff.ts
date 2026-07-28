@@ -74,6 +74,9 @@ type HandoffResult = {
   apolloContactsFound: number;
   contactsRanked: number;
   contactsImported: number;
+  plansCreated: number;
+  existingPlansFound: number;
+  actionablePlans: number;
   plansGenerated: number;
   qaFailedPlans: number;
   message: string;
@@ -468,6 +471,9 @@ export async function processNextHunterOutreachHandoff({
       apolloContactsFound: 0,
       contactsRanked: 0,
       contactsImported: 0,
+      plansCreated: 0,
+      existingPlansFound: 0,
+      actionablePlans: 0,
       plansGenerated: 0,
       qaFailedPlans: 0,
       message,
@@ -658,7 +664,9 @@ async function processCompany({
   });
   contactsImported = contactIds.length;
 
-  let plansGenerated = 0;
+  let plansCreated = 0;
+  let existingPlansFound = 0;
+  let actionablePlans = 0;
   let qaFailedPlans = 0;
   const fit = await reviewAndPersistHunterContactFit({
     tenantId,
@@ -696,7 +704,11 @@ async function processCompany({
       where: { id: contactId, tenantId },
       data: {
         contactScore: context.contactScore,
-        contactTier: context.contactTier
+        contactTier: context.contactTier,
+        assignedRep:
+          context.contact.assignedRep ??
+          context.senderIdentity?.ownerUserId ??
+          null
       }
     });
     const generated = await generateOutreachPlanForContact({
@@ -706,13 +718,24 @@ async function processCompany({
       generateWhenNotRequired: true
     });
     if (isActionableHunterPlanState(generated.state)) {
-      plansGenerated += 1;
+      actionablePlans += 1;
+    }
+    if (generated.state === "already_generated") {
+      existingPlansFound += 1;
+      if (generated.qaStatus === "FAILED") {
+        qaFailedPlans += 1;
+      }
+    } else if (
+      generated.state === "qa_passed" ||
+      generated.state === "qa_failed"
+    ) {
+      plansCreated += 1;
     }
     if (generated.state === "qa_failed") {
       qaFailedPlans += 1;
     }
   }
-  if (plansGenerated === 0) {
+  if (actionablePlans === 0) {
     return terminal(
       item,
       "NO_QUALIFYING_CONTACTS",
@@ -732,12 +755,14 @@ async function processCompany({
     "PLANS_GENERATED",
     classification,
     contactsImported,
-    plansGenerated,
+    actionablePlans,
     qaFailedPlans,
-    `${plansGenerated} grounded outreach plan${plansGenerated === 1 ? "" : "s"} created for human review.`,
+    `${actionablePlans} actionable outreach plan${actionablePlans === 1 ? "" : "s"} available for human review (${plansCreated} newly generated, ${existingPlansFound} already current).`,
     {
       apolloContactsFound: lookup.contacts.length,
-      contactsRanked: ranked.length
+      contactsRanked: ranked.length,
+      plansCreated,
+      existingPlansFound
     }
   );
 }
@@ -956,6 +981,7 @@ export function isActionableHunterPlanState(
     | "unranked"
     | "ineligible"
     | "sequence_missing"
+    | "sender_missing"
     | "evidence_missing"
 ) {
   return (
@@ -971,8 +997,12 @@ export function isStrongHunterBuyerRole(contact: {
 } | undefined) {
   if (!contact) return false;
   const role = `${contact.title ?? ""} ${contact.department ?? ""}`;
-  const hasBuyerFunction =
-    /\b(logistics|supply chain|operations|distribution|warehouse|warehousing|fulfillment|transportation|shipping|receiving|procurement|purchasing|sourcing|materials|inventory|import|export)\b/i.test(
+  const hasPhysicalBuyerFunction =
+    /\b(logistics|supply chain|distribution|warehouse|warehousing|fulfillment|transportation|shipping|receiving|procurement|purchasing|sourcing|materials|inventory|import|export)\b/i.test(
+      role
+    );
+  const hasPhysicalOperationsScope =
+    /\b(plant|manufacturing|factory|facility|facilities|distribution|warehouse|warehousing|fulfillment|transportation|shipping|receiving)\s+operations\b|\boperations\s+(?:manager|director|head|lead|supervisor|vp|vice president)\b.*\b(plant|manufacturing|factory|facility|facilities|distribution|warehouse|warehousing|fulfillment|transportation|shipping|receiving)\b/i.test(
       role
     );
   const hasDecisionScope =
@@ -980,10 +1010,14 @@ export function isStrongHunterBuyerRole(contact: {
       role
     );
   const isSellerSide =
-    /\b(sales|business development|account executive|customer service|marketing)\b/i.test(
+    /\b(sales|business development|account executive|customer service|marketing|digital operations|franchise operations|revenue operations|people operations|human resources|hr operations|finance operations|financial operations|clinical operations|administrative operations)\b/i.test(
       role
     );
-  return hasBuyerFunction && hasDecisionScope && !isSellerSide;
+  return (
+    (hasPhysicalBuyerFunction || hasPhysicalOperationsScope) &&
+    hasDecisionScope &&
+    !isSellerSide
+  );
 }
 
 export function shouldAdvanceHunterContactReview(
@@ -998,10 +1032,18 @@ export function shouldAdvanceHunterContactReview(
 ) {
   return (
     (
-      isContactFitAutoEligible(review) ||
+      (isContactFitAutoEligible(review) && !hasBlockingContactFitRisk(review)) ||
       isStrongHunterBuyerRole(contact)
     ) &&
     isContactEligibleForFreshOutreach(contact)
+  );
+}
+
+function hasBlockingContactFitRisk(review: HunterContactFitReview) {
+  return review.riskFlags.some((risk) =>
+    /\b(?:geography_mismatch|wrong geography|outside (?:the )?(?:target|opportunity) (?:market|region)|unrelated geography)\b/i.test(
+      risk
+    )
   );
 }
 
@@ -1381,6 +1423,26 @@ async function finishJob(
   const reviewCount = output.results.filter((result) => result.state === "REVIEW_REQUIRED").length;
   const contactsImported = output.results.reduce((sum, result) => sum + result.contactsImported, 0);
   const plansGenerated = output.results.reduce((sum, result) => sum + result.plansGenerated, 0);
+  const plansCreated = output.results.reduce(
+    (sum, result) =>
+      sum +
+      (
+        typeof result.plansCreated === "number"
+          ? result.plansCreated
+          : result.plansGenerated
+      ),
+    0
+  );
+  const existingPlansFound = output.results.reduce(
+    (sum, result) =>
+      sum +
+      (
+        typeof result.existingPlansFound === "number"
+          ? result.existingPlansFound
+          : 0
+      ),
+    0
+  );
   const finalOutput: HandoffOutput = {
     ...output,
     phase: "COMPLETE",
@@ -1412,7 +1474,9 @@ async function finishJob(
           failedCount,
           reviewCount,
           contactsImported,
-          plansGenerated
+          plansGenerated,
+          plansCreated,
+          existingPlansFound
         }
       }
     })
@@ -1488,6 +1552,8 @@ function terminal(
   discovery: {
     apolloContactsFound: number;
     contactsRanked: number;
+    plansCreated?: number;
+    existingPlansFound?: number;
   } = {
     apolloContactsFound: contactsImported,
     contactsRanked: contactsImported
@@ -1501,6 +1567,9 @@ function terminal(
     apolloContactsFound: discovery.apolloContactsFound,
     contactsRanked: discovery.contactsRanked,
     contactsImported,
+    plansCreated: discovery.plansCreated ?? plansGenerated,
+    existingPlansFound: discovery.existingPlansFound ?? 0,
+    actionablePlans: plansGenerated,
     plansGenerated,
     qaFailedPlans,
     message: message.slice(0, 500),
