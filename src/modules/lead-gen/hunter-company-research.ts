@@ -7,9 +7,9 @@ import {
   HunterSignalStatus,
   HunterSignalType,
   JobStatus,
-  Prisma,
-  ReplyStatus
+  Prisma
 } from "@prisma/client";
+import { HUNTER_COMPANY_REPLY_HARD_STOP_STATUSES } from "@/modules/lead-gen/apollo-reengagement-policy";
 
 import { DEFAULT_HUNTER_POLICY, runHunterDryPlan } from "@/modules/lead-gen/hunter-planner";
 import { enqueueHunterOutreachHandoff } from "@/modules/lead-gen/hunter-outreach-handoff";
@@ -435,7 +435,11 @@ export function buildHunterCompanyResearchWhere({
     },
     cashflowCustomers: { none: {} },
     contacts: {
-      none: { replyStatus: { not: ReplyStatus.NO_REPLY } }
+      none: {
+        replyStatus: {
+          in: [...HUNTER_COMPANY_REPLY_HARD_STOP_STATUSES]
+        }
+      }
     },
     ...(requestedKeys.length > 0
       ? { normalizedName: { in: requestedKeys } }

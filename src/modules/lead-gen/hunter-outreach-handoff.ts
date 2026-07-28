@@ -71,6 +71,8 @@ type HandoffResult = {
     | "SKIPPED_INELIGIBLE"
     | "ERROR";
   matchClassification: ApolloCompanyMatchClassification | null;
+  apolloContactsFound: number;
+  contactsRanked: number;
   contactsImported: number;
   plansGenerated: number;
   qaFailedPlans: number;
@@ -462,6 +464,8 @@ export async function processNextHunterOutreachHandoff({
       companyName: item.companyName,
       state: "ERROR",
       matchClassification: null,
+      apolloContactsFound: 0,
+      contactsRanked: 0,
       contactsImported: 0,
       plansGenerated: 0,
       qaFailedPlans: 0,
@@ -638,7 +642,11 @@ async function processCompany({
       0,
       0,
       0,
-      "Apollo returned contacts, but none matched Hunter's buyer criteria."
+      "Apollo returned contacts, but none matched Hunter's buyer criteria.",
+      {
+        apolloContactsFound: lookup.contacts.length,
+        contactsRanked: 0
+      }
     );
   }
   contactIds = await upsertContacts({
@@ -672,7 +680,11 @@ async function processCompany({
       contactsImported,
       0,
       0,
-      `${fit.reviewCount} contact${fit.reviewCount === 1 ? "" : "s"} evaluated; none cleared the AI buyer-role gate for automatic drafting.`
+      `${fit.reviewCount} contact${fit.reviewCount === 1 ? "" : "s"} evaluated; none cleared the model or deterministic buyer-role gate for human-review drafting.`,
+      {
+        apolloContactsFound: lookup.contacts.length,
+        contactsRanked: ranked.length
+      }
     );
   }
 
@@ -706,7 +718,11 @@ async function processCompany({
       contactsImported,
       0,
       0,
-      "Contacts were available, but none cleared deterministic contact ranking."
+      "Contacts were available, but none produced an actionable plan.",
+      {
+        apolloContactsFound: lookup.contacts.length,
+        contactsRanked: ranked.length
+      }
     );
   }
   return terminal(
@@ -716,7 +732,11 @@ async function processCompany({
     contactsImported,
     plansGenerated,
     qaFailedPlans,
-    `${plansGenerated} grounded outreach plan${plansGenerated === 1 ? "" : "s"} created for human review.`
+    `${plansGenerated} grounded outreach plan${plansGenerated === 1 ? "" : "s"} created for human review.`,
+    {
+      apolloContactsFound: lookup.contacts.length,
+      contactsRanked: ranked.length
+    }
   );
 }
 
@@ -892,14 +912,23 @@ async function reviewAndPersistHunterContactFit({
       const contact = contactById.get(review.contactId);
       return Boolean(
         contact &&
-        isContactFitAutoEligible(review) &&
-        isContactEligibleForFreshOutreach(contact)
+        shouldAdvanceHunterContactReview(review, contact)
       );
     })
     .sort((left, right) => {
+      const leftContact = contactById.get(left.contactId);
+      const rightContact = contactById.get(right.contactId);
+      const modelEligibilityDelta =
+        Number(isContactFitAutoEligible(right)) -
+        Number(isContactFitAutoEligible(left));
+      if (modelEligibilityDelta) return modelEligibilityDelta;
       const dispositionDelta =
         contactFitPriority(left.disposition) - contactFitPriority(right.disposition);
-      return dispositionDelta || right.confidence - left.confidence;
+      if (dispositionDelta) return dispositionDelta;
+      const deterministicDelta =
+        Number(isStrongHunterBuyerRole(rightContact)) -
+        Number(isStrongHunterBuyerRole(leftContact));
+      return deterministicDelta || right.confidence - left.confidence;
     })
     .slice(0, Math.max(1, Math.min(HUNTER_SELECTED_CONTACT_MAX, selectionLimit)))
     .map((review) => review.contactId);
@@ -913,6 +942,46 @@ export function isContactFitAutoEligible(review: HunterContactFitReview) {
   return (
     (review.disposition === "PRIMARY" && review.confidence >= 70) ||
     (review.disposition === "SECONDARY" && review.confidence >= 80)
+  );
+}
+
+export function isStrongHunterBuyerRole(contact: {
+  title: string | null;
+  department: string | null;
+} | undefined) {
+  if (!contact) return false;
+  const role = `${contact.title ?? ""} ${contact.department ?? ""}`;
+  const hasBuyerFunction =
+    /\b(logistics|supply chain|operations|distribution|warehouse|warehousing|fulfillment|transportation|shipping|receiving|procurement|purchasing|sourcing|materials|inventory|import|export)\b/i.test(
+      role
+    );
+  const hasDecisionScope =
+    /\b(manager|director|head|lead|supervisor|vp|vice president|chief|coo|president|owner)\b/i.test(
+      role
+    );
+  const isSellerSide =
+    /\b(sales|business development|account executive|customer service|marketing)\b/i.test(
+      role
+    );
+  return hasBuyerFunction && hasDecisionScope && !isSellerSide;
+}
+
+export function shouldAdvanceHunterContactReview(
+  review: HunterContactFitReview,
+  contact: {
+    title: string | null;
+    department: string | null;
+    contactStatus: ContactStatus;
+    sequenceStatus: SequenceStatus;
+    replyStatus: ReplyStatus;
+  }
+) {
+  return (
+    (
+      isContactFitAutoEligible(review) ||
+      isStrongHunterBuyerRole(contact)
+    ) &&
+    isContactEligibleForFreshOutreach(contact)
   );
 }
 
@@ -1395,13 +1464,22 @@ function terminal(
   contactsImported: number,
   plansGenerated: number,
   qaFailedPlans: number,
-  message: string
+  message: string,
+  discovery: {
+    apolloContactsFound: number;
+    contactsRanked: number;
+  } = {
+    apolloContactsFound: contactsImported,
+    contactsRanked: contactsImported
+  }
 ): HandoffResult {
   return {
     companyId: item.companyId,
     companyName: item.companyName,
     state,
     matchClassification,
+    apolloContactsFound: discovery.apolloContactsFound,
+    contactsRanked: discovery.contactsRanked,
     contactsImported,
     plansGenerated,
     qaFailedPlans,

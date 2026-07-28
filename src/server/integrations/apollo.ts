@@ -11,6 +11,8 @@ const APOLLO_PRIMARY_ROLE_KEYWORDS = [
   "fulfillment",
   "transportation",
   "distribution",
+  "shipping",
+  "receiving",
   "import",
   "procurement",
   "purchasing",
@@ -540,7 +542,6 @@ export async function fetchApolloContactsForCompany(
 
   let blockedByRecoveryAmbiguity = false;
   if (
-    contactsFromApollo.length === 0 &&
     providedOrganizationId &&
     organizationIdForSearch &&
     savedContactsForProvidedOrganization &&
@@ -551,7 +552,20 @@ export async function fetchApolloContactsForCompany(
       input.companyName,
       normalizeDomain(input.domain)
     );
+    const returnedOrganization = inferApolloOrganizationFromContacts(
+      contactsFromApollo,
+      input.companyName,
+      normalizeDomain(input.domain)
+    );
+    const providedIdentifierLooksStale =
+      contactsFromApollo.length === 0 ||
+      (
+        recoveredOrganization?.id &&
+        recoveredOrganization.id !== providedOrganizationId &&
+        returnedOrganization?.id === recoveredOrganization.id
+      );
     if (
+      providedIdentifierLooksStale &&
       recoveredOrganization?.id &&
       recoveredOrganization.id !== providedOrganizationId &&
       isDirectApolloCompanyMatch(recoveredOrganization)
@@ -575,7 +589,11 @@ export async function fetchApolloContactsForCompany(
           enforceExpectedOrganization: true,
           savedContacts: savedContactsForProvidedOrganization
         })) ?? [];
-    } else if (recoveredOrganization?.id && recoveredOrganization.id !== providedOrganizationId) {
+    } else if (
+      providedIdentifierLooksStale &&
+      recoveredOrganization?.id &&
+      recoveredOrganization.id !== providedOrganizationId
+    ) {
       trustedMatchedOrganization = null;
       effectiveMatchOrganization = recoveredOrganization;
       contactsFromApollo = [];
@@ -2470,7 +2488,11 @@ function scoreApolloRoleFit(entry: ApolloContactRecord) {
     score += 11;
   }
 
-  if (/(operations|supply chain|logistics|procurement|purchasing|distribution)/.test(roleText)) {
+  if (
+    /(operations|supply chain|logistics|procurement|purchasing|distribution|shipping|receiving)/.test(
+      roleText
+    )
+  ) {
     score += 15;
   } else if (fallbackHit) {
     score += 8;

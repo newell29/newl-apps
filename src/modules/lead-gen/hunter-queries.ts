@@ -134,6 +134,12 @@ export function summarizeHunterOutreachHandoffRun(
     .map((result) => ({
       companyName: readText(result.companyName, "Unknown company"),
       state: readText(result.state, "UNKNOWN"),
+      apolloContactsFound: readCount(
+        result.apolloContactsFound ?? result.contactsImported
+      ),
+      contactsRanked: readCount(
+        result.contactsRanked ?? result.contactsImported
+      ),
       contactsEvaluated: readCount(result.contactsImported),
       plansCreated: readCount(result.plansGenerated),
       qaFailedPlans: readCount(result.qaFailedPlans),
@@ -148,6 +154,14 @@ export function summarizeHunterOutreachHandoffRun(
     errorMessage: run.errorMessage,
     companiesQueued: items.length,
     companiesProcessed: results.length,
+    apolloContactsFound: results.reduce(
+      (sum, result) => sum + result.apolloContactsFound,
+      0
+    ),
+    contactsRanked: results.reduce(
+      (sum, result) => sum + result.contactsRanked,
+      0
+    ),
     contactsEvaluated: results.reduce(
       (sum, result) => sum + result.contactsEvaluated,
       0

@@ -4,8 +4,10 @@ import { describe, expect, it } from "vitest";
 import {
   isContactEligibleForFreshOutreach,
   isContactFitAutoEligible,
+  isStrongHunterBuyerRole,
   readCachedContactFitReview,
   rankHunterContacts,
+  shouldAdvanceHunterContactReview,
   validateExactContactFitCohort
 } from "@/modules/lead-gen/hunter-outreach-handoff";
 import {
@@ -184,6 +186,57 @@ describe("Hunter assisted outreach handoff", () => {
       ...review,
       disposition: "REJECT",
       confidence: 100
+    })).toBe(false);
+  });
+
+  it("keeps obvious buyer roles available for human review when the model is conservative", () => {
+    expect(isStrongHunterBuyerRole({
+      title: "Supply Chain and Logistics Manager",
+      department: "Operations"
+    })).toBe(true);
+    expect(isStrongHunterBuyerRole({
+      title: "Shipping Receiving Manager",
+      department: "Operations"
+    })).toBe(true);
+    expect(isStrongHunterBuyerRole({
+      title: "Vice President of Sales",
+      department: "Sales"
+    })).toBe(false);
+    expect(isStrongHunterBuyerRole({
+      title: "Warehouse Associate",
+      department: "Operations"
+    })).toBe(false);
+
+    expect(shouldAdvanceHunterContactReview({
+      contactId: "contact-1",
+      disposition: "REVIEW",
+      confidence: 55,
+      responsibilityHypothesis: "Role ownership needs human confirmation.",
+      rationale: "The model was conservative.",
+      recommendedApproach: "Ask whether this person owns the lane.",
+      riskFlags: []
+    }, {
+      title: "Distribution Manager",
+      department: "Operations",
+      contactStatus: ContactStatus.REVIEWING,
+      sequenceStatus: SequenceStatus.FINISHED,
+      replyStatus: ReplyStatus.NO_REPLY
+    })).toBe(true);
+
+    expect(shouldAdvanceHunterContactReview({
+      contactId: "contact-2",
+      disposition: "PRIMARY",
+      confidence: 95,
+      responsibilityHypothesis: "Likely owner.",
+      rationale: "Role aligns.",
+      recommendedApproach: "Ask a bounded ownership question.",
+      riskFlags: []
+    }, {
+      title: "Supply Chain Director",
+      department: "Operations",
+      contactStatus: ContactStatus.REVIEWING,
+      sequenceStatus: SequenceStatus.FINISHED,
+      replyStatus: ReplyStatus.REPLIED
     })).toBe(false);
   });
 
