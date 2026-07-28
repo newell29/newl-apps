@@ -118,6 +118,12 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
   records and the strongest specific logistics-management vacancy before filling the remaining packet
   by pass diversity. Production-line investment/expansion language is included in the strict trigger
   repair; generic growth claims, directories, and undated pages still cannot create a fresh trigger.
+- A salary or compensation page can mention a logistics-management title without representing an
+  opening, while Qwen can cite a generic footprint page even when the ledger contains a real vacancy.
+  Hunter requires explicit current-vacancy language and exact-company evidence, rejects salary records
+  and expired postings, and deterministically hands the qualifying vacancy to the saved current-account
+  citation. When no qualifying vacancy exists, unsupported hiring wording is removed instead of turning
+  a role reference into a claimed opening.
 - A parent or affiliate expansion can otherwise win merely because it appeared earlier in the ledger,
   while wording such as “establishing a distribution center” can evade a manufacturing-focused trigger
   pattern. Hunter recognizes that facility language, orders material events by the most specific
