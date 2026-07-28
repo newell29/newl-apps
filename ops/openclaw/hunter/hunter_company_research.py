@@ -1743,13 +1743,20 @@ def specific_logistics_management_vacancy_indices(
     current_vacancy_pattern = re.compile(
         r"\b(?:apply(?: now| today)?|current openings?|job (?:opening|posting)|"
         r"open (?:position|role|vacanc(?:y|ies))|we(?:'re| are) hiring|"
-        r"(?:is|are) hiring|seeks?|seeking|looking for|join (?:our|the) team|"
-        r"responsibilities|qualifications)\b",
+        r"(?:is|are) hiring|join (?:our|the) team|"
+        r"(?:seeks?|seeking|looking for)\s+(?:qualified\s+)?"
+        r"(?:candidates?|applicants?|an?\s+))\b",
         re.IGNORECASE,
     )
     non_vacancy_pattern = re.compile(
         r"\b(?:salary records?|salary estimates?|average (?:annual )?salary|"
         r"salaries for|compensation (?:data|report)|how much does .{0,80} make|"
+        r"(?:role|job|position|occupation(?:al)?)\s+(?:taxonomy|classification|"
+        r"catalog(?:ue)?|family|framework|reference|description|profile|overview)|"
+        r"(?:sample|template)\s+(?:role|job|position)\s+description|"
+        r"(?:employee|staff|team member|professional|leadership|linkedin)\s+"
+        r"(?:profile|bio(?:graphy)?|directory)|(?:current|former)\s+employee|"
+        r"works?\s+(?:at|for)|employment history|organizational chart|org chart|"
         r"position (?:has been filled|is no longer available)|"
         r"no longer accepting applications|expired (?:job|posting))\b",
         re.IGNORECASE,
@@ -1761,9 +1768,15 @@ def specific_logistics_management_vacancy_indices(
     ]
     matches: list[tuple[int, int, int]] = []
     for index, row in enumerate(evidence):
+        if not isinstance(row, dict):
+            continue
         if row.get("pass") != "CAREERS" and row.get("sourceType") != "CAREERS":
             continue
-        text = f"{row.get('title') or ''}\n{row.get('excerpt') or ''}"
+        title = clean(row.get("title"))
+        excerpt = clean(row.get("excerpt"))
+        if not title or not excerpt:
+            continue
+        text = f"{title}\n{excerpt}"
         if not any(pattern.search(text) for pattern in management_role_patterns):
             continue
         if not current_vacancy_pattern.search(text) or non_vacancy_pattern.search(text):
@@ -1781,6 +1794,42 @@ def specific_logistics_management_vacancy_indices(
             )
         )
     return [index for _first_party, _multi_site, index in sorted(matches)[:1]]
+
+
+def current_account_fallback_evidence_indices(
+    evidence: list[dict[str, Any]],
+) -> list[int]:
+    """Select non-careers evidence when a claimed vacancy fails closed."""
+    pass_priority = {
+        "DISTRIBUTION_FOOTPRINT": 0,
+        "IDENTITY": 1,
+        "FRESH_EVENTS": 2,
+        "FOLLOW_UP": 3,
+    }
+    source_priority = {
+        "FIRST_PARTY": 0,
+        "GOVERNMENT": 1,
+        "NEWS": 2,
+        "OTHER": 3,
+        "DIRECTORY": 4,
+    }
+    ranked: list[tuple[int, int, int, int]] = []
+    for index, row in enumerate(evidence):
+        if not isinstance(row, dict):
+            continue
+        if row.get("pass") == "CAREERS" or row.get("sourceType") == "CAREERS":
+            continue
+        if not clean(row.get("title")) or not clean(row.get("excerpt")):
+            continue
+        ranked.append(
+            (
+                pass_priority.get(str(row.get("pass")), 9),
+                source_priority.get(str(row.get("sourceType")), 9),
+                0 if row.get("firstParty") is True else 1,
+                index,
+            )
+        )
+    return [sorted(ranked)[0][3]] if ranked else []
 
 
 def preferred_model_evidence_indices(
@@ -1884,30 +1933,44 @@ def normalize_synthesis_for_evidence(
         rationale = f"{rationale} {message}".strip()
     elif (
         normalized.get("freshness") == "CURRENT"
-        and normalized.get("signalType") == "HIRING"
         and not vacancy_indices
     ):
-        normalized["signalType"] = "OTHER"
         cited_indices = [
             index
             for index in normalized.get("triggerEvidenceIndices", [])
             if isinstance(index, int) and 0 <= index < len(evidence)
         ]
-        if cited_indices:
-            cited = evidence[cited_indices[0]]
-            normalized["opportunitySummary"] = bounded_utf16_text(
-                f"{cited.get('title') or 'Current account evidence'}: "
-                f"{cited.get('excerpt') or ''}",
-                "Current account evidence was retained without an unsupported hiring claim.",
-                2_000,
+        cites_non_vacancy_careers = any(
+            isinstance(evidence[index], dict)
+            and (
+                evidence[index].get("pass") == "CAREERS"
+                or evidence[index].get("sourceType") == "CAREERS"
             )
-        message = (
-            "Hiring wording was removed because the saved evidence did not contain a current "
-            "exact-company logistics-management vacancy."
+            for index in cited_indices
         )
-        if message not in missing_evidence:
-            missing_evidence.append(message)
-        rationale = f"{rationale} {message}".strip()
+        if normalized.get("signalType") == "HIRING" or cites_non_vacancy_careers:
+            normalized["signalType"] = (
+                "OTHER"
+                if normalized.get("signalType") == "HIRING"
+                else normalized.get("signalType")
+            )
+            fallback_indices = current_account_fallback_evidence_indices(evidence)
+            if fallback_indices:
+                normalized["triggerEvidenceIndices"] = fallback_indices
+                cited = evidence[fallback_indices[0]]
+                normalized["opportunitySummary"] = bounded_utf16_text(
+                    f"{cited.get('title') or 'Current account evidence'}: "
+                    f"{cited.get('excerpt') or ''}",
+                    "Current account evidence was retained without an unsupported hiring claim.",
+                    2_000,
+                )
+            message = (
+                "Hiring wording was removed because the saved evidence did not contain a current "
+                "exact-company logistics-management vacancy."
+            )
+            if message not in missing_evidence:
+                missing_evidence.append(message)
+            rationale = f"{rationale} {message}".strip()
     if (
         normalized.get("identityDisposition") != "PASS"
         and has_corroborating_first_party_identity(candidate, evidence)
