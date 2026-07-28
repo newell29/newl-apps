@@ -21,7 +21,7 @@ from hunter_ingest import api_request, clean, required_env
 
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_MODEL = "qwen3:30b-instruct"
-PROMPT_VERSION = "hunter-signal-classifier-v1"
+PROMPT_VERSION = "hunter-signal-classifier-v2"
 ALLOWED_SIGNAL_TYPES = {
     "EXPANSION",
     "FACILITY_OPENING",
@@ -80,7 +80,12 @@ CLASSIFICATION_SCHEMA = {
 }
 
 
-def fetch_json(url: str, timeout: int = 90, max_attempts: int = 3) -> dict[str, Any]:
+def fetch_json(
+    url: str,
+    timeout: int = 90,
+    max_attempts: int = 3,
+    headers: Optional[dict[str, str]] = None,
+) -> dict[str, Any]:
     body = ""
     for attempt in range(1, max_attempts + 1):
         request = urllib.request.Request(
@@ -88,6 +93,7 @@ def fetch_json(url: str, timeout: int = 90, max_attempts: int = 3) -> dict[str, 
             headers={
                 "Accept": "application/json",
                 "User-Agent": "Newl-Hunter-Signal-Scout/1.0",
+                **(headers or {}),
             },
         )
         try:
@@ -112,6 +118,76 @@ def fetch_json(url: str, timeout: int = 90, max_attempts: int = 3) -> dict[str, 
     if not isinstance(parsed, dict):
         raise RuntimeError("Signal source returned an unexpected response shape.")
     return parsed
+
+
+def fetch_brave_lens(
+    endpoint: str,
+    lens: dict[str, Any],
+    freshness: str,
+    max_records: int,
+) -> tuple[list[dict[str, Any]], Optional[str]]:
+    parameters = {
+        "q": str(lens["query"]),
+        "count": str(max_records),
+        "search_lang": "en",
+        "safesearch": "moderate",
+        "freshness": freshness,
+        "extra_snippets": "true",
+    }
+    try:
+        payload = fetch_json(
+            f"{endpoint}?{urllib.parse.urlencode(parameters)}",
+            timeout=60,
+            headers={"X-Subscription-Token": required_env("HUNTER_BRAVE_SEARCH_API_KEY")},
+        )
+    except Exception as error:
+        return [], str(error)[:500]
+
+    rows = payload.get("web", {}).get("results", [])
+    if not isinstance(rows, list):
+        return [], "Brave did not return a web results array."
+    normalized: list[dict[str, Any]] = []
+    for row in rows[:max_records]:
+        if not isinstance(row, dict):
+            continue
+        source_url = clean(row.get("url"))
+        title = clean(row.get("title"))
+        if not source_url or not title:
+            continue
+        try:
+            parsed_url = urllib.parse.urlparse(source_url)
+        except ValueError:
+            continue
+        if parsed_url.scheme != "https" or not parsed_url.netloc:
+            continue
+        extra_snippets = (
+            row.get("extra_snippets")
+            if isinstance(row.get("extra_snippets"), list)
+            else []
+        )
+        snippet_parts = [
+            clean(row.get("description")) or "",
+            *[
+                clean(value) or ""
+                for value in extra_snippets
+                if isinstance(value, str)
+            ],
+        ]
+        normalized.append(
+            {
+                "sourceUrl": source_url,
+                "articleTitle": title[:500],
+                "articleSnippet": " ".join(
+                    part for part in snippet_parts if part
+                )[:2_000],
+                "sourceName": parsed_url.netloc,
+                "sourcePublishedAt": normalize_gdelt_date(clean(row.get("page_age"))),
+                "queryId": str(lens["id"]),
+                "serviceHint": str(lens["serviceLine"]),
+                "sourceCountry": None,
+            }
+        )
+    return normalized, None
 
 
 def fetch_gdelt_lens(
@@ -155,6 +231,7 @@ def fetch_gdelt_lens(
             {
                 "sourceUrl": source_url,
                 "articleTitle": title[:500],
+                "articleSnippet": "",
                 "sourceName": clean(article.get("domain")) or parsed_url.netloc,
                 "sourcePublishedAt": normalize_gdelt_date(clean(article.get("seendate"))),
                 "queryId": str(lens["id"]),
@@ -215,6 +292,7 @@ def fetch_google_news_lens(
             {
                 "sourceUrl": source_url,
                 "articleTitle": title[:500],
+                "articleSnippet": "",
                 "sourceName": source_name or parsed_url.netloc,
                 "sourcePublishedAt": published_at,
                 "queryId": str(lens["id"]),
@@ -266,12 +344,15 @@ def canonical_url(value: str) -> str:
     )
 
 
-def collect_articles(packet: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def collect_articles(
+    packet: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
     discovery = packet.get("discovery") if isinstance(packet.get("discovery"), dict) else {}
-    gdelt_endpoint = clean(discovery.get("gdeltEndpoint"))
+    brave_endpoint = clean(discovery.get("braveEndpoint"))
     google_news_endpoint = clean(discovery.get("googleNewsEndpoint"))
+    freshness = clean(discovery.get("freshness")) or "pm"
     lenses = discovery.get("lenses") if isinstance(discovery.get("lenses"), list) else []
-    lookback_hours = max(1, min(168, int(discovery.get("lookbackHours") or 36)))
+    lookback_hours = max(1, min(744, int(discovery.get("lookbackHours") or 744)))
     max_articles = max(1, min(100, int(discovery.get("maxArticles") or 40)))
     configured_service_limits = (
         discovery.get("maxArticlesByService")
@@ -310,10 +391,14 @@ def collect_articles(packet: dict[str, Any]) -> tuple[list[dict[str, Any]], list
     seen = set(existing_urls)
     articles: list[dict[str, Any]] = []
     query_results: list[dict[str, Any]] = []
-    if gdelt_endpoint != "https://api.gdeltproject.org/api/v2/doc/doc":
-        raise RuntimeError("Hunter signal scout received an unsupported GDELT endpoint.")
+    raw_result_count = 0
+    duplicate_url_count = 0
+    if brave_endpoint != "https://api.search.brave.com/res/v1/web/search":
+        raise RuntimeError("Hunter signal scout received an unsupported Brave endpoint.")
     if google_news_endpoint != "https://news.google.com/rss/search":
         raise RuntimeError("Hunter signal scout received an unsupported Google News endpoint.")
+    if freshness not in {"pd", "pw", "pm"}:
+        raise RuntimeError("Hunter signal scout received an unsupported Brave freshness filter.")
 
     for lens in lenses:
         if not isinstance(lens, dict):
@@ -329,11 +414,12 @@ def collect_articles(packet: dict[str, Any]) -> tuple[list[dict[str, Any]], list
         lens_counts_by_service[service_line] = max(0, remaining_lenses - 1)
         if remaining_for_service <= 0:
             continue
-        found, error = fetch_gdelt_lens(gdelt_endpoint, lens, lookback_hours, per_lens)
+        found, error = fetch_brave_lens(brave_endpoint, lens, freshness, per_lens)
+        raw_result_count += len(found)
         query_results.append(
             {
                 "id": lens_id,
-                "provider": "GDELT_DOC_2",
+                "provider": "BRAVE_WEB",
                 "resultCount": len(found),
                 "error": error,
             }
@@ -342,6 +428,7 @@ def collect_articles(packet: dict[str, Any]) -> tuple[list[dict[str, Any]], list
             fallback, fallback_error = fetch_google_news_lens(
                 google_news_endpoint, lens, lookback_hours, per_lens
             )
+            raw_result_count += len(fallback)
             query_results.append(
                 {
                     "id": lens_id,
@@ -354,6 +441,7 @@ def collect_articles(packet: dict[str, Any]) -> tuple[list[dict[str, Any]], list
         for article in found:
             key = canonical_url(str(article["sourceUrl"]))
             if key in seen:
+                duplicate_url_count += 1
                 continue
             seen.add(key)
             article["sourceIndex"] = len(articles)
@@ -366,7 +454,15 @@ def collect_articles(packet: dict[str, Any]) -> tuple[list[dict[str, Any]], list
     if not articles and query_results and all(row["error"] for row in query_results):
         errors = "; ".join(str(row["error"]) for row in query_results[:3])
         raise RuntimeError(f"Every configured signal-source query failed: {errors}")
-    return articles, query_results
+    return (
+        articles,
+        query_results,
+        {
+            "rawResultCount": raw_result_count,
+            "duplicateUrlCount": duplicate_url_count,
+            "selectedArticleCount": len(articles),
+        },
+    )
 
 
 def ollama_request(base_url: str, model: str, articles: list[dict[str, Any]]) -> dict[str, Any]:
@@ -374,6 +470,7 @@ def ollama_request(base_url: str, model: str, articles: list[dict[str, Any]]) ->
         {
             "sourceIndex": article["sourceIndex"],
             "articleTitle": article["articleTitle"],
+            "articleSnippet": article.get("articleSnippet") or "",
             "sourceName": article["sourceName"],
             "sourcePublishedAt": article["sourcePublishedAt"],
             "sourceCountry": article["sourceCountry"],
@@ -383,9 +480,9 @@ def ollama_request(base_url: str, model: str, articles: list[dict[str, Any]]) ->
         for article in articles
     ]
     system_prompt = (
-        "You classify public news headlines into evidence-backed sales opportunities for Newl Group, "
+        "You classify bounded public-search results into evidence-backed sales opportunities for Newl Group, "
         "a North American logistics provider. Return one result for every sourceIndex. Mark relevant=true "
-        "only when the headline explicitly identifies a non-logistics company and a concrete event likely "
+        "only when the title or snippet explicitly identifies a non-logistics company and a concrete event likely "
         "to create near-term warehousing, international ocean/air, or trucking demand. Reject generic market "
         "commentary, government announcements without a target company, logistics providers/carriers/3PLs, "
         "job ads without a material expansion signal, stock-price stories, and articles where the prospect "
@@ -398,8 +495,9 @@ def ollama_request(base_url: str, model: str, articles: list[dict[str, Any]]) ->
     )
     user_prompt = (
         f"Prompt version: {PROMPT_VERSION}\n"
-        "Classify these headline records. Evidence strings must quote or closely paraphrase only words in "
-        "the supplied headline metadata. For irrelevant records, explain the rejection in rationale and "
+        "Classify these search-result records. Evidence strings must quote or closely paraphrase only words in "
+        "the supplied title and snippet metadata. Treat each result as a discovery hypothesis that still requires "
+        "full company research before Apollo. For irrelevant records, explain the rejection in rationale and "
         "still provide safe enum values and a short summary.\n\n"
         f"{json.dumps(safe_articles, ensure_ascii=False)}"
     )
@@ -608,7 +706,7 @@ def run_signal_scout(force: bool = False, dry_run: bool = False) -> dict[str, An
         raise RuntimeError("Newl Apps did not return a Hunter signal scout packet.")
 
     try:
-        articles, query_results = collect_articles(packet)
+        articles, query_results, discovery_metrics = collect_articles(packet)
         model = clean(os.environ.get("HUNTER_CLASSIFICATION_MODEL")) or str(
             packet.get("model", {}).get("recommended") or DEFAULT_MODEL
         )
@@ -625,10 +723,11 @@ def run_signal_scout(force: bool = False, dry_run: bool = False) -> dict[str, An
                 "structuredOutput": True,
             },
             "discovery": {
-                "provider": "MULTI_SOURCE_NEWS",
-                "lookbackHours": int(packet.get("discovery", {}).get("lookbackHours") or 36),
+                "provider": "BRAVE_WEB",
+                "lookbackHours": int(packet.get("discovery", {}).get("lookbackHours") or 744),
                 "fetchedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
                 "queries": query_results,
+                **discovery_metrics,
             },
             "candidates": candidates,
         }
@@ -640,6 +739,7 @@ def run_signal_scout(force: bool = False, dry_run: bool = False) -> dict[str, An
                 "articleCount": len(articles),
                 "candidateCount": len(candidates),
                 "acceptedCount": sum(1 for item in candidates if item["relevant"]),
+                **discovery_metrics,
                 "model": model,
             }
         response = api_request(

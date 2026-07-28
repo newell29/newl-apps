@@ -5,10 +5,12 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 import {
+  createHunterSignalEventDedupeKey,
   HUNTER_SIGNAL_SCOUT_DEFAULT_MODEL,
   HUNTER_SIGNAL_SCOUT_PROMPT_VERSION,
   HUNTER_SIGNAL_SCOUT_SAFETY,
-  parseHunterSignalScoutCompletion
+  parseHunterSignalScoutCompletion,
+  selectHunterSignalDiscoveryLenses
 } from "@/modules/lead-gen/hunter-signal-scout";
 
 const execFileAsync = promisify(execFile);
@@ -20,7 +22,7 @@ const runnerPath = path.join(repoRoot, "ops/openclaw/run-hunter-worker.sh");
 describe("Hunter external signal scout", () => {
   it("uses the installed local instruct model and retains all external-write gates", () => {
     expect(HUNTER_SIGNAL_SCOUT_DEFAULT_MODEL).toBe("qwen3:30b-instruct");
-    expect(HUNTER_SIGNAL_SCOUT_PROMPT_VERSION).toBe("hunter-signal-classifier-v1");
+    expect(HUNTER_SIGNAL_SCOUT_PROMPT_VERSION).toBe("hunter-signal-classifier-v2");
     expect(HUNTER_SIGNAL_SCOUT_SAFETY).toEqual({
       externalWrites: false,
       apollo: false,
@@ -35,7 +37,7 @@ describe("Hunter external signal scout", () => {
     expect(parsed.model).toEqual({
       provider: "OLLAMA",
       name: "qwen3:30b-instruct",
-      promptVersion: "hunter-signal-classifier-v1",
+      promptVersion: "hunter-signal-classifier-v2",
       structuredOutput: true
     });
     expect(parsed.candidates[0]).toMatchObject({
@@ -69,8 +71,11 @@ describe("Hunter external signal scout", () => {
     expect(worker).toContain("signal_scout_due_now");
     expect(worker).toContain('HUNTER_SIGNAL_SCOUT_DAILY_TIME", "08:30"');
     expect(worker).toContain("run_signal_scout");
+    expect(worker).toContain("run_signal_scout_with_notification");
     expect(scout).toContain("http://127.0.0.1:11434");
     expect(scout).toContain("qwen3:30b-instruct");
+    expect(scout).toContain("HUNTER_BRAVE_SEARCH_API_KEY");
+    expect(scout).toContain("https://api.search.brave.com/res/v1/web/search");
     expect(scout).toContain('"format": CLASSIFICATION_SCHEMA');
     expect(scout).toContain('"WAREHOUSING": 24');
     expect(scout).toContain('"OCEAN_AIR": 12');
@@ -96,9 +101,9 @@ describe("Hunter external signal scout", () => {
     const program = [
       "import json",
       "import hunter_signal_scout as s",
-      "s.fetch_gdelt_lens=lambda endpoint,lens,lookback,limit: ([{'sourceUrl':f\"https://example.com/{lens['serviceLine'].lower()}/{i}\",'articleTitle':f\"{lens['serviceLine']} event {i}\",'sourceName':'Example','sourcePublishedAt':'2026-07-25T12:00:00+00:00','queryId':lens['id'],'serviceHint':lens['serviceLine'],'sourceCountry':'United States'} for i in range(limit)],None)",
-      "packet={'discovery':{'gdeltEndpoint':'https://api.gdeltproject.org/api/v2/doc/doc','googleNewsEndpoint':'https://news.google.com/rss/search','lookbackHours':36,'maxArticles':40,'maxArticlesByService':{'WAREHOUSING':24,'OCEAN_AIR':12,'TRUCKING':4},'lenses':[{'id':'w','serviceLine':'WAREHOUSING','query':'w'},{'id':'o','serviceLine':'OCEAN_AIR','query':'o'},{'id':'t','serviceLine':'TRUCKING','query':'t'}]},'existingSourceUrls':[]}",
-      "articles,_=s.collect_articles(packet)",
+      "s.fetch_brave_lens=lambda endpoint,lens,freshness,limit: ([{'sourceUrl':f\"https://example.com/{lens['serviceLine'].lower()}/{i}\",'articleTitle':f\"{lens['serviceLine']} event {i}\",'articleSnippet':'concrete expansion','sourceName':'Example','sourcePublishedAt':'2026-07-25T12:00:00+00:00','queryId':lens['id'],'serviceHint':lens['serviceLine'],'sourceCountry':'United States'} for i in range(limit)],None)",
+      "packet={'discovery':{'braveEndpoint':'https://api.search.brave.com/res/v1/web/search','googleNewsEndpoint':'https://news.google.com/rss/search','freshness':'pm','lookbackHours':744,'maxArticles':40,'maxArticlesByService':{'WAREHOUSING':24,'OCEAN_AIR':12,'TRUCKING':4},'lenses':[{'id':'w','serviceLine':'WAREHOUSING','query':'w'},{'id':'o','serviceLine':'OCEAN_AIR','query':'o'},{'id':'t','serviceLine':'TRUCKING','query':'t'}]},'existingSourceUrls':[]}",
+      "articles,_,_=s.collect_articles(packet)",
       "print(json.dumps({line:sum(1 for article in articles if article['serviceHint']==line) for line in ['WAREHOUSING','OCEAN_AIR','TRUCKING']}))"
     ].join(";");
     const { stdout } = await execFileAsync("python3", ["-c", program], {
@@ -115,6 +120,46 @@ describe("Hunter external signal scout", () => {
       TRUCKING: 4
     });
   });
+
+  it("rotates approved topic and geography queries instead of repeating the same set daily", () => {
+    const firstDay = selectHunterSignalDiscoveryLenses("2026-07-28");
+    const secondDay = selectHunterSignalDiscoveryLenses("2026-07-29");
+    const firstQueries = new Set(firstDay.map((lens) => lens.query));
+
+    expect(firstDay).toHaveLength(7);
+    expect(firstDay.filter((lens) => lens.serviceLine === "WAREHOUSING")).toHaveLength(4);
+    expect(firstDay.filter((lens) => lens.serviceLine === "OCEAN_AIR")).toHaveLength(2);
+    expect(firstDay.filter((lens) => lens.serviceLine === "TRUCKING")).toHaveLength(1);
+    expect(secondDay.some((lens) => !firstQueries.has(lens.query))).toBe(true);
+    expect(firstDay.every((lens) => lens.query.includes("-3PL"))).toBe(true);
+  });
+
+  it("groups repeat coverage of the same company event while allowing a later monthly event", () => {
+    const first = createHunterSignalEventDedupeKey({
+      companyName: "Example Retailer, Inc.",
+      signalType: "RETAIL_ROLLOUT",
+      geography: "North Carolina",
+      sourcePublishedAt: "2026-07-04T12:00:00.000Z",
+      fetchedAt: "2026-07-05T12:00:00.000Z"
+    });
+    const syndicated = createHunterSignalEventDedupeKey({
+      companyName: "Example Retailer Inc",
+      signalType: "RETAIL_ROLLOUT",
+      geography: "North Carolina",
+      sourcePublishedAt: "2026-07-06T12:00:00.000Z",
+      fetchedAt: "2026-07-06T12:00:00.000Z"
+    });
+    const later = createHunterSignalEventDedupeKey({
+      companyName: "Example Retailer Inc",
+      signalType: "RETAIL_ROLLOUT",
+      geography: "North Carolina",
+      sourcePublishedAt: "2026-08-06T12:00:00.000Z",
+      fetchedAt: "2026-08-06T12:00:00.000Z"
+    });
+
+    expect(syndicated).toBe(first);
+    expect(later).not.toBe(first);
+  });
 });
 
 function completion() {
@@ -122,14 +167,17 @@ function completion() {
     model: {
       provider: "OLLAMA",
       name: "qwen3:30b-instruct",
-      promptVersion: "hunter-signal-classifier-v1",
+      promptVersion: "hunter-signal-classifier-v2",
       structuredOutput: true
     },
     discovery: {
-      provider: "MULTI_SOURCE_NEWS",
-      lookbackHours: 36,
+      provider: "BRAVE_WEB",
+      lookbackHours: 744,
       fetchedAt: "2026-07-25T14:00:00.000Z",
-      queries: [{ id: "retail-rollout", provider: "GOOGLE_NEWS_RSS", resultCount: 1, error: null }]
+      rawResultCount: 1,
+      duplicateUrlCount: 0,
+      selectedArticleCount: 1,
+      queries: [{ id: "retail-rollout", provider: "BRAVE_WEB", resultCount: 1, error: null }]
     },
     candidates: [
       {

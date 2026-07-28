@@ -381,6 +381,44 @@ def run_company_research_with_notification(**kwargs: Any) -> dict[str, Any]:
     return result
 
 
+def build_signal_scout_message(result: dict[str, Any]) -> str:
+    selected = int(result.get("selectedArticleCount") or 0)
+    accepted = int(result.get("acceptedCount") or 0)
+    promoted = int(result.get("promotedCompanyCount") or 0)
+    duplicates = int(result.get("duplicateUrlCount") or 0) + int(
+        result.get("duplicateEventCount") or 0
+    )
+    return (
+        "Hunter external opportunity scout completed: "
+        f"{selected} new Brave results reached Qwen, {accepted} signals passed first review, "
+        f"{promoted} new companies were queued for full Qwen/Kimi research, and "
+        f"{duplicates} repeat URLs or events were suppressed. "
+        "No Apollo search or outreach was performed by the scout."
+    )
+
+
+def run_signal_scout_with_notification(**kwargs: Any) -> dict[str, Any]:
+    try:
+        result = run_signal_scout(**kwargs)
+    except Exception:
+        send_teams_message(
+            "Hunter external opportunity scouting failed during Brave retrieval or Qwen classification. "
+            "Review Admin & Quality → Health & Logs; no Apollo search or outreach was sent."
+        )
+        raise
+    if (
+        isinstance(result, dict)
+        and result.get("state") not in {
+            "already_attempted",
+            "disabled",
+            "dry_run",
+        }
+        and "acceptedCount" in result
+    ):
+        send_teams_message(build_signal_scout_message(result))
+    return result
+
+
 def read_job_run_summary(base_url: str, token: str, job_run_id: str) -> dict[str, Any]:
     response = api_request(
         base_url,
@@ -784,7 +822,15 @@ def main() -> int:
     poll_ms = max(5000, int(os.environ.get("HUNTER_POLL_MS", "60000")))
 
     if args.signal_scout_now or args.signal_scout_dry_run:
-        print(json.dumps(run_signal_scout(force=True, dry_run=args.signal_scout_dry_run), indent=2))
+        print(
+            json.dumps(
+                run_signal_scout_with_notification(
+                    force=True,
+                    dry_run=args.signal_scout_dry_run,
+                ),
+                indent=2,
+            )
+        )
         return 0
     if (
         args.company_research_now
@@ -835,7 +881,7 @@ def main() -> int:
             if last_signal_scout_check_date != local_date:
                 last_signal_scout_check_date = local_date
                 try:
-                    print(json.dumps(run_signal_scout(), indent=2))
+                    print(json.dumps(run_signal_scout_with_notification(), indent=2))
                 except Exception as error:
                     print(f"Hunter daily signal scout failed: {error}", file=sys.stderr)
         if not args.profile_id and not args.profile_name and company_research_due_now():

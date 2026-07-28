@@ -73,13 +73,19 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 ## External signal classification
 
 - Public-news discovery is opt-in and disabled by default. Enabling a source is a business/compliance decision, not a model decision.
-- Discovery is bounded to a recent window and at most 40 unique, previously unseen source URLs per daily run.
+- Discovery is bounded to a trailing-month Brave window and at most 40 unique, previously unseen source URLs per daily run.
+- Approved topics and geographies rotate deterministically by local date. Exact query fingerprints are stored in the
+  job input, canonical source URLs are suppressed for 180 days, and same-company/signal/geography coverage within
+  one publication month is grouped as one event with bounded corroborating sources.
 - A source outage cannot become a false successful zero-result run. If every configured query transport fails, the job is `ERROR`.
 - Model output is advisory evidence. Deterministic validation controls enums, HTTPS URLs, dates, field sizes, source mapping, dedupe, tenant scope, and the minimum confidence gate.
 - `relevant=true` requires an explicit company and confidence of at least 50. The tenant's `minimumSignalConfidence` remains the final activation threshold.
 - Local Qwen is the bulk classifier. A hosted model is not required for this phase and cannot independently authorize Apollo or outreach.
-- The prompt/model/provider/version, classification rationale, source lens, and supporting headline statements are retained with accepted signals.
-- The local classifier receives public headline metadata only. It does not receive contacts, emails, Apollo payloads, TradeMining raw rows, tenant credentials, or customer records.
+- The prompt/model/provider/version, classification rationale, source lens, and supporting title/snippet statements are retained with accepted signals.
+- An above-threshold company is matched to the tenant's canonical identity or created as a provisional external-scout
+  company without requiring a TradeMining record. External-signal companies receive a bounded one-third reservation
+  in the next company-research cohort; they still require the complete Qwen/Kimi/deterministic gate before Apollo.
+- The local classifier receives public search-result metadata only. It does not receive contacts, emails, Apollo payloads, TradeMining raw rows, tenant credentials, or customer records.
 
 ## Hunter company deep research
 

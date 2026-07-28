@@ -86,6 +86,9 @@ The checked-in template is `ops/openclaw/hunter/.env.example`. Store the real fi
 - `ops/openclaw/hunter/hunter_ingest.py`: tenant-bound job creation, batched ingestion, completion/failure reporting.
 - `ops/openclaw/hunter/hunter_worker.py`: live active-profile lookup, manual run-request polling, once-daily eligibility, per-profile lookback/port planning, collection, and ingestion coordination.
 - `ops/openclaw/hunter/hunter_company_research.py`: bounded four-pass web retrieval, local Qwen synthesis, Kimi scoring, replay ledger generation, and tenant-bound completion reporting. It has no Apollo or outreach integration.
+- `ops/openclaw/hunter/hunter_signal_scout.py`: bounded Brave discovery, rotating allowlisted
+  topic/geography queries, 180-day canonical-URL suppression, local Qwen first-pass classification, and
+  tenant-bound provisional-company reporting. It has no Apollo or outreach integration.
 - Each enabled profile begins with one full-lookback TradeMining BOL query. Optional destination ports use TradeMining's U.S.-port multi-select field; leaving them empty omits that field. Origin countries and foreign ports are resolved through its lookup service; ship-from ports and product keywords use Boolean `OR`; HS codes use TradeMining's comma-separated format; and `minShipmentVolume` is treated as minimum TEUs per BOL.
 - When the reported count exceeds 25,000, Hunter splits the date range into disjoint halves. A capped one-day query with multiple arrival ports is split into port groups. If a one-day one-port/no-port query is still capped, Hunter retains the available export and reports incomplete coverage instead of silently truncating it.
 - `minAggregateTeu` and industry-pack modes are evaluated in Newl Apps over the company's matched-profile evidence. They do not change the TradeMining form post.
@@ -100,6 +103,11 @@ Company research stays disabled until its reviewed code reaches the dedicated ru
 the following local-only values are configured:
 
 ```text
+HUNTER_SIGNAL_SCOUT_ENABLED=false
+HUNTER_SIGNAL_SCOUT_DAILY_TIME=08:30
+HUNTER_SIGNAL_SCOUT_TIMEZONE=America/Toronto
+HUNTER_CLASSIFICATION_MODEL=qwen3:30b-instruct
+HUNTER_CLASSIFICATION_BATCH_SIZE=6
 HUNTER_COMPANY_RESEARCH_ENABLED=false
 HUNTER_COMPANY_RESEARCH_DAILY_TIME=09:15
 HUNTER_COMPANY_RESEARCH_TIMEZONE=America/Toronto

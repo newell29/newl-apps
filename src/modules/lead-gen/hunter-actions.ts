@@ -15,11 +15,11 @@ import {
   processNextHunterOutreachHandoff,
   queueCurrentHunterOutreachHandoff
 } from "@/modules/lead-gen/hunter-outreach-handoff";
+import { normalizeHunterCompanyKey } from "@/modules/lead-gen/hunter-company-key";
 import { runHunterDryPlan } from "@/modules/lead-gen/hunter-planner";
 import { validateHunterAllocation } from "@/modules/lead-gen/hunter-planning-policy";
 import { requireAdmin, requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
-import { normalizeCompanyName } from "@/server/integrations/apollo";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
 const HUNTER_PATH = "/lead-gen/hunter";
@@ -76,7 +76,7 @@ export async function addHunterOpportunitySignalAction(formData: FormData) {
   await requireMutationAccess(context);
 
   const companyName = requiredText(formData, "companyName", 200);
-  const normalizedCompanyName = normalizeCompanyName(companyName);
+  const normalizedCompanyName = normalizeHunterCompanyKey(companyName);
   if (!normalizedCompanyName) {
     throw new Error("Enter a recognizable company name.");
   }
