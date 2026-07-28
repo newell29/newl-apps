@@ -187,9 +187,11 @@ Regression coverage must prove:
 10. a zero-result profile is only an anomaly when recent positive history exists;
 11. shell/schema tests preserve a read-only Codex audit, the 13:30 America/Toronto schedule, and Teams delivery through `RIVET_TEAMS_TARGET`;
 12. Rivet resolves Git state from its dedicated runtime, validates context against the fetched base branch, and stops a failed packet parse before any blank `origin/` worktree reference;
-13. the Hunter worker emits one settled daily profile digest, sends immediate sanitized failure alerts, and keeps processing other due profiles; and
-14. the assisted outreach-handoff machine route bypasses browser-session middleware and continues to enforce tenant-bound ingestion authentication in its route; and
-15. no schema migration is required because audit, incident, feedback, suggestion, and Rivet state use existing tenant-scoped tables.
+13. the Hunter worker emits one settled daily profile digest, sends immediate sanitized failure alerts, and keeps processing other due profiles;
+14. the assisted outreach-handoff machine route bypasses browser-session middleware and continues to enforce tenant-bound ingestion authentication in its route;
+15. the Mac worker starts its outreach-handoff poller before the sequential TradeMining loop, so a large profile
+    ingestion cannot block an interactive contact-discovery job; and
+16. no schema migration is required because audit, incident, feedback, suggestion, and Rivet state use existing tenant-scoped tables.
 
 ## Automated sales workspace
 
