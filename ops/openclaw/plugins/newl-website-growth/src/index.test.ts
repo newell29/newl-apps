@@ -2,9 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createApiTool,
+  createBusinessProfileTool,
   createDirectoryCredentialFillTool,
-  createParameterizedApiTool
+  createParameterizedApiTool,
+  readApprovedBusinessProfile
 } from "./index.js";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 describe("Newl Website Growth OpenClaw plugin", () => {
   afterEach(() => {
@@ -73,6 +78,90 @@ describe("Newl Website Growth OpenClaw plugin", () => {
     expect(
       createParameterizedApiTool("newl_backlink_send_email", "/send")({ config }).name
     ).toBe("newl_backlink_send_email");
+    expect(createBusinessProfileTool()({ config }).name).toBe(
+      "newl_backlink_business_profile"
+    );
+  });
+
+  it("returns only a bounded owner-approved public business profile", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "newl-profile-"));
+    const profilePath = path.join(directory, "profile.json");
+    await writeFile(profilePath, JSON.stringify({
+      status: "OWNER_APPROVED_2099-01-01",
+      legalEntities: {
+        CA: { legalName: "Example Logistics Ltd.", publicAddress: "Example address" },
+        US: { legalName: "Example Logistics USA Inc.", publicAddress: "Example address" }
+      },
+      publicBrandName: "Example Logistics",
+      website: "https://example.com",
+      senderName: "Example Sender",
+      publicDescriptions: {
+        short: "Public description",
+        medium: "Public description",
+        long: "Public description"
+      },
+      publicLocations: ["Example City"],
+      publicPhone: "555-0100",
+      outreachMailbox: "user@example.com",
+      approvedLogos: [],
+      approvedServiceCategories: ["Warehousing"],
+      approvedSocialProfiles: [],
+      certifications: [],
+      forbiddenClaims: ["Do not mention customers."],
+      outreachPolicy: {
+        countries: ["CA", "US"],
+        manualOpportunityApproval: true
+      },
+      submissionRules: {
+        freeListingsOnly: true,
+        allowPayment: false
+      },
+      privateNotes: "must not leave the protected file"
+    }));
+
+    try {
+      const profile = await readApprovedBusinessProfile(profilePath);
+      expect(profile.publicBrandName).toBe("Example Logistics");
+      expect(profile).not.toHaveProperty("privateNotes");
+
+      const result = await createBusinessProfileTool()({
+        config: {
+          baseUrl: "https://newl-apps.example.com",
+          businessProfilePath: profilePath
+        }
+      }).execute();
+      expect(result.details.status).toBe("ok");
+      expect(result.content[0].text).not.toContain("privateNotes");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an unapproved or payment-enabled business profile", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "newl-profile-"));
+    const profilePath = path.join(directory, "profile.json");
+    const baseProfile = {
+      status: "OWNER_COMPLETION_REQUIRED",
+      outreachPolicy: { manualOpportunityApproval: true },
+      submissionRules: { allowPayment: false }
+    };
+    await writeFile(profilePath, JSON.stringify(baseProfile));
+
+    try {
+      await expect(readApprovedBusinessProfile(profilePath)).rejects.toThrow(
+        "not owner approved"
+      );
+      await writeFile(profilePath, JSON.stringify({
+        ...baseProfile,
+        status: "OWNER_APPROVED_2099-01-01",
+        submissionRules: { allowPayment: true }
+      }));
+      await expect(readApprovedBusinessProfile(profilePath)).rejects.toThrow(
+        "Paid backlink execution must remain disabled"
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("passes the executor run start time to the deterministic summary", async () => {

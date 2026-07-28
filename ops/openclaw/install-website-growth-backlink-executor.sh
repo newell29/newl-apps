@@ -8,7 +8,7 @@ script_directory="${0:A:h}"
 repo_path="${script_directory:h:h}"
 plugin_path="${script_directory}/plugins/newl-website-growth"
 skill_path="${script_directory}/skills/website-growth-backlink-executor"
-prompt_path="${script_directory}/prompts/website-growth-backlink-executor.md"
+executor_runner_path="${script_directory}/run-website-growth-backlink-executor.sh"
 failure_monitor_path="${script_directory}/run-rivet-backlink-failure-monitor.sh"
 scout_env_file="${WEBSITE_GROWTH_SCOUT_ENV_FILE:-${HOME}/.openclaw/agents/scout/.env}"
 profile_source="${WEBSITE_GROWTH_BACKLINK_PROFILE_SOURCE:-}"
@@ -89,10 +89,11 @@ console.log(JSON.stringify({
   config: {
     baseUrl: process.argv[1],
     backlinkTokenEnv: "OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN",
-    directoryPasswordMasterEnv: "NEWL_DIRECTORY_PASSWORD_MASTER_V1"
+    directoryPasswordMasterEnv: "NEWL_DIRECTORY_PASSWORD_MASTER_V1",
+    businessProfilePath: process.argv[2]
   }
 }));
-' "${NEWL_APPS_URL}")"
+' "${NEWL_APPS_URL}" "${profile_target}")"
 openclaw config set plugins.entries.newl-website-growth "${plugin_config}" --strict-json
 openclaw plugins install --force "${plugin_path}"
 
@@ -101,31 +102,59 @@ openclaw skills install "${skill_path}" \
   --as website-growth-backlink-executor \
   --force
 
-cron_arguments=(
-  cron add
-  --name "NEWL Website Growth Backlink Outreach"
-  --display-name "NEWL Website Growth Backlink Outreach"
-  --description "Process only approved free backlink outreach, follow-ups and verification; send the owner a Teams reminder."
-  --declaration-key "newl.website-growth.backlink-outreach.weekday.v1"
-  --agent scout
-  --model "openai/gpt-5.6-sol"
-  --thinking high
-  --cron "0 11 * * 1-5"
-  --tz "America/Toronto"
-  --exact
-  --session isolated
-  --message "$(cat "${prompt_path}")"
-  --tools "browser,newl_backlink_sync_replies,newl_backlink_sync_directory_verifications,newl_backlink_follow_ups,newl_backlink_verification,newl_backlink_claim,newl_backlink_send_email,newl_backlink_fill_directory_credentials,newl_backlink_report,newl_backlink_summary,read"
-  --announce
-  --channel msteams
-  --to "${WEBSITE_GROWTH_TEAMS_TARGET}"
-  --timeout-seconds 1800
-  --disabled
-)
-if [[ -n "${WEBSITE_GROWTH_TEAMS_ACCOUNT:-}" ]]; then
-  cron_arguments+=(--account "${WEBSITE_GROWTH_TEAMS_ACCOUNT}")
+scout_agent_index="$(openclaw config get agents.list --json | /usr/bin/python3 -c '
+import json, sys
+agents = json.load(sys.stdin)
+for index, agent in enumerate(agents):
+    if agent.get("id") == "scout":
+        print(index)
+        break
+')"
+if [[ -z "${scout_agent_index}" ]]; then
+  echo "The Scout agent could not be located for tool-policy enforcement." >&2
+  exit 1
 fi
-openclaw "${cron_arguments[@]}"
+scout_tools_policy="$(node -e '
+console.log(JSON.stringify({
+  profile: "minimal",
+  allow: [
+    "browser",
+    "newl_backlink_business_profile",
+    "newl_backlink_sync_replies",
+    "newl_backlink_sync_directory_verifications",
+    "newl_backlink_follow_ups",
+    "newl_backlink_verification",
+    "newl_backlink_claim",
+    "newl_backlink_send_email",
+    "newl_backlink_fill_directory_credentials",
+    "newl_backlink_report"
+  ],
+  deny: ["exec", "bash", "read", "write", "edit", "apply_patch", "process"]
+}));
+')"
+openclaw config set \
+  "agents.list[${scout_agent_index}].tools" \
+  "${scout_tools_policy}" \
+  --strict-json
+
+executor_argv="$(node -e '
+console.log(JSON.stringify(["/bin/zsh", process.argv[1]]));
+' "${executor_runner_path}")"
+openclaw cron add \
+  --name "NEWL Website Growth Backlink Outreach" \
+  --display-name "NEWL Website Growth Backlink Outreach" \
+  --description "Process only approved free backlink outreach, follow-ups and verification; always send the deterministic owner summary." \
+  --declaration-key "newl.website-growth.backlink-outreach.weekday.v1" \
+  --cron "0 11 * * 1-5" \
+  --tz "America/Toronto" \
+  --exact \
+  --command-argv "${executor_argv}" \
+  --command-env "WEBSITE_GROWTH_SCOUT_ENV_FILE=${scout_env_file}" \
+  --command-env "OPENCLAW_GATEWAY_ENV_FILE=${HOME}/.openclaw/.env" \
+  --command-cwd "${repo_path}" \
+  --timeout-seconds 1800 \
+  --no-deliver \
+  --disabled
 
 failure_monitor_argv="$(node -e '
 console.log(JSON.stringify(["/bin/zsh", process.argv[1]]));

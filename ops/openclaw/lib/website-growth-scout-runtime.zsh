@@ -53,6 +53,7 @@ load_website_growth_search_env() {
 
 send_website_growth_teams_message() {
   local message="$1"
+  local openclaw_command="${OPENCLAW_BIN:-openclaw}"
   local -a teams_arguments
 
   if [[ -z "${WEBSITE_GROWTH_TEAMS_TARGET:-}" ]]; then
@@ -63,5 +64,5 @@ send_website_growth_teams_message() {
   if [[ -n "${WEBSITE_GROWTH_TEAMS_ACCOUNT:-}" ]]; then
     teams_arguments+=(--account "${WEBSITE_GROWTH_TEAMS_ACCOUNT}")
   fi
-  openclaw "${teams_arguments[@]}"
+  "${openclaw_command}" "${teams_arguments[@]}"
 }

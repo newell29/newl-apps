@@ -36,6 +36,7 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 | Deterministic blocker category, reason, next action, retry guidance | `src/modules/website-growth/backlink-blockers.ts` |
 | Microsoft 365 draft/send helper | `src/server/integrations/microsoft-graph-mail.ts` |
 | Dedicated OpenClaw tool plugin | `ops/openclaw/plugins/newl-website-growth` |
+| Deterministic outreach wrapper and authoritative Teams summary | `ops/openclaw/run-website-growth-backlink-executor.sh` |
 | Protected Scout installer and disabled weekday schedule | `ops/openclaw/install-website-growth-backlink-executor.sh` |
 | Production rollout and rollback | `docs/modules/website-growth/backlink-outreach-rollout.md` |
 
