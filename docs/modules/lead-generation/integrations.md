@@ -164,7 +164,10 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   only through the exact zero-credit saved-account directory. The contact lookup then stays constrained to the safely
   resolved `organization_ids` value and never falls back to an unscoped company search.
 - Ambiguous, logistics-provider, and no-match results enter **Apollo Match Review**. Bulk enrichment skips those companies until a rep resolves the latest match explicitly.
-- A rep can paste an Apollo company URL or organization ID. Newl Apps reads that exact organization, verifies that its name is a strong match, prevents duplicate tenant mappings, records the reviewer and source, and then searches people using the confirmed organization ID.
+- A rep can paste an Apollo company Overview/People URL or a raw organization ID. For `/accounts/{id}` links,
+  Newl Apps reads the exact account, extracts its nested global organization ID, validates that organization, verifies
+  that its name is a strong match, prevents duplicate tenant mappings, records the reviewer and source, and searches
+  people using only the confirmed global organization ID.
 - Apollo's Complete Organization Info endpoint consumes one credit when a company is returned. The mapping form therefore requires explicit one-credit confirmation. An automatic name-only retry requires a separate confirmation and is capped at two organization-search pages.
 - **Confirmed no match** is an auditable archive state, not deletion. The company remains visible and protected from bulk retry until a rep reopens it.
 

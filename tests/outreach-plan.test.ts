@@ -16,9 +16,11 @@ import {
   type OutreachStrategy
 } from "@/modules/lead-gen/outreach-plan";
 import {
+  buildApprovedNewlCapabilityEvidence,
   buildBoundedOutreachRepairFeedback,
   normalizeHunterChannelStrategy,
-  runBoundedOutreachQaRepair
+  runBoundedOutreachQaRepair,
+  shouldReuseExistingOutreachPlan
 } from "@/modules/lead-gen/outreach-plan-generation";
 
 const evidence: OutreachEvidenceRecord[] = [
@@ -104,6 +106,40 @@ const sequence: GeneratedOutreachSequence = {
 };
 
 describe("outreach plan grounding", () => {
+  it("preserves passed v2.4 plans while upgrading only failed plans to the corrected policy", () => {
+    expect(
+      shouldReuseExistingOutreachPlan({
+        promptVersion: "outreach-plan-v2.4",
+        qaStatus: OutreachQaStatus.PASSED
+      })
+    ).toBe(true);
+    expect(
+      shouldReuseExistingOutreachPlan({
+        promptVersion: "outreach-plan-v2.4",
+        qaStatus: OutreachQaStatus.FAILED
+      })
+    ).toBe(false);
+    expect(
+      shouldReuseExistingOutreachPlan({
+        promptVersion: "outreach-plan-v2.5",
+        qaStatus: OutreachQaStatus.FAILED
+      })
+    ).toBe(true);
+  });
+
+  it("adds only owner-approved service-line capabilities to the grounding ledger", () => {
+    const capability = buildApprovedNewlCapabilityEvidence(HunterServiceLine.WAREHOUSING);
+
+    expect(capability).toMatchObject({
+      id: "newl-capability:warehousing",
+      kind: "NEWL_CAPABILITY"
+    });
+    expect(capability.facts).toContain(
+      "Newl can provide supplemental and flexible warehousing support."
+    );
+    expect(capability.facts.join(" ")).not.toMatch(/guarantee|unlimited|cheapest/i);
+  });
+
   it("normalizes the model strategy to Hunter's authoritative cadence", () => {
     expect(
       normalizeHunterChannelStrategy({
@@ -257,6 +293,24 @@ describe("outreach plan grounding", () => {
     expect(result.modelQa.passed).toBe(true);
     expect(result.draftingUsageAttempts).toHaveLength(2);
     expect(result.qaUsageAttempts).toHaveLength(2);
+  });
+
+  it("tells the single repair pass to remove inference drift instead of paraphrasing it", () => {
+    const feedback = buildBoundedOutreachRepairFeedback({
+      deterministicIssues: [],
+      modelIssues: [{
+        code: "UNSUPPORTED_CAUSAL_CLAIM",
+        severity: "ERROR",
+        message: "A job posting was turned into added shipping capacity.",
+        stepNumber: 2
+      }],
+      allowCallTask: false,
+      senderFirstName: "Alex"
+    });
+
+    expect(feedback).toContain("Replace or remove each exact disputed clause");
+    expect(feedback).toContain("job posting proves only that the listed role is being recruited");
+    expect(feedback).toContain("Step 2: A job posting was turned into added shipping capacity.");
   });
 
   it("passes a complete hot-opportunity email sequence with one call task", () => {

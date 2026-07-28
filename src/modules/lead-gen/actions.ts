@@ -104,7 +104,7 @@ import {
   fetchApolloEmailAccountDirectory,
   fetchApolloContactsForCompany,
   fetchApolloOrganizationForMapping,
-  parseApolloOrganizationId,
+  parseApolloCompanyReference,
   syncApolloContactTypedCustomFields,
   type ApolloEmailAccountDirectoryEntry,
   type ApolloContactRecord,
@@ -1076,7 +1076,9 @@ export async function mapApolloCompanyUrlAction(
   try {
     const context = await authorizeLeadGenMutation();
     const leadId = readRequired(formData, "leadId");
-    const apolloOrganizationId = parseApolloOrganizationId(readRequired(formData, "apolloCompanyUrl"));
+    const apolloCompanyReference = parseApolloCompanyReference(
+      readRequired(formData, "apolloCompanyUrl")
+    );
     if (formData.get("confirmApolloCredit") !== "yes") {
       throw new Error("Confirm the one-credit Apollo company validation before mapping.");
     }
@@ -1127,10 +1129,15 @@ export async function mapApolloCompanyUrlAction(
       throw new Error("This company no longer has an unresolved Apollo match.");
     }
 
+    const mapping = await fetchApolloOrganizationForMapping({
+      companyName: lead.company.name,
+      apolloOrganizationId: apolloCompanyReference.id,
+      resourceType: apolloCompanyReference.resourceType
+    });
     const duplicate = await prisma.company.findFirst({
       where: {
         tenantId: context.tenantId,
-        apolloOrganizationId,
+        apolloOrganizationId: mapping.organizationId,
         id: {
           not: lead.companyId
         }
@@ -1142,11 +1149,6 @@ export async function mapApolloCompanyUrlAction(
     if (duplicate) {
       throw new Error(`That Apollo company is already mapped to ${duplicate.name}.`);
     }
-
-    const mapping = await fetchApolloOrganizationForMapping({
-      companyName: lead.company.name,
-      apolloOrganizationId
-    });
     const mappedAt = new Date();
     const mappingNote =
       `Apollo company manually mapped by ${context.userEmail} on ${mappedAt.toISOString()}. ` +

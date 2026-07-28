@@ -56,7 +56,7 @@ export default async function ApolloMatchReviewPage({
 
       <ReviewSection
         title="Needs review"
-        description="Open the company in Apollo, select its People page, and paste that page URL. You can also retry deliberately after correcting company data or confirm that no usable match exists."
+        description="Open the company in Apollo and paste its Overview or People page URL. You can also retry deliberately after correcting company data or confirm that no usable match exists."
         rows={activeRows}
       />
 
