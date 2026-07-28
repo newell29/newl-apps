@@ -8,6 +8,7 @@ import {
 import {
   fingerprintOutreachEvidence,
   getOutreachPlanApolloBlockReason,
+  isCurrentOutreachDraft,
   mergeOutreachQaResults,
   runDeterministicOutreachQa,
   type GeneratedOutreachSequence,
@@ -211,5 +212,23 @@ describe("outreach plan grounding", () => {
         qaStatus: OutreachQaStatus.PASSED
       })
     ).toBeNull();
+  });
+
+  it("hides an AI draft whose linked Hunter plan was superseded", () => {
+    expect(isCurrentOutreachDraft({
+      aiGenerated: true,
+      linkedPlanId: "old-plan",
+      currentPlanId: "current-plan"
+    })).toBe(false);
+    expect(isCurrentOutreachDraft({
+      aiGenerated: true,
+      linkedPlanId: "current-plan",
+      currentPlanId: "current-plan"
+    })).toBe(true);
+    expect(isCurrentOutreachDraft({
+      aiGenerated: false,
+      linkedPlanId: null,
+      currentPlanId: null
+    })).toBe(true);
   });
 });

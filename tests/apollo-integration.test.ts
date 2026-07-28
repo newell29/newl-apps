@@ -1102,6 +1102,100 @@ describe("fetchApolloContactsForCompany", () => {
     })).toBe(true);
   });
 
+  it("views the exact saved account by ID when Apollo account name search omits it", async () => {
+    const accountId = "661ec0f545d31b00076e28e0";
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ organizations: [] })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/accounts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ accounts: [] })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith(`/api/v1/accounts/${accountId}`)) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            account: {
+              id: accountId,
+              name: "DANSONS US LLC",
+              primary_domain: "dansons.com"
+            }
+          })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ contacts: [] })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+        if (Array.isArray(body.organization_ids)) {
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({ people: [] })
+          } as unknown as Response;
+        }
+
+        expect(body.q_organization_domains_list).toEqual(["dansons.com"]);
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            people: [{
+              id: "dansons-logistics-coordinator",
+              name: "Derek Serran",
+              title: "Senior Logistics Coordinator",
+              organization: {
+                name: "Dansons",
+                primary_domain: "dansons.com"
+              }
+            }]
+          })
+        } as unknown as Response;
+      }
+
+      throw new Error(`Unexpected Apollo URL in test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany(
+      {
+        companyName: "DANSONS US LLC",
+        apolloOrganizationId: accountId
+      },
+      {
+        keywordSearchLimit: 0
+      }
+    );
+
+    expect(result.match.classification).toBe("DIRECT_COMPANY");
+    expect(result.match.matchReason).toContain("saved-account directory");
+    expect(result.contacts.map((contact) => contact.fullName)).toEqual(["Derek Serran"]);
+    expect(
+      fetchMock.mock.calls.some(([request]) =>
+        String(request).endsWith(`/api/v1/accounts/${accountId}`)
+      )
+    ).toBe(true);
+  });
+
   it("accepts a same-domain shortened regional brand and recovers despite a partial account-ID result", async () => {
     const accountId = "661ec0fb45d31b00076e3598";
     const organizationId = "salice-global-organization";

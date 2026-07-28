@@ -299,7 +299,8 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Safe recovery: Hunter performs bounded Organization Search for unsaved companies, but Apollo intentionally omits
   already-saved accounts from that endpoint. When a mapped account produces at most one employee and Organization
   Search cannot resolve it, Hunter uses Apollo's zero-credit saved-account search to require the exact account ID and
-  legal-company identity, reads its nested canonical organization ID, and repeats both employee requests against
+  legal-company identity. If that name-filtered search omits the confirmed mapping, Hunter uses Apollo's zero-credit
+  Account View endpoint with the exact saved ID. It reads the nested canonical organization ID and repeats both employee requests against
   that ID alone. When Apollo exposes no nested ID, the exact saved account's trusted domain is used for the retry
   instead of repeating the stale account ID. The expected domain validates the returned people instead of being combined with
   `organization_ids`, which could over-constrain a legal subsidiary mapped to an operating parent/brand. Saved-contact
@@ -311,7 +312,7 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Regression coverage: `tests/apollo-integration.test.ts` covers an Atlas Copco account omitted from Organization
   Search but present in the saved-account directory, domainless Stabilus and Salice account IDs, a Silfab legal-entity
   account resolving through its explicit Apollo parent relationship, a Dansons saved account with only a trusted
-  domain, and an unrelated Hyosung parent-company result
+  domain, an exact Dansons account omitted by name search but recovered by Account View, and an unrelated Hyosung parent-company result
   failing closed.
 
 ### Apollo People Search returns employees but Hunter still keeps the same saved contacts

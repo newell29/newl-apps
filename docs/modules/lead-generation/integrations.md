@@ -92,8 +92,9 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - Apollo account IDs and global organization IDs are different identifiers. Organization Search intentionally omits
   companies already saved as Apollo accounts, while the zero-credit saved-account search may return both the account
   ID and nested global organization ID. If a mapped account produces at most one employee and Organization Search
-  cannot resolve it, Hunter searches the saved-account directory for that exact account and legal-company identity,
-  then repeats People Search with the nested global organization ID. When Apollo's exact saved-account record exposes
+  cannot resolve it, Hunter searches the saved-account directory for that exact account and legal-company identity.
+  If name-filtered account search omits the confirmed mapping, Hunter retrieves that exact saved account by ID through
+  Apollo's zero-credit Account View endpoint. It then repeats People Search with the nested global organization ID. When Apollo's exact saved-account record exposes
   no nested organization ID, Hunter retries by that record's trusted domain instead of repeating the stale account ID.
   It never combines `organization_ids` with a
   possibly subsidiary-specific domain filter. The expected domain remains a response-validation guard, so a scoped

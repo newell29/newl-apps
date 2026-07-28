@@ -224,7 +224,7 @@ Regression coverage must prove:
 3. machine routes ignore caller-supplied tenant identifiers and use ingestion authentication;
 4. each request processes at most one company and persisted leases, results, attempts, and retry dates survive worker restart;
 5. an unresolved latest Apollo company match blocks repeat discovery and remains review-required;
-6. saved contacts, a 100-result organization-scoped employee search, and an always-run multi-title search are merged and deduplicated before ranking; Apollo account IDs are resolved to the nested global organization ID before employee search (with saved-contact recovery as a fallback), an exact saved account with no nested organization ID retries by its trusted domain, one partial account result cannot be treated as complete, and sibling/parent organizations remain excluded;
+6. saved contacts, a 100-result organization-scoped employee search, and an always-run multi-title search are merged and deduplicated before ranking; Apollo account IDs are resolved to the nested global organization ID before employee search (with saved-contact recovery as a fallback), an exact saved account omitted by name search is recovered through zero-credit Account View, an exact saved account with no nested organization ID retries by its trusted domain, one partial account result cannot be treated as complete, and sibling/parent organizations remain excluded;
 7. deterministic ranking excludes seller-side and unidentifiable contacts, gives the buyer-role model the best 10 candidates, and caps final selection at `maxContactsPerCompany`;
 8. buyer-role review uses strict structured output and returns the exact requested contact IDs; model-qualified contacts rank first, while an explicit manager-or-higher physical logistics or facility-operations buyer remains eligible for an unapproved human-review plan; digital/franchise/general back-office operations and explicit geography mismatches do not receive that fallback;
 9. the manual current-opportunity handoff requires completed company research, creates a deterministic plan scoped
@@ -249,6 +249,8 @@ Regression coverage must prove:
     may replace stale `FINISHED` state only when Apollo reports the selected Hunter cadence ID.
 19. a contact recheck counts a current same-prompt outreach plan as actionable instead of incorrectly reporting zero
     plans and a terminal no-qualifying-contact result.
+20. a forced contact recheck archives unapproved plans for contacts that no longer pass buyer-role review, and the
+    active queue hides AI drafts linked to superseded prompt versions while preserving manual drafts and approved plans.
 
 ## Outreach Plans and grounded sequence generation
 
@@ -264,7 +266,8 @@ Regression coverage must prove:
 6. generated drafts are not auto-approved, plan approval requires QA plus contact/company safety, and a current
    unapproved plan blocks Apollo;
 7. editing generated copy invalidates QA and approval;
-8. every email ends with the routed Apollo mailbox first name, while sender placeholders, generic company signatures,
+8. every email ends with the routed Apollo mailbox first name, including when Apollo exposes the sender label as an
+   email address, while sender placeholders, generic company signatures,
    Hunter/internal references, and evidence IDs fail deterministic QA; and
 9. the migration is additive and preserves every existing lead-generation record;
 10. legacy/unassessed, Watchlist, Blocked, stale, unselected, or inconsistent Hunter handoffs cannot generate or push;

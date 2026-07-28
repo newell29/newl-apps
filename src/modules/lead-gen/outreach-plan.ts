@@ -6,7 +6,7 @@ import {
   OutreachQaStatus
 } from "@prisma/client";
 
-export const OUTREACH_PLAN_PROMPT_VERSION = "outreach-plan-v2.1";
+export const OUTREACH_PLAN_PROMPT_VERSION = "outreach-plan-v2.2";
 export const DEFAULT_OUTREACH_STRATEGY_MODEL = "gpt-5.6-terra";
 export const DEFAULT_OUTREACH_DRAFT_MODEL = "gpt-5.6-luna";
 export const DEFAULT_OUTREACH_QA_MODEL = "gpt-5.6-luna";
@@ -373,6 +373,18 @@ export function getOutreachPlanApolloBlockReason(
     return "The current outreach plan must pass QA and receive human approval before Apollo push.";
   }
   return null;
+}
+
+export function isCurrentOutreachDraft({
+  aiGenerated,
+  linkedPlanId,
+  currentPlanId
+}: {
+  aiGenerated: boolean;
+  linkedPlanId: string | null;
+  currentPlanId: string | null;
+}) {
+  return !aiGenerated || !linkedPlanId || linkedPlanId === currentPlanId;
 }
 
 function validateEvidenceRefs(
