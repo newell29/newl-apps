@@ -85,6 +85,43 @@ describe("Hunter outreach eligibility", () => {
     ).toBe("INVALID_HANDOFF");
   });
 
+  it.each([
+    {
+      label: "Qwen",
+      models: {
+        synthesis: {
+          provider: "OLLAMA",
+          name: "llama3.3:70b"
+        },
+        scoring: {
+          provider: "KIMI",
+          name: "kimi-k2.6"
+        }
+      }
+    },
+    {
+      label: "Kimi",
+      models: {
+        synthesis: {
+          provider: "OLLAMA",
+          name: "qwen3.5:35b"
+        },
+        scoring: {
+          provider: "KIMI",
+          name: "moonshot-v1"
+        }
+      }
+    }
+  ])("fails closed when the saved $label model family is missing", ({ models }) => {
+    expect(
+      evaluateHunterOutreachEligibility({
+        researchSignal: researchSignal("QUALIFIED_CURRENT_ACCOUNT", { models }),
+        prospectingDecision: decision(),
+        now: NOW
+      }).status
+    ).toBe("INVALID_HANDOFF");
+  });
+
   it("blocks stale research and service-line drift", () => {
     expect(
       evaluateHunterOutreachEligibility({

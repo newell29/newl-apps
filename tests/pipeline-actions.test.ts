@@ -261,7 +261,7 @@ describe("pipeline bulk actions", () => {
         id: "company-for-lead-1",
         name: "NOVALIS US, LLC",
         domain: null,
-        apolloOrganizationId: null,
+        apolloOrganizationId: "saved-apollo-organization",
         apolloCompanyMatches: [
           {
             classification: ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW
@@ -283,6 +283,53 @@ describe("pipeline bulk actions", () => {
     expect(fetchApolloContactsForCompany).not.toHaveBeenCalled();
     expect(contactFindMany).not.toHaveBeenCalled();
     expect(leadUpdate).not.toHaveBeenCalled();
+  });
+
+  it("sends a verified Apollo company with zero employees to manual review", async () => {
+    fetchApolloContactsForCompany.mockResolvedValueOnce({
+      organizationId: "apollo-org-empty",
+      companyName: "Harbor Home Retail LLC",
+      domain: "harbor-home.com",
+      linkedinUrl: null,
+      match: {
+        organizationId: "apollo-org-empty",
+        companyName: "Harbor Home Retail LLC",
+        domain: "harbor-home.com",
+        linkedinUrl: null,
+        score: 100,
+        classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
+        nameMatchType: "exact",
+        domainMatch: true,
+        logisticsProviderMatch: false,
+        branchLocationMatch: false,
+        matchReason: "Exact company and domain match.",
+        query: {},
+        rawPayload: {}
+      },
+      contacts: []
+    });
+    const formData = new FormData();
+    formData.append("leadId", "lead-1");
+
+    const summary = await bulkQueueApolloEnrichmentAction(formData);
+
+    expect(summary).toMatchObject({
+      status: "success",
+      requestedCompanies: 1,
+      processedCompanies: 1,
+      reviewNeededCompanies: 1,
+      companiesWithoutContacts: 0
+    });
+    expect(apolloCompanyMatchCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        classification: ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW,
+        matchReason: expect.stringContaining("returned zero employees")
+      })
+    });
+    expect(contactCreate).not.toHaveBeenCalled();
+    expect(leadUpdate.mock.calls.at(-1)?.[0]?.data?.notes).toContain(
+      "Apollo company review needed"
+    );
   });
 
   it("bulk assigns selected leads and contact ownership to a rep", async () => {

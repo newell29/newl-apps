@@ -252,7 +252,9 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   a per-company terminal result; do not queue a duplicate while it remains unfinished.
 - Check Automation Settings first. `DRY_RUN`, `OFF`, or the kill switch intentionally prevents automatic handoff.
 - Inspect the latest `HUNTER_OUTREACH_HANDOFF` job. `REVIEW_REQUIRED` means the immutable Apollo match must be
-  resolved manually; `NO_CONTACTS` and `NO_QUALIFYING_CONTACTS` are terminal for that saved run.
+  resolved manually. `NO_CONTACTS` is also persisted in Apollo Exceptions: open the correct Apollo company,
+  select its People page, and paste that URL rather than rerunning the same automatic search. `NO_QUALIFYING_CONTACTS`
+  remains terminal for that saved run because employees were found but none met the buyer-role rules.
 - Transient Apollo/model failures receive at most three server-owned attempts. The Mac worker resumes queued jobs
   during its normal loop, so research should not be rerun merely to retry the handoff.
 - A QA-failed plan is preserved for inspection and cannot advance. It must not be silently regenerated until its

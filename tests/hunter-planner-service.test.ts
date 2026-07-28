@@ -174,8 +174,8 @@ function researchSignal({
             : { status: "NOT_REQUIRED", disposition: "NOT_RUN" },
         deterministicGate: { passed: true },
         models: {
-          synthesis: { provider: "OLLAMA" },
-          scoring: { provider: "KIMI" }
+          synthesis: { provider: "OLLAMA", name: "qwen3.5:35b" },
+          scoring: { provider: "KIMI", name: "kimi-k2.6" }
         }
       }
     },
