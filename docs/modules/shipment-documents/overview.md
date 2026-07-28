@@ -34,6 +34,8 @@ Roles and defaults are in `src/server/auth/role-policy.ts`. Runtime checks are i
 
 Expected failures include missing tenant entitlement, read-only mutation attempts, validation errors, missing integration credentials, duplicate records, empty parser results, external API errors, timeouts, and partial job completion. Recovery should use module UI review screens, audit/job records, and documented dry-run scripts before live writes.
 
+For Garland Phase 2 jobs, a successful Teamship API update and its later editable-BOL cleanup are separate outcomes. The BOL cleanup worker may restart a closed Chrome session once and retry the interrupted order because clearing an already-empty generated weight field is idempotent. If the replacement browser also closes, the worker stops the cleanup batch, records the interrupted order as failed, records later orders as skipped because of the shared browser incident, and does not replay the successful API updates. A new production cleanup attempt still requires an explicit human-approved job or operational action.
+
 ## Testing
 
 Relevant tests are under `tests/` and generally named after the module. Recommended checks: `npm test`, `npm run lint`, `npm run typecheck`, and targeted route/service tests. Live integration scripts must not be run without explicit approval and safe credentials.

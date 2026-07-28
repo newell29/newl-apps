@@ -1,4 +1,5 @@
 import {
+  describeIncompleteBolCleanup,
   executeTeamshipPhase2BolCleanupJob,
   type TeamshipBolCleanupJobResult
 } from "@/modules/shipment-documents/teamship-browser-update-execution";
@@ -215,13 +216,13 @@ function mergeBolCleanupResult(result: TeamshipPhase2ExecutionResult, cleanupRes
       }
     };
 
-    if (cleanup.status === "FAILED") {
+    if (cleanup.status !== "UPDATED") {
       return {
         ...order,
         status: "FAILED" as const,
         responseStatus: order.responseStatus ?? 207,
         updatePayload,
-        error: `Teamship API update succeeded, but BOL weight cleanup failed: ${cleanup.error ?? "Unknown failure."}`
+        error: describeIncompleteBolCleanup(cleanup)
       };
     }
 
