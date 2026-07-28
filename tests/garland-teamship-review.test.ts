@@ -611,6 +611,52 @@ C-CLEAN STRONG CLEANING STRENGTH
     expect(orders[0]?.instructions).not.toContain("Ship Qty");
   });
 
+  it("keeps split CHEMTREC and quantity continuations inside the item-header cluster", () => {
+    const orders = parseGarlandShippingOrderPages([
+      {
+        pageNumber: 1,
+        text: `Ship-To Pre-Shipper Print Date
+99999999 PS123456 12/31/2099
+Pre-Shipper
+SYNTHETIC GARLAND CUSTOMER
+100 TEST STREET
+TEST CITY, ON A1A 1A1
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Order Number SR812345 Ship To PO TEST-PO Frt Terms PPADD-CD
+Order Date 12/31/2099 Ship Via TEST CARRIER
+RECEIVING BY APPOINTMENT
+DANGEROUS GOODS - SYNTHETIC CLEANER PROPER NAME: TEST MATERIAL, CLASS 8
+24 HOUR DG NUMBER:
+Ln Item Number T
+Site
+Location
+Lot/Serial
+Ref
+Ship Qty Qty Open UM Due
+Shipped
+CHEMTREC - 1-800-000-0000
+QUANTITY: 2
+1 TEST-CLEANER-5001 999999
+SYNTHETIC CLEANER DESCRIPTION
+2.00 EA 12/31/2099`
+      }
+    ]);
+
+    expect(orders[0]?.instructions).toBe(
+      [
+        "RECEIVING BY APPOINTMENT",
+        "DANGEROUS GOODS - SYNTHETIC CLEANER PROPER NAME: TEST MATERIAL, CLASS 8",
+        "24 HOUR DG NUMBER:",
+        "CHEMTREC - 1-800-000-0000",
+        "QUANTITY: 2"
+      ].join("\n")
+    );
+    expect(orders[0]?.instructions).not.toContain("Lot/Serial");
+    expect(orders[0]?.instructions).not.toContain("TEST-CLEANER-5001");
+    expect(orders[0]?.instructions).not.toContain("SYNTHETIC CLEANER DESCRIPTION");
+  });
+
   it("does not treat continuation-page item configuration as Special Instructions", () => {
     const orders = parseGarlandShippingOrderPages([
       {
