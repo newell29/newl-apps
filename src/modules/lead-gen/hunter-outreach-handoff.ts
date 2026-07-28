@@ -312,6 +312,183 @@ export async function enqueueHunterOutreachHandoff({
   };
 }
 
+export async function enqueueHunterCompanyOutreachHandoff({
+  tenantId,
+  companyId,
+  forceContactReview = true
+}: {
+  tenantId: string;
+  companyId: string;
+  forceContactReview?: boolean;
+}) {
+  const policy = await prisma.hunterAutomationPolicy.findUnique({
+    where: { tenantId },
+    select: {
+      mode: true,
+      killSwitch: true,
+      maxContactsPerCompany: true
+    }
+  });
+  if (
+    !policy ||
+    policy.killSwitch ||
+    policy.mode !== HunterAutomationMode.ASSISTED
+  ) {
+    return {
+      state: "disabled" as const,
+      message: "Hunter assisted handoff is not enabled for this tenant."
+    };
+  }
+  if (!isOpenAiDraftGenerationConfigured()) {
+    return {
+      state: "configuration_required" as const,
+      message: "Outreach model configuration is missing."
+    };
+  }
+  const aiConfig = await prisma.tradeMiningScoringConfig.findUnique({
+    where: { tenantId },
+    select: { aiClassificationEnabled: true }
+  });
+  if (aiConfig?.aiClassificationEnabled === false) {
+    return {
+      state: "configuration_required" as const,
+      message: "Lead-generation AI is disabled."
+    };
+  }
+
+  const decision = await prisma.hunterProspectingDecision.findFirst({
+    where: {
+      tenantId,
+      companyId
+    },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      status: true,
+      companyId: true,
+      companyName: true,
+      recommendedPersona: true,
+      serviceLine: true,
+      opportunityType: true,
+      rationale: true,
+      recommendedSender: true,
+      recommendedCadence: true,
+      createdAt: true,
+      jobRunId: true,
+      company: {
+        select: {
+          hunterOpportunitySignals: {
+            where: {
+              tenantId,
+              sourceName: "Hunter company research"
+            },
+            orderBy: { observedAt: "desc" },
+            take: 1,
+            select: {
+              id: true,
+              sourceName: true,
+              serviceLine: true,
+              observedAt: true,
+              evidence: true
+            }
+          }
+        }
+      }
+    }
+  });
+  const signal = decision?.company?.hunterOpportunitySignals[0] ?? null;
+  const eligibility = evaluateHunterOutreachEligibility({
+    researchSignal: signal,
+    prospectingDecision: decision,
+    maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
+  });
+  if (
+    !decision?.companyId ||
+    eligibility.status !== "ELIGIBLE" ||
+    !eligibility.directive ||
+    !signal
+  ) {
+    return {
+      state: "nothing_eligible" as const,
+      message: eligibility.reason
+    };
+  }
+
+  const activeJobs = await prisma.automationJobRun.findMany({
+    where: {
+      tenantId,
+      jobType: HUNTER_OUTREACH_HANDOFF_JOB_TYPE,
+      status: { in: [JobStatus.QUEUED, JobStatus.RUNNING] },
+      startedAt: { gte: new Date(Date.now() - ACTIVE_JOB_WINDOW_MS) }
+    },
+    orderBy: { startedAt: "desc" },
+    take: 50,
+    select: { id: true, input: true }
+  });
+  const active = activeJobs.find((candidate) => {
+    const input = isObject(candidate.input) ? candidate.input : {};
+    return Array.isArray(input.items) && input.items.some((item) => (
+      isObject(item) && item.companyId === companyId
+    ));
+  });
+  if (active) {
+    return {
+      state: "already_queued" as const,
+      runId: active.id
+    };
+  }
+
+  const item: HandoffItem = {
+    companyId: decision.companyId,
+    companyName: decision.companyName,
+    researchSignalId: eligibility.directive.researchSignalId,
+    prospectingDecisionId: eligibility.directive.prospectingDecisionId,
+    recommendedPersona: eligibility.directive.recommendedPersona
+  };
+  const maxContactsPerCompany = Math.min(
+    HUNTER_SELECTED_CONTACT_MAX,
+    Math.max(1, policy.maxContactsPerCompany)
+  );
+  const job = await prisma.automationJobRun.create({
+    data: {
+      tenantId,
+      jobType: HUNTER_OUTREACH_HANDOFF_JOB_TYPE,
+      status: JobStatus.QUEUED,
+      input: {
+        version: 1,
+        source: "MANUAL_APOLLO_MAPPING_OR_RECHECK",
+        researchRunId: null,
+        prospectingPlanRunId: decision.jobRunId,
+        maxContactsPerCompany,
+        forceContactReview,
+        items: [item]
+      },
+      output: emptyOutput()
+    }
+  });
+  await prisma.auditLog.create({
+    data: {
+      tenantId,
+      action: "lead-gen.hunter-outreach-handoff.company-queued",
+      entityType: "AutomationJobRun",
+      entityId: job.id,
+      after: {
+        companyId,
+        prospectingDecisionId: decision.id,
+        companyCount: 1,
+        maxContactsPerCompany,
+        forceContactReview,
+        source: "MANUAL_APOLLO_MAPPING_OR_RECHECK"
+      }
+    }
+  });
+  return {
+    state: "queued" as const,
+    runId: job.id,
+    companyCount: 1
+  };
+}
+
 export async function processNextHunterOutreachHandoff({
   tenantId,
   runId,
@@ -1130,6 +1307,7 @@ export function shouldAdvanceHunterContactReview(
   contact: {
     title: string | null;
     department: string | null;
+    seniority?: string | null;
     contactStatus: ContactStatus;
     sequenceStatus: SequenceStatus;
     replyStatus: ReplyStatus;
@@ -1137,10 +1315,26 @@ export function shouldAdvanceHunterContactReview(
 ) {
   return (
     (
-      (isContactFitAutoEligible(review) && !hasBlockingContactFitRisk(review)) ||
+      (
+        isContactFitAutoEligible(review) &&
+        !hasBlockingContactFitRisk(review) &&
+        !isClearlyIndividualContributor(contact)
+      ) ||
       isStrongHunterBuyerRole(contact)
     ) &&
     isContactEligibleForFreshOutreach(contact)
+  );
+}
+
+export function isClearlyIndividualContributor(contact: {
+  title: string | null;
+  department: string | null;
+  seniority?: string | null;
+}) {
+  if (isStrongHunterBuyerRole(contact)) return false;
+  const role = `${contact.title ?? ""} ${contact.department ?? ""} ${contact.seniority ?? ""}`;
+  return /\b(coordinator|specialist|analyst|associate|assistant|administrator|clerk|representative|agent|technician)\b/i.test(
+    role
   );
 }
 

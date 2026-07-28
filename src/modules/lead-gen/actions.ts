@@ -52,6 +52,10 @@ import {
   evaluateHunterOutreachEligibility,
   getHunterOutreachResearchMaxAgeDays
 } from "@/modules/lead-gen/hunter-outreach-eligibility";
+import {
+  enqueueHunterCompanyOutreachHandoff,
+  processNextHunterOutreachHandoff
+} from "@/modules/lead-gen/hunter-outreach-handoff";
 import { resolveApolloContactDiscoveryMatch } from "@/modules/lead-gen/apollo-contact-discovery-review";
 import { canonicalizeTradeMiningDestinationPort } from "@/modules/lead-gen/search-profile-suggestions";
 import {
@@ -1359,55 +1363,46 @@ export async function mapApolloCompanyUrlAction(
       })
     ]);
 
-    const existingContacts = await loadExistingApolloContactsForCompany(
-      context.tenantId,
-      lead.companyId
-    );
-
     try {
-      const lookup = await fetchApolloContactsForCompany({
-        companyName: mapping.companyName,
-        domain: mapping.domain,
-        apolloOrganizationId: mapping.organizationId
+      const queued = await enqueueHunterCompanyOutreachHandoff({
+        tenantId: context.tenantId,
+        companyId: lead.companyId,
+        forceContactReview: true
       });
-      if (lookup.contacts.length === 0) {
-        const recordedMatch = await recordApolloCompanyMatch({
-          tenantId: context.tenantId,
-          companyId: lead.companyId,
-          lookup
-        });
+      if (queued.state !== "queued") {
         revalidateLeadGenSurfaces();
         return {
-          status: "error",
+          status: queued.state === "nothing_eligible" ? "error" : "success",
           message:
-            `${lead.company.name} was mapped to ${mapping.companyName}, but ${recordedMatch.matchReason} ` +
-            "The company remains in Apollo Exceptions.",
+            `${lead.company.name} was mapped to ${mapping.companyName}. ` +
+            ("message" in queued
+              ? queued.message
+              : "Hunter contact review is already queued."),
           completedAt: new Date().toISOString()
         };
       }
-      const contactsImported = await finalizeApolloEnrichmentForLead({
+      const processed = await processNextHunterOutreachHandoff({
         tenantId: context.tenantId,
-        lead: {
-          ...lead,
-          ownerUserId: lead.ownerUserId,
-          company: {
-            id: lead.company.id,
-            apolloOrganizationId: mapping.organizationId,
-            domain: mapping.domain ?? lead.company.domain,
-            linkedinUrl: mapping.linkedinUrl ?? lead.company.linkedinUrl
-          }
-        },
-        existingContacts,
-        lookup,
-        baseNotes: appendLeadNote(lead.notes, mappingNote)
+        runId: queued.runId
       });
+      const result = "result" in processed ? processed.result : null;
 
       revalidateLeadGenSurfaces();
       return {
-        status: "success",
+        status:
+          result?.state === "NO_CONTACTS" ||
+          result?.state === "REVIEW_REQUIRED" ||
+          result?.state === "CONTACT_REVIEW_REQUIRED" ||
+          result?.state === "ERROR"
+            ? "error"
+            : "success",
         message:
           `${lead.company.name} was mapped to ${mapping.companyName}. ` +
-          `${contactsImported} relevant contact${contactsImported === 1 ? "" : "s"} imported.`,
+          (result
+            ? `${result.apolloContactsFound} Apollo employee${result.apolloContactsFound === 1 ? "" : "s"} found; ` +
+              `${result.contactsRanked} reviewed; ${result.actionablePlans} QA-passed plan${result.actionablePlans === 1 ? "" : "s"} ready. ` +
+              `Hunter enforced the saved maximum of three selected contacts. ${result.message}`
+            : "Hunter contact review was queued and will continue in the protected worker."),
         completedAt: new Date().toISOString()
       };
     } catch (contactError) {
@@ -1420,14 +1415,14 @@ export async function mapApolloCompanyUrlAction(
         data: {
           notes: appendLeadNote(
             appendLeadNote(lead.notes, mappingNote),
-            `Apollo company mapping succeeded, but contact import needs retry. ${warning}`
+            `Apollo company mapping succeeded, but Hunter contact review needs retry. ${warning}`
           )
         }
       });
       revalidateLeadGenSurfaces();
       return {
         status: "success",
-        message: `${lead.company.name} was mapped successfully. Contact import needs a later retry: ${warning}`,
+        message: `${lead.company.name} was mapped successfully. Hunter contact review needs a later retry: ${warning}`,
         completedAt: new Date().toISOString()
       };
     }
@@ -5079,45 +5074,6 @@ async function finalizeApolloEnrichmentForLead({
   });
 
   return syncedContacts.length;
-}
-
-async function loadExistingApolloContactsForCompany(tenantId: string, companyId: string) {
-  return prisma.contact.findMany({
-    where: {
-      tenantId,
-      companyId
-    },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      fullName: true,
-      title: true,
-      department: true,
-      seniority: true,
-      email: true,
-      phone: true,
-      linkedinUrl: true,
-      source: true,
-      contactStatus: true,
-      apolloContactId: true,
-      apolloPersonId: true,
-      apolloStatus: true,
-      sequenceStatus: true,
-      replyStatus: true,
-      recommendedSequenceName: true,
-      recommendedSequenceId: true,
-      selectedSequenceName: true,
-      selectedSequenceId: true,
-      sequenceRecommendationReason: true,
-      sequenceOverrideReason: true,
-      sequenceManuallyOverridden: true,
-      lastTouchAt: true,
-      lastReplyAt: true,
-      assignedRep: true,
-      rawJson: true
-    }
-  });
 }
 
 async function recordApolloCompanyMatch({

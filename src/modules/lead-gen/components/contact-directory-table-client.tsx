@@ -172,7 +172,9 @@ export function ContactDirectoryTableClient({
   updateContactSequenceAction,
   saveContactDraftAction,
   generateContactDraftAction,
-  approveOutreachPlanAction
+  approveOutreachPlanAction,
+  recheckHunterCompanyContactsAction,
+  canRecheckHunterContacts
 }: {
   contacts: ContactDirectoryRow[];
   initialApolloPushJobs: ApolloPushJobSummary[];
@@ -198,6 +200,8 @@ export function ContactDirectoryTableClient({
   saveContactDraftAction: (formData: FormData) => Promise<void>;
   generateContactDraftAction: (formData: FormData) => Promise<void>;
   approveOutreachPlanAction: (formData: FormData) => Promise<void>;
+  recheckHunterCompanyContactsAction: (formData: FormData) => Promise<void>;
+  canRecheckHunterContacts: boolean;
 }) {
   const router = useRouter();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -579,6 +583,17 @@ export function ContactDirectoryTableClient({
                   {contact.hunterEligibility.reason}
                 </div>
               </div>
+              {canRecheckHunterContacts && contact.hunterEligibility.status === "ELIGIBLE" ? (
+                <form action={recheckHunterCompanyContactsAction} className="space-y-1">
+                  <input type="hidden" name="companyId" value={contact.companyId} />
+                  <button className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-accentSoft">
+                    Re-evaluate company contacts
+                  </button>
+                  <p className="text-[11px] leading-4 text-mutedForeground">
+                    Rechecks only this company, enforces the 1-3 contact limit, and archives unselected draft plans.
+                  </p>
+                </form>
+              ) : null}
               {contact.outreachPlan ? (
                 <OutreachPlanPanel
                   contact={contact}
@@ -690,7 +705,9 @@ export function ContactDirectoryTableClient({
       updateContactSequenceAction,
       saveContactDraftAction,
       generateContactDraftAction,
-      approveOutreachPlanAction
+      approveOutreachPlanAction,
+      recheckHunterCompanyContactsAction,
+      canRecheckHunterContacts
     ]
   );
 

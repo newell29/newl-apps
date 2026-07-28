@@ -9,7 +9,10 @@ const prisma = vi.hoisted(() => ({
     findMany: vi.fn(),
     create: vi.fn()
   },
-  hunterProspectingDecision: { findMany: vi.fn() },
+  hunterProspectingDecision: {
+    findFirst: vi.fn(),
+    findMany: vi.fn()
+  },
   auditLog: { create: vi.fn() }
 }));
 const evaluateHunterOutreachEligibility = vi.hoisted(() => vi.fn());
@@ -38,6 +41,7 @@ vi.mock("@/server/integrations/apollo", () => ({
 }));
 
 import {
+  enqueueHunterCompanyOutreachHandoff,
   enqueueHunterOutreachHandoff,
   queueCurrentHunterOutreachHandoff
 } from "@/modules/lead-gen/hunter-outreach-handoff";
@@ -143,6 +147,83 @@ describe("Hunter assisted handoff queueing", () => {
             companyName: "Example Importer",
             researchSignalId: "signal-1",
             prospectingDecisionId: "decision-1",
+            recommendedPersona: "Director of Supply Chain"
+          }]
+        })
+      })
+    });
+  });
+
+  it("queues a forced one-company review and never exceeds the three-contact ceiling", async () => {
+    prisma.hunterAutomationPolicy.findUnique.mockResolvedValue({
+      mode: HunterAutomationMode.ASSISTED,
+      killSwitch: false,
+      maxContactsPerCompany: 9
+    });
+    prisma.hunterProspectingDecision.findFirst.mockResolvedValue({
+      id: "decision-target",
+      status: "WOULD_PURSUE",
+      companyId: "company-target",
+      companyName: "Target Importer",
+      recommendedPersona: "Director of Supply Chain",
+      serviceLine: "WAREHOUSING",
+      opportunityType: "Expansion",
+      rationale: "Verified warehouse expansion",
+      recommendedSender: "Alex",
+      recommendedCadence: "Hunter - Email Only",
+      createdAt: new Date(),
+      jobRunId: "plan-target",
+      company: {
+        hunterOpportunitySignals: [{
+          id: "signal-target",
+          sourceName: "Hunter company research",
+          serviceLine: "WAREHOUSING",
+          observedAt: new Date(),
+          evidence: {}
+        }]
+      }
+    });
+    evaluateHunterOutreachEligibility.mockReturnValue({
+      status: "ELIGIBLE",
+      directive: {
+        researchSignalId: "signal-target",
+        prospectingDecisionId: "decision-target",
+        recommendedPersona: "Director of Supply Chain"
+      }
+    });
+    prisma.automationJobRun.create.mockResolvedValue({ id: "handoff-target" });
+
+    await expect(enqueueHunterCompanyOutreachHandoff({
+      tenantId: "tenant-a",
+      companyId: "company-target"
+    })).resolves.toEqual({
+      state: "queued",
+      runId: "handoff-target",
+      companyCount: 1
+    });
+    expect(prisma.hunterProspectingDecision.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          tenantId: "tenant-a",
+          companyId: "company-target"
+        },
+        orderBy: { createdAt: "desc" }
+      })
+    );
+    expect(prisma.automationJobRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        tenantId: "tenant-a",
+        jobType: "HUNTER_OUTREACH_HANDOFF",
+        input: expect.objectContaining({
+          source: "MANUAL_APOLLO_MAPPING_OR_RECHECK",
+          prospectingPlanRunId: "plan-target",
+          maxContactsPerCompany: 3,
+          forceContactReview: true,
+          items: [{
+            companyId: "company-target",
+            companyName: "Target Importer",
+            researchSignalId: "signal-target",
+            prospectingDecisionId: "decision-target",
             recommendedPersona: "Director of Supply Chain"
           }]
         })

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   isActionableHunterPlanState,
+  isClearlyIndividualContributor,
   isContactEligibleForFreshOutreach,
   isContactFitAutoEligible,
   isStrongHunterBuyerRole,
@@ -226,6 +227,10 @@ describe("Hunter assisted outreach handoff", () => {
       title: "Franchise Operations Manager",
       department: "Operations"
     })).toBe(false);
+    expect(isClearlyIndividualContributor({
+      title: "Logistics Coordinator",
+      department: "Operations"
+    })).toBe(true);
 
     expect(shouldAdvanceHunterContactReview({
       contactId: "contact-1",
@@ -270,6 +275,23 @@ describe("Hunter assisted outreach handoff", () => {
     }, {
       title: "Franchise Operations Manager",
       department: "Operations",
+      contactStatus: ContactStatus.REVIEWING,
+      sequenceStatus: SequenceStatus.NOT_STARTED,
+      replyStatus: ReplyStatus.NO_REPLY
+    })).toBe(false);
+
+    expect(shouldAdvanceHunterContactReview({
+      contactId: "contact-4",
+      disposition: "PRIMARY",
+      confidence: 96,
+      responsibilityHypothesis: "May influence outbound logistics.",
+      rationale: "Function matches, but the title lacks buying authority.",
+      recommendedApproach: "Ask about warehouse support.",
+      riskFlags: []
+    }, {
+      title: "Logistics Coordinator",
+      department: "Operations",
+      seniority: "Individual Contributor",
       contactStatus: ContactStatus.REVIEWING,
       sequenceStatus: SequenceStatus.NOT_STARTED,
       replyStatus: ReplyStatus.NO_REPLY

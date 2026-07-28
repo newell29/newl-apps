@@ -5,6 +5,7 @@ import {
   ContactOutreachDraftStatus,
   ContactTier,
   ModuleKey,
+  PlatformRole,
   ReplyStatus,
   SequenceStatus
 } from "@prisma/client";
@@ -23,6 +24,7 @@ import {
 import { getRecentApolloPushJobs } from "@/modules/lead-gen/apollo-push-jobs";
 import { getApolloStatusSyncHealth } from "@/modules/lead-gen/apollo-status-sync";
 import { ContactDirectoryTableClient } from "@/modules/lead-gen/components/contact-directory-table-client";
+import { recheckHunterCompanyContactsAction } from "@/modules/lead-gen/hunter-actions";
 import {
   getContactDirectoryFilters,
   getOutreachQueues,
@@ -57,6 +59,7 @@ export default async function OutreachQueuePage({
   const params = searchParams ? await searchParams : {};
   const view = parseOutreachView(readParam(params.view));
   const requestedApolloJobId = readParam(params.apolloJob);
+  const contactReviewMessage = readParam(params.contactReview);
   const query = readParam(params.q) ?? "";
   const companyId = readParam(params.company);
   const searchProfileId = readParam(params.searchProfile);
@@ -178,6 +181,12 @@ export default async function OutreachQueuePage({
         contact is enrolled, it moves to Active Cadences for reply monitoring. Rejected, do-not-contact, bounced,
         finished, and sales-engaged records remain hidden.
       </div>
+
+      {contactReviewMessage ? (
+        <div className="rounded-lg border border-success/30 bg-success/10 px-4 py-3 text-sm text-foreground">
+          {contactReviewMessage}
+        </div>
+      ) : null}
 
       <nav className="flex flex-wrap gap-2" aria-label="Outreach work views">
         <Link
@@ -471,6 +480,8 @@ export default async function OutreachQueuePage({
             saveContactDraftAction={saveContactDraftAction}
             generateContactDraftAction={generateContactDraftAction}
             approveOutreachPlanAction={approveOutreachPlanAction}
+            recheckHunterCompanyContactsAction={recheckHunterCompanyContactsAction}
+            canRecheckHunterContacts={context.role === PlatformRole.ADMIN}
           />
         ) : (
           <div className="px-4 py-12 text-center">
