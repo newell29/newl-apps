@@ -9,9 +9,15 @@ const prismaMock = vi.hoisted(() => ({
     create: vi.fn(),
     findFirst: vi.fn(),
     findMany: vi.fn(),
+    update: vi.fn(),
+    updateMany: vi.fn()
+  },
+  developmentSuggestion: {
+    findMany: vi.fn(),
+    create: vi.fn(),
+    findFirst: vi.fn(),
     update: vi.fn()
   },
-  developmentSuggestion: { findMany: vi.fn(), create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
   automationJobRun: { create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn() },
   auditLog: { create: vi.fn() },
   $transaction: vi.fn()
@@ -25,6 +31,7 @@ import {
   decideDevelopmentSuggestion,
   explainGarlandCheck,
   generateDevelopmentSuggestions,
+  resolveDevelopmentSuggestion,
   retryRivetDevelopmentSuggestion,
   reviewOperationalFeedback
 } from "@/modules/assistant/operational-memory";
@@ -258,6 +265,209 @@ describe("operational feedback and approved memory", () => {
     );
   });
 
+  it("attaches later feedback to an approved issue family without changing its approved packet", async () => {
+    prismaMock.operationalFeedback.findMany.mockResolvedValue([
+      {
+        id: "feedback-2",
+        moduleKey: "SHIPMENT_DOCUMENTS",
+        workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+        classification: "CHECK_RESULT",
+        subjectType: "GARLAND_CHECK",
+        subjectId: "PS123457",
+        reporterStatement: "Commodity should show SN because the Lot/Serial reference exists.",
+        expectedOutcome: "PASS",
+        observedOutcome: "FAIL"
+      }
+    ]);
+    prismaMock.developmentSuggestion.findMany.mockResolvedValue([
+      {
+        id: "suggestion-1",
+        moduleKey: "SHIPMENT_DOCUMENTS",
+        workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+        title: "Garland Lot/Serial and commodity formatting",
+        summary: "The Commodity field is missing the Lot/Serial Ref.",
+        rationale: "One approved report.",
+        status: "APPROVED",
+        riskLevel: "HIGH",
+        sourceFeedbackIds: ["feedback-1"],
+        feedbackCount: 1,
+        proposedScope: { issueKey: "GARLAND_LOT_SERIAL_COMMODITY" },
+        generatedAt: new Date("2026-07-27T12:00:00Z")
+      }
+    ]);
+    prismaMock.developmentSuggestion.update.mockImplementation(async ({ data }) => ({
+      id: "suggestion-1",
+      ...data
+    }));
+
+    const suggestions = await generateDevelopmentSuggestions(context);
+
+    expect(suggestions).toHaveLength(1);
+    expect(prismaMock.developmentSuggestion.create).not.toHaveBeenCalled();
+    expect(prismaMock.developmentSuggestion.update).toHaveBeenCalledWith({
+      where: {
+        tenantId_id: {
+          tenantId: "tenant-1",
+          id: "suggestion-1"
+        }
+      },
+      data: {
+        proposedScope: expect.objectContaining({
+          issueKey: "GARLAND_LOT_SERIAL_COMMODITY",
+          followUpFeedbackIds: ["feedback-2"],
+          followUpFeedbackCount: 1
+        })
+      }
+    });
+    expect(prismaMock.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "assistant.development_suggestion.attach_follow_up",
+          after: expect.objectContaining({ approvedPacketChanged: false })
+        })
+      })
+    );
+  });
+
+  it("supersedes a duplicate awaiting card and preserves its feedback on the approved family", async () => {
+    prismaMock.operationalFeedback.findMany.mockResolvedValue([]);
+    prismaMock.developmentSuggestion.findMany.mockResolvedValue([
+      {
+        id: "suggestion-approved",
+        moduleKey: "SHIPMENT_DOCUMENTS",
+        workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+        title: "Garland ship-to address and location comparison",
+        summary: "The Ship to city is missing.",
+        rationale: "Approved report.",
+        status: "APPROVED",
+        riskLevel: "HIGH",
+        sourceFeedbackIds: ["feedback-1"],
+        feedbackCount: 1,
+        proposedScope: { issueKey: "GENERIC_CHECK_RESULT_OLD" },
+        generatedAt: new Date("2026-07-27T12:00:00Z")
+      },
+      {
+        id: "suggestion-duplicate",
+        moduleKey: "SHIPMENT_DOCUMENTS",
+        workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+        title: "Check Result feedback for Garland Teamship Review",
+        summary: "The Ship to address, city and postal code should be corrected.",
+        rationale: "Later report.",
+        status: "AWAITING_APPROVAL",
+        riskLevel: "HIGH",
+        sourceFeedbackIds: ["feedback-2"],
+        feedbackCount: 1,
+        proposedScope: { issueKey: "GENERIC_CHECK_RESULT_NEW" },
+        generatedAt: new Date("2026-07-28T12:00:00Z")
+      }
+    ]);
+    prismaMock.developmentSuggestion.update.mockResolvedValue({ id: "suggestion-approved" });
+
+    const suggestions = await generateDevelopmentSuggestions(context);
+
+    expect(suggestions).toEqual([]);
+    expect(prismaMock.developmentSuggestion.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          tenantId_id: {
+            tenantId: "tenant-1",
+            id: "suggestion-approved"
+          }
+        },
+        data: {
+          proposedScope: expect.objectContaining({
+            followUpFeedbackIds: ["feedback-2"],
+            followUpFeedbackCount: 1
+          })
+        }
+      })
+    );
+    expect(prismaMock.developmentSuggestion.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          tenantId_id: {
+            tenantId: "tenant-1",
+            id: "suggestion-duplicate"
+          }
+        },
+        data: expect.objectContaining({ status: "SUPERSEDED" })
+      })
+    );
+  });
+
+  it("creates one regression card after an administrator records the earlier fix as deployed", async () => {
+    prismaMock.operationalFeedback.findMany.mockResolvedValue([
+      {
+        id: "feedback-regression",
+        moduleKey: "SHIPMENT_DOCUMENTS",
+        workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+        classification: "CHECK_RESULT",
+        subjectType: "GARLAND_CHECK",
+        subjectId: "PS123458",
+        reporterStatement: "The Commodity field is missing the Lot/Serial Ref.",
+        expectedOutcome: "PASS",
+        observedOutcome: "FAIL"
+      }
+    ]);
+    prismaMock.developmentSuggestion.findMany.mockResolvedValue([
+      {
+        id: "suggestion-fixed",
+        moduleKey: "SHIPMENT_DOCUMENTS",
+        workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+        title: "Garland Lot/Serial and commodity formatting",
+        summary: "The Commodity field is missing the Lot/Serial Ref.",
+        rationale: "Deployed fix.",
+        status: "RESOLVED",
+        riskLevel: "HIGH",
+        sourceFeedbackIds: ["feedback-old"],
+        feedbackCount: 1,
+        proposedScope: {
+          issueKey: "GARLAND_LOT_SERIAL_COMMODITY",
+          lifecycleState: "FIX_DEPLOYED"
+        },
+        generatedAt: new Date("2026-07-27T12:00:00Z")
+      }
+    ]);
+    prismaMock.developmentSuggestion.create.mockImplementation(async ({ data }) => ({
+      id: "suggestion-regression",
+      ...data
+    }));
+
+    await generateDevelopmentSuggestions(context);
+
+    expect(prismaMock.developmentSuggestion.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        title: "Garland Lot/Serial and commodity formatting",
+        proposedScope: expect.objectContaining({
+          issueKey: "GARLAND_LOT_SERIAL_COMMODITY",
+          regressionOfSuggestionId: "suggestion-fixed"
+        })
+      })
+    });
+  });
+
+  it("screens only feedback with matching outcomes and identical compared values", async () => {
+    prismaMock.operationalFeedback.findMany.mockResolvedValue([
+      {
+        id: "non-actionable",
+        moduleKey: "SHIPMENT_DOCUMENTS",
+        workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+        classification: "CHECK_RESULT",
+        subjectType: "GARLAND_CHECK",
+        subjectId: "PS123459",
+        reporterStatement: "The Commodity field currently displays: SKU: EXAMPLE QTY: 1 It should display: SKU: EXAMPLE QTY: 1",
+        expectedOutcome: "PASS",
+        observedOutcome: "PASS"
+      }
+    ]);
+    prismaMock.developmentSuggestion.findMany.mockResolvedValue([]);
+
+    const suggestions = await generateDevelopmentSuggestions(context);
+
+    expect(suggestions).toEqual([]);
+    expect(prismaMock.developmentSuggestion.create).not.toHaveBeenCalled();
+  });
+
   it("atomically queues a Rivet Codex job when an administrator approves a suggestion", async () => {
     prismaMock.developmentSuggestion.findFirst.mockResolvedValue({
       id: "suggestion-1",
@@ -377,6 +587,52 @@ describe("operational feedback and approved memory", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           action: "assistant.rivet_development.retry"
+        })
+      })
+    );
+  });
+
+  it("resolves a reviewed deployed suggestion and its attached feedback after explicit confirmation", async () => {
+    prismaMock.developmentSuggestion.findFirst.mockResolvedValue({
+      id: "suggestion-1",
+      status: "APPROVED",
+      title: "Garland parser fix",
+      sourceFeedbackIds: ["feedback-1"],
+      proposedScope: {
+        issueKey: "GARLAND_SPECIAL_INSTRUCTIONS",
+        followUpFeedbackIds: ["feedback-2"]
+      },
+      pullRequestUrl: "https://github.com/example/repository/pull/12",
+      developmentThreadId: "rivet-job-1"
+    });
+    prismaMock.automationJobRun.findFirst.mockResolvedValue({
+      id: "rivet-job-1",
+      status: "SUCCESS",
+      output: { phase: "READY_FOR_ALEX" },
+      errorMessage: null
+    });
+    prismaMock.developmentSuggestion.update.mockResolvedValue({
+      id: "suggestion-1",
+      status: "RESOLVED"
+    });
+    prismaMock.operationalFeedback.updateMany.mockResolvedValue({ count: 2 });
+
+    const result = await resolveDevelopmentSuggestion(context, "suggestion-1");
+
+    expect(result).toMatchObject({ status: "RESOLVED" });
+    expect(prismaMock.operationalFeedback.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId: "tenant-1",
+          id: { in: ["feedback-1", "feedback-2"] }
+        }),
+        data: expect.objectContaining({ status: "RESOLVED" })
+      })
+    );
+    expect(prismaMock.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "assistant.development_suggestion.resolve_deployed"
         })
       })
     );

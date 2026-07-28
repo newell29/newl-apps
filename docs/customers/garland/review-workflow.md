@@ -27,6 +27,8 @@ Garland PS numbers are the unique shipment-document identity for matching PDF or
 
 For a Teams-uploaded multi-order PDF, the CSR must name one exact PS or SR number. Newl Apps stores the complete PDF as source evidence but filters the parsed orders before querying Teamship. An exact PS selects one order. An SR is accepted only when it selects one PDF order; if it repeats, Nemo asks for the PS number. Missing or unmatched references stop without a Teamship query, and the saved response names the selected PS/SR plus the number of other PDF orders ignored.
 
+Employee feedback about these reviews is grouped into stable root-cause families. New reports do not create another development approval while the same family already has an approved Rivet fix; they remain follow-up evidence until the reviewed PR is explicitly recorded as deployed. Evidence reported after that point is presented as one linked regression family.
+
 ## Pallet and printing notes
 
 Pallet dimensions, serials, weight, and SKU observations are represented in Teamship review/update types and `GarlandProductDimensionObservation`. The UPS special dimension rule is confirmed in existing documentation and tests should be consulted before changing it. Printer mappings, duplicate print protection, and a general print service were not located; production printing requires explicit human approval.

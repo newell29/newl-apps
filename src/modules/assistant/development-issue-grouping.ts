@@ -75,6 +75,15 @@ const GARLAND_ISSUES: Array<{
   matches: (text: string) => boolean;
 }> = [
   {
+    key: "GARLAND_COMPARISON_FALSE_MISMATCH",
+    title: "Garland comparison false mismatch",
+    matches: (text) =>
+      /\bcurrently displays?\b/.test(text) &&
+      /\bit should display\b/.test(text) &&
+      /\b(?:observed|reported)\b.*\b(?:missing|fail|pending)\b/.test(text) &&
+      /\bexpected\b.*\bpass\b/.test(text)
+  },
+  {
     key: "GARLAND_LOT_SERIAL_COMMODITY",
     title: "Garland Lot/Serial and commodity formatting",
     matches: (text) =>
@@ -97,6 +106,26 @@ const GARLAND_ISSUES: Array<{
       /\bemail (?:notification|processing|review)\b/.test(text) ||
       /\bmiss(?:ed|ing) (?:running|run|order|email)\b/.test(text) ||
       /\bdid not receive\b.*\bemail\b/.test(text)
+  },
+  {
+    key: "GARLAND_SHIP_TO_NAME",
+    title: "Garland ship-to name comparison",
+    matches: (text) =>
+      /\b(?:ship[\s-]*to name|first name)\b/.test(text)
+  },
+  {
+    key: "GARLAND_SHIP_TO_LOCATION",
+    title: "Garland ship-to address and location comparison",
+    matches: (text) =>
+      /\bship[\s-]*to\b/.test(text) &&
+      /\b(?:address|city|state|province|postal|zip)\b/.test(text)
+  },
+  {
+    key: "GARLAND_PALLET_DIMENSIONS",
+    title: "Garland pallet dimensions and weights",
+    matches: (text) =>
+      /\b(?:pallet|dims?|dimensions?|weight|lbs?)\b/.test(text) &&
+      /\bsku\b/.test(text)
   },
   {
     key: "GARLAND_ORDER_STATUS_RESPONSE",
@@ -158,6 +187,8 @@ export function describeDevelopmentIssue(
 ): IssueDescriptor {
   const normalized = normalizeIssueText([
     item.reporterStatement,
+    `Observed ${item.observedOutcome ?? ""}`,
+    `Expected ${item.expectedOutcome ?? ""}`,
     item.expectedOutcome,
     item.observedOutcome
   ].filter(Boolean).join(" "));
@@ -181,6 +212,16 @@ export function describeDevelopmentIssue(
     title: `${humanize(item.classification)} feedback for ${humanize(item.workflowKey)}`.slice(0, 240),
     tokens
   };
+}
+
+export function isNonActionableDevelopmentFeedback(item: DevelopmentFeedbackCandidate) {
+  const observed = normalizeOutcome(item.observedOutcome);
+  const expected = normalizeOutcome(item.expectedOutcome);
+  if (!observed || !expected || observed !== expected) return false;
+
+  const displayValues = extractComparedDisplayValues(item.reporterStatement);
+  if (!displayValues) return false;
+  return normalizeComparedValue(displayValues.current) === normalizeComparedValue(displayValues.expected);
 }
 
 export function getDevelopmentContextPaths(workflowKey: string) {
@@ -278,6 +319,28 @@ function normalizeIssueText(value: string) {
     .toLowerCase()
     .replace(/\b(?:ps|sr)\d+\b/g, " order-reference ")
     .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeOutcome(value: string | null | undefined) {
+  return value?.trim().toUpperCase() || null;
+}
+
+function extractComparedDisplayValues(value: string) {
+  const match = value.match(
+    /\b(?:it\s+)?(?:is\s+)?currently displays?\s*:\s*([\s\S]+?)\s+\bit should display\s*:\s*([\s\S]+)$/i
+  );
+  if (!match) return null;
+  return {
+    current: match[1],
+    expected: match[2]
+  };
+}
+
+function normalizeComparedValue(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
     .trim();
 }
 

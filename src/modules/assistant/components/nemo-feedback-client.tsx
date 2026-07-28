@@ -22,6 +22,8 @@ type Suggestion = {
   status: string;
   riskLevel: string;
   feedbackCount: number;
+  followUpFeedbackCount: number;
+  regressionOfSuggestionId: string | null;
   generatedAt: string;
   pullRequestUrl: string | null;
   developmentJob: {
@@ -43,6 +45,7 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [resolveConfirmId, setResolveConfirmId] = useState<string | null>(null);
   const [lessonDrafts, setLessonDrafts] = useState<Record<string, { title: string; ruleText: string }>>({});
 
   const load = useCallback(async () => {
@@ -161,6 +164,29 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
     setBusy(false);
   }
 
+  async function resolveSuggestion(id: string) {
+    setBusy(true);
+    const response = await fetch(`/api/assistant/development-suggestions/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "resolve_deployed" })
+    });
+    const body = await response.json().catch(() => ({}));
+    setMessage(
+      response.ok
+        ? "The deployed fix was recorded. Older feedback was resolved; later reports will reopen this issue as a regression."
+        : body.error ?? "The deployed fix could not be recorded."
+    );
+    setResolveConfirmId(null);
+    await load();
+    setBusy(false);
+  }
+
+  const activeSuggestions = suggestions.filter((item) =>
+    !["REJECTED", "RESOLVED", "SUPERSEDED"].includes(item.status)
+  );
+  const archivedSuggestionCount = suggestions.length - activeSuggestions.length;
+
   return (
     <div className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
       <form onSubmit={submitFeedback} className="space-y-4 rounded-lg border border-border bg-card p-5 shadow-sm">
@@ -227,9 +253,14 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
               </button>
             </div>
             <div className="mt-4 space-y-3">
-              {suggestions.length === 0 ? (
+              {archivedSuggestionCount > 0 ? (
+                <p className="text-xs text-mutedForeground">
+                  {archivedSuggestionCount} resolved, rejected, or superseded suggestion(s) are hidden from the active queue.
+                </p>
+              ) : null}
+              {activeSuggestions.length === 0 ? (
                 <p className="text-sm text-mutedForeground">No development suggestions yet.</p>
-              ) : suggestions.map((item) => (
+              ) : activeSuggestions.map((item) => (
                 <article key={item.id} className="rounded-md border border-border bg-background p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="font-semibold text-foreground">{item.title}</p>
@@ -239,6 +270,16 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
                   </div>
                   <p className="mt-2 text-sm text-foreground">{item.summary}</p>
                   <p className="mt-2 text-xs text-mutedForeground">{item.feedbackCount} similar feedback item(s) · {item.riskLevel} risk</p>
+                  {item.followUpFeedbackCount > 0 ? (
+                    <p className="mt-2 rounded-md border border-border bg-muted/30 p-2 text-xs text-foreground">
+                      {item.followUpFeedbackCount} later report(s) are attached as follow-up evidence. They did not change the already-approved Rivet packet.
+                    </p>
+                  ) : null}
+                  {item.regressionOfSuggestionId ? (
+                    <p className="mt-2 text-xs font-semibold text-destructive">
+                      Post-deployment regression of issue family {item.regressionOfSuggestionId}.
+                    </p>
+                  ) : null}
                   {item.developmentJob?.progressMessage ? (
                     <p className="mt-2 text-xs text-mutedForeground">{item.developmentJob.progressMessage}</p>
                   ) : null}
@@ -279,6 +320,27 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
                     <button disabled={busy} onClick={() => void retrySuggestion(item.id)} className="mt-3 rounded-md border border-border px-3 py-1.5 text-xs font-semibold">
                       Retry Rivet
                     </button>
+                  ) : null}
+                  {item.status === "APPROVED" && item.pullRequestUrl && ["READY_FOR_ALEX", "PR_OPEN"].includes(item.developmentJob?.phase ?? "") ? (
+                    resolveConfirmId === item.id ? (
+                      <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+                        <p className="text-xs text-foreground">
+                          Confirm only after this exact reviewed pull request is merged and deployed to production.
+                        </p>
+                        <div className="mt-2 flex gap-2">
+                          <button disabled={busy} onClick={() => void resolveSuggestion(item.id)} className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground">
+                            Confirm fixed in production
+                          </button>
+                          <button disabled={busy} onClick={() => setResolveConfirmId(null)} className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold">
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button disabled={busy} onClick={() => setResolveConfirmId(item.id)} className="mt-3 rounded-md border border-border px-3 py-1.5 text-xs font-semibold">
+                        Mark merged and deployed
+                      </button>
+                    )
                   ) : null}
                 </article>
               ))}
