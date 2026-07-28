@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
+import { partitionFeedbackReview } from "@/modules/assistant/feedback-review-display";
+
 type Feedback = {
   id: string;
   subjectId: string | null;
@@ -45,6 +47,7 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showFeedbackHistory, setShowFeedbackHistory] = useState(false);
   const [resolveConfirmId, setResolveConfirmId] = useState<string | null>(null);
   const [lessonDrafts, setLessonDrafts] = useState<Record<string, { title: string; ruleText: string }>>({});
 
@@ -186,6 +189,8 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
     !["REJECTED", "RESOLVED", "SUPERSEDED"].includes(item.status)
   );
   const archivedSuggestionCount = suggestions.length - activeSuggestions.length;
+  const { active: activeFeedback, archived: archivedFeedback } = partitionFeedbackReview(feedback);
+  const visibleFeedback = showFeedbackHistory ? [...activeFeedback, ...archivedFeedback] : activeFeedback;
 
   return (
     <div className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
@@ -223,11 +228,25 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
       <div className="space-y-6">
         <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
           <div className="flex items-center justify-between gap-3">
-            <div><h2 className="text-lg font-semibold text-foreground">Feedback review</h2><p className="text-sm text-mutedForeground">{isAdmin ? "All tenant feedback" : "Your submitted feedback"}</p></div>
-            <span className="rounded-full border border-border px-2.5 py-1 text-xs font-semibold">{feedback.length}</span>
+            <div><h2 className="text-lg font-semibold text-foreground">Feedback review</h2><p className="text-sm text-mutedForeground">{isAdmin ? "Pending tenant feedback" : "Your pending feedback"}</p></div>
+            <span className="rounded-full border border-border px-2.5 py-1 text-xs font-semibold">{activeFeedback.length}</span>
           </div>
+          {archivedFeedback.length > 0 ? (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/20 px-3 py-2">
+              <p className="text-xs text-mutedForeground">
+                {archivedFeedback.length} confirmed, rejected, or resolved finding(s) are hidden.
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowFeedbackHistory((current) => !current)}
+                className="rounded-md border border-border px-2.5 py-1 text-xs font-semibold"
+              >
+                {showFeedbackHistory ? "Hide history" : "Show history"}
+              </button>
+            </div>
+          ) : null}
           <div className="mt-4 space-y-3">
-            {feedback.length === 0 ? <p className="text-sm text-mutedForeground">No feedback has been submitted.</p> : feedback.map((item) => (
+            {visibleFeedback.length === 0 ? <p className="text-sm text-mutedForeground">No feedback is waiting for review.</p> : visibleFeedback.map((item) => (
               <article key={item.id} className="rounded-md border border-border bg-background p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-foreground">{item.subjectId || "General workflow"}</p><span className="rounded-full border border-border px-2 py-0.5 text-xs font-semibold">{item.status}</span></div>
                 <p className="mt-2 text-sm leading-6 text-foreground">{item.reporterStatement}</p>

@@ -14,6 +14,7 @@ Company Assistant / AI chat is documented because code, routes, schema, or tests
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
 - Operational feedback is stored separately from approved assistant memory. Employee reports begin as `REPORTED` evidence and cannot affect Nemo explanations until an administrator confirms the feedback and explicitly creates an `ApprovedOperationalLesson`.
+- Feedback Review is an active-work queue: only `REPORTED` and `INVESTIGATING` findings are visible by default. Confirmed, rejected, and resolved history is hidden unless the user explicitly opens it.
 - Development suggestions group similar employee reports into one focused issue before approval. Creating or refreshing the queue does not start development.
 - A development suggestion is one tenant-scoped issue family. Later feedback for an approved family is stored as follow-up evidence without changing the already-approved Rivet packet. Duplicate awaiting cards for that family are marked `SUPERSEDED`.
 - After the exact reviewed pull request is merged and deployed, an administrator must use the two-step **Mark merged and deployed** action. That resolves the source and follow-up reports. Later feedback opens one approval-gated regression suggestion linked to the resolved family.
