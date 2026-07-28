@@ -320,7 +320,23 @@ function extractWrappedInstructionContinuation(
     .filter((line) => !isItemTableHeaderFragment(line))
     .filter((line) => !/^\d{1,2}\/\d{1,2}\/\d{4}\b/.test(line));
 
+  if (instructionLines.some(isDangerousGoodsInstructionLine)) {
+    const dangerousGoodsContinuations = candidates.filter(isDangerousGoodsContinuationLine);
+    if (dangerousGoodsContinuations.length > 0) {
+      return dangerousGoodsContinuations.slice(0, 2);
+    }
+  }
+
   return candidates.slice(0, 1);
+}
+
+function isDangerousGoodsInstructionLine(line: string) {
+  return /\bDANGEROUS GOODS\b|\b24 HOUR DG NUMBER\b/i.test(line);
+}
+
+function isDangerousGoodsContinuationLine(line: string) {
+  const normalized = line.trim();
+  return /^CHEMTREC\b.*\d/i.test(normalized) || /^QUANTITY\s*:\s*\d+(?:\.\d+)?\b/i.test(normalized);
 }
 
 function findInstructionEndIndex(lines: string[], startIndex: number, itemHeaderIndex: number) {
