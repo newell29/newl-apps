@@ -80,26 +80,7 @@ export async function runHunterDryPlan({
   try {
     const [companies, signals, suppressions] = await Promise.all([
       prisma.company.findMany({
-        where: {
-          tenantId,
-          doNotProspect: false,
-          candidateStatus: { notIn: [CandidateStatus.REJECTED, CandidateStatus.DISQUALIFIED] },
-          cashflowCustomers: { none: {} },
-          leads: { none: {} },
-          contacts: {
-            none: {
-              OR: [
-                { contactStatus: ContactStatus.DO_NOT_CONTACT },
-                { replyStatus: { not: ReplyStatus.NO_REPLY } },
-                {
-                  sequenceStatus: {
-                    notIn: [SequenceStatus.NOT_STARTED, SequenceStatus.READY]
-                  }
-                }
-              ]
-            }
-          }
-        },
+        where: buildHunterPlanningCompanyWhere(tenantId),
         orderBy: [{ priorityScore: "desc" }, { updatedAt: "desc" }],
         take: Math.max(200, effective.dailyCompanyLimit * 10),
         select: {
@@ -137,7 +118,6 @@ export async function runHunterDryPlan({
               doNotProspect: true,
               candidateStatus: true,
               cashflowCustomers: { select: { id: true }, take: 1 },
-              leads: { select: { id: true }, take: 1 },
               contacts: {
                 select: {
                   contactStatus: true,
@@ -346,6 +326,32 @@ export async function runHunterDryPlan({
   }
 }
 
+export function buildHunterPlanningCompanyWhere(
+  tenantId: string
+): Prisma.CompanyWhereInput {
+  return {
+    tenantId,
+    doNotProspect: false,
+    candidateStatus: {
+      notIn: [CandidateStatus.REJECTED, CandidateStatus.DISQUALIFIED]
+    },
+    cashflowCustomers: { none: {} },
+    contacts: {
+      none: {
+        OR: [
+          { contactStatus: ContactStatus.DO_NOT_CONTACT },
+          { replyStatus: { not: ReplyStatus.NO_REPLY } },
+          {
+            sequenceStatus: {
+              notIn: [SequenceStatus.NOT_STARTED, SequenceStatus.READY]
+            }
+          }
+        ]
+      }
+    }
+  };
+}
+
 function hunterSignalPriority(signal: { confidence: number; evidence: Prisma.JsonValue | null }) {
   const evidence = signal.evidence;
   if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) return signal.confidence;
@@ -441,7 +447,6 @@ export function isHunterCompanyBlocked(company: {
   doNotProspect: boolean;
   candidateStatus: CandidateStatus;
   cashflowCustomers: Array<{ id: string }>;
-  leads: Array<{ id: string }>;
   contacts: Array<{
     contactStatus: ContactStatus;
     sequenceStatus: SequenceStatus;
@@ -453,8 +458,7 @@ export function isHunterCompanyBlocked(company: {
     company.doNotProspect ||
     company.candidateStatus === CandidateStatus.REJECTED ||
     company.candidateStatus === CandidateStatus.DISQUALIFIED ||
-    company.cashflowCustomers.length > 0 ||
-    company.leads.length > 0
+    company.cashflowCustomers.length > 0
   ) {
     return true;
   }

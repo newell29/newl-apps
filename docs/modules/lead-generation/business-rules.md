@@ -102,6 +102,10 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - Daily Opportunities is the researched decision surface; Found Companies remains a bounded source-data review screen.
 - Outreach Queue includes an active contact when it is approved, ready/enrolled/paused/replied in a sequence, or has a Newl outreach draft.
 - Outreach Queue excludes rejected and do-not-contact records, bounced or finished sequences, and positive, meeting-booked, or negative reply outcomes.
+- A legacy `Lead` row by itself does not remove a researched company from Hunter planning. Hunter blocks a company
+  for current-customer, do-not-prospect, rejected/disqualified, do-not-contact, reply, or prior-sequence evidence.
+  This preserves duplicate-outreach protection without letting the retired pipeline workflow suppress otherwise
+  valid Hot and Qualified opportunities.
 - Sales Opportunities is a revenue view over existing lead stages, limited to `REPLIED`, `MEETING_BOOKED`, `QUOTED`, `WON`, and `LOST`. A saved Apollo positive reply infers `REPLIED` for the view, while meeting-booked infers `MEETING_BOOKED`, so engagement cannot disappear between queues before a human confirms the lead stage. This layout rule does not change the Prisma enum or delete earlier-stage leads.
 - Apollo/customer communication approval boundaries are unchanged by this presentation redesign.
 

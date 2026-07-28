@@ -179,6 +179,7 @@ export default async function OutreachQueuePage({
             <h2 className="text-sm font-semibold text-foreground">Automatic Apollo reply sync</h2>
             <p className="mt-1 text-xs text-mutedForeground">
               The scheduler checks due Apollo contacts hourly; each successful contact is checked again in about {apolloSyncHealth.intervalHours} hours.
+              This monitoring total includes saved contacts outside the active Outreach Queue.
             </p>
           </div>
           <span
@@ -192,7 +193,7 @@ export default async function OutreachQueuePage({
           </span>
         </div>
         <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-4">
-          <SyncMetric label="Apollo contacts tracked" value={apolloSyncHealth.trackedContacts.toLocaleString("en-US")} />
+          <SyncMetric label="Saved Apollo contacts monitored" value={apolloSyncHealth.trackedContacts.toLocaleString("en-US")} />
           <SyncMetric label="Due now" value={apolloSyncHealth.dueContacts.toLocaleString("en-US")} />
           <SyncMetric
             label="Contacts with sync errors"

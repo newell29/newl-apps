@@ -52,6 +52,12 @@ export default async function AutomationSettingsPage({
           {handoffMessage}
         </section>
       ) : null}
+      {data.latestOutreachHandoff ? (
+        <LatestContactDiscoveryRun
+          run={data.latestOutreachHandoff}
+          timeZone={policy.scheduleTimezone}
+        />
+      ) : null}
 
       <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
         <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
@@ -171,6 +177,89 @@ export default async function AutomationSettingsPage({
   );
 }
 
+function LatestContactDiscoveryRun({
+  run,
+  timeZone
+}: {
+  run: NonNullable<
+    Awaited<ReturnType<typeof getHunterControlPlane>>["latestOutreachHandoff"]
+  >;
+  timeZone: string;
+}) {
+  return (
+    <section className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border bg-muted px-5 py-4">
+        <div>
+          <h2 className="font-semibold text-foreground">
+            Latest contact discovery run
+          </h2>
+          <p className="mt-1 text-sm text-mutedForeground">
+            Started {formatRunDate(run.startedAt, timeZone)}. Evaluated contacts
+            are the bounded Apollo candidates sent through buyer-role review;
+            only contacts with a generated plan appear in Outreach Queue.
+          </p>
+        </div>
+        <span className="rounded-full border border-border bg-card px-2.5 py-1 text-xs font-semibold text-foreground">
+          {formatEnum(run.status)}
+        </span>
+      </div>
+      <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-4">
+        <RunMetric label="Companies queued" value={run.companiesQueued} />
+        <RunMetric label="Companies processed" value={run.companiesProcessed} />
+        <RunMetric label="Contacts evaluated" value={run.contactsEvaluated} />
+        <RunMetric label="Outreach plans created" value={run.plansCreated} />
+      </div>
+      {run.errorMessage ? (
+        <p className="border-t border-danger/20 bg-danger/5 px-5 py-3 text-sm text-danger">
+          {run.errorMessage}
+        </p>
+      ) : null}
+      {run.results.length > 0 ? (
+        <div className="grid gap-3 border-t border-border p-4 lg:grid-cols-2">
+          {run.results.map((result, index) => (
+            <article
+              key={`${result.companyName}-${index}`}
+              className="rounded-md border border-border bg-background p-4"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <h3 className="font-semibold text-foreground">
+                  {result.companyName}
+                </h3>
+                <span className="rounded-full border border-border px-2 py-0.5 text-xs font-semibold text-mutedForeground">
+                  {formatHandoffResultState(result.state)}
+                </span>
+              </div>
+              <p className="mt-2 text-sm text-mutedForeground">
+                {result.contactsEvaluated} evaluated · {result.plansCreated} plan
+                {result.plansCreated === 1 ? "" : "s"} created
+                {result.qaFailedPlans > 0
+                  ? ` · ${result.qaFailedPlans} failed QA`
+                  : ""}
+              </p>
+              <p className="mt-2 text-sm text-foreground">{result.message}</p>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="border-t border-border px-5 py-4 text-sm text-mutedForeground">
+          The run has not recorded a company result yet.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function RunMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="bg-card px-5 py-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+        {label}
+      </p>
+      <p className="mt-1 text-2xl font-semibold text-foreground">{value}</p>
+    </div>
+  );
+}
+
 function formatHandoffMessage(state: string | undefined, countValue: string | undefined) {
   const count = Number(countValue);
   if (state === "queued") {
@@ -197,4 +286,24 @@ function NumberField({ name, label, value }: { name: string; label: string; valu
 
 function formatEnum(value: string) {
   return value.toLowerCase().split("_").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
+}
+
+function formatHandoffResultState(value: string) {
+  return formatEnum(value)
+    .replace("Plans Generated", "Plans created")
+    .replace("Contact Review Required", "No contact selected")
+    .replace("No Qualifying Contacts", "No qualifying contact")
+    .replace("Review Required", "Apollo review required");
+}
+
+function formatRunDate(value: Date, timeZone: string) {
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      dateStyle: "medium",
+      timeStyle: "short"
+    }).format(value);
+  } catch {
+    return value.toLocaleString("en-US");
+  }
 }

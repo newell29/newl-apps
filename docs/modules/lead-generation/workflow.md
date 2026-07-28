@@ -75,6 +75,10 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 12. The handoff never approves or communicates with a prospect. When a person approves a QA-passed Outreach Plan, that single approval also approves the selected contact, assigns the approver as sender when no sender is already assigned, and queues Apollo enrollment automatically. Apollo revalidates every guard before enrollment.
 13. An administrator can select **Recheck contacts for eligible opportunities** after enabling Assisted mode. The action creates a fresh deterministic plan from already-saved research, forces a new AI contact-fit review rather than reusing a cached disposition, and queues the protected handoff without rerunning web retrieval, Qwen, Kimi, or K3. Contacts with replies or active/finished sequence history are hard-excluded from fresh outreach selection.
 14. A `REVIEWING` contact with a current, non-archived Outreach Plan appears in Outreach Queue even when Hunter has not created a Sales Lead. Creating a Sales Lead remains reserved for later pipeline graduation.
+15. Automation Settings retains the latest assisted handoff breakdown. “Contacts evaluated” counts the bounded
+    organization-scoped Apollo candidates submitted to buyer-role review; “Outreach plans created” is the subset
+    that becomes actionable in Outreach Queue. The Apollo status-sync monitoring count is an all-status operational
+    metric and is not a daily-selection count.
 15. Before approval, a reviewer may enter bounded feedback and regenerate the complete email sequence. Feedback can change tone, emphasis, and approach, but cannot override the saved evidence, service line, contact identity, channel policy, or deterministic/model QA gates. Regeneration is blocked after plan approval or Apollo sequence activity begins.
 16. Each assigned rep may have a pool of Apollo send-from mailboxes. Enrollment chooses one active, positive-weight mailbox deterministically from the company ID; this keeps all contacts at the same company on one sender while allowing controlled distribution across real Newl identities.
 
