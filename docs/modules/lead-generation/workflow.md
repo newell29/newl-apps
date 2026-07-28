@@ -152,6 +152,8 @@ The layout is non-destructive: it does not migrate, delete, or rewrite existing 
    Hot-opportunity call remains a separate reviewed task rather than an automatic Apollo call step. When an eligible
    Hunter contact still carries a manually selected legacy cadence from the retired workflow, Newl Apps replaces it
    with the role-appropriate Hunter sequence. A deliberate choice between the two Hunter sequences is preserved.
+   An unapproved existing plan whose saved sequence no longer matches is regenerated on the next handoff. A
+   human-approved plan remains immutable and requires deliberate review instead of silent sequence replacement.
 7. Deterministic QA and a separate model critic evaluate the plan. An unavailable critic fails closed and is recorded
    as a QA error instead of silently approving the draft.
 8. Newl Apps archives the prior active version, saves the plan and all steps, and updates the legacy first-email draft

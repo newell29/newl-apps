@@ -78,11 +78,22 @@ export function normalizeHunterChannelStrategy(
 
 export function shouldReuseExistingOutreachPlan({
   promptVersion,
-  qaStatus
+  qaStatus,
+  existingSequenceName,
+  selectedSequenceName
 }: {
   promptVersion: string;
   qaStatus: OutreachQaStatus;
+  existingSequenceName?: string | null;
+  selectedSequenceName?: string | null;
 }) {
+  if (
+    selectedSequenceName &&
+    existingSequenceName !== undefined &&
+    existingSequenceName !== selectedSequenceName
+  ) {
+    return false;
+  }
   return (
     promptVersion === OUTREACH_PLAN_PROMPT_VERSION ||
     (
@@ -293,10 +304,15 @@ export async function generateOutreachPlanForContact({
   }
   if (
     draftContext.existingOutreachPlan &&
-    shouldReuseExistingOutreachPlan({
-      promptVersion: draftContext.existingOutreachPlan.promptVersion,
-      qaStatus: draftContext.existingOutreachPlan.qaStatus
-    }) &&
+    (
+      draftContext.existingOutreachPlan.status === OutreachPlanStatus.APPROVED ||
+      shouldReuseExistingOutreachPlan({
+        promptVersion: draftContext.existingOutreachPlan.promptVersion,
+        qaStatus: draftContext.existingOutreachPlan.qaStatus,
+        existingSequenceName: draftContext.existingOutreachPlan.sequenceName,
+        selectedSequenceName: draftContext.selectedSequenceName
+      })
+    ) &&
     !forceRegenerate
   ) {
     return {
@@ -706,7 +722,15 @@ export async function loadOutreachPlanContactContext({
           where: { tenantId, status: { not: OutreachPlanStatus.ARCHIVED } },
           orderBy: { version: "desc" },
           take: 1,
-          select: { id: true, status: true, qaStatus: true, version: true, promptVersion: true }
+          select: {
+            id: true,
+            status: true,
+            qaStatus: true,
+            version: true,
+            promptVersion: true,
+            sequenceName: true,
+            sequenceId: true
+          }
         }
       }
     }),
