@@ -16,10 +16,12 @@ import type { ApolloContactRecord } from "@/server/integrations/apollo";
 
 function contact(overrides: Partial<ApolloContactRecord>): ApolloContactRecord {
   return {
+    recordSource: "SAVED_CONTACT",
     apolloContactId: "contact-1",
     apolloPersonId: "person-1",
     firstName: "Taylor",
     lastName: "Morgan",
+    lastNameObfuscated: null,
     fullName: "Taylor Morgan",
     title: "Director of Supply Chain",
     department: "Operations",
@@ -27,6 +29,9 @@ function contact(overrides: Partial<ApolloContactRecord>): ApolloContactRecord {
     email: "taylor@example.com",
     phone: null,
     linkedinUrl: "https://linkedin.example/taylor",
+    hasEmailAvailable: true,
+    hasPhoneAvailable: false,
+    hasLinkedinAvailable: true,
     city: "Charlotte",
     state: "North Carolina",
     country: "United States",
@@ -79,11 +84,40 @@ describe("Hunter assisted outreach handoff", () => {
         title: "Intern",
         department: null,
         email: null,
-        linkedinUrl: null
+        linkedinUrl: null,
+        hasEmailAvailable: false,
+        hasLinkedinAvailable: false
       })
     ], null);
 
     expect(ranked).toEqual([]);
+  });
+
+  it("uses People Search availability without treating the person as an enriched contact", () => {
+    const ranked = rankHunterContacts([
+      contact({
+        recordSource: "PEOPLE_SEARCH",
+        apolloContactId: null,
+        apolloPersonId: "apollo-person-operations",
+        fullName: "Jason Co***n",
+        lastName: null,
+        lastNameObfuscated: "Co***n",
+        title: "Director of Operations",
+        email: null,
+        linkedinUrl: null,
+        hasEmailAvailable: true,
+        hasLinkedinAvailable: false
+      })
+    ], "Director of Operations");
+
+    expect(ranked).toEqual([
+      expect.objectContaining({
+        recordSource: "PEOPLE_SEARCH",
+        apolloContactId: null,
+        apolloPersonId: "apollo-person-operations",
+        hasEmailAvailable: true
+      })
+    ]);
   });
 
   it("prefers opportunity geography and penalizes prior cadence history", () => {

@@ -111,6 +111,9 @@ Scoring regression coverage must also verify:
 21. a confirmed Apollo organization ID bypasses organization discovery, and people search stays constrained to that `organization_ids` value without an unscoped fallback.
 22. an unresolved latest `ApolloCompanyMatch` makes bulk enrichment skip the company before any Apollo or contact lookup.
 23. Apollo company URL parsing rejects non-Apollo hosts, exact mapping validates the organization ID, and manual mapping never authorizes cadence enrollment.
+24. People Search parses its `id` as an Apollo person ID, retains obfuscated-name and availability metadata, and does not claim the person is an enriched saved contact.
+25. An organization-scoped People Search response may omit the returned organization ID only when its available company identity strictly matches the expected company; a sibling name or explicit different ID is rejected.
+26. Saved Contact and People Search records dedupe by Apollo person ID while preserving the saved contact ID, revealed contact data, sequence history, and enrichment state.
 
 The `20260722193000_add_lead_scoring_history` migration must remain additive: it may create the two history tables, indexes, and foreign keys, but must not drop, rename, truncate, update, or backfill existing tables.
 The `20260722201500_link_lead_outcomes_to_scores` migration may only add the nullable snapshot foreign key; it must not rewrite existing outcomes.
