@@ -41,6 +41,7 @@ Scout uses its own OpenClaw agent and workspace with Codex `gpt-5.6-sol` at high
 7. Put the same executor token in the protected OpenClaw gateway environment as `OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN`. Do not put it in an agent prompt, Teams, source control, or the business-profile JSON.
 8. Generate the local directory credential master once with `openssl rand -base64 48`. Add the result only to `~/.openclaw/.env` as `NEWL_DIRECTORY_PASSWORD_MASTER_V1=...`; do not add it to Vercel, Newl Apps, source control, an agent prompt, or Teams. Back up this single master in the owner's existing Apple Passwords/iCloud Keychain account. Losing it prevents deterministic recovery of directory passwords.
 9. Re-run `ops/openclaw/install-website-growth-backlink-executor.sh` so the installed plugin and weekday job include `newl_backlink_fill_directory_credentials` and `newl_backlink_sync_directory_verifications`.
+   The installer treats the returned command job as canonical and removes any retired agent-turn or duplicate job with the same declaration key before the schedule is enabled.
 10. Keep the owner-approved public business profile outside source control with file mode `600`.
 11. Restart or reload the OpenClaw gateway if required by the installed OpenClaw version, then validate that Scout uses the `minimal` tool profile with only the browser and dedicated `newl_backlink_*` tools. Shell, exec, arbitrary reads, writes, and source-code inspection must remain denied.
 
