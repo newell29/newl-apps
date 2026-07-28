@@ -48,9 +48,18 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
   strong company-name match, prevent duplicate organization mapping inside the tenant, and require explicit
   acknowledgement of the one-credit organization validation.
 - Confirming no Apollo match keeps the latest attempt and reviewer metadata. Automatic and bulk retry remain blocked until a rep explicitly reopens the review.
-- Resolving the company mapping can import contacts, but it never authorizes cadence enrollment; the existing contact approval and push controls still apply.
+- Resolving a company mapping queues the same one-company Hunter buyer-role review used by the automated handoff. It
+  never drafts from the unfiltered Apollo employee result, selects more than the saved 1-3-contact limit, or authorizes
+  cadence enrollment; the existing grounded QA, human approval, and push controls still apply.
 - The Contacts directory includes both assigned and unassigned contacts attached to pipeline accounts. Unassigned contacts remain filterable and reviewable, but Apollo queueing is blocked until a sales rep is assigned.
-- Contact title and department matching uses normalized phrase boundaries. Sales, business-development, and customer-service roles are deprioritized by default, while a preferred logistics/operations match takes precedence for mixed-function titles.
+- Contact title and department matching uses normalized phrase boundaries. Sales, business-development, and customer-service roles are deprioritized by default, while a preferred logistics/operations match takes precedence for mixed-function titles. Clearly individual-contributor titles such as coordinator, specialist, analyst, associate, assistant, administrator, clerk, representative, agent, or technician cannot be auto-selected merely because the contact-fit model rates them highly; a manager-or-higher buyer role or a non-junior model-qualified stakeholder is required.
+- Hunter email outreach requires a concrete syntactically usable email address before contact persistence, buyer-role
+  review, or plan generation. Apollo's `has_email` availability flag is not enough because it does not provide a
+  deliverable address.
+- Bulk outreach approval accepts selected contacts rather than plan IDs, resolves each contact's latest non-archived
+  plan inside the authenticated tenant, and approves only current `QA_PASSED` plans for safe Qwen/Kimi-vetted Hunter
+  opportunities with a usable email. Eligible contacts are approved atomically and placed into one Apollo enrollment
+  job; ineligible selections remain unchanged and return a visible reason.
 - Scoring settings reject invalid window combinations, company weights that do not total exactly 100 points, non-descending contact tiers, and incomplete or inverted mid-market TEU ranges.
 - Score history is immutable and event-driven. Company opportunity scores are captured after TradeMining ingestion and pipeline approval; contact relevance scores are captured when Apollo status is synchronized or a push is attempted. Opening a page does not create history.
 - Every score snapshot records the scoring model version, a deterministic fingerprint of the full scoring configuration, the matched search profile when available, an explanation, and the evidence date. This allows later outcomes to be compared against the score that was actually used.
@@ -165,6 +174,9 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
   sequence history remains eligible. If Apollo reports an active or paused different cadence, Newl Apps removes that
   membership and then enrolls the contact in the approved Hunter cadence. A reply, bounce, rejection, or
   do-not-contact state can never be overridden by this transition.
+- Apollo People Search identity is not enrollment identity. A selected person with no saved Apollo contact ID may be
+  converted only after every local approval and safety gate passes, using a concrete email and Apollo deduplication.
+  The worker must persist the returned contact ID with tenant filtering before applying custom fields or enrolling.
 - `ASSISTED` mode automatically queues only fresh Hot/Qualified `WOULD_PURSUE` companies after research. `DRY_RUN`
   and `OFF` never queue this work, and the kill switch prevents both queue creation and processing.
 - Company matching, contact ranking, and plan generation are durable preparation steps, not outreach authorization.

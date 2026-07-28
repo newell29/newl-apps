@@ -122,6 +122,10 @@ Scoring regression coverage must also verify:
 24. People Search parses its `id` as an Apollo person ID, retains obfuscated-name and availability metadata, and does not claim the person is an enriched saved contact.
 25. An organization-scoped People Search response may omit the returned organization ID only when its available company identity strictly matches the expected company; a sibling name or explicit different ID is rejected.
 26. Saved Contact and People Search records dedupe by Apollo person ID while preserving the saved contact ID, revealed contact data, sequence history, and enrichment state.
+27. Bulk outreach approval resolves only tenant-owned contacts, approves only the latest non-archived QA-passed plan
+    with a concrete usable email and current Hunter eligibility, leaves blocked selections unchanged with a reason,
+    assigns an unassigned accepted contact to the approver, and creates one bounded Apollo enrollment job for the
+    accepted contact IDs.
 
 The `20260722193000_add_lead_scoring_history` migration must remain additive: it may create the two history tables, indexes, and foreign keys, but must not drop, rename, truncate, update, or backfill existing tables.
 The `20260722201500_link_lead_outcomes_to_scores` migration may only add the nullable snapshot foreign key; it must not rewrite existing outcomes.
@@ -291,3 +295,6 @@ Regression coverage must prove:
 16. passed v2.4 plans remain unchanged, failed v2.4 plans upgrade once to v2.5, and a v2.5 failure does not create
     repeated automatic model spend; and
 17. drafting and bounded repair instructions forbid date/outcome conflation and job-posting-to-capacity inference.
+18. a selected Apollo person without a saved contact ID is matched to an existing saved contact or created with
+    deduplication before enrollment; masked name fragments are not submitted, and conflicting/missing Apollo
+    identities fail closed.

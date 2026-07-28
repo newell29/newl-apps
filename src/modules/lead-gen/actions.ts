@@ -52,7 +52,13 @@ import {
   evaluateHunterOutreachEligibility,
   getHunterOutreachResearchMaxAgeDays
 } from "@/modules/lead-gen/hunter-outreach-eligibility";
+import {
+  enqueueHunterCompanyOutreachHandoff,
+  hasUsableHunterEmail,
+  processNextHunterOutreachHandoff
+} from "@/modules/lead-gen/hunter-outreach-handoff";
 import { resolveApolloContactDiscoveryMatch } from "@/modules/lead-gen/apollo-contact-discovery-review";
+import { prepareApolloContactForEnrollment } from "@/modules/lead-gen/apollo-contact-preparation";
 import { canonicalizeTradeMiningDestinationPort } from "@/modules/lead-gen/search-profile-suggestions";
 import {
   assertValidTradeMiningSearchProfile,
@@ -105,6 +111,7 @@ import { requireAdmin, requireModule, requireMutationAccess } from "@/server/aut
 import { prisma } from "@/server/db";
 import {
   ApolloRateLimitError,
+  createApolloContactForEnrollment,
   fetchApolloEmailAccountDirectory,
   fetchApolloContactsForCompany,
   fetchApolloOrganizationForMapping,
@@ -1359,55 +1366,46 @@ export async function mapApolloCompanyUrlAction(
       })
     ]);
 
-    const existingContacts = await loadExistingApolloContactsForCompany(
-      context.tenantId,
-      lead.companyId
-    );
-
     try {
-      const lookup = await fetchApolloContactsForCompany({
-        companyName: mapping.companyName,
-        domain: mapping.domain,
-        apolloOrganizationId: mapping.organizationId
+      const queued = await enqueueHunterCompanyOutreachHandoff({
+        tenantId: context.tenantId,
+        companyId: lead.companyId,
+        forceContactReview: true
       });
-      if (lookup.contacts.length === 0) {
-        const recordedMatch = await recordApolloCompanyMatch({
-          tenantId: context.tenantId,
-          companyId: lead.companyId,
-          lookup
-        });
+      if (queued.state !== "queued") {
         revalidateLeadGenSurfaces();
         return {
-          status: "error",
+          status: queued.state === "nothing_eligible" ? "error" : "success",
           message:
-            `${lead.company.name} was mapped to ${mapping.companyName}, but ${recordedMatch.matchReason} ` +
-            "The company remains in Apollo Exceptions.",
+            `${lead.company.name} was mapped to ${mapping.companyName}. ` +
+            ("message" in queued
+              ? queued.message
+              : "Hunter contact review is already queued."),
           completedAt: new Date().toISOString()
         };
       }
-      const contactsImported = await finalizeApolloEnrichmentForLead({
+      const processed = await processNextHunterOutreachHandoff({
         tenantId: context.tenantId,
-        lead: {
-          ...lead,
-          ownerUserId: lead.ownerUserId,
-          company: {
-            id: lead.company.id,
-            apolloOrganizationId: mapping.organizationId,
-            domain: mapping.domain ?? lead.company.domain,
-            linkedinUrl: mapping.linkedinUrl ?? lead.company.linkedinUrl
-          }
-        },
-        existingContacts,
-        lookup,
-        baseNotes: appendLeadNote(lead.notes, mappingNote)
+        runId: queued.runId
       });
+      const result = "result" in processed ? processed.result : null;
 
       revalidateLeadGenSurfaces();
       return {
-        status: "success",
+        status:
+          result?.state === "NO_CONTACTS" ||
+          result?.state === "REVIEW_REQUIRED" ||
+          result?.state === "CONTACT_REVIEW_REQUIRED" ||
+          result?.state === "ERROR"
+            ? "error"
+            : "success",
         message:
           `${lead.company.name} was mapped to ${mapping.companyName}. ` +
-          `${contactsImported} relevant contact${contactsImported === 1 ? "" : "s"} imported.`,
+          (result
+            ? `${result.apolloContactsFound} Apollo employee${result.apolloContactsFound === 1 ? "" : "s"} found; ` +
+              `${result.contactsRanked} reviewed; ${result.actionablePlans} QA-passed plan${result.actionablePlans === 1 ? "" : "s"} ready. ` +
+              `Hunter enforced the saved maximum of three selected contacts. ${result.message}`
+            : "Hunter contact review was queued and will continue in the protected worker."),
         completedAt: new Date().toISOString()
       };
     } catch (contactError) {
@@ -1420,14 +1418,14 @@ export async function mapApolloCompanyUrlAction(
         data: {
           notes: appendLeadNote(
             appendLeadNote(lead.notes, mappingNote),
-            `Apollo company mapping succeeded, but contact import needs retry. ${warning}`
+            `Apollo company mapping succeeded, but Hunter contact review needs retry. ${warning}`
           )
         }
       });
       revalidateLeadGenSurfaces();
       return {
         status: "success",
-        message: `${lead.company.name} was mapped successfully. Contact import needs a later retry: ${warning}`,
+        message: `${lead.company.name} was mapped successfully. Hunter contact review needs a later retry: ${warning}`,
         completedAt: new Date().toISOString()
       };
     }
@@ -1870,6 +1868,289 @@ export async function bulkPushContactsToApolloAction(
   }
 }
 
+export async function bulkApproveOutreachPlansAction(formData: FormData): Promise<ContactBulkActionSummary>;
+export async function bulkApproveOutreachPlansAction(
+  previousState: ContactBulkActionSummary,
+  formData: FormData
+): Promise<ContactBulkActionSummary>;
+export async function bulkApproveOutreachPlansAction(
+  firstArg: ContactBulkActionSummary | FormData,
+  secondArg?: FormData
+): Promise<ContactBulkActionSummary> {
+  const context = await authorizeLeadGenMutation();
+  const formData = firstArg instanceof FormData ? firstArg : secondArg;
+
+  if (!formData) {
+    return {
+      ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+      status: "error",
+      operation: "approve",
+      message: "No outreach approval payload was provided.",
+      completedAt: new Date().toISOString()
+    };
+  }
+
+  try {
+    const contactIds = readSelectedIds(formData, "contactId");
+    const contacts = await prisma.contact.findMany({
+      where: {
+        tenantId: context.tenantId,
+        id: { in: contactIds }
+      },
+      select: {
+        id: true,
+        companyId: true,
+        fullName: true,
+        email: true,
+        contactStatus: true,
+        assignedRep: true,
+        company: {
+          select: {
+            name: true,
+            candidateStatus: true,
+            doNotProspect: true,
+            hunterOpportunitySignals: {
+              where: {
+                tenantId: context.tenantId,
+                sourceName: "Hunter company research"
+              },
+              orderBy: { observedAt: "desc" },
+              take: 1,
+              select: {
+                id: true,
+                sourceName: true,
+                serviceLine: true,
+                observedAt: true,
+                evidence: true
+              }
+            },
+            hunterProspectingDecisions: {
+              where: { tenantId: context.tenantId },
+              orderBy: { createdAt: "desc" },
+              take: 1,
+              select: {
+                id: true,
+                status: true,
+                serviceLine: true,
+                opportunityType: true,
+                rationale: true,
+                recommendedPersona: true,
+                recommendedSender: true,
+                recommendedCadence: true,
+                createdAt: true
+              }
+            }
+          }
+        },
+        outreachPlans: {
+          where: {
+            tenantId: context.tenantId,
+            status: { not: OutreachPlanStatus.ARCHIVED }
+          },
+          orderBy: { version: "desc" },
+          take: 1,
+          select: {
+            id: true,
+            companyId: true,
+            contactId: true,
+            sequenceName: true,
+            version: true,
+            status: true,
+            qaStatus: true,
+            evidenceFingerprint: true
+          }
+        }
+      }
+    });
+
+    if (contacts.length !== contactIds.length) {
+      throw new Error("One or more selected contacts were not found for this tenant.");
+    }
+
+    type BulkApprovalContact = (typeof contacts)[number];
+    type BulkApprovalPlan = BulkApprovalContact["outreachPlans"][number];
+    const approved: Array<{
+      contact: BulkApprovalContact;
+      plan: BulkApprovalPlan;
+    }> = [];
+    const details: ContactBulkActionSummary["details"] = [];
+    for (const contact of contacts) {
+      const plan = contact.outreachPlans[0] ?? null;
+      const hunterEligibility = evaluateHunterOutreachEligibility({
+        researchSignal: contact.company.hunterOpportunitySignals[0] ?? null,
+        prospectingDecision: contact.company.hunterProspectingDecisions[0] ?? null,
+        maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
+      });
+      const blockReason =
+        !plan
+          ? "No current outreach plan is available."
+          : plan.status !== OutreachPlanStatus.QA_PASSED ||
+              plan.qaStatus !== OutreachQaStatus.PASSED
+            ? "The outreach plan must pass the grounded QA gate before approval."
+            : !hasUsableHunterEmail(contact)
+              ? "A concrete usable email address is required before approval."
+              : contact.company.doNotProspect ||
+                  contact.company.candidateStatus === CandidateStatus.REJECTED ||
+                  contact.company.candidateStatus === CandidateStatus.DISQUALIFIED
+                ? "The company is blocked from prospecting."
+                : contact.contactStatus === ContactStatus.REJECTED ||
+                    contact.contactStatus === ContactStatus.DO_NOT_CONTACT
+                  ? "The contact is blocked from outreach."
+                  : hunterEligibility.status !== "ELIGIBLE"
+                    ? `${hunterEligibility.label}: ${hunterEligibility.reason}`
+                    : null;
+
+      if (blockReason || !plan) {
+        details.push({
+          contactId: contact.id,
+          contactName: contact.fullName,
+          companyName: contact.company.name,
+          outcome: "skipped",
+          reason: blockReason
+        });
+        continue;
+      }
+      approved.push({ contact, plan });
+      details.push({
+        contactId: contact.id,
+        contactName: contact.fullName,
+        companyName: contact.company.name,
+        outcome: "approved",
+        reason: "QA-passed plan approved; Apollo enrollment queued."
+      });
+    }
+
+    if (approved.length === 0) {
+      return {
+        ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+        status: "error",
+        operation: "approve",
+        message: "None of the selected contacts cleared the approval and enrollment safeguards.",
+        completedAt: new Date().toISOString(),
+        selectedContacts: contactIds.length,
+        skippedContacts: details.length,
+        details
+      };
+    }
+
+    const requestedAt = new Date();
+    const approvedContactIds = approved.map(({ contact }) => contact.id);
+    const companiesTouched = new Set(
+      approved.map(({ contact }) => contact.companyId)
+    ).size;
+    const enrollmentInput: ApolloPushJobInput = {
+      contactIds: approvedContactIds,
+      selectedContacts: approvedContactIds.length,
+      requestedAt: requestedAt.toISOString()
+    };
+    const enrollmentOutput = createApolloPushJobOutput(
+      approvedContactIds.length,
+      companiesTouched
+    );
+    const enrollmentJob = await prisma.$transaction(async (tx) => {
+      for (const { contact, plan } of approved) {
+        const updatedPlan = await tx.outreachPlan.updateMany({
+          where: {
+            id: plan.id,
+            tenantId: context.tenantId,
+            contactId: contact.id,
+            status: OutreachPlanStatus.QA_PASSED,
+            qaStatus: OutreachQaStatus.PASSED
+          },
+          data: {
+            status: OutreachPlanStatus.APPROVED,
+            approvedAt: requestedAt,
+            approvedByUserId: context.userId
+          }
+        });
+        if (updatedPlan.count !== 1) {
+          throw new Error(
+            `${contact.fullName}'s outreach plan changed during approval. Refresh and try again.`
+          );
+        }
+        await tx.contactOutreachDraft.updateMany({
+          where: {
+            tenantId: context.tenantId,
+            contactId: contact.id,
+            sequenceName: plan.sequenceName
+          },
+          data: {
+            status: ContactOutreachDraftStatus.APPROVED,
+            approvedAt: requestedAt
+          }
+        });
+        await tx.contact.updateMany({
+          where: {
+            id: contact.id,
+            tenantId: context.tenantId
+          },
+          data: {
+            contactStatus: ContactStatus.APPROVED,
+            assignedRep: contact.assignedRep ?? context.userId
+          }
+        });
+        await tx.auditLog.create({
+          data: {
+            tenantId: context.tenantId,
+            actorUserId: context.userId,
+            action: "OUTREACH_PLAN_APPROVED",
+            entityType: "OUTREACH_PLAN",
+            entityId: plan.id,
+            after: toInputJsonValue({
+              contactId: contact.id,
+              companyId: contact.companyId,
+              version: plan.version,
+              qaStatus: plan.qaStatus,
+              evidenceFingerprint: plan.evidenceFingerprint,
+              approvalMode: "BULK",
+              apolloEnrollment: "QUEUED"
+            })
+          }
+        });
+      }
+      return tx.automationJobRun.create({
+        data: {
+          tenantId: context.tenantId,
+          jobType: APOLLO_PUSH_JOB_TYPE,
+          status: JobStatus.QUEUED,
+          input: toInputJsonValue(enrollmentInput),
+          output: toInputJsonValue(enrollmentOutput)
+        },
+        select: { id: true }
+      });
+    });
+
+    revalidateLeadGenSurfaces();
+    const skippedContacts = contactIds.length - approved.length;
+    return {
+      ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+      status: "success",
+      operation: "approve",
+      message:
+        `Approved ${approved.length} contact${approved.length === 1 ? "" : "s"} and queued one guarded Apollo enrollment job.` +
+        (skippedContacts > 0
+          ? ` ${skippedContacts} selected contact${skippedContacts === 1 ? " was" : "s were"} skipped; review the reasons below.`
+          : ""),
+      completedAt: new Date().toISOString(),
+      jobRunId: enrollmentJob.id,
+      jobStatus: JobStatus.QUEUED,
+      selectedContacts: contactIds.length,
+      approvedContacts: approved.length,
+      skippedContacts,
+      companiesTouched,
+      details
+    };
+  } catch (error) {
+    return {
+      ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+      status: "error",
+      operation: "approve",
+      message: error instanceof Error ? error.message : "Bulk outreach approval failed.",
+      completedAt: new Date().toISOString()
+    };
+  }
+}
+
 export async function runApolloPushJob({
   tenantId,
   userId,
@@ -1996,7 +2277,8 @@ export async function runApolloPushJob({
     const groups = new Map<string, ApolloPushGroup>();
 
     for (const contact of contacts) {
-      const companyLookup = shouldRefreshApolloSequenceStatus(contact.sequenceStatus)
+      const companyLookup =
+        shouldRefreshApolloSequenceStatus(contact.sequenceStatus) || !contact.apolloContactId
         ? await getApolloCompanyLookupForContact(contact, companyLookupCache)
         : undefined;
       const validation = await validateApolloPushCandidate({
@@ -2831,6 +3113,7 @@ export async function approveOutreachPlanAction(formData: FormData) {
       contact: {
         select: {
           id: true,
+          email: true,
           contactStatus: true,
           assignedRep: true
         }
@@ -2856,6 +3139,9 @@ export async function approveOutreachPlanAction(formData: FormData) {
     plan.contact.contactStatus === ContactStatus.DO_NOT_CONTACT
   ) {
     throw new Error("This contact is blocked from outreach.");
+  }
+  if (!hasUsableHunterEmail(plan.contact)) {
+    throw new Error("A concrete usable email address is required before approval.");
   }
 
   const requestedAt = new Date();
@@ -3307,8 +3593,13 @@ type ApolloPushContactRecord = {
   id: string;
   tenantId: string;
   companyId: string;
+  firstName: string | null;
+  lastName: string | null;
   fullName: string;
+  title: string | null;
   email: string | null;
+  phone: string | null;
+  linkedinUrl: string | null;
   contactStatus: ContactStatus;
   assignedRep: string | null;
   recommendedSequenceId: string | null;
@@ -3316,6 +3607,7 @@ type ApolloPushContactRecord = {
   selectedSequenceId: string | null;
   selectedSequenceName: string | null;
   apolloContactId: string | null;
+  apolloPersonId: string | null;
   sequenceStatus: SequenceStatus;
   replyStatus: ReplyStatus;
   company: {
@@ -3560,10 +3852,6 @@ async function validateApolloPushCandidate({
     };
   }
 
-  if (!contact.apolloContactId) {
-    return { ok: false, reason: "Apollo contact ID is missing. Enrich the company again before pushing." };
-  }
-
   if (!contact.email) {
     return { ok: false, reason: "Contact email is missing, so this contact stays out of sequence push." };
   }
@@ -3676,6 +3964,27 @@ async function validateApolloPushCandidate({
     };
   }
 
+  let apolloContactId = contact.apolloContactId;
+  if (!apolloContactId) {
+    try {
+      apolloContactId = await ensureApolloContactIdForPush({
+        tenantId,
+        contact,
+        companyLookup
+      });
+    } catch (error) {
+      return {
+        ok: false,
+        reason:
+          error instanceof ApolloRateLimitError
+            ? "Apollo rate limit reached while preparing the contact. Wait a moment, then retry the approved contact."
+            : error instanceof Error
+              ? `Apollo contact preparation failed: ${error.message}`
+              : "Apollo contact preparation failed before cadence enrollment."
+      };
+    }
+  }
+
   if (
     contact.selectedSequenceId !== effectiveSequence.id ||
     contact.selectedSequenceName !== effectiveSequence.name
@@ -3707,7 +4016,7 @@ async function validateApolloPushCandidate({
     companyDomain: contact.company.domain,
     apolloOrganizationId: contact.company.apolloOrganizationId,
     fullName: contact.fullName,
-    apolloContactId: contact.apolloContactId,
+    apolloContactId,
     sequenceId: effectiveSequence.id,
     sequenceName: effectiveSequence.name,
     apolloOwnerUserId: repMapping.apolloUserId,
@@ -3720,6 +4029,77 @@ async function validateApolloPushCandidate({
         : null,
     alreadyEnrolled: transition.action === "ALREADY_ENROLLED"
   };
+}
+
+async function ensureApolloContactIdForPush({
+  tenantId,
+  contact,
+  companyLookup
+}: {
+  tenantId: string;
+  contact: ApolloPushContactRecord;
+  companyLookup?: ApolloContactLookupResult;
+}) {
+  if (contact.apolloContactId) {
+    return contact.apolloContactId;
+  }
+  if (!contact.email) {
+    throw new Error("A concrete email address is required before creating an Apollo contact.");
+  }
+
+  const prepared = await prepareApolloContactForEnrollment({
+    contact: {
+      apolloContactId: contact.apolloContactId,
+      apolloPersonId: contact.apolloPersonId,
+      firstName: contact.firstName,
+      lastName: contact.lastName,
+      fullName: contact.fullName,
+      title: contact.title,
+      email: contact.email,
+      phone: contact.phone,
+      linkedinUrl: contact.linkedinUrl
+    },
+    company: {
+      name: contact.company.name,
+      domain: contact.company.domain
+    },
+    savedContacts: companyLookup?.contacts ?? [],
+    createContact: createApolloContactForEnrollment,
+    persistContactIdentity: async ({
+      apolloContactId,
+      apolloPersonId
+    }) => {
+      const updated = await prisma.contact.updateMany({
+        where: {
+          id: contact.id,
+          tenantId
+        },
+        data: {
+          apolloContactId,
+          apolloPersonId,
+          apolloStatus: ApolloStatus.ENRICHED
+        }
+      });
+      if (updated.count !== 1) {
+        throw new Error(
+          "The Newl Apps contact changed while Apollo was preparing it. Refresh and retry."
+        );
+      }
+    }
+  });
+
+  await appendApolloContactActivity({
+    tenantId,
+    contactId: contact.id,
+    note:
+      `Apollo contact preparation on ${new Date().toISOString()} ` +
+      `${
+        prepared.resolution === "EXISTING_SAVED_CONTACT"
+          ? "recovered the existing saved contact"
+          : "created or deduplicated the saved contact"
+      } required for cadence enrollment.`
+  });
+  return prepared.apolloContactId;
 }
 
 function resolveApolloSendFromEmailAccountId({
@@ -5079,45 +5459,6 @@ async function finalizeApolloEnrichmentForLead({
   });
 
   return syncedContacts.length;
-}
-
-async function loadExistingApolloContactsForCompany(tenantId: string, companyId: string) {
-  return prisma.contact.findMany({
-    where: {
-      tenantId,
-      companyId
-    },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      fullName: true,
-      title: true,
-      department: true,
-      seniority: true,
-      email: true,
-      phone: true,
-      linkedinUrl: true,
-      source: true,
-      contactStatus: true,
-      apolloContactId: true,
-      apolloPersonId: true,
-      apolloStatus: true,
-      sequenceStatus: true,
-      replyStatus: true,
-      recommendedSequenceName: true,
-      recommendedSequenceId: true,
-      selectedSequenceName: true,
-      selectedSequenceId: true,
-      sequenceRecommendationReason: true,
-      sequenceOverrideReason: true,
-      sequenceManuallyOverridden: true,
-      lastTouchAt: true,
-      lastReplyAt: true,
-      assignedRep: true,
-      rawJson: true
-    }
-  });
 }
 
 async function recordApolloCompanyMatch({

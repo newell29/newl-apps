@@ -3,6 +3,8 @@ import {
   CandidateStatus,
   ContactStatus,
   LeadPipelineStage,
+  OutreachPlanStatus,
+  OutreachQaStatus,
   ReplyStatus,
   SequenceStatus
 } from "@prisma/client";
@@ -23,6 +25,11 @@ const requireModule = vi.fn();
 const requireMutationAccess = vi.fn();
 const fetchApolloContactsForCompany = vi.fn();
 const apolloCompanyMatchCreate = vi.fn();
+const outreachPlanUpdateMany = vi.fn();
+const contactOutreachDraftUpdateMany = vi.fn();
+const automationJobRunCreate = vi.fn();
+const auditLogCreate = vi.fn();
+const evaluateHunterOutreachEligibility = vi.fn();
 const recordLeadOutcomeEvent = vi.fn();
 const recordLeadScoreSnapshot = vi.fn();
 
@@ -46,7 +53,37 @@ vi.mock("@/server/db", () => ({
     },
     apolloCompanyMatch: {
       create: (...args: unknown[]) => apolloCompanyMatchCreate(...args)
-    }
+    },
+    outreachPlan: {
+      updateMany: (...args: unknown[]) => outreachPlanUpdateMany(...args)
+    },
+    contactOutreachDraft: {
+      updateMany: (...args: unknown[]) => contactOutreachDraftUpdateMany(...args)
+    },
+    automationJobRun: {
+      create: (...args: unknown[]) => automationJobRunCreate(...args)
+    },
+    auditLog: {
+      create: (...args: unknown[]) => auditLogCreate(...args)
+    },
+    $transaction: async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback({
+        outreachPlan: {
+          updateMany: (...args: unknown[]) => outreachPlanUpdateMany(...args)
+        },
+        contactOutreachDraft: {
+          updateMany: (...args: unknown[]) => contactOutreachDraftUpdateMany(...args)
+        },
+        contact: {
+          updateMany: (...args: unknown[]) => contactUpdateMany(...args)
+        },
+        automationJobRun: {
+          create: (...args: unknown[]) => automationJobRunCreate(...args)
+        },
+        auditLog: {
+          create: (...args: unknown[]) => auditLogCreate(...args)
+        }
+      })
   }
 }));
 
@@ -75,8 +112,15 @@ vi.mock("@/modules/lead-gen/score-history", () => ({
   recordLeadScoreSnapshot: (...args: unknown[]) => recordLeadScoreSnapshot(...args)
 }));
 
+vi.mock("@/modules/lead-gen/hunter-outreach-eligibility", () => ({
+  evaluateHunterOutreachEligibility: (...args: unknown[]) =>
+    evaluateHunterOutreachEligibility(...args),
+  getHunterOutreachResearchMaxAgeDays: () => 30
+}));
+
 import {
   bulkAssignLeadOwnerAction,
+  bulkApproveOutreachPlansAction,
   bulkPushContactsToApolloAction,
   bulkQueueApolloEnrichmentAction,
   bulkUnassignLeadOwnerAction,
@@ -90,7 +134,8 @@ describe("pipeline bulk actions", () => {
     getAuthenticatedContext.mockResolvedValue({
       tenantId: "tenant-1",
       tenantSlug: "newl-group",
-      tenantName: "Newl Group"
+      tenantName: "Newl Group",
+      userId: "user-alex"
     });
     leadFindFirst.mockImplementation(async ({ where }: { where: { id: string } }) => ({
       id: where.id,
@@ -113,6 +158,17 @@ describe("pipeline bulk actions", () => {
     contactCreate.mockImplementation(async ({ data }: { data: { fullName: string } }) => ({
       id: `contact-${data.fullName.toLowerCase().replace(/\s+/g, "-")}`
     }));
+    outreachPlanUpdateMany.mockResolvedValue({ count: 1 });
+    contactOutreachDraftUpdateMany.mockResolvedValue({ count: 1 });
+    contactUpdateMany.mockResolvedValue({ count: 1 });
+    automationJobRunCreate.mockResolvedValue({ id: "apollo-job-1" });
+    auditLogCreate.mockResolvedValue({ id: "audit-1" });
+    evaluateHunterOutreachEligibility.mockReturnValue({
+      status: "ELIGIBLE",
+      label: "Hunter hot opportunity",
+      reason: "Hunter research passed.",
+      directive: {}
+    });
     contactUpdate.mockResolvedValue({});
     contactUpdateMany.mockResolvedValue({ count: 1 });
     apolloCompanyMatchCreate.mockResolvedValue({});
@@ -428,6 +484,104 @@ describe("pipeline bulk actions", () => {
       status: "error",
       operation: "apollo_push",
       message: "Contact must be approved before it can be pushed to an Apollo cadence."
+    });
+  });
+
+  it("bulk-approves only QA-passed contacts with usable email and queues one enrollment job", async () => {
+    contactFindMany.mockResolvedValueOnce([
+      {
+        id: "contact-approved",
+        companyId: "company-1",
+        fullName: "Morgan Buyer",
+        email: "morgan@example.com",
+        contactStatus: ContactStatus.REVIEWING,
+        assignedRep: null,
+        company: {
+          name: "Example Importer",
+          candidateStatus: CandidateStatus.APPROVED_FOR_PIPELINE,
+          doNotProspect: false,
+          hunterOpportunitySignals: [{}],
+          hunterProspectingDecisions: [{}]
+        },
+        outreachPlans: [{
+          id: "plan-approved",
+          companyId: "company-1",
+          contactId: "contact-approved",
+          sequenceName: "Hunter - Email Only",
+          version: 1,
+          status: OutreachPlanStatus.QA_PASSED,
+          qaStatus: OutreachQaStatus.PASSED,
+          evidenceFingerprint: "evidence-1"
+        }]
+      },
+      {
+        id: "contact-no-email",
+        companyId: "company-1",
+        fullName: "Taylor Hidden",
+        email: null,
+        contactStatus: ContactStatus.REVIEWING,
+        assignedRep: null,
+        company: {
+          name: "Example Importer",
+          candidateStatus: CandidateStatus.APPROVED_FOR_PIPELINE,
+          doNotProspect: false,
+          hunterOpportunitySignals: [{}],
+          hunterProspectingDecisions: [{}]
+        },
+        outreachPlans: [{
+          id: "plan-no-email",
+          companyId: "company-1",
+          contactId: "contact-no-email",
+          sequenceName: "Hunter - Email Only",
+          version: 1,
+          status: OutreachPlanStatus.QA_PASSED,
+          qaStatus: OutreachQaStatus.PASSED,
+          evidenceFingerprint: "evidence-2"
+        }]
+      }
+    ]);
+
+    const formData = new FormData();
+    formData.append("contactId", "contact-approved");
+    formData.append("contactId", "contact-no-email");
+
+    await expect(bulkApproveOutreachPlansAction(formData)).resolves.toMatchObject({
+      status: "success",
+      operation: "approve",
+      selectedContacts: 2,
+      approvedContacts: 1,
+      skippedContacts: 1,
+      jobRunId: "apollo-job-1",
+      details: expect.arrayContaining([
+        expect.objectContaining({
+          contactId: "contact-no-email",
+          outcome: "skipped",
+          reason: "A concrete usable email address is required before approval."
+        })
+      ])
+    });
+    expect(outreachPlanUpdateMany).toHaveBeenCalledTimes(1);
+    expect(outreachPlanUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "plan-approved",
+          tenantId: "tenant-1",
+          status: OutreachPlanStatus.QA_PASSED,
+          qaStatus: OutreachQaStatus.PASSED
+        })
+      })
+    );
+    expect(automationJobRunCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        tenantId: "tenant-1",
+        jobType: "lead-gen.apollo-push",
+        status: "QUEUED",
+        input: expect.objectContaining({
+          contactIds: ["contact-approved"],
+          selectedContacts: 1
+        })
+      }),
+      select: { id: true }
     });
   });
 

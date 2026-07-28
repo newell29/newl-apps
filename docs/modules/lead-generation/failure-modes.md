@@ -233,6 +233,16 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Code guard: `src/server/integrations/apollo.ts` parses current campaign statuses and prefers active state over finished history.
 - Regression coverage: `tests/apollo-integration.test.ts` includes an active campaign membership alongside older finished history.
 
+## Apollo person was selected but no saved contact ID exists
+
+- Symptom: an otherwise approved contact is skipped with “Apollo contact ID is missing.”
+- Cause: Apollo People Search identifies people, but only contacts explicitly saved in the team's Apollo database can
+  be enrolled in a sequence. Earlier Newl Apps code treated the People Search record as enrollment-ready.
+- Safe recovery: the enrollment worker now recovers an existing saved contact or creates/deduplicates one through
+  Apollo's zero-credit Create Contact endpoint, then persists the returned contact ID before continuing. A missing
+  concrete email, conflicting dedupe email, unreadable response, or absent returned ID still fails closed.
+- Regression coverage: `tests/apollo-contact-preparation.test.ts` and `tests/apollo-integration.test.ts`.
+
 ## Outreach is blocked by Hunter eligibility
 
 - Symptom: Outreach Queue shows **Needs Hunter assessment**, **Hunter watchlist**, **Blocked by Hunter**,
