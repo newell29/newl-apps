@@ -1044,21 +1044,25 @@ async function searchApolloPeople({
   companyName,
   domain,
   organizationId,
-  queryKeywords
+  queryKeywords,
+  personTitles
 }: {
   apiKey: string;
   companyName: string;
   domain?: string | null;
   organizationId: string | null;
   queryKeywords?: string | null;
+  personTitles?: readonly string[];
 }) {
   const normalizedDomain = normalizeDomain(domain);
   const body = {
     page: 1,
-    per_page: APOLLO_CONTACT_PAGE_SIZE,
+    per_page: DEFAULT_PAGE_SIZE,
     organization_ids: organizationId ? [organizationId] : undefined,
     q_organization_domains_list: normalizedDomain ? [normalizedDomain] : undefined,
-    q_keywords: buildApolloPeopleSearchKeywords(companyName, queryKeywords, Boolean(organizationId || normalizedDomain))
+    q_keywords: buildApolloPeopleSearchKeywords(companyName, queryKeywords, Boolean(organizationId || normalizedDomain)),
+    person_titles: personTitles && personTitles.length > 0 ? [...personTitles] : undefined,
+    include_similar_titles: personTitles && personTitles.length > 0 ? true : undefined
   };
 
   const json = await postApolloJson("/api/v1/mixed_people/api_search", apiKey, body);
@@ -1112,24 +1116,20 @@ async function searchApolloRelevantPeople({
   );
   collected.push(...peopleWithoutKeyword);
 
-  const relevantPeopleWithoutKeyword = rankApolloRelevantContacts(collected);
-  if (relevantPeopleWithoutKeyword.length > 0) {
-    return relevantPeopleWithoutKeyword;
-  }
-
-  const keywordQueries = [...APOLLO_PRIMARY_ROLE_KEYWORDS, ...APOLLO_FALLBACK_ROLE_KEYWORDS].slice(
+  const roleTitles = [...APOLLO_PRIMARY_ROLE_KEYWORDS, ...APOLLO_FALLBACK_ROLE_KEYWORDS].slice(
     0,
     Math.max(0, keywordSearchLimit)
   );
 
-  for (const keyword of keywordQueries) {
-    const people = filterApolloContactsForExpectedOrganization(
+  if (roleTitles.length > 0) {
+    const rolePeople = filterApolloContactsForExpectedOrganization(
       await searchApolloPeople({
         apiKey,
         companyName,
         domain,
         organizationId,
-        queryKeywords: keyword
+        queryKeywords: null,
+        personTitles: roleTitles
       }),
       {
         companyName,
@@ -1137,7 +1137,7 @@ async function searchApolloRelevantPeople({
         organizationId
       }
     );
-    collected.push(...people);
+    collected.push(...rolePeople);
   }
 
   const ranked = rankApolloRelevantContacts(collected);

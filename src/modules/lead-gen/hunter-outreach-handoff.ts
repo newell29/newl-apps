@@ -44,7 +44,6 @@ export const HUNTER_OUTREACH_HANDOFF_JOB_TYPE = "HUNTER_OUTREACH_HANDOFF";
 const ACTIVE_JOB_WINDOW_MS = 4 * 60 * 60 * 1_000;
 const PROCESSING_LEASE_MS = 15 * 60 * 1_000;
 const MAX_COMPANY_ATTEMPTS = 3;
-const HUNTER_CONTACT_REVIEW_POOL_MIN = 5;
 const HUNTER_CONTACT_REVIEW_POOL_MAX = 10;
 const HUNTER_SELECTED_CONTACT_MAX = 3;
 
@@ -619,15 +618,11 @@ async function processCompany({
     );
   }
 
-  const reviewPoolSize = Math.min(
-    HUNTER_CONTACT_REVIEW_POOL_MAX,
-    Math.max(HUNTER_CONTACT_REVIEW_POOL_MIN, maxContactsPerCompany * 3)
-  );
   const ranked = rankHunterContacts(
     lookup.contacts,
     item.recommendedPersona,
     eligibility.directive.rationale
-  ).slice(0, reviewPoolSize);
+  ).slice(0, HUNTER_CONTACT_REVIEW_POOL_MAX);
   if (lookup.contacts.length === 0) {
     return terminal(item, "NO_CONTACTS", classification, 0, 0, 0, "Apollo returned no contacts.");
   }

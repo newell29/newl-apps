@@ -209,14 +209,15 @@ Regression coverage must prove:
 3. machine routes ignore caller-supplied tenant identifiers and use ingestion authentication;
 4. each request processes at most one company and persisted leases, results, attempts, and retry dates survive worker restart;
 5. an unresolved latest Apollo company match blocks repeat discovery and remains review-required;
-6. deterministic ranking excludes seller-side and unidentifiable contacts and caps imports at `maxContactsPerCompany`;
-7. buyer-role review uses strict structured output, returns the exact requested contact IDs, and accepts only Primary 70+ or Secondary 80+;
-8. the manual current-opportunity handoff requires completed company research, refreshes the deterministic plan, and queues the same bounded Assisted-mode job without rerunning research;
-9. the same prompt version and prospecting decision reuse a cached review, while a new decision requires fresh review;
-10. imported contacts remain `REVIEWING`, unapproved, unassigned, and unenrolled;
-11. plan generation uses the saved Hunter/TradeMining evidence ledger and persists QA failure rather than bypassing it;
-12. no assisted-handoff path creates a lead, changes a pipeline stage, approves a plan/contact, writes an Apollo cadence, or sends communication; and
-13. the Mac worker drains the queue after research and resumes unfinished jobs during its normal loop.
+6. saved contacts, a 100-result organization-scoped employee search, and an always-run multi-title search are merged and deduplicated before ranking; sibling organizations remain excluded;
+7. deterministic ranking excludes seller-side and unidentifiable contacts, gives the buyer-role model the best 10 candidates, and caps final selection at `maxContactsPerCompany`;
+8. buyer-role review uses strict structured output, returns the exact requested contact IDs, and accepts only Primary 70+ or Secondary 80+;
+9. the manual current-opportunity handoff requires completed company research, refreshes the deterministic plan, and queues the same bounded Assisted-mode job without rerunning research;
+10. the same prompt version and prospecting decision reuse a cached review, while a new decision requires fresh review;
+11. imported contacts remain `REVIEWING`, unapproved, unassigned, and unenrolled;
+12. plan generation uses the saved Hunter/TradeMining evidence ledger and persists QA failure rather than bypassing it;
+13. no assisted-handoff path creates a lead, changes a pipeline stage, approves a plan/contact, writes an Apollo cadence, or sends communication; and
+14. the Mac worker drains the queue after research and resumes unfinished jobs during its normal loop.
 
 ## Outreach Plans and grounded sequence generation
 
