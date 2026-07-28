@@ -129,7 +129,10 @@ export async function runHunterDryPlan({
               }),
           OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }]
         },
-        orderBy: [{ confidence: "desc" }, { observedAt: "desc" }],
+        orderBy:
+          candidateScope === "CURRENT_RESEARCHED_OUTREACH"
+            ? [{ observedAt: "desc" }, { confidence: "desc" }]
+            : [{ confidence: "desc" }, { observedAt: "desc" }],
         take: 500,
         include: {
           company: {

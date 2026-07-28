@@ -94,6 +94,15 @@ describe("Hunter researched outreach planning", () => {
       selectedCount: 14
     });
 
+    expect(prisma.hunterOpportunitySignal.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId: "tenant-a",
+          sourceName: "Hunter company research"
+        }),
+        orderBy: [{ observedAt: "desc" }, { confidence: "desc" }]
+      })
+    );
     const createManyCall =
       prisma.hunterProspectingDecision.createMany.mock.calls[0]?.[0];
     expect(createManyCall.data).toHaveLength(14);
