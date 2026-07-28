@@ -131,8 +131,15 @@ describe("Website Growth Scout OpenClaw scripts", () => {
   });
 
   it("runs backlink outreach through a deterministic command wrapper with no shell tools", async () => {
-    const [installer, runner, prompt] = await Promise.all([
+    const [installer, enableScript, runner, prompt] = await Promise.all([
       readFile(backlinkInstallerPath, "utf8"),
+      readFile(
+        path.join(
+          repoRoot,
+          "ops/openclaw/enable-website-growth-backlink-executor.sh",
+        ),
+        "utf8",
+      ),
       readFile(backlinkRunnerPath, "utf8"),
       readFile(backlinkPromptPath, "utf8"),
     ]);
@@ -145,6 +152,15 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     expect(installer).toContain('--command-argv "${executor_argv}"');
     expect(installer).toContain("--no-deliver");
     expect(installer).not.toContain('--agent scout\n  --model "openai/gpt-5.6-sol"');
+    expect(installer).toContain('canonical_executor_job_id="$(');
+    expect(installer).toContain('openclaw cron rm "${stale_job_id}"');
+    expect(installer).toContain(
+      'job.get("id") != sys.argv[2]'
+    );
+    expect(enableScript).toContain(
+      '(job.get("payload") or {}).get("kind") == "command"'
+    );
+    expect(enableScript).toContain("if len(matches) == 1:");
     expect(runner).toContain('run_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"');
     expect(runner).toContain('"${openclaw_command}" agent');
     expect(runner).toContain(

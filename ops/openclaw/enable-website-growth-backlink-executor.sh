@@ -17,14 +17,21 @@ with open(sys.argv[1], encoding="utf-8") as handle:
     payload = json.load(handle)
 jobs = payload.get("jobs") if isinstance(payload, dict) else payload
 jobs = jobs if isinstance(jobs, list) else []
-for job in jobs:
-    if job.get("declarationKey") == "newl.website-growth.backlink-outreach.weekday.v1":
-        print(job.get("id") or "")
-        break
+matches = [
+    job for job in jobs
+    if (
+        job.get("declarationKey")
+        == "newl.website-growth.backlink-outreach.weekday.v1"
+        and (job.get("payload") or {}).get("kind") == "command"
+        and job.get("id")
+    )
+]
+if len(matches) == 1:
+    print(matches[0]["id"])
 PY
 )"
 if [[ -z "${job_id}" ]]; then
-  echo "Install the Website Growth backlink executor before enabling it." >&2
+  echo "Exactly one deterministic Website Growth backlink command job must be installed before enabling it." >&2
   exit 1
 fi
 

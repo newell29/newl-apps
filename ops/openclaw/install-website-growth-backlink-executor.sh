@@ -15,6 +15,13 @@ profile_source="${WEBSITE_GROWTH_BACKLINK_PROFILE_SOURCE:-}"
 profile_target="${HOME}/.openclaw/agents/scout/backlink-business-profile.json"
 scout_workspace="${HOME}/.openclaw/workspace-scout"
 scout_agent_directory="${HOME}/.openclaw/agents/scout/agent"
+temporary_directory="$(mktemp -d)"
+executor_install_result="${temporary_directory}/executor-install-result.json"
+cron_snapshot="${temporary_directory}/cron-snapshot.json"
+cleanup() {
+  rm -rf "${temporary_directory}"
+}
+trap cleanup EXIT
 
 if [[ ! -r "${scout_env_file}" ]]; then
   echo "The protected Website Growth Scout environment file is not readable." >&2
@@ -154,7 +161,43 @@ openclaw cron add \
   --command-cwd "${repo_path}" \
   --timeout-seconds 1800 \
   --no-deliver \
-  --disabled
+  --disabled \
+  --json > "${executor_install_result}"
+
+canonical_executor_job_id="$(/usr/bin/python3 - "${executor_install_result}" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+job = payload.get("job") if isinstance(payload, dict) else None
+job = job if isinstance(job, dict) else payload
+if not isinstance(job, dict) or job.get("id") in (None, ""):
+    raise SystemExit("OpenClaw did not return the installed backlink executor job.")
+if (job.get("payload") or {}).get("kind") != "command":
+    raise SystemExit("The installed backlink executor is not a command job.")
+print(job["id"])
+PY
+)"
+
+openclaw cron list --json > "${cron_snapshot}"
+while IFS= read -r stale_job_id; do
+  [[ -z "${stale_job_id}" ]] && continue
+  openclaw cron rm "${stale_job_id}"
+done < <(/usr/bin/python3 - "${cron_snapshot}" "${canonical_executor_job_id}" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+jobs = payload.get("jobs") if isinstance(payload, dict) else payload
+jobs = jobs if isinstance(jobs, list) else []
+for job in jobs:
+    if (
+        job.get("declarationKey")
+        == "newl.website-growth.backlink-outreach.weekday.v1"
+        and job.get("id")
+        and job.get("id") != sys.argv[2]
+    ):
+        print(job["id"])
+PY
+)
 
 failure_monitor_argv="$(node -e '
 console.log(JSON.stringify(["/bin/zsh", process.argv[1]]));
