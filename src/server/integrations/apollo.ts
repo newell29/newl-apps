@@ -510,15 +510,17 @@ export async function fetchApolloContactsForCompany(
   const providedOrganization = providedOrganizationId
     ? buildTrustedProvidedApolloOrganization(input, providedOrganizationId)
     : null;
-  const discoveredOrganization =
-    !providedOrganizationId || normalizeDomain(input.domain)
-      ? await findApolloOrganization(input, apiKey)
-      : null;
+  // Apollo account IDs and global organization IDs are both 24-character
+  // identifiers, but People Search only returns the complete employee set for
+  // the global organization. Always resolve the company identity first—even
+  // when a confirmed mapping exists and the company has no stored domain—so a
+  // saved account ID cannot silently produce an empty or partial employee set.
+  const discoveredOrganization = await findApolloOrganization(input, apiKey);
   const canonicalDiscoveredOrganization =
     providedOrganizationId &&
     discoveredOrganization?.id &&
     discoveredOrganization.id !== providedOrganizationId &&
-    isDirectApolloCompanyMatch(discoveredOrganization)
+    isSafeCanonicalApolloOrganizationResolution(discoveredOrganization, input)
       ? {
           ...discoveredOrganization,
           matchReason:
@@ -533,6 +535,7 @@ export async function fetchApolloContactsForCompany(
   let effectiveMatchOrganization = matchedOrganization;
   let trustedMatchedOrganization = isDirectApolloCompanyMatch(matchedOrganization) ? matchedOrganization : null;
   let organizationIdForSearch = trustedMatchedOrganization?.id ?? providedOrganizationId ?? null;
+  let companyNameForSearch = trustedMatchedOrganization?.name ?? input.companyName;
   const savedContactsForProvidedOrganization = providedOrganizationId
     ? ((await searchApolloContacts({
         apiKey,
@@ -548,7 +551,7 @@ export async function fetchApolloContactsForCompany(
     organizationIdForSearch || input.domain
       ? ((await searchApolloRelevantPeople({
           apiKey,
-          companyName: input.companyName,
+          companyName: companyNameForSearch,
           domain: input.domain,
           organizationId: organizationIdForSearch,
           allowPeopleSearchFallback,
@@ -561,6 +564,7 @@ export async function fetchApolloContactsForCompany(
 
   let blockedByRecoveryAmbiguity = false;
   if (
+    !canonicalDiscoveredOrganization &&
     providedOrganizationId &&
     organizationIdForSearch &&
     savedContactsForProvidedOrganization &&
@@ -597,10 +601,11 @@ export async function fetchApolloContactsForCompany(
           `after the configured ID returned no employees`
       };
       organizationIdForSearch = recoveredOrganization.id;
+      companyNameForSearch = recoveredOrganization.name ?? input.companyName;
       contactsFromApollo =
         (await searchApolloRelevantPeople({
           apiKey,
-          companyName: input.companyName,
+          companyName: companyNameForSearch,
           domain: input.domain,
           organizationId: organizationIdForSearch,
           allowPeopleSearchFallback,
@@ -2161,9 +2166,30 @@ function scoreApolloOrganizationCandidate(
   let nameMatchType: ApolloOrganizationCandidate["nameMatchType"] = "NONE";
   const inputAliases = buildCompanyNameAliases(companyName);
   const candidateAliases = buildCompanyNameAliases(candidate.name ?? "");
+  const accountRecordName = readApolloString(candidate.rawPayload, [
+    "name",
+    "company_name",
+    "organization_name"
+  ]);
+  const accountAliases = buildCompanyNameAliases(accountRecordName ?? "");
+  const nestedOrganization = asRecord(candidate.rawPayload.organization);
+  const nestedOrganizationId = readApolloString(nestedOrganization ?? {}, [
+    "id",
+    "organization_id",
+    "apollo_organization_id"
+  ]);
   const tokenSimilarity = calculateBestTokenSimilarity(inputAliases, candidateAliases);
   const logisticsProviderMatch = isLogisticsProviderName(candidate.name ?? "") || isLogisticsProviderName(companyName);
-  const strongBaseNameMatch = hasStrongBaseNameMatch(inputAliases, candidateAliases);
+  const accountBackedCanonicalMatch = Boolean(
+    nestedOrganizationId &&
+    candidate.id === nestedOrganizationId &&
+    accountAliases.length > 0 &&
+    hasStrongBaseNameMatch(inputAliases, accountAliases)
+  );
+  const strongBaseNameMatch =
+    hasStrongBaseNameMatch(inputAliases, candidateAliases) ||
+    hasSafeRegionalBrandAlias(inputAliases, candidateAliases) ||
+    accountBackedCanonicalMatch;
   const branchLocationMatch = isBranchLocationMatch(candidate.name ?? "", companyName) && !strongBaseNameMatch;
 
   if (candidate.id) {
@@ -2275,6 +2301,44 @@ function isDirectApolloCompanyMatch(candidate: ApolloOrganizationCandidate | nul
   }
 
   return candidate.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY;
+}
+
+function isSafeCanonicalApolloOrganizationResolution(
+  candidate: ApolloOrganizationCandidate,
+  input: ApolloCompanyLookupInput
+) {
+  if (!isDirectApolloCompanyMatch(candidate)) {
+    return false;
+  }
+
+  const inputAliases = buildCompanyNameAliases(input.companyName);
+  const candidateAliases = buildCompanyNameAliases(candidate.name ?? "");
+  const normalizedDomain = normalizeDomain(input.domain);
+  const nestedOrganization = asRecord(candidate.rawPayload.organization);
+  const nestedOrganizationId = readApolloString(nestedOrganization ?? {}, [
+    "id",
+    "organization_id",
+    "apollo_organization_id"
+  ]);
+  const accountName = readApolloString(candidate.rawPayload, [
+    "name",
+    "company_name",
+    "organization_name"
+  ]);
+  const accountAliases = buildCompanyNameAliases(accountName ?? "");
+  const accountBackedCanonicalMatch = Boolean(
+    nestedOrganizationId &&
+    candidate.id === nestedOrganizationId &&
+    accountAliases.length > 0 &&
+    hasStrongBaseNameMatch(inputAliases, accountAliases)
+  );
+
+  return (
+    Boolean(normalizedDomain && candidate.domain === normalizedDomain) ||
+    hasExactAliasMatch(inputAliases, candidateAliases) ||
+    hasSafeRegionalBrandAlias(inputAliases, candidateAliases) ||
+    accountBackedCanonicalMatch
+  );
 }
 
 function toApolloCompanyLookupMatch(

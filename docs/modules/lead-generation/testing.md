@@ -108,10 +108,11 @@ Scoring regression coverage must also verify:
 18. the GitHub Actions caller does not retry a failed whole-batch HTTP request; retries remain bounded inside the per-contact Apollo client.
 19. organization search sends `q_organization_domains_list` for domains and `q_organization_name` for name-only companies, never internal TradeMining identity-field names.
 20. name-only organization discovery is capped at two deterministic queries and stops at the first direct-company match.
-21. a confirmed Apollo mapping with a saved domain performs one bounded organization lookup to resolve account IDs
-    to Apollo's canonical nested organization ID; People Search stays constrained to that exact
-    `organization_ids` value without an unscoped fallback. A confirmed mapping without a domain continues to use its
-    saved ID directly.
+21. every confirmed Apollo mapping performs one bounded organization lookup, with or without a saved domain, to
+    resolve account IDs to Apollo's canonical nested organization ID; People Search stays constrained to that exact
+    `organization_ids` value without an unscoped fallback. Exact Apollo account-to-organization relationships may
+    resolve a legal-entity card to its operating parent/brand, while unrelated parent or sibling candidates still
+    fail closed.
 22. an unresolved latest `ApolloCompanyMatch` makes bulk enrichment skip the company before any Apollo or contact lookup.
 23. Apollo company URL parsing rejects non-Apollo hosts, exact mapping validates the organization ID, and manual mapping never authorizes cadence enrollment.
 24. People Search parses its `id` as an Apollo person ID, retains obfuscated-name and availability metadata, and does not claim the person is an enriched saved contact.
