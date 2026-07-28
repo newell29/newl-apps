@@ -80,6 +80,10 @@ import {
 import { persistOutreachPlanWithSteps } from "@/modules/lead-gen/outreach-plan-persistence";
 import { buildApprovedOutreachEnrollment } from "@/modules/lead-gen/outreach-enrollment";
 import {
+  decideApolloSequenceTransition,
+  resolveTrackedSequenceStatus
+} from "@/modules/lead-gen/apollo-reengagement-policy";
+import {
   generateOutreachPlanForContact as generateSharedOutreachPlanForContact
 } from "@/modules/lead-gen/outreach-plan-generation";
 import {
@@ -103,7 +107,7 @@ import {
   syncApolloContactTypedCustomFields,
   type ApolloEmailAccountDirectoryEntry,
   type ApolloContactRecord,
-  pushApolloContactsToSequence,
+  transitionApolloContactsToSequence,
   type ApolloContactLookupResult
 } from "@/server/integrations/apollo";
 import {
@@ -1801,7 +1805,9 @@ export async function runApolloPushJob({
           select: {
             id: true,
             status: true,
-            qaStatus: true
+            qaStatus: true,
+            sequenceId: true,
+            sequenceName: true
           }
         }
       }
@@ -1855,6 +1861,39 @@ export async function runApolloPushJob({
           sequenceName: null,
           jobRunId: null,
           acceptedAt: null
+        });
+        await persistApolloPushJobProgress(jobRunId, output);
+        continue;
+      }
+
+      if (validation.alreadyEnrolled) {
+        output.enrolledContacts += 1;
+        output.processedContacts += 1;
+        output.details.push({
+          contactId: contact.id,
+          contactName: contact.fullName,
+          companyName: contact.company.name,
+          outcome: "enrolled",
+          reason: `Already enrolled in "${validation.sequenceName}".`
+        });
+        await prisma.contact.updateMany({
+          where: { id: contact.id, tenantId },
+          data: {
+            sequenceStatus: SequenceStatus.ENROLLED,
+            selectedSequenceId: validation.sequenceId,
+            selectedSequenceName: validation.sequenceName
+          }
+        });
+        await appendApolloContactActivity({
+          tenantId,
+          contactId: contact.id,
+          note:
+            `Apollo enrollment validation on ${new Date().toISOString()} confirmed this contact was already active in "${validation.sequenceName}".`
+        });
+        await persistApolloPushBlocker({
+          tenantId,
+          contactId: contact.id,
+          reason: null
         });
         await persistApolloPushJobProgress(jobRunId, output);
         continue;
@@ -1954,13 +1993,39 @@ export async function runApolloPushJob({
     for (let index = 0; index < groupedPushes.length; index += 1) {
       const group = groupedPushes[index]!;
       try {
-        const pushResult = await pushApolloContactsToSequence({
+        const transitionsBySequence = new Map<string, ApolloPushReadyContact[]>();
+        for (const contact of group.contacts) {
+          if (!contact.previousSequenceId) continue;
+          transitionsBySequence.set(contact.previousSequenceId, [
+            ...(transitionsBySequence.get(contact.previousSequenceId) ?? []),
+            contact
+          ]);
+        }
+        const pushResult = await transitionApolloContactsToSequence({
           sequenceId: group.sequenceId,
           apolloContactIds: group.contacts.map((contact) => contact.apolloContactId),
           sequenceOwnerUserId: group.apolloOwnerUserId,
           sendFromEmailAccountId: group.sendFromEmailAccountId,
-          initialStatus: "active"
+          initialStatus: "active",
+          previousSequenceByContactId: Object.fromEntries(
+            group.contacts.map((contact) => [
+              contact.apolloContactId,
+              contact.previousSequenceId
+            ])
+          )
         });
+        for (const [previousSequenceId, transitionContacts] of transitionsBySequence) {
+          await Promise.all(
+            transitionContacts.map((contact) =>
+              appendApolloContactActivity({
+                tenantId,
+                contactId: contact.contactId,
+                note:
+                  `Apollo cadence transition on ${new Date().toISOString()} removed the contact from prior cadence ${previousSequenceId} before enrolling in "${group.sequenceName}".`
+              })
+            )
+          );
+        }
 
         let verificationLookup: ApolloContactLookupResult | null = null;
         let verificationWasRateLimited = false;
@@ -2061,6 +2126,8 @@ export async function runApolloPushJob({
             data: {
               apolloStatus: ApolloStatus.ENRICHED,
               sequenceStatus: SequenceStatus.ENROLLED,
+              selectedSequenceId: group.sequenceId,
+              selectedSequenceName: group.sequenceName,
               lastTouchAt: pushedAt
             }
           });
@@ -3076,6 +3143,7 @@ type ApolloPushContactRecord = {
   selectedSequenceName: string | null;
   apolloContactId: string | null;
   sequenceStatus: SequenceStatus;
+  replyStatus: ReplyStatus;
   company: {
     id: string;
     name: string;
@@ -3111,6 +3179,8 @@ type ApolloPushContactRecord = {
     id: string;
     status: OutreachPlanStatus;
     qaStatus: OutreachQaStatus;
+    sequenceId: string | null;
+    sequenceName: string;
   }>;
 };
 
@@ -3165,9 +3235,21 @@ type ApolloPushReadyContact = {
   sendFromEmailAccountId: string;
   requiresAiDraft: boolean;
   draftId: string | null;
+  previousSequenceId: string | null;
+  alreadyEnrolled: boolean;
 };
 
-function resolveEffectiveApolloSequence(contact: ApolloPushContactRecord) {
+function resolveEffectiveApolloSequence(
+  contact: ApolloPushContactRecord,
+  outreachPlan?: ApolloPushContactRecord["outreachPlans"][number] | null
+) {
+  if (outreachPlan?.sequenceId && outreachPlan.sequenceName) {
+    return {
+      id: outreachPlan.sequenceId,
+      name: outreachPlan.sequenceName,
+      usedRecommendationFallback: false
+    };
+  }
   return {
     id: contact.selectedSequenceId ?? contact.recommendedSequenceId ?? null,
     name: contact.selectedSequenceName ?? contact.recommendedSequenceName ?? null,
@@ -3264,11 +3346,15 @@ async function validateApolloPushCandidate({
   emailAccounts: ApolloEmailAccountDirectoryEntry[];
   companyLookup?: ApolloContactLookupResult;
 }): Promise<{ ok: true } & ApolloPushReadyContact | { ok: false; reason: string }> {
-  let effectiveSequence = resolveEffectiveApolloSequence(contact);
-
   const contactBlockReason = getContactSequencePushBlockReason(contact.contactStatus);
   if (contactBlockReason) {
     return { ok: false, reason: contactBlockReason };
+  }
+  if (contact.replyStatus !== ReplyStatus.NO_REPLY) {
+    return {
+      ok: false,
+      reason: "This contact has replied and cannot be enrolled in a new automated cadence."
+    };
   }
 
   if (
@@ -3308,6 +3394,11 @@ async function validateApolloPushCandidate({
     return { ok: false, reason: "Contact email is missing, so this contact stays out of sequence push." };
   }
 
+  const latestDraft = contact.outreachDrafts[0] ?? null;
+  const latestOutreachPlan = contact.outreachPlans?.[0] ?? null;
+  const requiresAiDraft = await contactRequiresApprovedDraft(tenantId, contact.id);
+  let effectiveSequence = resolveEffectiveApolloSequence(contact, latestOutreachPlan);
+
   if (!effectiveSequence.id || !effectiveSequence.name) {
     const draftContext = await loadAiDraftContactContext({
       tenantId,
@@ -3327,22 +3418,27 @@ async function validateApolloPushCandidate({
     return { ok: false, reason: "No Apollo cadence is selected for this contact yet." };
   }
 
-  if (
-    contact.sequenceStatus !== SequenceStatus.NOT_STARTED &&
-    contact.sequenceStatus !== SequenceStatus.READY
-  ) {
-    const liveSequenceStatus = await refreshApolloSequenceStatusForPush({
-      tenantId,
-      contact,
-      companyLookup
-    });
-
-    if (!canBulkUpdateContactSequence(liveSequenceStatus)) {
-      return {
-        ok: false,
-        reason: "This contact already shows Apollo sequence history. Review it before pushing again."
-      };
-    }
+  const liveState =
+    contact.sequenceStatus !== SequenceStatus.NOT_STARTED ||
+    contact.replyStatus !== ReplyStatus.NO_REPLY
+      ? await refreshApolloContactStateForPush({
+          tenantId,
+          contact,
+          companyLookup
+        })
+      : {
+          sequenceStatus: contact.sequenceStatus,
+          replyStatus: contact.replyStatus,
+          sequenceId: null
+        };
+  const transition = decideApolloSequenceTransition({
+    sequenceStatus: liveState.sequenceStatus,
+    replyStatus: liveState.replyStatus,
+    currentSequenceId: liveState.sequenceId,
+    targetSequenceId: effectiveSequence.id
+  });
+  if (transition.action === "BLOCK") {
+    return { ok: false, reason: transition.reason };
   }
 
   const localOwner = await resolveAssignedRepUser({
@@ -3391,10 +3487,6 @@ async function validateApolloPushCandidate({
     };
   }
 
-  const latestDraft = contact.outreachDrafts[0] ?? null;
-  const latestOutreachPlan = contact.outreachPlans?.[0] ?? null;
-  const requiresAiDraft = await contactRequiresApprovedDraft(tenantId, contact.id);
-
   const outreachPlanBlockReason = getOutreachPlanApolloBlockReason(latestOutreachPlan);
   if (outreachPlanBlockReason) {
     return {
@@ -3410,7 +3502,10 @@ async function validateApolloPushCandidate({
     };
   }
 
-  if (effectiveSequence.usedRecommendationFallback) {
+  if (
+    contact.selectedSequenceId !== effectiveSequence.id ||
+    contact.selectedSequenceName !== effectiveSequence.name
+  ) {
     await prisma.contact.update({
       where: {
         id: contact.id
@@ -3444,7 +3539,12 @@ async function validateApolloPushCandidate({
     apolloOwnerUserId: repMapping.apolloUserId,
     sendFromEmailAccountId: resolvedSendFromEmailAccountId,
     requiresAiDraft,
-    draftId: latestDraft?.id ?? null
+    draftId: latestDraft?.id ?? null,
+    previousSequenceId:
+      transition.action === "REMOVE_THEN_ENROLL"
+        ? transition.previousSequenceId
+        : null,
+    alreadyEnrolled: transition.action === "ALREADY_ENROLLED"
   };
 }
 
@@ -4175,13 +4275,13 @@ export async function reconcileApolloPushJobPendingResults({
         });
       companyLookupCache.set(cacheKey, companyLookupPromise);
       const companyLookup = await companyLookupPromise;
-      const liveSequenceStatus = await refreshApolloSequenceStatusForPush({
+      const liveState = await refreshApolloContactStateForPush({
         tenantId,
         contact,
         companyLookup
       });
 
-      if (liveSequenceStatus !== SequenceStatus.ENROLLED) {
+      if (liveState.sequenceStatus !== SequenceStatus.ENROLLED) {
         return detail;
       }
 
@@ -4284,7 +4384,7 @@ async function getApolloCompanyLookupForContact(
   return lookupPromise;
 }
 
-async function refreshApolloSequenceStatusForPush({
+async function refreshApolloContactStateForPush({
   tenantId,
   contact,
   companyLookup
@@ -4296,6 +4396,7 @@ async function refreshApolloSequenceStatusForPush({
     email: string | null;
     apolloContactId: string | null;
     sequenceStatus: SequenceStatus;
+    replyStatus: ReplyStatus;
     recommendedSequenceName: string | null;
     recommendedSequenceId: string | null;
     selectedSequenceName: string | null;
@@ -4352,14 +4453,19 @@ async function refreshApolloSequenceStatusForPush({
   });
 
   const resolvedSequenceStatus = incoming?.sequenceStatus ?? SequenceStatus.NOT_STARTED;
+  const resolvedReplyStatus = incoming?.replyStatus ?? contact.replyStatus;
 
-  if (resolvedSequenceStatus !== contact.sequenceStatus) {
+  if (
+    resolvedSequenceStatus !== contact.sequenceStatus ||
+    resolvedReplyStatus !== contact.replyStatus
+  ) {
     await prisma.contact.update({
       where: {
         id: contact.id
       },
       data: {
-        sequenceStatus: resolvedSequenceStatus
+        sequenceStatus: resolvedSequenceStatus,
+        replyStatus: resolvedReplyStatus
       }
     });
 
@@ -4368,11 +4474,15 @@ async function refreshApolloSequenceStatusForPush({
       contactId: contact.id,
       note:
         `Apollo push validation refreshed sequence status on ${new Date().toISOString()}. ` +
-        `Status now reads ${resolvedSequenceStatus.toLowerCase()}.`
+        `Status now reads ${resolvedSequenceStatus.toLowerCase()} with reply state ${resolvedReplyStatus.toLowerCase()}.`
     });
   }
 
-  return resolvedSequenceStatus;
+  return {
+    sequenceStatus: resolvedSequenceStatus,
+    replyStatus: resolvedReplyStatus,
+    sequenceId: incoming?.sequenceId ?? null
+  };
 }
 
 function appendLeadNote(existingNotes: string | null, nextNote: string) {
@@ -4992,7 +5102,14 @@ function buildApolloContactMutation({
     apolloContactId: incoming.apolloContactId,
     apolloPersonId: incoming.apolloPersonId,
     apolloStatus: "ENRICHED" as const,
-    sequenceStatus: mergeSequenceStatus(existing?.sequenceStatus ?? null, incoming.sequenceStatus),
+    sequenceStatus: existing
+      ? resolveTrackedSequenceStatus({
+          existingStatus: existing.sequenceStatus,
+          incomingStatus: incoming.sequenceStatus,
+          selectedSequenceId: existing.selectedSequenceId,
+          incomingSequenceId: incoming.sequenceId
+        })
+      : incoming.sequenceStatus,
     replyStatus: mergeReplyStatus(existing?.replyStatus ?? null, incoming.replyStatus),
     recommendedSequenceName: existing?.recommendedSequenceName ?? null,
     recommendedSequenceId: existing?.recommendedSequenceId ?? null,
@@ -5013,39 +5130,6 @@ function buildApolloContactMutation({
       }
     })
   };
-}
-
-function mergeSequenceStatus(existing: SequenceStatus | null, incoming: SequenceStatus) {
-  if (!existing) {
-    return incoming;
-  }
-
-  if (incoming === SequenceStatus.NOT_STARTED) {
-    return existing;
-  }
-
-  return sequenceStatusRank(incoming) >= sequenceStatusRank(existing) ? incoming : existing;
-}
-
-function sequenceStatusRank(status: SequenceStatus) {
-  switch (status) {
-    case SequenceStatus.NOT_STARTED:
-      return 0;
-    case SequenceStatus.READY:
-      return 1;
-    case SequenceStatus.ENROLLED:
-      return 2;
-    case SequenceStatus.PAUSED:
-      return 3;
-    case SequenceStatus.REPLIED:
-      return 4;
-    case SequenceStatus.BOUNCED:
-      return 5;
-    case SequenceStatus.FINISHED:
-      return 6;
-    default:
-      return 0;
-  }
 }
 
 function mergeReplyStatus(existing: ReplyStatus | null, incoming: ReplyStatus) {

@@ -1,9 +1,7 @@
 import {
   CandidateStatus,
-  ContactStatus,
   HunterServiceLine,
-  ReplyStatus,
-  SequenceStatus
+  ReplyStatus
 } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import {
@@ -59,7 +57,7 @@ describe("Hunter planning policy", () => {
     ).toThrow("total exactly 100%");
   });
 
-  it("ignores legacy lead rows but blocks real engagement and prior sequence history", () => {
+  it("ignores legacy lead and sequence history but blocks real engagement", () => {
     expect(buildHunterPlanningCompanyWhere("tenant-a")).not.toHaveProperty("leads");
     const base = {
       doNotProspect: false,
@@ -74,21 +72,17 @@ describe("Hunter planning policy", () => {
         ...base,
         contacts: [
           {
-            contactStatus: ContactStatus.APPROVED,
-            replyStatus: ReplyStatus.NO_REPLY,
-            sequenceStatus: SequenceStatus.FINISHED
+            replyStatus: ReplyStatus.NO_REPLY
           }
         ]
       })
-    ).toBe(true);
+    ).toBe(false);
     expect(
       isHunterCompanyBlocked({
         ...base,
         contacts: [
           {
-            contactStatus: ContactStatus.REVIEWING,
-            replyStatus: ReplyStatus.POSITIVE,
-            sequenceStatus: SequenceStatus.NOT_STARTED
+            replyStatus: ReplyStatus.POSITIVE
           }
         ]
       })

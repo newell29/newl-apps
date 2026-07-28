@@ -2,15 +2,13 @@ import { createHash } from "node:crypto";
 
 import {
   CandidateStatus,
-  ContactStatus,
   HunterAutomationMode,
   HunterServiceLine,
   HunterSignalStatus,
   HunterSignalType,
   JobStatus,
   Prisma,
-  ReplyStatus,
-  SequenceStatus
+  ReplyStatus
 } from "@prisma/client";
 
 import { DEFAULT_HUNTER_POLICY, runHunterDryPlan } from "@/modules/lead-gen/hunter-planner";
@@ -274,27 +272,11 @@ export async function prepareHunterCompanyResearchRun({
   );
 
   const companies = await prisma.company.findMany({
-    where: {
+    where: buildHunterCompanyResearchWhere({
       tenantId,
-      doNotProspect: false,
-      candidateStatus: { notIn: [CandidateStatus.REJECTED, CandidateStatus.DISQUALIFIED] },
-      cashflowCustomers: { none: {} },
-      leads: { none: {} },
-      contacts: {
-        none: {
-          OR: [
-            { contactStatus: ContactStatus.DO_NOT_CONTACT },
-            { replyStatus: { not: ReplyStatus.NO_REPLY } },
-            { sequenceStatus: { notIn: [SequenceStatus.NOT_STARTED, SequenceStatus.READY] } }
-          ]
-        }
-      },
-      ...(requestedKeys.length > 0
-        ? { normalizedName: { in: requestedKeys } }
-        : recentlyResearchedIds.size > 0
-          ? { id: { notIn: [...recentlyResearchedIds] } }
-          : {})
-    },
+      requestedKeys,
+      recentlyResearchedIds: [...recentlyResearchedIds]
+    }),
     orderBy: [{ priorityScore: "desc" }, { updatedAt: "desc" }],
     take: requestedKeys.length > 0 ? Math.min(MAX_RESEARCH_COMPANIES, requestedKeys.length) : limit,
     select: {
@@ -433,6 +415,33 @@ export async function prepareHunterCompanyResearchRun({
         deprioritizeOtherForeignWithoutVerifiedUsDivision: true
       }
     }
+  };
+}
+
+export function buildHunterCompanyResearchWhere({
+  tenantId,
+  requestedKeys,
+  recentlyResearchedIds
+}: {
+  tenantId: string;
+  requestedKeys: string[];
+  recentlyResearchedIds: string[];
+}): Prisma.CompanyWhereInput {
+  return {
+    tenantId,
+    doNotProspect: false,
+    candidateStatus: {
+      notIn: [CandidateStatus.REJECTED, CandidateStatus.DISQUALIFIED]
+    },
+    cashflowCustomers: { none: {} },
+    contacts: {
+      none: { replyStatus: { not: ReplyStatus.NO_REPLY } }
+    },
+    ...(requestedKeys.length > 0
+      ? { normalizedName: { in: requestedKeys } }
+      : recentlyResearchedIds.length > 0
+        ? { id: { notIn: recentlyResearchedIds } }
+        : {})
   };
 }
 

@@ -160,6 +160,15 @@ export type ApolloSequencePushResult = {
   rawPayload: Record<string, unknown>;
 };
 
+export type ApolloSequenceRemovalInput = {
+  sequenceIds: string[];
+  apolloContactIds: string[];
+};
+
+export type ApolloSequenceTransitionInput = ApolloSequencePushInput & {
+  previousSequenceByContactId: Record<string, string | null>;
+};
+
 export type ApolloActivityKind = "CALL" | "CONNECTED_CALL" | "EMAIL_SENT" | "REPLY" | "LEAD_CREATED" | "OTHER";
 
 export type ApolloActivityRecord = {
@@ -771,6 +780,83 @@ export async function pushApolloContactsToSequence(
     message: extractApolloError(rawPayload) ?? null,
     rawPayload
   };
+}
+
+export async function removeApolloContactsFromSequences(
+  input: ApolloSequenceRemovalInput
+) {
+  const apiKey = readApolloMasterApiKey();
+  const sequenceIds = [...new Set(input.sequenceIds.map((value) => value.trim()).filter(Boolean))];
+  const contactIds = [...new Set(input.apolloContactIds.map((value) => value.trim()).filter(Boolean))];
+  if (sequenceIds.length === 0 || contactIds.length === 0) {
+    throw new Error("Apollo sequence removal requires sequence and contact IDs.");
+  }
+
+  const params = new URLSearchParams({ mode: "remove" });
+  sequenceIds.forEach((value) => params.append("emailer_campaign_ids[]", value));
+  contactIds.forEach((value) => params.append("contact_ids[]", value));
+  const response = await fetch(
+    `${DEFAULT_BASE_URL}/api/v1/emailer_campaigns/remove_or_stop_contact_ids?${params.toString()}`,
+    {
+      method: "POST",
+      headers: buildApolloHeaders(apiKey),
+      cache: "no-store"
+    }
+  );
+  const text = await response.text().catch(() => "");
+  let payload: Record<string, unknown> = {};
+  if (text.trim()) {
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      payload =
+        parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? (parsed as Record<string, unknown>)
+          : { response: text };
+    } catch {
+      payload = { response: text };
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      extractApolloError(payload) ??
+      text.trim() ??
+      `Apollo request failed with status ${response.status}.`;
+    if (response.status === 429 || isApolloRateLimitMessage(message)) {
+      throw new ApolloRateLimitError(message);
+    }
+    throw new Error(message);
+  }
+
+  return {
+    sequenceIds,
+    apolloContactIds: contactIds,
+    rawPayload: payload
+  };
+}
+
+export async function transitionApolloContactsToSequence(
+  input: ApolloSequenceTransitionInput
+) {
+  const transitions = new Map<string, string[]>();
+  for (const apolloContactId of input.apolloContactIds) {
+    const previousSequenceId =
+      input.previousSequenceByContactId[apolloContactId] ?? null;
+    if (!previousSequenceId) continue;
+    transitions.set(previousSequenceId, [
+      ...(transitions.get(previousSequenceId) ?? []),
+      apolloContactId
+    ]);
+  }
+
+  for (const [previousSequenceId, apolloContactIds] of transitions) {
+    await removeApolloContactsFromSequences({
+      sequenceIds: [previousSequenceId],
+      apolloContactIds
+    });
+  }
+
+  return pushApolloContactsToSequence(input);
 }
 
 export async function fetchApolloCallActivitySummary(
@@ -2984,7 +3070,45 @@ function hasStrictApolloOrganizationIdentityMatch({
 
   const expectedAliases = buildCompanyNameAliases(companyName);
   const candidateAliases = buildCompanyNameAliases(candidateName);
-  return hasExactAliasMatch(expectedAliases, candidateAliases);
+  return (
+    hasExactAliasMatch(expectedAliases, candidateAliases) ||
+    hasSafeRegionalBrandAlias(expectedAliases, candidateAliases)
+  );
+}
+
+function hasSafeRegionalBrandAlias(
+  expectedAliases: string[],
+  candidateAliases: string[]
+) {
+  return expectedAliases.some((expectedAlias) =>
+    candidateAliases.some((candidateAlias) => {
+      const expectedTokens = tokenizeCompanyName(expectedAlias);
+      const candidateTokens = tokenizeCompanyName(candidateAlias);
+      const shorter =
+        expectedTokens.length <= candidateTokens.length
+          ? expectedTokens
+          : candidateTokens;
+      const longer =
+        expectedTokens.length <= candidateTokens.length
+          ? candidateTokens
+          : expectedTokens;
+
+      if (
+        shorter.length === 0 ||
+        shorter[0]!.length < 4 ||
+        shorter.length >= longer.length
+      ) {
+        return false;
+      }
+
+      return (
+        shorter.every((token, index) => token === longer[index]) &&
+        longer
+          .slice(shorter.length)
+          .every((token) => APOLLO_REGIONAL_IDENTITY_TOKENS.has(token))
+      );
+    })
+  );
 }
 
 function normalizeStrictApolloOrganizationName(value: string) {
@@ -3049,6 +3173,13 @@ function isLeadingTokenBaseMatch(leftAlias: string, rightAlias: string) {
 }
 
 const COMPANY_STOP_WORDS = new Set(["the", "and", "of", "for", "usa", "us", "intl", "international", "group"]);
+const APOLLO_REGIONAL_IDENTITY_TOKENS = new Set([
+  "america",
+  "north",
+  "canada",
+  "united",
+  "states"
+]);
 
 const LOGISTICS_PROVIDER_PATTERN =
   /\b(3pl|broker|carrier|customs|distribution|drayage|forwarder|freight|fulfillment|logistic|logistics|shipping|steamship|transport|trucking|warehouse|warehousing)\b/i;

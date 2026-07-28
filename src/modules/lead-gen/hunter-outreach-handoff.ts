@@ -16,6 +16,7 @@ import {
   evaluateHunterOutreachEligibility,
   getHunterOutreachResearchMaxAgeDays
 } from "@/modules/lead-gen/hunter-outreach-eligibility";
+import { isHunterContactSafeForReview } from "@/modules/lead-gen/apollo-reengagement-policy";
 import {
   HUNTER_COMPANY_RESEARCH_JOB_TYPE,
   HUNTER_OUTREACH_HANDOFF_JOB_TYPE
@@ -758,6 +759,7 @@ async function reviewAndPersistHunterContactFit({
       email: true,
       phone: true,
       linkedinUrl: true,
+      contactStatus: true,
       sequenceStatus: true,
       replyStatus: true,
       selectedSequenceName: true,
@@ -770,9 +772,12 @@ async function reviewAndPersistHunterContactFit({
     throw new Error("Hunter contact-fit review could not resolve the complete tenant contact cohort.");
   }
 
+  const reviewableContacts = contacts.filter((contact) =>
+    isHunterContactSafeForReview(contact)
+  );
   const reviewByContactId = new Map<string, HunterContactFitReview>();
   const contactsNeedingReview = [];
-  for (const contact of contacts) {
+  for (const contact of reviewableContacts) {
     const cached = forceContactReview
       ? null
       : readCachedContactFitReview(
@@ -881,7 +886,7 @@ async function reviewAndPersistHunterContactFit({
     });
   }
 
-  const contactById = new Map(contacts.map((contact) => [contact.id, contact]));
+  const contactById = new Map(reviewableContacts.map((contact) => [contact.id, contact]));
   const acceptedContactIds = [...reviewByContactId.values()]
     .filter((review) => {
       const contact = contactById.get(review.contactId);
@@ -912,14 +917,11 @@ export function isContactFitAutoEligible(review: HunterContactFitReview) {
 }
 
 export function isContactEligibleForFreshOutreach(contact: {
+  contactStatus: ContactStatus;
   sequenceStatus: SequenceStatus;
   replyStatus: ReplyStatus;
 }) {
-  return (
-    contact.replyStatus === ReplyStatus.NO_REPLY &&
-    (contact.sequenceStatus === SequenceStatus.NOT_STARTED ||
-      contact.sequenceStatus === SequenceStatus.READY)
-  );
+  return isHunterContactSafeForReview(contact);
 }
 
 export function validateExactContactFitCohort(
@@ -1064,6 +1066,8 @@ async function upsertContacts({
       title: true,
       contactStatus: true,
       assignedRep: true,
+      selectedSequenceId: true,
+      selectedSequenceName: true,
       rawJson: true
     }
   });
@@ -1093,8 +1097,8 @@ async function upsertContacts({
           : match?.apolloStatus ?? ApolloStatus.NOT_STARTED,
       sequenceStatus: incoming.sequenceStatus,
       replyStatus: incoming.replyStatus,
-      selectedSequenceId: incoming.sequenceId,
-      selectedSequenceName: incoming.sequenceName,
+      selectedSequenceId: match?.selectedSequenceId ?? null,
+      selectedSequenceName: match?.selectedSequenceName ?? null,
       lastTouchAt: incoming.lastTouchAt,
       lastReplyAt: incoming.lastReplyAt,
       assignedRep: match?.assignedRep ?? null,
@@ -1181,13 +1185,20 @@ function contactFitScore(
     score += 4;
   }
   if (contact.replyStatus !== ReplyStatus.NO_REPLY) score -= 100;
+  if (contact.sequenceStatus === SequenceStatus.FINISHED) score -= 5;
   if (
-    contact.sequenceStatus !== SequenceStatus.NOT_STARTED &&
-    contact.sequenceStatus !== SequenceStatus.READY
+    contact.sequenceStatus === SequenceStatus.ENROLLED ||
+    contact.sequenceStatus === SequenceStatus.PAUSED
   ) {
-    score -= 30;
+    score -= 10;
   }
-  if (isApolloUnresponsive(contact.rawPayload)) score -= 25;
+  if (
+    contact.sequenceStatus === SequenceStatus.REPLIED ||
+    contact.sequenceStatus === SequenceStatus.BOUNCED
+  ) {
+    score -= 100;
+  }
+  if (isApolloUnresponsive(contact.rawPayload)) score -= 15;
   return score;
 }
 
@@ -1251,6 +1262,8 @@ function findExistingContact(
     title: string | null;
     contactStatus: ContactStatus;
     assignedRep: string | null;
+    selectedSequenceId: string | null;
+    selectedSequenceName: string | null;
     rawJson: Prisma.JsonValue | null;
   }>,
   incoming: ApolloContactRecord

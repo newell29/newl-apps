@@ -1,14 +1,12 @@
 import {
   CandidateStatus,
-  ContactStatus,
   HunterAutomationMode,
   HunterDecisionStatus,
   HunterServiceLine,
   HunterSignalStatus,
   JobStatus,
   Prisma,
-  ReplyStatus,
-  SequenceStatus
+  ReplyStatus
 } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { selectHunterPlanningCandidates } from "@/modules/lead-gen/hunter-planning-policy";
@@ -120,8 +118,6 @@ export async function runHunterDryPlan({
               cashflowCustomers: { select: { id: true }, take: 1 },
               contacts: {
                 select: {
-                  contactStatus: true,
-                  sequenceStatus: true,
                   replyStatus: true
                 }
               }
@@ -337,17 +333,7 @@ export function buildHunterPlanningCompanyWhere(
     },
     cashflowCustomers: { none: {} },
     contacts: {
-      none: {
-        OR: [
-          { contactStatus: ContactStatus.DO_NOT_CONTACT },
-          { replyStatus: { not: ReplyStatus.NO_REPLY } },
-          {
-            sequenceStatus: {
-              notIn: [SequenceStatus.NOT_STARTED, SequenceStatus.READY]
-            }
-          }
-        ]
-      }
+      none: { replyStatus: { not: ReplyStatus.NO_REPLY } }
     }
   };
 }
@@ -448,8 +434,6 @@ export function isHunterCompanyBlocked(company: {
   candidateStatus: CandidateStatus;
   cashflowCustomers: Array<{ id: string }>;
   contacts: Array<{
-    contactStatus: ContactStatus;
-    sequenceStatus: SequenceStatus;
     replyStatus: ReplyStatus;
   }>;
 } | null) {
@@ -463,10 +447,7 @@ export function isHunterCompanyBlocked(company: {
     return true;
   }
   return company.contacts.some((contact) =>
-    contact.contactStatus === ContactStatus.DO_NOT_CONTACT ||
-    contact.replyStatus !== ReplyStatus.NO_REPLY ||
-    (contact.sequenceStatus !== SequenceStatus.NOT_STARTED &&
-      contact.sequenceStatus !== SequenceStatus.READY)
+    contact.replyStatus !== ReplyStatus.NO_REPLY
   );
 }
 

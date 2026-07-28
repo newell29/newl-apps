@@ -225,10 +225,16 @@ Regression coverage must prove:
 12. plan generation uses the saved Hunter/TradeMining evidence ledger and persists QA failure rather than bypassing it;
 13. no assisted-handoff path creates a lead, changes a pipeline stage, approves a plan/contact, writes an Apollo cadence, or sends communication; and
 14. the Mac worker drains the queue after research and resumes unfinished jobs during its normal loop.
-15. legacy pre-engagement `Lead` rows do not suppress a current Hot/Qualified company, while current-customer,
-    do-not-contact, replied, and prior-sequence evidence still blocks duplicate outreach.
+15. legacy pre-engagement `Lead` rows, individual do-not-contact records, and prior-sequence evidence do not suppress
+    a current Hot/Qualified company. Current customers and company-level replies remain excluded; do-not-contact,
+    reply, and bounce safety is enforced on each selected contact.
 16. Automation Settings reports the latest handoff's queued companies, processed companies, evaluated Apollo
     candidates, created plans, QA failures, and per-company terminal reason as separate values.
+17. same-domain regional brand shortening such as `SALICE AMERICA INC` to Apollo organization `Salice` is accepted,
+    while different-domain parents and sibling companies still fail closed.
+18. an approved contact with finished prior cadence history can enroll in Hunter; an active or paused different
+    cadence is removed before the Hunter add-contact request; replies and bounces remain blocked; and status sync
+    may replace stale `FINISHED` state only when Apollo reports the selected Hunter cadence ID.
 
 ## Outreach Plans and grounded sequence generation
 
