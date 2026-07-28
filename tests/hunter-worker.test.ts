@@ -351,4 +351,51 @@ describe("Hunter daily profile worker", () => {
     expect(output.messages[1]).toContain("1/2 profiles completed successfully");
     expect(output.messages[1]).toContain("Healthy profile");
   });
+
+  it("builds a safe company-research Teams completion summary", () => {
+    const python = [
+      "import importlib.util, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "message = module.build_company_research_message({'researchedCount':29,'acceptedCount':8,'blockedCount':4,'missingCompanyCount':1})",
+      "print(json.dumps({'message':message}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).message).toBe(
+      "Hunter company research completed: 29 companies reached Qwen and Kimi, 8 qualified for planning, 4 blocked, and 1 omitted after bounded model-output repair. Review Sales → Daily Opportunities and Admin & Quality → Health & Logs."
+    );
+  });
+
+  it("sends a sanitized company-research failure alert", () => {
+    const python = [
+      "import importlib.util, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "messages=[]",
+      "module.send_teams_message=lambda message: messages.append(message) or True",
+      "module.run_company_research=lambda **_kwargs: (_ for _ in ()).throw(RuntimeError('secret provider response'))",
+      "try:",
+      " module.run_company_research_with_notification()",
+      "except RuntimeError:",
+      " pass",
+      "print(json.dumps({'messages':messages}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+    const messages = (JSON.parse(result.stdout) as { messages: string[] }).messages;
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain("paid-retrieval checkpoint was preserved");
+    expect(messages[0]).not.toContain("secret provider response");
+  });
 });

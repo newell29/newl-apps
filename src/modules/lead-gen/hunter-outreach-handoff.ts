@@ -738,7 +738,13 @@ async function processCompany({
       forceRegenerate: false,
       generateWhenNotRequired: true
     });
-    if (isActionableHunterPlanState(generated.state)) {
+    if (
+      isActionableHunterPlanState(generated.state) &&
+      (
+        generated.state !== "already_generated" ||
+        generated.qaStatus === "PASSED"
+      )
+    ) {
       actionablePlans += 1;
     }
     if (generated.state === "already_generated") {
@@ -756,7 +762,7 @@ async function processCompany({
       qaFailedPlans += 1;
     }
   }
-  if (actionablePlans === 0) {
+  if (actionablePlans === 0 && qaFailedPlans === 0) {
     return terminal(
       item,
       "NO_QUALIFYING_CONTACTS",
@@ -778,7 +784,9 @@ async function processCompany({
     contactsImported,
     actionablePlans,
     qaFailedPlans,
-    `${actionablePlans} actionable outreach plan${actionablePlans === 1 ? "" : "s"} available for human review (${plansCreated} newly generated, ${existingPlansFound} already current).`,
+    actionablePlans > 0
+      ? `${actionablePlans} QA-passed outreach plan${actionablePlans === 1 ? "" : "s"} available for human review (${plansCreated} newly generated, ${existingPlansFound} already current).`
+      : `${qaFailedPlans} outreach plan${qaFailedPlans === 1 ? "" : "s"} generated but blocked by QA; none are ready for approval.`,
     {
       apolloContactsFound: lookup.contacts.length,
       contactsRanked: ranked.length,
@@ -1084,7 +1092,6 @@ export function isActionableHunterPlanState(
 ) {
   return (
     state === "qa_passed" ||
-    state === "qa_failed" ||
     state === "already_generated"
   );
 }

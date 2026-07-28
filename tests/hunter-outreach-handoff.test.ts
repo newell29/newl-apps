@@ -192,7 +192,7 @@ describe("Hunter assisted outreach handoff", () => {
 
   it("keeps an existing current outreach plan actionable during a contact recheck", () => {
     expect(isActionableHunterPlanState("qa_passed")).toBe(true);
-    expect(isActionableHunterPlanState("qa_failed")).toBe(true);
+    expect(isActionableHunterPlanState("qa_failed")).toBe(false);
     expect(isActionableHunterPlanState("already_generated")).toBe(true);
     expect(isActionableHunterPlanState("not_required")).toBe(false);
     expect(isActionableHunterPlanState("unranked")).toBe(false);

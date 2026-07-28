@@ -171,7 +171,10 @@ Regression coverage must prove:
 10. ambiguous or below-70% identities pivot from candidate-matching domains found in saved evidence to official and legal/about/contact pages, rerun synthesis when first-party evidence is recovered, and never accept an unrelated directory or similar-name domain;
 11. completion preloads the prepared tenant-scoped company identity map, uses a bounded 30-second
     interactive transaction, stores tenant-scoped evidence atomically, and refreshes only the dry-run plan; and
-12. a retrieval/Qwen checkpoint resumes only against an identical newly prepared tenant cohort;
+12. a retrieval/Qwen checkpoint resumes only against an identical newly prepared tenant cohort; scheduled
+    runs write the paid-retrieval checkpoint atomically before Qwen, an exact same-day retry discovers it
+    automatically, malformed batches are isolated to individual companies with bounded repair attempts,
+    and exhausted company-level failures do not discard other valid synthesis results;
 13. legal-name, regional, and brand aliases cover known false-negative shapes such as Aalberts IPS Americas, AS Colour, 3F North America, Barnhardt Manufacturing, and Atlas Copco Compressors;
 14. saturated generic results cannot prevent a known-domain identity or fresh-event query from executing or contributing evidence, including Barnhardt's first-party NCFI expansion;
 15. a full evidence ledger executes no follow-up search, a partially full ledger appends only to the remaining capacity, resumed evidence is bounded, and no completion company can exceed 24 evidence records; and
@@ -268,7 +271,8 @@ Regression coverage must prove:
 7. editing generated copy invalidates QA and approval;
 8. every email ends with the routed Apollo mailbox first name, including when Apollo exposes the sender label as an
    email address, while sender placeholders, generic company signatures,
-   Hunter/internal references, and evidence IDs fail deterministic QA; and
+   Hunter/internal references, and evidence IDs fail deterministic QA; the model critic receives only outbound
+   sequence fields, not internal sequence names or evidence-reference arrays; and
 9. the migration is additive and preserves every existing lead-generation record;
 10. legacy/unassessed, Watchlist, Blocked, stale, unselected, or inconsistent Hunter handoffs cannot generate or push;
 11. a Hot opportunity requires K3 confirmation while a Qualified current account may retain `NOT_SELECTED`;

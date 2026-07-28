@@ -548,6 +548,84 @@ describe("fetchApolloContactsForCompany", () => {
     ]);
   });
 
+  it("keeps acronym-expanded employees from the confirmed organization scope", async () => {
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            accounts: [{
+              id: "aalberts-account-id",
+              name: "AALBERTS IPS AMERICAS",
+              organization: {
+                id: "aalberts-global-org",
+                name: "Aalberts integrated piping systems",
+                primary_domain: "aalberts-ips.com"
+              }
+            }]
+          })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            contacts: [{
+              id: "aalberts-warehouse-contact",
+              name: "Warehouse Associate",
+              title: "Warehouse Associate",
+              organization: {
+                id: "aalberts-account-id",
+                name: "AALBERTS IPS AMERICAS"
+              }
+            }]
+          })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+        expect(body.organization_ids).toEqual(["aalberts-global-org"]);
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            people: [{
+              id: "aalberts-coo",
+              name: "Aalberts Executive",
+              title: "COO at Aalberts IPS Americas & APAC",
+              organization: {
+                name: "Aalberts integrated piping systems",
+                primary_domain: "aalberts.com"
+              }
+            }]
+          })
+        } as unknown as Response;
+      }
+
+      throw new Error(`Unexpected Apollo URL in test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "AALBERTS IPS AMERICAS",
+      apolloOrganizationId: "aalberts-account-id"
+    });
+
+    expect(result.organizationId).toBe("aalberts-global-org");
+    expect(result.contacts).toEqual([
+      expect.objectContaining({
+        apolloPersonId: "aalberts-coo",
+        title: "COO at Aalberts IPS Americas & APAC"
+      })
+    ]);
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
   it("runs the organization-scoped role search even when the generic page already has an acceptable contact", async () => {
     const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);

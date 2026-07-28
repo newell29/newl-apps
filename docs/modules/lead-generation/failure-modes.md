@@ -76,6 +76,19 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 - A missing search or Kimi credential, unavailable local Qwen, total search-provider failure,
   incomplete structured output, company outside the prepared tenant cohort, forged URL/domain pair,
   or invalid score arithmetic closes the tracked run as `ERROR`.
+- Ollama schema-constrained output can still be truncated by an output limit, wrapped in prose by a
+  model, omit a requested company, or violate a required field. Hunter extracts a recoverable JSON
+  object, reports safe parse coordinates and completion metadata instead of a generic error, splits a
+  failed multi-company batch into individual companies, and gives each affected company bounded repair
+  attempts. A company that still fails is omitted from that completion and remains eligible for later
+  research; it does not prevent valid companies from reaching Kimi.
+- Paid retrieval is atomically checkpointed before Qwen runs. The checkpoint contains no provider key,
+  is written with mode `0600`, is fingerprinted to the local date, prompt version, and ordered tenant
+  cohort, and is reused only for an exact same-day match. Therefore a Qwen or Kimi failure does not
+  repeat Brave searches during an operator retry.
+- With a Teams target configured, a live company-research failure sends a sanitized alert and a
+  completion reports researched, accepted, blocked, and model-output-omission counts. Provider response
+  bodies, search excerpts, credentials, and raw exceptions are not sent to Teams.
 - The completion API accepts at most 24 evidence records per company and validates the cohort atomically.
   Follow-up queries therefore stop before a full evidence ledger, append only into remaining capacity,
   and the worker bounds both resumed checkpoints and the final completion payload. A legacy over-cap

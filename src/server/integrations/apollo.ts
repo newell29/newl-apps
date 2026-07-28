@@ -2214,12 +2214,18 @@ function filterApolloContactsForExpectedOrganization(
       // People API Search is already constrained by organization_ids, but its
       // response normally omits organization.id. Validate the returned company
       // name/domain when present instead of discarding every scoped employee.
-      return hasStrictApolloOrganizationIdentityMatch({
-        companyName,
-        candidateName: organization.name,
-        normalizedDomain,
-        candidateDomain: organization.domain
-      });
+      return (
+        hasStrictApolloOrganizationIdentityMatch({
+          companyName,
+          candidateName: organization.name,
+          normalizedDomain,
+          candidateDomain: organization.domain
+        }) ||
+        hasSafeScopedOrganizationAcronymMatch(
+          buildCompanyNameAliases(companyName),
+          buildCompanyNameAliases(organization.name ?? "")
+        )
+      );
     }
 
     if (normalizedDomain) {
@@ -3396,6 +3402,59 @@ function hasSafeRegionalBrandAlias(
         longer
           .slice(shorter.length)
           .every((token) => APOLLO_REGIONAL_IDENTITY_TOKENS.has(token))
+      );
+    })
+  );
+}
+
+function hasSafeScopedOrganizationAcronymMatch(
+  expectedAliases: string[],
+  candidateAliases: string[]
+) {
+  return expectedAliases.some((expectedAlias) =>
+    candidateAliases.some((candidateAlias) => {
+      const expectedTokens = tokenizeCompanyName(expectedAlias).filter(
+        (token) => !APOLLO_REGIONAL_IDENTITY_TOKENS.has(token)
+      );
+      const candidateTokens = tokenizeCompanyName(candidateAlias).filter(
+        (token) => !APOLLO_REGIONAL_IDENTITY_TOKENS.has(token)
+      );
+
+      if (
+        expectedTokens.length < 2 ||
+        candidateTokens.length < 2 ||
+        expectedTokens[0] !== candidateTokens[0] ||
+        expectedTokens[0]!.length < 4
+      ) {
+        return false;
+      }
+
+      const expectedRemainder = expectedTokens.slice(1);
+      const candidateRemainder = candidateTokens.slice(1);
+      const expectedAcronym = expectedRemainder.length === 1
+        ? expectedRemainder[0]
+        : null;
+      const candidateAcronym = candidateRemainder.length === 1
+        ? candidateRemainder[0]
+        : null;
+      const expectedInitials = expectedRemainder.map((token) => token[0]).join("");
+      const candidateInitials = candidateRemainder.map((token) => token[0]).join("");
+
+      return (
+        Boolean(
+          expectedAcronym &&
+          expectedAcronym.length >= 2 &&
+          expectedAcronym.length <= 6 &&
+          candidateRemainder.length >= 2 &&
+          expectedAcronym === candidateInitials
+        ) ||
+        Boolean(
+          candidateAcronym &&
+          candidateAcronym.length >= 2 &&
+          candidateAcronym.length <= 6 &&
+          expectedRemainder.length >= 2 &&
+          candidateAcronym === expectedInitials
+        )
       );
     })
   );
