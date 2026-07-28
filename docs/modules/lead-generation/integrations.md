@@ -80,6 +80,15 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
   metadata without email addresses or phone numbers. Hunter uses it for the generic and relevant-title employee
   searches. Accessing or enriching a selected person's email or phone is a separate downstream operation that can
   consume Apollo credits; search must not be represented as contact-data enrichment.
+- Saved Contact Search and People API Search return different identity shapes. A saved-contact `id` is stored as
+  `apolloContactId`; a People Search `id` is stored as `apolloPersonId`. People Search can omit the returned
+  organization's ID even when the request was constrained by `organization_ids`, so Hunter validates any returned
+  company name/domain against the expected company instead of rejecting the scoped employee solely because that ID
+  is absent. An explicit different organization ID or sibling company name still fails closed.
+- People Search availability flags participate in the bounded buyer-role review, but they are not represented as
+  revealed email, phone, or LinkedIn values. Net-new people remain `NOT_STARTED` for Apollo enrichment. When the same
+  person also exists as a saved contact, Hunter merges on `apolloPersonId` and preserves the saved contact ID,
+  revealed fields, sequence history, and enriched status.
 - Apollo account IDs and global organization IDs are different identifiers. Account search responses may contain
   both; Hunter persists and submits the nested global organization ID to People API Search. For legacy records whose
   saved ID returns no employees, Hunter may use zero-credit saved-contact/People Search evidence to recover exactly

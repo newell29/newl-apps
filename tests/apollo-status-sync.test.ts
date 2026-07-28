@@ -48,10 +48,12 @@ function existingContact(id = "contact-1") {
 
 function incomingContact(): ApolloContactRecord {
   return {
+    recordSource: "SAVED_CONTACT",
     apolloContactId: "apollo-contact-1",
     apolloPersonId: "person-1",
     firstName: "Jordan",
     lastName: "Demo",
+    lastNameObfuscated: null,
     fullName: "Jordan Demo",
     title: "Director of Supply Chain",
     department: "Operations",
@@ -59,6 +61,9 @@ function incomingContact(): ApolloContactRecord {
     email: "jordan@example.com",
     phone: null,
     linkedinUrl: null,
+    hasEmailAvailable: true,
+    hasPhoneAvailable: false,
+    hasLinkedinAvailable: false,
     city: null,
     state: null,
     country: null,

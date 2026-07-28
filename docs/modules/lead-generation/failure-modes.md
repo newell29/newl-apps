@@ -296,6 +296,23 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Regression coverage: `tests/apollo-integration.test.ts` covers a legacy Stabilus account ID recovering the global
   organization and a Hyosung parent-company result failing closed.
 
+### Apollo People Search returns employees but Hunter still keeps the same saved contacts
+
+- Symptom: an organization-scoped Apollo employee search visibly returns relevant operations or logistics people,
+  but a Hunter rerun keeps only the previously saved contacts.
+- Confirmed cause: People API Search uses `id` as the person ID and may return only the organization name, while the
+  former shared parser treated `id` as a saved-contact ID and required the response to repeat the exact organization
+  ID. The records were discarded before buyer-role AI review.
+- Prevention: Apollo response parsing is source-aware. Organization-scoped People Search records may omit the
+  returned organization ID, but any returned company identity must strictly match the expected company. Explicit
+  sibling-company identities remain rejected.
+- Data safety: a zero-credit People Search record remains not enriched and cannot overwrite a saved contact's
+  revealed email, phone, LinkedIn URL, Apollo contact ID, or enrichment state. Records merge by Apollo person ID.
+- Credit boundary: this fix finds and ranks employees without revealing email or phone data. A later enrichment
+  operation can consume Apollo credits and remains a separate approved workflow.
+- Regression coverage: `tests/apollo-integration.test.ts` uses Apollo's obfuscated People Search response shape,
+  verifies person/contact ID separation, rejects a sibling name, and preserves saved-contact data during deduplication.
+
 ## Automatic Apollo status sync is stale or failing
 
 - Symptom: the Contacts health panel shows **Setup required**, due contacts that are not draining, or contacts with sync errors.

@@ -799,22 +799,30 @@ async function reviewAndPersistHunterContactFit({
         rationale: directive.rationale,
         recommendedPersona: directive.recommendedPersona
       },
-      contacts: contactsNeedingReview.map((contact) => ({
-        ...readStoredApolloContactContext(contact.rawJson),
-        contactId: contact.id,
-        fullName: contact.fullName,
-        title: contact.title,
-        department: contact.department,
-        seniority: contact.seniority,
-        hasEmail: Boolean(contact.email),
-        hasPhone: Boolean(contact.phone),
-        hasLinkedin: Boolean(contact.linkedinUrl),
-        sequenceStatus: contact.sequenceStatus,
-        replyStatus: contact.replyStatus,
-        existingSequenceName: contact.selectedSequenceName,
-        lastTouchAt: contact.lastTouchAt?.toISOString() ?? null,
-        lastReplyAt: contact.lastReplyAt?.toISOString() ?? null
-      }))
+      contacts: contactsNeedingReview.map((contact) => {
+        const apolloContext = readStoredApolloContactContext(contact.rawJson);
+        return {
+          city: apolloContext.city,
+          state: apolloContext.state,
+          country: apolloContext.country,
+          priorActivityStatus: apolloContext.priorActivityStatus,
+          contactId: contact.id,
+          fullName: contact.fullName,
+          title: contact.title,
+          department: contact.department,
+          seniority: contact.seniority,
+          hasEmail: Boolean(contact.email) || apolloContext.hasEmailAvailable,
+          hasPhone: Boolean(contact.phone) || apolloContext.hasPhoneAvailable,
+          hasLinkedin:
+            Boolean(contact.linkedinUrl) ||
+            apolloContext.hasLinkedinAvailable,
+          sequenceStatus: contact.sequenceStatus,
+          replyStatus: contact.replyStatus,
+          existingSequenceName: contact.selectedSequenceName,
+          lastTouchAt: contact.lastTouchAt?.toISOString() ?? null,
+          lastReplyAt: contact.lastReplyAt?.toISOString() ?? null
+        };
+      })
     });
     validateExactContactFitCohort(
       contactsNeedingReview.map((contact) => contact.id),
@@ -1041,10 +1049,14 @@ async function upsertContacts({
     where: { tenantId, companyId },
     select: {
       id: true,
+      firstName: true,
+      lastName: true,
       email: true,
+      phone: true,
       linkedinUrl: true,
       apolloContactId: true,
       apolloPersonId: true,
+      apolloStatus: true,
       fullName: true,
       title: true,
       contactStatus: true,
@@ -1059,20 +1071,23 @@ async function upsertContacts({
     const data = {
       tenantId,
       companyId,
-      firstName: incoming.firstName,
-      lastName: incoming.lastName,
+      firstName: incoming.firstName ?? match?.firstName ?? null,
+      lastName: incoming.lastName ?? match?.lastName ?? null,
       fullName: incoming.fullName,
       title: incoming.title,
       department: incoming.department,
       seniority: incoming.seniority,
-      email: incoming.email,
-      phone: incoming.phone,
-      linkedinUrl: incoming.linkedinUrl,
+      email: incoming.email ?? match?.email ?? null,
+      phone: incoming.phone ?? match?.phone ?? null,
+      linkedinUrl: incoming.linkedinUrl ?? match?.linkedinUrl ?? null,
       source: ContactSource.APOLLO,
       contactStatus: match?.contactStatus ?? ContactStatus.REVIEWING,
-      apolloContactId: incoming.apolloContactId,
-      apolloPersonId: incoming.apolloPersonId,
-      apolloStatus: ApolloStatus.ENRICHED,
+      apolloContactId: incoming.apolloContactId ?? match?.apolloContactId ?? null,
+      apolloPersonId: incoming.apolloPersonId ?? match?.apolloPersonId ?? null,
+      apolloStatus:
+        incoming.recordSource === "SAVED_CONTACT" || incoming.apolloContactId
+          ? ApolloStatus.ENRICHED
+          : match?.apolloStatus ?? ApolloStatus.NOT_STARTED,
       sequenceStatus: incoming.sequenceStatus,
       replyStatus: incoming.replyStatus,
       selectedSequenceId: incoming.sequenceId,
@@ -1085,6 +1100,12 @@ async function upsertContacts({
         apollo: {
           importedAt: new Date().toISOString(),
           hunterHandoffJobId: jobId,
+          recordSource: incoming.recordSource,
+          availability: {
+            email: incoming.hasEmailAvailable,
+            phone: incoming.hasPhoneAvailable,
+            linkedin: incoming.hasLinkedinAvailable
+          },
           record: incoming.rawPayload
         }
       })
@@ -1140,8 +1161,8 @@ function contactFitScore(
 ) {
   const text = `${contact.title ?? ""} ${contact.department ?? ""}`.toLowerCase();
   const geography = opportunityGeography?.toLowerCase() ?? "";
-  let score = contact.email ? 30 : 0;
-  if (contact.linkedinUrl) score += 10;
+  let score = contact.hasEmailAvailable ? 30 : 0;
+  if (contact.hasLinkedinAvailable) score += 10;
   if (/\b(vp|vice president|head|director|chief|president|owner)\b/i.test(text)) score += 25;
   else if (/\bmanager\b/i.test(text)) score += 12;
   if (/\b(logistics|supply chain|operations|distribution|warehouse|warehousing|procurement|import)\b/i.test(text)) {
@@ -1187,6 +1208,7 @@ function readStoredApolloContactContext(rawJson: Prisma.JsonValue | null) {
   const root = isObject(rawJson) ? rawJson : {};
   const apollo = isObject(root.apollo) ? root.apollo : {};
   const record = isObject(apollo.record) ? apollo.record : {};
+  const availability = isObject(apollo.availability) ? apollo.availability : {};
   return {
     city: typeof record.city === "string" ? record.city : null,
     state:
@@ -1196,17 +1218,32 @@ function readStoredApolloContactContext(rawJson: Prisma.JsonValue | null) {
           ? record.region
           : null,
     country: typeof record.country === "string" ? record.country : null,
-    priorActivityStatus: isApolloUnresponsive(record) ? "UNRESPONSIVE" : null
+    priorActivityStatus: isApolloUnresponsive(record) ? "UNRESPONSIVE" : null,
+    hasEmailAvailable:
+      availability.email === true || record.has_email === true,
+    hasPhoneAvailable:
+      availability.phone === true ||
+      record.has_phone === true ||
+      record.has_direct_phone === true ||
+      record.has_mobile_phone === true,
+    hasLinkedinAvailable:
+      availability.linkedin === true ||
+      record.has_linkedin === true ||
+      record.has_linkedin_url === true
   };
 }
 
 function findExistingContact(
   existing: Array<{
     id: string;
+    firstName: string | null;
+    lastName: string | null;
     email: string | null;
+    phone: string | null;
     linkedinUrl: string | null;
     apolloContactId: string | null;
     apolloPersonId: string | null;
+    apolloStatus: ApolloStatus;
     fullName: string;
     title: string | null;
     contactStatus: ContactStatus;

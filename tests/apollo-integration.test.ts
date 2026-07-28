@@ -492,13 +492,13 @@ describe("fetchApolloContactsForCompany", () => {
                 id: "exact-person",
                 name: "Exact Logistics",
                 title: "Logistics Director",
-                organization: { id: "exact-org", name: "Hyosung USA" }
+                organization: { name: "Hyosung USA" }
               },
               {
                 id: "sibling-person",
                 name: "Sibling Buyer",
                 title: "Supply Chain Manager",
-                organization: { id: "sibling-org", name: "Hyosung Holdings USA" }
+                organization: { name: "Hyosung Holdings USA" }
               }
             ]
           })
@@ -540,15 +540,22 @@ describe("fetchApolloContactsForCompany", () => {
             people: personTitles.length > 0
               ? [{
                   id: "director-operations",
-                  name: "Jason Councilman",
+                  first_name: "Jason",
+                  last_name_obfuscated: "Co***n",
                   title: "Director of Operations",
-                  organization: { id: "stabilus-org", name: "Stabilus" }
+                  has_email: true,
+                  has_city: true,
+                  has_state: true,
+                  has_country: true,
+                  organization: { name: "Stabilus" }
                 }]
               : [{
                   id: "distribution-manager",
-                  name: "Mark Elrod",
+                  first_name: "Mark",
+                  last_name_obfuscated: "El**d",
                   title: "Distribution Manager",
-                  organization: { id: "stabilus-org", name: "Stabilus" }
+                  has_email: false,
+                  organization: { name: "Stabilus" }
                 }]
           })
         } as unknown as Response;
@@ -583,9 +590,84 @@ describe("fetchApolloContactsForCompany", () => {
       "purchasing",
       "director operations"
     ]));
-    expect(result.contacts.map((contact) => contact.fullName)).toEqual([
-      "Jason Councilman",
-      "Mark Elrod"
+    expect(result.contacts).toEqual([
+      expect.objectContaining({
+        recordSource: "PEOPLE_SEARCH",
+        apolloContactId: null,
+        apolloPersonId: "director-operations",
+        fullName: "Jason Co***n",
+        lastName: null,
+        lastNameObfuscated: "Co***n",
+        hasEmailAvailable: true
+      }),
+      expect.objectContaining({
+        recordSource: "PEOPLE_SEARCH",
+        apolloContactId: null,
+        apolloPersonId: "distribution-manager",
+        fullName: "Mark El**d",
+        hasEmailAvailable: false
+      })
+    ]);
+  });
+
+  it("dedupes a saved contact and People Search employee by Apollo person ID without losing enriched fields", async () => {
+    vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            contacts: [{
+              id: "saved-mark",
+              person_id: "mark-person",
+              first_name: "Mark",
+              last_name: "Elrod",
+              title: "Distribution Manager",
+              email: "mark@stabilus.example",
+              organization: { id: "stabilus-org", name: "Stabilus" }
+            }]
+          })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+        const people = Array.isArray(body.person_titles)
+          ? [{
+              id: "mark-person",
+              first_name: "Mark",
+              last_name_obfuscated: "El**d",
+              title: "Distribution Manager",
+              has_email: true,
+              organization: { name: "Stabilus" }
+            }]
+          : [];
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ people })
+        } as unknown as Response;
+      }
+
+      throw new Error(`Unexpected Apollo URL in test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "Stabilus",
+      apolloOrganizationId: "stabilus-org"
+    });
+
+    expect(result.contacts).toEqual([
+      expect.objectContaining({
+        recordSource: "SAVED_CONTACT",
+        apolloContactId: "saved-mark",
+        apolloPersonId: "mark-person",
+        fullName: "Mark Elrod",
+        email: "mark@stabilus.example",
+        hasEmailAvailable: true
+      })
     ]);
   });
 

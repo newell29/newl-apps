@@ -86,10 +86,12 @@ export type ApolloOrganizationMappingResult = {
 };
 
 export type ApolloContactRecord = {
+  recordSource: "SAVED_CONTACT" | "PEOPLE_SEARCH";
   apolloContactId: string | null;
   apolloPersonId: string | null;
   firstName: string | null;
   lastName: string | null;
+  lastNameObfuscated: string | null;
   fullName: string;
   title: string | null;
   department: string | null;
@@ -97,6 +99,9 @@ export type ApolloContactRecord = {
   email: string | null;
   phone: string | null;
   linkedinUrl: string | null;
+  hasEmailAvailable: boolean;
+  hasPhoneAvailable: boolean;
+  hasLinkedinAvailable: boolean;
   city: string | null;
   state: string | null;
   country: string | null;
@@ -709,7 +714,7 @@ export async function fetchApolloContactById(apolloContactId: string): Promise<A
   }
 
   const record = asRecord(json.contact) ?? asRecord(json.data) ?? json;
-  const contact = parseApolloContacts({ contacts: [record] })[0];
+  const contact = parseApolloContacts({ contacts: [record] }, "SAVED_CONTACT")[0];
   if (!contact) {
     throw new Error("Apollo returned a contact response without a usable contact record.");
   }
@@ -1092,7 +1097,7 @@ async function searchApolloContacts({
   };
 
   const json = await postApolloJson("/api/v1/contacts/search", apiKey, body);
-  const parsedContacts = parseApolloContacts(json);
+  const parsedContacts = parseApolloContacts(json, "SAVED_CONTACT");
   const contacts = enforceExpectedOrganization
     ? filterApolloContactsForExpectedOrganization(parsedContacts, {
         companyName,
@@ -1130,7 +1135,7 @@ async function searchApolloPeople({
   };
 
   const json = await postApolloJson("/api/v1/mixed_people/api_search", apiKey, body);
-  return parseApolloContacts(json);
+  return parseApolloContacts(json, "PEOPLE_SEARCH");
 }
 
 async function searchApolloRelevantPeople({
@@ -1547,7 +1552,10 @@ function parseApolloOrganizations(payload: Record<string, unknown>) {
   return [...deduped.values()];
 }
 
-function parseApolloContacts(payload: Record<string, unknown>): ApolloContactRecord[] {
+function parseApolloContacts(
+  payload: Record<string, unknown>,
+  recordSource: ApolloContactRecord["recordSource"]
+): ApolloContactRecord[] {
   const candidates = [
     ...readApolloArray(payload, ["contacts"]),
     ...readApolloArray(payload, ["people"]),
@@ -1563,9 +1571,10 @@ function parseApolloContacts(payload: Record<string, unknown>): ApolloContactRec
 
     const firstName = readApolloString(record, ["first_name"]);
     const lastName = readApolloString(record, ["last_name"]);
+    const lastNameObfuscated = readApolloString(record, ["last_name_obfuscated"]);
     const fullName =
       readApolloString(record, ["full_name", "name"]) ??
-      buildName(firstName, lastName);
+      buildName(firstName, lastName ?? lastNameObfuscated);
 
     if (!fullName) {
       return [];
@@ -1598,19 +1607,43 @@ function parseApolloContacts(payload: Record<string, unknown>): ApolloContactRec
         ? parseApolloDate(readApolloString(sequenceDetails ?? {}, ["replied_at", "responded_at", "updated_at"]))
         : null);
 
+    const email = readApolloString(record, ["email"]);
+    const phone = readApolloString(record, ["phone", "phone_number", "mobile_phone"]);
+    const linkedinUrl = readApolloString(record, ["linkedin_url"]);
+
     return [
       {
-        apolloContactId: readApolloString(record, ["contact_id", "apollo_contact_id", "id"]),
-        apolloPersonId: readApolloString(record, ["person_id", "apollo_person_id"]),
+        recordSource,
+        apolloContactId:
+          recordSource === "SAVED_CONTACT"
+            ? readApolloString(record, ["contact_id", "apollo_contact_id", "id"])
+            : null,
+        apolloPersonId:
+          recordSource === "PEOPLE_SEARCH"
+            ? readApolloString(record, ["person_id", "apollo_person_id", "id"])
+            : readApolloString(record, ["person_id", "apollo_person_id"]),
         firstName,
         lastName,
+        lastNameObfuscated,
         fullName,
         title: readApolloString(record, ["title", "job_title"]),
         department: readApolloString(record, ["department", "department_name", "function"]),
         seniority: readApolloString(record, ["seniority", "seniority_level"]),
-        email: readApolloString(record, ["email"]),
-        phone: readApolloString(record, ["phone", "phone_number", "mobile_phone"]),
-        linkedinUrl: readApolloString(record, ["linkedin_url"]),
+        email,
+        phone,
+        linkedinUrl,
+        hasEmailAvailable:
+          Boolean(email) || readApolloBoolean(record, ["has_email"], false),
+        hasPhoneAvailable:
+          Boolean(phone) ||
+          readApolloBoolean(
+            record,
+            ["has_phone", "has_direct_phone", "has_mobile_phone"],
+            false
+          ),
+        hasLinkedinAvailable:
+          Boolean(linkedinUrl) ||
+          readApolloBoolean(record, ["has_linkedin", "has_linkedin_url"], false),
         city: readApolloString(record, ["city"]),
         state: readApolloString(record, ["state", "region"]),
         country: readApolloString(record, ["country"]),
@@ -1857,7 +1890,7 @@ function filterApolloContactsForExpectedOrganization(
     }
 
     if (organizationId) {
-      if (organization.id !== organizationId) {
+      if (organization.id && organization.id !== organizationId) {
         return false;
       }
 
@@ -1865,6 +1898,9 @@ function filterApolloContactsForExpectedOrganization(
         return true;
       }
 
+      // People API Search is already constrained by organization_ids, but its
+      // response normally omits organization.id. Validate the returned company
+      // name/domain when present instead of discarding every scoped employee.
       return hasStrictApolloOrganizationIdentityMatch({
         companyName,
         candidateName: organization.name,
@@ -1902,18 +1938,70 @@ function dedupeApolloContacts(entries: ApolloContactRecord[]) {
 
   for (const entry of entries) {
     const key =
-      entry.apolloContactId ??
       entry.apolloPersonId ??
       entry.email?.toLowerCase() ??
+      entry.linkedinUrl?.toLowerCase() ??
+      entry.apolloContactId ??
       `${entry.fullName.toLowerCase()}|${entry.title?.toLowerCase() ?? ""}`;
 
     const existing = deduped.get(key);
-    if (!existing || scoreApolloContactEntry(entry) > scoreApolloContactEntry(existing)) {
+    if (!existing) {
       deduped.set(key, entry);
+      continue;
     }
+
+    deduped.set(key, mergeApolloContactRecords(existing, entry));
   }
 
   return [...deduped.values()];
+}
+
+function mergeApolloContactRecords(
+  left: ApolloContactRecord,
+  right: ApolloContactRecord
+): ApolloContactRecord {
+  const preferred =
+    left.recordSource === "SAVED_CONTACT" && right.recordSource !== "SAVED_CONTACT"
+      ? left
+      : right.recordSource === "SAVED_CONTACT" && left.recordSource !== "SAVED_CONTACT"
+        ? right
+        : scoreApolloContactEntry(right) > scoreApolloContactEntry(left)
+          ? right
+          : left;
+  const fallback = preferred === left ? right : left;
+
+  return {
+    ...fallback,
+    ...preferred,
+    apolloContactId: preferred.apolloContactId ?? fallback.apolloContactId,
+    apolloPersonId: preferred.apolloPersonId ?? fallback.apolloPersonId,
+    firstName: preferred.firstName ?? fallback.firstName,
+    lastName: preferred.lastName ?? fallback.lastName,
+    lastNameObfuscated:
+      preferred.lastNameObfuscated ?? fallback.lastNameObfuscated,
+    title: preferred.title ?? fallback.title,
+    department: preferred.department ?? fallback.department,
+    seniority: preferred.seniority ?? fallback.seniority,
+    email: preferred.email ?? fallback.email,
+    phone: preferred.phone ?? fallback.phone,
+    linkedinUrl: preferred.linkedinUrl ?? fallback.linkedinUrl,
+    city: preferred.city ?? fallback.city,
+    state: preferred.state ?? fallback.state,
+    country: preferred.country ?? fallback.country,
+    hasEmailAvailable:
+      preferred.hasEmailAvailable || fallback.hasEmailAvailable,
+    hasPhoneAvailable:
+      preferred.hasPhoneAvailable || fallback.hasPhoneAvailable,
+    hasLinkedinAvailable:
+      preferred.hasLinkedinAvailable || fallback.hasLinkedinAvailable,
+    rawPayload: {
+      ...fallback.rawPayload,
+      ...preferred.rawPayload,
+      organization:
+        preferred.rawPayload.organization ?? fallback.rawPayload.organization,
+      apolloSources: [...new Set([left.recordSource, right.recordSource])]
+    }
+  };
 }
 
 function dedupeApolloSequences(entries: ApolloSequenceDirectoryEntry[]) {
@@ -2213,9 +2301,9 @@ function scoreApolloContactEntry(entry: ApolloContactRecord) {
   let score = 0;
   const roleFit = scoreApolloRoleFit(entry);
   score += roleFit.score;
-  if (entry.email) score += 4;
+  if (entry.hasEmailAvailable) score += 4;
   if (entry.title) score += 2;
-  if (entry.linkedinUrl) score += 2;
+  if (entry.hasLinkedinAvailable) score += 2;
   if (entry.sequenceStatus !== SequenceStatus.NOT_STARTED) score += 1;
   return score;
 }
