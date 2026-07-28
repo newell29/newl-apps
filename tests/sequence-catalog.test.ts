@@ -1,7 +1,10 @@
 import { ContactTier } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
-import { recommendSequenceForContact } from "@/modules/lead-gen/sequence-catalog";
+import {
+  recommendSequenceForContact,
+  shouldUseHunterSequenceRecommendation
+} from "@/modules/lead-gen/sequence-catalog";
 
 const directory = [
   {
@@ -61,5 +64,23 @@ describe("Hunter cadence recommendation", () => {
     });
 
     expect(recommendation.id).toBe("apollo-executive");
+  });
+
+  it("replaces legacy cadence overrides but preserves a deliberate Hunter cadence choice", () => {
+    expect(
+      shouldUseHunterSequenceRecommendation({
+        hunterEligible: true,
+        sequenceManuallyOverridden: true,
+        selectedSequenceName: "Tier 1 Sequence"
+      })
+    ).toBe(true);
+
+    expect(
+      shouldUseHunterSequenceRecommendation({
+        hunterEligible: true,
+        sequenceManuallyOverridden: true,
+        selectedSequenceName: "Hunter - Executive Referral"
+      })
+    ).toBe(false);
   });
 });

@@ -1,4 +1,5 @@
 import {
+  ApolloCompanyMatchClassification,
   ApolloStatus,
   CandidateStatus,
   ContactSource,
@@ -44,7 +45,10 @@ import {
   type TradeMiningIndustryPackId
 } from "@/modules/lead-gen/industry-packs";
 import { defaultTradeMiningCompanyIdentityRoles } from "@/modules/lead-gen/search-profile-validation";
-import { recommendSequenceForContact } from "@/modules/lead-gen/sequence-catalog";
+import {
+  recommendSequenceForContact,
+  shouldUseHunterSequenceRecommendation
+} from "@/modules/lead-gen/sequence-catalog";
 import {
   DEFAULT_TRADEMINING_SCORING_SETTINGS,
   type TradeMiningScoringSettings
@@ -70,6 +74,34 @@ type LeadPipelineFilterRepOption = {
   value: string;
   label: string;
 };
+
+type HunterOutreachEligibilityInput = Parameters<typeof evaluateHunterOutreachEligibility>[0];
+
+export function evaluateCurrentHunterApolloException({
+  classification,
+  researchSignal,
+  prospectingDecision,
+  now,
+  maxResearchAgeDays = getHunterOutreachResearchMaxAgeDays()
+}: {
+  classification: ApolloCompanyMatchClassification;
+  researchSignal: HunterOutreachEligibilityInput["researchSignal"];
+  prospectingDecision: HunterOutreachEligibilityInput["prospectingDecision"];
+  now?: Date;
+  maxResearchAgeDays?: number;
+}) {
+  if (!requiresApolloMatchReview(classification)) {
+    return null;
+  }
+
+  const eligibility = evaluateHunterOutreachEligibility({
+    researchSignal,
+    prospectingDecision,
+    now,
+    maxResearchAgeDays
+  });
+  return eligibility.status === "ELIGIBLE" ? eligibility : null;
+}
 
 type TradeMiningScoringQueryClient = typeof prisma & {
   tradeMiningScoringConfig?: {
@@ -925,56 +957,90 @@ export async function getApolloMatchReviewQueue(
   filters: { companyId?: string } = {}
 ) {
   const repDirectory = await getLeadPipelineRepDirectory(tenant);
-  const leads = await prisma.lead.findMany({
+  const companies = await prisma.company.findMany({
     where: tenantWhere(tenant, {
-      companyId: filters.companyId,
-      company: {
-        apolloCompanyMatches: {
-          some: {}
-        }
+      id: filters.companyId,
+      doNotProspect: false,
+      candidateStatus: {
+        notIn: [CandidateStatus.REJECTED, CandidateStatus.DISQUALIFIED]
+      },
+      apolloCompanyMatches: {
+        some: {}
       }
     }),
     select: {
       id: true,
-      ownerUserId: true,
-      updatedAt: true,
-      company: {
+      name: true,
+      normalizedName: true,
+      domain: true,
+      linkedinUrl: true,
+      leads: {
+        orderBy: {
+          updatedAt: "desc"
+        },
+        take: 1,
         select: {
           id: true,
-          name: true,
-          normalizedName: true,
-          domain: true,
-          linkedinUrl: true,
+          ownerUserId: true
+        }
+      },
+      apolloCompanyMatches: {
+        orderBy: {
+          createdAt: "desc"
+        },
+        take: 1,
+        select: {
+          id: true,
           apolloOrganizationId: true,
-          apolloCompanyMatches: {
-            orderBy: {
-              createdAt: "desc"
-            },
-            take: 1,
-            select: {
-              id: true,
-              apolloOrganizationId: true,
-              apolloCompanyName: true,
-              apolloDomain: true,
-              score: true,
-              classification: true,
-              matchReason: true,
-              reviewedAt: true,
-              reviewedByUserId: true,
-              createdAt: true
-            }
-          }
+          apolloCompanyName: true,
+          apolloDomain: true,
+          score: true,
+          classification: true,
+          matchReason: true,
+          reviewedAt: true,
+          reviewedByUserId: true,
+          createdAt: true
+        }
+      },
+      hunterOpportunitySignals: {
+        where: {
+          sourceName: "Hunter company research"
+        },
+        orderBy: {
+          observedAt: "desc"
+        },
+        take: 1,
+        select: {
+          id: true,
+          sourceName: true,
+          serviceLine: true,
+          observedAt: true,
+          evidence: true
+        }
+      },
+      hunterProspectingDecisions: {
+        orderBy: {
+          createdAt: "desc"
+        },
+        take: 1,
+        select: {
+          id: true,
+          status: true,
+          serviceLine: true,
+          opportunityType: true,
+          rationale: true,
+          recommendedPersona: true,
+          recommendedSender: true,
+          recommendedCadence: true,
+          createdAt: true
         }
       }
-    },
-    orderBy: {
-      updatedAt: "desc"
     }
   });
 
-  return leads
-    .flatMap((lead) => {
-      const match = lead.company.apolloCompanyMatches[0] ?? null;
+  return companies
+    .flatMap((company) => {
+      const match = company.apolloCompanyMatches[0] ?? null;
       if (
         !match ||
         !requiresApolloMatchReview(match.classification)
@@ -982,18 +1048,31 @@ export async function getApolloMatchReviewQueue(
         return [];
       }
 
+      const eligibility = evaluateCurrentHunterApolloException({
+        classification: match.classification,
+        researchSignal: company.hunterOpportunitySignals[0] ?? null,
+        prospectingDecision: company.hunterProspectingDecisions[0] ?? null,
+        maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
+      });
+      if (!eligibility) {
+        return [];
+      }
+
+      const lead = company.leads[0] ?? null;
       return [
         {
-          leadId: lead.id,
-          companyId: lead.company.id,
-          companyName: lead.company.name,
-          normalizedName: lead.company.normalizedName,
-          companyDomain: lead.company.domain,
-          companyLinkedinUrl: lead.company.linkedinUrl,
+          leadId: lead?.id ?? null,
+          companyId: company.id,
+          companyName: company.name,
+          normalizedName: company.normalizedName,
+          companyDomain: company.domain,
+          companyLinkedinUrl: company.linkedinUrl,
           assignedRep:
-            (lead.ownerUserId ? repDirectory.get(lead.ownerUserId) : null) ??
-            lead.ownerUserId ??
-            "Unassigned",
+            (lead?.ownerUserId ? repDirectory.get(lead.ownerUserId) : null) ??
+            lead?.ownerUserId ??
+            "Hunter automation",
+          hunterQualification: eligibility.label,
+          researchRetrievedAt: eligibility.researchRetrievedAt,
           status: match.reviewedAt ? ("CONFIRMED_NO_MATCH" as const) : ("NEEDS_REVIEW" as const),
           latestMatch: {
             id: match.id,
@@ -1300,8 +1379,11 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
         : null;
     const tierMapping = effectiveSequenceMappings.find((entry) => entry.tier === scoring.tier) ?? null;
     const requiresAiDraft = hunterEligibility.status === "ELIGIBLE" || (tierMapping?.requiresAiDraft ?? false);
-    const useHunterRecommendation =
-      hunterEligibility.status === "ELIGIBLE" && !contact.sequenceManuallyOverridden;
+    const useHunterRecommendation = shouldUseHunterSequenceRecommendation({
+      hunterEligible: hunterEligibility.status === "ELIGIBLE",
+      sequenceManuallyOverridden: contact.sequenceManuallyOverridden,
+      selectedSequenceName: contact.selectedSequenceName
+    });
     const openAiRuntimeReady = isOpenAiDraftGenerationConfigured();
     const draftGenerationConfigured = openAiRuntimeReady && scoringConfig.aiClassificationEnabled;
     const draftGenerationDisabledReason = draftGenerationConfigured

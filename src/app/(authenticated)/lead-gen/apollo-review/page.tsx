@@ -36,7 +36,7 @@ export default async function ApolloMatchReviewPage({
       <PageHeader
         eyebrow="Lead Generation"
         title="Apollo Exceptions"
-        description="Resolve companies Apollo could not match safely or that returned zero employees. Accounts in this queue are protected from bulk and automatic repeat searches."
+        description="Resolve current Qwen/Kimi-vetted Hunter opportunities that Apollo could not match safely or that returned zero employees. Historical workflow records stay in the audit trail but do not clutter this active queue."
       />
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -98,11 +98,12 @@ function ReviewSection({
                   <h3 className="font-semibold text-foreground">{row.companyName}</h3>
                   <p className="mt-1 text-xs text-mutedForeground">{row.normalizedName}</p>
                   <p className="mt-2 text-sm text-mutedForeground">Assigned rep: {row.assignedRep}</p>
+                  <p className="mt-1 text-sm text-mutedForeground">{row.hunterQualification}</p>
                   <Link
-                    href={`/lead-gen/pipeline?company=${encodeURIComponent(row.companyId)}`}
+                    href="/lead-gen/hunter"
                     className="mt-2 inline-block text-sm font-semibold text-primary hover:text-primaryHover"
                   >
-                    View in Pipeline
+                    View Daily Opportunities
                   </Link>
                 </div>
                 <div className="text-sm text-mutedForeground">
@@ -131,7 +132,7 @@ function ReviewSection({
               </div>
 
               <ApolloMatchReviewActions
-                leadId={row.leadId}
+                companyId={row.companyId}
                 companyName={row.companyName}
                 status={row.status}
                 retryAction={retryApolloCompanyReviewFromQueueAction}

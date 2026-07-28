@@ -127,6 +127,26 @@ describe("outreach plan grounding", () => {
     ).toBe(true);
   });
 
+  it("regenerates an unapproved plan when Hunter replaces a legacy cadence", () => {
+    expect(
+      shouldReuseExistingOutreachPlan({
+        promptVersion: "outreach-plan-v2.5",
+        qaStatus: OutreachQaStatus.PASSED,
+        existingSequenceName: "Tier 1 Sequence",
+        selectedSequenceName: "Hunter - Executive Referral"
+      })
+    ).toBe(false);
+
+    expect(
+      shouldReuseExistingOutreachPlan({
+        promptVersion: "outreach-plan-v2.5",
+        qaStatus: OutreachQaStatus.PASSED,
+        existingSequenceName: "Hunter - Executive Referral",
+        selectedSequenceName: "Hunter - Executive Referral"
+      })
+    ).toBe(true);
+  });
+
   it("adds only owner-approved service-line capabilities to the grounding ledger", () => {
     const capability = buildApprovedNewlCapabilityEvidence(HunterServiceLine.WAREHOUSING);
 

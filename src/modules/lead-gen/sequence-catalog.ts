@@ -19,6 +19,32 @@ export const HUNTER_EXECUTIVE_REFERRAL_SEQUENCE = {
   name: "Hunter - Executive Referral"
 } as const;
 
+export function isHunterManagedSequenceName(value: string | null | undefined) {
+  const normalized = value?.trim().toLowerCase();
+  return (
+    normalized === HUNTER_EMAIL_ONLY_SEQUENCE.name.toLowerCase() ||
+    normalized === HUNTER_EXECUTIVE_REFERRAL_SEQUENCE.name.toLowerCase()
+  );
+}
+
+export function shouldUseHunterSequenceRecommendation({
+  hunterEligible,
+  sequenceManuallyOverridden,
+  selectedSequenceName
+}: {
+  hunterEligible: boolean;
+  sequenceManuallyOverridden: boolean;
+  selectedSequenceName: string | null;
+}) {
+  if (!hunterEligible) {
+    return false;
+  }
+  return (
+    !sequenceManuallyOverridden ||
+    !isHunterManagedSequenceName(selectedSequenceName)
+  );
+}
+
 const fallbackSequenceCatalog: SequenceCatalogItem[] = [
   {
     id: "houston-import-decision-maker",

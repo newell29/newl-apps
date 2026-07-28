@@ -65,7 +65,11 @@ import {
   getContactSequencePushBlockReason,
   scoreContact
 } from "@/modules/lead-gen/contact-scoring";
-import { buildSequenceCatalogItems, recommendSequenceForContact } from "@/modules/lead-gen/sequence-catalog";
+import {
+  buildSequenceCatalogItems,
+  recommendSequenceForContact,
+  shouldUseHunterSequenceRecommendation
+} from "@/modules/lead-gen/sequence-catalog";
 import {
   DEFAULT_OUTREACH_DRAFT_MODEL,
   DEFAULT_OUTREACH_QA_MODEL,
@@ -198,6 +202,158 @@ async function authorizeLeadGenMutation() {
   await requireModule(context, ModuleKey.LEAD_GEN);
   await requireMutationAccess(context);
   return context;
+}
+
+async function ensureCurrentHunterApolloReviewLead({
+  tenantId,
+  companyId,
+  ownerUserId,
+  ownerEmail
+}: {
+  tenantId: string;
+  companyId: string;
+  ownerUserId: string;
+  ownerEmail: string;
+}) {
+  const company = await prisma.company.findFirst({
+    where: {
+      id: companyId,
+      tenantId,
+      doNotProspect: false,
+      candidateStatus: {
+        notIn: [CandidateStatus.REJECTED, CandidateStatus.DISQUALIFIED]
+      }
+    },
+    select: {
+      id: true,
+      name: true,
+      leads: {
+        orderBy: {
+          updatedAt: "desc"
+        },
+        take: 1,
+        select: {
+          id: true,
+          ownerUserId: true
+        }
+      },
+      apolloCompanyMatches: {
+        orderBy: {
+          createdAt: "desc"
+        },
+        take: 1,
+        select: {
+          classification: true
+        }
+      },
+      hunterOpportunitySignals: {
+        where: {
+          sourceName: "Hunter company research"
+        },
+        orderBy: {
+          observedAt: "desc"
+        },
+        take: 1,
+        select: {
+          id: true,
+          sourceName: true,
+          serviceLine: true,
+          observedAt: true,
+          evidence: true
+        }
+      },
+      hunterProspectingDecisions: {
+        orderBy: {
+          createdAt: "desc"
+        },
+        take: 1,
+        select: {
+          id: true,
+          status: true,
+          serviceLine: true,
+          opportunityType: true,
+          rationale: true,
+          recommendedPersona: true,
+          recommendedSender: true,
+          recommendedCadence: true,
+          createdAt: true
+        }
+      }
+    }
+  });
+
+  if (!company) {
+    throw new Error("This company is no longer available for Apollo review.");
+  }
+
+  const latestMatch = company.apolloCompanyMatches[0] ?? null;
+  if (
+    !latestMatch ||
+    latestMatch.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY
+  ) {
+    throw new Error("This company no longer has an unresolved Apollo match.");
+  }
+
+  const eligibility = evaluateHunterOutreachEligibility({
+    researchSignal: company.hunterOpportunitySignals[0] ?? null,
+    prospectingDecision: company.hunterProspectingDecisions[0] ?? null,
+    maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
+  });
+  if (eligibility.status !== "ELIGIBLE") {
+    throw new Error(
+      `${company.name} is no longer a current Qwen/Kimi-vetted Hunter opportunity. Refresh Apollo Exceptions before continuing.`
+    );
+  }
+
+  const existingLead = company.leads[0] ?? null;
+  if (existingLead) {
+    if (!existingLead.ownerUserId) {
+      await prisma.lead.update({
+        where: {
+          id: existingLead.id
+        },
+        data: {
+          ownerUserId
+        }
+      });
+    }
+    return existingLead.id;
+  }
+
+  const lead = await prisma.lead.upsert({
+    where: {
+      tenantId_companyId: {
+        tenantId,
+        companyId
+      }
+    },
+    update: {},
+    create: {
+      tenantId,
+      companyId,
+      ownerUserId,
+      notes: `Hunter Apollo exception assigned to ${ownerEmail} on ${new Date().toISOString()}.`
+    },
+    select: {
+      id: true
+    }
+  });
+  return lead.id;
+}
+
+async function attachCurrentHunterApolloReviewLead(
+  context: Awaited<ReturnType<typeof authorizeLeadGenMutation>>,
+  formData: FormData
+) {
+  const companyId = readRequired(formData, "companyId");
+  const leadId = await ensureCurrentHunterApolloReviewLead({
+    tenantId: context.tenantId,
+    companyId,
+    ownerUserId: context.userId,
+    ownerEmail: context.userEmail
+  });
+  formData.set("leadId", leadId);
+  return leadId;
 }
 
 async function cancelTradeMiningProfileRunRequests(
@@ -894,9 +1050,11 @@ export async function retryApolloCompanyReviewFromQueueAction(
   formData: FormData
 ): Promise<ApolloMatchReviewActionState> {
   try {
+    const context = await authorizeLeadGenMutation();
     if (formData.get("confirmAutomaticCredits") !== "yes") {
       throw new Error("Confirm the automatic Apollo search credit limit before retrying.");
     }
+    await attachCurrentHunterApolloReviewLead(context, formData);
     const result = await retryApolloCompanyReviewAction(formData);
     return {
       status: "success",
@@ -916,7 +1074,7 @@ export async function confirmApolloNoMatchAction(
 ): Promise<ApolloMatchReviewActionState> {
   try {
     const context = await authorizeLeadGenMutation();
-    const leadId = readRequired(formData, "leadId");
+    const leadId = await attachCurrentHunterApolloReviewLead(context, formData);
     const lead = await prisma.lead.findFirst({
       where: {
         id: leadId,
@@ -993,7 +1151,7 @@ export async function reopenApolloMatchReviewAction(
 ): Promise<ApolloMatchReviewActionState> {
   try {
     const context = await authorizeLeadGenMutation();
-    const leadId = readRequired(formData, "leadId");
+    const leadId = await attachCurrentHunterApolloReviewLead(context, formData);
     const lead = await prisma.lead.findFirst({
       where: {
         id: leadId,
@@ -1075,13 +1233,13 @@ export async function mapApolloCompanyUrlAction(
 ): Promise<ApolloMatchReviewActionState> {
   try {
     const context = await authorizeLeadGenMutation();
-    const leadId = readRequired(formData, "leadId");
     const apolloCompanyReference = parseApolloCompanyReference(
       readRequired(formData, "apolloCompanyUrl")
     );
     if (formData.get("confirmApolloCredit") !== "yes") {
       throw new Error("Confirm the one-credit Apollo company validation before mapping.");
     }
+    const leadId = await attachCurrentHunterApolloReviewLead(context, formData);
 
     const lead = await prisma.lead.findFirst({
       where: {
@@ -5792,8 +5950,11 @@ async function loadAiDraftContactContext({
     hunterManaged: hunterEligibility.status === "ELIGIBLE"
   });
   const tierMapping = effectiveSequenceMappings.find((entry) => entry.tier === scoring.tier) ?? null;
-  const useHunterRecommendation =
-    hunterEligibility.status === "ELIGIBLE" && !contact.sequenceManuallyOverridden;
+  const useHunterRecommendation = shouldUseHunterSequenceRecommendation({
+    hunterEligible: hunterEligibility.status === "ELIGIBLE",
+    sequenceManuallyOverridden: contact.sequenceManuallyOverridden,
+    selectedSequenceName: contact.selectedSequenceName
+  });
 
   return {
     model,

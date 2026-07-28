@@ -12,7 +12,7 @@ type ReviewAction = (
 ) => Promise<ApolloMatchReviewActionState>;
 
 export function ApolloMatchReviewActions({
-  leadId,
+  companyId,
   companyName,
   status,
   retryAction,
@@ -20,7 +20,7 @@ export function ApolloMatchReviewActions({
   confirmNoMatchAction,
   reopenAction
 }: {
-  leadId: string;
+  companyId: string;
   companyName: string;
   status: "NEEDS_REVIEW" | "CONFIRMED_NO_MATCH";
   retryAction: ReviewAction;
@@ -52,7 +52,7 @@ export function ApolloMatchReviewActions({
           Bulk and automatic Apollo searches are blocked for this company.
         </p>
         <form action={reopenFormAction}>
-          <input type="hidden" name="leadId" value={leadId} />
+          <input type="hidden" name="companyId" value={companyId} />
           <button
             disabled={reopenPending}
             className="rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
@@ -75,7 +75,7 @@ export function ApolloMatchReviewActions({
             links to the exact global organization, records who mapped it, and searches contacts only inside that company.
           </p>
         </div>
-        <input type="hidden" name="leadId" value={leadId} />
+        <input type="hidden" name="companyId" value={companyId} />
         <label className="block space-y-1 text-sm font-medium text-foreground">
           <span>Apollo company URL</span>
           <input
@@ -106,7 +106,7 @@ export function ApolloMatchReviewActions({
 
       <div className="space-y-4 rounded-md border border-border bg-background p-4">
         <form action={retryFormAction} className="space-y-3">
-          <input type="hidden" name="leadId" value={leadId} />
+          <input type="hidden" name="companyId" value={companyId} />
           <div>
             <p className="font-semibold text-foreground">Retry automatic matching</p>
             <p className="mt-1 text-xs leading-5 text-mutedForeground">
@@ -134,7 +134,7 @@ export function ApolloMatchReviewActions({
         </form>
 
         <form action={confirmFormAction} className="space-y-2 border-t border-border pt-4">
-          <input type="hidden" name="leadId" value={leadId} />
+          <input type="hidden" name="companyId" value={companyId} />
           <p className="text-xs leading-5 text-mutedForeground">
             If Apollo truly has no usable company, archive it as Confirmed no match. It can be reopened later.
           </p>

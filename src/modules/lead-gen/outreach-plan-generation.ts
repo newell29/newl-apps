@@ -34,7 +34,10 @@ import {
   type OutreachStrategy
 } from "@/modules/lead-gen/outreach-plan";
 import { persistOutreachPlanWithSteps } from "@/modules/lead-gen/outreach-plan-persistence";
-import { recommendSequenceForContact } from "@/modules/lead-gen/sequence-catalog";
+import {
+  recommendSequenceForContact,
+  shouldUseHunterSequenceRecommendation
+} from "@/modules/lead-gen/sequence-catalog";
 import {
   buildApolloSequenceMappingsWithDefaults,
   parseApolloSequenceDirectory,
@@ -75,11 +78,22 @@ export function normalizeHunterChannelStrategy(
 
 export function shouldReuseExistingOutreachPlan({
   promptVersion,
-  qaStatus
+  qaStatus,
+  existingSequenceName,
+  selectedSequenceName
 }: {
   promptVersion: string;
   qaStatus: OutreachQaStatus;
+  existingSequenceName?: string | null;
+  selectedSequenceName?: string | null;
 }) {
+  if (
+    selectedSequenceName &&
+    existingSequenceName !== undefined &&
+    existingSequenceName !== selectedSequenceName
+  ) {
+    return false;
+  }
   return (
     promptVersion === OUTREACH_PLAN_PROMPT_VERSION ||
     (
@@ -290,10 +304,15 @@ export async function generateOutreachPlanForContact({
   }
   if (
     draftContext.existingOutreachPlan &&
-    shouldReuseExistingOutreachPlan({
-      promptVersion: draftContext.existingOutreachPlan.promptVersion,
-      qaStatus: draftContext.existingOutreachPlan.qaStatus
-    }) &&
+    (
+      draftContext.existingOutreachPlan.status === OutreachPlanStatus.APPROVED ||
+      shouldReuseExistingOutreachPlan({
+        promptVersion: draftContext.existingOutreachPlan.promptVersion,
+        qaStatus: draftContext.existingOutreachPlan.qaStatus,
+        existingSequenceName: draftContext.existingOutreachPlan.sequenceName,
+        selectedSequenceName: draftContext.selectedSequenceName
+      })
+    ) &&
     !forceRegenerate
   ) {
     return {
@@ -703,7 +722,15 @@ export async function loadOutreachPlanContactContext({
           where: { tenantId, status: { not: OutreachPlanStatus.ARCHIVED } },
           orderBy: { version: "desc" },
           take: 1,
-          select: { id: true, status: true, qaStatus: true, version: true, promptVersion: true }
+          select: {
+            id: true,
+            status: true,
+            qaStatus: true,
+            version: true,
+            promptVersion: true,
+            sequenceName: true,
+            sequenceId: true
+          }
         }
       }
     }),
@@ -768,8 +795,11 @@ export async function loadOutreachPlanContactContext({
     hunterManaged: hunterEligibility.status === "ELIGIBLE"
   });
   const tierMapping = effectiveMappings.find((entry) => entry.tier === scoring.tier) ?? null;
-  const useHunterRecommendation =
-    hunterEligibility.status === "ELIGIBLE" && !contact.sequenceManuallyOverridden;
+  const useHunterRecommendation = shouldUseHunterSequenceRecommendation({
+    hunterEligible: hunterEligibility.status === "ELIGIBLE",
+    sequenceManuallyOverridden: contact.sequenceManuallyOverridden,
+    selectedSequenceName: contact.selectedSequenceName
+  });
   const senderIdentity = resolveConfiguredApolloSender({
     entries: parseApolloRepMapping(apolloCredential?.publicConfig),
     users: memberships.map((membership) => membership.user),

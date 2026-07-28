@@ -21,7 +21,12 @@ Apollo match review reuses the existing tenant-scoped models and requires no sch
 - `Company.apolloOrganizationId`, `domain`, and `linkedinUrl` store the resolved organization identity.
 - each automatic or manual attempt creates an immutable `ApolloCompanyMatch` row with classification, score, request evidence, returned payload, and reason;
 - `ApolloCompanyMatch.reviewedAt` and `reviewedByUserId` distinguish active review from **Confirmed no match**;
-- the latest unresolved match is the repeat-search guard used by Pipeline bulk enrichment.
+- the latest unresolved match is the repeat-search guard used by Pipeline bulk enrichment;
+- the active Apollo Exceptions query begins from `Company`, not legacy `Lead`, and requires a fresh eligible
+  `HunterOpportunitySignal` plus current `WOULD_PURSUE` `HunterProspectingDecision`. This keeps current Qwen/Kimi-vetted
+  exceptions visible while retaining older match rows outside the active work queue;
+- an authenticated exception action creates the company's unique `Lead` only when none exists, assigns the acting
+  reviewer as owner, and preserves an existing owner. No cleanup migration or historical-row deletion is required.
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.
 
