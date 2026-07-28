@@ -202,6 +202,8 @@ Regression coverage must prove:
 5. the legacy `/lead-gen/contacts` route redirects to `/lead-gen/outreach`; and
 6. Outreach Queue starts with secondary audit columns hidden and links companies back to Found Companies; and
 7. every underlying query remains tenant scoped and the redesign requires no database migration.
+8. the Apollo reply-sync metric is labeled as an all-status saved-contact monitoring count and is not presented as
+   the number of contacts in Outreach Queue.
 
 ## Assisted post-research handoff
 
@@ -221,6 +223,10 @@ Regression coverage must prove:
 12. plan generation uses the saved Hunter/TradeMining evidence ledger and persists QA failure rather than bypassing it;
 13. no assisted-handoff path creates a lead, changes a pipeline stage, approves a plan/contact, writes an Apollo cadence, or sends communication; and
 14. the Mac worker drains the queue after research and resumes unfinished jobs during its normal loop.
+15. legacy pre-engagement `Lead` rows do not suppress a current Hot/Qualified company, while current-customer,
+    do-not-contact, replied, and prior-sequence evidence still blocks duplicate outreach.
+16. Automation Settings reports the latest handoff's queued companies, processed companies, evaluated Apollo
+    candidates, created plans, QA failures, and per-company terminal reason as separate values.
 
 ## Outreach Plans and grounded sequence generation
 

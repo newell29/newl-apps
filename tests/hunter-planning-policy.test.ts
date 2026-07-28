@@ -6,7 +6,10 @@ import {
   SequenceStatus
 } from "@prisma/client";
 import { describe, expect, it } from "vitest";
-import { isHunterCompanyBlocked } from "@/modules/lead-gen/hunter-planner";
+import {
+  buildHunterPlanningCompanyWhere,
+  isHunterCompanyBlocked
+} from "@/modules/lead-gen/hunter-planner";
 import {
   allocateHunterServiceCounts,
   selectHunterPlanningCandidates,
@@ -56,17 +59,16 @@ describe("Hunter planning policy", () => {
     ).toThrow("total exactly 100%");
   });
 
-  it("blocks existing pipeline and prior-sequence companies from being re-planned", () => {
+  it("ignores legacy lead rows but blocks real engagement and prior sequence history", () => {
+    expect(buildHunterPlanningCompanyWhere("tenant-a")).not.toHaveProperty("leads");
     const base = {
       doNotProspect: false,
       candidateStatus: CandidateStatus.NEW,
       cashflowCustomers: [],
-      leads: [],
       contacts: []
     };
 
     expect(isHunterCompanyBlocked(base)).toBe(false);
-    expect(isHunterCompanyBlocked({ ...base, leads: [{ id: "lead-1" }] })).toBe(true);
     expect(
       isHunterCompanyBlocked({
         ...base,
@@ -75,6 +77,18 @@ describe("Hunter planning policy", () => {
             contactStatus: ContactStatus.APPROVED,
             replyStatus: ReplyStatus.NO_REPLY,
             sequenceStatus: SequenceStatus.FINISHED
+          }
+        ]
+      })
+    ).toBe(true);
+    expect(
+      isHunterCompanyBlocked({
+        ...base,
+        contacts: [
+          {
+            contactStatus: ContactStatus.REVIEWING,
+            replyStatus: ReplyStatus.POSITIVE,
+            sequenceStatus: SequenceStatus.NOT_STARTED
           }
         ]
       })

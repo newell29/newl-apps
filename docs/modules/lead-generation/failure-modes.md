@@ -313,6 +313,18 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Regression coverage: `tests/apollo-integration.test.ts` uses Apollo's obfuscated People Search response shape,
   verifies person/contact ID separation, rejects a sibling name, and preserves saved-contact data during deduplication.
 
+## Hunter queues fewer companies or shows fewer contacts than the page counters suggest
+
+- “Saved Apollo contacts monitored” is the all-status population with a saved Apollo contact ID that the hourly
+  reply synchronizer can poll. It is not the current handoff size or Outreach Queue size.
+- “Contacts evaluated” is the bounded employee cohort submitted to buyer-role review. Only selected contacts with a
+  generated Outreach Plan become actionable rows in Outreach Queue.
+- The latest contact-discovery panel on Automation Settings records queued and processed companies, evaluated
+  contacts, generated plans, QA failures, and each company's terminal reason. Use that panel instead of inferring a
+  run result from unrelated counters.
+- A historical `Lead` row from the retired workflow must not suppress a researched account. Current-customer,
+  blocked-company, do-not-contact, reply, and prior-sequence evidence still prevent duplicate outreach.
+
 ## Automatic Apollo status sync is stale or failing
 
 - Symptom: the Contacts health panel shows **Setup required**, due contacts that are not draining, or contacts with sync errors.

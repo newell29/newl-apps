@@ -16,7 +16,10 @@ import {
   evaluateHunterOutreachEligibility,
   getHunterOutreachResearchMaxAgeDays
 } from "@/modules/lead-gen/hunter-outreach-eligibility";
-import { HUNTER_COMPANY_RESEARCH_JOB_TYPE } from "@/modules/lead-gen/hunter-job-types";
+import {
+  HUNTER_COMPANY_RESEARCH_JOB_TYPE,
+  HUNTER_OUTREACH_HANDOFF_JOB_TYPE
+} from "@/modules/lead-gen/hunter-job-types";
 import { runHunterDryPlan } from "@/modules/lead-gen/hunter-planner";
 import {
   generateOutreachPlanForContact,
@@ -39,7 +42,7 @@ import {
   reviewHunterContactFit
 } from "@/server/integrations/openai";
 
-export const HUNTER_OUTREACH_HANDOFF_JOB_TYPE = "HUNTER_OUTREACH_HANDOFF";
+export { HUNTER_OUTREACH_HANDOFF_JOB_TYPE } from "@/modules/lead-gen/hunter-job-types";
 
 const ACTIVE_JOB_WINDOW_MS = 4 * 60 * 60 * 1_000;
 const PROCESSING_LEASE_MS = 15 * 60 * 1_000;
