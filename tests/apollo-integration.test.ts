@@ -429,13 +429,26 @@ describe("fetchApolloContactsForCompany", () => {
 
     const contactsRequestBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body ?? "{}")) as Record<string, unknown>;
     expect(contactsRequestBody.organization_ids).toBeUndefined();
-    expect(contactsRequestBody.q_keywords).toBe("DORMEO NORTH AMERICA");
+    expect(contactsRequestBody.q_keywords).toBe("Dormeo North America");
   });
 
-  it("uses a confirmed Apollo organization ID without repeating organization discovery", async () => {
+  it("revalidates a confirmed Apollo organization ID before employee search", async () => {
     const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            organizations: [{
+              id: "5e66b6381e05b4008c8331b8",
+              name: "NOVALIS US, LLC"
+            }]
+          })
+        } as unknown as Response;
+      }
 
       if (url.endsWith("/api/v1/contacts/search")) {
         return {
@@ -464,12 +477,19 @@ describe("fetchApolloContactsForCompany", () => {
 
     expect(result.organizationId).toBe("5e66b6381e05b4008c8331b8");
     expect(result.match.matchReason).toContain("manually confirmed");
-    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/mixed_companies/search"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/mixed_companies/search"))).toBe(true);
   });
 
   it("merges saved and employee-search contacts while rejecting a sibling organization", async () => {
     vi.spyOn(global, "fetch").mockImplementation(async (input) => {
       const url = String(input);
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ organizations: [] })
+        } as unknown as Response;
+      }
       if (url.endsWith("/api/v1/contacts/search")) {
         return {
           ok: true,
@@ -524,6 +544,14 @@ describe("fetchApolloContactsForCompany", () => {
     const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ organizations: [] })
+        } as unknown as Response;
+      }
 
       if (url.endsWith("/api/v1/contacts/search")) {
         return {
@@ -616,6 +644,14 @@ describe("fetchApolloContactsForCompany", () => {
     vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ organizations: [] })
+        } as unknown as Response;
+      }
 
       if (url.endsWith("/api/v1/contacts/search")) {
         return {
@@ -772,7 +808,6 @@ describe("fetchApolloContactsForCompany", () => {
 
     const result = await fetchApolloContactsForCompany({
       companyName: "STABILUS, INC.",
-      domain: "stabilus.com",
       apolloOrganizationId: accountId
     });
 
@@ -800,6 +835,80 @@ describe("fetchApolloContactsForCompany", () => {
       )
     ).toBe(false);
     expect(peopleBodies.some((body) => body.organization_ids === undefined)).toBe(false);
+  });
+
+  it("uses an exact Apollo account-to-parent relationship for a domainless legal entity", async () => {
+    const accountId = "silfab-legal-account";
+    const organizationId = "silfab-global-organization";
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            accounts: [{
+              id: accountId,
+              name: "SILFAB SOLAR PV SC INC,",
+              organization: {
+                id: organizationId,
+                name: "Silfab Solar Inc.",
+                primary_domain: "silfabsolar.com"
+              }
+            }]
+          })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ contacts: [] })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+        expect(body.organization_ids).toEqual([organizationId]);
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            people: [{
+              id: "silfab-logistics-lead",
+              name: "Logistics Lead",
+              title: "Logistics Lead",
+              organization: {
+                id: organizationId,
+                name: "Silfab Solar Inc.",
+                primary_domain: "silfabsolar.com"
+              }
+            }]
+          })
+        } as unknown as Response;
+      }
+
+      throw new Error(`Unexpected Apollo URL in test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "SILFAB SOLAR PV SC INC,",
+      apolloOrganizationId: accountId
+    });
+
+    expect(result.organizationId).toBe(organizationId);
+    expect(result.match.classification).toBe("DIRECT_COMPANY");
+    expect(result.contacts.map((contact) => contact.fullName)).toEqual(["Logistics Lead"]);
+    const peopleBodies = fetchMock.mock.calls
+      .filter(([request]) => String(request).endsWith("/api/v1/mixed_people/api_search"))
+      .map(([, requestInit]) => JSON.parse(String(requestInit?.body ?? "{}")) as Record<string, unknown>);
+    expect(
+      peopleBodies.every(
+        (body) => Array.isArray(body.organization_ids) && body.organization_ids[0] === organizationId
+      )
+    ).toBe(true);
   });
 
   it("accepts a same-domain shortened regional brand and recovers despite a partial account-ID result", async () => {
@@ -901,7 +1010,6 @@ describe("fetchApolloContactsForCompany", () => {
 
     const result = await fetchApolloContactsForCompany({
       companyName: "SALICE AMERICA INC",
-      domain: "salice.com",
       apolloOrganizationId: accountId
     });
 
