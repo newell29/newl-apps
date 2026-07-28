@@ -12,6 +12,10 @@ import {
   HUNTER_COMPANY_REPLY_HARD_STOP_STATUSES,
   isHunterCompanyReplyHardStop
 } from "@/modules/lead-gen/apollo-reengagement-policy";
+import {
+  evaluateHunterOutreachEligibility,
+  getHunterOutreachResearchMaxAgeDays
+} from "@/modules/lead-gen/hunter-outreach-eligibility";
 import { prisma } from "@/server/db";
 import { selectHunterPlanningCandidates } from "@/modules/lead-gen/hunter-planning-policy";
 
@@ -45,14 +49,20 @@ type Candidate = {
   recommendedCadence: string;
 };
 
+export type HunterPlanningCandidateScope =
+  | "ALL_SOURCES"
+  | "CURRENT_RESEARCHED_OUTREACH";
+
 export async function runHunterDryPlan({
   tenantId,
   actorUserId,
-  trigger = "MANUAL"
+  trigger = "MANUAL",
+  candidateScope = "ALL_SOURCES"
 }: {
   tenantId: string;
   actorUserId: string | null;
   trigger?: "MANUAL" | "SCHEDULED" | "RESEARCH";
+  candidateScope?: HunterPlanningCandidateScope;
 }) {
   const policy = await prisma.hunterAutomationPolicy.findUnique({ where: { tenantId } });
   const effective = policy ?? DEFAULT_HUNTER_POLICY;
@@ -68,6 +78,7 @@ export async function runHunterDryPlan({
       input: {
         version: 1,
         trigger,
+        candidateScope,
         mode: effective.mode,
         dailyCompanyLimit: effective.dailyCompanyLimit,
         allocation: {
@@ -109,10 +120,19 @@ export async function runHunterDryPlan({
       prisma.hunterOpportunitySignal.findMany({
         where: {
           tenantId,
-          status: { in: [HunterSignalStatus.NEW, HunterSignalStatus.ACTIVE] },
+          ...(candidateScope === "CURRENT_RESEARCHED_OUTREACH"
+            ? { sourceName: "Hunter company research" }
+            : {
+                status: {
+                  in: [HunterSignalStatus.NEW, HunterSignalStatus.ACTIVE]
+                }
+              }),
           OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }]
         },
-        orderBy: [{ confidence: "desc" }, { observedAt: "desc" }],
+        orderBy:
+          candidateScope === "CURRENT_RESEARCHED_OUTREACH"
+            ? [{ observedAt: "desc" }, { confidence: "desc" }]
+            : [{ confidence: "desc" }, { observedAt: "desc" }],
         take: 500,
         include: {
           company: {
@@ -239,11 +259,18 @@ export async function runHunterDryPlan({
       });
     }
 
-    const eligible = [...candidates.values()].filter((candidate) =>
-      candidate.priorityScore >= effective.minimumPriorityScore &&
-      (candidate.sourceTypes.includes("TRADEMINING") ||
-        candidate.confidence >= effective.minimumSignalConfidence)
-    );
+    const eligible =
+      candidateScope === "CURRENT_RESEARCHED_OUTREACH"
+        ? buildCurrentResearchedOutreachCandidates({
+            signals,
+            suppressedCompanyIds,
+            suppressedValues
+          })
+        : [...candidates.values()].filter((candidate) =>
+            candidate.priorityScore >= effective.minimumPriorityScore &&
+            (candidate.sourceTypes.includes("TRADEMINING") ||
+              candidate.confidence >= effective.minimumSignalConfidence)
+          );
     const selected = selectHunterPlanningCandidates(eligible, effective.dailyCompanyLimit, {
       [HunterServiceLine.WAREHOUSING]: effective.warehousingPercent,
       [HunterServiceLine.OCEAN_AIR]: effective.oceanAirPercent,
@@ -297,6 +324,7 @@ export async function runHunterDryPlan({
         finishedAt: new Date(),
         output: {
           phase: "DRY_RUN_COMPLETE",
+          candidateScope,
           candidatePoolCount: eligible.length,
           selectedCount: selected.length,
           selectedByService: counts,
@@ -315,7 +343,14 @@ export async function runHunterDryPlan({
         after: { selectedCount: selected.length, selectedByService: counts, trigger }
       }
     });
-    return { state: "completed" as const, runId: job.id, selectedCount: selected.length, selectedByService: counts };
+    return {
+      state: "completed" as const,
+      runId: job.id,
+      candidateScope,
+      candidatePoolCount: eligible.length,
+      selectedCount: selected.length,
+      selectedByService: counts
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Hunter dry-run planning failed.";
     await prisma.automationJobRun.update({
@@ -324,6 +359,97 @@ export async function runHunterDryPlan({
     });
     throw error;
   }
+}
+
+function buildCurrentResearchedOutreachCandidates({
+  signals,
+  suppressedCompanyIds,
+  suppressedValues
+}: {
+  signals: Array<{
+    id: string;
+    companyId: string | null;
+    companyName: string;
+    normalizedCompanyName: string;
+    signalType: string;
+    serviceLine: HunterServiceLine;
+    sourceName: string | null;
+    title: string;
+    summary: string;
+    confidence: number;
+    observedAt: Date;
+    sourceUrl: string | null;
+    evidence: Prisma.JsonValue | null;
+    company: {
+      doNotProspect: boolean;
+      candidateStatus: CandidateStatus;
+      cashflowCustomers: Array<{ id: string }>;
+      contacts: Array<{ replyStatus: ReplyStatus }>;
+    } | null;
+  }>;
+  suppressedCompanyIds: Set<string>;
+  suppressedValues: Set<string>;
+}) {
+  const latestByCompany = new Map<string, (typeof signals)[number]>();
+  for (const signal of signals) {
+    if (
+      signal.sourceName !== "Hunter company research" ||
+      !signal.companyId ||
+      !signal.company
+    ) {
+      continue;
+    }
+    const existing = latestByCompany.get(signal.companyId);
+    if (!existing || signal.observedAt.getTime() > existing.observedAt.getTime()) {
+      latestByCompany.set(signal.companyId, signal);
+    }
+  }
+
+  const candidates: Candidate[] = [];
+  for (const signal of latestByCompany.values()) {
+    if (
+      suppressedCompanyIds.has(signal.companyId!) ||
+      suppressedValues.has(signal.normalizedCompanyName.toLowerCase()) ||
+      isHunterCompanyBlocked(signal.company)
+    ) {
+      continue;
+    }
+    const eligibility = evaluateHunterOutreachEligibility({
+      researchSignal: signal,
+      prospectingDecision: null,
+      maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
+    });
+    if (
+      eligibility.status !== "NOT_SELECTED" ||
+      !eligibility.opportunityTier ||
+      !["HOT_OPPORTUNITY", "QUALIFIED_CURRENT_ACCOUNT"].includes(
+        eligibility.opportunityTier
+      )
+    ) {
+      continue;
+    }
+
+    candidates.push({
+      companyId: signal.companyId,
+      companyKey: signal.normalizedCompanyName,
+      companyName: signal.companyName,
+      serviceLine: signal.serviceLine,
+      priorityScore: hunterSignalPriority(signal),
+      confidence: signal.confidence,
+      opportunityType: signal.title,
+      rationale: signal.summary,
+      sourceTypes: ["COMPANY_RESEARCH", signal.signalType],
+      recommendedPersona: recommendPersona(signal.serviceLine),
+      recommendedCadence: recommendCadence(signal.serviceLine),
+      evidence: {
+        researchSignalId: signal.id,
+        opportunityTier: eligibility.opportunityTier,
+        sourceUrl: signal.sourceUrl,
+        observedAt: signal.observedAt.toISOString()
+      }
+    });
+  }
+  return candidates;
 }
 
 export function buildHunterPlanningCompanyWhere(

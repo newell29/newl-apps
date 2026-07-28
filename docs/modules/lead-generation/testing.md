@@ -108,7 +108,10 @@ Scoring regression coverage must also verify:
 18. the GitHub Actions caller does not retry a failed whole-batch HTTP request; retries remain bounded inside the per-contact Apollo client.
 19. organization search sends `q_organization_domains_list` for domains and `q_organization_name` for name-only companies, never internal TradeMining identity-field names.
 20. name-only organization discovery is capped at two deterministic queries and stops at the first direct-company match.
-21. a confirmed Apollo organization ID bypasses organization discovery, and people search stays constrained to that `organization_ids` value without an unscoped fallback.
+21. a confirmed Apollo mapping with a saved domain performs one bounded organization lookup to resolve account IDs
+    to Apollo's canonical nested organization ID; People Search stays constrained to that exact
+    `organization_ids` value without an unscoped fallback. A confirmed mapping without a domain continues to use its
+    saved ID directly.
 22. an unresolved latest `ApolloCompanyMatch` makes bulk enrichment skip the company before any Apollo or contact lookup.
 23. Apollo company URL parsing rejects non-Apollo hosts, exact mapping validates the organization ID, and manual mapping never authorizes cadence enrollment.
 24. People Search parses its `id` as an Apollo person ID, retains obfuscated-name and availability metadata, and does not claim the person is an enriched saved contact.
@@ -212,14 +215,18 @@ Regression coverage must prove:
 Regression coverage must prove:
 
 1. only explicit `ASSISTED` mode with the kill switch off can queue or process a handoff;
-2. the queued cohort contains only fresh Hot/Qualified companies with the exact tenant-owned `WOULD_PURSUE` decision produced by the completed plan;
+2. the queued cohort contains only fresh Hot/Qualified companies with the exact tenant-owned `WOULD_PURSUE`
+   decision produced by the dedicated researched-outreach plan; unresearched TradeMining candidates cannot consume
+   this cohort's daily slots;
 3. machine routes ignore caller-supplied tenant identifiers and use ingestion authentication;
 4. each request processes at most one company and persisted leases, results, attempts, and retry dates survive worker restart;
 5. an unresolved latest Apollo company match blocks repeat discovery and remains review-required;
-6. saved contacts, a 100-result organization-scoped employee search, and an always-run multi-title search are merged and deduplicated before ranking; Apollo account IDs are resolved to the nested global organization ID even when the stale ID returns one partial person, and sibling/parent organizations remain excluded;
+6. saved contacts, a 100-result organization-scoped employee search, and an always-run multi-title search are merged and deduplicated before ranking; Apollo account IDs are resolved to the nested global organization ID before employee search (with saved-contact recovery as a fallback), one partial account result cannot be treated as complete, and sibling/parent organizations remain excluded;
 7. deterministic ranking excludes seller-side and unidentifiable contacts, gives the buyer-role model the best 10 candidates, and caps final selection at `maxContactsPerCompany`;
 8. buyer-role review uses strict structured output and returns the exact requested contact IDs; model-qualified contacts rank first, while an explicit manager-or-higher logistics/operations buyer remains eligible for an unapproved human-review plan;
-9. the manual current-opportunity handoff requires completed company research, refreshes the deterministic plan, and queues the same bounded Assisted-mode job without rerunning research;
+9. the manual current-opportunity handoff requires completed company research, creates a deterministic plan scoped
+   to the current researched Hot/Qualified cohort, and queues the same bounded Assisted-mode job without rerunning
+   research;
 10. the same prompt version and prospecting decision reuse a cached review, while a new decision requires fresh review;
 11. imported contacts remain `REVIEWING`, unapproved, unassigned, and unenrolled;
 12. plan generation uses the saved Hunter/TradeMining evidence ledger and persists QA failure rather than bypassing it;

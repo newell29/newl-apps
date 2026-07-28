@@ -262,9 +262,10 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   the 100-result organization-scoped employee request and the always-run multi-title request. Finding an acceptable
   person on the generic first page must not short-circuit relevant-title retrieval. The buyer-role model receives the
   best 10 merged candidates; the configured `maxContactsPerCompany` limits final selection, not discovery.
-- A legacy Apollo account ID that returns one partial person must not prevent recovery to Apollo's nested global
-  organization ID. Compare the separate **Apollo people found**, **Buyer-role candidates**, and **Contacts evaluated**
-  counters; a large drop now identifies whether discovery, deterministic ranking, or model review caused it.
+- A saved Apollo account ID must be resolved to Apollo's nested global organization ID before employee search when
+  an exact company domain is available. One partial account result must not be treated as the complete employee list.
+  Compare the separate **Apollo people found**, **Buyer-role candidates**, and **Contacts evaluated** counters; a
+  large drop identifies whether discovery, deterministic ranking, or model review caused it.
 - Also verify that `organization_ids` contains Apollo's nested global organization ID rather than the saved account
   record ID. A legacy account ID that returns no employees may be recovered only from one exact organization identity;
   parent/sibling evidence must produce `MATCH_QUALITY_REVIEW` and an empty contact set.
@@ -293,10 +294,11 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Cause: an Apollo account ID was stored in `Company.apolloOrganizationId` and then submitted to People API Search,
   which requires Apollo's nested global organization ID. Apollo can expose both identifiers in the same account or
   saved-contact payload.
-- Safe recovery: Hunter first tries the configured identifier. When it returns no employees and an exact company
-  domain exists, Hunter inspects bounded saved-contact and zero-credit People Search organization metadata. It
-  promotes only one exact normalized company identity, filters every candidate back to that organization, and lets
-  the existing direct-match transaction replace the stale identifier.
+- Safe recovery: with an exact company domain, Hunter first resolves the saved account mapping through bounded
+  company search and uses Apollo's nested canonical organization ID for both employee requests. Saved-contact and
+  People Search organization metadata remain a fallback for older records. Hunter promotes only one exact normalized
+  company identity, filters every candidate back to that organization, and lets the existing direct-match transaction
+  replace the stale identifier.
 - Ambiguity rule: a parent, subsidiary, sibling, or multiple exact organization candidate becomes
   `MATCH_QUALITY_REVIEW`; no contacts are imported and the AI buyer-role review is not run. Domain-wide employee
   results alone cannot authorize a match.

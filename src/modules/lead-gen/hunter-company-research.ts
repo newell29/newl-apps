@@ -661,7 +661,8 @@ export async function completeHunterCompanyResearchRun({
   const plan = await runHunterDryPlan({
     tenantId,
     actorUserId: null,
-    trigger: "RESEARCH"
+    trigger: "RESEARCH",
+    candidateScope: "CURRENT_RESEARCHED_OUTREACH"
   });
   let handoff:
     | Awaited<ReturnType<typeof enqueueHunterOutreachHandoff>>
