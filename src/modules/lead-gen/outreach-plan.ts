@@ -3,13 +3,27 @@ import {
   HunterServiceLine,
   OutreachChannel,
   OutreachPlanStatus,
-  OutreachQaStatus
+  OutreachQaStatus,
+  Prisma
 } from "@prisma/client";
 
 export const OUTREACH_PLAN_PROMPT_VERSION = "outreach-plan-v2.5";
 export const OUTREACH_PLAN_COMPATIBLE_PASSED_PROMPT_VERSIONS = new Set([
   "outreach-plan-v2.4"
 ]);
+export const VISIBLE_OUTREACH_PLAN_VERSION_WHERE = {
+  OR: [
+    {
+      promptVersion: OUTREACH_PLAN_PROMPT_VERSION
+    },
+    {
+      promptVersion: {
+        in: [...OUTREACH_PLAN_COMPATIBLE_PASSED_PROMPT_VERSIONS]
+      },
+      qaStatus: OutreachQaStatus.PASSED
+    }
+  ]
+} satisfies Prisma.OutreachPlanWhereInput;
 export const DEFAULT_OUTREACH_STRATEGY_MODEL = "gpt-5.6-terra";
 export const DEFAULT_OUTREACH_DRAFT_MODEL = "gpt-5.6-luna";
 export const DEFAULT_OUTREACH_QA_MODEL = "gpt-5.6-luna";

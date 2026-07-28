@@ -73,14 +73,11 @@ export function isOutreachQueueContact(contact: {
   draft: unknown | null;
   outreachPlan?: unknown | null;
 }) {
-  if (
-    contact.contactStatus === ContactStatus.REJECTED ||
-    contact.contactStatus === ContactStatus.DO_NOT_CONTACT ||
-    contact.replyStatus === ReplyStatus.POSITIVE ||
-    contact.replyStatus === ReplyStatus.MEETING_BOOKED ||
-    contact.replyStatus === ReplyStatus.NEGATIVE ||
-    contact.sequenceStatus === SequenceStatus.BOUNCED
-  ) {
+  if (isTerminalOrUnsafeOutreachContact(contact)) {
+    return false;
+  }
+
+  if (contact.sequenceStatus === SequenceStatus.ENROLLED) {
     return false;
   }
 
@@ -92,9 +89,34 @@ export function isOutreachQueueContact(contact: {
   return (
     contact.contactStatus === ContactStatus.APPROVED ||
     contact.sequenceStatus === SequenceStatus.READY ||
-    contact.sequenceStatus === SequenceStatus.ENROLLED ||
     contact.sequenceStatus === SequenceStatus.PAUSED ||
     contact.sequenceStatus === SequenceStatus.REPLIED ||
     hasCurrentOutreachWork
+  );
+}
+
+export function isActiveCadenceContact(contact: {
+  contactStatus: ContactStatus;
+  sequenceStatus: SequenceStatus;
+  replyStatus: ReplyStatus;
+}) {
+  return (
+    !isTerminalOrUnsafeOutreachContact(contact) &&
+    contact.sequenceStatus === SequenceStatus.ENROLLED
+  );
+}
+
+function isTerminalOrUnsafeOutreachContact(contact: {
+  contactStatus: ContactStatus;
+  sequenceStatus: SequenceStatus;
+  replyStatus: ReplyStatus;
+}) {
+  return (
+    contact.contactStatus === ContactStatus.REJECTED ||
+    contact.contactStatus === ContactStatus.DO_NOT_CONTACT ||
+    contact.replyStatus === ReplyStatus.POSITIVE ||
+    contact.replyStatus === ReplyStatus.MEETING_BOOKED ||
+    contact.replyStatus === ReplyStatus.NEGATIVE ||
+    contact.sequenceStatus === SequenceStatus.BOUNCED
   );
 }

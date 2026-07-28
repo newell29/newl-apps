@@ -210,13 +210,16 @@ Regression coverage must prove:
 
 1. Sales Opportunities contains only engaged, meeting, proposal, won, and lost stages;
 2. New, researching, enriched, qualified, and contacted leads remain stored but do not appear in the revenue view unless a saved Apollo positive reply or meeting-booked status supplies the corresponding effective sales stage;
-3. Outreach Queue includes approved, drafted, ready, enrolled, paused, and unanswered active work;
-4. rejected, do-not-contact, bounced, finished, positive, meeting-booked, and negative contacts are excluded from Outreach Queue;
+3. Outreach Queue **Needs Attention** includes approved, drafted, ready, paused, and unanswered pre-enrollment work;
+4. enrolled no-reply contacts move to **Active Cadences**, while rejected, do-not-contact, bounced, finished, positive,
+   meeting-booked, and negative contacts are excluded from both work views;
 5. the legacy `/lead-gen/contacts` route redirects to `/lead-gen/outreach`; and
 6. Outreach Queue starts with secondary audit columns hidden and links companies back to Found Companies; and
 7. every underlying query remains tenant scoped and the redesign requires no database migration.
 8. the Apollo reply-sync metric is labeled as an all-status saved-contact monitoring count and is not presented as
    the number of contacts in Outreach Queue.
+9. QA-passed prompt versions explicitly marked compatible remain query-visible after a prompt-policy upgrade, while
+   failed legacy plans do not.
 
 ## Assisted post-research handoff
 

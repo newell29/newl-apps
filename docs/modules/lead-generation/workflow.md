@@ -119,7 +119,10 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 The employee-facing layout follows the lifecycle of a prospect rather than the underlying database tables:
 
 1. **Daily Opportunities** shows Hunter-researched Hot, Qualified current account, and Watchlist recommendations. Raw source candidates and blocked research remain collapsed audit material.
-2. **Outreach Queue** contains active contact discovery, drafting, approval, Apollo enrollment, and unanswered follow-up work. Terminal, unsafe, and positively engaged contacts do not clutter this queue. The default table hides secondary audit columns; employees can restore them through the Columns menu.
+2. **Outreach Queue** defaults to **Needs Attention**, containing drafting, QA, approval, sender assignment, paused-cadence,
+   and Apollo enrollment work. Once Apollo confirms enrollment, the contact moves to **Active Cadences** for reply
+   monitoring. Terminal, unsafe, finished, and positively engaged contacts do not clutter either view. The default
+   table hides secondary audit columns; employees can restore them through the Columns menu.
 3. **Sales Opportunities** begins only after genuine engagement. It includes `REPLIED`, `MEETING_BOOKED`, `QUOTED`, `WON`, and `LOST`; an Apollo positive reply or meeting-booked status is also surfaced immediately even before the stored lead stage is manually confirmed. Earlier pipeline records remain stored but are not displayed in this revenue-focused view.
 4. **Apollo Exceptions** is the active review queue for fresh Qwen/Kimi-vetted Hunter opportunities with ambiguous
    or missing company mappings, plus verified Apollo companies that returned zero employees. Historical Lead-workflow
