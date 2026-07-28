@@ -64,7 +64,7 @@ This lane improves answer clarity and citation readiness; it does not claim to m
 | Imports, scoring, clustering, state checks | Deterministic code | N/A | No model should perform exact comparisons or status changes. |
 | Public-web backlink triage | Local Qwen `qwen3.5:35b` | Deterministic structured output | Monday deep run only. Qwen is advisory and sees only bounded search snippets and at most 40 safely downloaded pages. |
 | Scout research, final backlink review, and page brief | Codex `gpt-5.6-sol` | `high` | Monday deep run only. Search Console, GA4, forms, and the website repository remain primary; SEMrush is optional supporting evidence. |
-| Backlink outreach executor | Dedicated Scout agent with Codex `gpt-5.6-sol` | `high` | Receives constrained tools only. Newl Apps enforces approval, compliance, suppression, volume limits, and tenant scope before external actions. |
+| Backlink outreach executor | Dedicated Scout agent with Codex `gpt-5.6-sol` | `high` | Runs inside a deterministic command wrapper. Scout receives only the browser and dedicated backlink tools; it has no shell or arbitrary file access. Newl Apps enforces approval, compliance, suppression, volume limits, idempotency, and tenant scope before external actions. |
 | Website developer | Codex `gpt-5.6-sol` | `high` | Runs only after approval, in the website repo, with tests and a draft PR. |
 | Kimi K3 `kimi-k3` | Optional shadow challenger | `high` | Runs only after brief approval, creates a separate verified patch and draft PR, and never replaces the primary Newl Apps build record. |
 

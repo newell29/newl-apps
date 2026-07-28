@@ -1,5 +1,8 @@
 import { Type } from "typebox";
 import { defineToolPlugin } from "openclaw/plugin-sdk/tool-plugin";
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import path from "node:path";
 
 import {
   fillProtectedDirectoryCredentials,
@@ -10,12 +13,20 @@ import {
 const DEFAULT_TOKEN_ENV = "OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN";
 const DEFAULT_DIRECTORY_PASSWORD_MASTER_ENV =
   "NEWL_DIRECTORY_PASSWORD_MASTER_V1";
+const DEFAULT_BUSINESS_PROFILE_PATH = path.join(
+  homedir(),
+  ".openclaw",
+  "agents",
+  "scout",
+  "backlink-business-profile.json"
+);
 
 export type WebsiteGrowthPluginConfig = {
   baseUrl: string;
   backlinkTokenEnv?: string;
   vercelProtectionBypassEnv?: string;
   directoryPasswordMasterEnv?: string;
+  businessProfilePath?: string;
 };
 
 const emptyParameters = Type.Object({});
@@ -99,6 +110,10 @@ const configSchema = Type.Object({
   directoryPasswordMasterEnv: Type.Optional(Type.String({
     description:
       "Protected local environment variable containing the directory credential master. It is never sent to Newl Apps or the model."
+  })),
+  businessProfilePath: Type.Optional(Type.String({
+    description:
+      "Protected owner-approved public business profile read by the dedicated profile tool."
   }))
 });
 
@@ -108,6 +123,14 @@ const plugin = defineToolPlugin({
   description: "Executes only human-approved, non-paid Website Growth backlink outreach and directory work.",
   configSchema,
   tools: (tool) => [
+    tool({
+      name: "newl_backlink_business_profile",
+      label: "Read Approved Backlink Business Profile",
+      description:
+        "Return only the bounded, owner-approved public Newl identity and outreach rules. Never reads arbitrary files.",
+      parameters: emptyParameters,
+      factory: createBusinessProfileTool()
+    }),
     tool({
       name: "newl_backlink_claim",
       label: "Claim Approved Backlink Work",
@@ -264,6 +287,93 @@ export function createDirectoryCredentialFillTool() {
   });
 }
 
+export function createBusinessProfileTool() {
+  return ({ config }: { config: WebsiteGrowthPluginConfig }) => ({
+    name: "newl_backlink_business_profile",
+    label: "Read Approved Backlink Business Profile",
+    description:
+      "Returns the bounded public identity and policy fields from the protected owner-approved profile.",
+    parameters: emptyParameters,
+    async execute() {
+      try {
+        const profile = await readApprovedBusinessProfile(
+          config.businessProfilePath?.trim() || DEFAULT_BUSINESS_PROFILE_PATH
+        );
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify(profile)
+          }],
+          details: {
+            status: "ok",
+            data: profile
+          }
+        };
+      } catch (error) {
+        return textResult(
+          error instanceof Error
+            ? error.message
+            : "Approved backlink business profile could not be read.",
+          "failed"
+        );
+      }
+    }
+  });
+}
+
+export async function readApprovedBusinessProfile(profilePath: string) {
+  const raw = await readFile(profilePath, "utf8");
+  if (Buffer.byteLength(raw, "utf8") > 64 * 1024) {
+    throw new Error("Approved backlink business profile is too large.");
+  }
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Approved backlink business profile is invalid.");
+  }
+  const profile = parsed as Record<string, unknown>;
+  if (
+    typeof profile.status !== "string" ||
+    !profile.status.startsWith("OWNER_APPROVED_")
+  ) {
+    throw new Error("Backlink business profile is not owner approved.");
+  }
+  const outreachPolicy = readRecord(profile, "outreachPolicy");
+  const submissionRules = readRecord(profile, "submissionRules");
+  if (outreachPolicy.manualOpportunityApproval !== true) {
+    throw new Error("Manual backlink opportunity approval must remain enabled.");
+  }
+  if (submissionRules.allowPayment !== false) {
+    throw new Error("Paid backlink execution must remain disabled.");
+  }
+
+  return {
+    status: readBoundedString(profile, "status", 100),
+    legalEntities: readRecord(profile, "legalEntities"),
+    publicBrandName: readBoundedString(profile, "publicBrandName", 200),
+    website: readBoundedString(profile, "website", 1000),
+    senderName: readBoundedString(profile, "senderName", 200),
+    publicDescriptions: readRecord(profile, "publicDescriptions"),
+    publicLocations: readBoundedArray(profile, "publicLocations", 20),
+    publicPhone: readBoundedString(profile, "publicPhone", 100),
+    outreachMailbox: readBoundedString(profile, "outreachMailbox", 320),
+    approvedLogos: readBoundedArray(profile, "approvedLogos", 20),
+    approvedServiceCategories: readBoundedArray(
+      profile,
+      "approvedServiceCategories",
+      50
+    ),
+    approvedSocialProfiles: readBoundedArray(
+      profile,
+      "approvedSocialProfiles",
+      20
+    ),
+    certifications: readBoundedArray(profile, "certifications", 50),
+    forbiddenClaims: readBoundedArray(profile, "forbiddenClaims", 50),
+    outreachPolicy,
+    submissionRules
+  };
+}
+
 async function callNewlApps(
   config: WebsiteGrowthPluginConfig,
   path: string,
@@ -379,6 +489,42 @@ function parseDirectoryCredentialFillInput(
     passwordRef: read("passwordRef"),
     confirmPasswordRef: read("confirmPasswordRef")
   };
+}
+
+function readRecord(value: Record<string, unknown>, name: string) {
+  const result = value[name];
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    throw new Error(`Backlink business profile ${name} is required.`);
+  }
+  return result as Record<string, unknown>;
+}
+
+function readBoundedString(
+  value: Record<string, unknown>,
+  name: string,
+  maxLength: number
+) {
+  const result = value[name];
+  if (
+    typeof result !== "string" ||
+    !result.trim() ||
+    result.length > maxLength
+  ) {
+    throw new Error(`Backlink business profile ${name} is invalid.`);
+  }
+  return result.trim();
+}
+
+function readBoundedArray(
+  value: Record<string, unknown>,
+  name: string,
+  maxItems: number
+): unknown[] {
+  const result = value[name];
+  if (!Array.isArray(result) || result.length > maxItems) {
+    throw new Error(`Backlink business profile ${name} is invalid.`);
+  }
+  return [...result] as unknown[];
 }
 
 function normalizeBaseUrl(value: string) {

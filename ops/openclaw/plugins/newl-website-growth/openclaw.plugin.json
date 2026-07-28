@@ -2,7 +2,7 @@
   "id": "newl-website-growth",
   "name": "Newl Website Growth",
   "description": "Executes only human-approved, non-paid Website Growth backlink outreach and directory work.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "configSchema": {
     "type": "object",
     "required": [
@@ -23,7 +23,11 @@
       },
       "directoryPasswordMasterEnv": {
         "type": "string",
-        "description": "Protected local environment variable containing the directory credential master."
+        "description": "Protected local environment variable containing the directory credential master. It is never sent to Newl Apps or the model."
+      },
+      "businessProfilePath": {
+        "type": "string",
+        "description": "Protected owner-approved public business profile read by the dedicated profile tool."
       }
     }
   },
@@ -32,6 +36,7 @@
   },
   "contracts": {
     "tools": [
+      "newl_backlink_business_profile",
       "newl_backlink_claim",
       "newl_backlink_follow_ups",
       "newl_backlink_verification",

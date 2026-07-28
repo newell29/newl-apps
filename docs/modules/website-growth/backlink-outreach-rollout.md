@@ -42,7 +42,7 @@ Scout uses its own OpenClaw agent and workspace with Codex `gpt-5.6-sol` at high
 8. Generate the local directory credential master once with `openssl rand -base64 48`. Add the result only to `~/.openclaw/.env` as `NEWL_DIRECTORY_PASSWORD_MASTER_V1=...`; do not add it to Vercel, Newl Apps, source control, an agent prompt, or Teams. Back up this single master in the owner's existing Apple Passwords/iCloud Keychain account. Losing it prevents deterministic recovery of directory passwords.
 9. Re-run `ops/openclaw/install-website-growth-backlink-executor.sh` so the installed plugin and weekday job include `newl_backlink_fill_directory_credentials` and `newl_backlink_sync_directory_verifications`.
 10. Keep the owner-approved public business profile outside source control with file mode `600`.
-11. Restart or reload the OpenClaw gateway if required by the installed OpenClaw version, then validate that only Scout has the Website Growth executor tools.
+11. Restart or reload the OpenClaw gateway if required by the installed OpenClaw version, then validate that Scout uses the `minimal` tool profile with only the browser and dedicated `newl_backlink_*` tools. Shell, exec, arbitrary reads, writes, and source-code inspection must remain denied.
 
 ## Supervised launch test
 
@@ -60,8 +60,10 @@ Scout uses its own OpenClaw agent and workspace with Codex `gpt-5.6-sol` at high
 - Maximum five new contacts in a rolling 24-hour period and 20 new contacts in a rolling seven-day period.
 - First follow-up at day 5, second at day 12, and close at day 21.
 - The job first syncs replies and opt-outs, then handles due follow-ups and verification, then claims newly approved work.
-- Public research opens each approved URL in a fresh browser tab. The executor focuses the returned stable tab handle before taking an accessibility snapshot and never uses the unsupported `snapshot --refs` or `snapshot --target-id` options. It does not navigate an assumed active tab because any browser-command failure causes OpenClaw to classify an otherwise recovered run as failed and suppress its normal Teams summary.
-- A Teams summary is sent after every run, including zero-opportunity runs. It lists recent directory usernames/login URLs and verified backlink URLs, never passwords.
+- Public research uses the constrained browser tool to open each approved URL in a fresh tab. The executor focuses the returned stable tab handle before taking a bounded accessibility snapshot and never navigates an assumed active tab.
+- The cron is a deterministic command job. It records the run start, invokes one constrained Scout work phase, calls the Newl Apps summary endpoint after the agent exits, and sends that exact Teams summary even when the Scout phase fails.
+- Scout cannot send the Teams summary itself and cannot use shell, exec, arbitrary file reads, curl, direct HTTP, or source-code inspection. The bounded `newl_backlink_business_profile` tool is its only source for the owner-approved public identity.
+- A Teams summary is sent after every run, including zero-opportunity and partially failed runs. It lists recent directory usernames/login URLs and verified backlink URLs, never passwords.
 - The model-free failure monitor polls every 15 minutes, records each failed source run once, and sends a separate Teams alert. Code defects can queue Rivet for a draft PR; uncertain sends and permission failures never retry automatically. The second identical failure within seven days disables the executor.
 
 ## Directory-account credentials

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -21,6 +21,10 @@ const backlinkInstallerPath = path.join(
 const backlinkPromptPath = path.join(
   repoRoot,
   "ops/openclaw/prompts/website-growth-backlink-executor.md",
+);
+const backlinkRunnerPath = path.join(
+  repoRoot,
+  "ops/openclaw/run-website-growth-backlink-executor.sh",
 );
 const backlinkSkillPath = path.join(
   repoRoot,
@@ -126,22 +130,126 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     expect(monitor).toContain("send_website_growth_teams_message");
   });
 
-  it("opens fresh backlink research tabs instead of navigating a stale active tab", async () => {
+  it("runs backlink outreach through a deterministic command wrapper with no shell tools", async () => {
+    const [installer, runner, prompt] = await Promise.all([
+      readFile(backlinkInstallerPath, "utf8"),
+      readFile(backlinkRunnerPath, "utf8"),
+      readFile(backlinkPromptPath, "utf8"),
+    ]);
+
+    expect(installer).toContain('profile: "minimal"');
+    expect(installer).toContain(
+      'deny: ["exec", "bash", "read", "write", "edit", "apply_patch", "process"]'
+    );
+    expect(installer).toContain('"newl_backlink_business_profile"');
+    expect(installer).toContain('--command-argv "${executor_argv}"');
+    expect(installer).toContain("--no-deliver");
+    expect(installer).not.toContain('--agent scout\n  --model "openai/gpt-5.6-sol"');
+    expect(runner).toContain('run_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"');
+    expect(runner).toContain('"${openclaw_command}" agent');
+    expect(runner).toContain(
+      "/api/website-growth/backlinks/executor/summary"
+    );
+    expect(runner).toContain(
+      "The Scout browser work phase failed after its deterministic summary was delivered."
+    );
+    expect(prompt).toContain(
+      "Never call or emulate Bash, exec, a shell, arbitrary file reads"
+    );
+    expect(prompt).toContain(
+      "Do not call `newl_backlink_summary` and do not send a Teams message."
+    );
+  });
+
+  it("delivers the deterministic summary even when the constrained agent turn fails", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "newl-backlink-runner-"));
+    const scoutEnvPath = path.join(directory, "scout.env");
+    const gatewayEnvPath = path.join(directory, "gateway.env");
+    const openclawPath = path.join(directory, "openclaw");
+    const curlPath = path.join(directory, "curl");
+    const teamsLogPath = path.join(directory, "teams.log");
+
+    await writeFile(
+      scoutEnvPath,
+      [
+        "NEWL_APPS_URL=https://newl-apps.example.com",
+        "WEBSITE_GROWTH_TEAMS_TARGET=example-target",
+      ].join("\n"),
+    );
+    await writeFile(
+      gatewayEnvPath,
+      "OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN=synthetic-token\n",
+    );
+    await writeFile(
+      openclawPath,
+      `#!/bin/zsh
+if [[ "$1" == "agent" ]]; then
+  exit 9
+fi
+message=""
+while [[ "$#" -gt 0 ]]; do
+  if [[ "$1" == "--message" ]]; then
+    shift
+    message="$1"
+  fi
+  shift
+done
+print -r -- "$message" > "$TEAMS_LOG_PATH"
+`,
+    );
+    await writeFile(
+      curlPath,
+      `#!/bin/zsh
+print -r -- '{"data":{"message":"Deterministic summary after failure"}}'
+`,
+    );
+    await Promise.all([chmod(openclawPath, 0o700), chmod(curlPath, 0o700)]);
+
+    try {
+      let failure: {
+        code?: number;
+        stderr?: string;
+      } | null = null;
+      try {
+        await execFileAsync("/bin/zsh", [backlinkRunnerPath], {
+          env: {
+            ...process.env,
+            HOME: directory,
+            OPENCLAW_BIN: openclawPath,
+            CURL_BIN: curlPath,
+            WEBSITE_GROWTH_SCOUT_ENV_FILE: scoutEnvPath,
+            OPENCLAW_GATEWAY_ENV_FILE: gatewayEnvPath,
+            TEAMS_LOG_PATH: teamsLogPath,
+          },
+        });
+      } catch (error) {
+        failure = error as typeof failure;
+      }
+
+      expect(failure?.code).toBe(9);
+      expect(failure?.stderr).toContain(
+        "failed after its deterministic summary was delivered",
+      );
+      expect(await readFile(teamsLogPath, "utf8")).toBe(
+        "Deterministic summary after failure\n",
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("opens fresh backlink research tabs through the browser tool", async () => {
     const [prompt, skill] = await Promise.all([
       readFile(backlinkPromptPath, "utf8"),
       readFile(backlinkSkillPath, "utf8"),
     ]);
 
-    expect(prompt).toContain("openclaw browser open <url> --json");
-    expect(prompt).toContain("do not start with `openclaw browser navigate`");
-    expect(prompt).toContain("openclaw browser --json focus <suggestedTargetId>");
-    expect(prompt).toContain("openclaw browser --json snapshot --format aria --limit 300");
-    expect(prompt).toContain("Never use the unsupported `snapshot --refs` or `snapshot --target-id`");
-    expect(skill).toContain("open a fresh browser tab");
-    expect(skill).toContain("openclaw browser --json focus <suggestedTargetId>");
-    expect(skill).toContain("openclaw browser --json snapshot --format aria --limit 300");
-    expect(skill).toContain("does not support `snapshot --refs` or `snapshot --target-id`");
-    expect(skill).toContain("A failed browser probe marks the scheduled run failed");
+    expect(prompt).toContain("Use the browser tool directly");
+    expect(prompt).toContain("Open every approved public URL in a fresh tab");
+    expect(prompt).toContain("Never navigate an assumed active tab");
+    expect(skill).toContain("open a fresh tab");
+    expect(skill).toContain("Retain and focus the stable tab handle");
+    expect(skill).toContain("Do not issue speculative browser actions");
   });
 
   it("updates the clean dedicated runtime from main before every Scout run", async () => {
@@ -213,6 +321,7 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     "install-website-growth-scout.sh",
     "install-website-growth-backlink-executor.sh",
     "enable-website-growth-backlink-executor.sh",
+    "run-website-growth-backlink-executor.sh",
     "run-rivet-backlink-failure-monitor.sh",
     "run-website-growth-scout.sh",
     "run-website-growth-scout-runtime.sh",
