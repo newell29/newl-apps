@@ -19,7 +19,13 @@ describe("Hunter company research selection", () => {
       tenantId: "tenant-a",
       contacts: {
         none: {
-          replyStatus: { not: ReplyStatus.NO_REPLY }
+          replyStatus: {
+            in: [
+              ReplyStatus.REPLIED,
+              ReplyStatus.POSITIVE,
+              ReplyStatus.MEETING_BOOKED
+            ]
+          }
         }
       }
     });

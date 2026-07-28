@@ -22,6 +22,8 @@ describe("Hunter contact-discovery run summary", () => {
           {
             companyName: "Company One",
             state: "PLANS_GENERATED",
+            apolloContactsFound: 100,
+            contactsRanked: 10,
             contactsImported: 10,
             plansGenerated: 2,
             qaFailedPlans: 1,
@@ -30,6 +32,8 @@ describe("Hunter contact-discovery run summary", () => {
           {
             companyName: "Company Two",
             state: "CONTACT_REVIEW_REQUIRED",
+            apolloContactsFound: 59,
+            contactsRanked: 9,
             contactsImported: 9,
             plansGenerated: 0,
             qaFailedPlans: 0,
@@ -42,6 +46,8 @@ describe("Hunter contact-discovery run summary", () => {
     expect(summary).toMatchObject({
       companiesQueued: 2,
       companiesProcessed: 2,
+      apolloContactsFound: 159,
+      contactsRanked: 19,
       contactsEvaluated: 19,
       plansCreated: 2,
       qaFailedPlans: 1
@@ -49,6 +55,8 @@ describe("Hunter contact-discovery run summary", () => {
     expect(summary?.results).toEqual([
       expect.objectContaining({
         companyName: "Company One",
+        apolloContactsFound: 100,
+        contactsRanked: 10,
         contactsEvaluated: 10,
         plansCreated: 2
       }),

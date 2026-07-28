@@ -87,6 +87,19 @@ describe("Hunter planning policy", () => {
         ]
       })
     ).toBe(true);
+    expect(
+      isHunterCompanyBlocked({
+        ...base,
+        contacts: [
+          {
+            replyStatus: ReplyStatus.NEGATIVE
+          },
+          {
+            replyStatus: ReplyStatus.OUT_OF_OFFICE
+          }
+        ]
+      })
+    ).toBe(false);
   });
 });
 

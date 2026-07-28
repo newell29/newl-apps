@@ -704,7 +704,18 @@ describe("fetchApolloContactsForCompany", () => {
           return {
             ok: true,
             status: 200,
-            json: vi.fn().mockResolvedValue({ people: [] })
+            json: vi.fn().mockResolvedValue({
+              people: [{
+                id: "partial-account-result",
+                name: "Legacy Account Person",
+                title: "Office Manager",
+                organization: {
+                  id: organizationId,
+                  name: "Stabilus",
+                  primary_domain: "stabilus.com"
+                }
+              }]
+            })
           } as unknown as Response;
         }
 
@@ -766,7 +777,7 @@ describe("fetchApolloContactsForCompany", () => {
     expect(peopleBodies.some((body) => body.organization_ids === undefined)).toBe(false);
   });
 
-  it("accepts a same-domain shortened regional brand during legacy account recovery", async () => {
+  it("accepts a same-domain shortened regional brand and recovers despite a partial account-ID result", async () => {
     const accountId = "661ec0fb45d31b00076e3598";
     const organizationId = "salice-global-organization";
     vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
@@ -794,23 +805,50 @@ describe("fetchApolloContactsForCompany", () => {
 
       if (url.endsWith("/api/v1/mixed_people/api_search")) {
         if (Array.isArray(body.organization_ids) && body.organization_ids.includes(accountId)) {
-          return emptyApolloPeopleResponse();
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({
+              people: [{
+                id: "partial-account-result",
+                name: "Nitin Chavda",
+                title: "Franchise Operations Manager",
+                organization: {
+                  id: organizationId,
+                  name: "Salice",
+                  primary_domain: "salice.com"
+                }
+              }]
+            })
+          } as unknown as Response;
         }
         expect(body.organization_ids).toEqual([organizationId]);
         return {
           ok: true,
           status: 200,
           json: vi.fn().mockResolvedValue({
-            people: [{
-              id: "person-thomas",
-              name: "Thomas Mattocks",
-              title: "Supply Chain and Logistics Manager",
-              organization: {
-                id: organizationId,
-                name: "Salice",
-                primary_domain: "salice.com"
+            people: [
+              {
+                id: "person-thomas",
+                name: "Thomas Mattocks",
+                title: "Supply Chain and Logistics Manager",
+                organization: {
+                  id: organizationId,
+                  name: "Salice",
+                  primary_domain: "salice.com"
+                }
+              },
+              {
+                id: "person-frank",
+                name: "Frank Snead",
+                title: "Shipping Receiving Manager",
+                organization: {
+                  id: organizationId,
+                  name: "Salice",
+                  primary_domain: "salice.com"
+                }
               }
-            }]
+            ]
           })
         } as unknown as Response;
       }
@@ -827,6 +865,8 @@ describe("fetchApolloContactsForCompany", () => {
     expect(result.organizationId).toBe(organizationId);
     expect(result.match.classification).toBe("DIRECT_COMPANY");
     expect(result.contacts.map((contact) => contact.fullName)).toContain("Thomas Mattocks");
+    expect(result.contacts.map((contact) => contact.fullName)).toContain("Frank Snead");
+    expect(result.contacts.map((contact) => contact.fullName)).not.toContain("Nitin Chavda");
   });
 
   it("fails closed when account recovery resolves only to a parent or sibling Apollo organization", async () => {

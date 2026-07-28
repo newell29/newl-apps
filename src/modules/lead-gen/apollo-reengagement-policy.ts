@@ -1,5 +1,17 @@
 import { ReplyStatus, SequenceStatus } from "@prisma/client";
 
+export const HUNTER_COMPANY_REPLY_HARD_STOP_STATUSES = [
+  ReplyStatus.REPLIED,
+  ReplyStatus.POSITIVE,
+  ReplyStatus.MEETING_BOOKED
+] as const;
+
+export function isHunterCompanyReplyHardStop(replyStatus: ReplyStatus) {
+  return HUNTER_COMPANY_REPLY_HARD_STOP_STATUSES.includes(
+    replyStatus as (typeof HUNTER_COMPANY_REPLY_HARD_STOP_STATUSES)[number]
+  );
+}
+
 export type ApolloSequenceTransition =
   | { action: "BLOCK"; reason: string }
   | { action: "ENROLL" }

@@ -8,6 +8,10 @@ import {
   Prisma,
   ReplyStatus
 } from "@prisma/client";
+import {
+  HUNTER_COMPANY_REPLY_HARD_STOP_STATUSES,
+  isHunterCompanyReplyHardStop
+} from "@/modules/lead-gen/apollo-reengagement-policy";
 import { prisma } from "@/server/db";
 import { selectHunterPlanningCandidates } from "@/modules/lead-gen/hunter-planning-policy";
 
@@ -333,7 +337,11 @@ export function buildHunterPlanningCompanyWhere(
     },
     cashflowCustomers: { none: {} },
     contacts: {
-      none: { replyStatus: { not: ReplyStatus.NO_REPLY } }
+      none: {
+        replyStatus: {
+          in: [...HUNTER_COMPANY_REPLY_HARD_STOP_STATUSES]
+        }
+      }
     }
   };
 }
@@ -447,7 +455,7 @@ export function isHunterCompanyBlocked(company: {
     return true;
   }
   return company.contacts.some((contact) =>
-    contact.replyStatus !== ReplyStatus.NO_REPLY
+    isHunterCompanyReplyHardStop(contact.replyStatus)
   );
 }
 

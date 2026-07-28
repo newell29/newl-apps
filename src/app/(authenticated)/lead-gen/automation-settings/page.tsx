@@ -203,9 +203,11 @@ function LatestContactDiscoveryRun({
           {formatEnum(run.status)}
         </span>
       </div>
-      <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-6">
         <RunMetric label="Companies queued" value={run.companiesQueued} />
         <RunMetric label="Companies processed" value={run.companiesProcessed} />
+        <RunMetric label="Apollo people found" value={run.apolloContactsFound} />
+        <RunMetric label="Buyer-role candidates" value={run.contactsRanked} />
         <RunMetric label="Contacts evaluated" value={run.contactsEvaluated} />
         <RunMetric label="Outreach plans created" value={run.plansCreated} />
       </div>
@@ -230,6 +232,9 @@ function LatestContactDiscoveryRun({
                 </span>
               </div>
               <p className="mt-2 text-sm text-mutedForeground">
+                {result.apolloContactsFound} found in Apollo ·{" "}
+                {result.contactsRanked} buyer-role candidate
+                {result.contactsRanked === 1 ? "" : "s"} ·{" "}
                 {result.contactsEvaluated} evaluated · {result.plansCreated} plan
                 {result.plansCreated === 1 ? "" : "s"} created
                 {result.qaFailedPlans > 0
