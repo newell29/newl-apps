@@ -81,10 +81,12 @@ export function parseGarlandShippingOrderPages(pages: TextPage[]): GarlandPdfShi
 
   for (const page of pages) {
     const parsedPage = parseGarlandShippingOrderPage(page);
+    const leadingContinuationSerialNumbers = extractLeadingItemContinuationSerialNumbers(page.text);
 
     if (!parsedPage) {
       const previous = orders.at(-1);
       if (previous) {
+        appendContinuationSerialNumbers(previous, leadingContinuationSerialNumbers);
         previous.pageNumbers.push(page.pageNumber);
         previous.rawText = [previous.rawText, page.text].filter(Boolean).join("\n\n");
       }
@@ -94,6 +96,7 @@ export function parseGarlandShippingOrderPages(pages: TextPage[]): GarlandPdfShi
     const existingOrder = findExistingOrder(orders, parsedPage);
 
     if (existingOrder) {
+      appendContinuationSerialNumbers(existingOrder, leadingContinuationSerialNumbers);
       existingOrder.pageNumbers.push(page.pageNumber);
       existingOrder.rawText = [existingOrder.rawText, page.text].filter(Boolean).join("\n\n");
       existingOrder.instructions = mergeText(existingOrder.instructions, parsedPage.instructions);
@@ -107,6 +110,40 @@ export function parseGarlandShippingOrderPages(pages: TextPage[]): GarlandPdfShi
   }
 
   return orders;
+}
+
+function extractLeadingItemContinuationSerialNumbers(text: string) {
+  const lines = normalizePageLines(text);
+  const itemHeaderIndex = lines.findIndex((line) => /^Ln\s+Item Number\b/i.test(line));
+  if (itemHeaderIndex < 0) {
+    return [];
+  }
+
+  const firstItemIndex = lines.findIndex(
+    (line, index) => index > itemHeaderIndex && Boolean(matchGarlandItemStart(line))
+  );
+  const continuationEndIndex = firstItemIndex > itemHeaderIndex ? firstItemIndex : lines.length;
+  const serialCandidateLines = lines
+    .slice(itemHeaderIndex + 1, continuationEndIndex)
+    .filter((line) => !isItemTableHeaderFragment(line))
+    .filter(isGarlandSerialCandidateLine);
+
+  return extractSerialNumbers(serialCandidateLines);
+}
+
+function appendContinuationSerialNumbers(
+  order: GarlandPdfShippingOrder,
+  serialNumbers: string[]
+) {
+  const previousItem = order.items.at(-1);
+  if (!previousItem || serialNumbers.length === 0) {
+    return;
+  }
+
+  previousItem.serialNumbers = uniqueStrings([
+    ...previousItem.serialNumbers,
+    ...serialNumbers
+  ]);
 }
 
 function parseGarlandShippingOrderPage(page: TextPage): GarlandPdfShippingOrder | null {

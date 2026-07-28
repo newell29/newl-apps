@@ -333,6 +333,102 @@ DESCRIPTION
     });
   });
 
+  it("keeps Lot/Serial rows that continue an item from the previous PDF page", () => {
+    const orders = parseGarlandShippingOrderPages([
+      {
+        pageNumber: 1,
+        text: `Ship-To Pre-Shipper Print Date
+99999999 PS123456 12/31/2099
+Pre-Shipper
+SYNTHETIC GARLAND CUSTOMER
+100 TEST STREET
+TEST CITY, ON A1A 1A1
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Order Number SR812345 Ship To PO TEST-PO Frt Terms PPADD-CD
+Order Date 12/31/2099 Ship Via TEST CARRIER
+Ln Item Number T
+Site
+Location
+Lot/Serial
+Ref
+Ship Qty Qty Open UM Due
+Shipped
+1 TEST-OVEN-5001 999999
+SYNTHETIC OVEN DESCRIPTION
+1.00 EA 12/31/2099`
+      },
+      {
+        pageNumber: 2,
+        text: `Ship-To Pre-Shipper Print Date
+99999999 PS123456 12/31/2099
+Pre-Shipper
+SYNTHETIC GARLAND CUSTOMER
+100 TEST STREET
+TEST CITY, ON A1A 1A1
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Sales Order SR812345 Order Date 12/31/2099 Ship To PO TEST-PO
+Ln Item Number T
+Site
+Location
+Lot/Serial
+Ref
+Ship Qty Qty Open UM Due
+Shipped
+NEWLS 9900000000001 1.00 ( )
+2 TEST-FRYER-5002 999999
+SYNTHETIC FRYER DESCRIPTION
+1.00 EA 12/31/2099
+NEWLS 9900000000002 1.00 ( )`
+      }
+    ]);
+    const review = buildGarlandTeamshipReview(
+      orders,
+      [
+        {
+          ...sampleTeamshipOrder(
+            "SR812345",
+            "PS123456",
+            "TEST CARRIER",
+            "SYNTHETIC GARLAND CUSTOMER",
+            "TEST-PO",
+            "PPADD-CD",
+            [
+              "SKU: TEST-OVEN-5001 QTY: 1",
+              "SKU: TEST-FRYER-5002, SN: 9900000000002"
+            ]
+          ),
+          id: 312345
+        }
+      ]
+    );
+    const plan = buildTeamshipPhase2DryRunPlan(review);
+
+    expect(orders).toHaveLength(1);
+    expect(orders[0]?.pageNumbers).toEqual([1, 2]);
+    expect(orders[0]?.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sku: "TEST-OVEN-5001",
+          serialNumbers: ["9900000000001"]
+        }),
+        expect.objectContaining({
+          sku: "TEST-FRYER-5002",
+          serialNumbers: ["9900000000002"]
+        })
+      ])
+    );
+    expect(review.reviews[0]?.fields.find((field) => field.key === "serialNumbers")).toMatchObject({
+      status: "DISCREPANCY",
+      pdfValue: "9900000000001, 9900000000002",
+      teamshipValue: "9900000000002"
+    });
+    expect(plan.orders[0]?.plannedPalletRows[0]).toMatchObject({
+      commodity: "SKU: TEST-OVEN-5001, SN: 9900000000001"
+    });
+  });
+
   it("keeps serialized Garland item evidence in the review and planned commodity", () => {
     const orders = parseGarlandShippingOrderPages([
       {
