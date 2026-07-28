@@ -1086,6 +1086,81 @@ describe("Hunter company deep research", () => {
     });
   });
 
+  it("does not join unrelated commencement and greenfield-facility events in one evidence record", async () => {
+    const program = [
+      "import datetime as d,json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'EXAMPLE BEDDING INC.','companyKey':'example-bedding-inc'}",
+      "recent=(d.datetime.now(d.timezone.utc)-d.timedelta(days=30)).isoformat()",
+      "evidence=[{'pass':'IDENTITY','firstParty':True,'sourceType':'FIRST_PARTY','title':'Example Bedding','excerpt':'Example Bedding is a U.S. manufacturer.','publishedAt':None},{'pass':'FRESH_EVENTS','firstParty':False,'sourceType':'OTHER','title':'Example Bedding operating update','excerpt':'Example Bedding began commercial operations at its existing plant while a separate greenfield facility remains planned for a future phase.','publishedAt':recent}]",
+      "synthesis={'identityDisposition':'PASS','identityConfidence':90,'identityReason':'Verified.','confidence':82,'freshness':'CURRENT','triggerEvidenceIndices':[1],'opportunitySummary':'Operations began at an existing plant; the greenfield project remains future.','signalType':'NEWS','missingEvidence':[],'rationale':'No qualifying new-facility commencement was found.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
+      "normalized=r.normalize_synthesis_for_evidence(candidate,evidence,synthesis)",
+      "print(json.dumps({'material':r.recent_material_trigger_indices(candidate,evidence),'freshness':normalized['freshness'],'triggers':normalized['triggerEvidenceIndices'],'summary':normalized['opportunitySummary']}))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual({
+      material: [],
+      freshness: "CURRENT",
+      triggers: [1],
+      summary: "Operations began at an existing plant; the greenfield project remains future."
+    });
+  });
+
+  it("selects duplicate qualifying commencement evidence deterministically", async () => {
+    const program = [
+      "import datetime as d,json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'EXAMPLE BEDDING INC.','companyKey':'example-bedding-inc'}",
+      "recent=(d.datetime.now(d.timezone.utc)-d.timedelta(days=30)).isoformat()",
+      "identity={'pass':'IDENTITY','firstParty':True,'sourceType':'FIRST_PARTY','title':'Example Bedding','excerpt':'Example Bedding is a U.S. manufacturer.','publishedAt':None}",
+      "filing={'pass':'FRESH_EVENTS','firstParty':False,'sourceType':'OTHER','title':'Example Bedding begins commercial production at its new plant','excerpt':'Example Bedding began commercial production at its new greenfield manufacturing facility.','publishedAt':recent}",
+      "evidence=[identity,filing,dict(filing)]",
+      "synthesis={'identityDisposition':'PASS','identityConfidence':90,'identityReason':'Verified.','confidence':82,'freshness':'CURRENT','triggerEvidenceIndices':[0],'opportunitySummary':'No recent event selected.','signalType':'NEWS','missingEvidence':[],'rationale':'No trigger selected.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
+      "normalized=r.normalize_synthesis_for_evidence(candidate,evidence,synthesis)",
+      "print(json.dumps({'material':r.recent_material_trigger_indices(candidate,evidence),'freshness':normalized['freshness'],'triggers':normalized['triggerEvidenceIndices']}))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual({
+      material: [1],
+      freshness: "FRESH",
+      triggers: [1]
+    });
+  });
+
+  it("fails closed on malformed commencement evidence", async () => {
+    const program = [
+      "import datetime as d,json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'EXAMPLE BEDDING INC.','companyKey':'example-bedding-inc'}",
+      "recent=(d.datetime.now(d.timezone.utc)-d.timedelta(days=30)).isoformat()",
+      "evidence=[{'pass':'FRESH_EVENTS','firstParty':False,'sourceType':'OTHER','title':'','excerpt':'Example Bedding began commercial production at its new greenfield facility.','publishedAt':recent},{'pass':'FRESH_EVENTS','firstParty':False,'sourceType':'OTHER','title':'Example Bedding begins production at a new plant','excerpt':None,'publishedAt':recent},{'pass':'FRESH_EVENTS','firstParty':False,'sourceType':'OTHER','title':'Example Bedding begins production at a new plant','excerpt':'Example Bedding began commercial production at its new greenfield facility.','publishedAt':'not-a-date'}]",
+      "print(json.dumps(r.recent_material_trigger_indices(candidate,evidence)))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual([]);
+  });
+
   it("prefers Atlas Copco Compressors' distribution center over an affiliate expansion", async () => {
     const program = [
       "import datetime as d,json",

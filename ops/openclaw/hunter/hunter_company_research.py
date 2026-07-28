@@ -100,6 +100,10 @@ NEW_OR_GREENFIELD_FACILITY_PATTERN = re.compile(
     r"(?:facility|plant|site)\b",
     re.IGNORECASE,
 )
+EVENT_CLAUSE_BOUNDARY_PATTERN = re.compile(
+    r"(?:[\r\n]+|(?<=[.!?;])\s+|\s+\b(?:but|however|while|whereas)\b\s+)",
+    re.IGNORECASE,
+)
 PUBLIC_DOMAIN_PATTERN = re.compile(
     r"(?<![@A-Za-z0-9.-])(?:https?://)?(?:www\.)?"
     r"([A-Za-z0-9](?:[A-Za-z0-9-]{0,62}\.)+[A-Za-z]{2,24})\b",
@@ -1759,6 +1763,21 @@ def has_explicit_stable_provider_evidence(evidence: list[dict[str, Any]]) -> boo
     )
 
 
+def has_new_facility_production_commencement(title: Any, excerpt: Any) -> bool:
+    if not isinstance(title, str) or not title.strip():
+        return False
+    if not isinstance(excerpt, str) or not excerpt.strip():
+        return False
+    for value in (title, excerpt):
+        for clause in EVENT_CLAUSE_BOUNDARY_PATTERN.split(value):
+            if (
+                PRODUCTION_COMMENCEMENT_PATTERN.search(clause)
+                and NEW_OR_GREENFIELD_FACILITY_PATTERN.search(clause)
+            ):
+                return True
+    return False
+
+
 def recent_material_trigger_indices(
     candidate: dict[str, Any],
     evidence: list[dict[str, Any]],
@@ -1787,14 +1806,23 @@ def recent_material_trigger_indices(
         re.IGNORECASE,
     )
     matches: list[tuple[int, int, int]] = []
+    seen_material_events: set[str] = set()
     for index, row in enumerate(evidence):
+        if not isinstance(row, dict):
+            continue
         if row.get("pass") not in {"FRESH_EVENTS", "FOLLOW_UP"}:
             continue
         if row.get("sourceType") in {"CAREERS", "DIRECTORY"}:
             continue
         if not is_recent_trigger({"triggerEvidenceIndices": [index]}, evidence):
             continue
-        text = f"{row.get('title') or ''} {row.get('excerpt') or ''}"
+        title = row.get("title")
+        excerpt = row.get("excerpt")
+        if not isinstance(title, str) or not title.strip():
+            continue
+        if not isinstance(excerpt, str) or not excerpt.strip():
+            continue
+        text = f"{title} {excerpt}"
         normalized_text = re.sub(r"[^a-z0-9]+", "", text.lower())
         alias_rank = next(
             (rank for rank, alias in enumerate(aliases) if alias in normalized_text),
@@ -1802,14 +1830,19 @@ def recent_material_trigger_indices(
         )
         if alias_rank is None:
             continue
+        qualifying_commencement = has_new_facility_production_commencement(
+            title,
+            excerpt,
+        )
         if (
             material_pattern.search(text)
             or PRODUCTION_LINE_EXPANSION_PATTERN.search(text)
-            or (
-                PRODUCTION_COMMENCEMENT_PATTERN.search(text)
-                and NEW_OR_GREENFIELD_FACILITY_PATTERN.search(text)
-            )
+            or qualifying_commencement
         ):
+            if qualifying_commencement:
+                if normalized_text in seen_material_events:
+                    continue
+                seen_material_events.add(normalized_text)
             matches.append(
                 (
                     alias_rank,
