@@ -298,3 +298,6 @@ Regression coverage must prove:
 18. a selected Apollo person without a saved contact ID is matched to an existing saved contact or created with
     deduplication before enrollment; masked name fragments are not submitted, and conflicting/missing Apollo
     identities fail closed.
+19. internal Hunter cadence keys are resolved against one live Apollo cadence directory by exact ID or unique exact
+    name, while absent, inactive, ambiguous, and unavailable cadences fail before the enrollment endpoint; and the
+    low-level Apollo client refuses to transmit known Newl Apps cadence keys.

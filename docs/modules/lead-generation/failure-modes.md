@@ -243,6 +243,19 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   concrete email, conflicting dedupe email, unreadable response, or absent returned ID still fails closed.
 - Regression coverage: `tests/apollo-contact-preparation.test.ts` and `tests/apollo-integration.test.ts`.
 
+## Apollo rejects a Hunter cadence key as an invalid ID
+
+- Symptom: Apollo enrollment fails with a message such as
+  `hunter-executive-referral is not a valid ID`.
+- Cause: a plan created while the synced Apollo cadence directory was unavailable retained Hunter's internal catalog
+  key. The enrollment worker previously passed that planning key directly to Apollo, which requires the live sequence
+  record ID.
+- Safe recovery: after the fix is deployed, retry the already-approved contact. The worker refreshes Apollo's live
+  cadence directory and maps the exact managed cadence name to its unique active Apollo ID before any write.
+- Prevention: unresolved, inactive, duplicate-name, or unavailable cadence data is a safe skip, and the low-level
+  Apollo client rejects every known Newl Apps catalog key without making a request.
+- Regression coverage: `tests/apollo-sequence-resolution.test.ts` and `tests/apollo-integration.test.ts`.
+
 ## Outreach is blocked by Hunter eligibility
 
 - Symptom: Outreach Queue shows **Needs Hunter assessment**, **Hunter watchlist**, **Blocked by Hunter**,

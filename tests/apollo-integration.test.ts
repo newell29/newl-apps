@@ -10,6 +10,7 @@ import {
   fetchApolloSequenceDirectory,
   parseApolloCompanyReference,
   parseApolloOrganizationId,
+  pushApolloContactsToSequence,
   removeApolloContactsFromSequences,
   transitionApolloContactsToSequence
 } from "@/server/integrations/apollo";
@@ -2501,6 +2502,27 @@ describe("removeApolloContactsFromSequences", () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+  });
+
+  it.each([
+    "hunter-email-only",
+    "hunter-executive-referral"
+  ])("never sends the internal Newl Apps cadence key %s to Apollo", async (sequenceId) => {
+    const fetchMock = vi.spyOn(global, "fetch");
+
+    await expect(
+      pushApolloContactsToSequence({
+        sequenceId,
+        apolloContactIds: ["apollo-contact-1"],
+        sequenceOwnerUserId: "apollo-owner",
+        sendFromEmailAccountId: "mailbox-1",
+        initialStatus: "active"
+      })
+    ).rejects.toThrow(
+      `${sequenceId} is an internal Newl Apps cadence key, not an Apollo sequence ID.`
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("uses Apollo's zero-credit remove endpoint before cadence re-enrollment", async () => {

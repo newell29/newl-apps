@@ -94,6 +94,7 @@ import {
   decideApolloSequenceTransition,
   resolveTrackedSequenceStatus
 } from "@/modules/lead-gen/apollo-reengagement-policy";
+import { resolveLiveApolloSequence } from "@/modules/lead-gen/apollo-sequence-resolution";
 import {
   generateOutreachPlanForContact as generateSharedOutreachPlanForContact
 } from "@/modules/lead-gen/outreach-plan-generation";
@@ -115,10 +116,12 @@ import {
   fetchApolloEmailAccountDirectory,
   fetchApolloContactsForCompany,
   fetchApolloOrganizationForMapping,
+  fetchApolloSequenceDirectory,
   parseApolloCompanyReference,
   syncApolloContactTypedCustomFields,
   type ApolloEmailAccountDirectoryEntry,
   type ApolloContactRecord,
+  type ApolloSequenceDirectoryEntry,
   transitionApolloContactsToSequence,
   type ApolloContactLookupResult
 } from "@/server/integrations/apollo";
@@ -2268,9 +2271,10 @@ export async function runApolloPushJob({
       }
     });
 
-    const [repMappings, emailAccounts] = await Promise.all([
+    const [repMappings, emailAccounts, sequenceDirectoryResult] = await Promise.all([
       loadApolloRepMappings(tenantId),
-      fetchApolloEmailAccountDirectory().catch(() => [])
+      fetchApolloEmailAccountDirectory().catch(() => []),
+      loadLiveApolloSequenceDirectory()
     ]);
     const contactsById = new Map(contacts.map((contact) => [contact.id, contact]));
     output.companiesTouched = new Set(contacts.map((contact) => contact.companyId)).size;
@@ -2286,6 +2290,7 @@ export async function runApolloPushJob({
         contact,
         repMappings,
         emailAccounts,
+        sequenceDirectoryResult,
         companyLookup
       });
 
@@ -3804,12 +3809,14 @@ async function validateApolloPushCandidate({
   contact,
   repMappings,
   emailAccounts,
+  sequenceDirectoryResult,
   companyLookup
 }: {
   tenantId: string;
   contact: ApolloPushContactRecord;
   repMappings: ReturnType<typeof parseApolloRepMapping>;
   emailAccounts: ApolloEmailAccountDirectoryEntry[];
+  sequenceDirectoryResult: ApolloSequenceDirectoryLoadResult;
   companyLookup?: ApolloContactLookupResult;
 }): Promise<{ ok: true } & ApolloPushReadyContact | { ok: false; reason: string }> {
   const contactBlockReason = getContactSequencePushBlockReason(contact.contactStatus);
@@ -3880,6 +3887,28 @@ async function validateApolloPushCandidate({
     return { ok: false, reason: "No Apollo cadence is selected for this contact yet." };
   }
 
+  if (sequenceDirectoryResult.error) {
+    return {
+      ok: false,
+      reason: sequenceDirectoryResult.error
+    };
+  }
+
+  const liveSequence = resolveLiveApolloSequence({
+    requestedSequence: {
+      id: effectiveSequence.id,
+      name: effectiveSequence.name
+    },
+    directory: sequenceDirectoryResult.directory
+  });
+  if (!liveSequence.ok) {
+    return {
+      ok: false,
+      reason: liveSequence.reason
+    };
+  }
+  const resolvedEffectiveSequence = liveSequence.sequence;
+
   const liveState =
     contact.sequenceStatus !== SequenceStatus.NOT_STARTED ||
     contact.replyStatus !== ReplyStatus.NO_REPLY
@@ -3897,7 +3926,7 @@ async function validateApolloPushCandidate({
     sequenceStatus: liveState.sequenceStatus,
     replyStatus: liveState.replyStatus,
     currentSequenceId: liveState.sequenceId,
-    targetSequenceId: effectiveSequence.id
+    targetSequenceId: resolvedEffectiveSequence.id
   });
   if (transition.action === "BLOCK") {
     return { ok: false, reason: transition.reason };
@@ -3986,16 +4015,16 @@ async function validateApolloPushCandidate({
   }
 
   if (
-    contact.selectedSequenceId !== effectiveSequence.id ||
-    contact.selectedSequenceName !== effectiveSequence.name
+    contact.selectedSequenceId !== resolvedEffectiveSequence.id ||
+    contact.selectedSequenceName !== resolvedEffectiveSequence.name
   ) {
     await prisma.contact.update({
       where: {
         id: contact.id
       },
       data: {
-        selectedSequenceId: effectiveSequence.id,
-        selectedSequenceName: effectiveSequence.name
+        selectedSequenceId: resolvedEffectiveSequence.id,
+        selectedSequenceName: resolvedEffectiveSequence.name
       }
     });
   }
@@ -4017,8 +4046,8 @@ async function validateApolloPushCandidate({
     apolloOrganizationId: contact.company.apolloOrganizationId,
     fullName: contact.fullName,
     apolloContactId,
-    sequenceId: effectiveSequence.id,
-    sequenceName: effectiveSequence.name,
+    sequenceId: resolvedEffectiveSequence.id,
+    sequenceName: resolvedEffectiveSequence.name,
     apolloOwnerUserId: repMapping.apolloUserId,
     sendFromEmailAccountId: resolvedSendFromEmailAccountId,
     requiresAiDraft,
@@ -4029,6 +4058,32 @@ async function validateApolloPushCandidate({
         : null,
     alreadyEnrolled: transition.action === "ALREADY_ENROLLED"
   };
+}
+
+type ApolloSequenceDirectoryLoadResult =
+  | {
+      directory: ApolloSequenceDirectoryEntry[];
+      error: null;
+    }
+  | {
+      directory: [];
+      error: string;
+    };
+
+async function loadLiveApolloSequenceDirectory(): Promise<ApolloSequenceDirectoryLoadResult> {
+  try {
+    const directory = await fetchApolloSequenceDirectory();
+    return {
+      directory,
+      error: null
+    };
+  } catch {
+    return {
+      directory: [],
+      error:
+        "Newl Apps could not verify the live Apollo cadence directory. No enrollment was attempted; retry the approved contact after Apollo is available."
+    };
+  }
 }
 
 async function ensureApolloContactIdForPush({

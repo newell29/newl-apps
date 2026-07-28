@@ -174,7 +174,10 @@ The layout is non-destructive: it does not migrate, delete, or rewrite existing 
    approved but still performs no customer communication.
 10. The explicit **Approve selected & enroll** action and the background worker both recheck the current Hunter
     handoff, plan approval, draft requirements, suppression, contact approval, sender mapping, email, company safety,
-    and existing sequence history before any external write. If contact discovery produced only an Apollo person ID,
+    and existing sequence history before any external write. The worker refreshes Apollo's active cadence directory
+    once per job and converts any stored Hunter cadence key to the unique live Apollo sequence ID by exact cadence
+    name; an absent, inactive, duplicate, or unreadable cadence fails before custom-field or enrollment writes. If
+    contact discovery produced only an Apollo person ID,
     the worker first looks for the exact saved contact and otherwise uses Apollo's zero-credit Create Contact endpoint
     with deduplication enabled. The returned saved-contact ID is persisted tenant-safely before custom-field sync and
     cadence enrollment.

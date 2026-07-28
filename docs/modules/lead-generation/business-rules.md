@@ -148,6 +148,8 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
   conservative statements about Newl's own services, but it does not prove a prospect event, need, volume, timing,
   incumbent relationship, or buyer responsibility.
 - A Hunter cadence contains three emails on days 0, 4, and 10. A separate manual call task on day 7 is permitted only for a Hot opportunity. Hunter does not add LinkedIn tasks to Apollo cadences.
+- Hunter cadence catalog keys are planning identifiers only. Customer enrollment requires one active Apollo cadence
+  with the exact managed name and always uses Apollo's live sequence ID.
 - Every strategy and step must cite a saved evidence ID. Deterministic QA validates citations, ordering, channel mix,
   lengths, unsupported URLs, banned generic phrases, and unsupported quantified shipment/TEU/store/facility/location
   claims. A conservative model critic separately checks semantic grounding and buyer-responsibility assumptions.
