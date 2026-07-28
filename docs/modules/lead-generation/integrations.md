@@ -186,6 +186,12 @@ ID, exact email, LinkedIn URL, or exact name/title. If no saved contact exists, 
 Apollo responses with a conflicting email fail closed, and the saved contact ID is persisted with tenant filtering
 before custom-field or cadence writes.
 
+Hunter's catalog keys such as `hunter-executive-referral` are internal planning identifiers, not Apollo sequence IDs.
+Immediately before enrollment, Newl Apps reads Apollo's live active-cadence directory once for the job, accepts an
+exact live ID or resolves one unique exact cadence-name match, and persists the resolved ID on the contact. Missing,
+inactive, duplicate-name, or unavailable cadence data fails closed. The Apollo integration client also rejects known
+Newl Apps catalog keys so they can never be transmitted to Apollo's enrollment endpoint.
+
 The Apollo push path remains deliberately two-phase:
 
 1. submit the selected contact IDs to the tenant-configured cadence and sender;

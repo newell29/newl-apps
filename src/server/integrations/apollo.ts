@@ -3,6 +3,15 @@ import { ApolloCompanyMatchClassification, ReplyStatus, SequenceStatus } from "@
 const DEFAULT_BASE_URL = "https://api.apollo.io";
 const DEFAULT_PAGE_SIZE = 100;
 const APOLLO_CONTACT_PAGE_SIZE = 25;
+const INTERNAL_SEQUENCE_KEYS = new Set([
+  "hunter-email-only",
+  "hunter-executive-referral",
+  "houston-import-decision-maker",
+  "charlotte-warehouse-decision-maker",
+  "standard-logistics-outreach",
+  "warehouse-capacity-outreach",
+  "general-newl-group-intro"
+]);
 const APOLLO_PRIMARY_ROLE_KEYWORDS = [
   "logistics",
   "supply chain",
@@ -1006,6 +1015,12 @@ export async function pushApolloContactsToSequence(
 
   if (!sequenceId) {
     throw new Error("Apollo sequence push requires a sequence ID.");
+  }
+  if (INTERNAL_SEQUENCE_KEYS.has(sequenceId)) {
+    throw new Error(
+      `${sequenceId} is an internal Newl Apps cadence key, not an Apollo sequence ID. ` +
+        "Resolve the live Apollo cadence before enrollment."
+    );
   }
 
   if (!sequenceOwnerUserId) {
