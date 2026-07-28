@@ -157,9 +157,12 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
   communication occurs.
 - A latest unresolved Apollo match blocks automatic repeat lookup. Transient processing failures receive at most
   three attempts; research remains completed and the handoff job records the independent failure.
-- Deterministic buyer filtering runs before model review and cannot be overridden. The contact-fit model may only
-  advance a `PRIMARY` result at confidence 70 or above or a `SECONDARY` result at confidence 80 or above.
-  `REVIEW` and `REJECT` remain visible without automatic sequence generation.
+- Deterministic contact safety runs before model review and cannot be overridden. Model-qualified `PRIMARY` 70+
+  and `SECONDARY` 80+ contacts rank first. An explicit manager-or-higher logistics/operations buyer role may still
+  receive an unapproved human-review Outreach Plan when the model is conservative; replies, bounces, rejection,
+  do-not-contact, and seller-side roles remain hard stops.
+- An old negative reply or out-of-office response suppresses that contact, not every other person at the company.
+  A generic reply requiring review, positive reply, or meeting booked remains a company-level planning/research stop.
 - Contact-fit results are tied to the exact Hunter prospecting decision and prompt version. They are reused on an
   identical retry and invalidated automatically when a new research decision changes the opportunity.
 

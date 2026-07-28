@@ -262,6 +262,9 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   the 100-result organization-scoped employee request and the always-run multi-title request. Finding an acceptable
   person on the generic first page must not short-circuit relevant-title retrieval. The buyer-role model receives the
   best 10 merged candidates; the configured `maxContactsPerCompany` limits final selection, not discovery.
+- A legacy Apollo account ID that returns one partial person must not prevent recovery to Apollo's nested global
+  organization ID. Compare the separate **Apollo people found**, **Buyer-role candidates**, and **Contacts evaluated**
+  counters; a large drop now identifies whether discovery, deterministic ranking, or model review caused it.
 - Also verify that `organization_ids` contains Apollo's nested global organization ID rather than the saved account
   record ID. A legacy account ID that returns no employees may be recovered only from one exact organization identity;
   parent/sibling evidence must produce `MATCH_QUALITY_REVIEW` and an empty contact set.

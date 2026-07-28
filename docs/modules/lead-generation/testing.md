@@ -216,20 +216,22 @@ Regression coverage must prove:
 3. machine routes ignore caller-supplied tenant identifiers and use ingestion authentication;
 4. each request processes at most one company and persisted leases, results, attempts, and retry dates survive worker restart;
 5. an unresolved latest Apollo company match blocks repeat discovery and remains review-required;
-6. saved contacts, a 100-result organization-scoped employee search, and an always-run multi-title search are merged and deduplicated before ranking; Apollo account IDs are resolved to the nested global organization ID, and sibling/parent organizations remain excluded;
+6. saved contacts, a 100-result organization-scoped employee search, and an always-run multi-title search are merged and deduplicated before ranking; Apollo account IDs are resolved to the nested global organization ID even when the stale ID returns one partial person, and sibling/parent organizations remain excluded;
 7. deterministic ranking excludes seller-side and unidentifiable contacts, gives the buyer-role model the best 10 candidates, and caps final selection at `maxContactsPerCompany`;
-8. buyer-role review uses strict structured output, returns the exact requested contact IDs, and accepts only Primary 70+ or Secondary 80+;
+8. buyer-role review uses strict structured output and returns the exact requested contact IDs; model-qualified contacts rank first, while an explicit manager-or-higher logistics/operations buyer remains eligible for an unapproved human-review plan;
 9. the manual current-opportunity handoff requires completed company research, refreshes the deterministic plan, and queues the same bounded Assisted-mode job without rerunning research;
 10. the same prompt version and prospecting decision reuse a cached review, while a new decision requires fresh review;
 11. imported contacts remain `REVIEWING`, unapproved, unassigned, and unenrolled;
 12. plan generation uses the saved Hunter/TradeMining evidence ledger and persists QA failure rather than bypassing it;
 13. no assisted-handoff path creates a lead, changes a pipeline stage, approves a plan/contact, writes an Apollo cadence, or sends communication; and
 14. the Mac worker drains the queue after research and resumes unfinished jobs during its normal loop.
-15. legacy pre-engagement `Lead` rows, individual do-not-contact records, and prior-sequence evidence do not suppress
-    a current Hot/Qualified company. Current customers and company-level replies remain excluded; do-not-contact,
+15. legacy pre-engagement `Lead` rows, old negative/out-of-office contacts, individual do-not-contact records, and
+    prior-sequence evidence do not suppress a current Hot/Qualified company. Current customers, generic replies
+    requiring review, positive replies, and meetings remain company-level stops; contact-level do-not-contact,
     reply, and bounce safety is enforced on each selected contact.
-16. Automation Settings reports the latest handoff's queued companies, processed companies, evaluated Apollo
-    candidates, created plans, QA failures, and per-company terminal reason as separate values.
+16. Automation Settings reports the latest handoff's queued companies, processed companies, Apollo people found,
+    deterministic buyer-role candidates, evaluated contacts, created plans, QA failures, and per-company terminal
+    reason as separate values.
 17. same-domain regional brand shortening such as `SALICE AMERICA INC` to Apollo organization `Salice` is accepted,
     while different-domain parents and sibling companies still fail closed.
 18. an approved contact with finished prior cadence history can enroll in Hunter; an active or paused different
