@@ -450,6 +450,14 @@ describe("fetchApolloContactsForCompany", () => {
         } as unknown as Response;
       }
 
+      if (url.endsWith("/api/v1/accounts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ accounts: [] })
+        } as unknown as Response;
+      }
+
       if (url.endsWith("/api/v1/contacts/search")) {
         return {
           ok: true,
@@ -553,6 +561,14 @@ describe("fetchApolloContactsForCompany", () => {
         } as unknown as Response;
       }
 
+      if (url.endsWith("/api/v1/accounts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ accounts: [] })
+        } as unknown as Response;
+      }
+
       if (url.endsWith("/api/v1/contacts/search")) {
         return {
           ok: true,
@@ -650,6 +666,14 @@ describe("fetchApolloContactsForCompany", () => {
           ok: true,
           status: 200,
           json: vi.fn().mockResolvedValue({ organizations: [] })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/accounts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ accounts: [] })
         } as unknown as Response;
       }
 
@@ -911,6 +935,90 @@ describe("fetchApolloContactsForCompany", () => {
     ).toBe(true);
   });
 
+  it("recovers a saved account that Apollo omits from organization search", async () => {
+    const accountId = "661ec0f545d31b00076e28d9";
+    const organizationId = "atlas-copco-global-organization";
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ organizations: [] })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/accounts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            accounts: [{
+              id: accountId,
+              organization_id: organizationId,
+              name: "ATLAS COPCO COMPRESSORS LLC",
+              primary_domain: "atlascopco.com"
+            }]
+          })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ contacts: [] })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+        if (Array.isArray(body.organization_ids) && body.organization_ids.includes(accountId)) {
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({ people: [] })
+          } as unknown as Response;
+        }
+
+        expect(body.organization_ids).toEqual([organizationId]);
+        expect(body.q_organization_domains_list).toBeUndefined();
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            people: [{
+              id: "atlas-supply-chain-manager",
+              name: "Aaron Rowsell",
+              title: "Supply Chain Manager",
+              organization: {
+                name: "Atlas Copco",
+                primary_domain: "atlascopco.com"
+              }
+            }]
+          })
+        } as unknown as Response;
+      }
+
+      throw new Error(`Unexpected Apollo URL in test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "ATLAS COPCO COMPRESSORS LLC",
+      domain: "atlascopco.com",
+      apolloOrganizationId: accountId
+    });
+
+    expect(result.organizationId).toBe(organizationId);
+    expect(result.match.classification).toBe("DIRECT_COMPANY");
+    expect(result.match.matchReason).toContain("saved-account directory");
+    expect(result.contacts.map((contact) => contact.fullName)).toEqual(["Aaron Rowsell"]);
+    expect(
+      fetchMock.mock.calls.some(([request]) => String(request).endsWith("/api/v1/accounts/search"))
+    ).toBe(true);
+  });
+
   it("accepts a same-domain shortened regional brand and recovers despite a partial account-ID result", async () => {
     const accountId = "661ec0fb45d31b00076e3598";
     const organizationId = "salice-global-organization";
@@ -1041,6 +1149,14 @@ describe("fetchApolloContactsForCompany", () => {
               }
             }]
           })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/accounts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ accounts: [] })
         } as unknown as Response;
       }
 

@@ -2,6 +2,7 @@ import { ContactStatus, ReplyStatus, SequenceStatus } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
+  isActionableHunterPlanState,
   isContactEligibleForFreshOutreach,
   isContactFitAutoEligible,
   isStrongHunterBuyerRole,
@@ -187,6 +188,17 @@ describe("Hunter assisted outreach handoff", () => {
       disposition: "REJECT",
       confidence: 100
     })).toBe(false);
+  });
+
+  it("keeps an existing current outreach plan actionable during a contact recheck", () => {
+    expect(isActionableHunterPlanState("qa_passed")).toBe(true);
+    expect(isActionableHunterPlanState("qa_failed")).toBe(true);
+    expect(isActionableHunterPlanState("already_generated")).toBe(true);
+    expect(isActionableHunterPlanState("not_required")).toBe(false);
+    expect(isActionableHunterPlanState("unranked")).toBe(false);
+    expect(isActionableHunterPlanState("ineligible")).toBe(false);
+    expect(isActionableHunterPlanState("sequence_missing")).toBe(false);
+    expect(isActionableHunterPlanState("evidence_missing")).toBe(false);
   });
 
   it("keeps obvious buyer roles available for human review when the model is conservative", () => {

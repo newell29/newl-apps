@@ -295,18 +295,21 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Cause: an Apollo account ID was stored in `Company.apolloOrganizationId` and then submitted to People API Search,
   which requires Apollo's nested global organization ID. Apollo can expose both identifiers in the same account or
   saved-contact payload.
-- Safe recovery: Hunter first resolves every saved account mapping through bounded company search and uses Apollo's
-  nested canonical organization ID for both employee requests, even when no domain is stored. An exact Apollo
-  account-to-organization relationship may resolve a zero-employee legal-entity card to its operating parent/brand.
-  Saved-contact and People Search organization metadata remain a fallback for older records. Hunter filters every
-  candidate back to the resolved organization and lets the existing direct-match transaction replace the stale
-  identifier.
+- Safe recovery: Hunter performs bounded Organization Search for unsaved companies, but Apollo intentionally omits
+  already-saved accounts from that endpoint. When a mapped account produces at most one employee and Organization
+  Search cannot resolve it, Hunter uses Apollo's zero-credit saved-account search to require the exact account ID and
+  legal-company identity, reads its nested canonical organization ID, and repeats both employee requests against
+  that ID alone. The expected domain validates the returned people instead of being combined with
+  `organization_ids`, which could over-constrain a legal subsidiary mapped to an operating parent/brand. Saved-contact
+  and People Search organization metadata remain a fallback for older records. Hunter filters every candidate back
+  to the resolved organization and lets the existing direct-match transaction replace the stale identifier.
 - Ambiguity rule: a parent, subsidiary, sibling, or multiple exact organization candidate becomes
   `MATCH_QUALITY_REVIEW`; no contacts are imported and the AI buyer-role review is not run. Domain-wide employee
   results alone cannot authorize a match.
-- Regression coverage: `tests/apollo-integration.test.ts` covers domainless Stabilus and Salice account IDs,
-  a Silfab legal-entity account resolving through its explicit Apollo parent relationship, and an unrelated Hyosung
-  parent-company result failing closed.
+- Regression coverage: `tests/apollo-integration.test.ts` covers an Atlas Copco account omitted from Organization
+  Search but present in the saved-account directory, domainless Stabilus and Salice account IDs, a Silfab legal-entity
+  account resolving through its explicit Apollo parent relationship, and an unrelated Hyosung parent-company result
+  failing closed.
 
 ### Apollo People Search returns employees but Hunter still keeps the same saved contacts
 

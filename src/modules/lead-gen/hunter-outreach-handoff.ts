@@ -705,9 +705,10 @@ async function processCompany({
       forceRegenerate: false,
       generateWhenNotRequired: true
     });
-    if (generated.state === "qa_passed") plansGenerated += 1;
-    if (generated.state === "qa_failed") {
+    if (isActionableHunterPlanState(generated.state)) {
       plansGenerated += 1;
+    }
+    if (generated.state === "qa_failed") {
       qaFailedPlans += 1;
     }
   }
@@ -943,6 +944,24 @@ export function isContactFitAutoEligible(review: HunterContactFitReview) {
   return (
     (review.disposition === "PRIMARY" && review.confidence >= 70) ||
     (review.disposition === "SECONDARY" && review.confidence >= 80)
+  );
+}
+
+export function isActionableHunterPlanState(
+  state:
+    | "qa_passed"
+    | "qa_failed"
+    | "already_generated"
+    | "not_required"
+    | "unranked"
+    | "ineligible"
+    | "sequence_missing"
+    | "evidence_missing"
+) {
+  return (
+    state === "qa_passed" ||
+    state === "qa_failed" ||
+    state === "already_generated"
   );
 }
 
