@@ -28,7 +28,7 @@ describe("Hunter company deep research", () => {
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL).toBe("qwen3.5:35b");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL).toBe("kimi-k2.6");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL).toBe("kimi-k3");
-    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v13");
+    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v15");
     expect(HUNTER_COMPANY_RESEARCH_TRANSACTION_TIMEOUT_MS).toBe(30_000);
     expect(HUNTER_COMPANY_RESEARCH_SAFETY).toEqual({
       externalWrites: false,
@@ -988,6 +988,199 @@ describe("Hunter company deep research", () => {
     });
   });
 
+  it("hands off a current logistics vacancy instead of a footprint or salary page", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'EXAMPLE COMPONENTS INC.','companyKey':'example-components-inc'}",
+      "evidence=[{'pass':'IDENTITY','sourceType':'FIRST_PARTY','firstParty':True,'title':'Example Components','excerpt':'Example Components is a U.S. manufacturer.','publishedAt':None},{'pass':'DISTRIBUTION_FOOTPRINT','sourceType':'DIRECTORY','firstParty':False,'title':'Example Components footprint','excerpt':'Example Components operates a manufacturing site.','publishedAt':None},{'pass':'CAREERS','sourceType':'CAREERS','firstParty':False,'title':'Warehouse Supervisor Salary in Example City','excerpt':'Example Components Warehouse Supervisor salary records and average annual salary.','publishedAt':None},{'pass':'CAREERS','sourceType':'CAREERS','firstParty':False,'title':'Operations Logistics Manager - Example Components','excerpt':'Example Components is hiring an Operations Logistics Manager. Apply now to manage inbound materials and warehouse operations.','publishedAt':None}]",
+      "synthesis={'identityDisposition':'PASS','identityConfidence':90,'identityReason':'Verified.','confidence':82,'freshness':'CURRENT','triggerEvidenceIndices':[1],'opportunitySummary':'The company footprint supports current fit.','signalType':'HIRING','missingEvidence':[],'rationale':'Current operations.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
+      "vacancies=r.specific_logistics_management_vacancy_indices(candidate,evidence)",
+      "preferred=r.preferred_model_evidence_indices(candidate,evidence,synthesis)",
+      "normalized=r.normalize_synthesis_for_evidence(candidate,evidence,synthesis)",
+      "print(json.dumps({'vacancies':vacancies,'preferred':preferred,'triggers':normalized['triggerEvidenceIndices'],'summary':normalized['opportunitySummary'],'signalType':normalized['signalType']}))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual({
+      vacancies: [3],
+      preferred: [3, 1],
+      triggers: [3],
+      summary:
+        "Operations Logistics Manager - Example Components: Example Components is hiring an Operations Logistics Manager. Apply now to manage inbound materials and warehouse operations.",
+      signalType: "HIRING"
+    });
+  });
+
+  it("does not convert salary records or missing vacancy evidence into current openings", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'EXAMPLE COMPONENTS INC.','companyKey':'example-components-inc'}",
+      "evidence=[{'pass':'IDENTITY','sourceType':'FIRST_PARTY','firstParty':True,'title':'Example Components','excerpt':'Example Components is a U.S. manufacturer.','publishedAt':None},{'pass':'DISTRIBUTION_FOOTPRINT','sourceType':'DIRECTORY','firstParty':False,'title':'Example Components footprint','excerpt':'Example Components operates a manufacturing site.','publishedAt':None},{'pass':'CAREERS','sourceType':'CAREERS','firstParty':False,'title':'Supply Chain Manager Salary in Example City','excerpt':'Example Components Supply Chain Manager salary records and average annual salary.','publishedAt':None}]",
+      "synthesis={'identityDisposition':'PASS','identityConfidence':90,'identityReason':'Verified.','confidence':82,'freshness':'CURRENT','triggerEvidenceIndices':[2],'opportunitySummary':'Example Components is hiring a Supply Chain Manager.','signalType':'HIRING','missingEvidence':[],'rationale':'Current hiring.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
+      "normalized=r.normalize_synthesis_for_evidence(candidate,evidence,synthesis)",
+      "missing_evidence=evidence[:2]",
+      "missing_synthesis={**synthesis,'triggerEvidenceIndices':[1],'opportunitySummary':'Example Components is hiring a warehouse leader.'}",
+      "missing_normalized=r.normalize_synthesis_for_evidence(candidate,missing_evidence,missing_synthesis)",
+      "print(json.dumps({'salary':{'vacancies':r.specific_logistics_management_vacancy_indices(candidate,evidence),'triggers':normalized['triggerEvidenceIndices'],'summary':normalized['opportunitySummary'],'signalType':normalized['signalType'],'missingEvidence':normalized['missingEvidence']},'missing':{'vacancies':r.specific_logistics_management_vacancy_indices(candidate,missing_evidence),'triggers':missing_normalized['triggerEvidenceIndices'],'summary':missing_normalized['opportunitySummary'],'signalType':missing_normalized['signalType'],'missingEvidence':missing_normalized['missingEvidence']}}))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+    const normalized = JSON.parse(stdout) as {
+      salary: {
+        vacancies: number[];
+        triggers: number[];
+        summary: string;
+        signalType: string;
+        missingEvidence: string[];
+      };
+      missing: {
+        vacancies: number[];
+        triggers: number[];
+        summary: string;
+        signalType: string;
+        missingEvidence: string[];
+      };
+    };
+
+    expect(normalized.salary).toMatchObject({
+      vacancies: [],
+      triggers: [1],
+      signalType: "OTHER"
+    });
+    expect(normalized.salary.summary).toContain("operates a manufacturing site");
+    expect(normalized.salary.summary).not.toContain("salary records");
+    expect(normalized.salary.summary).not.toContain("is hiring");
+    expect(normalized.salary.missingEvidence).toContain(
+      "Hiring wording was removed because the saved evidence did not contain a current exact-company logistics-management vacancy."
+    );
+    expect(normalized.missing).toMatchObject({
+      vacancies: [],
+      triggers: [1],
+      signalType: "OTHER"
+    });
+    expect(normalized.missing.summary).toContain("operates a manufacturing site");
+    expect(normalized.missing.summary).not.toContain("is hiring");
+    expect(normalized.missing.missingEvidence).toContain(
+      "Hiring wording was removed because the saved evidence did not contain a current exact-company logistics-management vacancy."
+    );
+  });
+
+  it("rejects role taxonomies, job descriptions, employee profiles, and generic duties as vacancies", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'EXAMPLE COMPONENTS INC.','companyKey':'example-components-inc'}",
+      "base=[{'pass':'IDENTITY','sourceType':'FIRST_PARTY','firstParty':True,'title':'Example Components','excerpt':'Example Components is a U.S. manufacturer.','publishedAt':None},{'pass':'DISTRIBUTION_FOOTPRINT','sourceType':'FIRST_PARTY','firstParty':True,'title':'Example Components locations','excerpt':'Example Components operates a manufacturing and distribution site.','publishedAt':None}]",
+      "invalid=[{'pass':'CAREERS','sourceType':'CAREERS','firstParty':False,'title':'Warehouse Supervisor Role Taxonomy','excerpt':'Example Components warehouse supervisor role taxonomy with responsibilities and qualifications. Apply now when adapting this reference.','publishedAt':None},{'pass':'CAREERS','sourceType':'CAREERS','firstParty':False,'title':'Supply Chain Manager Job Description','excerpt':'Example Components sample job description lists responsibilities and qualifications. Join our team language is included as a template.','publishedAt':None},{'pass':'CAREERS','sourceType':'CAREERS','firstParty':False,'title':'Employee Profile: Example Person, Logistics Manager','excerpt':'Example Person works at Example Components as Logistics Manager. The employee profile says the team is seeking qualified candidates.','publishedAt':None},{'pass':'CAREERS','sourceType':'CAREERS','firstParty':False,'title':'Distribution Manager responsibilities','excerpt':'Example Components Distribution Manager responsibilities include inventory control. Qualifications include five years of experience.','publishedAt':None}]",
+      "results=[]",
+      "synthesis={'identityDisposition':'PASS','identityConfidence':90,'identityReason':'Verified.','confidence':82,'freshness':'CURRENT','triggerEvidenceIndices':[2],'opportunitySummary':'Example Components is hiring a logistics manager.','signalType':'HIRING','missingEvidence':[],'rationale':'Current hiring.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
+      "exec(\"for row in invalid:\\n evidence=base+[row]\\n normalized=r.normalize_synthesis_for_evidence(candidate,evidence,synthesis)\\n results.append({'vacancies':r.specific_logistics_management_vacancy_indices(candidate,evidence),'triggers':normalized['triggerEvidenceIndices'],'summary':normalized['opportunitySummary'],'signalType':normalized['signalType']})\")",
+      "print(json.dumps(results))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+    const results = JSON.parse(stdout) as Array<{
+      vacancies: number[];
+      triggers: number[];
+      summary: string;
+      signalType: string;
+    }>;
+
+    expect(results).toHaveLength(4);
+    for (const result of results) {
+      expect(result).toMatchObject({
+        vacancies: [],
+        triggers: [1],
+        signalType: "OTHER"
+      });
+      expect(result.summary).toContain("manufacturing and distribution site");
+      expect(result.summary).not.toContain("is hiring");
+    }
+  });
+
+  it("rejects a first-party career path that advertises only future opportunities", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'EXAMPLE COMPONENTS INC.','companyKey':'example-components-inc'}",
+      "evidence=[{'pass':'IDENTITY','sourceType':'FIRST_PARTY','firstParty':True,'title':'Example Components','excerpt':'Example Components is a U.S. manufacturer.','publishedAt':None},{'pass':'DISTRIBUTION_FOOTPRINT','sourceType':'FIRST_PARTY','firstParty':True,'title':'Example Components locations','excerpt':'Example Components operates a manufacturing and distribution site.','publishedAt':None},{'pass':'CAREERS','sourceType':'CAREERS','firstParty':True,'title':'Warehouse Manager career path | Example Components','excerpt':'Learn how Warehouse Managers grow at Example Components. Join our team and apply for future opportunities.','publishedAt':None}]",
+      "synthesis={'identityDisposition':'PASS','identityConfidence':90,'identityReason':'Verified.','confidence':82,'freshness':'CURRENT','triggerEvidenceIndices':[2],'opportunitySummary':'Example Components is hiring a Warehouse Manager.','signalType':'HIRING','missingEvidence':[],'rationale':'Current hiring.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
+      "normalized=r.normalize_synthesis_for_evidence(candidate,evidence,synthesis)",
+      "print(json.dumps({'vacancies':r.specific_logistics_management_vacancy_indices(candidate,evidence),'triggers':normalized['triggerEvidenceIndices'],'summary':normalized['opportunitySummary'],'signalType':normalized['signalType'],'missingEvidence':normalized['missingEvidence']}))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual({
+      vacancies: [],
+      triggers: [1],
+      summary:
+        "Example Components locations: Example Components operates a manufacturing and distribution site.",
+      signalType: "OTHER",
+      missingEvidence: [
+        "Hiring wording was removed because the saved evidence did not contain a current exact-company logistics-management vacancy."
+      ]
+    });
+  });
+
+  it("selects duplicate vacancies deterministically and fails closed on incomplete careers rows", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'EXAMPLE COMPONENTS INC.','companyKey':'example-components-inc'}",
+      "base=[{'pass':'IDENTITY','sourceType':'FIRST_PARTY','firstParty':True,'title':'Example Components','excerpt':'Example Components is a U.S. manufacturer.','publishedAt':None},{'pass':'DISTRIBUTION_FOOTPRINT','sourceType':'FIRST_PARTY','firstParty':True,'title':'Example Components locations','excerpt':'Example Components operates a distribution site.','publishedAt':None}]",
+      "vacancy={'pass':'CAREERS','sourceType':'CAREERS','firstParty':False,'title':'Logistics Operations Manager - Example Components','excerpt':'Example Components is hiring a Logistics Operations Manager. Apply now to lead warehouse operations.','publishedAt':None}",
+      "duplicates=base+[vacancy,dict(vacancy)]",
+      "incomplete=base+[{'pass':'CAREERS','sourceType':'CAREERS','firstParty':False,'title':'','excerpt':'Example Components is hiring a Warehouse Manager. Apply now.','publishedAt':None},{'pass':'CAREERS','sourceType':'CAREERS','firstParty':False,'title':'Supply Chain Manager - Example Components','excerpt':'','publishedAt':None}]",
+      "synthesis={'identityDisposition':'PASS','identityConfidence':90,'identityReason':'Verified.','confidence':82,'freshness':'CURRENT','triggerEvidenceIndices':[2],'opportunitySummary':'Example Components is hiring a logistics manager.','signalType':'HIRING','missingEvidence':[],'rationale':'Current hiring.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
+      "duplicate_normalized=r.normalize_synthesis_for_evidence(candidate,duplicates,synthesis)",
+      "incomplete_normalized=r.normalize_synthesis_for_evidence(candidate,incomplete,synthesis)",
+      "print(json.dumps({'duplicateVacancies':r.specific_logistics_management_vacancy_indices(candidate,duplicates),'duplicateTriggers':duplicate_normalized['triggerEvidenceIndices'],'duplicateSummary':duplicate_normalized['opportunitySummary'],'incompleteVacancies':r.specific_logistics_management_vacancy_indices(candidate,incomplete),'incompleteTriggers':incomplete_normalized['triggerEvidenceIndices'],'incompleteSummary':incomplete_normalized['opportunitySummary'],'incompleteSignalType':incomplete_normalized['signalType']}))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual({
+      duplicateVacancies: [2],
+      duplicateTriggers: [2],
+      duplicateSummary:
+        "Logistics Operations Manager - Example Components: Example Components is hiring a Logistics Operations Manager. Apply now to lead warehouse operations.",
+      incompleteVacancies: [],
+      incompleteTriggers: [1],
+      incompleteSummary:
+        "Example Components locations: Example Components operates a distribution site.",
+      incompleteSignalType: "OTHER"
+    });
+  });
+
   it("guarantees reconciled trigger evidence into compact Kimi packets", async () => {
     const program = [
       "import json",
@@ -1193,7 +1386,7 @@ function completion() {
       synthesis: {
         provider: "OLLAMA",
         name: "qwen3.5:35b",
-        promptVersion: "hunter-company-research-v13",
+        promptVersion: "hunter-company-research-v15",
         structuredOutput: true,
         inputTokens: 2000,
         outputTokens: 700,
@@ -1202,7 +1395,7 @@ function completion() {
       scoring: {
         provider: "KIMI",
         name: "kimi-k2.6",
-        promptVersion: "hunter-company-research-v13",
+        promptVersion: "hunter-company-research-v15",
         structuredOutput: true,
         inputTokens: 1800,
         cachedInputTokens: 200,
@@ -1213,7 +1406,7 @@ function completion() {
       validation: {
         provider: "KIMI",
         name: "kimi-k3",
-        promptVersion: "hunter-company-research-v13",
+        promptVersion: "hunter-company-research-v15",
         structuredOutput: true,
         status: "SUCCESS",
         reasoningEffort: "LOW",

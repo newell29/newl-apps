@@ -28,7 +28,7 @@ DEFAULT_QWEN_MODEL = "qwen3.5:35b"
 DEFAULT_KIMI_URL = "https://api.moonshot.ai/v1"
 DEFAULT_KIMI_MODEL = "kimi-k2.6"
 DEFAULT_KIMI_VALIDATOR_MODEL = "kimi-k3"
-PROMPT_VERSION = "hunter-company-research-v13"
+PROMPT_VERSION = "hunter-company-research-v15"
 ALLOWED_SERVICE_LINES = {"WAREHOUSING", "OCEAN_AIR", "TRUCKING"}
 ALLOWED_OPERATING_REGIONS = {"NORTH_AMERICA", "CHINA", "OTHER_FOREIGN", "UNKNOWN"}
 ALLOWED_SIGNAL_TYPES = {
@@ -933,6 +933,11 @@ def ollama_synthesis_request(
         "publishedAt value; a recent generic company profile cannot date an unrelated old event. CURRENT means current "
         "operating footprint or hiring evidence without a discrete trigger. STALE or NONE must not be "
         "described as a near-term trigger. Never invent a location, facility, buyer, event, or relationship. "
+        "A salary record, compensation reference, role taxonomy, employee profile, expired posting, generic "
+        "join-our-team invitation, or future-opportunities page does not prove a current vacancy. Describe an "
+        "open role only when opening, hiring, or application language is tied to that specific currently "
+        "available role, preserve the exact role wording from that evidence, and cite that vacancy rather than "
+        "a generic footprint or directory page. "
         "Determine companyCountry and operatingRegion only from public identity evidence about the company "
         "or its verified parent, never from TradeMining shipment origin, foreign port, product, or routing "
         "facts. companyCountry must be the full human country name such as United States, Canada, France, "
@@ -1790,7 +1795,8 @@ def recent_material_trigger_indices(
     return [index for _alias, _logistics, index in sorted(matches)[:2]]
 
 
-def specific_logistics_management_role_indices(
+def specific_logistics_management_vacancy_indices(
+    candidate: dict[str, Any],
     evidence: list[dict[str, Any]],
 ) -> list[int]:
     management_role_patterns = (
@@ -1812,21 +1818,110 @@ def specific_logistics_management_role_indices(
         r"distribution cent(?:er|re)s)\b",
         re.IGNORECASE,
     )
+    current_vacancy_pattern = re.compile(
+        r"\b(?:apply (?:now|today)|current openings?|job (?:opening|posting)|"
+        r"open (?:position|role|vacanc(?:y|ies))|we(?:'re| are) hiring|"
+        r"(?:is|are) hiring|accepting applications? for|"
+        r"(?:seeks?|seeking|looking for)\s+(?:qualified\s+)?"
+        r"(?:candidates?|applicants?|an?\s+))\b",
+        re.IGNORECASE,
+    )
+    non_vacancy_pattern = re.compile(
+        r"\b(?:salary records?|salary estimates?|average (?:annual )?salary|"
+        r"salaries for|compensation (?:data|report)|how much does .{0,80} make|"
+        r"(?:role|job|position|occupation(?:al)?)\s+(?:taxonomy|classification|"
+        r"catalog(?:ue)?|family|framework|reference|description|profile|overview)|"
+        r"(?:sample|template)\s+(?:role|job|position)\s+description|"
+        r"(?:employee|staff|team member|professional|leadership|linkedin)\s+"
+        r"(?:profile|bio(?:graphy)?|directory)|(?:current|former)\s+employee|"
+        r"works?\s+(?:at|for)|employment history|organizational chart|org chart|"
+        r"(?:future|upcoming)\s+(?:(?:career|job|employment)\s+)?opportunit(?:y|ies)|"
+        r"(?:future|upcoming)\s+(?:openings?|positions?|roles?|vacanc(?:y|ies))|"
+        r"(?:general|speculative)\s+applications?|talent (?:community|network|pool)|"
+        r"(?:no|without)\s+current\s+(?:openings?|positions?|vacanc(?:y|ies))|"
+        r"position (?:has been filled|is no longer available)|"
+        r"no longer accepting applications|expired (?:job|posting))\b",
+        re.IGNORECASE,
+    )
+    aliases = [
+        re.sub(r"[^a-z0-9]+", "", alias.lower())
+        for alias in company_search_aliases(candidate)
+        if len(re.sub(r"[^a-z0-9]+", "", alias.lower())) >= 5
+    ]
     matches: list[tuple[int, int, int]] = []
     for index, row in enumerate(evidence):
+        if not isinstance(row, dict):
+            continue
         if row.get("pass") != "CAREERS" and row.get("sourceType") != "CAREERS":
             continue
-        text = f"{row.get('title') or ''}\n{row.get('excerpt') or ''}"
+        title = clean(row.get("title"))
+        excerpt = clean(row.get("excerpt"))
+        if not title or not excerpt:
+            continue
+        text = f"{title}\n{excerpt}"
         if not any(pattern.search(text) for pattern in management_role_patterns):
+            continue
+        vacancy_segments = [
+            segment.strip()
+            for segment in re.split(r"(?:[\r\n]+|(?<=[.!?;])\s+)", text)
+            if segment.strip()
+        ]
+        has_role_specific_vacancy = any(
+            current_vacancy_pattern.search(segment)
+            and any(pattern.search(segment) for pattern in management_role_patterns)
+            for segment in vacancy_segments
+        )
+        if not has_role_specific_vacancy or non_vacancy_pattern.search(text):
+            continue
+        normalized_text = re.sub(r"[^a-z0-9]+", "", text.lower())
+        if row.get("firstParty") is not True and not any(
+            alias in normalized_text for alias in aliases
+        ):
             continue
         matches.append(
             (
+                0 if row.get("firstParty") is True else 1,
                 0 if multi_facility_pattern.search(text) else 1,
+                index,
+            )
+        )
+    return [index for _first_party, _multi_site, index in sorted(matches)[:1]]
+
+
+def current_account_fallback_evidence_indices(
+    evidence: list[dict[str, Any]],
+) -> list[int]:
+    """Select non-careers evidence when a claimed vacancy fails closed."""
+    pass_priority = {
+        "DISTRIBUTION_FOOTPRINT": 0,
+        "IDENTITY": 1,
+        "FRESH_EVENTS": 2,
+        "FOLLOW_UP": 3,
+    }
+    source_priority = {
+        "FIRST_PARTY": 0,
+        "GOVERNMENT": 1,
+        "NEWS": 2,
+        "OTHER": 3,
+        "DIRECTORY": 4,
+    }
+    ranked: list[tuple[int, int, int, int]] = []
+    for index, row in enumerate(evidence):
+        if not isinstance(row, dict):
+            continue
+        if row.get("pass") == "CAREERS" or row.get("sourceType") == "CAREERS":
+            continue
+        if not clean(row.get("title")) or not clean(row.get("excerpt")):
+            continue
+        ranked.append(
+            (
+                pass_priority.get(str(row.get("pass")), 9),
+                source_priority.get(str(row.get("sourceType")), 9),
                 0 if row.get("firstParty") is True else 1,
                 index,
             )
         )
-    return [index for _multi_site, _first_party, index in sorted(matches)[:1]]
+    return [sorted(ranked)[0][3]] if ranked else []
 
 
 def preferred_model_evidence_indices(
@@ -1835,8 +1930,11 @@ def preferred_model_evidence_indices(
     synthesis: Optional[dict[str, Any]] = None,
 ) -> list[int]:
     material_triggers = recent_material_trigger_indices(candidate, evidence)
-    specific_roles = specific_logistics_management_role_indices(evidence)
-    preferred = list(dict.fromkeys(material_triggers + specific_roles))
+    specific_vacancies = specific_logistics_management_vacancy_indices(
+        candidate,
+        evidence,
+    )
+    preferred = list(dict.fromkeys(material_triggers + specific_vacancies))
     if not material_triggers and synthesis:
         preferred.extend(
             index
@@ -1855,6 +1953,10 @@ def normalize_synthesis_for_evidence(
     missing_evidence = list(normalized.get("missingEvidence") or [])
     rationale = clean(normalized.get("rationale")) or ""
     material_trigger_indices = recent_material_trigger_indices(candidate, evidence)
+    vacancy_indices = specific_logistics_management_vacancy_indices(
+        candidate,
+        evidence,
+    )
     cited_recent_trigger = is_recent_trigger(normalized, evidence)
     cited_trigger_indices = [
         index
@@ -1902,6 +2004,65 @@ def normalize_synthesis_for_evidence(
         if message not in missing_evidence:
             missing_evidence.append(message)
         rationale = f"{rationale} {message}".strip()
+    if (
+        not material_trigger_indices
+        and normalized.get("freshness") == "CURRENT"
+        and vacancy_indices
+    ):
+        vacancy = evidence[vacancy_indices[0]]
+        normalized["triggerEvidenceIndices"] = vacancy_indices
+        normalized["opportunitySummary"] = bounded_utf16_text(
+            f"{vacancy.get('title') or 'Current logistics vacancy'}: "
+            f"{vacancy.get('excerpt') or ''}",
+            "A current logistics-management vacancy supports current account fit.",
+            2_000,
+        )
+        normalized["signalType"] = "HIRING"
+        message = (
+            "Deterministic evidence review handed off the strongest exact-company current "
+            "logistics-management vacancy and preserved its role wording."
+        )
+        rationale = f"{rationale} {message}".strip()
+    elif (
+        normalized.get("freshness") == "CURRENT"
+        and not vacancy_indices
+    ):
+        cited_indices = [
+            index
+            for index in normalized.get("triggerEvidenceIndices", [])
+            if isinstance(index, int) and 0 <= index < len(evidence)
+        ]
+        cites_non_vacancy_careers = any(
+            isinstance(evidence[index], dict)
+            and (
+                evidence[index].get("pass") == "CAREERS"
+                or evidence[index].get("sourceType") == "CAREERS"
+            )
+            for index in cited_indices
+        )
+        if normalized.get("signalType") == "HIRING" or cites_non_vacancy_careers:
+            normalized["signalType"] = (
+                "OTHER"
+                if normalized.get("signalType") == "HIRING"
+                else normalized.get("signalType")
+            )
+            fallback_indices = current_account_fallback_evidence_indices(evidence)
+            if fallback_indices:
+                normalized["triggerEvidenceIndices"] = fallback_indices
+                cited = evidence[fallback_indices[0]]
+                normalized["opportunitySummary"] = bounded_utf16_text(
+                    f"{cited.get('title') or 'Current account evidence'}: "
+                    f"{cited.get('excerpt') or ''}",
+                    "Current account evidence was retained without an unsupported hiring claim.",
+                    2_000,
+                )
+            message = (
+                "Hiring wording was removed because the saved evidence did not contain a current "
+                "exact-company logistics-management vacancy."
+            )
+            if message not in missing_evidence:
+                missing_evidence.append(message)
+            rationale = f"{rationale} {message}".strip()
     if (
         normalized.get("identityDisposition") != "PASS"
         and has_corroborating_first_party_identity(candidate, evidence)
