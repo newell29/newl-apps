@@ -116,7 +116,8 @@ export async function queueCurrentHunterOutreachHandoff({
   const plan = await runHunterDryPlan({
     tenantId,
     actorUserId,
-    trigger: "MANUAL"
+    trigger: "MANUAL",
+    candidateScope: "CURRENT_RESEARCHED_OUTREACH"
   });
   if (plan.state !== "completed") {
     return {

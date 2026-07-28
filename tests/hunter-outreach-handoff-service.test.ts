@@ -209,7 +209,8 @@ describe("Hunter assisted handoff queueing", () => {
     expect(runHunterDryPlan).toHaveBeenCalledWith({
       tenantId: "tenant-a",
       actorUserId: "user-a",
-      trigger: "MANUAL"
+      trigger: "MANUAL",
+      candidateScope: "CURRENT_RESEARCHED_OUTREACH"
     });
     expect(prisma.automationJobRun.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -220,6 +221,74 @@ describe("Hunter assisted handoff queueing", () => {
         })
       })
     });
+  });
+
+  it("freezes the complete researched Hot and Qualified cohort into the Apollo job", async () => {
+    prisma.automationJobRun.findFirst.mockResolvedValue({
+      id: "research-current"
+    });
+    prisma.hunterAutomationPolicy.findUnique.mockResolvedValue({
+      mode: HunterAutomationMode.ASSISTED,
+      killSwitch: false,
+      maxContactsPerCompany: 3
+    });
+    prisma.hunterProspectingDecision.findMany.mockResolvedValue(
+      Array.from({ length: 14 }, (_, index) => ({
+        id: `decision-${index + 1}`,
+        status: "WOULD_PURSUE",
+        companyId: `company-${index + 1}`,
+        companyName: `Researched Company ${index + 1}`,
+        recommendedPersona: "Director of Supply Chain",
+        serviceLine: "WAREHOUSING",
+        opportunityType: "Qualified logistics opportunity",
+        rationale: "Current Qwen/Kimi research passed.",
+        recommendedSender: "Alex",
+        recommendedCadence: "Warehousing Opportunity",
+        createdAt: new Date(),
+        company: {
+          hunterOpportunitySignals: [{
+            id: `signal-${index + 1}`,
+            sourceName: "Hunter company research",
+            serviceLine: "WAREHOUSING",
+            observedAt: new Date(),
+            evidence: {}
+          }]
+        }
+      }))
+    );
+    evaluateHunterOutreachEligibility.mockImplementation(
+      ({ researchSignal, prospectingDecision }) => ({
+        status: "ELIGIBLE",
+        directive: {
+          researchSignalId: researchSignal.id,
+          prospectingDecisionId: prospectingDecision.id,
+          recommendedPersona: "Director of Supply Chain"
+        }
+      })
+    );
+    prisma.automationJobRun.create.mockResolvedValue({
+      id: "handoff-complete-cohort"
+    });
+
+    await expect(
+      queueCurrentHunterOutreachHandoff({
+        tenantId: "tenant-a",
+        actorUserId: "user-a"
+      })
+    ).resolves.toEqual({
+      state: "queued",
+      runId: "handoff-complete-cohort",
+      companyCount: 14
+    });
+
+    const handoffInput =
+      prisma.automationJobRun.create.mock.calls[0]?.[0]?.data?.input;
+    expect(handoffInput.items).toHaveLength(14);
+    expect(
+      handoffInput.items.map((item: { companyId: string }) => item.companyId)
+    ).toEqual(
+      Array.from({ length: 14 }, (_, index) => `company-${index + 1}`)
+    );
   });
 
   it("does not create a plan or handoff without completed company research", async () => {

@@ -673,12 +673,30 @@ describe("fetchApolloContactsForCompany", () => {
     ]);
   });
 
-  it("recovers Apollo's global organization ID when a saved account ID returns no employees", async () => {
+  it("resolves a saved Apollo account ID to the canonical organization before employee search", async () => {
     const accountId = "63fe171e83950e00f3ecaadc";
     const organizationId = "612f7790266e9500a4be058d";
     const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            accounts: [{
+              id: accountId,
+              name: "Account-level Stabilus",
+              organization: {
+                id: organizationId,
+                name: "Stabilus",
+                primary_domain: "stabilus.com"
+              }
+            }]
+          })
+        } as unknown as Response;
+      }
 
       if (url.endsWith("/api/v1/contacts/search")) {
         return {
@@ -760,7 +778,9 @@ describe("fetchApolloContactsForCompany", () => {
 
     expect(result.organizationId).toBe(organizationId);
     expect(result.match.classification).toBe("DIRECT_COMPANY");
-    expect(result.match.matchReason).toContain("recovered Apollo's global organization ID");
+    expect(result.match.matchReason).toMatch(
+      /(?:canonical organization ID|global organization ID)/
+    );
     expect(result.contacts.map((contact) => contact.fullName)).toEqual([
       "Jason Councilman",
       "Mark Elrod"
@@ -774,6 +794,11 @@ describe("fetchApolloContactsForCompany", () => {
         (body) => Array.isArray(body.organization_ids) && body.organization_ids.includes(organizationId)
       )
     ).toBe(true);
+    expect(
+      peopleBodies.some(
+        (body) => Array.isArray(body.organization_ids) && body.organization_ids.includes(accountId)
+      )
+    ).toBe(false);
     expect(peopleBodies.some((body) => body.organization_ids === undefined)).toBe(false);
   });
 
@@ -783,6 +808,24 @@ describe("fetchApolloContactsForCompany", () => {
     vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            accounts: [{
+              id: accountId,
+              name: "Account-level Salice",
+              organization: {
+                id: organizationId,
+                name: "Salice",
+                primary_domain: "salice.com"
+              }
+            }]
+          })
+        } as unknown as Response;
+      }
 
       if (url.endsWith("/api/v1/contacts/search")) {
         return {
@@ -875,6 +918,23 @@ describe("fetchApolloContactsForCompany", () => {
     vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            accounts: [{
+              id: "parent-account",
+              organization: {
+                id: parentOrganizationId,
+                name: "Hyosung Corporation",
+                primary_domain: "hyosung.com"
+              }
+            }]
+          })
+        } as unknown as Response;
+      }
 
       if (url.endsWith("/api/v1/contacts/search")) {
         return {

@@ -510,7 +510,26 @@ export async function fetchApolloContactsForCompany(
   const providedOrganization = providedOrganizationId
     ? buildTrustedProvidedApolloOrganization(input, providedOrganizationId)
     : null;
-  const matchedOrganization = providedOrganization ?? (await findApolloOrganization(input, apiKey));
+  const discoveredOrganization =
+    !providedOrganizationId || normalizeDomain(input.domain)
+      ? await findApolloOrganization(input, apiKey)
+      : null;
+  const canonicalDiscoveredOrganization =
+    providedOrganizationId &&
+    discoveredOrganization?.id &&
+    discoveredOrganization.id !== providedOrganizationId &&
+    isDirectApolloCompanyMatch(discoveredOrganization)
+      ? {
+          ...discoveredOrganization,
+          matchReason:
+            `${discoveredOrganization.matchReason}; resolved the saved Apollo account ID ` +
+            `to Apollo's canonical organization ID before employee search`
+        }
+      : null;
+  const matchedOrganization =
+    canonicalDiscoveredOrganization ??
+    providedOrganization ??
+    discoveredOrganization;
   let effectiveMatchOrganization = matchedOrganization;
   let trustedMatchedOrganization = isDirectApolloCompanyMatch(matchedOrganization) ? matchedOrganization : null;
   let organizationIdForSearch = trustedMatchedOrganization?.id ?? providedOrganizationId ?? null;
