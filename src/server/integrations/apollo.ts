@@ -1263,8 +1263,6 @@ async function findApolloSavedAccountOrganization(
   apiKey: string,
   providedAccountId: string
 ): Promise<ApolloOrganizationCandidate | null> {
-  const inputAliases = buildCompanyNameAliases(input.companyName);
-
   for (const accountName of buildApolloOrganizationSearchQueries(input.companyName)) {
     const json = await postApolloJson("/api/v1/accounts/search", apiKey, {
       page: 1,
@@ -1278,41 +1276,98 @@ async function findApolloSavedAccountOrganization(
       continue;
     }
 
-    const accountNameFromApollo = readApolloString(exactAccount.rawPayload, [
-      "name",
-      "company_name",
-      "organization_name"
-    ]);
-    const accountAliases = buildCompanyNameAliases(accountNameFromApollo ?? "");
-    const safeAccountIdentity =
-      hasExactAliasMatch(inputAliases, accountAliases) ||
-      hasStrongBaseNameMatch(inputAliases, accountAliases) ||
-      hasSafeRegionalBrandAlias(inputAliases, accountAliases);
-    if (!safeAccountIdentity) {
-      return null;
-    }
-
-    const scored = scoreApolloOrganizationCandidate(
+    const trusted = trustExactApolloSavedAccount(
+      input,
       exactAccount,
-      input.companyName,
-      normalizeDomain(input.domain),
-      {
-        source: "saved-account-search",
-        account_id: providedAccountId
-      }
+      providedAccountId,
+      "saved-account-search"
     );
-    return {
-      ...scored,
-      score: Math.max(scored.score, 12),
-      strongBaseNameMatch: true,
-      classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
-      matchReason:
-        `direct company; exact saved Apollo account mapping; ` +
-        `resolved through Apollo's zero-credit saved-account directory`
-    };
+    if (trusted) return trusted;
+  }
+
+  // Account Search is name-dependent and can omit a saved account when the
+  // TradeMining legal name differs from Apollo's display name. The confirmed
+  // account ID is immutable, so retrieve that exact saved account directly
+  // before declaring that Apollo has no employees. Apollo documents this
+  // endpoint as zero-credit.
+  try {
+    const json = await getApolloJson(
+      `/api/v1/accounts/${encodeURIComponent(providedAccountId)}`,
+      apiKey
+    );
+    const account =
+      asRecord(json.account) ??
+      asRecord(json.data) ??
+      asRecord(json.company) ??
+      null;
+    const exactAccount = account
+      ? parseApolloOrganizations({ accounts: [account] }).find(
+          (candidate) =>
+            readApolloString(candidate.rawPayload, ["id"]) === providedAccountId
+        ) ?? null
+      : null;
+    if (exactAccount) {
+      return trustExactApolloSavedAccount(
+        input,
+        exactAccount,
+        providedAccountId,
+        "saved-account-view"
+      );
+    }
+  } catch (error) {
+    if (error instanceof ApolloRateLimitError) throw error;
+    // Older Apollo plans may not expose Account View. Preserve the existing
+    // fail-closed result when the exact record cannot be read.
   }
 
   return null;
+}
+
+function trustExactApolloSavedAccount(
+  input: ApolloCompanyLookupInput,
+  exactAccount: {
+    id: string | null;
+    name: string | null;
+    domain: string | null;
+    linkedinUrl: string | null;
+    rawPayload: Record<string, unknown>;
+  },
+  providedAccountId: string,
+  source: "saved-account-search" | "saved-account-view"
+) {
+  const inputAliases = buildCompanyNameAliases(input.companyName);
+  const accountNameFromApollo = readApolloString(exactAccount.rawPayload, [
+    "name",
+    "company_name",
+    "organization_name"
+  ]);
+  const accountAliases = buildCompanyNameAliases(accountNameFromApollo ?? "");
+  const safeAccountIdentity =
+    hasExactAliasMatch(inputAliases, accountAliases) ||
+    hasStrongBaseNameMatch(inputAliases, accountAliases) ||
+    hasSafeRegionalBrandAlias(inputAliases, accountAliases);
+  if (!safeAccountIdentity) {
+    return null;
+  }
+
+  const scored = scoreApolloOrganizationCandidate(
+    exactAccount,
+    input.companyName,
+    normalizeDomain(input.domain),
+    {
+      source,
+      account_id: providedAccountId
+    }
+  );
+  return {
+    ...scored,
+    score: Math.max(scored.score, 12),
+    strongBaseNameMatch: true,
+    classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
+    matchReason:
+      `direct company; exact saved Apollo account mapping; ` +
+      `resolved through Apollo's zero-credit saved-account directory`
+  };
 }
 
 async function searchApolloContacts({

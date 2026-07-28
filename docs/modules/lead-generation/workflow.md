@@ -71,7 +71,9 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 5. A known Apollo mapping is trusted as the intended account, but its account ID must resolve to Apollo's canonical
    nested organization ID when Apollo exposes one. Organization Search handles unsaved companies; if it omits an
    already-saved mapped account and the initial employee search returns at most one person, Hunter requires an exact
-   match in Apollo's zero-credit saved-account directory. It repeats People Search with the nested organization ID
+   match in Apollo's zero-credit saved-account directory. If name-filtered account search omits that confirmed account,
+   Hunter retrieves the exact saved account by its immutable ID through Apollo's zero-credit Account View endpoint.
+   It repeats People Search with the nested organization ID
    alone when available, or with the exact saved account's trusted domain when Apollo exposes no nested ID. Otherwise organization
    discovery is bounded and an immutable match record is saved. An ambiguous or missing latest match stops in Apollo
    Exceptions and blocks automatic repeat lookup.
@@ -83,8 +85,9 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 11. Transient failures retry at most three times with rate-limit delay. Permanent company failures are recorded in the job output and audit log without invalidating the completed research.
 12. The handoff never approves or communicates with a prospect. When a person approves a QA-passed Outreach Plan, that single approval also approves the selected contact, assigns the approver as sender when no sender is already assigned, and queues Apollo enrollment automatically. Apollo revalidates every guard before enrollment. The approved Outreach Plan is authoritative over stale cadence fields. Finished prior cadence history may enroll directly; an active or paused different cadence is removed before the contact is enrolled in the approved Hunter cadence. Replies, bounces, rejected contacts, and do-not-contact records remain hard stops.
 13. An administrator can select **Recheck contacts for eligible opportunities** after enabling Assisted mode. The action creates a fresh deterministic plan from already-saved research, forces a new AI contact-fit review rather than reusing a cached disposition, and queues the protected handoff without rerunning web retrieval, Qwen, Kimi, or K3. A prior cadence does not remove the company or contact from this recheck.
-    A current non-archived outreach plan remains actionable and is counted in the run even when its prompt version
-    means no replacement draft is needed.
+    A current same-prompt, non-archived outreach plan remains actionable and is counted when no replacement draft is
+    needed. Unapproved plans for contacts rejected by the forced review are archived, and AI drafts linked to
+    superseded plan versions are removed from the active Outreach Queue.
 14. A `REVIEWING` contact with a current, non-archived Outreach Plan appears in Outreach Queue even when Hunter has not created a Sales Lead. Creating a Sales Lead remains reserved for later pipeline graduation.
 15. Automation Settings retains the latest assisted handoff breakdown. It separately reports Apollo people found,
     deterministic buyer-role candidates, contacts submitted to model review, newly created Outreach Plans, already-current plans, and total actionable plans. The Apollo

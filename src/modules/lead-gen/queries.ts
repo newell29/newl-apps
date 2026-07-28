@@ -32,6 +32,10 @@ import {
   getHunterOutreachResearchMaxAgeDays
 } from "@/modules/lead-gen/hunter-outreach-eligibility";
 import {
+  isCurrentOutreachDraft,
+  OUTREACH_PLAN_PROMPT_VERSION
+} from "@/modules/lead-gen/outreach-plan";
+import {
   matchesTradeMiningIndustryLabels,
   matchesTradeMiningIndustrySignals,
   normalizeTradeMiningIndustryFilterMode,
@@ -1229,7 +1233,8 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
         where: tenantWhere(tenant, {
           status: {
             not: OutreachPlanStatus.ARCHIVED
-          }
+          },
+          promptVersion: OUTREACH_PLAN_PROMPT_VERSION
         }),
         orderBy: {
           version: "desc"
@@ -1282,8 +1287,18 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
       sequenceDirectory: apolloSequenceDirectory,
       hunterManaged: hunterEligibility.status === "ELIGIBLE"
     });
-    const draft = contact.outreachDrafts[0] ?? null;
+    const draftRecord = contact.outreachDrafts[0] ?? null;
     const outreachPlan = contact.outreachPlans[0] ?? null;
+    const draftPlanId = readString(asObject(draftRecord?.rawJson), "outreachPlanId");
+    const draft =
+      draftRecord &&
+      isCurrentOutreachDraft({
+        aiGenerated: draftRecord.aiGenerated,
+        linkedPlanId: draftPlanId,
+        currentPlanId: outreachPlan?.id ?? null
+      })
+        ? draftRecord
+        : null;
     const tierMapping = effectiveSequenceMappings.find((entry) => entry.tier === scoring.tier) ?? null;
     const requiresAiDraft = hunterEligibility.status === "ELIGIBLE" || (tierMapping?.requiresAiDraft ?? false);
     const useHunterRecommendation =
@@ -1495,7 +1510,8 @@ export async function getContactDirectoryFilters(tenant: TenantContext) {
           some: tenantWhere(tenant, {
             outreachPlans: {
               some: tenantWhere(tenant, {
-                status: { not: OutreachPlanStatus.ARCHIVED }
+                status: { not: OutreachPlanStatus.ARCHIVED },
+                promptVersion: OUTREACH_PLAN_PROMPT_VERSION
               })
             }
           })

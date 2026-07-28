@@ -57,6 +57,28 @@ describe("Hunter Apollo sender routing", () => {
       companyId: "company-1"
     })).toBeNull();
   });
+
+  it("extracts only the first name when Apollo exposes an email address as the sender label", () => {
+    const result = resolveConfiguredApolloSender({
+      entries: [
+        mailbox({
+          id: "mailbox-alex",
+          senderLabel: "Alex.newell@newl.ca",
+          sendFromEmail: "Alex.newell@newl.ca",
+          routingWeight: 100,
+          active: true
+        })
+      ],
+      users,
+      assignedRep: null,
+      companyId: "company-1"
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      firstName: "Alex",
+      senderLabel: "Alex.newell@newl.ca"
+    }));
+  });
 });
 
 function mailbox(

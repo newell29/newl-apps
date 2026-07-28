@@ -91,16 +91,20 @@ function resolveSenderFirstName(
 ) {
   const candidates = [
     mailbox.senderLabel,
-    mailbox.sendFromEmail?.split("@")[0]?.replace(/[._-]+/g, " "),
     owner.name,
+    mailbox.sendFromEmail,
     owner.email?.split("@")[0]?.replace(/[._-]+/g, " ")
   ];
 
   for (const candidate of candidates) {
-    const firstToken = candidate
+    const normalizedCandidate = candidate
       ?.trim()
+      .split("@")[0]
+      ?.replace(/[._-]+/g, " ");
+    if (!normalizedCandidate) continue;
+    const firstToken = normalizedCandidate
       .split(/\s+/)[0]
-      ?.replace(/^[^A-Za-z]+|[^A-Za-z'-]+$/g, "");
+      ?.match(/[A-Za-z][A-Za-z'-]*/)?.[0];
     if (
       firstToken &&
       firstToken.length >= 2 &&

@@ -7,6 +7,7 @@ import {
   ContactStatus,
   HunterAutomationMode,
   JobStatus,
+  OutreachPlanStatus,
   Prisma,
   ReplyStatus,
   SequenceStatus
@@ -681,6 +682,14 @@ async function processCompany({
     selectionLimit: Math.min(HUNTER_SELECTED_CONTACT_MAX, maxContactsPerCompany),
     forceContactReview
   });
+  if (forceContactReview) {
+    await archiveUnselectedHunterPlans({
+      tenantId,
+      companyId: company.id,
+      jobId,
+      acceptedContactIds: fit.acceptedContactIds
+    });
+  }
   if (fit.acceptedContactIds.length === 0) {
     return terminal(
       item,
@@ -765,6 +774,83 @@ async function processCompany({
       existingPlansFound
     }
   );
+}
+
+async function archiveUnselectedHunterPlans({
+  tenantId,
+  companyId,
+  jobId,
+  acceptedContactIds
+}: {
+  tenantId: string;
+  companyId: string;
+  jobId: string;
+  acceptedContactIds: string[];
+}) {
+  const supersedablePlans = await prisma.outreachPlan.findMany({
+    where: {
+      tenantId,
+      companyId,
+      status: {
+        in: [
+          OutreachPlanStatus.DRAFT,
+          OutreachPlanStatus.QA_FAILED,
+          OutreachPlanStatus.QA_PASSED
+        ]
+      },
+      ...(acceptedContactIds.length > 0
+        ? { contactId: { notIn: acceptedContactIds } }
+        : {})
+    },
+    select: {
+      id: true,
+      contactId: true,
+      version: true,
+      promptVersion: true
+    }
+  });
+  if (supersedablePlans.length === 0) return;
+
+  const archivedAt = new Date();
+  await prisma.$transaction([
+    prisma.outreachPlan.updateMany({
+      where: {
+        tenantId,
+        companyId,
+        id: { in: supersedablePlans.map((plan) => plan.id) },
+        status: {
+          in: [
+            OutreachPlanStatus.DRAFT,
+            OutreachPlanStatus.QA_FAILED,
+            OutreachPlanStatus.QA_PASSED
+          ]
+        }
+      },
+      data: {
+        status: OutreachPlanStatus.ARCHIVED,
+        archivedAt
+      }
+    }),
+    prisma.auditLog.create({
+      data: {
+        tenantId,
+        action: "lead-gen.hunter-outreach-plan.superseded",
+        entityType: "Company",
+        entityId: companyId,
+        after: {
+          handoffJobId: jobId,
+          acceptedContactIds,
+          archivedPlans: supersedablePlans.map((plan) => ({
+            id: plan.id,
+            contactId: plan.contactId,
+            version: plan.version,
+            promptVersion: plan.promptVersion
+          })),
+          archivedAt: archivedAt.toISOString()
+        }
+      }
+    })
+  ]);
 }
 
 async function reviewAndPersistHunterContactFit({
