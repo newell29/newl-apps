@@ -1,6 +1,11 @@
 import { JobStatus, ModuleKey, PlatformRole, Prisma } from "@prisma/client";
 
-import { groupDevelopmentFeedback } from "@/modules/assistant/development-issue-grouping";
+import {
+  describeDevelopmentIssue,
+  groupDevelopmentFeedback,
+  isNonActionableDevelopmentFeedback,
+  type DevelopmentFeedbackCandidate
+} from "@/modules/assistant/development-issue-grouping";
 import { GARLAND_WORKFLOW_KEY } from "@/modules/assistant/garland-artifacts";
 import {
   createRivetDevelopmentJob,
@@ -328,7 +333,9 @@ export async function generateDevelopmentSuggestions(context: AuthenticatedConte
     }
   });
   const existing = await prisma.developmentSuggestion.findMany({
-    where: { tenantId: context.tenantId, status: { in: ["AWAITING_APPROVAL", "APPROVED"] } },
+    where: { tenantId: context.tenantId },
+    orderBy: { generatedAt: "asc" },
+    take: 500,
     select: {
       id: true,
       moduleKey: true,
@@ -340,22 +347,40 @@ export async function generateDevelopmentSuggestions(context: AuthenticatedConte
       riskLevel: true,
       sourceFeedbackIds: true,
       feedbackCount: true,
-      proposedScope: true
+      proposedScope: true,
+      generatedAt: true
     }
   });
-  const alreadyQueued = new Set(existing.flatMap((item) => jsonStringArray(item.sourceFeedbackIds)));
-  const groups = groupDevelopmentFeedback(feedback.filter((item) => !alreadyQueued.has(item.id)));
+  await reconcileAwaitingSuggestionDuplicates(context, existing);
+
+  const alreadyQueued = new Set(existing.flatMap((item) => [
+    ...jsonStringArray(item.sourceFeedbackIds),
+    ...readFollowUpFeedbackIds(item.proposedScope)
+  ]));
+  const groups = groupDevelopmentFeedback(
+    feedback.filter((item) =>
+      !alreadyQueued.has(item.id) &&
+      !isNonActionableDevelopmentFeedback(item)
+    )
+  );
 
   const created = [];
   for (const group of groups) {
     const items = group.items;
     const first = items[0];
-    const matchingAwaiting = existing.find((item) =>
-      item.status === "AWAITING_APPROVAL" &&
+    const family = existing.filter((item) =>
       item.moduleKey === first.moduleKey &&
       item.workflowKey === first.workflowKey &&
-      readIssueKey(item.proposedScope) === group.issueKey
+      readSuggestionIssueKey(item) === group.issueKey
     );
+    const matchingApproved = [...family].reverse().find((item) => item.status === "APPROVED");
+    if (matchingApproved) {
+      created.push(await attachFollowUpFeedback(context, matchingApproved, items));
+      continue;
+    }
+
+    const matchingAwaiting = [...family].reverse().find((item) => item.status === "AWAITING_APPROVAL");
+    const previousResolved = [...family].reverse().find((item) => item.status === "RESOLVED");
     created.push(await prisma.$transaction(async (tx) => {
       const sourceFeedbackIds = [
         ...(matchingAwaiting ? jsonStringArray(matchingAwaiting.sourceFeedbackIds) : []),
@@ -392,7 +417,7 @@ export async function generateDevelopmentSuggestions(context: AuthenticatedConte
               riskLevel: first.workflowKey === GARLAND_WORKFLOW_KEY ? "HIGH" : "MEDIUM",
               sourceFeedbackIds,
               feedbackCount,
-              proposedScope: buildDevelopmentScope(group.issueKey)
+              proposedScope: buildDevelopmentScope(group.issueKey, previousResolved?.id)
             }
           });
       await tx.auditLog.create({
@@ -448,6 +473,9 @@ export async function listDevelopmentSuggestions(context: AuthenticatedContext, 
   const jobsById = new Map(jobs.map((job) => [job.id, summarizeRivetDevelopmentJob(job)]));
   return suggestions.map((suggestion) => ({
     ...suggestion,
+    issueKey: readSuggestionIssueKey(suggestion),
+    followUpFeedbackCount: readFollowUpFeedbackIds(suggestion.proposedScope).length,
+    regressionOfSuggestionId: readScopeString(suggestion.proposedScope, "regressionOfSuggestionId"),
     developmentJob: suggestion.developmentThreadId
       ? jobsById.get(suggestion.developmentThreadId) ?? null
       : null
@@ -643,6 +671,110 @@ export async function retryRivetDevelopmentSuggestion(
   });
 }
 
+export async function resolveDevelopmentSuggestion(
+  context: AuthenticatedContext,
+  suggestionId: string
+) {
+  const existing = await prisma.developmentSuggestion.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      id: suggestionId,
+      status: "APPROVED"
+    },
+    select: {
+      id: true,
+      status: true,
+      title: true,
+      sourceFeedbackIds: true,
+      proposedScope: true,
+      pullRequestUrl: true,
+      developmentThreadId: true
+    }
+  });
+  if (!existing?.developmentThreadId || !existing.pullRequestUrl) {
+    throw new OperationalMemoryError("Only an approved Rivet suggestion with a pull request can be resolved.", 409);
+  }
+  const job = await prisma.automationJobRun.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      id: existing.developmentThreadId,
+      jobType: RIVET_DEVELOPMENT_JOB_TYPE,
+      status: JobStatus.SUCCESS
+    },
+    select: {
+      id: true,
+      status: true,
+      output: true,
+      errorMessage: true
+    }
+  });
+  const phase = job ? summarizeRivetDevelopmentJob(job).phase : null;
+  if (!job || !new Set(["READY_FOR_ALEX", "PR_OPEN"]).has(phase ?? "")) {
+    throw new OperationalMemoryError("The Rivet pull request must be ready for owner review first.", 409);
+  }
+
+  const resolvedAt = new Date();
+  const feedbackIds = [
+    ...jsonStringArray(existing.sourceFeedbackIds),
+    ...readFollowUpFeedbackIds(existing.proposedScope)
+  ];
+  const proposedScope = mergeDevelopmentScope(existing.proposedScope, {
+    lifecycleState: "FIX_DEPLOYED",
+    resolvedAt: resolvedAt.toISOString(),
+    resolvedPullRequestUrl: existing.pullRequestUrl,
+    followUpFeedbackIds: []
+  });
+
+  return prisma.$transaction(async (tx) => {
+    const suggestion = await tx.developmentSuggestion.update({
+      where: {
+        tenantId_id: {
+          tenantId: context.tenantId,
+          id: existing.id
+        }
+      },
+      data: {
+        status: "RESOLVED",
+        proposedScope,
+        decisionByUserId: context.userId,
+        decisionAt: resolvedAt,
+        decisionNotes: "Administrator confirmed the reviewed pull request is merged and deployed."
+      }
+    });
+    if (feedbackIds.length > 0) {
+      await tx.operationalFeedback.updateMany({
+        where: {
+          tenantId: context.tenantId,
+          id: { in: [...new Set(feedbackIds)] },
+          status: { in: ["REPORTED", "INVESTIGATING", "CONFIRMED"] }
+        },
+        data: {
+          status: "RESOLVED",
+          resolutionNotes: `Covered by deployed development suggestion ${existing.id}.`,
+          reviewedByUserId: context.userId,
+          reviewedAt: resolvedAt
+        }
+      });
+    }
+    await tx.auditLog.create({
+      data: {
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        action: "assistant.development_suggestion.resolve_deployed",
+        entityType: "DevelopmentSuggestion",
+        entityId: existing.id,
+        before: { status: existing.status } satisfies Prisma.InputJsonValue,
+        after: {
+          status: "RESOLVED",
+          pullRequestUrl: existing.pullRequestUrl,
+          resolvedFeedbackCount: feedbackIds.length
+        } satisfies Prisma.InputJsonValue
+      }
+    });
+    return suggestion;
+  });
+}
+
 const feedbackSelect = {
   id: true,
   moduleKey: true,
@@ -720,15 +852,207 @@ function jsonStringArray(value: Prisma.JsonValue) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
+type DevelopmentSuggestionQueueRecord = {
+  id: string;
+  moduleKey: ModuleKey;
+  workflowKey: string;
+  title: string;
+  summary: string;
+  rationale: string;
+  status: string;
+  riskLevel: string;
+  sourceFeedbackIds: Prisma.JsonValue;
+  feedbackCount: number;
+  proposedScope: Prisma.JsonValue | null;
+  generatedAt: Date;
+};
+
+async function reconcileAwaitingSuggestionDuplicates(
+  context: AuthenticatedContext,
+  suggestions: DevelopmentSuggestionQueueRecord[]
+) {
+  const families = new Map<string, DevelopmentSuggestionQueueRecord[]>();
+  for (const suggestion of suggestions) {
+    const familyKey = [
+      suggestion.moduleKey,
+      suggestion.workflowKey,
+      readSuggestionIssueKey(suggestion)
+    ].join(":");
+    families.set(familyKey, [...(families.get(familyKey) ?? []), suggestion]);
+  }
+
+  for (const family of families.values()) {
+    const canonical = [...family].reverse().find((item) => item.status === "APPROVED");
+    const duplicates = family.filter((item) => item.status === "AWAITING_APPROVAL");
+    if (!canonical || duplicates.length === 0) continue;
+
+    const followUpFeedbackIds = [...new Set([
+      ...readFollowUpFeedbackIds(canonical.proposedScope),
+      ...duplicates.flatMap((item) => jsonStringArray(item.sourceFeedbackIds))
+    ])];
+    const proposedScope = mergeDevelopmentScope(canonical.proposedScope, {
+      followUpFeedbackIds,
+      followUpFeedbackCount: followUpFeedbackIds.length
+    });
+
+    await prisma.$transaction(async (tx) => {
+      await tx.developmentSuggestion.update({
+        where: {
+          tenantId_id: {
+            tenantId: context.tenantId,
+            id: canonical.id
+          }
+        },
+        data: { proposedScope }
+      });
+      for (const duplicate of duplicates) {
+        await tx.developmentSuggestion.update({
+          where: {
+            tenantId_id: {
+              tenantId: context.tenantId,
+              id: duplicate.id
+            }
+          },
+          data: {
+            status: "SUPERSEDED",
+            decisionByUserId: context.userId,
+            decisionAt: new Date(),
+            decisionNotes: `Superseded by active issue family ${canonical.id}; feedback remains attached as follow-up evidence.`
+          }
+        });
+        await tx.auditLog.create({
+          data: {
+            tenantId: context.tenantId,
+            actorUserId: context.userId,
+            action: "assistant.development_suggestion.supersede_duplicate",
+            entityType: "DevelopmentSuggestion",
+            entityId: duplicate.id,
+            before: { status: duplicate.status } satisfies Prisma.InputJsonValue,
+            after: {
+              status: "SUPERSEDED",
+              canonicalSuggestionId: canonical.id,
+              issueKey: readSuggestionIssueKey(canonical)
+            } satisfies Prisma.InputJsonValue
+          }
+        });
+        duplicate.status = "SUPERSEDED";
+      }
+    });
+    canonical.proposedScope = proposedScope;
+  }
+}
+
+async function attachFollowUpFeedback(
+  context: AuthenticatedContext,
+  suggestion: DevelopmentSuggestionQueueRecord,
+  feedback: DevelopmentFeedbackCandidate[]
+) {
+  const followUpFeedbackIds = [...new Set([
+    ...readFollowUpFeedbackIds(suggestion.proposedScope),
+    ...feedback.map((item) => item.id)
+  ])];
+  const proposedScope = mergeDevelopmentScope(suggestion.proposedScope, {
+    followUpFeedbackIds,
+    followUpFeedbackCount: followUpFeedbackIds.length
+  });
+  const updated = await prisma.$transaction(async (tx) => {
+    const result = await tx.developmentSuggestion.update({
+      where: {
+        tenantId_id: {
+          tenantId: context.tenantId,
+          id: suggestion.id
+        }
+      },
+      data: { proposedScope }
+    });
+    await tx.auditLog.create({
+      data: {
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        action: "assistant.development_suggestion.attach_follow_up",
+        entityType: "DevelopmentSuggestion",
+        entityId: suggestion.id,
+        after: {
+          issueKey: readSuggestionIssueKey(suggestion),
+          addedFeedbackIds: feedback.map((item) => item.id),
+          followUpFeedbackCount: followUpFeedbackIds.length,
+          approvedPacketChanged: false
+        } satisfies Prisma.InputJsonValue
+      }
+    });
+    return result;
+  });
+  suggestion.proposedScope = proposedScope;
+  return updated;
+}
+
 function readIssueKey(value: Prisma.JsonValue | null) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const issueKey = value.issueKey;
   return typeof issueKey === "string" && issueKey.trim() ? issueKey.trim() : null;
 }
 
-function buildDevelopmentScope(issueKey: string): Prisma.InputJsonValue {
+function readSuggestionIssueKey(
+  suggestion: Pick<
+    DevelopmentSuggestionQueueRecord,
+    "id" | "moduleKey" | "workflowKey" | "title" | "summary" | "proposedScope"
+  >
+) {
+  const stored = readIssueKey(suggestion.proposedScope);
+  const derived = describeDevelopmentIssue({
+    id: suggestion.id,
+    moduleKey: suggestion.moduleKey,
+    workflowKey: suggestion.workflowKey,
+    classification: "CHECK_RESULT",
+    reporterStatement: `${suggestion.title} ${suggestion.summary}`
+  }).key;
+  return stored?.startsWith("GENERIC_") && !derived.startsWith("GENERIC_")
+    ? derived
+    : stored ?? derived;
+}
+
+function readFollowUpFeedbackIds(value: Prisma.JsonValue | null) {
+  const object = readScopeObject(value);
+  return jsonStringArray(object.followUpFeedbackIds ?? []);
+}
+
+function readScopeString(value: Prisma.JsonValue | null, key: string) {
+  const candidate = readScopeObject(value)[key];
+  return typeof candidate === "string" && candidate.trim() ? candidate.trim() : null;
+}
+
+function readScopeObject(value: Prisma.JsonValue | null): Record<string, Prisma.JsonValue> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const result: Record<string, Prisma.JsonValue> = {};
+  for (const [key, candidate] of Object.entries(value)) {
+    if (candidate !== undefined) result[key] = candidate;
+  }
+  return result;
+}
+
+function mergeDevelopmentScope(
+  value: Prisma.JsonValue | null,
+  patch: Record<string, Prisma.JsonValue>
+): Prisma.JsonObject {
+  return {
+    ...readScopeObject(value),
+    ...patch
+  };
+}
+
+function buildDevelopmentScope(
+  issueKey: string,
+  regressionOfSuggestionId?: string
+): Prisma.InputJsonValue {
   return {
     issueKey,
+    lifecycleState: "AWAITING_APPROVAL",
+    ...(regressionOfSuggestionId
+      ? {
+          regressionOfSuggestionId,
+          regressionDetectedAt: new Date().toISOString()
+        }
+      : {}),
     requiresHumanApproval: true,
     approvalStartsDevelopment: true,
     developmentMode: "RIVET_LOCAL_CODEX_REVIEWED_PR",

@@ -15,6 +15,8 @@ The daily digest and the Newl Apps feedback page call the same deterministic gro
 
 Generic feedback is normalized and grouped only when its significant terms meet the configured similarity threshold. Different known Garland themes are never combined merely because they share the `CHECK_RESULT` classification.
 
+The issue family remains stable after approval. Later reports attach as follow-up evidence and cannot silently expand the approved Rivet packet. A refresh supersedes duplicate awaiting cards that match an active approved family. After Alex confirms that the exact reviewed PR is merged and deployed, the family is resolved; later evidence creates one linked regression suggestion requiring a new approval.
+
 Selecting **Approve & start Rivet** is the single approval to begin development. The approval transaction records the administrator decision and creates one tenant-scoped `AutomationJobRun` with job type `ASSISTANT_RIVET_DEVELOPMENT`. Repeated requests cannot approve the same suggestion twice.
 
 ## Required Garland understanding
@@ -98,3 +100,5 @@ The development-jobs API remains outside browser session middleware so the route
 An active job uses a short-lived lease. A worker error or expired lease marks the job failed and sends a safe Teams message. Failed and blocked jobs are not automatically retried. The local worktree is preserved for investigation when a failure occurs; after checking that no uncertain branch or PR action is still running, an administrator may select **Retry Rivet** to create a new job and lease. Completed worktrees are removed only after an exact-commit review passes and the PR is recorded as `READY_FOR_ALEX`.
 
 Existing suggestions approved before this workflow are not automatically queued. Link or close their already-created PR work before enabling the worker so Rivet does not rebuild historical fixes.
+
+Legacy successful Rivet jobs that predate the independent review gate may show `PR_OPEN`. The same two-step administrator confirmation can resolve them after the owner verifies that their exact PR is merged and deployed. This records lifecycle state only; it never performs a merge or deployment.

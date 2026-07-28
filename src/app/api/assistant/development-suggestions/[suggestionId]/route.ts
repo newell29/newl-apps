@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 import {
   decideDevelopmentSuggestion,
+  resolveDevelopmentSuggestion,
   retryRivetDevelopmentSuggestion
 } from "@/modules/assistant/operational-memory";
 import { requireAdmin, requireModule, requireMutationAccess } from "@/server/auth/authorization";
@@ -23,6 +24,11 @@ export async function PATCH(
   if (body.action === "retry") {
     return NextResponse.json({
       data: await retryRivetDevelopmentSuggestion(context, suggestionId)
+    });
+  }
+  if (body.action === "resolve_deployed") {
+    return NextResponse.json({
+      data: await resolveDevelopmentSuggestion(context, suggestionId)
     });
   }
   const suggestion = await decideDevelopmentSuggestion(context, suggestionId, {
