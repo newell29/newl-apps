@@ -245,6 +245,10 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 ## Assisted handoff stops after research
 
 - Symptom: research and the Daily Opportunity are complete, but no contact or Outreach Plan appears.
+- If a manual contact-discovery run stays `QUEUED` with zero processed companies while TradeMining is running, confirm
+  the dedicated runtime contains `run_outreach_handoff_poller` and reinstall the launch service. The handoff poller
+  must run independently of sequential TradeMining collection and ingestion. Verify that the original job records
+  a per-company terminal result; do not queue a duplicate while it remains unfinished.
 - Check Automation Settings first. `DRY_RUN`, `OFF`, or the kill switch intentionally prevents automatic handoff.
 - Inspect the latest `HUNTER_OUTREACH_HANDOFF` job. `REVIEW_REQUIRED` means the immutable Apollo match must be
   resolved manually; `NO_CONTACTS` and `NO_QUALIFYING_CONTACTS` are terminal for that saved run.

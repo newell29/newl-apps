@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -667,6 +668,23 @@ def company_research_due_now(now: Optional[dt.datetime] = None) -> bool:
     return current.astimezone(timezone).time() >= daily_time
 
 
+def run_outreach_handoff_poller(
+    base_url: str,
+    token: str,
+    poll_ms: int,
+    stop_event: threading.Event,
+) -> None:
+    """Drain interactive handoffs independently of long TradeMining work."""
+    while not stop_event.is_set():
+        try:
+            handoff = drain_outreach_handoff(base_url, token)
+            if handoff.get("state") not in {"idle", "disabled"}:
+                print(json.dumps({"hunterOutreachHandoff": handoff}, indent=2))
+        except Exception as error:
+            print(f"Hunter outreach handoff failed: {error}", file=sys.stderr)
+        stop_event.wait(poll_ms / 1000)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true")
@@ -760,17 +778,19 @@ def main() -> int:
         print(json.dumps(build_profile_plan(resolve_profile(profiles, clean(args.profile_id), clean(args.profile_name))), indent=2))
         return 0
 
+    if not args.once and not args.profile_id and not args.profile_name:
+        handoff_stop_event = threading.Event()
+        threading.Thread(
+            target=run_outreach_handoff_poller,
+            args=(base_url, token, poll_ms, handoff_stop_event),
+            name="hunter-outreach-handoff",
+            daemon=True,
+        ).start()
+
     last_signal_scout_check_date: Optional[dt.date] = None
     last_company_research_check_date: Optional[dt.date] = None
     while True:
         process_once(base_url, token, clean(args.profile_id), clean(args.profile_name))
-        if not args.profile_id and not args.profile_name:
-            try:
-                handoff = drain_outreach_handoff(base_url, token)
-                if handoff.get("state") not in {"idle", "disabled"}:
-                    print(json.dumps({"hunterOutreachHandoff": handoff}, indent=2))
-            except Exception as error:
-                print(f"Hunter outreach handoff failed: {error}", file=sys.stderr)
         if not args.profile_id and not args.profile_name and signal_scout_due_now():
             local_timezone = ZoneInfo(os.environ.get("HUNTER_SIGNAL_SCOUT_TIMEZONE", "America/Toronto").strip())
             local_date = dt.datetime.now(dt.timezone.utc).astimezone(local_timezone).date()
