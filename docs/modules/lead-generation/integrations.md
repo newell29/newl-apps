@@ -179,6 +179,13 @@ paused in a different cadence, then calls the normal add-contact endpoint for th
 history in another cadence requires no removal. The selected Hunter cadence ID makes later status sync
 campaign-aware, so stale `FINISHED` history cannot mask a new `ENROLLED` status.
 
+Apollo People Search returns a person ID, while sequence enrollment requires a saved Apollo contact ID. Immediately
+before an otherwise eligible approved enrollment, Newl Apps searches the bounded saved-contact result by Apollo person
+ID, exact email, LinkedIn URL, or exact name/title. If no saved contact exists, it calls Apollo's zero-credit
+`POST /api/v1/contacts` endpoint with the concrete email and `run_dedupe=true`. Masked name fragments are omitted,
+Apollo responses with a conflicting email fail closed, and the saved contact ID is persisted with tenant filtering
+before custom-field or cadence writes.
+
 The Apollo push path remains deliberately two-phase:
 
 1. submit the selected contact IDs to the tenant-configured cadence and sender;

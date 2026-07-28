@@ -58,6 +58,7 @@ import {
   processNextHunterOutreachHandoff
 } from "@/modules/lead-gen/hunter-outreach-handoff";
 import { resolveApolloContactDiscoveryMatch } from "@/modules/lead-gen/apollo-contact-discovery-review";
+import { prepareApolloContactForEnrollment } from "@/modules/lead-gen/apollo-contact-preparation";
 import { canonicalizeTradeMiningDestinationPort } from "@/modules/lead-gen/search-profile-suggestions";
 import {
   assertValidTradeMiningSearchProfile,
@@ -110,6 +111,7 @@ import { requireAdmin, requireModule, requireMutationAccess } from "@/server/aut
 import { prisma } from "@/server/db";
 import {
   ApolloRateLimitError,
+  createApolloContactForEnrollment,
   fetchApolloEmailAccountDirectory,
   fetchApolloContactsForCompany,
   fetchApolloOrganizationForMapping,
@@ -2275,7 +2277,8 @@ export async function runApolloPushJob({
     const groups = new Map<string, ApolloPushGroup>();
 
     for (const contact of contacts) {
-      const companyLookup = shouldRefreshApolloSequenceStatus(contact.sequenceStatus)
+      const companyLookup =
+        shouldRefreshApolloSequenceStatus(contact.sequenceStatus) || !contact.apolloContactId
         ? await getApolloCompanyLookupForContact(contact, companyLookupCache)
         : undefined;
       const validation = await validateApolloPushCandidate({
@@ -3590,8 +3593,13 @@ type ApolloPushContactRecord = {
   id: string;
   tenantId: string;
   companyId: string;
+  firstName: string | null;
+  lastName: string | null;
   fullName: string;
+  title: string | null;
   email: string | null;
+  phone: string | null;
+  linkedinUrl: string | null;
   contactStatus: ContactStatus;
   assignedRep: string | null;
   recommendedSequenceId: string | null;
@@ -3599,6 +3607,7 @@ type ApolloPushContactRecord = {
   selectedSequenceId: string | null;
   selectedSequenceName: string | null;
   apolloContactId: string | null;
+  apolloPersonId: string | null;
   sequenceStatus: SequenceStatus;
   replyStatus: ReplyStatus;
   company: {
@@ -3843,10 +3852,6 @@ async function validateApolloPushCandidate({
     };
   }
 
-  if (!contact.apolloContactId) {
-    return { ok: false, reason: "Apollo contact ID is missing. Enrich the company again before pushing." };
-  }
-
   if (!contact.email) {
     return { ok: false, reason: "Contact email is missing, so this contact stays out of sequence push." };
   }
@@ -3959,6 +3964,27 @@ async function validateApolloPushCandidate({
     };
   }
 
+  let apolloContactId = contact.apolloContactId;
+  if (!apolloContactId) {
+    try {
+      apolloContactId = await ensureApolloContactIdForPush({
+        tenantId,
+        contact,
+        companyLookup
+      });
+    } catch (error) {
+      return {
+        ok: false,
+        reason:
+          error instanceof ApolloRateLimitError
+            ? "Apollo rate limit reached while preparing the contact. Wait a moment, then retry the approved contact."
+            : error instanceof Error
+              ? `Apollo contact preparation failed: ${error.message}`
+              : "Apollo contact preparation failed before cadence enrollment."
+      };
+    }
+  }
+
   if (
     contact.selectedSequenceId !== effectiveSequence.id ||
     contact.selectedSequenceName !== effectiveSequence.name
@@ -3990,7 +4016,7 @@ async function validateApolloPushCandidate({
     companyDomain: contact.company.domain,
     apolloOrganizationId: contact.company.apolloOrganizationId,
     fullName: contact.fullName,
-    apolloContactId: contact.apolloContactId,
+    apolloContactId,
     sequenceId: effectiveSequence.id,
     sequenceName: effectiveSequence.name,
     apolloOwnerUserId: repMapping.apolloUserId,
@@ -4003,6 +4029,77 @@ async function validateApolloPushCandidate({
         : null,
     alreadyEnrolled: transition.action === "ALREADY_ENROLLED"
   };
+}
+
+async function ensureApolloContactIdForPush({
+  tenantId,
+  contact,
+  companyLookup
+}: {
+  tenantId: string;
+  contact: ApolloPushContactRecord;
+  companyLookup?: ApolloContactLookupResult;
+}) {
+  if (contact.apolloContactId) {
+    return contact.apolloContactId;
+  }
+  if (!contact.email) {
+    throw new Error("A concrete email address is required before creating an Apollo contact.");
+  }
+
+  const prepared = await prepareApolloContactForEnrollment({
+    contact: {
+      apolloContactId: contact.apolloContactId,
+      apolloPersonId: contact.apolloPersonId,
+      firstName: contact.firstName,
+      lastName: contact.lastName,
+      fullName: contact.fullName,
+      title: contact.title,
+      email: contact.email,
+      phone: contact.phone,
+      linkedinUrl: contact.linkedinUrl
+    },
+    company: {
+      name: contact.company.name,
+      domain: contact.company.domain
+    },
+    savedContacts: companyLookup?.contacts ?? [],
+    createContact: createApolloContactForEnrollment,
+    persistContactIdentity: async ({
+      apolloContactId,
+      apolloPersonId
+    }) => {
+      const updated = await prisma.contact.updateMany({
+        where: {
+          id: contact.id,
+          tenantId
+        },
+        data: {
+          apolloContactId,
+          apolloPersonId,
+          apolloStatus: ApolloStatus.ENRICHED
+        }
+      });
+      if (updated.count !== 1) {
+        throw new Error(
+          "The Newl Apps contact changed while Apollo was preparing it. Refresh and retry."
+        );
+      }
+    }
+  });
+
+  await appendApolloContactActivity({
+    tenantId,
+    contactId: contact.id,
+    note:
+      `Apollo contact preparation on ${new Date().toISOString()} ` +
+      `${
+        prepared.resolution === "EXISTING_SAVED_CONTACT"
+          ? "recovered the existing saved contact"
+          : "created or deduplicated the saved contact"
+      } required for cadence enrollment.`
+  });
+  return prepared.apolloContactId;
 }
 
 function resolveApolloSendFromEmailAccountId({

@@ -54,7 +54,9 @@ Roles and defaults are in `src/server/auth/role-policy.ts`. Runtime checks are i
 - Plan generation never approves, enrolls, or communicates. An authenticated mutation-capable user's explicit
   individual or bulk approval of a QA-passed plan is the human authorization boundary: it records the approver and
   queues a protected Apollo enrollment job. The worker still revalidates company/contact safety, Hunter eligibility,
-  usable email, sender, sequence, and Apollo state before any external write.
+  usable email, sender, sequence, and Apollo state before any external write. If Apollo discovery returned only a
+  person-search ID, the approved worker may create or deduplicate the corresponding saved Apollo contact after those
+  checks pass; the resulting tenant-scoped contact ID is persisted before sequence enrollment.
 - Only a tenant administrator can select `ASSISTED`. Processing requires the tenant-bound ingestion credential and
   rechecks the stored mode and kill switch on every request. Assisted processing may create `REVIEWING` contacts
   and unapproved plans; it cannot approve, assign, enroll, create a Sales Opportunity, or send.

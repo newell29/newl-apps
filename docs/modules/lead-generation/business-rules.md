@@ -174,6 +174,9 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
   sequence history remains eligible. If Apollo reports an active or paused different cadence, Newl Apps removes that
   membership and then enrolls the contact in the approved Hunter cadence. A reply, bounce, rejection, or
   do-not-contact state can never be overridden by this transition.
+- Apollo People Search identity is not enrollment identity. A selected person with no saved Apollo contact ID may be
+  converted only after every local approval and safety gate passes, using a concrete email and Apollo deduplication.
+  The worker must persist the returned contact ID with tenant filtering before applying custom fields or enrolling.
 - `ASSISTED` mode automatically queues only fresh Hot/Qualified `WOULD_PURSUE` companies after research. `DRY_RUN`
   and `OFF` never queue this work, and the kill switch prevents both queue creation and processing.
 - Company matching, contact ranking, and plan generation are durable preparation steps, not outreach authorization.

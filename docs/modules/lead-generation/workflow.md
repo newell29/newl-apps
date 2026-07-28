@@ -172,9 +172,12 @@ The layout is non-destructive: it does not migrate, delete, or rewrite existing 
 9. An authenticated employee reviews the strategy, sequence, citations, evidence sources, QA findings, and model
    versions. Approval requires an approved contact and a safe company. It marks the first-email compatibility draft
    approved but still performs no customer communication.
-10. The existing explicit **Push to Apollo** action and the background worker both recheck the current Hunter handoff,
-    plan approval, draft requirements, suppression, contact approval, sender mapping, email, company safety, and
-    existing sequence history before any external write.
+10. The explicit **Approve selected & enroll** action and the background worker both recheck the current Hunter
+    handoff, plan approval, draft requirements, suppression, contact approval, sender mapping, email, company safety,
+    and existing sequence history before any external write. If contact discovery produced only an Apollo person ID,
+    the worker first looks for the exact saved contact and otherwise uses Apollo's zero-credit Create Contact endpoint
+    with deduplication enabled. The returned saved-contact ID is persisted tenant-safely before custom-field sync and
+    cadence enrollment.
 11. A manual email edit invalidates QA. The employee must regenerate a new version before approval and push.
 
 ## Apollo company-match review

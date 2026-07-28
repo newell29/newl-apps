@@ -132,6 +132,17 @@ export type ApolloContactLookupResult = {
   contacts: ApolloContactRecord[];
 };
 
+export type ApolloContactCreateInput = {
+  firstName: string | null;
+  lastName: string | null;
+  fullName: string;
+  title: string | null;
+  email: string;
+  phone: string | null;
+  companyName: string;
+  companyDomain: string | null;
+};
+
 export class ApolloRateLimitError extends Error {
   retryAfterMs: number | null;
 
@@ -933,6 +944,52 @@ export async function fetchApolloContactById(apolloContactId: string): Promise<A
   return contact;
 }
 
+export async function createApolloContactForEnrollment(
+  input: ApolloContactCreateInput
+): Promise<ApolloContactRecord> {
+  const email = input.email.trim().toLowerCase();
+  if (!email) {
+    throw new Error("Apollo contact creation requires a concrete email address.");
+  }
+
+  const apiKey = readApolloMasterApiKey();
+  const firstName = safeApolloContactNamePart(input.firstName);
+  const lastName = safeApolloContactNamePart(input.lastName);
+  const websiteUrl = buildApolloContactWebsiteUrl(input.companyDomain);
+  const json = await postApolloJson("/api/v1/contacts", apiKey, {
+    first_name: firstName ?? undefined,
+    last_name: lastName ?? undefined,
+    organization_name: input.companyName.trim(),
+    title: input.title?.trim() || undefined,
+    email,
+    website_url: websiteUrl ?? undefined,
+    direct_phone: input.phone?.trim() || undefined,
+    run_dedupe: true
+  });
+  const record =
+    asRecord(json.contact) ??
+    asRecord(json.data) ??
+    json;
+  const contact = parseApolloContacts({ contacts: [record] }, "SAVED_CONTACT")[0];
+
+  if (!contact?.apolloContactId) {
+    throw new Error("Apollo created or matched the contact but did not return a usable contact ID.");
+  }
+
+  const returnedEmail = contact.email?.trim().toLowerCase() ?? null;
+  if (returnedEmail && returnedEmail !== email) {
+    throw new Error(
+      "Apollo deduplication returned a different email address. Review the contact in Apollo before enrollment."
+    );
+  }
+
+  return {
+    ...contact,
+    email: contact.email ?? email,
+    fullName: contact.fullName || input.fullName
+  };
+}
+
 export async function pushApolloContactsToSequence(
   input: ApolloSequencePushInput
 ): Promise<ApolloSequencePushResult> {
@@ -982,6 +1039,19 @@ export async function pushApolloContactsToSequence(
     message: extractApolloError(rawPayload) ?? null,
     rawPayload
   };
+}
+
+function safeApolloContactNamePart(value: string | null) {
+  const normalized = value?.trim() ?? "";
+  if (!normalized || /[*•●]/u.test(normalized)) {
+    return null;
+  }
+  return normalized;
+}
+
+function buildApolloContactWebsiteUrl(domain: string | null) {
+  const normalizedDomain = normalizeDomain(domain);
+  return normalizedDomain ? `https://${normalizedDomain}` : null;
 }
 
 export async function removeApolloContactsFromSequences(

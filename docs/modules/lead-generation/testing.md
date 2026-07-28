@@ -295,3 +295,6 @@ Regression coverage must prove:
 16. passed v2.4 plans remain unchanged, failed v2.4 plans upgrade once to v2.5, and a v2.5 failure does not create
     repeated automatic model spend; and
 17. drafting and bounded repair instructions forbid date/outcome conflation and job-posting-to-capacity inference.
+18. a selected Apollo person without a saved contact ID is matched to an existing saved contact or created with
+    deduplication before enrollment; masked name fragments are not submitted, and conflicting/missing Apollo
+    identities fail closed.

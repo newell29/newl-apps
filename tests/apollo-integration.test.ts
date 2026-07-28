@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReplyStatus, SequenceStatus } from "@prisma/client";
 import {
+  createApolloContactForEnrollment,
   fetchApolloActivitySummary,
   fetchApolloContactById,
   fetchApolloContactsForCompany,
@@ -12,6 +13,93 @@ import {
   removeApolloContactsFromSequences,
   transitionApolloContactsToSequence
 } from "@/server/integrations/apollo";
+
+describe("createApolloContactForEnrollment", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.stubEnv("APOLLO_MASTER_API", "master-api-key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("creates or recovers a saved Apollo contact with deduplication and no masked name fragment", async () => {
+    const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        contact: {
+          id: "apollo-contact-corey",
+          first_name: "Corey",
+          email: "corey@vsamerica.example",
+          organization_name: "VS AMERICA, INC."
+        }
+      })
+    } as unknown as Response);
+
+    await expect(
+      createApolloContactForEnrollment({
+        firstName: "Corey",
+        lastName: "Ma****y",
+        fullName: "Corey Ma****y",
+        title: "Director of Operations",
+        email: "Corey@VSAmerica.Example",
+        phone: null,
+        companyName: "VS AMERICA, INC.",
+        companyDomain: "vsamerica.example"
+      })
+    ).resolves.toMatchObject({
+      recordSource: "SAVED_CONTACT",
+      apolloContactId: "apollo-contact-corey",
+      email: "corey@vsamerica.example"
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.apollo.io/api/v1/contacts",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          first_name: "Corey",
+          organization_name: "VS AMERICA, INC.",
+          title: "Director of Operations",
+          email: "corey@vsamerica.example",
+          website_url: "https://vsamerica.example",
+          run_dedupe: true
+        })
+      })
+    );
+  });
+
+  it("fails closed if Apollo deduplication returns a different email", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        contact: {
+          id: "wrong-contact",
+          first_name: "Corey",
+          email: "someone-else@example.com"
+        }
+      })
+    } as unknown as Response);
+
+    await expect(
+      createApolloContactForEnrollment({
+        firstName: "Corey",
+        lastName: null,
+        fullName: "Corey",
+        title: null,
+        email: "corey@example.com",
+        phone: null,
+        companyName: "VS AMERICA, INC.",
+        companyDomain: null
+      })
+    ).rejects.toThrow(
+      "Apollo deduplication returned a different email address. Review the contact in Apollo before enrollment."
+    );
+  });
+});
 
 describe("fetchApolloContactById", () => {
   beforeEach(() => {
