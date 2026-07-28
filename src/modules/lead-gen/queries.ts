@@ -19,6 +19,7 @@ import { tenantWhere } from "@/server/tenant-query";
 import type { TenantContext } from "@/server/tenant-context";
 import { getContactApolloAssignmentBlockReason, scoreContact } from "@/modules/lead-gen/contact-scoring";
 import {
+  isActiveCadenceContact,
   isOutreachQueueContact,
   resolveSalesOpportunityStage
 } from "@/modules/lead-gen/automation-workflow";
@@ -34,7 +35,7 @@ import {
 import { requiresApolloMatchReview } from "@/modules/lead-gen/apollo-contact-discovery-review";
 import {
   isCurrentOutreachDraft,
-  OUTREACH_PLAN_PROMPT_VERSION
+  VISIBLE_OUTREACH_PLAN_VERSION_WHERE
 } from "@/modules/lead-gen/outreach-plan";
 import {
   matchesTradeMiningIndustryLabels,
@@ -1312,7 +1313,7 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
           status: {
             not: OutreachPlanStatus.ARCHIVED
           },
-          promptVersion: OUTREACH_PLAN_PROMPT_VERSION
+          ...VISIBLE_OUTREACH_PLAN_VERSION_WHERE
         }),
         orderBy: {
           version: "desc"
@@ -1568,6 +1569,19 @@ export async function getOutreachQueue(tenant: TenantContext, filters: ContactDi
   return contacts.filter(isOutreachQueueContact);
 }
 
+export async function getOutreachQueues(tenant: TenantContext, filters: ContactDirectoryFilters = {}) {
+  const contacts = await getContactDirectory(tenant, filters);
+  return {
+    attention: contacts.filter(isOutreachQueueContact),
+    activeCadences: contacts.filter(isActiveCadenceContact)
+  };
+}
+
+export async function getActiveCadenceQueue(tenant: TenantContext, filters: ContactDirectoryFilters = {}) {
+  const contacts = await getContactDirectory(tenant, filters);
+  return contacts.filter(isActiveCadenceContact);
+}
+
 export async function getContactDirectoryFilters(tenant: TenantContext) {
   const [pipelineAccounts, outreachPlanCompanies, owners, approvedAccountCount, apolloCredentials, searchProfiles] = await Promise.all([
     prisma.lead.findMany({
@@ -1592,7 +1606,7 @@ export async function getContactDirectoryFilters(tenant: TenantContext) {
             outreachPlans: {
               some: tenantWhere(tenant, {
                 status: { not: OutreachPlanStatus.ARCHIVED },
-                promptVersion: OUTREACH_PLAN_PROMPT_VERSION
+                ...VISIBLE_OUTREACH_PLAN_VERSION_WHERE
               })
             }
           })

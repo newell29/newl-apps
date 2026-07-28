@@ -7,6 +7,7 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   formatSalesOpportunityStage,
+  isActiveCadenceContact,
   isOutreachQueueContact,
   isSalesOpportunityStage,
   resolveSalesOpportunityStage,
@@ -86,6 +87,26 @@ describe("automated sales workflow", () => {
     ).toBe(true);
   });
 
+  it("moves enrolled contacts from Needs Attention to Active Cadences", () => {
+    const enrolled = {
+      contactStatus: ContactStatus.APPROVED,
+      sequenceStatus: SequenceStatus.ENROLLED,
+      replyStatus: ReplyStatus.NO_REPLY,
+      draft: { id: "draft-1" },
+      outreachPlan: { id: "plan-1" }
+    };
+
+    expect(isOutreachQueueContact(enrolled)).toBe(false);
+    expect(isActiveCadenceContact(enrolled)).toBe(true);
+
+    const paused = {
+      ...enrolled,
+      sequenceStatus: SequenceStatus.PAUSED
+    };
+    expect(isOutreachQueueContact(paused)).toBe(true);
+    expect(isActiveCadenceContact(paused)).toBe(false);
+  });
+
   it("removes terminal, unsafe, and sales-engaged contacts from Outreach Queue", () => {
     const base = {
       contactStatus: ContactStatus.APPROVED,
@@ -103,5 +124,7 @@ describe("automated sales workflow", () => {
     })).toBe(false);
     expect(isOutreachQueueContact({ ...base, replyStatus: ReplyStatus.POSITIVE })).toBe(false);
     expect(isOutreachQueueContact({ ...base, replyStatus: ReplyStatus.MEETING_BOOKED })).toBe(false);
+    expect(isActiveCadenceContact({ ...base, replyStatus: ReplyStatus.POSITIVE })).toBe(false);
+    expect(isActiveCadenceContact({ ...base, sequenceStatus: SequenceStatus.BOUNCED })).toBe(false);
   });
 });

@@ -24,8 +24,8 @@ import { getRecentApolloPushJobs } from "@/modules/lead-gen/apollo-push-jobs";
 import { getApolloStatusSyncHealth } from "@/modules/lead-gen/apollo-status-sync";
 import { ContactDirectoryTableClient } from "@/modules/lead-gen/components/contact-directory-table-client";
 import {
-  getOutreachQueue,
   getContactDirectoryFilters,
+  getOutreachQueues,
   type ContactBooleanFilter,
   type ContactDraftStatusFilter,
   type ContactDirectorySort,
@@ -44,6 +44,7 @@ const sortOptions = [
 ] as const;
 
 type SearchParams = Record<string, string | string[] | undefined>;
+type OutreachView = "attention" | "active-cadences";
 
 export default async function OutreachQueuePage({
   searchParams
@@ -54,6 +55,7 @@ export default async function OutreachQueuePage({
   await requireModule(context, ModuleKey.LEAD_GEN);
   const tenant = context;
   const params = searchParams ? await searchParams : {};
+  const view = parseOutreachView(readParam(params.view));
   const requestedApolloJobId = readParam(params.apolloJob);
   const query = readParam(params.q) ?? "";
   const companyId = readParam(params.company);
@@ -100,6 +102,7 @@ export default async function OutreachQueuePage({
       sort !== "score_desc"
   );
   const exportFilteredHref = buildContactsExportHref({
+    scope: view === "active-cadences" ? "active-cadences" : "outreach",
     q: query,
     company: companyId ?? "",
     searchProfile: searchProfileId ?? "",
@@ -116,9 +119,9 @@ export default async function OutreachQueuePage({
     rep: assignedRep,
     sort
   });
-  const exportAllHref = "/api/lead-gen/contacts/export?scope=outreach";
-  const [contacts, filterOptions, apolloPushJobs, apolloSyncHealth] = await Promise.all([
-    getOutreachQueue(tenant, {
+  const exportAllHref = `/api/lead-gen/contacts/export?scope=${view === "active-cadences" ? "active-cadences" : "outreach"}`;
+  const [queues, filterOptions, apolloPushJobs, apolloSyncHealth] = await Promise.all([
+    getOutreachQueues(tenant, {
       query,
       companyId,
       searchProfileId,
@@ -139,7 +142,9 @@ export default async function OutreachQueuePage({
     getRecentApolloPushJobs(tenant),
     getApolloStatusSyncHealth(tenant)
   ]);
+  const contacts = view === "active-cadences" ? queues.activeCadences : queues.attention;
   const filterChips = buildContactFilterChips({
+    view,
     query,
     companyId,
     companies: filterOptions.companies,
@@ -169,9 +174,33 @@ export default async function OutreachQueuePage({
       />
 
       <div className="rounded-lg border border-accentBorder bg-accentSoft px-4 py-3 text-sm text-foreground">
-        This is an active work queue, not the complete contact database. Rejected, do-not-contact, bounced, finished,
-        and sales-engaged records are hidden so the team can focus on the next safe outreach action.
+        Needs Attention contains only drafting, approval, assignment, paused-cadence, and Apollo push work. Once a
+        contact is enrolled, it moves to Active Cadences for reply monitoring. Rejected, do-not-contact, bounced,
+        finished, and sales-engaged records remain hidden.
       </div>
+
+      <nav className="flex flex-wrap gap-2" aria-label="Outreach work views">
+        <Link
+          href="/lead-gen/outreach"
+          className={`rounded-md border px-4 py-2 text-sm font-semibold transition-colors ${
+            view === "attention"
+              ? "border-primary bg-primary text-primaryForeground"
+              : "border-border bg-card text-foreground hover:bg-accentSoft"
+          }`}
+        >
+          Needs Attention ({queues.attention.length.toLocaleString("en-US")})
+        </Link>
+        <Link
+          href="/lead-gen/outreach?view=active-cadences"
+          className={`rounded-md border px-4 py-2 text-sm font-semibold transition-colors ${
+            view === "active-cadences"
+              ? "border-primary bg-primary text-primaryForeground"
+              : "border-border bg-card text-foreground hover:bg-accentSoft"
+          }`}
+        >
+          Active Cadences ({queues.activeCadences.length.toLocaleString("en-US")})
+        </Link>
+      </nav>
 
       <section className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border bg-muted px-4 py-3">
@@ -213,6 +242,7 @@ export default async function OutreachQueuePage({
       </section>
 
       <form className="overflow-hidden rounded-lg border border-border bg-card shadow-sm" action="/lead-gen/outreach">
+        {view === "active-cadences" ? <input type="hidden" name="view" value="active-cadences" /> : null}
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border bg-muted px-4 py-3">
           <div>
             <p className="text-sm font-semibold text-foreground">Filters</p>
@@ -225,7 +255,7 @@ export default async function OutreachQueuePage({
               Apply filters
             </button>
             <a
-              href="/lead-gen/outreach"
+              href={view === "active-cadences" ? "/lead-gen/outreach?view=active-cadences" : "/lead-gen/outreach"}
               className="rounded-md border border-border bg-card px-4 py-2 text-center text-sm font-semibold text-foreground transition-colors hover:bg-accentSoft"
             >
               Clear filters
@@ -404,9 +434,13 @@ export default async function OutreachQueuePage({
       <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted px-4 py-3">
           <div>
-            <p className="text-sm font-semibold text-foreground">Contact cadence foundation</p>
+            <p className="text-sm font-semibold text-foreground">
+              {view === "active-cadences" ? "Active Apollo cadences" : "Contacts requiring attention"}
+            </p>
             <p className="text-xs text-mutedForeground">
-              Review evidence-grounded Outreach Plans, complete sequences, QA, Apollo readiness, and synced results in one place.
+              {view === "active-cadences"
+                ? "Monitor enrolled contacts and synchronized Apollo status without mixing them into the approval queue."
+                : "Review evidence-grounded Outreach Plans, QA, ownership, and Apollo readiness before enrollment."}
             </p>
           </div>
           <span className="rounded-full border border-accentBorder bg-card px-2.5 py-1 text-xs font-semibold text-primary">
@@ -441,13 +475,19 @@ export default async function OutreachQueuePage({
         ) : (
           <div className="px-4 py-12 text-center">
             <h2 className="text-base font-semibold text-foreground">
-              {hasFilters ? "No active outreach matches these filters." : "The outreach queue is clear."}
+              {hasFilters
+                ? `No ${view === "active-cadences" ? "active cadences" : "attention items"} match these filters.`
+                : view === "active-cadences"
+                  ? "No contacts are currently enrolled."
+                  : "The attention queue is clear."}
             </h2>
             <p className="mt-2 text-sm text-mutedForeground">
               {hasFilters
                 ? "Adjust the company, status, source, tier, search, or sort controls to widen the queue."
+                : view === "active-cadences"
+                  ? "Contacts appear here automatically after Apollo confirms cadence enrollment."
                 : filterOptions.approvedAccountCount > 0
-                  ? "There is no active drafting, Apollo enrollment, or follow-up work. Start from a reviewed Daily Opportunity."
+                  ? "There is no drafting, approval, assignment, paused-cadence, or Apollo push work requiring attention."
                   : "Review Daily Opportunities first; approved outreach work will appear here automatically."}
             </p>
           </div>
@@ -458,6 +498,7 @@ export default async function OutreachQueuePage({
 }
 
 function buildContactFilterChips({
+  view,
   query,
   companyId,
   companies,
@@ -476,6 +517,7 @@ function buildContactFilterChips({
   assignedRep,
   sort
 }: {
+  view: OutreachView;
   query: string;
   companyId: string | undefined;
   companies: Array<{ id: string; name: string }>;
@@ -495,97 +537,102 @@ function buildContactFilterChips({
   sort: string;
 }) {
   const chips: Array<{ label: string; href: string }> = [];
+  const buildHref = (params: Record<string, string | undefined>) =>
+    buildContactsPageHref({
+      ...(view === "active-cadences" ? { view } : {}),
+      ...params
+    });
   const matchedCompany = companies.find((company) => company.id === companyId);
   const matchedProfile = searchProfiles.find((profile) => profile.id === searchProfileId);
 
   if (query) {
     chips.push({
       label: `Search: ${query}`,
-      href: buildContactsPageHref({ company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, replyStatus, source, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, rep: assignedRep, sort })
+      href: buildHref({ company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, replyStatus, source, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, rep: assignedRep, sort })
     });
   }
   if (matchedCompany) {
     chips.push({
       label: `Company: ${matchedCompany.name}`,
-      href: buildContactsPageHref({ q: query, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, replyStatus, source, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, rep: assignedRep, sort })
+      href: buildHref({ q: query, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, replyStatus, source, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, rep: assignedRep, sort })
     });
   }
   if (matchedProfile) {
     chips.push({
       label: `Profile: ${matchedProfile.name}`,
-      href: buildContactsPageHref({ q: query, company: companyId, contactStatus, apolloStatus, sequenceStatus, replyStatus, source, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, rep: assignedRep, sort })
+      href: buildHref({ q: query, company: companyId, contactStatus, apolloStatus, sequenceStatus, replyStatus, source, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, rep: assignedRep, sort })
     });
   }
   if (contactStatus !== "ALL") {
     chips.push({
       label: `Contact: ${formatEnum(contactStatus)}`,
-      href: buildContactsPageHref({ q: query, company: companyId, searchProfile: searchProfileId, apolloStatus, sequenceStatus, replyStatus, source, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, rep: assignedRep, sort })
+      href: buildHref({ q: query, company: companyId, searchProfile: searchProfileId, apolloStatus, sequenceStatus, replyStatus, source, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, rep: assignedRep, sort })
     });
   }
   if (apolloStatus !== "ALL") {
     chips.push({
       label: `Apollo: ${formatEnum(apolloStatus)}`,
-      href: buildContactsPageHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, sequenceStatus, replyStatus, source, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, rep: assignedRep, sort })
+      href: buildHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, sequenceStatus, replyStatus, source, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, rep: assignedRep, sort })
     });
   }
   if (sequenceStatus !== "ALL") {
     chips.push({
       label: `Sequence: ${formatEnum(sequenceStatus)}`,
-      href: buildContactsPageHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, replyStatus, source, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, rep: assignedRep, sort })
+      href: buildHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, replyStatus, source, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, rep: assignedRep, sort })
     });
   }
   if (replyStatus !== "ALL") {
     chips.push({
       label: `Reply: ${formatEnum(replyStatus)}`,
-      href: buildContactsPageHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, source, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, rep: assignedRep, sort })
+      href: buildHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, source, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, rep: assignedRep, sort })
     });
   }
   if (source !== "ALL") {
     chips.push({
       label: `Source: ${formatEnum(source)}`,
-      href: buildContactsPageHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, replyStatus, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, rep: assignedRep, sort })
+      href: buildHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, replyStatus, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, rep: assignedRep, sort })
     });
   }
   if (contactTier !== "ALL") {
     chips.push({
       label: `Tier: ${formatEnum(contactTier)}`,
-      href: buildContactsPageHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, replyStatus, source, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, rep: assignedRep, sort })
+      href: buildHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, replyStatus, source, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, rep: assignedRep, sort })
     });
   }
   if (draftStatus !== "ALL") {
     chips.push({
       label: `Draft: ${formatDraftStatusFilter(draftStatus as ContactDraftStatusFilter)}`,
-      href: buildContactsPageHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, replyStatus, source, tier: contactTier, requiresAiDraft, approvedDraft, hasSequenceSelected, rep: assignedRep, sort })
+      href: buildHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, replyStatus, source, tier: contactTier, requiresAiDraft, approvedDraft, hasSequenceSelected, rep: assignedRep, sort })
     });
   }
   if (requiresAiDraft !== "ALL") {
     chips.push({
       label: `Needs AI draft: ${formatBooleanFilter(requiresAiDraft as ContactBooleanFilter)}`,
-      href: buildContactsPageHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, replyStatus, source, tier: contactTier, draftStatus, approvedDraft, hasSequenceSelected, rep: assignedRep, sort })
+      href: buildHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, replyStatus, source, tier: contactTier, draftStatus, approvedDraft, hasSequenceSelected, rep: assignedRep, sort })
     });
   }
   if (approvedDraft !== "ALL") {
     chips.push({
       label: `Approved draft: ${formatBooleanFilter(approvedDraft as ContactBooleanFilter)}`,
-      href: buildContactsPageHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, replyStatus, source, tier: contactTier, draftStatus, requiresAiDraft, hasSequenceSelected, rep: assignedRep, sort })
+      href: buildHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, replyStatus, source, tier: contactTier, draftStatus, requiresAiDraft, hasSequenceSelected, rep: assignedRep, sort })
     });
   }
   if (hasSequenceSelected !== "ALL") {
     chips.push({
       label: `Cadence selected: ${formatBooleanFilter(hasSequenceSelected as ContactBooleanFilter)}`,
-      href: buildContactsPageHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, replyStatus, source, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, rep: assignedRep, sort })
+      href: buildHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, replyStatus, source, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, rep: assignedRep, sort })
     });
   }
   if (assignedRep !== "ALL") {
     chips.push({
       label: `Rep: ${assignedRep === "UNASSIGNED" ? "Unassigned" : assignedRep}`,
-      href: buildContactsPageHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, replyStatus, source, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, sort })
+      href: buildHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, replyStatus, source, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, sort })
     });
   }
   if (sort !== "score_desc") {
     chips.push({
       label: `Sort: ${sortOptions.find((option) => option.value === sort)?.label ?? sort}`,
-      href: buildContactsPageHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, replyStatus, source, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, rep: assignedRep })
+      href: buildHref({ q: query, company: companyId, searchProfile: searchProfileId, contactStatus, apolloStatus, sequenceStatus, replyStatus, source, tier: contactTier, draftStatus, requiresAiDraft, approvedDraft, hasSequenceSelected, rep: assignedRep })
     });
   }
 
@@ -724,6 +771,10 @@ function parseSortParam(value: string | undefined): ContactDirectorySort {
   return sortOptions.some((option) => option.value === value) ? (value as ContactDirectorySort) : "score_desc";
 }
 
+function parseOutreachView(value: string | undefined): OutreachView {
+  return value === "active-cadences" ? value : "attention";
+}
+
 function readParam(value: string | string[] | undefined) {
   if (Array.isArray(value)) {
     return value[0];
@@ -734,10 +785,10 @@ function readParam(value: string | string[] | undefined) {
 
 function buildContactsExportHref(params: Record<string, string>) {
   const searchParams = new URLSearchParams();
-  searchParams.set("scope", "outreach");
+  searchParams.set("scope", params.scope);
 
   for (const [key, value] of Object.entries(params)) {
-    if (!value || value === "ALL" || (key === "sort" && value === "score_desc")) {
+    if (key === "scope" || !value || value === "ALL" || (key === "sort" && value === "score_desc")) {
       continue;
     }
 

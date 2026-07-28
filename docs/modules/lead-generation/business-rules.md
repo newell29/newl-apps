@@ -103,8 +103,11 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 ## Automated sales workspace boundaries
 
 - Daily Opportunities is the researched decision surface; Found Companies remains a bounded source-data review screen.
-- Outreach Queue includes an active contact when it is approved, ready/enrolled/paused/replied in a sequence, or has a Newl outreach draft.
-- Outreach Queue excludes rejected and do-not-contact records, bounced sequences, finished sequences without current outreach work, and positive, meeting-booked, or negative reply outcomes. A current non-archived Outreach Plan keeps a no-reply contact visible even when an older cadence is finished.
+- Outreach Queue defaults to **Needs Attention**. It includes approved, ready, paused, or replied contacts and contacts
+  with a current Newl draft or Outreach Plan, but excludes contacts already enrolled in Apollo.
+- **Active Cadences** contains enrolled, no-reply contacts for monitoring. Enrollment therefore removes a contact from
+  Needs Attention without deleting the contact, plan, sequence history, or reply-sync state.
+- Both views exclude rejected and do-not-contact records, bounced sequences, finished sequences without current outreach work, and positive, meeting-booked, or negative reply outcomes. A current non-archived Outreach Plan keeps a no-reply contact visible in Needs Attention even when an older cadence is finished.
 - A legacy `Lead` row by itself does not remove a researched company from Hunter planning. Hunter blocks a company
   for current-customer, do-not-prospect, rejected/disqualified, do-not-contact, reply, or prior-sequence evidence.
   This preserves duplicate-outreach protection without letting the retired pipeline workflow suppress otherwise

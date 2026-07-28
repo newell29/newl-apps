@@ -11,6 +11,7 @@ import {
   isCurrentOutreachDraft,
   mergeOutreachQaResults,
   runDeterministicOutreachQa,
+  VISIBLE_OUTREACH_PLAN_VERSION_WHERE,
   type GeneratedOutreachSequence,
   type OutreachEvidenceRecord,
   type OutreachStrategy
@@ -106,6 +107,22 @@ const sequence: GeneratedOutreachSequence = {
 };
 
 describe("outreach plan grounding", () => {
+  it("keeps compatible QA-passed plans visible while hiding failed legacy plans", () => {
+    expect(VISIBLE_OUTREACH_PLAN_VERSION_WHERE).toEqual({
+      OR: [
+        {
+          promptVersion: "outreach-plan-v2.5"
+        },
+        {
+          promptVersion: {
+            in: ["outreach-plan-v2.4"]
+          },
+          qaStatus: OutreachQaStatus.PASSED
+        }
+      ]
+    });
+  });
+
   it("preserves passed v2.4 plans while upgrading only failed plans to the corrected policy", () => {
     expect(
       shouldReuseExistingOutreachPlan({

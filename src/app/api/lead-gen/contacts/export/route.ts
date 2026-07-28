@@ -10,6 +10,7 @@ import {
 } from "@prisma/client";
 import { NextResponse } from "next/server";
 import {
+  getActiveCadenceQueue,
   getContactDirectory,
   getOutreachQueue,
   type ContactBooleanFilter,
@@ -45,9 +46,13 @@ export async function GET(request: Request) {
       sort: parseSortParam(url.searchParams.get("sort"))
     };
 
-    const contacts = url.searchParams.get("scope") === "outreach"
-      ? await getOutreachQueue(context, filters)
-      : await getContactDirectory(context, filters);
+    const scope = url.searchParams.get("scope");
+    const contacts =
+      scope === "outreach"
+        ? await getOutreachQueue(context, filters)
+        : scope === "active-cadences"
+          ? await getActiveCadenceQueue(context, filters)
+          : await getContactDirectory(context, filters);
     const csv = toCsv([
       [
         "Contact Name",
