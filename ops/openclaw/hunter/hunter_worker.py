@@ -343,6 +343,44 @@ def send_teams_message(message: str) -> bool:
         return False
 
 
+def build_company_research_message(result: dict[str, Any]) -> str:
+    researched = int(result.get("researchedCount") or 0)
+    accepted = int(result.get("acceptedCount") or 0)
+    blocked = int(result.get("blockedCount") or 0)
+    missing = int(result.get("missingCompanyCount") or 0)
+    return (
+        "Hunter company research completed: "
+        f"{researched} companies reached Qwen and Kimi, {accepted} qualified for planning, "
+        f"{blocked} blocked, and {missing} omitted after bounded model-output repair. "
+        "Review Sales → Daily Opportunities and Admin & Quality → Health & Logs."
+    )
+
+
+def run_company_research_with_notification(**kwargs: Any) -> dict[str, Any]:
+    try:
+        result = run_company_research(**kwargs)
+    except Exception:
+        send_teams_message(
+            "Hunter company research failed during retrieval or model processing. "
+            "A paid-retrieval checkpoint was preserved when retrieval completed. "
+            "Review Admin & Quality → Health & Logs; no outreach was sent."
+        )
+        raise
+    if (
+        isinstance(result, dict)
+        and result.get("state") not in {
+            "already_attempted",
+            "disabled",
+            "dry_run",
+            "idle",
+            "research_only",
+        }
+        and ("researchedCount" in result or "missingCompanyCount" in result)
+    ):
+        send_teams_message(build_company_research_message(result))
+    return result
+
+
 def read_job_run_summary(base_url: str, token: str, job_run_id: str) -> dict[str, Any]:
     response = api_request(
         base_url,
@@ -758,7 +796,7 @@ def main() -> int:
 
         print(
             json.dumps(
-                run_company_research(
+                run_company_research_with_notification(
                     force=True,
                     dry_run=args.company_research_dry_run,
                     company_keys=read_company_keys(args.company_research_cohort),
@@ -808,7 +846,7 @@ def main() -> int:
             if last_company_research_check_date != local_date:
                 last_company_research_check_date = local_date
                 try:
-                    print(json.dumps(run_company_research(), indent=2))
+                    print(json.dumps(run_company_research_with_notification(), indent=2))
                 except Exception as error:
                     print(f"Hunter daily company research failed: {error}", file=sys.stderr)
         if args.once or args.profile_id or args.profile_name:

@@ -486,6 +486,169 @@ describe("Hunter company deep research", () => {
     await expect(execFileAsync("/bin/zsh", ["-n", runnerPath])).resolves.toBeDefined();
   });
 
+  it("isolates malformed Qwen batches and retries affected companies independently", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "def valid_row(key):",
+      " return {'companyKey':key,'identityDisposition':'PASS','identityConfidence':90,'identityReason':'Verified identity.','logisticsProvider':False,'namedExternalLogisticsProvider':False,'stableExclusiveProviderEvidence':False,'providerDisplacementEvidence':False,'freshness':'CURRENT','opportunitySummary':'Current operating footprint.','triggerEvidenceIndices':[0],'geography':'Charlotte, North Carolina','companyCountry':'United States','operatingRegion':'NORTH_AMERICA','verifiedUsDivision':False,'usDivisionName':None,'usDivisionEvidenceIndices':[],'serviceLine':'WAREHOUSING','signalType':'OTHER','confidence':80,'rationale':'Evidence supports current fit.','missingEvidence':[],'followUpQueries':[]}",
+      "calls=[]",
+      "def fake_request(_url,_model,packets,retry_reason=None):",
+      " calls.append({'keys':[packet['companyKey'] for packet in packets],'repair':bool(retry_reason)})",
+      " if len(packets)>1: raise RuntimeError('doneReason=length')",
+      " return [valid_row(packets[0]['companyKey'])],{'inputTokens':1,'outputTokens':2,'durationMs':3}",
+      "r.ollama_synthesis_request=fake_request",
+      "candidates=[{'companyKey':'alpha','companyName':'Alpha'},{'companyKey':'beta','companyName':'Beta'}]",
+      "evidence={key:[{'pass':'IDENTITY','firstParty':True,'sourceType':'FIRST_PARTY','title':key,'excerpt':'identity','publishedAt':None}] for key in ['alpha','beta']}",
+      "results,usage,failures=r.synthesize_companies('http://127.0.0.1:11434','qwen',candidates,evidence,2,2)",
+      "print(json.dumps({'keys':sorted(results.keys()),'usage':usage,'failures':failures,'calls':calls}))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual({
+      keys: ["alpha", "beta"],
+      usage: { inputTokens: 2, outputTokens: 4, durationMs: 6 },
+      failures: {},
+      calls: [
+        { keys: ["alpha", "beta"], repair: false },
+        { keys: ["alpha"], repair: true },
+        { keys: ["beta"], repair: true }
+      ]
+    });
+  });
+
+  it("retains valid Qwen results when one company exhausts its repair attempts", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "def valid_row(key):",
+      " return {'companyKey':key,'identityDisposition':'PASS','identityConfidence':90,'identityReason':'Verified identity.','logisticsProvider':False,'namedExternalLogisticsProvider':False,'stableExclusiveProviderEvidence':False,'providerDisplacementEvidence':False,'freshness':'CURRENT','opportunitySummary':'Current operating footprint.','triggerEvidenceIndices':[0],'geography':'Charlotte, North Carolina','companyCountry':'United States','operatingRegion':'NORTH_AMERICA','verifiedUsDivision':False,'usDivisionName':None,'usDivisionEvidenceIndices':[],'serviceLine':'WAREHOUSING','signalType':'OTHER','confidence':80,'rationale':'Evidence supports current fit.','missingEvidence':[],'followUpQueries':[]}",
+      "def fake_request(_url,_model,packets,retry_reason=None):",
+      " if len(packets)>1: raise RuntimeError('invalid batch')",
+      " key=packets[0]['companyKey']",
+      " if key=='beta': raise RuntimeError('missing companies array')",
+      " return [valid_row(key)],{'inputTokens':1,'outputTokens':2,'durationMs':3}",
+      "r.ollama_synthesis_request=fake_request",
+      "candidates=[{'companyKey':'alpha','companyName':'Alpha'},{'companyKey':'beta','companyName':'Beta'}]",
+      "evidence={key:[{'pass':'IDENTITY','firstParty':True,'sourceType':'FIRST_PARTY','title':key,'excerpt':'identity','publishedAt':None}] for key in ['alpha','beta']}",
+      "results,usage,failures=r.synthesize_companies('http://127.0.0.1:11434','qwen',candidates,evidence,2,1)",
+      "print(json.dumps({'keys':sorted(results.keys()),'usage':usage,'failures':failures}))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+    const result = JSON.parse(stdout) as {
+      keys: string[];
+      usage: { inputTokens: number; outputTokens: number; durationMs: number };
+      failures: Record<string, string>;
+    };
+
+    expect(result.keys).toEqual(["alpha"]);
+    expect(result.usage).toEqual({ inputTokens: 1, outputTokens: 2, durationMs: 3 });
+    expect(result.failures.beta).toContain("missing companies array");
+  });
+
+  it("creates a private same-day cohort checkpoint path without exposing provider credentials", async () => {
+    const program = [
+      "import json,os",
+      "import hunter_company_research as r",
+      "os.environ['HUNTER_PROCESSED_DIRECTORY']='/private/tmp/hunter-processed'",
+      "os.environ['HUNTER_COMPANY_RESEARCH_TIMEZONE']='America/Toronto'",
+      "path=r.automatic_checkpoint_path([{'companyKey':'alpha'},{'companyKey':'beta'}])",
+      "print(json.dumps({'path':path,'containsKey':'secret-key' in path}))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+    const result = JSON.parse(stdout) as { path: string; containsKey: boolean };
+
+    expect(result.path).toMatch(
+      /^\/private\/tmp\/hunter-processed\/company-research-checkpoints\/\d{4}-\d{2}-\d{2}-[a-f0-9]{16}\.json$/
+    );
+    expect(result.containsKey).toBe(false);
+  });
+
+  it("writes paid-retrieval checkpoints atomically with owner-only permissions", async () => {
+    const program = [
+      "import json,os,tempfile",
+      "import hunter_company_research as r",
+      "with tempfile.TemporaryDirectory(dir='/private/tmp') as directory:",
+      " path=os.path.join(directory,'nested','checkpoint.json')",
+      " r.write_checkpoint(path,{'stage':'RETRIEVAL_COMPLETE','candidateKeys':['alpha']})",
+      " mode=oct(os.stat(path).st_mode & 0o777)",
+      " print(json.dumps({'mode':mode,'payload':r.read_checkpoint(path),'temporaryExists':os.path.exists(path+'.tmp')}))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual({
+      mode: "0o600",
+      payload: { stage: "RETRIEVAL_COMPLETE", candidateKeys: ["alpha"] },
+      temporaryExists: false
+    });
+  });
+
+  it("recovers fenced Qwen JSON and reports safe truncation diagnostics", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "class Response:",
+      " def __init__(self,payload): self.payload=payload",
+      " def __enter__(self): return self",
+      " def __exit__(self,*_args): return False",
+      " def read(self): return json.dumps(self.payload).encode()",
+      "responses=[",
+      " {'message':{'content':'```json\\n{\"companies\": []}\\n```'},'done_reason':'stop','prompt_eval_count':1,'eval_count':2},",
+      " {'message':{'content':'{\"companies\": ['},'done_reason':'length','prompt_eval_count':1,'eval_count':2},",
+      "]",
+      "r.urllib.request.urlopen=lambda *_args,**_kwargs: Response(responses.pop(0))",
+      "rows,usage=r.ollama_synthesis_request('http://127.0.0.1:11434','qwen',[])",
+      "try:",
+      " r.ollama_synthesis_request('http://127.0.0.1:11434','qwen',[])",
+      "except RuntimeError as error:",
+      " diagnostic=str(error)",
+      "print(json.dumps({'rows':rows,'usage':usage,'diagnostic':diagnostic}))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+    const result = JSON.parse(stdout) as {
+      rows: unknown[];
+      usage: { inputTokens: number; outputTokens: number; durationMs: number };
+      diagnostic: string;
+    };
+
+    expect(result.rows).toEqual([]);
+    expect(result.usage.inputTokens).toBe(1);
+    expect(result.usage.outputTokens).toBe(2);
+    expect(result.diagnostic).toContain("doneReason=length");
+    expect(result.diagnostic).toContain("JSON decode failed at line");
+    expect(result.diagnostic).not.toContain('"companies"');
+  });
+
   it("builds all four company-specific research queries", async () => {
     const program = [
       "import json",

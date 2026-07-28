@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import html
 import ipaddress
 import json
@@ -92,11 +93,13 @@ PUBLIC_DOMAIN_PATTERN = re.compile(
 
 SYNTHESIS_SCHEMA = {
     "type": "object",
+    "additionalProperties": False,
     "properties": {
         "companies": {
             "type": "array",
             "items": {
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {
                     "companyKey": {"type": "string"},
                     "identityDisposition": {
@@ -904,6 +907,7 @@ def ollama_synthesis_request(
     base_url: str,
     model: str,
     company_packets: list[dict[str, Any]],
+    retry_reason: Optional[str] = None,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     system_prompt = (
         "You are the evidence-synthesis stage of Hunter, Newl Group's logistics opportunity engine. "
@@ -951,7 +955,16 @@ def ollama_synthesis_request(
     user_prompt = (
         f"Prompt version: {PROMPT_VERSION}\n"
         "Synthesize these companies. Evidence is indexed within each company. Explain conflicts and list "
-        "material missing evidence. Confidence measures the evidence, not sales enthusiasm.\n\n"
+        "material missing evidence. Confidence measures the evidence, not sales enthusiasm. Return exactly "
+        "one JSON object matching the supplied schema, with exactly one companies row for every supplied "
+        "companyKey and no prose, Markdown, or additional keys."
+        + (
+            "\nThe prior response was rejected. Correct this validation problem without changing or omitting "
+            f"any company: {bounded_text(retry_reason, 'invalid structured output', 500)}"
+            if retry_reason
+            else ""
+        )
+        + "\n\n"
         f"{json.dumps(company_packets, ensure_ascii=False)}"
     )
     payload = {
@@ -981,10 +994,29 @@ def ollama_synthesis_request(
         raise RuntimeError(f"Ollama request failed: {error.reason}") from error
     try:
         envelope = json.loads(body)
-        parsed = json.loads(envelope["message"]["content"])
+    except json.JSONDecodeError as error:
+        raise RuntimeError(
+            "Ollama returned an invalid API envelope "
+            f"(JSON decode failed at line {error.lineno}, column {error.colno}; responseBytes={len(body)})."
+        ) from error
+    try:
+        content = envelope["message"]["content"]
+        parsed = parse_json_object(content)
         rows = parsed["companies"]
-    except (json.JSONDecodeError, KeyError, TypeError) as error:
-        raise RuntimeError("Ollama returned invalid structured company research.") from error
+    except json.JSONDecodeError as error:
+        content_length = len(content) if isinstance(content, str) else 0
+        done_reason = bounded_text(envelope.get("done_reason"), "unknown", 100)
+        raise RuntimeError(
+            "Ollama returned invalid structured company research "
+            f"(JSON decode failed at line {error.lineno}, column {error.colno}; "
+            f"doneReason={done_reason}; contentChars={content_length})."
+        ) from error
+    except (KeyError, TypeError) as error:
+        done_reason = bounded_text(envelope.get("done_reason"), "unknown", 100)
+        raise RuntimeError(
+            "Ollama returned invalid structured company research "
+            f"(missing message.content or companies; doneReason={done_reason})."
+        ) from error
     if not isinstance(rows, list):
         raise RuntimeError("Ollama company research did not contain a companies array.")
     usage = {
@@ -1453,10 +1485,17 @@ def synthesize_companies(
     candidates: list[dict[str, Any]],
     evidence_by_key: dict[str, list[dict[str, Any]]],
     batch_size: int,
-) -> tuple[dict[str, dict[str, Any]], dict[str, int]]:
+    repair_attempts: int = 2,
+) -> tuple[dict[str, dict[str, Any]], dict[str, int], dict[str, str]]:
     results: dict[str, dict[str, Any]] = {}
     usage = {"inputTokens": 0, "outputTokens": 0, "durationMs": 0}
-    for batch in batched(candidates, batch_size):
+    failures: dict[str, str] = {}
+
+    def synthesize_batch(
+        batch: list[dict[str, Any]],
+        attempt: int = 0,
+        retry_reason: Optional[str] = None,
+    ) -> None:
         packet = [
             {
                 "companyKey": candidate["companyKey"],
@@ -1473,25 +1512,63 @@ def synthesize_companies(
             }
             for candidate in batch
         ]
-        rows, batch_usage = ollama_synthesis_request(ollama_url, model, packet)
+        try:
+            rows, batch_usage = ollama_synthesis_request(
+                ollama_url,
+                model,
+                packet,
+                retry_reason=retry_reason,
+            )
+        except RuntimeError as error:
+            if len(batch) > 1:
+                for candidate in batch:
+                    synthesize_batch([candidate], retry_reason=str(error))
+                return
+            key = str(batch[0]["companyKey"])
+            if attempt < repair_attempts:
+                synthesize_batch(batch, attempt + 1, str(error))
+                return
+            failures[key] = bounded_text(
+                error,
+                "Qwen returned invalid structured output.",
+                1_000,
+            )
+            return
+        for name in usage:
+            usage[name] += batch_usage[name]
         rows_by_key = {
             clean(row.get("companyKey")): row
             for row in rows
             if isinstance(row, dict) and clean(row.get("companyKey"))
         }
         for candidate in batch:
-            key = candidate["companyKey"]
+            key = str(candidate["companyKey"])
             row = rows_by_key.get(key)
-            if not row:
-                raise RuntimeError(f"Qwen did not return companyKey {key}.")
-            results[key] = normalize_synthesis_for_evidence(
-                candidate,
-                evidence_by_key.get(key, []),
-                validate_synthesis(row, key),
-            )
-        for name in usage:
-            usage[name] += batch_usage[name]
-    return results, usage
+            try:
+                if not row:
+                    raise RuntimeError(f"Qwen did not return companyKey {key}.")
+                results[key] = normalize_synthesis_for_evidence(
+                    candidate,
+                    evidence_by_key.get(key, []),
+                    validate_synthesis(row, key),
+                )
+            except RuntimeError as error:
+                if len(batch) > 1 or attempt < repair_attempts:
+                    synthesize_batch(
+                        [candidate],
+                        attempt + 1 if len(batch) == 1 else 0,
+                        str(error),
+                    )
+                else:
+                    failures[key] = bounded_text(
+                        error,
+                        "Qwen returned invalid structured output.",
+                        1_000,
+                    )
+
+    for batch in batched(candidates, batch_size):
+        synthesize_batch(batch)
+    return results, usage, failures
 
 
 def score_companies(
@@ -2115,8 +2192,44 @@ def report_failure(base_url: str, token: str, run_id: Optional[str], error: Exce
 def write_checkpoint(path: Optional[str], payload: dict[str, Any]) -> None:
     if not path:
         return
-    with open(path, "w", encoding="utf-8") as handle:
+    parent = os.path.dirname(os.path.abspath(path))
+    os.makedirs(parent, mode=0o700, exist_ok=True)
+    temporary_path = f"{path}.tmp"
+    with open(temporary_path, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2, ensure_ascii=False)
+    os.chmod(temporary_path, 0o600)
+    os.replace(temporary_path, path)
+
+
+def automatic_checkpoint_path(
+    candidates: list[dict[str, Any]],
+    explicit_path: Optional[str] = None,
+) -> Optional[str]:
+    if explicit_path:
+        return explicit_path
+    configured_directory = clean(os.environ.get("HUNTER_RESEARCH_CHECKPOINT_DIRECTORY"))
+    if configured_directory:
+        directory = configured_directory
+    else:
+        processed_directory = clean(os.environ.get("HUNTER_PROCESSED_DIRECTORY"))
+        if not processed_directory:
+            return None
+        directory = os.path.join(processed_directory, "company-research-checkpoints")
+    timezone_name = clean(os.environ.get("HUNTER_COMPANY_RESEARCH_TIMEZONE")) or "America/Toronto"
+    try:
+        from zoneinfo import ZoneInfo
+
+        local_date = dt.datetime.now(dt.timezone.utc).astimezone(ZoneInfo(timezone_name)).date()
+    except Exception as error:
+        raise RuntimeError("HUNTER_COMPANY_RESEARCH_TIMEZONE must be a valid IANA timezone") from error
+    candidate_keys = [str(candidate["companyKey"]) for candidate in candidates]
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            {"promptVersion": PROMPT_VERSION, "candidateKeys": candidate_keys},
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()[:16]
+    return os.path.join(directory, f"{local_date.isoformat()}-{fingerprint}.json")
 
 
 def read_checkpoint(path: Optional[str]) -> Optional[dict[str, Any]]:
@@ -2186,6 +2299,9 @@ def run_company_research(
         follow_up_limit = max(
             0, min(2, int(os.environ.get("HUNTER_RESEARCH_FOLLOW_UP_QUERIES", "2")))
         )
+        qwen_repair_attempts = max(
+            0, min(3, int(os.environ.get("HUNTER_RESEARCH_QWEN_REPAIR_ATTEMPTS", "2")))
+        )
         ollama_url = clean(os.environ.get("HUNTER_OLLAMA_BASE_URL")) or DEFAULT_OLLAMA_URL
         if not re.fullmatch(r"http://(127\.0\.0\.1|localhost)(:\d+)?", ollama_url):
             raise RuntimeError("HUNTER_OLLAMA_BASE_URL must use localhost or 127.0.0.1 over HTTP.")
@@ -2203,7 +2319,15 @@ def run_company_research(
             or DEFAULT_KIMI_VALIDATOR_MODEL
         )
 
-        checkpoint = read_checkpoint(resume_checkpoint)
+        checkpoint_output = automatic_checkpoint_path(candidates, replay_output)
+        automatic_resume = (
+            checkpoint_output
+            if not resume_checkpoint
+            and checkpoint_output
+            and os.path.isfile(checkpoint_output)
+            else None
+        )
+        checkpoint = read_checkpoint(resume_checkpoint or automatic_resume)
         if checkpoint:
             validate_checkpoint_cohort(checkpoint, candidates)
         checkpoint_stage = clean(checkpoint.get("stage")) if checkpoint else None
@@ -2240,7 +2364,7 @@ def run_company_research(
                 query_log.extend([{"companyKey": key, **row} for row in company_queries])
                 page_fetch_count += page_count
             write_checkpoint(
-                replay_output,
+                checkpoint_output,
                 {
                     "stage": "RETRIEVAL_COMPLETE",
                     "version": 1,
@@ -2269,12 +2393,30 @@ def run_company_research(
                 "durationMs": int(raw_qwen_usage.get("durationMs") or 0),
             }
         else:
-            synthesis_by_key, qwen_usage = synthesize_companies(
-                ollama_url, qwen_model, candidates, evidence_by_key, qwen_batch_size
+            synthesis_by_key, qwen_usage, synthesis_failures = synthesize_companies(
+                ollama_url,
+                qwen_model,
+                candidates,
+                evidence_by_key,
+                qwen_batch_size,
+                qwen_repair_attempts,
             )
+            synthesized_candidates = [
+                candidate
+                for candidate in candidates
+                if candidate["companyKey"] in synthesis_by_key
+            ]
+            if not synthesized_candidates:
+                failure_summary = "; ".join(
+                    f"{key}: {message}" for key, message in synthesis_failures.items()
+                )
+                raise RuntimeError(
+                    "Qwen could not produce valid structured research for any company. "
+                    f"{bounded_text(failure_summary, 'No valid company synthesis was returned.', 1_000)}"
+                )
             identity_evidence_added, identity_page_count = collect_identity_discovery_evidence(
                 provider,
-                candidates,
+                synthesized_candidates,
                 synthesis_by_key,
                 evidence_by_key,
                 query_log,
@@ -2287,7 +2429,7 @@ def run_company_research(
             if has_follow_ups:
                 page_fetch_count += collect_follow_up_evidence(
                     provider,
-                    candidates,
+                    synthesized_candidates,
                     synthesis_by_key,
                     evidence_by_key,
                     query_log,
@@ -2299,16 +2441,35 @@ def run_company_research(
                     for key, rows in evidence_by_key.items()
                 }
             if identity_evidence_added > 0 or has_follow_ups:
-                final_synthesis, final_usage = synthesize_companies(
-                    ollama_url, qwen_model, candidates, evidence_by_key, qwen_batch_size
+                final_synthesis, final_usage, final_failures = synthesize_companies(
+                    ollama_url,
+                    qwen_model,
+                    synthesized_candidates,
+                    evidence_by_key,
+                    qwen_batch_size,
+                    qwen_repair_attempts,
                 )
                 for name in qwen_usage:
                     qwen_usage[name] += final_usage[name]
                 synthesis_by_key = final_synthesis
+                synthesis_failures.update(final_failures)
+                synthesized_candidates = [
+                    candidate
+                    for candidate in synthesized_candidates
+                    if candidate["companyKey"] in synthesis_by_key
+                ]
+                if not synthesized_candidates:
+                    raise RuntimeError(
+                        "Qwen could not produce valid structured research after follow-up retrieval."
+                    )
             write_checkpoint(
-                replay_output,
+                checkpoint_output,
                 {
-                    "stage": "SYNTHESIS_COMPLETE",
+                    "stage": (
+                        "SYNTHESIS_COMPLETE"
+                        if not synthesis_failures
+                        else "RETRIEVAL_COMPLETE"
+                    ),
                     "version": 1,
                     "promptVersion": PROMPT_VERSION,
                     "candidateKeys": [candidate["companyKey"] for candidate in candidates],
@@ -2318,8 +2479,16 @@ def run_company_research(
                     "pageFetchCount": page_fetch_count,
                     "synthesisByKey": synthesis_by_key,
                     "qwenUsage": qwen_usage,
+                    "synthesisFailures": synthesis_failures,
                 },
             )
+        if checkpoint_stage == "SYNTHESIS_COMPLETE":
+            synthesis_failures: dict[str, str] = {}
+            synthesized_candidates = [
+                candidate
+                for candidate in candidates
+                if candidate["companyKey"] in synthesis_by_key
+            ]
 
         if research_only:
             report_failure(
@@ -2336,7 +2505,8 @@ def run_company_research(
                 "queryCount": len(query_log),
                 "failedQueryCount": sum(1 for row in query_log if row.get("error")),
                 "qwen": qwen_usage,
-                "checkpoint": replay_output,
+                "checkpoint": checkpoint_output,
+                "synthesisFailureCount": len(synthesis_failures),
             }
 
         kimi_api_key = required_env("HUNTER_KIMI_API_KEY")
@@ -2344,14 +2514,14 @@ def run_company_research(
             kimi_url,
             kimi_api_key,
             kimi_model,
-            candidates,
+            synthesized_candidates,
             evidence_by_key,
             synthesis_by_key,
             kimi_batch_size,
         )
         thresholds = packet.get("thresholds") if isinstance(packet.get("thresholds"), dict) else {}
         k3_candidates = select_k3_candidates(
-            candidates,
+            synthesized_candidates,
             evidence_by_key,
             synthesis_by_key,
             scoring_by_key,
@@ -2428,7 +2598,7 @@ def run_company_research(
                         },
                     ),
                 }
-                for candidate in candidates
+                for candidate in synthesized_candidates
             ],
         }
         if replay_output:
