@@ -536,6 +536,7 @@ export async function fetchApolloContactsForCompany(
   let trustedMatchedOrganization = isDirectApolloCompanyMatch(matchedOrganization) ? matchedOrganization : null;
   let organizationIdForSearch = trustedMatchedOrganization?.id ?? providedOrganizationId ?? null;
   let companyNameForSearch = trustedMatchedOrganization?.name ?? input.companyName;
+  let domainForSearch = trustedMatchedOrganization?.domain ?? normalizeDomain(input.domain);
   const savedContactsForProvidedOrganization = providedOrganizationId
     ? ((await searchApolloContacts({
         apiKey,
@@ -552,7 +553,8 @@ export async function fetchApolloContactsForCompany(
       ? ((await searchApolloRelevantPeople({
           apiKey,
           companyName: companyNameForSearch,
-          domain: input.domain,
+          domain: organizationIdForSearch ? null : domainForSearch,
+          expectedOrganizationDomain: domainForSearch,
           organizationId: organizationIdForSearch,
           allowPeopleSearchFallback,
           keywordSearchLimit,
@@ -561,6 +563,53 @@ export async function fetchApolloContactsForCompany(
         })) ??
         [])
       : [];
+
+  if (
+    !canonicalDiscoveredOrganization &&
+    providedOrganizationId &&
+    contactsFromApollo.length <= 1
+  ) {
+    const savedAccountOrganization = await findApolloSavedAccountOrganization(
+      input,
+      apiKey,
+      providedOrganizationId
+    );
+    const savedAccountId = readApolloString(savedAccountOrganization?.rawPayload ?? {}, ["id"]);
+    const recoveredOrganizationId =
+      savedAccountOrganization?.id &&
+      savedAccountOrganization.id !== savedAccountId
+        ? savedAccountOrganization.id
+        : null;
+    const recoveredDomain = savedAccountOrganization?.domain ?? domainForSearch;
+    const recoveryChangesScope =
+      Boolean(recoveredOrganizationId && recoveredOrganizationId !== organizationIdForSearch) ||
+      Boolean(!recoveredOrganizationId && recoveredDomain && recoveredDomain !== domainForSearch);
+
+    if (savedAccountOrganization && recoveryChangesScope) {
+      trustedMatchedOrganization = savedAccountOrganization;
+      effectiveMatchOrganization = {
+        ...savedAccountOrganization,
+        matchReason:
+          `${savedAccountOrganization.matchReason}; recovered from Apollo's saved-account directory ` +
+          `after the original employee search returned ${contactsFromApollo.length} result(s)`
+      };
+      organizationIdForSearch = recoveredOrganizationId;
+      companyNameForSearch = savedAccountOrganization.name ?? input.companyName;
+      domainForSearch = recoveredDomain;
+      contactsFromApollo =
+        (await searchApolloRelevantPeople({
+          apiKey,
+          companyName: companyNameForSearch,
+          domain: organizationIdForSearch ? null : domainForSearch,
+          expectedOrganizationDomain: domainForSearch,
+          organizationId: organizationIdForSearch,
+          allowPeopleSearchFallback,
+          keywordSearchLimit,
+          enforceExpectedOrganization: true,
+          savedContacts: savedContactsForProvidedOrganization
+        })) ?? [];
+    }
+  }
 
   let blockedByRecoveryAmbiguity = false;
   if (
@@ -602,11 +651,13 @@ export async function fetchApolloContactsForCompany(
       };
       organizationIdForSearch = recoveredOrganization.id;
       companyNameForSearch = recoveredOrganization.name ?? input.companyName;
+      domainForSearch = recoveredOrganization.domain ?? domainForSearch;
       contactsFromApollo =
         (await searchApolloRelevantPeople({
           apiKey,
           companyName: companyNameForSearch,
-          domain: input.domain,
+          domain: null,
+          expectedOrganizationDomain: domainForSearch,
           organizationId: organizationIdForSearch,
           allowPeopleSearchFallback,
           keywordSearchLimit,
@@ -1200,6 +1251,63 @@ async function findApolloOrganization(input: ApolloCompanyLookupInput, apiKey: s
   return scoredCandidates.sort((left, right) => right.score - left.score)[0] ?? null;
 }
 
+async function findApolloSavedAccountOrganization(
+  input: ApolloCompanyLookupInput,
+  apiKey: string,
+  providedAccountId: string
+): Promise<ApolloOrganizationCandidate | null> {
+  const inputAliases = buildCompanyNameAliases(input.companyName);
+
+  for (const accountName of buildApolloOrganizationSearchQueries(input.companyName)) {
+    const json = await postApolloJson("/api/v1/accounts/search", apiKey, {
+      page: 1,
+      per_page: 10,
+      q_organization_name: accountName
+    });
+    const exactAccount = parseApolloOrganizations(json).find(
+      (candidate) => readApolloString(candidate.rawPayload, ["id"]) === providedAccountId
+    );
+    if (!exactAccount) {
+      continue;
+    }
+
+    const accountNameFromApollo = readApolloString(exactAccount.rawPayload, [
+      "name",
+      "company_name",
+      "organization_name"
+    ]);
+    const accountAliases = buildCompanyNameAliases(accountNameFromApollo ?? "");
+    const safeAccountIdentity =
+      hasExactAliasMatch(inputAliases, accountAliases) ||
+      hasStrongBaseNameMatch(inputAliases, accountAliases) ||
+      hasSafeRegionalBrandAlias(inputAliases, accountAliases);
+    if (!safeAccountIdentity) {
+      return null;
+    }
+
+    const scored = scoreApolloOrganizationCandidate(
+      exactAccount,
+      input.companyName,
+      normalizeDomain(input.domain),
+      {
+        source: "saved-account-search",
+        account_id: providedAccountId
+      }
+    );
+    return {
+      ...scored,
+      score: Math.max(scored.score, 12),
+      strongBaseNameMatch: true,
+      classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
+      matchReason:
+        `direct company; exact saved Apollo account mapping; ` +
+        `resolved through Apollo's zero-credit saved-account directory`
+    };
+  }
+
+  return null;
+}
+
 async function searchApolloContacts({
   apiKey,
   companyName,
@@ -1270,6 +1378,7 @@ async function searchApolloRelevantPeople({
   apiKey,
   companyName,
   domain,
+  expectedOrganizationDomain,
   organizationId,
   allowPeopleSearchFallback,
   keywordSearchLimit,
@@ -1279,6 +1388,7 @@ async function searchApolloRelevantPeople({
   apiKey: string;
   companyName: string;
   domain?: string | null;
+  expectedOrganizationDomain?: string | null;
   organizationId: string | null;
   allowPeopleSearchFallback: boolean;
   keywordSearchLimit: number;
@@ -1286,12 +1396,13 @@ async function searchApolloRelevantPeople({
   savedContacts: ApolloContactRecord[] | null;
 }) {
   const collected: ApolloContactRecord[] = [];
+  const normalizedExpectedDomain = normalizeDomain(expectedOrganizationDomain ?? domain);
 
   const contactsWithoutKeyword = savedContacts
     ? enforceExpectedOrganization
       ? filterApolloContactsForExpectedOrganization(savedContacts, {
           companyName,
-          normalizedDomain: normalizeDomain(domain),
+          normalizedDomain: normalizedExpectedDomain,
           organizationId
         })
       : savedContacts
@@ -1319,7 +1430,7 @@ async function searchApolloRelevantPeople({
   const peopleWithoutKeyword = enforceExpectedOrganization
     ? filterApolloContactsForExpectedOrganization(peopleWithoutKeywordRaw, {
         companyName,
-        normalizedDomain: normalizeDomain(domain),
+        normalizedDomain: normalizedExpectedDomain,
         organizationId
       })
     : peopleWithoutKeywordRaw;
@@ -1342,7 +1453,7 @@ async function searchApolloRelevantPeople({
     const rolePeople = enforceExpectedOrganization
       ? filterApolloContactsForExpectedOrganization(rolePeopleRaw, {
           companyName,
-          normalizedDomain: normalizeDomain(domain),
+          normalizedDomain: normalizedExpectedDomain,
           organizationId
         })
       : rolePeopleRaw;
@@ -2022,7 +2133,19 @@ function filterApolloContactsForExpectedOrganization(
         return false;
       }
 
+      if (organization.id === organizationId) {
+        return true;
+      }
+
       if (!organization.name && !organization.domain) {
+        return true;
+      }
+
+      if (
+        contact.recordSource === "PEOPLE_SEARCH" &&
+        normalizedDomain &&
+        organization.domain === normalizedDomain
+      ) {
         return true;
       }
 

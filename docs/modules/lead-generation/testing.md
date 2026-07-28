@@ -108,11 +108,13 @@ Scoring regression coverage must also verify:
 18. the GitHub Actions caller does not retry a failed whole-batch HTTP request; retries remain bounded inside the per-contact Apollo client.
 19. organization search sends `q_organization_domains_list` for domains and `q_organization_name` for name-only companies, never internal TradeMining identity-field names.
 20. name-only organization discovery is capped at two deterministic queries and stops at the first direct-company match.
-21. every confirmed Apollo mapping performs one bounded organization lookup, with or without a saved domain, to
-    resolve account IDs to Apollo's canonical nested organization ID; People Search stays constrained to that exact
-    `organization_ids` value without an unscoped fallback. Exact Apollo account-to-organization relationships may
-    resolve a legal-entity card to its operating parent/brand, while unrelated parent or sibling candidates still
-    fail closed.
+21. every confirmed Apollo mapping performs bounded identity lookup, with or without a saved domain, to resolve
+    account IDs to Apollo's canonical nested organization ID; when Organization Search omits an already-saved account,
+    an exact zero-credit saved-account lookup recovers that relationship after a zero/partial employee result. People
+    Search stays constrained to the canonical `organization_ids` value without combining it with a subsidiary-specific
+    domain filter or falling back to an unscoped search. The expected domain remains a response guard. Exact Apollo
+    account-to-organization relationships may resolve a legal-entity card to its operating parent/brand, while
+    unrelated parents, siblings, explicit different organization IDs, and unsafe identities still fail closed.
 22. an unresolved latest `ApolloCompanyMatch` makes bulk enrichment skip the company before any Apollo or contact lookup.
 23. Apollo company URL parsing rejects non-Apollo hosts, exact mapping validates the organization ID, and manual mapping never authorizes cadence enrollment.
 24. People Search parses its `id` as an Apollo person ID, retains obfuscated-name and availability metadata, and does not claim the person is an enriched saved contact.
@@ -245,6 +247,8 @@ Regression coverage must prove:
 18. an approved contact with finished prior cadence history can enroll in Hunter; an active or paused different
     cadence is removed before the Hunter add-contact request; replies and bounces remain blocked; and status sync
     may replace stale `FINISHED` state only when Apollo reports the selected Hunter cadence ID.
+19. a contact recheck counts a current same-prompt outreach plan as actionable instead of incorrectly reporting zero
+    plans and a terminal no-qualifying-contact result.
 
 ## Outreach Plans and grounded sequence generation
 

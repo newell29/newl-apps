@@ -89,13 +89,17 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
   revealed email, phone, or LinkedIn values. Net-new people remain `NOT_STARTED` for Apollo enrichment. When the same
   person also exists as a saved contact, Hunter merges on `apolloPersonId` and preserves the saved contact ID,
   revealed fields, sequence history, and enriched status.
-- Apollo account IDs and global organization IDs are different identifiers. Account search responses may contain
-  both. Hunter therefore performs one bounded exact-company search before every mapped-company employee search,
-  including when the saved Newl company has no domain, and submits the nested canonical organization ID to People
-  API Search. An exact Apollo account-to-organization relationship is accepted for legal-entity cards that point to
-  the operating parent/brand; a loose parent, subsidiary, sibling, or multiple-candidate result still routes to Apollo
-  Match Review with no contacts selected. The validated global ID is persisted by the existing direct-match
-  transaction, so later runs remain organization scoped.
+- Apollo account IDs and global organization IDs are different identifiers. Organization Search intentionally omits
+  companies already saved as Apollo accounts, while the zero-credit saved-account search may return both the account
+  ID and nested global organization ID. If a mapped account produces at most one employee and Organization Search
+  cannot resolve it, Hunter searches the saved-account directory for that exact account and legal-company identity,
+  then repeats People Search with the nested global organization ID. It never combines `organization_ids` with a
+  possibly subsidiary-specific domain filter. The expected domain remains a response-validation guard, so a scoped
+  People Search result that omits its organization ID can still be accepted when the returned domain matches; an
+  explicit different organization ID still fails closed. An exact Apollo account-to-organization relationship is
+  accepted for legal-entity cards that point to the operating parent/brand; a loose parent, subsidiary, sibling, or
+  multiple-candidate result still routes to Apollo Match Review with no contacts selected. The validated global ID is
+  persisted by the existing direct-match transaction, so later runs remain organization scoped.
 - `HUNTER_CONTACT_FIT_MODEL` optionally selects the buyer-role validator and defaults to the existing
   `gpt-5.6-luna` outreach model. The model receives bounded company identity, Hunter opportunity context, contact
   role fields, and contactability booleans; it does not receive Apollo credentials, raw Apollo payloads, email
@@ -145,10 +149,11 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 
 - Organization discovery uses Apollo's documented Organization Search filters: `q_organization_domains_list` when Newl Apps has a domain, otherwise `q_organization_name`. Newl Apps does not send internal TradeMining identity-field names to Apollo.
 - A domain lookup uses one result page. A name-only lookup tries at most two deterministic name variants and stops as soon as a direct-company match is found.
-- A confirmed `apolloOrganizationId` is revalidated through one bounded exact-company lookup before People Search
-  because the saved value can be an Apollo account ID rather than the global organization ID. The contact lookup then
-  stays constrained to the safely resolved `organization_ids` value and never falls back to an unscoped company
-  search.
+- A confirmed `apolloOrganizationId` is revalidated through bounded exact-company lookup before People Search
+  because the saved value can be an Apollo account ID rather than the global organization ID. Apollo Organization
+  Search covers unsaved organizations; an unresolved mapped account that returns at most one employee is recovered
+  only through the exact zero-credit saved-account directory. The contact lookup then stays constrained to the safely
+  resolved `organization_ids` value and never falls back to an unscoped company search.
 - Ambiguous, logistics-provider, and no-match results enter **Apollo Match Review**. Bulk enrichment skips those companies until a rep resolves the latest match explicitly.
 - A rep can paste an Apollo company URL or organization ID. Newl Apps reads that exact organization, verifies that its name is a strong match, prevents duplicate tenant mappings, records the reviewer and source, and then searches people using the confirmed organization ID.
 - Apollo's Complete Organization Info endpoint consumes one credit when a company is returned. The mapping form therefore requires explicit one-credit confirmation. An automatic name-only retry requires a separate confirmation and is capped at two organization-search pages.
