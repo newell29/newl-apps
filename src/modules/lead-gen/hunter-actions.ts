@@ -10,7 +10,11 @@ import {
 } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { queueCurrentHunterOutreachHandoff } from "@/modules/lead-gen/hunter-outreach-handoff";
+import {
+  enqueueHunterCompanyOutreachHandoff,
+  processNextHunterOutreachHandoff,
+  queueCurrentHunterOutreachHandoff
+} from "@/modules/lead-gen/hunter-outreach-handoff";
 import { runHunterDryPlan } from "@/modules/lead-gen/hunter-planner";
 import { validateHunterAllocation } from "@/modules/lead-gen/hunter-planning-policy";
 import { requireAdmin, requireModule, requireMutationAccess } from "@/server/auth/authorization";
@@ -175,6 +179,49 @@ export async function queueCurrentHunterOutreachHandoffAction() {
 
   const count = "companyCount" in result ? `&count=${result.companyCount}` : "";
   redirect(`${HUNTER_SETTINGS_PATH}?handoff=${encodeURIComponent(result.state)}${count}`);
+}
+
+export async function recheckHunterCompanyContactsAction(formData: FormData) {
+  const context = await getAuthenticatedContext();
+  await requireModule(context, ModuleKey.LEAD_GEN);
+  requireAdmin(context);
+  const companyId = requiredText(formData, "companyId", 100);
+
+  const queued = await enqueueHunterCompanyOutreachHandoff({
+    tenantId: context.tenantId,
+    companyId,
+    forceContactReview: true
+  });
+  let message: string =
+    "message" in queued
+      ? queued.message ?? "Hunter could not queue contact review for this company."
+      : queued.state === "already_queued"
+        ? "Hunter contact review is already queued for this company."
+        : "Hunter contact review was queued.";
+
+  if (queued.state === "queued") {
+    const processed = await processNextHunterOutreachHandoff({
+      tenantId: context.tenantId,
+      runId: queued.runId
+    });
+    const result = "result" in processed ? processed.result : null;
+    if (result) {
+      message =
+        `${result.apolloContactsFound} Apollo employee${result.apolloContactsFound === 1 ? "" : "s"} found; ` +
+        `${result.contactsRanked} evaluated; ${result.actionablePlans} QA-passed plan${result.actionablePlans === 1 ? "" : "s"} ready. ` +
+        `Hunter selected no more than three contacts. ${result.message}`;
+    } else if (processed.state === "retry_scheduled") {
+      message = "Apollo or model review was temporarily unavailable. Hunter queued a protected retry.";
+    }
+  }
+
+  revalidatePath(HUNTER_PATH);
+  revalidatePath(HUNTER_SETTINGS_PATH);
+  revalidatePath("/lead-gen/apollo-review");
+  revalidatePath("/lead-gen/outreach");
+  redirect(
+    `/lead-gen/outreach?company=${encodeURIComponent(companyId)}&contactReview=${encodeURIComponent(message)}`
+  );
 }
 
 function parseHunterMode(value: FormDataEntryValue | null) {
