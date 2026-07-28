@@ -46,6 +46,13 @@ For `TEAMSHIP_AGENT_MODE=live-api`, the worker runs the Teamship API update firs
 
 After each successful API update, the worker automatically opens the editable BOL in the VM browser for every successfully updated order that has planned BOL cleanup. The cleanup removes Teamship-generated weight values from the Customer Order Information weight column and records screenshots/readback evidence with the job.
 
+The worker uses a bounded browser recovery policy for this post-API step:
+
+- A closed Playwright page, context, browser, or disconnected Chrome process triggers one fresh browser session and retries the interrupted cleanup order.
+- The API update is not repeated during this browser recovery.
+- If the replacement browser also closes, the interrupted order fails, remaining cleanup orders are marked skipped under the shared browser incident, and the batch stops.
+- A later production cleanup retry is not automatic and still requires an explicitly approved action.
+
 To temporarily turn off the browser cleanup while keeping API updates enabled, set one of:
 
 ```bash
