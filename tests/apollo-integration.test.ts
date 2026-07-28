@@ -350,7 +350,7 @@ describe("fetchApolloContactsForCompany", () => {
           contacts: []
         })
       } as unknown as Response)
-      .mockResolvedValueOnce({
+      .mockResolvedValue({
         ok: true,
         status: 200,
         json: vi.fn().mockResolvedValue({
@@ -405,7 +405,7 @@ describe("fetchApolloContactsForCompany", () => {
           ]
         })
       } as unknown as Response)
-      .mockResolvedValueOnce({
+      .mockResolvedValue({
         ok: true,
         status: 200,
         json: vi.fn().mockResolvedValue({
@@ -518,6 +518,77 @@ describe("fetchApolloContactsForCompany", () => {
     ]);
   });
 
+  it("runs the organization-scoped role search even when the generic page already has an acceptable contact", async () => {
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ contacts: [] })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+        const personTitles = Array.isArray(body.person_titles) ? body.person_titles : [];
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            people: personTitles.length > 0
+              ? [{
+                  id: "director-operations",
+                  name: "Jason Councilman",
+                  title: "Director of Operations",
+                  organization: { id: "stabilus-org", name: "Stabilus" }
+                }]
+              : [{
+                  id: "distribution-manager",
+                  name: "Mark Elrod",
+                  title: "Distribution Manager",
+                  organization: { id: "stabilus-org", name: "Stabilus" }
+                }]
+          })
+        } as unknown as Response;
+      }
+
+      throw new Error(`Unexpected Apollo URL in test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "Stabilus",
+      apolloOrganizationId: "stabilus-org"
+    });
+
+    const peopleRequests = fetchMock.mock.calls
+      .filter(([input]) => String(input).endsWith("/api/v1/mixed_people/api_search"))
+      .map(([, init]) => JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+    expect(peopleRequests).toHaveLength(2);
+    expect(peopleRequests[0]).toMatchObject({
+      per_page: 100,
+      organization_ids: ["stabilus-org"]
+    });
+    expect(peopleRequests[0]).not.toHaveProperty("person_titles");
+    expect(peopleRequests[1]).toMatchObject({
+      per_page: 100,
+      organization_ids: ["stabilus-org"],
+      include_similar_titles: true
+    });
+    expect(peopleRequests[1]?.person_titles).toEqual(expect.arrayContaining([
+      "logistics",
+      "operations",
+      "distribution",
+      "purchasing",
+      "director operations"
+    ]));
+    expect(result.contacts.map((contact) => contact.fullName)).toEqual([
+      "Jason Councilman",
+      "Mark Elrod"
+    ]);
+  });
+
   it("parses and validates Apollo company URLs before mapping", async () => {
     expect(
       parseApolloOrganizationId(
@@ -582,7 +653,10 @@ describe("fetchApolloContactsForCompany", () => {
       }
 
       if (url.endsWith("/api/v1/mixed_people/api_search")) {
-        if (body.q_keywords === "logistics") {
+        if (
+          Array.isArray(body.person_titles) &&
+          body.person_titles.includes("logistics")
+        ) {
           return {
             ok: true,
             status: 200,
@@ -805,7 +879,7 @@ describe("fetchApolloContactsForCompany", () => {
           contacts: []
         })
       } as unknown as Response)
-      .mockResolvedValueOnce({
+      .mockResolvedValue({
         ok: true,
         status: 200,
         json: vi.fn().mockResolvedValue({
@@ -928,7 +1002,7 @@ describe("fetchApolloContactsForCompany", () => {
       companyName: "SIEMENS ENERGY INC. C/O PROCUREMENT TEAM"
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
     expect(result.match.classification).toBe("DIRECT_COMPANY");
     expect(result.organizationId).toBe("apollo-org-siemens-4");
     expect(result.contacts).toEqual([

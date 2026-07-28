@@ -254,6 +254,10 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   evidence or generation defect is understood.
 - `CONTACT_REVIEW_REQUIRED` means Apollo contacts were found but none cleared the buyer-role threshold. Inspect the
   saved `hunterContactFit` rationale and risks; do not lower the deterministic safety filter to force generation.
+- If Apollo visibly contains stronger role-aligned employees than Hunter reviewed, verify that the handoff ran both
+  the 100-result organization-scoped employee request and the always-run multi-title request. Finding an acceptable
+  person on the generic first page must not short-circuit relevant-title retrieval. The buyer-role model receives the
+  best 10 merged candidates; the configured `maxContactsPerCompany` limits final selection, not discovery.
 - An HTTP 307 from the Mac-mini handoff worker means session middleware intercepted the machine route before
   ingestion authentication. `/api/lead-gen/hunter/outreach-handoff/*` is exempt from session middleware and must
   enforce its own tenant-bound ingestion token; regression coverage preserves that boundary.
