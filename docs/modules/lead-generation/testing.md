@@ -116,7 +116,9 @@ Scoring regression coverage must also verify:
     account-to-organization relationships may resolve a legal-entity card to its operating parent/brand, while
     unrelated parents, siblings, explicit different organization IDs, and unsafe identities still fail closed.
 22. an unresolved latest `ApolloCompanyMatch` makes bulk enrichment skip the company before any Apollo or contact lookup.
-23. Apollo company URL parsing rejects non-Apollo hosts, exact mapping validates the organization ID, and manual mapping never authorizes cadence enrollment.
+23. Apollo company URL parsing rejects non-Apollo hosts, distinguishes `/accounts/{id}` from
+    `/organizations/{id}`, resolves account links to their nested global organization before exact validation, and
+    manual mapping never authorizes cadence enrollment.
 24. People Search parses its `id` as an Apollo person ID, retains obfuscated-name and availability metadata, and does not claim the person is an enriched saved contact.
 25. An organization-scoped People Search response may omit the returned organization ID only when its available company identity strictly matches the expected company; a sibling name or explicit different ID is rejected.
 26. Saved Contact and People Search records dedupe by Apollo person ID while preserving the saved contact ID, revealed contact data, sequence history, and enrichment state.
@@ -281,3 +283,8 @@ Regression coverage must prove:
 12. a current selected handoff exposes Hunter's saved service line, point of attack, score, confidence, and provenance;
 13. the strategy request includes that directive and rejects any model response that changes the service line; and
 14. the evidence ledger preserves individual Hunter research URLs and excerpts rather than only flattened JSON text.
+15. owner-approved Newl capability evidence can ground conservative statements about Newl's selected service line,
+    without weakening company-claim grounding;
+16. passed v2.4 plans remain unchanged, failed v2.4 plans upgrade once to v2.5, and a v2.5 failure does not create
+    repeated automatic model spend; and
+17. drafting and bounded repair instructions forbid date/outcome conflation and job-posting-to-capacity inference.

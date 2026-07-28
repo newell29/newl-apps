@@ -1,6 +1,7 @@
 import {
   ContactOutreachDraftSource,
   ContactOutreachDraftStatus,
+  HunterServiceLine,
   OutreachPlanStatus,
   OutreachQaStatus,
   Prisma,
@@ -23,6 +24,7 @@ import {
   DEFAULT_OUTREACH_STRATEGY_MODEL,
   fingerprintOutreachEvidence,
   mergeOutreachQaResults,
+  OUTREACH_PLAN_COMPATIBLE_PASSED_PROMPT_VERSIONS,
   OUTREACH_PLAN_PROMPT_VERSION,
   runDeterministicOutreachQa,
   type GeneratedOutreachSequence,
@@ -69,6 +71,22 @@ export function normalizeHunterChannelStrategy(
           "Email on day 10"
         ]
   };
+}
+
+export function shouldReuseExistingOutreachPlan({
+  promptVersion,
+  qaStatus
+}: {
+  promptVersion: string;
+  qaStatus: OutreachQaStatus;
+}) {
+  return (
+    promptVersion === OUTREACH_PLAN_PROMPT_VERSION ||
+    (
+      qaStatus === OutreachQaStatus.PASSED &&
+      OUTREACH_PLAN_COMPATIBLE_PASSED_PROMPT_VERSIONS.has(promptVersion)
+    )
+  );
 }
 
 export function buildBoundedOutreachRepairFeedback({
@@ -118,6 +136,9 @@ export function buildBoundedOutreachRepairFeedback({
     `Every email must end with ${senderFirstName} on its own final line.`,
     "Never expose research provenance in customer-visible copy. Do not say saved activity, saved shipment, saved record, evidence, research, TradeMining, Hunter, internal, database, or system.",
     "Use only evidenceRefs that exactly match IDs in the supplied evidence ledger.",
+    "Replace or remove each exact disputed clause. Do not preserve an unsupported inference by paraphrasing it.",
+    "Keep dates, quantities, and intended outcomes attached only to the exact fact they modify in the evidence.",
+    "A job posting proves only that the listed role is being recruited; it does not prove added capacity, team growth, increased workload, or an operational problem.",
     issueText
   ].join("\n");
 }
@@ -268,7 +289,11 @@ export async function generateOutreachPlanForContact({
     return { state: "evidence_missing" as const };
   }
   if (
-    draftContext.existingOutreachPlan?.promptVersion === OUTREACH_PLAN_PROMPT_VERSION &&
+    draftContext.existingOutreachPlan &&
+    shouldReuseExistingOutreachPlan({
+      promptVersion: draftContext.existingOutreachPlan.promptVersion,
+      qaStatus: draftContext.existingOutreachPlan.qaStatus
+    }) &&
     !forceRegenerate
   ) {
     return {
@@ -816,6 +841,12 @@ function buildOutreachEvidenceLedger(
     ]
   }];
 
+  const requiredServiceLine =
+    draftContext.hunterEligibility.directive?.requiredServiceLine ?? null;
+  if (requiredServiceLine) {
+    records.push(buildApprovedNewlCapabilityEvidence(requiredServiceLine));
+  }
+
   if (draftContext.contact.company.importRecords.length > 0) {
     const shipmentFacts = [
       `${draftContext.evidence.shipmentCount} shipments during the saved evidence lookback`,
@@ -890,6 +921,35 @@ function buildOutreachEvidenceLedger(
     });
   }
   return records.slice(0, 12);
+}
+
+export function buildApprovedNewlCapabilityEvidence(
+  serviceLine: HunterServiceLine
+): OutreachEvidenceRecord {
+  const factsByServiceLine: Record<HunterServiceLine, string[]> = {
+    WAREHOUSING: [
+      "Newl can provide supplemental and flexible warehousing support.",
+      "Newl can support overflow storage, inventory staging, receiving, and distribution handoffs."
+    ],
+    OCEAN_AIR: [
+      "Newl can provide ocean and air freight-forwarding support.",
+      "Newl can coordinate freight handoffs with warehousing and inland transportation support."
+    ],
+    TRUCKING: [
+      "Newl can provide supplemental trucking support.",
+      "Newl can coordinate planned and exception inbound or outbound transportation."
+    ]
+  };
+
+  return {
+    id: `newl-capability:${serviceLine.toLowerCase()}`,
+    kind: "NEWL_CAPABILITY",
+    title: `Owner-approved Newl ${serviceLine.replaceAll("_", " ").toLowerCase()} capabilities`,
+    summary: factsByServiceLine[serviceLine].join(" "),
+    sourceUrl: null,
+    publishedAt: null,
+    facts: factsByServiceLine[serviceLine]
+  };
 }
 
 function normalizeLeadGenAiScoringConfig(

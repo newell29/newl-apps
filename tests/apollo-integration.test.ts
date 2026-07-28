@@ -7,6 +7,7 @@ import {
   fetchApolloOrganizationForMapping,
   fetchApolloRepDirectory,
   fetchApolloSequenceDirectory,
+  parseApolloCompanyReference,
   parseApolloOrganizationId,
   removeApolloContactsFromSequences,
   transitionApolloContactsToSequence
@@ -1638,6 +1639,14 @@ describe("fetchApolloContactsForCompany", () => {
     expect(() => parseApolloOrganizationId("https://example.com/5e66b6381e05b4008c8331b8")).toThrow(
       "must be an Apollo URL"
     );
+    expect(
+      parseApolloCompanyReference(
+        "https://app.apollo.io/#/accounts/661ec104e14548000791da78"
+      )
+    ).toEqual({
+      id: "661ec104e14548000791da78",
+      resourceType: "ACCOUNT"
+    });
 
     const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue({
       ok: true,
@@ -1665,6 +1674,68 @@ describe("fetchApolloContactsForCompany", () => {
       companyName: "NOVALIS US, LLC",
       domain: "novalis-intl.com"
     });
+  });
+
+  it("resolves a pasted Apollo account URL to its global organization before mapping", async () => {
+    const accountId = "661ec104e14548000791da78";
+    const organizationId = "5e66b6381e05b4008c8331b8";
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith(`/api/v1/accounts/${accountId}`)) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            account: {
+              id: accountId,
+              name: "DANSONS US LLC",
+              organization_id: organizationId,
+              organization: {
+                id: organizationId,
+                name: "DANSONS US LLC",
+                primary_domain: "dansons.com"
+              }
+            }
+          })
+        } as unknown as Response;
+      }
+      if (url.endsWith(`/api/v1/organizations/${organizationId}`)) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            organization: {
+              id: organizationId,
+              name: "DANSONS US LLC",
+              primary_domain: "dansons.com"
+            }
+          })
+        } as unknown as Response;
+      }
+      throw new Error(`Unexpected Apollo URL in test: ${url}`);
+    });
+
+    const mapping = await fetchApolloOrganizationForMapping({
+      companyName: "DANSONS US LLC",
+      apolloOrganizationId: accountId,
+      resourceType: "ACCOUNT"
+    });
+
+    expect(mapping).toMatchObject({
+      organizationId,
+      companyName: "DANSONS US LLC",
+      domain: "dansons.com"
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      `https://api.apollo.io/api/v1/accounts/${accountId}`,
+      expect.objectContaining({ method: "GET", cache: "no-store" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      `https://api.apollo.io/api/v1/organizations/${organizationId}`,
+      expect.objectContaining({ method: "GET", cache: "no-store" })
+    );
   });
 
   it("uses targeted role queries when the organization has people but not direct contact records", async () => {

@@ -159,8 +159,11 @@ The layout is non-destructive: it does not migrate, delete, or rewrite existing 
 1. Pipeline enrichment first searches Apollo by the stored company domain, or by at most two company-name variants when no domain is available.
 2. Only a direct-company result continues to contact discovery. Contact discovery for a direct or manually mapped company remains scoped to the confirmed Apollo organization ID.
 3. Any ambiguous, logistics-provider, or no-match result creates an `ApolloCompanyMatch` attempt and appears in **Apollo Match Review**. The same company is skipped by later bulk enrichment, preventing accidental repeat searches and credit use.
-4. A rep can resolve the row by pasting the Apollo company URL, explicitly retrying automatic matching after company data is corrected, or confirming there is no usable match.
-5. URL mapping validates the exact Apollo organization, records the reviewer and mapping evidence, stores the organization ID/domain/LinkedIn URL, and then imports relevant contacts. It does not enroll a contact in a cadence.
+4. A rep can resolve the row by pasting the Apollo company Overview or People URL, explicitly retrying automatic matching after company data is corrected, or confirming there is no usable match.
+5. URL mapping distinguishes Apollo account links from organization links. An account link is resolved through Account
+   View to its nested global organization ID before exact organization validation and People Search. The action records
+   the reviewer and mapping evidence, stores only the global organization ID/domain/LinkedIn URL, and then imports
+   relevant contacts. It does not enroll a contact in a cadence.
 6. Confirming no match keeps the row in the review archive and blocks bulk retries. Reopening returns it to the active review list; it does not itself call Apollo.
 
 ## Automatic Apollo reply sync

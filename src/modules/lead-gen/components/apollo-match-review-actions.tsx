@@ -71,8 +71,8 @@ export function ApolloMatchReviewActions({
         <div>
           <p className="font-semibold text-foreground">Map the Apollo company URL</p>
           <p className="mt-1 text-xs leading-5 text-mutedForeground">
-            Open the company in Apollo, select its People page, then paste that page&apos;s URL. Newl Apps validates
-            the exact organization, records who mapped it, and searches contacts only inside that company.
+            Open the company in Apollo and paste its Overview or People page URL. Newl Apps resolves Apollo account
+            links to the exact global organization, records who mapped it, and searches contacts only inside that company.
           </p>
         </div>
         <input type="hidden" name="leadId" value={leadId} />
@@ -81,7 +81,7 @@ export function ApolloMatchReviewActions({
           <input
             name="apolloCompanyUrl"
             required
-            placeholder="https://app.apollo.io/#/accounts/<organization-id>/people"
+            placeholder="https://app.apollo.io/#/accounts/<account-id>"
             className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground"
           />
         </label>

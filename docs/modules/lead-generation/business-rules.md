@@ -43,7 +43,10 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - Only contacts explicitly marked `APPROVED` can be queued for Apollo. The queue worker rechecks the contact and blocks companies marked `doNotProspect`, `REJECTED`, or `DISQUALIFIED` before any external write.
 - Apollo organization discovery must use documented Apollo filters. A known domain uses `q_organization_domains_list`; a name-only search uses `q_organization_name` and no more than two deterministic variants.
 - Only `DIRECT_COMPANY` matches can proceed automatically. If the latest match is ambiguous, a logistics provider, or no match, bulk enrichment must skip the company until a rep resolves it in **Apollo Match Review**.
-- A manually supplied Apollo URL must resolve to a strong company-name match, must not already belong to another company in the same tenant, and requires explicit acknowledgement of the one-credit organization validation.
+- A manually supplied Apollo Overview or People URL may contain either an Apollo account ID or global organization
+  ID. Newl Apps must resolve an account ID to its nested global organization ID before employee search, require a
+  strong company-name match, prevent duplicate organization mapping inside the tenant, and require explicit
+  acknowledgement of the one-credit organization validation.
 - Confirming no Apollo match keeps the latest attempt and reviewer metadata. Automatic and bulk retry remain blocked until a rep explicitly reopens the review.
 - Resolving the company mapping can import contacts, but it never authorizes cadence enrollment; the existing contact approval and push controls still apply.
 - The Contacts directory includes both assigned and unassigned contacts attached to pipeline accounts. Unassigned contacts remain filterable and reviewable, but Apollo queueing is blocked until a sales rep is assigned.
@@ -129,11 +132,17 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
   cannot substitute another service line; a mismatch fails before persistence.
 - Every plan freezes a bounded evidence ledger and SHA-256 fingerprint. Company/contact identity, each exact Hunter
   research article URL/excerpt, the selected Hunter decision, and TradeMining summaries have stable evidence IDs.
+- The ledger includes a small owner-approved Newl capability record for Hunter's selected service line. It may ground
+  conservative statements about Newl's own services, but it does not prove a prospect event, need, volume, timing,
+  incumbent relationship, or buyer responsibility.
 - A Hunter cadence contains three emails on days 0, 4, and 10. A separate manual call task on day 7 is permitted only for a Hot opportunity. Hunter does not add LinkedIn tasks to Apollo cadences.
 - Every strategy and step must cite a saved evidence ID. Deterministic QA validates citations, ordering, channel mix,
   lengths, unsupported URLs, banned generic phrases, and unsupported quantified shipment/TEU/store/facility/location
   claims. A conservative model critic separately checks semantic grounding and buyer-responsibility assumptions.
 - Any deterministic or model error fails closed. A failed plan remains reviewable but cannot be approved or pushed.
+- Outreach policy v2.5 preserves already-passed v2.4 plans. Failed v2.4 plans receive one upgrade attempt under v2.5,
+  while any v2.5 result is reused until a person explicitly requests regeneration. This prevents repeated model spend
+  without rewriting copy that already passed both gates.
 - Generation never marks a draft approved. Human plan approval requires QA `PASSED` and a company/contact that is
   not rejected, disqualified, or do-not-prospect. That single approval approves the selected contact and queues
   Apollo enrollment; there is no second manual push step.

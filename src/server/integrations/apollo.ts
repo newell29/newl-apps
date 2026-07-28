@@ -87,6 +87,11 @@ export type ApolloOrganizationMappingResult = {
   match: ApolloCompanyLookupMatch;
 };
 
+export type ApolloCompanyReference = {
+  id: string;
+  resourceType: "ACCOUNT" | "ORGANIZATION";
+};
+
 export type ApolloContactRecord = {
   recordSource: "SAVED_CONTACT" | "PEOPLE_SEARCH";
   apolloContactId: string | null;
@@ -763,10 +768,13 @@ export async function fetchApolloContactsForCompany(
   };
 }
 
-export function parseApolloOrganizationId(value: string) {
+export function parseApolloCompanyReference(value: string): ApolloCompanyReference {
   const trimmed = value.trim();
   if (/^[a-f0-9]{24}$/iu.test(trimmed)) {
-    return trimmed;
+    return {
+      id: trimmed,
+      resourceType: "ORGANIZATION"
+    };
   }
 
   let parsed: URL;
@@ -780,31 +788,77 @@ export function parseApolloOrganizationId(value: string) {
     throw new Error("The company mapping URL must be an Apollo URL.");
   }
 
-  const candidates = [
-    parsed.pathname,
-    parsed.hash,
-    ...parsed.searchParams.values()
-  ];
+  const candidates = [parsed.pathname, parsed.hash, ...parsed.searchParams.values()];
   for (const candidate of candidates) {
-    const match = candidate.match(/[a-f0-9]{24}/iu);
-    if (match) {
-      return match[0];
+    const typedMatch = candidate.match(
+      /\/(accounts|organizations)\/([a-f0-9]{24})(?:\/|$)/iu
+    );
+    if (typedMatch) {
+      return {
+        id: typedMatch[2],
+        resourceType: typedMatch[1].toLowerCase() === "accounts" ? "ACCOUNT" : "ORGANIZATION"
+      };
+    }
+  }
+
+  for (const candidate of candidates) {
+    const untypedMatch = candidate.match(/[a-f0-9]{24}/iu);
+    if (untypedMatch) {
+      return {
+        id: untypedMatch[0],
+        resourceType: "ORGANIZATION"
+      };
     }
   }
 
   throw new Error("The Apollo company URL does not contain an organization ID.");
 }
 
+export function parseApolloOrganizationId(value: string) {
+  return parseApolloCompanyReference(value).id;
+}
+
 export async function fetchApolloOrganizationForMapping({
   companyName,
-  apolloOrganizationId
+  apolloOrganizationId,
+  resourceType = "ORGANIZATION"
 }: {
   companyName: string;
   apolloOrganizationId: string;
+  resourceType?: ApolloCompanyReference["resourceType"];
 }): Promise<ApolloOrganizationMappingResult> {
   const apiKey = readApolloMasterApiKey();
+  let canonicalOrganizationId = apolloOrganizationId;
+  let accountPayload: Record<string, unknown> | null = null;
+
+  if (resourceType === "ACCOUNT") {
+    accountPayload = await getApolloJson(
+      `/api/v1/accounts/${encodeURIComponent(apolloOrganizationId)}`,
+      apiKey
+    );
+    const account =
+      asRecord(accountPayload.account) ??
+      asRecord(accountPayload.data) ??
+      accountPayload;
+    const nestedOrganization = asRecord(account.organization);
+    canonicalOrganizationId =
+      readApolloString(account, ["organization_id", "apollo_organization_id"]) ??
+      readApolloString(nestedOrganization ?? {}, [
+        "id",
+        "organization_id",
+        "apollo_organization_id"
+      ]) ??
+      "";
+
+    if (!canonicalOrganizationId) {
+      throw new Error(
+        "Apollo returned that account, but it did not expose the global organization ID required for employee search."
+      );
+    }
+  }
+
   const json = await getApolloJson(
-    `/api/v1/organizations/${encodeURIComponent(apolloOrganizationId)}`,
+    `/api/v1/organizations/${encodeURIComponent(canonicalOrganizationId)}`,
     apiKey
   );
   const organization =
@@ -821,7 +875,9 @@ export async function fetchApolloOrganizationForMapping({
 
   const scored = scoreApolloOrganizationCandidate(candidate, companyName, null, {
     source: "manual-apollo-url",
-    organization_ids: [apolloOrganizationId]
+    resource_type: resourceType,
+    supplied_id: apolloOrganizationId,
+    organization_ids: [canonicalOrganizationId]
   });
 
   if (scored.classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY) {
