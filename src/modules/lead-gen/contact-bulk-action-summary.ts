@@ -2,13 +2,13 @@ export type ContactBulkActionDetail = {
   contactId: string;
   contactName: string;
   companyName: string;
-  outcome: "enrolled" | "skipped" | "failed";
+  outcome: "approved" | "enrolled" | "skipped" | "failed";
   reason: string | null;
 };
 
 export type ContactBulkActionSummary = {
   status: "idle" | "success" | "error";
-  operation: "sequence" | "remove" | "apollo_push" | "apollo_sync" | null;
+  operation: "sequence" | "approve" | "remove" | "apollo_push" | "apollo_sync" | null;
   message: string;
   completedAt: string | null;
   jobRunId: string | null;
@@ -16,6 +16,7 @@ export type ContactBulkActionSummary = {
   selectedContacts: number;
   updatedContacts: number;
   readyContacts: number;
+  approvedContacts: number;
   protectedContacts: number;
   removedContacts: number;
   removedDrafts: number;
@@ -38,6 +39,7 @@ export const EMPTY_CONTACT_BULK_ACTION_SUMMARY: ContactBulkActionSummary = {
   selectedContacts: 0,
   updatedContacts: 0,
   readyContacts: 0,
+  approvedContacts: 0,
   protectedContacts: 0,
   removedContacts: 0,
   removedDrafts: 0,

@@ -13,6 +13,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import {
   approveOutreachPlanAction,
+  bulkApproveOutreachPlansAction,
   bulkPushContactsToApolloAction,
   bulkRemoveContactsAction,
   syncSelectedApolloStatusesAction,
@@ -475,6 +476,7 @@ export default async function OutreachQueuePage({
             bulkUpdateContactSequenceAction={bulkUpdateContactSequenceAction}
             bulkRemoveContactsAction={bulkRemoveContactsAction}
             bulkPushContactsToApolloAction={bulkPushContactsToApolloAction}
+            bulkApproveOutreachPlansAction={bulkApproveOutreachPlansAction}
             syncSelectedApolloStatusesAction={syncSelectedApolloStatusesAction}
             updateContactSequenceAction={updateContactSequenceAction}
             saveContactDraftAction={saveContactDraftAction}

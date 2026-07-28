@@ -51,8 +51,10 @@ Roles and defaults are in `src/server/auth/role-policy.ts`. Runtime checks are i
   and company relations.
 - Generating, editing, or approving a plan requires Lead Generation mutation access. Approval records the authenticated
   user ID and is rejected for an unapproved contact or unsafe company.
-- No plan-generation or plan-approval action performs Apollo enrollment or customer communication. The existing
-  explicit Apollo push permission and validation boundary remains separate.
+- Plan generation never approves, enrolls, or communicates. An authenticated mutation-capable user's explicit
+  individual or bulk approval of a QA-passed plan is the human authorization boundary: it records the approver and
+  queues a protected Apollo enrollment job. The worker still revalidates company/contact safety, Hunter eligibility,
+  usable email, sender, sequence, and Apollo state before any external write.
 - Only a tenant administrator can select `ASSISTED`. Processing requires the tenant-bound ingestion credential and
   rechecks the stored mode and kill switch on every request. Assisted processing may create `REVIEWING` contacts
   and unapproved plans; it cannot approve, assign, enroll, create a Sales Opportunity, or send.

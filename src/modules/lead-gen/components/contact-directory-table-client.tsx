@@ -168,6 +168,7 @@ export function ContactDirectoryTableClient({
   bulkUpdateContactSequenceAction,
   bulkRemoveContactsAction,
   bulkPushContactsToApolloAction,
+  bulkApproveOutreachPlansAction,
   syncSelectedApolloStatusesAction,
   updateContactSequenceAction,
   saveContactDraftAction,
@@ -189,6 +190,10 @@ export function ContactDirectoryTableClient({
     formData: FormData
   ) => Promise<ContactBulkActionSummary>;
   bulkPushContactsToApolloAction: (
+    previousState: ContactBulkActionSummary,
+    formData: FormData
+  ) => Promise<ContactBulkActionSummary>;
+  bulkApproveOutreachPlansAction: (
     previousState: ContactBulkActionSummary,
     formData: FormData
   ) => Promise<ContactBulkActionSummary>;
@@ -215,6 +220,10 @@ export function ContactDirectoryTableClient({
   );
   const [apolloPushState, runApolloPushAction, isApolloPushPending] = useActionState(
     bulkPushContactsToApolloAction,
+    EMPTY_CONTACT_BULK_ACTION_SUMMARY
+  );
+  const [bulkApproveState, runBulkApproveAction, isBulkApprovePending] = useActionState(
+    bulkApproveOutreachPlansAction,
     EMPTY_CONTACT_BULK_ACTION_SUMMARY
   );
   const [apolloSyncState, runApolloSyncAction, isApolloSyncPending] = useActionState(
@@ -743,6 +752,12 @@ export function ContactDirectoryTableClient({
   const selectedContactsBlockedByAssignment = selectedContacts.filter((contact) =>
     Boolean(contact.apolloAssignmentBlockReason)
   );
+  const isAnyBulkActionPending =
+    isBulkSequencePending ||
+    isBulkApprovePending ||
+    isBulkRemovePending ||
+    isApolloPushPending ||
+    isApolloSyncPending;
 
   useEffect(() => {
     if (bulkActionState.status === "success" && bulkActionState.completedAt) {
@@ -763,10 +778,30 @@ export function ContactDirectoryTableClient({
   }, [apolloPushState.completedAt, apolloPushState.status]);
 
   useEffect(() => {
-    if (apolloPushState.jobRunId) {
-      setActiveApolloPushJobId(apolloPushState.jobRunId);
+    if (bulkApproveState.status === "success" && bulkApproveState.completedAt) {
+      setSelectedIds([]);
     }
-  }, [apolloPushState.jobRunId]);
+  }, [bulkApproveState.completedAt, bulkApproveState.status]);
+
+  useEffect(() => {
+    const jobRunId = bulkApproveState.jobRunId ?? apolloPushState.jobRunId;
+    if (jobRunId) {
+      setActiveApolloPushJobId(jobRunId);
+      router.refresh();
+    }
+  }, [apolloPushState.jobRunId, bulkApproveState.jobRunId, router]);
+
+  useEffect(() => {
+    setApolloPushJobs((current) => {
+      const next = [
+        ...initialApolloPushJobs,
+        ...current.filter(
+          (job) => !initialApolloPushJobs.some((initial) => initial.id === job.id)
+        )
+      ];
+      return next.slice(0, 10);
+    });
+  }, [initialApolloPushJobs]);
 
   useEffect(() => {
     if (!activeApolloPushJobId) {
@@ -857,18 +892,20 @@ export function ContactDirectoryTableClient({
   return (
     <>
       <ApolloPushJobHistoryPanel jobs={apolloPushJobs} />
-      {isBulkSequencePending || isBulkRemovePending || isApolloPushPending || isApolloSyncPending ? (
+      {isAnyBulkActionPending ? (
         <div className="border-b border-border bg-primary/5 px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-foreground">
                 {isBulkRemovePending
                   ? "Removing contacts"
-                  : isApolloPushPending
-                    ? "Pushing selected contacts to Apollo"
-                    : isApolloSyncPending
-                      ? "Syncing Apollo contact statuses"
-                      : "Updating contact cadence"}
+                  : isBulkApprovePending
+                    ? "Approving plans and queueing Apollo enrollment"
+                    : isApolloPushPending
+                      ? "Pushing selected contacts to Apollo"
+                      : isApolloSyncPending
+                        ? "Syncing Apollo contact statuses"
+                        : "Updating contact cadence"}
               </p>
               <p className="text-xs text-mutedForeground">
                 Working through {selectedIds.length} selected contact{selectedIds.length === 1 ? "" : "s"} now.
@@ -882,6 +919,7 @@ export function ContactDirectoryTableClient({
         </div>
       ) : null}
       {bulkActionState.status !== "idle" ? <ContactBulkActionSummaryBanner summary={bulkActionState} /> : null}
+      {bulkApproveState.status !== "idle" ? <ContactBulkActionSummaryBanner summary={bulkApproveState} /> : null}
       {removeActionState.status !== "idle" ? <ContactBulkActionSummaryBanner summary={removeActionState} /> : null}
       {apolloPushState.status !== "idle" ? <ContactBulkActionSummaryBanner summary={apolloPushState} /> : null}
       {apolloSyncState.status !== "idle" ? <ContactBulkActionSummaryBanner summary={apolloSyncState} /> : null}
@@ -936,23 +974,26 @@ export function ContactDirectoryTableClient({
               </label>
             ) : null}
             {selectedContactsBlockedByAssignment.length > 0 ? (
-              <p className="max-w-[300px] rounded-md border border-danger/20 bg-danger/5 px-3 py-2 text-xs text-danger">
-                Assign a sales rep to {selectedContactsBlockedByAssignment.length} selected contact
-                {selectedContactsBlockedByAssignment.length === 1 ? "" : "s"} before pushing to Apollo.
+              <p className="max-w-[300px] rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-foreground">
+                Bulk approval will assign {selectedContactsBlockedByAssignment.length} unassigned contact
+                {selectedContactsBlockedByAssignment.length === 1 ? "" : "s"} to you. A direct Apollo retry still
+                requires an assigned rep.
               </p>
             ) : null}
             <button
               type="submit"
-              disabled={
-                selectedIds.length === 0 ||
-                isBulkSequencePending ||
-                isBulkRemovePending ||
-                isApolloPushPending ||
-                isApolloSyncPending
-              }
+              disabled={selectedIds.length === 0 || isAnyBulkActionPending}
               className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isBulkSequencePending ? "Applying..." : "Apply selected cadence"}
+            </button>
+            <button
+              type="submit"
+              formAction={runBulkApproveAction}
+              disabled={selectedIds.length === 0 || isAnyBulkActionPending}
+              className="rounded-md bg-success px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-success/90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isBulkApprovePending ? "Approving..." : "Approve selected & enroll"}
             </button>
             <button
               type="submit"
@@ -960,24 +1001,18 @@ export function ContactDirectoryTableClient({
               disabled={
                 selectedIds.length === 0 ||
                 selectedContactsBlockedByAssignment.length > 0 ||
-                isBulkSequencePending ||
-                isBulkRemovePending ||
-                isApolloPushPending ||
-                isApolloSyncPending
+                isAnyBulkActionPending
               }
               className="rounded-md border border-success/30 bg-success/10 px-3 py-1.5 text-xs font-semibold text-success transition-colors hover:bg-success/15 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isApolloPushPending ? "Pushing..." : "Push to Apollo"}
+              {isApolloPushPending ? "Pushing..." : "Retry approved in Apollo"}
             </button>
             <button
               type="submit"
               formAction={runApolloSyncAction}
               disabled={
                 selectedIds.length === 0 ||
-                isBulkSequencePending ||
-                isBulkRemovePending ||
-                isApolloPushPending ||
-                isApolloSyncPending
+                isAnyBulkActionPending
               }
               className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-accentSoft disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -988,10 +1023,7 @@ export function ContactDirectoryTableClient({
               formAction={runBulkRemoveAction}
               disabled={
                 selectedIds.length === 0 ||
-                isBulkSequencePending ||
-                isBulkRemovePending ||
-                isApolloPushPending ||
-                isApolloSyncPending
+                isAnyBulkActionPending
               }
               onClick={(event) => {
                 if (
@@ -1010,10 +1042,12 @@ export function ContactDirectoryTableClient({
         </div>
 
         <div className="border-b border-border bg-card px-4 py-2 text-xs text-mutedForeground">
-          Contacts with prior cadence history can still be assigned a new selected cadence, but the user must explicitly
-          confirm that change first. After a Hunter plan is approved, no-reply contacts can move from an old active or
-          paused cadence into the selected Hunter cadence automatically. Replies, bounces, rejected contacts, and
-          do-not-contact records remain blocked.
+          Use <strong>Approve selected &amp; enroll</strong> for new QA-passed Hunter plans. It records your approval
+          and queues one guarded Apollo enrollment job for all eligible selections.{" "}
+          <strong>Retry approved in Apollo</strong> is only for contacts that were already approved but need another
+          enrollment attempt.
+          Contacts with prior cadence history can move into the selected Hunter cadence after explicit approval;
+          replies, bounces, rejected contacts, do-not-contact records, and contacts without usable email remain blocked.
         </div>
       </form>
       <div className="overflow-x-auto">
@@ -1266,19 +1300,21 @@ function ApolloPushJobHistoryPanel({ jobs }: { jobs: ApolloPushJobSummary[] }) {
   }
 
   return (
-    <div className="border-b border-border bg-muted/40 px-4 py-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-foreground">Apollo push jobs</p>
-          <p className="text-xs text-mutedForeground">
-            Track recent bulk pushes, current progress, and any contacts Apollo skipped or rejected.
-          </p>
+    <details className="border-b border-border bg-muted/40">
+      <summary className="cursor-pointer list-none px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-foreground">Apollo enrollment history</p>
+            <p className="text-xs text-mutedForeground">
+              Expand only when you need job progress, skipped-contact reasons, or an enrollment audit.
+            </p>
+          </div>
+          <span className="rounded-full border border-accentBorder bg-card px-2.5 py-1 text-xs font-semibold text-primary">
+            {jobs.length} recent job{jobs.length === 1 ? "" : "s"}
+          </span>
         </div>
-        <span className="rounded-full border border-accentBorder bg-card px-2.5 py-1 text-xs font-semibold text-primary">
-          {jobs.length} recent job{jobs.length === 1 ? "" : "s"}
-        </span>
-      </div>
-      <div className="mt-3 space-y-3">
+      </summary>
+      <div className="space-y-3 px-4 pb-4">
         {jobs.map((job) => {
           const progressPercent =
             job.selectedContacts > 0 ? Math.round((job.processedContacts / job.selectedContacts) * 100) : 0;
@@ -1338,7 +1374,7 @@ function ApolloPushJobHistoryPanel({ jobs }: { jobs: ApolloPushJobSummary[] }) {
           );
         })}
       </div>
-    </div>
+    </details>
   );
 }
 
@@ -1348,6 +1384,8 @@ function ContactBulkActionSummaryBanner({ summary }: { summary: ContactBulkActio
   const title = isError
     ? summary.operation === "remove"
       ? "Contact removal failed"
+      : summary.operation === "approve"
+        ? "Bulk approval failed"
       : summary.operation === "apollo_push"
         ? "Apollo push failed"
         : summary.operation === "apollo_sync"
@@ -1355,6 +1393,8 @@ function ContactBulkActionSummaryBanner({ summary }: { summary: ContactBulkActio
           : "Cadence update failed"
     : summary.operation === "remove"
       ? "Contact removal summary"
+      : summary.operation === "approve"
+        ? "Bulk approval and enrollment summary"
       : summary.operation === "apollo_push"
         ? "Apollo push summary"
         : summary.operation === "apollo_sync"
@@ -1370,7 +1410,8 @@ function ContactBulkActionSummaryBanner({ summary }: { summary: ContactBulkActio
         </div>
         {summary.completedAt ? <span className="text-xs text-mutedForeground">{formatDateTime(summary.completedAt)}</span> : null}
       </div>
-      {summary.operation === "apollo_push" && apolloBlockerSummary.length > 0 ? (
+      {(summary.operation === "apollo_push" || summary.operation === "approve") &&
+      apolloBlockerSummary.length > 0 ? (
         <div className="mt-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-foreground">Apollo blockers</p>
           <div className="mt-2 space-y-2">
@@ -1395,6 +1436,13 @@ function ContactBulkActionSummaryBanner({ summary }: { summary: ContactBulkActio
                 <ContactBulkMetric label="Removed drafts" value={summary.removedDrafts} />
                 <ContactBulkMetric label="Apollo deletions" value={summary.pushedToApollo ? 1 : 0} />
               </>
+            ) : summary.operation === "approve" ? (
+              <>
+                <ContactBulkMetric label="Selected" value={summary.selectedContacts} />
+                <ContactBulkMetric label="Approved" value={summary.approvedContacts} />
+                <ContactBulkMetric label="Skipped" value={summary.skippedContacts} />
+                <ContactBulkMetric label="Companies" value={summary.companiesTouched} />
+              </>
             ) : summary.operation === "apollo_push" ? (
               <>
                 <ContactBulkMetric label="Selected" value={summary.selectedContacts} />
@@ -1418,7 +1466,8 @@ function ContactBulkActionSummaryBanner({ summary }: { summary: ContactBulkActio
               </>
             )}
           </div>
-          {summary.operation === "apollo_push" && summary.details.length > 0 ? (
+          {(summary.operation === "apollo_push" || summary.operation === "approve") &&
+          summary.details.length > 0 ? (
             <ApolloPushDetails details={summary.details} />
           ) : null}
         </>
@@ -1428,7 +1477,9 @@ function ContactBulkActionSummaryBanner({ summary }: { summary: ContactBulkActio
 }
 
 function ApolloPushDetails({ details }: { details: ContactBulkActionDetail[] }) {
-  const skippedOrFailed = details.filter((detail) => detail.outcome !== "enrolled");
+  const skippedOrFailed = details.filter(
+    (detail) => detail.outcome === "skipped" || detail.outcome === "failed"
+  );
 
   if (skippedOrFailed.length === 0) {
     return null;
@@ -1463,14 +1514,17 @@ function ApolloPushDetails({ details }: { details: ContactBulkActionDetail[] }) 
 }
 
 function summarizeApolloBlockers(summary: ContactBulkActionSummary) {
-  if (summary.operation !== "apollo_push" || summary.details.length === 0) {
+  if (
+    (summary.operation !== "apollo_push" && summary.operation !== "approve") ||
+    summary.details.length === 0
+  ) {
     return [];
   }
 
   const reasonCounts = new Map<string, number>();
 
   for (const detail of summary.details) {
-    if (detail.outcome === "enrolled") {
+    if (detail.outcome === "enrolled" || detail.outcome === "approved") {
       continue;
     }
 
@@ -1488,7 +1542,7 @@ function summarizeApolloJobBlockers(details: ContactBulkActionDetail[]) {
   const reasonCounts = new Map<string, number>();
 
   for (const detail of details) {
-    if (detail.outcome === "enrolled") {
+    if (detail.outcome === "enrolled" || detail.outcome === "approved") {
       continue;
     }
 

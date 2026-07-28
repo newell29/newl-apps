@@ -56,6 +56,10 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - Hunter email outreach requires a concrete syntactically usable email address before contact persistence, buyer-role
   review, or plan generation. Apollo's `has_email` availability flag is not enough because it does not provide a
   deliverable address.
+- Bulk outreach approval accepts selected contacts rather than plan IDs, resolves each contact's latest non-archived
+  plan inside the authenticated tenant, and approves only current `QA_PASSED` plans for safe Qwen/Kimi-vetted Hunter
+  opportunities with a usable email. Eligible contacts are approved atomically and placed into one Apollo enrollment
+  job; ineligible selections remain unchanged and return a visible reason.
 - Scoring settings reject invalid window combinations, company weights that do not total exactly 100 points, non-descending contact tiers, and incomplete or inverted mid-market TEU ranges.
 - Score history is immutable and event-driven. Company opportunity scores are captured after TradeMining ingestion and pipeline approval; contact relevance scores are captured when Apollo status is synchronized or a push is attempted. Opening a page does not create history.
 - Every score snapshot records the scoring model version, a deterministic fingerprint of the full scoring configuration, the matched search profile when available, an explanation, and the evidence date. This allows later outcomes to be compared against the score that was actually used.
