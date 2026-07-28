@@ -784,7 +784,9 @@ async function processCompany({
     contactsImported,
     actionablePlans,
     qaFailedPlans,
-    `${actionablePlans} actionable outreach plan${actionablePlans === 1 ? "" : "s"} available for human review (${plansCreated} newly generated, ${existingPlansFound} already current).`,
+    actionablePlans > 0
+      ? `${actionablePlans} QA-passed outreach plan${actionablePlans === 1 ? "" : "s"} available for human review (${plansCreated} newly generated, ${existingPlansFound} already current).`
+      : `${qaFailedPlans} outreach plan${qaFailedPlans === 1 ? "" : "s"} generated but blocked by QA; none are ready for approval.`,
     {
       apolloContactsFound: lookup.contacts.length,
       contactsRanked: ranked.length,
