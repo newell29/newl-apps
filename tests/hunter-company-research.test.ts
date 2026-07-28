@@ -1059,6 +1059,33 @@ describe("Hunter company deep research", () => {
     });
   });
 
+  it("does not restore a dated operating commencement without facility-expansion evidence", async () => {
+    const program = [
+      "import datetime as d,json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'EXAMPLE BEDDING INC.','companyKey':'example-bedding-inc'}",
+      "recent=(d.datetime.now(d.timezone.utc)-d.timedelta(days=30)).isoformat()",
+      "evidence=[{'pass':'IDENTITY','firstParty':True,'sourceType':'FIRST_PARTY','title':'Example Bedding','excerpt':'Example Bedding is a U.S. manufacturer.','publishedAt':None},{'pass':'FRESH_EVENTS','firstParty':False,'sourceType':'OTHER','title':'Example Bedding commercial operations began in January','excerpt':'Example Bedding began commercial operations and fulfilled its first customer orders.','publishedAt':recent}]",
+      "synthesis={'identityDisposition':'PASS','identityConfidence':90,'identityReason':'Verified.','confidence':82,'freshness':'CURRENT','triggerEvidenceIndices':[1],'opportunitySummary':'The company has current operating history without facility-expansion evidence.','signalType':'NEWS','missingEvidence':[],'rationale':'No material expansion was found.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
+      "normalized=r.normalize_synthesis_for_evidence(candidate,evidence,synthesis)",
+      "print(json.dumps({'material':r.recent_material_trigger_indices(candidate,evidence),'freshness':normalized['freshness'],'triggers':normalized['triggerEvidenceIndices'],'summary':normalized['opportunitySummary']}))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual({
+      material: [],
+      freshness: "CURRENT",
+      triggers: [1],
+      summary: "The company has current operating history without facility-expansion evidence."
+    });
+  });
+
   it("prefers Atlas Copco Compressors' distribution center over an affiliate expansion", async () => {
     const program = [
       "import datetime as d,json",

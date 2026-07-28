@@ -95,6 +95,11 @@ PRODUCTION_COMMENCEMENT_PATTERN = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+NEW_OR_GREENFIELD_FACILITY_PATTERN = re.compile(
+    r"\b(?:new|greenfield)(?:\s+[a-z0-9][a-z0-9&'/-]*){0,6}\s+"
+    r"(?:facility|plant|site)\b",
+    re.IGNORECASE,
+)
 PUBLIC_DOMAIN_PATTERN = re.compile(
     r"(?<![@A-Za-z0-9.-])(?:https?://)?(?:www\.)?"
     r"([A-Za-z0-9](?:[A-Za-z0-9-]{0,62}\.)+[A-Za-z]{2,24})\b",
@@ -1800,7 +1805,10 @@ def recent_material_trigger_indices(
         if (
             material_pattern.search(text)
             or PRODUCTION_LINE_EXPANSION_PATTERN.search(text)
-            or PRODUCTION_COMMENCEMENT_PATTERN.search(text)
+            or (
+                PRODUCTION_COMMENCEMENT_PATTERN.search(text)
+                and NEW_OR_GREENFIELD_FACILITY_PATTERN.search(text)
+            )
         ):
             matches.append(
                 (
