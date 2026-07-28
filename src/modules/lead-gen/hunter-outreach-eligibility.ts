@@ -134,7 +134,9 @@ export function evaluateHunterOutreachEligibility({
     deterministicGate.passed !== true ||
     !retrievedAt ||
     synthesisModel.provider !== "OLLAMA" ||
+    !isRequiredModel(synthesisModel.name, "qwen") ||
     scoringModel.provider !== "KIMI" ||
+    !isRequiredModel(scoringModel.name, "kimi") ||
     synthesisServiceLine !== scoringServiceLine ||
     !scoringServiceLine ||
     scoringServiceLine !== researchSignal.serviceLine ||
@@ -257,6 +259,11 @@ function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function isRequiredModel(value: unknown, requiredName: string) {
+  return typeof value === "string" &&
+    value.toLowerCase().includes(requiredName);
 }
 
 function readOpportunityTier(value: unknown): HunterOpportunityTier | null {

@@ -17,6 +17,7 @@ import {
   evaluateHunterOutreachEligibility,
   getHunterOutreachResearchMaxAgeDays
 } from "@/modules/lead-gen/hunter-outreach-eligibility";
+import { resolveApolloContactDiscoveryMatch } from "@/modules/lead-gen/apollo-contact-discovery-review";
 import { isHunterContactSafeForReview } from "@/modules/lead-gen/apollo-reengagement-policy";
 import {
   HUNTER_COMPANY_RESEARCH_JOB_TYPE,
@@ -597,7 +598,6 @@ async function processCompany({
     company.apolloOrganizationId ? ApolloCompanyMatchClassification.DIRECT_COMPANY : null;
   const latestMatch = company.apolloCompanyMatches[0] ?? null;
   if (
-    !company.apolloOrganizationId &&
     latestMatch &&
     latestMatch.classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY
   ) {
@@ -617,11 +617,26 @@ async function processCompany({
     domain: company.domain,
     apolloOrganizationId: company.apolloOrganizationId
   });
-  classification = lookup.match.classification;
-  await recordCompanyMatch(tenantId, company.id, lookup, {
+  const recordedMatch = await recordCompanyMatch(tenantId, company.id, lookup, {
     domain: company.domain,
     linkedinUrl: company.linkedinUrl
   });
+  classification = recordedMatch.classification;
+  if (
+    lookup.match.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY &&
+    lookup.contacts.length === 0
+  ) {
+    return terminal(
+      item,
+      "NO_CONTACTS",
+      classification,
+      0,
+      0,
+      0,
+      recordedMatch.matchReason ??
+        "Apollo verified the company but returned zero employees; manual Apollo company-page review is required."
+    );
+  }
   if (classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY) {
     return terminal(
       item,
@@ -639,9 +654,6 @@ async function processCompany({
     item.recommendedPersona,
     eligibility.directive.rationale
   ).slice(0, HUNTER_CONTACT_REVIEW_POOL_MAX);
-  if (lookup.contacts.length === 0) {
-    return terminal(item, "NO_CONTACTS", classification, 0, 0, 0, "Apollo returned no contacts.");
-  }
   if (ranked.length === 0) {
     return terminal(
       item,
@@ -1221,6 +1233,11 @@ async function recordCompanyMatch(
   lookup: ApolloContactLookupResult,
   current: { domain: string | null; linkedinUrl: string | null }
 ) {
+  const resolvedMatch = resolveApolloContactDiscoveryMatch({
+    classification: lookup.match.classification,
+    matchReason: lookup.match.matchReason,
+    contactsFound: lookup.contacts.length
+  });
   await prisma.$transaction(async (tx) => {
     await tx.apolloCompanyMatch.create({
       data: {
@@ -1231,19 +1248,19 @@ async function recordCompanyMatch(
         apolloDomain: lookup.match.domain,
         apolloLinkedinUrl: lookup.match.linkedinUrl,
         score: lookup.match.score,
-        classification: lookup.match.classification,
+        classification: resolvedMatch.classification,
         nameMatchType: lookup.match.nameMatchType,
         domainMatch: lookup.match.domainMatch,
         logisticsProviderMatch: lookup.match.logisticsProviderMatch,
         branchLocationMatch: lookup.match.branchLocationMatch,
-        matchReason: lookup.match.matchReason,
+        matchReason: resolvedMatch.matchReason,
         queryJson: toInputJsonValue(lookup.match.query),
         rawJson: lookup.match.rawPayload
           ? toInputJsonValue(lookup.match.rawPayload)
           : Prisma.JsonNull
       }
     });
-    if (lookup.match.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY) {
+    if (resolvedMatch.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY) {
       await tx.company.updateMany({
         where: { id: companyId, tenantId },
         data: {
@@ -1254,6 +1271,7 @@ async function recordCompanyMatch(
       });
     }
   });
+  return resolvedMatch;
 }
 
 async function upsertContacts({

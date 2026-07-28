@@ -52,6 +52,7 @@ import {
   evaluateHunterOutreachEligibility,
   getHunterOutreachResearchMaxAgeDays
 } from "@/modules/lead-gen/hunter-outreach-eligibility";
+import { resolveApolloContactDiscoveryMatch } from "@/modules/lead-gen/apollo-contact-discovery-review";
 import { canonicalizeTradeMiningDestinationPort } from "@/modules/lead-gen/search-profile-suggestions";
 import {
   assertValidTradeMiningSearchProfile,
@@ -571,7 +572,6 @@ export async function bulkQueueApolloEnrichmentAction(
       const assignedOwnerUserId = lead.ownerUserId;
       const latestCompanyMatch = lead.company.apolloCompanyMatches[0] ?? null;
       if (
-        !lead.company.apolloOrganizationId &&
         latestCompanyMatch &&
         latestCompanyMatch.classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY
       ) {
@@ -633,7 +633,7 @@ export async function bulkQueueApolloEnrichmentAction(
         apolloOrganizationId: lead.company.apolloOrganizationId
       });
 
-      await recordApolloCompanyMatch({
+      const recordedMatch = await recordApolloCompanyMatch({
         tenantId: context.tenantId,
         companyId: lead.companyId,
         lookup
@@ -641,7 +641,7 @@ export async function bulkQueueApolloEnrichmentAction(
 
       summary.processedCompanies += 1;
 
-      if (lookup.match.classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY) {
+      if (recordedMatch.classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY) {
         summary.reviewNeededCompanies += 1;
 
         await prisma.lead.update({
@@ -651,7 +651,7 @@ export async function bulkQueueApolloEnrichmentAction(
           data: {
             notes: appendLeadNote(
               queuedNotes,
-              `Apollo company review needed on ${new Date().toISOString()}. ${lookup.match.matchReason}`
+              `Apollo company review needed on ${new Date().toISOString()}. ${recordedMatch.matchReason}`
             )
           }
         });
@@ -840,13 +840,13 @@ export async function retryApolloCompanyReviewAction(formData: FormData) {
     apolloOrganizationId: null
   });
 
-  await recordApolloCompanyMatch({
+  const recordedMatch = await recordApolloCompanyMatch({
     tenantId: context.tenantId,
     companyId: lead.companyId,
     lookup
   });
 
-  if (lookup.match.classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY) {
+  if (recordedMatch.classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY) {
     await prisma.lead.update({
       where: {
         id: lead.id
@@ -854,7 +854,7 @@ export async function retryApolloCompanyReviewAction(formData: FormData) {
       data: {
         notes: appendLeadNote(
           suggestionNotes,
-          `Apollo company review needed on ${new Date().toISOString()}. Tried "${suggestion.suggestedCompanyName}". ${lookup.match.matchReason}`
+          `Apollo company review needed on ${new Date().toISOString()}. Tried "${suggestion.suggestedCompanyName}". ${recordedMatch.matchReason}`
         )
       }
     });
@@ -1122,8 +1122,7 @@ export async function mapApolloCompanyUrlAction(
     const latestMatch = lead.company.apolloCompanyMatches[0] ?? null;
     if (
       !latestMatch ||
-      latestMatch.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY ||
-      lead.company.apolloOrganizationId
+      latestMatch.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY
     ) {
       throw new Error("This company no longer has an unresolved Apollo match.");
     }
@@ -1211,6 +1210,21 @@ export async function mapApolloCompanyUrlAction(
         domain: mapping.domain,
         apolloOrganizationId: mapping.organizationId
       });
+      if (lookup.contacts.length === 0) {
+        const recordedMatch = await recordApolloCompanyMatch({
+          tenantId: context.tenantId,
+          companyId: lead.companyId,
+          lookup
+        });
+        revalidateLeadGenSurfaces();
+        return {
+          status: "error",
+          message:
+            `${lead.company.name} was mapped to ${mapping.companyName}, but ${recordedMatch.matchReason} ` +
+            "The company remains in Apollo Exceptions.",
+          completedAt: new Date().toISOString()
+        };
+      }
       const contactsImported = await finalizeApolloEnrichmentForLead({
         tenantId: context.tenantId,
         lead: {
@@ -4955,6 +4969,11 @@ async function recordApolloCompanyMatch({
   companyId: string;
   lookup: ApolloContactLookupResult;
 }) {
+  const resolvedMatch = resolveApolloContactDiscoveryMatch({
+    classification: lookup.match.classification,
+    matchReason: lookup.match.matchReason,
+    contactsFound: lookup.contacts.length
+  });
   await prisma.apolloCompanyMatch.create({
     data: {
       tenantId,
@@ -4964,16 +4983,17 @@ async function recordApolloCompanyMatch({
       apolloDomain: lookup.match.domain,
       apolloLinkedinUrl: lookup.match.linkedinUrl,
       score: lookup.match.score,
-      classification: lookup.match.classification,
+      classification: resolvedMatch.classification,
       nameMatchType: lookup.match.nameMatchType,
       domainMatch: lookup.match.domainMatch,
       logisticsProviderMatch: lookup.match.logisticsProviderMatch,
       branchLocationMatch: lookup.match.branchLocationMatch,
-      matchReason: lookup.match.matchReason,
+      matchReason: resolvedMatch.matchReason,
       queryJson: toInputJsonValue(lookup.match.query),
       rawJson: lookup.match.rawPayload ? toInputJsonValue(lookup.match.rawPayload) : Prisma.JsonNull
     }
   });
+  return resolvedMatch;
 }
 
 function apolloMatchReviewErrorState(error: unknown): ApolloMatchReviewActionState {

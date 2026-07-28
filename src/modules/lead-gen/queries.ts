@@ -1,5 +1,4 @@
 import {
-  ApolloCompanyMatchClassification,
   ApolloStatus,
   CandidateStatus,
   ContactSource,
@@ -31,6 +30,7 @@ import {
   evaluateHunterOutreachEligibility,
   getHunterOutreachResearchMaxAgeDays
 } from "@/modules/lead-gen/hunter-outreach-eligibility";
+import { requiresApolloMatchReview } from "@/modules/lead-gen/apollo-contact-discovery-review";
 import {
   isCurrentOutreachDraft,
   OUTREACH_PLAN_PROMPT_VERSION
@@ -977,8 +977,7 @@ export async function getApolloMatchReviewQueue(
       const match = lead.company.apolloCompanyMatches[0] ?? null;
       if (
         !match ||
-        match.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY ||
-        lead.company.apolloOrganizationId
+        !requiresApolloMatchReview(match.classification)
       ) {
         return [];
       }

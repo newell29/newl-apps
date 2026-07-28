@@ -115,6 +115,9 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
   company-research signal must be Hot or Qualified current account, pass the deterministic research gate, and have a
   newer `WOULD_PURSUE` planner decision with the same service line. Watchlist, Blocked, unassessed, stale, unselected,
   or inconsistent handoffs cannot generate or push outreach.
+- The saved model ledger must explicitly identify a Qwen synthesis model and a Kimi scoring model. An Ollama or Kimi
+  provider label without the expected model-family name fails closed, so legacy or partially processed records cannot
+  enter the contact-discovery queue.
 - Hot opportunities additionally require a saved Kimi K3 `CONFIRM` validation. Qualified current accounts may use
   the normal `NOT_SELECTED` validator state because K3 is reserved for the strongest fresh-event candidates.
 - Research freshness defaults to 30 days through `HUNTER_OUTREACH_RESEARCH_MAX_AGE_DAYS`. The duration is inferred

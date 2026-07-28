@@ -120,7 +120,11 @@ The employee-facing layout follows the lifecycle of a prospect rather than the u
 1. **Daily Opportunities** shows Hunter-researched Hot, Qualified current account, and Watchlist recommendations. Raw source candidates and blocked research remain collapsed audit material.
 2. **Outreach Queue** contains active contact discovery, drafting, approval, Apollo enrollment, and unanswered follow-up work. Terminal, unsafe, and positively engaged contacts do not clutter this queue. The default table hides secondary audit columns; employees can restore them through the Columns menu.
 3. **Sales Opportunities** begins only after genuine engagement. It includes `REPLIED`, `MEETING_BOOKED`, `QUOTED`, `WON`, and `LOST`; an Apollo positive reply or meeting-booked status is also surfaced immediately even before the stored lead stage is manually confirmed. Earlier pipeline records remain stored but are not displayed in this revenue-focused view.
-4. **Apollo Exceptions** contains ambiguous and missing company mappings.
+4. **Apollo Exceptions** contains ambiguous and missing company mappings plus verified Apollo companies that returned
+   zero employees. A zero-contact result creates a durable unresolved match-review record and blocks blind automatic
+   reruns. To resolve it, open the company in Apollo, select the **People** page, and paste its
+   `https://app.apollo.io/#/accounts/<organization-id>/people` URL. A successful manual mapping and employee lookup
+   clears the exception; another zero-contact result remains queued for deliberate review.
 5. TradeMining searches and Found Companies live under **Data Sources**. Automation controls, scoring/outcomes, and health/logs live under **Admin & Quality**.
 
 The layout is non-destructive: it does not migrate, delete, or rewrite existing Company, Contact, Lead, Hunter, TradeMining, Apollo, scoring, or outcome data.

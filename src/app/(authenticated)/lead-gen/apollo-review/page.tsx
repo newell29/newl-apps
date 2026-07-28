@@ -35,8 +35,8 @@ export default async function ApolloMatchReviewPage({
     <div className="space-y-6">
       <PageHeader
         eyebrow="Lead Generation"
-        title="Apollo Match Review"
-        description="Resolve companies Apollo could not match safely. Accounts in this queue are protected from bulk and automatic repeat searches."
+        title="Apollo Exceptions"
+        description="Resolve companies Apollo could not match safely or that returned zero employees. Accounts in this queue are protected from bulk and automatic repeat searches."
       />
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -56,7 +56,7 @@ export default async function ApolloMatchReviewPage({
 
       <ReviewSection
         title="Needs review"
-        description="Use the Apollo company URL when a rep finds the correct record, retry deliberately after correcting company data, or confirm that no usable match exists."
+        description="Open the company in Apollo, select its People page, and paste that page URL. You can also retry deliberately after correcting company data or confirm that no usable match exists."
         rows={activeRows}
       />
 

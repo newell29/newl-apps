@@ -114,7 +114,9 @@ export default async function AutomationSettingsPage({
                   Recheck contacts for eligible opportunities
                 </button>
                 <p className="mt-2 text-xs text-mutedForeground">
-                  Reruns exact-organization Apollo employee searches for the current eligible Hot and Qualified companies, repeats AI contact review, and creates plans for newly selected contacts. It does not rerun company research or send outreach without plan approval.
+                  Reruns exact-organization Apollo employee searches only for current Hot and Qualified companies
+                  with completed Qwen synthesis and Kimi scoring, repeats AI contact review, and creates plans for
+                  newly selected contacts. It does not rerun company research or send outreach without plan approval.
                 </p>
               </div>
             </form>
@@ -194,9 +196,11 @@ function LatestContactDiscoveryRun({
             Latest contact discovery run
           </h2>
           <p className="mt-1 text-sm text-mutedForeground">
-            Started {formatRunDate(run.startedAt, timeZone)}. Evaluated contacts
-            are the bounded Apollo candidates sent through buyer-role review;
-            only contacts with a generated plan appear in Outreach Queue.
+            Started {formatRunDate(run.startedAt, timeZone)}. Every queued company
+            passed the saved Qwen synthesis, Kimi scoring, deterministic research,
+            and current Hunter selection gates. Evaluated contacts are the bounded
+            Apollo candidates sent through buyer-role review; only contacts with a
+            generated plan appear in Outreach Queue.
           </p>
         </div>
         <span className="rounded-full border border-border bg-card px-2.5 py-1 text-xs font-semibold text-foreground">
