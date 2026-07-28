@@ -258,6 +258,9 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   the 100-result organization-scoped employee request and the always-run multi-title request. Finding an acceptable
   person on the generic first page must not short-circuit relevant-title retrieval. The buyer-role model receives the
   best 10 merged candidates; the configured `maxContactsPerCompany` limits final selection, not discovery.
+- Also verify that `organization_ids` contains Apollo's nested global organization ID rather than the saved account
+  record ID. A legacy account ID that returns no employees may be recovered only from one exact organization identity;
+  parent/sibling evidence must produce `MATCH_QUALITY_REVIEW` and an empty contact set.
 - An HTTP 307 from the Mac-mini handoff worker means session middleware intercepted the machine route before
   ingestion authentication. `/api/lead-gen/hunter/outreach-handoff/*` is exempt from session middleware and must
   enforce its own tenant-bound ingestion token; regression coverage preserves that boundary.
@@ -275,6 +278,23 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Credit guard: URL validation requires explicit acknowledgement of one Apollo credit. Automatic retry requires explicit acknowledgement of up to two returned organization-search pages.
 - Prevention: once the latest match is unresolved, bulk enrichment performs no Apollo lookup for that company. Confirmed-no-match rows remain visible and blocked until explicitly reopened.
 - Limitation: duplicate organization mapping is checked within the tenant in application code. A future additive unique database constraint could provide stronger protection against two simultaneous manual mappings, but requires separate migration approval.
+
+## Apollo has the company but Hunter finds only saved contacts or no employees
+
+- Symptom: Apollo visibly contains relevant employees, but Hunter repeatedly imports only one previously saved
+  contact or reports no contacts after an organization-scoped search.
+- Cause: an Apollo account ID was stored in `Company.apolloOrganizationId` and then submitted to People API Search,
+  which requires Apollo's nested global organization ID. Apollo can expose both identifiers in the same account or
+  saved-contact payload.
+- Safe recovery: Hunter first tries the configured identifier. When it returns no employees and an exact company
+  domain exists, Hunter inspects bounded saved-contact and zero-credit People Search organization metadata. It
+  promotes only one exact normalized company identity, filters every candidate back to that organization, and lets
+  the existing direct-match transaction replace the stale identifier.
+- Ambiguity rule: a parent, subsidiary, sibling, or multiple exact organization candidate becomes
+  `MATCH_QUALITY_REVIEW`; no contacts are imported and the AI buyer-role review is not run. Domain-wide employee
+  results alone cannot authorize a match.
+- Regression coverage: `tests/apollo-integration.test.ts` covers a legacy Stabilus account ID recovering the global
+  organization and a Hyosung parent-company result failing closed.
 
 ## Automatic Apollo status sync is stale or failing
 

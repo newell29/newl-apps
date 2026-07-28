@@ -209,7 +209,7 @@ Regression coverage must prove:
 3. machine routes ignore caller-supplied tenant identifiers and use ingestion authentication;
 4. each request processes at most one company and persisted leases, results, attempts, and retry dates survive worker restart;
 5. an unresolved latest Apollo company match blocks repeat discovery and remains review-required;
-6. saved contacts, a 100-result organization-scoped employee search, and an always-run multi-title search are merged and deduplicated before ranking; sibling organizations remain excluded;
+6. saved contacts, a 100-result organization-scoped employee search, and an always-run multi-title search are merged and deduplicated before ranking; Apollo account IDs are resolved to the nested global organization ID, and sibling/parent organizations remain excluded;
 7. deterministic ranking excludes seller-side and unidentifiable contacts, gives the buyer-role model the best 10 candidates, and caps final selection at `maxContactsPerCompany`;
 8. buyer-role review uses strict structured output, returns the exact requested contact IDs, and accepts only Primary 70+ or Secondary 80+;
 9. the manual current-opportunity handoff requires completed company research, refreshes the deterministic plan, and queues the same bounded Assisted-mode job without rerunning research;
