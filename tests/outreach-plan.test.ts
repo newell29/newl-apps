@@ -15,6 +15,11 @@ import {
   type OutreachEvidenceRecord,
   type OutreachStrategy
 } from "@/modules/lead-gen/outreach-plan";
+import {
+  buildBoundedOutreachRepairFeedback,
+  normalizeHunterChannelStrategy,
+  runBoundedOutreachQaRepair
+} from "@/modules/lead-gen/outreach-plan-generation";
 
 const evidence: OutreachEvidenceRecord[] = [
   {
@@ -99,6 +104,161 @@ const sequence: GeneratedOutreachSequence = {
 };
 
 describe("outreach plan grounding", () => {
+  it("normalizes the model strategy to Hunter's authoritative cadence", () => {
+    expect(
+      normalizeHunterChannelStrategy({
+        ...strategy,
+        channelStrategy: ["Email on day 3", "Email on day 6"]
+      }, true).channelStrategy
+    ).toEqual([
+      "Email on day 0",
+      "Email on day 4",
+      "Separate human call task on day 7",
+      "Email on day 10"
+    ]);
+
+    expect(
+      normalizeHunterChannelStrategy({
+        ...strategy,
+        channelStrategy: ["Call after the second email"]
+      }, false).channelStrategy
+    ).toEqual([
+      "Email on day 0",
+      "Email on day 4",
+      "Email on day 10"
+    ]);
+  });
+
+  it("builds one bounded repair instruction from deterministic and model QA issues", () => {
+    const feedback = buildBoundedOutreachRepairFeedback({
+      deterministicIssues: [{
+        code: "CHANNEL_MIX",
+        severity: "ERROR",
+        message: "The call task was labeled as an email.",
+        stepNumber: 3
+      }],
+      modelIssues: [{
+        code: "INTERNAL_REFERENCE",
+        severity: "ERROR",
+        message: "Customer-visible copy says saved shipment activity.",
+        stepNumber: 1
+      }],
+      allowCallTask: true,
+      senderFirstName: "Alex"
+    });
+
+    expect(feedback).toContain("Automatic bounded QA repair");
+    expect(feedback).toContain("CALL_TASK on day 7");
+    expect(feedback).toContain("saved activity");
+    expect(feedback).toContain("Step 3: The call task was labeled as an email.");
+    expect(feedback).toContain("Step 1: Customer-visible copy says saved shipment activity.");
+  });
+
+  it("does not retry when model QA itself is unavailable", () => {
+    expect(buildBoundedOutreachRepairFeedback({
+      deterministicIssues: [],
+      modelIssues: [{
+        code: "MODEL_QA_UNAVAILABLE",
+        severity: "ERROR",
+        message: "Timed out.",
+        stepNumber: null
+      }],
+      allowCallTask: false,
+      senderFirstName: "Alex"
+    })).toBeNull();
+  });
+
+  it("repairs a deterministic sequence failure once before model QA", async () => {
+    let draftCalls = 0;
+    let modelQaCalls = 0;
+    const result = await runBoundedOutreachQaRepair({
+      generateSequence: async (repairFeedback) => {
+        draftCalls += 1;
+        return {
+          sequence: repairFeedback
+            ? sequence
+            : {
+                ...sequence,
+                steps: sequence.steps.map((step) =>
+                  step.stepNumber === 3
+                    ? { ...step, channel: OutreachChannel.EMAIL }
+                    : step
+                )
+              },
+          usage: usage()
+        };
+      },
+      runDeterministicQa: (candidateSequence) =>
+        runDeterministicOutreachQa({
+          evidence,
+          strategy,
+          sequence: candidateSequence,
+          senderFirstName: "Alex",
+          allowCallTask: true
+        }),
+      runModelQa: async () => {
+        modelQaCalls += 1;
+        return {
+          result: { passed: true, issues: [] },
+          usage: usage()
+        };
+      },
+      allowCallTask: true,
+      senderFirstName: "Alex"
+    });
+
+    expect(draftCalls).toBe(2);
+    expect(modelQaCalls).toBe(1);
+    expect(result.automaticRepairAttempted).toBe(true);
+    expect(result.deterministicQa.passed).toBe(true);
+    expect(result.modelQa.passed).toBe(true);
+  });
+
+  it("repairs a model grounding failure once and reruns both gates", async () => {
+    let draftCalls = 0;
+    let modelQaCalls = 0;
+    const result = await runBoundedOutreachQaRepair({
+      generateSequence: async () => {
+        draftCalls += 1;
+        return { sequence, usage: usage() };
+      },
+      runDeterministicQa: (candidateSequence) =>
+        runDeterministicOutreachQa({
+          evidence,
+          strategy,
+          sequence: candidateSequence,
+          senderFirstName: "Alex",
+          allowCallTask: true
+        }),
+      runModelQa: async () => {
+        modelQaCalls += 1;
+        return {
+          result: modelQaCalls === 1
+            ? {
+                passed: false,
+                issues: [{
+                  code: "INTERNAL_REFERENCE",
+                  severity: "ERROR",
+                  message: "Customer-visible copy says saved shipment activity.",
+                  stepNumber: 1
+                }]
+              }
+            : { passed: true, issues: [] },
+          usage: usage()
+        };
+      },
+      allowCallTask: true,
+      senderFirstName: "Alex"
+    });
+
+    expect(draftCalls).toBe(2);
+    expect(modelQaCalls).toBe(2);
+    expect(result.automaticRepairAttempted).toBe(true);
+    expect(result.modelQa.passed).toBe(true);
+    expect(result.draftingUsageAttempts).toHaveLength(2);
+    expect(result.qaUsageAttempts).toHaveLength(2);
+  });
+
   it("passes a complete hot-opportunity email sequence with one call task", () => {
     const result = runDeterministicOutreachQa({
       evidence,
@@ -232,3 +392,12 @@ describe("outreach plan grounding", () => {
     })).toBe(true);
   });
 });
+
+function usage() {
+  return {
+    inputTokens: 10,
+    outputTokens: 5,
+    cachedInputTokens: 0,
+    totalTokens: 15
+  };
+}

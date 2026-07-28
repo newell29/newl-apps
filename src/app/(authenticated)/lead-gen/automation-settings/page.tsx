@@ -114,9 +114,11 @@ export default async function AutomationSettingsPage({
                   Recheck contacts for eligible opportunities
                 </button>
                 <p className="mt-2 text-xs text-mutedForeground">
-                  Reruns exact-organization Apollo employee searches only for current Hot and Qualified companies
-                  with completed Qwen synthesis and Kimi scoring, repeats AI contact review, and creates plans for
-                  newly selected contacts. It does not rerun company research or send outreach without plan approval.
+                  Reruns organization-scoped Apollo employee searches for current Hot and Qualified companies with
+                  completed Qwen synthesis and Kimi scoring, repeats AI contact review, and creates or refreshes plans
+                  for selected contacts. Failed plans receive one automatic QA-guided rewrite in the same run. This
+                  does not rerun Brave searches, Qwen research, or Kimi scoring, and it never sends outreach without
+                  plan approval.
                 </p>
               </div>
             </form>

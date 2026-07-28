@@ -626,6 +626,101 @@ describe("fetchApolloContactsForCompany", () => {
     expect(fetchMock).toHaveBeenCalled();
   });
 
+  it("expands a partial mapped-account result through its trusted saved-contact domain", async () => {
+    const accountId = "aalberts-saved-account";
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ organizations: [] })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/accounts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ accounts: [] })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith(`/api/v1/accounts/${accountId}`)) {
+        return {
+          ok: false,
+          status: 403,
+          json: vi.fn().mockResolvedValue({ error: "Account View unavailable" })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            contacts: [{
+              id: "aalberts-warehouse-contact",
+              name: "Warehouse Associate",
+              title: "Warehouse Associate",
+              organization: {
+                id: accountId,
+                name: "AALBERTS IPS AMERICAS",
+                primary_domain: "aalberts.com"
+              }
+            }]
+          })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+        if (Array.isArray(body.organization_ids)) {
+          expect(body.organization_ids).toEqual([accountId]);
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({ people: [] })
+          } as unknown as Response;
+        }
+
+        expect(body.q_organization_domains_list).toEqual(["aalberts.com"]);
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            people: [{
+              id: "aalberts-coo-domain",
+              name: "Aalberts Executive",
+              title: "COO at Aalberts IPS Americas & APAC",
+              organization: {
+                name: "Aalberts integrated piping systems",
+                primary_domain: "aalberts.com"
+              }
+            }]
+          })
+        } as unknown as Response;
+      }
+
+      throw new Error(`Unexpected Apollo URL in test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "AALBERTS IPS AMERICAS",
+      apolloOrganizationId: accountId
+    });
+
+    expect(result.contacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        apolloPersonId: "aalberts-coo-domain",
+        title: "COO at Aalberts IPS Americas & APAC"
+      })
+    ]));
+    expect(result.match.matchReason).toContain("trusted saved-contact domain");
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
   it("runs the organization-scoped role search even when the generic page already has an acceptable contact", async () => {
     const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);

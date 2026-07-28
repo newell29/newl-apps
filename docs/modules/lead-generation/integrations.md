@@ -103,6 +103,12 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
   accepted for legal-entity cards that point to the operating parent/brand; a loose parent, subsidiary, sibling, or
   multiple-candidate result still routes to Apollo Match Review with no contacts selected. The validated global ID is
   persisted by the existing direct-match transaction, so later runs remain organization scoped.
+- If an immutable mapped account still returns at most one employee and Apollo Account Search/View does not expose
+  the nested global organization ID, Hunter may recover one unique domain from a saved contact whose organization
+  identity matches the exact legal/regional account. It repeats the generic and relevant-title People Search against
+  that trusted domain and merges the results without revealing emails or phone numbers. Returned domains must match
+  exactly, explicit organization-ID mismatches remain rejected, and acronym-expanded operating names such as
+  `Aalberts IPS Americas` / `Aalberts integrated piping systems` are accepted only inside that confirmed scope.
 - `HUNTER_CONTACT_FIT_MODEL` optionally selects the buyer-role validator and defaults to the existing
   `gpt-5.6-luna` outreach model. The model receives bounded company identity, Hunter opportunity context, contact
   role fields, and contactability booleans; it does not receive Apollo credentials, raw Apollo payloads, email

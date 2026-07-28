@@ -25,7 +25,11 @@ import {
   mergeOutreachQaResults,
   OUTREACH_PLAN_PROMPT_VERSION,
   runDeterministicOutreachQa,
-  type OutreachEvidenceRecord
+  type GeneratedOutreachSequence,
+  type ModelOutreachQaResult,
+  type OutreachEvidenceRecord,
+  type OutreachQaIssue,
+  type OutreachStrategy
 } from "@/modules/lead-gen/outreach-plan";
 import { persistOutreachPlanWithSteps } from "@/modules/lead-gen/outreach-plan-persistence";
 import { recommendSequenceForContact } from "@/modules/lead-gen/sequence-catalog";
@@ -42,8 +46,162 @@ import { prisma } from "@/server/db";
 import {
   generateCompleteOutreachSequence,
   generateOutreachStrategy,
-  reviewOutreachSequenceGrounding
+  reviewOutreachSequenceGrounding,
+  type OpenAiStructuredUsage
 } from "@/server/integrations/openai";
+
+export function normalizeHunterChannelStrategy(
+  strategy: OutreachStrategy,
+  allowCallTask: boolean
+): OutreachStrategy {
+  return {
+    ...strategy,
+    channelStrategy: allowCallTask
+      ? [
+          "Email on day 0",
+          "Email on day 4",
+          "Separate human call task on day 7",
+          "Email on day 10"
+        ]
+      : [
+          "Email on day 0",
+          "Email on day 4",
+          "Email on day 10"
+        ]
+  };
+}
+
+export function buildBoundedOutreachRepairFeedback({
+  deterministicIssues,
+  modelIssues,
+  allowCallTask,
+  senderFirstName
+}: {
+  deterministicIssues: OutreachQaIssue[];
+  modelIssues: OutreachQaIssue[];
+  allowCallTask: boolean;
+  senderFirstName: string;
+}) {
+  const blockingIssues = [...deterministicIssues, ...modelIssues]
+    .filter(
+      (issue) =>
+        issue.severity === "ERROR" &&
+        issue.code !== "MODEL_QA_UNAVAILABLE"
+    )
+    .filter(
+      (issue, index, issues) =>
+        issues.findIndex(
+          (candidate) =>
+            candidate.code === issue.code &&
+            candidate.stepNumber === issue.stepNumber &&
+            candidate.message === issue.message
+        ) === index
+    )
+    .slice(0, 12);
+  if (blockingIssues.length === 0) {
+    return null;
+  }
+
+  const schedule = allowCallTask
+    ? "Return exactly three EMAIL steps on days 0, 4, and 10 plus one CALL_TASK on day 7. The CALL_TASK must be its own channel and must not have a subject."
+    : "Return exactly three EMAIL steps on days 0, 4, and 10. Do not include a call or LinkedIn task.";
+  const issueText = blockingIssues
+    .map(
+      (issue) =>
+        `${issue.stepNumber === null ? "Sequence" : `Step ${issue.stepNumber}`}: ${issue.message}`
+    )
+    .join("\n");
+
+  return [
+    "Automatic bounded QA repair: regenerate the complete sequence once and correct every blocking issue below.",
+    schedule,
+    `Every email must end with ${senderFirstName} on its own final line.`,
+    "Never expose research provenance in customer-visible copy. Do not say saved activity, saved shipment, saved record, evidence, research, TradeMining, Hunter, internal, database, or system.",
+    "Use only evidenceRefs that exactly match IDs in the supplied evidence ledger.",
+    issueText
+  ].join("\n");
+}
+
+function combineOutreachFeedback(
+  reviewerFeedback: string | null,
+  repairFeedback: string | null
+) {
+  return [reviewerFeedback?.trim(), repairFeedback?.trim()]
+    .filter((value): value is string => Boolean(value))
+    .join("\n\n") || null;
+}
+
+export async function runBoundedOutreachQaRepair({
+  generateSequence,
+  runDeterministicQa,
+  runModelQa,
+  allowCallTask,
+  senderFirstName
+}: {
+  generateSequence: (
+    repairFeedback: string | null
+  ) => Promise<{
+    sequence: GeneratedOutreachSequence;
+    usage: OpenAiStructuredUsage;
+  }>;
+  runDeterministicQa: (
+    sequence: GeneratedOutreachSequence
+  ) => ReturnType<typeof runDeterministicOutreachQa>;
+  runModelQa: (
+    sequence: GeneratedOutreachSequence
+  ) => Promise<{
+    result: ModelOutreachQaResult;
+    usage: OpenAiStructuredUsage | null;
+  }>;
+  allowCallTask: boolean;
+  senderFirstName: string;
+}) {
+  const draftingUsageAttempts: OpenAiStructuredUsage[] = [];
+  const qaUsageAttempts: OpenAiStructuredUsage[] = [];
+
+  const createDraft = async (repairFeedback: string | null) => {
+    const generated = await generateSequence(repairFeedback);
+    draftingUsageAttempts.push(generated.usage);
+    return generated.sequence;
+  };
+  const reviewDraft = async (sequence: GeneratedOutreachSequence) => {
+    const reviewed = await runModelQa(sequence);
+    if (reviewed.usage) {
+      qaUsageAttempts.push(reviewed.usage);
+    }
+    return reviewed.result;
+  };
+
+  let sequence = await createDraft(null);
+  let deterministicQa = runDeterministicQa(sequence);
+  let modelQa = deterministicQa.passed
+    ? await reviewDraft(sequence)
+    : { passed: true, issues: [] as OutreachQaIssue[] };
+  const automaticRepairFeedback = buildBoundedOutreachRepairFeedback({
+    deterministicIssues: deterministicQa.issues,
+    modelIssues: modelQa.issues,
+    allowCallTask,
+    senderFirstName
+  });
+
+  if (automaticRepairFeedback) {
+    sequence = await createDraft(automaticRepairFeedback);
+    deterministicQa = runDeterministicQa(sequence);
+    modelQa = deterministicQa.passed
+      ? await reviewDraft(sequence)
+      : { passed: true, issues: [] as OutreachQaIssue[] };
+  }
+
+  return {
+    sequence,
+    deterministicQa,
+    modelQa,
+    draftingUsageAttempts,
+    qaUsageAttempts,
+    automaticRepairAttempted: Boolean(automaticRepairFeedback),
+    automaticRepairFeedback
+  };
+}
 
 export async function generateOutreachPlanForContact({
   tenantId,
@@ -100,6 +258,7 @@ export async function generateOutreachPlanForContact({
     }
     return { state: "sender_missing" as const };
   }
+  const senderIdentity = draftContext.senderIdentity;
 
   const evidenceLedger = buildOutreachEvidenceLedger(draftContext);
   if (evidenceLedger.length === 0) {
@@ -139,72 +298,87 @@ export async function generateOutreachPlanForContact({
     recommendedPersona: hunterDirective.recommendedPersona,
     recommendedCadence: hunterDirective.recommendedCadence,
     hunterDirective,
-    senderFirstName: draftContext.senderIdentity.firstName,
+    senderFirstName: senderIdentity.firstName,
     allowCallTask,
     evidence: evidenceLedger,
     reviewerFeedback
   });
-  const strategy = {
+  const strategy = normalizeHunterChannelStrategy({
     ...strategyGeneration.strategy,
-    senderRecommendation: draftContext.senderIdentity.firstName
+    senderRecommendation: senderIdentity.firstName
+  }, allowCallTask);
+  const contactContext = {
+    firstName: draftContext.contact.firstName,
+    fullName: draftContext.contact.fullName,
+    title: draftContext.contact.title,
+    department: draftContext.contact.department,
+    seniority: draftContext.contact.seniority
   };
-  const sequenceGeneration = await generateCompleteOutreachSequence({
-    model: models.drafting,
-    companyName: draftContext.contact.company.name,
-    contact: {
-      firstName: draftContext.contact.firstName,
-      fullName: draftContext.contact.fullName,
-      title: draftContext.contact.title,
-      department: draftContext.contact.department,
-      seniority: draftContext.contact.seniority
+  const repaired = await runBoundedOutreachQaRepair({
+    generateSequence: async (repairFeedback) =>
+      generateCompleteOutreachSequence({
+        model: models.drafting,
+        companyName: draftContext.contact.company.name,
+        contact: contactContext,
+        selectedSequenceName: draftContext.selectedSequenceName,
+        strategy,
+        senderFirstName: senderIdentity.firstName,
+        evidence: evidenceLedger,
+        allowCallTask,
+        reviewerFeedback: combineOutreachFeedback(reviewerFeedback, repairFeedback)
+      }),
+    runDeterministicQa: (candidateSequence) =>
+      runDeterministicOutreachQa({
+        evidence: evidenceLedger,
+        strategy,
+        sequence: candidateSequence,
+        senderFirstName: senderIdentity.firstName,
+        allowCallTask
+      }),
+    runModelQa: async (candidateSequence) => {
+      try {
+        const qaReview = await reviewOutreachSequenceGrounding({
+          model: models.qa,
+          companyName: draftContext.contact.company.name,
+          contact: contactContext,
+          strategy,
+          sequence: candidateSequence,
+          evidence: evidenceLedger,
+          senderFirstName: senderIdentity.firstName,
+          allowCallTask
+        });
+        return {
+          result: qaReview.result,
+          usage: qaReview.usage
+        };
+      } catch (error) {
+        return {
+          result: {
+            passed: false,
+            issues: [{
+              code: "MODEL_QA_UNAVAILABLE",
+              severity: "ERROR" as const,
+              message: error instanceof Error ? error.message : "The model QA check could not be completed.",
+              stepNumber: null
+            }]
+          },
+          usage: null
+        };
+      }
     },
-    selectedSequenceName: draftContext.selectedSequenceName,
-    strategy,
-    senderFirstName: draftContext.senderIdentity.firstName,
-    evidence: evidenceLedger,
     allowCallTask,
-    reviewerFeedback
+    senderFirstName: senderIdentity.firstName
   });
-  const sequence = sequenceGeneration.sequence;
-  const deterministicQa = runDeterministicOutreachQa({
-    evidence: evidenceLedger,
-    strategy,
+  const {
     sequence,
-    senderFirstName: draftContext.senderIdentity.firstName,
-    allowCallTask
-  });
-  let modelQa;
-  let qaUsage = null;
-  try {
-    const qaReview = await reviewOutreachSequenceGrounding({
-      model: models.qa,
-      companyName: draftContext.contact.company.name,
-      contact: {
-        firstName: draftContext.contact.firstName,
-        fullName: draftContext.contact.fullName,
-        title: draftContext.contact.title,
-        department: draftContext.contact.department,
-        seniority: draftContext.contact.seniority
-      },
-      strategy,
-      sequence,
-      evidence: evidenceLedger,
-      senderFirstName: draftContext.senderIdentity.firstName,
-      allowCallTask
-    });
-    modelQa = qaReview.result;
-    qaUsage = qaReview.usage;
-  } catch (error) {
-    modelQa = {
-      passed: false,
-      issues: [{
-        code: "MODEL_QA_UNAVAILABLE",
-        severity: "ERROR" as const,
-        message: error instanceof Error ? error.message : "The model QA check could not be completed.",
-        stepNumber: null
-      }]
-    };
-  }
+    deterministicQa,
+    modelQa,
+    draftingUsageAttempts,
+    qaUsageAttempts,
+    automaticRepairAttempted,
+    automaticRepairFeedback
+  } = repaired;
+
   const qa = mergeOutreachQaResults(deterministicQa, modelQa);
   const firstEmail = sequence.steps.find((step) => step.channel === "EMAIL");
   if (!firstEmail?.subject) {
@@ -217,8 +391,14 @@ export async function generateOutreachPlanForContact({
     promptVersion: OUTREACH_PLAN_PROMPT_VERSION,
     modelUsage: {
       strategy: strategyGeneration.usage,
-      drafting: sequenceGeneration.usage,
-      qa: qaUsage
+      drafting: draftingUsageAttempts.at(-1) ?? null,
+      draftingAttempts: draftingUsageAttempts,
+      qa: qaUsageAttempts.at(-1) ?? null,
+      qaAttempts: qaUsageAttempts
+    },
+    automaticRepair: {
+      attempted: automaticRepairAttempted,
+      feedback: automaticRepairFeedback
     },
     generatedAt: new Date().toISOString(),
     companyName: draftContext.contact.company.name,
@@ -227,7 +407,7 @@ export async function generateOutreachPlanForContact({
     contactTier: draftContext.contactTier,
     selectedSequenceName: draftContext.selectedSequenceName,
     selectedSequenceId: draftContext.selectedSequenceId,
-    senderIdentity: draftContext.senderIdentity,
+    senderIdentity,
     reviewerFeedback,
     hunterDirective,
     strategy,
