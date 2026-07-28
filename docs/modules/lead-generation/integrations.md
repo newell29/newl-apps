@@ -153,6 +153,12 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 
 Apollo's Contacts API can return sequence membership in either the older top-level sequence fields or the newer `contact_campaign_statuses` array. Newl Apps must parse both shapes. When several campaign memberships exist, current replied, active, or paused memberships take precedence over finished history; equally ranked memberships use the newest membership timestamp.
 
+For an approved Hunter Outreach Plan, Newl Apps uses Apollo's no-credit
+`emailer_campaigns/remove_or_stop_contact_ids` endpoint in `remove` mode when a no-reply contact is still active or
+paused in a different cadence, then calls the normal add-contact endpoint for the approved Hunter cadence. Finished
+history in another cadence requires no removal. The selected Hunter cadence ID makes later status sync
+campaign-aware, so stale `FINISHED` history cannot mask a new `ENROLLED` status.
+
 The Apollo push path remains deliberately two-phase:
 
 1. submit the selected contact IDs to the tenant-configured cadence and sender;

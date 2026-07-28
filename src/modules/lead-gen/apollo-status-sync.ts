@@ -5,8 +5,7 @@ import {
   JobStatus,
   ModuleKey,
   Prisma,
-  ReplyStatus,
-  SequenceStatus
+  ReplyStatus
 } from "@prisma/client";
 
 import {
@@ -16,6 +15,7 @@ import {
   getApolloStatusSyncIntervalHours,
   getNextApolloSyncAt
 } from "@/modules/lead-gen/apollo-status-sync-policy";
+import { resolveTrackedSequenceStatus } from "@/modules/lead-gen/apollo-reengagement-policy";
 import { recordCurrentContactScoreSnapshot } from "@/modules/lead-gen/contact-score-snapshot";
 import { recordLeadOutcomeEvent } from "@/modules/lead-gen/score-history";
 import { prisma } from "@/server/db";
@@ -183,7 +183,12 @@ export async function syncApolloStatusesForTenant(
           result.retryCount += 1;
         });
         const syncedAt = dependencies.now();
-        const sequenceStatus = mergeSequenceStatus(contact.sequenceStatus, incoming.sequenceStatus);
+        const sequenceStatus = resolveTrackedSequenceStatus({
+          existingStatus: contact.sequenceStatus,
+          incomingStatus: incoming.sequenceStatus,
+          selectedSequenceId: contact.selectedSequenceId,
+          incomingSequenceId: incoming.sequenceId
+        });
         const replyStatus = mergeReplyStatus(contact.replyStatus, incoming.replyStatus);
         const sequenceChanged = sequenceStatus !== contact.sequenceStatus;
         const replyChanged = replyStatus !== contact.replyStatus;
@@ -373,23 +378,6 @@ async function fetchContactWithRetry(
 
 function isRetryable(error: unknown) {
   return error instanceof ApolloRateLimitError || error instanceof ApolloTransientError;
-}
-
-function mergeSequenceStatus(existing: SequenceStatus, incoming: SequenceStatus) {
-  if (incoming === SequenceStatus.NOT_STARTED) return existing;
-  return sequenceStatusRank(incoming) >= sequenceStatusRank(existing) ? incoming : existing;
-}
-
-function sequenceStatusRank(status: SequenceStatus) {
-  return {
-    [SequenceStatus.NOT_STARTED]: 0,
-    [SequenceStatus.READY]: 1,
-    [SequenceStatus.ENROLLED]: 2,
-    [SequenceStatus.PAUSED]: 3,
-    [SequenceStatus.REPLIED]: 4,
-    [SequenceStatus.BOUNCED]: 5,
-    [SequenceStatus.FINISHED]: 6
-  }[status];
 }
 
 function mergeReplyStatus(existing: ReplyStatus, incoming: ReplyStatus) {

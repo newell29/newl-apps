@@ -179,4 +179,40 @@ describe("scheduled Apollo status sync", () => {
       expect.objectContaining({ data: expect.objectContaining({ status: JobStatus.ERROR }) })
     );
   });
+
+  it("replaces stale finished history when Apollo reports the selected Hunter cadence active", async () => {
+    prismaMock.contact.findMany.mockResolvedValue([{
+      ...existingContact(),
+      sequenceStatus: SequenceStatus.FINISHED,
+      selectedSequenceId: "hunter-sequence",
+      selectedSequenceName: "Hunter - Email Only"
+    }]);
+    const fetchContact = vi.fn().mockResolvedValue({
+      ...incomingContact(),
+      sequenceStatus: SequenceStatus.ENROLLED,
+      replyStatus: ReplyStatus.NO_REPLY,
+      sequenceId: "hunter-sequence",
+      sequenceName: "Hunter - Email Only",
+      lastReplyAt: null
+    });
+
+    await syncApolloStatusesForTenant(tenant, {
+      dependencies: {
+        fetchContact,
+        now: () => now,
+        sleep: vi.fn(),
+        recordScoreSnapshot: vi.fn().mockResolvedValue({ id: "snapshot-1" }),
+        recordOutcome: vi.fn().mockResolvedValue({ id: "outcome-1" })
+      }
+    });
+
+    expect(prismaMock.contact.updateMany).toHaveBeenCalledWith({
+      where: { id: "contact-1", tenantId: "tenant-a" },
+      data: expect.objectContaining({
+        sequenceStatus: SequenceStatus.ENROLLED,
+        selectedSequenceId: "hunter-sequence",
+        selectedSequenceName: "Hunter - Email Only"
+      })
+    });
+  });
 });

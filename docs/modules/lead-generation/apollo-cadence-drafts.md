@@ -11,6 +11,10 @@ Approving a QA-passed Outreach Plan is the sole human authorization. Newl Apps t
 - The contact remains assigned to the Newl Apps rep/Apollo owner. At enrollment, Newl Apps chooses one eligible mailbox from that owner's pool using a deterministic company-level allocation. Every contact at the same company therefore stays on the same sender.
 - The initial rollout is Alex 100, with every secondary mailbox inactive at weight 0. A later reviewed change may distribute weight across additional identities. Weight 0 excludes a mailbox without deleting its mapping.
 - Existing in-flight Apollo enrollments are never reassigned when weights change. Mailbox display names, signatures, authentication, sending limits, and warm-up remain Apollo/mail-provider responsibilities.
+- A no-reply contact is not discarded merely because Apollo has prior cadence history. Finished history may enter the
+  approved Hunter cadence directly. If the contact is still active or paused in a different cadence, the approved
+  plan authorizes Newl Apps to remove that membership and then enroll the contact in the selected Hunter cadence.
+  Replies, bounces, rejected contacts, and do-not-contact records remain blocked.
 
 ## Hunter - Email Only
 

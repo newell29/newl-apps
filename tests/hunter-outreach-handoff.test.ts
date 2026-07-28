@@ -1,4 +1,4 @@
-import { ReplyStatus, SequenceStatus } from "@prisma/client";
+import { ContactStatus, ReplyStatus, SequenceStatus } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -187,22 +187,36 @@ describe("Hunter assisted outreach handoff", () => {
     })).toBe(false);
   });
 
-  it("hard-excludes replied and previously enrolled contacts from fresh outreach", () => {
+  it("allows prior cadence history but hard-excludes replies, bounces, and do-not-contact records", () => {
     expect(isContactEligibleForFreshOutreach({
+      contactStatus: ContactStatus.REVIEWING,
       sequenceStatus: SequenceStatus.NOT_STARTED,
       replyStatus: ReplyStatus.NO_REPLY
     })).toBe(true);
     expect(isContactEligibleForFreshOutreach({
+      contactStatus: ContactStatus.REVIEWING,
       sequenceStatus: SequenceStatus.READY,
       replyStatus: ReplyStatus.NO_REPLY
     })).toBe(true);
     expect(isContactEligibleForFreshOutreach({
+      contactStatus: ContactStatus.REVIEWING,
       sequenceStatus: SequenceStatus.ENROLLED,
       replyStatus: ReplyStatus.NO_REPLY
-    })).toBe(false);
+    })).toBe(true);
     expect(isContactEligibleForFreshOutreach({
+      contactStatus: ContactStatus.REVIEWING,
+      sequenceStatus: SequenceStatus.FINISHED,
+      replyStatus: ReplyStatus.NO_REPLY
+    })).toBe(true);
+    expect(isContactEligibleForFreshOutreach({
+      contactStatus: ContactStatus.REVIEWING,
       sequenceStatus: SequenceStatus.NOT_STARTED,
       replyStatus: ReplyStatus.REPLIED
+    })).toBe(false);
+    expect(isContactEligibleForFreshOutreach({
+      contactStatus: ContactStatus.DO_NOT_CONTACT,
+      sequenceStatus: SequenceStatus.FINISHED,
+      replyStatus: ReplyStatus.NO_REPLY
     })).toBe(false);
   });
 

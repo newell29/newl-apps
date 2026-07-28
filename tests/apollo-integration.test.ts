@@ -7,7 +7,9 @@ import {
   fetchApolloOrganizationForMapping,
   fetchApolloRepDirectory,
   fetchApolloSequenceDirectory,
-  parseApolloOrganizationId
+  parseApolloOrganizationId,
+  removeApolloContactsFromSequences,
+  transitionApolloContactsToSequence
 } from "@/server/integrations/apollo";
 
 describe("fetchApolloContactById", () => {
@@ -762,6 +764,69 @@ describe("fetchApolloContactsForCompany", () => {
       )
     ).toBe(true);
     expect(peopleBodies.some((body) => body.organization_ids === undefined)).toBe(false);
+  });
+
+  it("accepts a same-domain shortened regional brand during legacy account recovery", async () => {
+    const accountId = "661ec0fb45d31b00076e3598";
+    const organizationId = "salice-global-organization";
+    vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            contacts: [{
+              id: "saved-thomas",
+              name: "Thomas Mattocks",
+              title: "Supply Chain and Logistics Manager",
+              organization: {
+                id: organizationId,
+                name: "Salice",
+                primary_domain: "salice.com"
+              }
+            }]
+          })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+        if (Array.isArray(body.organization_ids) && body.organization_ids.includes(accountId)) {
+          return emptyApolloPeopleResponse();
+        }
+        expect(body.organization_ids).toEqual([organizationId]);
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            people: [{
+              id: "person-thomas",
+              name: "Thomas Mattocks",
+              title: "Supply Chain and Logistics Manager",
+              organization: {
+                id: organizationId,
+                name: "Salice",
+                primary_domain: "salice.com"
+              }
+            }]
+          })
+        } as unknown as Response;
+      }
+
+      throw new Error(`Unexpected Apollo URL in test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "SALICE AMERICA INC",
+      domain: "salice.com",
+      apolloOrganizationId: accountId
+    });
+
+    expect(result.organizationId).toBe(organizationId);
+    expect(result.match.classification).toBe("DIRECT_COMPANY");
+    expect(result.contacts.map((contact) => contact.fullName)).toContain("Thomas Mattocks");
   });
 
   it("fails closed when account recovery resolves only to a parent or sibling Apollo organization", async () => {
@@ -1592,6 +1657,75 @@ describe("fetchApolloSequenceDirectory", () => {
         lastUsedAt: "2026-06-23T15:41:12.082+00:00"
       }
     ]);
+  });
+});
+
+describe("removeApolloContactsFromSequences", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.stubEnv("APOLLO_MASTER_API", "master-api-key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("uses Apollo's zero-credit remove endpoint before cadence re-enrollment", async () => {
+    const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: vi.fn().mockResolvedValue('{"success":true}')
+    } as unknown as Response);
+
+    await expect(removeApolloContactsFromSequences({
+      sequenceIds: ["legacy-sequence"],
+      apolloContactIds: ["apollo-contact-1"]
+    })).resolves.toMatchObject({
+      sequenceIds: ["legacy-sequence"],
+      apolloContactIds: ["apollo-contact-1"]
+    });
+
+    const requestUrl = String(fetchMock.mock.calls[0]?.[0] ?? "");
+    expect(requestUrl).toContain("/api/v1/emailer_campaigns/remove_or_stop_contact_ids?");
+    expect(requestUrl).toContain("mode=remove");
+    expect(requestUrl).toContain("emailer_campaign_ids%5B%5D=legacy-sequence");
+    expect(requestUrl).toContain("contact_ids%5B%5D=apollo-contact-1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ method: "POST", cache: "no-store" })
+    );
+  });
+
+  it("removes active prior cadence membership before adding the contact to Hunter", async () => {
+    const fetchMock = vi.spyOn(global, "fetch")
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: vi.fn().mockResolvedValue('{"success":true}')
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({ contacts: ["apollo-contact-1"] })
+      } as unknown as Response);
+
+    await transitionApolloContactsToSequence({
+      sequenceId: "hunter-sequence",
+      apolloContactIds: ["apollo-contact-1"],
+      sequenceOwnerUserId: "apollo-owner",
+      sendFromEmailAccountId: "mailbox-1",
+      initialStatus: "active",
+      previousSequenceByContactId: {
+        "apollo-contact-1": "legacy-sequence"
+      }
+    });
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      "/emailer_campaigns/remove_or_stop_contact_ids?"
+    );
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
+      "https://api.apollo.io/api/v1/emailer_campaigns/hunter-sequence/add_contact_ids"
+    );
   });
 });
 
