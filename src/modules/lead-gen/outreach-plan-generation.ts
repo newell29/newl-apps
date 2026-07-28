@@ -34,7 +34,10 @@ import {
   type OutreachStrategy
 } from "@/modules/lead-gen/outreach-plan";
 import { persistOutreachPlanWithSteps } from "@/modules/lead-gen/outreach-plan-persistence";
-import { recommendSequenceForContact } from "@/modules/lead-gen/sequence-catalog";
+import {
+  recommendSequenceForContact,
+  shouldUseHunterSequenceRecommendation
+} from "@/modules/lead-gen/sequence-catalog";
 import {
   buildApolloSequenceMappingsWithDefaults,
   parseApolloSequenceDirectory,
@@ -768,8 +771,11 @@ export async function loadOutreachPlanContactContext({
     hunterManaged: hunterEligibility.status === "ELIGIBLE"
   });
   const tierMapping = effectiveMappings.find((entry) => entry.tier === scoring.tier) ?? null;
-  const useHunterRecommendation =
-    hunterEligibility.status === "ELIGIBLE" && !contact.sequenceManuallyOverridden;
+  const useHunterRecommendation = shouldUseHunterSequenceRecommendation({
+    hunterEligible: hunterEligibility.status === "ELIGIBLE",
+    sequenceManuallyOverridden: contact.sequenceManuallyOverridden,
+    selectedSequenceName: contact.selectedSequenceName
+  });
   const senderIdentity = resolveConfiguredApolloSender({
     entries: parseApolloRepMapping(apolloCredential?.publicConfig),
     users: memberships.map((membership) => membership.user),

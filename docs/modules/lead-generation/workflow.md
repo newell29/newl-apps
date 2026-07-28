@@ -121,11 +121,15 @@ The employee-facing layout follows the lifecycle of a prospect rather than the u
 1. **Daily Opportunities** shows Hunter-researched Hot, Qualified current account, and Watchlist recommendations. Raw source candidates and blocked research remain collapsed audit material.
 2. **Outreach Queue** contains active contact discovery, drafting, approval, Apollo enrollment, and unanswered follow-up work. Terminal, unsafe, and positively engaged contacts do not clutter this queue. The default table hides secondary audit columns; employees can restore them through the Columns menu.
 3. **Sales Opportunities** begins only after genuine engagement. It includes `REPLIED`, `MEETING_BOOKED`, `QUOTED`, `WON`, and `LOST`; an Apollo positive reply or meeting-booked status is also surfaced immediately even before the stored lead stage is manually confirmed. Earlier pipeline records remain stored but are not displayed in this revenue-focused view.
-4. **Apollo Exceptions** contains ambiguous and missing company mappings plus verified Apollo companies that returned
-   zero employees. A zero-contact result creates a durable unresolved match-review record and blocks blind automatic
-   reruns. To resolve it, open the company in Apollo, select the **People** page, and paste its
+4. **Apollo Exceptions** is the active review queue for fresh Qwen/Kimi-vetted Hunter opportunities with ambiguous
+   or missing company mappings, plus verified Apollo companies that returned zero employees. Historical Lead-workflow
+   match records remain stored for audit but do not appear in this current-work queue. A zero-contact result creates
+   a durable unresolved match-review record and blocks blind automatic reruns. To resolve it, open the company in
+   Apollo, select the **People** page, and paste its
    `https://app.apollo.io/#/accounts/<organization-id>/people` URL. A successful manual mapping and employee lookup
-   clears the exception; another zero-contact result remains queued for deliberate review.
+   clears the exception; another zero-contact result remains queued for deliberate review. If a current Hunter company
+   has no legacy `Lead`, the authenticated reviewer is attached as owner only when they deliberately map, retry,
+   confirm, or reopen the exception.
 5. TradeMining searches and Found Companies live under **Data Sources**. Automation controls, scoring/outcomes, and health/logs live under **Admin & Quality**.
 
 The layout is non-destructive: it does not migrate, delete, or rewrite existing Company, Contact, Lead, Hunter, TradeMining, Apollo, scoring, or outcome data.
@@ -142,6 +146,12 @@ The layout is non-destructive: it does not migrate, delete, or rewrite existing 
    hypothesis, trigger, value proposition, objection, CTA, sender recommendation, confidence, and citations without
    reconsidering the service line. A different model-returned service line fails closed.
 6. The drafting model creates three coordinated emails on days 0, 4, and 10. A fourth, separate call task on day 7 is allowed only for a saved Hot opportunity. LinkedIn tasks are not part of the managed Apollo cadence. Every touch cites the frozen ledger.
+   Apollo contains two exact managed sequence shells, `Hunter - Email Only` and `Hunter - Executive Referral`.
+   Each shell reads `NEWL Email 1/2/3 Subject` and `NEWL Email 1/2/3 Body` contact custom fields; Newl Apps supplies
+   those values before enrollment. The executive sequence name changes routing, not the three-email timing, and any
+   Hot-opportunity call remains a separate reviewed task rather than an automatic Apollo call step. When an eligible
+   Hunter contact still carries a manually selected legacy cadence from the retired workflow, Newl Apps replaces it
+   with the role-appropriate Hunter sequence. A deliberate choice between the two Hunter sequences is preserved.
 7. Deterministic QA and a separate model critic evaluate the plan. An unavailable critic fails closed and is recorded
    as a QA error instead of silently approving the draft.
 8. Newl Apps archives the prior active version, saves the plan and all steps, and updates the legacy first-email draft
