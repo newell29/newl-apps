@@ -80,6 +80,13 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
   metadata without email addresses or phone numbers. Hunter uses it for the generic and relevant-title employee
   searches. Accessing or enriching a selected person's email or phone is a separate downstream operation that can
   consume Apollo credits; search must not be represented as contact-data enrichment.
+- Apollo account IDs and global organization IDs are different identifiers. Account search responses may contain
+  both; Hunter persists and submits the nested global organization ID to People API Search. For legacy records whose
+  saved ID returns no employees, Hunter may use zero-credit saved-contact/People Search evidence to recover exactly
+  one global organization only when its normalized organization identity matches the Newl company. A parent,
+  subsidiary, sibling, or multiple exact candidate result is routed to Apollo Match Review with no contacts selected.
+  The validated global ID is persisted by the existing direct-match transaction, so later runs stay organization
+  scoped without repeating recovery.
 - `HUNTER_CONTACT_FIT_MODEL` optionally selects the buyer-role validator and defaults to the existing
   `gpt-5.6-luna` outreach model. The model receives bounded company identity, Hunter opportunity context, contact
   role fields, and contactability booleans; it does not receive Apollo credentials, raw Apollo payloads, email
