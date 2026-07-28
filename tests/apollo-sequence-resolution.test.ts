@@ -28,6 +28,30 @@ describe("resolveLiveApolloSequence", () => {
     });
   });
 
+  it("converts the internal Hunter email-only key to the live Apollo sequence ID", () => {
+    expect(
+      resolveLiveApolloSequence({
+        requestedSequence: {
+          id: "hunter-email-only",
+          name: "Hunter - Email Only"
+        },
+        directory: [
+          sequence({
+            id: "66b1234567890abcdef12345",
+            name: "Hunter - Email Only"
+          })
+        ]
+      })
+    ).toEqual({
+      ok: true,
+      sequence: {
+        id: "66b1234567890abcdef12345",
+        name: "Hunter - Email Only"
+      },
+      resolvedBy: "NAME"
+    });
+  });
+
   it("preserves a verified live Apollo sequence ID", () => {
     expect(
       resolveLiveApolloSequence({

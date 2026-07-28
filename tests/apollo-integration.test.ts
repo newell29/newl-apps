@@ -2504,19 +2504,22 @@ describe("removeApolloContactsFromSequences", () => {
     vi.unstubAllEnvs();
   });
 
-  it("never sends an internal Newl Apps cadence key to Apollo", async () => {
+  it.each([
+    "hunter-email-only",
+    "hunter-executive-referral"
+  ])("never sends the internal Newl Apps cadence key %s to Apollo", async (sequenceId) => {
     const fetchMock = vi.spyOn(global, "fetch");
 
     await expect(
       pushApolloContactsToSequence({
-        sequenceId: "hunter-executive-referral",
+        sequenceId,
         apolloContactIds: ["apollo-contact-1"],
         sequenceOwnerUserId: "apollo-owner",
         sendFromEmailAccountId: "mailbox-1",
         initialStatus: "active"
       })
     ).rejects.toThrow(
-      "hunter-executive-referral is an internal Newl Apps cadence key, not an Apollo sequence ID."
+      `${sequenceId} is an internal Newl Apps cadence key, not an Apollo sequence ID.`
     );
 
     expect(fetchMock).not.toHaveBeenCalled();
