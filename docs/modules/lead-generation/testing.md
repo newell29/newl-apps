@@ -271,7 +271,8 @@ Regression coverage must prove:
 7. editing generated copy invalidates QA and approval;
 8. every email ends with the routed Apollo mailbox first name, including when Apollo exposes the sender label as an
    email address, while sender placeholders, generic company signatures,
-   Hunter/internal references, and evidence IDs fail deterministic QA; and
+   Hunter/internal references, and evidence IDs fail deterministic QA; the model critic receives only outbound
+   sequence fields, not internal sequence names or evidence-reference arrays; and
 9. the migration is additive and preserves every existing lead-generation record;
 10. legacy/unassessed, Watchlist, Blocked, stale, unselected, or inconsistent Hunter handoffs cannot generate or push;
 11. a Hot opportunity requires K3 confirmation while a Qualified current account may retain `NOT_SELECTED`;

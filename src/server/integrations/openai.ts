@@ -537,7 +537,7 @@ export async function generateCompleteOutreachSequence(
     schemaName: "newl_outreach_sequence",
     schema: OUTREACH_SEQUENCE_SCHEMA,
     system:
-      "You write concise, credible B2B logistics outreach for Newl Group. Return three coordinated EMAIL touches on days 0, 4, and 10. If allowCallTask is true, also return one CALL_TASK on day 7; otherwise return no call task. Never return a LinkedIn task. For the Hunter - Executive Referral cadence, write respectfully to a senior stakeholder and make it easy to refer Newl to the operating owner; do not presume the executive owns the work. For Hunter - Email Only, address the likely operational buyer directly. Each email must advance a different angle and aim for a low-friction reply. End every email body with senderFirstName on its own final line. Never use a sender placeholder, a generic company signature, the word Hunter, an evidence ID, or any internal system/research reference in the subject or body. Evidence IDs belong only in evidenceRefs. A call task must be an instruction for a person, never a claim that a call occurred. Use only the supplied evidence and strategy. Do not fabricate facts. Every step must cite at least one supplied evidence ID. Plain text only; no markdown, HTML, hype, fake familiarity, or generic AI phrasing.",
+      "You write concise, credible B2B logistics outreach for Newl Group. Return three coordinated EMAIL touches on days 0, 4, and 10. If allowCallTask is true, also return one CALL_TASK on day 7; otherwise return no call task. Never return a LinkedIn task. For the Hunter - Executive Referral cadence, write respectfully to a senior stakeholder and make it easy to refer Newl to the operating owner; do not presume the executive owns the work. For Hunter - Email Only, address the likely operational buyer directly. Each email must advance a different angle and aim for a low-friction reply. End every email body with senderFirstName on its own final line. Never use a sender placeholder, a generic company signature, the word Hunter, an evidence ID, or any internal system/research reference in the subject or body. Evidence IDs belong only in evidenceRefs. Do not use these generic phrases in outbound copy: “I hope this email finds you well,” “reaching out because,” “just wanted to,” “circle back,” “touch base,” “synergy,” or “game changer.” A call task must be an instruction for a person, never a claim that a call occurred. Use only the supplied evidence and strategy. Do not fabricate facts. Every step must cite at least one supplied evidence ID. Plain text only; no markdown, HTML, hype, fake familiarity, or generic AI phrasing.",
     user: JSON.stringify({
       companyName: context.companyName,
       contact: context.contact,
@@ -565,12 +565,33 @@ export async function reviewOutreachSequenceGrounding(
     schemaName: "newl_outreach_qa",
     schema: OUTREACH_QA_SCHEMA,
     system:
-      "You are the conservative QA gate for Newl Group outbound logistics messaging. Compare every factual claim with the saved evidence ledger. Fail unsupported events, shipment claims, quantities, geography, buyer responsibilities, incumbent-provider assumptions, Newl capabilities not listed in the strategy context, deceptive familiarity, or messages that imply a LinkedIn/call action already happened. Also fail any outbound use of the word Hunter, any internal evidence ID or research-system reference, any sender placeholder or generic Newl Group signature, any email that does not end with senderFirstName on its own final line, and any mismatch between allowCallTask and the sequence or channel strategy. Style preferences alone are warnings. Return passed=false whenever any ERROR exists.",
+      "You are the conservative QA gate for Newl Group outbound logistics messaging. Inspect only customer-visible subject/body text and the human-visible call-task instruction for prohibited outbound wording. Internal sequence names, evidenceRefs, evidence-ledger IDs, database labels, and other grounding metadata are not outbound copy and must never be reported as outbound violations. Compare every factual claim in the customer-visible copy with the saved evidence ledger. Fail unsupported events, shipment claims, quantities, geography, buyer responsibilities, incumbent-provider assumptions, Newl capabilities not listed in the strategy context, deceptive familiarity, or messages that imply a LinkedIn/call action already happened. Also fail any customer-visible use of the word Hunter, any internal evidence ID or research-system reference, any sender placeholder or generic Newl Group signature, any email that does not end with senderFirstName on its own final line, and any mismatch between allowCallTask and the outbound channel strategy. Style preferences alone are warnings. Return passed=false whenever any ERROR exists.",
     user: JSON.stringify({
       companyName: context.companyName,
       contact: context.contact,
-      strategy: context.strategy,
-      sequence: context.sequence,
+      strategyContext: {
+        serviceLine: context.strategy.serviceLine,
+        opportunityType: context.strategy.opportunityType,
+        objective: context.strategy.objective,
+        triggerSummary: context.strategy.triggerSummary,
+        buyerHypothesis: context.strategy.buyerHypothesis,
+        valueProposition: context.strategy.valueProposition,
+        likelyObjection: context.strategy.likelyObjection,
+        callToAction: context.strategy.callToAction,
+        channelStrategy: context.strategy.channelStrategy,
+        senderRecommendation: context.strategy.senderRecommendation,
+        confidence: context.strategy.confidence
+      },
+      outboundSequence: {
+        steps: context.sequence.steps.map((step) => ({
+          stepNumber: step.stepNumber,
+          channel: step.channel,
+          delayDays: step.delayDays,
+          subject: step.subject,
+          body: step.body,
+          angle: step.angle
+        }))
+      },
       senderFirstName: context.senderFirstName,
       allowCallTask: context.allowCallTask,
       evidenceLedger: context.evidence
