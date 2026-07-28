@@ -28,7 +28,7 @@ describe("Hunter company deep research", () => {
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL).toBe("qwen3.5:35b");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL).toBe("kimi-k2.6");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL).toBe("kimi-k3");
-    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v14");
+    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v15");
     expect(HUNTER_COMPANY_RESEARCH_TRANSACTION_TIMEOUT_MS).toBe(30_000);
     expect(HUNTER_COMPANY_RESEARCH_SAFETY).toEqual({
       externalWrites: false,
@@ -953,6 +953,36 @@ describe("Hunter company deep research", () => {
     }
   });
 
+  it("rejects a first-party career path that advertises only future opportunities", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'EXAMPLE COMPONENTS INC.','companyKey':'example-components-inc'}",
+      "evidence=[{'pass':'IDENTITY','sourceType':'FIRST_PARTY','firstParty':True,'title':'Example Components','excerpt':'Example Components is a U.S. manufacturer.','publishedAt':None},{'pass':'DISTRIBUTION_FOOTPRINT','sourceType':'FIRST_PARTY','firstParty':True,'title':'Example Components locations','excerpt':'Example Components operates a manufacturing and distribution site.','publishedAt':None},{'pass':'CAREERS','sourceType':'CAREERS','firstParty':True,'title':'Warehouse Manager career path | Example Components','excerpt':'Learn how Warehouse Managers grow at Example Components. Join our team and apply for future opportunities.','publishedAt':None}]",
+      "synthesis={'identityDisposition':'PASS','identityConfidence':90,'identityReason':'Verified.','confidence':82,'freshness':'CURRENT','triggerEvidenceIndices':[2],'opportunitySummary':'Example Components is hiring a Warehouse Manager.','signalType':'HIRING','missingEvidence':[],'rationale':'Current hiring.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
+      "normalized=r.normalize_synthesis_for_evidence(candidate,evidence,synthesis)",
+      "print(json.dumps({'vacancies':r.specific_logistics_management_vacancy_indices(candidate,evidence),'triggers':normalized['triggerEvidenceIndices'],'summary':normalized['opportunitySummary'],'signalType':normalized['signalType'],'missingEvidence':normalized['missingEvidence']}))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual({
+      vacancies: [],
+      triggers: [1],
+      summary:
+        "Example Components locations: Example Components operates a manufacturing and distribution site.",
+      signalType: "OTHER",
+      missingEvidence: [
+        "Hiring wording was removed because the saved evidence did not contain a current exact-company logistics-management vacancy."
+      ]
+    });
+  });
+
   it("selects duplicate vacancies deterministically and fails closed on incomplete careers rows", async () => {
     const program = [
       "import json",
@@ -1193,7 +1223,7 @@ function completion() {
       synthesis: {
         provider: "OLLAMA",
         name: "qwen3.5:35b",
-        promptVersion: "hunter-company-research-v14",
+        promptVersion: "hunter-company-research-v15",
         structuredOutput: true,
         inputTokens: 2000,
         outputTokens: 700,
@@ -1202,7 +1232,7 @@ function completion() {
       scoring: {
         provider: "KIMI",
         name: "kimi-k2.6",
-        promptVersion: "hunter-company-research-v14",
+        promptVersion: "hunter-company-research-v15",
         structuredOutput: true,
         inputTokens: 1800,
         cachedInputTokens: 200,
@@ -1213,7 +1243,7 @@ function completion() {
       validation: {
         provider: "KIMI",
         name: "kimi-k3",
-        promptVersion: "hunter-company-research-v14",
+        promptVersion: "hunter-company-research-v15",
         structuredOutput: true,
         status: "SUCCESS",
         reasoningEffort: "LOW",

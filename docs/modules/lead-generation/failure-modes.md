@@ -123,9 +123,11 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
   Hunter requires explicit current-vacancy language and exact-company evidence, rejects salary records
   and expired postings, and deterministically hands the qualifying vacancy to the saved current-account
   citation. Generic responsibilities or qualifications, role taxonomies, job-description references,
-  employee profiles, and malformed careers rows also fail closed. When no qualifying vacancy exists,
-  Hunter replaces the non-vacancy careers citation and removes unsupported hiring wording instead of
-  turning a role reference into a claimed opening.
+  employee profiles, malformed careers rows, generic “Join our team” invitations, general applications,
+  talent communities, and future-opportunity pages also fail closed. Opening or application language must
+  be tied to the specific currently available role. When no qualifying vacancy exists, Hunter replaces the
+  non-vacancy careers citation and removes unsupported hiring wording instead of turning a role reference
+  into a claimed opening.
 - A parent or affiliate expansion can otherwise win merely because it appeared earlier in the ledger,
   while wording such as “establishing a distribution center” can evade a manufacturing-focused trigger
   pattern. Hunter recognizes that facility language, orders material events by the most specific

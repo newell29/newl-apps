@@ -27,7 +27,7 @@ DEFAULT_QWEN_MODEL = "qwen3.5:35b"
 DEFAULT_KIMI_URL = "https://api.moonshot.ai/v1"
 DEFAULT_KIMI_MODEL = "kimi-k2.6"
 DEFAULT_KIMI_VALIDATOR_MODEL = "kimi-k3"
-PROMPT_VERSION = "hunter-company-research-v14"
+PROMPT_VERSION = "hunter-company-research-v15"
 ALLOWED_SERVICE_LINES = {"WAREHOUSING", "OCEAN_AIR", "TRUCKING"}
 ALLOWED_OPERATING_REGIONS = {"NORTH_AMERICA", "CHINA", "OTHER_FOREIGN", "UNKNOWN"}
 ALLOWED_SIGNAL_TYPES = {
@@ -929,10 +929,11 @@ def ollama_synthesis_request(
         "publishedAt value; a recent generic company profile cannot date an unrelated old event. CURRENT means current "
         "operating footprint or hiring evidence without a discrete trigger. STALE or NONE must not be "
         "described as a near-term trigger. Never invent a location, facility, buyer, event, or relationship. "
-        "A salary record, compensation reference, role taxonomy, employee profile, or expired posting does "
-        "not prove a current vacancy. Describe an open role only when the evidence itself uses current vacancy "
-        "language, preserve the exact role wording from that evidence, and cite that vacancy rather than a "
-        "generic footprint or directory page. "
+        "A salary record, compensation reference, role taxonomy, employee profile, expired posting, generic "
+        "join-our-team invitation, or future-opportunities page does not prove a current vacancy. Describe an "
+        "open role only when opening, hiring, or application language is tied to that specific currently "
+        "available role, preserve the exact role wording from that evidence, and cite that vacancy rather than "
+        "a generic footprint or directory page. "
         "Determine companyCountry and operatingRegion only from public identity evidence about the company "
         "or its verified parent, never from TradeMining shipment origin, foreign port, product, or routing "
         "facts. companyCountry must be the full human country name such as United States, Canada, France, "
@@ -1741,9 +1742,9 @@ def specific_logistics_management_vacancy_indices(
         re.IGNORECASE,
     )
     current_vacancy_pattern = re.compile(
-        r"\b(?:apply(?: now| today)?|current openings?|job (?:opening|posting)|"
+        r"\b(?:apply (?:now|today)|current openings?|job (?:opening|posting)|"
         r"open (?:position|role|vacanc(?:y|ies))|we(?:'re| are) hiring|"
-        r"(?:is|are) hiring|join (?:our|the) team|"
+        r"(?:is|are) hiring|accepting applications? for|"
         r"(?:seeks?|seeking|looking for)\s+(?:qualified\s+)?"
         r"(?:candidates?|applicants?|an?\s+))\b",
         re.IGNORECASE,
@@ -1757,6 +1758,10 @@ def specific_logistics_management_vacancy_indices(
         r"(?:employee|staff|team member|professional|leadership|linkedin)\s+"
         r"(?:profile|bio(?:graphy)?|directory)|(?:current|former)\s+employee|"
         r"works?\s+(?:at|for)|employment history|organizational chart|org chart|"
+        r"(?:future|upcoming)\s+(?:(?:career|job|employment)\s+)?opportunit(?:y|ies)|"
+        r"(?:future|upcoming)\s+(?:openings?|positions?|roles?|vacanc(?:y|ies))|"
+        r"(?:general|speculative)\s+applications?|talent (?:community|network|pool)|"
+        r"(?:no|without)\s+current\s+(?:openings?|positions?|vacanc(?:y|ies))|"
         r"position (?:has been filled|is no longer available)|"
         r"no longer accepting applications|expired (?:job|posting))\b",
         re.IGNORECASE,
@@ -1779,7 +1784,17 @@ def specific_logistics_management_vacancy_indices(
         text = f"{title}\n{excerpt}"
         if not any(pattern.search(text) for pattern in management_role_patterns):
             continue
-        if not current_vacancy_pattern.search(text) or non_vacancy_pattern.search(text):
+        vacancy_segments = [
+            segment.strip()
+            for segment in re.split(r"(?:[\r\n]+|(?<=[.!?;])\s+)", text)
+            if segment.strip()
+        ]
+        has_role_specific_vacancy = any(
+            current_vacancy_pattern.search(segment)
+            and any(pattern.search(segment) for pattern in management_role_patterns)
+            for segment in vacancy_segments
+        )
+        if not has_role_specific_vacancy or non_vacancy_pattern.search(text):
             continue
         normalized_text = re.sub(r"[^a-z0-9]+", "", text.lower())
         if row.get("firstParty") is not True and not any(
