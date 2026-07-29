@@ -315,11 +315,13 @@ export async function enqueueHunterOutreachHandoff({
 export async function enqueueHunterCompanyOutreachHandoff({
   tenantId,
   companyId,
-  forceContactReview = true
+  forceContactReview = true,
+  authorizePaidEmailEnrichment = false
 }: {
   tenantId: string;
   companyId: string;
   forceContactReview?: boolean;
+  authorizePaidEmailEnrichment?: boolean;
 }) {
   const policy = await prisma.hunterAutomationPolicy.findUnique({
     where: { tenantId },
@@ -461,6 +463,7 @@ export async function enqueueHunterCompanyOutreachHandoff({
         prospectingPlanRunId: decision.jobRunId,
         maxContactsPerCompany,
         forceContactReview,
+        authorizePaidEmailEnrichment,
         items: [item]
       },
       output: emptyOutput()
@@ -478,6 +481,7 @@ export async function enqueueHunterCompanyOutreachHandoff({
         companyCount: 1,
         maxContactsPerCompany,
         forceContactReview,
+        authorizePaidEmailEnrichment,
         source: "MANUAL_APOLLO_MAPPING_OR_RECHECK"
       }
     }
@@ -582,7 +586,8 @@ export async function processNextHunterOutreachHandoff({
       jobId: job.id,
       item,
       maxContactsPerCompany: input.maxContactsPerCompany,
-      forceContactReview: input.forceContactReview
+      forceContactReview: input.forceContactReview,
+      authorizePaidEmailEnrichment: input.authorizePaidEmailEnrichment
     });
     const nextOutput: HandoffOutput = {
       ...output,
@@ -688,13 +693,15 @@ async function processCompany({
   jobId,
   item,
   maxContactsPerCompany,
-  forceContactReview
+  forceContactReview,
+  authorizePaidEmailEnrichment
 }: {
   tenantId: string;
   jobId: string;
   item: HandoffItem;
   maxContactsPerCompany: number;
   forceContactReview: boolean;
+  authorizePaidEmailEnrichment: boolean;
 }): Promise<HandoffResult> {
   const company = await prisma.company.findFirst({
     where: {
@@ -789,11 +796,16 @@ async function processCompany({
     );
   }
 
-  const lookup = await fetchApolloContactsForCompany({
-    companyName: company.name,
-    domain: company.domain,
-    apolloOrganizationId: company.apolloOrganizationId
-  });
+  const lookup = await fetchApolloContactsForCompany(
+    {
+      companyName: company.name,
+      domain: company.domain,
+      apolloOrganizationId: company.apolloOrganizationId
+    },
+    {
+      authorizePaidEmailEnrichment
+    }
+  );
   const recordedMatch = await recordCompanyMatch(tenantId, company.id, lookup, {
     domain: company.domain,
     linkedinUrl: company.linkedinUrl
@@ -803,6 +815,11 @@ async function processCompany({
     lookup.match.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY &&
     lookup.contacts.length === 0
   ) {
+    await archiveHunterPlansWithoutConcreteEmail({
+      tenantId,
+      companyId: company.id,
+      jobId
+    });
     return terminal(
       item,
       "NO_CONTACTS",
@@ -832,6 +849,11 @@ async function processCompany({
     eligibility.directive.rationale
   ).slice(0, HUNTER_CONTACT_REVIEW_POOL_MAX);
   if (ranked.length === 0) {
+    await archiveHunterPlansWithoutConcreteEmail({
+      tenantId,
+      companyId: company.id,
+      jobId
+    });
     return terminal(
       item,
       "NO_QUALIFYING_CONTACTS",
@@ -853,6 +875,11 @@ async function processCompany({
     contacts: ranked
   });
   contactsImported = contactIds.length;
+  await archiveHunterPlansWithoutConcreteEmail({
+    tenantId,
+    companyId: company.id,
+    jobId
+  });
 
   let plansCreated = 0;
   let existingPlansFound = 0;
@@ -1042,6 +1069,86 @@ async function archiveUnselectedHunterPlans({
             contactId: plan.contactId,
             version: plan.version,
             promptVersion: plan.promptVersion
+          })),
+          archivedAt: archivedAt.toISOString()
+        }
+      }
+    })
+  ]);
+}
+
+async function archiveHunterPlansWithoutConcreteEmail({
+  tenantId,
+  companyId,
+  jobId
+}: {
+  tenantId: string;
+  companyId: string;
+  jobId: string;
+}) {
+  const plans = await prisma.outreachPlan.findMany({
+    where: {
+      tenantId,
+      companyId,
+      status: {
+        in: [
+          OutreachPlanStatus.DRAFT,
+          OutreachPlanStatus.QA_FAILED,
+          OutreachPlanStatus.QA_PASSED
+        ]
+      }
+    },
+    select: {
+      id: true,
+      contactId: true,
+      version: true,
+      contact: {
+        select: {
+          email: true
+        }
+      }
+    }
+  });
+  const stalePlans = plans.filter(
+    (plan) => !hasUsableHunterEmail({ email: plan.contact.email })
+  );
+  if (stalePlans.length === 0) {
+    return;
+  }
+
+  const archivedAt = new Date();
+  await prisma.$transaction([
+    prisma.outreachPlan.updateMany({
+      where: {
+        tenantId,
+        companyId,
+        id: { in: stalePlans.map((plan) => plan.id) },
+        status: {
+          in: [
+            OutreachPlanStatus.DRAFT,
+            OutreachPlanStatus.QA_FAILED,
+            OutreachPlanStatus.QA_PASSED
+          ]
+        }
+      },
+      data: {
+        status: OutreachPlanStatus.ARCHIVED,
+        archivedAt
+      }
+    }),
+    prisma.auditLog.create({
+      data: {
+        tenantId,
+        action: "lead-gen.hunter-outreach-plan.archived-missing-email",
+        entityType: "Company",
+        entityId: companyId,
+        after: {
+          handoffJobId: jobId,
+          reason: "MISSING_CONCRETE_EMAIL",
+          plans: stalePlans.map((plan) => ({
+            id: plan.id,
+            contactId: plan.contactId,
+            version: plan.version
           })),
           archivedAt: archivedAt.toISOString()
         }
@@ -1333,6 +1440,13 @@ export function isClearlyIndividualContributor(contact: {
 }) {
   if (isStrongHunterBuyerRole(contact)) return false;
   const role = `${contact.title ?? ""} ${contact.department ?? ""} ${contact.seniority ?? ""}`;
+  if (
+    /\b(?:import(?:\s*\/\s*|\s+and\s+|\s+)export|customs|trade compliance)\s+specialist\b/i.test(
+      role
+    )
+  ) {
+    return false;
+  }
   return /\b(coordinator|specialist|analyst|associate|assistant|administrator|clerk|representative|agent|technician)\b/i.test(
     role
   );
@@ -1434,9 +1548,18 @@ async function recordCompanyMatch(
   lookup: ApolloContactLookupResult,
   current: { domain: string | null; linkedinUrl: string | null }
 ) {
+  const recoverySummary =
+    `Apollo employee retrieval completed: ${lookup.contactRecovery.savedContactPagesRead} ` +
+    `saved-contact page${lookup.contactRecovery.savedContactPagesRead === 1 ? "" : "s"} read, ` +
+    `${lookup.contactRecovery.maskedPeopleChecked} masked candidate${lookup.contactRecovery.maskedPeopleChecked === 1 ? "" : "s"} checked, ` +
+    `${lookup.contactRecovery.savedContactsRecovered} saved contact${lookup.contactRecovery.savedContactsRecovered === 1 ? "" : "s"} recovered, ` +
+    `${lookup.contactRecovery.paidEmailsRecovered}/${lookup.contactRecovery.paidEmailEnrichmentsAttempted} ` +
+    `authorized paid email enrichment${lookup.contactRecovery.paidEmailEnrichmentsAttempted === 1 ? "" : "s"} recovered`;
   const resolvedMatch = resolveApolloContactDiscoveryMatch({
     classification: lookup.match.classification,
-    matchReason: lookup.match.matchReason,
+    matchReason: [lookup.match.matchReason, recoverySummary]
+      .filter(Boolean)
+      .join("; "),
     contactsFound: lookup.contacts.length
   });
   await prisma.$transaction(async (tx) => {
@@ -1712,16 +1835,48 @@ function findExistingContact(
 ) {
   const email = incoming.email?.trim().toLowerCase();
   const linkedin = incoming.linkedinUrl?.trim().toLowerCase();
-  return existing.find((contact) =>
-    (incoming.apolloContactId && contact.apolloContactId === incoming.apolloContactId) ||
-    (incoming.apolloPersonId && contact.apolloPersonId === incoming.apolloPersonId) ||
-    (email && contact.email?.trim().toLowerCase() === email) ||
-    (linkedin && contact.linkedinUrl?.trim().toLowerCase() === linkedin) ||
-    (
-      contact.fullName.trim().toLowerCase() === incoming.fullName.trim().toLowerCase() &&
-      (contact.title ?? "").trim().toLowerCase() === (incoming.title ?? "").trim().toLowerCase()
-    )
-  ) ?? null;
+  const incomingFirstName = normalizeContactIdentity(
+    incoming.firstName ?? incoming.fullName.split(/\s+/u)[0] ?? null
+  );
+  const incomingTitle = normalizeContactIdentity(incoming.title);
+  return (
+    existing.find(
+      (contact) =>
+        incoming.apolloPersonId &&
+        contact.apolloPersonId === incoming.apolloPersonId
+    ) ??
+    existing.find(
+      (contact) =>
+        incoming.apolloContactId &&
+        contact.apolloContactId === incoming.apolloContactId
+    ) ??
+    existing.find(
+      (contact) =>
+        linkedin &&
+        contact.linkedinUrl?.trim().toLowerCase() === linkedin
+    ) ??
+    existing.find(
+      (contact) =>
+        email &&
+        contact.email?.trim().toLowerCase() === email
+    ) ??
+    existing.find((contact) => {
+      const existingFirstName = normalizeContactIdentity(
+        contact.firstName ?? contact.fullName.split(/\s+/u)[0] ?? null
+      );
+      return Boolean(
+        incomingFirstName &&
+        existingFirstName === incomingFirstName &&
+        incomingTitle &&
+        normalizeContactIdentity(contact.title) === incomingTitle
+      );
+    }) ??
+    null
+  );
+}
+
+function normalizeContactIdentity(value: string | null | undefined) {
+  return value?.trim().toLowerCase() || null;
 }
 
 async function finishJob(
@@ -1827,6 +1982,8 @@ function parseInput(value: Prisma.JsonValue | null) {
         ? Math.min(3, Math.max(1, Math.round(root.maxContactsPerCompany)))
         : 2,
     forceContactReview: root.forceContactReview === true,
+    authorizePaidEmailEnrichment:
+      root.authorizePaidEmailEnrichment === true,
     items
   };
 }

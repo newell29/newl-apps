@@ -46,16 +46,19 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - A manually supplied Apollo Overview or People URL may contain either an Apollo account ID or global organization
   ID. Newl Apps must resolve an account ID to its nested global organization ID before employee search, require a
   strong company-name match, prevent duplicate organization mapping inside the tenant, and require explicit
-  acknowledgement of the one-credit organization validation.
+  acknowledgement of the one-credit organization validation. A facility/legal account may map to the canonical
+  operating parent only when Account View proves the exact relationship and both names share a distinctive brand.
 - Confirming no Apollo match keeps the latest attempt and reviewer metadata. Automatic and bulk retry remain blocked until a rep explicitly reopens the review.
 - Resolving a company mapping queues the same one-company Hunter buyer-role review used by the automated handoff. It
   never drafts from the unfiltered Apollo employee result, selects more than the saved 1-3-contact limit, or authorizes
   cadence enrollment; the existing grounded QA, human approval, and push controls still apply.
 - The Contacts directory includes both assigned and unassigned contacts attached to pipeline accounts. Unassigned contacts remain filterable and reviewable, but Apollo queueing is blocked until a sales rep is assigned.
-- Contact title and department matching uses normalized phrase boundaries. Sales, business-development, and customer-service roles are deprioritized by default, while a preferred logistics/operations match takes precedence for mixed-function titles. Clearly individual-contributor titles such as coordinator, specialist, analyst, associate, assistant, administrator, clerk, representative, agent, or technician cannot be auto-selected merely because the contact-fit model rates them highly; a manager-or-higher buyer role or a non-junior model-qualified stakeholder is required.
+- Contact title and department matching uses normalized phrase boundaries. Sales, business-development, and customer-service roles are deprioritized by default, while a preferred logistics/operations match takes precedence for mixed-function titles. Clearly individual-contributor titles such as coordinator, specialist, analyst, associate, assistant, administrator, clerk, representative, agent, or technician cannot be auto-selected merely because the contact-fit model rates them highly; a manager-or-higher buyer role or a non-junior model-qualified stakeholder is required. The narrow exception is an explicit import/export, customs, or trade-compliance specialist: that person may advance only when the buyer-role model independently returns a qualifying Primary/Secondary disposition and every contact-safety gate passes.
 - Hunter email outreach requires a concrete syntactically usable email address before contact persistence, buyer-role
   review, or plan generation. Apollo's `has_email` availability flag is not enough because it does not provide a
-  deliverable address.
+  deliverable address. Saved-contact lookup is zero-credit and must be exhausted before enrichment. Paid email-only
+  enrichment is disabled for automatic runs and requires a separate explicit manual authorization capped at three
+  people; phone, personal-email, and waterfall enrichment remain disabled.
 - Bulk outreach approval accepts selected contacts rather than plan IDs, resolves each contact's latest non-archived
   plan inside the authenticated tenant, and approves only current `QA_PASSED` plans for safe Qwen/Kimi-vetted Hunter
   opportunities with a usable email. Eligible contacts are approved atomically and placed into one Apollo enrollment

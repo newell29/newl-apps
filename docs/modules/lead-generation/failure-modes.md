@@ -391,6 +391,24 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   domain, an exact Dansons account omitted by name search but recovered by Account View, and an unrelated Hyosung parent-company result
   failing closed.
 
+### A mapped company stays in Apollo Exceptions or a visible employee is missed
+
+- Symptom: the company URL maps successfully, but the row remains under **Needs review**, reports zero employees, or
+  misses a role that is visible on a later Apollo page.
+- Cause: the older path read only the first 25 saved contacts and did not reconcile a masked People Search identity
+  back to the saved contact's concrete email. A successful mapping could therefore be followed by a genuine zero-row
+  contact result, which correctly created another review attempt but did not explain which recovery work ran.
+- Safe recovery: map/recheck again after this release. Hunter reads up to 20 relevant saved-contact pages of 100,
+  targets each shortlisted masked person by name/title/confirmed company, backfills saved identity, and reports the
+  recovery counts in the immutable match reason. An import/export specialist is evaluated as a relevant employee,
+  but an individual-contributor title is still not automatically selected unless the buyer-role gate clears it.
+- Credit boundary: saved-contact and People Search recovery is zero-credit. Paid email-only enrichment remains off
+  unless the operator explicitly checks the separate authorization, is limited to three people, and disables phone
+  and waterfall requests.
+- Queue behavior: a direct company with at least one recovered employee leaves Apollo Exceptions. A direct company
+  with no employees remains visible with the completed-search reason so it cannot spin silently. Unapproved plans
+  attached to contacts that still have no concrete email are archived.
+
 ### Apollo People Search returns employees but Hunter still keeps the same saved contacts
 
 - Symptom: an organization-scoped Apollo employee search visibly returns relevant operations or logistics people,

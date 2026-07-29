@@ -1827,6 +1827,340 @@ describe("fetchApolloContactsForCompany", () => {
     );
   });
 
+  it("accepts a manually confirmed facility account that resolves to its canonical parent brand", async () => {
+    const accountId = "661ec104e14548000791da79";
+    const organizationId = "5e66b6381e05b4008c8331b9";
+    vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith(`/api/v1/accounts/${accountId}`)) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            account: {
+              id: accountId,
+              name: "Pratt Industries",
+              organization_id: organizationId,
+              organization: {
+                id: organizationId,
+                name: "Pratt Industries",
+                primary_domain: "prattindustries.com"
+              }
+            }
+          })
+        } as unknown as Response;
+      }
+      if (url.endsWith(`/api/v1/organizations/${organizationId}`)) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            organization: {
+              id: organizationId,
+              name: "Pratt Industries",
+              primary_domain: "prattindustries.com"
+            }
+          })
+        } as unknown as Response;
+      }
+      throw new Error(`Unexpected Apollo URL in test: ${url}`);
+    });
+
+    await expect(fetchApolloOrganizationForMapping({
+      companyName: "PRATT (ROCK HILL CORRUGATING) LLC",
+      apolloOrganizationId: accountId,
+      resourceType: "ACCOUNT"
+    })).resolves.toMatchObject({
+      organizationId,
+      companyName: "Pratt Industries",
+      match: {
+        classification: "DIRECT_COMPANY",
+        matchReason: expect.stringContaining("operating parent/brand")
+      }
+    });
+  });
+
+  it("reads later saved-contact pages so a relevant YAT employee is not hidden behind the first 100", async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      id: `apollo-contact-yat-${index}`,
+      person_id: `apollo-person-yat-${index}`,
+      first_name: `Marketing${index}`,
+      last_name: "Contact",
+      title: "Marketing Specialist",
+      email: `marketing${index}@yat.com`,
+      organization: {
+        id: "apollo-org-yat",
+        name: "YAT USA, INC.",
+        primary_domain: "yat.com"
+      }
+    }));
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : {};
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            organizations: [{
+              id: "apollo-org-yat",
+              name: "YAT USA, INC.",
+              primary_domain: "yat.com"
+            }]
+          })
+        } as unknown as Response;
+      }
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            contacts: body.page === 1
+              ? firstPage
+              : [{
+                  id: "apollo-contact-yat-import",
+                  person_id: "apollo-person-yat-import",
+                  first_name: "Avery",
+                  last_name: "Imports",
+                  title: "Import Export Specialist",
+                  email: "avery.imports@yat.com",
+                  organization: {
+                    id: "apollo-org-yat",
+                    name: "YAT USA, INC.",
+                    primary_domain: "yat.com"
+                  }
+                }]
+          })
+        } as unknown as Response;
+      }
+      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+        return emptyApolloPeopleResponse();
+      }
+      throw new Error(`Unexpected Apollo URL in test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "YAT USA, INC.",
+      domain: "yat.com"
+    });
+
+    expect(result.contacts).toEqual([
+      expect.objectContaining({
+        apolloContactId: "apollo-contact-yat-import",
+        fullName: "Avery Imports",
+        email: "avery.imports@yat.com"
+      })
+    ]);
+    expect(result.contactRecovery.savedContactPagesRead).toBe(2);
+    expect(fetchMock.mock.calls.some(([, init]) => {
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : {};
+      return body.page === 2 && body.per_page === 100;
+    })).toBe(true);
+  });
+
+  it("recovers a masked shortlisted person from saved contacts before considering paid enrichment", async () => {
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : {};
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            organizations: [{
+              id: "apollo-org-vs",
+              name: "VS AMERICA, INC.",
+              primary_domain: "vsamerica.com"
+            }]
+          })
+        } as unknown as Response;
+      }
+      if (url.endsWith("/api/v1/contacts/search")) {
+        const targeted = String(body.q_keywords ?? "").includes("Isaac");
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            contacts: targeted
+              ? [{
+                  id: "apollo-contact-isaac",
+                  first_name: "Isaac",
+                  last_name: "Watkins",
+                  title: "Assistant Warehouse Manager",
+                  email: "i.watkins@vsamerica.com",
+                  organization: {
+                    id: "apollo-org-vs",
+                    name: "VS AMERICA, INC.",
+                    primary_domain: "vsamerica.com"
+                  }
+                }]
+              : []
+          })
+        } as unknown as Response;
+      }
+      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            people: [{
+              person_id: "apollo-person-isaac",
+              first_name: "Isaac",
+              last_name_obfuscated: "Wa***s",
+              title: "Assistant Warehouse Manager",
+              has_email: true,
+              organization: {
+                id: "apollo-org-vs",
+                name: "VS AMERICA, INC.",
+                primary_domain: "vsamerica.com"
+              }
+            }]
+          })
+        } as unknown as Response;
+      }
+      if (url.includes("/api/v1/people/match")) {
+        throw new Error("Paid enrichment must not run when a saved contact was recovered.");
+      }
+      throw new Error(`Unexpected Apollo URL in test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany(
+      {
+        companyName: "VS AMERICA, INC.",
+        domain: "vsamerica.com"
+      },
+      {
+        authorizePaidEmailEnrichment: true
+      }
+    );
+
+    expect(result.contacts).toEqual([
+      expect.objectContaining({
+        apolloContactId: "apollo-contact-isaac",
+        apolloPersonId: "apollo-person-isaac",
+        fullName: "Isaac Watkins",
+        email: "i.watkins@vsamerica.com"
+      })
+    ]);
+    expect(result.contactRecovery).toMatchObject({
+      maskedPeopleChecked: 1,
+      savedContactsRecovered: 1,
+      paidEmailEnrichmentsAttempted: 0,
+      paidEmailsRecovered: 0
+    });
+    expect(fetchMock.mock.calls.some(([input]) =>
+      String(input).includes("/api/v1/people/match")
+    )).toBe(false);
+  });
+
+  it("uses an email-only paid enrichment only after explicit authorization and a saved-contact miss", async () => {
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            organizations: [{
+              id: "apollo-org-paid",
+              name: "Paid Recovery Importer",
+              primary_domain: "paid-recovery.test"
+            }]
+          })
+        } as unknown as Response;
+      }
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ contacts: [] })
+        } as unknown as Response;
+      }
+      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            people: [{
+              person_id: "apollo-person-paid",
+              first_name: "Pat",
+              last_name_obfuscated: "Bu***r",
+              title: "Director of Import Operations",
+              has_email: true,
+              organization: {
+                id: "apollo-org-paid",
+                name: "Paid Recovery Importer",
+                primary_domain: "paid-recovery.test"
+              }
+            }]
+          })
+        } as unknown as Response;
+      }
+      if (url.includes("/api/v1/people/match?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            person: {
+              id: "apollo-person-paid",
+              first_name: "Pat",
+              last_name: "Buyer",
+              title: "Director of Import Operations",
+              email: "pat@paid-recovery.test",
+              organization: {
+                id: "apollo-org-paid",
+                name: "Paid Recovery Importer",
+                primary_domain: "paid-recovery.test"
+              }
+            }
+          })
+        } as unknown as Response;
+      }
+      throw new Error(`Unexpected Apollo URL in test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany(
+      {
+        companyName: "Paid Recovery Importer",
+        domain: "paid-recovery.test"
+      },
+      {
+        authorizePaidEmailEnrichment: true
+      }
+    );
+
+    expect(result.contacts).toEqual([
+      expect.objectContaining({
+        apolloPersonId: "apollo-person-paid",
+        fullName: "Pat Buyer",
+        email: "pat@paid-recovery.test"
+      })
+    ]);
+    expect(result.contactRecovery).toMatchObject({
+      maskedPeopleChecked: 1,
+      savedContactsRecovered: 0,
+      paidEmailEnrichmentsAttempted: 1,
+      paidEmailsRecovered: 1
+    });
+    const enrichmentUrl = new URL(
+      String(
+        fetchMock.mock.calls.find(([input]) =>
+          String(input).includes("/api/v1/people/match?")
+        )?.[0]
+      )
+    );
+    expect(enrichmentUrl.searchParams.get("id")).toBe("apollo-person-paid");
+    expect(enrichmentUrl.searchParams.get("reveal_phone_number")).toBe("false");
+    expect(enrichmentUrl.searchParams.get("run_waterfall_email")).toBe("false");
+    expect(enrichmentUrl.searchParams.get("run_waterfall_phone")).toBe("false");
+  });
+
   it("uses targeted role queries when the organization has people but not direct contact records", async () => {
     const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);

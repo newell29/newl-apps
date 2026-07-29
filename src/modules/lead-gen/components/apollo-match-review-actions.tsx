@@ -95,6 +95,18 @@ export function ApolloMatchReviewActions({
           />
           <span>I confirm this is the Apollo company for {companyName} and authorize the 1-credit validation.</span>
         </label>
+        <label className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs leading-5 text-mutedForeground">
+          <input
+            type="checkbox"
+            name="authorizePaidEmailEnrichment"
+            value="yes"
+            className="mt-1"
+          />
+          <span>
+            Optional: if no saved Apollo contact has a usable email, authorize up to 3 email-only person
+            enrichments (maximum 1 credit each; no phone or waterfall lookup).
+          </span>
+        </label>
         <button
           disabled={mapPending}
           className="rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"

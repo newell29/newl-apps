@@ -257,7 +257,7 @@ Regression coverage must prove:
 3. machine routes ignore caller-supplied tenant identifiers and use ingestion authentication;
 4. each request processes at most one company and persisted leases, results, attempts, and retry dates survive worker restart;
 5. an unresolved latest Apollo company match blocks repeat discovery and remains review-required;
-6. saved contacts, a 100-result organization-scoped employee search, and an always-run multi-title search are merged and deduplicated before ranking; Apollo account IDs are resolved to the nested global organization ID before employee search (with saved-contact recovery as a fallback), an exact saved account omitted by name search is recovered through zero-credit Account View, an exact saved account with no nested organization ID retries by its trusted account domain, and an unresolved partial result may use the one unique domain carried by an exact-identity saved contact; one partial account result cannot be treated as complete, acronym-expanded operating names are accepted only inside the confirmed ID/domain scope, and sibling/parent organizations remain excluded;
+6. saved contacts are read in 100-record pages through a 20-page safety cap, then combined with a 100-result organization-scoped employee search and an always-run multi-title search before ranking; each masked shortlisted person is searched again in the saved directory by name/title/confirmed company, and records merge by person/contact ID, LinkedIn/email, then strict company + first name + title while preserving the revealed saved identity; Apollo account IDs are resolved to the nested global organization ID before employee search (with saved-contact recovery as a fallback), an exact saved account omitted by name search is recovered through zero-credit Account View, an exact saved account with no nested organization ID retries by its trusted account domain, and an unresolved partial result may use the one unique domain carried by an exact-identity saved contact; one partial account result cannot be treated as complete, acronym-expanded operating names are accepted only inside the confirmed ID/domain scope, and sibling/parent organizations remain excluded unless a manually pasted account proves the exact account-to-parent relationship and distinctive shared brand;
 7. deterministic ranking excludes seller-side and unidentifiable contacts, gives the buyer-role model the best 10 candidates, and caps final selection at `maxContactsPerCompany`;
 8. buyer-role review uses strict structured output and returns the exact requested contact IDs; model-qualified contacts rank first, while an explicit manager-or-higher physical logistics or facility-operations buyer remains eligible for an unapproved human-review plan; digital/franchise/general back-office operations and explicit geography mismatches do not receive that fallback;
 9. the manual current-opportunity handoff requires completed company research, creates a deterministic plan scoped
@@ -284,6 +284,13 @@ Regression coverage must prove:
     plans and a terminal no-qualifying-contact result.
 20. a forced contact recheck archives unapproved plans for contacts that no longer pass buyer-role review, and the
     active queue hides AI drafts linked to superseded prompt versions while preserving manual drafts and approved plans.
+21. manual mapping/recheck is credit-free unless the operator checks the separate paid-email authorization; the
+    authorized job attempts no more than three `/people/match` requests, disables phone/personal/waterfall fields, and
+    never calls paid enrichment when a concrete saved contact was recovered.
+22. an existing masked local contact such as Isaac is backfilled with the saved Apollo name, email, and contact ID;
+    unapproved plans for contacts that still lack a concrete email are archived and cannot remain in Outreach Queue.
+23. a later saved-contact page can surface a role such as YAT's import/export specialist, and a manually confirmed
+    Pratt Rock Hill Apollo account may resolve to Pratt Industries only through its explicit account relationship.
 
 ## Outreach Plans and grounded sequence generation
 
