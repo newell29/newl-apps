@@ -610,6 +610,7 @@ model Tenant {
   teamshipUpdateJobs                      TeamshipUpdateJob[]
   teamshipUpdateOrders                    TeamshipUpdateOrder[]
   teamshipBrowserReadJobs                 TeamshipBrowserReadJob[]
+  teamshipPrintBatches                    TeamshipPrintBatch[]
   teamshipPrintJobs                       TeamshipPrintJob[]
   openClawUnresolvedTurns                 OpenClawUnresolvedTurn[]
   garlandProductDimensionObservations     GarlandProductDimensionObservation[]
@@ -674,6 +675,8 @@ model User {
   teamshipReviewRuns                 TeamshipReviewRun[]
   teamshipUpdateJobsCreated          TeamshipUpdateJob[]                 @relation("TeamshipUpdateJobCreatedBy")
   teamshipUpdateJobsApproved         TeamshipUpdateJob[]                 @relation("TeamshipUpdateJobApprovedBy")
+  teamshipPrintBatchesRequested      TeamshipPrintBatch[]                @relation("TeamshipPrintBatchRequestedBy")
+  teamshipPrintBatchesApproved       TeamshipPrintBatch[]                @relation("TeamshipPrintBatchApprovedBy")
   teamshipPrintJobsRequested         TeamshipPrintJob[]                  @relation("TeamshipPrintJobRequestedBy")
   teamshipPrintJobsApproved          TeamshipPrintJob[]                  @relation("TeamshipPrintJobApprovedBy")
 
@@ -1182,9 +1185,10 @@ model TeamshipReviewRun {
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
-  tenant    Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  createdBy User?                 @relation(fields: [createdByUserId], references: [id], onDelete: NoAction)
-  orders    TeamshipReviewOrder[]
+  tenant       Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy    User?                 @relation(fields: [createdByUserId], references: [id], onDelete: NoAction)
+  orders       TeamshipReviewOrder[]
+  printBatches TeamshipPrintBatch[]
 
   @@index([tenantId, workflowKey, shipmentDate])
   @@index([tenantId, createdAt])
@@ -1522,17 +1526,53 @@ model TeamshipPrintJob {
   result              Json?
   errorCode           String?
   errorMessage        String?
+  batchId             String?
+  batchPosition       Int?
+  reviewOrderId       String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  tenant      Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  requestedBy User   @relation("TeamshipPrintJobRequestedBy", fields: [requestedByUserId], references: [id], onDelete: NoAction)
-  approvedBy  User?  @relation("TeamshipPrintJobApprovedBy", fields: [approvedByUserId], references: [id], onDelete: NoAction)
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  requestedBy User                @relation("TeamshipPrintJobRequestedBy", fields: [requestedByUserId], references: [id], onDelete: NoAction)
+  approvedBy  User?               @relation("TeamshipPrintJobApprovedBy", fields: [approvedByUserId], references: [id], onDelete: NoAction)
+  batch       TeamshipPrintBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, idempotencyKey])
   @@unique([tenantId, activeOrderKey])
   @@index([tenantId, status, createdAt])
   @@index([tenantId, shippingOrderNumber, createdAt])
+  @@index([tenantId, requestedByUserId, createdAt])
+  @@index([tenantId, batchId, batchPosition])
+  @@index([expiresAt])
+}
+
+model TeamshipPrintBatch {
+  id                String    @id @default(cuid())
+  tenantId          String
+  reviewRunId       String?
+  status            String    @default("PLANNING")
+  summary           Json
+  idempotencyKey    String
+  requestedByUserId String
+  approvedByUserId  String?
+  approvedAt        DateTime?
+  expiresAt         DateTime
+  completedAt       DateTime?
+  failedAt          DateTime?
+  errorCode         String?
+  errorMessage      String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  reviewRun   TeamshipReviewRun? @relation(fields: [reviewRunId], references: [id], onDelete: SetNull)
+  requestedBy User               @relation("TeamshipPrintBatchRequestedBy", fields: [requestedByUserId], references: [id], onDelete: NoAction)
+  approvedBy  User?              @relation("TeamshipPrintBatchApprovedBy", fields: [approvedByUserId], references: [id], onDelete: NoAction)
+  jobs        TeamshipPrintJob[]
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, reviewRunId, createdAt])
   @@index([tenantId, requestedByUserId, createdAt])
   @@index([expiresAt])
 }

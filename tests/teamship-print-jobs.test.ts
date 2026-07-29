@@ -7,18 +7,23 @@ const teamshipPrintJob = vi.hoisted(() => ({
   create: vi.fn(),
   update: vi.fn(),
   updateMany: vi.fn(),
-  findUniqueOrThrow: vi.fn()
+  findUniqueOrThrow: vi.fn(),
+  findMany: vi.fn()
 }));
 const auditLog = vi.hoisted(() => ({ create: vi.fn() }));
 const tenant = vi.hoisted(() => ({ findUnique: vi.fn() }));
+const teamshipPrintBatch = vi.hoisted(() => ({ updateMany: vi.fn(), findFirst: vi.fn(), update: vi.fn() }));
+const teamshipReviewOrder = vi.hoisted(() => ({ updateMany: vi.fn() }));
 const resolveCredentials = vi.hoisted(() => vi.fn());
 
 vi.mock("@/server/db", () => ({
   prisma: {
     teamshipPrintJob,
+    teamshipPrintBatch,
+    teamshipReviewOrder,
     auditLog,
     tenant,
-    $transaction: (callback: (tx: unknown) => unknown) => callback({ teamshipPrintJob, auditLog })
+    $transaction: (callback: (tx: unknown) => unknown) => callback({ teamshipPrintJob, teamshipPrintBatch, teamshipReviewOrder, auditLog })
   }
 }));
 vi.mock("@/server/auth/authorization", () => ({
@@ -32,7 +37,9 @@ vi.mock("@/server/integrations/teamship-settings", () => ({
 import {
   approveTeamshipPrintPlan,
   calculateTeamshipPalletCount,
+  completeTeamshipPrintJob,
   createTeamshipPrintPlan,
+  failTeamshipPrintJob,
   getTeamshipPrinterPlan
 } from "@/modules/teamship/print-jobs";
 
@@ -50,6 +57,7 @@ describe("Teamship print jobs", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     teamshipPrintJob.findUnique.mockResolvedValue(null);
+    teamshipPrintJob.findMany.mockResolvedValue([]);
     auditLog.create.mockResolvedValue({ id: "audit-1" });
   });
 
@@ -179,6 +187,90 @@ describe("Teamship print jobs", () => {
     await expect(approveTeamshipPrintPlan(context, "cmprintjob12345", true)).rejects.toMatchObject({ status: 403 });
     await expect(approveTeamshipPrintPlan(context, "cmprintjob12345", false)).rejects.toThrow(/explicit/i);
     expect(teamshipPrintJob.update).not.toHaveBeenCalled();
+  });
+
+  it("promotes only the next batch order after the current order completes", async () => {
+    tenant.findUnique.mockResolvedValue({ id: "tenant-1" });
+    teamshipPrintJob.findFirst
+      .mockResolvedValueOnce(storedJob({
+        id: "cmjobfirst1234",
+        status: "CLAIMED",
+        workerId: "worker-1",
+        batchId: "cmbatch123456",
+        batchPosition: 0,
+        reviewOrderId: "cmreview123456"
+      }))
+      .mockResolvedValueOnce(storedJob({
+        id: "cmjobsecond123",
+        status: "WAITING_BATCH",
+        batchId: "cmbatch123456",
+        batchPosition: 1
+      }));
+    teamshipPrintJob.updateMany.mockResolvedValue({ count: 1 });
+    teamshipPrintJob.update.mockResolvedValue({});
+    teamshipPrintBatch.findFirst.mockResolvedValue({
+      id: "cmbatch123456",
+      reviewRunId: "cmrun123456",
+      approvedByUserId: "user-1"
+    });
+    teamshipReviewOrder.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await completeTeamshipPrintJob(
+      "cmjobfirst1234",
+      "worker-1",
+      "newl-group",
+      {
+        status: "COMPLETED",
+        observedPalletCount: 2,
+        completedAt: "2026-07-29T14:05:00.000Z",
+        documents: [
+          { kind: "PICKING_LIST", status: "COMPLETED", printer: "_192_168_1_28", copies: 1 },
+          { kind: "BOL", status: "SUBMITTED", printer: "KONICA MINOLTA bizhub C3350i PCL (192.168.1.28) UPD", copies: 1 },
+          { kind: "OUTBOUND_LABELS", status: "SUBMITTED", printer: "BIXOLON SRP-770III", copies: 2 }
+        ]
+      }
+    );
+
+    expect(result).toBe(true);
+    expect(teamshipReviewOrder.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: "cmreview123456", tenantId: "tenant-1" }),
+      data: expect.objectContaining({ workflowStatus: "BOL_PRINTED" })
+    }));
+    expect(teamshipPrintJob.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "cmjobsecond123" },
+      data: expect.objectContaining({ status: "APPROVED" })
+    }));
+  });
+
+  it("blocks all remaining batch orders after an uncertain failure", async () => {
+    tenant.findUnique.mockResolvedValue({ id: "tenant-1" });
+    teamshipPrintJob.findFirst.mockResolvedValue(storedJob({
+      id: "cmjobfirst1234",
+      status: "CLAIMED",
+      workerId: "worker-1",
+      batchId: "cmbatch123456"
+    }));
+    teamshipPrintJob.updateMany.mockResolvedValue({ count: 1 });
+    teamshipPrintBatch.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await failTeamshipPrintJob(
+      "cmjobfirst1234",
+      "worker-1",
+      "newl-group",
+      {
+        errorCode: "PRINTER_UNCERTAIN",
+        errorMessage: "The printer result was uncertain."
+      }
+    );
+
+    expect(result).toBe(true);
+    expect(teamshipPrintJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ batchId: "cmbatch123456", status: "WAITING_BATCH" }),
+      data: expect.objectContaining({ status: "BLOCKED", errorCode: "BATCH_STOPPED" })
+    }));
+    expect(teamshipPrintBatch.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "PARTIAL_FAILED" })
+    }));
   });
 });
 
