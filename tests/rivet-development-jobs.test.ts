@@ -116,7 +116,8 @@ describe("Rivet approved development jobs", () => {
         reporterStatement: "Special Instructions omitted CHEMTREC.",
         expectedOutcome: "PASS",
         observedOutcome: "FAIL"
-      }]
+      }],
+      "Preserve every business-content continuation line; decorative separators are optional."
     );
 
     expect(prismaMock.automationJobRun.create).toHaveBeenCalledWith({
@@ -126,6 +127,8 @@ describe("Rivet approved development jobs", () => {
         status: JobStatus.QUEUED,
         input: expect.objectContaining({
           issueKey: "GARLAND_SPECIAL_INSTRUCTIONS",
+          approvalComments:
+            "Preserve every business-content continuation line; decorative separators are optional.",
           requiredContextPaths: expect.arrayContaining([
             "AGENTS.md",
             "docs/customers/garland/overview.md",

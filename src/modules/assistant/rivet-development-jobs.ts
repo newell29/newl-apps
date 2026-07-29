@@ -62,6 +62,7 @@ type RivetJobInput = {
   title: string;
   summary: string;
   rationale: string;
+  approvalComments: string | null;
   riskLevel: string;
   repository: string;
   baseBranch: string;
@@ -120,7 +121,8 @@ export async function createRivetDevelopmentJob(
   tx: Prisma.TransactionClient,
   context: Pick<AuthenticatedContext, "tenantId" | "userId">,
   suggestion: DevelopmentSuggestionForJob,
-  sourceFeedback: SourceFeedbackForJob[]
+  sourceFeedback: SourceFeedbackForJob[],
+  approvalComments: string | null = null
 ) {
   const issueKey = readIssueKey(suggestion.proposedScope) ??
     describeDevelopmentIssue(sourceFeedback[0] ?? {
@@ -140,6 +142,7 @@ export async function createRivetDevelopmentJob(
     title: suggestion.title,
     summary: suggestion.summary,
     rationale: suggestion.rationale,
+    approvalComments: normalizeText(approvalComments, 4000),
     riskLevel: suggestion.riskLevel,
     repository: process.env.RIVET_DEVELOPER_REPOSITORY?.trim() || DEFAULT_REPOSITORY,
     baseBranch: process.env.RIVET_DEVELOPER_BASE_BRANCH?.trim() || DEFAULT_BASE_BRANCH,
@@ -670,6 +673,9 @@ function parseRivetJobInput(value: Prisma.JsonValue | null): RivetJobInput | nul
     title: record.title,
     summary: typeof record.summary === "string" ? record.summary : "",
     rationale: typeof record.rationale === "string" ? record.rationale : "",
+    approvalComments: typeof record.approvalComments === "string"
+      ? normalizeText(record.approvalComments, 4000)
+      : null,
     riskLevel: typeof record.riskLevel === "string" ? record.riskLevel : "MEDIUM",
     repository: record.repository,
     baseBranch: record.baseBranch,
