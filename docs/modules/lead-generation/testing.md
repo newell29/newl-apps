@@ -227,11 +227,11 @@ Regression coverage must prove:
 5. model judgment and data/configuration issues notify but never auto-queue Rivet;
 6. reproducible retrieval, handoff, and deterministic-rule defects require the exact owner standing-approval value;
 7. a Rivet suggestion forbids reclassification, TradeMining/outreach retry, merge, deploy, production writes, permissions, and customer communication;
-8. a second identical seven-day incident trips the circuit breaker and does not create another development job;
+8. related reproducible findings from the same workflow consolidate into one incident and one Rivet job, while a second workflow-scoped incident inside seven days trips the circuit breaker;
 9. enabled TradeMining profiles without a due run, removed/disabled profiles that ran, overlap, stuck/failed runs, missing/incomplete coverage, and exported/processed count drift are detected;
 10. a zero-result profile is only an anomaly when recent positive history exists;
 11. shell/schema tests preserve a read-only Codex audit, the 13:30 America/Toronto schedule, and Teams delivery through `RIVET_TEAMS_TARGET`;
-12. Rivet resolves Git state from its dedicated runtime, validates context against the fetched base branch, and stops a failed packet parse before any blank `origin/` worktree reference;
+12. Rivet resolves Git state from its dedicated runtime, validates context against the fetched base branch, stops a failed packet parse before any blank `origin/` worktree reference, refuses sibling queued/running/review-blocked work for one workflow, and creates no PR until the exact branch commit receives a zero-finding independent `PASS`;
 13. the Hunter worker emits one settled daily profile digest, sends immediate sanitized failure alerts, and keeps processing other due profiles;
 14. the assisted outreach-handoff machine route bypasses browser-session middleware and continues to enforce tenant-bound ingestion authentication in its route;
 15. the Mac worker starts its outreach-handoff poller before the sequential TradeMining loop, so a large profile

@@ -28,7 +28,7 @@ DEFAULT_QWEN_MODEL = "qwen3.5:35b"
 DEFAULT_KIMI_URL = "https://api.moonshot.ai/v1"
 DEFAULT_KIMI_MODEL = "kimi-k2.6"
 DEFAULT_KIMI_VALIDATOR_MODEL = "kimi-k3"
-PROMPT_VERSION = "hunter-company-research-v15"
+PROMPT_VERSION = "hunter-company-research-v17"
 ALLOWED_SERVICE_LINES = {"WAREHOUSING", "OCEAN_AIR", "TRUCKING"}
 ALLOWED_OPERATING_REGIONS = {"NORTH_AMERICA", "CHINA", "OTHER_FOREIGN", "UNKNOWN"}
 ALLOWED_SIGNAL_TYPES = {
@@ -42,7 +42,14 @@ ALLOWED_SIGNAL_TYPES = {
     "NEWS",
     "OTHER",
 }
-ALLOWED_PASSES = {"IDENTITY", "FRESH_EVENTS", "CAREERS", "DISTRIBUTION_FOOTPRINT", "FOLLOW_UP"}
+ALLOWED_PASSES = {
+    "IDENTITY",
+    "FRESH_EVENTS",
+    "CAREERS",
+    "DISTRIBUTION_FOOTPRINT",
+    "CUSTOMS_RECORDS",
+    "FOLLOW_UP",
+}
 SOURCE_TYPES = {"FIRST_PARTY", "GOVERNMENT", "NEWS", "CAREERS", "DIRECTORY", "OTHER"}
 MAX_RESPONSE_BYTES = 2_000_000
 MAX_PAGE_BYTES = 400_000
@@ -82,6 +89,16 @@ REGIONAL_IDENTITY_MARKERS = {
 }
 PRODUCTION_LINE_EXPANSION_PATTERN = re.compile(
     r"\bnew(?:\s+[a-z][a-z-]*){0,3}\s+(?:production|manufacturing)\s+lines?\b",
+    re.IGNORECASE,
+)
+MANUFACTURING_COMMENCEMENT_PATTERN = re.compile(
+    r"\b(?:began|begins?|commenced|commences?|started|starts?|launched|launches?)\b"
+    r"[^.;\n]{0,100}\b(?:commercial\s+)?(?:production|manufacturing|operations?)\b",
+    re.IGNORECASE,
+)
+NEW_FACILITY_PATTERN = re.compile(
+    r"\b(?:new|greenfield|newly[- ]built)\b[^.;\n]{0,80}"
+    r"\b(?:facility|plant|site|factory|manufacturing(?:\s+facility|\s+site)?)\b",
     re.IGNORECASE,
 )
 PUBLIC_DOMAIN_PATTERN = re.compile(
@@ -571,7 +588,50 @@ def company_search_aliases(candidate: dict[str, Any]) -> list[str]:
             break
     if brand_words and len("".join(brand_words)) >= 5:
         aliases.append(" ".join(brand_words))
-    return list(dict.fromkeys(alias for alias in aliases if alias))
+    aliases.extend(query_only_trade_aliases(candidate, without_suffix))
+    return list(dict.fromkeys(alias for alias in aliases if alias))[:8]
+
+
+def query_only_trade_aliases(
+    candidate: dict[str, Any],
+    company_words: Optional[list[str]] = None,
+) -> list[str]:
+    """Return bounded same-entity trade aliases for search construction only."""
+    company_words = company_words or re.findall(
+        r"[A-Za-z0-9]+",
+        bounded_text(candidate.get("companyName"), "", 300),
+    )
+    company_tokens = [
+        word.lower()
+        for word in company_words
+        if word.lower() not in LEGAL_SUFFIXES
+    ]
+    company_core = " ".join(company_tokens)
+    if not company_core:
+        return []
+    accepted: list[str] = []
+    raw_aliases = candidate.get("queryAliases")
+    if not isinstance(raw_aliases, list):
+        return []
+    for raw in raw_aliases[:8]:
+        alias = bounded_text(raw, "", 200)
+        alias_tokens = [
+            word.lower()
+            for word in re.findall(r"[A-Za-z0-9]+", alias)
+            if word.lower() not in LEGAL_SUFFIXES
+        ]
+        alias_core = " ".join(alias_tokens)
+        if not alias_core:
+            continue
+        same_identity = alias_core == company_core
+        if len(company_core) >= 5 and len(alias_core) >= 5:
+            same_identity = same_identity or (
+                all(token in company_tokens for token in alias_tokens)
+                or all(token in alias_tokens for token in company_tokens)
+            )
+        if same_identity:
+            accepted.append(alias)
+    return list(dict.fromkeys(accepted))[:4]
 
 
 def search_subject(candidate: dict[str, Any]) -> str:
@@ -628,6 +688,13 @@ def build_research_queries(candidate: dict[str, Any]) -> list[dict[str, str]]:
                 'OR "logistics provider")'
             ),
         },
+        {
+            "pass": "CUSTOMS_RECORDS",
+            "query": (
+                f'{subject} (customs OR imports OR consignee OR "bill of lading" OR shipment)'
+                f'{destination_query_hint(candidate)}'
+            ),
+        },
     ]
     if domain:
         queries.extend(
@@ -646,6 +713,23 @@ def build_research_queries(candidate: dict[str, Any]) -> list[dict[str, str]]:
             ]
         )
     return queries
+
+
+def destination_query_hint(candidate: dict[str, Any]) -> str:
+    evidence = candidate.get("shipmentEvidence")
+    if not isinstance(evidence, list):
+        return ""
+    destinations: list[str] = []
+    for row in evidence[:8]:
+        if not isinstance(row, dict):
+            continue
+        city = bounded_text(row.get("destinationCity"), "", 100)
+        state = bounded_text(row.get("destinationState"), "", 100)
+        location = ", ".join(value for value in (city, state) if value)
+        if location:
+            destinations.append(f'"{location}"')
+    unique = list(dict.fromkeys(destinations))[:2]
+    return f" ({' OR '.join(unique)})" if unique else ""
 
 
 def discovered_candidate_domains(
@@ -864,11 +948,30 @@ def collect_company_evidence(
             first_party = is_likely_first_party(candidate, hostname)
             excerpt = row.get("snippet") or row["title"]
             published_at = row.get("publishedAt")
-            if fetched_pages < pages_per_company and (first_party or pass_id in {"FRESH_EVENTS", "CAREERS"}):
+            customs_page_fetched = any(
+                item.get("pass") == "CUSTOMS_RECORDS" and item.get("pageFetched") is True
+                for item in evidence
+            )
+            reserved_customs_slot = (
+                pages_per_company > 0
+                and not customs_page_fetched
+                and pass_id != "CUSTOMS_RECORDS"
+                and fetched_pages >= pages_per_company - 1
+            )
+            page_fetched = False
+            if (
+                fetched_pages < pages_per_company
+                and not reserved_customs_slot
+                and (
+                    first_party
+                    or pass_id in {"FRESH_EVENTS", "CAREERS", "CUSTOMS_RECORDS"}
+                )
+            ):
                 page_excerpt, page_published_at = fetch_page_evidence(url)
                 if page_excerpt:
                     excerpt = page_excerpt
                     fetched_pages += 1
+                    page_fetched = True
                 if page_published_at:
                     published_at = page_published_at
             evidence.append(
@@ -882,6 +985,7 @@ def collect_company_evidence(
                     "publishedAt": published_at,
                     "excerpt": bounded_utf16_text(excerpt, row["title"], 2_000),
                     "firstParty": first_party,
+                    "pageFetched": page_fetched,
                 }
             )
             if len(evidence) >= MAX_EVIDENCE_PER_COMPANY:
@@ -925,12 +1029,18 @@ def ollama_synthesis_request(
         "relationship is current, stable, and exclusive or contractually committed; never infer it from "
         "ordinary internal operations. providerDisplacementEvidence is true when a disruption, service gap, "
         "rebid, outsourcing change, capacity need, or other credible reason to reconsider that provider is "
-        "supported. FRESH means a material event whose supplied publishedAt value is within 18 months. "
+        "supported. FRESH means the material event itself occurred within 18 months and its supplied "
+        "publishedAt value is also within 18 months. A recent article that describes an explicitly older "
+        "event is not fresh. Facility and commencement/opening language must belong to the same atomic claim; "
+        "do not join separate clauses about an existing plant and a planned new facility into one event. "
         "The year in a search query and current crawl time are not event-date evidence. If a material event "
         "has no supplied publishedAt date, classify it as CURRENT at most. triggerEvidenceIndices must "
         "cite one to five supplied evidenceIndex values that directly support the opportunity summary. "
         "For FRESH, at least one cited item must describe that same material event and carry a recent "
-        "publishedAt value; a recent generic company profile cannot date an unrelated old event. CURRENT means current "
+        "publishedAt value; a recent generic company profile cannot date an unrelated old event. Active "
+        "government registration plus independent recent customs evidence may establish exact current identity, "
+        "but never a fresh trigger by itself. A named notify party or logistics company in a customs record does "
+        "not prove a provider relationship or exclusivity. CURRENT means current "
         "operating footprint or hiring evidence without a discrete trigger. STALE or NONE must not be "
         "described as a near-term trigger. Never invent a location, facility, buyer, event, or relationship. "
         "A salary record, compensation reference, role taxonomy, employee profile, expired posting, generic "
@@ -1658,18 +1768,91 @@ def is_recent_trigger(
         row = evidence[index]
         if row.get("pass") not in {"FRESH_EVENTS", "FOLLOW_UP"}:
             continue
-        published_at = clean(row.get("publishedAt"))
-        if not published_at:
-            continue
-        try:
-            parsed = dt.datetime.fromisoformat(published_at.replace("Z", "+00:00"))
-        except ValueError:
-            continue
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=dt.timezone.utc)
-        if cutoff <= parsed.astimezone(dt.timezone.utc) <= latest:
+        if evidence_row_is_recent(row, cutoff, latest) and not cited_material_event_is_explicitly_old(
+            row,
+            cutoff,
+        ):
             return True
     return False
+
+
+def evidence_row_is_recent(
+    row: dict[str, Any],
+    cutoff: Optional[dt.datetime] = None,
+    latest: Optional[dt.datetime] = None,
+) -> bool:
+    cutoff = cutoff or dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=548)
+    latest = latest or dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=1)
+    published_at = clean(row.get("publishedAt"))
+    if not published_at:
+        return False
+    try:
+        parsed = dt.datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return cutoff <= parsed.astimezone(dt.timezone.utc) <= latest
+
+
+def cited_material_event_is_explicitly_old(
+    row: dict[str, Any],
+    cutoff: dt.datetime,
+) -> bool:
+    text = f"{row.get('title') or ''}. {row.get('excerpt') or ''}"
+    event_segments = [
+        segment
+        for segment in split_atomic_event_segments(text)
+        if (
+            material_event_pattern().search(segment)
+            or (
+                MANUFACTURING_COMMENCEMENT_PATTERN.search(segment)
+                and NEW_FACILITY_PATTERN.search(segment)
+            )
+        )
+    ]
+    if not event_segments:
+        return False
+    current_year = dt.datetime.now(dt.timezone.utc).year
+    oldest_allowed_year = cutoff.year
+    for segment in event_segments:
+        years = [
+            int(value)
+            for value in re.findall(r"\b(?:19|20)\d{2}\b", segment)
+            if 1900 <= int(value) <= current_year + 2
+        ]
+        if not years or any(year >= oldest_allowed_year for year in years):
+            return False
+    return True
+
+
+def split_atomic_event_segments(text: str) -> list[str]:
+    return [
+        segment.strip()
+        for segment in re.split(
+            r"(?:[\r\n]+|[.;](?:\s+|$)|\b(?:and\s+separately|whereas|while)\b)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if segment.strip()
+    ]
+
+
+def material_event_pattern() -> re.Pattern[str]:
+    return re.compile(
+        r"\b(major investment|breaks? ground|broke ground|"
+        r"invest(?:s|ed|ing|ment) .{0,100}(?:new|advanced|additional) "
+        r".{0,50}(?:production|manufacturing) (?:lines?|capacity)|"
+        r"(?:new|advanced|additional) (?:production|manufacturing) lines?|"
+        r"new (?:facility|warehouse|distribution cent(?:er|re)|manufacturing site)|"
+        r"expands? (?:its |the )?(?:production|manufacturing|warehouse|distribution|facility)|"
+        r"increas(?:e|es|ed|ing) (?:its )?(?:manufacturing |production )?capacity|"
+        r"(?:production|manufacturing) expansion|"
+        r"(?:facility|warehouse|distribution cent(?:er|re)) expansion|"
+        r"establish(?:es|ed|ing)? .{0,100}(?:facility|warehouse|"
+        r"distribution cent(?:er|re)|manufacturing(?: site| facility)?))\b",
+        re.IGNORECASE,
+    )
 
 
 def has_corroborating_first_party_identity(
@@ -1696,6 +1879,60 @@ def has_corroborating_first_party_identity(
         if any(alias in text for alias in aliases):
             return True
     return False
+
+
+def has_current_public_trade_identity(
+    candidate: dict[str, Any],
+    evidence: list[dict[str, Any]],
+) -> bool:
+    """Allow active public registration plus recent trade evidence to prove identity, never freshness."""
+    core_tokens = [
+        token.lower()
+        for token in re.findall(
+            r"[A-Za-z0-9]+",
+            bounded_text(candidate.get("companyName"), "", 300),
+        )
+        if token.lower() not in LEGAL_SUFFIXES
+    ]
+    if not core_tokens or (len(core_tokens) == 1 and len(core_tokens[0]) < 5):
+        return False
+    identity_phrase = re.compile(
+        r"(?<![a-z0-9])"
+        + r"[\s,.'’&()/_-]+".join(re.escape(token) for token in core_tokens)
+        + r"(?![a-z0-9])"
+        + r"(?![\s,.'’&()/_-]+(?:group|holdings?|international|global|parent|affiliate)\b)",
+        re.IGNORECASE,
+    )
+    inactive_pattern = re.compile(
+        r"\b(?:inactive|dissolved|revoked|withdrawn|terminated|cancelled|canceled)\b",
+        re.IGNORECASE,
+    )
+    active_pattern = re.compile(
+        r"\b(?:active|current|good standing|registered|existing)\b",
+        re.IGNORECASE,
+    )
+    government_rows = []
+    trade_rows = []
+    for row in evidence:
+        text = f"{row.get('title') or ''} {row.get('excerpt') or ''}"
+        if not identity_phrase.search(text):
+            continue
+        if (
+            row.get("sourceType") == "GOVERNMENT"
+            and active_pattern.search(text)
+            and not inactive_pattern.search(text)
+        ):
+            government_rows.append(row)
+        if (
+            row.get("pass") == "CUSTOMS_RECORDS"
+            and evidence_row_is_recent(row)
+        ):
+            trade_rows.append(row)
+    return any(
+        government.get("sourceDomain") != trade.get("sourceDomain")
+        for government in government_rows
+        for trade in trade_rows
+    )
 
 
 def has_explicit_provider_service_evidence(evidence: list[dict[str, Any]]) -> bool:
@@ -1750,20 +1987,7 @@ def recent_material_trigger_indices(
         for alias in company_search_aliases(candidate)
         if len(re.sub(r"[^a-z0-9]+", "", alias.lower())) >= 5
     ]
-    material_pattern = re.compile(
-        r"\b(major investment|breaks? ground|broke ground|"
-        r"invest(?:s|ed|ing|ment) .{0,100}(?:new|advanced|additional) "
-        r".{0,50}(?:production|manufacturing) (?:lines?|capacity)|"
-        r"(?:new|advanced|additional) (?:production|manufacturing) lines?|"
-        r"new (?:facility|warehouse|distribution cent(?:er|re)|manufacturing site)|"
-        r"expands? (?:its |the )?(?:production|manufacturing|warehouse|distribution|facility)|"
-        r"increas(?:e|es|ed|ing) (?:its )?(?:manufacturing |production )?capacity|"
-        r"(?:production|manufacturing) expansion|"
-        r"(?:facility|warehouse|distribution cent(?:er|re)) expansion|"
-        r"establish(?:es|ed|ing)? .{0,100}(?:facility|warehouse|"
-        r"distribution cent(?:er|re)|manufacturing(?: site| facility)?))\b",
-        re.IGNORECASE,
-    )
+    material_pattern = material_event_pattern()
     logistics_facility_pattern = re.compile(
         r"\b(?:distribution cent(?:er|re)|warehouse|fulfillment cent(?:er|re))\b",
         re.IGNORECASE,
@@ -1784,7 +2008,17 @@ def recent_material_trigger_indices(
         )
         if alias_rank is None:
             continue
-        if material_pattern.search(text) or PRODUCTION_LINE_EXPANSION_PATTERN.search(text):
+        atomic_segments = split_atomic_event_segments(text)
+        has_atomic_material_event = any(
+            material_pattern.search(segment)
+            or PRODUCTION_LINE_EXPANSION_PATTERN.search(segment)
+            or (
+                MANUFACTURING_COMMENCEMENT_PATTERN.search(segment)
+                and NEW_FACILITY_PATTERN.search(segment)
+            )
+            for segment in atomic_segments
+        )
+        if has_atomic_material_event:
             matches.append(
                 (
                     alias_rank,
@@ -2073,6 +2307,18 @@ def normalize_synthesis_for_evidence(
         identity_reason = clean(normalized.get("identityReason")) or ""
         normalized["identityReason"] = (
             f"{identity_reason} The candidate identity is directly corroborated by matching first-party evidence."
+        ).strip()
+    elif (
+        normalized.get("identityDisposition") != "PASS"
+        and has_current_public_trade_identity(candidate, evidence)
+    ):
+        normalized["identityDisposition"] = "PASS"
+        normalized["identityConfidence"] = max(70, int(normalized.get("identityConfidence") or 0))
+        normalized["confidence"] = max(60, int(normalized.get("confidence") or 0))
+        identity_reason = clean(normalized.get("identityReason")) or ""
+        normalized["identityReason"] = (
+            f"{identity_reason} Active government registration and independent recent trade evidence "
+            "corroborate the exact operating identity; this establishes current identity only, not a fresh event."
         ).strip()
     if normalized.get("logisticsProvider") is True and not has_explicit_provider_service_evidence(evidence):
         normalized["logisticsProvider"] = False

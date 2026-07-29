@@ -399,19 +399,6 @@ commit_sha="$(git -C "${job_worktree}" rev-parse HEAD)"
 failure_stage="push the isolated branch"
 git -C "${job_worktree}" push -u origin "${branch_name}"
 
-failure_stage="open the draft pull request"
-write_pull_request_payload "create"
-curl --fail --silent --show-error \
-  --request POST \
-  --header "Accept: application/vnd.github+json" \
-  --header "Authorization: Bearer ${RIVET_GITHUB_TOKEN}" \
-  --header "Content-Type: application/json" \
-  --header "X-GitHub-Api-Version: 2022-11-28" \
-  --data-binary "@${pull_request_path}" \
-  "https://api.github.com/repos/${repository}/pulls" > "${pull_response_path}"
-pull_request_url="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["html_url"])' "${pull_response_path}")"
-pull_request_number="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["number"])' "${pull_response_path}")"
-
 while true; do
   review_attempt=$((review_attempt + 1))
   review_started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -421,6 +408,8 @@ while true; do
   git -C "${job_worktree}" diff --check "origin/${base_branch}...HEAD"
   git -C "${job_worktree}" diff --name-only "origin/${base_branch}...HEAD" | sort -u > "${changed_paths_file}"
   git -C "${job_worktree}" diff --unified=0 --no-color "origin/${base_branch}...HEAD" > "${diff_path}"
+  # Build the prospective PR payload for read-only review without opening a PR.
+  write_pull_request_payload "create"
 
   mergeable_with_main=1
   if ! git -C "${job_worktree}" merge-tree --write-tree "origin/${base_branch}" HEAD \
@@ -443,7 +432,7 @@ while true; do
     > "${open_pulls_path}"
   /usr/bin/python3 - \
     "${open_pulls_path}" \
-    "${pull_request_number}" \
+    "0" \
     "${open_pull_numbers_path}" \
     "${sibling_report_path}" <<'PY'
 import json, sys
@@ -651,16 +640,18 @@ PY
   review_summary="$(sed -n '3p' "${temporary_directory}/review-decision.txt")"
 
   if [[ "${review_verdict}" == "PASS" ]]; then
-    failure_stage="update the pull request with the passing independent review"
-    write_pull_request_payload "update"
+    failure_stage="open the independently reviewed draft pull request"
+    write_pull_request_payload "create"
     curl --fail --silent --show-error \
-      --request PATCH \
+      --request POST \
       --header "Accept: application/vnd.github+json" \
       --header "Authorization: Bearer ${RIVET_GITHUB_TOKEN}" \
       --header "Content-Type: application/json" \
       --header "X-GitHub-Api-Version: 2022-11-28" \
       --data-binary "@${pull_request_path}" \
-      "https://api.github.com/repos/${repository}/pulls/${pull_request_number}" >/dev/null
+      "https://api.github.com/repos/${repository}/pulls" > "${pull_response_path}"
+    pull_request_url="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["html_url"])' "${pull_response_path}")"
+    pull_request_number="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["number"])' "${pull_response_path}")"
     break
   fi
 
@@ -748,47 +739,27 @@ PY
 
     git -C "${job_worktree}" diff --name-only "origin/${base_branch}...HEAD" | sort -u > "${changed_paths_file}"
     unlink "${review_result_path}"
-    write_pull_request_payload "update"
-    curl --fail --silent --show-error \
-      --request PATCH \
-      --header "Accept: application/vnd.github+json" \
-      --header "Authorization: Bearer ${RIVET_GITHUB_TOKEN}" \
-      --header "Content-Type: application/json" \
-      --header "X-GitHub-Api-Version: 2022-11-28" \
-      --data-binary "@${pull_request_path}" \
-      "https://api.github.com/repos/${repository}/pulls/${pull_request_number}" >/dev/null
     continue
   fi
 
   failure_stage="record the independent review blocker"
-  write_pull_request_payload "update"
-  curl --fail --silent --show-error \
-    --request PATCH \
-    --header "Accept: application/vnd.github+json" \
-    --header "Authorization: Bearer ${RIVET_GITHUB_TOKEN}" \
-    --header "Content-Type: application/json" \
-    --header "X-GitHub-Api-Version: 2022-11-28" \
-    --data-binary "@${pull_request_path}" \
-    "https://api.github.com/repos/${repository}/pulls/${pull_request_number}" >/dev/null
   /usr/bin/python3 - \
     "${job_id}" \
     "${lease_token}" \
     "${branch_name}" \
     "${commit_sha}" \
-    "${pull_request_url}" \
     "${review_summary}" \
     "${completion_request_path}" <<'PY'
 import json, sys
-with open(sys.argv[7], "w", encoding="utf-8") as handle:
+with open(sys.argv[6], "w", encoding="utf-8") as handle:
     json.dump({
         "action": "fail",
         "jobId": sys.argv[1],
         "leaseToken": sys.argv[2],
         "branchName": sys.argv[3],
         "commitSha": sys.argv[4],
-        "pullRequestUrls": [sys.argv[5]],
         "errorCode": "RIVET_REVIEW_BLOCKED",
-        "errorMessage": f"Independent Codex review blocked this PR: {sys.argv[6]}"
+        "errorMessage": f"Independent Codex review blocked this branch before PR creation: {sys.argv[5]}"
     }, handle)
 PY
   curl --fail --silent --show-error \

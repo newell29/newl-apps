@@ -146,6 +146,42 @@ describe("Rivet approved development jobs", () => {
     });
   });
 
+  it("refuses a sibling job while the same workflow has active or blocked Rivet work", async () => {
+    prismaMock.automationJobRun.findFirst.mockResolvedValue({
+      id: "job-existing",
+      status: JobStatus.ERROR,
+      output: { phase: "BLOCKED" }
+    });
+
+    await expect(createRivetDevelopmentJob(
+      prismaMock as never,
+      context,
+      {
+        id: "suggestion-2",
+        moduleKey: "SHIPMENT_DOCUMENTS",
+        workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+        title: "Another Garland correction",
+        summary: "A related defect was found.",
+        rationale: "Review it with the existing work.",
+        riskLevel: "HIGH",
+        sourceFeedbackIds: ["feedback-2"],
+        proposedScope: { issueKey: "GARLAND_RELATED_DEFECT" }
+      },
+      [{
+        id: "feedback-2",
+        moduleKey: "SHIPMENT_DOCUMENTS",
+        workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+        classification: "CHECK_RESULT",
+        subjectType: "GARLAND_CHECK",
+        subjectId: "PS123456",
+        reporterStatement: "A related defect was found.",
+        expectedOutcome: "PASS",
+        observedOutcome: "FAIL"
+      }]
+    )).rejects.toThrow("already has active or blocked work");
+    expect(prismaMock.automationJobRun.create).not.toHaveBeenCalled();
+  });
+
   it("atomically claims at most one queued job and returns a short-lived lease", async () => {
     prismaMock.automationJobRun.findFirst.mockResolvedValue({
       id: "job-1",
