@@ -131,6 +131,12 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
   queries bounded legal-name, brand, and regional aliases and adds official-domain queries when a
   domain is known. Matching first-party identity evidence can correct an unsupported ambiguous
   synthesis label.
+- Small importers may have no first-party site even though public evidence resolves the operating
+  identity. Hunter therefore runs a dedicated public trade/import identity query and may clear an
+  ambiguous label only when an independent trade profile documents import or shipment activity and
+  matches both the exact registered company name and normalized government-registration street
+  address. A missing trade profile, missing address, different address, or same-source pair remains
+  blocked.
 - A full generic result set can otherwise consume the bounded evidence ledger before a later
   official-domain event query runs. Hunter executes every enabled query first and samples their
   results in rounds, preserving targeted first-party evidence without increasing the 24-record cap.

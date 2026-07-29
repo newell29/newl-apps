@@ -28,7 +28,7 @@ DEFAULT_QWEN_MODEL = "qwen3.5:35b"
 DEFAULT_KIMI_URL = "https://api.moonshot.ai/v1"
 DEFAULT_KIMI_MODEL = "kimi-k2.6"
 DEFAULT_KIMI_VALIDATOR_MODEL = "kimi-k3"
-PROMPT_VERSION = "hunter-company-research-v15"
+PROMPT_VERSION = "hunter-company-research-v16"
 ALLOWED_SERVICE_LINES = {"WAREHOUSING", "OCEAN_AIR", "TRUCKING"}
 ALLOWED_OPERATING_REGIONS = {"NORTH_AMERICA", "CHINA", "OTHER_FOREIGN", "UNKNOWN"}
 ALLOWED_SIGNAL_TYPES = {
@@ -87,6 +87,20 @@ PRODUCTION_LINE_EXPANSION_PATTERN = re.compile(
 PUBLIC_DOMAIN_PATTERN = re.compile(
     r"(?<![@A-Za-z0-9.-])(?:https?://)?(?:www\.)?"
     r"([A-Za-z0-9](?:[A-Za-z0-9-]{0,62}\.)+[A-Za-z]{2,24})\b",
+    re.IGNORECASE,
+)
+STREET_ADDRESS_PATTERN = re.compile(
+    r"\b\d{1,6}\s+[a-z0-9][a-z0-9.' -]{1,80}?\s"
+    r"(?:street|st|avenue|ave|road|rd|boulevard|blvd|drive|dr|lane|ln|"
+    r"court|ct|parkway|pkwy|highway|hwy|way|place|pl|circle|cir|trail|"
+    r"trl|terrace|ter)\b",
+    re.IGNORECASE,
+)
+PUBLIC_TRADE_ACTIVITY_PATTERN = re.compile(
+    r"\b(?:\d[\d,.]*\s+)?(?:import shipments?|shipments?|transactions?|"
+    r"bills? of lading)\b|\b(?:import|shipment|trade)\s+"
+    r"(?:activity|history|records?|profile)\b|\b\d[\d,.]*\s*"
+    r"(?:kg|kilograms?|teus?)\b",
     re.IGNORECASE,
 )
 
@@ -608,6 +622,13 @@ def build_research_queries(candidate: dict[str, Any]) -> list[dict[str, str]]:
             "query": f"{subject} official company about parent ownership",
         },
         {
+            "pass": "IDENTITY",
+            "query": (
+                f'{subject} ("import records" OR "bill of lading" OR importer '
+                'OR consignee OR shipments) address'
+            ),
+        },
+        {
             "pass": "FRESH_EVENTS",
             "query": (
                 f'{subject} (expansion OR "new facility" OR warehouse OR distribution OR investment '
@@ -676,7 +697,10 @@ def needs_identity_discovery(
     return (
         synthesis.get("identityDisposition") != "PASS"
         or int(synthesis.get("identityConfidence") or 0) < 70
-        or not has_corroborating_first_party_identity(candidate, evidence)
+        or not (
+            has_corroborating_first_party_identity(candidate, evidence)
+            or has_corroborating_public_trade_identity(candidate, evidence)
+        )
     )
 
 
@@ -954,6 +978,10 @@ def ollama_synthesis_request(
         "candidate label is a facility, campus, address, department, truncated name, or unclear affiliate "
         "and the evidence does not establish it as an exact operating company or an unambiguous trade name. "
         "Do not silently substitute a plausible parent for an ambiguous candidate. "
+        "When no first-party site exists, an exact candidate-name and street-address match between a "
+        "government registration and an independent public trade profile with explicit import or shipment "
+        "activity can corroborate the operating identity. Neither source alone, an unmatched address, or "
+        "a generic directory profile is sufficient. "
         "Return one company for every supplied companyKey. You may request no more than two precise follow-up "
         "queries when a missing fact could materially change the decision."
     )
@@ -1698,6 +1726,97 @@ def has_corroborating_first_party_identity(
     return False
 
 
+def normalized_street_addresses(value: str) -> set[str]:
+    suffixes = {
+        "st": "street",
+        "ave": "avenue",
+        "rd": "road",
+        "blvd": "boulevard",
+        "dr": "drive",
+        "ln": "lane",
+        "ct": "court",
+        "pkwy": "parkway",
+        "hwy": "highway",
+        "pl": "place",
+        "cir": "circle",
+        "trl": "trail",
+        "ter": "terrace",
+    }
+    addresses: set[str] = set()
+    for match in STREET_ADDRESS_PATTERN.finditer(value):
+        tokens = re.sub(r"[^a-z0-9]+", " ", match.group(0).lower()).strip().split()
+        if tokens and tokens[-1] in suffixes:
+            tokens[-1] = suffixes[tokens[-1]]
+        if tokens:
+            addresses.add(" ".join(tokens))
+    return addresses
+
+
+def evidence_names_company(
+    candidate: dict[str, Any],
+    row: dict[str, Any],
+) -> bool:
+    evidence_text = re.sub(
+        r"[^a-z0-9]+",
+        " ",
+        f"{row.get('title') or ''} {row.get('excerpt') or ''}".lower(),
+    ).strip()
+    exact_company_name = re.sub(
+        r"[^a-z0-9]+",
+        " ",
+        str(candidate.get("companyName") or "").lower(),
+    ).strip()
+    return len(exact_company_name) >= 5 and exact_company_name in evidence_text
+
+
+def corroborating_public_trade_identity_indices(
+    candidate: dict[str, Any],
+    evidence: list[dict[str, Any]],
+) -> list[int]:
+    identity_rows = [
+        (index, row)
+        for index, row in enumerate(evidence)
+        if isinstance(row, dict)
+        and row.get("pass") in {"IDENTITY", "FOLLOW_UP"}
+        and evidence_names_company(candidate, row)
+    ]
+    government_rows = [
+        (index, row)
+        for index, row in identity_rows
+        if row.get("sourceType") == "GOVERNMENT"
+    ]
+    trade_rows = [
+        (index, row)
+        for index, row in identity_rows
+        if row.get("sourceType") != "GOVERNMENT"
+        and PUBLIC_TRADE_ACTIVITY_PATTERN.search(
+            f"{row.get('title') or ''}\n{row.get('excerpt') or ''}"
+        )
+    ]
+    for government_index, government in government_rows:
+        government_addresses = normalized_street_addresses(
+            f"{government.get('title') or ''}\n{government.get('excerpt') or ''}"
+        )
+        if not government_addresses:
+            continue
+        for trade_index, trade in trade_rows:
+            if clean(trade.get("sourceDomain")) == clean(government.get("sourceDomain")):
+                continue
+            trade_addresses = normalized_street_addresses(
+                f"{trade.get('title') or ''}\n{trade.get('excerpt') or ''}"
+            )
+            if government_addresses.intersection(trade_addresses):
+                return [government_index, trade_index]
+    return []
+
+
+def has_corroborating_public_trade_identity(
+    candidate: dict[str, Any],
+    evidence: list[dict[str, Any]],
+) -> bool:
+    return bool(corroborating_public_trade_identity_indices(candidate, evidence))
+
+
 def has_explicit_provider_service_evidence(evidence: list[dict[str, Any]]) -> bool:
     direct_provider_pattern = re.compile(
         r"\b(provider|provides?|providing|offers?|offering)\b[^.\n]{0,120}"
@@ -1929,12 +2048,20 @@ def preferred_model_evidence_indices(
     evidence: list[dict[str, Any]],
     synthesis: Optional[dict[str, Any]] = None,
 ) -> list[int]:
+    public_trade_identity = corroborating_public_trade_identity_indices(
+        candidate,
+        evidence,
+    )
     material_triggers = recent_material_trigger_indices(candidate, evidence)
     specific_vacancies = specific_logistics_management_vacancy_indices(
         candidate,
         evidence,
     )
-    preferred = list(dict.fromkeys(material_triggers + specific_vacancies))
+    preferred = list(
+        dict.fromkeys(
+            public_trade_identity + material_triggers + specific_vacancies
+        )
+    )
     if not material_triggers and synthesis:
         preferred.extend(
             index
@@ -2065,15 +2192,24 @@ def normalize_synthesis_for_evidence(
             rationale = f"{rationale} {message}".strip()
     if (
         normalized.get("identityDisposition") != "PASS"
-        and has_corroborating_first_party_identity(candidate, evidence)
+        and (
+            has_corroborating_first_party_identity(candidate, evidence)
+            or has_corroborating_public_trade_identity(candidate, evidence)
+        )
     ):
         normalized["identityDisposition"] = "PASS"
         normalized["identityConfidence"] = max(70, int(normalized.get("identityConfidence") or 0))
         normalized["confidence"] = max(60, int(normalized.get("confidence") or 0))
         identity_reason = clean(normalized.get("identityReason")) or ""
-        normalized["identityReason"] = (
-            f"{identity_reason} The candidate identity is directly corroborated by matching first-party evidence."
-        ).strip()
+        corroboration_reason = (
+            "The candidate identity is directly corroborated by matching first-party evidence."
+            if has_corroborating_first_party_identity(candidate, evidence)
+            else (
+                "The registered entity and an independent public trade profile match the exact company "
+                "name and street address, and the trade profile documents operating import activity."
+            )
+        )
+        normalized["identityReason"] = f"{identity_reason} {corroboration_reason}".strip()
     if normalized.get("logisticsProvider") is True and not has_explicit_provider_service_evidence(evidence):
         normalized["logisticsProvider"] = False
         message = "The provider label lacked explicit evidence that the company sells logistics services to others."

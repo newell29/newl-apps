@@ -23,7 +23,7 @@ import { dedupeHunterCompaniesByIdentity } from "@/modules/lead-gen/hunter-compa
 import { prisma } from "@/server/db";
 
 export { HUNTER_COMPANY_RESEARCH_JOB_TYPE };
-export const HUNTER_COMPANY_RESEARCH_PROMPT_VERSION = "hunter-company-research-v15";
+export const HUNTER_COMPANY_RESEARCH_PROMPT_VERSION = "hunter-company-research-v16";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL = "qwen3.5:35b";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL = "kimi-k2.6";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL = "kimi-k3";
@@ -424,7 +424,7 @@ export async function prepareHunterCompanyResearchRun({
       },
       limits: {
         companies: limit,
-        initialQueriesPerCompany: HUNTER_RESEARCH_PASSES.length,
+        initialQueriesPerCompany: HUNTER_RESEARCH_PASSES.length + 1,
         followUpQueriesPerCompany: 2,
         resultsPerQuery: 5,
         evidencePerCompany: MAX_EVIDENCE_PER_COMPANY
@@ -999,7 +999,8 @@ export function evaluateResearchGate(company: ResearchResult) {
   const blockers: string[] = [];
   if (
     (company.synthesis.identityDisposition !== "PASS" || company.synthesis.identityConfidence < 70) &&
-    !hasCorroboratingFirstPartyIdentity(company)
+    !hasCorroboratingFirstPartyIdentity(company) &&
+    !hasCorroboratingPublicTradeIdentity(company)
   ) {
     blockers.push("Company identity was not confirmed at 70% or better.");
   }
@@ -1201,6 +1202,75 @@ function hasCorroboratingFirstPartyIdentity(company: ResearchResult) {
     const text = `${item.title} ${item.excerpt}`.toLowerCase().replace(/[^a-z0-9]+/g, "");
     return text.includes(identityNeedle);
   });
+}
+
+const STREET_ADDRESS_PATTERN =
+  /\b\d{1,6}\s+[a-z0-9][a-z0-9.' -]{1,80}?\s(?:street|st|avenue|ave|road|rd|boulevard|blvd|drive|dr|lane|ln|court|ct|parkway|pkwy|highway|hwy|way|place|pl|circle|cir|trail|trl|terrace|ter)\b/gi;
+const PUBLIC_TRADE_ACTIVITY_PATTERN =
+  /\b(?:\d[\d,.]*\s+)?(?:import shipments?|shipments?|transactions?|bills? of lading)\b|\b(?:import|shipment|trade)\s+(?:activity|history|records?|profile)\b|\b\d[\d,.]*\s*(?:kg|kilograms?|teus?)\b/i;
+
+function hasCorroboratingPublicTradeIdentity(company: ResearchResult) {
+  const exactCompanyName = normalizeEvidenceText(company.companyName);
+  if (exactCompanyName.length < 5) return false;
+  const identityRows = company.evidence
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => ["IDENTITY", "FOLLOW_UP"].includes(item.pass));
+  const governmentRows = identityRows.filter(
+    ({ item }) =>
+      item.sourceType === "GOVERNMENT" &&
+      evidenceNamesCompany(item, exactCompanyName)
+  );
+  const tradeRows = identityRows.filter(
+    ({ item }) =>
+      item.sourceType !== "GOVERNMENT" &&
+      PUBLIC_TRADE_ACTIVITY_PATTERN.test(`${item.title}\n${item.excerpt}`) &&
+      evidenceNamesCompany(item, exactCompanyName)
+  );
+
+  return governmentRows.some(({ item: government }) => {
+    const governmentAddresses = normalizedStreetAddresses(
+      `${government.title}\n${government.excerpt}`
+    );
+    if (governmentAddresses.size === 0) return false;
+    return tradeRows.some(({ item: trade }) => {
+      if (trade.sourceDomain === government.sourceDomain) return false;
+      return [...normalizedStreetAddresses(`${trade.title}\n${trade.excerpt}`)].some(
+        (address) => governmentAddresses.has(address)
+      );
+    });
+  });
+}
+
+function evidenceNamesCompany(item: Evidence, exactCompanyName: string) {
+  const evidenceText = normalizeEvidenceText(`${item.title} ${item.excerpt}`);
+  return evidenceText.includes(exactCompanyName);
+}
+
+function normalizedStreetAddresses(value: string) {
+  const suffixes: Record<string, string> = {
+    st: "street",
+    ave: "avenue",
+    rd: "road",
+    blvd: "boulevard",
+    dr: "drive",
+    ln: "lane",
+    ct: "court",
+    pkwy: "parkway",
+    hwy: "highway",
+    pl: "place",
+    cir: "circle",
+    trl: "trail",
+    ter: "terrace"
+  };
+  return new Set(
+    [...value.matchAll(STREET_ADDRESS_PATTERN)].map((match) => {
+      const normalized = normalizeEvidenceText(match[0]);
+      const tokens = normalized.split(" ");
+      const last = tokens[tokens.length - 1];
+      if (last && suffixes[last]) tokens[tokens.length - 1] = suffixes[last];
+      return tokens.join(" ");
+    })
+  );
 }
 
 function hasRecentDatedTriggerEvidence(evidence: Evidence[], triggerEvidenceIndices: number[]) {

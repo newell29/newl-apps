@@ -28,7 +28,7 @@ describe("Hunter company deep research", () => {
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL).toBe("qwen3.5:35b");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL).toBe("kimi-k2.6");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL).toBe("kimi-k3");
-    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v15");
+    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v16");
     expect(HUNTER_COMPANY_RESEARCH_TRANSACTION_TIMEOUT_MS).toBe(30_000);
     expect(HUNTER_COMPANY_RESEARCH_SAFETY).toEqual({
       externalWrites: false,
@@ -413,6 +413,93 @@ describe("Hunter company deep research", () => {
     );
   });
 
+  it("accepts exact registered-name and address trade corroboration but fails closed when it is partial or missing", () => {
+    const company = parseHunterCompanyResearchCompletion(completion()).companies[0];
+    const registeredIdentity = {
+      ...company.evidence[0],
+      title: "Example Candle Imports Inc registration",
+      url: "https://registry.example.gov/business/example-candle-imports",
+      sourceDomain: "registry.example.gov",
+      sourceType: "GOVERNMENT" as const,
+      firstParty: false,
+      excerpt:
+        "Example Candle Imports Inc is registered at 8123 Example Avenue, Raleigh, North Carolina."
+    };
+    const tradeIdentity = {
+      ...company.evidence[0],
+      title: "Example Candle Imports Inc import profile",
+      url: "https://trade.example.org/importers/example-candle-imports",
+      sourceDomain: "trade.example.org",
+      sourceType: "OTHER" as const,
+      firstParty: false,
+      excerpt:
+        "Example Candle Imports Inc at 8123 Example Ave, Raleigh, North Carolina recorded 15 import shipments for candles and diffusers."
+    };
+    const footprint = {
+      ...company.evidence[1],
+      pass: "DISTRIBUTION_FOOTPRINT" as const,
+      publishedAt: null,
+      title: "Example Candle Imports Inc product activity",
+      excerpt: "The importer handles candles and diffusers.",
+      url: "https://market.example.net/example-candle-imports",
+      sourceDomain: "market.example.net"
+    };
+    const ambiguous = {
+      ...company,
+      companyName: "Example Candle Imports Inc",
+      evidence: [registeredIdentity, tradeIdentity, footprint],
+      synthesis: {
+        ...company.synthesis,
+        identityDisposition: "AMBIGUOUS" as const,
+        identityConfidence: 45,
+        freshness: "CURRENT" as const,
+        triggerEvidenceIndices: [2]
+      },
+      validation: {
+        ...company.validation,
+        status: "NOT_SELECTED" as const,
+        disposition: null,
+        validatedScore: null,
+        confidence: null,
+        rationale: null,
+        supportingEvidenceIndices: []
+      }
+    };
+
+    const corroboratedGate = evaluateResearchGate(ambiguous);
+    expect(corroboratedGate.blockers).not.toContain(
+      "Company identity was not confirmed at 70% or better."
+    );
+    expect(
+      classifyResearchOpportunity(ambiguous, corroboratedGate, {
+        minimumPriorityScore: 35,
+        minimumSignalConfidence: 50
+      }).tier
+    ).toBe("QUALIFIED_CURRENT_ACCOUNT");
+
+    const mismatchedAddress = {
+      ...ambiguous,
+      evidence: [
+        registeredIdentity,
+        {
+          ...tradeIdentity,
+          excerpt:
+            "Example Candle Imports Inc at 4900 Different Road, Raleigh, North Carolina recorded 15 import shipments."
+        },
+        footprint
+      ]
+    };
+    expect(evaluateResearchGate(mismatchedAddress).blockers).toContain(
+      "Company identity was not confirmed at 70% or better."
+    );
+    expect(
+      evaluateResearchGate({
+        ...ambiguous,
+        evidence: [registeredIdentity, footprint]
+      }).blockers
+    ).toContain("Company identity was not confirmed at 70% or better.");
+  });
+
   it("rejects forged domains and model arithmetic", () => {
     const forged = completion();
     forged.companies[0].evidence[0].sourceDomain = "different.example";
@@ -699,7 +786,7 @@ describe("Hunter company deep research", () => {
     expect(result.diagnostic).not.toContain('"companies"');
   });
 
-  it("builds all four company-specific research queries", async () => {
+  it("builds all four company-specific research passes including public trade identity", async () => {
     const program = [
       "import json",
       "import hunter_company_research as r",
@@ -717,13 +804,15 @@ describe("Hunter company deep research", () => {
 
     expect(rows.map((row) => row.pass)).toEqual([
       "IDENTITY",
+      "IDENTITY",
       "FRESH_EVENTS",
       "CAREERS",
       "DISTRIBUTION_FOOTPRINT",
       "IDENTITY",
       "FRESH_EVENTS"
     ]);
-    expect(rows.slice(0, 4).every((row) => row.query.includes("Example Retailer"))).toBe(true);
+    expect(rows.slice(0, 5).every((row) => row.query.includes("Example Retailer"))).toBe(true);
+    expect(rows[1].query).toContain('"bill of lading"');
     expect(rows.some((row) => row.query.includes("site:example.com"))).toBe(true);
   });
 
@@ -762,9 +851,9 @@ describe("Hunter company deep research", () => {
     };
 
     expect(result).toMatchObject({
-      queryCount: 6,
+      queryCount: 7,
       evidenceCount: 24,
-      queryEvidenceCounts: [4, 4, 4, 4, 4, 4]
+      queryEvidenceCounts: [4, 4, 4, 3, 3, 3, 3]
     });
     expect(result.target).toEqual([
       expect.objectContaining({
@@ -904,6 +993,41 @@ describe("Hunter company deep research", () => {
         excerpt: expect.stringContaining("Charlotte")
       })
     );
+  });
+
+  it("retrieves and preserves exact-address public trade identity corroboration", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'EXAMPLE CANDLE IMPORTS INC','companyKey':'example-candle-imports-inc','domain':None}",
+      "government={'pass':'IDENTITY','query':'registration','title':'Example Candle Imports Inc registration','url':'https://registry.example.gov/business/example-candle-imports','sourceDomain':'registry.example.gov','sourceType':'GOVERNMENT','publishedAt':None,'excerpt':'Example Candle Imports Inc is registered at 8123 Example Avenue, Raleigh, North Carolina.','firstParty':False}",
+      "trade={'pass':'IDENTITY','query':'import records','title':'Example Candle Imports Inc import profile','url':'https://trade.example.org/importers/example-candle-imports','sourceDomain':'trade.example.org','sourceType':'OTHER','publishedAt':None,'excerpt':'Example Candle Imports Inc at 8123 Example Ave, Raleigh, North Carolina recorded 15 import shipments for candles and diffusers.','firstParty':False}",
+      "footprint={'pass':'DISTRIBUTION_FOOTPRINT','query':'locations','title':'Example Candle Imports Inc product activity','url':'https://market.example.net/example-candle-imports','sourceDomain':'market.example.net','sourceType':'OTHER','publishedAt':None,'excerpt':'The importer handles candles and diffusers.','firstParty':False}",
+      "synthesis={'identityDisposition':'AMBIGUOUS','identityConfidence':45,'identityReason':'Registration alone does not prove operations.','confidence':55,'freshness':'CURRENT','triggerEvidenceIndices':[2],'opportunitySummary':'Current import activity.','signalType':'OTHER','missingEvidence':[],'rationale':'Identity remains blocked.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
+      "complete=[government,trade,footprint]",
+      "partial=[government,{**trade,'excerpt':'Example Candle Imports Inc at 4900 Different Road recorded 15 import shipments.'},footprint]",
+      "missing=[government,footprint]",
+      "normalized=r.normalize_synthesis_for_evidence(candidate,complete,synthesis)",
+      "queries=[row['query'] for row in r.build_research_queries(candidate)]",
+      "print(json.dumps({'tradeQuery':any('bill of lading' in query and 'shipments' in query for query in queries),'indices':r.corroborating_public_trade_identity_indices(candidate,complete),'preferred':r.preferred_model_evidence_indices(candidate,complete,synthesis),'identityDisposition':normalized['identityDisposition'],'identityConfidence':normalized['identityConfidence'],'partial':r.has_corroborating_public_trade_identity(candidate,partial),'missing':r.has_corroborating_public_trade_identity(candidate,missing)}))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual({
+      tradeQuery: true,
+      indices: [0, 1],
+      preferred: [0, 1, 2],
+      identityDisposition: "PASS",
+      identityConfidence: 70,
+      partial: false,
+      missing: false
+    });
   });
 
   it("normalizes undated fresh claims and corroborated first-party identities before Kimi scoring", async () => {
@@ -1436,7 +1560,7 @@ function completion() {
       synthesis: {
         provider: "OLLAMA",
         name: "qwen3.5:35b",
-        promptVersion: "hunter-company-research-v15",
+        promptVersion: "hunter-company-research-v16",
         structuredOutput: true,
         inputTokens: 2000,
         outputTokens: 700,
@@ -1445,7 +1569,7 @@ function completion() {
       scoring: {
         provider: "KIMI",
         name: "kimi-k2.6",
-        promptVersion: "hunter-company-research-v15",
+        promptVersion: "hunter-company-research-v16",
         structuredOutput: true,
         inputTokens: 1800,
         cachedInputTokens: 200,
@@ -1456,7 +1580,7 @@ function completion() {
       validation: {
         provider: "KIMI",
         name: "kimi-k3",
-        promptVersion: "hunter-company-research-v15",
+        promptVersion: "hunter-company-research-v16",
         structuredOutput: true,
         status: "SUCCESS",
         reasoningEffort: "LOW",
