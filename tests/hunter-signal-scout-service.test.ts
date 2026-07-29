@@ -148,6 +148,7 @@ function completion() {
       fetchedAt: "2026-07-28T12:00:00.000Z",
       rawResultCount: 2,
       duplicateUrlCount: 1,
+      filteredNonEventCount: 0,
       selectedArticleCount: 1,
       queries: [
         {

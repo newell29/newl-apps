@@ -155,15 +155,16 @@ Regression coverage must prove:
 3. every accepted source URL is HTTPS and every relevant result has an explicit company;
 4. approved topics and geographies rotate across local dates, preserve the 60/30/10 service mix, store query fingerprints,
    suppress canonical source URLs for 180 days, and group repeat monthly company events without suppressing a later event;
-5. model and prompt version, source provider/lens, confidence, rationale, raw/duplicate/selected coverage metrics, and evidence remain auditable;
-6. invalid enums, oversized batches, missing fields, omitted source rows, and confidence below 50 fail closed;
-7. Brave 429/5xx responses receive bounded retry, the RSS fallback remains available, and total source failure makes the run fail visibly;
-8. accepted news creates or reuses a tenant-scoped provisional company without TradeMining, and the next company-research
+5. obvious directories and warehouse/provider roundups are filtered before Qwen, and model instructions reject one-off pop-ups plus unsupported service-line inference;
+6. model and prompt version, source provider/lens, confidence, rationale, raw/filtered/duplicate/selected coverage metrics, and evidence remain auditable;
+7. invalid enums, oversized batches, missing fields, omitted source rows, and confidence below 50 fail closed;
+8. Brave 429/5xx responses receive bounded retry, the RSS fallback remains available, and total source failure makes the run fail visibly;
+9. accepted news creates or reuses a tenant-scoped provisional company without TradeMining, and the next company-research
    cohort reserves bounded capacity for external-signal companies;
-9. the live runner allows only loopback Ollama endpoints and reads its model settings from the protected Hunter environment;
-10. the installed Hunter service remains pinned to the dedicated clean runtime checkout;
-11. no scout module or route imports or calls Apollo, cadence enrollment, email, LinkedIn, or customer-communication code; and
-12. Python, zsh, TypeScript, and structured-output contract tests pass without a database migration.
+10. the live runner allows only loopback Ollama endpoints and reads its model settings from the protected Hunter environment;
+11. the installed Hunter service remains pinned to the dedicated clean runtime checkout;
+12. no scout module or route imports or calls Apollo, cadence enrollment, email, LinkedIn, or customer-communication code; and
+13. Python, zsh, TypeScript, and structured-output contract tests pass without a database migration.
 
 ## Hunter company deep research
 

@@ -16,7 +16,7 @@ import {
 import { prisma } from "@/server/db";
 
 export const HUNTER_SIGNAL_SCOUT_JOB_TYPE = "HUNTER_EXTERNAL_SIGNAL_SCOUT";
-export const HUNTER_SIGNAL_SCOUT_PROMPT_VERSION = "hunter-signal-classifier-v2";
+export const HUNTER_SIGNAL_SCOUT_PROMPT_VERSION = "hunter-signal-classifier-v3";
 export const HUNTER_SIGNAL_SCOUT_DEFAULT_MODEL = "qwen3:30b-instruct";
 const ACTIVE_RUN_WINDOW_MS = 2 * 60 * 60 * 1000;
 const MAX_COMPLETION_CANDIDATES = 100;
@@ -213,6 +213,7 @@ export type HunterSignalScoutCompletion = {
     fetchedAt: string;
     rawResultCount: number;
     duplicateUrlCount: number;
+    filteredNonEventCount: number;
     selectedArticleCount: number;
     queries: Array<{
       id: string;
@@ -581,6 +582,7 @@ export async function completeHunterSignalScoutRun({
           duplicateEventCount,
           rawResultCount: completion.discovery.rawResultCount,
           duplicateUrlCount: completion.discovery.duplicateUrlCount,
+          filteredNonEventCount: completion.discovery.filteredNonEventCount,
           selectedArticleCount: completion.discovery.selectedArticleCount,
           savedSignalIds,
           rejectedSample: rejected.slice(0, 20).map((candidate) => ({
@@ -627,6 +629,7 @@ export async function completeHunterSignalScoutRun({
     duplicateEventCount,
     rawResultCount: completion.discovery.rawResultCount,
     duplicateUrlCount: completion.discovery.duplicateUrlCount,
+    filteredNonEventCount: completion.discovery.filteredNonEventCount,
     selectedArticleCount: completion.discovery.selectedArticleCount
   };
 }
@@ -704,6 +707,12 @@ export function parseHunterSignalScoutCompletion(value: unknown): HunterSignalSc
         0,
         10_000,
         "completion.discovery.duplicateUrlCount"
+      ),
+      filteredNonEventCount: integer(
+        discovery.filteredNonEventCount,
+        0,
+        10_000,
+        "completion.discovery.filteredNonEventCount"
       ),
       selectedArticleCount: integer(
         discovery.selectedArticleCount,

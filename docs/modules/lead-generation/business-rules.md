@@ -77,6 +77,8 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - Approved topics and geographies rotate deterministically by local date. Exact query fingerprints are stored in the
   job input, canonical source URLs are suppressed for 180 days, and same-company/signal/geography coverage within
   one publication month is grouped as one event with bounded corroborating sources.
+- Obvious directories, rankings, and warehouse/provider roundup titles are deterministically removed before Qwen.
+  The classifier must also reject one-off pop-ups and service-line assignments without explicit supporting evidence.
 - A source outage cannot become a false successful zero-result run. If every configured query transport fails, the job is `ERROR`.
 - Model output is advisory evidence. Deterministic validation controls enums, HTTPS URLs, dates, field sizes, source mapping, dedupe, tenant scope, and the minimum confidence gate.
 - `relevant=true` requires an explicit company and confidence of at least 50. The tenant's `minimumSignalConfidence` remains the final activation threshold.

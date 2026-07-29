@@ -21,7 +21,7 @@ from hunter_ingest import api_request, clean, required_env
 
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_MODEL = "qwen3:30b-instruct"
-PROMPT_VERSION = "hunter-signal-classifier-v2"
+PROMPT_VERSION = "hunter-signal-classifier-v3"
 ALLOWED_SIGNAL_TYPES = {
     "EXPANSION",
     "FACILITY_OPENING",
@@ -344,6 +344,22 @@ def canonical_url(value: str) -> str:
     )
 
 
+def is_obvious_non_event_article(article: dict[str, Any]) -> bool:
+    title = (clean(article.get("articleTitle")) or "").lower()
+    return bool(
+        re.search(
+            r"^(?:the\s+)?(?:top\s+\d+|best|largest)\s+(?:warehouses?|distribution centers?|"
+            r"fulfillment centers?|logistics companies|warehousing companies|providers)\b",
+            title,
+        )
+        or re.search(
+            r"\b(?:warehousing|logistics|distribution)\s+companies\s+in\b.*\breviews?\b",
+            title,
+        )
+        or re.search(r"\b(?:directory|list)\s+of\s+(?:warehouses?|companies|providers)\b", title)
+    )
+
+
 def collect_articles(
     packet: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
@@ -393,6 +409,7 @@ def collect_articles(
     query_results: list[dict[str, Any]] = []
     raw_result_count = 0
     duplicate_url_count = 0
+    filtered_non_event_count = 0
     if brave_endpoint != "https://api.search.brave.com/res/v1/web/search":
         raise RuntimeError("Hunter signal scout received an unsupported Brave endpoint.")
     if google_news_endpoint != "https://news.google.com/rss/search":
@@ -439,6 +456,9 @@ def collect_articles(
             )
             found = fallback
         for article in found:
+            if is_obvious_non_event_article(article):
+                filtered_non_event_count += 1
+                continue
             key = canonical_url(str(article["sourceUrl"]))
             if key in seen:
                 duplicate_url_count += 1
@@ -460,6 +480,7 @@ def collect_articles(
         {
             "rawResultCount": raw_result_count,
             "duplicateUrlCount": duplicate_url_count,
+            "filteredNonEventCount": filtered_non_event_count,
             "selectedArticleCount": len(articles),
         },
     )
@@ -486,7 +507,14 @@ def ollama_request(base_url: str, model: str, articles: list[dict[str, Any]]) ->
         "to create near-term warehousing, international ocean/air, or trucking demand. Reject generic market "
         "commentary, government announcements without a target company, logistics providers/carriers/3PLs, "
         "job ads without a material expansion signal, stock-price stories, and articles where the prospect "
-        "company is ambiguous. Never invent a company, geography, event, quantity, or supporting fact. "
+        "company is ambiguous. Also reject listicles, rankings, directories, facility histories, or roundups "
+        "that do not announce a new company event. Reject one-off pop-ups, cafés, restaurants, entertainment "
+        "activations, and individual store openings unless the result explicitly describes a multi-site rollout "
+        "or a material distribution, production, sourcing, or import change. WAREHOUSING requires an explicit "
+        "facility, fulfillment, capacity, production, or multi-site distribution event. OCEAN_AIR requires an "
+        "explicit cross-border market entry, importing/exporting, international sourcing, manufacturing, or "
+        "distribution event. TRUCKING requires an explicit regional delivery, distribution-network, production, "
+        "capacity, or multi-site replenishment event. Never invent a company, geography, event, quantity, or supporting fact. "
         "Confidence measures evidence quality, not enthusiasm. Use the service hint only as a clue."
         " Confidence rubric: 90-100 means the headline explicitly names the prospect, concrete event, "
         "and geography; 70-89 means the prospect and event are explicit but one useful detail is missing; "

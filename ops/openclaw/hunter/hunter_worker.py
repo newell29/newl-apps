@@ -385,6 +385,7 @@ def build_signal_scout_message(result: dict[str, Any]) -> str:
     selected = int(result.get("selectedArticleCount") or 0)
     accepted = int(result.get("acceptedCount") or 0)
     promoted = int(result.get("promotedCompanyCount") or 0)
+    filtered = int(result.get("filteredNonEventCount") or 0)
     duplicates = int(result.get("duplicateUrlCount") or 0) + int(
         result.get("duplicateEventCount") or 0
     )
@@ -392,7 +393,7 @@ def build_signal_scout_message(result: dict[str, Any]) -> str:
         "Hunter external opportunity scout completed: "
         f"{selected} new Brave results reached Qwen, {accepted} signals passed first review, "
         f"{promoted} new companies were queued for full Qwen/Kimi research, and "
-        f"{duplicates} repeat URLs or events were suppressed. "
+        f"{filtered} obvious non-event results plus {duplicates} repeat URLs or events were suppressed. "
         "No Apollo search or outreach was performed by the scout."
     )
 

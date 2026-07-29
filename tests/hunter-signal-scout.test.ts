@@ -22,7 +22,7 @@ const runnerPath = path.join(repoRoot, "ops/openclaw/run-hunter-worker.sh");
 describe("Hunter external signal scout", () => {
   it("uses the installed local instruct model and retains all external-write gates", () => {
     expect(HUNTER_SIGNAL_SCOUT_DEFAULT_MODEL).toBe("qwen3:30b-instruct");
-    expect(HUNTER_SIGNAL_SCOUT_PROMPT_VERSION).toBe("hunter-signal-classifier-v2");
+    expect(HUNTER_SIGNAL_SCOUT_PROMPT_VERSION).toBe("hunter-signal-classifier-v3");
     expect(HUNTER_SIGNAL_SCOUT_SAFETY).toEqual({
       externalWrites: false,
       apollo: false,
@@ -37,7 +37,7 @@ describe("Hunter external signal scout", () => {
     expect(parsed.model).toEqual({
       provider: "OLLAMA",
       name: "qwen3:30b-instruct",
-      promptVersion: "hunter-signal-classifier-v2",
+      promptVersion: "hunter-signal-classifier-v3",
       structuredOutput: true
     });
     expect(parsed.candidates[0]).toMatchObject({
@@ -80,6 +80,9 @@ describe("Hunter external signal scout", () => {
     expect(scout).toContain('"WAREHOUSING": 24');
     expect(scout).toContain('"OCEAN_AIR": 12');
     expect(scout).toContain('"TRUCKING": 4');
+    expect(scout).toContain("Also reject listicles, rankings, directories");
+    expect(scout).toContain("Reject one-off pop-ups");
+    expect(scout).toContain("OCEAN_AIR requires an");
     expect(scout).not.toContain("api.apollo.io");
     expect(runner).toContain("HUNTER_CLASSIFICATION_MODEL");
     expect(runner).toContain("HUNTER_OLLAMA_BASE_URL");
@@ -119,6 +122,24 @@ describe("Hunter external signal scout", () => {
       OCEAN_AIR: 12,
       TRUCKING: 4
     });
+  });
+
+  it("filters obvious directories and warehouse roundups before Qwen", async () => {
+    const program = [
+      "import json",
+      "import hunter_signal_scout as s",
+      "titles=['Largest Warehouses in North America','Warehousing Companies in Toronto - 2026 Reviews','Company opens largest distribution center in Ontario']",
+      "print(json.dumps([s.is_obvious_non_event_article({'articleTitle':title}) for title in titles]))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-signal-scout-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual([true, true, false]);
   });
 
   it("rotates approved topic and geography queries instead of repeating the same set daily", () => {
@@ -167,7 +188,7 @@ function completion() {
     model: {
       provider: "OLLAMA",
       name: "qwen3:30b-instruct",
-      promptVersion: "hunter-signal-classifier-v2",
+      promptVersion: "hunter-signal-classifier-v3",
       structuredOutput: true
     },
     discovery: {
@@ -176,6 +197,7 @@ function completion() {
       fetchedAt: "2026-07-25T14:00:00.000Z",
       rawResultCount: 1,
       duplicateUrlCount: 0,
+      filteredNonEventCount: 0,
       selectedArticleCount: 1,
       queries: [{ id: "retail-rollout", provider: "BRAVE_WEB", resultCount: 1, error: null }]
     },
