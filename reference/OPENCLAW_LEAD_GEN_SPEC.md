@@ -329,7 +329,10 @@ Company search:
 - Scores by token name similarity, domain presence, organization ID presence, logistics-provider penalty, and branch/location penalty.
 - Classifies matches as `direct_company`, `match_quality_review`, `logistics_provider`, or `no_match`.
 - Non-direct results enter the Newl Apps Apollo Match Review queue and are protected from repeat bulk searches.
-- A rep-provided Apollo company URL is validated through the exact organization endpoint, audited, and reused as `organization_ids` for scoped people search.
+- A rep-provided Apollo company URL is validated through the exact organization endpoint, audited, and reused as
+  `organization_ids` for scoped people search. Explicit reviewer confirmation is authoritative over weak automated
+  name similarity for facility, legal-entity, regional-brand, and canonical-parent differences; invalid Apollo
+  organizations and logistics providers remain blocked.
 
 People search:
 

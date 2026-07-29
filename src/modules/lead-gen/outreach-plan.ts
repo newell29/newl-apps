@@ -1,10 +1,13 @@
 import { createHash } from "node:crypto";
 import {
+  ContactStatus,
   HunterServiceLine,
   OutreachChannel,
   OutreachPlanStatus,
   OutreachQaStatus,
-  Prisma
+  Prisma,
+  ReplyStatus,
+  SequenceStatus
 } from "@prisma/client";
 
 export const OUTREACH_PLAN_PROMPT_VERSION = "outreach-plan-v2.5";
@@ -100,6 +103,11 @@ export type ModelOutreachQaResult = {
   issues: OutreachQaIssue[];
 };
 
+export type OutreachQaRepairDisposition =
+  | "AUTOMATIC"
+  | "MODEL_REGENERATION"
+  | "HUMAN_REVIEW";
+
 const BANNED_PHRASES = [
   "i hope this email finds you well",
   "reaching out because",
@@ -124,6 +132,162 @@ export function fingerprintOutreachEvidence(evidence: OutreachEvidenceRecord[]) 
     .sort((left, right) => left.id.localeCompare(right.id));
 
   return createHash("sha256").update(JSON.stringify(stablePayload)).digest("hex");
+}
+
+export function repairOutreachSequenceDeterministically({
+  evidence,
+  sequence
+}: {
+  evidence: OutreachEvidenceRecord[];
+  sequence: GeneratedOutreachSequence;
+}) {
+  const normalizedEvidenceIds = new Map<string, string | null>();
+  for (const record of evidence) {
+    const normalized = normalizeEvidenceId(record.id);
+    normalizedEvidenceIds.set(
+      normalized,
+      normalizedEvidenceIds.has(normalized) ? null : record.id
+    );
+  }
+
+  const repairs: string[] = [];
+  const repairRefs = (refs: string[], location: string) =>
+    refs.map((ref) => {
+      const exactEvidenceId = normalizedEvidenceIds.get(normalizeEvidenceId(ref));
+      if (!exactEvidenceId || exactEvidenceId === ref) return ref;
+      repairs.push(`${location}: corrected evidence reference "${ref}" to "${exactEvidenceId}".`);
+      return exactEvidenceId;
+    });
+
+  const repairedSteps = sequence.steps.map((step) => {
+    const subject = step.subject
+      ? stripEvidenceLedgerAnnotations(step.subject, evidence, repairs, `Step ${step.stepNumber} subject`)
+      : null;
+    const body = stripEvidenceLedgerAnnotations(
+      step.body,
+      evidence,
+      repairs,
+      `Step ${step.stepNumber} body`
+    );
+    return {
+      ...step,
+      subject,
+      body,
+      evidenceRefs: repairRefs(step.evidenceRefs, `Step ${step.stepNumber}`)
+    };
+  });
+
+  return {
+    changed: repairs.length > 0,
+    repairs,
+    sequence: {
+      ...sequence,
+      steps: repairedSteps
+    }
+  };
+}
+
+export function classifyOutreachQaIssues(
+  issues: OutreachQaIssue[],
+  evidence: OutreachEvidenceRecord[] = [],
+  sequence?: GeneratedOutreachSequence
+): OutreachQaRepairDisposition {
+  const errorCodes = new Set(
+    issues.filter((issue) => issue.severity === "ERROR").map((issue) => issue.code)
+  );
+  if (errorCodes.size === 0) return "AUTOMATIC";
+
+  const humanReviewCodes = new Set([
+    "MISSING_EVIDENCE",
+    "MODEL_QA_UNAVAILABLE",
+    "SENDER_IDENTITY_MISSING",
+    "SENDER_SIGNATURE",
+    "SENDER_PLACEHOLDER"
+  ]);
+  if ([...errorCodes].some((code) => humanReviewCodes.has(code))) {
+    return "HUMAN_REVIEW";
+  }
+
+  const unknownEvidenceIssues = issues.filter(
+    (issue) => issue.severity === "ERROR" && issue.code === "UNKNOWN_EVIDENCE_REF"
+  );
+  const unknownEvidenceIsRepairable = unknownEvidenceIssues.every((issue) => {
+      const malformedId = issue.message.match(/"([^"]+)"/)?.[1];
+      if (!malformedId) return false;
+      const normalized = normalizeEvidenceId(malformedId);
+      return evidence.some(
+        (record) => normalizeEvidenceId(record.id) === normalized
+      );
+    });
+  if (unknownEvidenceIssues.length > 0 && !unknownEvidenceIsRepairable) {
+    return "HUMAN_REVIEW";
+  }
+
+  const automaticCodes = new Set(["INTERNAL_REFERENCE", "UNKNOWN_EVIDENCE_REF"]);
+  if ([...errorCodes].every((code) => automaticCodes.has(code))) {
+    if (!sequence || evidence.length === 0 || !unknownEvidenceIsRepairable) {
+      return "MODEL_REGENERATION";
+    }
+    const repaired = repairOutreachSequenceDeterministically({
+      evidence,
+      sequence
+    });
+    const internalReferenceSteps = new Set(
+      issues
+        .filter((issue) => issue.code === "INTERNAL_REFERENCE")
+        .map((issue) => issue.stepNumber)
+    );
+    const internalReferencesRemoved = repaired.sequence.steps
+      .filter(
+        (step) =>
+          internalReferenceSteps.has(step.stepNumber) ||
+          internalReferenceSteps.has(null)
+      )
+      .every((step) => {
+        const copy = `${step.subject ?? ""}\n${step.body}`;
+        return !/\bhunter\b/i.test(copy) &&
+          !containsEvidenceLedgerId(copy, evidence);
+      });
+    if (repaired.changed && internalReferencesRemoved) {
+      return "AUTOMATIC";
+    }
+  }
+
+  return "MODEL_REGENERATION";
+}
+
+export function getOutreachRegenerationBlockReason({
+  planStatus,
+  contactStatus,
+  replyStatus,
+  sequenceStatus
+}: {
+  planStatus: OutreachPlanStatus | null;
+  contactStatus: ContactStatus;
+  replyStatus: ReplyStatus;
+  sequenceStatus: SequenceStatus;
+}) {
+  if (planStatus === OutreachPlanStatus.APPROVED) {
+    return "Approved outreach plans cannot be regenerated.";
+  }
+  if (
+    contactStatus === ContactStatus.REJECTED ||
+    contactStatus === ContactStatus.DO_NOT_CONTACT
+  ) {
+    return "Rejected and do-not-contact records cannot be regenerated.";
+  }
+  if (replyStatus !== ReplyStatus.NO_REPLY) {
+    return "Contacts with a recorded reply cannot be regenerated.";
+  }
+  if (
+    sequenceStatus === SequenceStatus.ENROLLED ||
+    sequenceStatus === SequenceStatus.PAUSED ||
+    sequenceStatus === SequenceStatus.REPLIED ||
+    sequenceStatus === SequenceStatus.BOUNCED
+  ) {
+    return "Contacts with active, paused, replied, or bounced outreach cannot be regenerated.";
+  }
+  return null;
 }
 
 export function runDeterministicOutreachQa({
@@ -295,9 +459,7 @@ export function runDeterministicOutreachQa({
 
     if (
       /\bhunter\b/i.test(combinedCopy) ||
-      /\b(?:hunter-research|hunter-decision|trademining:summary|company:identity)\b/i.test(
-        combinedCopy
-      )
+      containsEvidenceLedgerId(combinedCopy, evidence)
     ) {
       issues.push({
         code: "INTERNAL_REFERENCE",
@@ -372,6 +534,55 @@ export function runDeterministicOutreachQa({
     passed: !issues.some((issue) => issue.severity === "ERROR"),
     issues
   };
+}
+
+function normalizeEvidenceId(value: string) {
+  return value.replace(/\s+/g, "").toLowerCase();
+}
+
+function buildWhitespaceTolerantEvidenceIdPattern(id: string) {
+  return id
+    .split("")
+    .map((character) => character.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("[\\t ]*");
+}
+
+function containsEvidenceLedgerId(
+  value: string,
+  evidence: OutreachEvidenceRecord[]
+) {
+  return evidence.some((record) =>
+    new RegExp(buildWhitespaceTolerantEvidenceIdPattern(record.id), "i").test(value)
+  );
+}
+
+function stripEvidenceLedgerAnnotations(
+  value: string,
+  evidence: OutreachEvidenceRecord[],
+  repairs: string[],
+  location: string
+) {
+  let repaired = value;
+  for (const record of evidence) {
+    const idPattern = buildWhitespaceTolerantEvidenceIdPattern(record.id);
+    const annotationPattern = new RegExp(
+      String.raw`(?:\b(?:evidence|source|ref(?:erence)?)\s*[:#-]?[ \t]*)?[\[({<]?[ \t]*${idPattern}[ \t]*[\])}>]?`,
+      "gi"
+    );
+    const next = repaired.replace(annotationPattern, "");
+    if (next !== repaired) {
+      repairs.push(`${location}: removed internal evidence annotation "${record.id}".`);
+      repaired = next;
+    }
+  }
+  return repaired
+    .replace(/[ \t]+([,.;:!?])/g, "$1")
+    .replace(/([([{<])\s*([)\]}>])/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 export function mergeOutreachQaResults(

@@ -881,11 +881,13 @@ export function parseApolloOrganizationId(value: string) {
 export async function fetchApolloOrganizationForMapping({
   companyName,
   apolloOrganizationId,
-  resourceType = "ORGANIZATION"
+  resourceType = "ORGANIZATION",
+  reviewerConfirmed = false
 }: {
   companyName: string;
   apolloOrganizationId: string;
   resourceType?: ApolloCompanyReference["resourceType"];
+  reviewerConfirmed?: boolean;
 }): Promise<ApolloOrganizationMappingResult> {
   const apiKey = readApolloMasterApiKey();
   let canonicalOrganizationId = apolloOrganizationId;
@@ -962,7 +964,30 @@ export async function fetchApolloOrganizationForMapping({
     };
   }
 
+  if (
+    scored.classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY &&
+    reviewerConfirmed &&
+    !scored.logisticsProviderMatch
+  ) {
+    scored = {
+      ...scored,
+      classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
+      matchReason:
+        `direct company; authenticated reviewer explicitly confirmed Apollo URL mapping from ` +
+        `"${companyName}" to "${candidate.name}" despite weak automated name similarity`,
+      query: {
+        ...scored.query,
+        reviewer_confirmed_name_override: true
+      }
+    };
+  }
+
   if (scored.classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY) {
+    if (scored.logisticsProviderMatch) {
+      throw new Error(
+        `Apollo URL resolved to logistics provider "${candidate.name}". Provider safety cannot be overridden by company-name confirmation.`
+      );
+    }
     throw new Error(
       `Apollo URL resolved to "${candidate.name}", but it is not a strong enough match for "${companyName}".`
     );

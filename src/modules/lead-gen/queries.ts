@@ -37,7 +37,10 @@ import {
   requiresApolloMatchReview
 } from "@/modules/lead-gen/apollo-contact-discovery-review";
 import {
+  classifyOutreachQaIssues,
+  getOutreachRegenerationBlockReason,
   isCurrentOutreachDraft,
+  type OutreachEvidenceRecord,
   VISIBLE_OUTREACH_PLAN_VERSION_WHERE
 } from "@/modules/lead-gen/outreach-plan";
 import {
@@ -1441,6 +1444,26 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
       contact.sequenceStatus !== SequenceStatus.ENROLLED
         ? "PUSH_BLOCKED"
         : contact.sequenceStatus;
+    const outreachQaIssues = outreachPlan
+      ? readOutreachQaIssues(outreachPlan.qaIssues)
+      : [];
+    const outreachEvidence = outreachPlan
+      ? readOutreachEvidence(outreachPlan.evidence)
+      : [];
+    const outreachSequence = outreachPlan
+      ? {
+          sequenceName: outreachPlan.sequenceName,
+          steps: outreachPlan.steps.map((step) => ({
+            stepNumber: step.stepNumber,
+            channel: step.channel,
+            delayDays: step.delayDays,
+            subject: step.subject,
+            body: step.body,
+            angle: step.angle,
+            evidenceRefs: asStringArray(step.evidenceRefs)
+          }))
+        }
+      : undefined;
 
     return {
       id: contact.id,
@@ -1520,8 +1543,19 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
             callToAction: outreachPlan.callToAction,
             senderRecommendation: outreachPlan.senderRecommendation,
             confidence: outreachPlan.confidence,
-            qaIssues: readOutreachQaIssues(outreachPlan.qaIssues),
-            evidence: readOutreachEvidence(outreachPlan.evidence),
+            qaIssues: outreachQaIssues,
+            qaRepairDisposition: classifyOutreachQaIssues(
+              outreachQaIssues,
+              outreachEvidence,
+              outreachSequence
+            ),
+            regenerationBlockReason: getOutreachRegenerationBlockReason({
+              planStatus: outreachPlan.status,
+              contactStatus: contact.contactStatus,
+              replyStatus: contact.replyStatus,
+              sequenceStatus: contact.sequenceStatus
+            }),
+            evidence: outreachEvidence,
             models: {
               strategy: outreachPlan.strategyModel,
               drafting: outreachPlan.draftingModel,
@@ -1748,19 +1782,31 @@ function readOutreachQaIssues(value: unknown) {
   });
 }
 
-function readOutreachEvidence(value: unknown) {
+function readOutreachEvidence(value: unknown): OutreachEvidenceRecord[] {
   if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
+  return value.flatMap((item): OutreachEvidenceRecord[] => {
     if (!item || typeof item !== "object" || Array.isArray(item)) return [];
     const record = item as Record<string, unknown>;
     const id = typeof record.id === "string" ? record.id : null;
+    const kind =
+      typeof record.kind === "string" &&
+      [
+        "TRADEMINING",
+        "HUNTER_RESEARCH",
+        "HUNTER_SIGNAL",
+        "HUNTER_DECISION",
+        "COMPANY",
+        "NEWL_CAPABILITY"
+      ].includes(record.kind)
+        ? record.kind as OutreachEvidenceRecord["kind"]
+        : null;
     const title = typeof record.title === "string" ? record.title : null;
     const summary = typeof record.summary === "string" ? record.summary : null;
-    if (!id || !title || !summary) return [];
+    if (!id || !kind || !title || !summary) return [];
     return [
       {
         id,
-        kind: typeof record.kind === "string" ? record.kind : "UNKNOWN",
+        kind,
         title,
         summary,
         sourceUrl: typeof record.sourceUrl === "string" ? record.sourceUrl : null,

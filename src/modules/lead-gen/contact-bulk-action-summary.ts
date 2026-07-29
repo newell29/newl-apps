@@ -2,13 +2,13 @@ export type ContactBulkActionDetail = {
   contactId: string;
   contactName: string;
   companyName: string;
-  outcome: "approved" | "enrolled" | "skipped" | "failed";
+  outcome: "approved" | "enrolled" | "repaired" | "regenerated" | "skipped" | "failed";
   reason: string | null;
 };
 
 export type ContactBulkActionSummary = {
   status: "idle" | "success" | "error";
-  operation: "sequence" | "approve" | "remove" | "apollo_push" | "apollo_sync" | null;
+  operation: "sequence" | "approve" | "qa_repair" | "remove" | "apollo_push" | "apollo_sync" | null;
   message: string;
   completedAt: string | null;
   jobRunId: string | null;

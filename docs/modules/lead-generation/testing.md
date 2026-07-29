@@ -135,6 +135,15 @@ Scoring regression coverage must also verify:
     with a concrete usable email and current Hunter eligibility, leaves blocked selections unchanged with a reason,
     assigns an unassigned accepted contact to the approver, and creates one bounded Apollo enrollment job for the
     accepted contact IDs.
+28. Outreach QA repairs normalize whitespace-only corruption of a saved evidence ID, strip any exact ledger ID from
+    customer-visible copy, preserve line breaks and mailbox signatures, and rerun deterministic QA without a second
+    draft-model call. Unsupported semantic claims still receive at most one model regeneration.
+29. Regeneration remains allowed for an unapproved contact whose prior cadence is `FINISHED`, but replies, bounces,
+    rejection, do-not-contact, approval, and active or paused outreach remain hard stops.
+30. Needs Attention and Active Cadences exclude null, masked, and syntactically invalid email values without deleting
+    the underlying tenant-owned contact.
+31. A mapped-company employee recheck returns its result to Apollo Exceptions, exposes paid email-only enrichment as
+    a separate explicit checkbox, and links to Outreach only when at least one actionable plan exists.
 
 The `20260722193000_add_lead_scoring_history` migration must remain additive: it may create the two history tables, indexes, and foreign keys, but must not drop, rename, truncate, update, or backfill existing tables.
 The `20260722201500_link_lead_outcomes_to_scores` migration may only add the nullable snapshot foreign key; it must not rewrite existing outcomes.
@@ -291,6 +300,10 @@ Regression coverage must prove:
     unapproved plans for contacts that still lack a concrete email are archived and cannot remain in Outreach Queue.
 23. a later saved-contact page can surface a role such as YAT's import/export specialist, and a manually confirmed
     Pratt Rock Hill Apollo account may resolve to Pratt Industries only through its explicit account relationship.
+24. an authenticated reviewer can explicitly confirm weak facility/parent or legal/brand name differences such as
+    Roechling Industrial Gastonia to Roechling Industrial North America and Kimbrells Furniture Distributors to
+    Kimbrell's Home Furnishings; the manual override is audited, while unconfirmed weak matches and logistics
+    providers remain blocked.
 
 ## Outreach Plans and grounded sequence generation
 

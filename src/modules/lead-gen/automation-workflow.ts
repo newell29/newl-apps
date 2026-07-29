@@ -67,12 +67,16 @@ export function resolveSalesOpportunityStage(input: {
 }
 
 export function isOutreachQueueContact(contact: {
+  email: string | null;
   contactStatus: ContactStatus;
   sequenceStatus: SequenceStatus;
   replyStatus: ReplyStatus;
   draft: unknown | null;
   outreachPlan?: unknown | null;
 }) {
+  if (!hasActionableEmail(contact.email)) {
+    return false;
+  }
   if (isTerminalOrUnsafeOutreachContact(contact)) {
     return false;
   }
@@ -96,13 +100,22 @@ export function isOutreachQueueContact(contact: {
 }
 
 export function isActiveCadenceContact(contact: {
+  email: string | null;
   contactStatus: ContactStatus;
   sequenceStatus: SequenceStatus;
   replyStatus: ReplyStatus;
 }) {
   return (
+    hasActionableEmail(contact.email) &&
     !isTerminalOrUnsafeOutreachContact(contact) &&
     contact.sequenceStatus === SequenceStatus.ENROLLED
+  );
+}
+
+export function hasActionableEmail(email: string | null) {
+  return Boolean(
+    email?.trim() &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
   );
 }
 

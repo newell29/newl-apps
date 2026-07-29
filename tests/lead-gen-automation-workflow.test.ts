@@ -53,6 +53,7 @@ describe("automated sales workflow", () => {
   it("shows contacts that have actionable outreach work", () => {
     expect(
       isOutreachQueueContact({
+        email: "buyer@example.com",
         contactStatus: ContactStatus.APPROVED,
         sequenceStatus: SequenceStatus.NOT_STARTED,
         replyStatus: ReplyStatus.NO_REPLY,
@@ -61,6 +62,7 @@ describe("automated sales workflow", () => {
     ).toBe(true);
     expect(
       isOutreachQueueContact({
+        email: "buyer@example.com",
         contactStatus: ContactStatus.REVIEWING,
         sequenceStatus: SequenceStatus.FINISHED,
         replyStatus: ReplyStatus.NO_REPLY,
@@ -70,6 +72,7 @@ describe("automated sales workflow", () => {
     ).toBe(true);
     expect(
       isOutreachQueueContact({
+        email: "buyer@example.com",
         contactStatus: ContactStatus.REVIEWING,
         sequenceStatus: SequenceStatus.NOT_STARTED,
         replyStatus: ReplyStatus.NO_REPLY,
@@ -79,6 +82,7 @@ describe("automated sales workflow", () => {
     ).toBe(true);
     expect(
       isOutreachQueueContact({
+        email: "buyer@example.com",
         contactStatus: ContactStatus.NEW,
         sequenceStatus: SequenceStatus.NOT_STARTED,
         replyStatus: ReplyStatus.NO_REPLY,
@@ -89,6 +93,7 @@ describe("automated sales workflow", () => {
 
   it("moves enrolled contacts from Needs Attention to Active Cadences", () => {
     const enrolled = {
+      email: "buyer@example.com",
       contactStatus: ContactStatus.APPROVED,
       sequenceStatus: SequenceStatus.ENROLLED,
       replyStatus: ReplyStatus.NO_REPLY,
@@ -109,6 +114,7 @@ describe("automated sales workflow", () => {
 
   it("removes terminal, unsafe, and sales-engaged contacts from Outreach Queue", () => {
     const base = {
+      email: "buyer@example.com",
       contactStatus: ContactStatus.APPROVED,
       sequenceStatus: SequenceStatus.ENROLLED,
       replyStatus: ReplyStatus.NO_REPLY,
@@ -126,5 +132,24 @@ describe("automated sales workflow", () => {
     expect(isOutreachQueueContact({ ...base, replyStatus: ReplyStatus.MEETING_BOOKED })).toBe(false);
     expect(isActiveCadenceContact({ ...base, replyStatus: ReplyStatus.POSITIVE })).toBe(false);
     expect(isActiveCadenceContact({ ...base, sequenceStatus: SequenceStatus.BOUNCED })).toBe(false);
+  });
+
+  it("keeps contacts without a usable email out of actionable outreach views", () => {
+    const base = {
+      contactStatus: ContactStatus.APPROVED,
+      sequenceStatus: SequenceStatus.READY,
+      replyStatus: ReplyStatus.NO_REPLY,
+      draft: { id: "draft-1" }
+    };
+
+    expect(isOutreachQueueContact({ ...base, email: null })).toBe(false);
+    expect(isOutreachQueueContact({ ...base, email: "masked***" })).toBe(false);
+    expect(
+      isActiveCadenceContact({
+        ...base,
+        email: null,
+        sequenceStatus: SequenceStatus.ENROLLED
+      })
+    ).toBe(false);
   });
 });
