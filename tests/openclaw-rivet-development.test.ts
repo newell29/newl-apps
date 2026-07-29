@@ -25,6 +25,7 @@ describe("Rivet local Codex development worker", () => {
 
   it("requires Garland context, an isolated branch, and schema-validated local Codex output", async () => {
     const runner = await readFile(runnerPath, "utf8");
+    const gitignore = await readFile(path.join(repoRoot, ".gitignore"), "utf8");
 
     expect(runner).toContain("read every requiredContextPaths entry");
     expect(runner).toContain("For Garland work, those files are the required operating understanding");
@@ -45,6 +46,14 @@ describe("Rivet local Codex development worker", () => {
     expect(runner).toContain("max_autofix_attempts=2");
     expect(runner).toContain("OPEN_SIBLING_PULL_REQUEST_OVERLAPS_JSON");
     expect(runner).toContain("RIVET_REVIEW_BLOCKED");
+    expect(runner).toContain("evidenceManifests");
+    expect(runner).toContain(".rivet-evidence");
+    expect(runner).toContain("X-Newl-Rivet-Lease-Token");
+    expect(runner).toContain("inspect every artifact localPath");
+    expect(runner).toContain("exact saved reviewOrder");
+    expect(runner).toContain("Evidence is read-only and must never be added to Git");
+    expect(runner).toContain("\\.rivet-evidence(?:/|$)");
+    expect(gitignore).toContain(".rivet-evidence/");
   });
 
   it("opens only a draft PR and reports completion without merge or deployment", async () => {

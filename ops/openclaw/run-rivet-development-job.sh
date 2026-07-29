@@ -54,6 +54,9 @@ pull_response_path="${temporary_directory}/pull-response.json"
 changed_paths_file="${temporary_directory}/changed-paths.txt"
 packet_fields_path="${temporary_directory}/packet-fields.txt"
 required_context_path="${temporary_directory}/required-context.txt"
+evidence_plan_path="${temporary_directory}/evidence-plan.tsv"
+evidence_local_paths="${temporary_directory}/evidence-local-paths.tsv"
+evidence_cache_directory="${temporary_directory}/evidence-cache"
 job_id=""
 lease_token=""
 job_worktree=""
@@ -68,6 +71,9 @@ max_autofix_attempts=2
 failure_stage="claim the next approved suggestion"
 
 cleanup() {
+  if [[ -n "${job_worktree}" && -d "${job_worktree}/.rivet-evidence" ]]; then
+    rm -rf "${job_worktree}/.rivet-evidence"
+  fi
   rm -rf "${temporary_directory}"
 }
 
@@ -251,7 +257,7 @@ if [[ "${claim_state}" != "claimed" || -z "${job_id}" || -z "${lease_token}" || 
 fi
 
 failure_stage="validate the approved development packet"
-if ! /usr/bin/python3 - "${packet_path}" "${packet_fields_path}" "${required_context_path}" <<'PY'
+if ! /usr/bin/python3 - "${packet_path}" "${packet_fields_path}" "${required_context_path}" "${evidence_plan_path}" <<'PY'
 import json, os, re, sys
 with open(sys.argv[1], encoding="utf-8") as handle:
     packet = json.load(handle)
@@ -278,6 +284,31 @@ with open(sys.argv[2], "w", encoding="utf-8") as handle:
 with open(sys.argv[3], "w", encoding="utf-8") as handle:
     for path in packet.get("requiredContextPaths", []):
         handle.write(path + "\n")
+with open(sys.argv[4], "w", encoding="utf-8") as handle:
+    for manifest in packet.get("evidenceManifests", []):
+        if not isinstance(manifest, dict):
+            raise SystemExit("The approved evidence manifest is invalid.")
+        feedback_id = manifest.get("feedbackId")
+        status = manifest.get("evidenceStatus")
+        required = manifest.get("evidenceRequired") is True
+        artifacts = manifest.get("artifacts") or []
+        if required and (status != "READY" or not artifacts):
+            raise SystemExit("Required approved source evidence is missing.")
+        for artifact in artifacts:
+            if not isinstance(artifact, dict):
+                raise SystemExit("The approved evidence artifact is invalid.")
+            values = [
+                feedback_id,
+                artifact.get("artifactId"),
+                artifact.get("downloadPath"),
+                artifact.get("contentType"),
+                artifact.get("kind"),
+            ]
+            if not all(isinstance(value, str) and value and "\t" not in value and "\n" not in value for value in values):
+                raise SystemExit("The approved evidence artifact metadata is invalid.")
+            if not values[2].startswith("/api/assistant/openclaw/development-jobs/evidence?"):
+                raise SystemExit("The approved evidence download path is invalid.")
+            handle.write("\t".join(values) + "\n")
 PY
 then
   exit 1
@@ -310,6 +341,78 @@ if [[ -d "${rivet_repo_path}/node_modules" && ! -e "${job_worktree}/node_modules
   node_modules_linked=1
 fi
 
+failure_stage="download the exact approved Garland evidence"
+evidence_directory="${job_worktree}/.rivet-evidence"
+mkdir -p "${evidence_directory}"
+: > "${evidence_local_paths}"
+while IFS=$'\t' read -r feedback_id artifact_id download_path content_type evidence_kind || [[ -n "${feedback_id}" ]]; do
+  [[ -z "${feedback_id}" ]] && continue
+  if [[ ! "${feedback_id}" =~ ^[A-Za-z0-9_-]{1,100}$ || ! "${artifact_id}" =~ ^[A-Za-z0-9_-]{1,100}$ ]]; then
+    echo "The approved evidence identifiers are invalid." >&2
+    exit 1
+  fi
+  case "${content_type}" in
+    application/pdf) evidence_extension="pdf" ;;
+    image/png) evidence_extension="png" ;;
+    image/jpeg) evidence_extension="jpg" ;;
+    image/webp) evidence_extension="webp" ;;
+    *)
+      echo "The approved evidence content type is not supported." >&2
+      exit 1
+      ;;
+  esac
+  evidence_file="${evidence_directory}/${feedback_id}-${artifact_id}-${evidence_kind}.${evidence_extension}"
+  evidence_headers="${temporary_directory}/${artifact_id}.headers"
+  curl --fail --silent --show-error \
+    --request GET \
+    "${rivet_request_headers[@]}" \
+    --header "X-Newl-Rivet-Lease-Token: ${lease_token}" \
+    --dump-header "${evidence_headers}" \
+    --output "${evidence_file}" \
+    "${NEWL_APPS_URL%/}${download_path}&jobId=${job_id}"
+  /usr/bin/python3 - "${evidence_headers}" "${evidence_file}" "${content_type}" <<'PY'
+import hashlib, sys
+headers = {}
+with open(sys.argv[1], encoding="iso-8859-1") as handle:
+    for line in handle:
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        headers[key.strip().lower()] = value.strip()
+expected_type = sys.argv[3]
+actual_type = headers.get("content-type", "").split(";", 1)[0].strip().lower()
+if actual_type != expected_type:
+    raise SystemExit("The approved evidence response returned an unexpected content type.")
+with open(sys.argv[2], "rb") as handle:
+    actual_hash = hashlib.sha256(handle.read()).hexdigest()
+if headers.get("x-newl-content-hash", "").lower() != actual_hash:
+    raise SystemExit("The approved evidence response failed its content-hash check.")
+PY
+  printf '%s\t%s\t%s\n' "${feedback_id}" "${artifact_id}" "${evidence_file}" >> "${evidence_local_paths}"
+done < "${evidence_plan_path}"
+
+/usr/bin/python3 - "${packet_path}" "${evidence_local_paths}" <<'PY'
+import json, os, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    packet = json.load(handle)
+paths = {}
+with open(sys.argv[2], encoding="utf-8") as handle:
+    for line in handle:
+        feedback_id, artifact_id, path = line.rstrip("\n").split("\t")
+        if not os.path.isfile(path):
+            raise SystemExit("An approved evidence file was not downloaded.")
+        paths[(feedback_id, artifact_id)] = path
+for manifest in packet.get("evidenceManifests", []):
+    feedback_id = manifest.get("feedbackId")
+    for artifact in manifest.get("artifacts", []):
+        key = (feedback_id, artifact.get("artifactId"))
+        if key not in paths:
+            raise SystemExit("The approved packet is missing a downloaded evidence file.")
+        artifact["localPath"] = paths[key]
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    json.dump(packet, handle, ensure_ascii=False)
+PY
+
 /usr/bin/python3 - "${job_id}" "${lease_token}" "${completion_request_path}" <<'PY'
 import json, sys
 with open(sys.argv[3], "w", encoding="utf-8") as handle:
@@ -334,6 +437,9 @@ schema_path="${runner_directory}/skills/rivet-developer/development-output.schem
   printf '%s\n' "This development packet was approved by a Newl administrator. It authorizes only the cohesive issue identified by issueKey."
   printf '%s\n' "Before changing any file, read AGENTS.md completely and read every requiredContextPaths entry in the packet completely."
   printf '%s\n' "For Garland work, those files are the required operating understanding; do not substitute generic WMS assumptions."
+  printf '%s\n' "When an evidence manifest is READY, inspect every artifact localPath and the exact saved reviewOrder before changing code. For PDF or image evidence, render or otherwise inspect the relevant page layout; do not rely only on the employee summary."
+  printf '%s\n' "Evidence is read-only and must never be added to Git, copied into fixtures or documentation, or quoted in a commit or pull request."
+  printf '%s\n' "If required evidence is unreadable, mismatched, or insufficient to reproduce the approved failure, do not guess or broaden the fix. Report the evidence problem as a business question/known limitation without copying live data."
   printf '%s\n' "Inspect the existing implementation across UI, API, services, database, permissions, tests, and documentation."
   printf '%s\n' "Similar employee reports have already been grouped. Confirm they share one root cause; do not broaden the task to unrelated feedback."
   printf '%s\n' "Implement the smallest complete fix, add regression tests for the confirmed failure, and update the relevant documentation."
@@ -373,6 +479,9 @@ if [[ ! -r "${result_path}" ]]; then
 fi
 
 failure_stage="validate and commit the Codex changes"
+if [[ -d "${job_worktree}/.rivet-evidence" ]]; then
+  /bin/mv "${job_worktree}/.rivet-evidence" "${evidence_cache_directory}"
+fi
 git -C "${job_worktree}" diff --check
 {
   git -C "${job_worktree}" diff --name-only
@@ -384,7 +493,7 @@ if [[ ! -s "${changed_paths_file}" ]]; then
 fi
 /usr/bin/python3 - "${changed_paths_file}" <<'PY'
 import os, re, sys
-blocked = re.compile(r"(^|/)(?:\.env(?:\.|$)|node_modules(?:/|$)|outputs?(?:/|$)|.*\.(?:pem|key|p12|pfx)$)", re.I)
+blocked = re.compile(r"(^|/)(?:\.env(?:\.|$)|\.rivet-evidence(?:/|$)|node_modules(?:/|$)|outputs?(?:/|$)|.*\.(?:pem|key|p12|pfx|pdf|png|jpe?g|webp)$)", re.I)
 with open(sys.argv[1], encoding="utf-8") as handle:
     paths = [line.strip() for line in handle if line.strip()]
 for path in paths:
@@ -497,6 +606,10 @@ PY
   done < "${open_pull_numbers_path}"
 
   preflight_status="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "${preflight_report_path}")"
+  if [[ -d "${evidence_cache_directory}" ]]; then
+    rm -rf "${job_worktree}/.rivet-evidence"
+    /bin/cp -R "${evidence_cache_directory}" "${job_worktree}/.rivet-evidence"
+  fi
   if [[ "${preflight_status}" != "PASS" ]]; then
     /usr/bin/python3 - \
       "${preflight_report_path}" \
@@ -721,6 +834,7 @@ PY
       exit 1
     fi
 
+    rm -rf "${job_worktree}/.rivet-evidence"
     git -C "${job_worktree}" diff --check
     {
       git -C "${job_worktree}" diff --name-only
@@ -732,7 +846,7 @@ PY
     fi
     /usr/bin/python3 - "${changed_paths_file}" <<'PY'
 import re, sys
-blocked = re.compile(r"(^|/)(?:\.env(?:\.|$)|node_modules(?:/|$)|outputs?(?:/|$)|.*\.(?:pem|key|p12|pfx)$)", re.I)
+blocked = re.compile(r"(^|/)(?:\.env(?:\.|$)|\.rivet-evidence(?:/|$)|node_modules(?:/|$)|outputs?(?:/|$)|.*\.(?:pem|key|p12|pfx|pdf|png|jpe?g|webp)$)", re.I)
 with open(sys.argv[1], encoding="utf-8") as handle:
     paths = [line.strip() for line in handle if line.strip()]
 for path in paths:

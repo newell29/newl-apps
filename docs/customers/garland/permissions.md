@@ -27,6 +27,10 @@ Emails are classified using Garland-domain, PS-range, order/page-count, attachme
 
 Pallet dimensions, serials, weight, and SKU observations are represented in Teamship review/update types and `GarlandProductDimensionObservation`. The UPS special dimension rule is confirmed in existing documentation and tests should be consulted before changing it. Printer mappings, duplicate print protection, and a general print service were not located; production printing requires explicit human approval.
 
+## Development evidence
+
+An administrator may link a reported field-update issue only to an exact tenant-scoped saved Garland review matching its PS or SR number. A stored review PDF or administrator-supplied PDF/image is required before confirmation. Rivet receives only the selected review pages or attachment under an active short-lived lease. This evidence is read-only, audited, excluded from Git, and does not authorize operational changes.
+
 ## Open questions
 
 - Final employee-approved Garland order lifecycle terms. Requires employee confirmation.

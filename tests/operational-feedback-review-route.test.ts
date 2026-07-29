@@ -69,4 +69,43 @@ describe("operational feedback review route", () => {
     );
     expect(mocks.review).not.toHaveBeenCalled();
   });
+
+  it("forwards issue-specific field evidence and the exact saved review", async () => {
+    const response = await PATCH(
+      new Request("https://newl.test/api/assistant/operational-feedback/feedback-1", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "update_review_fields",
+          classification: "TEAMSHIP_FIELD_UPDATE",
+          evidence: {
+            affectedField: "COMMODITY",
+            actualValue: "incorrect",
+            expectedValue: "correct"
+          },
+          teamshipReviewOrderId: "review-order-1",
+          artifactId: "evidence-1"
+        })
+      }),
+      { params: Promise.resolve({ feedbackId: "feedback-1" }) }
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.updateFields).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: "tenant-1" }),
+      "feedback-1",
+      {
+        observedOutcome: undefined,
+        expectedOutcome: undefined,
+        classification: "TEAMSHIP_FIELD_UPDATE",
+        evidence: {
+          affectedField: "COMMODITY",
+          actualValue: "incorrect",
+          expectedValue: "correct"
+        },
+        teamshipReviewOrderId: "review-order-1",
+        artifactId: "evidence-1"
+      }
+    );
+  });
 });

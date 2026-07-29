@@ -15,7 +15,8 @@ Shipment documents and Garland Teamship review is documented because code, route
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
 - Printing regression tests cover tenant and identity binding, dedicated credentials, exact numeric order input, Garland/Annagem restriction, pallet-quantity summation, corrected `BIXOLON SRP-770III` selection, same-user confirmation, plugin routing, and no-retry failure reporting. Live printer validation requires a separately approved supervised production test.
 - Carrier-manifest attachment regression tests cover repeated chunked PDF uploads, PDF signature and size validation, tenant-scoped creation and download, incomplete-upload hiding, and combined history for legacy signed copies plus newer attachments.
-- Operational-feedback regression tests cover tenant-scoped full-message review, administrator correction of pending Garland outcomes, rejection of identical observed/expected confirmation, confirmed-only development grouping, specific-family precedence over generic false mismatches, and delivery of approval comments in Rivet's immutable packet.
+- Operational-feedback regression tests cover tenant-scoped full-message review, conditional issue fields, rejection of identical order decisions, exact PS/SR evidence linking, confirmed-only development grouping, specific-family precedence over generic false mismatches, and delivery of approval comments in Rivet's immutable packet.
+- Rivet evidence tests require a tenant-scoped active lease, verify artifact hashes, and confirm that a source PDF is reduced to only the approved Garland review pages before the worker receives it. Worker tests also block evidence files from Git changes.
 
 ## Data model
 

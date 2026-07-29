@@ -33,6 +33,8 @@ The `newl-teamship` plugin also exposes identity-bound Garland tools for Teams P
 
 The daily digest groups unqueued feedback into focused `AWAITING_APPROVAL` suggestions and reports Rivet work that is `READY_FOR_ALEX` or `BLOCKED`. It cannot start development. Selecting **Approve & start Rivet** in Newl Apps is the separate human approval that queues the restricted local Codex branch-and-PR workflow described in [rivet-development-worker.md](rivet-development-worker.md). The resulting draft PR must pass a fresh read-only Codex review of the exact commit before it is ready for Alex. Rivet may correct only explicitly auto-fixable findings within the already-approved scope, at most twice, and never merges or deploys.
 
+Garland field-update feedback uses structured issue fields and exact saved-review evidence. Newl Apps, not OpenClaw, authorizes and serves only the approved review pages or supporting attachment under the active Rivet lease. OpenClaw carries the immutable manifest and files into the isolated worker but cannot browse other tenant artifacts or convert evidence access into a Teamship write.
+
 The digest remains read-only and has no Codex or GitHub write permission. A separate local OpenClaw command schedule claims approved Rivet jobs with a short-lived lease. Codex receives a deterministic required-context manifest; Garland jobs require the full customer and Shipment Documents workflow documentation before changes begin.
 
 For scheduled delivery, the plugin may use the configured administrator's Entra object ID only when the OpenClaw run has no interactive requester. Interactive calls always bind the actual Teams sender, preventing another employee from inheriting the scheduled administrator identity.

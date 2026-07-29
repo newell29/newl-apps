@@ -16,8 +16,9 @@ Company Assistant / AI chat is documented because code, routes, schema, or tests
 - Operational feedback is stored separately from approved assistant memory. Employee reports begin as `REPORTED` evidence and cannot affect Nemo explanations until an administrator confirms the feedback and explicitly creates an `ApprovedOperationalLesson`.
 - Feedback Review is an active-work queue: only `REPORTED` and `INVESTIGATING` findings are visible by default. Confirmed, rejected, and resolved history is hidden unless the user explicitly opens it.
 - Development suggestions group similar employee reports into one focused issue before approval. Creating or refreshing the queue does not start development.
-- Only administrator-confirmed feedback may enter a Rivet approval packet. Pending reports can be expanded in full and their observed/expected result classifications can be corrected without resubmission; identical Garland check outcomes cannot be confirmed as a development issue.
-- The approval screen exposes every complete source and follow-up message for the grouped family. Optional administrator comments entered with approval are audited and included verbatim in the restricted Rivet development packet.
+- Only administrator-confirmed feedback may enter a Rivet approval packet. Pending Garland reports use an issue-type selector: order-decision issues collect Nemo's original and correct decisions, while incorrect or missing Teamship updates collect the affected field plus actual/correct values. Legacy `CHECK_RESULT` reports must be reclassified before confirmation.
+- Incorrect or missing Teamship updates cannot be confirmed until an administrator links the exact tenant-scoped saved PS/SR review and its stored source PDF, or attaches a supporting PDF/image. This uses existing feedback evidence and workflow-artifact storage without a schema change.
+- The approval screen exposes every complete source and follow-up message for the grouped family. The **Your instructions for Rivet** box appears on an `AWAITING_APPROVAL` suggestion after feedback is confirmed and the queue is refreshed. Its bounded comments are audited and included verbatim in the immutable Rivet packet.
 - A development suggestion is one tenant-scoped issue family. Later feedback for an approved family is stored as follow-up evidence without changing the already-approved Rivet packet. Duplicate awaiting cards for that family are marked `SUPERSEDED`.
 - After the exact reviewed pull request is merged and deployed, an administrator must use the two-step **Mark merged and deployed** action. That resolves the source and follow-up reports. Later feedback opens one approval-gated regression suggestion linked to the resolved family.
 - Generic historical issue keys are reclassified into deterministic Garland families for Lot/Serial, Special Instructions, ship-to name, ship-to location, pallet dimensions, email processing, order-status responses, and false comparison mismatches. A report is screened as a no-change report only when its displayed values and its observed/expected outcomes are both equal.
@@ -29,7 +30,7 @@ Company Assistant / AI chat is documented because code, routes, schema, or tests
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.
 
-Operational-learning and development-control tables are `OperationalFeedback`, `ApprovedOperationalLesson`, `DevelopmentSuggestion`, and `CodexReviewRun`. `WorkflowArtifact` and `WorkflowArtifactChunk` retain workflow evidence such as Teams PDFs.
+Operational-learning and development-control tables are `OperationalFeedback`, `ApprovedOperationalLesson`, `DevelopmentSuggestion`, and `CodexReviewRun`. `OperationalFeedback.evidence` stores issue-specific fields. `WorkflowArtifact` and `WorkflowArtifactChunk` retain workflow evidence such as Teams PDFs and administrator attachments.
 
 ```mermaid
 flowchart LR

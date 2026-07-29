@@ -19,7 +19,9 @@ The issue family remains stable after approval. Later reports attach as follow-u
 
 Selecting **Approve & start Rivet** is the single approval to begin development. The approval transaction records the administrator decision and creates one tenant-scoped `AutomationJobRun` with job type `ASSISTANT_RIVET_DEVELOPMENT`. Repeated requests cannot approve the same suggestion twice.
 
-Before approval, the administrator can expand every complete source and follow-up report, correct the observed and expected result fields on pending feedback, and add bounded approval comments. Those comments are stored with the decision and included in the immutable Rivet packet. Rivet must treat them as reviewed business context without broadening the approved issue family.
+Before approval, the administrator can expand every complete source and follow-up report and select a specific issue type. Order-decision issues capture Nemo's original and correct decisions. Incorrect or missing Teamship updates capture the affected field and actual/correct values and require the exact saved Garland PS/SR review plus source PDF or supporting screenshot. After feedback is confirmed and the queue is refreshed, the `AWAITING_APPROVAL` card shows **Your instructions for Rivet**; those comments are stored with the decision and included in the immutable Rivet packet.
+
+For evidence-backed Garland field issues, packet version 2 includes the exact saved review snapshot, page numbers, structured field evidence, hashes, and lease-scoped download paths. The worker downloads only those approved artifacts, verifies their hashes, and requires Codex to inspect every ready PDF/image and the saved review before editing. Source PDFs are reduced server-side to the selected order pages. Missing or inconsistent evidence blocks the job instead of allowing Rivet to infer the PDF contents.
 
 ## Required Garland understanding
 
@@ -41,6 +43,8 @@ The local Codex prompt requires every listed document to be read before any file
 10. Newl Apps records the branch, commit, PR URL, tests, limitations, review result, and audit evidence. Rivet messages only the configured Teams target when the PR is ready or blocked.
 
 The worker uses a fine-grained GitHub token only to open the pull request. That token is removed from the environment passed to Codex. Git push continues through the workstation's trusted repository credential.
+
+Downloaded evidence lives only in the worker's ignored `.rivet-evidence` directory. It is temporarily moved outside the worktree before every diff or commit check and restored only for review/remediation. The changed-file guard rejects PDF/image evidence and `.rivet-evidence` paths, so live customer material cannot be committed or included in a pull request.
 
 ## Hunter quality-triggered development
 
