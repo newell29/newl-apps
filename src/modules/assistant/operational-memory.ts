@@ -12,6 +12,7 @@ import {
   feedbackUsesOrderDecisions,
   isGarlandFeedbackIssueType
 } from "@/modules/assistant/feedback-review-fields";
+import { ensureGarlandFeedbackReviewSourceArtifact } from "@/modules/assistant/operational-feedback-evidence";
 import { GARLAND_WORKFLOW_KEY } from "@/modules/assistant/garland-artifacts";
 import {
   createRivetDevelopmentJob,
@@ -1091,7 +1092,7 @@ type OperationalFeedbackReviewChanges = {
 };
 
 async function resolveOperationalFeedbackReviewChanges(
-  context: Pick<AuthenticatedContext, "tenantId">,
+  context: Pick<AuthenticatedContext, "tenantId" | "userId">,
   existing: OperationalFeedbackReviewRecord,
   input: {
     classification?: string | null;
@@ -1198,17 +1199,9 @@ async function resolveOperationalFeedbackReviewChanges(
   }
 
   if (reviewRunId && !artifactId) {
-    const sourceArtifact = await prisma.workflowArtifact.findFirst({
-      where: {
-        tenantId: context.tenantId,
-        workflowKey: GARLAND_WORKFLOW_KEY,
-        teamshipReviewRunId: reviewRunId,
-        status: "REVIEWED",
-        contentType: "application/pdf"
-      },
-      orderBy: { createdAt: "desc" },
-      select: { id: true }
-    });
+    const sourceArtifact = reviewOrderId
+      ? await ensureGarlandFeedbackReviewSourceArtifact(context, reviewOrderId)
+      : null;
     artifactId = sourceArtifact?.id ?? null;
   }
 

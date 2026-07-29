@@ -7,6 +7,7 @@ import {
   reviewOperationalFeedback,
   updateOperationalFeedbackReviewFields
 } from "@/modules/assistant/operational-memory";
+import { OperationalFeedbackEvidenceError } from "@/modules/assistant/operational-feedback-evidence";
 import { requireAdmin, requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
@@ -58,7 +59,7 @@ export async function PATCH(
     });
     return NextResponse.json({ data: feedback });
   } catch (error) {
-    if (error instanceof OperationalMemoryError) {
+    if (error instanceof OperationalMemoryError || error instanceof OperationalFeedbackEvidenceError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     throw error;

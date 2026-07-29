@@ -94,6 +94,7 @@ type FeedbackEvidenceOption = {
   documentLabel: string;
   sourcePdfFileName: string | null;
   hasStoredSourcePdf: boolean;
+  hasSavedEmailPdf: boolean;
 };
 
 export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
@@ -602,7 +603,11 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
                                 {feedbackEvidenceOptions[item.id].map((option) => (
                                   <option key={option.reviewOrderId} value={option.reviewOrderId}>
                                     {option.psNumber} / {option.srNumber} · {option.shipmentDate} · {option.status}
-                                    {option.hasStoredSourcePdf ? " · source PDF saved" : " · attach screenshot/PDF"}
+                                    {option.hasStoredSourcePdf
+                                      ? " · source PDF saved"
+                                      : option.hasSavedEmailPdf
+                                        ? " · original email PDF available"
+                                        : " · attach screenshot/PDF"}
                                   </option>
                                 ))}
                               </select>

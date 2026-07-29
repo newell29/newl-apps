@@ -4,9 +4,12 @@ import { Prisma } from "@prisma/client";
 
 import { GARLAND_WORKFLOW_KEY, WORKFLOW_ARTIFACT_CHUNK_BYTES } from "@/modules/assistant/garland-artifacts";
 import { prisma } from "@/server/db";
+import { getMicrosoftGraphApplicationAccessToken } from "@/server/integrations/microsoft-graph-application";
+import { fetchMicrosoftGraphMessageAttachmentContent } from "@/server/integrations/microsoft-graph-mail";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 
 export const OPERATIONAL_FEEDBACK_EVIDENCE_MAX_BYTES = WORKFLOW_ARTIFACT_CHUNK_BYTES;
+const GARLAND_EMAIL_PDF_MAX_BYTES = 20 * 1024 * 1024;
 
 const SUPPORTED_EVIDENCE_TYPES = new Set([
   "application/pdf",
@@ -79,6 +82,29 @@ export async function listGarlandFeedbackEvidenceOptions(
       artifactByRun.set(artifact.teamshipReviewRunId, artifact.id);
     }
   }
+  const sourceFileNames = [...new Set(
+    orders
+      .map((order) => order.run.sourcePdfFileName)
+      .filter((fileName): fileName is string => Boolean(fileName))
+  )];
+  const emailAttachments = sourceFileNames.length === 0
+    ? []
+    : await prisma.garlandSourceAttachment.findMany({
+        where: {
+          tenantId: context.tenantId,
+          fileName: { in: sourceFileNames },
+          intakeStatus: "PDF_PARSED"
+        },
+        orderBy: { updatedAt: "desc" },
+        take: 100,
+        select: {
+          id: true,
+          fileName: true,
+          contentHash: true,
+          extractedPsNumbers: true,
+          extractedSrNumbers: true
+        }
+      });
 
   return orders.map((order) => ({
     reviewOrderId: order.id,
@@ -92,8 +118,199 @@ export async function listGarlandFeedbackEvidenceOptions(
     shipmentDate: order.run.shipmentDate.toISOString().slice(0, 10),
     documentLabel: order.run.documentLabel,
     sourcePdfFileName: order.run.sourcePdfFileName,
-    hasStoredSourcePdf: artifactByRun.has(order.runId)
+    hasStoredSourcePdf: artifactByRun.has(order.runId),
+    hasSavedEmailPdf: emailAttachments.some((attachment) =>
+      emailAttachmentMatchesReview(attachment, order)
+    )
   }));
+}
+
+export async function ensureGarlandFeedbackReviewSourceArtifact(
+  context: Pick<AuthenticatedContext, "tenantId" | "userId">,
+  reviewOrderId: string
+) {
+  const reviewOrder = await prisma.teamshipReviewOrder.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      id: reviewOrderId,
+      run: { deletedAt: null }
+    },
+    select: {
+      id: true,
+      runId: true,
+      psNumber: true,
+      srNumber: true,
+      run: {
+        select: {
+          sourcePdfFileName: true
+        }
+      }
+    }
+  });
+  if (!reviewOrder) {
+    throw new OperationalFeedbackEvidenceError("The selected saved Garland review was not found.", 404);
+  }
+  const existing = await prisma.workflowArtifact.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      workflowKey: GARLAND_WORKFLOW_KEY,
+      teamshipReviewRunId: reviewOrder.runId,
+      status: "REVIEWED",
+      contentType: "application/pdf"
+    },
+    orderBy: { createdAt: "desc" },
+    select: { id: true }
+  });
+  if (existing) return existing;
+  if (!reviewOrder.run.sourcePdfFileName) return null;
+
+  const candidates = await prisma.garlandSourceAttachment.findMany({
+    where: {
+      tenantId: context.tenantId,
+      fileName: reviewOrder.run.sourcePdfFileName,
+      intakeStatus: "PDF_PARSED"
+    },
+    orderBy: { updatedAt: "desc" },
+    take: 50,
+    select: {
+      id: true,
+      graphAttachmentId: true,
+      fileName: true,
+      contentHash: true,
+      extractedPsNumbers: true,
+      extractedSrNumbers: true,
+      sourceEmail: {
+        select: {
+          mailboxAddress: true,
+          graphMessageId: true,
+          conversationId: true
+        }
+      }
+    }
+  });
+  const matching = candidates.filter((candidate) =>
+    emailAttachmentMatchesReview(candidate, reviewOrder)
+  );
+  const uniqueHashes = [...new Set(
+    matching.map((candidate) => candidate.contentHash).filter((value): value is string => Boolean(value))
+  )];
+  if (matching.length === 0) return null;
+  if (uniqueHashes.length !== 1) {
+    throw new OperationalFeedbackEvidenceError(
+      "More than one saved email PDF matches this Garland review. Attach the exact PDF or screenshot instead.",
+      409
+    );
+  }
+  const attachment = matching.find((candidate) => candidate.contentHash === uniqueHashes[0]);
+  if (!attachment) {
+    throw new OperationalFeedbackEvidenceError(
+      "The saved email PDF does not have enough integrity information. Attach the exact PDF or screenshot instead.",
+      409
+    );
+  }
+  try {
+    const accessToken = await getMicrosoftGraphApplicationAccessToken();
+    const graphAttachment = await fetchMicrosoftGraphMessageAttachmentContent(
+      accessToken,
+      attachment.sourceEmail.mailboxAddress,
+      attachment.sourceEmail.graphMessageId,
+      attachment.graphAttachmentId
+    );
+    const contentBytes = graphAttachment.contentBytes;
+    if (!contentBytes) {
+      throw new Error("Microsoft Graph returned an empty attachment.");
+    }
+    const bytes = new Uint8Array(Buffer.from(contentBytes, "base64"));
+    if (
+      bytes.byteLength < 1 ||
+      bytes.byteLength > GARLAND_EMAIL_PDF_MAX_BYTES ||
+      !startsWith(bytes, [0x25, 0x50, 0x44, 0x46, 0x2d])
+    ) {
+      throw new Error("The saved email attachment is not a supported Garland PDF.");
+    }
+    const contentHash = sha256(bytes);
+    if (attachment.contentHash !== contentHash) {
+      throw new Error("The saved email PDF no longer matches its parsed content hash.");
+    }
+    const sourceIdempotencyKey = sha256(Buffer.from([
+      "GARLAND_EMAIL_RIVET_EVIDENCE",
+      context.tenantId,
+      reviewOrder.runId,
+      attachment.id,
+      contentHash
+    ].join("\u0000")));
+    const chunks = splitEvidenceChunks(bytes);
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const artifact = await tx.workflowArtifact.create({
+          data: {
+            tenantId: context.tenantId,
+            workflowKey: GARLAND_WORKFLOW_KEY,
+            sourceChannel: "EMAIL",
+            sourceIdempotencyKey,
+            externalMessageId: attachment.sourceEmail.graphMessageId,
+            externalConversationId: attachment.sourceEmail.conversationId,
+            submittedByUserId: context.userId,
+            fileName: normalizeEvidenceFileName(attachment.fileName, "application/pdf"),
+            contentType: "application/pdf",
+            sizeBytes: bytes.byteLength,
+            contentHash,
+            status: "REVIEWED",
+            chunkCount: chunks.length,
+            teamshipReviewRunId: reviewOrder.runId,
+            completedAt: new Date(),
+            extractionSummary: {
+              purpose: "RIVET_SAVED_EMAIL_SOURCE",
+              sourceAttachmentId: attachment.id,
+              reviewOrderId: reviewOrder.id,
+              selectedPsNumber: reviewOrder.psNumber,
+              selectedSrNumber: reviewOrder.srNumber
+            } satisfies Prisma.InputJsonValue,
+            chunks: {
+              create: chunks.map((chunk, chunkIndex) => ({
+                chunkIndex,
+                sizeBytes: chunk.byteLength,
+                contentHash: sha256(chunk),
+                bytes: Buffer.from(chunk)
+              }))
+            }
+          },
+          select: { id: true }
+        });
+        await tx.auditLog.create({
+          data: {
+            tenantId: context.tenantId,
+            actorUserId: context.userId,
+            action: "assistant.operational_feedback.cache_saved_email_pdf",
+            entityType: "WorkflowArtifact",
+            entityId: artifact.id,
+            after: {
+              reviewRunId: reviewOrder.runId,
+              reviewOrderId: reviewOrder.id,
+              sourceAttachmentId: attachment.id,
+              contentHash
+            } satisfies Prisma.InputJsonValue
+          }
+        });
+        return artifact;
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const racedArtifact = await prisma.workflowArtifact.findFirst({
+          where: { tenantId: context.tenantId, sourceIdempotencyKey },
+          select: { id: true }
+        });
+        if (racedArtifact) return racedArtifact;
+      }
+      throw error;
+    }
+  } catch (error) {
+    if (error instanceof OperationalFeedbackEvidenceError) throw error;
+    throw new OperationalFeedbackEvidenceError(
+      "The original saved email PDF could not be retrieved or did not pass integrity validation. Attach a supporting PDF or screenshot instead.",
+      409
+    );
+  }
 }
 
 export async function saveOperationalFeedbackEvidence(
@@ -243,6 +460,37 @@ function normalizePageNumbers(value: Prisma.JsonValue) {
         .filter((item): item is number => typeof item === "number" && Number.isInteger(item) && item > 0)
         .slice(0, 20)
     : [];
+}
+
+function emailAttachmentMatchesReview(
+  attachment: {
+    fileName: string;
+    extractedPsNumbers: Prisma.JsonValue | null;
+    extractedSrNumbers: Prisma.JsonValue | null;
+  },
+  review: {
+    psNumber: string;
+    srNumber: string;
+    run: { sourcePdfFileName: string | null };
+  }
+) {
+  return attachment.fileName === review.run.sourcePdfFileName &&
+    jsonStringArray(attachment.extractedPsNumbers).includes(review.psNumber) &&
+    jsonStringArray(attachment.extractedSrNumbers).includes(review.srNumber);
+}
+
+function jsonStringArray(value: Prisma.JsonValue | null) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function splitEvidenceChunks(bytes: Uint8Array) {
+  const chunks: Uint8Array[] = [];
+  for (let offset = 0; offset < bytes.byteLength; offset += WORKFLOW_ARTIFACT_CHUNK_BYTES) {
+    chunks.push(bytes.slice(offset, offset + WORKFLOW_ARTIFACT_CHUNK_BYTES));
+  }
+  return chunks;
 }
 
 function startsWith(bytes: Uint8Array, signature: number[]) {

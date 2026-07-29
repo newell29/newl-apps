@@ -29,7 +29,7 @@ Pallet dimensions, serials, weight, and SKU observations are represented in Team
 
 ## Development evidence
 
-An administrator may link a reported field-update issue only to an exact tenant-scoped saved Garland review matching its PS or SR number. A stored review PDF or administrator-supplied PDF/image is required before confirmation. Rivet receives only the selected review pages or attachment under an active short-lived lease. This evidence is read-only, audited, excluded from Git, and does not authorize operational changes.
+An administrator may link a reported field-update issue only to an exact tenant-scoped saved Garland review matching its PS or SR number. A stored review PDF, hash-verified original PDF retrieved from that review's saved Garland email, or administrator-supplied PDF/image is required before confirmation. Email retrieval additionally requires an exact filename, PS, SR, and parsed-content-hash match. Rivet receives only the selected review pages or attachment under an active short-lived lease. This evidence is read-only, audited, excluded from Git, and does not authorize operational changes.
 
 ## Open questions
 
