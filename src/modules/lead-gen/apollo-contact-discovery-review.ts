@@ -3,6 +3,37 @@ import { ApolloCompanyMatchClassification } from "@prisma/client";
 export const APOLLO_ZERO_CONTACT_REVIEW_REASON =
   "Apollo verified the company but returned zero employees. Open the company in Apollo, select its People page, and paste that Apollo company URL for manual verification.";
 
+export function isMappedApolloZeroEmployeeState({
+  apolloOrganizationId,
+  matchReason
+}: {
+  apolloOrganizationId: string | null;
+  matchReason: string | null;
+}) {
+  return Boolean(
+    apolloOrganizationId &&
+      matchReason?.includes(APOLLO_ZERO_CONTACT_REVIEW_REASON)
+  );
+}
+
+export function blocksApolloEmployeeLookup({
+  classification,
+  apolloOrganizationId,
+  matchReason
+}: {
+  classification: ApolloCompanyMatchClassification;
+  apolloOrganizationId: string | null;
+  matchReason: string | null;
+}) {
+  return (
+    classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY &&
+    !isMappedApolloZeroEmployeeState({
+      apolloOrganizationId,
+      matchReason
+    })
+  );
+}
+
 export function requiresApolloMatchReview(
   classification: ApolloCompanyMatchClassification
 ) {

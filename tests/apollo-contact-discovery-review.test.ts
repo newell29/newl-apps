@@ -2,6 +2,8 @@ import { ApolloCompanyMatchClassification } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import {
   APOLLO_ZERO_CONTACT_REVIEW_REASON,
+  blocksApolloEmployeeLookup,
+  isMappedApolloZeroEmployeeState,
   requiresApolloMatchReview,
   resolveApolloContactDiscoveryMatch
 } from "@/modules/lead-gen/apollo-contact-discovery-review";
@@ -45,5 +47,53 @@ describe("Apollo contact-discovery review", () => {
       classification: ApolloCompanyMatchClassification.NO_MATCH,
       matchReason: "No Apollo company matched."
     });
+  });
+
+  it("recognizes a persisted mapping with a zero-employee result as safe for a read-only employee recheck", () => {
+    expect(
+      isMappedApolloZeroEmployeeState({
+        apolloOrganizationId: "apollo-org-yat",
+        matchReason:
+          `direct company; ${APOLLO_ZERO_CONTACT_REVIEW_REASON}`
+      })
+    ).toBe(true);
+  });
+
+  it("does not treat an ordinary unresolved match as a confirmed mapped-company recheck", () => {
+    expect(
+      isMappedApolloZeroEmployeeState({
+        apolloOrganizationId: "apollo-org-yat",
+        matchReason: "Partial name match requires review."
+      })
+    ).toBe(false);
+    expect(
+      isMappedApolloZeroEmployeeState({
+        apolloOrganizationId: null,
+        matchReason: APOLLO_ZERO_CONTACT_REVIEW_REASON
+      })
+    ).toBe(false);
+  });
+
+  it("does not let the handoff guard block the mapped zero-employee recheck shown by the UI", () => {
+    expect(
+      blocksApolloEmployeeLookup({
+        classification:
+          ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW,
+        apolloOrganizationId: "apollo-org-yat",
+        matchReason:
+          `direct company; ${APOLLO_ZERO_CONTACT_REVIEW_REASON}`
+      })
+    ).toBe(false);
+  });
+
+  it("keeps ordinary unresolved matches blocked before Apollo employee lookup", () => {
+    expect(
+      blocksApolloEmployeeLookup({
+        classification:
+          ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW,
+        apolloOrganizationId: "apollo-org-yat",
+        matchReason: "Partial name match requires review."
+      })
+    ).toBe(true);
   });
 });
