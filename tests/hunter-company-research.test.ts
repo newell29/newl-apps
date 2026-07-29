@@ -1113,6 +1113,28 @@ describe("Hunter company deep research", () => {
     });
   });
 
+  it("does not join comma-coordinated commencement and future-facility claims", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "unrelated='Example Bedding began commercial operations at its existing plant, and the company separately announced plans for a new greenfield facility next year.'",
+      "related='After commissioning, Example Bedding began commercial production at its new greenfield manufacturing facility.'",
+      "print(json.dumps({'unrelated':r.has_new_facility_production_commencement('Example Bedding update',unrelated),'related':r.has_new_facility_production_commencement('Example Bedding update',related)}))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual({
+      unrelated: false,
+      related: true
+    });
+  });
+
   it("selects duplicate qualifying commencement evidence deterministically", async () => {
     const program = [
       "import datetime as d,json",

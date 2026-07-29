@@ -129,7 +129,7 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
   operations” commencement without using the words expansion or opening. Hunter includes those
   phrases in both general and official-domain fresh-event queries and recognizes the exact-company,
   recent, dated operating start during deterministic trigger reconciliation only when commencement
-  and the new/greenfield facility describe the same bounded title, sentence, or clause. Separate
+  and the new/greenfield facility describe the same atomic event clause. Separate or comma-coordinated
   events in one record, malformed evidence, and an undated facility plan cannot become a fresh trigger.
 - A full generic result set can otherwise consume the bounded evidence ledger before a later
   official-domain event query runs. Hunter executes every enabled query first and samples their

@@ -101,7 +101,12 @@ NEW_OR_GREENFIELD_FACILITY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 EVENT_CLAUSE_BOUNDARY_PATTERN = re.compile(
-    r"(?:[\r\n]+|(?<=[.!?;])\s+|\s+\b(?:but|however|while|whereas)\b\s+)",
+    r"(?:"
+    r"[\r\n]+|"
+    r"(?<=[.!?;])\s+|"
+    r",\s+\b(?:and|but|yet|while|whereas|although|with)\b\s+|"
+    r"\s+\b(?:but|however|while|whereas)\b\s+"
+    r")",
     re.IGNORECASE,
 )
 PUBLIC_DOMAIN_PATTERN = re.compile(
