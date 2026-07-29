@@ -70,6 +70,10 @@ When re-enrollment is approved, regression coverage must verify Apollo receives
 `SUCCESS` as proof of enrollment; compare enrolled, pending, skipped, and failed counts and verify the exact requested
 campaign ID. A pending result must resolve to enrolled or failed within ten minutes and must never cause an automatic
 second enrollment write.
+If the pending-confirmation marker is missing, regression coverage must prove that Newl Apps can recover only from an
+exact saved selected-cadence ID plus a matching live active membership. The same path must fail closed when that ID is
+missing or Apollo reports a different cadence, and recovery must clear a stale push blocker so the contact moves to
+Active Cadences.
 
 For Hunter collector validation, include a canonical export containing both a valid company row and a shipment-only row. Confirm the adapter uploads the valid row, counts the identity-free row under `recordsRejectedBeforeUpload`, and does not fail the complete batch.
 

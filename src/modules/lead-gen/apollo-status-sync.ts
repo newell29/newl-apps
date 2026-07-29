@@ -204,6 +204,11 @@ export async function syncApolloStatusesForTenant(
           syncedAt.getTime() - new Date(pendingConfirmation.acceptedAt).getTime() >=
             APOLLO_ENROLLMENT_CONFIRMATION_TIMEOUT_MS
         );
+        const selectedEnrollmentConfirmed = Boolean(
+          contact.selectedSequenceId &&
+          incoming.sequenceId === contact.selectedSequenceId &&
+          isApolloSequenceMembershipConfirmed(incoming.sequenceStatus)
+        );
         const sequenceStatus = resolveTrackedSequenceStatus({
           existingStatus: contact.sequenceStatus,
           incomingStatus: incoming.sequenceStatus,
@@ -216,7 +221,8 @@ export async function syncApolloStatusesForTenant(
         const rawJson = mergeApolloSyncPayload(contact.rawJson, incoming, syncedAt, {
           pendingConfirmation,
           confirmed: pendingEnrollmentConfirmed,
-          failed: pendingEnrollmentFailed
+          failed: pendingEnrollmentFailed,
+          selectedEnrollmentConfirmed
         });
         let leadId: string | null = null;
         let scoreSnapshotId: string | null = null;
@@ -451,6 +457,7 @@ function mergeApolloSyncPayload(
     pendingConfirmation: ReturnType<typeof readApolloPendingSequenceConfirmation>;
     confirmed: boolean;
     failed: boolean;
+    selectedEnrollmentConfirmed: boolean;
   }
 ) {
   const current = asJsonObject(rawJson);
@@ -482,7 +489,9 @@ function mergeApolloSyncPayload(
               nextCheckAt: new Date(syncedAt.getTime() + 15 * 60 * 1000).toISOString()
             }
           }
-        : apollo;
+        : enrollmentConfirmation.selectedEnrollmentConfirmed
+          ? withoutPendingOrBlocker
+          : apollo;
   return {
     ...current,
     apollo: {

@@ -61,6 +61,19 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
   new immutable version and rerun every check.
 - A current unapproved plan blocks Apollo even when the contact's legacy cadence tier would not normally require a
   Newl draft. Correct or regenerate and approve the plan instead of bypassing the gate.
+- Bulk approval reports the first saved QA finding for a genuinely failed plan. An already-approved plan is reported
+  separately and directs the operator to **Retry approved in Apollo** or **Sync Apollo status** instead of incorrectly
+  claiming that grounded QA failed.
+
+## Apollo enrollment is active externally but missing from Active Cadences
+
+- Active Cadences is driven by the tenant-scoped contact's confirmed `ENROLLED` state for the exact selected Apollo
+  cadence; an accepted API request alone is not treated as enrollment.
+- A pending push normally stores a durable cadence-confirmation marker. If that temporary marker is missing, the
+  reconciler falls back only to the contact's saved exact selected cadence ID, checks live Apollo membership, and
+  repairs Newl Apps when that exact membership is active. It never sends a second enrollment request during recovery.
+- The hourly Apollo status sync also removes a stale push blocker when the exact selected cadence is confirmed active.
+  A missing selected cadence ID or a different live cadence still fails closed and remains in Needs Attention.
 
 ## External signal discovery or classification fails
 

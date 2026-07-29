@@ -27,6 +27,13 @@ export type ApolloPendingSequenceConfirmation = {
   nextCheckAt: string | null;
 };
 
+export type ApolloEnrollmentConfirmationTarget = {
+  sequenceId: string;
+  sequenceName: string;
+  pending: ApolloPendingSequenceConfirmation | null;
+  source: "pending_marker" | "selected_sequence";
+};
+
 export type ApolloPushJobInput = {
   contactIds: string[];
   selectedContacts: number;
@@ -305,6 +312,40 @@ export function readApolloPendingSequenceConfirmation(
         : 0,
     lastCheckedAt: readString(pending.lastCheckedAt),
     nextCheckAt: readString(pending.nextCheckAt)
+  };
+}
+
+export function resolveApolloEnrollmentConfirmationTarget({
+  rawJson,
+  jobRunId,
+  selectedSequenceId,
+  selectedSequenceName
+}: {
+  rawJson: Prisma.JsonValue | null;
+  jobRunId: string;
+  selectedSequenceId: string | null;
+  selectedSequenceName: string | null;
+}): ApolloEnrollmentConfirmationTarget | null {
+  const pending = readApolloPendingSequenceConfirmation(rawJson, jobRunId);
+  if (pending) {
+    return {
+      sequenceId: pending.sequenceId,
+      sequenceName: pending.sequenceName,
+      pending,
+      source: "pending_marker"
+    };
+  }
+
+  const sequenceId = selectedSequenceId?.trim();
+  if (!sequenceId) {
+    return null;
+  }
+
+  return {
+    sequenceId,
+    sequenceName: selectedSequenceName?.trim() || "the selected Apollo cadence",
+    pending: null,
+    source: "selected_sequence"
   };
 }
 
