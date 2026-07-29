@@ -18,6 +18,7 @@ import {
 } from "@/modules/lead-gen/hunter-outreach-eligibility";
 import { prisma } from "@/server/db";
 import { selectHunterPlanningCandidates } from "@/modules/lead-gen/hunter-planning-policy";
+import { resolveHunterCompanyIdentityKey } from "@/modules/lead-gen/hunter-company-identity";
 
 export const HUNTER_DRY_RUN_JOB_TYPE = "HUNTER_DAILY_PROSPECTING_PLAN";
 
@@ -47,6 +48,8 @@ type Candidate = {
   evidence: Prisma.InputJsonValue;
   recommendedPersona: string;
   recommendedCadence: string;
+  researchCohort?: "TODAY" | "CARRY_FORWARD";
+  sourceResearchRunId?: string | null;
 };
 
 export type HunterPlanningCandidateScope =
@@ -57,12 +60,14 @@ export async function runHunterDryPlan({
   tenantId,
   actorUserId,
   trigger = "MANUAL",
-  candidateScope = "ALL_SOURCES"
+  candidateScope = "ALL_SOURCES",
+  researchRunId = null
 }: {
   tenantId: string;
   actorUserId: string | null;
   trigger?: "MANUAL" | "SCHEDULED" | "RESEARCH";
   candidateScope?: HunterPlanningCandidateScope;
+  researchRunId?: string | null;
 }) {
   const policy = await prisma.hunterAutomationPolicy.findUnique({ where: { tenantId } });
   const effective = policy ?? DEFAULT_HUNTER_POLICY;
@@ -79,6 +84,7 @@ export async function runHunterDryPlan({
         version: 1,
         trigger,
         candidateScope,
+        researchRunId,
         mode: effective.mode,
         dailyCompanyLimit: effective.dailyCompanyLimit,
         allocation: {
@@ -137,6 +143,8 @@ export async function runHunterDryPlan({
         include: {
           company: {
             select: {
+              domain: true,
+              apolloOrganizationId: true,
               doNotProspect: true,
               candidateStatus: true,
               cashflowCustomers: { select: { id: true }, take: 1 },
@@ -264,7 +272,8 @@ export async function runHunterDryPlan({
         ? buildCurrentResearchedOutreachCandidates({
             signals,
             suppressedCompanyIds,
-            suppressedValues
+            suppressedValues,
+            researchRunId
           })
         : [...candidates.values()].filter((candidate) =>
             candidate.priorityScore >= effective.minimumPriorityScore &&
@@ -307,7 +316,11 @@ export async function runHunterDryPlan({
           recommendedPersona: candidate.recommendedPersona,
           recommendedCadence: candidate.recommendedCadence,
           sourceTypes: candidate.sourceTypes,
-          evidence: candidate.evidence,
+          evidence: {
+            ...(candidate.evidence as Prisma.JsonObject),
+            researchCohort: candidate.researchCohort ?? null,
+            sourceResearchRunId: candidate.sourceResearchRunId ?? null
+          },
           configSnapshot
         }))
       });
@@ -328,6 +341,12 @@ export async function runHunterDryPlan({
           candidatePoolCount: eligible.length,
           selectedCount: selected.length,
           selectedByService: counts,
+          todayResearchSelectedCount: selected.filter(
+            (candidate) => candidate.researchCohort === "TODAY"
+          ).length,
+          carryForwardSelectedCount: selected.filter(
+            (candidate) => candidate.researchCohort === "CARRY_FORWARD"
+          ).length,
           externalSignalCount: signals.length,
           completedAt: new Date().toISOString()
         }
@@ -364,7 +383,8 @@ export async function runHunterDryPlan({
 function buildCurrentResearchedOutreachCandidates({
   signals,
   suppressedCompanyIds,
-  suppressedValues
+  suppressedValues,
+  researchRunId
 }: {
   signals: Array<{
     id: string;
@@ -380,7 +400,10 @@ function buildCurrentResearchedOutreachCandidates({
     observedAt: Date;
     sourceUrl: string | null;
     evidence: Prisma.JsonValue | null;
+    rawJson: Prisma.JsonValue | null;
     company: {
+      domain: string | null;
+      apolloOrganizationId: string | null;
       doNotProspect: boolean;
       candidateStatus: CandidateStatus;
       cashflowCustomers: Array<{ id: string }>;
@@ -389,6 +412,7 @@ function buildCurrentResearchedOutreachCandidates({
   }>;
   suppressedCompanyIds: Set<string>;
   suppressedValues: Set<string>;
+  researchRunId: string | null;
 }) {
   const latestByCompany = new Map<string, (typeof signals)[number]>();
   for (const signal of signals) {
@@ -399,9 +423,15 @@ function buildCurrentResearchedOutreachCandidates({
     ) {
       continue;
     }
-    const existing = latestByCompany.get(signal.companyId);
+    const identityKey = resolveHunterCompanyIdentityKey({
+      name: signal.companyName,
+      normalizedName: signal.normalizedCompanyName,
+      domain: signal.company.domain,
+      apolloOrganizationId: signal.company.apolloOrganizationId
+    });
+    const existing = latestByCompany.get(identityKey);
     if (!existing || signal.observedAt.getTime() > existing.observedAt.getTime()) {
-      latestByCompany.set(signal.companyId, signal);
+      latestByCompany.set(identityKey, signal);
     }
   }
 
@@ -441,6 +471,11 @@ function buildCurrentResearchedOutreachCandidates({
       sourceTypes: ["COMPANY_RESEARCH", signal.signalType],
       recommendedPersona: recommendPersona(signal.serviceLine),
       recommendedCadence: recommendCadence(signal.serviceLine),
+      researchCohort:
+        researchRunId && readResearchRunId(signal.rawJson) === researchRunId
+          ? "TODAY"
+          : "CARRY_FORWARD",
+      sourceResearchRunId: readResearchRunId(signal.rawJson),
       evidence: {
         researchSignalId: signal.id,
         opportunityTier: eligibility.opportunityTier,
@@ -450,6 +485,12 @@ function buildCurrentResearchedOutreachCandidates({
     });
   }
   return candidates;
+}
+
+function readResearchRunId(value: Prisma.JsonValue | null) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const runId = (value as Prisma.JsonObject).runId;
+  return typeof runId === "string" && runId.trim() ? runId : null;
 }
 
 export function buildHunterPlanningCompanyWhere(

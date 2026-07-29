@@ -7,7 +7,7 @@ import {
 } from "@/modules/lead-gen/apollo-contact-discovery-review";
 
 describe("Apollo contact-discovery review", () => {
-  it("turns a verified company with zero employees into a durable manual-review exception", () => {
+  it("keeps a verified company mapped when employee discovery returns zero results", () => {
     const result = resolveApolloContactDiscoveryMatch({
       classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
       matchReason: "Exact saved Apollo organization.",
@@ -15,10 +15,10 @@ describe("Apollo contact-discovery review", () => {
     });
 
     expect(result).toEqual({
-      classification: ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW,
+      classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
       matchReason: `Exact saved Apollo organization.; ${APOLLO_ZERO_CONTACT_REVIEW_REASON}`
     });
-    expect(requiresApolloMatchReview(result.classification)).toBe(true);
+    expect(requiresApolloMatchReview(result.classification)).toBe(false);
   });
 
   it("keeps a direct match resolved when Apollo returns employees", () => {

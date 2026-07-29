@@ -341,7 +341,7 @@ describe("pipeline bulk actions", () => {
     expect(leadUpdate).not.toHaveBeenCalled();
   });
 
-  it("sends a verified Apollo company with zero employees to manual review", async () => {
+  it("keeps a verified Apollo company mapped when it has zero employees", async () => {
     fetchApolloContactsForCompany.mockResolvedValueOnce({
       organizationId: "apollo-org-empty",
       companyName: "Harbor Home Retail LLC",
@@ -373,18 +373,18 @@ describe("pipeline bulk actions", () => {
       status: "success",
       requestedCompanies: 1,
       processedCompanies: 1,
-      reviewNeededCompanies: 1,
-      companiesWithoutContacts: 0
+      reviewNeededCompanies: 0,
+      companiesWithoutContacts: 1
     });
     expect(apolloCompanyMatchCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        classification: ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW,
+        classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
         matchReason: expect.stringContaining("returned zero employees")
       })
     });
     expect(contactCreate).not.toHaveBeenCalled();
     expect(leadUpdate.mock.calls.at(-1)?.[0]?.data?.notes).toContain(
-      "Apollo company review needed"
+      "completed with no contacts"
     );
   });
 

@@ -37,6 +37,30 @@ it verifies the latest Apollo company match, imports a bounded set of buyer cont
 and creates grounded Outreach Plans. Ambiguous/missing Apollo matches are recorded for review and are not searched
 again automatically. Assisted mode never approves a contact or plan, enrolls a cadence, or sends communication.
 
+Daily Opportunities separates the latest successful research cohort from carry-forward outreach. Primary tier counts
+represent only companies completed in the latest run; still-current Hot and Qualified accounts from earlier runs
+remain actionable in a distinct carry-forward section. The planner records the cohort and source research run on
+each decision so an older opportunity cannot be presented as research completed today.
+
+Research preparation resolves a canonical company identity before selecting the bounded cohort. A normalized company
+domain takes precedence over legal suffixes and branch labels, preventing aliases of the same operating company from
+consuming multiple research slots. Tenant company IDs and prepared keys are still revalidated at completion.
+
+The Qwen/Luna shadow comparison is visible under Automation Settings. An administrator may replay Luna against the
+exact saved public-evidence packet without repeating Brave retrieval; Luna remains non-authoritative and cannot change
+the Qwen/Kimi classification or authorize outreach.
+
+Apollo company mapping and employee discovery are separate states. A verified Apollo organization remains mapped
+when Apollo returns zero employees. It appears under **Mapped company — employee lookup needed**, where employees can
+be rechecked without repeating paid organization matching; it is not presented as an unmapped-company exception.
+
+Company and contact identity resolution is tenant-wide. TradeMining ingestion reuses an existing company for a unique,
+safe legal-suffix name variant rather than creating another company row. Apollo organization ID and normalized domain
+take precedence over display-name spelling after a manual mapping; ambiguous name-only matches remain in human review.
+Apollo person/contact ID, then LinkedIn URL and concrete email, identify an existing contact across company aliases.
+If that person is already enrolled or paused in a Hunter-managed cadence, Hunter creates neither a duplicate contact
+nor another outreach plan. Prior non-Hunter cadence history remains eligible for the separately approved move policy.
+
 ## Data model
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.

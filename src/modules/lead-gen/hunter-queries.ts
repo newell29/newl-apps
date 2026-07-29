@@ -1,6 +1,10 @@
 import { HunterDecisionStatus, type JobStatus, type Prisma } from "@prisma/client";
 import { DEFAULT_HUNTER_POLICY, HUNTER_DRY_RUN_JOB_TYPE } from "@/modules/lead-gen/hunter-planner";
 import { HUNTER_COMPANY_RESEARCH_JOB_TYPE } from "@/modules/lead-gen/hunter-company-research";
+import {
+  readStoredHunterResearchLunaShadow,
+  summarizeHunterResearchLunaShadow
+} from "@/modules/lead-gen/hunter-company-research-shadow";
 import { HUNTER_OUTREACH_HANDOFF_JOB_TYPE } from "@/modules/lead-gen/hunter-job-types";
 import { HUNTER_SIGNAL_SCOUT_JOB_TYPE } from "@/modules/lead-gen/hunter-signal-scout";
 import { prisma } from "@/server/db";
@@ -52,7 +56,7 @@ export async function getHunterControlPlane(tenant: Pick<TenantContext, "tenantI
     prisma.hunterOpportunitySignal.findMany({
       where: { tenantId: tenant.tenantId },
       orderBy: [{ observedAt: "desc" }, { createdAt: "desc" }],
-      take: 30
+      take: 200
     }),
     prisma.hunterProspectingDecision.count({
       where: {
@@ -85,6 +89,17 @@ export async function getHunterControlPlane(tenant: Pick<TenantContext, "tenantI
     })
   ]);
 
+  const latestSuccessfulCompanyResearchRun =
+    companyResearchRuns.find((run) => run.status === "SUCCESS") ?? null;
+  const latestResearchRunId = latestSuccessfulCompanyResearchRun?.id ?? null;
+  const {
+    latestResearchSignals,
+    carryForwardResearchSignals
+  } = partitionHunterResearchSignals(signals, latestResearchRunId);
+  const lunaShadow = readStoredHunterResearchLunaShadow(
+    latestSuccessfulCompanyResearchRun?.output
+  );
+
   return {
     policy: storedPolicy ?? {
       id: null,
@@ -101,6 +116,11 @@ export async function getHunterControlPlane(tenant: Pick<TenantContext, "tenantI
     latestSignalScoutRun: signalScoutRuns[0] ?? null,
     companyResearchRuns,
     latestCompanyResearchRun: companyResearchRuns[0] ?? null,
+    latestSuccessfulCompanyResearchRun,
+    latestResearchSignals,
+    carryForwardResearchSignals,
+    latestLunaShadow: lunaShadow,
+    latestLunaShadowSummary: summarizeHunterResearchLunaShadow(lunaShadow),
     signals,
     decisionCount,
     activeSuppressionCount,
@@ -108,6 +128,49 @@ export async function getHunterControlPlane(tenant: Pick<TenantContext, "tenantI
       latestOutreachHandoffRun
     )
   };
+}
+
+export function partitionHunterResearchSignals<
+  T extends {
+    id: string;
+    sourceName: string | null;
+    rawJson: Prisma.JsonValue | null;
+    evidence: Prisma.JsonValue | null;
+  }
+>(signals: T[], latestResearchRunId: string | null) {
+  const researchedSignals = signals.filter(
+    (signal) => signal.sourceName === "Hunter company research"
+  );
+  const latestResearchSignals = latestResearchRunId
+    ? researchedSignals.filter(
+        (signal) => readSignalResearchRunId(signal.rawJson) === latestResearchRunId
+      )
+    : [];
+  const latestResearchSignalIds = new Set(
+    latestResearchSignals.map((signal) => signal.id)
+  );
+  return {
+    latestResearchSignals,
+    carryForwardResearchSignals: researchedSignals.filter(
+      (signal) =>
+        !latestResearchSignalIds.has(signal.id) &&
+        isActionableResearchSignal(signal.evidence)
+    )
+  };
+}
+
+function readSignalResearchRunId(value: Prisma.JsonValue | null) {
+  const record = asRecord(value);
+  return typeof record?.runId === "string" ? record.runId : null;
+}
+
+function isActionableResearchSignal(value: Prisma.JsonValue | null) {
+  const evidence = asRecord(value);
+  const research = asRecord(evidence?.research);
+  return (
+    research?.opportunityTier === "HOT_OPPORTUNITY" ||
+    research?.opportunityTier === "QUALIFIED_CURRENT_ACCOUNT"
+  );
 }
 
 type HunterOutreachHandoffRun = {

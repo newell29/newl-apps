@@ -4,7 +4,10 @@ import {
   HunterServiceLine
 } from "@prisma/client";
 import { describe, expect, it } from "vitest";
-import { evaluateCurrentHunterApolloException } from "@/modules/lead-gen/queries";
+import {
+  evaluateCurrentHunterApolloException,
+  resolveApolloReviewQueueStatus
+} from "@/modules/lead-gen/queries";
 
 const NOW = new Date("2026-07-28T18:00:00.000Z");
 
@@ -55,6 +58,20 @@ describe("current Hunter Apollo exception filtering", () => {
         now: NOW
       })
     ).toBeNull();
+  });
+});
+
+describe("Apollo review queue states", () => {
+  it("separates a mapped zero-employee organization from unmapped exceptions", () => {
+    expect(
+      resolveApolloReviewQueueStatus({
+        apolloOrganizationId: "apollo-org-1",
+        classification: ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW,
+        matchReason:
+          "Exact company; Apollo verified the company but returned zero employees. Open the company in Apollo, select its People page, and paste that Apollo company URL for manual verification.",
+        reviewedAt: null
+      })
+    ).toBe("MAPPED_NO_EMPLOYEES");
   });
 });
 

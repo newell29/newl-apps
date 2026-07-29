@@ -293,7 +293,8 @@ describe("Hunter assisted handoff queueing", () => {
       tenantId: "tenant-a",
       actorUserId: "user-a",
       trigger: "MANUAL",
-      candidateScope: "CURRENT_RESEARCHED_OUTREACH"
+      candidateScope: "CURRENT_RESEARCHED_OUTREACH",
+      researchRunId: "research-current"
     });
     expect(prisma.automationJobRun.create).toHaveBeenCalledWith({
       data: expect.objectContaining({

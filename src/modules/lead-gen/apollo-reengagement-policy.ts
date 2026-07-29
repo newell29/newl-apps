@@ -1,5 +1,7 @@
 import { ReplyStatus, SequenceStatus } from "@prisma/client";
 
+import { isHunterManagedSequenceName } from "@/modules/lead-gen/sequence-catalog";
+
 export const HUNTER_COMPANY_REPLY_HARD_STOP_STATUSES = [
   ReplyStatus.REPLIED,
   ReplyStatus.POSITIVE,
@@ -91,18 +93,40 @@ export function decideApolloSequenceTransition({
 export function isHunterContactSafeForReview({
   contactStatus,
   replyStatus,
-  sequenceStatus
+  sequenceStatus,
+  selectedSequenceName
 }: {
   contactStatus: "REJECTED" | "DO_NOT_CONTACT" | string;
   replyStatus: ReplyStatus;
   sequenceStatus: SequenceStatus;
+  selectedSequenceName?: string | null;
 }) {
   return (
     contactStatus !== "REJECTED" &&
     contactStatus !== "DO_NOT_CONTACT" &&
     replyStatus === ReplyStatus.NO_REPLY &&
     sequenceStatus !== SequenceStatus.REPLIED &&
-    sequenceStatus !== SequenceStatus.BOUNCED
+    sequenceStatus !== SequenceStatus.BOUNCED &&
+    !isActiveHunterCadence({
+      sequenceStatus,
+      sequenceName: selectedSequenceName
+    })
+  );
+}
+
+export function isActiveHunterCadence({
+  sequenceStatus,
+  sequenceName
+}: {
+  sequenceStatus: SequenceStatus;
+  sequenceName: string | null | undefined;
+}) {
+  return (
+    (
+      sequenceStatus === SequenceStatus.ENROLLED ||
+      sequenceStatus === SequenceStatus.PAUSED
+    ) &&
+    isHunterManagedSequenceName(sequenceName)
   );
 }
 

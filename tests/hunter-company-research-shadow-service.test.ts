@@ -9,6 +9,9 @@ const prisma = vi.hoisted(() => ({
   company: {
     findMany: vi.fn()
   },
+  hunterOpportunitySignal: {
+    findMany: vi.fn()
+  },
   auditLog: {
     create: vi.fn()
   }
@@ -28,6 +31,7 @@ vi.mock("@/server/db", () => ({ prisma }));
 import {
   HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_MODEL,
   hunterResearchLunaShadowConfiguration,
+  replayHunterResearchLunaShadowComparison,
   runHunterResearchLunaShadowBatch
 } from "@/modules/lead-gen/hunter-company-research-shadow";
 
@@ -171,6 +175,67 @@ describe("Hunter Luna company-research shadow service", () => {
     expect(generateHunterResearchLunaShadow).toHaveBeenCalledWith(
       expect.objectContaining({
         packets: [expect.objectContaining({ qwenSynthesis: null })]
+      })
+    );
+  });
+
+  it("replays Luna from saved evidence without another retrieval step", async () => {
+    prisma.automationJobRun.findFirst.mockResolvedValue({
+      id: "run-1",
+      input: {
+        candidateCompanyIds: ["company-1"],
+        candidateCompanyKeys: ["example-retailer"]
+      },
+      output: null
+    });
+    prisma.company.findMany
+      .mockResolvedValueOnce([
+        {
+          id: "company-1",
+          name: "Example Retailer",
+          normalizedName: "example-retailer",
+          domain: "example.com",
+          priorityScore: 80,
+          primaryIndustry: "Retail",
+          importRecords: []
+        }
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: "company-1",
+          name: "Example Retailer",
+          normalizedName: "example-retailer"
+        }
+      ]);
+    prisma.hunterOpportunitySignal.findMany.mockResolvedValue([
+      {
+        companyId: "company-1",
+        rawJson: { runId: "run-1" },
+        evidence: {
+          research: {
+            evidence: packet().publicEvidence,
+            synthesis: synthesis()
+          }
+        }
+      }
+    ]);
+
+    const result = await replayHunterResearchLunaShadowComparison({
+      tenantId: "tenant-a",
+      runId: "run-1"
+    });
+
+    expect(result).toMatchObject({
+      state: "completed",
+      replayedCompanyCount: 1
+    });
+    expect(generateHunterResearchLunaShadow).toHaveBeenCalledTimes(1);
+    expect(prisma.hunterOpportunitySignal.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId: "tenant-a",
+          sourceName: "Hunter company research"
+        })
       })
     );
   });

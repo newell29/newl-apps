@@ -23,7 +23,7 @@ export function resolveApolloContactDiscoveryMatch({
     contactsFound === 0
   ) {
     return {
-      classification: ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW,
+      classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
       matchReason: matchReason
         ? `${matchReason}; ${APOLLO_ZERO_CONTACT_REVIEW_REASON}`
         : APOLLO_ZERO_CONTACT_REVIEW_REASON

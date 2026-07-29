@@ -18,15 +18,17 @@ export function ApolloMatchReviewActions({
   retryAction,
   mapAction,
   confirmNoMatchAction,
-  reopenAction
+  reopenAction,
+  mappedCompanyRecheckAction
 }: {
   companyId: string;
   companyName: string;
-  status: "NEEDS_REVIEW" | "CONFIRMED_NO_MATCH";
+  status: "NEEDS_REVIEW" | "MAPPED_NO_EMPLOYEES" | "CONFIRMED_NO_MATCH";
   retryAction: ReviewAction;
   mapAction: ReviewAction;
   confirmNoMatchAction: ReviewAction;
   reopenAction: ReviewAction;
+  mappedCompanyRecheckAction: (formData: FormData) => Promise<void>;
 }) {
   const [retryState, retryFormAction, retryPending] = useActionState(
     retryAction,
@@ -44,6 +46,24 @@ export function ApolloMatchReviewActions({
     reopenAction,
     EMPTY_APOLLO_MATCH_REVIEW_ACTION_STATE
   );
+
+  if (status === "MAPPED_NO_EMPLOYEES") {
+    return (
+      <div className="rounded-md border border-success/30 bg-success/10 p-4">
+        <p className="font-semibold text-foreground">Apollo company mapping is confirmed</p>
+        <p className="mt-1 text-sm leading-6 text-mutedForeground">
+          Recheck saved contacts and the organization employee directory. This keeps the existing company
+          mapping and does not repeat paid organization matching.
+        </p>
+        <form action={mappedCompanyRecheckAction} className="mt-3">
+          <input type="hidden" name="companyId" value={companyId} />
+          <button className="rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primaryForeground">
+            Recheck employees
+          </button>
+        </form>
+      </div>
+    );
+  }
 
   if (status === "CONFIRMED_NO_MATCH") {
     return (

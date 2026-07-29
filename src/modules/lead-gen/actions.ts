@@ -1320,16 +1320,17 @@ export async function mapApolloCompanyUrlAction(
         }
       },
       select: {
+        id: true,
         name: true
       }
     });
-    if (duplicate) {
-      throw new Error(`That Apollo company is already mapped to ${duplicate.name}.`);
-    }
     const mappedAt = new Date();
     const mappingNote =
       `Apollo company manually mapped by ${context.userEmail} on ${mappedAt.toISOString()}. ` +
-      `Mapped "${lead.company.name}" to "${mapping.companyName}".`;
+      `Mapped "${lead.company.name}" to "${mapping.companyName}".` +
+      (duplicate
+        ? ` Apollo organization identity is shared with canonical company "${duplicate.name}" (${duplicate.id}); Hunter will suppress duplicate contacts and active Hunter cadence enrollment.`
+        : "");
 
     await prisma.$transaction([
       prisma.company.update({

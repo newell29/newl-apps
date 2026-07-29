@@ -48,6 +48,7 @@ type CompanyRow = {
   candidateStatus?: string;
   doNotProspect?: boolean;
   domain?: string | null;
+  apolloOrganizationId?: string | null;
   primaryIndustry?: string | null;
   secondaryIndustry?: string | null;
   industryConfidence?: number | null;
@@ -176,7 +177,21 @@ const mockDb = vi.hoisted(() => {
       })
     },
     company: {
-      findMany: vi.fn(async () => []),
+      findMany: vi.fn(async ({ where, select }: {
+        where?: { tenantId?: string };
+        select?: Record<string, boolean>;
+      } = {}) => {
+        if (!select?.apolloOrganizationId) return [];
+        return [...state.companies.values()]
+          .filter((company) => !where?.tenantId || company.tenantId === where.tenantId)
+          .map((company) =>
+            Object.fromEntries(
+              Object.entries(select)
+                .filter(([, include]) => include)
+                .map(([key]) => [key, company[key as keyof CompanyRow] ?? null])
+            )
+          );
+      }),
       findUnique: vi.fn(async ({ where, select }: { where: { id?: string; tenantId_normalizedName?: { tenantId: string; normalizedName: string } }; select?: Record<string, boolean> }) => {
         const company = where.id
           ? [...state.companies.values()].find((candidate) => candidate.id === where.id) ?? null
@@ -566,6 +581,53 @@ describe("TradeMining ingestion", () => {
       priorityScore: 78,
       primaryIndustry: "Furniture & Home",
       industrySource: "MIXED"
+    });
+  });
+
+  it("resolves a unique legal-name alias to the existing tenant company", async () => {
+    mockDb.state.searchProfiles.set(
+      "profile-a",
+      searchProfile({
+        id: "profile-a",
+        tenantId: "tenant-a",
+        allowedCompanyIdentityRoles: ["importer_name"]
+      })
+    );
+    mockDb.state.companies.set("tenant-a:atlas-copco-compressors-llc", {
+      id: "company-atlas",
+      tenantId: "tenant-a",
+      name: "Atlas Copco Compressors LLC",
+      normalizedName: "atlas-copco-compressors-llc",
+      source: "trademining",
+      priorityScore: 70,
+      candidateStatus: "NEW",
+      doNotProspect: false,
+      domain: "atlascopco.com",
+      apolloOrganizationId: "apollo-atlas"
+    });
+
+    await expect(
+      ingestTradeMiningBatch(tenant, {
+        source: "OPENCLAW",
+        searchProfileId: "profile-a",
+        records: [
+          {
+            importerName: "Atlas Copco Compressors, Inc.",
+            bolNumber: "BOL-alias",
+            shipmentDate: "2026-06-18",
+            destinationPort: "Charlotte, North Carolina"
+          }
+        ]
+      })
+    ).resolves.toMatchObject({
+      recordsCreated: 1,
+      companiesCreated: 0,
+      companiesUpdated: 1
+    });
+
+    expect(mockDb.state.companies.size).toBe(1);
+    expect([...mockDb.state.importRecords.values()][0]).toMatchObject({
+      companyId: "company-atlas"
     });
   });
 

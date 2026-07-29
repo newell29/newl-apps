@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/page-header";
 import {
   addHunterOpportunitySignalAction,
   queueCurrentHunterOutreachHandoffAction,
+  replayHunterLunaComparisonAction,
   runHunterDryPlanAction,
   saveHunterPolicyAction
 } from "@/modules/lead-gen/hunter-actions";
@@ -22,7 +23,12 @@ export const dynamic = "force-dynamic";
 export default async function AutomationSettingsPage({
   searchParams
 }: {
-  searchParams: Promise<{ handoff?: string; count?: string }>;
+  searchParams: Promise<{
+    handoff?: string;
+    count?: string;
+    lunaReplay?: string;
+    lunaCount?: string;
+  }>;
 }) {
   const context = await getAuthenticatedContext();
   await requireModule(context, ModuleKey.LEAD_GEN);
@@ -30,6 +36,10 @@ export default async function AutomationSettingsPage({
   const data = await getHunterControlPlane(context);
   const policy = data.policy;
   const handoffMessage = formatHandoffMessage(query.handoff, query.count);
+  const lunaReplayMessage = formatLunaReplayMessage(
+    query.lunaReplay,
+    query.lunaCount
+  );
 
   return (
     <div className="space-y-6">
@@ -51,6 +61,18 @@ export default async function AutomationSettingsPage({
         <section className="rounded-lg border border-success/30 bg-success/10 p-4 text-sm text-foreground">
           {handoffMessage}
         </section>
+      ) : null}
+      {lunaReplayMessage ? (
+        <section className="rounded-lg border border-success/30 bg-success/10 p-4 text-sm text-foreground">
+          {lunaReplayMessage}
+        </section>
+      ) : null}
+      {data.latestSuccessfulCompanyResearchRun ? (
+        <LunaComparison
+          runId={data.latestSuccessfulCompanyResearchRun.id}
+          summary={data.latestLunaShadowSummary}
+          results={data.latestLunaShadow?.results ?? []}
+        />
       ) : null}
       {data.latestOutreachHandoff ? (
         <LatestContactDiscoveryRun
@@ -181,6 +203,79 @@ export default async function AutomationSettingsPage({
   );
 }
 
+function LunaComparison({
+  runId,
+  summary,
+  results
+}: {
+  runId: string;
+  summary: Awaited<ReturnType<typeof getHunterControlPlane>>["latestLunaShadowSummary"];
+  results: NonNullable<
+    Awaited<ReturnType<typeof getHunterControlPlane>>["latestLunaShadow"]
+  >["results"];
+}) {
+  return (
+    <details className="rounded-lg border border-border bg-card p-5 shadow-sm">
+      <summary className="cursor-pointer font-semibold text-foreground">
+        Qwen vs Luna research comparison
+        {summary
+          ? ` · ${summary.evaluatedCompanyCount}/${summary.expectedCompanyCount} evaluated`
+          : " · not completed"}
+      </summary>
+      <p className="mt-2 text-sm leading-6 text-mutedForeground">
+        Luna independently reviews the exact saved Brave evidence used by Qwen. It remains non-authoritative and
+        cannot change classifications or authorize outreach. Replay reuses saved evidence and does not purchase
+        another Brave retrieval.
+      </p>
+      {summary ? (
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <RunMetric label="Status" value={summary.status} />
+          <RunMetric
+            label="Categorical agreement"
+            value={summary.categoricalAgreementPercent === null
+              ? "Not comparable"
+              : `${summary.categoricalAgreementPercent}%`}
+          />
+          <RunMetric
+            label="Trigger agreement"
+            value={`${summary.triggerEvidenceAgreementCount}/${summary.evaluatedCompanyCount}`}
+          />
+          <RunMetric
+            label="Tokens"
+            value={summary.inputTokens + summary.outputTokens}
+          />
+        </div>
+      ) : null}
+      {results.length > 0 ? (
+        <div className="mt-4 grid gap-2">
+          {results.map((result) => (
+            <div
+              key={result.companyId}
+              className="rounded-md border border-border bg-background px-3 py-2 text-sm"
+            >
+              <span className="font-semibold text-foreground">{result.companyKey}</span>
+              <span className="ml-2 text-mutedForeground">
+                {result.comparison
+                  ? `${result.comparison.agreementPercent}% agreement` +
+                    (result.comparison.disagreedFields.length
+                      ? ` · differs on ${result.comparison.disagreedFields.join(", ")}`
+                      : " · no categorical differences")
+                  : "Qwen result was unavailable for comparison"}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <form action={replayHunterLunaComparisonAction} className="mt-4">
+        <input type="hidden" name="runId" value={runId} />
+        <button className="rounded-md border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground">
+          Replay Luna from saved evidence
+        </button>
+      </form>
+    </details>
+  );
+}
+
 function LatestContactDiscoveryRun({
   run,
   timeZone
@@ -262,7 +357,7 @@ function LatestContactDiscoveryRun({
   );
 }
 
-function RunMetric({ label, value }: { label: string; value: number }) {
+function RunMetric({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="bg-card px-5 py-4">
       <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">
@@ -271,6 +366,20 @@ function RunMetric({ label, value }: { label: string; value: number }) {
       <p className="mt-1 text-2xl font-semibold text-foreground">{value}</p>
     </div>
   );
+}
+
+function formatLunaReplayMessage(
+  state: string | undefined,
+  countValue: string | undefined
+) {
+  if (!state) return null;
+  const count = Number(countValue);
+  if (state === "completed" || state === "cached") {
+    return `Luna replayed the saved evidence for ${
+      Number.isInteger(count) ? count : "the selected"
+    } compan${count === 1 ? "y" : "ies"}. No Brave search was repeated.`;
+  }
+  return "The Luna comparison replay finished with an error. Review Health & Logs before retrying.";
 }
 
 function formatHandoffMessage(state: string | undefined, countValue: string | undefined) {
