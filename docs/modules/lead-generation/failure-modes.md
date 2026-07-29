@@ -426,7 +426,10 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Cause: the older path read only the first 25 saved contacts and did not reconcile a masked People Search identity
   back to the saved contact's concrete email. A second state bug could display **Recheck employees** for a persisted
   zero-employee mapping while the handoff worker rejected the same company because its latest immutable attempt had a
-  review classification. In that case no Apollo employee request ran at all.
+  review classification. In that case no Apollo employee request ran at all. A later queue-state bug did the inverse:
+  contact discovery correctly persisted a verified `DIRECT_COMPANY` result with the zero-employee marker, but the
+  exception eligibility filter discarded ordinary direct matches before honoring that marker. The failed company
+  disappeared immediately after the lookup instead of remaining available for deliberate recheck.
 - Safe recovery: map/recheck again after this release. Hunter reads up to 20 relevant saved-contact pages of 100,
   targets each shortlisted masked person by name/title/confirmed company, backfills saved identity, and reports the
   recovery counts in the immutable match reason. **Recheck employees** now uses the same persisted-mapping state as
@@ -437,8 +440,9 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   unless the operator explicitly checks the separate authorization, is limited to three people, and disables phone
   and waterfall requests.
 - Queue behavior: a direct company with at least one recovered employee leaves Apollo Exceptions. A direct company
-  with no employees remains visible with the completed-search reason so it cannot spin silently. Unapproved plans
-  attached to contacts that still have no concrete email are archived.
+  with no employees remains visible with the completed-search reason so it cannot spin silently. Queue eligibility
+  still requires a current Qwen/Kimi-vetted Hunter opportunity; the zero-employee marker is the only direct-match
+  exception. Unapproved plans attached to contacts that still have no concrete email are archived.
 
 ### Apollo People Search returns employees but Hunter still keeps the same saved contacts
 
