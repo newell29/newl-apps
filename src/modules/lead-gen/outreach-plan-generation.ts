@@ -4,8 +4,7 @@ import {
   HunterServiceLine,
   OutreachPlanStatus,
   OutreachQaStatus,
-  Prisma,
-  SequenceStatus
+  Prisma
 } from "@prisma/client";
 
 import {
@@ -22,10 +21,13 @@ import {
   DEFAULT_OUTREACH_DRAFT_MODEL,
   DEFAULT_OUTREACH_QA_MODEL,
   DEFAULT_OUTREACH_STRATEGY_MODEL,
+  classifyOutreachQaIssues,
   fingerprintOutreachEvidence,
+  getOutreachRegenerationBlockReason,
   mergeOutreachQaResults,
   OUTREACH_PLAN_COMPATIBLE_PASSED_PROMPT_VERSIONS,
   OUTREACH_PLAN_PROMPT_VERSION,
+  repairOutreachSequenceDeterministically,
   runDeterministicOutreachQa,
   type GeneratedOutreachSequence,
   type ModelOutreachQaResult,
@@ -118,7 +120,7 @@ export function buildBoundedOutreachRepairFeedback({
     .filter(
       (issue) =>
         issue.severity === "ERROR" &&
-        issue.code !== "MODEL_QA_UNAVAILABLE"
+        classifyOutreachQaIssues([issue]) === "MODEL_REGENERATION"
     )
     .filter(
       (issue, index, issues) =>
@@ -170,6 +172,7 @@ export async function runBoundedOutreachQaRepair({
   generateSequence,
   runDeterministicQa,
   runModelQa,
+  repairSequence = (sequence) => sequence,
   allowCallTask,
   senderFirstName
 }: {
@@ -188,6 +191,9 @@ export async function runBoundedOutreachQaRepair({
     result: ModelOutreachQaResult;
     usage: OpenAiStructuredUsage | null;
   }>;
+  repairSequence?: (
+    sequence: GeneratedOutreachSequence
+  ) => GeneratedOutreachSequence;
   allowCallTask: boolean;
   senderFirstName: string;
 }) {
@@ -197,7 +203,7 @@ export async function runBoundedOutreachQaRepair({
   const createDraft = async (repairFeedback: string | null) => {
     const generated = await generateSequence(repairFeedback);
     draftingUsageAttempts.push(generated.usage);
-    return generated.sequence;
+    return repairSequence(generated.sequence);
   };
   const reviewDraft = async (sequence: GeneratedOutreachSequence) => {
     const reviewed = await runModelQa(sequence);
@@ -256,13 +262,16 @@ export async function generateOutreachPlanForContact({
   if (!draftContext) {
     throw new Error("Contact not found for this tenant.");
   }
-  if (
-    forceRegenerate &&
-    (draftContext.existingOutreachPlan?.status === OutreachPlanStatus.APPROVED ||
-      (draftContext.contact.sequenceStatus !== SequenceStatus.NOT_STARTED &&
-        draftContext.contact.sequenceStatus !== SequenceStatus.READY))
-  ) {
-    throw new Error("Emails cannot be regenerated after outreach approval or Apollo cadence enrollment.");
+  const regenerationBlockReason = forceRegenerate
+    ? getOutreachRegenerationBlockReason({
+        planStatus: draftContext.existingOutreachPlan?.status ?? null,
+        contactStatus: draftContext.contact.contactStatus,
+        replyStatus: draftContext.contact.replyStatus,
+        sequenceStatus: draftContext.contact.sequenceStatus
+      })
+    : null;
+  if (regenerationBlockReason) {
+    throw new Error(regenerationBlockReason);
   }
   if (!draftContext.requiresAiDraft && !forceRegenerate && !generateWhenNotRequired) {
     return { state: "not_required" as const };
@@ -379,6 +388,11 @@ export async function generateOutreachPlanForContact({
         senderFirstName: senderIdentity.firstName,
         allowCallTask
       }),
+    repairSequence: (candidateSequence) =>
+      repairOutreachSequenceDeterministically({
+        evidence: evidenceLedger,
+        sequence: candidateSequence
+      }).sequence,
     runModelQa: async (candidateSequence) => {
       try {
         const qaReview = await reviewOutreachSequenceGrounding({
@@ -587,6 +601,224 @@ export async function generateOutreachPlanForContact({
     ...persisted,
     qaPassed: qa.passed,
     issueCount: qa.issues.length
+  };
+}
+
+export async function repairFailedOutreachPlanForContact({
+  tenantId,
+  contactId
+}: {
+  tenantId: string;
+  contactId: string;
+}) {
+  const plan = await prisma.outreachPlan.findFirst({
+    where: {
+      tenantId,
+      contactId,
+      status: OutreachPlanStatus.QA_FAILED,
+      qaStatus: OutreachQaStatus.FAILED
+    },
+    orderBy: { version: "desc" },
+    include: {
+      steps: { orderBy: { stepNumber: "asc" } },
+      contact: {
+        select: {
+          contactStatus: true,
+          replyStatus: true,
+          sequenceStatus: true
+        }
+      }
+    }
+  });
+  if (!plan) {
+    return {
+      state: "skipped" as const,
+      message: "No current failed QA plan was found."
+    };
+  }
+
+  const regenerationBlockReason = getOutreachRegenerationBlockReason({
+    planStatus: plan.status,
+    contactStatus: plan.contact.contactStatus,
+    replyStatus: plan.contact.replyStatus,
+    sequenceStatus: plan.contact.sequenceStatus
+  });
+  if (regenerationBlockReason) {
+    return { state: "blocked" as const, message: regenerationBlockReason };
+  }
+
+  const priorIssues = parseOutreachQaIssues(plan.qaIssues);
+  const evidence = parseOutreachEvidence(plan.evidence);
+  const sequence: GeneratedOutreachSequence = {
+    sequenceName: plan.sequenceName,
+    steps: plan.steps.map((step) => ({
+      stepNumber: step.stepNumber,
+      channel: step.channel,
+      delayDays: step.delayDays,
+      subject: step.subject,
+      body: step.body,
+      angle: step.angle,
+      evidenceRefs: asStringArray(step.evidenceRefs)
+    }))
+  };
+  const priorDisposition = classifyOutreachQaIssues(
+    priorIssues,
+    evidence,
+    sequence
+  );
+  if (priorDisposition === "HUMAN_REVIEW") {
+    return {
+      state: "human_review" as const,
+      message: "This plan needs sender, evidence, or configuration review before it can be repaired."
+    };
+  }
+  const strategy: OutreachStrategy = {
+    serviceLine: plan.serviceLine,
+    opportunityType: plan.opportunityType,
+    objective: plan.objective,
+    triggerSummary: plan.triggerSummary,
+    buyerHypothesis: plan.buyerHypothesis,
+    valueProposition: plan.valueProposition,
+    likelyObjection: plan.likelyObjection,
+    callToAction: plan.callToAction,
+    channelStrategy: asStringArray(plan.channelStrategy),
+    senderRecommendation: plan.senderRecommendation ?? "",
+    confidence: plan.confidence,
+    evidenceRefs: evidence.map((record) => record.id)
+  };
+
+  const deterministicRepair = repairOutreachSequenceDeterministically({
+    evidence,
+    sequence
+  });
+  const allowCallTask = deterministicRepair.sequence.steps.some(
+    (step) => step.channel === "CALL_TASK"
+  );
+  const deterministicQa = runDeterministicOutreachQa({
+    evidence,
+    strategy,
+    sequence: deterministicRepair.sequence,
+    senderFirstName: plan.senderRecommendation ?? undefined,
+    allowCallTask
+  });
+  const remainingDisposition = classifyOutreachQaIssues(
+    deterministicQa.issues,
+    evidence,
+    deterministicRepair.sequence
+  );
+
+  if (
+    priorDisposition === "AUTOMATIC" &&
+    deterministicRepair.changed &&
+    deterministicQa.passed
+  ) {
+    const firstEmail = deterministicRepair.sequence.steps.find(
+      (step) => step.channel === "EMAIL" && step.subject
+    );
+    if (!firstEmail?.subject) {
+      return {
+        state: "human_review" as const,
+        message: "The repaired plan has no usable first email."
+      };
+    }
+    const firstEmailSubject = firstEmail.subject;
+    await prisma.$transaction(async (transaction) => {
+      await transaction.outreachPlan.update({
+        where: { tenantId_id: { tenantId, id: plan.id } },
+        data: {
+          status: OutreachPlanStatus.QA_PASSED,
+          qaStatus: OutreachQaStatus.PASSED,
+          qaIssues: toInputJsonValue([]),
+          qaCheckedAt: new Date()
+        }
+      });
+      for (const step of deterministicRepair.sequence.steps) {
+        await transaction.outreachSequenceStep.update({
+          where: {
+            tenantId_outreachPlanId_stepNumber: {
+              tenantId,
+              outreachPlanId: plan.id,
+              stepNumber: step.stepNumber
+            }
+          },
+          data: {
+            subject: step.subject,
+            body: step.body,
+            evidenceRefs: toInputJsonValue(step.evidenceRefs),
+            qaIssues: toInputJsonValue([])
+          }
+        });
+      }
+      await transaction.contactOutreachDraft.updateMany({
+        where: {
+          tenantId,
+          contactId,
+          sequenceName: plan.sequenceName
+        },
+        data: {
+          subject: firstEmailSubject,
+          body: firstEmail.body,
+          status: ContactOutreachDraftStatus.AVAILABLE,
+          approvedAt: null
+        }
+      });
+      await transaction.auditLog.create({
+        data: {
+          tenantId,
+          actorUserId: null,
+          action: "OUTREACH_PLAN_DETERMINISTIC_QA_REPAIRED",
+          entityType: "OUTREACH_PLAN",
+          entityId: plan.id,
+          after: toInputJsonValue({
+            contactId,
+            repairs: deterministicRepair.repairs,
+            noModelCall: true
+          })
+        }
+      });
+    });
+    return {
+      state: "repaired" as const,
+      message: "Evidence annotations were repaired and deterministic QA now passes."
+    };
+  }
+
+  if (
+    priorDisposition === "MODEL_REGENERATION" ||
+    remainingDisposition === "MODEL_REGENERATION"
+  ) {
+    const feedback = [...priorIssues, ...deterministicQa.issues]
+      .filter(
+        (issue) =>
+          issue.severity === "ERROR" &&
+          classifyOutreachQaIssues([issue], evidence) === "MODEL_REGENERATION"
+      )
+      .map((issue) => issue.message)
+      .filter((message, index, messages) => messages.indexOf(message) === index)
+      .slice(0, 8)
+      .join("\n");
+    const regenerated = await generateOutreachPlanForContact({
+      tenantId,
+      contactId,
+      forceRegenerate: true,
+      reviewerFeedback:
+        feedback || "Regenerate the sequence to resolve the remaining grounded QA failures."
+    });
+    return {
+      state: regenerated.state === "qa_passed" ? "regenerated" as const : "failed" as const,
+      message:
+        regenerated.state === "qa_passed"
+          ? "The semantic QA failures were regenerated and the new plan passed."
+          : "The model regenerated this plan, but its replacement still did not pass QA."
+    };
+  }
+
+  return {
+    state: "human_review" as const,
+    message:
+      deterministicRepair.changed
+        ? "The safe corrections were applied in memory, but remaining evidence or configuration failures need review."
+        : "No safe deterministic correction was available for this plan."
   };
 }
 
@@ -1039,6 +1271,68 @@ function asStringArray(value: Prisma.JsonValue | null | undefined) {
   return Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === "string")
     : [];
+}
+
+function parseOutreachQaIssues(value: Prisma.JsonValue | null | undefined) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry): OutreachQaIssue[] => {
+    const issue = asObject(entry);
+    const code = readString(issue, "code");
+    const message = readString(issue, "message");
+    const severity = readString(issue, "severity");
+    if (
+      !code ||
+      !message ||
+      (severity !== "ERROR" && severity !== "WARNING")
+    ) {
+      return [];
+    }
+    return [{
+      code,
+      message,
+      severity,
+      stepNumber:
+        typeof issue.stepNumber === "number" ? issue.stepNumber : null
+    }];
+  });
+}
+
+function parseOutreachEvidence(
+  value: Prisma.JsonValue
+): OutreachEvidenceRecord[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry): OutreachEvidenceRecord[] => {
+    const record = asObject(entry);
+    const id = readString(record, "id");
+    const kind = readString(record, "kind");
+    const title = readString(record, "title");
+    const summary = readString(record, "summary");
+    if (
+      !id ||
+      !title ||
+      !summary ||
+      !kind ||
+      ![
+        "TRADEMINING",
+        "HUNTER_RESEARCH",
+        "HUNTER_SIGNAL",
+        "HUNTER_DECISION",
+        "COMPANY",
+        "NEWL_CAPABILITY"
+      ].includes(kind)
+    ) {
+      return [];
+    }
+    return [{
+      id,
+      kind: kind as OutreachEvidenceRecord["kind"],
+      title,
+      summary,
+      sourceUrl: readString(record, "sourceUrl"),
+      publishedAt: readString(record, "publishedAt"),
+      facts: asStringArray(record.facts)
+    }];
+  });
 }
 
 function asObject(value: unknown) {

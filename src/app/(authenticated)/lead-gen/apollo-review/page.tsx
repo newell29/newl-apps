@@ -26,6 +26,8 @@ export default async function ApolloMatchReviewPage({
   await requireModule(context, ModuleKey.LEAD_GEN);
   const params = searchParams ? await searchParams : {};
   const companyId = readParam(params.company);
+  const contactReviewMessage = readParam(params.contactReview);
+  const actionablePlans = Number(readParam(params.plans) ?? "0");
   const rows = await getApolloMatchReviewQueue(context, {
     companyId: companyId ?? undefined
   });
@@ -49,6 +51,24 @@ export default async function ApolloMatchReviewPage({
         <Metric label="Confirmed no match" value={confirmedRows.length} />
         <Metric label="Protected from bulk retry" value={rows.length} />
       </div>
+
+      {contactReviewMessage ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-success/30 bg-success/10 px-4 py-3 text-sm text-foreground">
+          <span>{contactReviewMessage}</span>
+          {actionablePlans > 0 ? (
+            <Link
+              href={`/lead-gen/outreach?company=${encodeURIComponent(companyId ?? "")}`}
+              className="font-semibold text-primary hover:text-primaryHover"
+            >
+              Open {actionablePlans} ready plan{actionablePlans === 1 ? "" : "s"}
+            </Link>
+          ) : (
+            <span className="text-xs text-mutedForeground">
+              No outreach plan was created, so the company remains here for follow-up.
+            </span>
+          )}
+        </div>
+      ) : null}
 
       {companyId ? (
         <div className="flex items-center justify-between rounded-md border border-border bg-card px-4 py-3 text-sm">

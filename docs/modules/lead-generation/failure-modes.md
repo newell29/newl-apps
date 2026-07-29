@@ -57,6 +57,10 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 - Unknown evidence citations, unsupported quantified claims, unsupported URLs, invalid sequence structure, sender
   placeholders, generic company signatures, Hunter/internal references, an incorrect mailbox-first-name signature, or semantic
   grounding errors fail closed and remain visible on the plan.
+- Exact evidence-ledger annotations and whitespace-only corruption of a known evidence ID are repaired
+  deterministically before QA and do not spend another model call. The bulk repair action applies that same safe
+  correction to existing failed plans. Unsupported claims use bounded model regeneration; missing evidence, sender
+  routing, or model QA availability remains a human-review failure.
 - Editing the first email changes the plan to `QA_FAILED`, clears approval, and blocks Apollo. Regenerate to produce a
   new immutable version and rerun every check.
 - A current unapproved plan blocks Apollo even when the contact's legacy cadence tier would not normally require a
@@ -64,6 +68,8 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 - Bulk approval reports the first saved QA finding for a genuinely failed plan. An already-approved plan is reported
   separately and directs the operator to **Retry approved in Apollo** or **Sync Apollo status** instead of incorrectly
   claiming that grounded QA failed.
+- Contacts without a concrete usable email stay in tenant-scoped storage for audit and later Apollo recovery, but are
+  hidden from Needs Attention and Active Cadences because they cannot be actioned.
 
 ## Apollo enrollment is active externally but missing from Active Cadences
 
@@ -360,7 +366,9 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Safe recovery: open **Apollo Match Review**. Paste the correct Apollo company Overview or People URL when known,
   retry automatically only after correcting the company name/domain, or choose **Confirm no Apollo match**. Apollo
   `/accounts/{id}` links are resolved to the nested global organization ID before employee search; the account ID is
-  never stored as `Company.apolloOrganizationId`.
+  never stored as `Company.apolloOrganizationId`. Explicit reviewer confirmation overrides weak automated name
+  similarity for facility, legal-entity, parent, and regional-brand differences, and that override is retained in the
+  match audit. It does not override invalid Apollo data or logistics-provider safety.
 - Credit guard: URL validation requires explicit acknowledgement of one Apollo credit. Automatic retry requires explicit acknowledgement of up to two returned organization-search pages.
 - Prevention: once the latest match is unresolved, bulk enrichment performs no Apollo lookup for that company. Confirmed-no-match rows remain visible and blocked until explicitly reopened.
 - Limitation: duplicate organization mapping is checked within the tenant in application code. A future additive unique database constraint could provide stronger protection against two simultaneous manual mappings, but requires separate migration approval.

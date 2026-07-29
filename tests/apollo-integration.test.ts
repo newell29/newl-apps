@@ -1880,6 +1880,121 @@ describe("fetchApolloContactsForCompany", () => {
     });
   });
 
+  it.each([
+    {
+      companyName: "ROECHLING INDUSTRIAL GASTONIA",
+      apolloName: "Roechling Industrial North America"
+    },
+    {
+      companyName: "KIMBRELLS FURNITURE DISTRIBUTORS",
+      apolloName: "Kimbrell's Home Furnishings (Furniture Distributors, Inc.)"
+    }
+  ])(
+    "lets an authenticated reviewer override weak name similarity from $companyName to $apolloName",
+    async ({ companyName, apolloName }) => {
+      const accountId = "661ec104e14548000791da80";
+      const organizationId = "5e66b6381e05b4008c8331c0";
+      vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.endsWith(`/api/v1/accounts/${accountId}`)) {
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({
+              account: {
+                id: accountId,
+                name: apolloName,
+                organization_id: organizationId,
+                organization: {
+                  id: organizationId,
+                  name: apolloName,
+                  primary_domain: "confirmed-company.example"
+                }
+              }
+            })
+          } as unknown as Response;
+        }
+        if (url.endsWith(`/api/v1/organizations/${organizationId}`)) {
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({
+              organization: {
+                id: organizationId,
+                name: apolloName,
+                primary_domain: "confirmed-company.example"
+              }
+            })
+          } as unknown as Response;
+        }
+        throw new Error(`Unexpected Apollo URL in test: ${url}`);
+      });
+
+      const mapping = await fetchApolloOrganizationForMapping({
+        companyName,
+        apolloOrganizationId: accountId,
+        resourceType: "ACCOUNT",
+        reviewerConfirmed: true
+      });
+
+      expect(mapping).toMatchObject({
+        organizationId,
+        companyName: apolloName,
+        match: {
+          classification: "DIRECT_COMPANY",
+          strongBaseNameMatch: false,
+          matchReason: expect.stringContaining("authenticated reviewer explicitly confirmed"),
+          query: expect.objectContaining({
+            reviewer_confirmed_name_override: true
+          })
+        }
+      });
+    }
+  );
+
+  it("keeps weak Apollo name matches blocked when no reviewer confirmation is supplied", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        organization: {
+          id: "5e66b6381e05b4008c8331c1",
+          name: "Unrelated Manufacturing Company",
+          primary_domain: "unrelated.example"
+        }
+      })
+    } as unknown as Response);
+
+    await expect(fetchApolloOrganizationForMapping({
+      companyName: "ROECHLING INDUSTRIAL GASTONIA",
+      apolloOrganizationId: "5e66b6381e05b4008c8331c1"
+    })).rejects.toThrow(
+      'Apollo URL resolved to "Unrelated Manufacturing Company", but it is not a strong enough match for "ROECHLING INDUSTRIAL GASTONIA".'
+    );
+  });
+
+  it("does not let reviewer confirmation override Apollo logistics-provider safety", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        organization: {
+          id: "5e66b6381e05b4008c8331c2",
+          name: "Example Global Logistics",
+          primary_domain: "example-logistics.test"
+        }
+      })
+    } as unknown as Response);
+
+    await expect(fetchApolloOrganizationForMapping({
+      companyName: "ROECHLING INDUSTRIAL GASTONIA",
+      apolloOrganizationId: "5e66b6381e05b4008c8331c2",
+      reviewerConfirmed: true
+    })).rejects.toThrow(
+      'Apollo URL resolved to logistics provider "Example Global Logistics". Provider safety cannot be overridden by company-name confirmation.'
+    );
+  });
+
   it("reads later saved-contact pages so a relevant YAT employee is not hidden behind the first 100", async () => {
     const firstPage = Array.from({ length: 100 }, (_, index) => ({
       id: `apollo-contact-yat-${index}`,

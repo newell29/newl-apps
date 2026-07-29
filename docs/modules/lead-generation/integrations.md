@@ -189,8 +189,11 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Ambiguous, logistics-provider, and no-match results enter **Apollo Match Review**. Bulk enrichment skips those companies until a rep resolves the latest match explicitly.
 - A rep can paste an Apollo company Overview/People URL or a raw organization ID. For `/accounts/{id}` links,
   Newl Apps reads the exact account, extracts its nested global organization ID, validates that organization, verifies
-  that its name is a strong match, prevents duplicate tenant mappings, records the reviewer and source, and searches
-  people using only the confirmed global organization ID.
+  the returned company, prevents duplicate tenant mappings, records the reviewer and source, and searches people
+  using only the confirmed global organization ID. The required reviewer confirmation is authoritative when the
+  resolved Apollo name differs from a facility, legal entity, regional brand, or parent-company name; the audit record
+  preserves that weak-similarity override. A confirmed URL still cannot override logistics-provider safety or an
+  invalid/unresolvable Apollo organization.
 - Apollo's Complete Organization Info endpoint consumes one credit when a company is returned. The mapping form therefore requires explicit one-credit confirmation. An automatic name-only retry requires a separate confirmation and is capped at two organization-search pages.
 - **Confirmed no match** is an auditable archive state, not deletion. The company remains visible and protected from bulk retry until a rep reopens it.
 
