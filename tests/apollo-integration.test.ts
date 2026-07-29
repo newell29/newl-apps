@@ -3,6 +3,7 @@ import { ReplyStatus, SequenceStatus } from "@prisma/client";
 import {
   createApolloContactForEnrollment,
   fetchApolloActivitySummary,
+  fetchApolloBouncedSequenceContacts,
   fetchApolloContactById,
   fetchApolloContactsForCompany,
   fetchApolloOrganizationForMapping,
@@ -11,6 +12,7 @@ import {
   parseApolloCompanyReference,
   parseApolloOrganizationId,
   pushApolloContactsToSequence,
+  reconcileApolloContactWithBounceEvidence,
   removeApolloContactsFromSequences,
   transitionApolloContactsToSequence
 } from "@/server/integrations/apollo";
@@ -230,6 +232,67 @@ describe("fetchApolloContactById", () => {
       sequenceId: "hunter-email-only",
       sequenceStatus: SequenceStatus.BOUNCED
     });
+  });
+});
+
+describe("Apollo bounced outreach reconciliation", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.stubEnv("APOLLO_MASTER_API", "master-api-key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("uses the zero-credit outreach-email search when the contact response omits a bounce", async () => {
+    const fetchMock = vi.spyOn(global, "fetch")
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          contact: {
+            id: "apollo-contact-1",
+            first_name: "Taylor",
+            last_name: "Example",
+            email: "taylor@example.com"
+          }
+        })
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          emailer_messages: [
+            {
+              id: "message-1",
+              contact_id: "apollo-contact-1",
+              to_email: "taylor@example.com",
+              status: "bounced"
+            }
+          ]
+        })
+      } as unknown as Response);
+
+    const contact = await fetchApolloContactById("apollo-contact-1");
+    const bouncedContacts = await fetchApolloBouncedSequenceContacts("sequence-1");
+    const reconciled = reconcileApolloContactWithBounceEvidence({
+      contact,
+      selectedSequenceId: "sequence-1",
+      apolloContactId: "apollo-contact-1",
+      email: "taylor@example.com",
+      bouncedContacts
+    });
+
+    expect(contact.sequenceStatus).toBe(SequenceStatus.NOT_STARTED);
+    expect(reconciled).toMatchObject({
+      sequenceStatus: SequenceStatus.BOUNCED,
+      sequenceId: "sequence-1"
+    });
+    const requestUrl = new URL(String(fetchMock.mock.calls[1]?.[0]));
+    expect(requestUrl.pathname).toBe("/api/v1/emailer_messages/search");
+    expect(requestUrl.searchParams.getAll("emailer_campaign_ids[]")).toEqual(["sequence-1"]);
+    expect(requestUrl.searchParams.getAll("emailer_message_stats[]")).toEqual(["bounced"]);
   });
 });
 

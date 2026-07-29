@@ -100,6 +100,7 @@ import { persistOutreachPlanWithSteps } from "@/modules/lead-gen/outreach-plan-p
 import { buildApprovedOutreachEnrollment } from "@/modules/lead-gen/outreach-enrollment";
 import {
   decideApolloSequenceTransition,
+  needsApolloBounceDeliveryReconciliation,
   resolveTrackedSequenceStatus
 } from "@/modules/lead-gen/apollo-reengagement-policy";
 import { resolveLiveApolloSequence } from "@/modules/lead-gen/apollo-sequence-resolution";
@@ -122,13 +123,16 @@ import { prisma } from "@/server/db";
 import {
   ApolloRateLimitError,
   createApolloContactForEnrollment,
+  fetchApolloBouncedSequenceContacts,
   fetchApolloContactById,
   fetchApolloEmailAccountDirectory,
   fetchApolloContactsForCompany,
   fetchApolloOrganizationForMapping,
   fetchApolloSequenceDirectory,
   parseApolloCompanyReference,
+  reconcileApolloContactWithBounceEvidence,
   syncApolloContactTypedCustomFields,
+  type ApolloBouncedSequenceContact,
   type ApolloEmailAccountDirectoryEntry,
   type ApolloContactRecord,
   type ApolloSequenceDirectoryEntry,
@@ -2967,6 +2971,10 @@ export async function syncSelectedApolloStatusesAction(
     let failedContacts = 0;
     let skippedContacts = 0;
     const failureReasons = new Set<string>();
+    const bouncedContactsBySequence = new Map<
+      string,
+      Promise<ApolloBouncedSequenceContact[]>
+    >();
 
     for (const company of companies.values()) {
       try {
@@ -2975,12 +2983,42 @@ export async function syncSelectedApolloStatusesAction(
           domain: company.domain,
           apolloOrganizationId: company.apolloOrganizationId
         });
-        const exactContacts = await Promise.all(
-          company.contacts.flatMap((contact) => {
-            const apolloContactId = contact.apolloContactId?.trim();
-            return apolloContactId ? [fetchApolloContactById(apolloContactId)] : [];
-          })
-        );
+        const exactContacts = (
+          await Promise.all(
+            company.contacts.map(async (contact) => {
+              const apolloContactId = contact.apolloContactId?.trim();
+              if (!apolloContactId) {
+                return null;
+              }
+
+              let incoming = await fetchApolloContactById(apolloContactId);
+              if (
+                contact.selectedSequenceId &&
+                needsApolloBounceDeliveryReconciliation(
+                  contact.sequenceStatus,
+                  incoming.sequenceStatus
+                )
+              ) {
+                const selectedSequenceId = contact.selectedSequenceId;
+                const bouncedContactsPromise =
+                  bouncedContactsBySequence.get(selectedSequenceId) ??
+                  fetchApolloBouncedSequenceContacts(selectedSequenceId);
+                bouncedContactsBySequence.set(
+                  selectedSequenceId,
+                  bouncedContactsPromise
+                );
+                incoming = reconcileApolloContactWithBounceEvidence({
+                  contact: incoming,
+                  selectedSequenceId,
+                  apolloContactId,
+                  email: contact.email,
+                  bouncedContacts: await bouncedContactsPromise
+                });
+              }
+              return incoming;
+            })
+          )
+        ).filter((contact): contact is ApolloContactRecord => Boolean(contact));
 
         const updatedCount = await syncExistingApolloContactsForCompany({
           tenantId: context.tenantId,

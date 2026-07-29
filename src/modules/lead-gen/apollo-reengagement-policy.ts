@@ -154,6 +154,24 @@ export function resolveTrackedSequenceStatus({
     : existingStatus;
 }
 
+export function needsApolloBounceDeliveryReconciliation(
+  existingStatus: SequenceStatus,
+  incomingStatus: SequenceStatus
+) {
+  const unresolvedStatuses = [
+    SequenceStatus.NOT_STARTED,
+    SequenceStatus.READY
+  ] as const;
+  return (
+    unresolvedStatuses.includes(
+      existingStatus as (typeof unresolvedStatuses)[number]
+    ) &&
+    unresolvedStatuses.includes(
+      incomingStatus as (typeof unresolvedStatuses)[number]
+    )
+  );
+}
+
 function sequenceStatusRank(status: SequenceStatus) {
   return {
     [SequenceStatus.NOT_STARTED]: 0,
