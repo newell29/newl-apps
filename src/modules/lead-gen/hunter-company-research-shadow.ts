@@ -15,7 +15,7 @@ import { HUNTER_COMPANY_RESEARCH_JOB_TYPE } from "@/modules/lead-gen/hunter-job-
 
 export const HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_MODEL = "gpt-5.6-luna";
 export const HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_PROMPT_VERSION =
-  "hunter-company-research-v15-luna-shadow-v1";
+  "hunter-company-research-v16-luna-shadow-v1";
 
 const MAX_SHADOW_BATCH_SIZE = 4;
 const MAX_PACKET_JSON_CHARS = 120_000;

@@ -26,7 +26,7 @@ describe("OpenAI Luna Hunter research shadow", () => {
 
     const result = await generateHunterResearchLunaShadow({
       model: "gpt-5.6-luna",
-      promptVersion: "hunter-company-research-v15-luna-shadow-v1",
+      promptVersion: "hunter-company-research-v16-luna-shadow-v1",
       packets,
       safetyIdentifier: "tenant-hash"
     });
@@ -57,6 +57,9 @@ describe("OpenAI Luna Hunter research shadow", () => {
       }
     });
     expect(body.tools).toBeUndefined();
+    expect(body.input[0].content).toContain(
+      "bill-of-lading record naming a separate logistics company as notify party"
+    );
     expect(body.input[1].content).toContain("Do not browse, call tools, or invent facts.");
     expect(body.input[1].content).toContain('"evidenceIndex":0');
     expect(body.input[1].content).not.toContain(
@@ -79,7 +82,7 @@ describe("OpenAI Luna Hunter research shadow", () => {
     await expect(
       generateHunterResearchLunaShadow({
         model: "gpt-5.6-luna",
-        promptVersion: "hunter-company-research-v15-luna-shadow-v1",
+        promptVersion: "hunter-company-research-v16-luna-shadow-v1",
         packets: [packet()],
         safetyIdentifier: "tenant-hash"
       })

@@ -381,6 +381,8 @@ function companyResearchSystemPrompt() {
     "A manufacturer, retailer, importer, or distributor with internal logistics staff remains a prospect; " +
     "logisticsProvider is true only when supplied evidence says it sells logistics services to others. " +
     "namedExternalLogisticsProvider and stableExclusiveProviderEvidence require explicit evidence, and " +
+    "a customs or bill-of-lading record naming a separate logistics company as notify party supports only " +
+    "namedExternalLogisticsProvider, not a stable, exclusive, or current contractual relationship. " +
     "providerDisplacementEvidence requires explicit change, dissatisfaction, overflow, bid, or replacement evidence. " +
     "FRESH requires a material exact-company event with a supplied publication date in the trailing 18 months. " +
     "CURRENT means supported operating footprint or a specific currently open role without a discrete recent trigger. " +

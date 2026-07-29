@@ -134,6 +134,12 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 - A full generic result set can otherwise consume the bounded evidence ledger before a later
   official-domain event query runs. Hunter executes every enabled query first and samples their
   results in rounds, preserving targeted first-party evidence without increasing the 24-record cap.
+- A generic distribution-footprint query can miss a public customs page that contains both materially
+  stronger current shipment history and a logistics company named as BOL notify party. Hunter now runs
+  a separate customs/import/BOL query with available destination-location hints and reserves one bounded
+  page fetch for that third-party evidence. Partial or missing location evidence does not suppress the
+  query. A notify-party name is retained as provider evidence but is not treated as proof of an
+  exclusive or stable relationship.
 - A model's provider or incumbent label cannot block an account without explicit supporting language
   in the saved evidence. An undated claimed trigger is treated as current fit. Stale/no-opportunity
   research is retained on Watchlist for later research instead of becoming a permanent block.

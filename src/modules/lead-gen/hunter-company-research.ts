@@ -23,7 +23,7 @@ import { dedupeHunterCompaniesByIdentity } from "@/modules/lead-gen/hunter-compa
 import { prisma } from "@/server/db";
 
 export { HUNTER_COMPANY_RESEARCH_JOB_TYPE };
-export const HUNTER_COMPANY_RESEARCH_PROMPT_VERSION = "hunter-company-research-v15";
+export const HUNTER_COMPANY_RESEARCH_PROMPT_VERSION = "hunter-company-research-v16";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL = "qwen3.5:35b";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL = "kimi-k2.6";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL = "kimi-k3";

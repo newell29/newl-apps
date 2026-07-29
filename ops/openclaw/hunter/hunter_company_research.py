@@ -28,7 +28,7 @@ DEFAULT_QWEN_MODEL = "qwen3.5:35b"
 DEFAULT_KIMI_URL = "https://api.moonshot.ai/v1"
 DEFAULT_KIMI_MODEL = "kimi-k2.6"
 DEFAULT_KIMI_VALIDATOR_MODEL = "kimi-k3"
-PROMPT_VERSION = "hunter-company-research-v15"
+PROMPT_VERSION = "hunter-company-research-v16"
 ALLOWED_SERVICE_LINES = {"WAREHOUSING", "OCEAN_AIR", "TRUCKING"}
 ALLOWED_OPERATING_REGIONS = {"NORTH_AMERICA", "CHINA", "OTHER_FOREIGN", "UNKNOWN"}
 ALLOWED_SIGNAL_TYPES = {
@@ -602,6 +602,7 @@ def build_research_queries(candidate: dict[str, Any]) -> list[dict[str, str]]:
     subject = search_subject(candidate)
     domain = clean(candidate.get("domain"))
     year = dt.datetime.now(dt.timezone.utc).year
+    shipment_location = shipment_location_query(candidate)
     queries = [
         {
             "pass": "IDENTITY",
@@ -628,6 +629,14 @@ def build_research_queries(candidate: dict[str, Any]) -> list[dict[str, str]]:
                 'OR "logistics provider")'
             ),
         },
+        {
+            "pass": "DISTRIBUTION_FOOTPRINT",
+            "detail": "PUBLIC_SHIPMENT_RECORDS",
+            "query": (
+                f'{subject} ("bill of lading" OR customs OR "import shipments" OR consignee '
+                f'OR "notify party"){shipment_location}'
+            ),
+        },
     ]
     if domain:
         queries.extend(
@@ -646,6 +655,25 @@ def build_research_queries(candidate: dict[str, Any]) -> list[dict[str, str]]:
             ]
         )
     return queries
+
+
+def shipment_location_query(candidate: dict[str, Any]) -> str:
+    """Add a bounded location hint when TradeMining supplied one."""
+    shipment_evidence = candidate.get("shipmentEvidence")
+    if not isinstance(shipment_evidence, list):
+        return ""
+    locations: list[str] = []
+    for row in shipment_evidence:
+        if not isinstance(row, dict):
+            continue
+        city = bounded_text(row.get("destinationCity"), "", 100)
+        state = bounded_text(row.get("destinationState"), "", 100)
+        location = ", ".join(value for value in (city, state) if value)
+        if location and location.casefold() not in {value.casefold() for value in locations}:
+            locations.append(location)
+        if len(locations) >= 2:
+            break
+    return f' ({" OR ".join(json.dumps(location) for location in locations)})' if locations else ""
 
 
 def discovered_candidate_domains(
@@ -845,6 +873,16 @@ def collect_company_evidence(
             continue
         query_results.append((query_row, results))
 
+    reserves_public_shipment_page = pages_per_company > 0 and any(
+        query_row.get("detail") == "PUBLIC_SHIPMENT_RECORDS" and bool(results)
+        for query_row, results in query_results
+    )
+    standard_page_limit = max(
+        0,
+        pages_per_company - (1 if reserves_public_shipment_page else 0),
+    )
+    standard_pages_fetched = 0
+    public_shipment_pages_fetched = 0
     result_index = 0
     while len(evidence) < MAX_EVIDENCE_PER_COMPANY and any(
         result_index < len(results) for _, results in query_results
@@ -864,8 +902,22 @@ def collect_company_evidence(
             first_party = is_likely_first_party(candidate, hostname)
             excerpt = row.get("snippet") or row["title"]
             published_at = row.get("publishedAt")
-            if fetched_pages < pages_per_company and (first_party or pass_id in {"FRESH_EVENTS", "CAREERS"}):
+            is_public_shipment_result = query_row.get("detail") == "PUBLIC_SHIPMENT_RECORDS"
+            should_fetch_standard_page = (
+                standard_pages_fetched < standard_page_limit
+                and (first_party or pass_id in {"FRESH_EVENTS", "CAREERS"})
+            )
+            should_fetch_public_shipment_page = (
+                is_public_shipment_result
+                and public_shipment_pages_fetched < 1
+                and pages_per_company > 0
+            )
+            if should_fetch_standard_page or should_fetch_public_shipment_page:
                 page_excerpt, page_published_at = fetch_page_evidence(url)
+                if is_public_shipment_result:
+                    public_shipment_pages_fetched += 1
+                else:
+                    standard_pages_fetched += 1
                 if page_excerpt:
                     excerpt = page_excerpt
                     fetched_pages += 1
@@ -921,6 +973,9 @@ def ollama_synthesis_request(
         "as an industry consortium, or closely associated with manufacturers. Classify from the services it "
         "provides, not merely from its name or ownership. namedExternalLogisticsProvider is true only when the evidence "
         "explicitly names a separate carrier, forwarder, warehouse, or 3PL used by the prospect. "
+        "A public customs or bill-of-lading record that explicitly names a separate logistics company "
+        "as notify party supports namedExternalLogisticsProvider, but that record alone does not prove "
+        "a stable, exclusive, or current contractual relationship. "
         "stableExclusiveProviderEvidence is true only when evidence explicitly shows that named external "
         "relationship is current, stable, and exclusive or contractually committed; never infer it from "
         "ordinary internal operations. providerDisplacementEvidence is true when a disruption, service gap, "

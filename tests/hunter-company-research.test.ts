@@ -28,7 +28,7 @@ describe("Hunter company deep research", () => {
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL).toBe("qwen3.5:35b");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL).toBe("kimi-k2.6");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL).toBe("kimi-k3");
-    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v15");
+    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v16");
     expect(HUNTER_COMPANY_RESEARCH_TRANSACTION_TIMEOUT_MS).toBe(30_000);
     expect(HUNTER_COMPANY_RESEARCH_SAFETY).toEqual({
       externalWrites: false,
@@ -699,11 +699,11 @@ describe("Hunter company deep research", () => {
     expect(result.diagnostic).not.toContain('"companies"');
   });
 
-  it("builds all four company-specific research queries", async () => {
+  it("builds all four research passes and adds a public shipment-record query", async () => {
     const program = [
       "import json",
       "import hunter_company_research as r",
-      "rows=r.build_research_queries({'companyName':'Example Retailer','domain':'example.com'})",
+      "rows=r.build_research_queries({'companyName':'Example Retailer','domain':'example.com','shipmentEvidence':[{'destinationCity':'Example City','destinationState':'North Carolina'}]})",
       "print(json.dumps(rows))"
     ].join(";");
     const { stdout } = await execFileAsync("python3", ["-c", program], {
@@ -713,18 +713,101 @@ describe("Hunter company deep research", () => {
         PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
       }
     });
-    const rows = JSON.parse(stdout) as Array<{ pass: string; query: string }>;
+    const rows = JSON.parse(stdout) as Array<{
+      pass: string;
+      query: string;
+      detail?: string;
+    }>;
 
     expect(rows.map((row) => row.pass)).toEqual([
       "IDENTITY",
       "FRESH_EVENTS",
       "CAREERS",
       "DISTRIBUTION_FOOTPRINT",
+      "DISTRIBUTION_FOOTPRINT",
       "IDENTITY",
       "FRESH_EVENTS"
     ]);
     expect(rows.slice(0, 4).every((row) => row.query.includes("Example Retailer"))).toBe(true);
     expect(rows.some((row) => row.query.includes("site:example.com"))).toBe(true);
+    expect(rows).toContainEqual(expect.objectContaining({
+      pass: "DISTRIBUTION_FOOTPRINT",
+      detail: "PUBLIC_SHIPMENT_RECORDS",
+      query: expect.stringContaining('"bill of lading"')
+    }));
+    expect(
+      rows.find((row) => row.detail === "PUBLIC_SHIPMENT_RECORDS")?.query
+    ).toContain('"Example City, North Carolina"');
+  });
+
+  it("keeps the public shipment query safe when shipment locations are partial or missing", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "partial=r.build_research_queries({'companyName':'Example Components','shipmentEvidence':[{'destinationCity':'Example City','destinationState':None},None]})",
+      "missing=r.build_research_queries({'companyName':'Example Components'})",
+      "find=lambda rows: next(row for row in rows if row.get('detail')=='PUBLIC_SHIPMENT_RECORDS')",
+      "print(json.dumps({'partial':find(partial),'missing':find(missing)}))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+    const result = JSON.parse(stdout) as {
+      partial: { query: string };
+      missing: { query: string };
+    };
+
+    expect(result.partial.query).toContain('"Example City"');
+    expect(result.missing.query).toContain('"notify party"');
+    expect(result.missing.query).not.toContain("None");
+  });
+
+  it("reserves a bounded page fetch for third-party customs evidence", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'Example Components','companyKey':'example-components','shipmentEvidence':[{'destinationCity':'Example City','destinationState':'North Carolina'}]}",
+      "def fake_search(_provider,query,_limit):",
+      " if 'bill of lading' in query:",
+      "  return [{'url':'https://customs.example/example-components','title':'Example Components import records','snippet':'15 shipment records.','publishedAt':None}]",
+      " return [{'url':'https://search.example/result-'+str(abs(hash(query))),'title':'Generic result','snippet':'Generic evidence.','publishedAt':None}]",
+      "r.search_web=fake_search",
+      "r.fetch_page_evidence=lambda url: ('Example Components has repeated display-fixture imports in 2026. Synthetic Global Logistics is named as notify party on the sample bill of lading.',None) if 'customs.example' in url else (None,None)",
+      "evidence,query_log,page_count=r.collect_company_evidence(candidate,'BRAVE',1,1)",
+      "customs=[row for row in evidence if row['sourceDomain']=='customs.example']",
+      "r.search_web=lambda _provider,query,_limit: [] if 'bill of lading' in query else [{'url':'https://example-components.example/'+str(abs(hash(query))),'title':'Example Components','snippet':'Company evidence.','publishedAt':None}]",
+      "r.fetch_page_evidence=lambda _url: ('Example Components official operating evidence.',None)",
+      "_missing_evidence,_missing_log,missing_page_count=r.collect_company_evidence(candidate,'BRAVE',1,1)",
+      "print(json.dumps({'customs':customs,'pageCount':page_count,'queryCount':len(query_log),'missingPageCount':missing_page_count}))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+    const result = JSON.parse(stdout) as {
+      customs: Array<{ excerpt: string; pass: string; sourceType: string }>;
+      pageCount: number;
+      queryCount: number;
+      missingPageCount: number;
+    };
+
+    expect(result.pageCount).toBe(1);
+    expect(result.queryCount).toBe(5);
+    expect(result.missingPageCount).toBe(1);
+    expect(result.customs).toEqual([
+      expect.objectContaining({
+        pass: "DISTRIBUTION_FOOTPRINT",
+        sourceType: "OTHER",
+        excerpt: expect.stringContaining("Synthetic Global Logistics")
+      })
+    ]);
   });
 
   it("preserves the Barnhardt first-party expansion query when generic results fill the evidence cap", async () => {
@@ -762,9 +845,9 @@ describe("Hunter company deep research", () => {
     };
 
     expect(result).toMatchObject({
-      queryCount: 6,
+      queryCount: 7,
       evidenceCount: 24,
-      queryEvidenceCounts: [4, 4, 4, 4, 4, 4]
+      queryEvidenceCounts: [4, 4, 4, 3, 3, 3, 3]
     });
     expect(result.target).toEqual([
       expect.objectContaining({
@@ -1436,7 +1519,7 @@ function completion() {
       synthesis: {
         provider: "OLLAMA",
         name: "qwen3.5:35b",
-        promptVersion: "hunter-company-research-v15",
+        promptVersion: "hunter-company-research-v16",
         structuredOutput: true,
         inputTokens: 2000,
         outputTokens: 700,
@@ -1445,7 +1528,7 @@ function completion() {
       scoring: {
         provider: "KIMI",
         name: "kimi-k2.6",
-        promptVersion: "hunter-company-research-v15",
+        promptVersion: "hunter-company-research-v16",
         structuredOutput: true,
         inputTokens: 1800,
         cachedInputTokens: 200,
@@ -1456,7 +1539,7 @@ function completion() {
       validation: {
         provider: "KIMI",
         name: "kimi-k3",
-        promptVersion: "hunter-company-research-v15",
+        promptVersion: "hunter-company-research-v16",
         structuredOutput: true,
         status: "SUCCESS",
         reasoningEffort: "LOW",
