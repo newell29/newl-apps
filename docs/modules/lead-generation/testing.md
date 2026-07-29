@@ -310,6 +310,9 @@ Regression coverage must prove:
     Roechling Industrial Gastonia to Roechling Industrial North America and Kimbrells Furniture Distributors to
     Kimbrell's Home Furnishings; the manual override is audited, while unconfirmed weak matches and logistics
     providers remain blocked.
+25. the exact persisted zero-employee production shape—a current Hunter company with a `DIRECT_COMPANY` match and
+    the explicit zero-employee marker—remains in **Mapped company — employee lookup needed**, while ordinary
+    successful direct matches remain excluded.
 
 ## Outreach Plans and grounded sequence generation
 

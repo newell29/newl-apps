@@ -59,6 +59,21 @@ describe("current Hunter Apollo exception filtering", () => {
       })
     ).toBeNull();
   });
+
+  it("retains a current Hunter company when a direct Apollo match returned zero employees", () => {
+    const eligibility = evaluateCurrentHunterApolloException({
+      classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
+      mappedZeroEmployees: true,
+      researchSignal: researchSignal(),
+      prospectingDecision: prospectingDecision(),
+      now: NOW
+    });
+
+    expect(eligibility).toMatchObject({
+      status: "ELIGIBLE",
+      label: "Hunter hot opportunity"
+    });
+  });
 });
 
 describe("Apollo review queue states", () => {
@@ -69,6 +84,18 @@ describe("Apollo review queue states", () => {
         classification: ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW,
         matchReason:
           "Exact company; Apollo verified the company but returned zero employees. Open the company in Apollo, select its People page, and paste that Apollo company URL for manual verification.",
+        reviewedAt: null
+      })
+    ).toBe("MAPPED_NO_EMPLOYEES");
+  });
+
+  it("recognizes the direct-match zero-employee record written by contact discovery", () => {
+    expect(
+      resolveApolloReviewQueueStatus({
+        apolloOrganizationId: "apollo-org-yat",
+        classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
+        matchReason:
+          "direct company; Apollo verified the company but returned zero employees. Open the company in Apollo, select its People page, and paste that Apollo company URL for manual verification.",
         reviewedAt: null
       })
     ).toBe("MAPPED_NO_EMPLOYEES");

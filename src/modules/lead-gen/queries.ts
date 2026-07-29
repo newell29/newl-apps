@@ -86,18 +86,23 @@ type HunterOutreachEligibilityInput = Parameters<typeof evaluateHunterOutreachEl
 
 export function evaluateCurrentHunterApolloException({
   classification,
+  mappedZeroEmployees = false,
   researchSignal,
   prospectingDecision,
   now,
   maxResearchAgeDays = getHunterOutreachResearchMaxAgeDays()
 }: {
   classification: ApolloCompanyMatchClassification;
+  mappedZeroEmployees?: boolean;
   researchSignal: HunterOutreachEligibilityInput["researchSignal"];
   prospectingDecision: HunterOutreachEligibilityInput["prospectingDecision"];
   now?: Date;
   maxResearchAgeDays?: number;
 }) {
-  if (!requiresApolloMatchReview(classification)) {
+  if (
+    !requiresApolloMatchReview(classification) &&
+    !mappedZeroEmployees
+  ) {
     return null;
   }
 
@@ -1064,6 +1069,7 @@ export async function getApolloMatchReviewQueue(
 
       const eligibility = evaluateCurrentHunterApolloException({
         classification: match.classification,
+        mappedZeroEmployees: reviewStatus === "MAPPED_NO_EMPLOYEES",
         researchSignal: company.hunterOpportunitySignals[0] ?? null,
         prospectingDecision: company.hunterProspectingDecisions[0] ?? null,
         maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
