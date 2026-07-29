@@ -297,6 +297,7 @@ export async function prepareHunterCompanyResearchRun({
       updatedAt: true,
       primaryIndustry: true,
       domain: true,
+      apolloOrganizationId: true,
       importRecords: {
         orderBy: { arrivalDate: "desc" },
         take: 8,

@@ -144,6 +144,7 @@ export async function runHunterDryPlan({
           company: {
             select: {
               domain: true,
+              apolloOrganizationId: true,
               doNotProspect: true,
               candidateStatus: true,
               cashflowCustomers: { select: { id: true }, take: 1 },
@@ -402,6 +403,7 @@ function buildCurrentResearchedOutreachCandidates({
     rawJson: Prisma.JsonValue | null;
     company: {
       domain: string | null;
+      apolloOrganizationId: string | null;
       doNotProspect: boolean;
       candidateStatus: CandidateStatus;
       cashflowCustomers: Array<{ id: string }>;
@@ -424,7 +426,8 @@ function buildCurrentResearchedOutreachCandidates({
     const identityKey = resolveHunterCompanyIdentityKey({
       name: signal.companyName,
       normalizedName: signal.normalizedCompanyName,
-      domain: signal.company.domain
+      domain: signal.company.domain,
+      apolloOrganizationId: signal.company.apolloOrganizationId
     });
     const existing = latestByCompany.get(identityKey);
     if (!existing || signal.observedAt.getTime() > existing.observedAt.getTime()) {

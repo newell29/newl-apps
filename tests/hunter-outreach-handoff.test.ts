@@ -201,6 +201,27 @@ describe("Hunter assisted outreach handoff", () => {
     ]);
   });
 
+  it("does not import a person already active in a Hunter cadence", () => {
+    const ranked = rankHunterContacts([
+      contact({
+        apolloContactId: "hunter-active",
+        sequenceStatus: SequenceStatus.ENROLLED,
+        sequenceId: "apollo-hunter-email",
+        sequenceName: "Hunter - Email Only"
+      }),
+      contact({
+        apolloContactId: "legacy-active",
+        sequenceStatus: SequenceStatus.ENROLLED,
+        sequenceId: "legacy-sequence",
+        sequenceName: "Legacy Warehousing Cadence"
+      })
+    ], "Director of Supply Chain");
+
+    expect(ranked.map((item) => item.apolloContactId)).toEqual([
+      "legacy-active"
+    ]);
+  });
+
   it("automates only confident primary and strong secondary model reviews", () => {
     const review = {
       contactId: "contact-1",

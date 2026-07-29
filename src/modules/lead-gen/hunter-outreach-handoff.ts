@@ -18,7 +18,10 @@ import {
   getHunterOutreachResearchMaxAgeDays
 } from "@/modules/lead-gen/hunter-outreach-eligibility";
 import { resolveApolloContactDiscoveryMatch } from "@/modules/lead-gen/apollo-contact-discovery-review";
-import { isHunterContactSafeForReview } from "@/modules/lead-gen/apollo-reengagement-policy";
+import {
+  isActiveHunterCadence,
+  isHunterContactSafeForReview
+} from "@/modules/lead-gen/apollo-reengagement-policy";
 import {
   HUNTER_COMPANY_RESEARCH_JOB_TYPE,
   HUNTER_OUTREACH_HANDOFF_JOB_TYPE
@@ -869,18 +872,36 @@ async function processCompany({
       }
     );
   }
-  contactIds = await upsertContacts({
+  const contactPersistence = await upsertContacts({
     tenantId,
     jobId,
     companyId: company.id,
     contacts: ranked
   });
+  contactIds = contactPersistence.contactIds;
   contactsImported = contactIds.length;
   await archiveHunterPlansWithoutConcreteEmail({
     tenantId,
     companyId: company.id,
     jobId
   });
+  if (contactIds.length === 0) {
+    return terminal(
+      item,
+      "NO_QUALIFYING_CONTACTS",
+      classification,
+      0,
+      0,
+      0,
+      contactPersistence.activeHunterCadenceCount > 0
+        ? `${contactPersistence.activeHunterCadenceCount} Apollo contact${contactPersistence.activeHunterCadenceCount === 1 ? " is" : "s are"} already active in a Hunter cadence; no duplicate contact or outreach plan was created.`
+        : `${contactPersistence.existingCanonicalContactCount} Apollo contact${contactPersistence.existingCanonicalContactCount === 1 ? " is" : "s are"} already tracked under another canonical company record; no duplicate contact was created.`,
+      {
+        apolloContactsFound: lookup.contacts.length,
+        contactsRanked: ranked.length
+      }
+    );
+  }
 
   let plansCreated = 0;
   let existingPlansFound = 0;
@@ -1611,9 +1632,10 @@ async function upsertContacts({
   contacts: ApolloContactRecord[];
 }) {
   const existing = await prisma.contact.findMany({
-    where: { tenantId, companyId },
+    where: { tenantId },
     select: {
       id: true,
+      companyId: true,
       firstName: true,
       lastName: true,
       email: true,
@@ -1625,6 +1647,8 @@ async function upsertContacts({
       fullName: true,
       title: true,
       contactStatus: true,
+      sequenceStatus: true,
+      replyStatus: true,
       assignedRep: true,
       selectedSequenceId: true,
       selectedSequenceName: true,
@@ -1632,8 +1656,24 @@ async function upsertContacts({
     }
   });
   const ids: string[] = [];
+  let activeHunterCadenceCount = 0;
+  let existingCanonicalContactCount = 0;
   for (const incoming of contacts) {
-    const match = findExistingContact(existing, incoming);
+    const match = findExistingContact(existing, incoming, companyId);
+    if (
+      match &&
+      isActiveHunterCadence({
+        sequenceStatus: match.sequenceStatus,
+        sequenceName: match.selectedSequenceName
+      })
+    ) {
+      activeHunterCadenceCount += 1;
+      continue;
+    }
+    if (match && match.companyId !== companyId) {
+      existingCanonicalContactCount += 1;
+      continue;
+    }
     const rawJson = isObject(match?.rawJson) ? match.rawJson : {};
     const data = {
       tenantId,
@@ -1691,7 +1731,11 @@ async function upsertContacts({
       ids.push(created.id);
     }
   }
-  return ids;
+  return {
+    contactIds: ids,
+    activeHunterCadenceCount,
+    existingCanonicalContactCount
+  };
 }
 
 export function rankHunterContacts(
@@ -1714,6 +1758,10 @@ export function rankHunterContacts(
       score >= 20 &&
       hasUsableHunterEmail(contact) &&
       Boolean(contact.apolloContactId || contact.apolloPersonId) &&
+      !isActiveHunterCadence({
+        sequenceStatus: contact.sequenceStatus,
+        sequenceName: contact.sequenceName
+      }) &&
       !/\b(sales|business development|customer service|account executive)\b/i.test(
         `${contact.title ?? ""} ${contact.department ?? ""}`
       )
@@ -1816,6 +1864,7 @@ function readStoredApolloContactContext(rawJson: Prisma.JsonValue | null) {
 function findExistingContact(
   existing: Array<{
     id: string;
+    companyId: string;
     firstName: string | null;
     lastName: string | null;
     email: string | null;
@@ -1827,12 +1876,15 @@ function findExistingContact(
     fullName: string;
     title: string | null;
     contactStatus: ContactStatus;
+    sequenceStatus: SequenceStatus;
+    replyStatus: ReplyStatus;
     assignedRep: string | null;
     selectedSequenceId: string | null;
     selectedSequenceName: string | null;
     rawJson: Prisma.JsonValue | null;
   }>,
-  incoming: ApolloContactRecord
+  incoming: ApolloContactRecord,
+  companyId: string
 ) {
   const email = incoming.email?.trim().toLowerCase();
   const linkedin = incoming.linkedinUrl?.trim().toLowerCase();
@@ -1866,6 +1918,7 @@ function findExistingContact(
         contact.firstName ?? contact.fullName.split(/\s+/u)[0] ?? null
       );
       return Boolean(
+        contact.companyId === companyId &&
         incomingFirstName &&
         existingFirstName === incomingFirstName &&
         incomingTitle &&

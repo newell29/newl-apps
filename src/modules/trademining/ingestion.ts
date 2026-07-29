@@ -1,6 +1,7 @@
 import { JobStatus, type Prisma } from "@prisma/client";
 
 import { classifyTradeMiningIndustryFromRecords } from "@/modules/lead-gen/industry-classification";
+import { resolveExistingHunterCompanyByName } from "@/modules/lead-gen/hunter-company-identity";
 import {
   calculateLeadPipelineScoringForCompany,
   getCandidateFeed
@@ -320,6 +321,21 @@ export async function ingestTradeMiningBatch(tenant: TenantContext, payload: unk
   const excludedCompanyKeywords = asStringArray(profileRules?.excludedCompanyKeywords).map((value) =>
     value.trim().toLowerCase()
   );
+  const companyIdentityCandidates = await prisma.company.findMany({
+    where: {
+      tenantId: tenant.tenantId
+    },
+    select: {
+      id: true,
+      name: true,
+      normalizedName: true,
+      domain: true,
+      apolloOrganizationId: true,
+      priorityScore: true,
+      candidateStatus: true,
+      doNotProspect: true
+    }
+  });
 
   for (const [index, record] of batch.records.entries()) {
     const companyIdentity = getCompanyIdentity(record, allowedCompanyIdentityRoles);
@@ -336,54 +352,71 @@ export async function ingestTradeMiningBatch(tenant: TenantContext, payload: unk
 
     const companyName = companyIdentity.name;
     const normalizedName = normalizeCompanyName(companyName);
-    const rawRecordKey = getRawRecordKey(batch, record, normalizedName, index);
     const priorityScore = calculateCandidateScore(record);
-
-    const existingCompany = await prisma.company.findUnique({
-      where: {
-        tenantId_normalizedName: {
-          tenantId: tenant.tenantId,
-          normalizedName
-        }
+    const resolvedCompany = resolveExistingHunterCompanyByName(
+      {
+        name: companyName,
+        normalizedName
       },
-      select: {
-        id: true,
-        priorityScore: true,
-        candidateStatus: true,
-        doNotProspect: true
-      }
-    });
+      companyIdentityCandidates
+    );
+    const existingCompany = resolvedCompany?.company ?? null;
+    const rawRecordKey = getRawRecordKey(
+      batch,
+      record,
+      existingCompany?.normalizedName ?? normalizedName,
+      index
+    );
 
     if (existingCompany?.doNotProspect || existingCompany?.candidateStatus === "DISQUALIFIED") {
       recordsSkipped += 1;
       continue;
     }
 
-    const company = await prisma.company.upsert({
-      where: {
-        tenantId_normalizedName: {
-          tenantId: tenant.tenantId,
-          normalizedName
-        }
-      },
-      update: {
-        name: companyName,
-        source: "trademining",
-        priorityScore: Math.max(existingCompany?.priorityScore ?? 0, priorityScore)
-      },
-      create: {
-        tenantId: tenant.tenantId,
-        name: companyName,
-        normalizedName,
-        source: "trademining",
-        priorityScore
-      }
-    });
+    const company = existingCompany
+      ? await prisma.company.update({
+          where: {
+            id: existingCompany.id
+          },
+          data: {
+            source: "trademining",
+            priorityScore: Math.max(existingCompany.priorityScore, priorityScore)
+          }
+        })
+      : await prisma.company.upsert({
+          where: {
+            tenantId_normalizedName: {
+              tenantId: tenant.tenantId,
+              normalizedName
+            }
+          },
+          update: {
+            source: "trademining",
+            priorityScore
+          },
+          create: {
+            tenantId: tenant.tenantId,
+            name: companyName,
+            normalizedName,
+            source: "trademining",
+            priorityScore
+          }
+        });
 
     if (existingCompany) {
       companiesUpdated += 1;
     } else {
       companiesCreated += 1;
+      companyIdentityCandidates.push({
+        id: company.id,
+        name: company.name,
+        normalizedName: company.normalizedName,
+        domain: company.domain,
+        apolloOrganizationId: company.apolloOrganizationId,
+        priorityScore: company.priorityScore,
+        candidateStatus: company.candidateStatus,
+        doNotProspect: company.doNotProspect
+      });
     }
     touchedCompanyIds.add(company.id);
 

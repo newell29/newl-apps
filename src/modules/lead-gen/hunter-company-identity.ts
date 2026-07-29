@@ -5,11 +5,17 @@ export type HunterCompanyIdentityInput = {
   name: string;
   normalizedName: string;
   domain?: string | null;
+  apolloOrganizationId?: string | null;
 };
+
+export type HunterCompanyNameCandidate = HunterCompanyIdentityInput;
 
 export function resolveHunterCompanyIdentityKey(
   company: Omit<HunterCompanyIdentityInput, "id">
 ) {
+  const apolloOrganizationId = company.apolloOrganizationId?.trim();
+  if (apolloOrganizationId) return `apollo:${apolloOrganizationId}`;
+
   const domain = normalizeHunterCompanyDomain(company.domain);
   if (domain) return `domain:${domain}`;
 
@@ -29,6 +35,50 @@ export function dedupeHunterCompaniesByIdentity<T extends HunterCompanyIdentityI
     seen.add(identityKey);
     return true;
   });
+}
+
+export function resolveExistingHunterCompanyByName<
+  T extends HunterCompanyNameCandidate
+>(
+  incoming: {
+    name: string;
+    normalizedName: string;
+  },
+  companies: T[]
+) {
+  const exact = companies.find(
+    (company) => company.normalizedName === incoming.normalizedName
+  );
+  if (exact) {
+    return {
+      company: exact,
+      matchType: "EXACT_NORMALIZED_NAME" as const
+    };
+  }
+
+  const identity =
+    normalizeHunterCompanyIdentity(incoming.name) ||
+    normalizeHunterCompanyIdentity(incoming.normalizedName);
+  if (!isSafeAutomaticCompanyNameIdentity(identity)) return null;
+
+  const aliases = companies.filter((company) => {
+    const candidateIdentity =
+      normalizeHunterCompanyIdentity(company.name) ||
+      normalizeHunterCompanyIdentity(company.normalizedName);
+    return candidateIdentity === identity;
+  });
+  if (aliases.length !== 1) return null;
+
+  return {
+    company: aliases[0],
+    matchType: "UNIQUE_LEGAL_NAME_ALIAS" as const
+  };
+}
+
+export function isSafeAutomaticCompanyNameIdentity(value: string) {
+  if (!value) return false;
+  const tokens = value.split("-").filter(Boolean);
+  return tokens.length >= 2 || value.length >= 6;
 }
 
 export function normalizeHunterCompanyDomain(value: string | null | undefined) {

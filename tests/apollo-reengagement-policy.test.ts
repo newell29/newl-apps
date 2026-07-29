@@ -66,6 +66,18 @@ describe("Apollo re-engagement policy", () => {
       replyStatus: ReplyStatus.NO_REPLY,
       sequenceStatus: SequenceStatus.FINISHED
     })).toBe(false);
+    expect(isHunterContactSafeForReview({
+      contactStatus: ContactStatus.REVIEWING,
+      replyStatus: ReplyStatus.NO_REPLY,
+      sequenceStatus: SequenceStatus.ENROLLED,
+      selectedSequenceName: "Hunter - Email Only"
+    })).toBe(false);
+    expect(isHunterContactSafeForReview({
+      contactStatus: ContactStatus.REVIEWING,
+      replyStatus: ReplyStatus.NO_REPLY,
+      sequenceStatus: SequenceStatus.ENROLLED,
+      selectedSequenceName: "Legacy Warehousing Cadence"
+    })).toBe(true);
   });
 
   it("lets the selected new cadence replace stale finished status during sync", () => {

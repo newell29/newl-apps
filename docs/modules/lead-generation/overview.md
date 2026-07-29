@@ -54,6 +54,13 @@ Apollo company mapping and employee discovery are separate states. A verified Ap
 when Apollo returns zero employees. It appears under **Mapped company — employee lookup needed**, where employees can
 be rechecked without repeating paid organization matching; it is not presented as an unmapped-company exception.
 
+Company and contact identity resolution is tenant-wide. TradeMining ingestion reuses an existing company for a unique,
+safe legal-suffix name variant rather than creating another company row. Apollo organization ID and normalized domain
+take precedence over display-name spelling after a manual mapping; ambiguous name-only matches remain in human review.
+Apollo person/contact ID, then LinkedIn URL and concrete email, identify an existing contact across company aliases.
+If that person is already enrolled or paused in a Hunter-managed cadence, Hunter creates neither a duplicate contact
+nor another outreach plan. Prior non-Hunter cadence history remains eligible for the separately approved move policy.
+
 ## Data model
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.
