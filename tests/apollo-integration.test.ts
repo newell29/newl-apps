@@ -147,6 +147,35 @@ describe("fetchApolloContactById", () => {
     });
   });
 
+  it("reads an active Hunter membership from the exact saved Apollo contact", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        contact: {
+          id: "apollo-contact-active",
+          first_name: "Taylor",
+          last_name: "Active",
+          email: "taylor.active@example.com",
+          contact_campaign_statuses: [
+            {
+              emailer_campaign_id: "hunter-email-only",
+              status: "active",
+              added_at: "2026-07-29T18:00:00.000Z"
+            }
+          ]
+        }
+      })
+    } as unknown as Response);
+
+    await expect(fetchApolloContactById("apollo-contact-active")).resolves.toMatchObject({
+      apolloContactId: "apollo-contact-active",
+      sequenceId: "hunter-email-only",
+      sequenceStatus: SequenceStatus.ENROLLED,
+      replyStatus: ReplyStatus.NO_REPLY
+    });
+  });
+
   it("treats a bounced sequence membership as terminal even when Apollo also returns an active status", async () => {
     vi.spyOn(global, "fetch").mockResolvedValue({
       ok: true,
