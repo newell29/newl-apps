@@ -15,6 +15,13 @@ import {
   getApolloStatusSyncIntervalHours,
   getNextApolloSyncAt
 } from "@/modules/lead-gen/apollo-status-sync-policy";
+import {
+  APOLLO_ENROLLMENT_CONFIRMATION_FAILED_REASON,
+  APOLLO_ENROLLMENT_CONFIRMATION_TIMEOUT_MS,
+  isApolloSequenceMembershipConfirmed,
+  persistApolloPushJobPendingResolution,
+  readApolloPendingSequenceConfirmation
+} from "@/modules/lead-gen/apollo-push-jobs";
 import { resolveTrackedSequenceStatus } from "@/modules/lead-gen/apollo-reengagement-policy";
 import { recordCurrentContactScoreSnapshot } from "@/modules/lead-gen/contact-score-snapshot";
 import { recordLeadOutcomeEvent } from "@/modules/lead-gen/score-history";
@@ -54,6 +61,8 @@ export type ApolloStatusSyncResult = {
   syncedContacts: number;
   changedContacts: number;
   failedContacts: number;
+  confirmedEnrollments: number;
+  failedEnrollments: number;
   deferredContacts: number;
   retryCount: number;
   rateLimited: boolean;
@@ -183,6 +192,18 @@ export async function syncApolloStatusesForTenant(
           result.retryCount += 1;
         });
         const syncedAt = dependencies.now();
+        const pendingConfirmation = readApolloPendingSequenceConfirmation(contact.rawJson);
+        const pendingEnrollmentConfirmed = Boolean(
+          pendingConfirmation &&
+          incoming.sequenceId === pendingConfirmation.sequenceId &&
+          isApolloSequenceMembershipConfirmed(incoming.sequenceStatus)
+        );
+        const pendingEnrollmentFailed = Boolean(
+          pendingConfirmation &&
+          !pendingEnrollmentConfirmed &&
+          syncedAt.getTime() - new Date(pendingConfirmation.acceptedAt).getTime() >=
+            APOLLO_ENROLLMENT_CONFIRMATION_TIMEOUT_MS
+        );
         const sequenceStatus = resolveTrackedSequenceStatus({
           existingStatus: contact.sequenceStatus,
           incomingStatus: incoming.sequenceStatus,
@@ -192,7 +213,11 @@ export async function syncApolloStatusesForTenant(
         const replyStatus = mergeReplyStatus(contact.replyStatus, incoming.replyStatus);
         const sequenceChanged = sequenceStatus !== contact.sequenceStatus;
         const replyChanged = replyStatus !== contact.replyStatus;
-        const rawJson = mergeApolloSyncPayload(contact.rawJson, incoming, syncedAt);
+        const rawJson = mergeApolloSyncPayload(contact.rawJson, incoming, syncedAt, {
+          pendingConfirmation,
+          confirmed: pendingEnrollmentConfirmed,
+          failed: pendingEnrollmentFailed
+        });
         let leadId: string | null = null;
         let scoreSnapshotId: string | null = null;
 
@@ -223,7 +248,10 @@ export async function syncApolloStatusesForTenant(
             lastReplyAt: incoming.lastReplyAt ?? contact.lastReplyAt,
             rawJson,
             apolloLastSyncedAt: syncedAt,
-            apolloNextSyncAt: getNextApolloSyncAt(syncedAt),
+            apolloNextSyncAt:
+              pendingConfirmation && !pendingEnrollmentConfirmed && !pendingEnrollmentFailed
+                ? new Date(syncedAt.getTime() + 15 * 60 * 1000)
+                : getNextApolloSyncAt(syncedAt),
             apolloSyncFailureCount: 0,
             apolloSyncLastError: null
           }
@@ -233,6 +261,25 @@ export async function syncApolloStatusesForTenant(
         }
 
         result.syncedContacts += 1;
+        if (pendingConfirmation && pendingEnrollmentConfirmed) {
+          result.confirmedEnrollments += 1;
+          await persistApolloPushJobPendingResolution({
+            tenantId: tenant.tenantId,
+            jobRunId: pendingConfirmation.jobRunId,
+            contactId: contact.id,
+            outcome: "enrolled",
+            reason: `Enrollment confirmed in "${pendingConfirmation.sequenceName}".`
+          });
+        } else if (pendingConfirmation && pendingEnrollmentFailed) {
+          result.failedEnrollments += 1;
+          await persistApolloPushJobPendingResolution({
+            tenantId: tenant.tenantId,
+            jobRunId: pendingConfirmation.jobRunId,
+            contactId: contact.id,
+            outcome: "failed",
+            reason: APOLLO_ENROLLMENT_CONFIRMATION_FAILED_REASON
+          });
+        }
         if (sequenceChanged || replyChanged) {
           result.changedContacts += 1;
 
@@ -396,13 +443,50 @@ function replyStatusRank(status: ReplyStatus) {
   }[status];
 }
 
-function mergeApolloSyncPayload(rawJson: Prisma.JsonValue | null, incoming: ApolloContactRecord, syncedAt: Date) {
+function mergeApolloSyncPayload(
+  rawJson: Prisma.JsonValue | null,
+  incoming: ApolloContactRecord,
+  syncedAt: Date,
+  enrollmentConfirmation: {
+    pendingConfirmation: ReturnType<typeof readApolloPendingSequenceConfirmation>;
+    confirmed: boolean;
+    failed: boolean;
+  }
+) {
   const current = asJsonObject(rawJson);
   const apollo = asJsonObject(current.apollo);
+  const withoutPending = Object.fromEntries(
+    Object.entries(apollo).filter(([key]) => key !== "pendingSequenceConfirmation")
+  );
+  const withoutPendingOrBlocker = Object.fromEntries(
+    Object.entries(withoutPending).filter(([key]) => key !== "pushBlocker")
+  );
+  const pending = enrollmentConfirmation.pendingConfirmation;
+  const enrollmentMetadata = enrollmentConfirmation.confirmed
+    ? withoutPendingOrBlocker
+    : enrollmentConfirmation.failed
+      ? {
+          ...withoutPending,
+          pushBlocker: {
+            reason: APOLLO_ENROLLMENT_CONFIRMATION_FAILED_REASON,
+            blockedAt: syncedAt.toISOString()
+          }
+        }
+      : pending
+        ? {
+            ...apollo,
+            pendingSequenceConfirmation: {
+              ...pending,
+              attemptCount: pending.attemptCount + 1,
+              lastCheckedAt: syncedAt.toISOString(),
+              nextCheckAt: new Date(syncedAt.getTime() + 15 * 60 * 1000).toISOString()
+            }
+          }
+        : apollo;
   return {
     ...current,
     apollo: {
-      ...apollo,
+      ...enrollmentMetadata,
       importedAt: syncedAt.toISOString(),
       record: incoming.rawPayload,
       statusSync: {
@@ -431,6 +515,8 @@ function emptyResult(tenantId: string, status: ApolloStatusSyncResult["status"],
     syncedContacts: 0,
     changedContacts: 0,
     failedContacts: 0,
+    confirmedEnrollments: 0,
+    failedEnrollments: 0,
     deferredContacts: 0,
     retryCount: 0,
     rateLimited: false,
@@ -444,6 +530,13 @@ function buildResultMessage(result: ApolloStatusSyncResult) {
   }
   if (result.failedContacts > 0) {
     return `Apollo status sync refreshed ${result.syncedContacts} contact(s) and failed ${result.failedContacts}.`;
+  }
+  if (result.confirmedEnrollments > 0 || result.failedEnrollments > 0) {
+    return (
+      `Apollo status sync refreshed ${result.syncedContacts} contact(s); ` +
+      `${result.confirmedEnrollments} pending enrollment(s) were confirmed and ` +
+      `${result.failedEnrollments} expired without confirmation.`
+    );
   }
   return `Apollo status sync refreshed ${result.syncedContacts} contact(s); ${result.changedContacts} had new sequence or reply outcomes.`;
 }

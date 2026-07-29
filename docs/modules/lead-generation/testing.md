@@ -64,7 +64,12 @@ Use synthetic data for ingestion and pipeline-state testing:
 6. for a live Apollo test, require a named-contact confirmation that includes contact, cadence, sender, active/paused status, and contact count;
 7. after the Newl Apps job completes, verify Apollo membership independently and then sync status back into Newl Apps.
 
-Do not use a contact with active or finished sequence history unless the owner explicitly approves re-enrollment. Do not treat a job-level `SUCCESS` as proof of enrollment; compare enrolled, skipped, and failed counts and verify the contact's campaign status.
+Do not use a contact with active or finished sequence history unless the owner explicitly approves re-enrollment.
+When re-enrollment is approved, regression coverage must verify Apollo receives
+`sequence_active_in_other_campaigns=true` and `sequence_finished_in_other_campaigns=true`. Do not treat a job-level
+`SUCCESS` as proof of enrollment; compare enrolled, pending, skipped, and failed counts and verify the exact requested
+campaign ID. A pending result must resolve to enrolled or failed within ten minutes and must never cause an automatic
+second enrollment write.
 
 For Hunter collector validation, include a canonical export containing both a valid company row and a shipment-only row. Confirm the adapter uploads the valid row, counts the identity-free row under `recordsRejectedBeforeUpload`, and does not fail the complete batch.
 

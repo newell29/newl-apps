@@ -192,7 +192,11 @@ Apollo's Contacts API can return sequence membership in either the older top-lev
 For an approved Hunter Outreach Plan, Newl Apps uses Apollo's no-credit
 `emailer_campaigns/remove_or_stop_contact_ids` endpoint in `remove` mode when a no-reply contact is still active or
 paused in a different cadence, then calls the normal add-contact endpoint for the approved Hunter cadence. Finished
-history in another cadence requires no removal. The selected Hunter cadence ID makes later status sync
+history in another cadence requires no removal. The add-contact request uses Apollo's documented query parameters,
+including `sequence_active_in_other_campaigns=true`, `sequence_finished_in_other_campaigns=true`,
+`sequence_same_company_in_same_campaign=true`, and `add_if_in_queue=true`, because the owner approved safe
+re-enrollment of no-reply contacts from earlier cadences. Missing email, bounce, reply, do-not-contact, and grounded
+approval gates still fail closed before this request. The selected Hunter cadence ID makes later status sync
 campaign-aware, so stale `FINISHED` history cannot mask a new `ENROLLED` status.
 
 Apollo People Search returns a person ID, while sequence enrollment requires a saved Apollo contact ID. Immediately
@@ -214,6 +218,12 @@ The Apollo push path remains deliberately two-phase:
 2. read the contacts back from Apollo before marking the Newl Apps contact `ENROLLED`.
 
 Apollo can accept a push before the membership is visible to a follow-up read. The job should retain a pending-confirmation marker and must not automatically submit the same contact again. A later status sync is the recovery path.
+The Outreach Queue displays this state as `Pending confirmation`, polls it with bounded backoff while the page is
+open, and makes the contact immediately due for the scheduled saved-contact sync. Confirmation must match both the
+requested Apollo cadence ID and a current ready, enrolled, or paused membership state; stale `FINISHED` history does
+not count. If Apollo still does not show that exact
+membership after ten minutes, the job becomes failed with a visible blocker instead of remaining skipped or silently
+retrying the write.
 
 ## Apollo reply synchronization
 

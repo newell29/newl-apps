@@ -23,8 +23,15 @@ import {
   type ApolloMatchReviewActionState
 } from "@/modules/lead-gen/apollo-match-review-state";
 import {
+  APOLLO_ENROLLMENT_CONFIRMATION_FAILED_REASON,
+  APOLLO_ENROLLMENT_CONFIRMATION_TIMEOUT_MS,
+  APOLLO_PROPAGATION_PENDING_REASON,
   APOLLO_PUSH_JOB_TYPE,
   createApolloPushJobOutput,
+  isApolloSequenceMembershipConfirmed,
+  isApolloPushJobDetailPending,
+  readApolloPendingSequenceConfirmation,
+  recalculateApolloPushJobOutput,
   type ApolloPushJobInput,
   parseApolloPushJobOutput,
   type ApolloPushJobOutput
@@ -134,8 +141,7 @@ import {
 } from "@/server/integrations/openai";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
-const APOLLO_PROPAGATION_PENDING_REASON =
-  "Apollo accepted the push, but the cadence enrollment is still propagating in Apollo and was not visible during Newl Apps verification.";
+const APOLLO_ENROLLMENT_CONFIRMATION_RETRY_DELAYS_MS = [15_000, 30_000, 60_000, 120_000] as const;
 
 type SearchProfileMutationClient = typeof prisma & {
   tradeMiningSearchProfile?: {
@@ -2600,14 +2606,20 @@ export async function runApolloPushJob({
             const reason = verificationWasRateLimited
               ? "Apollo accepted the push, but Newl Apps hit Apollo rate limits before verification finished. Use Sync Apollo status shortly instead of re-pushing this contact."
               : APOLLO_PROPAGATION_PENDING_REASON;
-            output.skippedContacts += 1;
+            if (verificationWasRateLimited) {
+              output.skippedContacts += 1;
+            } else {
+              output.pendingContacts += 1;
+            }
             output.processedContacts += 1;
-            failureReasons.add(reason);
+            if (verificationWasRateLimited) {
+              failureReasons.add(reason);
+            }
             output.details.push({
               contactId: contact.contactId,
               contactName: contact.fullName,
               companyName: group.companyName,
-              outcome: "skipped",
+              outcome: verificationWasRateLimited ? "skipped" : "pending",
               reason
             });
             await appendApolloContactActivity({
@@ -4449,7 +4461,10 @@ function isApolloContactEnrolledInSequence(
     return false;
   }
 
-  return incoming.sequenceId === sequenceId && incoming.sequenceStatus !== SequenceStatus.NOT_STARTED;
+  return (
+    incoming.sequenceId === sequenceId &&
+    isApolloSequenceMembershipConfirmed(incoming.sequenceStatus)
+  );
 }
 
 async function verifyApolloSequencePush({
@@ -4718,7 +4733,10 @@ async function persistApolloPendingSequenceConfirmation({
   sequenceId,
   sequenceName,
   jobRunId,
-  acceptedAt
+  acceptedAt,
+  attemptCount = 0,
+  lastCheckedAt = null,
+  nextCheckAt = null
 }: {
   tenantId: string;
   contactId: string;
@@ -4726,6 +4744,9 @@ async function persistApolloPendingSequenceConfirmation({
   sequenceName: string | null;
   jobRunId: string | null;
   acceptedAt: string | null;
+  attemptCount?: number;
+  lastCheckedAt?: string | null;
+  nextCheckAt?: string | null;
 }) {
   const contact = await prisma.contact.findFirst({
     where: {
@@ -4744,6 +4765,16 @@ async function persistApolloPendingSequenceConfirmation({
 
   const currentRawJson = isJsonObject(contact.rawJson) ? contact.rawJson : {};
   const apolloData = isJsonObject(currentRawJson.apollo) ? currentRawJson.apollo : {};
+  const resolvedNextCheckAt =
+    acceptedAt
+      ? nextCheckAt ??
+        new Date(
+          new Date(acceptedAt).getTime() +
+            APOLLO_ENROLLMENT_CONFIRMATION_RETRY_DELAYS_MS[
+              Math.min(attemptCount, APOLLO_ENROLLMENT_CONFIRMATION_RETRY_DELAYS_MS.length - 1)
+            ]
+        ).toISOString()
+      : null;
 
   const nextApolloData =
     sequenceId && sequenceName && jobRunId && acceptedAt
@@ -4753,7 +4784,10 @@ async function persistApolloPendingSequenceConfirmation({
             sequenceId,
             sequenceName,
             jobRunId,
-            acceptedAt
+            acceptedAt,
+            attemptCount,
+            lastCheckedAt,
+            nextCheckAt: resolvedNextCheckAt
           }
         }
       : Object.fromEntries(Object.entries(apolloData).filter(([key]) => key !== "pendingSequenceConfirmation"));
@@ -4766,7 +4800,12 @@ async function persistApolloPendingSequenceConfirmation({
       rawJson: toInputJsonValue({
         ...currentRawJson,
         apollo: nextApolloData
-      })
+      }),
+      ...(resolvedNextCheckAt
+        ? {
+            apolloNextSyncAt: new Date(resolvedNextCheckAt)
+          }
+        : {})
     }
   });
 }
@@ -4800,9 +4839,7 @@ export async function reconcileApolloPushJobPendingResults({
     return false;
   }
 
-  const pendingDetails = output.details.filter(
-    (detail) => detail.outcome === "skipped" && detail.reason === APOLLO_PROPAGATION_PENDING_REASON
-  );
+  const pendingDetails = output.details.filter(isApolloPushJobDetailPending);
   if (pendingDetails.length === 0) {
     return false;
   }
@@ -4856,16 +4893,46 @@ export async function reconcileApolloPushJobPendingResults({
 
   const contactsById = new Map(contacts.map((contact) => [contact.id, contact]));
   const companyLookupCache = new Map<string, Promise<ApolloContactLookupResult>>();
+  const checkedAt = new Date();
   let changed = false;
 
   const nextDetails = await Promise.all(
     output.details.map(async (detail) => {
-      if (!(detail.outcome === "skipped" && detail.reason === APOLLO_PROPAGATION_PENDING_REASON)) {
+      if (!isApolloPushJobDetailPending(detail)) {
         return detail;
       }
 
       const contact = contactsById.get(detail.contactId);
       if (!contact) {
+        return detail;
+      }
+      const pending = readApolloPendingSequenceConfirmation(contact.rawJson, jobRunId);
+      if (!pending) {
+        changed = true;
+        const reason =
+          "Apollo enrollment confirmation metadata is missing, so Newl Apps could not safely verify the requested cadence. Review and retry this contact.";
+        await persistApolloPushBlocker({
+          tenantId,
+          contactId: contact.id,
+          reason
+        });
+        return {
+          ...detail,
+          outcome: "failed" as const,
+          reason
+        };
+      }
+
+      const nextCheckAt = pending.nextCheckAt ? new Date(pending.nextCheckAt) : null;
+      const timedOut =
+        checkedAt.getTime() - new Date(pending.acceptedAt).getTime() >=
+        APOLLO_ENROLLMENT_CONFIRMATION_TIMEOUT_MS;
+      if (
+        !timedOut &&
+        nextCheckAt &&
+        Number.isFinite(nextCheckAt.getTime()) &&
+        nextCheckAt.getTime() > checkedAt.getTime()
+      ) {
         return detail;
       }
 
@@ -4890,8 +4957,56 @@ export async function reconcileApolloPushJobPendingResults({
         companyLookup
       });
 
-      if (liveState.sequenceStatus !== SequenceStatus.ENROLLED) {
-        return detail;
+      if (
+        !isApolloSequenceMembershipConfirmed(liveState.sequenceStatus) ||
+        liveState.sequenceId !== pending.sequenceId
+      ) {
+        if (!timedOut) {
+          const attemptCount = pending.attemptCount + 1;
+          const delayMs =
+            APOLLO_ENROLLMENT_CONFIRMATION_RETRY_DELAYS_MS[
+              Math.min(attemptCount, APOLLO_ENROLLMENT_CONFIRMATION_RETRY_DELAYS_MS.length - 1)
+            ];
+          await persistApolloPendingSequenceConfirmation({
+            tenantId,
+            contactId: contact.id,
+            sequenceId: pending.sequenceId,
+            sequenceName: pending.sequenceName,
+            jobRunId: pending.jobRunId,
+            acceptedAt: pending.acceptedAt,
+            attemptCount,
+            lastCheckedAt: checkedAt.toISOString(),
+            nextCheckAt: new Date(checkedAt.getTime() + delayMs).toISOString()
+          });
+          return detail;
+        }
+
+        changed = true;
+        await persistApolloPushBlocker({
+          tenantId,
+          contactId: contact.id,
+          reason: APOLLO_ENROLLMENT_CONFIRMATION_FAILED_REASON
+        });
+        await persistApolloPendingSequenceConfirmation({
+          tenantId,
+          contactId: contact.id,
+          sequenceId: null,
+          sequenceName: null,
+          jobRunId: null,
+          acceptedAt: null
+        });
+        await appendApolloContactActivity({
+          tenantId,
+          contactId: contact.id,
+          note:
+            `Apollo enrollment verification failed on ${checkedAt.toISOString()}. ` +
+            `The contact was not visible in "${pending.sequenceName}" after 10 minutes.`
+        });
+        return {
+          ...detail,
+          outcome: "failed" as const,
+          reason: APOLLO_ENROLLMENT_CONFIRMATION_FAILED_REASON
+        };
       }
 
       changed = true;
@@ -4912,14 +5027,14 @@ export async function reconcileApolloPushJobPendingResults({
         tenantId,
         contactId: contact.id,
         note:
-          `Apollo enrollment verification completed on ${new Date().toISOString()}. ` +
-          `The contact is now visible in "${contact.selectedSequenceName ?? contact.recommendedSequenceName ?? "Apollo"}".`
+          `Apollo enrollment verification completed on ${checkedAt.toISOString()}. ` +
+          `The contact is now visible in "${pending.sequenceName}".`
       });
 
       return {
         ...detail,
         outcome: "enrolled" as const,
-        reason: `Enrollment confirmed in "${contact.selectedSequenceName ?? contact.recommendedSequenceName ?? "Apollo"}".`
+        reason: `Enrollment confirmed in "${pending.sequenceName}".`
       };
     })
   );
@@ -4928,13 +5043,7 @@ export async function reconcileApolloPushJobPendingResults({
     return false;
   }
 
-  const nextOutput: ApolloPushJobOutput = {
-    ...output,
-    enrolledContacts: nextDetails.filter((detail) => detail.outcome === "enrolled").length,
-    skippedContacts: nextDetails.filter((detail) => detail.outcome === "skipped").length,
-    failedContacts: nextDetails.filter((detail) => detail.outcome === "failed").length,
-    details: nextDetails
-  };
+  const nextOutput = recalculateApolloPushJobOutput(output, nextDetails);
 
   await prisma.automationJobRun.update({
     where: {
@@ -4947,6 +5056,21 @@ export async function reconcileApolloPushJobPendingResults({
         nextOutput.failedContacts > 0 && nextOutput.enrolledContacts === 0
           ? nextOutput.details.find((detail) => detail.outcome === "failed")?.reason ?? "Apollo push failed."
           : null
+    }
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      tenantId,
+      actorUserId: null,
+      action: "lead-gen.apollo-push.pending-reconciled",
+      entityType: "AutomationJobRun",
+      entityId: jobRunId,
+      after: {
+        enrolledContacts: nextOutput.enrolledContacts,
+        pendingContacts: nextOutput.pendingContacts,
+        failedContacts: nextOutput.failedContacts
+      }
     }
   });
 

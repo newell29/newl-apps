@@ -232,11 +232,18 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 
 ## Apollo accepted but enrollment is not immediately visible
 
-- Symptom: an Apollo push job completes with `0 enrolled` and one or more skipped contacts even though Apollo accepted the request.
-- Cause: Apollo sequence membership can propagate after the push response. Apollo also exposes current membership under `contact_campaign_statuses`; ignoring that response shape makes both immediate verification and manual sync report `NOT_STARTED` incorrectly.
-- Safe recovery: do not re-push. Wait briefly, run **Sync Apollo status**, and inspect the Apollo contact directly if the app still disagrees.
-- Code guard: `src/server/integrations/apollo.ts` parses current campaign statuses and prefers active state over finished history.
-- Regression coverage: `tests/apollo-integration.test.ts` includes an active campaign membership alongside older finished history.
+- Symptom: an Apollo push job shows `Pending confirmation` after Apollo returns success, but the contact is not yet
+  visible in the requested cadence.
+- Cause: Apollo sequence membership can propagate after the push response. A second failure mode was sending legacy
+  body fields instead of Apollo's documented add-contact query parameters, which omitted the active/finished prior
+  cadence overrides and could leave a no-reply contact with earlier sequence history unenrolled.
+- Safe recovery: do not immediately re-push. Newl Apps rechecks with bounded backoff and the scheduled saved-contact
+  sync. It promotes the result only when the exact requested cadence ID is visible. After ten minutes without that
+  membership, it marks the job failed and exposes a blocker for review.
+- Code guard: `src/server/integrations/apollo.ts` sends the documented query contract and parses current campaign
+  statuses. `src/modules/lead-gen/actions.ts` and `apollo-status-sync.ts` reconcile the durable pending marker.
+- Regression coverage: `tests/apollo-integration.test.ts`, `tests/apollo-push-jobs.test.ts`, and
+  `tests/apollo-status-sync.test.ts`.
 
 ## Apollo person was selected but no saved contact ID exists
 
