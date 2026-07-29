@@ -68,7 +68,8 @@ describe("Teamship print batches", () => {
           srNumber: "SR812345",
           status: "PASS",
           workflowStatus: "READY_TO_PRINT",
-          teamshipOrderId: "30202"
+          teamshipOrderId: "30202",
+          teamshipUrl: "https://members.fulfillit.io/ship-inventories/30202"
         }),
         reviewOrder({
           id: "cmorderfail1",
@@ -76,7 +77,8 @@ describe("Teamship print batches", () => {
           srNumber: "SR812346",
           status: "FAIL",
           workflowStatus: "NEEDS_REVIEW",
-          teamshipOrderId: "30203"
+          teamshipOrderId: "30203",
+          teamshipUrl: "https://members.fulfillit.io/ship-inventories/30203"
         })
       ]
     });
@@ -126,7 +128,12 @@ describe("Teamship print batches", () => {
       2,
       context,
       expect.objectContaining({
-        shippingOrderNumber: "30203",
+        reviewReference: {
+          psNumber: "PS123457",
+          srNumber: "SR812346",
+          teamshipOrderId: "30203",
+          teamshipUrl: "https://members.fulfillit.io/ship-inventories/30203"
+        },
         batch: {
           batchId: "cmbatch123456",
           batchPosition: 1,
@@ -273,6 +280,7 @@ function reviewOrder(overrides: Record<string, unknown>) {
     status: "PASS",
     workflowStatus: "READY_TO_PRINT",
     teamshipOrderId: "30202",
+    teamshipUrl: "https://members.fulfillit.io/ship-inventories/30202",
     ...overrides
   };
 }
