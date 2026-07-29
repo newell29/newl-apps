@@ -22,14 +22,20 @@ import {
   persistApolloPushJobPendingResolution,
   readApolloPendingSequenceConfirmation
 } from "@/modules/lead-gen/apollo-push-jobs";
-import { resolveTrackedSequenceStatus } from "@/modules/lead-gen/apollo-reengagement-policy";
+import {
+  needsApolloBounceDeliveryReconciliation,
+  resolveTrackedSequenceStatus
+} from "@/modules/lead-gen/apollo-reengagement-policy";
 import { recordCurrentContactScoreSnapshot } from "@/modules/lead-gen/contact-score-snapshot";
 import { recordLeadOutcomeEvent } from "@/modules/lead-gen/score-history";
 import { prisma } from "@/server/db";
 import {
   ApolloRateLimitError,
   ApolloTransientError,
+  fetchApolloBouncedSequenceContacts,
   fetchApolloContactById,
+  reconcileApolloContactWithBounceEvidence,
+  type ApolloBouncedSequenceContact,
   type ApolloContactRecord
 } from "@/server/integrations/apollo";
 import type { TenantContext } from "@/server/tenant-context";
@@ -39,6 +45,7 @@ const ACTIVE_JOB_WINDOW_MS = 30 * 60 * 1000;
 
 type SyncDependencies = {
   fetchContact: typeof fetchApolloContactById;
+  fetchBouncedSequenceContacts: typeof fetchApolloBouncedSequenceContacts;
   sleep: (milliseconds: number) => Promise<void>;
   now: () => Date;
   recordScoreSnapshot: typeof recordCurrentContactScoreSnapshot;
@@ -47,6 +54,7 @@ type SyncDependencies = {
 
 const defaultDependencies: SyncDependencies = {
   fetchContact: fetchApolloContactById,
+  fetchBouncedSequenceContacts: fetchApolloBouncedSequenceContacts,
   sleep: async (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
   now: () => new Date(),
   recordScoreSnapshot: recordCurrentContactScoreSnapshot,
@@ -166,6 +174,7 @@ export async function syncApolloStatusesForTenant(
         companyId: true,
         apolloContactId: true,
         apolloPersonId: true,
+        email: true,
         sequenceStatus: true,
         replyStatus: true,
         selectedSequenceId: true,
@@ -179,6 +188,10 @@ export async function syncApolloStatusesForTenant(
       take: batchSize
     });
     result.selectedContacts = contacts.length;
+    const bouncedContactsBySequence = new Map<
+      string,
+      Promise<ApolloBouncedSequenceContact[]>
+    >();
 
     for (let index = 0; index < contacts.length; index += 1) {
       const contact = contacts[index];
@@ -188,9 +201,29 @@ export async function syncApolloStatusesForTenant(
       }
 
       try {
-        const incoming = await fetchContactWithRetry(apolloContactId, dependencies, () => {
+        let incoming = await fetchContactWithRetry(apolloContactId, dependencies, () => {
           result.retryCount += 1;
         });
+        if (
+          contact.selectedSequenceId &&
+          needsApolloBounceDeliveryReconciliation(
+            contact.sequenceStatus,
+            incoming.sequenceStatus
+          )
+        ) {
+          const selectedSequenceId = contact.selectedSequenceId;
+          const bouncedContactsPromise =
+            bouncedContactsBySequence.get(selectedSequenceId) ??
+            dependencies.fetchBouncedSequenceContacts(selectedSequenceId);
+          bouncedContactsBySequence.set(selectedSequenceId, bouncedContactsPromise);
+          incoming = reconcileApolloContactWithBounceEvidence({
+            contact: incoming,
+            selectedSequenceId,
+            apolloContactId,
+            email: contact.email,
+            bouncedContacts: await bouncedContactsPromise
+          });
+        }
         const syncedAt = dependencies.now();
         const pendingConfirmation = readApolloPendingSequenceConfirmation(contact.rawJson);
         const pendingEnrollmentConfirmed = Boolean(
