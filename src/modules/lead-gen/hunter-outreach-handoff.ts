@@ -43,6 +43,7 @@ import { prisma } from "@/server/db";
 import {
   ApolloRateLimitError,
   fetchApolloContactsForCompany,
+  readApolloAccountIdFromMatchQuery,
   type ApolloContactLookupResult,
   type ApolloContactRecord
 } from "@/server/integrations/apollo";
@@ -725,11 +726,12 @@ async function processCompany({
       apolloOrganizationId: true,
       apolloCompanyMatches: {
         orderBy: { createdAt: "desc" },
-        take: 1,
+        take: 25,
         select: {
           classification: true,
           matchReason: true,
-          reviewedAt: true
+          reviewedAt: true,
+          queryJson: true
         }
       },
       hunterOpportunitySignals: {
@@ -789,6 +791,11 @@ async function processCompany({
   let classification: ApolloCompanyMatchClassification | null =
     company.apolloOrganizationId ? ApolloCompanyMatchClassification.DIRECT_COMPANY : null;
   const latestMatch = company.apolloCompanyMatches[0] ?? null;
+  const confirmedApolloAccountId =
+    company.apolloCompanyMatches
+      .map((match) => readApolloAccountIdFromMatchQuery(match.queryJson))
+      .find((accountId): accountId is string => Boolean(accountId)) ??
+    null;
   if (
     latestMatch &&
     blocksApolloEmployeeLookup({
@@ -812,7 +819,8 @@ async function processCompany({
     {
       companyName: company.name,
       domain: company.domain,
-      apolloOrganizationId: company.apolloOrganizationId
+      apolloOrganizationId: company.apolloOrganizationId,
+      apolloAccountId: confirmedApolloAccountId
     },
     {
       authorizePaidEmailEnrichment

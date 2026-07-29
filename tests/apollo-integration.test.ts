@@ -12,6 +12,7 @@ import {
   parseApolloCompanyReference,
   parseApolloOrganizationId,
   pushApolloContactsToSequence,
+  readApolloAccountIdFromMatchQuery,
   reconcileApolloContactWithBounceEvidence,
   removeApolloContactsFromSequences,
   transitionApolloContactsToSequence
@@ -404,6 +405,131 @@ describe("fetchApolloContactsForCompany", () => {
     ).rejects.toThrow(
       "Apollo API key is not configured. Add APOLLO_API_KEY or APOLLO_MASTER_API before importing contacts."
     );
+  });
+
+  it("recovers YAT employees by confirmed account domain when its canonical organization returns zero", async () => {
+    const accountId = "6888f2e0496bf40001170587";
+    const organizationId = "5e66b6381e05b4008c8331b8";
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/v1/accounts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            accounts: [{
+              id: accountId,
+              organization_id: organizationId,
+              name: "YAT USA, INC.",
+              primary_domain: "yattool.com"
+            }]
+          })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            organizations: [{
+              id: organizationId,
+              name: "YAT USA, INC.",
+              primary_domain: "yattool.com"
+            }]
+          })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ contacts: [] })
+        } as unknown as Response;
+      }
+
+      if (url.includes("/api/v1/mixed_people/api_search")) {
+        const requestUrl = new URL(url);
+        if (requestUrl.searchParams.getAll("organization_ids[]").includes(organizationId)) {
+          return emptyApolloPeopleResponse();
+        }
+
+        expect(requestUrl.searchParams.getAll("q_organization_domains_list[]"))
+          .toEqual(["yattool.com"]);
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            people: [{
+              id: "6138684489ec360001a60945",
+              first_name: "Rogelio",
+              last_name: "Martinez",
+              title: "Import Export Specialist",
+              has_email: true,
+              organization: {
+                id: organizationId,
+                name: "YAT USA, INC.",
+                primary_domain: "yattool.com"
+              }
+            }]
+          })
+        } as unknown as Response;
+      }
+
+      throw new Error(
+        `Unexpected Apollo URL in YAT account-domain recovery test: ${url}; ${String(init?.body ?? "")}`
+      );
+    });
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "YAT USA, INC.",
+      domain: "yattool.com",
+      apolloOrganizationId: organizationId,
+      apolloAccountId: accountId
+    });
+
+    expect(result.organizationId).toBe(organizationId);
+    expect(result.contacts).toEqual([
+      expect.objectContaining({
+        apolloPersonId: "6138684489ec360001a60945",
+        fullName: "Rogelio Martinez",
+        title: "Import Export Specialist"
+      })
+    ]);
+    expect(result.match.matchReason).toContain(
+      "recovered employees through the confirmed Apollo account domain"
+    );
+    expect(result.match.query).toMatchObject({
+      apollo_account_id: accountId
+    });
+    expect(readApolloAccountIdFromMatchQuery(result.match.query)).toBe(accountId);
+    expect(
+      fetchMock.mock.calls.some(([request]) =>
+        new URL(String(request)).searchParams
+          .getAll("q_organization_domains_list[]")
+          .includes("yattool.com")
+      )
+    ).toBe(true);
+    expect(
+      fetchMock.mock.calls.some(([request]) =>
+        String(request).includes("/api/v1/people/match")
+      )
+    ).toBe(false);
+  });
+
+  it("recovers a confirmed account ID from the original manual mapping query", () => {
+    expect(readApolloAccountIdFromMatchQuery({
+      source: "manual-apollo-url",
+      resource_type: "ACCOUNT",
+      supplied_id: "6888f2e0496bf40001170587",
+      organization_ids: ["5e66b6381e05b4008c8331b8"]
+    })).toBe("6888f2e0496bf40001170587");
+    expect(readApolloAccountIdFromMatchQuery({
+      resource_type: "ORGANIZATION",
+      supplied_id: "6888f2e0496bf40001170587"
+    })).toBeNull();
   });
 
   it("parses contacts and preserves existing Apollo sequence history", async () => {

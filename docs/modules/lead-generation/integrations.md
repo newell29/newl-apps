@@ -14,6 +14,13 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
 
+## Confirmed Apollo account employee discovery
+
+When a reviewer maps a saved Apollo account URL, Newl Apps preserves both the account ID and Apollo's canonical
+organization ID in the match history. Employee discovery first uses Apollo's documented organization-ID People Search
+filter. If that search returns no useful people, it retries with the exact domain returned by the confirmed saved
+account. Both People Search requests are zero-credit; paid email enrichment remains separately authorized.
+
 ## Hunter TradeMining query mapping
 
 - Destination ports are optional canonical U.S. ports. When present they are submitted together through TradeMining's multi-select `USPort` field; when absent Hunter omits that field.
