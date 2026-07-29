@@ -125,6 +125,11 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
   queries bounded legal-name, brand, and regional aliases and adds official-domain queries when a
   domain is known. Matching first-party identity evidence can correct an unsupported ambiguous
   synthesis label.
+- A short acronym-only company label can retrieve an unrelated business with the same generic name.
+  Hunter now carries the bounded shipment-party names already selected inside the authenticated tenant
+  into the research packet, accepts only party aliases containing the exact acronym token, and adds at
+  most two shipment-destination qualifiers. With partial context it uses the available qualifier; with
+  no matching alias or geography it keeps the exact short-name query and fails closed at identity review.
 - A full generic result set can otherwise consume the bounded evidence ledger before a later
   official-domain event query runs. Hunter executes every enabled query first and samples their
   results in rounds, preserving targeted first-party evidence without increasing the 24-record cap.

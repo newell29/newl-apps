@@ -200,7 +200,7 @@ Regression coverage must prove:
     runs write the paid-retrieval checkpoint atomically before Qwen, an exact same-day retry discovers it
     automatically, malformed batches are isolated to individual companies with bounded repair attempts,
     and exhausted company-level failures do not discard other valid synthesis results;
-13. legal-name, regional, and brand aliases cover known false-negative shapes such as Aalberts IPS Americas, AS Colour, 3F North America, Barnhardt Manufacturing, and Atlas Copco Compressors;
+13. legal-name, regional, and brand aliases cover known false-negative shapes such as Aalberts IPS Americas, AS Colour, 3F North America, Barnhardt Manufacturing, and Atlas Copco Compressors; a short synthetic acronym uses only matching shipment-party aliases plus at most two bounded destination qualifiers, while partial and completely missing shipment context remain deterministic and safe;
 14. saturated generic results cannot prevent a known-domain identity or fresh-event query from executing or contributing evidence, including Barnhardt's first-party NCFI expansion;
 15. a full evidence ledger executes no follow-up search, a partially full ledger appends only to the remaining capacity, resumed evidence is bounded, and no completion company can exceed 24 evidence records; and
 16. no company-research module or route imports or calls Apollo, pipeline-stage mutation, cadence enrollment, email, LinkedIn, or customer-communication code; and

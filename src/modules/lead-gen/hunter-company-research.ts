@@ -23,7 +23,7 @@ import { dedupeHunterCompaniesByIdentity } from "@/modules/lead-gen/hunter-compa
 import { prisma } from "@/server/db";
 
 export { HUNTER_COMPANY_RESEARCH_JOB_TYPE };
-export const HUNTER_COMPANY_RESEARCH_PROMPT_VERSION = "hunter-company-research-v15";
+export const HUNTER_COMPANY_RESEARCH_PROMPT_VERSION = "hunter-company-research-v16";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL = "qwen3.5:35b";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL = "kimi-k2.6";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL = "kimi-k3";
@@ -188,6 +188,9 @@ type PreparedCandidate = {
   domain: string | null;
   shipmentEvidence: Array<{
     arrivalDate: string | null;
+    importerName: string | null;
+    consigneeName: string | null;
+    shipperName: string | null;
     destinationCity: string | null;
     destinationState: string | null;
     sourcePort: string | null;
@@ -303,6 +306,9 @@ export async function prepareHunterCompanyResearchRun({
         take: 8,
         select: {
           arrivalDate: true,
+          importerName: true,
+          consigneeName: true,
+          shipperName: true,
           destinationCity: true,
           destinationState: true,
           sourcePort: true,

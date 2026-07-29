@@ -28,7 +28,7 @@ DEFAULT_QWEN_MODEL = "qwen3.5:35b"
 DEFAULT_KIMI_URL = "https://api.moonshot.ai/v1"
 DEFAULT_KIMI_MODEL = "kimi-k2.6"
 DEFAULT_KIMI_VALIDATOR_MODEL = "kimi-k3"
-PROMPT_VERSION = "hunter-company-research-v15"
+PROMPT_VERSION = "hunter-company-research-v16"
 ALLOWED_SERVICE_LINES = {"WAREHOUSING", "OCEAN_AIR", "TRUCKING"}
 ALLOWED_OPERATING_REGIONS = {"NORTH_AMERICA", "CHINA", "OTHER_FOREIGN", "UNKNOWN"}
 ALLOWED_SIGNAL_TYPES = {
@@ -47,6 +47,7 @@ SOURCE_TYPES = {"FIRST_PARTY", "GOVERNMENT", "NEWS", "CAREERS", "DIRECTORY", "OT
 MAX_RESPONSE_BYTES = 2_000_000
 MAX_PAGE_BYTES = 400_000
 MAX_EVIDENCE_PER_COMPANY = 24
+MAX_SHIPMENT_COMPANY_ALIASES = 6
 LEGAL_SUFFIXES = {
     "co",
     "company",
@@ -82,6 +83,12 @@ REGIONAL_IDENTITY_MARKERS = {
 }
 PRODUCTION_LINE_EXPANSION_PATTERN = re.compile(
     r"\bnew(?:\s+[a-z][a-z-]*){0,3}\s+(?:production|manufacturing)\s+lines?\b",
+    re.IGNORECASE,
+)
+MANUFACTURING_LAUNCH_PATTERN = re.compile(
+    r"\b(?:(?:begins?|began|starts?|started|launch(?:es|ed|ing)?)"
+    r"(?:\s+[a-z0-9][a-z0-9-]*){0,4}\s+(?:production|manufacturing|assembly)|"
+    r"ramps?\s+(?:up\s+)?(?:to\s+)?full\s+production)\b",
     re.IGNORECASE,
 )
 PUBLIC_DOMAIN_PATTERN = re.compile(
@@ -541,8 +548,8 @@ def fetch_page_evidence(url: str) -> tuple[Optional[str], Optional[str]]:
     return bounded_text(" ".join(parser.parts), "", 3_000) or None, parse_page_published_at(document)
 
 
-def company_search_aliases(candidate: dict[str, Any]) -> list[str]:
-    company = bounded_text(candidate.get("companyName"), "", 300)
+def company_name_aliases(value: Any) -> list[str]:
+    company = bounded_text(value, "", 300)
     words = re.findall(r"[A-Za-z0-9]+", company)
     aliases = [company] if company else []
     without_suffix = list(words)
@@ -574,9 +581,77 @@ def company_search_aliases(candidate: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(alias for alias in aliases if alias))
 
 
+def generic_company_identity_token(candidate: dict[str, Any]) -> Optional[str]:
+    company = bounded_text(candidate.get("companyName"), "", 300)
+    words = re.findall(r"[A-Za-z0-9]+", company)
+    while words and words[-1].lower() in LEGAL_SUFFIXES:
+        words.pop()
+    while words:
+        last_two = " ".join(word.lower() for word in words[-2:])
+        if len(words) >= 2 and last_two in REGIONAL_IDENTITY_MARKERS:
+            words = words[:-2]
+            continue
+        if words[-1].lower() in REGIONAL_IDENTITY_MARKERS:
+            words.pop()
+            continue
+        break
+    compact = "".join(words).lower()
+    return compact if 2 <= len(compact) < 5 else None
+
+
+def shipment_company_aliases(candidate: dict[str, Any]) -> list[str]:
+    identity_token = generic_company_identity_token(candidate)
+    shipments = candidate.get("shipmentEvidence")
+    if not identity_token or not isinstance(shipments, list):
+        return []
+    aliases: list[str] = []
+    for shipment in shipments:
+        if not isinstance(shipment, dict):
+            continue
+        for field in ("importerName", "consigneeName", "shipperName"):
+            name = bounded_text(shipment.get(field), "", 300)
+            tokens = {
+                token.lower()
+                for token in re.findall(r"[A-Za-z0-9]+", name)
+            }
+            if identity_token in tokens:
+                aliases.extend(company_name_aliases(name))
+    return list(dict.fromkeys(aliases))[:MAX_SHIPMENT_COMPANY_ALIASES]
+
+
+def company_search_aliases(candidate: dict[str, Any]) -> list[str]:
+    aliases = company_name_aliases(candidate.get("companyName"))
+    aliases.extend(shipment_company_aliases(candidate))
+    return list(dict.fromkeys(aliases))
+
+
+def generic_company_location_qualifiers(candidate: dict[str, Any]) -> list[str]:
+    if not generic_company_identity_token(candidate):
+        return []
+    shipments = candidate.get("shipmentEvidence")
+    if not isinstance(shipments, list):
+        return []
+    qualifiers: list[str] = []
+    for shipment in shipments:
+        if not isinstance(shipment, dict):
+            continue
+        for field in ("destinationCity", "destinationState"):
+            value = bounded_text(shipment.get(field), "", 100)
+            compact = re.sub(r"[^a-z0-9]+", "", value.lower())
+            if len(compact) >= 4 and value not in qualifiers:
+                qualifiers.append(value)
+            if len(qualifiers) >= 2:
+                return qualifiers
+    return qualifiers
+
+
 def search_subject(candidate: dict[str, Any]) -> str:
     aliases = company_search_aliases(candidate)
-    return "(" + " OR ".join(f'"{alias}"' for alias in aliases) + ")"
+    subject = "(" + " OR ".join(f'"{alias}"' for alias in aliases) + ")"
+    qualifiers = generic_company_location_qualifiers(candidate)
+    if qualifiers:
+        subject += " (" + " OR ".join(f'"{value}"' for value in qualifiers) + ")"
+    return subject
 
 
 def is_likely_first_party(candidate: dict[str, Any], hostname: str) -> bool:
@@ -1784,7 +1859,11 @@ def recent_material_trigger_indices(
         )
         if alias_rank is None:
             continue
-        if material_pattern.search(text) or PRODUCTION_LINE_EXPANSION_PATTERN.search(text):
+        if (
+            material_pattern.search(text)
+            or PRODUCTION_LINE_EXPANSION_PATTERN.search(text)
+            or MANUFACTURING_LAUNCH_PATTERN.search(text)
+        ):
             matches.append(
                 (
                     alias_rank,
@@ -1986,7 +2065,10 @@ def normalize_synthesis_for_evidence(
             "Recent material expansion evidence was found.",
             2_000,
         )
-        if PRODUCTION_LINE_EXPANSION_PATTERN.search(trigger_text):
+        if (
+            PRODUCTION_LINE_EXPANSION_PATTERN.search(trigger_text)
+            or MANUFACTURING_LAUNCH_PATTERN.search(trigger_text)
+        ):
             normalized["signalType"] = "EXPANSION"
         message = (
             "Deterministic evidence review replaced weaker or unsupported trigger citations with the "

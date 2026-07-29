@@ -28,7 +28,7 @@ describe("Hunter company deep research", () => {
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL).toBe("qwen3.5:35b");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL).toBe("kimi-k2.6");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL).toBe("kimi-k3");
-    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v15");
+    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v16");
     expect(HUNTER_COMPANY_RESEARCH_TRANSACTION_TIMEOUT_MS).toBe(30_000);
     expect(HUNTER_COMPANY_RESEARCH_SAFETY).toEqual({
       externalWrites: false,
@@ -476,6 +476,9 @@ describe("Hunter company deep research", () => {
     expect(research).not.toContain("api.apollo.io");
     expect(serverResearch).toContain("tenantCompanies = await tx.company.findMany");
     expect(serverResearch).toContain("timeout: HUNTER_COMPANY_RESEARCH_TRANSACTION_TIMEOUT_MS");
+    expect(serverResearch).toContain("importerName: true");
+    expect(serverResearch).toContain("consigneeName: true");
+    expect(serverResearch).toContain("shipperName: true");
     expect(serverResearch).toContain("company.evidence[company.synthesis.triggerEvidenceIndices[0]]");
     expect(serverResearch).toContain("shadowSynthesis: lunaShadow");
     expect(shadowResearch).toContain("authoritative: false");
@@ -846,6 +849,43 @@ describe("Hunter company deep research", () => {
       official: true,
       directory: false
     });
+  });
+
+  it("disambiguates a short company name with shipment aliases and bounded geography", async () => {
+    const program = [
+      "import datetime as d,json",
+      "import hunter_company_research as r",
+      "recent=(d.datetime.now(d.timezone.utc)-d.timedelta(days=30)).isoformat()",
+      "resolved={'companyName':'ACP','companyKey':'acp','shipmentEvidence':[{'importerName':'ACP US LLC','consigneeName':'Unrelated Staffing LLC','shipperName':None,'destinationCity':'Exampleville','destinationState':'North Carolina'}]}",
+      "partial={'companyName':'ACP','companyKey':'acp','shipmentEvidence':[{'destinationCity':'Exampleville'}]}",
+      "missing={'companyName':'ACP','companyKey':'acp','shipmentEvidence':[]}",
+      "evidence=[{'pass':'IDENTITY','firstParty':False,'sourceType':'OTHER','title':'ACP US LLC identity','excerpt':'ACP US LLC is a synthetic industrial manufacturer.','publishedAt':None},{'pass':'FRESH_EVENTS','firstParty':False,'sourceType':'NEWS','title':'ACP US LLC starts high-voltage component assembly','excerpt':'ACP US LLC began synthetic high-voltage component assembly and is ramping to full production.','publishedAt':recent}]",
+      "print(json.dumps({'aliases':r.company_search_aliases(resolved),'resolvedQueries':r.build_research_queries(resolved),'partialSubject':r.search_subject(partial),'missingSubject':r.search_subject(missing),'material':r.recent_material_trigger_indices(resolved,evidence)}))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+    const result = JSON.parse(stdout) as {
+      aliases: string[];
+      resolvedQueries: Array<{ query: string }>;
+      partialSubject: string;
+      missingSubject: string;
+      material: number[];
+    };
+
+    expect(result.aliases).toEqual(["ACP", "ACP US LLC", "ACP US"]);
+    expect(result.resolvedQueries.every((row) =>
+      row.query.includes('"ACP US LLC"') &&
+      row.query.includes('"Exampleville"') &&
+      row.query.includes('"North Carolina"')
+    )).toBe(true);
+    expect(result.partialSubject).toBe('("ACP") ("Exampleville")');
+    expect(result.missingSubject).toBe('("ACP")');
+    expect(result.material).toEqual([1]);
   });
 
   it("pivots from a discovered brand domain to first-party legal identity evidence", async () => {
