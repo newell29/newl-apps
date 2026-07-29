@@ -97,6 +97,11 @@ Lead score should consider:
 - The intended model routing is local Qwen for research synthesis, Kimi K2.6/K3 for opportunity scoring/validation,
   GPT-5.6 Terra for outreach strategy, GPT-5.6 Luna for sequence drafting and QA, and deterministic metrics before a
   later Terra results-analysis review. Model names stay configurable and every plan records the actual model/prompt.
+- Owner-approved trial: GPT-5.6 Luna may run beside Qwen over the exact saved company-research evidence.
+  This is a non-authoritative quality/cost comparison only: Brave runs once, Qwen continues into Kimi and
+  deterministic eligibility, Luna has no tools or downstream write authority, and usage plus agreement are
+  retained in the tenant run ledger. Promoting Luna to fallback or primary synthesis requires a separate
+  reviewed decision after the trial.
 - Automation mode and a tenant kill switch must remain explicit. Transitioning from dry run to assisted or automatic outreach requires a reviewed code change and owner approval.
 
 ## 10. What Not To Build Yet

@@ -14,6 +14,11 @@ import { HUNTER_COMPANY_REPLY_HARD_STOP_STATUSES } from "@/modules/lead-gen/apol
 import { DEFAULT_HUNTER_POLICY, runHunterDryPlan } from "@/modules/lead-gen/hunter-planner";
 import { enqueueHunterOutreachHandoff } from "@/modules/lead-gen/hunter-outreach-handoff";
 import { HUNTER_COMPANY_RESEARCH_JOB_TYPE } from "@/modules/lead-gen/hunter-job-types";
+import {
+  hunterResearchLunaShadowConfiguration,
+  readStoredHunterResearchLunaShadow,
+  summarizeHunterResearchLunaShadow
+} from "@/modules/lead-gen/hunter-company-research-shadow";
 import { prisma } from "@/server/db";
 
 export { HUNTER_COMPANY_RESEARCH_JOB_TYPE };
@@ -349,6 +354,7 @@ export async function prepareHunterCompanyResearchRun({
       observedAt: signal.observedAt.toISOString()
     }))
   }));
+  const lunaShadow = hunterResearchLunaShadowConfiguration();
 
   const job = await prisma.automationJobRun.create({
     data: {
@@ -366,7 +372,11 @@ export async function prepareHunterCompanyResearchRun({
         promptVersion: HUNTER_COMPANY_RESEARCH_PROMPT_VERSION,
         qwenModel: HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL,
         kimiModel: HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL,
-        validatorModel: HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL
+        validatorModel: HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL,
+        lunaShadowRequested: lunaShadow.requested,
+        lunaShadowEnabled: lunaShadow.enabled,
+        lunaShadowModel: lunaShadow.recommended,
+        lunaShadowPromptVersion: lunaShadow.promptVersion
       }
     }
   });
@@ -400,7 +410,8 @@ export async function prepareHunterCompanyResearchRun({
           promptVersion: HUNTER_COMPANY_RESEARCH_PROMPT_VERSION,
           structuredOutput: true,
           reasoningEffort: "LOW"
-        }
+        },
+        shadowSynthesis: lunaShadow
       },
       limits: {
         companies: limit,
@@ -560,11 +571,13 @@ export async function completeHunterCompanyResearchRun({
       jobType: HUNTER_COMPANY_RESEARCH_JOB_TYPE,
       status: JobStatus.RUNNING
     },
-    select: { id: true, input: true }
+    select: { id: true, input: true, output: true }
   });
   if (!run) throw new Error("Hunter company-research run is not active for this tenant.");
 
   const input = record(run.input, "run.input");
+  const lunaShadow = readStoredHunterResearchLunaShadow(run.output);
+  const lunaShadowSummary = summarizeHunterResearchLunaShadow(lunaShadow);
   const expectedCompanyIds = new Set(
     array(input.candidateCompanyIds, "run.input.candidateCompanyIds").map((value, index) =>
       text(value, 200, `run.input.candidateCompanyIds[${index}]`)
@@ -724,6 +737,7 @@ export async function completeHunterCompanyResearchRun({
           evidenceCount: completion.companies.reduce((sum, company) => sum + company.evidence.length, 0),
           search: completion.search,
           models: completion.models,
+          lunaShadow,
           savedSignalIds,
           completedAt: new Date().toISOString()
         }
@@ -744,7 +758,8 @@ export async function completeHunterCompanyResearchRun({
           qwenModel: completion.models.synthesis.name,
           kimiModel: completion.models.scoring.name,
           validatorModel: completion.models.validation.name,
-          validatorStatus: completion.models.validation.status
+          validatorStatus: completion.models.validation.status,
+          lunaShadow: lunaShadowSummary
         }
       }
     });
@@ -794,6 +809,7 @@ export async function completeHunterCompanyResearchRun({
     blockedCount,
     tierCounts,
     missingCompanyCount: expectedCompanyIds.size - returnedCompanyIds.size,
+    lunaShadow: lunaShadowSummary,
     plan,
     handoff
   };

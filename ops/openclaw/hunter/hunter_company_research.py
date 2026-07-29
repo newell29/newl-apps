@@ -2335,6 +2335,93 @@ def prepare_request(
     )
 
 
+def submit_luna_shadow_batches(
+    base_url: str,
+    token: str,
+    run_id: str,
+    packet: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    evidence_by_key: dict[str, list[dict[str, Any]]],
+    synthesis_by_key: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    models = packet.get("models") if isinstance(packet.get("models"), dict) else {}
+    shadow = models.get("shadowSynthesis") if isinstance(models.get("shadowSynthesis"), dict) else {}
+    if shadow.get("enabled") is not True:
+        return {
+            "state": "disabled",
+            "requested": shadow.get("requested") is True,
+        }
+
+    shadow_batches = batched(candidates, 4)
+    latest_report: dict[str, Any] = {}
+    failed_batches = 0
+    for batch_index, batch in enumerate(shadow_batches):
+        company_packets = []
+        for candidate in batch:
+            key = str(candidate["companyKey"])
+            qwen_synthesis = synthesis_by_key.get(key)
+            company_packets.append(
+                {
+                    "companyId": candidate["companyId"],
+                    "companyKey": key,
+                    "companyName": candidate["companyName"],
+                    "domain": candidate.get("domain"),
+                    "priorityScore": candidate.get("priorityScore"),
+                    "primaryIndustry": candidate.get("primaryIndustry"),
+                    "shipmentEvidence": candidate.get("shipmentEvidence", []),
+                    "existingSignals": candidate.get("existingSignals", []),
+                    "publicEvidence": select_company_model_evidence(
+                        candidate,
+                        evidence_by_key.get(key, []),
+                        qwen_synthesis if isinstance(qwen_synthesis, dict) else None,
+                    ),
+                    "qwenSynthesis": (
+                        {"companyKey": key, **qwen_synthesis}
+                        if isinstance(qwen_synthesis, dict)
+                        else None
+                    ),
+                }
+            )
+        if not company_packets:
+            failed_batches += 1
+            continue
+        try:
+            response = api_request(
+                base_url,
+                token,
+                "POST",
+                "/api/lead-gen/hunter/company-research/shadow",
+                {
+                    "runId": run_id,
+                    "packets": company_packets,
+                    "finalBatch": batch_index == len(shadow_batches) - 1,
+                },
+            )
+            data = response.get("data") if isinstance(response.get("data"), dict) else {}
+            if isinstance(data.get("report"), dict):
+                latest_report = data["report"]
+            if data.get("state") == "error":
+                failed_batches += 1
+        except Exception as error:
+            failed_batches += 1
+            print(
+                "Hunter Luna shadow batch failed without affecting production research: "
+                f"{type(error).__name__}",
+                file=sys.stderr,
+            )
+    return {
+        "state": (
+            "completed"
+            if latest_report.get("status") == "SUCCESS"
+            else "partial"
+            if latest_report
+            else "error"
+        ),
+        "failedBatchCount": failed_batches,
+        "report": latest_report,
+    }
+
+
 def report_failure(base_url: str, token: str, run_id: Optional[str], error: Exception) -> None:
     if not run_id:
         return
@@ -2568,6 +2655,15 @@ def run_company_research(
                 if candidate["companyKey"] in synthesis_by_key
             ]
             if not synthesized_candidates:
+                submit_luna_shadow_batches(
+                    base_url,
+                    token,
+                    run_id,
+                    packet,
+                    candidates,
+                    evidence_by_key,
+                    synthesis_by_key,
+                )
                 failure_summary = "; ".join(
                     f"{key}: {message}" for key, message in synthesis_failures.items()
                 )
@@ -2620,6 +2716,15 @@ def run_company_research(
                     if candidate["companyKey"] in synthesis_by_key
                 ]
                 if not synthesized_candidates:
+                    submit_luna_shadow_batches(
+                        base_url,
+                        token,
+                        run_id,
+                        packet,
+                        candidates,
+                        evidence_by_key,
+                        synthesis_by_key,
+                    )
                     raise RuntimeError(
                         "Qwen could not produce valid structured research after follow-up retrieval."
                     )
@@ -2670,6 +2775,15 @@ def run_company_research(
                 "synthesisFailureCount": len(synthesis_failures),
             }
 
+        luna_shadow = submit_luna_shadow_batches(
+            base_url,
+            token,
+            run_id,
+            packet,
+            candidates,
+            evidence_by_key,
+            synthesis_by_key,
+        )
         kimi_api_key = required_env("HUNTER_KIMI_API_KEY")
         scoring_by_key, kimi_usage = score_companies(
             kimi_url,
@@ -2781,6 +2895,7 @@ def run_company_research(
                 ),
                 "search": completion["search"],
                 "models": completion["models"],
+                "lunaShadow": luna_shadow,
                 "output": replay_output,
             }
         response = api_request(

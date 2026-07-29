@@ -24,7 +24,9 @@ Hunter must not store Apollo credentials or enroll contacts directly.
 
 The opt-in company-research phase may store a dedicated local Brave search key and Kimi key in
 Hunter's protected `0600` environment. It never sends either value to Newl Apps or writes the values
-to a run ledger. Local Qwen remains on loopback.
+to a run ledger. Local Qwen remains on loopback. The optional GPT-5.6 Luna comparison reuses
+`OPENAI_API_KEY` only inside Newl Apps; do not add that key or the Luna feature flag to the Mac
+environment.
 
 ## Safe VM source transfer
 
@@ -121,6 +123,16 @@ HUNTER_KIMI_VALIDATOR_MODEL=kimi-k3
 HUNTER_RESEARCH_K3_VALIDATOR_LIMIT=5
 HUNTER_RESEARCH_K3_REASONING_EFFORT=LOW
 ```
+
+The Luna side-by-side trial is enabled only in the deployed Newl Apps environment:
+
+```text
+HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_ENABLED=true
+```
+
+It does not change the Mac schedule or trigger a second Brave search. The existing 09:15 company
+research run sends each completed Qwen evidence packet to the tenant-scoped Newl Apps shadow route.
+Teams then reports Luna coverage, first-pass schema validity, and Qwen/Luna categorical agreement.
 
 Before enabling the schedule, replay a reviewed cohort:
 

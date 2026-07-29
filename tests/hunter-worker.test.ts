@@ -372,6 +372,26 @@ describe("Hunter daily profile worker", () => {
     );
   });
 
+  it("adds the non-authoritative Luna comparison to the company-research Teams summary", () => {
+    const python = [
+      "import importlib.util, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "message = module.build_company_research_message({'researchedCount':30,'acceptedCount':9,'blockedCount':3,'missingCompanyCount':0,'lunaShadow':{'status':'SUCCESS','evaluatedCompanyCount':30,'expectedCompanyCount':30,'firstPassSchemaValidCompanyCount':30,'qwenSynthesisCompanyCount':29,'qwenMissingCompanyCount':1,'categoricalAgreementPercent':86.7}})",
+      "print(json.dumps({'message':message}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).message).toContain(
+      "Luna shadow (non-authoritative): SUCCESS, 30/30 evaluated, 30 schema-valid on first pass, 29 Qwen rows and 1 Qwen omissions, 86.7% categorical agreement with Qwen."
+    );
+  });
+
   it("sends a sanitized company-research failure alert", () => {
     const python = [
       "import importlib.util, json, pathlib, sys",
