@@ -18,7 +18,8 @@ import {
   isApolloSequenceMembershipConfirmed,
   parseApolloPushJobOutput,
   persistApolloPushJobPendingResolution,
-  readApolloPendingSequenceConfirmation
+  readApolloPendingSequenceConfirmation,
+  resolveApolloEnrollmentConfirmationTarget
 } from "@/modules/lead-gen/apollo-push-jobs";
 
 describe("Apollo enrollment confirmation jobs", () => {
@@ -87,6 +88,39 @@ describe("Apollo enrollment confirmation jobs", () => {
     expect(isApolloSequenceMembershipConfirmed(SequenceStatus.PAUSED)).toBe(true);
     expect(isApolloSequenceMembershipConfirmed(SequenceStatus.FINISHED)).toBe(false);
     expect(isApolloSequenceMembershipConfirmed(SequenceStatus.NOT_STARTED)).toBe(false);
+  });
+
+  it("recovers the exact selected cadence when the temporary pending marker is missing", () => {
+    expect(
+      resolveApolloEnrollmentConfirmationTarget({
+        rawJson: {
+          apollo: {
+            pushBlocker: {
+              reason: "Confirmation metadata is missing."
+            }
+          }
+        } as Prisma.JsonValue,
+        jobRunId: "job-1",
+        selectedSequenceId: "hunter-email-sequence",
+        selectedSequenceName: "Hunter - Email Only"
+      })
+    ).toEqual({
+      sequenceId: "hunter-email-sequence",
+      sequenceName: "Hunter - Email Only",
+      pending: null,
+      source: "selected_sequence"
+    });
+  });
+
+  it("fails closed when neither pending metadata nor an exact selected cadence ID exists", () => {
+    expect(
+      resolveApolloEnrollmentConfirmationTarget({
+        rawJson: null,
+        jobRunId: "job-1",
+        selectedSequenceId: null,
+        selectedSequenceName: "Hunter - Email Only"
+      })
+    ).toBeNull();
   });
 
   it("moves a pending job to enrolled only through the matching tenant job", async () => {

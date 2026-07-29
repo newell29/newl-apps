@@ -536,7 +536,39 @@ describe("pipeline bulk actions", () => {
           version: 1,
           status: OutreachPlanStatus.QA_PASSED,
           qaStatus: OutreachQaStatus.PASSED,
+          qaIssues: null,
           evidenceFingerprint: "evidence-2"
+        }]
+      },
+      {
+        id: "contact-qa-failed",
+        companyId: "company-1",
+        fullName: "Jordan QA",
+        email: "jordan@example.com",
+        contactStatus: ContactStatus.REVIEWING,
+        assignedRep: null,
+        company: {
+          name: "Example Importer",
+          candidateStatus: CandidateStatus.APPROVED_FOR_PIPELINE,
+          doNotProspect: false,
+          hunterOpportunitySignals: [{}],
+          hunterProspectingDecisions: [{}]
+        },
+        outreachPlans: [{
+          id: "plan-qa-failed",
+          companyId: "company-1",
+          contactId: "contact-qa-failed",
+          sequenceName: "Hunter - Email Only",
+          version: 1,
+          status: OutreachPlanStatus.QA_FAILED,
+          qaStatus: OutreachQaStatus.FAILED,
+          qaIssues: [{
+            code: "UNKNOWN_EVIDENCE",
+            severity: "ERROR",
+            stepNumber: 2,
+            message: 'Evidence reference "tr ademining:summary" is not in the saved evidence ledger.'
+          }],
+          evidenceFingerprint: "evidence-3"
         }]
       }
     ]);
@@ -544,19 +576,26 @@ describe("pipeline bulk actions", () => {
     const formData = new FormData();
     formData.append("contactId", "contact-approved");
     formData.append("contactId", "contact-no-email");
+    formData.append("contactId", "contact-qa-failed");
 
     await expect(bulkApproveOutreachPlansAction(formData)).resolves.toMatchObject({
       status: "success",
       operation: "approve",
-      selectedContacts: 2,
+      selectedContacts: 3,
       approvedContacts: 1,
-      skippedContacts: 1,
+      skippedContacts: 2,
       jobRunId: "apollo-job-1",
       details: expect.arrayContaining([
         expect.objectContaining({
           contactId: "contact-no-email",
           outcome: "skipped",
           reason: "A concrete usable email address is required before approval."
+        }),
+        expect.objectContaining({
+          contactId: "contact-qa-failed",
+          outcome: "skipped",
+          reason:
+            'Grounded QA failed. Step 2: Evidence reference "tr ademining:summary" is not in the saved evidence ledger. Regenerate the plan before approval.'
         })
       ])
     });

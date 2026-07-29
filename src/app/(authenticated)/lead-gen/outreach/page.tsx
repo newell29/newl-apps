@@ -179,8 +179,9 @@ export default async function OutreachQueuePage({
 
       <div className="rounded-lg border border-accentBorder bg-accentSoft px-4 py-3 text-sm text-foreground">
         Needs Attention contains only drafting, approval, assignment, paused-cadence, and Apollo push work. Once a
-        contact is enrolled, it moves to Active Cadences for reply monitoring. Rejected, do-not-contact, bounced,
-        finished, and sales-engaged records remain hidden.
+        contact is confirmed in its exact selected Apollo cadence, it moves to Active Cadences for reply monitoring.
+        If Apollo accepted a push before membership became visible, Newl Apps keeps checking without sending a second
+        enrollment request. Rejected, do-not-contact, bounced, finished, and sales-engaged records remain hidden.
       </div>
 
       {contactReviewMessage ? (

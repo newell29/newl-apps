@@ -30,8 +30,8 @@ import {
   createApolloPushJobOutput,
   isApolloSequenceMembershipConfirmed,
   isApolloPushJobDetailPending,
-  readApolloPendingSequenceConfirmation,
   recalculateApolloPushJobOutput,
+  resolveApolloEnrollmentConfirmationTarget,
   type ApolloPushJobInput,
   parseApolloPushJobOutput,
   type ApolloPushJobOutput
@@ -40,6 +40,7 @@ import {
   EMPTY_CONTACT_BULK_ACTION_SUMMARY,
   type ContactBulkActionSummary
 } from "@/modules/lead-gen/contact-bulk-action-summary";
+import { getOutreachPlanApprovalBlockReason } from "@/modules/lead-gen/outreach-approval-reason";
 import {
   buildTradeMiningEvidenceWhere,
   calculateLeadPipelineScoringForCompany,
@@ -1966,6 +1967,7 @@ export async function bulkApproveOutreachPlansAction(
             version: true,
             status: true,
             qaStatus: true,
+            qaIssues: true,
             evidenceFingerprint: true
           }
         }
@@ -1990,12 +1992,12 @@ export async function bulkApproveOutreachPlansAction(
         prospectingDecision: contact.company.hunterProspectingDecisions[0] ?? null,
         maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
       });
+      const planApprovalBlockReason = plan
+        ? getOutreachPlanApprovalBlockReason(plan)
+        : "No current outreach plan is available.";
       const blockReason =
-        !plan
-          ? "No current outreach plan is available."
-          : plan.status !== OutreachPlanStatus.QA_PASSED ||
-              plan.qaStatus !== OutreachQaStatus.PASSED
-            ? "The outreach plan must pass the grounded QA gate before approval."
+        planApprovalBlockReason
+          ? planApprovalBlockReason
             : !hasUsableHunterEmail(contact)
               ? "A concrete usable email address is required before approval."
               : contact.company.doNotProspect ||
@@ -4906,11 +4908,16 @@ export async function reconcileApolloPushJobPendingResults({
       if (!contact) {
         return detail;
       }
-      const pending = readApolloPendingSequenceConfirmation(contact.rawJson, jobRunId);
-      if (!pending) {
+      const confirmationTarget = resolveApolloEnrollmentConfirmationTarget({
+        rawJson: contact.rawJson,
+        jobRunId,
+        selectedSequenceId: contact.selectedSequenceId,
+        selectedSequenceName: contact.selectedSequenceName
+      });
+      if (!confirmationTarget) {
         changed = true;
         const reason =
-          "Apollo enrollment confirmation metadata is missing, so Newl Apps could not safely verify the requested cadence. Review and retry this contact.";
+          "Newl Apps cannot identify the exact requested Apollo cadence, so it cannot safely confirm enrollment. Select the intended cadence and retry this approved contact.";
         await persistApolloPushBlocker({
           tenantId,
           contactId: contact.id,
@@ -4923,11 +4930,14 @@ export async function reconcileApolloPushJobPendingResults({
         };
       }
 
-      const nextCheckAt = pending.nextCheckAt ? new Date(pending.nextCheckAt) : null;
-      const timedOut =
-        checkedAt.getTime() - new Date(pending.acceptedAt).getTime() >=
-        APOLLO_ENROLLMENT_CONFIRMATION_TIMEOUT_MS;
+      const pending = confirmationTarget.pending;
+      const nextCheckAt = pending?.nextCheckAt ? new Date(pending.nextCheckAt) : null;
+      const timedOut = pending
+        ? checkedAt.getTime() - new Date(pending.acceptedAt).getTime() >=
+          APOLLO_ENROLLMENT_CONFIRMATION_TIMEOUT_MS
+        : true;
       if (
+        pending &&
         !timedOut &&
         nextCheckAt &&
         Number.isFinite(nextCheckAt.getTime()) &&
@@ -4959,9 +4969,9 @@ export async function reconcileApolloPushJobPendingResults({
 
       if (
         !isApolloSequenceMembershipConfirmed(liveState.sequenceStatus) ||
-        liveState.sequenceId !== pending.sequenceId
+        liveState.sequenceId !== confirmationTarget.sequenceId
       ) {
-        if (!timedOut) {
+        if (pending && !timedOut) {
           const attemptCount = pending.attemptCount + 1;
           const delayMs =
             APOLLO_ENROLLMENT_CONFIRMATION_RETRY_DELAYS_MS[
@@ -4982,10 +4992,14 @@ export async function reconcileApolloPushJobPendingResults({
         }
 
         changed = true;
+        const reason =
+          pending
+            ? APOLLO_ENROLLMENT_CONFIRMATION_FAILED_REASON
+            : `Apollo does not currently show this contact in "${confirmationTarget.sequenceName}". Newl Apps recovered the selected cadence but could not confirm an active membership, so no second enrollment was attempted.`;
         await persistApolloPushBlocker({
           tenantId,
           contactId: contact.id,
-          reason: APOLLO_ENROLLMENT_CONFIRMATION_FAILED_REASON
+          reason
         });
         await persistApolloPendingSequenceConfirmation({
           tenantId,
@@ -5000,12 +5014,12 @@ export async function reconcileApolloPushJobPendingResults({
           contactId: contact.id,
           note:
             `Apollo enrollment verification failed on ${checkedAt.toISOString()}. ` +
-            `The contact was not visible in "${pending.sequenceName}" after 10 minutes.`
+            `The contact was not visible in "${confirmationTarget.sequenceName}"${pending ? " after 10 minutes" : ""}.`
         });
         return {
           ...detail,
           outcome: "failed" as const,
-          reason: APOLLO_ENROLLMENT_CONFIRMATION_FAILED_REASON
+          reason
         };
       }
 
@@ -5028,13 +5042,16 @@ export async function reconcileApolloPushJobPendingResults({
         contactId: contact.id,
         note:
           `Apollo enrollment verification completed on ${checkedAt.toISOString()}. ` +
-          `The contact is now visible in "${pending.sequenceName}".`
+          `The contact is now visible in "${confirmationTarget.sequenceName}"` +
+          `${confirmationTarget.source === "selected_sequence" ? " using the saved selected-cadence fallback" : ""}.`
       });
 
       return {
         ...detail,
         outcome: "enrolled" as const,
-        reason: `Enrollment confirmed in "${pending.sequenceName}".`
+        reason:
+          `Enrollment confirmed in "${confirmationTarget.sequenceName}".` +
+          `${confirmationTarget.source === "selected_sequence" ? " Newl Apps recovered the missing confirmation marker from the saved selected cadence." : ""}`
       };
     })
   );

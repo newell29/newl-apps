@@ -298,6 +298,48 @@ describe("scheduled Apollo status sync", () => {
     );
   });
 
+  it("clears a stale push blocker when the exact selected cadence is active without a pending marker", async () => {
+    prismaMock.contact.findMany.mockResolvedValue([
+      {
+        ...existingContact(),
+        sequenceStatus: SequenceStatus.READY,
+        selectedSequenceId: "hunter-email-sequence",
+        selectedSequenceName: "Hunter - Email Only",
+        rawJson: {
+          apollo: {
+            pushBlocker: {
+              reason: "Apollo enrollment confirmation metadata is missing.",
+              blockedAt: "2026-07-22T17:55:00.000Z"
+            }
+          }
+        }
+      }
+    ]);
+    const fetchContact = vi.fn().mockResolvedValue({
+      ...incomingContact(),
+      sequenceStatus: SequenceStatus.ENROLLED,
+      replyStatus: ReplyStatus.NO_REPLY,
+      sequenceId: "hunter-email-sequence",
+      sequenceName: "Hunter - Email Only",
+      lastReplyAt: null
+    });
+
+    await syncApolloStatusesForTenant(tenant, {
+      dependencies: {
+        fetchContact,
+        now: () => now,
+        sleep: vi.fn(),
+        recordScoreSnapshot: vi.fn().mockResolvedValue({ id: "snapshot-1" }),
+        recordOutcome: vi.fn().mockResolvedValue({ id: "outcome-1" })
+      }
+    });
+
+    const contactUpdate = prismaMock.contact.updateMany.mock.calls[0]?.[0];
+    expect(contactUpdate.data.sequenceStatus).toBe(SequenceStatus.ENROLLED);
+    expect(contactUpdate.data.rawJson.apollo.pushBlocker).toBeUndefined();
+    expect(contactUpdate.data.rawJson.apollo.pendingSequenceConfirmation).toBeUndefined();
+  });
+
   it("fails an expired pending enrollment instead of accepting stale finished history", async () => {
     prismaMock.automationJobRun.findFirst
       .mockResolvedValueOnce(null)
