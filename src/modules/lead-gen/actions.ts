@@ -122,6 +122,7 @@ import { prisma } from "@/server/db";
 import {
   ApolloRateLimitError,
   createApolloContactForEnrollment,
+  fetchApolloContactById,
   fetchApolloEmailAccountDirectory,
   fetchApolloContactsForCompany,
   fetchApolloOrganizationForMapping,
@@ -2974,12 +2975,21 @@ export async function syncSelectedApolloStatusesAction(
           domain: company.domain,
           apolloOrganizationId: company.apolloOrganizationId
         });
+        const exactContacts = await Promise.all(
+          company.contacts.flatMap((contact) => {
+            const apolloContactId = contact.apolloContactId?.trim();
+            return apolloContactId ? [fetchApolloContactById(apolloContactId)] : [];
+          })
+        );
 
         const updatedCount = await syncExistingApolloContactsForCompany({
           tenantId: context.tenantId,
           companyId: company.id,
           existingContacts: company.contacts,
-          lookup
+          lookup: {
+            ...lookup,
+            contacts: [...exactContacts, ...lookup.contacts]
+          }
         });
 
         syncedContacts += updatedCount;

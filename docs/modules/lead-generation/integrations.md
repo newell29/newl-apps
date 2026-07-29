@@ -197,7 +197,7 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Apollo's Complete Organization Info endpoint consumes one credit when a company is returned. The mapping form therefore requires explicit one-credit confirmation. An automatic name-only retry requires a separate confirmation and is capped at two organization-search pages.
 - **Confirmed no match** is an auditable archive state, not deletion. The company remains visible and protected from bulk retry until a rep reopens it.
 
-Apollo's Contacts API can return sequence membership in either the older top-level sequence fields or the newer `contact_campaign_statuses` array. Newl Apps must parse both shapes. When several campaign memberships exist, current replied, active, or paused memberships take precedence over finished history; equally ranked memberships use the newest membership timestamp.
+Apollo's Contacts API can return sequence membership in either the older top-level sequence fields or the newer `contact_campaign_statuses` array. Newl Apps must parse both shapes. A bounced membership or direct bounced email-delivery status is terminal and takes precedence over active, paused, or finished history. Otherwise current replied, active, or paused memberships take precedence over finished history; equally ranked memberships use the newest membership timestamp.
 
 For an approved Hunter Outreach Plan, Newl Apps uses Apollo's no-credit
 `emailer_campaigns/remove_or_stop_contact_ids` endpoint in `remove` mode when a no-reply contact is still active or
@@ -239,5 +239,6 @@ retrying the write.
 
 - Apollo's documented webhook callbacks apply to asynchronous enrichment results; no general saved-contact reply webhook is documented. Newl Apps therefore polls the saved Contact endpoint.
 - `GET /api/v1/contacts/{contact_id}` requires the master API key and does not consume Apollo credits. The scheduled sync never calls people enrichment.
+- The manual **Sync Apollo status** action also re-reads each selected saved contact by its exact Apollo contact ID before using the broader organization-scoped result. This prevents a company search response from masking a contact-level bounce or reply.
 - Apollo applies fixed-window, endpoint-specific limits. Newl Apps uses small batches, bounded retries, a maximum 30-second retry delay, and stops the remaining batch after a sustained `429`.
 - References: [View a Contact](https://docs.apollo.io/reference/view-a-contact), [Rate Limits](https://docs.apollo.io/reference/rate-limits), and [API Pricing and Credits](https://docs.apollo.io/docs/api-pricing).

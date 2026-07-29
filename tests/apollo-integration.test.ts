@@ -146,6 +146,62 @@ describe("fetchApolloContactById", () => {
       lastReplyAt: new Date("2026-07-22T16:30:00.000Z")
     });
   });
+
+  it("treats a bounced sequence membership as terminal even when Apollo also returns an active status", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        contact: {
+          id: "apollo-contact-bounced",
+          first_name: "Taylor",
+          last_name: "Bounce",
+          email: "taylor.bounce@example.com",
+          contact_campaign_statuses: [
+            {
+              emailer_campaign_id: "hunter-email-only",
+              status: "active",
+              added_at: "2026-07-29T13:00:00.000Z"
+            },
+            {
+              emailer_campaign_id: "hunter-email-only",
+              status: "bounced",
+              updated_at: "2026-07-29T14:00:00.000Z"
+            }
+          ]
+        }
+      })
+    } as unknown as Response);
+
+    await expect(fetchApolloContactById("apollo-contact-bounced")).resolves.toMatchObject({
+      sequenceId: "hunter-email-only",
+      sequenceStatus: SequenceStatus.BOUNCED,
+      replyStatus: ReplyStatus.NO_REPLY
+    });
+  });
+
+  it("treats Apollo's direct bounced email status as a terminal sequence status", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        contact: {
+          id: "apollo-contact-bad-data",
+          first_name: "Taylor",
+          last_name: "Bounce",
+          email: "taylor.bounce@example.com",
+          email_status: "bounced",
+          apollo_sequence_status: "active",
+          apollo_sequence_id: "hunter-email-only"
+        }
+      })
+    } as unknown as Response);
+
+    await expect(fetchApolloContactById("apollo-contact-bad-data")).resolves.toMatchObject({
+      sequenceId: "hunter-email-only",
+      sequenceStatus: SequenceStatus.BOUNCED
+    });
+  });
 });
 
 describe("fetchApolloRepDirectory", () => {
