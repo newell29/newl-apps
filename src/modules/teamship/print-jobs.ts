@@ -20,7 +20,9 @@ export const TEAMSHIP_PRINT_JOB_STATUSES = [
   "CLAIMED",
   "COMPLETED",
   "FAILED",
-  "EXPIRED"
+  "EXPIRED",
+  "WAITING_BATCH",
+  "BLOCKED"
 ] as const;
 
 export type TeamshipPrintJobStatus = typeof TEAMSHIP_PRINT_JOB_STATUSES[number];
@@ -84,6 +86,12 @@ type PrintJobDependencies = {
   now?: () => Date;
 };
 
+type TeamshipPrintBatchChild = {
+  batchId: string;
+  batchPosition: number;
+  reviewOrderId: string;
+};
+
 const APPROVAL_TTL_MS = 15 * 60_000;
 const CLAIM_TTL_MS = 15 * 60_000;
 const MAX_PALLET_COUNT = 100;
@@ -103,10 +111,10 @@ export class TeamshipPrintJobError extends Error {
 
 export async function createTeamshipPrintPlan(
   context: AuthenticatedContext,
-  input: { shippingOrderNumber: string; requestKey: string },
+  input: { shippingOrderNumber: string; requestKey: string; batch?: TeamshipPrintBatchChild },
   dependencies: PrintJobDependencies = {}
 ) {
-  await requirePrintAccess(context);
+  await requireTeamshipPrintAccess(context);
   const shippingOrderNumber = requireShippingOrderNumber(input.shippingOrderNumber);
   const requestKey = requireRequestKey(input.requestKey);
   const now = dependencies.now?.() ?? new Date();
@@ -189,6 +197,9 @@ export async function createTeamshipPrintPlan(
           idempotencyKey,
           activeOrderKey: shippingOrderNumber,
           requestedByUserId: context.userId,
+          batchId: input.batch?.batchId,
+          batchPosition: input.batch?.batchPosition,
+          reviewOrderId: input.batch?.reviewOrderId,
           expiresAt: new Date(now.getTime() + APPROVAL_TTL_MS)
         }
       });
@@ -205,7 +216,10 @@ export async function createTeamshipPrintPlan(
             status: "PENDING_APPROVAL",
             approvedPalletCount,
             documentPlan,
-            printerPlan
+            printerPlan,
+            batchId: input.batch?.batchId ?? null,
+            batchPosition: input.batch?.batchPosition ?? null,
+            reviewOrderId: input.batch?.reviewOrderId ?? null
           } as unknown as Prisma.InputJsonValue
         }
       });
@@ -227,7 +241,7 @@ export async function approveTeamshipPrintPlan(
   confirmed: boolean,
   dependencies: Pick<PrintJobDependencies, "now"> = {}
 ) {
-  await requirePrintAccess(context);
+  await requireTeamshipPrintAccess(context);
   if (!confirmed) {
     throw new TeamshipPrintJobError("Explicit print confirmation is required.");
   }
@@ -286,7 +300,7 @@ export async function approveTeamshipPrintPlan(
 }
 
 export async function getTeamshipPrintJobForEmployee(context: AuthenticatedContext, jobId: string) {
-  await requirePrintAccess(context);
+  await requireTeamshipPrintAccess(context);
   await expireTeamshipPrintJobs(context.tenantId, new Date());
   const job = await prisma.teamshipPrintJob.findFirst({
     where: { id: requireJobId(jobId), tenantId: context.tenantId, requestedByUserId: context.userId }
@@ -322,6 +336,12 @@ export async function claimNextTeamshipPrintJob(
   if (claimed.count !== 1) return null;
 
   const job = await prisma.teamshipPrintJob.findUniqueOrThrow({ where: { id: pending.id } });
+  if (job.batchId) {
+    await prisma.teamshipPrintBatch.updateMany({
+      where: { id: job.batchId, tenantId: tenant.id, status: "APPROVED" },
+      data: { status: "RUNNING" }
+    });
+  }
   const credentials = await resolveTenantTeamshipCredentials({ tenantId: tenant.id });
   if (!credentials) {
     await failTeamshipPrintJob(job.id, workerId, tenantSlug, {
@@ -357,17 +377,68 @@ export async function completeTeamshipPrintJob(
   });
   if (!job) return false;
   const normalized = parseExecutionResult(result, job);
-  const updated = await prisma.teamshipPrintJob.updateMany({
-    where: { id: jobId, tenantId: tenant.id, status: "CLAIMED", workerId },
-    data: {
-      status: "COMPLETED",
-      completedAt: new Date(),
-      result: normalized as unknown as Prisma.InputJsonValue,
-      errorCode: null,
-      errorMessage: null
+  const completedAt = new Date();
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.teamshipPrintJob.updateMany({
+      where: { id: jobId, tenantId: tenant.id, status: "CLAIMED", workerId },
+      data: {
+        status: "COMPLETED",
+        completedAt,
+        result: normalized as unknown as Prisma.InputJsonValue,
+        errorCode: null,
+        errorMessage: null
+      }
+    });
+    if (updated.count !== 1) return false;
+    if (!job.batchId) return true;
+
+    const batch = await tx.teamshipPrintBatch.findFirst({
+      where: { id: job.batchId, tenantId: tenant.id }
+    });
+    if (!batch) return true;
+
+    if (job.reviewOrderId && batch.reviewRunId) {
+      await tx.teamshipReviewOrder.updateMany({
+        where: {
+          id: job.reviewOrderId,
+          tenantId: tenant.id,
+          runId: batch.reviewRunId
+        },
+        data: {
+          workflowStatus: "BOL_PRINTED",
+          bolPrintedAt: completedAt,
+          bolPrintedByUserId: batch.approvedByUserId,
+          orderCompletedAt: null,
+          orderCompletedByUserId: null
+        }
+      });
     }
+
+    const next = await tx.teamshipPrintJob.findFirst({
+      where: { tenantId: tenant.id, batchId: job.batchId, status: "WAITING_BATCH" },
+      orderBy: { batchPosition: "asc" }
+    });
+    if (next) {
+      await tx.teamshipPrintJob.update({
+        where: { id: next.id },
+        data: {
+          status: "APPROVED",
+          expiresAt: new Date(completedAt.getTime() + CLAIM_TTL_MS)
+        }
+      });
+    } else {
+      await tx.teamshipPrintBatch.updateMany({
+        where: { id: job.batchId, tenantId: tenant.id, status: { in: ["APPROVED", "RUNNING"] } },
+        data: {
+          status: "COMPLETED",
+          completedAt,
+          errorCode: null,
+          errorMessage: null
+        }
+      });
+    }
+    return true;
   });
-  return updated.count === 1;
 }
 
 export async function failTeamshipPrintJob(
@@ -378,18 +449,48 @@ export async function failTeamshipPrintJob(
 ) {
   const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug }, select: { id: true } });
   if (!tenant) return false;
-  const updated = await prisma.teamshipPrintJob.updateMany({
-    where: { id: jobId, tenantId: tenant.id, status: "CLAIMED", workerId },
-    data: {
-      status: "FAILED",
-      failedAt: new Date(),
-      errorCode: sanitizeErrorCode(failure.errorCode),
-      errorMessage: sanitizeErrorMessage(failure.errorMessage),
-      result: failure.result ? sanitizeFailureResult(failure.result) as Prisma.InputJsonValue : undefined,
-      activeOrderKey: null
-    }
+  const current = await prisma.teamshipPrintJob.findFirst({
+    where: { id: jobId, tenantId: tenant.id, status: "CLAIMED", workerId }
   });
-  return updated.count === 1;
+  if (!current) return false;
+  const failedAt = new Date();
+  const errorCode = sanitizeErrorCode(failure.errorCode);
+  const errorMessage = sanitizeErrorMessage(failure.errorMessage);
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.teamshipPrintJob.updateMany({
+      where: { id: jobId, tenantId: tenant.id, status: "CLAIMED", workerId },
+      data: {
+        status: "FAILED",
+        failedAt,
+        errorCode,
+        errorMessage,
+        result: failure.result ? sanitizeFailureResult(failure.result) as Prisma.InputJsonValue : undefined,
+        activeOrderKey: null
+      }
+    });
+    if (updated.count !== 1) return false;
+    if (!current.batchId) return true;
+
+    await tx.teamshipPrintJob.updateMany({
+      where: { tenantId: tenant.id, batchId: current.batchId, status: "WAITING_BATCH" },
+      data: {
+        status: "BLOCKED",
+        errorCode: "BATCH_STOPPED",
+        errorMessage: "The batch stopped after an earlier order failed. Physical output must be checked before creating a new plan.",
+        activeOrderKey: null
+      }
+    });
+    await tx.teamshipPrintBatch.updateMany({
+      where: { id: current.batchId, tenantId: tenant.id, status: { in: ["APPROVED", "RUNNING"] } },
+      data: {
+        status: "PARTIAL_FAILED",
+        failedAt,
+        errorCode,
+        errorMessage
+      }
+    });
+    return true;
+  });
 }
 
 export function getTeamshipPrinterPlan(
@@ -512,7 +613,7 @@ function sameTeamshipName(left: string, right: string) {
   return left.replace(/\s+/g, " ").trim().toLowerCase() === right.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-async function requirePrintAccess(context: AuthenticatedContext) {
+export async function requireTeamshipPrintAccess(context: AuthenticatedContext) {
   await requireModule(context, ModuleKey.SHIPMENT_DOCUMENTS);
   await requireMutationAccess(context);
   if (!hasTeamshipInternalReadAccess(context)) {
@@ -521,6 +622,15 @@ async function requirePrintAccess(context: AuthenticatedContext) {
 }
 
 async function expireTeamshipPrintJobs(tenantId: string, now: Date) {
+  const expiredBatchJobs = await prisma.teamshipPrintJob.findMany({
+    where: {
+      tenantId,
+      batchId: { not: null },
+      status: { in: ["PENDING_APPROVAL", "APPROVED", "CLAIMED"] },
+      expiresAt: { lt: now }
+    },
+    select: { batchId: true }
+  });
   await prisma.teamshipPrintJob.updateMany({
     where: { tenantId, status: { in: ["PENDING_APPROVAL", "APPROVED", "CLAIMED"] }, expiresAt: { lt: now } },
     data: {
@@ -530,6 +640,27 @@ async function expireTeamshipPrintJobs(tenantId: string, now: Date) {
       activeOrderKey: null
     }
   });
+  const batchIds = Array.from(new Set(expiredBatchJobs.map((job) => job.batchId).filter((value): value is string => Boolean(value))));
+  if (batchIds.length > 0) {
+    await prisma.teamshipPrintJob.updateMany({
+      where: { tenantId, batchId: { in: batchIds }, status: "WAITING_BATCH" },
+      data: {
+        status: "BLOCKED",
+        errorCode: "BATCH_STOPPED",
+        errorMessage: "The batch stopped because an earlier print job expired.",
+        activeOrderKey: null
+      }
+    });
+    await prisma.teamshipPrintBatch.updateMany({
+      where: { tenantId, id: { in: batchIds }, status: { in: ["PENDING_APPROVAL", "APPROVED", "RUNNING"] } },
+      data: {
+        status: "PARTIAL_FAILED",
+        failedAt: now,
+        errorCode: "JOB_EXPIRED",
+        errorMessage: "A print job expired. The batch was stopped and was not retried."
+      }
+    });
+  }
 }
 
 function parseExecutionResult(value: unknown, job: { approvedPalletCount: number; documentPlan: unknown; printerPlan: unknown }) {

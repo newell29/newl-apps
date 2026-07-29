@@ -52,6 +52,21 @@ Each numbered action requires human approval at its normal production boundary.
 
 Disable or unload `com.newl.teamship-print-worker`, disable the `newl-print` plugin, and preserve all `TeamshipPrintJob` records for audit. Do not replay an approved, claimed, failed, expired, or uncertain job. A new plan requires a new explicit employee approval after physical output is checked.
 
-## Later phases
+## Phase 2 supervised batch scope
 
-Phase 2 may propose a complete batch consisting only of saved Nemo-checked orders, but it requires separate design and owner approval. Phase 3 automatic printing requires a new approved policy, batch-level idempotency, stop controls, printer health monitoring, and production evidence from Phase 2. Neither later phase is enabled by the Phase 1 code.
+The owner approved the supervised Phase 2 design on 2026-07-29. It is enabled only after its reviewed migration and application deployment:
+
+1. Expand a saved Garland Teamship review batch.
+2. Select individual PS numbers or all printable rows.
+3. For each selected historical `FAIL`, explicitly confirm that Teamship was corrected.
+4. Prepare a plan. Newl Apps preflights every order against the live signed-in Teamship page and records exclusions without approving or printing anything.
+5. Review the PS/SR list, one picking list and BOL per order, per-order pallet-label quantities, totals, and exact printer destinations.
+6. Approve the batch once. Newl Apps releases one child job at a time.
+7. The worker re-resolves and verifies the exact printers on every order. Successful completion releases the next child.
+8. Any uncertain failure or expiry blocks every remaining child. There is no automatic retry.
+
+Historical failed reviews are not rewritten to passed. The manual correction confirmation, actor, selected saved-review order, and resulting child print job are retained for audit.
+
+## Later phase
+
+Phase 3 automatic printing requires a new approved policy, batch-level stop controls, printer health monitoring, and production evidence from Phase 2. It is not enabled by Phase 2.
