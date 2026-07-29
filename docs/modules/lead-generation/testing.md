@@ -291,6 +291,10 @@ Regression coverage must prove:
     unapproved plans for contacts that still lack a concrete email are archived and cannot remain in Outreach Queue.
 23. a later saved-contact page can surface a role such as YAT's import/export specialist, and a manually confirmed
     Pratt Rock Hill Apollo account may resolve to Pratt Industries only through its explicit account relationship.
+24. an authenticated reviewer can explicitly confirm weak facility/parent or legal/brand name differences such as
+    Roechling Industrial Gastonia to Roechling Industrial North America and Kimbrells Furniture Distributors to
+    Kimbrell's Home Furnishings; the manual override is audited, while unconfirmed weak matches and logistics
+    providers remain blocked.
 
 ## Outreach Plans and grounded sequence generation
 

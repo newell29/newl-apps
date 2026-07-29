@@ -360,7 +360,9 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Safe recovery: open **Apollo Match Review**. Paste the correct Apollo company Overview or People URL when known,
   retry automatically only after correcting the company name/domain, or choose **Confirm no Apollo match**. Apollo
   `/accounts/{id}` links are resolved to the nested global organization ID before employee search; the account ID is
-  never stored as `Company.apolloOrganizationId`.
+  never stored as `Company.apolloOrganizationId`. Explicit reviewer confirmation overrides weak automated name
+  similarity for facility, legal-entity, parent, and regional-brand differences, and that override is retained in the
+  match audit. It does not override invalid Apollo data or logistics-provider safety.
 - Credit guard: URL validation requires explicit acknowledgement of one Apollo credit. Automatic retry requires explicit acknowledgement of up to two returned organization-search pages.
 - Prevention: once the latest match is unresolved, bulk enrichment performs no Apollo lookup for that company. Confirmed-no-match rows remain visible and blocked until explicitly reopened.
 - Limitation: duplicate organization mapping is checked within the tenant in application code. A future additive unique database constraint could provide stronger protection against two simultaneous manual mappings, but requires separate migration approval.

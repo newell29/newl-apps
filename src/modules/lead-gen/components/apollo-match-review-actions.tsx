@@ -113,7 +113,10 @@ export function ApolloMatchReviewActions({
             required
             className="mt-1"
           />
-          <span>I confirm this is the Apollo company for {companyName} and authorize the 1-credit validation.</span>
+          <span>
+            I confirm this Apollo account is the correct company or canonical parent/brand for {companyName},
+            understand this overrides automated name-similarity warnings, and authorize the 1-credit validation.
+          </span>
         </label>
         <label className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs leading-5 text-mutedForeground">
           <input

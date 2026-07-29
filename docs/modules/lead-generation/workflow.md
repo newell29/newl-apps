@@ -200,9 +200,10 @@ The layout is non-destructive: it does not migrate, delete, or rewrite existing 
 5. URL mapping distinguishes Apollo account links from organization links. An account link is resolved through Account
    View to its nested global organization ID before exact organization validation and People Search. The action records
    the reviewer and mapping evidence, stores only the global organization ID/domain/LinkedIn URL, and then imports
-   relevant contacts. A manually confirmed facility/legal account may resolve to its canonical operating parent/brand
-   only when the pasted Apollo account contains that exact account-to-organization relationship and the parent has the
-   same distinctive brand token; an arbitrary parent, sibling, or similar company still fails closed. The completion
+   relevant contacts. Automated similarity remains advisory in this explicit manual path: after the reviewer confirms
+   that the pasted Apollo account is the correct company or canonical parent/brand, a facility, legal entity, or
+   regional-name mismatch is accepted and recorded as a manual override. Invalid organizations and Apollo logistics
+   providers still fail closed. The completion
    message reports employee-search, buyer-review, and QA-plan counts. The row leaves the active exception queue only
    after the latest contact-discovery attempt is a direct match with employees; otherwise the saved reason includes
    saved-contact pages and masked/paid recovery counts. Mapping does not enroll a contact in a cadence.

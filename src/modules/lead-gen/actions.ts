@@ -1309,7 +1309,8 @@ export async function mapApolloCompanyUrlAction(
     const mapping = await fetchApolloOrganizationForMapping({
       companyName: lead.company.name,
       apolloOrganizationId: apolloCompanyReference.id,
-      resourceType: apolloCompanyReference.resourceType
+      resourceType: apolloCompanyReference.resourceType,
+      reviewerConfirmed: true
     });
     const duplicate = await prisma.company.findFirst({
       where: {
