@@ -67,6 +67,8 @@ The owner approved the supervised Phase 2 design on 2026-07-29. It is enabled on
 
 Historical failed reviews are not rewritten to passed. The manual correction confirmation, actor, selected saved-review order, and resulting child print job are retained for audit.
 
+For each selected saved review row, Newl Apps resolves the exact PS/SR pair, confirms the saved internal Teamship page ID, and then derives the separate display shipping-order number used by the print job. A failed or ambiguous identity mapping is excluded before approval and cannot fall back to treating the internal page ID as the display number.
+
 ## Later phase
 
 Phase 3 automatic printing requires a new approved policy, batch-level stop controls, printer health monitoring, and production evidence from Phase 2. It is not enabled by Phase 2.

@@ -121,6 +121,65 @@ describe("Teamship print jobs", () => {
     }));
   });
 
+  it("resolves a saved review PS/SR and internal page ID to the display shipping-order number", async () => {
+    teamshipPrintJob.create.mockResolvedValue(storedJob());
+    const preflightPalletCount = vi.fn().mockResolvedValue(2);
+    const findOrders = vi.fn().mockResolvedValue([{
+      id: 30666,
+      record_no: "PS123456",
+      shipment_id: "SR812345",
+      teamship_internal_id: 31064,
+      url: "https://members.fulfillit.io/ship-inventories/31064",
+      customer: { company: "Garland Canada Distribution" },
+      warehouse_name: "Annagem"
+    }]);
+
+    const result = await createTeamshipPrintPlan(context, {
+      reviewReference: {
+        psNumber: "PS123456",
+        srNumber: "SR812345",
+        teamshipOrderId: "31064",
+        teamshipUrl: "https://members.fulfillit.io/ship-inventories/31064"
+      },
+      requestKey: "f".repeat(64)
+    }, { findOrders, preflightPalletCount });
+
+    expect(findOrders).toHaveBeenCalledWith({
+      tenantId: "tenant-1",
+      orderIdentifier: "PS123456"
+    });
+    expect(result.shippingOrderNumber).toBe("30666");
+    expect(teamshipPrintJob.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        shippingOrderNumber: "30666",
+        teamshipOrderId: "31064"
+      })
+    }));
+  });
+
+  it("fails closed when a saved review reference resolves to a different internal page", async () => {
+    const findOrders = vi.fn().mockResolvedValue([{
+      id: 30666,
+      record_no: "PS123456",
+      shipment_id: "SR812345",
+      teamship_internal_id: 31065,
+      url: "https://members.fulfillit.io/ship-inventories/31065",
+      customer: { company: "Garland Canada Distribution" },
+      warehouse_name: "Annagem"
+    }]);
+
+    await expect(createTeamshipPrintPlan(context, {
+      reviewReference: {
+        psNumber: "PS123456",
+        srNumber: "SR812345",
+        teamshipOrderId: "31064",
+        teamshipUrl: "https://members.fulfillit.io/ship-inventories/31064"
+      },
+      requestKey: "0".repeat(64)
+    }, { findOrders })).rejects.toMatchObject({ status: 404 });
+    expect(teamshipPrintJob.create).not.toHaveBeenCalled();
+  });
+
   it("does not create an approval request when the local page preflight fails", async () => {
     const findOrders = vi.fn().mockResolvedValue([{
       id: 30666,

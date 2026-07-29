@@ -104,6 +104,7 @@ export async function createTeamshipPrintBatchPlan(
           srNumber: true,
           status: true,
           teamshipOrderId: true,
+          teamshipUrl: true,
           workflowStatus: true
         }
       }
@@ -154,7 +155,12 @@ export async function createTeamshipPrintBatchPlan(
         .update(`${batch.id}:${order.id}`)
         .digest("hex");
       const job = await (dependencies.createPrintPlan ?? createTeamshipPrintPlan)(context, {
-        shippingOrderNumber: order.teamshipOrderId!,
+        reviewReference: {
+          psNumber: order.psNumber,
+          srNumber: order.srNumber,
+          teamshipOrderId: order.teamshipOrderId!,
+          teamshipUrl: order.teamshipUrl
+        },
         requestKey: childRequestKey,
         batch: {
           batchId: batch.id,
