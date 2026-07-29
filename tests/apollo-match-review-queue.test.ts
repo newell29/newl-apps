@@ -73,6 +73,17 @@ describe("Apollo review queue states", () => {
       })
     ).toBe("MAPPED_NO_EMPLOYEES");
   });
+
+  it("does not offer mapped-company employee recovery for an unresolved match without the zero-employee marker", () => {
+    expect(
+      resolveApolloReviewQueueStatus({
+        apolloOrganizationId: "apollo-org-1",
+        classification: ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW,
+        matchReason: "Partial name match requires review.",
+        reviewedAt: null
+      })
+    ).toBe("NEEDS_REVIEW");
+  });
 });
 
 function researchSignal() {

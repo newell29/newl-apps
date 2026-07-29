@@ -420,12 +420,15 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Symptom: the company URL maps successfully, but the row remains under **Needs review**, reports zero employees, or
   misses a role that is visible on a later Apollo page.
 - Cause: the older path read only the first 25 saved contacts and did not reconcile a masked People Search identity
-  back to the saved contact's concrete email. A successful mapping could therefore be followed by a genuine zero-row
-  contact result, which correctly created another review attempt but did not explain which recovery work ran.
+  back to the saved contact's concrete email. A second state bug could display **Recheck employees** for a persisted
+  zero-employee mapping while the handoff worker rejected the same company because its latest immutable attempt had a
+  review classification. In that case no Apollo employee request ran at all.
 - Safe recovery: map/recheck again after this release. Hunter reads up to 20 relevant saved-contact pages of 100,
   targets each shortlisted masked person by name/title/confirmed company, backfills saved identity, and reports the
-  recovery counts in the immutable match reason. An import/export specialist is evaluated as a relevant employee,
-  but an individual-contributor title is still not automatically selected unless the buyer-role gate clears it.
+  recovery counts in the immutable match reason. **Recheck employees** now uses the same persisted-mapping state as
+  the exception queue and can repeat the read-only organization employee lookup. An import/export specialist is
+  evaluated as a relevant employee, but an individual-contributor title is still not automatically selected unless
+  the buyer-role gate clears it.
 - Credit boundary: saved-contact and People Search recovery is zero-credit. Paid email-only enrichment remains off
   unless the operator explicitly checks the separate authorization, is limited to three people, and disables phone
   and waterfall requests.

@@ -33,7 +33,7 @@ import {
   getHunterOutreachResearchMaxAgeDays
 } from "@/modules/lead-gen/hunter-outreach-eligibility";
 import {
-  APOLLO_ZERO_CONTACT_REVIEW_REASON,
+  isMappedApolloZeroEmployeeState,
   requiresApolloMatchReview
 } from "@/modules/lead-gen/apollo-contact-discovery-review";
 import {
@@ -1128,10 +1128,7 @@ export function resolveApolloReviewQueueStatus({
   reviewedAt: Date | null;
 }) {
   if (!classification) return null;
-  if (
-    apolloOrganizationId &&
-    matchReason?.includes(APOLLO_ZERO_CONTACT_REVIEW_REASON)
-  ) {
+  if (isMappedApolloZeroEmployeeState({ apolloOrganizationId, matchReason })) {
     return "MAPPED_NO_EMPLOYEES" as const;
   }
   if (!requiresApolloMatchReview(classification)) return null;

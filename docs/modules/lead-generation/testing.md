@@ -124,7 +124,10 @@ Scoring regression coverage must also verify:
     domain filter or falling back to an unscoped search. The expected domain remains a response guard. Exact Apollo
     account-to-organization relationships may resolve a legal-entity card to its operating parent/brand, while
     unrelated parents, siblings, explicit different organization IDs, and unsafe identities still fail closed.
-22. an unresolved latest `ApolloCompanyMatch` makes bulk enrichment skip the company before any Apollo or contact lookup.
+22. an unresolved latest `ApolloCompanyMatch` makes bulk enrichment skip the company before any Apollo or contact
+    lookup, except for the explicit mapped-zero-employee state shown under **Mapped, no employees**. That state may
+    repeat only the read-only, organization-scoped employee lookup; a stored organization ID or zero-employee reason
+    alone is insufficient.
 23. Apollo company URL parsing rejects non-Apollo hosts, distinguishes `/accounts/{id}` from
     `/organizations/{id}`, resolves account links to their nested global organization before exact validation, and
     manual mapping never authorizes cadence enrollment.

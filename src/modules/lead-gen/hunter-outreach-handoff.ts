@@ -17,7 +17,10 @@ import {
   evaluateHunterOutreachEligibility,
   getHunterOutreachResearchMaxAgeDays
 } from "@/modules/lead-gen/hunter-outreach-eligibility";
-import { resolveApolloContactDiscoveryMatch } from "@/modules/lead-gen/apollo-contact-discovery-review";
+import {
+  blocksApolloEmployeeLookup,
+  resolveApolloContactDiscoveryMatch
+} from "@/modules/lead-gen/apollo-contact-discovery-review";
 import {
   isActiveHunterCadence,
   isHunterContactSafeForReview
@@ -725,6 +728,7 @@ async function processCompany({
         take: 1,
         select: {
           classification: true,
+          matchReason: true,
           reviewedAt: true
         }
       },
@@ -787,7 +791,11 @@ async function processCompany({
   const latestMatch = company.apolloCompanyMatches[0] ?? null;
   if (
     latestMatch &&
-    latestMatch.classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY
+    blocksApolloEmployeeLookup({
+      classification: latestMatch.classification,
+      apolloOrganizationId: company.apolloOrganizationId,
+      matchReason: latestMatch.matchReason
+    })
   ) {
     return terminal(
       item,
