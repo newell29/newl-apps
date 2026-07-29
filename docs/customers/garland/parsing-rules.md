@@ -31,6 +31,8 @@ Owner-confirmed dangerous-goods behaviour: long runs of asterisks are decorative
 
 Garland ship-to city, province/state, and postal code extraction accepts both `CITY, ST POSTAL` and `CITY ST POSTAL` text layouts. The PDF text layer can omit the visual comma, and that omission must not move the location line into ship-to address line 1 or leave city and postal code blank.
 
+Owner-confirmed ship-to normalization: Garland's known source city token `QUEBEFC` must be corrected to `QUEBEC` when it appears with province `QC`. A later stray or fallback `ON` line must not override the complete `QUEBEC, QC <postal-code>` location. This is a narrow approved alias, not permission to silently correct other customer names, cities, or address text.
+
 ## Pallet and printing notes
 
 Pallet dimensions, serials, weight, and SKU observations are represented in Teamship review/update types and `GarlandProductDimensionObservation`. The UPS special dimension rule is confirmed in existing documentation and tests should be consulted before changing it. Printer mappings, duplicate print protection, and a general print service were not located; production printing requires explicit human approval.
