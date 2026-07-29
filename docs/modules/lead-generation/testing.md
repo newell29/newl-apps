@@ -153,13 +153,18 @@ Regression coverage must prove:
 1. prepare, complete, and fail routes resolve tenant scope through machine ingestion authentication;
 2. a completion cannot write without an active tenant-owned run ID;
 3. every accepted source URL is HTTPS and every relevant result has an explicit company;
-4. model and prompt version, source provider/lens, confidence, rationale, and evidence remain auditable;
-5. invalid enums, oversized batches, missing fields, omitted source rows, and confidence below 50 fail closed;
-6. GDELT 429/5xx responses receive bounded retry, the RSS fallback remains available, and total source failure makes the run fail visibly;
-7. the live runner allows only loopback Ollama endpoints and reads its model settings from the protected Hunter environment;
-8. the installed Hunter service remains pinned to the dedicated clean runtime checkout;
-9. no scout module or route imports or calls Apollo, cadence enrollment, email, LinkedIn, or customer-communication code; and
-10. Python, zsh, TypeScript, and structured-output contract tests pass without a database migration.
+4. approved topics and geographies rotate across local dates, preserve the 60/30/10 service mix, store query fingerprints,
+   suppress canonical source URLs for 180 days, and group repeat monthly company events without suppressing a later event;
+5. obvious directories and warehouse/provider roundups are filtered before Qwen, and model instructions reject one-off pop-ups plus unsupported service-line inference;
+6. model and prompt version, source provider/lens, confidence, rationale, raw/filtered/duplicate/selected coverage metrics, and evidence remain auditable;
+7. invalid enums, oversized batches, missing fields, omitted source rows, and confidence below 50 fail closed;
+8. Brave 429/5xx responses receive bounded retry, the RSS fallback remains available, and total source failure makes the run fail visibly;
+9. accepted news creates or reuses a tenant-scoped provisional company without TradeMining, and the next company-research
+   cohort reserves bounded capacity for external-signal companies;
+10. the live runner allows only loopback Ollama endpoints and reads its model settings from the protected Hunter environment;
+11. the installed Hunter service remains pinned to the dedicated clean runtime checkout;
+12. no scout module or route imports or calls Apollo, cadence enrollment, email, LinkedIn, or customer-communication code; and
+13. Python, zsh, TypeScript, and structured-output contract tests pass without a database migration.
 
 ## Hunter company deep research
 

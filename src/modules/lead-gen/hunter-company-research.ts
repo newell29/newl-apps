@@ -271,19 +271,24 @@ export async function prepareHunterCompanyResearchRun({
     recentResearch.map((row) => row.companyId).filter((value): value is string => Boolean(value))
   );
 
-  const companies = await prisma.company.findMany({
+  const companyRows = await prisma.company.findMany({
     where: buildHunterCompanyResearchWhere({
       tenantId,
       requestedKeys,
       recentlyResearchedIds: [...recentlyResearchedIds]
     }),
     orderBy: [{ priorityScore: "desc" }, { updatedAt: "desc" }],
-    take: requestedKeys.length > 0 ? Math.min(MAX_RESEARCH_COMPANIES, requestedKeys.length) : limit,
+    take:
+      requestedKeys.length > 0
+        ? Math.min(MAX_RESEARCH_COMPANIES, requestedKeys.length)
+        : Math.max(200, limit * 10),
     select: {
       id: true,
       name: true,
       normalizedName: true,
+      source: true,
       priorityScore: true,
+      updatedAt: true,
       primaryIndustry: true,
       domain: true,
       importRecords: {
@@ -310,12 +315,18 @@ export async function prepareHunterCompanyResearchRun({
           title: true,
           summary: true,
           sourceUrl: true,
+          sourceName: true,
+          evidence: true,
           confidence: true,
           observedAt: true
         }
       }
     }
   });
+  const companies =
+    requestedKeys.length > 0
+      ? companyRows
+      : rankHunterCompanyResearchCandidates(companyRows, limit);
 
   const candidates: PreparedCandidate[] = companies.map((company) => ({
     companyId: company.id,
@@ -447,6 +458,89 @@ export function buildHunterCompanyResearchWhere({
         ? { id: { notIn: recentlyResearchedIds } }
         : {})
   };
+}
+
+export function rankHunterCompanyResearchCandidates<
+  T extends {
+    id: string;
+    source: string | null;
+    priorityScore: number;
+    updatedAt: Date;
+    hunterOpportunitySignals: Array<{
+      confidence: number;
+      sourceName: string | null;
+      evidence: Prisma.JsonValue | null;
+    }>;
+  }
+>(companies: T[], limit: number): T[] {
+  const boundedLimit = Math.max(1, Math.min(MAX_RESEARCH_COMPANIES, limit));
+  const externalSignals = companies
+    .filter((company) => externalSignalScore(company) > 0)
+    .sort(compareResearchCandidates);
+  const reservedExternalCount = Math.min(
+    externalSignals.length,
+    Math.max(1, Math.ceil(boundedLimit / 3))
+  );
+  const reserved = externalSignals.slice(0, reservedExternalCount);
+  const reservedIds = new Set(reserved.map((company) => company.id));
+  const remaining = companies
+    .filter((company) => !reservedIds.has(company.id))
+    .sort(compareResearchCandidates);
+  return [...reserved, ...remaining].slice(0, boundedLimit);
+}
+
+function compareResearchCandidates<
+  T extends {
+    source: string | null;
+    priorityScore: number;
+    updatedAt: Date;
+    hunterOpportunitySignals: Array<{
+      confidence: number;
+      sourceName: string | null;
+      evidence: Prisma.JsonValue | null;
+    }>;
+  }
+>(left: T, right: T) {
+  const scoreDifference =
+    Math.max(right.priorityScore, externalSignalScore(right)) -
+    Math.max(left.priorityScore, externalSignalScore(left));
+  if (scoreDifference !== 0) return scoreDifference;
+  return right.updatedAt.getTime() - left.updatedAt.getTime();
+}
+
+function externalSignalScore(company: {
+  source: string | null;
+  priorityScore: number;
+  hunterOpportunitySignals: Array<{
+    confidence: number;
+    sourceName: string | null;
+    evidence: Prisma.JsonValue | null;
+  }>;
+}) {
+  if (company.source === "HUNTER_EXTERNAL_SIGNAL_SCOUT") {
+    return Math.max(
+      company.priorityScore,
+      ...company.hunterOpportunitySignals.map((signal) => signal.confidence)
+    );
+  }
+  return company.hunterOpportunitySignals.reduce(
+    (highest, signal) =>
+      isExternalScoutEvidence(signal.evidence)
+        ? Math.max(highest, signal.confidence)
+        : highest,
+    0
+  );
+}
+
+function isExternalScoutEvidence(evidence: Prisma.JsonValue | null) {
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) return false;
+  const discovery = (evidence as Record<string, unknown>).discovery;
+  return Boolean(
+    discovery &&
+      typeof discovery === "object" &&
+      !Array.isArray(discovery) &&
+      (discovery as Record<string, unknown>).provider === "BRAVE_WEB"
+  );
 }
 
 export async function completeHunterCompanyResearchRun({
