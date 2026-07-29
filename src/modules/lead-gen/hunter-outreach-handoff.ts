@@ -122,7 +122,8 @@ export async function queueCurrentHunterOutreachHandoff({
     tenantId,
     actorUserId,
     trigger: "MANUAL",
-    candidateScope: "CURRENT_RESEARCHED_OUTREACH"
+    candidateScope: "CURRENT_RESEARCHED_OUTREACH",
+    researchRunId: latestResearch.id
   });
   if (plan.state !== "completed") {
     return {

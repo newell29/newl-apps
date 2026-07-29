@@ -1,7 +1,10 @@
 import { JobStatus } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
-import { summarizeHunterOutreachHandoffRun } from "@/modules/lead-gen/hunter-queries";
+import {
+  partitionHunterResearchSignals,
+  summarizeHunterOutreachHandoffRun
+} from "@/modules/lead-gen/hunter-queries";
 
 describe("Hunter contact-discovery run summary", () => {
   it("separates queued companies, evaluated candidates, and generated plans", () => {
@@ -100,5 +103,35 @@ describe("Hunter contact-discovery run summary", () => {
       actionablePlans: 0,
       results: []
     });
+  });
+});
+
+describe("Hunter daily research cohorts", () => {
+  it("separates the latest run from still-actionable carry-forward outreach", () => {
+    const signal = (
+      id: string,
+      runId: string,
+      opportunityTier: string
+    ) => ({
+      id,
+      sourceName: "Hunter company research",
+      rawJson: { runId },
+      evidence: { research: { opportunityTier } }
+    });
+    const result = partitionHunterResearchSignals(
+      [
+        signal("today-hot", "run-today", "HOT_OPPORTUNITY"),
+        signal("old-qualified", "run-old", "QUALIFIED_CURRENT_ACCOUNT"),
+        signal("old-watch", "run-old", "WATCHLIST")
+      ],
+      "run-today"
+    );
+
+    expect(result.latestResearchSignals.map((row) => row.id)).toEqual([
+      "today-hot"
+    ]);
+    expect(result.carryForwardResearchSignals.map((row) => row.id)).toEqual([
+      "old-qualified"
+    ]);
   });
 });

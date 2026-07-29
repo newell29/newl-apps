@@ -7,6 +7,7 @@ import {
   reopenApolloMatchReviewAction,
   retryApolloCompanyReviewFromQueueAction
 } from "@/modules/lead-gen/actions";
+import { recheckHunterCompanyContactsAction } from "@/modules/lead-gen/hunter-actions";
 import { ApolloMatchReviewActions } from "@/modules/lead-gen/components/apollo-match-review-actions";
 import { getApolloMatchReviewQueue } from "@/modules/lead-gen/queries";
 import { requireModule } from "@/server/auth/authorization";
@@ -29,6 +30,9 @@ export default async function ApolloMatchReviewPage({
     companyId: companyId ?? undefined
   });
   const activeRows = rows.filter((row) => row.status === "NEEDS_REVIEW");
+  const mappedNoEmployeeRows = rows.filter(
+    (row) => row.status === "MAPPED_NO_EMPLOYEES"
+  );
   const confirmedRows = rows.filter((row) => row.status === "CONFIRMED_NO_MATCH");
 
   return (
@@ -36,11 +40,12 @@ export default async function ApolloMatchReviewPage({
       <PageHeader
         eyebrow="Lead Generation"
         title="Apollo Exceptions"
-        description="Resolve current Qwen/Kimi-vetted Hunter opportunities that Apollo could not match safely or that returned zero employees. Historical workflow records stay in the audit trail but do not clutter this active queue."
+        description="Resolve current Qwen/Kimi-vetted Hunter opportunities that Apollo could not match safely. Verified companies with no returned employees stay mapped and appear in a separate contact-discovery section."
       />
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
         <Metric label="Needs review" value={activeRows.length} />
+        <Metric label="Mapped, no employees" value={mappedNoEmployeeRows.length} />
         <Metric label="Confirmed no match" value={confirmedRows.length} />
         <Metric label="Protected from bulk retry" value={rows.length} />
       </div>
@@ -58,6 +63,12 @@ export default async function ApolloMatchReviewPage({
         title="Needs review"
         description="Open the company in Apollo and paste its Overview or People page URL. You can also retry deliberately after correcting company data or confirm that no usable match exists."
         rows={activeRows}
+      />
+
+      <ReviewSection
+        title="Mapped company — employee lookup needed"
+        description="The Apollo organization is already verified and will not be treated as an unmapped exception. Recheck its saved and organization-scoped employees without spending another organization-match credit."
+        rows={mappedNoEmployeeRows}
       />
 
       <ReviewSection
@@ -139,6 +150,7 @@ function ReviewSection({
                 mapAction={mapApolloCompanyUrlAction}
                 confirmNoMatchAction={confirmApolloNoMatchAction}
                 reopenAction={reopenApolloMatchReviewAction}
+                mappedCompanyRecheckAction={recheckHunterCompanyContactsAction}
               />
             </article>
           ))}

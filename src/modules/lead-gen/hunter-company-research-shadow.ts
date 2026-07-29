@@ -99,12 +99,14 @@ export async function runHunterResearchLunaShadowBatch({
   tenantId,
   runId,
   packets: rawPackets,
-  finalBatch
+  finalBatch,
+  forceReplay = false
 }: {
   tenantId: string;
   runId: string;
   packets: unknown;
   finalBatch: boolean;
+  forceReplay?: boolean;
 }) {
   const configuration = hunterResearchLunaShadowConfiguration();
   if (!configuration.enabled) {
@@ -121,7 +123,9 @@ export async function runHunterResearchLunaShadowBatch({
       id: runId,
       tenantId,
       jobType: HUNTER_COMPANY_RESEARCH_JOB_TYPE,
-      status: JobStatus.RUNNING
+      status: forceReplay
+        ? { in: [JobStatus.RUNNING, JobStatus.SUCCESS, JobStatus.ERROR] }
+        : JobStatus.RUNNING
     },
     select: { id: true, input: true, output: true }
   });
@@ -187,7 +191,7 @@ export async function runHunterResearchLunaShadowBatch({
   const cachedBatch = existing?.batches.find(
     (batch) => batch.batchId === batchId && batch.status === "SUCCESS"
   );
-  if (cachedBatch) {
+  if (cachedBatch && !forceReplay) {
     return {
       state: "cached" as const,
       batchId,
@@ -229,12 +233,14 @@ export async function runHunterResearchLunaShadowBatch({
       results,
       finalBatch
     });
-    await persistShadowReport({ tenantId, runId, report });
+    await persistShadowReport({ tenantId, runId, report, allowCompletedRun: forceReplay });
     if (finalBatch) {
       await prisma.auditLog.create({
         data: {
           tenantId,
-          action: "lead-gen.hunter-company-research.luna-shadow-completed",
+          action: forceReplay
+            ? "lead-gen.hunter-company-research.luna-shadow-replayed"
+            : "lead-gen.hunter-company-research.luna-shadow-completed",
           entityType: "AutomationJobRun",
           entityId: runId,
           after: summarizeHunterResearchLunaShadow(report) ?? {}
@@ -265,7 +271,7 @@ export async function runHunterResearchLunaShadowBatch({
       results: [],
       finalBatch
     });
-    await persistShadowReport({ tenantId, runId, report });
+    await persistShadowReport({ tenantId, runId, report, allowCompletedRun: forceReplay });
     return {
       state: "error" as const,
       batchId,
@@ -273,6 +279,133 @@ export async function runHunterResearchLunaShadowBatch({
       report: summarizeHunterResearchLunaShadow(report)
     };
   }
+}
+
+export async function replayHunterResearchLunaShadowComparison({
+  tenantId,
+  runId
+}: {
+  tenantId: string;
+  runId: string;
+}) {
+  const run = await prisma.automationJobRun.findFirst({
+    where: {
+      id: runId,
+      tenantId,
+      jobType: HUNTER_COMPANY_RESEARCH_JOB_TYPE,
+      status: { in: [JobStatus.SUCCESS, JobStatus.ERROR] }
+    },
+    select: { id: true, input: true }
+  });
+  if (!run) throw new Error("Select a completed Hunter company-research run.");
+
+  const input = asRecord(run.input, "Hunter company-research run input");
+  const candidateCompanyIds = stringArray(
+    input.candidateCompanyIds,
+    100,
+    "Hunter company-research candidate IDs"
+  );
+  const [companies, signals] = await Promise.all([
+    prisma.company.findMany({
+      where: { tenantId, id: { in: candidateCompanyIds } },
+      select: {
+        id: true,
+        name: true,
+        normalizedName: true,
+        domain: true,
+        priorityScore: true,
+        primaryIndustry: true,
+        importRecords: {
+          orderBy: { arrivalDate: "desc" },
+          take: 8,
+          select: {
+            arrivalDate: true,
+            destinationCity: true,
+            destinationState: true,
+            sourcePort: true,
+            originCountry: true,
+            productDescription: true
+          }
+        }
+      }
+    }),
+    prisma.hunterOpportunitySignal.findMany({
+      where: {
+        tenantId,
+        sourceName: "Hunter company research",
+        companyId: { in: candidateCompanyIds }
+      },
+      orderBy: { observedAt: "desc" },
+      take: 500,
+      select: {
+        companyId: true,
+        evidence: true,
+        rawJson: true
+      }
+    })
+  ]);
+  const signalByCompanyId = new Map(
+    signals
+      .filter((signal) => readRunId(signal.rawJson) === runId && signal.companyId)
+      .map((signal) => [signal.companyId!, signal])
+  );
+  const packets = companies.flatMap((company) => {
+    const signal = signalByCompanyId.get(company.id);
+    const research = readResearchRecord(signal?.evidence ?? null);
+    if (!research) return [];
+    const publicEvidence = readReplayEvidence(research.evidence);
+    if (publicEvidence.length === 0 || !isRecord(research.synthesis)) return [];
+    const basePacket: HunterResearchShadowPacket = {
+      companyId: company.id,
+      companyKey: company.normalizedName,
+      companyName: company.name,
+      domain: company.domain,
+      priorityScore: company.priorityScore,
+      primaryIndustry: company.primaryIndustry,
+      shipmentEvidence: company.importRecords.map((record) => ({
+        ...record,
+        arrivalDate: record.arrivalDate?.toISOString() ?? null
+      })),
+      existingSignals: [],
+      publicEvidence,
+      qwenSynthesis: null
+    };
+    const qwenSynthesis = validateHunterResearchShadowResponse(
+      {
+        companies: [{
+          ...research.synthesis,
+          companyKey: company.normalizedName,
+          followUpQueries: Array.isArray(research.synthesis.followUpQueries)
+            ? research.synthesis.followUpQueries
+            : []
+        }]
+      },
+      [basePacket]
+    )[0]!;
+    return [{ ...basePacket, qwenSynthesis }];
+  });
+  if (packets.length === 0) {
+    throw new Error(
+      "This run has no saved Qwen evidence packets that can be replayed without repeating Brave retrieval."
+    );
+  }
+
+  let result: Awaited<ReturnType<typeof runHunterResearchLunaShadowBatch>> | null = null;
+  for (let index = 0; index < packets.length; index += MAX_SHADOW_BATCH_SIZE) {
+    const batch = packets.slice(index, index + MAX_SHADOW_BATCH_SIZE);
+    result = await runHunterResearchLunaShadowBatch({
+      tenantId,
+      runId,
+      packets: batch,
+      finalBatch: index + MAX_SHADOW_BATCH_SIZE >= packets.length,
+      forceReplay: true
+    });
+  }
+  return {
+    state: result?.state ?? ("error" as const),
+    replayedCompanyCount: packets.length,
+    report: result && "report" in result ? result.report : null
+  };
 }
 
 export function readStoredHunterResearchLunaShadow(
@@ -523,18 +656,22 @@ function mergeShadowReport({
 async function persistShadowReport({
   tenantId,
   runId,
-  report
+  report,
+  allowCompletedRun = false
 }: {
   tenantId: string;
   runId: string;
   report: StoredHunterResearchLunaShadow;
+  allowCompletedRun?: boolean;
 }) {
   const latest = await prisma.automationJobRun.findFirst({
     where: {
       id: runId,
       tenantId,
       jobType: HUNTER_COMPANY_RESEARCH_JOB_TYPE,
-      status: JobStatus.RUNNING
+      status: allowCompletedRun
+        ? { in: [JobStatus.RUNNING, JobStatus.SUCCESS, JobStatus.ERROR] }
+        : JobStatus.RUNNING
     },
     select: { output: true }
   });
@@ -545,7 +682,9 @@ async function persistShadowReport({
       id: runId,
       tenantId,
       jobType: HUNTER_COMPANY_RESEARCH_JOB_TYPE,
-      status: JobStatus.RUNNING
+      status: allowCompletedRun
+        ? { in: [JobStatus.RUNNING, JobStatus.SUCCESS, JobStatus.ERROR] }
+        : JobStatus.RUNNING
     },
     data: {
       output: {
@@ -558,6 +697,44 @@ async function persistShadowReport({
   if (update.count !== 1) {
     throw new Error("Hunter company-research shadow run ended before persistence.");
   }
+}
+
+function readRunId(value: Prisma.JsonValue | null) {
+  return isRecord(value) && typeof value.runId === "string" ? value.runId : null;
+}
+
+function readResearchRecord(value: Prisma.JsonValue | null) {
+  if (!isRecord(value) || !isRecord(value.research)) return null;
+  return value.research;
+}
+
+function readReplayEvidence(value: unknown): HunterResearchShadowEvidence[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item, evidenceIndex) => {
+    if (!isRecord(item)) return [];
+    const url = typeof item.url === "string" ? item.url : "";
+    const pass = String(item.pass);
+    const sourceType = String(item.sourceType);
+    if (
+      !url.startsWith("https://") ||
+      !["IDENTITY", "FRESH_EVENTS", "CAREERS", "DISTRIBUTION_FOOTPRINT", "FOLLOW_UP"].includes(pass) ||
+      !["FIRST_PARTY", "GOVERNMENT", "NEWS", "CAREERS", "DIRECTORY", "OTHER"].includes(sourceType)
+    ) {
+      return [];
+    }
+    return [{
+      evidenceIndex,
+      pass: pass as HunterResearchShadowEvidence["pass"],
+      query: stringOr(item.query, "Saved research query").slice(0, 500),
+      title: stringOr(item.title, "Saved evidence").slice(0, 500),
+      url,
+      sourceDomain: stringOr(item.sourceDomain, new URL(url).hostname).slice(0, 300),
+      sourceType: sourceType as HunterResearchShadowEvidence["sourceType"],
+      publishedAt: typeof item.publishedAt === "string" ? item.publishedAt : null,
+      excerpt: stringOr(item.excerpt, "Saved public evidence").slice(0, 1_000),
+      firstParty: item.firstParty === true
+    }];
+  });
 }
 
 function addUsage(

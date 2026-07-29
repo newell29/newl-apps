@@ -16,6 +16,7 @@ import {
   queueCurrentHunterOutreachHandoff
 } from "@/modules/lead-gen/hunter-outreach-handoff";
 import { normalizeHunterCompanyKey } from "@/modules/lead-gen/hunter-company-key";
+import { replayHunterResearchLunaShadowComparison } from "@/modules/lead-gen/hunter-company-research-shadow";
 import { runHunterDryPlan } from "@/modules/lead-gen/hunter-planner";
 import { validateHunterAllocation } from "@/modules/lead-gen/hunter-planning-policy";
 import { requireAdmin, requireModule, requireMutationAccess } from "@/server/auth/authorization";
@@ -179,6 +180,23 @@ export async function queueCurrentHunterOutreachHandoffAction() {
 
   const count = "companyCount" in result ? `&count=${result.companyCount}` : "";
   redirect(`${HUNTER_SETTINGS_PATH}?handoff=${encodeURIComponent(result.state)}${count}`);
+}
+
+export async function replayHunterLunaComparisonAction(formData: FormData) {
+  const context = await getAuthenticatedContext();
+  await requireModule(context, ModuleKey.LEAD_GEN);
+  requireAdmin(context);
+  const runId = requiredText(formData, "runId", 100);
+  const result = await replayHunterResearchLunaShadowComparison({
+    tenantId: context.tenantId,
+    runId
+  });
+  revalidatePath(HUNTER_PATH);
+  revalidatePath(HUNTER_SETTINGS_PATH);
+  redirect(
+    `${HUNTER_SETTINGS_PATH}?lunaReplay=${encodeURIComponent(result.state)}` +
+      `&lunaCount=${result.replayedCompanyCount}`
+  );
 }
 
 export async function recheckHunterCompanyContactsAction(formData: FormData) {

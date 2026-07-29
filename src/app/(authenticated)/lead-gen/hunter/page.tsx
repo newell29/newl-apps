@@ -18,10 +18,21 @@ export default async function DailyOpportunitiesPage() {
   const context = await getAuthenticatedContext();
   await requireModule(context, ModuleKey.LEAD_GEN);
   const data = await getHunterControlPlane(context);
-  const researched = data.signals.filter((signal) => Boolean(researchRecord(signal.evidence)));
+  const researched = data.latestResearchSignals.filter((signal) =>
+    Boolean(researchRecord(signal.evidence))
+  );
+  const carryForward = data.carryForwardResearchSignals.filter((signal) =>
+    Boolean(researchRecord(signal.evidence))
+  );
   const byTier = Object.fromEntries(
     tierOrder.map((tier) => [tier, researched.filter((signal) => researchTier(signal.evidence) === tier)])
   ) as Record<(typeof tierOrder)[number], typeof researched>;
+  const carryForwardByTier = Object.fromEntries(
+    tierOrder.map((tier) => [
+      tier,
+      carryForward.filter((signal) => researchTier(signal.evidence) === tier)
+    ])
+  ) as Record<(typeof tierOrder)[number], typeof carryForward>;
 
   return (
     <div className="space-y-6">
@@ -53,6 +64,15 @@ export default async function DailyOpportunitiesPage() {
         <TierMetric label="Watchlist" value={byTier.WATCHLIST.length} tone="watch" />
         <TierMetric label="Blocked" value={byTier.BLOCKED.length} tone="blocked" />
       </div>
+
+      <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
+        <h2 className="font-semibold text-foreground">What these lists represent</h2>
+        <p className="mt-1 text-sm leading-6 text-mutedForeground">
+          The tier counts and primary opportunity groups below show only the latest successful company-research
+          cohort. Still-current Hot and Qualified accounts from earlier runs remain available in a separate
+          carry-forward section so outreach is not lost or mistaken for research completed today.
+        </p>
+      </section>
 
       <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -102,6 +122,26 @@ export default async function DailyOpportunitiesPage() {
         empty="No Watchlist companies are available."
         collapsed
       />
+
+      <details className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <summary className="cursor-pointer font-semibold text-foreground">
+          Carry-forward outreach ({carryForwardByTier.HOT_OPPORTUNITY.length +
+            carryForwardByTier.QUALIFIED_CURRENT_ACCOUNT.length})
+        </summary>
+        <p className="mt-2 text-sm text-mutedForeground">
+          These were researched in an earlier run but still pass the current freshness, suppression, and
+          opportunity-tier rules. Hunter may continue contact discovery for them; they are not counted as
+          today&apos;s research.
+        </p>
+        <div className="mt-4 grid gap-3">
+          {[...carryForwardByTier.HOT_OPPORTUNITY, ...carryForwardByTier.QUALIFIED_CURRENT_ACCOUNT]
+            .map((signal) => <OpportunityCard key={signal.id} signal={signal} />)}
+          {carryForwardByTier.HOT_OPPORTUNITY.length +
+            carryForwardByTier.QUALIFIED_CURRENT_ACCOUNT.length === 0 ? (
+              <p className="text-sm text-mutedForeground">No current carry-forward opportunities.</p>
+            ) : null}
+        </div>
+      </details>
 
       <details className="rounded-lg border border-border bg-card p-4 shadow-sm">
         <summary className="cursor-pointer font-semibold text-foreground">

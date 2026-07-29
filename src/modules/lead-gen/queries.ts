@@ -32,7 +32,10 @@ import {
   evaluateHunterOutreachEligibility,
   getHunterOutreachResearchMaxAgeDays
 } from "@/modules/lead-gen/hunter-outreach-eligibility";
-import { requiresApolloMatchReview } from "@/modules/lead-gen/apollo-contact-discovery-review";
+import {
+  APOLLO_ZERO_CONTACT_REVIEW_REASON,
+  requiresApolloMatchReview
+} from "@/modules/lead-gen/apollo-contact-discovery-review";
 import {
   isCurrentOutreachDraft,
   VISIBLE_OUTREACH_PLAN_VERSION_WHERE
@@ -975,6 +978,7 @@ export async function getApolloMatchReviewQueue(
       normalizedName: true,
       domain: true,
       linkedinUrl: true,
+      apolloOrganizationId: true,
       leads: {
         orderBy: {
           updatedAt: "desc"
@@ -1042,9 +1046,15 @@ export async function getApolloMatchReviewQueue(
   return companies
     .flatMap((company) => {
       const match = company.apolloCompanyMatches[0] ?? null;
+      const reviewStatus = resolveApolloReviewQueueStatus({
+        apolloOrganizationId: company.apolloOrganizationId,
+        classification: match?.classification ?? null,
+        matchReason: match?.matchReason ?? null,
+        reviewedAt: match?.reviewedAt ?? null
+      });
       if (
         !match ||
-        !requiresApolloMatchReview(match.classification)
+        !reviewStatus
       ) {
         return [];
       }
@@ -1074,7 +1084,7 @@ export async function getApolloMatchReviewQueue(
             "Hunter automation",
           hunterQualification: eligibility.label,
           researchRetrievedAt: eligibility.researchRetrievedAt,
-          status: match.reviewedAt ? ("CONFIRMED_NO_MATCH" as const) : ("NEEDS_REVIEW" as const),
+          status: reviewStatus,
           latestMatch: {
             id: match.id,
             organizationId: match.apolloOrganizationId,
@@ -1092,10 +1102,39 @@ export async function getApolloMatchReviewQueue(
     })
     .sort((left, right) => {
       if (left.status !== right.status) {
-        return left.status === "NEEDS_REVIEW" ? -1 : 1;
+        const order = {
+          NEEDS_REVIEW: 0,
+          MAPPED_NO_EMPLOYEES: 1,
+          CONFIRMED_NO_MATCH: 2
+        };
+        return order[left.status] - order[right.status];
       }
       return right.latestMatch.attemptedAt.getTime() - left.latestMatch.attemptedAt.getTime();
     });
+}
+
+export function resolveApolloReviewQueueStatus({
+  apolloOrganizationId,
+  classification,
+  matchReason,
+  reviewedAt
+}: {
+  apolloOrganizationId: string | null;
+  classification: ApolloCompanyMatchClassification | null;
+  matchReason: string | null;
+  reviewedAt: Date | null;
+}) {
+  if (!classification) return null;
+  if (
+    apolloOrganizationId &&
+    matchReason?.includes(APOLLO_ZERO_CONTACT_REVIEW_REASON)
+  ) {
+    return "MAPPED_NO_EMPLOYEES" as const;
+  }
+  if (!requiresApolloMatchReview(classification)) return null;
+  return reviewedAt
+    ? ("CONFIRMED_NO_MATCH" as const)
+    : ("NEEDS_REVIEW" as const);
 }
 
 export async function getLeadPipelineFilters(tenant: TenantContext) {

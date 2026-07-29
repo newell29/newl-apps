@@ -19,6 +19,7 @@ import {
   readStoredHunterResearchLunaShadow,
   summarizeHunterResearchLunaShadow
 } from "@/modules/lead-gen/hunter-company-research-shadow";
+import { dedupeHunterCompaniesByIdentity } from "@/modules/lead-gen/hunter-company-identity";
 import { prisma } from "@/server/db";
 
 export { HUNTER_COMPANY_RESEARCH_JOB_TYPE };
@@ -328,10 +329,11 @@ export async function prepareHunterCompanyResearchRun({
       }
     }
   });
+  const identityResolvedRows = dedupeHunterCompaniesByIdentity(companyRows);
   const companies =
     requestedKeys.length > 0
-      ? companyRows
-      : rankHunterCompanyResearchCandidates(companyRows, limit);
+      ? identityResolvedRows.slice(0, limit)
+      : rankHunterCompanyResearchCandidates(identityResolvedRows, limit);
 
   const candidates: PreparedCandidate[] = companies.map((company) => ({
     companyId: company.id,
@@ -368,6 +370,12 @@ export async function prepareHunterCompanyResearchRun({
         requestedCompanyKeys: requestedKeys,
         candidateCompanyIds: candidates.map((candidate) => candidate.companyId),
         candidateCompanyKeys: candidates.map((candidate) => candidate.companyKey),
+        candidateCompanyIdentities: candidates.map((candidate) => ({
+          companyId: candidate.companyId,
+          companyKey: candidate.companyKey,
+          companyName: candidate.companyName,
+          domain: candidate.domain
+        })),
         dailyCompanyLimit: limit,
         promptVersion: HUNTER_COMPANY_RESEARCH_PROMPT_VERSION,
         qwenModel: HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL,
@@ -771,7 +779,8 @@ export async function completeHunterCompanyResearchRun({
     tenantId,
     actorUserId: null,
     trigger: "RESEARCH",
-    candidateScope: "CURRENT_RESEARCHED_OUTREACH"
+    candidateScope: "CURRENT_RESEARCHED_OUTREACH",
+    researchRunId: runId
   });
   let handoff:
     | Awaited<ReturnType<typeof enqueueHunterOutreachHandoff>>
