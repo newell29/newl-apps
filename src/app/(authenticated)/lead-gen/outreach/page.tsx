@@ -14,6 +14,7 @@ import { PageHeader } from "@/components/page-header";
 import {
   approveOutreachPlanAction,
   bulkApproveOutreachPlansAction,
+  bulkRepairFailedOutreachPlansAction,
   bulkPushContactsToApolloAction,
   bulkRemoveContactsAction,
   syncSelectedApolloStatusesAction,
@@ -478,6 +479,7 @@ export default async function OutreachQueuePage({
             bulkRemoveContactsAction={bulkRemoveContactsAction}
             bulkPushContactsToApolloAction={bulkPushContactsToApolloAction}
             bulkApproveOutreachPlansAction={bulkApproveOutreachPlansAction}
+            bulkRepairFailedOutreachPlansAction={bulkRepairFailedOutreachPlansAction}
             syncSelectedApolloStatusesAction={syncSelectedApolloStatusesAction}
             updateContactSequenceAction={updateContactSequenceAction}
             saveContactDraftAction={saveContactDraftAction}

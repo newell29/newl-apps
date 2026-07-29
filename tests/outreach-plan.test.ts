@@ -1,15 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
+  ContactStatus,
   HunterServiceLine,
   OutreachChannel,
   OutreachPlanStatus,
-  OutreachQaStatus
+  OutreachQaStatus,
+  ReplyStatus,
+  SequenceStatus
 } from "@prisma/client";
 import {
+  classifyOutreachQaIssues,
   fingerprintOutreachEvidence,
+  getOutreachRegenerationBlockReason,
   getOutreachPlanApolloBlockReason,
   isCurrentOutreachDraft,
   mergeOutreachQaResults,
+  repairOutreachSequenceDeterministically,
   runDeterministicOutreachQa,
   VISIBLE_OUTREACH_PLAN_VERSION_WHERE,
   type GeneratedOutreachSequence,
@@ -310,7 +316,7 @@ describe("outreach plan grounding", () => {
             ? {
                 passed: false,
                 issues: [{
-                  code: "INTERNAL_REFERENCE",
+                  code: "UNSUPPORTED_CLAIM",
                   severity: "ERROR",
                   message: "Customer-visible copy says saved shipment activity.",
                   stepNumber: 1
@@ -330,6 +336,152 @@ describe("outreach plan grounding", () => {
     expect(result.modelQa.passed).toBe(true);
     expect(result.draftingUsageAttempts).toHaveLength(2);
     expect(result.qaUsageAttempts).toHaveLength(2);
+  });
+
+  it("repairs whitespace-damaged evidence refs and strips ledger annotations without another draft", async () => {
+    let draftCalls = 0;
+    const malformed = {
+      ...sequence,
+      steps: sequence.steps.map((step) =>
+        step.stepNumber === 1
+          ? {
+              ...step,
+              subject: "Houston inbound [tr ademining:summary]",
+              body:
+                "Hi Jordan,\n\nYour Houston activity may create a warehousing need. Evidence: company:identity\n\nAlex",
+              evidenceRefs: ["company:identity", "tr ademining:summary"]
+            }
+          : step
+      )
+    };
+    const result = await runBoundedOutreachQaRepair({
+      generateSequence: async () => {
+        draftCalls += 1;
+        return { sequence: malformed, usage: usage() };
+      },
+      repairSequence: (candidate) =>
+        repairOutreachSequenceDeterministically({
+          evidence,
+          sequence: candidate
+        }).sequence,
+      runDeterministicQa: (candidate) =>
+        runDeterministicOutreachQa({
+          evidence,
+          strategy,
+          sequence: candidate,
+          senderFirstName: "Alex",
+          allowCallTask: true
+        }),
+      runModelQa: async () => ({
+        result: { passed: true, issues: [] },
+        usage: usage()
+      }),
+      allowCallTask: true,
+      senderFirstName: "Alex"
+    });
+
+    expect(draftCalls).toBe(1);
+    expect(result.automaticRepairAttempted).toBe(false);
+    expect(result.deterministicQa.issues).toEqual([]);
+    expect(result.sequence.steps[0]?.evidenceRefs).toContain("trademining:summary");
+    expect(result.sequence.steps[0]?.subject).not.toMatch(/tr\s*ademining/i);
+    expect(result.sequence.steps[0]?.body).not.toContain("company:identity");
+  });
+
+  it("detects arbitrary saved evidence IDs in outbound copy", () => {
+    const dynamicEvidence = [
+      ...evidence,
+      {
+        ...evidence[0],
+        id: "hunter-signal:custom-987",
+        title: "Custom signal"
+      }
+    ];
+    const candidate = {
+      ...sequence,
+      steps: sequence.steps.map((step) =>
+        step.stepNumber === 1
+          ? { ...step, body: `${step.body}\n[hunter-signal:custom-987]` }
+          : step
+      )
+    };
+
+    expect(
+      runDeterministicOutreachQa({
+        evidence: dynamicEvidence,
+        strategy,
+        sequence: candidate,
+        senderFirstName: "Alex",
+        allowCallTask: true
+      }).issues
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "INTERNAL_REFERENCE", stepNumber: 1 })
+      ])
+    );
+  });
+
+  it("classifies repair work and allows regeneration after finished historical outreach", () => {
+    const malformedEvidenceSequence = {
+      ...sequence,
+      steps: sequence.steps.map((step) =>
+        step.stepNumber === 1
+          ? {
+              ...step,
+              body: `${step.body}\n[tr ademining:summary]`,
+              evidenceRefs: ["company:identity", "tr ademining:summary"]
+            }
+          : step
+      )
+    };
+    expect(
+      classifyOutreachQaIssues([{
+        code: "INTERNAL_REFERENCE",
+        severity: "ERROR",
+        message: "Internal evidence ID is visible.",
+        stepNumber: 1
+      }], evidence, malformedEvidenceSequence)
+    ).toBe("AUTOMATIC");
+    expect(
+      classifyOutreachQaIssues([{
+        code: "UNKNOWN_EVIDENCE_REF",
+        severity: "ERROR",
+        message: 'Evidence reference "tr ademining:summary" is not in the saved evidence ledger.',
+        stepNumber: 1
+      }], evidence, malformedEvidenceSequence)
+    ).toBe("AUTOMATIC");
+    expect(
+      classifyOutreachQaIssues([{
+        code: "UNKNOWN_EVIDENCE_REF",
+        severity: "ERROR",
+        message: 'Evidence reference "invented:source" is not in the saved evidence ledger.',
+        stepNumber: 1
+      }], evidence, malformedEvidenceSequence)
+    ).toBe("HUMAN_REVIEW");
+    expect(
+      classifyOutreachQaIssues([{
+        code: "UNSUPPORTED_CAUSAL_CLAIM",
+        severity: "ERROR",
+        message: "The claim is not grounded.",
+        stepNumber: 1
+      }])
+    ).toBe("MODEL_REGENERATION");
+    expect(
+      getOutreachRegenerationBlockReason({
+        planStatus: OutreachPlanStatus.QA_FAILED,
+        contactStatus: ContactStatus.REVIEWING,
+        replyStatus: ReplyStatus.NO_REPLY,
+        sequenceStatus: SequenceStatus.FINISHED
+      })
+    ).toBeNull();
+    expect(
+      getOutreachRegenerationBlockReason({
+        planStatus: OutreachPlanStatus.QA_FAILED,
+        contactStatus: ContactStatus.REVIEWING,
+        replyStatus: ReplyStatus.REPLIED,
+        sequenceStatus: SequenceStatus.FINISHED
+      })
+    ).toContain("recorded reply");
   });
 
   it("tells the single repair pass to remove inference drift instead of paraphrasing it", () => {

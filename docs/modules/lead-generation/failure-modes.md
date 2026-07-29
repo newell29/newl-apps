@@ -57,6 +57,10 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 - Unknown evidence citations, unsupported quantified claims, unsupported URLs, invalid sequence structure, sender
   placeholders, generic company signatures, Hunter/internal references, an incorrect mailbox-first-name signature, or semantic
   grounding errors fail closed and remain visible on the plan.
+- Exact evidence-ledger annotations and whitespace-only corruption of a known evidence ID are repaired
+  deterministically before QA and do not spend another model call. The bulk repair action applies that same safe
+  correction to existing failed plans. Unsupported claims use bounded model regeneration; missing evidence, sender
+  routing, or model QA availability remains a human-review failure.
 - Editing the first email changes the plan to `QA_FAILED`, clears approval, and blocks Apollo. Regenerate to produce a
   new immutable version and rerun every check.
 - A current unapproved plan blocks Apollo even when the contact's legacy cadence tier would not normally require a
@@ -64,6 +68,8 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 - Bulk approval reports the first saved QA finding for a genuinely failed plan. An already-approved plan is reported
   separately and directs the operator to **Retry approved in Apollo** or **Sync Apollo status** instead of incorrectly
   claiming that grounded QA failed.
+- Contacts without a concrete usable email stay in tenant-scoped storage for audit and later Apollo recovery, but are
+  hidden from Needs Attention and Active Cadences because they cannot be actioned.
 
 ## Apollo enrollment is active externally but missing from Active Cadences
 

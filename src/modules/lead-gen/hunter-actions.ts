@@ -219,6 +219,7 @@ export async function recheckHunterCompanyContactsAction(formData: FormData) {
       : queued.state === "already_queued"
         ? "Hunter contact review is already queued for this company."
         : "Hunter contact review was queued.";
+  let actionablePlans = 0;
 
   if (queued.state === "queued") {
     const processed = await processNextHunterOutreachHandoff({
@@ -227,6 +228,7 @@ export async function recheckHunterCompanyContactsAction(formData: FormData) {
     });
     const result = "result" in processed ? processed.result : null;
     if (result) {
+      actionablePlans = result.actionablePlans;
       message =
         `${result.apolloContactsFound} Apollo employee${result.apolloContactsFound === 1 ? "" : "s"} found; ` +
         `${result.contactsRanked} evaluated; ${result.actionablePlans} QA-passed plan${result.actionablePlans === 1 ? "" : "s"} ready. ` +
@@ -241,7 +243,9 @@ export async function recheckHunterCompanyContactsAction(formData: FormData) {
   revalidatePath("/lead-gen/apollo-review");
   revalidatePath("/lead-gen/outreach");
   redirect(
-    `/lead-gen/outreach?company=${encodeURIComponent(companyId)}&contactReview=${encodeURIComponent(message)}`
+    `/lead-gen/apollo-review?company=${encodeURIComponent(companyId)}` +
+      `&contactReview=${encodeURIComponent(message)}` +
+      `&plans=${encodeURIComponent(String(actionablePlans))}`
   );
 }
 

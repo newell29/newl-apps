@@ -104,7 +104,8 @@ import {
 } from "@/modules/lead-gen/apollo-reengagement-policy";
 import { resolveLiveApolloSequence } from "@/modules/lead-gen/apollo-sequence-resolution";
 import {
-  generateOutreachPlanForContact as generateSharedOutreachPlanForContact
+  generateOutreachPlanForContact as generateSharedOutreachPlanForContact,
+  repairFailedOutreachPlanForContact
 } from "@/modules/lead-gen/outreach-plan-generation";
 import {
   buildApolloSequenceMappingsWithDefaults,
@@ -3235,6 +3236,120 @@ export async function approveOutreachPlanAction(formData: FormData) {
 
   revalidateLeadGenSurfaces();
   redirect(`/lead-gen/outreach?apolloJob=${encodeURIComponent(enrollmentJob.id)}`);
+}
+
+export async function bulkRepairFailedOutreachPlansAction(
+  formData: FormData
+): Promise<ContactBulkActionSummary>;
+export async function bulkRepairFailedOutreachPlansAction(
+  previousState: ContactBulkActionSummary,
+  formData: FormData
+): Promise<ContactBulkActionSummary>;
+export async function bulkRepairFailedOutreachPlansAction(
+  firstArg: ContactBulkActionSummary | FormData,
+  secondArg?: FormData
+): Promise<ContactBulkActionSummary> {
+  const context = await authorizeLeadGenMutation();
+  const formData = firstArg instanceof FormData ? firstArg : secondArg;
+  if (!formData) {
+    return {
+      ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+      status: "error",
+      operation: "qa_repair",
+      message: "No QA repair payload was provided.",
+      completedAt: new Date().toISOString()
+    };
+  }
+
+  try {
+    const contactIds = readSelectedIds(formData, "contactId");
+    if (contactIds.length > 25) {
+      throw new Error("Repair no more than 25 failed QA plans at a time.");
+    }
+    const contacts = await prisma.contact.findMany({
+      where: {
+        tenantId: context.tenantId,
+        id: { in: contactIds }
+      },
+      select: {
+        id: true,
+        fullName: true,
+        company: { select: { name: true } }
+      }
+    });
+    if (contacts.length !== contactIds.length) {
+      throw new Error("One or more selected contacts were not found for this tenant.");
+    }
+    const contactsById = new Map(contacts.map((contact) => [contact.id, contact]));
+    const details: ContactBulkActionSummary["details"] = [];
+    let repaired = 0;
+    let regenerated = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const contactId of contactIds) {
+      const contact = contactsById.get(contactId)!;
+      try {
+        const result = await repairFailedOutreachPlanForContact({
+          tenantId: context.tenantId,
+          contactId
+        });
+        if (result.state === "repaired") repaired += 1;
+        else if (result.state === "regenerated") regenerated += 1;
+        else if (result.state === "failed") failed += 1;
+        else skipped += 1;
+        details.push({
+          contactId,
+          contactName: contact.fullName,
+          companyName: contact.company.name,
+          outcome:
+            result.state === "repaired"
+              ? "repaired"
+              : result.state === "regenerated"
+                ? "regenerated"
+                : result.state === "failed"
+                  ? "failed"
+                  : "skipped",
+          reason: result.message
+        });
+      } catch (error) {
+        failed += 1;
+        details.push({
+          contactId,
+          contactName: contact.fullName,
+          companyName: contact.company.name,
+          outcome: "failed",
+          reason:
+            error instanceof Error ? error.message : "QA repair failed."
+        });
+      }
+    }
+
+    revalidateLeadGenSurfaces();
+    return {
+      ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+      status: failed === contactIds.length ? "error" : "success",
+      operation: "qa_repair",
+      message:
+        `${repaired} plan${repaired === 1 ? "" : "s"} repaired without a model call; ` +
+        `${regenerated} regenerated; ${skipped} require no action or human review; ${failed} failed.`,
+      completedAt: new Date().toISOString(),
+      selectedContacts: contactIds.length,
+      updatedContacts: repaired + regenerated,
+      skippedContacts: skipped,
+      failedContacts: failed,
+      companiesTouched: new Set(contacts.map((contact) => contact.company.name)).size,
+      details
+    };
+  } catch (error) {
+    return {
+      ...EMPTY_CONTACT_BULK_ACTION_SUMMARY,
+      status: "error",
+      operation: "qa_repair",
+      message: error instanceof Error ? error.message : "Bulk QA repair failed.",
+      completedAt: new Date().toISOString()
+    };
+  }
 }
 
 export async function approveContactDraftAction(formData: FormData) {

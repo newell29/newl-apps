@@ -107,6 +107,8 @@ type ContactDirectoryRow = {
     callToAction: string;
     senderRecommendation: string | null;
     confidence: number;
+    qaRepairDisposition: "AUTOMATIC" | "MODEL_REGENERATION" | "HUMAN_REVIEW";
+    regenerationBlockReason: string | null;
     qaIssues: Array<{
       code: string;
       severity: "ERROR" | "WARNING";
@@ -172,6 +174,7 @@ export function ContactDirectoryTableClient({
   bulkRemoveContactsAction,
   bulkPushContactsToApolloAction,
   bulkApproveOutreachPlansAction,
+  bulkRepairFailedOutreachPlansAction,
   syncSelectedApolloStatusesAction,
   updateContactSequenceAction,
   saveContactDraftAction,
@@ -197,6 +200,10 @@ export function ContactDirectoryTableClient({
     formData: FormData
   ) => Promise<ContactBulkActionSummary>;
   bulkApproveOutreachPlansAction: (
+    previousState: ContactBulkActionSummary,
+    formData: FormData
+  ) => Promise<ContactBulkActionSummary>;
+  bulkRepairFailedOutreachPlansAction: (
     previousState: ContactBulkActionSummary,
     formData: FormData
   ) => Promise<ContactBulkActionSummary>;
@@ -227,6 +234,10 @@ export function ContactDirectoryTableClient({
   );
   const [bulkApproveState, runBulkApproveAction, isBulkApprovePending] = useActionState(
     bulkApproveOutreachPlansAction,
+    EMPTY_CONTACT_BULK_ACTION_SUMMARY
+  );
+  const [qaRepairState, runQaRepairAction, isQaRepairPending] = useActionState(
+    bulkRepairFailedOutreachPlansAction,
     EMPTY_CONTACT_BULK_ACTION_SUMMARY
   );
   const [apolloSyncState, runApolloSyncAction, isApolloSyncPending] = useActionState(
@@ -770,6 +781,7 @@ export function ContactDirectoryTableClient({
   const isAnyBulkActionPending =
     isBulkSequencePending ||
     isBulkApprovePending ||
+    isQaRepairPending ||
     isBulkRemovePending ||
     isApolloPushPending ||
     isApolloSyncPending;
@@ -935,6 +947,7 @@ export function ContactDirectoryTableClient({
       ) : null}
       {bulkActionState.status !== "idle" ? <ContactBulkActionSummaryBanner summary={bulkActionState} /> : null}
       {bulkApproveState.status !== "idle" ? <ContactBulkActionSummaryBanner summary={bulkApproveState} /> : null}
+      {qaRepairState.status !== "idle" ? <ContactBulkActionSummaryBanner summary={qaRepairState} /> : null}
       {removeActionState.status !== "idle" ? <ContactBulkActionSummaryBanner summary={removeActionState} /> : null}
       {apolloPushState.status !== "idle" ? <ContactBulkActionSummaryBanner summary={apolloPushState} /> : null}
       {apolloSyncState.status !== "idle" ? <ContactBulkActionSummaryBanner summary={apolloSyncState} /> : null}
@@ -1009,6 +1022,14 @@ export function ContactDirectoryTableClient({
               className="rounded-md bg-success px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-success/90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isBulkApprovePending ? "Approving..." : "Approve selected & enroll"}
+            </button>
+            <button
+              type="submit"
+              formAction={runQaRepairAction}
+              disabled={selectedIds.length === 0 || isAnyBulkActionPending}
+              className="rounded-md border border-warning/30 bg-warning/10 px-3 py-1.5 text-xs font-semibold text-warning transition-colors hover:bg-warning/15 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isQaRepairPending ? "Repairing QA..." : "Repair failed QA plans"}
             </button>
             <button
               type="submit"
@@ -1174,6 +1195,13 @@ function OutreachPlanPanel({
         {plan.qaIssues.length > 0 ? (
           <div className="rounded-md border border-danger/20 bg-danger/5 p-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-danger">QA findings</p>
+            <p className="mt-1 text-xs font-semibold text-foreground">
+              {plan.qaRepairDisposition === "AUTOMATIC"
+                ? "Automatically repairable without another model call."
+                : plan.qaRepairDisposition === "MODEL_REGENERATION"
+                  ? "Requires model regeneration because the remaining issue is semantic."
+                  : "Requires human evidence, sender, or configuration review."}
+            </p>
             <ul className="mt-2 space-y-1 text-xs leading-5 text-foreground">
               {plan.qaIssues.map((issue, index) => (
                 <li key={`${issue.code}-${issue.stepNumber ?? "plan"}-${index}`}>
@@ -1256,16 +1284,15 @@ function OutreachPlanPanel({
           <button
             disabled={
               !contact.draftGenerationConfigured ||
-              plan.status === OutreachPlanStatus.APPROVED ||
-              (contact.sequenceStatus !== SequenceStatus.NOT_STARTED &&
-                contact.sequenceStatus !== SequenceStatus.READY)
+              Boolean(plan.regenerationBlockReason)
             }
             className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-accentSoft disabled:cursor-not-allowed disabled:opacity-50"
           >
             Regenerate emails with feedback
           </button>
           <p className="text-[11px] leading-4 text-mutedForeground">
-            Feedback can change tone and emphasis before approval, but the evidence and grounded QA gates still apply.
+            {plan.regenerationBlockReason ??
+              "Feedback can change tone and emphasis before approval, including after a finished historical cadence. Evidence and grounded QA gates still apply."}
           </p>
         </form>
 
@@ -1405,6 +1432,8 @@ function ContactBulkActionSummaryBanner({ summary }: { summary: ContactBulkActio
       ? "Contact removal failed"
       : summary.operation === "approve"
         ? "Bulk approval failed"
+      : summary.operation === "qa_repair"
+        ? "QA repair failed"
       : summary.operation === "apollo_push"
         ? "Apollo push failed"
         : summary.operation === "apollo_sync"
@@ -1414,6 +1443,8 @@ function ContactBulkActionSummaryBanner({ summary }: { summary: ContactBulkActio
       ? "Contact removal summary"
       : summary.operation === "approve"
         ? "Bulk approval and enrollment summary"
+      : summary.operation === "qa_repair"
+        ? "QA repair summary"
       : summary.operation === "apollo_push"
         ? "Apollo push summary"
         : summary.operation === "apollo_sync"
@@ -1461,6 +1492,13 @@ function ContactBulkActionSummaryBanner({ summary }: { summary: ContactBulkActio
                 <ContactBulkMetric label="Approved" value={summary.approvedContacts} />
                 <ContactBulkMetric label="Skipped" value={summary.skippedContacts} />
                 <ContactBulkMetric label="Companies" value={summary.companiesTouched} />
+              </>
+            ) : summary.operation === "qa_repair" ? (
+              <>
+                <ContactBulkMetric label="Selected" value={summary.selectedContacts} />
+                <ContactBulkMetric label="Repaired / regenerated" value={summary.updatedContacts} />
+                <ContactBulkMetric label="Needs human review" value={summary.skippedContacts} />
+                <ContactBulkMetric label="Failed" value={summary.failedContacts} />
               </>
             ) : summary.operation === "apollo_push" ? (
               <>

@@ -55,8 +55,20 @@ export function ApolloMatchReviewActions({
           Recheck saved contacts and the organization employee directory. This keeps the existing company
           mapping and does not repeat paid organization matching.
         </p>
-        <form action={mappedCompanyRecheckAction} className="mt-3">
+        <form action={mappedCompanyRecheckAction} className="mt-3 space-y-3">
           <input type="hidden" name="companyId" value={companyId} />
+          <label className="flex items-start gap-2 rounded-md border border-warning/30 bg-background px-3 py-2 text-xs leading-5 text-mutedForeground">
+            <input
+              type="checkbox"
+              name="authorizePaidEmailEnrichment"
+              value="yes"
+              className="mt-1"
+            />
+            <span>
+              Optional: only if no saved Apollo contact has a usable email, authorize up to 3
+              email-only person enrichments (maximum 1 credit each).
+            </span>
+          </label>
           <button className="rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primaryForeground">
             Recheck employees
           </button>
