@@ -1649,3 +1649,20 @@ combines bounded Hunter and TradeMining evidence, generates a company/contact st
 sequence, records evidence citations and model/prompt versions, and requires deterministic plus model grounding QA.
 Generation never approves, enrolls, sends, calls, or performs LinkedIn activity. Human approval remains separate from
 the existing Apollo push action, and a current unapproved plan blocks that push.
+
+## 29. Qwen/Luna Company-Research Trial Addendum (2026-07-28)
+
+The owner approved a side-by-side trial during the normal company-research run. Brave retrieval occurs once.
+Local Qwen remains the authoritative synthesis consumed by Kimi and the deterministic eligibility path.
+After the bounded Qwen stage completes, the Mac worker submits the same bounded public-evidence packet to a
+tenant-scoped Newl Apps endpoint in batches of at most four. Newl Apps uses its existing server-only
+`OPENAI_API_KEY` to call `gpt-5.6-luna` with low reasoning, strict Structured Outputs, `store: false`, and no tools.
+Evidence packets are also submitted for Qwen omissions. Qwen output is retained only for server-side comparison
+and is removed from the Luna model input so the hosted model cannot copy the local assessment.
+
+Luna output is audit-only. It cannot change the company tier or score, create a signal/decision/contact,
+search or map Apollo, create or approve an outreach plan, enroll a cadence, or communicate with a prospect.
+The existing run ledger records provider/model/prompt version, successful batch fingerprints, usage,
+first-pass schema-valid coverage, Qwen/Luna categorical agreement, trigger-evidence overlap, and bounded
+failure state. A Luna failure never repeats Brave retrieval or prevents the normal Qwen/Kimi completion.
+Promotion of Luna to primary or fallback synthesis is not approved by this trial and requires later review.

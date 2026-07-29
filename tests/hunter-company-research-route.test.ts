@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const authenticateIngestionRequest = vi.hoisted(() => vi.fn());
 const prepareHunterCompanyResearchRun = vi.hoisted(() => vi.fn());
 const completeHunterCompanyResearchRun = vi.hoisted(() => vi.fn());
+const runHunterResearchLunaShadowBatch = vi.hoisted(() => vi.fn());
 
 vi.mock("@/server/ingestion-auth", () => ({
   authenticateIngestionRequest,
@@ -14,9 +15,13 @@ vi.mock("@/modules/lead-gen/hunter-company-research", () => ({
   prepareHunterCompanyResearchRun,
   completeHunterCompanyResearchRun
 }));
+vi.mock("@/modules/lead-gen/hunter-company-research-shadow", () => ({
+  runHunterResearchLunaShadowBatch
+}));
 
 import { POST as complete } from "@/app/api/lead-gen/hunter/company-research/complete/route";
 import { POST as prepare } from "@/app/api/lead-gen/hunter/company-research/prepare/route";
+import { POST as shadow } from "@/app/api/lead-gen/hunter/company-research/shadow/route";
 
 describe("Hunter company-research machine routes", () => {
   beforeEach(() => {
@@ -55,5 +60,33 @@ describe("Hunter company-research machine routes", () => {
 
     expect(response.status).toBe(400);
     expect(completeHunterCompanyResearchRun).not.toHaveBeenCalled();
+  });
+
+  it("keeps Luna shadow batches tenant scoped and explicitly non-authoritative", async () => {
+    runHunterResearchLunaShadowBatch.mockResolvedValue({
+      state: "completed",
+      report: { authoritative: false, evaluatedCompanyCount: 1 }
+    });
+    const request = new Request(
+      "https://app.example/api/lead-gen/hunter/company-research/shadow",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          runId: "run-1",
+          packets: [{ companyId: "company-1" }],
+          finalBatch: true
+        })
+      }
+    );
+    const response = await shadow(request);
+
+    expect(response.status).toBe(200);
+    expect(runHunterResearchLunaShadowBatch).toHaveBeenCalledWith({
+      tenantId: "tenant-a",
+      runId: "run-1",
+      packets: [{ companyId: "company-1" }],
+      finalBatch: true
+    });
   });
 });

@@ -428,11 +428,15 @@ describe("Hunter company deep research", () => {
   });
 
   it("schedules the bounded local worker and contains no outreach integration", async () => {
-    const [research, worker, runner, serverResearch] = await Promise.all([
+    const [research, worker, runner, serverResearch, shadowResearch] = await Promise.all([
       readFile(researchPath, "utf8"),
       readFile(workerPath, "utf8"),
       readFile(runnerPath, "utf8"),
-      readFile(path.join(repoRoot, "src/modules/lead-gen/hunter-company-research.ts"), "utf8")
+      readFile(path.join(repoRoot, "src/modules/lead-gen/hunter-company-research.ts"), "utf8"),
+      readFile(
+        path.join(repoRoot, "src/modules/lead-gen/hunter-company-research-shadow.ts"),
+        "utf8"
+      )
     ]);
 
     expect(worker).toContain("company_research_due_now");
@@ -454,6 +458,9 @@ describe("Hunter company deep research", () => {
     expect(research).toContain("triggerEvidenceIndices");
     expect(research).toContain("must cite one to five trigger evidence records");
     expect(research).toContain("whose supplied publishedAt value is within 18 months");
+    expect(research).toContain("/api/lead-gen/hunter/company-research/shadow");
+    expect(research).toContain("submit_luna_shadow_batches");
+    expect(research).not.toContain("OPENAI_API_KEY");
     expect(research).toContain('"thinking": {"type": "disabled"}');
     expect(research).toContain('"temperature": 0.6');
     expect(research).toContain('"max_tokens": 16_000');
@@ -470,6 +477,10 @@ describe("Hunter company deep research", () => {
     expect(serverResearch).toContain("tenantCompanies = await tx.company.findMany");
     expect(serverResearch).toContain("timeout: HUNTER_COMPANY_RESEARCH_TRANSACTION_TIMEOUT_MS");
     expect(serverResearch).toContain("company.evidence[company.synthesis.triggerEvidenceIndices[0]]");
+    expect(serverResearch).toContain("shadowSynthesis: lunaShadow");
+    expect(shadowResearch).toContain("authoritative: false");
+    expect(shadowResearch).toContain("tenantId");
+    expect(shadowResearch).toContain("HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_ENABLED");
     expect(runner).toContain("HUNTER_COMPANY_RESEARCH_ENABLED");
     expect(runner).toContain("HUNTER_RESEARCH_SEARCH_PROVIDER");
   });
@@ -484,6 +495,45 @@ describe("Hunter company deep research", () => {
       })
     ).resolves.toBeDefined();
     await expect(execFileAsync("/bin/zsh", ["-n", runnerPath])).resolves.toBeDefined();
+  });
+
+  it("submits every retrieved company to Luna even when Qwen omitted one", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "requests=[]",
+      "def fake_api(_base_url,_token,method,path,payload):",
+      " requests.append({'method':method,'path':path,'payload':payload})",
+      " return {'data':{'state':'completed','report':{'status':'SUCCESS'}}}",
+      "r.api_request=fake_api",
+      "candidates=[{'companyId':'company-1','companyKey':'alpha','companyName':'Alpha','priorityScore':80,'shipmentEvidence':[],'existingSignals':[]},{'companyId':'company-2','companyKey':'beta','companyName':'Beta','priorityScore':70,'shipmentEvidence':[],'existingSignals':[]}]",
+      "evidence={key:[{'pass':'IDENTITY','query':key,'title':key,'url':'https://example.com/'+key,'sourceDomain':'example.com','sourceType':'FIRST_PARTY','publishedAt':None,'excerpt':'identity','firstParty':True}] for key in ['alpha','beta']}",
+      "synthesis={'alpha':{'identityDisposition':'PASS','identityConfidence':90,'identityReason':'verified','logisticsProvider':False,'namedExternalLogisticsProvider':False,'stableExclusiveProviderEvidence':False,'providerDisplacementEvidence':False,'freshness':'CURRENT','opportunitySummary':'fit','triggerEvidenceIndices':[0],'geography':None,'companyCountry':'United States','operatingRegion':'NORTH_AMERICA','verifiedUsDivision':False,'usDivisionName':None,'usDivisionEvidenceIndices':[],'serviceLine':'WAREHOUSING','signalType':'OTHER','confidence':70,'rationale':'fit','missingEvidence':[],'followUpQueries':[]}}",
+      "result=r.submit_luna_shadow_batches('https://example.com','token','run-1',{'models':{'shadowSynthesis':{'enabled':True}}},candidates,evidence,synthesis)",
+      "print(json.dumps({'result':result,'requests':requests}))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    const output = JSON.parse(stdout);
+    expect(output.requests).toHaveLength(1);
+    expect(output.requests[0]).toMatchObject({
+      method: "POST",
+      path: "/api/lead-gen/hunter/company-research/shadow",
+      payload: {
+        runId: "run-1",
+        finalBatch: true,
+        packets: [
+          { companyKey: "alpha", qwenSynthesis: expect.objectContaining({ companyKey: "alpha" }) },
+          { companyKey: "beta", qwenSynthesis: null }
+        ]
+      }
+    });
   });
 
   it("isolates malformed Qwen batches and retries affected companies independently", async () => {
