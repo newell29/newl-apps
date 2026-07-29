@@ -14,6 +14,14 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
 
+## Confirmed Apollo account returns zero employees
+
+A saved Apollo account URL can resolve to a canonical global organization ID whose organization-scoped People Search
+returns no people even though Apollo's account page visibly lists employees. Newl Apps must carry the reviewer-confirmed
+account ID forward from match history, refresh the exact saved account, and retry People Search with the account's
+normalized domain. The fallback remains restricted to the confirmed company identity and must not use paid enrichment
+without explicit authorization.
+
 ## Data model
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.

@@ -89,6 +89,7 @@ export type ApolloCompanyLookupInput = {
   companyName: string;
   domain?: string | null;
   apolloOrganizationId?: string | null;
+  apolloAccountId?: string | null;
 };
 
 export type ApolloOrganizationMappingResult = {
@@ -556,8 +557,15 @@ export async function fetchApolloContactsForCompany(
     input.apolloOrganizationId?.trim() && input.apolloOrganizationId !== "null"
       ? input.apolloOrganizationId.trim()
       : null;
+  const providedAccountId =
+    input.apolloAccountId?.trim() && input.apolloAccountId !== "null"
+      ? input.apolloAccountId.trim()
+      : null;
   const providedOrganization = providedOrganizationId
     ? buildTrustedProvidedApolloOrganization(input, providedOrganizationId)
+    : null;
+  const confirmedSavedAccount = providedAccountId
+    ? await findApolloSavedAccountOrganization(input, apiKey, providedAccountId)
     : null;
   // Apollo account IDs and global organization IDs are both 24-character
   // identifiers, but People Search only returns the complete employee set for
@@ -578,6 +586,7 @@ export async function fetchApolloContactsForCompany(
         }
       : null;
   const matchedOrganization =
+    confirmedSavedAccount ??
     canonicalDiscoveredOrganization ??
     providedOrganization ??
     discoveredOrganization;
@@ -615,16 +624,56 @@ export async function fetchApolloContactsForCompany(
         [])
       : [];
 
+  const organizationScopedContactCount = contactsFromApollo.length;
+  const confirmedAccountDomain =
+    confirmedSavedAccount?.domain ?? normalizeDomain(input.domain);
+  if (
+    providedAccountId &&
+    confirmedAccountDomain &&
+    contactsFromApollo.length <= 1
+  ) {
+    const domainContacts =
+      (await searchApolloRelevantPeople({
+        apiKey,
+        companyName: confirmedSavedAccount?.name ?? companyNameForSearch,
+        domain: confirmedAccountDomain,
+        expectedOrganizationDomain: confirmedAccountDomain,
+        organizationId: null,
+        allowPeopleSearchFallback,
+        keywordSearchLimit,
+        enforceExpectedOrganization: true,
+        savedContacts: savedContactsForProvidedOrganization,
+        contactRecovery
+      })) ?? [];
+    contactsFromApollo = dedupeApolloContacts([
+      ...contactsFromApollo,
+      ...domainContacts
+    ]);
+    domainForSearch = confirmedAccountDomain;
+    if (effectiveMatchOrganization && domainContacts.length > 0) {
+      effectiveMatchOrganization = {
+        ...effectiveMatchOrganization,
+        domain: effectiveMatchOrganization.domain ?? confirmedAccountDomain,
+        matchReason:
+          `${effectiveMatchOrganization.matchReason}; recovered employees through the ` +
+          `confirmed Apollo account domain after the organization-scoped search returned ` +
+          `${organizationScopedContactCount} result(s)`
+      };
+    }
+  }
+
   if (
     !canonicalDiscoveredOrganization &&
     providedOrganizationId &&
     contactsFromApollo.length <= 1
   ) {
-    const savedAccountOrganization = await findApolloSavedAccountOrganization(
-      input,
-      apiKey,
-      providedOrganizationId
-    );
+    const savedAccountOrganization =
+      confirmedSavedAccount ??
+      await findApolloSavedAccountOrganization(
+        input,
+        apiKey,
+        providedOrganizationId
+      );
     const savedAccountId = readApolloString(savedAccountOrganization?.rawPayload ?? {}, ["id"]);
     const recoveredOrganizationId =
       savedAccountOrganization?.id &&
@@ -824,15 +873,48 @@ export async function fetchApolloContactsForCompany(
     }
   }
 
+  const match = toApolloCompanyLookupMatch(
+    effectiveMatchOrganization,
+    input.companyName,
+    normalizeDomain(input.domain)
+  );
   return {
     organizationId: trustedMatchedOrganization?.id ?? null,
     companyName: trustedMatchedOrganization?.name ?? input.companyName,
     domain: trustedMatchedOrganization?.domain ?? normalizeDomain(input.domain),
     linkedinUrl: trustedMatchedOrganization?.linkedinUrl ?? null,
-    match: toApolloCompanyLookupMatch(effectiveMatchOrganization, input.companyName, normalizeDomain(input.domain)),
+    match: providedAccountId
+      ? {
+          ...match,
+          query: {
+            ...match.query,
+            apollo_account_id: providedAccountId
+          }
+        }
+      : match,
     contacts: dedupeApolloContacts(contactsFromApollo),
     contactRecovery
   };
+}
+
+export function readApolloAccountIdFromMatchQuery(value: unknown) {
+  const query = asRecord(value);
+  if (!query) return null;
+
+  const explicitAccountId = readApolloString(query, [
+    "apollo_account_id",
+    "account_id"
+  ]);
+  const resourceType = readApolloString(query, ["resource_type"])?.toUpperCase();
+  const suppliedAccountId =
+    resourceType === "ACCOUNT"
+      ? readApolloString(query, ["supplied_id"])
+      : null;
+  const accountId = explicitAccountId ?? suppliedAccountId;
+
+  return accountId && /^[a-f0-9]{24}$/iu.test(accountId)
+    ? accountId
+    : null;
 }
 
 export function parseApolloCompanyReference(value: string): ApolloCompanyReference {

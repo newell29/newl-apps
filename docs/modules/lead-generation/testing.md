@@ -14,6 +14,10 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
 
+Regression coverage for Apollo contact discovery must include a reviewer-confirmed saved account whose canonical
+organization search returns zero while its exact company domain returns relevant people. Tests must also verify that
+the saved account ID survives subsequent match records so a later manual recheck does not lose the recovery path.
+
 ## Data model
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.
