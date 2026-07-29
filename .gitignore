@@ -65,6 +65,7 @@ tmp/
 .tmp/
 temp/
 .cache/
+.rivet-evidence/
 .vercel
 work/
 .next-corrupt-*/

@@ -16,6 +16,8 @@ Shipment documents and Garland Teamship review is documented because code, route
 - Phase 1 printing requires trusted Teams identity, Assistant and Shipment Documents module access, mutation permission, the approved internal Teamship employee policy, a dedicated print credential, and approval by the same employee who created the plan. Worker endpoints use a separate tenant-bound credential.
 - Authenticated Newl Apps batch printing requires Shipment Documents access, mutation permission, the approved internal Teamship employee policy, tenant-scoped saved-run selection, and approval by the same employee who prepared the batch. An employee selecting a failed review must separately confirm that its Teamship correction was completed; the actor and selected order are written to the batch audit record.
 - Adding a PDF to a saved carrier-manifest run requires authenticated Shipment Documents module access and mutation permission. Upload and download lookups filter both the saved run and attachment by the authenticated tenant.
+- Reviewing Garland feedback, linking saved-review evidence, and attaching a PDF/image require an authenticated administrator with Shipment Documents access. Automatic saved-email retrieval is limited to the exact tenant-scoped Garland attachment matching the review filename, PS, SR, and parsed content hash; cached and administrator-supplied artifacts are size/type/signature validated.
+- Rivet can download only artifacts named in its immutable approved packet and only while its tenant-scoped short-lived lease is active. Evidence reads are audited, returned with `no-store`, and never authorize a Teamship write, print, deployment, migration, or customer communication.
 
 ## Data model
 

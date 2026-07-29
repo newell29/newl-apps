@@ -2,6 +2,15 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
+import {
+  describeFeedbackIssueType,
+  feedbackRequiresSourceEvidence,
+  feedbackUsesFieldValues,
+  feedbackUsesOrderDecisions,
+  GARLAND_FEEDBACK_AFFECTED_FIELDS,
+  GARLAND_FEEDBACK_ISSUE_TYPES,
+  readGarlandFeedbackEvidence
+} from "@/modules/assistant/feedback-review-fields";
 import { partitionFeedbackReview } from "@/modules/assistant/feedback-review-display";
 
 type Feedback = {
@@ -11,6 +20,10 @@ type Feedback = {
   expectedOutcome: string | null;
   observedOutcome: string | null;
   classification: string;
+  evidence: unknown;
+  teamshipReviewRunId: string | null;
+  teamshipReviewOrderId: string | null;
+  artifactId: string | null;
   status: string;
   resolutionNotes: string | null;
   createdAt: string;
@@ -36,6 +49,10 @@ type Suggestion = {
     expectedOutcome: string | null;
     observedOutcome: string | null;
     classification: string;
+    evidence: unknown;
+    teamshipReviewRunId: string | null;
+    teamshipReviewOrderId: string | null;
+    artifactId: string | null;
     status: string;
     createdAt: string;
     evidenceRole: "APPROVED_PACKET" | "FOLLOW_UP";
@@ -54,6 +71,32 @@ type Suggestion = {
   } | null;
 };
 
+type FeedbackDraft = {
+  classification: string;
+  observedOutcome: string;
+  expectedOutcome: string;
+  affectedField: string;
+  actualValue: string;
+  expectedValue: string;
+  teamshipReviewOrderId: string;
+};
+
+type FeedbackEvidenceOption = {
+  reviewOrderId: string;
+  reviewRunId: string;
+  artifactId: string | null;
+  psNumber: string;
+  srNumber: string;
+  status: string;
+  pageNumbers: number[];
+  checkedAt: string;
+  shipmentDate: string;
+  documentLabel: string;
+  sourcePdfFileName: string | null;
+  hasStoredSourcePdf: boolean;
+  hasSavedEmailPdf: boolean;
+};
+
 export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
   const [feedback, setFeedback] = useState<Feedback[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -61,9 +104,11 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
   const [busy, setBusy] = useState(false);
   const [showFeedbackHistory, setShowFeedbackHistory] = useState(false);
   const [resolveConfirmId, setResolveConfirmId] = useState<string | null>(null);
+  const [newIssueType, setNewIssueType] = useState("ORDER_DECISION");
   const [lessonDrafts, setLessonDrafts] = useState<Record<string, { title: string; ruleText: string }>>({});
-  const [feedbackDrafts, setFeedbackDrafts] = useState<
-    Record<string, { observedOutcome: string; expectedOutcome: string }>
+  const [feedbackDrafts, setFeedbackDrafts] = useState<Record<string, FeedbackDraft>>({});
+  const [feedbackEvidenceOptions, setFeedbackEvidenceOptions] = useState<
+    Record<string, FeedbackEvidenceOption[]>
   >({});
   const [suggestionNotes, setSuggestionNotes] = useState<Record<string, string>>({});
 
@@ -87,6 +132,7 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
     setBusy(true);
     setMessage("");
     const data = new FormData(event.currentTarget);
+    const usesOrderDecisions = feedbackUsesOrderDecisions(newIssueType);
     const response = await fetch("/api/assistant/operational-feedback", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -95,57 +141,81 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
         subjectType: "GARLAND_CHECK",
         subjectId: data.get("subjectId"),
         reporterStatement: data.get("reporterStatement"),
-        expectedOutcome: data.get("expectedOutcome"),
-        observedOutcome: data.get("observedOutcome"),
-        classification: "CHECK_RESULT"
+        expectedOutcome: usesOrderDecisions ? data.get("expectedOutcome") : null,
+        observedOutcome: usesOrderDecisions ? data.get("observedOutcome") : null,
+        classification: newIssueType,
+        evidence: {
+          affectedField: data.get("affectedField"),
+          actualValue: data.get("actualValue"),
+          expectedValue: data.get("expectedValue")
+        }
       })
     });
     const body = await response.json().catch(() => ({}));
     setMessage(response.ok ? "Feedback saved for review. It has not changed Nemo's rules." : body.error ?? "Feedback could not be saved.");
     if (response.ok) {
       event.currentTarget.reset();
+      setNewIssueType("ORDER_DECISION");
       await load();
     }
     setBusy(false);
   }
 
-  function feedbackOutcomes(item: Feedback) {
+  function feedbackReviewDraft(item: Feedback): FeedbackDraft {
+    const evidence = readGarlandFeedbackEvidence(item.evidence);
     return feedbackDrafts[item.id] ?? {
+      classification: item.classification,
       observedOutcome: item.observedOutcome ?? "",
-      expectedOutcome: item.expectedOutcome ?? ""
+      expectedOutcome: item.expectedOutcome ?? "",
+      affectedField: evidence.affectedField,
+      actualValue: evidence.actualValue,
+      expectedValue: evidence.expectedValue,
+      teamshipReviewOrderId: item.teamshipReviewOrderId ?? ""
     };
   }
 
-  function setFeedbackOutcome(
+  function setFeedbackReviewField(
     item: Feedback,
-    field: "observedOutcome" | "expectedOutcome",
+    field: keyof FeedbackDraft,
     value: string
   ) {
     setFeedbackDrafts((current) => ({
       ...current,
       [item.id]: {
-        ...(current[item.id] ?? {
-          observedOutcome: item.observedOutcome ?? "",
-          expectedOutcome: item.expectedOutcome ?? ""
-        }),
+        ...feedbackReviewDraft(item),
         [field]: value
       }
     }));
   }
 
-  async function saveFeedbackOutcomes(item: Feedback) {
-    const draft = feedbackOutcomes(item);
+  function buildFeedbackReviewPayload(item: Feedback) {
+    const draft = feedbackReviewDraft(item);
+    const usesOrderDecisions = feedbackUsesOrderDecisions(draft.classification);
+    return {
+      classification: draft.classification,
+      observedOutcome: usesOrderDecisions ? draft.observedOutcome || null : null,
+      expectedOutcome: usesOrderDecisions ? draft.expectedOutcome || null : null,
+      evidence: {
+        affectedField: draft.affectedField,
+        actualValue: draft.actualValue,
+        expectedValue: draft.expectedValue
+      },
+      teamshipReviewOrderId: draft.teamshipReviewOrderId || null
+    };
+  }
+
+  async function saveFeedbackReviewFields(item: Feedback) {
     setBusy(true);
     const response = await fetch(`/api/assistant/operational-feedback/${item.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         action: "update_review_fields",
-        ...draft
+        ...buildFeedbackReviewPayload(item)
       })
     });
     const body = await response.json().catch(() => ({}));
-    setMessage(response.ok ? "The review results were corrected." : body.error ?? "The review results could not be saved.");
+    setMessage(response.ok ? "The issue classification and evidence were saved." : body.error ?? "The review fields could not be saved.");
     if (response.ok) {
       setFeedbackDrafts((current) => {
         const next = { ...current };
@@ -158,18 +228,58 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
   }
 
   async function reviewFeedback(item: Feedback, status: "CONFIRMED" | "REJECTED") {
-    const draft = feedbackOutcomes(item);
     setBusy(true);
     const response = await fetch(`/api/assistant/operational-feedback/${item.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "review", status, ...draft })
+      body: JSON.stringify({ action: "review", status, ...buildFeedbackReviewPayload(item) })
     });
     const body = await response.json().catch(() => ({}));
     setMessage(
       response.ok
         ? `Feedback marked ${status.toLowerCase()}.`
         : body.error ?? "The feedback decision could not be saved."
+    );
+    await load();
+    setBusy(false);
+  }
+
+  async function findSavedEvidence(item: Feedback) {
+    if (!item.subjectId) {
+      setMessage("Add a PS or SR number before looking for saved Garland evidence.");
+      return;
+    }
+    setBusy(true);
+    const response = await fetch(
+      `/api/assistant/operational-feedback/evidence-options?reference=${encodeURIComponent(item.subjectId)}`,
+      { cache: "no-store" }
+    );
+    const body = await response.json().catch(() => ({}));
+    if (response.ok) {
+      setFeedbackEvidenceOptions((current) => ({ ...current, [item.id]: body.data ?? [] }));
+      setMessage((body.data ?? []).length > 0
+        ? "Choose the exact saved Garland check that produced this feedback."
+        : "No saved Garland check was found for this PS or SR number.");
+    } else {
+      setMessage(body.error ?? "Saved Garland evidence could not be loaded.");
+    }
+    setBusy(false);
+  }
+
+  async function uploadFeedbackEvidence(item: Feedback, file: File | null) {
+    if (!file) return;
+    setBusy(true);
+    const formData = new FormData();
+    formData.set("file", file);
+    const response = await fetch(`/api/assistant/operational-feedback/${item.id}/evidence`, {
+      method: "POST",
+      body: formData
+    });
+    const body = await response.json().catch(() => ({}));
+    setMessage(
+      response.ok
+        ? "The supporting PDF or screenshot was attached to this feedback."
+        : body.error ?? "The evidence file could not be attached."
     );
     await load();
     setBusy(false);
@@ -276,20 +386,57 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
           PS or SR number
           <input name="subjectId" className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" placeholder="PS123456 or SR812345" />
         </label>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block text-sm font-medium text-foreground">
+          What kind of problem happened?
+          <select
+            name="classification"
+            value={newIssueType}
+            onChange={(event) => setNewIssueType(event.target.value)}
+            className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2"
+          >
+            {GARLAND_FEEDBACK_ISSUE_TYPES.map((item) => (
+              <option key={item.value} value={item.value}>{item.label}</option>
+            ))}
+          </select>
+          <span className="mt-1 block text-xs font-normal text-mutedForeground">
+            {GARLAND_FEEDBACK_ISSUE_TYPES.find((item) => item.value === newIssueType)?.description}
+          </span>
+        </label>
+        {feedbackUsesOrderDecisions(newIssueType) ? <div className="grid gap-3 sm:grid-cols-2">
           <label className="block text-sm font-medium text-foreground">
-            Nemo reported
+            Nemo&apos;s original order decision
             <select name="observedOutcome" className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2">
-              <option value="">Choose</option><option>PASS</option><option>FAIL</option><option>MISSING</option><option>PENDING</option>
+              <option value="">Choose</option><option value="PASS">Passed</option><option value="FAIL">Failed</option><option value="MISSING">Missing in Teamship</option><option value="PENDING">Pending/not completed</option>
             </select>
           </label>
           <label className="block text-sm font-medium text-foreground">
-            Expected result
+            Correct order decision
             <select name="expectedOutcome" className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2">
-              <option value="">Choose</option><option>PASS</option><option>FAIL</option><option>MISSING</option><option>PENDING</option>
+              <option value="">Choose</option><option value="PASS">Passed</option><option value="FAIL">Failed</option><option value="MISSING">Missing in Teamship</option><option value="PENDING">Pending/not completed</option>
             </select>
           </label>
-        </div>
+        </div> : null}
+        {feedbackUsesFieldValues(newIssueType) ? (
+          <div className="space-y-3 rounded-md border border-border bg-muted/20 p-3">
+            <label className="block text-sm font-medium text-foreground">
+              Teamship field affected
+              <select name="affectedField" className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2">
+                <option value="">Choose</option>
+                {GARLAND_FEEDBACK_AFFECTED_FIELDS.map((field) => <option key={field}>{field}</option>)}
+              </select>
+            </label>
+            {newIssueType === "TEAMSHIP_FIELD_UPDATE" ? (
+              <label className="block text-sm font-medium text-foreground">
+                Value Nemo wrote
+                <textarea name="actualValue" rows={3} className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" />
+              </label>
+            ) : null}
+            <label className="block text-sm font-medium text-foreground">
+              Correct value
+              <textarea name="expectedValue" rows={3} className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" />
+            </label>
+          </div>
+        ) : null}
         <label className="block text-sm font-medium text-foreground">
           What should we know?
           <textarea required name="reporterStatement" rows={5} className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" />
@@ -333,51 +480,164 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
                 {isAdmin && ["REPORTED", "INVESTIGATING"].includes(item.status) ? (
                   <div className="mt-3 rounded-md border border-border bg-muted/20 p-3">
                     <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">
-                      Correct the result before confirming
+                      Classify the issue before confirming
                     </p>
-                    <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                    <label className="mt-2 block text-xs font-medium text-foreground">
+                      Issue type
+                      <select
+                        value={feedbackReviewDraft(item).classification}
+                        onChange={(event) => setFeedbackReviewField(item, "classification", event.target.value)}
+                        className="mt-1 w-full rounded-md border border-border bg-background px-2.5 py-2 text-sm"
+                      >
+                        {item.classification === "CHECK_RESULT" ? (
+                          <option value="CHECK_RESULT">Legacy check result — choose a clearer issue type</option>
+                        ) : null}
+                        {GARLAND_FEEDBACK_ISSUE_TYPES.map((issueType) => (
+                          <option key={issueType.value} value={issueType.value}>{issueType.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    {feedbackUsesOrderDecisions(feedbackReviewDraft(item).classification) ? (
+                      <div className="mt-2 grid gap-3 sm:grid-cols-2">
                       <label className="text-xs font-medium text-foreground">
-                        Nemo reported
+                        Nemo&apos;s original order decision
                         <select
-                          value={feedbackOutcomes(item).observedOutcome}
-                          onChange={(event) => setFeedbackOutcome(item, "observedOutcome", event.target.value)}
+                          value={feedbackReviewDraft(item).observedOutcome}
+                          onChange={(event) => setFeedbackReviewField(item, "observedOutcome", event.target.value)}
                           className="mt-1 w-full rounded-md border border-border bg-background px-2.5 py-2 text-sm"
                         >
                           <option value="">Choose</option>
-                          <option>PASS</option>
-                          <option>FAIL</option>
-                          <option>MISSING</option>
-                          <option>PENDING</option>
+                          <option value="PASS">Passed</option>
+                          <option value="FAIL">Failed</option>
+                          <option value="MISSING">Missing in Teamship</option>
+                          <option value="PENDING">Pending/not completed</option>
                         </select>
                       </label>
                       <label className="text-xs font-medium text-foreground">
-                        Expected result
+                        Correct order decision
                         <select
-                          value={feedbackOutcomes(item).expectedOutcome}
-                          onChange={(event) => setFeedbackOutcome(item, "expectedOutcome", event.target.value)}
+                          value={feedbackReviewDraft(item).expectedOutcome}
+                          onChange={(event) => setFeedbackReviewField(item, "expectedOutcome", event.target.value)}
                           className="mt-1 w-full rounded-md border border-border bg-background px-2.5 py-2 text-sm"
                         >
                           <option value="">Choose</option>
-                          <option>PASS</option>
-                          <option>FAIL</option>
-                          <option>MISSING</option>
-                          <option>PENDING</option>
+                          <option value="PASS">Passed</option>
+                          <option value="FAIL">Failed</option>
+                          <option value="MISSING">Missing in Teamship</option>
+                          <option value="PENDING">Pending/not completed</option>
                         </select>
                       </label>
-                    </div>
-                    {feedbackOutcomes(item).observedOutcome &&
-                    feedbackOutcomes(item).observedOutcome === feedbackOutcomes(item).expectedOutcome ? (
+                      </div>
+                    ) : null}
+                    {feedbackUsesFieldValues(feedbackReviewDraft(item).classification) ? (
+                      <div className="mt-3 space-y-3 rounded-md border border-border bg-background p-3">
+                        <label className="block text-xs font-medium text-foreground">
+                          Teamship field affected
+                          <select
+                            value={feedbackReviewDraft(item).affectedField}
+                            onChange={(event) => setFeedbackReviewField(item, "affectedField", event.target.value)}
+                            className="mt-1 w-full rounded-md border border-border bg-background px-2.5 py-2 text-sm"
+                          >
+                            <option value="">Choose</option>
+                            {GARLAND_FEEDBACK_AFFECTED_FIELDS.map((field) => <option key={field}>{field}</option>)}
+                          </select>
+                        </label>
+                        {feedbackReviewDraft(item).classification === "TEAMSHIP_FIELD_UPDATE" ? (
+                          <label className="block text-xs font-medium text-foreground">
+                            Value Nemo wrote
+                            <textarea
+                              value={feedbackReviewDraft(item).actualValue}
+                              onChange={(event) => setFeedbackReviewField(item, "actualValue", event.target.value)}
+                              rows={3}
+                              maxLength={4000}
+                              className="mt-1 w-full rounded-md border border-border bg-background px-2.5 py-2 text-sm"
+                            />
+                          </label>
+                        ) : null}
+                        <label className="block text-xs font-medium text-foreground">
+                          Correct value
+                          <textarea
+                            value={feedbackReviewDraft(item).expectedValue}
+                            onChange={(event) => setFeedbackReviewField(item, "expectedValue", event.target.value)}
+                            rows={3}
+                            maxLength={4000}
+                            className="mt-1 w-full rounded-md border border-border bg-background px-2.5 py-2 text-sm"
+                          />
+                        </label>
+                        <div className="rounded-md border border-border bg-muted/20 p-3">
+                          <p className="text-xs font-semibold text-foreground">Exact Garland source evidence</p>
+                          <p className="mt-1 text-xs text-mutedForeground">
+                            Link the saved check for this PS/SR and attach a screenshot when the page layout explains the failure.
+                          </p>
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void findSavedEvidence(item)}
+                              className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold"
+                            >
+                              Find saved checks
+                            </button>
+                            <label className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-xs font-semibold">
+                              Attach PDF or screenshot
+                              <input
+                                type="file"
+                                accept="application/pdf,image/png,image/jpeg,image/webp"
+                                className="sr-only"
+                                onChange={(event) => {
+                                  void uploadFeedbackEvidence(item, event.target.files?.[0] ?? null);
+                                  event.currentTarget.value = "";
+                                }}
+                              />
+                            </label>
+                          </div>
+                          {(feedbackEvidenceOptions[item.id] ?? []).length > 0 ? (
+                            <label className="mt-2 block text-xs font-medium text-foreground">
+                              Saved Garland check
+                              <select
+                                value={feedbackReviewDraft(item).teamshipReviewOrderId}
+                                onChange={(event) => setFeedbackReviewField(item, "teamshipReviewOrderId", event.target.value)}
+                                className="mt-1 w-full rounded-md border border-border bg-background px-2.5 py-2 text-sm"
+                              >
+                                <option value="">Choose the exact check</option>
+                                {feedbackEvidenceOptions[item.id].map((option) => (
+                                  <option key={option.reviewOrderId} value={option.reviewOrderId}>
+                                    {option.psNumber} / {option.srNumber} · {option.shipmentDate} · {option.status}
+                                    {option.hasStoredSourcePdf
+                                      ? " · source PDF saved"
+                                      : option.hasSavedEmailPdf
+                                        ? " · original email PDF available"
+                                        : " · attach screenshot/PDF"}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          ) : null}
+                          <p className="mt-2 text-xs text-mutedForeground">
+                            Saved check: {item.teamshipReviewOrderId ? "linked" : "not linked"} · Supporting file: {item.artifactId ? "attached" : "not attached"}
+                          </p>
+                        </div>
+                      </div>
+                    ) : null}
+                    {feedbackUsesOrderDecisions(feedbackReviewDraft(item).classification) &&
+                    feedbackReviewDraft(item).observedOutcome &&
+                    feedbackReviewDraft(item).observedOutcome === feedbackReviewDraft(item).expectedOutcome ? (
                       <p className="mt-2 text-xs font-semibold text-destructive">
-                        These results are the same. Correct one before confirming this as a development issue.
+                        These decisions are the same. Use a field-update or workflow issue type if Nemo&apos;s order decision was correct.
+                      </p>
+                    ) : null}
+                    {feedbackRequiresSourceEvidence(feedbackReviewDraft(item).classification) ? (
+                      <p className="mt-2 text-xs text-mutedForeground">
+                        Rivet will not start this field-update issue until the exact saved check and source PDF or supporting screenshot are attached.
                       </p>
                     ) : null}
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         disabled={busy}
-                        onClick={() => void saveFeedbackOutcomes(item)}
+                        onClick={() => void saveFeedbackReviewFields(item)}
                         className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold"
                       >
-                        Save result changes
+                        Save review details
                       </button>
                       <button
                         disabled={busy}
@@ -396,9 +656,12 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
                     </div>
                   </div>
                 ) : (
-                  <p className="mt-2 text-xs text-mutedForeground">
-                    Observed: {item.observedOutcome || "not supplied"} · Expected: {item.expectedOutcome || "not supplied"} · {new Date(item.createdAt).toLocaleString()}
-                  </p>
+                  <div className="mt-2 text-xs text-mutedForeground">
+                    <p>{describeFeedbackIssueType(item.classification)} · {new Date(item.createdAt).toLocaleString()}</p>
+                    {feedbackUsesOrderDecisions(item.classification) ? (
+                      <p>Original decision: {item.observedOutcome || "not supplied"} · Correct decision: {item.expectedOutcome || "not supplied"}</p>
+                    ) : null}
+                  </div>
                 )}
                 {isAdmin && item.status === "CONFIRMED" ? <div className="mt-4 space-y-2 border-t border-border pt-3"><p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Optional approved memory</p><input value={lessonDrafts[item.id]?.title ?? ""} onChange={(event) => setLessonDrafts((current) => ({ ...current, [item.id]: { title: event.target.value, ruleText: current[item.id]?.ruleText ?? "" } }))} className="w-full rounded-md border border-border px-3 py-2 text-sm" placeholder="Lesson title" /><textarea value={lessonDrafts[item.id]?.ruleText ?? ""} onChange={(event) => setLessonDrafts((current) => ({ ...current, [item.id]: { title: current[item.id]?.title ?? "", ruleText: event.target.value } }))} className="w-full rounded-md border border-border px-3 py-2 text-sm" rows={3} placeholder="Exact approved rule Nemo may use" /><button disabled={busy} onClick={() => void promoteLesson(item.id)} className="rounded-md border border-primary px-3 py-1.5 text-xs font-semibold text-primary">Approve as Nemo lesson</button></div> : null}
               </article>
@@ -413,6 +676,10 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
                 <h2 className="text-lg font-semibold text-foreground">Development suggestions</h2>
                 <p className="mt-1 text-sm text-mutedForeground">
                   Similar feedback is grouped first. Rivet builds a draft PR, independently reviews the exact commit, and only marks a passing result ready for you.
+                </p>
+                <p className="mt-2 rounded-md border border-border bg-muted/20 p-2 text-xs text-foreground">
+                  To send Rivet extra instructions: confirm the feedback, select <strong>Refresh queue</strong>, then use the
+                  clearly labelled <strong>Your instructions for Rivet</strong> box on the awaiting-approval suggestion before starting it.
                 </p>
               </div>
               <button disabled={busy} onClick={() => void generateSuggestions()} className="rounded-md border border-border px-3 py-2 text-sm font-semibold">
@@ -459,8 +726,22 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
                               {feedbackItem.reporterStatement}
                             </p>
                             <p className="mt-2 text-xs text-mutedForeground">
-                              Observed: {feedbackItem.observedOutcome || "not supplied"} · Expected: {feedbackItem.expectedOutcome || "not supplied"} · {new Date(feedbackItem.createdAt).toLocaleString()}
+                              {describeFeedbackIssueType(feedbackItem.classification)}
+                              {feedbackUsesOrderDecisions(feedbackItem.classification)
+                                ? ` · Original: ${feedbackItem.observedOutcome || "not supplied"} · Correct: ${feedbackItem.expectedOutcome || "not supplied"}`
+                                : ""}
+                              {" · "}{new Date(feedbackItem.createdAt).toLocaleString()}
                             </p>
+                            {feedbackRequiresSourceEvidence(feedbackItem.classification) ? (
+                              <p className={`mt-1 text-xs font-semibold ${
+                                feedbackItem.teamshipReviewOrderId && feedbackItem.artifactId
+                                  ? "text-foreground"
+                                  : "text-destructive"
+                              }`}>
+                                Exact evidence: {feedbackItem.teamshipReviewOrderId ? "saved check linked" : "saved check missing"}
+                                {" · "}{feedbackItem.artifactId ? "source file attached" : "source file missing"}
+                              </p>
+                            ) : null}
                           </div>
                         ))}
                       </div>
@@ -503,9 +784,9 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
                     </p>
                   ) : null}
                   {item.status === "AWAITING_APPROVAL" ? (
-                    <div className="mt-3 rounded-md border border-border bg-muted/20 p-3">
-                      <label className="block text-xs font-semibold uppercase tracking-wide text-mutedForeground">
-                        Additional comments for Rivet
+                    <div className="mt-3 rounded-md border-2 border-primary/40 bg-primary/5 p-3">
+                      <label className="block text-sm font-semibold text-foreground">
+                        Your instructions for Rivet
                         <textarea
                           value={suggestionNotes[item.id] ?? ""}
                           onChange={(event) => setSuggestionNotes((current) => ({
@@ -514,12 +795,12 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
                           }))}
                           rows={4}
                           maxLength={4000}
-                          className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm font-normal normal-case tracking-normal text-foreground"
-                          placeholder="Add corrections, source-document context, or exact behaviour Rivet must preserve."
+                          className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm font-normal text-foreground"
+                          placeholder="Add corrections, business context, or exact behaviour Rivet must preserve before you approve this suggestion."
                         />
                       </label>
                       <p className="mt-1 text-xs text-mutedForeground">
-                        These comments are stored with the approval and included in Rivet&apos;s approved development packet.
+                        Optional. These instructions are stored with your approval, included in Rivet&apos;s immutable development packet, and shown here afterward.
                       </p>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <button disabled={busy} onClick={() => void decideSuggestion(item.id, "APPROVED")} className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground">

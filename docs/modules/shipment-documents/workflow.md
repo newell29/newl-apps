@@ -21,7 +21,8 @@ Shipment documents and Garland Teamship review is documented because code, route
 - Phase 1 does not update Teamship or print. Existing update and print paths retain their separate approval requirements.
 - CSRs can ask why the latest saved PS/SR check failed. The explanation uses the saved deterministic per-field comparison and may additionally show active admin-approved lessons.
 - CSRs can report that a result should have passed or failed. The report is not treated as true until reviewed.
-- Administrators can expand the complete report, correct its observed/expected result fields, and add bounded comments for Rivet. Only confirmed reports enter development grouping; malformed or identical outcome pairs cannot be approved into a Garland development packet.
+- Administrators can expand the complete report and select the issue type. Incorrect order decisions use original/correct decision fields. Incorrect or missing Teamship updates use affected-field and actual/correct-value fields and require the exact saved PS/SR review plus source PDF or supporting screenshot before confirmation. When the review came from a saved Garland email, Newl Apps automatically retrieves the original attachment from Microsoft Graph, verifies its stored hash, and caches it as the review artifact; the employee does not need to re-attach that PDF.
+- After confirmation and a queue refresh, the grouped `AWAITING_APPROVAL` card exposes **Your instructions for Rivet**. These comments and the exact evidence manifest are frozen into the approved packet. Only confirmed reports enter development grouping.
 - A saved Garland carrier-manifest run can retain multiple completed PDF attachments. Employees can add another PDF after the first signed/completed copy has been uploaded; older single signed-copy files remain available alongside newer attachments.
 
 ## Data model

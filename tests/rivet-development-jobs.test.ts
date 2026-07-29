@@ -1,4 +1,7 @@
+import { createHash } from "node:crypto";
+
 import { JobStatus } from "@prisma/client";
+import { PDFDocument } from "pdf-lib";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const prismaMock = vi.hoisted(() => ({
@@ -11,6 +14,12 @@ const prismaMock = vi.hoisted(() => ({
   },
   developmentSuggestion: {
     updateMany: vi.fn()
+  },
+  teamshipReviewOrder: {
+    findFirst: vi.fn()
+  },
+  workflowArtifact: {
+    findFirst: vi.fn()
   },
   codexReviewRun: {
     create: vi.fn()
@@ -26,6 +35,7 @@ vi.mock("@/server/db", () => ({ prisma: prismaMock }));
 import {
   claimRivetDevelopmentJob,
   createRivetDevelopmentJob,
+  getRivetDevelopmentEvidence,
   RIVET_DEVELOPMENT_JOB_TYPE,
   updateRivetDevelopmentJob
 } from "@/modules/assistant/rivet-development-jobs";
@@ -78,7 +88,7 @@ const storedInput = {
 
 describe("Rivet approved development jobs", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
     prismaMock.codexReviewRun.create.mockResolvedValue({ id: "review-1" });
   });
@@ -144,6 +154,188 @@ describe("Rivet approved development jobs", () => {
         })
       })
     });
+  });
+
+  it("includes the exact saved Garland review and source-PDF pages in a field-update packet", async () => {
+    prismaMock.teamshipReviewOrder.findFirst.mockResolvedValue({
+      id: "review-order-1",
+      runId: "review-run-1",
+      psNumber: "PS123456",
+      srNumber: "SR812345",
+      pageNumbers: [2, 3],
+      pdfOrder: { psNumber: "PS123456", srNumber: "SR812345" },
+      review: { status: "FAIL", fields: [{ key: "commodity", status: "DISCREPANCY" }] }
+    });
+    prismaMock.workflowArtifact.findFirst.mockResolvedValue({
+      id: "source-pdf-1",
+      status: "REVIEWED",
+      contentType: "application/pdf",
+      sizeBytes: 1234,
+      contentHash: "a".repeat(64),
+      teamshipReviewRunId: "review-run-1",
+      extractionSummary: null
+    });
+    prismaMock.automationJobRun.create.mockImplementation(async ({ data }) => ({
+      id: "job-1",
+      ...data,
+      errorMessage: null
+    }));
+
+    await createRivetDevelopmentJob(
+      prismaMock as never,
+      context,
+      {
+        id: "suggestion-1",
+        moduleKey: "SHIPMENT_DOCUMENTS",
+        workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+        title: "Correct Garland commodity formatting",
+        summary: "A commodity value was written incorrectly.",
+        rationale: "Confirmed against the saved review.",
+        riskLevel: "HIGH",
+        sourceFeedbackIds: ["feedback-1"],
+        proposedScope: { issueKey: "GARLAND_COMMODITY_FORMATTING" }
+      },
+      [{
+        id: "feedback-1",
+        moduleKey: "SHIPMENT_DOCUMENTS",
+        workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+        classification: "TEAMSHIP_FIELD_UPDATE",
+        subjectType: "GARLAND_CHECK",
+        subjectId: "PS123456",
+        reporterStatement: "The commodity value is wrong.",
+        expectedOutcome: "PASS",
+        observedOutcome: "PASS",
+        teamshipReviewRunId: "review-run-1",
+        teamshipReviewOrderId: "review-order-1",
+        artifactId: null,
+        evidence: {
+          affectedField: "COMMODITY",
+          actualValue: "SKU: SAMPLE-1, SN: SAMPLE-1",
+          expectedValue: "SKU: SAMPLE-1, Qty: 8"
+        }
+      }]
+    );
+
+    const packet = prismaMock.automationJobRun.create.mock.calls[0]?.[0]?.data?.input;
+    expect(packet).toEqual(expect.objectContaining({
+      version: 2,
+      evidenceManifests: [{
+        feedbackId: "feedback-1",
+        subjectId: "PS123456",
+        issueType: "TEAMSHIP_FIELD_UPDATE",
+        evidenceRequired: true,
+        evidenceStatus: "READY",
+        structuredFeedback: {
+          affectedField: "COMMODITY",
+          actualValue: "SKU: SAMPLE-1, SN: SAMPLE-1",
+          expectedValue: "SKU: SAMPLE-1, Qty: 8"
+        },
+        reviewOrder: expect.objectContaining({
+          id: "review-order-1",
+          runId: "review-run-1",
+          pageNumbers: [2, 3]
+        }),
+        artifacts: [expect.objectContaining({
+          artifactId: "source-pdf-1",
+          kind: "SOURCE_PDF",
+          pageNumbers: [2, 3]
+        })]
+      }]
+    }));
+  });
+
+  it("serves only the approved PDF pages under the active tenant-scoped lease", async () => {
+    const sourcePdf = await PDFDocument.create();
+    sourcePdf.addPage();
+    sourcePdf.addPage();
+    sourcePdf.addPage();
+    const sourceBytes = await sourcePdf.save();
+    const sourceHash = createHash("sha256").update(sourceBytes).digest("hex");
+    const leaseToken = "lease-token-with-enough-entropy";
+    const leaseHash = createHash("sha256").update(leaseToken).digest("hex");
+    prismaMock.automationJobRun.findFirst.mockResolvedValue({
+      id: "job-1",
+      input: {
+        ...storedInput,
+        version: 2,
+        evidenceManifests: [{
+          feedbackId: "feedback-1",
+          subjectId: "PS123456",
+          issueType: "TEAMSHIP_FIELD_UPDATE",
+          evidenceRequired: true,
+          evidenceStatus: "READY",
+          structuredFeedback: {
+            affectedField: "COMMODITY",
+            actualValue: "incorrect",
+            expectedValue: "correct"
+          },
+          reviewOrder: {
+            id: "review-order-1",
+            runId: "review-run-1",
+            psNumber: "PS123456",
+            srNumber: "SR812345",
+            pageNumbers: [2],
+            pdfOrder: {},
+            review: {}
+          },
+          artifacts: [{
+            artifactId: "source-pdf-1",
+            kind: "SOURCE_PDF",
+            contentType: "application/pdf",
+            sizeBytes: sourceBytes.byteLength,
+            contentHash: sourceHash,
+            pageNumbers: [2],
+            downloadPath: "/api/assistant/openclaw/development-jobs/evidence"
+          }]
+        }]
+      },
+      output: {
+        phase: "CLAIMED",
+        leaseTokenHash: leaseHash,
+        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString()
+      }
+    });
+    prismaMock.workflowArtifact.findFirst.mockResolvedValue({
+      id: "source-pdf-1",
+      workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+      status: "REVIEWED",
+      contentType: "application/pdf",
+      sizeBytes: sourceBytes.byteLength,
+      contentHash: sourceHash,
+      chunkCount: 1,
+      chunks: [{
+        chunkIndex: 0,
+        contentHash: sourceHash,
+        bytes: Buffer.from(sourceBytes)
+      }]
+    });
+
+    const result = await getRivetDevelopmentEvidence(context, {
+      jobId: "job-1",
+      feedbackId: "feedback-1",
+      artifactId: "source-pdf-1",
+      leaseToken
+    });
+    const selected = await PDFDocument.load(result.bytes);
+
+    expect(selected.getPageCount()).toBe(1);
+    expect(result.contentType).toBe("application/pdf");
+    expect(result.contentHash).not.toBe(sourceHash);
+    expect(prismaMock.workflowArtifact.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId: "tenant-1",
+          id: "source-pdf-1"
+        })
+      })
+    );
+    expect(prismaMock.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "assistant.rivet_development.read_evidence"
+        })
+      })
+    );
   });
 
   it("refuses a sibling job while the same workflow has active or blocked Rivet work", async () => {

@@ -6,6 +6,13 @@ import {
   isNonActionableDevelopmentFeedback,
   type DevelopmentFeedbackCandidate
 } from "@/modules/assistant/development-issue-grouping";
+import {
+  feedbackRequiresSourceEvidence,
+  feedbackUsesFieldValues,
+  feedbackUsesOrderDecisions,
+  isGarlandFeedbackIssueType
+} from "@/modules/assistant/feedback-review-fields";
+import { ensureGarlandFeedbackReviewSourceArtifact } from "@/modules/assistant/operational-feedback-evidence";
 import { GARLAND_WORKFLOW_KEY } from "@/modules/assistant/garland-artifacts";
 import {
   createRivetDevelopmentJob,
@@ -121,6 +128,8 @@ export async function createOperationalFeedback(
   const workflowKey = normalizeRequiredText(input.workflowKey || GARLAND_WORKFLOW_KEY, "workflowKey", 100);
   const subjectType = normalizeRequiredText(input.subjectType, "subjectType", 100);
   const subjectId = normalizeOptionalText(input.subjectId, 200);
+  const classification = normalizeClassification(input.classification);
+  const evidence = normalizeFeedbackEvidence(input.evidence, classification);
 
   await validateFeedbackReferences(context.tenantId, input);
 
@@ -139,8 +148,8 @@ export async function createOperationalFeedback(
         reporterStatement: statement,
         expectedOutcome: normalizeFeedbackOutcome(input.expectedOutcome, "expectedOutcome"),
         observedOutcome: normalizeFeedbackOutcome(input.observedOutcome, "observedOutcome"),
-        classification: normalizeClassification(input.classification),
-        evidence: input.evidence ?? Prisma.JsonNull
+        classification,
+        evidence
       },
       select: feedbackSelect
     });
@@ -190,6 +199,10 @@ export async function reviewOperationalFeedback(
     resolutionNotes?: string | null;
     expectedOutcome?: string | null;
     observedOutcome?: string | null;
+    classification?: string | null;
+    evidence?: Prisma.InputJsonValue | null;
+    teamshipReviewOrderId?: string | null;
+    artifactId?: string | null;
   }
 ) {
   const status = input.status.trim().toUpperCase();
@@ -201,32 +214,41 @@ export async function reviewOperationalFeedback(
     select: {
       id: true,
       workflowKey: true,
+      subjectId: true,
       classification: true,
       status: true,
       expectedOutcome: true,
       observedOutcome: true,
+      evidence: true,
+      teamshipReviewRunId: true,
+      teamshipReviewOrderId: true,
+      artifactId: true,
       resolutionNotes: true
     }
   });
   if (!existing) throw new OperationalMemoryError("Feedback was not found.", 404);
 
   const resolutionNotes = normalizeOptionalText(input.resolutionNotes, 4000);
-  const expectedOutcome = input.expectedOutcome === undefined
-    ? existing.expectedOutcome
-    : normalizeFeedbackOutcome(input.expectedOutcome, "expectedOutcome");
-  const observedOutcome = input.observedOutcome === undefined
-    ? existing.observedOutcome
-    : normalizeFeedbackOutcome(input.observedOutcome, "observedOutcome");
+  const changes = await resolveOperationalFeedbackReviewChanges(
+    context,
+    existing,
+    input
+  );
   if (status === "CONFIRMED") {
-    validateConfirmedFeedbackOutcomes(existing, observedOutcome, expectedOutcome);
+    validateConfirmedFeedback(existing.workflowKey, changes);
   }
   return prisma.$transaction(async (tx) => {
     const feedback = await tx.operationalFeedback.update({
       where: { tenantId_id: { tenantId: context.tenantId, id: feedbackId } },
       data: {
         status,
-        expectedOutcome,
-        observedOutcome,
+        expectedOutcome: changes.expectedOutcome,
+        observedOutcome: changes.observedOutcome,
+        classification: changes.classification,
+        evidence: changes.evidence,
+        teamshipReviewRunId: changes.teamshipReviewRunId,
+        teamshipReviewOrderId: changes.teamshipReviewOrderId,
+        artifactId: changes.artifactId,
         resolutionNotes,
         reviewedByUserId: context.userId,
         reviewedAt: new Date()
@@ -244,12 +266,20 @@ export async function reviewOperationalFeedback(
           status: existing.status,
           expectedOutcome: existing.expectedOutcome,
           observedOutcome: existing.observedOutcome,
+          classification: existing.classification,
+          teamshipReviewRunId: existing.teamshipReviewRunId,
+          teamshipReviewOrderId: existing.teamshipReviewOrderId,
+          artifactId: existing.artifactId,
           resolutionNotes: existing.resolutionNotes
         } satisfies Prisma.InputJsonValue,
         after: {
           status,
-          expectedOutcome,
-          observedOutcome,
+          expectedOutcome: changes.expectedOutcome,
+          observedOutcome: changes.observedOutcome,
+          classification: changes.classification,
+          teamshipReviewRunId: changes.teamshipReviewRunId,
+          teamshipReviewOrderId: changes.teamshipReviewOrderId,
+          artifactId: changes.artifactId,
           resolutionNotes
         } satisfies Prisma.InputJsonValue
       }
@@ -264,34 +294,45 @@ export async function updateOperationalFeedbackReviewFields(
   input: {
     expectedOutcome?: string | null;
     observedOutcome?: string | null;
+    classification?: string | null;
+    evidence?: Prisma.InputJsonValue | null;
+    teamshipReviewOrderId?: string | null;
+    artifactId?: string | null;
   }
 ) {
   const existing = await prisma.operationalFeedback.findFirst({
     where: { tenantId: context.tenantId, id: feedbackId },
     select: {
       id: true,
+      workflowKey: true,
+      subjectId: true,
       status: true,
       expectedOutcome: true,
-      observedOutcome: true
+      observedOutcome: true,
+      classification: true,
+      evidence: true,
+      teamshipReviewRunId: true,
+      teamshipReviewOrderId: true,
+      artifactId: true
     }
   });
   if (!existing) throw new OperationalMemoryError("Feedback was not found.", 404);
   if (!new Set(["REPORTED", "INVESTIGATING"]).has(existing.status)) {
     throw new OperationalMemoryError("Only pending feedback can be corrected before review.", 409);
   }
-  const expectedOutcome = input.expectedOutcome === undefined
-    ? existing.expectedOutcome
-    : normalizeFeedbackOutcome(input.expectedOutcome, "expectedOutcome");
-  const observedOutcome = input.observedOutcome === undefined
-    ? existing.observedOutcome
-    : normalizeFeedbackOutcome(input.observedOutcome, "observedOutcome");
+  const changes = await resolveOperationalFeedbackReviewChanges(context, existing, input);
 
   return prisma.$transaction(async (tx) => {
     const feedback = await tx.operationalFeedback.update({
       where: { tenantId_id: { tenantId: context.tenantId, id: feedbackId } },
       data: {
-        expectedOutcome,
-        observedOutcome
+        expectedOutcome: changes.expectedOutcome,
+        observedOutcome: changes.observedOutcome,
+        classification: changes.classification,
+        evidence: changes.evidence,
+        teamshipReviewRunId: changes.teamshipReviewRunId,
+        teamshipReviewOrderId: changes.teamshipReviewOrderId,
+        artifactId: changes.artifactId
       },
       select: feedbackSelect
     });
@@ -304,11 +345,19 @@ export async function updateOperationalFeedbackReviewFields(
         entityId: feedbackId,
         before: {
           expectedOutcome: existing.expectedOutcome,
-          observedOutcome: existing.observedOutcome
+          observedOutcome: existing.observedOutcome,
+          classification: existing.classification,
+          teamshipReviewRunId: existing.teamshipReviewRunId,
+          teamshipReviewOrderId: existing.teamshipReviewOrderId,
+          artifactId: existing.artifactId
         } satisfies Prisma.InputJsonValue,
         after: {
-          expectedOutcome,
-          observedOutcome
+          expectedOutcome: changes.expectedOutcome,
+          observedOutcome: changes.observedOutcome,
+          classification: changes.classification,
+          teamshipReviewRunId: changes.teamshipReviewRunId,
+          teamshipReviewOrderId: changes.teamshipReviewOrderId,
+          artifactId: changes.artifactId
         } satisfies Prisma.InputJsonValue
       }
     });
@@ -591,6 +640,10 @@ export async function listDevelopmentSuggestions(context: AuthenticatedContext, 
           expectedOutcome: true,
           observedOutcome: true,
           classification: true,
+          evidence: true,
+          teamshipReviewRunId: true,
+          teamshipReviewOrderId: true,
+          artifactId: true,
           status: true,
           createdAt: true
         }
@@ -665,6 +718,10 @@ export async function decideDevelopmentSuggestion(
           reporterStatement: true,
           expectedOutcome: true,
           observedOutcome: true,
+          evidence: true,
+          teamshipReviewRunId: true,
+          teamshipReviewOrderId: true,
+          artifactId: true,
           status: true
         }
       })
@@ -779,7 +836,11 @@ export async function retryRivetDevelopmentSuggestion(
       subjectId: true,
       reporterStatement: true,
       expectedOutcome: true,
-      observedOutcome: true
+      observedOutcome: true,
+      evidence: true,
+      teamshipReviewRunId: true,
+      teamshipReviewOrderId: true,
+      artifactId: true
     }
   });
 
@@ -944,6 +1005,7 @@ const feedbackSelect = {
   expectedOutcome: true,
   observedOutcome: true,
   classification: true,
+  evidence: true,
   status: true,
   resolutionNotes: true,
   reviewedByUserId: true,
@@ -1006,28 +1068,241 @@ function normalizeFeedbackOutcome(value: string | null | undefined, field: strin
   return normalized;
 }
 
-function validateConfirmedFeedbackOutcomes(
-  feedback: {
-    workflowKey: string;
-    classification: string;
-  },
-  observedOutcome: string | null,
-  expectedOutcome: string | null
+type OperationalFeedbackReviewRecord = {
+  id: string;
+  workflowKey: string;
+  subjectId: string | null;
+  classification: string;
+  expectedOutcome: string | null;
+  observedOutcome: string | null;
+  evidence: Prisma.JsonValue | null;
+  teamshipReviewRunId: string | null;
+  teamshipReviewOrderId: string | null;
+  artifactId: string | null;
+};
+
+type OperationalFeedbackReviewChanges = {
+  classification: string;
+  expectedOutcome: string | null;
+  observedOutcome: string | null;
+  evidence: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput;
+  teamshipReviewRunId: string | null;
+  teamshipReviewOrderId: string | null;
+  artifactId: string | null;
+};
+
+async function resolveOperationalFeedbackReviewChanges(
+  context: Pick<AuthenticatedContext, "tenantId" | "userId">,
+  existing: OperationalFeedbackReviewRecord,
+  input: {
+    classification?: string | null;
+    expectedOutcome?: string | null;
+    observedOutcome?: string | null;
+    evidence?: Prisma.InputJsonValue | null;
+    teamshipReviewOrderId?: string | null;
+    artifactId?: string | null;
+  }
+): Promise<OperationalFeedbackReviewChanges> {
+  const classification = input.classification === undefined
+    ? existing.classification
+    : normalizeClassification(input.classification);
+  const expectedOutcome = input.expectedOutcome === undefined
+    ? existing.expectedOutcome
+    : normalizeFeedbackOutcome(input.expectedOutcome, "expectedOutcome");
+  const observedOutcome = input.observedOutcome === undefined
+    ? existing.observedOutcome
+    : normalizeFeedbackOutcome(input.observedOutcome, "observedOutcome");
+  const evidence = input.evidence === undefined
+    ? normalizeFeedbackEvidence(existing.evidence, classification)
+    : normalizeFeedbackEvidence(input.evidence, classification);
+  const reviewOrderId = input.teamshipReviewOrderId === undefined
+    ? existing.teamshipReviewOrderId
+    : normalizeOptionalText(input.teamshipReviewOrderId, 100);
+  let reviewRunId = reviewOrderId ? existing.teamshipReviewRunId : null;
+  let artifactId = input.artifactId === undefined
+    ? existing.artifactId
+    : normalizeOptionalText(input.artifactId, 100);
+
+  let reviewOrder: {
+    id: string;
+    runId: string;
+    psNumber: string;
+    srNumber: string;
+  } | null = null;
+  if (reviewOrderId) {
+    reviewOrder = await prisma.teamshipReviewOrder.findFirst({
+      where: {
+        tenantId: context.tenantId,
+        id: reviewOrderId,
+        run: { deletedAt: null }
+      },
+      select: {
+        id: true,
+        runId: true,
+        psNumber: true,
+        srNumber: true
+      }
+    });
+    if (!reviewOrder) {
+      throw new OperationalMemoryError("The selected Garland review evidence was not found.", 404);
+    }
+    const subject = existing.subjectId?.trim().toUpperCase() ?? null;
+    if (subject && subject !== reviewOrder.psNumber && subject !== reviewOrder.srNumber) {
+      throw new OperationalMemoryError(
+        "The selected Garland review does not match this feedback PS or SR number.",
+        409
+      );
+    }
+    reviewRunId = reviewOrder.runId;
+  }
+
+  let artifact: {
+    id: string;
+    status: string;
+    teamshipReviewRunId: string | null;
+    extractionSummary: Prisma.JsonValue | null;
+  } | null = null;
+  if (artifactId) {
+    artifact = await prisma.workflowArtifact.findFirst({
+      where: {
+        tenantId: context.tenantId,
+        id: artifactId,
+        workflowKey: GARLAND_WORKFLOW_KEY,
+        status: { in: ["REVIEWED", "EVIDENCE_READY"] }
+      },
+      select: {
+        id: true,
+        status: true,
+        teamshipReviewRunId: true,
+        extractionSummary: true
+      }
+    });
+    if (!artifact) {
+      throw new OperationalMemoryError("The selected Garland source evidence was not found.", 404);
+    }
+    const summary = readJsonRecord(artifact.extractionSummary);
+    if (
+      artifact.status === "EVIDENCE_READY" &&
+      summary.purpose === "RIVET_FEEDBACK_EVIDENCE" &&
+      summary.feedbackId !== existing.id
+    ) {
+      throw new OperationalMemoryError("The uploaded evidence belongs to different feedback.", 409);
+    }
+    if (
+      artifact.status === "REVIEWED" &&
+      reviewRunId &&
+      artifact.teamshipReviewRunId !== reviewRunId
+    ) {
+      artifactId = null;
+      artifact = null;
+    }
+  }
+
+  if (reviewRunId && !artifactId) {
+    const sourceArtifact = reviewOrderId
+      ? await ensureGarlandFeedbackReviewSourceArtifact(context, reviewOrderId)
+      : null;
+    artifactId = sourceArtifact?.id ?? null;
+  }
+
+  return {
+    classification,
+    expectedOutcome,
+    observedOutcome,
+    evidence,
+    teamshipReviewRunId: reviewRunId,
+    teamshipReviewOrderId: reviewOrder?.id ?? reviewOrderId,
+    artifactId
+  };
+}
+
+function validateConfirmedFeedback(
+  workflowKey: string,
+  changes: OperationalFeedbackReviewChanges
 ) {
+  if (workflowKey !== GARLAND_WORKFLOW_KEY) return;
+  if (changes.classification === "CHECK_RESULT") {
+    throw new OperationalMemoryError(
+      "Choose a clearer issue type before confirming this legacy Garland feedback."
+    );
+  }
+  if (feedbackUsesOrderDecisions(changes.classification)) {
+    if (!changes.observedOutcome || !changes.expectedOutcome) {
+      throw new OperationalMemoryError(
+        "Choose both Nemo's original order decision and the correct order decision."
+      );
+    }
+    if (changes.observedOutcome === changes.expectedOutcome) {
+      throw new OperationalMemoryError(
+        "The original and correct order decisions must differ for an incorrect order-decision issue."
+      );
+    }
+  }
   if (
-    feedback.workflowKey !== GARLAND_WORKFLOW_KEY ||
-    feedback.classification !== "CHECK_RESULT"
-  ) return;
-  if (!observedOutcome || !expectedOutcome) {
+    feedbackRequiresSourceEvidence(changes.classification) &&
+    (!changes.teamshipReviewOrderId || !changes.artifactId)
+  ) {
     throw new OperationalMemoryError(
-      "Choose both what Nemo reported and the expected result before confirming Garland feedback."
+      "Link the exact saved Garland review and attach its source PDF or a supporting screenshot before confirming this field-update issue."
     );
   }
-  if (observedOutcome === expectedOutcome) {
-    throw new OperationalMemoryError(
-      "Nemo reported and Expected result must differ before this Garland feedback can be confirmed."
-    );
+}
+
+function normalizeFeedbackEvidence(
+  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
+  classification: string
+): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput {
+  if (!isGarlandFeedbackIssueType(classification)) {
+    return value === null || value === undefined
+      ? Prisma.JsonNull
+      : value as Prisma.InputJsonValue;
   }
+  const record = readJsonRecord(value);
+  const affectedField = normalizeOptionalText(
+    typeof record.affectedField === "string" ? record.affectedField : null,
+    200
+  );
+  const actualValue = normalizeOptionalText(
+    typeof record.actualValue === "string" ? record.actualValue : null,
+    4000
+  );
+  const expectedValue = normalizeOptionalText(
+    typeof record.expectedValue === "string" ? record.expectedValue : null,
+    4000
+  );
+  if (feedbackUsesFieldValues(classification) && !affectedField) {
+    throw new OperationalMemoryError("Choose the Teamship field affected by this issue.");
+  }
+  if (classification === "TEAMSHIP_FIELD_UPDATE" && (!actualValue || !expectedValue)) {
+    throw new OperationalMemoryError("Provide both the value Nemo wrote and the correct value.");
+  }
+  if (classification === "MISSING_TEAMSHIP_UPDATE" && !expectedValue) {
+    throw new OperationalMemoryError("Provide the value Nemo should have written.");
+  }
+  if (
+    classification === "TEAMSHIP_FIELD_UPDATE" &&
+    actualValue &&
+    expectedValue &&
+    normalizeComparedFeedbackValue(actualValue) === normalizeComparedFeedbackValue(expectedValue)
+  ) {
+    throw new OperationalMemoryError("The value Nemo wrote and the correct value must differ.");
+  }
+  return {
+    issueType: classification,
+    affectedField,
+    actualValue,
+    expectedValue
+  } satisfies Prisma.InputJsonValue;
+}
+
+function normalizeComparedFeedbackValue(value: string) {
+  return value.toUpperCase().replace(/\s+/g, " ").trim();
+}
+
+function readJsonRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }
 
 function normalizeClassification(value?: string | null) {

@@ -1,12 +1,15 @@
 import crypto from "node:crypto";
 
 import { JobStatus, type Prisma } from "@prisma/client";
+import { PDFDocument } from "pdf-lib";
 
 import {
   describeDevelopmentIssue,
   getDevelopmentContextPaths,
   type DevelopmentFeedbackCandidate
 } from "@/modules/assistant/development-issue-grouping";
+import { feedbackRequiresSourceEvidence } from "@/modules/assistant/feedback-review-fields";
+import { GARLAND_WORKFLOW_KEY } from "@/modules/assistant/garland-artifacts";
 import { prisma } from "@/server/db";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 
@@ -50,10 +53,14 @@ type DevelopmentSuggestionForJob = {
 type SourceFeedbackForJob = DevelopmentFeedbackCandidate & {
   subjectType: string;
   subjectId: string | null;
+  teamshipReviewRunId?: string | null;
+  teamshipReviewOrderId?: string | null;
+  artifactId?: string | null;
+  evidence?: Prisma.JsonValue | null;
 };
 
 type RivetJobInput = {
-  version: 1;
+  version: 1 | 2;
   suggestionId: string;
   approvedByUserId: string;
   moduleKey: string;
@@ -79,8 +86,40 @@ type RivetJobInput = {
     expectedOutcome: string | null;
     observedOutcome: string | null;
   }>;
+  evidenceManifests: RivetEvidenceManifest[];
   allowedActions: string[];
   forbiddenActions: string[];
+};
+
+type RivetEvidenceManifest = {
+  feedbackId: string;
+  subjectId: string | null;
+  issueType: string;
+  evidenceRequired: boolean;
+  evidenceStatus: "READY" | "NOT_REQUIRED" | "MISSING";
+  structuredFeedback: {
+    affectedField: string | null;
+    actualValue: string | null;
+    expectedValue: string | null;
+  };
+  reviewOrder: {
+    id: string;
+    runId: string;
+    psNumber: string;
+    srNumber: string;
+    pageNumbers: number[];
+    pdfOrder: Prisma.JsonValue;
+    review: Prisma.JsonValue;
+  } | null;
+  artifacts: Array<{
+    artifactId: string;
+    kind: "SOURCE_PDF" | "REVIEWER_ATTACHMENT";
+    contentType: string;
+    sizeBytes: number;
+    contentHash: string;
+    pageNumbers: number[];
+    downloadPath: string;
+  }>;
 };
 
 type RivetJobOutput = {
@@ -155,8 +194,13 @@ export async function createRivetDevelopmentJob(
       409
     );
   }
+  const evidenceManifests = await buildRivetEvidenceManifests(
+    tx,
+    context.tenantId,
+    sourceFeedback
+  );
   const input: RivetJobInput = {
-    version: 1,
+    version: 2,
     suggestionId: suggestion.id,
     approvedByUserId: context.userId,
     moduleKey: suggestion.moduleKey,
@@ -182,6 +226,7 @@ export async function createRivetDevelopmentJob(
       expectedOutcome: item.expectedOutcome ?? null,
       observedOutcome: item.observedOutcome ?? null
     })),
+    evidenceManifests,
     allowedActions: [
       "READ_REQUIRED_CONTEXT",
       "EDIT_ISOLATED_BRANCH",
@@ -213,6 +258,176 @@ export async function createRivetDevelopmentJob(
       output: { phase: "QUEUED", attempt: 0 }
     }
   });
+}
+
+async function buildRivetEvidenceManifests(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  feedback: SourceFeedbackForJob[]
+): Promise<RivetEvidenceManifest[]> {
+  const manifests: RivetEvidenceManifest[] = [];
+  for (const item of feedback) {
+    const evidenceRequired =
+      item.workflowKey === GARLAND_WORKFLOW_KEY &&
+      feedbackRequiresSourceEvidence(item.classification);
+    const evidence = readRecord(item.evidence);
+    const reviewOrder = item.teamshipReviewOrderId
+      ? await tx.teamshipReviewOrder.findFirst({
+          where: {
+            tenantId,
+            id: item.teamshipReviewOrderId,
+            run: { deletedAt: null }
+          },
+          select: {
+            id: true,
+            runId: true,
+            psNumber: true,
+            srNumber: true,
+            pageNumbers: true,
+            pdfOrder: true,
+            review: true
+          }
+        })
+      : null;
+    if (item.teamshipReviewOrderId && !reviewOrder) {
+      throw new RivetDevelopmentJobError(
+        "The approved feedback references Garland review evidence that is no longer available.",
+        409
+      );
+    }
+    if (
+      reviewOrder &&
+      item.subjectId &&
+      item.subjectId !== reviewOrder.psNumber &&
+      item.subjectId !== reviewOrder.srNumber
+    ) {
+      throw new RivetDevelopmentJobError(
+        "The approved feedback evidence does not match its PS or SR number.",
+        409
+      );
+    }
+
+    const sourceArtifact = reviewOrder
+      ? await tx.workflowArtifact.findFirst({
+          where: {
+            tenantId,
+            workflowKey: GARLAND_WORKFLOW_KEY,
+            teamshipReviewRunId: reviewOrder.runId,
+            status: "REVIEWED",
+            contentType: "application/pdf",
+            contentHash: { not: null }
+          },
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            contentType: true,
+            sizeBytes: true,
+            contentHash: true
+          }
+        })
+      : null;
+    const reviewerArtifact = item.artifactId
+      ? await tx.workflowArtifact.findFirst({
+          where: {
+            tenantId,
+            id: item.artifactId,
+            workflowKey: GARLAND_WORKFLOW_KEY,
+            status: { in: ["REVIEWED", "EVIDENCE_READY"] },
+            contentHash: { not: null }
+          },
+          select: {
+            id: true,
+            status: true,
+            contentType: true,
+            sizeBytes: true,
+            contentHash: true,
+            teamshipReviewRunId: true,
+            extractionSummary: true
+          }
+        })
+      : null;
+    if (item.artifactId && !reviewerArtifact) {
+      throw new RivetDevelopmentJobError(
+        "The approved feedback attachment is no longer available.",
+        409
+      );
+    }
+    if (
+      reviewerArtifact?.status === "EVIDENCE_READY" &&
+      readRecord(reviewerArtifact.extractionSummary).feedbackId !== item.id
+    ) {
+      throw new RivetDevelopmentJobError(
+        "The approved feedback attachment belongs to another report.",
+        409
+      );
+    }
+
+    const artifactsById = new Map<string, RivetEvidenceManifest["artifacts"][number]>();
+    if (sourceArtifact?.contentHash) {
+      artifactsById.set(sourceArtifact.id, {
+        artifactId: sourceArtifact.id,
+        kind: "SOURCE_PDF",
+        contentType: sourceArtifact.contentType,
+        sizeBytes: sourceArtifact.sizeBytes,
+        contentHash: sourceArtifact.contentHash,
+        pageNumbers: normalizeEvidencePageNumbers(reviewOrder?.pageNumbers),
+        downloadPath: `/api/assistant/openclaw/development-jobs/evidence?feedbackId=${encodeURIComponent(item.id)}&artifactId=${encodeURIComponent(sourceArtifact.id)}`
+      });
+    }
+    if (reviewerArtifact?.contentHash) {
+      const kind: RivetEvidenceManifest["artifacts"][number]["kind"] =
+        reviewerArtifact.status === "EVIDENCE_READY"
+        ? "REVIEWER_ATTACHMENT"
+        : "SOURCE_PDF";
+      artifactsById.set(reviewerArtifact.id, {
+        artifactId: reviewerArtifact.id,
+        kind,
+        contentType: reviewerArtifact.contentType,
+        sizeBytes: reviewerArtifact.sizeBytes,
+        contentHash: reviewerArtifact.contentHash,
+        pageNumbers: kind === "SOURCE_PDF"
+          ? normalizeEvidencePageNumbers(reviewOrder?.pageNumbers)
+          : [],
+        downloadPath: `/api/assistant/openclaw/development-jobs/evidence?feedbackId=${encodeURIComponent(item.id)}&artifactId=${encodeURIComponent(reviewerArtifact.id)}`
+      });
+    }
+    const artifacts = [...artifactsById.values()];
+    const evidenceStatus = reviewOrder && artifacts.length > 0
+      ? "READY"
+      : evidenceRequired
+        ? "MISSING"
+        : "NOT_REQUIRED";
+    if (evidenceRequired && evidenceStatus !== "READY") {
+      throw new RivetDevelopmentJobError(
+        "This Garland field-update suggestion needs an exact saved review plus its source PDF or a supporting screenshot before Rivet can start.",
+        409
+      );
+    }
+
+    manifests.push({
+      feedbackId: item.id,
+      subjectId: item.subjectId,
+      issueType: item.classification,
+      evidenceRequired,
+      evidenceStatus,
+      structuredFeedback: {
+        affectedField: readBoundedString(evidence.affectedField, 200),
+        actualValue: readBoundedString(evidence.actualValue, 4000),
+        expectedValue: readBoundedString(evidence.expectedValue, 4000)
+      },
+      reviewOrder: reviewOrder ? {
+        id: reviewOrder.id,
+        runId: reviewOrder.runId,
+        psNumber: reviewOrder.psNumber,
+        srNumber: reviewOrder.srNumber,
+        pageNumbers: normalizeEvidencePageNumbers(reviewOrder.pageNumbers),
+        pdfOrder: reviewOrder.pdfOrder,
+        review: reviewOrder.review
+      } : null,
+      artifacts
+    });
+  }
+  return manifests;
 }
 
 export async function claimRivetDevelopmentJob(context: AuthenticatedContext) {
@@ -310,6 +525,125 @@ export async function claimRivetDevelopmentJob(context: AuthenticatedContext) {
       jobId: queued.id,
       branchName
     }
+  };
+}
+
+export async function getRivetDevelopmentEvidence(
+  context: AuthenticatedContext,
+  input: {
+    jobId: string;
+    feedbackId: string;
+    artifactId: string;
+    leaseToken: string;
+  }
+) {
+  const job = await prisma.automationJobRun.findFirst({
+    where: {
+      id: input.jobId,
+      tenantId: context.tenantId,
+      jobType: RIVET_DEVELOPMENT_JOB_TYPE,
+      status: JobStatus.RUNNING
+    },
+    select: {
+      id: true,
+      input: true,
+      output: true
+    }
+  });
+  if (!job) throw new RivetDevelopmentJobError("The Rivet development job is not active.", 404);
+  const packet = parseRivetJobInput(job.input);
+  const output = readJobOutput(job.output);
+  if (
+    !packet ||
+    !output.leaseTokenHash ||
+    !safeLeaseTokenEquals(input.leaseToken, output.leaseTokenHash)
+  ) {
+    throw new RivetDevelopmentJobError("The Rivet development evidence lease is invalid.", 403);
+  }
+  if (output.leaseExpiresAt && Date.parse(output.leaseExpiresAt) < Date.now()) {
+    throw new RivetDevelopmentJobError("The Rivet development evidence lease has expired.", 409);
+  }
+  const manifest = packet.evidenceManifests.find((item) => item.feedbackId === input.feedbackId);
+  const approvedArtifact = manifest?.artifacts.find((item) => item.artifactId === input.artifactId);
+  if (!manifest || !approvedArtifact) {
+    throw new RivetDevelopmentJobError(
+      "This artifact is not part of the approved Rivet evidence packet.",
+      403
+    );
+  }
+  const artifact = await prisma.workflowArtifact.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      id: approvedArtifact.artifactId,
+      workflowKey: GARLAND_WORKFLOW_KEY,
+      status: { in: ["REVIEWED", "EVIDENCE_READY"] }
+    },
+    include: {
+      chunks: { orderBy: { chunkIndex: "asc" } }
+    }
+  });
+  if (
+    !artifact ||
+    !artifact.contentHash ||
+    artifact.contentHash !== approvedArtifact.contentHash ||
+    artifact.contentType !== approvedArtifact.contentType ||
+    artifact.chunks.length !== artifact.chunkCount
+  ) {
+    throw new RivetDevelopmentJobError("The approved Rivet evidence failed integrity validation.", 409);
+  }
+  artifact.chunks.forEach((chunk, index) => {
+    if (
+      chunk.chunkIndex !== index ||
+      chunk.contentHash !== hashBytes(chunk.bytes)
+    ) {
+      throw new RivetDevelopmentJobError("The approved Rivet evidence is incomplete.", 409);
+    }
+  });
+  const sourceBytes = Buffer.concat(artifact.chunks.map((chunk) => Buffer.from(chunk.bytes)));
+  if (
+    sourceBytes.byteLength !== artifact.sizeBytes ||
+    hashBytes(sourceBytes) !== artifact.contentHash
+  ) {
+    throw new RivetDevelopmentJobError("The approved Rivet evidence does not match its stored hash.", 409);
+  }
+
+  let bytes: Uint8Array = new Uint8Array(sourceBytes);
+  let contentType = artifact.contentType;
+  if (artifact.contentType === "application/pdf" && approvedArtifact.pageNumbers.length > 0) {
+    bytes = await selectPdfEvidencePages(bytes, approvedArtifact.pageNumbers);
+    contentType = "application/pdf";
+  }
+  const contentHash = hashBytes(bytes);
+  const extension = contentType === "application/pdf"
+    ? "pdf"
+    : contentType === "image/png"
+      ? "png"
+      : contentType === "image/webp"
+        ? "webp"
+        : "jpg";
+  const fileName = `feedback-${safeFilePart(input.feedbackId)}-${approvedArtifact.kind.toLowerCase()}.${extension}`;
+
+  await prisma.auditLog.create({
+    data: {
+      tenantId: context.tenantId,
+      actorUserId: context.userId,
+      action: "assistant.rivet_development.read_evidence",
+      entityType: "AutomationJobRun",
+      entityId: job.id,
+      after: {
+        feedbackId: input.feedbackId,
+        artifactId: input.artifactId,
+        kind: approvedArtifact.kind,
+        pageNumbers: approvedArtifact.pageNumbers,
+        contentHash
+      } satisfies Prisma.InputJsonValue
+    }
+  });
+  return {
+    bytes,
+    contentType,
+    contentHash,
+    fileName
   };
 }
 
@@ -671,11 +1005,12 @@ export class RivetDevelopmentJobError extends Error {
 
 function parseRivetJobInput(value: Prisma.JsonValue | null): RivetJobInput | null {
   const record = readRecord(value);
+  const version = record.version === 2 ? 2 : record.version === 1 ? 1 : null;
   const sourceFeedback = Array.isArray(record.sourceFeedback)
     ? record.sourceFeedback.map(readRecord).filter((item) => typeof item.id === "string")
     : [];
   if (
-    record.version !== 1 ||
+    version === null ||
     typeof record.suggestionId !== "string" ||
     typeof record.approvedByUserId !== "string" ||
     typeof record.moduleKey !== "string" ||
@@ -688,7 +1023,7 @@ function parseRivetJobInput(value: Prisma.JsonValue | null): RivetJobInput | nul
     !Array.isArray(record.requiredContextPaths)
   ) return null;
   return {
-    version: 1,
+    version,
     suggestionId: record.suggestionId,
     approvedByUserId: record.approvedByUserId,
     moduleKey: record.moduleKey,
@@ -720,9 +1055,80 @@ function parseRivetJobInput(value: Prisma.JsonValue | null): RivetJobInput | nul
       expectedOutcome: typeof item.expectedOutcome === "string" ? item.expectedOutcome : null,
       observedOutcome: typeof item.observedOutcome === "string" ? item.observedOutcome : null
     })),
+    evidenceManifests: parseRivetEvidenceManifests(record.evidenceManifests),
     allowedActions: normalizeStringArray(record.allowedActions, 20, 100),
     forbiddenActions: normalizeStringArray(record.forbiddenActions, 20, 100)
   };
+}
+
+function parseRivetEvidenceManifests(value: unknown): RivetEvidenceManifest[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate) => {
+    const record = readRecord(candidate);
+    if (
+      typeof record.feedbackId !== "string" ||
+      typeof record.issueType !== "string"
+    ) return [];
+    const structured = readRecord(record.structuredFeedback);
+    const review = readRecord(record.reviewOrder);
+    const reviewOrder =
+      typeof review.id === "string" &&
+      typeof review.runId === "string" &&
+      typeof review.psNumber === "string" &&
+      typeof review.srNumber === "string"
+        ? {
+            id: review.id,
+            runId: review.runId,
+            psNumber: review.psNumber,
+            srNumber: review.srNumber,
+            pageNumbers: normalizeEvidencePageNumbers(review.pageNumbers),
+            pdfOrder: (review.pdfOrder ?? null) as Prisma.JsonValue,
+            review: (review.review ?? null) as Prisma.JsonValue
+          }
+        : null;
+    const artifacts = Array.isArray(record.artifacts)
+      ? record.artifacts.flatMap((artifactCandidate) => {
+          const artifact = readRecord(artifactCandidate);
+          if (
+            typeof artifact.artifactId !== "string" ||
+            (artifact.kind !== "SOURCE_PDF" && artifact.kind !== "REVIEWER_ATTACHMENT") ||
+            typeof artifact.contentType !== "string" ||
+            typeof artifact.sizeBytes !== "number" ||
+            typeof artifact.contentHash !== "string" ||
+            typeof artifact.downloadPath !== "string"
+          ) return [];
+          return [{
+            artifactId: artifact.artifactId,
+            kind: artifact.kind as RivetEvidenceManifest["artifacts"][number]["kind"],
+            contentType: artifact.contentType,
+            sizeBytes: artifact.sizeBytes,
+            contentHash: artifact.contentHash,
+            pageNumbers: normalizeEvidencePageNumbers(artifact.pageNumbers),
+            downloadPath: artifact.downloadPath
+          }];
+        })
+      : [];
+    const evidenceStatus =
+      record.evidenceStatus === "READY" ||
+      record.evidenceStatus === "NOT_REQUIRED" ||
+      record.evidenceStatus === "MISSING"
+        ? record.evidenceStatus
+        : "MISSING";
+    return [{
+      feedbackId: record.feedbackId,
+      subjectId: typeof record.subjectId === "string" ? record.subjectId : null,
+      issueType: record.issueType,
+      evidenceRequired: record.evidenceRequired === true,
+      evidenceStatus,
+      structuredFeedback: {
+        affectedField: readBoundedString(structured.affectedField, 200),
+        actualValue: readBoundedString(structured.actualValue, 4000),
+        expectedValue: readBoundedString(structured.expectedValue, 4000)
+      },
+      reviewOrder,
+      artifacts
+    }];
+  });
 }
 
 function readJobOutput(value: Prisma.JsonValue | null): RivetJobOutput {
@@ -802,6 +1208,53 @@ function validatePullRequestUrls(values: string[] | undefined, repository: strin
     }
   }
   return normalized;
+}
+
+async function selectPdfEvidencePages(bytes: Uint8Array, pageNumbers: number[]) {
+  try {
+    const source = await PDFDocument.load(bytes);
+    const indexes = [...new Set(pageNumbers)]
+      .map((pageNumber) => pageNumber - 1)
+      .filter((index) => index >= 0 && index < source.getPageCount());
+    if (indexes.length === 0) {
+      throw new RivetDevelopmentJobError(
+        "The approved Garland evidence page numbers do not exist in the source PDF.",
+        409
+      );
+    }
+    const selected = await PDFDocument.create();
+    const pages = await selected.copyPages(source, indexes);
+    pages.forEach((page) => selected.addPage(page));
+    return selected.save();
+  } catch (error) {
+    if (error instanceof RivetDevelopmentJobError) throw error;
+    throw new RivetDevelopmentJobError("The approved Garland PDF evidence could not be prepared.", 409);
+  }
+}
+
+function normalizeEvidencePageNumbers(value: unknown) {
+  return Array.isArray(value)
+    ? [...new Set(value.filter((item): item is number =>
+        typeof item === "number" &&
+        Number.isInteger(item) &&
+        item > 0 &&
+        item <= 10_000
+      ))].slice(0, 20)
+    : [];
+}
+
+function readBoundedString(value: unknown, maxLength: number) {
+  return typeof value === "string"
+    ? value.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, maxLength) || null
+    : null;
+}
+
+function hashBytes(value: Uint8Array) {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+function safeFilePart(value: string) {
+  return value.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 100) || "evidence";
 }
 
 function hashLeaseToken(value: string) {
