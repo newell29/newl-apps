@@ -295,10 +295,11 @@ export async function completeHunterQualityAudit({
     }))
   ];
 
+  const consolidatedIssues = consolidateHunterQualityIssues(issueInputs);
   const incidents: Array<
     Awaited<ReturnType<typeof recordHunterQualityIncident>>
   > = [];
-  for (const issue of issueInputs) {
+  for (const issue of consolidatedIssues) {
     incidents.push(
       await recordHunterQualityIncident({
         tenantId: context.tenantId,
@@ -320,6 +321,7 @@ export async function completeHunterQualityAudit({
           auditedAt: completion.auditedAt,
           sampleSize: completion.findings.length,
           issueCount: issueInputs.length,
+          consolidatedIssueCount: consolidatedIssues.length,
           tradeMiningIssueCount: tradeMiningFindings.length,
           findings: completion.findings,
           incidentIds: incidents.map((incident) => incident.incidentId),
@@ -339,6 +341,7 @@ export async function completeHunterQualityAudit({
         after: {
           sampleSize: completion.findings.length,
           issueCount: issueInputs.length,
+          consolidatedIssueCount: consolidatedIssues.length,
           tradeMiningIssueCount: tradeMiningFindings.length,
           developmentJobIds: incidents
             .map((incident) => incident.developmentJobId)
@@ -521,20 +524,28 @@ async function recordHunterQualityIncident({
     rationale: string;
     evidence: unknown;
     autoRivet: boolean;
+    scopeKey: string;
   };
   env: Record<string, string | undefined>;
   now: Date;
 }) {
   const fingerprint = crypto
     .createHash("sha256")
-    .update(`${issue.workflowKey}|${issue.category}|${normalizeFingerprintText(issue.summary)}`)
+    .update(
+      issue.autoRivet
+        ? issue.scopeKey
+        : `${issue.workflowKey}|${issue.category}|${normalizeFingerprintText(issue.summary)}`
+    )
     .digest("hex");
   const recent = await prisma.automationJobRun.findMany({
     where: {
       tenantId,
       jobType: HUNTER_QUALITY_INCIDENT_JOB_TYPE,
       createdAt: { gte: new Date(now.getTime() - INCIDENT_LOOKBACK_MS) },
-      input: { path: ["fingerprint"], equals: fingerprint }
+      OR: [
+        { input: { path: ["fingerprint"], equals: fingerprint } },
+        { input: { path: ["scopeKey"], equals: issue.scopeKey } }
+      ]
     },
     select: { id: true, output: true },
     take: INCIDENT_CIRCUIT_BREAKER_COUNT
@@ -561,6 +572,7 @@ async function recordHunterQualityIncident({
           version: 1,
           sourceKey: issue.sourceKey,
           workflowKey: issue.workflowKey,
+          scopeKey: issue.scopeKey,
           fingerprint
         },
         output: {
@@ -686,6 +698,7 @@ async function recordHunterQualityIncident({
         entityId: incident.id,
         after: {
           sourceKey: issue.sourceKey,
+          scopeKey: issue.scopeKey,
           category: issue.category,
           fingerprint,
           circuitBreaker,
@@ -699,6 +712,50 @@ async function recordHunterQualityIncident({
       developmentJobQueued,
       circuitBreaker,
       autoTriageApproved: approved
+    };
+  });
+}
+
+function consolidateHunterQualityIssues<T extends {
+  sourceKey: string;
+  workflowKey: string;
+  title: string;
+  category: string;
+  summary: string;
+  rationale: string;
+  evidence: unknown;
+  autoRivet: boolean;
+}>(issues: T[]) {
+  const groups = new Map<string, T[]>();
+  for (const issue of issues) {
+    const scopeKey = `${issue.workflowKey}:${
+      issue.autoRivet ? "REPRODUCIBLE_CODE_DEFECT" : issue.sourceKey
+    }`;
+    const group = groups.get(scopeKey) ?? [];
+    group.push(issue);
+    groups.set(scopeKey, group);
+  }
+  return [...groups.entries()].map(([scopeKey, group]) => {
+    const first = group[0]!;
+    if (group.length === 1) return { ...first, scopeKey };
+    const categories = [...new Set(group.map((item) => item.category))];
+    return {
+      ...first,
+      sourceKey: group.map((item) => item.sourceKey).join(","),
+      category: categories.length === 1 ? categories[0]! : "MULTIPLE_CODE_DEFECTS",
+      summary: `${group.length} related ${first.workflowKey.toLowerCase().replaceAll("_", " ")} defects were found and must be corrected together: ${group
+        .map((item) => item.summary)
+        .join(" | ")}`,
+      rationale: group.map((item) => item.rationale).join(" | "),
+      evidence: {
+        groupedDefects: group.map((item) => ({
+          sourceKey: item.sourceKey,
+          category: item.category,
+          evidence: item.evidence
+        }))
+      },
+      autoRivet: group.every((item) => item.autoRivet),
+      scopeKey
     };
   });
 }

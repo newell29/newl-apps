@@ -928,7 +928,9 @@ describe("operational feedback and approved memory", () => {
       proposedScope: { issueKey: "GARLAND_SPECIAL_INSTRUCTIONS" },
       developmentThreadId: "failed-job-1"
     });
-    prismaMock.automationJobRun.findFirst.mockResolvedValue({ id: "failed-job-1" });
+    prismaMock.automationJobRun.findFirst
+      .mockResolvedValueOnce({ id: "failed-job-1" })
+      .mockResolvedValueOnce(null);
     prismaMock.operationalFeedback.findMany.mockResolvedValue([{
       id: "feedback-1",
       moduleKey: "SHIPMENT_DOCUMENTS",

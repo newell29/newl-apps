@@ -81,6 +81,18 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 - The hourly Apollo status sync also removes a stale push blocker when the exact selected cadence is confirmed active.
   A missing selected cadence ID or a different live cadence still fails closed and remains in Needs Attention.
 
+## Apollo shows a bounced Hunter contact that remains in Needs Attention
+
+- Apollo can show an exact cadence as `Bounced` while its contact-detail response omits both campaign membership and
+  delivery status. Newl Apps therefore checks Apollo's zero-credit outreach-email search only when the local state and
+  contact response are both unresolved and an exact selected cadence is known.
+- The fallback is bounded to ten 100-record pages per cadence and reused across contacts in the same sync. It matches
+  exact Apollo contact ID first and normalized email second. A confirmed match persists `BOUNCED`, records the Apollo
+  evidence in the contact's raw audit payload, and the normal queue rule removes the contact from Needs Attention.
+- A failed or rate-limited fallback fails the affected sync visibly; it never guesses from Apollo's user-configurable
+  `Bad Data` contact stage and never changes a contact that Apollo already reports as active, replied, finished, or
+  bounced.
+
 ## External signal discovery or classification fails
 
 - A GDELT 429/5xx response receives bounded retries and is recorded before the worker tries the RSS fallback.
@@ -189,15 +201,19 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 - Reproducible retrieval, handoff, rule, or TradeMining code defects create Rivet work only when the
   exact standing-approval value is present. Without it, the Teams message says the defect was recorded
   but not queued.
-- Repeated identical incidents trip the seven-day circuit breaker. Review the existing Rivet job or
-  underlying runtime before another automated development attempt.
+- Related reproducible findings from one workflow are combined into one incident and one development
+  packet. A queued, running, or review-blocked scope refuses sibling Rivet jobs. Review the existing
+  branch and add evidence there before another development attempt.
+- A second incident for the same reproducible workflow scope trips the seven-day circuit breaker.
 - The auditor is a bounded daily sample, not proof that every classification is correct. The tiered
   sample, independent web research, deterministic TradeMining checks, and stored evidence make misses
   more likely to surface without pretending to eliminate all model or search-index risk.
-- If every queued Rivet job fails while preparing its branch, inspect the worker diagnostics before
-  treating the underlying Hunter findings as four separate implementation failures. Rivet uses its
+- If Rivet fails while preparing or reviewing its branch, inspect the one consolidated worker diagnostic
+  before treating the underlying Hunter findings as separate implementation failures. Rivet uses its
   dedicated runtime as the trusted Git source, validates required context against the fetched base
   branch, and exits immediately on an invalid packet. It never falls through with a blank base branch.
+  Independent review occurs before PR creation: a blocked result preserves the branch and job evidence,
+  sends the protected Teams notice, and opens no PR.
 - Absence of a routine TradeMining Teams digest does not prove that the searches failed. Health & Logs
   remains authoritative. With `HUNTER_TEAMS_TARGET` configured, the current worker sends one settled
   daily digest and an immediate generic alert for each failed profile without exposing raw errors.

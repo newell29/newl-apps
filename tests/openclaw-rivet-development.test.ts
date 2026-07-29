@@ -67,6 +67,30 @@ describe("Rivet local Codex development worker", () => {
     expect(runner).not.toMatch(/\bvercel deploy\b/);
   });
 
+  it("opens no PR until the exact commit passes independent review", async () => {
+    const runner = await readFile(runnerPath, "utf8");
+    const passGate = runner.indexOf('if [[ "${review_verdict}" == "PASS" ]]');
+    const openReviewedPr = runner.indexOf(
+      'failure_stage="open the independently reviewed draft pull request"'
+    );
+    const blockedReview = runner.indexOf(
+      'failure_stage="record the independent review blocker"'
+    );
+
+    expect(passGate).toBeGreaterThan(0);
+    expect(openReviewedPr).toBeGreaterThan(passGate);
+    expect(blockedReview).toBeGreaterThan(openReviewedPr);
+    expect(runner).not.toContain('failure_stage="open the draft pull request"');
+    expect(
+      runner.indexOf('write_pull_request_payload "create"', runner.indexOf("while true; do"))
+    ).toBeLessThan(
+      runner.indexOf("CURRENT_PULL_REQUEST_PAYLOAD_JSON:", runner.indexOf("while true; do"))
+    );
+    expect(runner).toContain(
+      "Independent Codex review blocked this branch before PR creation"
+    );
+  });
+
   it("installs a separate Rivet command schedule instead of adding Codex access to the digest", async () => {
     const installer = await readFile(installerPath, "utf8");
 

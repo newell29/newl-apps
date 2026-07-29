@@ -28,7 +28,7 @@ describe("Hunter company deep research", () => {
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL).toBe("qwen3.5:35b");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL).toBe("kimi-k2.6");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL).toBe("kimi-k3");
-    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v15");
+    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v17");
     expect(HUNTER_COMPANY_RESEARCH_TRANSACTION_TIMEOUT_MS).toBe(30_000);
     expect(HUNTER_COMPANY_RESEARCH_SAFETY).toEqual({
       externalWrites: false,
@@ -413,6 +413,70 @@ describe("Hunter company deep research", () => {
     );
   });
 
+  it("uses active public registration plus recent exact customs evidence only as an identity fallback", () => {
+    const company = parseHunterCompanyResearchCompletion(completion()).companies[0];
+    const ambiguous = {
+      ...company,
+      companyName: "Example Components LLC",
+      synthesis: {
+        ...company.synthesis,
+        identityDisposition: "AMBIGUOUS" as const,
+        identityConfidence: 45
+      },
+      evidence: [
+        {
+          ...company.evidence[0],
+          pass: "IDENTITY" as const,
+          sourceType: "GOVERNMENT" as const,
+          sourceDomain: "sos.example.gov",
+          sourceUrl: "https://sos.example.gov/example-components",
+          firstParty: false,
+          title: "Example Components LLC registration",
+          excerpt: "Example Components LLC is active and in good standing."
+        },
+        {
+          ...company.evidence[1],
+          pass: "CUSTOMS_RECORDS" as const,
+          sourceType: "OTHER" as const,
+          sourceDomain: "customs.example",
+          sourceUrl: "https://customs.example/example-components",
+          firstParty: false,
+          title: "Example Components LLC import record",
+          excerpt: "Example Components LLC appeared as consignee.",
+          publishedAt: new Date().toISOString()
+        }
+      ]
+    };
+
+    expect(evaluateResearchGate(ambiguous).blockers).not.toContain(
+      "Company identity was not confirmed at 70% or better."
+    );
+    expect(
+      evaluateResearchGate({
+        ...ambiguous,
+        evidence: ambiguous.evidence.map((item, index) =>
+          index === 0
+            ? { ...item, excerpt: "Example Components LLC is inactive and dissolved." }
+            : item
+        )
+      }).blockers
+    ).toContain("Company identity was not confirmed at 70% or better.");
+    expect(
+      evaluateResearchGate({
+        ...ambiguous,
+        evidence: ambiguous.evidence.map((item, index) =>
+          index === 1
+            ? {
+                ...item,
+                title: "Example Components Holdings import record",
+                excerpt: "Example Components Holdings appeared as consignee."
+              }
+            : item
+        )
+      }).blockers
+    ).toContain("Company identity was not confirmed at 70% or better.");
+  });
+
   it("rejects forged domains and model arithmetic", () => {
     const forged = completion();
     forged.companies[0].evidence[0].sourceDomain = "different.example";
@@ -457,7 +521,7 @@ describe("Hunter company deep research", () => {
     expect(research).toContain("parse_page_published_at");
     expect(research).toContain("triggerEvidenceIndices");
     expect(research).toContain("must cite one to five trigger evidence records");
-    expect(research).toContain("whose supplied publishedAt value is within 18 months");
+    expect(research).toContain("the material event itself occurred within 18 months");
     expect(research).toContain("/api/lead-gen/hunter/company-research/shadow");
     expect(research).toContain("submit_luna_shadow_batches");
     expect(research).not.toContain("OPENAI_API_KEY");
@@ -699,7 +763,7 @@ describe("Hunter company deep research", () => {
     expect(result.diagnostic).not.toContain('"companies"');
   });
 
-  it("builds all four company-specific research queries", async () => {
+  it("builds the bounded company-specific research queries including customs records", async () => {
     const program = [
       "import json",
       "import hunter_company_research as r",
@@ -720,11 +784,81 @@ describe("Hunter company deep research", () => {
       "FRESH_EVENTS",
       "CAREERS",
       "DISTRIBUTION_FOOTPRINT",
+      "CUSTOMS_RECORDS",
       "IDENTITY",
       "FRESH_EVENTS"
     ]);
     expect(rows.slice(0, 4).every((row) => row.query.includes("Example Retailer"))).toBe(true);
     expect(rows.some((row) => row.query.includes("site:example.com"))).toBe(true);
+  });
+
+  it("uses same-entity TradeMining aliases only for search and never sends them to model packets", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "candidate={'companyKey':'example-retailer','companyName':'Example Retailer LLC','priorityScore':80,'queryAliases':['EXAMPLE RETAILER, INC.','Unrelated Supplier Ltd.'],'shipmentEvidence':[],'existingSignals':[]}",
+      "queries=r.build_research_queries(candidate)",
+      "captured={}",
+      "def fake_request(base,model,packets,retry_reason=None):",
+      " captured['packets']=packets",
+      " return ([{'companyKey':'example-retailer','identityDisposition':'PASS','identityConfidence':90,'identityReason':'Verified.','logisticsProvider':False,'namedExternalLogisticsProvider':False,'stableExclusiveProviderEvidence':False,'providerDisplacementEvidence':False,'freshness':'CURRENT','opportunitySummary':'Current footprint.','triggerEvidenceIndices':[0],'geography':None,'companyCountry':'United States','operatingRegion':'NORTH_AMERICA','verifiedUsDivision':False,'usDivisionName':None,'usDivisionEvidenceIndices':[],'serviceLine':'WAREHOUSING','signalType':'OTHER','confidence':80,'rationale':'Current fit.','missingEvidence':[],'followUpQueries':[]}],{'inputTokens':1,'outputTokens':1,'durationMs':1})",
+      "r.ollama_synthesis_request=fake_request",
+      "evidence={'example-retailer':[{'pass':'IDENTITY','query':'identity','title':'Example Retailer','url':'https://example.com','sourceDomain':'example.com','sourceType':'FIRST_PARTY','publishedAt':None,'excerpt':'Example Retailer LLC','firstParty':True}]}",
+      "r.synthesize_companies('local','qwen',[candidate],evidence,1)",
+      "print(json.dumps({'queries':queries,'packets':captured['packets']}))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+    const result = JSON.parse(stdout) as {
+      queries: Array<{ query: string }>;
+      packets: Array<Record<string, unknown>>;
+    };
+
+    expect(result.queries.every((row) => row.query.includes("EXAMPLE RETAILER"))).toBe(true);
+    expect(result.queries.every((row) => !row.query.includes("Unrelated Supplier"))).toBe(true);
+    expect(JSON.stringify(result.packets)).not.toContain("queryAliases");
+    expect(JSON.stringify(result.packets)).not.toContain("Unrelated Supplier");
+  });
+
+  it("reserves a page-fetch slot for customs evidence and deduplicates repeated source URLs", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'Example Retailer','companyKey':'example-retailer'}",
+      "def fake_search(provider,query,limit):",
+      " pass_id=next(row['pass'] for row in r.build_research_queries(candidate) if row['query']==query)",
+      " url='https://shared.example/evidence' if pass_id in {'IDENTITY','FRESH_EVENTS'} else f'https://{pass_id.lower()}.example/evidence'",
+      " return [{'url':url,'title':pass_id,'snippet':'Example Retailer evidence.','publishedAt':'2026-07-01T00:00:00+00:00'}]",
+      "fetched=[]",
+      "def fake_page(url):",
+      " fetched.append(url)",
+      " return ('Example Retailer page evidence.','2026-07-01T00:00:00+00:00')",
+      "r.search_web=fake_search",
+      "r.fetch_page_evidence=fake_page",
+      "evidence,_,_=r.collect_company_evidence(candidate,'BRAVE',1,2)",
+      "print(json.dumps({'urls':[row['url'] for row in evidence],'fetched':fetched,'passes':[row['pass'] for row in evidence]}))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+    const result = JSON.parse(stdout) as {
+      urls: string[];
+      fetched: string[];
+      passes: string[];
+    };
+
+    expect(new Set(result.urls).size).toBe(result.urls.length);
+    expect(result.passes).toContain("CUSTOMS_RECORDS");
+    expect(result.fetched.some((url) => url.includes("customs_records.example"))).toBe(true);
   });
 
   it("preserves the Barnhardt first-party expansion query when generic results fill the evidence cap", async () => {
@@ -762,9 +896,9 @@ describe("Hunter company deep research", () => {
     };
 
     expect(result).toMatchObject({
-      queryCount: 6,
+      queryCount: 7,
       evidenceCount: 24,
-      queryEvidenceCounts: [4, 4, 4, 4, 4, 4]
+      queryEvidenceCounts: [4, 4, 4, 3, 3, 3, 3]
     });
     expect(result.target).toEqual([
       expect.objectContaining({
@@ -973,6 +1107,98 @@ describe("Hunter company deep research", () => {
     });
     expect(normalized.opportunitySummary).toContain("new advanced production lines");
     expect(normalized.opportunitySummary).not.toContain("No concrete expansion");
+  });
+
+  it("does not promote a recently published article about an explicitly historical facility start", async () => {
+    const program = [
+      "import datetime as d,json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'EXAMPLE COMPONENTS INC','companyKey':'example-components-inc'}",
+      "recent=(d.datetime.now(d.timezone.utc)-d.timedelta(days=20)).isoformat()",
+      "evidence=[{'pass':'IDENTITY','firstParty':True,'sourceType':'FIRST_PARTY','title':'Example Components','excerpt':'Example Components Inc is an active manufacturer.','publishedAt':None},{'pass':'FRESH_EVENTS','firstParty':False,'sourceType':'NEWS','title':'2026 annual report','excerpt':'Example Components began commercial production at its new greenfield facility in 2010.','publishedAt':recent}]",
+      "synthesis={'identityDisposition':'PASS','identityConfidence':90,'identityReason':'Verified.','confidence':80,'freshness':'FRESH','triggerEvidenceIndices':[1],'opportunitySummary':'New facility started production.','signalType':'FACILITY_OPENING','missingEvidence':[],'rationale':'Recent article.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
+      "normalized=r.normalize_synthesis_for_evidence(candidate,evidence,synthesis)",
+      "print(json.dumps({'material':r.recent_material_trigger_indices(candidate,evidence),'recent':r.is_recent_trigger(synthesis,evidence),'freshness':normalized['freshness']}))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual({
+      material: [],
+      recent: false,
+      freshness: "CURRENT"
+    });
+  });
+
+  it("keeps a recent exact-company event when the same article also provides historical context", async () => {
+    const program = [
+      "import datetime as d,json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'EXAMPLE COMPONENTS INC','companyKey':'example-components-inc'}",
+      "recent=(d.datetime.now(d.timezone.utc)-d.timedelta(days=20)).isoformat()",
+      "evidence=[{'pass':'FRESH_EVENTS','firstParty':False,'sourceType':'NEWS','title':'Example Components expansion','excerpt':'Example Components began production at its first plant in 2010. Example Components opened a new distribution center in 2026.','publishedAt':recent}]",
+      "synthesis={'freshness':'FRESH','triggerEvidenceIndices':[0]}",
+      "print(json.dumps({'material':r.recent_material_trigger_indices(candidate,evidence),'recent':r.is_recent_trigger(synthesis,evidence)}))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual({ material: [0], recent: true });
+  });
+
+  it("does not join separate existing-plant and planned-facility clauses into a commencement event", async () => {
+    const program = [
+      "import datetime as d,json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'EXAMPLE COMPONENTS INC','companyKey':'example-components-inc'}",
+      "recent=(d.datetime.now(d.timezone.utc)-d.timedelta(days=20)).isoformat()",
+      "evidence=[{'pass':'FRESH_EVENTS','sourceType':'NEWS','firstParty':False,'title':'Example Components update','excerpt':'Example Components began operations at its existing plant and separately plans a new greenfield facility.','publishedAt':recent}]",
+      "print(json.dumps(r.recent_material_trigger_indices(candidate,evidence)))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual([]);
+  });
+
+  it("uses active exact-name public registration plus recent trade evidence for identity only", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'Example Components Inc','companyKey':'example-components-inc'}",
+      "good=[{'pass':'IDENTITY','sourceType':'GOVERNMENT','sourceDomain':'sos.example.gov','title':'Example Components Inc','excerpt':'Status Active; registered business.','publishedAt':None},{'pass':'CUSTOMS_RECORDS','sourceType':'OTHER','sourceDomain':'customs.example','title':'Example Components Inc imports','excerpt':'Example Components Inc consignee shipment.','publishedAt':'2026-07-01T00:00:00+00:00'}]",
+      "inactive=[dict(good[0],excerpt='Status Dissolved'),good[1]]",
+      "similar=[dict(good[0],title='Example Components Holdings Inc',excerpt='Example Components Holdings Inc status Active'),dict(good[1],title='Example Components Holdings Inc imports',excerpt='Example Components Holdings Inc consignee shipment')]",
+      "print(json.dumps({'good':r.has_current_public_trade_identity(candidate,good),'inactive':r.has_current_public_trade_identity(candidate,inactive),'similar':r.has_current_public_trade_identity(candidate,similar)}))"
+    ].join(";");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual({
+      good: true,
+      inactive: false,
+      similar: false
+    });
   });
 
   it("prefers Atlas Copco Compressors' distribution center over an affiliate expansion", async () => {
@@ -1436,7 +1662,7 @@ function completion() {
       synthesis: {
         provider: "OLLAMA",
         name: "qwen3.5:35b",
-        promptVersion: "hunter-company-research-v15",
+        promptVersion: "hunter-company-research-v17",
         structuredOutput: true,
         inputTokens: 2000,
         outputTokens: 700,
@@ -1445,7 +1671,7 @@ function completion() {
       scoring: {
         provider: "KIMI",
         name: "kimi-k2.6",
-        promptVersion: "hunter-company-research-v15",
+        promptVersion: "hunter-company-research-v17",
         structuredOutput: true,
         inputTokens: 1800,
         cachedInputTokens: 200,
@@ -1456,7 +1682,7 @@ function completion() {
       validation: {
         provider: "KIMI",
         name: "kimi-k3",
-        promptVersion: "hunter-company-research-v15",
+        promptVersion: "hunter-company-research-v17",
         structuredOutput: true,
         status: "SUCCESS",
         reasoningEffort: "LOW",

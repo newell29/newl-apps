@@ -26,7 +26,7 @@ describe("OpenAI Luna Hunter research shadow", () => {
 
     const result = await generateHunterResearchLunaShadow({
       model: "gpt-5.6-luna",
-      promptVersion: "hunter-company-research-v15-luna-shadow-v1",
+      promptVersion: "hunter-company-research-v17-luna-shadow-v1",
       packets,
       safetyIdentifier: "tenant-hash"
     });
@@ -79,7 +79,7 @@ describe("OpenAI Luna Hunter research shadow", () => {
     await expect(
       generateHunterResearchLunaShadow({
         model: "gpt-5.6-luna",
-        promptVersion: "hunter-company-research-v15-luna-shadow-v1",
+        promptVersion: "hunter-company-research-v17-luna-shadow-v1",
         packets: [packet()],
         safetyIdentifier: "tenant-hash"
       })

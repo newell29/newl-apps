@@ -23,7 +23,7 @@ import { dedupeHunterCompaniesByIdentity } from "@/modules/lead-gen/hunter-compa
 import { prisma } from "@/server/db";
 
 export { HUNTER_COMPANY_RESEARCH_JOB_TYPE };
-export const HUNTER_COMPANY_RESEARCH_PROMPT_VERSION = "hunter-company-research-v15";
+export const HUNTER_COMPANY_RESEARCH_PROMPT_VERSION = "hunter-company-research-v17";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL = "qwen3.5:35b";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL = "kimi-k2.6";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL = "kimi-k3";
@@ -50,6 +50,10 @@ export const HUNTER_RESEARCH_PASSES = [
   {
     id: "DISTRIBUTION_FOOTPRINT",
     purpose: "Map facilities, markets, channels, and any named external provider or displacement evidence."
+  },
+  {
+    id: "CUSTOMS_RECORDS",
+    purpose: "Find independent customs, import, shipment, or bill-of-lading evidence for the exact company."
   }
 ] as const;
 
@@ -186,6 +190,7 @@ type PreparedCandidate = {
   priorityScore: number;
   primaryIndustry: string | null;
   domain: string | null;
+  queryAliases: string[];
   shipmentEvidence: Array<{
     arrivalDate: string | null;
     destinationCity: string | null;
@@ -307,7 +312,10 @@ export async function prepareHunterCompanyResearchRun({
           destinationState: true,
           sourcePort: true,
           originCountry: true,
-          productDescription: true
+          productDescription: true,
+          importerName: true,
+          consigneeName: true,
+          shipperName: true
         }
       },
       hunterOpportunitySignals: {
@@ -343,9 +351,13 @@ export async function prepareHunterCompanyResearchRun({
     priorityScore: company.priorityScore,
     primaryIndustry: company.primaryIndustry,
     domain: company.domain,
+    queryAliases: buildTradeIdentityQueryAliases(company.name, company.importRecords),
     shipmentEvidence: company.importRecords.map((record) => ({
-      ...record,
       arrivalDate: record.arrivalDate?.toISOString() ?? null,
+      destinationCity: record.destinationCity,
+      destinationState: record.destinationState,
+      sourcePort: record.sourcePort,
+      originCountry: record.originCountry,
       productDescription: record.productDescription?.slice(0, 1_000) ?? null
     })),
     existingSignals: company.hunterOpportunitySignals.map((signal) => ({
@@ -999,7 +1011,8 @@ export function evaluateResearchGate(company: ResearchResult) {
   const blockers: string[] = [];
   if (
     (company.synthesis.identityDisposition !== "PASS" || company.synthesis.identityConfidence < 70) &&
-    !hasCorroboratingFirstPartyIdentity(company)
+    !hasCorroboratingFirstPartyIdentity(company) &&
+    !hasCurrentPublicTradeIdentity(company)
   ) {
     blockers.push("Company identity was not confirmed at 70% or better.");
   }
@@ -1203,6 +1216,115 @@ function hasCorroboratingFirstPartyIdentity(company: ResearchResult) {
   });
 }
 
+function hasCurrentPublicTradeIdentity(company: ResearchResult) {
+  const companyTokens = normalizedIdentityTokens(company.companyName);
+  if (
+    companyTokens.length === 0 ||
+    (companyTokens.length === 1 && companyTokens[0]!.length < 5)
+  ) {
+    return false;
+  }
+  const activePattern = /\b(?:active|current|good standing|registered|existing)\b/i;
+  const inactivePattern =
+    /\b(?:inactive|dissolved|revoked|withdrawn|terminated|cancelled|canceled)\b/i;
+  const cutoff = Date.now() - 548 * 24 * 60 * 60 * 1_000;
+  const latestAccepted = Date.now() + 24 * 60 * 60 * 1_000;
+  const matchingRows = company.evidence.filter((item) =>
+    hasExactIdentityTokenSequence(
+      normalizeEvidenceText(`${item.title} ${item.excerpt}`).split(/\s+/).filter(Boolean),
+      companyTokens
+    )
+  );
+  const governmentRows = matchingRows.filter((item) => {
+    const text = `${item.title} ${item.excerpt}`;
+    return (
+      item.sourceType === "GOVERNMENT" &&
+      activePattern.test(text) &&
+      !inactivePattern.test(text)
+    );
+  });
+  const tradeRows = matchingRows.filter((item) => {
+    if (item.pass !== "CUSTOMS_RECORDS" || !item.publishedAt) return false;
+    const publishedAt = new Date(item.publishedAt).getTime();
+    return publishedAt >= cutoff && publishedAt <= latestAccepted;
+  });
+  return governmentRows.some((government) =>
+    tradeRows.some((trade) => trade.sourceDomain !== government.sourceDomain)
+  );
+}
+
+function hasExactIdentityTokenSequence(haystack: string[], needle: string[]) {
+  const disallowedFollowingTokens = new Set([
+    "affiliate",
+    "global",
+    "group",
+    "holding",
+    "holdings",
+    "international",
+    "parent"
+  ]);
+  for (let index = 0; index <= haystack.length - needle.length; index += 1) {
+    if (!needle.every((token, offset) => haystack[index + offset] === token)) continue;
+    const following = haystack[index + needle.length];
+    if (!following || !disallowedFollowingTokens.has(following)) return true;
+  }
+  return false;
+}
+
+function buildTradeIdentityQueryAliases(
+  companyName: string,
+  records: Array<{
+    importerName: string | null;
+    consigneeName: string | null;
+    shipperName: string | null;
+  }>
+) {
+  const companyTokens = normalizedIdentityTokens(companyName);
+  const companyCore = companyTokens.join(" ");
+  if (!companyCore) return [];
+  const aliases = records
+    .flatMap((record) => [
+      record.importerName,
+      record.consigneeName,
+      record.shipperName
+    ])
+    .filter((value): value is string => Boolean(value?.trim()))
+    .filter((value) => {
+      const aliasTokens = normalizedIdentityTokens(value);
+      if (aliasTokens.length === 0) return false;
+      const aliasCore = aliasTokens.join(" ");
+      if (aliasCore === companyCore) return true;
+      if (companyCore.length < 5 || aliasCore.length < 5) return false;
+      return (
+        aliasTokens.every((token) => companyTokens.includes(token)) ||
+        companyTokens.every((token) => aliasTokens.includes(token))
+      );
+    })
+    .map((value) => value.replace(/\s+/g, " ").trim().slice(0, 200));
+  return [...new Set(aliases)].slice(0, 4);
+}
+
+function normalizedIdentityTokens(value: string) {
+  const legalSuffixes = new Set([
+    "co",
+    "company",
+    "corp",
+    "corporation",
+    "inc",
+    "incorporated",
+    "llc",
+    "limited",
+    "lp",
+    "ltd",
+    "plc"
+  ]);
+  const tokens = normalizeEvidenceText(value).split(/\s+/).filter(Boolean);
+  while (tokens.length > 0 && legalSuffixes.has(tokens[tokens.length - 1]!)) {
+    tokens.pop();
+  }
+  return tokens;
+}
+
 function hasRecentDatedTriggerEvidence(evidence: Evidence[], triggerEvidenceIndices: number[]) {
   const now = Date.now();
   const cutoff = now - 548 * 24 * 60 * 60 * 1_000;
@@ -1212,7 +1334,27 @@ function hasRecentDatedTriggerEvidence(evidence: Evidence[], triggerEvidenceIndi
     if (!item) return false;
     if (!["FRESH_EVENTS", "FOLLOW_UP"].includes(item.pass) || !item.publishedAt) return false;
     const publishedAt = new Date(item.publishedAt).getTime();
-    return publishedAt >= cutoff && publishedAt <= latestAccepted;
+    return (
+      publishedAt >= cutoff &&
+      publishedAt <= latestAccepted &&
+      !hasExplicitlyOldMaterialEvent(item, new Date(cutoff).getUTCFullYear())
+    );
+  });
+}
+
+function hasExplicitlyOldMaterialEvent(item: Evidence, oldestAllowedYear: number) {
+  const materialEvent =
+    /\b(?:major investment|breaks? ground|broke ground|new (?:facility|warehouse|distribution cent(?:er|re)|manufacturing site)|(?:production|manufacturing|facility|warehouse|distribution cent(?:er|re)) expansion|(?:began|commenced|started|launched)[^.;\n]{0,100}(?:production|manufacturing|operations?))\b/i;
+  const segments = `${item.title}. ${item.excerpt}`
+    .split(/(?:[\r\n]+|[.;](?:\s+|$)|\b(?:and\s+separately|whereas|while)\b)/i)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment && materialEvent.test(segment));
+  if (segments.length === 0) return false;
+  return segments.every((segment) => {
+    const years = [...segment.matchAll(/\b(?:19|20)\d{2}\b/g)].map((match) =>
+      Number(match[0])
+    );
+    return years.length > 0 && years.every((year) => year < oldestAllowedYear);
   });
 }
 

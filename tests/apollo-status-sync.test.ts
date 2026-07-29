@@ -250,6 +250,50 @@ describe("scheduled Apollo status sync", () => {
     });
   });
 
+  it("reconciles a hidden Apollo bounce when contact status remains not started", async () => {
+    prismaMock.contact.findMany.mockResolvedValue([
+      {
+        ...existingContact(),
+        email: "taylor@example.com",
+        sequenceStatus: SequenceStatus.NOT_STARTED
+      }
+    ]);
+    const fetchContact = vi.fn().mockResolvedValue({
+      ...incomingContact(),
+      sequenceStatus: SequenceStatus.NOT_STARTED,
+      replyStatus: ReplyStatus.NO_REPLY,
+      sequenceId: null,
+      sequenceName: null,
+      lastReplyAt: null
+    });
+    const fetchBouncedSequenceContacts = vi.fn().mockResolvedValue([
+      {
+        apolloContactId: "apollo-contact-1",
+        email: "taylor@example.com",
+        rawPayload: { id: "message-1", status: "bounced" }
+      }
+    ]);
+
+    await syncApolloStatusesForTenant(tenant, {
+      dependencies: {
+        fetchContact,
+        fetchBouncedSequenceContacts,
+        now: () => now,
+        sleep: vi.fn(),
+        recordScoreSnapshot: vi.fn().mockResolvedValue({ id: "snapshot-1" }),
+        recordOutcome: vi.fn().mockResolvedValue({ id: "outcome-1" })
+      }
+    });
+
+    expect(fetchBouncedSequenceContacts).toHaveBeenCalledWith("sequence-1");
+    expect(prismaMock.contact.updateMany).toHaveBeenCalledWith({
+      where: { id: "contact-1", tenantId: "tenant-a" },
+      data: expect.objectContaining({
+        sequenceStatus: SequenceStatus.BOUNCED
+      })
+    });
+  });
+
   it("reconciles a durable pending enrollment when Apollo confirms the requested cadence", async () => {
     prismaMock.automationJobRun.findFirst
       .mockResolvedValueOnce(null)

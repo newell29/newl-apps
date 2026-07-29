@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   decideApolloSequenceTransition,
   isHunterContactSafeForReview,
+  needsApolloBounceDeliveryReconciliation,
   resolveTrackedSequenceStatus
 } from "@/modules/lead-gen/apollo-reengagement-policy";
 
@@ -93,5 +94,24 @@ describe("Apollo re-engagement policy", () => {
       selectedSequenceId: "hunter-sequence",
       incomingSequenceId: "legacy-sequence"
     })).toBe(SequenceStatus.FINISHED);
+  });
+
+  it("only performs the extra bounce lookup for unresolved local and Apollo status", () => {
+    expect(needsApolloBounceDeliveryReconciliation(
+      SequenceStatus.NOT_STARTED,
+      SequenceStatus.NOT_STARTED
+    )).toBe(true);
+    expect(needsApolloBounceDeliveryReconciliation(
+      SequenceStatus.READY,
+      SequenceStatus.NOT_STARTED
+    )).toBe(true);
+    expect(needsApolloBounceDeliveryReconciliation(
+      SequenceStatus.NOT_STARTED,
+      SequenceStatus.ENROLLED
+    )).toBe(false);
+    expect(needsApolloBounceDeliveryReconciliation(
+      SequenceStatus.ENROLLED,
+      SequenceStatus.NOT_STARTED
+    )).toBe(false);
   });
 });

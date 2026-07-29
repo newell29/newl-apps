@@ -66,6 +66,7 @@ type RivetJobInput = {
   moduleKey: string;
   workflowKey: string;
   issueKey: string;
+  scopeKey: string;
   title: string;
   summary: string;
   rationale: string;
@@ -171,6 +172,28 @@ export async function createRivetDevelopmentJob(
       classification: "GENERAL",
       reporterStatement: suggestion.summary
     }).key;
+  const scopeKey = `${suggestion.moduleKey}:${suggestion.workflowKey}`;
+  const overlapping = await tx.automationJobRun.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      jobType: RIVET_DEVELOPMENT_JOB_TYPE,
+      input: { path: ["scopeKey"], equals: scopeKey },
+      OR: [
+        { status: { in: [JobStatus.QUEUED, JobStatus.RUNNING] } },
+        {
+          status: JobStatus.ERROR,
+          output: { path: ["phase"], equals: "BLOCKED" }
+        }
+      ]
+    },
+    select: { id: true, status: true, output: true }
+  });
+  if (overlapping) {
+    throw new RivetDevelopmentJobError(
+      `Rivet already has active or blocked work for ${suggestion.workflowKey} (${overlapping.id}). Add the evidence to that review before starting another branch.`,
+      409
+    );
+  }
   const evidenceManifests = await buildRivetEvidenceManifests(
     tx,
     context.tenantId,
@@ -183,6 +206,7 @@ export async function createRivetDevelopmentJob(
     moduleKey: suggestion.moduleKey,
     workflowKey: suggestion.workflowKey,
     issueKey,
+    scopeKey,
     title: suggestion.title,
     summary: suggestion.summary,
     rationale: suggestion.rationale,
@@ -1005,6 +1029,9 @@ function parseRivetJobInput(value: Prisma.JsonValue | null): RivetJobInput | nul
     moduleKey: record.moduleKey,
     workflowKey: record.workflowKey,
     issueKey: record.issueKey,
+    scopeKey: typeof record.scopeKey === "string"
+      ? record.scopeKey
+      : `${record.moduleKey}:${record.workflowKey}`,
     title: record.title,
     summary: typeof record.summary === "string" ? record.summary : "",
     rationale: typeof record.rationale === "string" ? record.rationale : "",
