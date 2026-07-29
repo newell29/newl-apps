@@ -393,6 +393,10 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 
 - Symptom: Apollo visibly contains relevant employees, but Hunter repeatedly imports only one previously saved
   contact or reports no contacts after an organization-scoped search.
+- Protocol check: Apollo's current People Search contract documents employee filters as URL query parameters. A
+  body-only request can yield an unscoped/default result set that is then correctly rejected by Hunter's
+  company-identity safety filter, producing a misleading zero-employee result. Hunter supplies the same bounded
+  filters in the documented query string and keeps the existing response validation.
 - Cause: an Apollo account ID was stored in `Company.apolloOrganizationId` and then submitted to People API Search,
   which requires Apollo's nested global organization ID. Apollo can expose both identifiers in the same account or
   saved-contact payload.

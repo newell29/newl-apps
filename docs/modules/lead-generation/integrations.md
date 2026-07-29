@@ -94,8 +94,12 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
   to the Mac. Each request handles one company and the server persists retries and results.
 - Apollo documents People API Search as a zero-credit endpoint that returns identity, title, location, and company
   metadata without email addresses or phone numbers. Hunter uses it for the generic and relevant-title employee
-  searches. Accessing or enriching a selected person's email or phone is a separate downstream operation that can
-  consume Apollo credits; search must not be represented as contact-data enrichment.
+  searches. Apollo's current contract expresses the filters as URL query parameters, so Hunter sends
+  `organization_ids[]`, `q_organization_domains_list[]`, `person_titles[]`, pagination, and similar-title controls in
+  the documented query string. The identical raw JSON payload remains for compatibility, while returned employers
+  still have to pass the confirmed-company safety check. Accessing or enriching a selected person's email or phone is
+  a separate downstream operation that can consume Apollo credits; search must not be represented as contact-data
+  enrichment.
 - Saved Contact Search and People API Search return different identity shapes. A saved-contact `id` is stored as
   `apolloContactId`; a People Search `id` is stored as `apolloPersonId`. People Search can omit the returned
   organization's ID even when the request was constrained by `organization_ids`, so Hunter validates any returned

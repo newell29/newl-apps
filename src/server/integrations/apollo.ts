@@ -1971,8 +1971,53 @@ async function searchApolloPeople({
     include_similar_titles: personTitles && personTitles.length > 0 ? true : undefined
   };
 
-  const json = await postApolloJson("/api/v1/mixed_people/api_search", apiKey, body);
+  const json = await postApolloJson(
+    buildApolloPeopleSearchPath(body),
+    apiKey,
+    body
+  );
   return parseApolloContacts(json, "PEOPLE_SEARCH");
+}
+
+function buildApolloPeopleSearchPath({
+  page,
+  per_page: perPage,
+  organization_ids: organizationIds,
+  q_organization_domains_list: organizationDomains,
+  q_keywords: queryKeywords,
+  person_titles: personTitles,
+  include_similar_titles: includeSimilarTitles
+}: {
+  page: number;
+  per_page: number;
+  organization_ids?: string[];
+  q_organization_domains_list?: string[];
+  q_keywords?: string;
+  person_titles?: string[];
+  include_similar_titles?: boolean;
+}) {
+  const params = new URLSearchParams({
+    page: String(page),
+    per_page: String(perPage)
+  });
+
+  for (const organizationId of organizationIds ?? []) {
+    params.append("organization_ids[]", organizationId);
+  }
+  for (const organizationDomain of organizationDomains ?? []) {
+    params.append("q_organization_domains_list[]", organizationDomain);
+  }
+  for (const personTitle of personTitles ?? []) {
+    params.append("person_titles[]", personTitle);
+  }
+  if (queryKeywords) {
+    params.set("q_keywords", queryKeywords);
+  }
+  if (includeSimilarTitles !== undefined) {
+    params.set("include_similar_titles", String(includeSimilarTitles));
+  }
+
+  return `/api/v1/mixed_people/api_search?${params.toString()}`;
 }
 
 async function searchApolloRelevantPeople({

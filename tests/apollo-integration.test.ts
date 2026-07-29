@@ -704,7 +704,7 @@ describe("fetchApolloContactsForCompany", () => {
         } as unknown as Response;
       }
 
-      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+      if (url.includes("/api/v1/mixed_people/api_search")) {
         expect(body.organization_ids).toEqual(["5e66b6381e05b4008c8331b8"]);
         return {
           ok: true,
@@ -750,7 +750,7 @@ describe("fetchApolloContactsForCompany", () => {
           })
         } as unknown as Response;
       }
-      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+      if (url.includes("/api/v1/mixed_people/api_search")) {
         return {
           ok: true,
           status: 200,
@@ -827,7 +827,7 @@ describe("fetchApolloContactsForCompany", () => {
         } as unknown as Response;
       }
 
-      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+      if (url.includes("/api/v1/mixed_people/api_search")) {
         expect(body.organization_ids).toEqual(["aalberts-global-org"]);
         return {
           ok: true,
@@ -913,7 +913,7 @@ describe("fetchApolloContactsForCompany", () => {
         } as unknown as Response;
       }
 
-      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+      if (url.includes("/api/v1/mixed_people/api_search")) {
         if (Array.isArray(body.organization_ids)) {
           expect(body.organization_ids).toEqual([accountId]);
           return {
@@ -988,7 +988,7 @@ describe("fetchApolloContactsForCompany", () => {
         } as unknown as Response;
       }
 
-      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+      if (url.includes("/api/v1/mixed_people/api_search")) {
         const personTitles = Array.isArray(body.person_titles) ? body.person_titles : [];
         return {
           ok: true,
@@ -1027,7 +1027,7 @@ describe("fetchApolloContactsForCompany", () => {
     });
 
     const peopleRequests = fetchMock.mock.calls
-      .filter(([input]) => String(input).endsWith("/api/v1/mixed_people/api_search"))
+      .filter(([input]) => String(input).includes("/api/v1/mixed_people/api_search"))
       .map(([, init]) => JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
     expect(peopleRequests).toHaveLength(2);
     expect(peopleRequests[0]).toMatchObject({
@@ -1106,7 +1106,7 @@ describe("fetchApolloContactsForCompany", () => {
         } as unknown as Response;
       }
 
-      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+      if (url.includes("/api/v1/mixed_people/api_search")) {
         const people = Array.isArray(body.person_titles)
           ? [{
               id: "mark-person",
@@ -1188,7 +1188,7 @@ describe("fetchApolloContactsForCompany", () => {
         } as unknown as Response;
       }
 
-      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+      if (url.includes("/api/v1/mixed_people/api_search")) {
         if (Array.isArray(body.organization_ids) && body.organization_ids.includes(accountId)) {
           return {
             ok: true,
@@ -1257,7 +1257,7 @@ describe("fetchApolloContactsForCompany", () => {
     ]);
 
     const peopleBodies = fetchMock.mock.calls
-      .filter(([request]) => String(request).endsWith("/api/v1/mixed_people/api_search"))
+      .filter(([request]) => String(request).includes("/api/v1/mixed_people/api_search"))
       .map(([, requestInit]) => JSON.parse(String(requestInit?.body ?? "{}")) as Record<string, unknown>);
     expect(
       peopleBodies.some(
@@ -1305,7 +1305,7 @@ describe("fetchApolloContactsForCompany", () => {
         } as unknown as Response;
       }
 
-      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+      if (url.includes("/api/v1/mixed_people/api_search")) {
         expect(body.organization_ids).toEqual([organizationId]);
         return {
           ok: true,
@@ -1337,7 +1337,7 @@ describe("fetchApolloContactsForCompany", () => {
     expect(result.match.classification).toBe("DIRECT_COMPANY");
     expect(result.contacts.map((contact) => contact.fullName)).toEqual(["Logistics Lead"]);
     const peopleBodies = fetchMock.mock.calls
-      .filter(([request]) => String(request).endsWith("/api/v1/mixed_people/api_search"))
+      .filter(([request]) => String(request).includes("/api/v1/mixed_people/api_search"))
       .map(([, requestInit]) => JSON.parse(String(requestInit?.body ?? "{}")) as Record<string, unknown>);
     expect(
       peopleBodies.every(
@@ -1384,7 +1384,7 @@ describe("fetchApolloContactsForCompany", () => {
         } as unknown as Response;
       }
 
-      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+      if (url.includes("/api/v1/mixed_people/api_search")) {
         if (Array.isArray(body.organization_ids) && body.organization_ids.includes(accountId)) {
           return {
             ok: true,
@@ -1466,7 +1466,7 @@ describe("fetchApolloContactsForCompany", () => {
         } as unknown as Response;
       }
 
-      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+      if (url.includes("/api/v1/mixed_people/api_search")) {
         if (Array.isArray(body.organization_ids)) {
           expect(body.organization_ids).toEqual([accountId]);
           return {
@@ -1557,7 +1557,7 @@ describe("fetchApolloContactsForCompany", () => {
         } as unknown as Response;
       }
 
-      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+      if (url.includes("/api/v1/mixed_people/api_search")) {
         if (Array.isArray(body.organization_ids)) {
           return {
             ok: true,
@@ -1651,7 +1651,7 @@ describe("fetchApolloContactsForCompany", () => {
         } as unknown as Response;
       }
 
-      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+      if (url.includes("/api/v1/mixed_people/api_search")) {
         if (Array.isArray(body.organization_ids) && body.organization_ids.includes(accountId)) {
           return {
             ok: true,
@@ -1767,7 +1767,7 @@ describe("fetchApolloContactsForCompany", () => {
         } as unknown as Response;
       }
 
-      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+      if (url.includes("/api/v1/mixed_people/api_search")) {
         if (Array.isArray(body.organization_ids) && body.organization_ids.includes(accountId)) {
           return {
             ok: true,
@@ -1842,7 +1842,7 @@ describe("fetchApolloContactsForCompany", () => {
         } as unknown as Response;
       }
 
-      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+      if (url.includes("/api/v1/mixed_people/api_search")) {
         expect(body.organization_ids).toEqual(["apollo-global-organization-id"]);
         return {
           ok: true,
@@ -2143,7 +2143,7 @@ describe("fetchApolloContactsForCompany", () => {
     );
   });
 
-  it("reads later saved-contact pages so a relevant YAT employee is not hidden behind the first 100", async () => {
+  it("uses Apollo's documented query filters and reads later saved-contact pages for YAT employees", async () => {
     const firstPage = Array.from({ length: 100 }, (_, index) => ({
       id: `apollo-contact-yat-${index}`,
       person_id: `apollo-person-yat-${index}`,
@@ -2198,7 +2198,7 @@ describe("fetchApolloContactsForCompany", () => {
           })
         } as unknown as Response;
       }
-      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+      if (url.includes("/api/v1/mixed_people/api_search")) {
         return emptyApolloPeopleResponse();
       }
       throw new Error(`Unexpected Apollo URL in test: ${url}`);
@@ -2223,6 +2223,122 @@ describe("fetchApolloContactsForCompany", () => {
         : {};
       return body.page === 2 && body.per_page === 100;
     })).toBe(true);
+    const peopleRequest = fetchMock.mock.calls.find(([request]) =>
+      String(request).includes("/api/v1/mixed_people/api_search")
+    );
+    expect(peopleRequest).toBeDefined();
+    const peopleSearchUrl = new URL(String(peopleRequest?.[0]));
+    expect(peopleSearchUrl.searchParams.getAll("organization_ids[]")).toEqual([
+      "apollo-org-yat"
+    ]);
+    expect(peopleSearchUrl.searchParams.get("page")).toBe("1");
+    expect(peopleSearchUrl.searchParams.get("per_page")).toBe("100");
+  });
+
+  it("recovers YAT employees when Apollo applies People Search filters only from the documented query string", async () => {
+    vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : {};
+
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            organizations: [{
+              id: "apollo-org-yat",
+              name: "YAT USA, INC.",
+              primary_domain: "yattool.com"
+            }]
+          })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/contacts/search")) {
+        const query = String(body.q_keywords ?? "");
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            contacts: query.includes("Rogelio")
+              ? [{
+                  id: "apollo-contact-yat-rogelio",
+                  person_id: "apollo-person-yat-rogelio",
+                  first_name: "Rogelio",
+                  last_name: "Martinez",
+                  title: "Import Export Specialist",
+                  email: "rogelio.martinez@yattool.com",
+                  organization: {
+                    id: "apollo-org-yat",
+                    name: "YAT USA, INC.",
+                    primary_domain: "yattool.com"
+                  }
+                }]
+              : []
+          })
+        } as unknown as Response;
+      }
+
+      if (url.includes("/api/v1/mixed_people/api_search")) {
+        const searchUrl = new URL(url);
+        const scopedOrganizationIds =
+          searchUrl.searchParams.getAll("organization_ids[]");
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue(
+            scopedOrganizationIds.includes("apollo-org-yat")
+              ? {
+                  people: [{
+                    id: "apollo-person-yat-rogelio",
+                    first_name: "Rogelio",
+                    last_name_obfuscated: "M.",
+                    title: "Import Export Specialist",
+                    has_email: true,
+                    organization: {
+                      name: "YAT USA, INC.",
+                      primary_domain: "yattool.com"
+                    }
+                  }]
+                }
+              : {
+                  people: [{
+                    id: "apollo-person-unrelated",
+                    first_name: "Unrelated",
+                    last_name_obfuscated: "P.",
+                    title: "Import Manager",
+                    has_email: true,
+                    organization: {
+                      name: "Unrelated Company",
+                      primary_domain: "unrelated.example"
+                    }
+                  }]
+                }
+          )
+        } as unknown as Response;
+      }
+
+      throw new Error(`Unexpected Apollo URL in test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "YAT USA, INC.",
+      domain: "yattool.com"
+    });
+
+    expect(result.contacts).toEqual([
+      expect.objectContaining({
+        apolloContactId: "apollo-contact-yat-rogelio",
+        apolloPersonId: "apollo-person-yat-rogelio",
+        fullName: "Rogelio Martinez",
+        title: "Import Export Specialist",
+        email: "rogelio.martinez@yattool.com"
+      })
+    ]);
+    expect(result.contactRecovery.savedContactsRecovered).toBeGreaterThan(0);
+    expect(result.contactRecovery.paidEmailEnrichmentsAttempted).toBe(0);
   });
 
   it("recovers a masked shortlisted person from saved contacts before considering paid enrichment", async () => {
@@ -2267,7 +2383,7 @@ describe("fetchApolloContactsForCompany", () => {
           })
         } as unknown as Response;
       }
-      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+      if (url.includes("/api/v1/mixed_people/api_search")) {
         return {
           ok: true,
           status: 200,
@@ -2345,7 +2461,7 @@ describe("fetchApolloContactsForCompany", () => {
           json: vi.fn().mockResolvedValue({ contacts: [] })
         } as unknown as Response;
       }
-      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+      if (url.includes("/api/v1/mixed_people/api_search")) {
         return {
           ok: true,
           status: 200,
@@ -2449,7 +2565,7 @@ describe("fetchApolloContactsForCompany", () => {
         } as unknown as Response;
       }
 
-      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+      if (url.includes("/api/v1/mixed_people/api_search")) {
         if (
           Array.isArray(body.person_titles) &&
           body.person_titles.includes("logistics")
@@ -2535,7 +2651,7 @@ describe("fetchApolloContactsForCompany", () => {
         } as unknown as Response;
       }
 
-      if (url.endsWith("/api/v1/mixed_people/api_search")) {
+      if (url.includes("/api/v1/mixed_people/api_search")) {
         if (body.q_keywords === "DORMEO NORTH AMERICA logistics") {
           return {
             ok: true,
