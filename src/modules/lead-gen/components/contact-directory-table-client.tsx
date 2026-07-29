@@ -25,7 +25,10 @@ import { useRouter } from "next/navigation";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { DataGridColumnMenu } from "@/components/data-grid-column-menu";
 import { usePersistedTableState } from "@/components/use-persisted-table-state";
-import type { ApolloPushJobSummary } from "@/modules/lead-gen/apollo-push-jobs";
+import type {
+  ApolloPushJobDetailItem,
+  ApolloPushJobSummary
+} from "@/modules/lead-gen/apollo-push-jobs";
 import type { ContactSequenceStatusFilter } from "@/modules/lead-gen/queries";
 import {
   EMPTY_CONTACT_BULK_ACTION_SUMMARY,
@@ -233,7 +236,7 @@ export function ContactDirectoryTableClient({
   const [apolloPushJobs, setApolloPushJobs] = useState(initialApolloPushJobs);
   const [activeApolloPushJobId, setActiveApolloPushJobId] = useState<string | null>(
     initialActiveApolloPushJobId ??
-      initialApolloPushJobs.find((job) => job.status === "QUEUED" || job.status === "RUNNING")?.id ??
+      initialApolloPushJobs.find(isApolloPushJobStillActive)?.id ??
       null
   );
   const startedApolloPushJobIdsRef = useRef<Set<string>>(new Set());
@@ -1327,16 +1330,20 @@ function ApolloPushJobHistoryPanel({ jobs }: { jobs: ApolloPushJobSummary[] }) {
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="text-sm font-semibold text-foreground">Apollo bulk push</p>
-                      <StatusBadge value={job.status} tone={apolloJobTone(job.status)} />
+                      <StatusBadge
+                        value={job.pendingContacts > 0 ? "PENDING_CONFIRMATION" : job.status}
+                        tone={job.pendingContacts > 0 ? "warning" : apolloJobTone(job.status)}
+                      />
                     </div>
                     <p className="mt-1 text-xs text-mutedForeground">
                       Started {formatDateTime(job.startedAt)}
                       {job.finishedAt ? ` • Finished ${formatDateTime(job.finishedAt)}` : ""}
                     </p>
                   </div>
-                  <div className="grid min-w-[340px] gap-2 text-right sm:grid-cols-4 sm:text-left">
+                  <div className="grid min-w-[420px] gap-2 text-right sm:grid-cols-5 sm:text-left">
                     <ContactBulkMetric label="Selected" value={job.selectedContacts} />
                     <ContactBulkMetric label="Enrolled" value={job.enrolledContacts} />
+                    <ContactBulkMetric label="Pending" value={job.pendingContacts} />
                     <ContactBulkMetric label="Skipped" value={job.skippedContacts} />
                     <ContactBulkMetric label="Failed" value={job.failedContacts} />
                   </div>
@@ -1476,9 +1483,16 @@ function ContactBulkActionSummaryBanner({ summary }: { summary: ContactBulkActio
   );
 }
 
-function ApolloPushDetails({ details }: { details: ContactBulkActionDetail[] }) {
+function ApolloPushDetails({
+  details
+}: {
+  details: Array<ApolloPushJobDetailItem | ContactBulkActionDetail>;
+}) {
   const skippedOrFailed = details.filter(
-    (detail) => detail.outcome === "skipped" || detail.outcome === "failed"
+    (detail) =>
+      detail.outcome === "pending" ||
+      detail.outcome === "skipped" ||
+      detail.outcome === "failed"
   );
 
   if (skippedOrFailed.length === 0) {
@@ -1502,7 +1516,11 @@ function ApolloPushDetails({ details }: { details: ContactBulkActionDetail[] }) 
                     : "border-warning/30 bg-warning/10 text-warning"
                 }`}
               >
-                {detail.outcome === "failed" ? "Failed" : "Skipped"}
+                {detail.outcome === "failed"
+                  ? "Failed"
+                  : detail.outcome === "pending"
+                    ? "Pending"
+                    : "Skipped"}
               </span>
             </div>
             <p className="mt-1 text-xs text-mutedForeground">{detail.reason ?? "No reason returned."}</p>
@@ -1538,11 +1556,11 @@ function summarizeApolloBlockers(summary: ContactBulkActionSummary) {
     .slice(0, 3);
 }
 
-function summarizeApolloJobBlockers(details: ContactBulkActionDetail[]) {
+function summarizeApolloJobBlockers(details: ApolloPushJobDetailItem[]) {
   const reasonCounts = new Map<string, number>();
 
   for (const detail of details) {
-    if (detail.outcome === "enrolled" || detail.outcome === "approved") {
+    if (detail.outcome === "enrolled") {
       continue;
     }
 
@@ -1561,12 +1579,7 @@ function isApolloPushJobStillActive(job: ApolloPushJobSummary) {
     return true;
   }
 
-  return job.details.some(
-    (detail) =>
-      detail.outcome === "skipped" &&
-      detail.reason ===
-        "Apollo accepted the push, but the cadence enrollment is still propagating in Apollo and was not visible during Newl Apps verification."
-  );
+  return job.pendingContacts > 0;
 }
 
 function apolloJobTone(status: ApolloPushJobSummary["status"]) {

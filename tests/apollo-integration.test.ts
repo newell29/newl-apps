@@ -2525,6 +2525,27 @@ describe("removeApolloContactsFromSequences", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("fails closed when Apollo returns a successful HTTP response with an enrollment error", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        success: false,
+        message: "Contact is not eligible for this sequence."
+      })
+    } as unknown as Response);
+
+    await expect(
+      pushApolloContactsToSequence({
+        sequenceId: "hunter-sequence",
+        apolloContactIds: ["apollo-contact-1"],
+        sequenceOwnerUserId: "apollo-owner",
+        sendFromEmailAccountId: "mailbox-1",
+        initialStatus: "active"
+      })
+    ).rejects.toThrow("Contact is not eligible for this sequence.");
+  });
+
   it("uses Apollo's zero-credit remove endpoint before cadence re-enrollment", async () => {
     const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue({
       ok: true,
@@ -2578,8 +2599,25 @@ describe("removeApolloContactsFromSequences", () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
       "/emailer_campaigns/remove_or_stop_contact_ids?"
     );
-    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
+    const addRequestUrl = new URL(String(fetchMock.mock.calls[1]?.[0]));
+    expect(`${addRequestUrl.origin}${addRequestUrl.pathname}`).toBe(
       "https://api.apollo.io/api/v1/emailer_campaigns/hunter-sequence/add_contact_ids"
+    );
+    expect(addRequestUrl.searchParams.getAll("contact_ids[]")).toEqual(["apollo-contact-1"]);
+    expect(addRequestUrl.searchParams.get("emailer_campaign_id")).toBe("hunter-sequence");
+    expect(addRequestUrl.searchParams.get("send_email_from_email_account_id")).toBe("mailbox-1");
+    expect(addRequestUrl.searchParams.get("user_id")).toBe("apollo-owner");
+    expect(addRequestUrl.searchParams.get("status")).toBe("active");
+    expect(addRequestUrl.searchParams.get("sequence_active_in_other_campaigns")).toBe("true");
+    expect(addRequestUrl.searchParams.get("sequence_finished_in_other_campaigns")).toBe("true");
+    expect(addRequestUrl.searchParams.get("sequence_same_company_in_same_campaign")).toBe("true");
+    expect(addRequestUrl.searchParams.get("contacts_without_ownership_permission")).toBe("true");
+    expect(addRequestUrl.searchParams.get("add_if_in_queue")).toBe("true");
+    expect(fetchMock.mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({
+        method: "POST",
+        body: "{}"
+      })
     );
   });
 });

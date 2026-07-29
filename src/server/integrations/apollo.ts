@@ -1032,21 +1032,32 @@ export async function pushApolloContactsToSequence(
   }
 
   const initialStatus = input.initialStatus ?? "active";
-  const payload = {
+  const params = new URLSearchParams({
     emailer_campaign_id: sequenceId,
-    apollo_sequence_id: sequenceId,
-    contact_ids: acceptedContactIds,
-    sequence_owner_user_id: sequenceOwnerUserId,
     send_email_from_email_account_id: sendFromEmailAccountId,
-    sequence_send_from_email_account_id: sendFromEmailAccountId,
-    sequence_push_initial_status: initialStatus,
-    allow_no_email: false,
-    allow_unverified_email: false,
-    allow_contacts_with_same_company: true,
-    allow_contacts_owned_by_other_users: true
-  } satisfies Record<string, unknown>;
+    sequence_no_email: "false",
+    sequence_unverified_email: "false",
+    sequence_job_change: "false",
+    sequence_active_in_other_campaigns: "true",
+    sequence_finished_in_other_campaigns: "true",
+    sequence_same_company_in_same_campaign: "true",
+    contacts_without_ownership_permission: "true",
+    add_if_in_queue: "true",
+    contact_verification_skipped: "false",
+    user_id: sequenceOwnerUserId,
+    status: initialStatus
+  });
+  acceptedContactIds.forEach((contactId) => params.append("contact_ids[]", contactId));
 
-  const rawPayload = await postApolloJson(`/api/v1/emailer_campaigns/${sequenceId}/add_contact_ids`, apiKey, payload);
+  const rawPayload = await postApolloJson(
+    `/api/v1/emailer_campaigns/${sequenceId}/add_contact_ids?${params.toString()}`,
+    apiKey,
+    {}
+  );
+  const responseError = extractApolloSequencePushError(rawPayload);
+  if (responseError) {
+    throw new Error(responseError);
+  }
 
   return {
     sequenceId,
@@ -1054,6 +1065,27 @@ export async function pushApolloContactsToSequence(
     message: extractApolloError(rawPayload) ?? null,
     rawPayload
   };
+}
+
+function extractApolloSequencePushError(payload: Record<string, unknown>) {
+  const success = payload.success;
+  const explicitError = readApolloString(payload, ["error", "detail"]);
+  if (explicitError) {
+    return explicitError;
+  }
+
+  if (payload.errors && typeof payload.errors === "object") {
+    const nestedMessage = readApolloString(payload.errors as Record<string, unknown>, [
+      "message",
+      "base",
+      "detail"
+    ]);
+    if (nestedMessage) {
+      return nestedMessage;
+    }
+  }
+
+  return success === false ? readApolloString(payload, ["message"]) ?? "Apollo rejected the sequence enrollment." : null;
 }
 
 function safeApolloContactNamePart(value: string | null) {

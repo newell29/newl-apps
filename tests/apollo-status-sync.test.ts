@@ -215,4 +215,172 @@ describe("scheduled Apollo status sync", () => {
       })
     });
   });
+
+  it("reconciles a durable pending enrollment when Apollo confirms the requested cadence", async () => {
+    prismaMock.automationJobRun.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: "push-job-1",
+        output: {
+          selectedContacts: 1,
+          processedContacts: 1,
+          enrolledContacts: 0,
+          pendingContacts: 1,
+          skippedContacts: 0,
+          failedContacts: 0,
+          companiesTouched: 1,
+          details: [
+            {
+              contactId: "contact-1",
+              contactName: "Cynthia Sykes",
+              companyName: "HYOSUNG USA, INC.",
+              outcome: "pending",
+              reason:
+                "Apollo accepted the push, but the cadence enrollment is still propagating in Apollo and was not visible during Newl Apps verification."
+            }
+          ]
+        }
+      });
+    prismaMock.contact.findMany.mockResolvedValue([
+      {
+        ...existingContact(),
+        sequenceStatus: SequenceStatus.READY,
+        selectedSequenceId: "hunter-email-sequence",
+        selectedSequenceName: "Hunter - Email Only",
+        rawJson: {
+          apollo: {
+            pendingSequenceConfirmation: {
+              sequenceId: "hunter-email-sequence",
+              sequenceName: "Hunter - Email Only",
+              jobRunId: "push-job-1",
+              acceptedAt: "2026-07-22T17:55:00.000Z"
+            }
+          }
+        }
+      }
+    ]);
+    const fetchContact = vi.fn().mockResolvedValue({
+      ...incomingContact(),
+      sequenceStatus: SequenceStatus.ENROLLED,
+      replyStatus: ReplyStatus.NO_REPLY,
+      sequenceId: "hunter-email-sequence",
+      sequenceName: "Hunter - Email Only",
+      lastReplyAt: null
+    });
+
+    const result = await syncApolloStatusesForTenant(tenant, {
+      dependencies: {
+        fetchContact,
+        now: () => now,
+        sleep: vi.fn(),
+        recordScoreSnapshot: vi.fn().mockResolvedValue({ id: "snapshot-1" }),
+        recordOutcome: vi.fn().mockResolvedValue({ id: "outcome-1" })
+      }
+    });
+
+    expect(result).toMatchObject({
+      status: "success",
+      confirmedEnrollments: 1,
+      failedEnrollments: 0
+    });
+    const contactUpdate = prismaMock.contact.updateMany.mock.calls[0]?.[0];
+    expect(contactUpdate.data.rawJson.apollo.pendingSequenceConfirmation).toBeUndefined();
+    expect(contactUpdate.data.rawJson.apollo.pushBlocker).toBeUndefined();
+    expect(prismaMock.automationJobRun.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          output: expect.objectContaining({
+            enrolledContacts: 1,
+            pendingContacts: 0
+          })
+        })
+      })
+    );
+  });
+
+  it("fails an expired pending enrollment instead of accepting stale finished history", async () => {
+    prismaMock.automationJobRun.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: "push-job-1",
+        output: {
+          selectedContacts: 1,
+          processedContacts: 1,
+          enrolledContacts: 0,
+          pendingContacts: 1,
+          skippedContacts: 0,
+          failedContacts: 0,
+          companiesTouched: 1,
+          details: [
+            {
+              contactId: "contact-1",
+              contactName: "Cynthia Sykes",
+              companyName: "HYOSUNG USA, INC.",
+              outcome: "pending",
+              reason:
+                "Apollo accepted the push, but the cadence enrollment is still propagating in Apollo and was not visible during Newl Apps verification."
+            }
+          ]
+        }
+      });
+    prismaMock.contact.findMany.mockResolvedValue([
+      {
+        ...existingContact(),
+        sequenceStatus: SequenceStatus.READY,
+        selectedSequenceId: "hunter-email-sequence",
+        selectedSequenceName: "Hunter - Email Only",
+        rawJson: {
+          apollo: {
+            pendingSequenceConfirmation: {
+              sequenceId: "hunter-email-sequence",
+              sequenceName: "Hunter - Email Only",
+              jobRunId: "push-job-1",
+              acceptedAt: "2026-07-22T17:45:00.000Z"
+            }
+          }
+        }
+      }
+    ]);
+    const fetchContact = vi.fn().mockResolvedValue({
+      ...incomingContact(),
+      sequenceStatus: SequenceStatus.FINISHED,
+      replyStatus: ReplyStatus.NO_REPLY,
+      sequenceId: "hunter-email-sequence",
+      sequenceName: "Hunter - Email Only",
+      lastReplyAt: null
+    });
+
+    const result = await syncApolloStatusesForTenant(tenant, {
+      dependencies: {
+        fetchContact,
+        now: () => now,
+        sleep: vi.fn(),
+        recordScoreSnapshot: vi.fn().mockResolvedValue({ id: "snapshot-1" }),
+        recordOutcome: vi.fn().mockResolvedValue({ id: "outcome-1" })
+      }
+    });
+
+    expect(result).toMatchObject({
+      status: "success",
+      confirmedEnrollments: 0,
+      failedEnrollments: 1
+    });
+    const contactUpdate = prismaMock.contact.updateMany.mock.calls[0]?.[0];
+    expect(contactUpdate.data.rawJson.apollo.pendingSequenceConfirmation).toBeUndefined();
+    expect(contactUpdate.data.rawJson.apollo.pushBlocker.reason).toContain(
+      "still not present in the requested cadence after 10 minutes"
+    );
+    expect(prismaMock.automationJobRun.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: JobStatus.ERROR,
+          output: expect.objectContaining({
+            enrolledContacts: 0,
+            pendingContacts: 0,
+            failedContacts: 1
+          })
+        })
+      })
+    );
+  });
 });
