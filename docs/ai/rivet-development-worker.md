@@ -6,7 +6,7 @@ Rivet is the restricted local development worker for administrator-approved Newl
 
 ## Approval and grouping
 
-The daily digest and the Newl Apps feedback page call the same deterministic grouping service. Similar feedback is grouped by tenant, module, workflow, classification, and issue theme before a suggestion is presented for approval. Confirmed Garland themes include:
+The daily digest and the Newl Apps feedback page call the same deterministic grouping service. Only administrator-confirmed feedback is eligible for grouping. Similar feedback is grouped by tenant, module, workflow, classification, and issue theme before a suggestion is presented for approval. Specific Garland field families are classified before the generic false-comparison family. Confirmed Garland themes include:
 
 - Lot/Serial extraction and commodity formatting;
 - Special Instructions extraction;
@@ -18,6 +18,8 @@ Generic feedback is normalized and grouped only when its significant terms meet 
 The issue family remains stable after approval. Later reports attach as follow-up evidence and cannot silently expand the approved Rivet packet. A refresh supersedes duplicate awaiting cards that match an active approved family. After Alex confirms that the exact reviewed PR is merged and deployed, the family is resolved; later evidence creates one linked regression suggestion requiring a new approval.
 
 Selecting **Approve & start Rivet** is the single approval to begin development. The approval transaction records the administrator decision and creates one tenant-scoped `AutomationJobRun` with job type `ASSISTANT_RIVET_DEVELOPMENT`. Repeated requests cannot approve the same suggestion twice.
+
+Before approval, the administrator can expand every complete source and follow-up report, correct the observed and expected result fields on pending feedback, and add bounded approval comments. Those comments are stored with the decision and included in the immutable Rivet packet. Rivet must treat them as reviewed business context without broadening the approved issue family.
 
 ## Required Garland understanding
 

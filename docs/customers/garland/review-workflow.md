@@ -29,6 +29,8 @@ For a Teams-uploaded multi-order PDF, the CSR must name one exact PS or SR numbe
 
 Employee feedback about these reviews is grouped into stable root-cause families. New reports do not create another development approval while the same family already has an approved Rivet fix; they remain follow-up evidence until the reviewed PR is explicitly recorded as deployed. Evidence reported after that point is presented as one linked regression family.
 
+An employee report remains unapproved evidence until an administrator reviews it. The administrator can read the complete message, correct the reported and expected Garland result classifications without a duplicate submission, and add approval comments for Rivet. Only confirmed feedback can enter a Rivet packet, and a Garland check report whose observed and expected outcomes are identical must be corrected before confirmation.
+
 ## Pallet and printing notes
 
 Pallet dimensions, serials, weight, and SKU observations are represented in Teamship review/update types and `GarlandProductDimensionObservation`. The UPS special dimension rule is confirmed in existing documentation and tests should be consulted before changing it. Printer mappings, duplicate print protection, and a general print service were not located; production printing requires explicit human approval.

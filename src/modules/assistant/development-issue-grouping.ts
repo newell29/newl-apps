@@ -75,15 +75,6 @@ const GARLAND_ISSUES: Array<{
   matches: (text: string) => boolean;
 }> = [
   {
-    key: "GARLAND_COMPARISON_FALSE_MISMATCH",
-    title: "Garland comparison false mismatch",
-    matches: (text) =>
-      /\bcurrently displays?\b/.test(text) &&
-      /\bit should display\b/.test(text) &&
-      /\b(?:observed|reported)\b.*\b(?:missing|fail|pending)\b/.test(text) &&
-      /\bexpected\b.*\bpass\b/.test(text)
-  },
-  {
     key: "GARLAND_LOT_SERIAL_COMMODITY",
     title: "Garland Lot/Serial and commodity formatting",
     matches: (text) =>
@@ -133,6 +124,15 @@ const GARLAND_ISSUES: Array<{
     matches: (text) =>
       /\border status\b/.test(text) ||
       /\bstatus of (?:ps|sr)\b/.test(text)
+  },
+  {
+    key: "GARLAND_COMPARISON_FALSE_MISMATCH",
+    title: "Garland comparison false mismatch",
+    matches: (text) =>
+      /\bcurrently displays?\b/.test(text) &&
+      /\bit should display\b/.test(text) &&
+      /\b(?:observed|reported)\b.*\b(?:missing|fail|pending)\b/.test(text) &&
+      /\bexpected\b.*\bpass\b/.test(text)
   }
 ];
 

@@ -105,6 +105,32 @@ describe("development issue grouping", () => {
     ]);
   });
 
+  it("keeps specific Garland field failures out of the generic false-mismatch family", () => {
+    const groups = groupDevelopmentFeedback([
+      {
+        ...base,
+        id: "serial-specific",
+        reporterStatement:
+          "The Commodity field currently displays: SKU: EXAMPLE QTY: 1 It should display: SKU: EXAMPLE SN: SERIAL123",
+        observedOutcome: "MISSING",
+        expectedOutcome: "PASS"
+      },
+      {
+        ...base,
+        id: "location-specific",
+        reporterStatement:
+          "The Ship-to city and province currently display: MISSISSAUGA ON It should display: SOURCE CITY QC",
+        observedOutcome: "MISSING",
+        expectedOutcome: "PASS"
+      }
+    ]);
+
+    expect(groups.map((group) => group.issueKey)).toEqual([
+      "GARLAND_LOT_SERIAL_COMMODITY",
+      "GARLAND_SHIP_TO_LOCATION"
+    ]);
+  });
+
   it("screens an exact no-change report only when its observed and expected outcomes also match", () => {
     const statement = "The Commodity field currently displays: SKU: EXAMPLE QTY: 1 It should display: SKU: EXAMPLE QTY: 1";
 

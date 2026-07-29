@@ -17,6 +17,7 @@ import { prisma } from "@/server/db";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 
 const FEEDBACK_STATUSES = new Set(["REPORTED", "INVESTIGATING", "CONFIRMED", "REJECTED", "RESOLVED"]);
+const FEEDBACK_OUTCOMES = new Set(["PASS", "FAIL", "MISSING", "PENDING"]);
 const SUGGESTION_STATUSES = new Set(["AWAITING_APPROVAL", "APPROVED", "REJECTED"]);
 
 export class OperationalMemoryError extends Error {
@@ -136,8 +137,8 @@ export async function createOperationalFeedback(
         artifactId: normalizeOptionalText(input.artifactId, 100),
         reporterUserId: context.userId,
         reporterStatement: statement,
-        expectedOutcome: normalizeOptionalText(input.expectedOutcome, 100),
-        observedOutcome: normalizeOptionalText(input.observedOutcome, 100),
+        expectedOutcome: normalizeFeedbackOutcome(input.expectedOutcome, "expectedOutcome"),
+        observedOutcome: normalizeFeedbackOutcome(input.observedOutcome, "observedOutcome"),
         classification: normalizeClassification(input.classification),
         evidence: input.evidence ?? Prisma.JsonNull
       },
@@ -184,7 +185,12 @@ export async function listOperationalFeedback(
 export async function reviewOperationalFeedback(
   context: AuthenticatedContext,
   feedbackId: string,
-  input: { status: string; resolutionNotes?: string | null }
+  input: {
+    status: string;
+    resolutionNotes?: string | null;
+    expectedOutcome?: string | null;
+    observedOutcome?: string | null;
+  }
 ) {
   const status = input.status.trim().toUpperCase();
   if (!FEEDBACK_STATUSES.has(status)) {
@@ -192,16 +198,35 @@ export async function reviewOperationalFeedback(
   }
   const existing = await prisma.operationalFeedback.findFirst({
     where: { tenantId: context.tenantId, id: feedbackId },
-    select: { id: true, status: true, resolutionNotes: true }
+    select: {
+      id: true,
+      workflowKey: true,
+      classification: true,
+      status: true,
+      expectedOutcome: true,
+      observedOutcome: true,
+      resolutionNotes: true
+    }
   });
   if (!existing) throw new OperationalMemoryError("Feedback was not found.", 404);
 
   const resolutionNotes = normalizeOptionalText(input.resolutionNotes, 4000);
+  const expectedOutcome = input.expectedOutcome === undefined
+    ? existing.expectedOutcome
+    : normalizeFeedbackOutcome(input.expectedOutcome, "expectedOutcome");
+  const observedOutcome = input.observedOutcome === undefined
+    ? existing.observedOutcome
+    : normalizeFeedbackOutcome(input.observedOutcome, "observedOutcome");
+  if (status === "CONFIRMED") {
+    validateConfirmedFeedbackOutcomes(existing, observedOutcome, expectedOutcome);
+  }
   return prisma.$transaction(async (tx) => {
     const feedback = await tx.operationalFeedback.update({
       where: { tenantId_id: { tenantId: context.tenantId, id: feedbackId } },
       data: {
         status,
+        expectedOutcome,
+        observedOutcome,
         resolutionNotes,
         reviewedByUserId: context.userId,
         reviewedAt: new Date()
@@ -217,9 +242,74 @@ export async function reviewOperationalFeedback(
         entityId: feedbackId,
         before: {
           status: existing.status,
+          expectedOutcome: existing.expectedOutcome,
+          observedOutcome: existing.observedOutcome,
           resolutionNotes: existing.resolutionNotes
         } satisfies Prisma.InputJsonValue,
-        after: { status, resolutionNotes } satisfies Prisma.InputJsonValue
+        after: {
+          status,
+          expectedOutcome,
+          observedOutcome,
+          resolutionNotes
+        } satisfies Prisma.InputJsonValue
+      }
+    });
+    return feedback;
+  });
+}
+
+export async function updateOperationalFeedbackReviewFields(
+  context: AuthenticatedContext,
+  feedbackId: string,
+  input: {
+    expectedOutcome?: string | null;
+    observedOutcome?: string | null;
+  }
+) {
+  const existing = await prisma.operationalFeedback.findFirst({
+    where: { tenantId: context.tenantId, id: feedbackId },
+    select: {
+      id: true,
+      status: true,
+      expectedOutcome: true,
+      observedOutcome: true
+    }
+  });
+  if (!existing) throw new OperationalMemoryError("Feedback was not found.", 404);
+  if (!new Set(["REPORTED", "INVESTIGATING"]).has(existing.status)) {
+    throw new OperationalMemoryError("Only pending feedback can be corrected before review.", 409);
+  }
+  const expectedOutcome = input.expectedOutcome === undefined
+    ? existing.expectedOutcome
+    : normalizeFeedbackOutcome(input.expectedOutcome, "expectedOutcome");
+  const observedOutcome = input.observedOutcome === undefined
+    ? existing.observedOutcome
+    : normalizeFeedbackOutcome(input.observedOutcome, "observedOutcome");
+
+  return prisma.$transaction(async (tx) => {
+    const feedback = await tx.operationalFeedback.update({
+      where: { tenantId_id: { tenantId: context.tenantId, id: feedbackId } },
+      data: {
+        expectedOutcome,
+        observedOutcome
+      },
+      select: feedbackSelect
+    });
+    await tx.auditLog.create({
+      data: {
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        action: "assistant.operational_feedback.correct_review_fields",
+        entityType: "OperationalFeedback",
+        entityId: feedbackId,
+        before: {
+          expectedOutcome: existing.expectedOutcome,
+          observedOutcome: existing.observedOutcome
+        } satisfies Prisma.InputJsonValue,
+        after: {
+          expectedOutcome,
+          observedOutcome
+        } satisfies Prisma.InputJsonValue
       }
     });
     return feedback;
@@ -329,7 +419,8 @@ export async function generateDevelopmentSuggestions(context: AuthenticatedConte
       subjectId: true,
       reporterStatement: true,
       expectedOutcome: true,
-      observedOutcome: true
+      observedOutcome: true,
+      status: true
     }
   });
   const existing = await prisma.developmentSuggestion.findMany({
@@ -351,14 +442,24 @@ export async function generateDevelopmentSuggestions(context: AuthenticatedConte
       generatedAt: true
     }
   });
+  await reconcileAwaitingSuggestionReviewState(
+    context,
+    existing,
+    new Map(feedback.map((item) => [item.id, item.status]))
+  );
   await reconcileAwaitingSuggestionDuplicates(context, existing);
 
-  const alreadyQueued = new Set(existing.flatMap((item) => [
-    ...jsonStringArray(item.sourceFeedbackIds),
-    ...readFollowUpFeedbackIds(item.proposedScope)
-  ]));
+  const alreadyQueued = new Set(
+    existing
+      .filter((item) => ["AWAITING_APPROVAL", "APPROVED"].includes(item.status))
+      .flatMap((item) => [
+        ...jsonStringArray(item.sourceFeedbackIds),
+        ...readFollowUpFeedbackIds(item.proposedScope)
+      ])
+  );
   const groups = groupDevelopmentFeedback(
     feedback.filter((item) =>
+      item.status === "CONFIRMED" &&
       !alreadyQueued.has(item.id) &&
       !isNonActionableDevelopmentFeedback(item)
     )
@@ -471,11 +572,45 @@ export async function listDevelopmentSuggestions(context: AuthenticatedContext, 
         }
       });
   const jobsById = new Map(jobs.map((job) => [job.id, summarizeRivetDevelopmentJob(job)]));
+  const feedbackIds = [...new Set(suggestions.flatMap((suggestion) => [
+    ...jsonStringArray(suggestion.sourceFeedbackIds),
+    ...readFollowUpFeedbackIds(suggestion.proposedScope)
+  ]))];
+  const feedback = feedbackIds.length === 0
+    ? []
+    : await prisma.operationalFeedback.findMany({
+        where: {
+          tenantId: context.tenantId,
+          id: { in: feedbackIds }
+        },
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          subjectId: true,
+          reporterStatement: true,
+          expectedOutcome: true,
+          observedOutcome: true,
+          classification: true,
+          status: true,
+          createdAt: true
+        }
+      });
+  const feedbackById = new Map(feedback.map((item) => [item.id, item]));
   return suggestions.map((suggestion) => ({
     ...suggestion,
     issueKey: readSuggestionIssueKey(suggestion),
     followUpFeedbackCount: readFollowUpFeedbackIds(suggestion.proposedScope).length,
     regressionOfSuggestionId: readScopeString(suggestion.proposedScope, "regressionOfSuggestionId"),
+    feedbackItems: [
+      ...jsonStringArray(suggestion.sourceFeedbackIds).flatMap((id) => {
+        const item = feedbackById.get(id);
+        return item ? [{ ...item, evidenceRole: "APPROVED_PACKET" as const }] : [];
+      }),
+      ...readFollowUpFeedbackIds(suggestion.proposedScope).flatMap((id) => {
+        const item = feedbackById.get(id);
+        return item ? [{ ...item, evidenceRole: "FOLLOW_UP" as const }] : [];
+      })
+    ],
     developmentJob: suggestion.developmentThreadId
       ? jobsById.get(suggestion.developmentThreadId) ?? null
       : null
@@ -529,13 +664,26 @@ export async function decideDevelopmentSuggestion(
           subjectId: true,
           reporterStatement: true,
           expectedOutcome: true,
-          observedOutcome: true
+          observedOutcome: true,
+          status: true
         }
       })
     : [];
+  if (
+    status === "APPROVED" &&
+    (
+      sourceFeedback.length !== jsonStringArray(existing.sourceFeedbackIds).length ||
+      sourceFeedback.some((item) => item.status !== "CONFIRMED")
+    )
+  ) {
+    throw new OperationalMemoryError(
+      "Review and confirm every source feedback item, then refresh the queue before starting Rivet.",
+      409
+    );
+  }
   return prisma.$transaction(async (tx) => {
     const job = status === "APPROVED"
-      ? await createRivetDevelopmentJob(tx, context, existing, sourceFeedback)
+      ? await createRivetDevelopmentJob(tx, context, existing, sourceFeedback, decisionNotes)
       : null;
     const suggestion = await tx.developmentSuggestion.update({
       where: { tenantId_id: { tenantId: context.tenantId, id: suggestionId } },
@@ -598,7 +746,8 @@ export async function retryRivetDevelopmentSuggestion(
       riskLevel: true,
       sourceFeedbackIds: true,
       proposedScope: true,
-      developmentThreadId: true
+      developmentThreadId: true,
+      decisionNotes: true
     }
   });
   if (!existing?.developmentThreadId) {
@@ -635,7 +784,13 @@ export async function retryRivetDevelopmentSuggestion(
   });
 
   return prisma.$transaction(async (tx) => {
-    const job = await createRivetDevelopmentJob(tx, context, existing, sourceFeedback);
+    const job = await createRivetDevelopmentJob(
+      tx,
+      context,
+      existing,
+      sourceFeedback,
+      existing.decisionNotes
+    );
     const suggestion = await tx.developmentSuggestion.update({
       where: {
         tenantId_id: {
@@ -843,6 +998,38 @@ function normalizeOptionalText(value: string | null | undefined, maxLength: numb
   return text ? text.slice(0, maxLength) : null;
 }
 
+function normalizeFeedbackOutcome(value: string | null | undefined, field: string) {
+  const normalized = value?.trim().toUpperCase() || null;
+  if (normalized && !FEEDBACK_OUTCOMES.has(normalized)) {
+    throw new OperationalMemoryError(`${field} must be PASS, FAIL, MISSING, or PENDING.`);
+  }
+  return normalized;
+}
+
+function validateConfirmedFeedbackOutcomes(
+  feedback: {
+    workflowKey: string;
+    classification: string;
+  },
+  observedOutcome: string | null,
+  expectedOutcome: string | null
+) {
+  if (
+    feedback.workflowKey !== GARLAND_WORKFLOW_KEY ||
+    feedback.classification !== "CHECK_RESULT"
+  ) return;
+  if (!observedOutcome || !expectedOutcome) {
+    throw new OperationalMemoryError(
+      "Choose both what Nemo reported and the expected result before confirming Garland feedback."
+    );
+  }
+  if (observedOutcome === expectedOutcome) {
+    throw new OperationalMemoryError(
+      "Nemo reported and Expected result must differ before this Garland feedback can be confirmed."
+    );
+  }
+}
+
 function normalizeClassification(value?: string | null) {
   const normalized = value?.trim().toUpperCase().replace(/[^A-Z0-9_]+/g, "_").slice(0, 80);
   return normalized || "UNCLASSIFIED";
@@ -866,6 +1053,57 @@ type DevelopmentSuggestionQueueRecord = {
   proposedScope: Prisma.JsonValue | null;
   generatedAt: Date;
 };
+
+async function reconcileAwaitingSuggestionReviewState(
+  context: AuthenticatedContext,
+  suggestions: DevelopmentSuggestionQueueRecord[],
+  feedbackStatuses: Map<string, string>
+) {
+  for (const suggestion of suggestions) {
+    if (suggestion.status !== "AWAITING_APPROVAL") continue;
+    const sourceFeedbackIds = jsonStringArray(suggestion.sourceFeedbackIds);
+    const hasUnconfirmedEvidence =
+      sourceFeedbackIds.length === 0 ||
+      sourceFeedbackIds.some((id) => feedbackStatuses.get(id) !== "CONFIRMED");
+    if (!hasUnconfirmedEvidence) continue;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.developmentSuggestion.update({
+        where: {
+          tenantId_id: {
+            tenantId: context.tenantId,
+            id: suggestion.id
+          }
+        },
+        data: {
+          status: "SUPERSEDED",
+          decisionByUserId: context.userId,
+          decisionAt: new Date(),
+          decisionNotes:
+            "Superseded because its Rivet packet included feedback that had not been administrator-confirmed."
+        }
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          action: "assistant.development_suggestion.supersede_unreviewed",
+          entityType: "DevelopmentSuggestion",
+          entityId: suggestion.id,
+          before: {
+            status: suggestion.status,
+            sourceFeedbackIds
+          } satisfies Prisma.InputJsonValue,
+          after: {
+            status: "SUPERSEDED",
+            reason: "UNCONFIRMED_SOURCE_FEEDBACK"
+          } satisfies Prisma.InputJsonValue
+        }
+      });
+    });
+    suggestion.status = "SUPERSEDED";
+  }
+}
 
 async function reconcileAwaitingSuggestionDuplicates(
   context: AuthenticatedContext,
