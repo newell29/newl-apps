@@ -86,7 +86,9 @@ function findSavedApolloContact(
   );
   const normalizedEmail = normalize(contact.email);
   const normalizedLinkedin = normalize(contact.linkedinUrl);
-  const normalizedFullName = normalize(contact.fullName);
+  const normalizedFirstName = normalize(
+    contact.firstName ?? contact.fullName.split(/\s+/u)[0] ?? null
+  );
   const normalizedTitle = normalize(contact.title);
 
   return (
@@ -97,17 +99,23 @@ function findSavedApolloContact(
     ) ??
     savedContacts.find(
       (candidate) =>
-        normalizedEmail &&
-        normalize(candidate.email) === normalizedEmail
-    ) ??
-    savedContacts.find(
-      (candidate) =>
         normalizedLinkedin &&
         normalize(candidate.linkedinUrl) === normalizedLinkedin
     ) ??
     savedContacts.find(
       (candidate) =>
-        normalize(candidate.fullName) === normalizedFullName &&
+        normalizedEmail &&
+        normalize(candidate.email) === normalizedEmail
+    ) ??
+    savedContacts.find(
+      (candidate) =>
+        normalizedFirstName &&
+        normalize(
+          candidate.firstName ??
+            candidate.fullName.split(/\s+/u)[0] ??
+            null
+        ) === normalizedFirstName &&
+        normalizedTitle &&
         normalize(candidate.title) === normalizedTitle
     ) ??
     null

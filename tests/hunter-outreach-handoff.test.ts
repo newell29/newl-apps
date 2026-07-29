@@ -118,6 +118,40 @@ describe("Hunter assisted outreach handoff", () => {
     expect(ranked).toEqual([]);
   });
 
+  it("allows a model-qualified import/export specialist while keeping generic coordinators blocked", () => {
+    const review = {
+      contactId: "contact-1",
+      disposition: "PRIMARY" as const,
+      confidence: 85,
+      responsibilityHypothesis: "Owns day-to-day import and export execution.",
+      rationale: "The role directly manages cross-border freight.",
+      recommendedApproach: "Ask a bounded ownership question.",
+      riskFlags: []
+    };
+    expect(shouldAdvanceHunterContactReview(
+      review,
+      {
+        title: "Import Export Specialist",
+        department: "Logistics",
+        seniority: "specialist",
+        contactStatus: ContactStatus.REVIEWING,
+        sequenceStatus: SequenceStatus.NOT_STARTED,
+        replyStatus: ReplyStatus.NO_REPLY
+      }
+    )).toBe(true);
+    expect(shouldAdvanceHunterContactReview(
+      review,
+      {
+        title: "Logistics Coordinator",
+        department: "Logistics",
+        seniority: "coordinator",
+        contactStatus: ContactStatus.REVIEWING,
+        sequenceStatus: SequenceStatus.NOT_STARTED,
+        replyStatus: ReplyStatus.NO_REPLY
+      }
+    )).toBe(false);
+  });
+
   it("requires a concrete, usable email instead of Apollo availability metadata", () => {
     expect(hasUsableHunterEmail({ email: "buyer@example.com" })).toBe(true);
     expect(hasUsableHunterEmail({ email: " buyer@example.com " })).toBe(true);

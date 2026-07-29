@@ -186,11 +186,14 @@ export async function recheckHunterCompanyContactsAction(formData: FormData) {
   await requireModule(context, ModuleKey.LEAD_GEN);
   requireAdmin(context);
   const companyId = requiredText(formData, "companyId", 100);
+  const authorizePaidEmailEnrichment =
+    formData.get("authorizePaidEmailEnrichment") === "yes";
 
   const queued = await enqueueHunterCompanyOutreachHandoff({
     tenantId: context.tenantId,
     companyId,
-    forceContactReview: true
+    forceContactReview: true,
+    authorizePaidEmailEnrichment
   });
   let message: string =
     "message" in queued

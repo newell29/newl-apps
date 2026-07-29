@@ -195,7 +195,8 @@ describe("Hunter assisted handoff queueing", () => {
 
     await expect(enqueueHunterCompanyOutreachHandoff({
       tenantId: "tenant-a",
-      companyId: "company-target"
+      companyId: "company-target",
+      authorizePaidEmailEnrichment: true
     })).resolves.toEqual({
       state: "queued",
       runId: "handoff-target",
@@ -219,6 +220,7 @@ describe("Hunter assisted handoff queueing", () => {
           prospectingPlanRunId: "plan-target",
           maxContactsPerCompany: 3,
           forceContactReview: true,
+          authorizePaidEmailEnrichment: true,
           items: [{
             companyId: "company-target",
             companyName: "Target Importer",

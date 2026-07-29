@@ -81,6 +81,48 @@ describe("prepareApolloContactForEnrollment", () => {
     });
   });
 
+  it("backfills a masked local identity from the same-company saved contact using strict first name and title", async () => {
+    const createContact = vi.fn();
+    const persistContactIdentity = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      prepareApolloContactForEnrollment({
+        contact: {
+          ...localContact(),
+          apolloPersonId: "apollo-person-masked",
+          lastName: "Ma****y",
+          fullName: "Corey Ma****y",
+          email: "corey@vsamerica.example",
+          linkedinUrl: null
+        },
+        company: {
+          name: "VS AMERICA, INC.",
+          domain: "vsamerica.example"
+        },
+        savedContacts: [
+          apolloContact({
+            apolloContactId: "apollo-contact-saved",
+            apolloPersonId: null,
+            firstName: "Corey",
+            lastName: "Mackey",
+            fullName: "Corey Mackey",
+            title: "Director of Operations",
+            email: "different-but-concrete@vsamerica.example",
+            linkedinUrl: null
+          })
+        ],
+        createContact,
+        persistContactIdentity
+      })
+    ).resolves.toEqual({
+      apolloContactId: "apollo-contact-saved",
+      apolloPersonId: "apollo-person-masked",
+      resolution: "EXISTING_SAVED_CONTACT"
+    });
+
+    expect(createContact).not.toHaveBeenCalled();
+  });
+
   it("does not persist an Apollo identity when creation returns no saved contact ID", async () => {
     const persistContactIdentity = vi.fn();
 

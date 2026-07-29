@@ -1256,6 +1256,8 @@ export async function mapApolloCompanyUrlAction(
     if (formData.get("confirmApolloCredit") !== "yes") {
       throw new Error("Confirm the one-credit Apollo company validation before mapping.");
     }
+    const authorizePaidEmailEnrichment =
+      formData.get("authorizePaidEmailEnrichment") === "yes";
     const leadId = await attachCurrentHunterApolloReviewLead(context, formData);
 
     const lead = await prisma.lead.findFirst({
@@ -1380,7 +1382,8 @@ export async function mapApolloCompanyUrlAction(
       const queued = await enqueueHunterCompanyOutreachHandoff({
         tenantId: context.tenantId,
         companyId: lead.companyId,
-        forceContactReview: true
+        forceContactReview: true,
+        authorizePaidEmailEnrichment
       });
       if (queued.state !== "queued") {
         revalidateLeadGenSurfaces();

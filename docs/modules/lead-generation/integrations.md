@@ -101,10 +101,16 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
   organization's ID even when the request was constrained by `organization_ids`, so Hunter validates any returned
   company name/domain against the expected company instead of rejecting the scoped employee solely because that ID
   is absent. An explicit different organization ID or sibling company name still fails closed.
-- People Search availability flags participate in the bounded buyer-role review, but they are not represented as
-  revealed email, phone, or LinkedIn values. Net-new people remain `NOT_STARTED` for Apollo enrichment. When the same
-  person also exists as a saved contact, Hunter merges on `apolloPersonId` and preserves the saved contact ID,
-  revealed fields, sequence history, and enriched status.
+- People Search availability flags identify candidates for recovery, but they are not represented as revealed email,
+  phone, or LinkedIn values. Hunter reads zero-credit Saved Contact Search in 100-record pages (maximum 20 relevant
+  pages), then searches the saved directory again for each of the best 10 masked role candidates using name, title,
+  and confirmed company. Identity resolution uses person/contact ID, LinkedIn/email, then strict confirmed-company +
+  first-name + title matching. When the same person exists as a saved contact, Hunter preserves and backfills the saved
+  full name, email, contact ID, sequence history, and enriched status.
+- Automatic and scheduled handoffs never call paid People Enrichment. Manual company mapping and one-company recheck
+  expose a separate optional authorization for at most three email-only `/api/v1/people/match` calls, and only after
+  saved-contact recovery has failed. The request uses the Apollo person ID plus confirmed employer, disables personal
+  email, phone, and both waterfall modes, and freezes the authorization into the tenant job/audit record.
 - Apollo account IDs and global organization IDs are different identifiers. Organization Search intentionally omits
   companies already saved as Apollo accounts, while the zero-credit saved-account search may return both the account
   ID and nested global organization ID. If a mapped account produces at most one employee and Organization Search
@@ -116,7 +122,8 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
   possibly subsidiary-specific domain filter. The expected domain remains a response-validation guard, so a scoped
   People Search result that omits its organization ID can still be accepted when the returned domain matches; an
   explicit different organization ID still fails closed. An exact Apollo account-to-organization relationship is
-  accepted for legal-entity cards that point to the operating parent/brand; a loose parent, subsidiary, sibling, or
+  accepted for a manually pasted account only when Account View proves the exact account-to-canonical-organization
+  relationship and both company names share the same distinctive brand token; a loose parent, subsidiary, sibling, or
   multiple-candidate result still routes to Apollo Match Review with no contacts selected. The validated global ID is
   persisted by the existing direct-match transaction, so later runs remain organization scoped.
 - If an immutable mapped account still returns at most one employee and Apollo Account Search/View does not expose

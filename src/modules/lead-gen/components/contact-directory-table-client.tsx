@@ -598,6 +598,18 @@ export function ContactDirectoryTableClient({
               {canRecheckHunterContacts && contact.hunterEligibility.status === "ELIGIBLE" ? (
                 <form action={recheckHunterCompanyContactsAction} className="space-y-1">
                   <input type="hidden" name="companyId" value={contact.companyId} />
+                  <label className="flex items-start gap-2 text-[11px] leading-4 text-mutedForeground">
+                    <input
+                      type="checkbox"
+                      name="authorizePaidEmailEnrichment"
+                      value="yes"
+                      className="mt-0.5"
+                    />
+                    <span>
+                      If saved contacts still have masked emails, authorize up to 3 email-only Apollo
+                      enrichments (max 1 credit each; no phone or waterfall).
+                    </span>
+                  </label>
                   <button className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-accentSoft">
                     Re-evaluate company contacts
                   </button>
