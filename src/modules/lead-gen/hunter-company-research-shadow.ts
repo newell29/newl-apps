@@ -15,7 +15,7 @@ import { HUNTER_COMPANY_RESEARCH_JOB_TYPE } from "@/modules/lead-gen/hunter-job-
 
 export const HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_MODEL = "gpt-5.6-luna";
 export const HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_PROMPT_VERSION =
-  "hunter-company-research-v15-luna-shadow-v1";
+  "hunter-company-research-v17-luna-shadow-v1";
 
 const MAX_SHADOW_BATCH_SIZE = 4;
 const MAX_PACKET_JSON_CHARS = 120_000;
@@ -539,7 +539,14 @@ function parsePublicEvidence(value: unknown, companyKey: string): HunterResearch
       evidenceIndex,
       pass: enumString(
         evidence.pass,
-        ["IDENTITY", "FRESH_EVENTS", "CAREERS", "DISTRIBUTION_FOOTPRINT", "FOLLOW_UP"] as const,
+        [
+          "IDENTITY",
+          "FRESH_EVENTS",
+          "CAREERS",
+          "DISTRIBUTION_FOOTPRINT",
+          "CUSTOMS_RECORDS",
+          "FOLLOW_UP"
+        ] as const,
         `${companyKey} evidence pass`
       ),
       query: boundedString(evidence.query, 500, `${companyKey} evidence query`),
@@ -717,7 +724,14 @@ function readReplayEvidence(value: unknown): HunterResearchShadowEvidence[] {
     const sourceType = String(item.sourceType);
     if (
       !url.startsWith("https://") ||
-      !["IDENTITY", "FRESH_EVENTS", "CAREERS", "DISTRIBUTION_FOOTPRINT", "FOLLOW_UP"].includes(pass) ||
+      ![
+        "IDENTITY",
+        "FRESH_EVENTS",
+        "CAREERS",
+        "DISTRIBUTION_FOOTPRINT",
+        "CUSTOMS_RECORDS",
+        "FOLLOW_UP"
+      ].includes(pass) ||
       !["FIRST_PARTY", "GOVERNMENT", "NEWS", "CAREERS", "DIRECTORY", "OTHER"].includes(sourceType)
     ) {
       return [];

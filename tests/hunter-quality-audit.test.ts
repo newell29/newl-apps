@@ -241,6 +241,47 @@ describe("Hunter quality audit", () => {
     expect(result.teamsMessage).toContain("No lead was reclassified");
   });
 
+  it("groups related reproducible company-research defects into one Rivet job", async () => {
+    mocks.automationJobRun.findFirst.mockResolvedValue({
+      id: "audit-run-1",
+      input: {
+        signalIds: ["signal-1", "signal-2"],
+        tradeMiningFindings: [],
+        tradeMiningRunState: {
+          enabledProfiles: 3,
+          completed: 3,
+          active: 0,
+          failed: 0,
+          missing: 0
+        }
+      }
+    });
+    const completion = buildCompletion();
+    completion.findings.push({
+      ...completion.findings[0],
+      signalId: "signal-2",
+      category: "DETERMINISTIC_RULE",
+      summary: "Hunter treated a historical facility start as a fresh event."
+    });
+
+    const result = await completeHunterQualityAudit({
+      context: { tenantId: "tenant-1", userId: "admin-1" },
+      runId: "audit-run-1",
+      completion,
+      env: {
+        HUNTER_RIVET_AUTO_TRIAGE_APPROVAL: HUNTER_RIVET_APPROVAL_VALUE
+      }
+    });
+
+    expect(mocks.createRivetDevelopmentJob).toHaveBeenCalledTimes(1);
+    expect(mocks.operationalFeedback.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        reporterStatement: expect.stringContaining("2 related hunter company research quality defects")
+      })
+    });
+    expect(result.developmentJobIds).toEqual(["rivet-job-1"]);
+  });
+
   it("notifies but does not queue Rivet for subjective model judgment", async () => {
     const completion = buildCompletion();
     completion.findings[0] = {

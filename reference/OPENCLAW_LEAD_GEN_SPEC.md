@@ -1669,3 +1669,24 @@ The existing run ledger records provider/model/prompt version, successful batch 
 first-pass schema-valid coverage, Qwen/Luna categorical agreement, trigger-evidence overlap, and bounded
 failure state. A Luna failure never repeats Brave retrieval or prevents the normal Qwen/Kimi completion.
 Promotion of Luna to primary or fallback synthesis is not approved by this trial and requires later review.
+
+## 30. Consolidated Hunter Research and Rivet Safeguards (2026-07-29)
+
+The owner approved one consolidated correction after closing overlapping Rivet PRs. Company research prompt
+`hunter-company-research-v17` adds a bounded customs/import-record pass. Same-identity TradeMining importer,
+consignee, and shipper names may be used only to construct search queries; raw party names are not included in
+Qwen, Kimi, or Luna model packets. Hunter reserves one page-fetch slot for customs evidence and deduplicates
+source URLs across passes.
+
+A fresh trigger requires both a publication date and the material event itself inside the trailing 18 months.
+A recent article about an explicitly historical event is current or stale, not fresh, and separate clauses about
+an existing facility and a planned facility cannot be combined. Active government registration plus independent,
+recent, exact-company customs evidence may establish current identity only. An inactive registration, a similar
+holding/parent identity, a customs row alone, or a notify-party mention cannot establish identity, freshness,
+provider incumbency, exclusivity, or displacement.
+
+The Hunter quality audit consolidates related reproducible findings by workflow into one Rivet packet. A queued,
+running, or review-blocked Rivet scope refuses sibling jobs. Rivet prepares and pushes one isolated branch, runs
+the independent exact-commit review, and opens a draft PR only after a zero-finding `PASS`. A blocked review keeps
+the branch and review record, reports through the protected Teams target, and creates no PR. Merge, deployment,
+production writes, retries, permission changes, and customer communication remain prohibited.

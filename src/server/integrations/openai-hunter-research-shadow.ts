@@ -19,7 +19,13 @@ const SIGNAL_TYPES = [
 
 export type HunterResearchShadowEvidence = {
   evidenceIndex: number;
-  pass: "IDENTITY" | "FRESH_EVENTS" | "CAREERS" | "DISTRIBUTION_FOOTPRINT" | "FOLLOW_UP";
+  pass:
+    | "IDENTITY"
+    | "FRESH_EVENTS"
+    | "CAREERS"
+    | "DISTRIBUTION_FOOTPRINT"
+    | "CUSTOMS_RECORDS"
+    | "FOLLOW_UP";
   query: string;
   title: string;
   url: string;
