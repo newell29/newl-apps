@@ -216,6 +216,40 @@ describe("scheduled Apollo status sync", () => {
     });
   });
 
+  it("persists a bounced Apollo contact as terminal outreach state", async () => {
+    prismaMock.contact.findMany.mockResolvedValue([
+      {
+        ...existingContact(),
+        sequenceStatus: SequenceStatus.NOT_STARTED
+      }
+    ]);
+    const fetchContact = vi.fn().mockResolvedValue({
+      ...incomingContact(),
+      sequenceStatus: SequenceStatus.BOUNCED,
+      replyStatus: ReplyStatus.NO_REPLY,
+      sequenceId: "sequence-1",
+      sequenceName: "Charlotte Warehousing",
+      lastReplyAt: null
+    });
+
+    await syncApolloStatusesForTenant(tenant, {
+      dependencies: {
+        fetchContact,
+        now: () => now,
+        sleep: vi.fn(),
+        recordScoreSnapshot: vi.fn().mockResolvedValue({ id: "snapshot-1" }),
+        recordOutcome: vi.fn().mockResolvedValue({ id: "outcome-1" })
+      }
+    });
+
+    expect(prismaMock.contact.updateMany).toHaveBeenCalledWith({
+      where: { id: "contact-1", tenantId: "tenant-a" },
+      data: expect.objectContaining({
+        sequenceStatus: SequenceStatus.BOUNCED
+      })
+    });
+  });
+
   it("reconciles a durable pending enrollment when Apollo confirms the requested cadence", async () => {
     prismaMock.automationJobRun.findFirst
       .mockResolvedValueOnce(null)

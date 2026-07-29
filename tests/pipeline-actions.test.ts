@@ -14,6 +14,7 @@ const leadFindFirst = vi.fn();
 const leadUpdate = vi.fn();
 const companyUpdate = vi.fn();
 const contactFindMany = vi.fn();
+const contactFindFirst = vi.fn();
 const contactCreate = vi.fn();
 const contactUpdate = vi.fn();
 const contactUpdateMany = vi.fn();
@@ -24,6 +25,7 @@ const requireAdmin = vi.fn();
 const requireModule = vi.fn();
 const requireMutationAccess = vi.fn();
 const fetchApolloContactsForCompany = vi.fn();
+const fetchApolloContactById = vi.fn();
 const apolloCompanyMatchCreate = vi.fn();
 const outreachPlanUpdateMany = vi.fn();
 const contactOutreachDraftUpdateMany = vi.fn();
@@ -32,6 +34,7 @@ const auditLogCreate = vi.fn();
 const evaluateHunterOutreachEligibility = vi.fn();
 const recordLeadOutcomeEvent = vi.fn();
 const recordLeadScoreSnapshot = vi.fn();
+const recordCurrentContactScoreSnapshot = vi.fn();
 
 vi.mock("@/server/db", () => ({
   prisma: {
@@ -41,6 +44,7 @@ vi.mock("@/server/db", () => ({
     },
     contact: {
       findMany: (...args: unknown[]) => contactFindMany(...args),
+      findFirst: (...args: unknown[]) => contactFindFirst(...args),
       create: (...args: unknown[]) => contactCreate(...args),
       update: (...args: unknown[]) => contactUpdate(...args),
       updateMany: (...args: unknown[]) => contactUpdateMany(...args)
@@ -102,7 +106,13 @@ vi.mock("@/server/auth/authorization", () => ({
 }));
 
 vi.mock("@/server/integrations/apollo", () => ({
-  fetchApolloContactsForCompany: (...args: unknown[]) => fetchApolloContactsForCompany(...args)
+  fetchApolloContactsForCompany: (...args: unknown[]) => fetchApolloContactsForCompany(...args),
+  fetchApolloContactById: (...args: unknown[]) => fetchApolloContactById(...args)
+}));
+
+vi.mock("@/modules/lead-gen/contact-score-snapshot", () => ({
+  recordCurrentContactScoreSnapshot: (...args: unknown[]) =>
+    recordCurrentContactScoreSnapshot(...args)
 }));
 
 vi.mock("@/modules/lead-gen/score-history", () => ({
@@ -123,6 +133,7 @@ import {
   bulkApproveOutreachPlansAction,
   bulkPushContactsToApolloAction,
   bulkQueueApolloEnrichmentAction,
+  syncSelectedApolloStatusesAction,
   bulkUnassignLeadOwnerAction,
   bulkUpdateContactSequenceAction,
   bulkUpdateLeadStageAction
@@ -155,6 +166,10 @@ describe("pipeline bulk actions", () => {
     leadUpdate.mockResolvedValue({});
     companyUpdate.mockResolvedValue({});
     contactFindMany.mockResolvedValue([]);
+    contactFindFirst.mockImplementation(async ({ where }: { where: { id: string } }) => ({
+      id: where.id,
+      rawJson: null
+    }));
     contactCreate.mockImplementation(async ({ data }: { data: { fullName: string } }) => ({
       id: `contact-${data.fullName.toLowerCase().replace(/\s+/g, "-")}`
     }));
@@ -233,6 +248,37 @@ describe("pipeline bulk actions", () => {
         }
       ]
     });
+    fetchApolloContactById.mockResolvedValue({
+      recordSource: "SAVED_CONTACT",
+      apolloContactId: "apollo-contact-1",
+      apolloPersonId: "apollo-person-1",
+      firstName: "Jordan",
+      lastName: "Demo",
+      lastNameObfuscated: null,
+      fullName: "Jordan Demo",
+      title: "Director of Supply Chain",
+      department: "Logistics",
+      seniority: "director",
+      email: "jordan@harbor-home.com",
+      phone: null,
+      linkedinUrl: "https://linkedin.test/jordan-demo",
+      hasEmailAvailable: true,
+      hasPhoneAvailable: false,
+      hasLinkedinAvailable: true,
+      city: null,
+      state: null,
+      country: null,
+      sequenceStatus: SequenceStatus.NOT_STARTED,
+      replyStatus: ReplyStatus.NO_REPLY,
+      sequenceId: null,
+      sequenceName: null,
+      sequenceOwnerName: null,
+      sequenceOwnerUserId: null,
+      lastTouchAt: null,
+      lastReplyAt: null,
+      rawPayload: {}
+    });
+    recordCurrentContactScoreSnapshot.mockResolvedValue({ id: "contact-snapshot-1" });
   });
 
   it("bulk moves selected leads to a new stage", async () => {
@@ -698,6 +744,106 @@ describe("pipeline bulk actions", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           sequenceStatus: SequenceStatus.READY
+        })
+      })
+    );
+  });
+
+  it("uses the exact saved Apollo contact when manually syncing a bounced address", async () => {
+    contactFindMany.mockResolvedValueOnce([
+      {
+        id: "contact-taylor",
+        companyId: "company-example",
+        firstName: "Taylor",
+        lastName: "Bounce",
+        fullName: "Taylor Bounce",
+        title: "CSR/Logistics Coordinator",
+        department: null,
+        seniority: null,
+        email: "taylor.bounce@example.com",
+        phone: null,
+        linkedinUrl: "https://linkedin.test/taylor-bounce",
+        contactStatus: ContactStatus.APPROVED,
+        apolloContactId: "apollo-contact-taylor",
+        apolloPersonId: "apollo-person-taylor",
+        sequenceStatus: SequenceStatus.NOT_STARTED,
+        replyStatus: ReplyStatus.NO_REPLY,
+        recommendedSequenceName: "Hunter - Email Only",
+        recommendedSequenceId: "hunter-email-only",
+        selectedSequenceName: "Hunter - Email Only",
+        selectedSequenceId: "hunter-email-only",
+        sequenceRecommendationReason: null,
+        sequenceOverrideReason: null,
+        sequenceManuallyOverridden: false,
+        lastTouchAt: null,
+        lastReplyAt: null,
+        assignedRep: "user-alex",
+        rawJson: null,
+        company: {
+          id: "company-example",
+          name: "EXAMPLE MANUFACTURING",
+          domain: "example.com",
+          linkedinUrl: null,
+          apolloOrganizationId: "apollo-org-example"
+        }
+      }
+    ]);
+    fetchApolloContactById.mockResolvedValueOnce({
+      recordSource: "SAVED_CONTACT",
+      apolloContactId: "apollo-contact-taylor",
+      apolloPersonId: "apollo-person-taylor",
+      firstName: "Taylor",
+      lastName: "Bounce",
+      lastNameObfuscated: null,
+      fullName: "Taylor Bounce",
+      title: "CSR/Logistics Coordinator",
+      department: null,
+      seniority: null,
+      email: "taylor.bounce@example.com",
+      phone: null,
+      linkedinUrl: "https://linkedin.test/taylor-bounce",
+      hasEmailAvailable: true,
+      hasPhoneAvailable: false,
+      hasLinkedinAvailable: true,
+      city: "Charlotte",
+      state: "North Carolina",
+      country: "United States",
+      sequenceStatus: SequenceStatus.BOUNCED,
+      replyStatus: ReplyStatus.NO_REPLY,
+      sequenceId: "hunter-email-only",
+      sequenceName: "Hunter - Email Only",
+      sequenceOwnerName: "Example Owner",
+      sequenceOwnerUserId: "apollo-user-example",
+      lastTouchAt: new Date("2026-07-29T14:00:00.000Z"),
+      lastReplyAt: null,
+      rawPayload: {
+        contact_campaign_statuses: [
+          {
+            emailer_campaign_id: "hunter-email-only",
+            status: "bounced"
+          }
+        ]
+      }
+    });
+
+    const formData = new FormData();
+    formData.append("contactId", "contact-taylor");
+
+    const result = await syncSelectedApolloStatusesAction(formData);
+    expect(result.message).toBe("Apollo status sync updated 1 contact across 1 company.");
+    expect(result).toMatchObject({
+      status: "success",
+      operation: "apollo_sync",
+      syncedContacts: 1,
+      failedContacts: 0
+    });
+
+    expect(fetchApolloContactById).toHaveBeenCalledWith("apollo-contact-taylor");
+    expect(contactUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "contact-taylor" },
+        data: expect.objectContaining({
+          sequenceStatus: SequenceStatus.BOUNCED
         })
       })
     );

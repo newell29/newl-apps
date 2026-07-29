@@ -2444,7 +2444,7 @@ function parseApolloContacts(
       asRecord(record.cadence) ??
       asRecord(record.enrollment) ??
       selectCurrentApolloCampaignStatus(record);
-    const sequenceStatus = parseSequenceStatus(
+    const campaignSequenceStatus = parseSequenceStatus(
       readApolloString(record, [
         "apollo_sequence_status",
         "sequence_status",
@@ -2452,6 +2452,14 @@ function parseApolloContacts(
         "emailer_campaign_status"
       ]) ?? readApolloString(sequenceDetails ?? {}, ["status", "state"])
     );
+    const emailDeliveryStatus = readApolloString(record, [
+      "email_status",
+      "email_delivery_status",
+      "emailer_message_status"
+    ]);
+    const sequenceStatus = /bounc/i.test(emailDeliveryStatus ?? "")
+      ? SequenceStatus.BOUNCED
+      : campaignSequenceStatus;
     const explicitReplyStatus = parseReplyStatus(
       readApolloString(record, ["reply_status", "response_status", "last_response_type"])
     );
@@ -2560,19 +2568,19 @@ function apolloCampaignStatusRank(value: string | null) {
 
   switch (status) {
     case SequenceStatus.REPLIED:
+      return 7;
+    case SequenceStatus.BOUNCED:
       return 6;
     case SequenceStatus.ENROLLED:
       return 5;
     case SequenceStatus.PAUSED:
       return 4;
-    case SequenceStatus.BOUNCED:
-      return 3;
     case SequenceStatus.FINISHED:
-      return 2;
+      return 3;
     case SequenceStatus.READY:
-      return 1;
+      return 2;
     case SequenceStatus.NOT_STARTED:
-      return 0;
+      return 1;
   }
 }
 
