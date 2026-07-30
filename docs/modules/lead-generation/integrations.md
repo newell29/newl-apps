@@ -20,13 +20,17 @@ When a reviewer maps a saved Apollo account URL, Newl Apps preserves both the ac
 organization ID in the match history. Employee discovery first uses Apollo's documented organization-ID People Search
 filter. A successfully resolved saved account already supplies that canonical identity, so Hunter skips the
 credit-consuming Organization Search endpoint on later rechecks. If People Search returns no useful people, it
-retries with the exact domain returned by the confirmed saved account. Apollo can return a strictly scoped employee
+retries with the trusted domain stored on the confirmed company even when the original saved-account ID is
+unavailable. Both scopes read up to five 100-person pages rather than treating the first page as the complete
+company roster. Apollo can return a strictly scoped employee
 with only a marketing/brand employer label and omit the
 organization ID and domain from that person record. Newl Apps accepts a safe leading uppercase brand expansion such
 as `YAT USA, INC.` / `YAT - Your Advanced Technology` only inside the exact confirmed organization/domain query;
 explicitly different organization IDs, domains, and sibling names still fail closed. If the UI still exposes people
-that neither supported employer index returns, Newl Apps stops automatic retries and asks the reviewer for up to
-three exact Apollo person profile URLs. Resolving those IDs uses separately authorized email-only People Enrichment.
+that neither supported employer index returns, Newl Apps exposes a last-resort reviewer option for up to
+three exact Apollo person profile URLs. Apollo can place either a saved-contact ID or a global person ID in this
+route, so Newl Apps first checks zero-credit Contact View and uses separately authorized email-only People Enrichment
+only when the ID is not an existing saved contact.
 Every returned employer must match the confirmed account identity and trusted domain, and a concrete email must be
 present; similarly named or unverifiable companies are rejected. Company name is not placed in People Search's
 generic keyword filter because Apollo does not document that filter as an employer-name lookup.

@@ -521,6 +521,19 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Scheduler visibility: any tenant-level `error` makes the scheduled HTTP request fail. GitHub Actions must therefore show a failed run rather than a green run with an error hidden only in the JSON response.
 - Retry visibility: GitHub Actions does not retry the entire scheduled request. Retrying after failed contacts have been deferred could produce an empty 200 response and mask the original failed batch; only the service's bounded per-contact retries are allowed.
 
+## A confirmed Apollo company repeatedly shows zero employees
+
+- Symptom: Apollo's UI shows employees for a confirmed saved account, while Newl Apps reports zero and asks for
+  individual people.
+- Cause: Apollo saved-account IDs, global organization IDs, and saved-contact IDs are separate identities. A global
+  organization search can be empty even when the same confirmed company is indexed through its domain, and Apollo's
+  `/people/<id>` UI route can carry a saved-contact ID rather than a global person ID.
+- Recovery: use **Search company employees and build plans** first. It searches the global organization and trusted
+  domain, reads the bounded complete roster, and merges saved contacts. Individual person URLs are a last-resort
+  diagnostic only; their IDs are checked against Contact View before any separately authorized People Enrichment.
+- Safety: all recovered people still pass exact employer validation, deterministic role ranking, AI buyer-role
+  review, concrete-email validation, and grounded outreach QA. A company mapping never authorizes communication.
+
 ## A TradeMining batch contains rows without a company identity
 
 - Symptom: the ingestion batch returns `Validation failed` even though the TradeMining export and canonical summary completed.
