@@ -23,7 +23,21 @@ export async function GET() {
     apolloAccountId: "6888f2e0496bf40001170587",
     expectedApolloPersonId: "6138684489ec360001a60945"
   });
-  return NextResponse.json(result);
+  return new NextResponse(
+    [
+      "<!doctype html>",
+      '<html lang="en"><body>',
+      "<h1>Zero-credit Apollo directory diagnostic</h1>",
+      `<pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre>`,
+      "</body></html>"
+    ].join(""),
+    {
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store"
+      }
+    }
+  );
 }
 
 export async function POST() {
@@ -71,4 +85,18 @@ export async function POST() {
       { status: 500 }
     );
   }
+}
+
+function escapeHtml(value: string) {
+  return value.replace(
+    /[&<>"']/gu,
+    (character) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;"
+      })[character] ?? character
+  );
 }
