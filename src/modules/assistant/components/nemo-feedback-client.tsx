@@ -101,6 +101,7 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
   const [feedback, setFeedback] = useState<Feedback[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [message, setMessage] = useState("");
+  const [suggestionMessage, setSuggestionMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [showFeedbackHistory, setShowFeedbackHistory] = useState(false);
   const [resolveConfirmId, setResolveConfirmId] = useState<string | null>(null);
@@ -305,14 +306,16 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
 
   async function generateSuggestions() {
     setBusy(true);
+    setSuggestionMessage("");
     const response = await fetch("/api/assistant/development-suggestions", { method: "POST" });
-    setMessage(response.ok ? "The approval queue is up to date. No development was started." : "The suggestion queue could not be updated.");
+    setSuggestionMessage(response.ok ? "The approval queue is up to date. No development was started." : "The suggestion queue could not be updated.");
     await load();
     setBusy(false);
   }
 
   async function decideSuggestion(id: string, status: "APPROVED" | "REJECTED") {
     setBusy(true);
+    setSuggestionMessage("");
     const response = await fetch(`/api/assistant/development-suggestions/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -322,10 +325,12 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
       })
     });
     const body = await response.json().catch(() => ({}));
-    setMessage(
+    setSuggestionMessage(
       response.ok
         ? status === "APPROVED"
-          ? `Suggestion approved. Rivet job ${String(body.data?.developmentJob?.id ?? "")} is queued for the local Codex worker.`
+          ? body.data?.developmentJob?.phase === "WAITING_FOR_RIVET"
+            ? "Suggestion approved. It is waiting for the current Rivet job in this workflow to finish or be resolved, then it will start automatically."
+            : `Suggestion approved. Rivet job ${String(body.data?.developmentJob?.id ?? "")} is queued for the local Codex worker.`
           : "Suggestion rejected."
         : body.error ?? "The suggestion decision could not be saved."
     );
@@ -335,15 +340,18 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
 
   async function retrySuggestion(id: string) {
     setBusy(true);
+    setSuggestionMessage("");
     const response = await fetch(`/api/assistant/development-suggestions/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "retry" })
     });
     const body = await response.json().catch(() => ({}));
-    setMessage(
+    setSuggestionMessage(
       response.ok
-        ? `Rivet job ${String(body.data?.developmentJob?.id ?? "")} was queued again.`
+        ? body.data?.developmentJob?.phase === "WAITING_FOR_RIVET"
+          ? "The retry was approved and is waiting for the current Rivet job in this workflow to finish or be resolved."
+          : `Rivet job ${String(body.data?.developmentJob?.id ?? "")} was queued again.`
         : body.error ?? "The Rivet job could not be retried."
     );
     await load();
@@ -352,13 +360,14 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
 
   async function resolveSuggestion(id: string) {
     setBusy(true);
+    setSuggestionMessage("");
     const response = await fetch(`/api/assistant/development-suggestions/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "resolve_deployed" })
     });
     const body = await response.json().catch(() => ({}));
-    setMessage(
+    setSuggestionMessage(
       response.ok
         ? "The deployed fix was recorded. Older feedback was resolved; later reports will reopen this issue as a regression."
         : body.error ?? "The deployed fix could not be recorded."
@@ -679,8 +688,13 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
                 </p>
                 <p className="mt-2 rounded-md border border-border bg-muted/20 p-2 text-xs text-foreground">
                   To send Rivet extra instructions: confirm the feedback, select <strong>Refresh queue</strong>, then use the
-                  clearly labelled <strong>Your instructions for Rivet</strong> box on the awaiting-approval suggestion before starting it.
+                  clearly labelled <strong>Your instructions for Rivet</strong> box on the awaiting-approval suggestion before approving it.
                 </p>
+                {suggestionMessage ? (
+                  <p role="status" aria-live="polite" className="mt-2 rounded-md border border-primary/30 bg-primary/5 p-3 text-sm font-medium text-foreground">
+                    {suggestionMessage}
+                  </p>
+                ) : null}
               </div>
               <button disabled={busy} onClick={() => void generateSuggestions()} className="rounded-md border border-border px-3 py-2 text-sm font-semibold">
                 Refresh queue
@@ -699,7 +713,9 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="font-semibold text-foreground">{item.title}</p>
                     <span className="rounded-full border border-border px-2 py-0.5 text-xs font-semibold">
-                      {item.developmentJob?.phase ?? item.status}
+                      {item.developmentJob?.phase === "WAITING_FOR_RIVET"
+                        ? "APPROVED — WAITING FOR RIVET"
+                        : item.developmentJob?.phase ?? item.status}
                     </span>
                   </div>
                   <p className="mt-2 text-sm text-foreground">
@@ -804,7 +820,7 @@ export function NemoFeedbackClient({ isAdmin }: { isAdmin: boolean }) {
                       </p>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <button disabled={busy} onClick={() => void decideSuggestion(item.id, "APPROVED")} className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground">
-                          Approve &amp; start Rivet
+                          Approve &amp; queue Rivet
                         </button>
                         <button disabled={busy} onClick={() => void decideSuggestion(item.id, "REJECTED")} className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold">
                           Reject

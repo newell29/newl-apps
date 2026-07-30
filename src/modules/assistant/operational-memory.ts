@@ -764,7 +764,15 @@ export async function decideDevelopmentSuggestion(
           status,
           decisionNotes,
           developmentJobId: job?.id ?? null,
-          developmentStarted: Boolean(job)
+          developmentQueued: Boolean(job),
+          developmentPhase: job
+            ? summarizeRivetDevelopmentJob({
+                id: job.id,
+                status: job.status,
+                output: job.output,
+                errorMessage: job.errorMessage
+              }).phase
+            : null
         } satisfies Prisma.InputJsonValue
       }
     });
@@ -850,8 +858,16 @@ export async function retryRivetDevelopmentSuggestion(
       context,
       existing,
       sourceFeedback,
-      existing.decisionNotes
+      existing.decisionNotes,
+      { excludeJobId: failedJob.id }
     );
+    await tx.automationJobRun.update({
+      where: { id: failedJob.id },
+      data: {
+        status: JobStatus.CANCELLED,
+        errorMessage: "This Rivet job was superseded by an administrator-approved retry."
+      }
+    });
     const suggestion = await tx.developmentSuggestion.update({
       where: {
         tenantId_id: {

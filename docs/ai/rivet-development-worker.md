@@ -17,7 +17,9 @@ Generic feedback is normalized and grouped only when its significant terms meet 
 
 The issue family remains stable after approval. Later reports attach as follow-up evidence and cannot silently expand the approved Rivet packet. A refresh supersedes duplicate awaiting cards that match an active approved family. After Alex confirms that the exact reviewed PR is merged and deployed, the family is resolved; later evidence creates one linked regression suggestion requiring a new approval.
 
-Selecting **Approve & start Rivet** is the single approval to begin development. The approval transaction records the administrator decision and creates one tenant-scoped `AutomationJobRun` with job type `ASSISTANT_RIVET_DEVELOPMENT`. Repeated requests cannot approve the same suggestion twice.
+Selecting **Approve & queue Rivet** is the single approval that authorizes development. The approval transaction records the administrator decision and creates one tenant-scoped `AutomationJobRun` with job type `ASSISTANT_RIVET_DEVELOPMENT`. Repeated requests cannot approve the same suggestion twice.
+
+Approval and worker capacity are separate concerns. If the same module/workflow already has queued, running, or review-blocked Rivet work, the new approval is still saved and its immutable packet is created with phase `WAITING_FOR_RIVET`. Newl Apps displays **APPROVED — WAITING FOR RIVET** and the local worker automatically claims the oldest eligible waiting job after the earlier job finishes or is resolved. The worker never claims two jobs from the same module/workflow scope concurrently.
 
 Before approval, the administrator can expand every complete source and follow-up report and select a specific issue type. Order-decision issues capture Nemo's original and correct decisions. Incorrect or missing Teamship updates capture the affected field and actual/correct values and require the exact saved Garland PS/SR review plus source PDF or supporting screenshot. An email-backed review automatically reuses the original Garland attachment after an exact filename/PS/SR match and content-hash verification, so the employee attaches evidence only when email retrieval cannot safely identify the source or when the issue is visible only in Teamship. After feedback is confirmed and the queue is refreshed, the `AWAITING_APPROVAL` card shows **Your instructions for Rivet**; those comments are stored with the decision and included in the immutable Rivet packet.
 
@@ -33,7 +35,7 @@ The local Codex prompt requires every listed document to be read before any file
 
 1. The local OpenClaw command schedule runs `ops/openclaw/run-rivet-development-job.sh` once per minute.
 2. The worker authenticates with the existing distinct OpenClaw assistant token and Alex's configured Microsoft Entra identity.
-3. Newl Apps returns at most one approved queued job and a short-lived, hashed server-side lease.
+3. Newl Apps returns at most one eligible approved job and a short-lived, hashed server-side lease. Jobs waiting behind active or review-blocked work in the same module/workflow remain queued.
 4. The worker creates a fresh `codex/rivet-*` Git worktree from the approved base branch.
 5. Codex reads the required context, implements only the approved cohesive issue, adds regression tests, updates documentation, and returns schema-validated results.
 6. The wrapper rejects blocked paths, checks the diff, commits, pushes the isolated branch, and opens a draft pull request.
@@ -103,7 +105,7 @@ The development-jobs API remains outside browser session middleware so the route
 
 ## Failure handling
 
-An active job uses a short-lived lease. A worker error or expired lease marks the job failed and sends a safe Teams message. Failed and blocked jobs are not automatically retried. The local worktree is preserved for investigation when a failure occurs; after checking that no uncertain branch or PR action is still running, an administrator may select **Retry Rivet** to create a new job and lease. Completed worktrees are removed only after an exact-commit review passes and the PR is recorded as `READY_FOR_ALEX`.
+An active job uses a short-lived lease. A worker error or expired lease marks the job failed and sends a safe Teams message. Failed and blocked jobs are not automatically retried. A waiting sibling remains queued while a review-blocked job in the same scope is unresolved. The local worktree is preserved for investigation when a failure occurs; after checking that no uncertain branch or PR action is still running, an administrator may select **Retry Rivet** to create a new job and lease. The failed predecessor is then marked superseded so it no longer blocks that scope. Completed worktrees are removed only after an exact-commit review passes and the PR is recorded as `READY_FOR_ALEX`.
 
 Existing suggestions approved before this workflow are not automatically queued. Link or close their already-created PR work before enabling the worker so Rivet does not rebuild historical fixes.
 
