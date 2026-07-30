@@ -42,7 +42,7 @@ export default async function ApolloMatchReviewPage({
       <PageHeader
         eyebrow="Lead Generation"
         title="Apollo Exceptions"
-        description="Resolve current Qwen/Kimi-vetted Hunter opportunities that Apollo could not match safely. Verified companies with no returned employees stay mapped and appear in a separate contact-discovery section."
+        description="Resolve current Hunter/Kimi-vetted opportunities that Apollo could not match safely. Verified companies with no returned employees stay mapped and appear in a separate contact-discovery section."
       />
 
       <div className="grid gap-4 md:grid-cols-4">

@@ -137,9 +137,9 @@ export default async function AutomationSettingsPage({
                 </button>
                 <p className="mt-2 text-xs text-mutedForeground">
                   Reruns organization-scoped Apollo employee searches for current Hot and Qualified companies with
-                  completed Qwen synthesis and Kimi scoring, repeats AI contact review, and creates or refreshes plans
+                  completed Luna synthesis and Kimi scoring, repeats AI contact review, and creates or refreshes plans
                   for selected contacts. Failed plans receive one automatic QA-guided rewrite in the same run. This
-                  does not rerun Brave searches, Qwen research, or Kimi scoring, and it never sends outreach without
+                  does not rerun Brave searches, Luna research, or Kimi scoring, and it never sends outreach without
                   plan approval.
                 </p>
               </div>
@@ -217,15 +217,16 @@ function LunaComparison({
   return (
     <details className="rounded-lg border border-border bg-card p-5 shadow-sm">
       <summary className="cursor-pointer font-semibold text-foreground">
-        Qwen vs Luna research comparison
+        Luna primary vs Qwen shadow research comparison
         {summary
           ? ` · ${summary.evaluatedCompanyCount}/${summary.expectedCompanyCount} evaluated`
           : " · not completed"}
       </summary>
       <p className="mt-2 text-sm leading-6 text-mutedForeground">
-        Luna independently reviews the exact saved Brave evidence used by Qwen. It remains non-authoritative and
-        cannot change classifications or authorize outreach. Replay reuses saved evidence and does not purchase
-        another Brave retrieval.
+        Luna is the authoritative evidence-synthesis model. Qwen independently reviews the same saved Brave
+        evidence as a temporary, non-blocking shadow and cannot change classifications or authorize outreach.
+        Replay is an audit comparison against saved evidence; it does not repeat Brave retrieval or rewrite a
+        completed opportunity.
       </p>
       {summary ? (
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -269,7 +270,7 @@ function LunaComparison({
       <form action={replayHunterLunaComparisonAction} className="mt-4">
         <input type="hidden" name="runId" value={runId} />
         <button className="rounded-md border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground">
-          Replay Luna from saved evidence
+          Replay Luna audit from saved evidence
         </button>
       </form>
     </details>
@@ -294,7 +295,7 @@ function LatestContactDiscoveryRun({
           </h2>
           <p className="mt-1 text-sm text-mutedForeground">
             Started {formatRunDate(run.startedAt, timeZone)}. Every queued company
-            passed the saved Qwen synthesis, Kimi scoring, deterministic research,
+            passed the saved Luna synthesis (or an approved legacy Qwen run), Kimi scoring, deterministic research,
             and current Hunter selection gates. Evaluated contacts are the bounded
             Apollo candidates sent through buyer-role review; only contacts with a
             generated plan appear in Outreach Queue.

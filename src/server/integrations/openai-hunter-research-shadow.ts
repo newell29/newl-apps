@@ -95,14 +95,14 @@ export async function generateHunterResearchLunaShadow({
   safetyIdentifier: string;
 }) {
   if (packets.length === 0 || packets.length > MAX_SHADOW_BATCH_SIZE) {
-    throw new Error(`Luna shadow batches must contain 1-${MAX_SHADOW_BATCH_SIZE} companies.`);
+    throw new Error(`Luna synthesis batches must contain 1-${MAX_SHADOW_BATCH_SIZE} companies.`);
   }
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey || apiKey === "OPENAI_API_KEY_PLACEHOLDER") {
-    throw new Error("OPENAI_API_KEY is not configured for the Luna company-research shadow.");
+    throw new Error("OPENAI_API_KEY is not configured for Luna company research.");
   }
   if (model !== "gpt-5.6-luna") {
-    throw new Error("Hunter company-research shadow is restricted to gpt-5.6-luna.");
+    throw new Error("Hunter company research is restricted to gpt-5.6-luna.");
   }
 
   const startedAt = Date.now();
@@ -140,7 +140,7 @@ export async function generateHunterResearchLunaShadow({
           role: "user",
           content:
             `Prompt version: ${promptVersion}\n` +
-            "Independently synthesize every supplied company from only the supplied evidence. " +
+            "Produce the authoritative research synthesis for every supplied company using only the supplied evidence. " +
             "Return one companies row for every companyKey. The local Qwen assessment is deliberately not " +
             "included in this model input; Newl Apps compares the independent rows after your response. " +
             "Do not browse, call tools, or invent facts.\n\n" +
@@ -151,7 +151,7 @@ export async function generateHunterResearchLunaShadow({
         verbosity: "low",
         format: {
           type: "json_schema",
-          name: "hunter_company_research_shadow",
+          name: "hunter_company_research_synthesis",
           strict: true,
           schema: HUNTER_RESEARCH_SHADOW_SCHEMA
         }
@@ -165,19 +165,19 @@ export async function generateHunterResearchLunaShadow({
   if (!response.ok || !payload) {
     throw new Error(
       extractOpenAiError(payload) ??
-        `OpenAI Luna shadow request failed with status ${response.status}.`
+        `OpenAI Luna company-research request failed with status ${response.status}.`
     );
   }
   if (payload.status !== "completed") {
     const reason = readIncompleteReason(payload);
     throw new Error(
       reason
-        ? `OpenAI Luna shadow response was incomplete: ${reason}.`
-        : "OpenAI Luna shadow response did not complete."
+        ? `OpenAI Luna company-research response was incomplete: ${reason}.`
+        : "OpenAI Luna company-research response did not complete."
     );
   }
   if (hasRefusal(payload)) {
-    throw new Error("OpenAI Luna declined the company-research shadow request.");
+    throw new Error("OpenAI Luna declined the company-research request.");
   }
 
   const parsed = JSON.parse(readResponsesOutputText(payload)) as unknown;
@@ -190,16 +190,16 @@ export function validateHunterResearchShadowResponse(
   value: unknown,
   packets: HunterResearchShadowPacket[]
 ): HunterResearchShadowSynthesis[] {
-  const root = asRecord(value, "Luna shadow response");
-  const companies = asArray(root.companies, "Luna shadow response companies");
+  const root = asRecord(value, "Luna synthesis response");
+  const companies = asArray(root.companies, "Luna synthesis response companies");
   if (companies.length !== packets.length) {
-    throw new Error("OpenAI Luna did not return exactly one row for every shadow company.");
+    throw new Error("OpenAI Luna did not return exactly one row for every research company.");
   }
   const packetByKey = new Map(packets.map((packet) => [packet.companyKey, packet]));
   const returnedKeys = new Set<string>();
   const rows = companies.map((value, index) => {
-    const row = asRecord(value, `Luna shadow company ${index}`);
-    const companyKey = boundedString(row.companyKey, 300, `Luna shadow company ${index} key`);
+    const row = asRecord(value, `Luna synthesis company ${index}`);
+    const companyKey = boundedString(row.companyKey, 300, `Luna synthesis company ${index} key`);
     const packet = packetByKey.get(companyKey);
     if (!packet || returnedKeys.has(companyKey)) {
       throw new Error("OpenAI Luna returned an unknown or duplicate companyKey.");
@@ -380,7 +380,7 @@ const HUNTER_RESEARCH_SHADOW_SCHEMA = {
 
 function companyResearchSystemPrompt() {
   return (
-    "You are Luna acting as a non-authoritative shadow evaluator for Hunter company research. " +
+    "You are Luna, the authoritative evidence-synthesis stage for Hunter company research. " +
     "Use only supplied publicEvidence, shipmentEvidence, and existingSignals. Never infer facts from a URL, " +
     "company name, search query, shipment origin, or Qwen synthesis. Confirm the exact operating company and " +
     "distinguish it from parents, siblings, locations, logistics providers, and ambiguous aliases. " +

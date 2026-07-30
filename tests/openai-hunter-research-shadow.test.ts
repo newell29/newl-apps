@@ -7,7 +7,7 @@ import {
   validateHunterResearchShadowResponse
 } from "@/server/integrations/openai-hunter-research-shadow";
 
-describe("OpenAI Luna Hunter research shadow", () => {
+describe("OpenAI Luna Hunter research synthesis", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.stubEnv("OPENAI_API_KEY", "test-openai-key");
@@ -26,7 +26,7 @@ describe("OpenAI Luna Hunter research shadow", () => {
 
     const result = await generateHunterResearchLunaShadow({
       model: "gpt-5.6-luna",
-      promptVersion: "hunter-company-research-v17-luna-shadow-v1",
+      promptVersion: "hunter-company-research-v18-luna-primary-v1",
       packets,
       safetyIdentifier: "tenant-hash"
     });
@@ -51,7 +51,7 @@ describe("OpenAI Luna Hunter research shadow", () => {
         verbosity: "low",
         format: {
           type: "json_schema",
-          name: "hunter_company_research_shadow",
+          name: "hunter_company_research_synthesis",
           strict: true
         }
       }
@@ -79,7 +79,7 @@ describe("OpenAI Luna Hunter research shadow", () => {
     await expect(
       generateHunterResearchLunaShadow({
         model: "gpt-5.6-luna",
-        promptVersion: "hunter-company-research-v17-luna-shadow-v1",
+        promptVersion: "hunter-company-research-v18-luna-primary-v1",
         packets: [packet()],
         safetyIdentifier: "tenant-hash"
       })

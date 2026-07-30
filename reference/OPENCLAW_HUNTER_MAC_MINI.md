@@ -87,7 +87,9 @@ The checked-in template is `ops/openclaw/hunter/.env.example`. Store the real fi
 - `ops/openclaw/hunter/trademining_summary.py`: canonical record conversion and deduplication.
 - `ops/openclaw/hunter/hunter_ingest.py`: tenant-bound job creation, batched ingestion, completion/failure reporting.
 - `ops/openclaw/hunter/hunter_worker.py`: live active-profile lookup, manual run-request polling, once-daily eligibility, per-profile lookback/port planning, collection, and ingestion coordination.
-- `ops/openclaw/hunter/hunter_company_research.py`: bounded four-pass web retrieval, local Qwen synthesis, Kimi scoring, replay ledger generation, and tenant-bound completion reporting. It has no Apollo or outreach integration.
+- `ops/openclaw/hunter/hunter_company_research.py`: bounded evidence retrieval, tenant-bound Luna synthesis,
+  optional local Qwen shadow comparison, Kimi scoring, replay ledger generation, and tenant-bound completion
+  reporting. It has no Apollo or outreach integration.
 - `ops/openclaw/hunter/hunter_signal_scout.py`: bounded Brave discovery, rotating allowlisted
   topic/geography queries, 180-day canonical-URL suppression, local Qwen first-pass classification, and
   tenant-bound provisional-company reporting. It has no Apollo or outreach integration.
@@ -116,6 +118,7 @@ HUNTER_COMPANY_RESEARCH_TIMEZONE=America/Toronto
 HUNTER_RESEARCH_SEARCH_PROVIDER=BRAVE
 HUNTER_BRAVE_SEARCH_API_KEY=<dedicated read-only search key>
 HUNTER_RESEARCH_QWEN_MODEL=qwen3.5:35b
+HUNTER_RESEARCH_QWEN_SHADOW_ENABLED=true
 HUNTER_KIMI_API_KEY=<dedicated Kimi key>
 HUNTER_KIMI_BASE_URL=https://api.moonshot.ai/v1
 HUNTER_KIMI_MODEL=kimi-k2.6
@@ -124,15 +127,17 @@ HUNTER_RESEARCH_K3_VALIDATOR_LIMIT=5
 HUNTER_RESEARCH_K3_REASONING_EFFORT=LOW
 ```
 
-The Luna side-by-side trial is enabled only in the deployed Newl Apps environment:
+Luna primary synthesis is enabled only in the deployed Newl Apps environment:
 
 ```text
 HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_ENABLED=true
 ```
 
 It does not change the Mac schedule or trigger a second Brave search. The existing 09:15 company
-research run sends each completed Qwen evidence packet to the tenant-scoped Newl Apps shadow route.
-Teams then reports Luna coverage, first-pass schema validity, and Qwen/Luna categorical agreement.
+research run sends each completed public-evidence packet to the tenant-scoped Newl Apps synthesis route.
+Luna is authoritative; Qwen remains a temporary non-blocking shadow unless
+`HUNTER_RESEARCH_QWEN_SHADOW_ENABLED=false`. Teams reports Luna coverage, first-pass schema validity,
+and Qwen/Luna categorical agreement.
 
 Before enabling the schedule, replay a reviewed cohort:
 
@@ -143,7 +148,7 @@ python3 ops/openclaw/hunter/hunter_worker.py \
   --company-research-output /absolute/path/to/research-ledger.json
 ```
 
-If Kimi is unavailable after retrieval/Qwen, the output is a redacted `SYNTHESIS_COMPLETE`
+If Kimi is unavailable after retrieval/Luna, the output is a redacted `SYNTHESIS_COMPLETE`
 checkpoint. Resume only against a newly prepared identical tenant cohort:
 
 ```bash

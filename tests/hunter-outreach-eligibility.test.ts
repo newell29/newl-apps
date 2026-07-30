@@ -43,6 +43,27 @@ describe("Hunter outreach eligibility", () => {
     expect(eligibility.status).toBe("ELIGIBLE");
   });
 
+  it("allows the Luna-primary and Kimi handoff", () => {
+    const eligibility = evaluateHunterOutreachEligibility({
+      researchSignal: researchSignal("QUALIFIED_CURRENT_ACCOUNT", {
+        models: {
+          synthesis: {
+            provider: "OPENAI",
+            name: "gpt-5.6-luna"
+          },
+          scoring: {
+            provider: "KIMI",
+            name: "kimi-k2.6"
+          }
+        }
+      }),
+      prospectingDecision: decision(),
+      now: NOW
+    });
+
+    expect(eligibility.status).toBe("ELIGIBLE");
+  });
+
   it.each([
     [null, null, "NEEDS_HUNTER_ASSESSMENT"],
     [researchSignal("WATCHLIST"), null, "WATCHLIST"],

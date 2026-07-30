@@ -15,7 +15,7 @@ import { HUNTER_COMPANY_RESEARCH_JOB_TYPE } from "@/modules/lead-gen/hunter-job-
 
 export const HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_MODEL = "gpt-5.6-luna";
 export const HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_PROMPT_VERSION =
-  "hunter-company-research-v17-luna-shadow-v1";
+  "hunter-company-research-v18-luna-primary-v1";
 
 const MAX_SHADOW_BATCH_SIZE = 4;
 const MAX_PACKET_JSON_CHARS = 120_000;
@@ -62,7 +62,7 @@ type StoredShadowResult = {
 export type StoredHunterResearchLunaShadow = {
   version: 1;
   status: "RUNNING" | "SUCCESS" | "PARTIAL" | "ERROR";
-  authoritative: false;
+  authoritative: true;
   model: string;
   promptVersion: string;
   expectedCompanyCount: number;
@@ -91,7 +91,7 @@ export function hunterResearchLunaShadowConfiguration() {
     promptVersion: HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_PROMPT_VERSION,
     structuredOutput: true,
     reasoningEffort: "LOW" as const,
-    authoritative: false
+    authoritative: true
   };
 }
 
@@ -113,8 +113,8 @@ export async function runHunterResearchLunaShadowBatch({
     return {
       state: "disabled" as const,
       message: configuration.requested
-        ? "Luna shadow was requested but the server OpenAI runtime is not configured."
-        : "Luna shadow is disabled."
+        ? "Luna research was requested but the server OpenAI runtime is not configured."
+        : "Luna research is disabled."
     };
   }
 
@@ -129,7 +129,7 @@ export async function runHunterResearchLunaShadowBatch({
     },
     select: { id: true, input: true, output: true }
   });
-  if (!run) throw new Error("Hunter company-research shadow run is not active for this tenant.");
+  if (!run) throw new Error("Hunter company-research Luna run is not active for this tenant.");
 
   const input = asRecord(run.input, "Hunter company-research run input");
   const expectedCompanyIds = stringArray(
@@ -154,7 +154,7 @@ export async function runHunterResearchLunaShadowBatch({
     packets.some((packet) => expectedKeyById.get(packet.companyId) !== packet.companyKey) ||
     new Set(packetIds).size !== packetIds.length
   ) {
-    throw new Error("Luna shadow batch contains a company outside the prepared tenant cohort.");
+    throw new Error("Luna research batch contains a company outside the prepared tenant cohort.");
   }
 
   const tenantCompanies = await prisma.company.findMany({
@@ -176,14 +176,20 @@ export async function runHunterResearchLunaShadowBatch({
       );
     })
   ) {
-    throw new Error("Luna shadow batch failed tenant or company identity validation.");
+    throw new Error("Luna research batch failed tenant or company identity validation.");
   }
 
   const batchId = createHash("sha256")
     .update([
       HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_PROMPT_VERSION,
       HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_MODEL,
-      ...packetIds
+      JSON.stringify(packets.map((packet) => ({
+        companyId: packet.companyId,
+        companyKey: packet.companyKey,
+        publicEvidence: packet.publicEvidence,
+        shipmentEvidence: packet.shipmentEvidence,
+        existingSignals: packet.existingSignals
+      })))
     ].join("|"))
     .digest("hex")
     .slice(0, 24);
@@ -192,10 +198,28 @@ export async function runHunterResearchLunaShadowBatch({
     (batch) => batch.batchId === batchId && batch.status === "SUCCESS"
   );
   if (cachedBatch && !forceReplay) {
+    const resultByCompanyId = new Map(
+      (existing?.results ?? []).map((result) => [result.companyId, result.luna])
+    );
+    const report =
+      finalBatch && existing && existing.status === "RUNNING"
+        ? mergeShadowReport({
+            existing,
+            expectedCompanyCount: expectedCompanyIds.length,
+            batch: cachedBatch,
+            results: [],
+            finalBatch: true
+          })
+        : existing;
+    if (report && report !== existing) {
+      await persistShadowReport({ tenantId, runId, report });
+    }
     return {
       state: "cached" as const,
       batchId,
-      report: summarizeHunterResearchLunaShadow(existing)
+      rows: packetIds.map((companyId) => resultByCompanyId.get(companyId)).filter(Boolean),
+      usage: cachedBatch.usage,
+      report: summarizeHunterResearchLunaShadow(report)
     };
   }
 
@@ -239,8 +263,8 @@ export async function runHunterResearchLunaShadowBatch({
         data: {
           tenantId,
           action: forceReplay
-            ? "lead-gen.hunter-company-research.luna-shadow-replayed"
-            : "lead-gen.hunter-company-research.luna-shadow-completed",
+            ? "lead-gen.hunter-company-research.luna-primary-replayed"
+            : "lead-gen.hunter-company-research.luna-primary-completed",
           entityType: "AutomationJobRun",
           entityId: runId,
           after: summarizeHunterResearchLunaShadow(report) ?? {}
@@ -250,6 +274,8 @@ export async function runHunterResearchLunaShadowBatch({
     return {
       state: "completed" as const,
       batchId,
+      rows: generated.rows,
+      usage: generated.usage,
       report: summarizeHunterResearchLunaShadow(report)
     };
   } catch (error) {
@@ -386,7 +412,7 @@ export async function replayHunterResearchLunaShadowComparison({
   });
   if (packets.length === 0) {
     throw new Error(
-      "This run has no saved Qwen evidence packets that can be replayed without repeating Brave retrieval."
+      "This run has no saved public-evidence packets that can be replayed without repeating Brave retrieval."
     );
   }
 
@@ -413,7 +439,7 @@ export function readStoredHunterResearchLunaShadow(
 ): StoredHunterResearchLunaShadow | null {
   if (!isRecord(value) || !isRecord(value.lunaShadow)) return null;
   const shadow = value.lunaShadow;
-  if (shadow.version !== 1 || shadow.authoritative !== false) return null;
+  if (shadow.version !== 1 || shadow.authoritative !== true) return null;
   const batches = Array.isArray(shadow.batches)
     ? shadow.batches.filter(isStoredBatch)
     : [];
@@ -423,7 +449,7 @@ export function readStoredHunterResearchLunaShadow(
   return {
     version: 1,
     status: shadowStatus(shadow.status),
-    authoritative: false,
+    authoritative: true,
     model: stringOr(shadow.model, HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_MODEL),
     promptVersion: stringOr(
       shadow.promptVersion,
@@ -450,7 +476,7 @@ export function summarizeHunterResearchLunaShadow(
   if (!report) return null;
   return {
     status: report.status,
-    authoritative: false as const,
+    authoritative: true as const,
     model: report.model,
     expectedCompanyCount: report.expectedCompanyCount,
     evaluatedCompanyCount: report.evaluatedCompanyCount,
@@ -469,20 +495,20 @@ export function summarizeHunterResearchLunaShadow(
 
 function parseShadowPackets(value: unknown): HunterResearchShadowPacket[] {
   if (!Array.isArray(value) || value.length === 0 || value.length > MAX_SHADOW_BATCH_SIZE) {
-    throw new Error(`Luna shadow packets must contain 1-${MAX_SHADOW_BATCH_SIZE} companies.`);
+    throw new Error(`Luna research packets must contain 1-${MAX_SHADOW_BATCH_SIZE} companies.`);
   }
   return value.map((item, index) => {
-    const packet = asRecord(item, `Luna shadow packet ${index}`);
-    const companyId = boundedString(packet.companyId, 200, `Luna shadow packet ${index} companyId`);
+    const packet = asRecord(item, `Luna research packet ${index}`);
+    const companyId = boundedString(packet.companyId, 200, `Luna research packet ${index} companyId`);
     const companyKey = boundedString(
       packet.companyKey,
       300,
-      `Luna shadow packet ${index} companyKey`
+      `Luna research packet ${index} companyKey`
     );
     const companyName = boundedString(
       packet.companyName,
       500,
-      `Luna shadow packet ${index} companyName`
+      `Luna research packet ${index} companyName`
     );
     const publicEvidence = parsePublicEvidence(packet.publicEvidence, companyKey);
     const basePacket: HunterResearchShadowPacket = {
@@ -501,18 +527,25 @@ function parseShadowPackets(value: unknown): HunterResearchShadowPacket[] {
       publicEvidence,
       qwenSynthesis: null
     };
-    const qwenSynthesis = packet.qwenSynthesis === null
-      ? null
-      : validateHunterResearchShadowResponse(
+    let qwenSynthesis: HunterResearchShadowSynthesis | null = null;
+    if (packet.qwenSynthesis !== null) {
+      try {
+        qwenSynthesis = validateHunterResearchShadowResponse(
           { companies: [packet.qwenSynthesis] },
           [basePacket]
         )[0]!;
+      } catch {
+        // Qwen is comparison-only during the Luna-primary cutover. Invalid shadow output
+        // must never prevent authoritative Luna synthesis for a valid evidence packet.
+        qwenSynthesis = null;
+      }
+    }
     const parsed: HunterResearchShadowPacket = {
       ...basePacket,
       qwenSynthesis
     };
     if (JSON.stringify(parsed).length > MAX_PACKET_JSON_CHARS) {
-      throw new Error(`${companyKey} Luna shadow packet is too large.`);
+      throw new Error(`${companyKey} Luna research packet is too large.`);
     }
     return parsed;
   });
@@ -520,7 +553,7 @@ function parseShadowPackets(value: unknown): HunterResearchShadowPacket[] {
 
 function parsePublicEvidence(value: unknown, companyKey: string): HunterResearchShadowEvidence[] {
   if (!Array.isArray(value) || value.length === 0 || value.length > 5) {
-    throw new Error(`${companyKey} Luna shadow evidence must contain 1-5 records.`);
+    throw new Error(`${companyKey} Luna research evidence must contain 1-5 records.`);
   }
   const seenIndices = new Set<number>();
   return value.map((item, index) => {
@@ -639,7 +672,7 @@ function mergeShadowReport({
   return {
     version: 1,
     status,
-    authoritative: false,
+    authoritative: true,
     model: HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_MODEL,
     promptVersion: HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_PROMPT_VERSION,
     expectedCompanyCount,
@@ -682,7 +715,7 @@ async function persistShadowReport({
     },
     select: { output: true }
   });
-  if (!latest) throw new Error("Hunter company-research shadow run ended before persistence.");
+  if (!latest) throw new Error("Hunter company-research Luna run ended before persistence.");
   const output = isRecord(latest.output) ? latest.output : {};
   const update = await prisma.automationJobRun.updateMany({
     where: {
@@ -696,13 +729,13 @@ async function persistShadowReport({
     data: {
       output: {
         ...output,
-        phase: report.status === "RUNNING" ? "LUNA_SHADOW_RUNNING" : "LUNA_SHADOW_COMPLETE",
+        phase: report.status === "RUNNING" ? "LUNA_PRIMARY_RUNNING" : "LUNA_PRIMARY_COMPLETE",
         lunaShadow: report
       }
     }
   });
   if (update.count !== 1) {
-    throw new Error("Hunter company-research shadow run ended before persistence.");
+    throw new Error("Hunter company-research Luna run ended before persistence.");
   }
 }
 
@@ -779,7 +812,7 @@ function safeErrorMessage(error: unknown) {
   if (error instanceof Error && error.message.trim()) {
     return error.message.trim().slice(0, 500);
   }
-  return "Luna shadow evaluation failed.";
+  return "Luna company research failed.";
 }
 
 function boundedJsonArray(value: unknown, maximumItems: number, label: string) {

@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL,
+  HUNTER_COMPANY_RESEARCH_DEFAULT_LUNA_MODEL,
   HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL,
   HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL,
   HUNTER_COMPANY_RESEARCH_PROMPT_VERSION,
@@ -24,11 +25,12 @@ const workerPath = path.join(repoRoot, "ops/openclaw/hunter/hunter_worker.py");
 const runnerPath = path.join(repoRoot, "ops/openclaw/run-hunter-worker.sh");
 
 describe("Hunter company deep research", () => {
-  it("keeps the three-stage model pipeline dry-run only", () => {
+  it("keeps the hosted research pipeline read-only", () => {
+    expect(HUNTER_COMPANY_RESEARCH_DEFAULT_LUNA_MODEL).toBe("gpt-5.6-luna");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL).toBe("qwen3.5:35b");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL).toBe("kimi-k2.6");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL).toBe("kimi-k3");
-    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v17");
+    expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v18");
     expect(HUNTER_COMPANY_RESEARCH_TRANSACTION_TIMEOUT_MS).toBe(30_000);
     expect(HUNTER_COMPANY_RESEARCH_SAFETY).toEqual({
       externalWrites: false,
@@ -522,8 +524,8 @@ describe("Hunter company deep research", () => {
     expect(research).toContain("triggerEvidenceIndices");
     expect(research).toContain("must cite one to five trigger evidence records");
     expect(research).toContain("the material event itself occurred within 18 months");
-    expect(research).toContain("/api/lead-gen/hunter/company-research/shadow");
-    expect(research).toContain("submit_luna_shadow_batches");
+    expect(research).toContain("/api/lead-gen/hunter/company-research/synthesis");
+    expect(research).toContain("submit_luna_primary_batches");
     expect(research).not.toContain("OPENAI_API_KEY");
     expect(research).toContain('"thinking": {"type": "disabled"}');
     expect(research).toContain('"temperature": 0.6');
@@ -541,8 +543,9 @@ describe("Hunter company deep research", () => {
     expect(serverResearch).toContain("tenantCompanies = await tx.company.findMany");
     expect(serverResearch).toContain("timeout: HUNTER_COMPANY_RESEARCH_TRANSACTION_TIMEOUT_MS");
     expect(serverResearch).toContain("company.evidence[company.synthesis.triggerEvidenceIndices[0]]");
-    expect(serverResearch).toContain("shadowSynthesis: lunaShadow");
-    expect(shadowResearch).toContain("authoritative: false");
+    expect(serverResearch).toContain('provider: "OPENAI"');
+    expect(serverResearch).toContain("shadowSynthesis:");
+    expect(shadowResearch).toContain("authoritative: true");
     expect(shadowResearch).toContain("tenantId");
     expect(shadowResearch).toContain("HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_ENABLED");
     expect(runner).toContain("HUNTER_COMPANY_RESEARCH_ENABLED");
@@ -561,19 +564,24 @@ describe("Hunter company deep research", () => {
     await expect(execFileAsync("/bin/zsh", ["-n", runnerPath])).resolves.toBeDefined();
   });
 
-  it("submits every retrieved company to Luna even when Qwen omitted one", async () => {
+  it("uses every Luna row as primary synthesis even when Qwen omitted one", async () => {
     const program = [
       "import json",
       "import hunter_company_research as r",
       "requests=[]",
       "def fake_api(_base_url,_token,method,path,payload):",
       " requests.append({'method':method,'path':path,'payload':payload})",
-      " return {'data':{'state':'completed','report':{'status':'SUCCESS'}}}",
+      " rows=[]",
+      " for packet in payload['packets']:",
+      "  row=dict(synthesis['alpha'])",
+      "  row['companyKey']=packet['companyKey']",
+      "  rows.append(row)",
+      " return {'data':{'state':'completed','rows':rows,'usage':{'inputTokens':100,'cachedInputTokens':10,'outputTokens':20,'totalTokens':120,'durationMs':30},'report':{'status':'SUCCESS','inputTokens':100,'cachedInputTokens':10,'outputTokens':20,'durationMs':30}}}",
       "r.api_request=fake_api",
       "candidates=[{'companyId':'company-1','companyKey':'alpha','companyName':'Alpha','priorityScore':80,'shipmentEvidence':[],'existingSignals':[]},{'companyId':'company-2','companyKey':'beta','companyName':'Beta','priorityScore':70,'shipmentEvidence':[],'existingSignals':[]}]",
       "evidence={key:[{'pass':'IDENTITY','query':key,'title':key,'url':'https://example.com/'+key,'sourceDomain':'example.com','sourceType':'FIRST_PARTY','publishedAt':None,'excerpt':'identity','firstParty':True}] for key in ['alpha','beta']}",
       "synthesis={'alpha':{'identityDisposition':'PASS','identityConfidence':90,'identityReason':'verified','logisticsProvider':False,'namedExternalLogisticsProvider':False,'stableExclusiveProviderEvidence':False,'providerDisplacementEvidence':False,'freshness':'CURRENT','opportunitySummary':'fit','triggerEvidenceIndices':[0],'geography':None,'companyCountry':'United States','operatingRegion':'NORTH_AMERICA','verifiedUsDivision':False,'usDivisionName':None,'usDivisionEvidenceIndices':[],'serviceLine':'WAREHOUSING','signalType':'OTHER','confidence':70,'rationale':'fit','missingEvidence':[],'followUpQueries':[]}}",
-      "result=r.submit_luna_shadow_batches('https://example.com','token','run-1',{'models':{'shadowSynthesis':{'enabled':True}}},candidates,evidence,synthesis)",
+      "result=r.submit_luna_primary_batches('https://example.com','token','run-1',{'models':{'synthesis':{'provider':'OPENAI','enabled':True}}},candidates,evidence,synthesis)",
       "print(json.dumps({'result':result,'requests':requests}))"
     ].join("\n");
     const { stdout } = await execFileAsync("python3", ["-c", program], {
@@ -588,7 +596,7 @@ describe("Hunter company deep research", () => {
     expect(output.requests).toHaveLength(1);
     expect(output.requests[0]).toMatchObject({
       method: "POST",
-      path: "/api/lead-gen/hunter/company-research/shadow",
+      path: "/api/lead-gen/hunter/company-research/synthesis",
       payload: {
         runId: "run-1",
         finalBatch: true,
@@ -597,6 +605,10 @@ describe("Hunter company deep research", () => {
           { companyKey: "beta", qwenSynthesis: null }
         ]
       }
+    });
+    expect(output.result.synthesisByKey).toEqual({
+      alpha: expect.objectContaining({ identityDisposition: "PASS" }),
+      beta: expect.objectContaining({ identityDisposition: "PASS" })
     });
   });
 
@@ -1660,10 +1672,26 @@ function completion() {
   return {
     models: {
       synthesis: {
+        provider: "OPENAI",
+        name: "gpt-5.6-luna",
+        promptVersion: "hunter-company-research-v18",
+        structuredOutput: true,
+        inputTokens: 2000,
+        cachedInputTokens: 200,
+        outputTokens: 700,
+        totalTokens: 2700,
+        durationMs: 4000,
+        estimatedCostUsd: 0.006
+      },
+      shadowSynthesis: {
         provider: "OLLAMA",
         name: "qwen3.5:35b",
-        promptVersion: "hunter-company-research-v17",
+        promptVersion: "hunter-company-research-v18",
         structuredOutput: true,
+        enabled: true,
+        status: "SUCCESS",
+        companyCount: 1,
+        failureCount: 0,
         inputTokens: 2000,
         outputTokens: 700,
         durationMs: 4000
@@ -1671,7 +1699,7 @@ function completion() {
       scoring: {
         provider: "KIMI",
         name: "kimi-k2.6",
-        promptVersion: "hunter-company-research-v17",
+        promptVersion: "hunter-company-research-v18",
         structuredOutput: true,
         inputTokens: 1800,
         cachedInputTokens: 200,
@@ -1682,7 +1710,7 @@ function completion() {
       validation: {
         provider: "KIMI",
         name: "kimi-k3",
-        promptVersion: "hunter-company-research-v17",
+        promptVersion: "hunter-company-research-v18",
         structuredOutput: true,
         status: "SUCCESS",
         reasoningEffort: "LOW",

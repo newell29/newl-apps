@@ -22,6 +22,7 @@ vi.mock("@/modules/lead-gen/hunter-company-research-shadow", () => ({
 import { POST as complete } from "@/app/api/lead-gen/hunter/company-research/complete/route";
 import { POST as prepare } from "@/app/api/lead-gen/hunter/company-research/prepare/route";
 import { POST as shadow } from "@/app/api/lead-gen/hunter/company-research/shadow/route";
+import { POST as synthesis } from "@/app/api/lead-gen/hunter/company-research/synthesis/route";
 
 describe("Hunter company-research machine routes", () => {
   beforeEach(() => {
@@ -62,13 +63,13 @@ describe("Hunter company-research machine routes", () => {
     expect(completeHunterCompanyResearchRun).not.toHaveBeenCalled();
   });
 
-  it("keeps Luna shadow batches tenant scoped and explicitly non-authoritative", async () => {
+  it("keeps authoritative Luna synthesis batches tenant scoped", async () => {
     runHunterResearchLunaShadowBatch.mockResolvedValue({
       state: "completed",
-      report: { authoritative: false, evaluatedCompanyCount: 1 }
+      report: { authoritative: true, evaluatedCompanyCount: 1 }
     });
     const request = new Request(
-      "https://app.example/api/lead-gen/hunter/company-research/shadow",
+      "https://app.example/api/lead-gen/hunter/company-research/synthesis",
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -79,7 +80,7 @@ describe("Hunter company-research machine routes", () => {
         })
       }
     );
-    const response = await shadow(request);
+    const response = await synthesis(request);
 
     expect(response.status).toBe(200);
     expect(runHunterResearchLunaShadowBatch).toHaveBeenCalledWith({
@@ -88,5 +89,19 @@ describe("Hunter company-research machine routes", () => {
       packets: [{ companyId: "company-1" }],
       finalBatch: true
     });
+  });
+
+  it("retains the legacy shadow route during the Mac worker cutover", async () => {
+    runHunterResearchLunaShadowBatch.mockResolvedValue({ state: "completed" });
+    const response = await shadow(new Request(
+      "https://app.example/api/lead-gen/hunter/company-research/shadow",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ runId: "run-1", packets: [{}], finalBatch: false })
+      }
+    ));
+
+    expect(response.status).toBe(200);
   });
 });

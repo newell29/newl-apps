@@ -324,7 +324,7 @@ async function ensureCurrentHunterApolloReviewLead({
   });
   if (eligibility.status !== "ELIGIBLE") {
     throw new Error(
-      `${company.name} is no longer a current Qwen/Kimi-vetted Hunter opportunity. Refresh Apollo Exceptions before continuing.`
+      `${company.name} is no longer a current Hunter/Kimi-vetted opportunity. Refresh Apollo Exceptions before continuing.`
     );
   }
 

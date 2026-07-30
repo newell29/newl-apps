@@ -46,9 +46,10 @@ Research preparation resolves a canonical company identity before selecting the 
 domain takes precedence over legal suffixes and branch labels, preventing aliases of the same operating company from
 consuming multiple research slots. Tenant company IDs and prepared keys are still revalidated at completion.
 
-The Qwen/Luna shadow comparison is visible under Automation Settings. An administrator may replay Luna against the
-exact saved public-evidence packet without repeating Brave retrieval; Luna remains non-authoritative and cannot change
-the Qwen/Kimi classification or authorize outreach.
+The Luna/Qwen comparison is visible under Automation Settings. Luna is the authoritative company-research
+synthesis consumed by Kimi and deterministic classification. Qwen receives the same saved public evidence only as a
+temporary non-blocking shadow. An administrator may replay the Luna audit against saved evidence without repeating
+Brave retrieval; replay does not rewrite a completed opportunity or authorize outreach.
 
 Apollo company mapping and employee discovery are separate states. A verified Apollo organization remains mapped
 when Apollo returns zero employees. It appears under **Mapped company — employee lookup needed**, where employees can
