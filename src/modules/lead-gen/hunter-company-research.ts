@@ -23,8 +23,9 @@ import { dedupeHunterCompaniesByIdentity } from "@/modules/lead-gen/hunter-compa
 import { prisma } from "@/server/db";
 
 export { HUNTER_COMPANY_RESEARCH_JOB_TYPE };
-export const HUNTER_COMPANY_RESEARCH_PROMPT_VERSION = "hunter-company-research-v17";
+export const HUNTER_COMPANY_RESEARCH_PROMPT_VERSION = "hunter-company-research-v18";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL = "qwen3.5:35b";
+export const HUNTER_COMPANY_RESEARCH_DEFAULT_LUNA_MODEL = "gpt-5.6-luna";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL = "kimi-k2.6";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL = "kimi-k3";
 
@@ -138,10 +139,26 @@ type ResearchResult = {
 export type HunterCompanyResearchCompletion = {
   models: {
     synthesis: {
+      provider: "OPENAI";
+      name: string;
+      promptVersion: string;
+      structuredOutput: boolean;
+      inputTokens: number;
+      cachedInputTokens: number;
+      outputTokens: number;
+      totalTokens: number;
+      durationMs: number;
+      estimatedCostUsd: number | null;
+    };
+    shadowSynthesis: {
       provider: "OLLAMA";
       name: string;
       promptVersion: string;
       structuredOutput: boolean;
+      enabled: boolean;
+      status: "SUCCESS" | "PARTIAL" | "ERROR" | "DISABLED";
+      companyCount: number;
+      failureCount: number;
       inputTokens: number;
       outputTokens: number;
       durationMs: number;
@@ -369,7 +386,7 @@ export async function prepareHunterCompanyResearchRun({
       observedAt: signal.observedAt.toISOString()
     }))
   }));
-  const lunaShadow = hunterResearchLunaShadowConfiguration();
+  const lunaPrimary = hunterResearchLunaShadowConfiguration();
 
   const job = await prisma.automationJobRun.create({
     data: {
@@ -391,13 +408,14 @@ export async function prepareHunterCompanyResearchRun({
         })),
         dailyCompanyLimit: limit,
         promptVersion: HUNTER_COMPANY_RESEARCH_PROMPT_VERSION,
-        qwenModel: HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL,
+        lunaModel: HUNTER_COMPANY_RESEARCH_DEFAULT_LUNA_MODEL,
         kimiModel: HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL,
         validatorModel: HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL,
-        lunaShadowRequested: lunaShadow.requested,
-        lunaShadowEnabled: lunaShadow.enabled,
-        lunaShadowModel: lunaShadow.recommended,
-        lunaShadowPromptVersion: lunaShadow.promptVersion
+        lunaPrimaryRequested: lunaPrimary.requested,
+        lunaPrimaryEnabled: lunaPrimary.enabled,
+        lunaPrimaryModel: lunaPrimary.recommended,
+        lunaPrimaryPromptVersion: lunaPrimary.promptVersion,
+        qwenShadowModel: HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL
       }
     }
   });
@@ -412,11 +430,11 @@ export async function prepareHunterCompanyResearchRun({
       passes: HUNTER_RESEARCH_PASSES,
       models: {
         synthesis: {
-          provider: "OLLAMA",
-          recommended: HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL,
-          promptVersion: HUNTER_COMPANY_RESEARCH_PROMPT_VERSION,
+          ...lunaPrimary,
+          provider: "OPENAI",
+          recommended: HUNTER_COMPANY_RESEARCH_DEFAULT_LUNA_MODEL,
           structuredOutput: true,
-          thinking: false
+          reasoningEffort: "LOW"
         },
         scoring: {
           provider: "KIMI",
@@ -432,7 +450,15 @@ export async function prepareHunterCompanyResearchRun({
           structuredOutput: true,
           reasoningEffort: "LOW"
         },
-        shadowSynthesis: lunaShadow
+        shadowSynthesis: {
+          provider: "OLLAMA",
+          recommended: HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL,
+          promptVersion: HUNTER_COMPANY_RESEARCH_PROMPT_VERSION,
+          structuredOutput: true,
+          thinking: false,
+          authoritative: false,
+          enabled: true
+        }
       },
       limits: {
         companies: limit,
@@ -776,11 +802,13 @@ export async function completeHunterCompanyResearchRun({
           blockedCount,
           tierCounts,
           searchProvider: completion.search.provider,
-          qwenModel: completion.models.synthesis.name,
+          lunaModel: completion.models.synthesis.name,
+          qwenShadowModel: completion.models.shadowSynthesis.name,
+          qwenShadowStatus: completion.models.shadowSynthesis.status,
           kimiModel: completion.models.scoring.name,
           validatorModel: completion.models.validation.name,
           validatorStatus: completion.models.validation.status,
-          lunaShadow: lunaShadowSummary
+          lunaComparison: lunaShadowSummary
         }
       }
     });
@@ -831,7 +859,7 @@ export async function completeHunterCompanyResearchRun({
     blockedCount,
     tierCounts,
     missingCompanyCount: expectedCompanyIds.size - returnedCompanyIds.size,
-    lunaShadow: lunaShadowSummary,
+    lunaComparison: lunaShadowSummary,
     plan,
     handoff
   };
@@ -867,6 +895,10 @@ export function parseHunterCompanyResearchCompletion(value: unknown): HunterComp
   const root = record(value, "completion");
   const models = record(root.models, "completion.models");
   const synthesisModel = record(models.synthesis, "completion.models.synthesis");
+  const shadowSynthesisModel = record(
+    models.shadowSynthesis,
+    "completion.models.shadowSynthesis"
+  );
   const scoringModel = record(models.scoring, "completion.models.scoring");
   const validationModel = record(models.validation, "completion.models.validation");
   const search = record(root.search, "completion.search");
@@ -877,13 +909,87 @@ export function parseHunterCompanyResearchCompletion(value: unknown): HunterComp
   const parsed: HunterCompanyResearchCompletion = {
     models: {
       synthesis: {
-        provider: enumValue(synthesisModel.provider, ["OLLAMA"] as const, "completion.models.synthesis.provider"),
+        provider: enumValue(synthesisModel.provider, ["OPENAI"] as const, "completion.models.synthesis.provider"),
         name: text(synthesisModel.name, 200, "completion.models.synthesis.name"),
         promptVersion: text(synthesisModel.promptVersion, 100, "completion.models.synthesis.promptVersion"),
         structuredOutput: boolean(synthesisModel.structuredOutput, "completion.models.synthesis.structuredOutput"),
         inputTokens: integer(synthesisModel.inputTokens, 0, 10_000_000, "completion.models.synthesis.inputTokens"),
+        cachedInputTokens: integer(
+          synthesisModel.cachedInputTokens,
+          0,
+          10_000_000,
+          "completion.models.synthesis.cachedInputTokens"
+        ),
         outputTokens: integer(synthesisModel.outputTokens, 0, 10_000_000, "completion.models.synthesis.outputTokens"),
-        durationMs: integer(synthesisModel.durationMs, 0, 86_400_000, "completion.models.synthesis.durationMs")
+        totalTokens: integer(
+          synthesisModel.totalTokens,
+          0,
+          20_000_000,
+          "completion.models.synthesis.totalTokens"
+        ),
+        durationMs: integer(synthesisModel.durationMs, 0, 86_400_000, "completion.models.synthesis.durationMs"),
+        estimatedCostUsd: nullableNumber(
+          synthesisModel.estimatedCostUsd,
+          0,
+          10_000,
+          "completion.models.synthesis.estimatedCostUsd"
+        )
+      },
+      shadowSynthesis: {
+        provider: enumValue(
+          shadowSynthesisModel.provider,
+          ["OLLAMA"] as const,
+          "completion.models.shadowSynthesis.provider"
+        ),
+        name: text(shadowSynthesisModel.name, 200, "completion.models.shadowSynthesis.name"),
+        promptVersion: text(
+          shadowSynthesisModel.promptVersion,
+          100,
+          "completion.models.shadowSynthesis.promptVersion"
+        ),
+        structuredOutput: boolean(
+          shadowSynthesisModel.structuredOutput,
+          "completion.models.shadowSynthesis.structuredOutput"
+        ),
+        enabled: boolean(
+          shadowSynthesisModel.enabled,
+          "completion.models.shadowSynthesis.enabled"
+        ),
+        status: enumValue(
+          shadowSynthesisModel.status,
+          ["SUCCESS", "PARTIAL", "ERROR", "DISABLED"] as const,
+          "completion.models.shadowSynthesis.status"
+        ),
+        companyCount: integer(
+          shadowSynthesisModel.companyCount,
+          0,
+          MAX_RESEARCH_COMPANIES,
+          "completion.models.shadowSynthesis.companyCount"
+        ),
+        failureCount: integer(
+          shadowSynthesisModel.failureCount,
+          0,
+          MAX_RESEARCH_COMPANIES,
+          "completion.models.shadowSynthesis.failureCount"
+        ),
+        inputTokens: integer(
+          shadowSynthesisModel.inputTokens,
+          0,
+          10_000_000,
+          "completion.models.shadowSynthesis.inputTokens"
+        ),
+        outputTokens: integer(
+          shadowSynthesisModel.outputTokens,
+          0,
+          10_000_000,
+          "completion.models.shadowSynthesis.outputTokens"
+        ),
+        durationMs: integer(
+          shadowSynthesisModel.durationMs,
+          0,
+          86_400_000,
+          "completion.models.shadowSynthesis.durationMs"
+        )
       },
       scoring: {
         provider: enumValue(scoringModel.provider, ["KIMI"] as const, "completion.models.scoring.provider"),
@@ -980,6 +1086,22 @@ export function parseHunterCompanyResearchCompletion(value: unknown): HunterComp
     },
     companies: companies.map((company, index) => parseResearchResult(company, index))
   };
+  if (
+    parsed.models.synthesis.totalTokens !==
+    parsed.models.synthesis.inputTokens + parsed.models.synthesis.outputTokens
+  ) {
+    throw new Error(
+      "completion.models.synthesis.totalTokens must equal inputTokens plus outputTokens."
+    );
+  }
+  if (
+    parsed.models.shadowSynthesis.status === "DISABLED" &&
+    (parsed.models.shadowSynthesis.enabled ||
+      parsed.models.shadowSynthesis.companyCount > 0 ||
+      parsed.models.shadowSynthesis.failureCount > 0)
+  ) {
+    throw new Error("completion.models.shadowSynthesis DISABLED metadata is inconsistent.");
+  }
   const validatedCount = parsed.companies.filter(
     (company) => company.validation.status === "VALIDATED"
   ).length;

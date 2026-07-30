@@ -217,15 +217,16 @@ function LunaComparison({
   return (
     <details className="rounded-lg border border-border bg-card p-5 shadow-sm">
       <summary className="cursor-pointer font-semibold text-foreground">
-        Qwen vs Luna research comparison
+        Luna primary vs Qwen shadow research comparison
         {summary
           ? ` · ${summary.evaluatedCompanyCount}/${summary.expectedCompanyCount} evaluated`
           : " · not completed"}
       </summary>
       <p className="mt-2 text-sm leading-6 text-mutedForeground">
-        Luna independently reviews the exact saved Brave evidence used by Qwen. It remains non-authoritative and
-        cannot change classifications or authorize outreach. Replay reuses saved evidence and does not purchase
-        another Brave retrieval.
+        Luna is the authoritative evidence-synthesis model. Qwen independently reviews the same saved Brave
+        evidence as a temporary, non-blocking shadow and cannot change classifications or authorize outreach.
+        Replay is an audit comparison against saved evidence; it does not repeat Brave retrieval or rewrite a
+        completed opportunity.
       </p>
       {summary ? (
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -269,7 +270,7 @@ function LunaComparison({
       <form action={replayHunterLunaComparisonAction} className="mt-4">
         <input type="hidden" name="runId" value={runId} />
         <button className="rounded-md border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground">
-          Replay Luna from saved evidence
+          Replay Luna audit from saved evidence
         </button>
       </form>
     </details>

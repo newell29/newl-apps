@@ -56,25 +56,24 @@ account. Both People Search requests are zero-credit; paid email enrichment rema
   bounded public evidence and usage metadata, never either credential.
 - Public page retrieval accepts HTTPS only, validates DNS as globally routable, revalidates redirects,
   caps response sizes, and rejects local/private destinations.
-- Ollama is restricted to loopback and defaults to `qwen3.5:35b` for synthesis. The Kimi client is
+- Ollama is restricted to loopback and defaults to `qwen3.5:35b` for temporary shadow synthesis. The Kimi client is
   restricted to `https://api.moonshot.ai/v1`, defaults to `kimi-k2.6` for scoring, and uses `kimi-k3`
   with low reasoning and strict JSON Schema for at most five top fresh-event validators. Both use the
   same protected local Kimi credential; no Kimi secret is sent to Newl Apps.
 - The company-research worker and machine routes contain no Apollo, pipeline-stage, cadence, email,
   LinkedIn, or customer-communication client.
-- `HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_ENABLED=true` opts the server into a non-authoritative
-  GPT-5.6 Luna comparison. It reuses the existing server-only `OPENAI_API_KEY`; that key is never
-  copied to Hunter's Mac environment. The worker sends the already-retrieved, bounded evidence and
-  Qwen row through the ingestion-authenticated, tenant-scoped shadow route in batches of at most four.
+- `HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_ENABLED=true` enables authoritative GPT-5.6 Luna synthesis during
+  the compatibility cutover. It reuses the existing server-only `OPENAI_API_KEY`; that key is never copied to
+  Hunter's Mac environment. The worker sends already-retrieved bounded evidence and an optional Qwen shadow row
+  through the ingestion-authenticated, tenant-scoped synthesis route in batches of at most four.
   The Qwen row is retained for server-side comparison but removed from the OpenAI model input; Luna also
   receives evidence for companies where Qwen failed to produce a valid row.
 - The Luna call uses the Responses API, `store: false`, low reasoning, strict Structured Outputs, and
   no web or other tools. A prompt/model/batch fingerprint makes successful batches idempotent, so an
   operator retry does not repeat an already-completed OpenAI call.
-- Shadow usage, schema-valid coverage, categorical agreement, evidence-citation overlap, and bounded
-  errors are stored in the company-research `AutomationJobRun.output`. They are audit information only:
-  production synthesis, Kimi scoring, deterministic gates, planning, Apollo, and outreach continue to
-  use Qwen and are unchanged.
+- Luna usage, schema-valid coverage, categorical agreement, evidence-citation overlap, and bounded errors are
+  stored in the company-research `AutomationJobRun.output`. Luna rows continue into Kimi scoring and deterministic
+  gates. Qwen comparison rows remain audit-only and cannot affect planning, Apollo, or outreach.
 
 ## Hunter planning integration boundary
 

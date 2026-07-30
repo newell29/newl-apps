@@ -1673,7 +1673,8 @@ Promotion of Luna to primary or fallback synthesis is not approved by this trial
 ## 30. Consolidated Hunter Research and Rivet Safeguards (2026-07-29)
 
 The owner approved one consolidated correction after closing overlapping Rivet PRs. Company research prompt
-`hunter-company-research-v17` adds a bounded customs/import-record pass. Same-identity TradeMining importer,
+`hunter-company-research-v18` retains the bounded customs/import-record pass while changing model authority.
+Same-identity TradeMining importer,
 consignee, and shipper names may be used only to construct search queries; raw party names are not included in
 Qwen, Kimi, or Luna model packets. Hunter reserves one page-fetch slot for customs evidence and deduplicates
 source URLs across passes.
@@ -1690,3 +1691,18 @@ running, or review-blocked Rivet scope refuses sibling jobs. Rivet prepares and 
 the independent exact-commit review, and opens a draft PR only after a zero-finding `PASS`. A blocked review keeps
 the branch and review record, reports through the protected Teams target, and creates no PR. Merge, deployment,
 production writes, retries, permission changes, and customer communication remain prohibited.
+
+## 31. Luna-Primary Company-Research Cutover (2026-07-29)
+
+The owner approved replacing local Qwen as the authoritative company-research synthesizer. Brave retrieval still
+runs once. The Mac worker sends each bounded evidence packet to the tenant-scoped Newl Apps synthesis endpoint,
+where GPT-5.6 Luna uses low reasoning, strict Structured Outputs, `store: false`, and no tools. Luna synthesis is
+the only model output passed to Kimi K2.6 scoring and deterministic classification. Missing, malformed, disabled,
+or unavailable Luna output fails the run closed; Qwen must never become an implicit fallback.
+
+Kimi K2.6 remains an independent cross-provider scorer and Kimi K3 remains the bounded validator for at most five
+fresh-event leaders. Local Qwen may run over the same evidence as a non-blocking shadow for three comparable
+production runs. Qwen rows are withheld from Luna, retained only for agreement/coverage telemetry, and cannot
+change identity recovery, follow-up retrieval, classification, planning, Apollo, or outreach. After the three-run
+benchmark, set `HUNTER_RESEARCH_QWEN_SHADOW_ENABLED=false` unless the recorded evidence demonstrates a material
+quality or resilience benefit. This section supersedes the authority assignment in section 29.

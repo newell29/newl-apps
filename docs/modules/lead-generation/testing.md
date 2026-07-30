@@ -203,28 +203,29 @@ Regression coverage must prove:
 3. the default queue follows the saved daily company limit and excludes recently researched companies for seven days;
 4. identity, fresh-event, careers, and distribution-footprint queries are generated for every company;
 5. evidence URLs are HTTPS, source domains match their URLs, redirects cannot reach local/private addresses, and query/evidence sizes are bounded;
-6. Qwen runs locally with structured output and thinking disabled, while K2.6 and bounded K3 usage, cached-token counts, reasoning effort, status, and cost estimates remain auditable;
-   an enabled Luna shadow receives the same bounded evidence in batches of at most four through a
-   tenant-scoped machine route, uses strict Structured Outputs with no tools and `store: false`,
-   withholds the Qwen row from the hosted model, evaluates Qwen omissions, records usage/agreement
-   without mutating the authoritative result, and cannot prevent Qwen/Kimi completion when unavailable
-   or malformed;
+6. Luna receives the bounded evidence in batches of at most four through a tenant-scoped machine route,
+   uses strict Structured Outputs with no tools and `store: false`, and is the only synthesis allowed into
+   K2.6 and deterministic classification. A missing, malformed, disabled, or unavailable Luna response fails
+   closed. Qwen runs locally with structured output and thinking disabled only as an optional non-blocking shadow;
+   its row is withheld from the hosted model, its failure cannot block Luna/Kimi completion, and agreement remains
+   auditable. K2.6 and bounded K3 usage, cached-token counts, reasoning effort, status, and cost estimates remain auditable;
 7. uncorroborated ambiguous identity, explicit provider-service evidence even when the model misses it, explicitly evidenced stable/exclusive external-provider relationships without displacement evidence, thin evidence, and incomplete pass coverage fail deterministic gates; matching first-party identity can correct unsupported ambiguity; unsupported provider/incumbent labels cannot block; stale/no-opportunity evidence remains Watchlist; an undated/old `FRESH` claim is evaluated as current fit rather than Hot; exact-company recent material expansions, including new production lines at an existing facility and distribution-center establishments, can restore a missed fresh trigger or replace a weaker affiliate or unsupported careers citation before the date gate, replace a contradicted generic summary with saved evidence, and remain typed as expansion rather than facility opening; compact Qwen/K2.6/K3 packets preserve up to two qualifying expansion records in exact-entity-first order plus the strongest specific current logistics-management vacancy before pass-diverse backfill; a Qualified current account saves that qualifying vacancy as its trigger citation with exact role wording, while salary/compensation records, role taxonomies, job-description references, employee profiles, generic responsibilities/qualifications, malformed or incomplete careers rows, generic “Join our team” invitations, general applications, talent communities, future-opportunity pages, and completely missing vacancy evidence cannot become trigger citations or retain an unsupported hiring claim; opening or application language must be tied to the specific currently available role; duplicate vacancy evidence is selected deterministically; and incidental China text cannot override verified North American identity;
 8. five 0-20 K2.6 dimensions must equal the reported total; K3 cannot raise that score, promote a blocked candidate, or create Hot without citing the same recent dated trigger;
 9. public identity evidence, never shipment origin, determines company country; verified North American operators do not fail a redundant foreign-division name check, while foreign division evidence tolerates legal-suffix/parenthetical differences but still requires a matching alias, U.S. jurisdiction, and explicit operating relationship; other foreign entities without a verified U.S. division receive a 10-point penalty and Watchlist cap, while mainland-China entities without one are blocked;
 10. ambiguous or below-70% identities pivot from candidate-matching domains found in saved evidence to official and legal/about/contact pages, rerun synthesis when first-party evidence is recovered, and never accept an unrelated directory or similar-name domain;
 11. completion preloads the prepared tenant-scoped company identity map, uses a bounded 30-second
     interactive transaction, stores tenant-scoped evidence atomically, and refreshes only the dry-run plan; and
-12. a retrieval/Qwen checkpoint resumes only against an identical newly prepared tenant cohort; scheduled
-    runs write the paid-retrieval checkpoint atomically before Qwen, an exact same-day retry discovers it
+12. a retrieval/synthesis checkpoint resumes only against an identical newly prepared tenant cohort; scheduled
+    runs write the paid-retrieval checkpoint atomically before Luna, an exact same-day retry discovers it
     automatically, malformed batches are isolated to individual companies with bounded repair attempts,
     and exhausted company-level failures do not discard other valid synthesis results;
 13. legal-name, regional, and brand aliases cover known false-negative shapes such as Aalberts IPS Americas, AS Colour, 3F North America, Barnhardt Manufacturing, and Atlas Copco Compressors;
 14. saturated generic results cannot prevent a known-domain identity or fresh-event query from executing or contributing evidence, including Barnhardt's first-party NCFI expansion;
 15. a full evidence ledger executes no follow-up search, a partially full ledger appends only to the remaining capacity, resumed evidence is bounded, and no completion company can exceed 24 evidence records; and
 16. no company-research module or route imports or calls Apollo, pipeline-stage mutation, cadence enrollment, email, LinkedIn, or customer-communication code; and
-17. the Luna shadow flag requires the existing server OpenAI key, successful batches are idempotent,
-    off-cohort identities fail before provider access, and no OpenAI key appears in the Mac worker.
+17. the Luna compatibility flag requires the existing server OpenAI key, successful batches are idempotent,
+    evidence changes produce a new fingerprint, off-cohort identities fail before provider access, and no OpenAI
+    key appears in the Mac worker.
 
 ## Hunter quality audit and Rivet triage
 

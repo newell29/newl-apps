@@ -23,7 +23,7 @@ Apollo match review reuses the existing tenant-scoped models and requires no sch
 - `ApolloCompanyMatch.reviewedAt` and `reviewedByUserId` distinguish active review from **Confirmed no match**;
 - the latest unresolved match is the repeat-search guard used by Pipeline bulk enrichment;
 - the active Apollo Exceptions query begins from `Company`, not legacy `Lead`, and requires a fresh eligible
-  `HunterOpportunitySignal` plus current `WOULD_PURSUE` `HunterProspectingDecision`. This keeps current Qwen/Kimi-vetted
+  `HunterOpportunitySignal` plus current `WOULD_PURSUE` `HunterProspectingDecision`. This keeps current Luna/Kimi-vetted
   exceptions visible while retaining older match rows outside the active work queue;
 - an authenticated exception action creates the company's unique `Lead` only when none exists, assigns the acting
   reviewer as owner, and preserves an existing owner. No cleanup migration or historical-row deletion is required.
@@ -55,11 +55,13 @@ Hunter Phase 2 requires no database migration:
 Hunter Phase 3 also requires no database migration:
 
 - `AutomationJobRun` stores the prepared tenant cohort and aggregate retrieval/model telemetry;
-- an enabled Luna shadow stores its non-authoritative provider/model/prompt version, per-batch
-  fingerprints, bounded Qwen/Luna comparisons, usage, completion state, and errors under
+- enabled Luna primary synthesis stores its provider/model/prompt version, per-batch fingerprints,
+  bounded Qwen/Luna comparisons, usage, completion state, and errors under
   `AutomationJobRun.output.lunaShadow`; it creates no company, signal, decision, contact, or outreach
   record and requires no schema migration;
-- `HunterOpportunitySignal.evidence` stores the complete per-company search ledger, Qwen synthesis, deterministic gate result, K2.6 dimensions, K3 validation, company-country/U.S.-division evidence, four-tier classification, foreign adjustment, final score, and model usage;
+- `HunterOpportunitySignal.evidence` stores the complete per-company search ledger, authoritative Luna synthesis,
+  optional Qwen shadow metadata, deterministic gate result, K2.6 dimensions, K3 validation,
+  company-country/U.S.-division evidence, four-tier classification, foreign adjustment, final score, and model usage;
 - `HunterOpportunitySignal.rawJson` stores bounded non-secret replay metadata;
 - the refreshed `HunterProspectingDecision` keeps the scored signal in the existing immutable daily-plan ledger.
 

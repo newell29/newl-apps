@@ -35,7 +35,7 @@ import {
   runHunterResearchLunaShadowBatch
 } from "@/modules/lead-gen/hunter-company-research-shadow";
 
-describe("Hunter Luna company-research shadow service", () => {
+describe("Hunter Luna company-research synthesis service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("OPENAI_API_KEY", "test-openai-key");
@@ -73,11 +73,11 @@ describe("Hunter Luna company-research shadow service", () => {
     vi.unstubAllEnvs();
   });
 
-  it("enables the trial only when both the explicit flag and server key are present", () => {
+  it("enables Luna only when both the explicit flag and server key are present", () => {
     expect(hunterResearchLunaShadowConfiguration()).toMatchObject({
       enabled: true,
       requested: true,
-      authoritative: false,
+      authoritative: true,
       recommended: HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_MODEL
     });
     vi.stubEnv("OPENAI_API_KEY", "OPENAI_API_KEY_PLACEHOLDER");
@@ -87,7 +87,7 @@ describe("Hunter Luna company-research shadow service", () => {
     });
   });
 
-  it("stores a non-authoritative tenant-scoped comparison without changing companies", async () => {
+  it("stores authoritative tenant-scoped synthesis without changing companies directly", async () => {
     const result = await runHunterResearchLunaShadowBatch({
       tenantId: "tenant-a",
       runId: "run-1",
@@ -99,7 +99,7 @@ describe("Hunter Luna company-research shadow service", () => {
       state: "completed",
       report: {
         status: "SUCCESS",
-        authoritative: false,
+        authoritative: true,
         expectedCompanyCount: 1,
         evaluatedCompanyCount: 1,
         firstPassSchemaValidCompanyCount: 1,
@@ -124,9 +124,9 @@ describe("Hunter Luna company-research shadow service", () => {
         }),
         data: {
           output: expect.objectContaining({
-            phase: "LUNA_SHADOW_COMPLETE",
+            phase: "LUNA_PRIMARY_COMPLETE",
             lunaShadow: expect.objectContaining({
-              authoritative: false,
+              authoritative: true,
               status: "SUCCESS",
               evaluatedCompanyCount: 1
             })
@@ -238,6 +238,64 @@ describe("Hunter Luna company-research shadow service", () => {
         })
       })
     );
+  });
+
+  it("ignores malformed Qwen shadow output instead of blocking Luna", async () => {
+    const result = await runHunterResearchLunaShadowBatch({
+      tenantId: "tenant-a",
+      runId: "run-1",
+      packets: [{
+        ...packet(),
+        qwenSynthesis: {
+          ...synthesis(),
+          identityDisposition: "NOT_A_REAL_DISPOSITION"
+        }
+      }],
+      finalBatch: true
+    });
+
+    expect(result).toMatchObject({
+      state: "completed",
+      report: {
+        status: "SUCCESS",
+        evaluatedCompanyCount: 1,
+        qwenSynthesisCompanyCount: 0,
+        qwenMissingCompanyCount: 1
+      }
+    });
+    expect(generateHunterResearchLunaShadow).toHaveBeenCalledTimes(1);
+  });
+
+  it("finalizes a running report when the final Luna batch is served from cache", async () => {
+    const first = await runHunterResearchLunaShadowBatch({
+      tenantId: "tenant-a",
+      runId: "run-1",
+      packets: [packet()],
+      finalBatch: false
+    });
+    expect(first).toMatchObject({ report: { status: "RUNNING" } });
+    const persistedOutput = prisma.automationJobRun.updateMany.mock.calls[0]![0].data.output;
+    prisma.automationJobRun.findFirst.mockResolvedValue({
+      id: "run-1",
+      input: {
+        candidateCompanyIds: ["company-1"],
+        candidateCompanyKeys: ["example-retailer"]
+      },
+      output: persistedOutput
+    });
+
+    const cached = await runHunterResearchLunaShadowBatch({
+      tenantId: "tenant-a",
+      runId: "run-1",
+      packets: [packet()],
+      finalBatch: true
+    });
+
+    expect(cached).toMatchObject({
+      state: "cached",
+      report: { status: "SUCCESS", evaluatedCompanyCount: 1 }
+    });
+    expect(generateHunterResearchLunaShadow).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -350,26 +350,27 @@ def build_company_research_message(result: dict[str, Any]) -> str:
     missing = int(result.get("missingCompanyCount") or 0)
     message = (
         "Hunter company research completed: "
-        f"{researched} companies reached Qwen and Kimi, {accepted} qualified for planning, "
+        f"{researched} companies reached Luna and Kimi, {accepted} qualified for planning, "
         f"{blocked} blocked, and {missing} omitted after bounded model-output repair. "
     )
-    luna_shadow = result.get("lunaShadow")
-    if isinstance(luna_shadow, dict):
-        evaluated = int(luna_shadow.get("evaluatedCompanyCount") or 0)
-        expected = int(luna_shadow.get("expectedCompanyCount") or 0)
-        schema_valid = int(luna_shadow.get("firstPassSchemaValidCompanyCount") or 0)
-        qwen_valid = int(luna_shadow.get("qwenSynthesisCompanyCount") or 0)
-        qwen_missing = int(luna_shadow.get("qwenMissingCompanyCount") or 0)
-        agreement = luna_shadow.get("categoricalAgreementPercent")
+    luna_comparison = result.get("lunaComparison")
+    if isinstance(luna_comparison, dict):
+        evaluated = int(luna_comparison.get("evaluatedCompanyCount") or 0)
+        expected = int(luna_comparison.get("expectedCompanyCount") or 0)
+        schema_valid = int(luna_comparison.get("firstPassSchemaValidCompanyCount") or 0)
+        qwen_valid = int(luna_comparison.get("qwenSynthesisCompanyCount") or 0)
+        qwen_missing = int(luna_comparison.get("qwenMissingCompanyCount") or 0)
+        agreement = luna_comparison.get("categoricalAgreementPercent")
         agreement_text = (
             f"{float(agreement):g}% categorical agreement with Qwen"
             if isinstance(agreement, (int, float))
             else "agreement unavailable"
         )
         message += (
-            f"Luna shadow (non-authoritative): {clean(luna_shadow.get('status')) or 'UNKNOWN'}, "
+            f"Luna primary: {clean(luna_comparison.get('status')) or 'UNKNOWN'}, "
             f"{evaluated}/{expected} evaluated, {schema_valid} schema-valid on first pass, "
-            f"{qwen_valid} Qwen rows and {qwen_missing} Qwen omissions, {agreement_text}. "
+            f"Qwen shadow returned {qwen_valid} rows with {qwen_missing} omissions; "
+            f"{agreement_text}. "
         )
     return message + "Review Sales → Daily Opportunities and Admin & Quality → Health & Logs."
 
