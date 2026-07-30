@@ -7,6 +7,33 @@ import { getAuthenticatedContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
 
+export async function GET() {
+  if (process.env.VERCEL_ENV !== "preview") {
+    return NextResponse.json({ error: "Not found." }, { status: 404 });
+  }
+
+  const context = await getAuthenticatedContext();
+  requireAdmin(context);
+  await requireModule(context, ModuleKey.LEAD_GEN);
+
+  return new NextResponse(
+    [
+      "<!doctype html>",
+      '<html lang="en"><body>',
+      '<form method="post">',
+      '<button type="submit">Run one-credit YAT verification</button>',
+      "</form>",
+      "</body></html>"
+    ].join(""),
+    {
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store"
+      }
+    }
+  );
+}
+
 export async function POST() {
   if (process.env.VERCEL_ENV !== "preview") {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
