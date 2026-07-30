@@ -22,7 +22,10 @@ filter. A successfully resolved saved account already supplies that canonical id
 credit-consuming Organization Search endpoint on later rechecks. If People Search returns no useful people, it
 retries with the trusted domain stored on the confirmed company even when the original saved-account ID is
 unavailable. Both scopes read up to five 100-person pages rather than treating the first page as the complete
-company roster. Apollo can maintain duplicate or related saved accounts for one brand while its UI combines their
+company roster. Saved-contact lookup uses Apollo's canonical account/company name—not a TradeMining facility label
+such as `UNISYNC GROUP:GUELPH DC`—and accepts contacts tied to either the reviewer-confirmed account ID or its resolved
+canonical organization ID. A contradictory organization ID still fails closed. Apollo can maintain duplicate or
+related saved accounts for one brand while its UI combines their
 employees through **Include Sub Accounts**. After the exact organization and domain return zero, Hunter searches a
 bounded set of zero-credit saved-account results, accepts only safe same-brand records on the exact trusted domain,
 and searches each distinct nested organization ID. If those verified scopes are still empty, one bounded
