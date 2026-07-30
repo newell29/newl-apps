@@ -11,6 +11,7 @@ import {
   fetchApolloSequenceDirectory,
   parseApolloCompanyReference,
   parseApolloOrganizationId,
+  parseApolloPersonIds,
   pushApolloContactsToSequence,
   readApolloAccountIdFromMatchQuery,
   reconcileApolloContactWithBounceEvidence,
@@ -517,11 +518,17 @@ describe("fetchApolloContactsForCompany", () => {
         String(request).includes("/api/v1/people/match")
       )
     ).toBe(false);
+    expect(
+      fetchMock.mock.calls.some(([request]) =>
+        String(request).includes("/api/v1/mixed_companies/search")
+      )
+    ).toBe(false);
   });
 
-  it("recovers YAT employees by exact company name when Apollo account, organization, and domain scopes return zero", async () => {
+  it("recovers reviewer-selected YAT employees by exact Apollo person ID when public roster search returns zero", async () => {
     const accountId = "6888f2e0496bf40001170587";
-    const organizationId = "yat-canonical-organization";
+    const organizationId = "5e66b6381e05b4008c8331b8";
+    const personId = "6138684489ec360001a60945";
     const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input) => {
       const url = String(input);
 
@@ -563,82 +570,157 @@ describe("fetchApolloContactsForCompany", () => {
       }
 
       if (url.includes("/api/v1/mixed_people/api_search")) {
-        const requestUrl = new URL(url);
-        const exactNameQuery =
-          requestUrl.searchParams.get("q_keywords") === "YAT USA, INC." &&
-          requestUrl.searchParams.getAll("organization_ids[]").length === 0 &&
-          requestUrl.searchParams.getAll("q_organization_domains_list[]").length === 0;
-
         return {
           ok: true,
           status: 200,
-          json: vi.fn().mockResolvedValue(
-            exactNameQuery
-              ? {
-                  people: [
-                    {
-                      id: "yat-rogelio",
-                      first_name: "Rogelio",
-                      last_name_obfuscated: "M.",
-                      title: "Import Export Specialist",
-                      has_email: true,
-                      organization: {
-                        name: "YAT USA, INC.",
-                        primary_domain: "yattool.com"
-                      }
-                    },
-                    {
-                      id: "unrelated-yat",
-                      first_name: "Unrelated",
-                      last_name_obfuscated: "P.",
-                      title: "Supply Chain Manager",
-                      organization: {
-                        name: "Yat Logistics Group",
-                        primary_domain: "unrelated.example"
-                      }
-                    }
-                  ]
-                }
-              : emptyApolloPeopleResponse()
-          )
+          json: vi.fn().mockResolvedValue(emptyApolloPeopleResponse())
+        } as unknown as Response;
+      }
+      if (url.includes("/api/v1/people/match?")) {
+        expect(new URL(url).searchParams.get("id")).toBe(personId);
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            person: {
+              id: personId,
+              first_name: "Rogelio",
+              last_name: "Martinez",
+              title: "Import Export Specialist",
+              email: "rogelio.martinez@yattool.com",
+              organization: {
+                name: "YAT - Your Advanced Technology"
+              }
+            }
+          })
         } as unknown as Response;
       }
 
-      throw new Error(`Unexpected Apollo URL in exact-name YAT recovery test: ${url}`);
+      throw new Error(`Unexpected Apollo URL in explicit-person YAT recovery test: ${url}`);
     });
 
-    const result = await fetchApolloContactsForCompany({
-      companyName: "YAT USA, INC.",
-      domain: "yattool.com",
-      apolloOrganizationId: organizationId,
-      apolloAccountId: accountId
-    });
+    const result = await fetchApolloContactsForCompany(
+      {
+        companyName: "YAT USA, INC.",
+        domain: "yattool.com",
+        apolloOrganizationId: organizationId,
+        apolloAccountId: accountId
+      },
+      {
+        authorizePaidEmailEnrichment: true,
+        explicitApolloPersonIds: [personId]
+      }
+    );
 
     expect(result.contacts).toEqual([
       expect.objectContaining({
-        apolloPersonId: "yat-rogelio",
-        fullName: "Rogelio M.",
-        title: "Import Export Specialist"
+        apolloPersonId: personId,
+        fullName: "Rogelio Martinez",
+        title: "Import Export Specialist",
+        email: "rogelio.martinez@yattool.com"
       })
     ]);
     expect(result.match.matchReason).toContain(
-      "exact-company-name People Search"
+      "explicit Apollo person URLs"
     );
-    expect(
-      fetchMock.mock.calls.some(([request]) => {
-        const requestUrl = new URL(String(request));
-        return (
-          requestUrl.searchParams.get("q_keywords") === "YAT USA, INC." &&
-          requestUrl.searchParams.getAll("organization_ids[]").length === 0 &&
-          requestUrl.searchParams.getAll("q_organization_domains_list[]").length === 0
-        );
-      })
-    ).toBe(true);
-    expect(
-      fetchMock.mock.calls.some(([request]) =>
-        String(request).includes("/api/v1/people/match")
-      )
-    ).toBe(false);
+    expect(result.contactRecovery).toMatchObject({
+      paidEmailEnrichmentsAttempted: 1,
+      paidEmailsRecovered: 1
+    });
+    expect(fetchMock.mock.calls.some(([request]) =>
+      new URL(String(request)).searchParams.has("account_ids[]")
+    )).toBe(false);
+    expect(fetchMock.mock.calls.some(([request]) =>
+      String(request).includes("/api/v1/mixed_companies/search")
+    )).toBe(false);
+  });
+
+  it("rejects a reviewer-selected Apollo person whose returned employer is not the mapped company", async () => {
+    const personId = "6138684489ec360001a60945";
+    vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/accounts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            accounts: [{
+              id: "6888f2e0496bf40001170587",
+              organization_id: "5e66b6381e05b4008c8331b8",
+              name: "YAT USA, INC.",
+              primary_domain: "yattool.com"
+            }]
+          })
+        } as unknown as Response;
+      }
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            organizations: [{
+              id: "5e66b6381e05b4008c8331b8",
+              name: "YAT USA, INC.",
+              primary_domain: "yattool.com"
+            }]
+          })
+        } as unknown as Response;
+      }
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ contacts: [] })
+        } as unknown as Response;
+      }
+      if (url.includes("/api/v1/mixed_people/api_search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue(emptyApolloPeopleResponse())
+        } as unknown as Response;
+      }
+      if (url.includes("/api/v1/people/match?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            person: {
+              id: personId,
+              first_name: "Wrong",
+              last_name: "Company",
+              title: "Director of Supply Chain",
+              email: "wrong@unrelated.example",
+              organization: {
+                id: "65f111111111111111111111",
+                name: "YAT Logistics Group",
+                primary_domain: "unrelated.example"
+              }
+            }
+          })
+        } as unknown as Response;
+      }
+      throw new Error(`Unexpected Apollo URL in explicit-person mismatch test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany(
+      {
+        companyName: "YAT USA, INC.",
+        domain: "yattool.com",
+        apolloOrganizationId: "5e66b6381e05b4008c8331b8",
+        apolloAccountId: "6888f2e0496bf40001170587"
+      },
+      {
+        authorizePaidEmailEnrichment: true,
+        explicitApolloPersonIds: [personId]
+      }
+    );
+
+    expect(result.contacts).toEqual([]);
+    expect(result.contactRecovery).toMatchObject({
+      paidEmailEnrichmentsAttempted: 1,
+      paidEmailsRecovered: 0
+    });
   });
 
   it("recovers a confirmed account ID from the original manual mapping query", () => {
@@ -2132,6 +2214,29 @@ describe("fetchApolloContactsForCompany", () => {
       id: "661ec104e14548000791da78",
       resourceType: "ACCOUNT"
     });
+    expect(
+      parseApolloPersonIds(
+        [
+          "https://app.apollo.io/#/people/6138684489ec360001a60945",
+          "https://app.apollo.io/#/people/6138684489ec360001a60945?tab=contact",
+          "6107e3c693686100019d55e1"
+        ].join("\n")
+      )
+    ).toEqual([
+      "6138684489ec360001a60945",
+      "6107e3c693686100019d55e1"
+    ]);
+    expect(() =>
+      parseApolloPersonIds("https://example.com/#/people/6138684489ec360001a60945")
+    ).toThrow("must use https://app.apollo.io");
+    expect(() =>
+      parseApolloPersonIds([
+        "61718465010e6e0001cf807a",
+        "6138684489ec360001a60945",
+        "54a230b67468693825efd714",
+        "6107e3c693686100019d55e1"
+      ].join("\n"))
+    ).toThrow("no more than 3");
 
     const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue({
       ok: true,
@@ -2483,7 +2588,7 @@ describe("fetchApolloContactsForCompany", () => {
     expect(peopleSearchUrl.searchParams.get("per_page")).toBe("100");
   });
 
-  it("recovers YAT employees when Apollo applies People Search filters only from the documented query string", async () => {
+  it("recovers YAT employees when a scoped People Search returns only Apollo's marketing brand label", async () => {
     vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       const body = init?.body
@@ -2546,8 +2651,7 @@ describe("fetchApolloContactsForCompany", () => {
                     title: "Import Export Specialist",
                     has_email: true,
                     organization: {
-                      name: "YAT USA, INC.",
-                      primary_domain: "yattool.com"
+                      name: "YAT - Your Advanced Technology"
                     }
                   }]
                 }

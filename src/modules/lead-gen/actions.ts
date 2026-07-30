@@ -130,6 +130,7 @@ import {
   fetchApolloOrganizationForMapping,
   fetchApolloSequenceDirectory,
   parseApolloCompanyReference,
+  parseApolloPersonIds,
   reconcileApolloContactWithBounceEvidence,
   syncApolloContactTypedCustomFields,
   type ApolloBouncedSequenceContact,
@@ -1264,6 +1265,17 @@ export async function mapApolloCompanyUrlAction(
     }
     const authorizePaidEmailEnrichment =
       formData.get("authorizePaidEmailEnrichment") === "yes";
+    const explicitApolloPersonIds = parseApolloPersonIds(
+      String(formData.get("apolloPersonUrls") ?? "")
+    );
+    if (
+      explicitApolloPersonIds.length > 0 &&
+      !authorizePaidEmailEnrichment
+    ) {
+      throw new Error(
+        "Authorize email-only Apollo enrichment before resolving the selected people."
+      );
+    }
     const leadId = await attachCurrentHunterApolloReviewLead(context, formData);
 
     const lead = await prisma.lead.findFirst({
@@ -1391,7 +1403,8 @@ export async function mapApolloCompanyUrlAction(
         tenantId: context.tenantId,
         companyId: lead.companyId,
         forceContactReview: true,
-        authorizePaidEmailEnrichment
+        authorizePaidEmailEnrichment,
+        explicitApolloPersonIds
       });
       if (queued.state !== "queued") {
         revalidateLeadGenSurfaces();

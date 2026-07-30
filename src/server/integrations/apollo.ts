@@ -541,6 +541,7 @@ export async function fetchApolloContactsForCompany(
     allowPeopleSearchFallback?: boolean;
     keywordSearchLimit?: number;
     authorizePaidEmailEnrichment?: boolean;
+    explicitApolloPersonIds?: string[];
   }
 ): Promise<ApolloContactLookupResult> {
   const apiKey = readApolloSearchApiKey();
@@ -572,7 +573,9 @@ export async function fetchApolloContactsForCompany(
   // the global organization. Always resolve the company identity first—even
   // when a confirmed mapping exists and the company has no stored domain—so a
   // saved account ID cannot silently produce an empty or partial employee set.
-  const discoveredOrganization = await findApolloOrganization(input, apiKey);
+  const discoveredOrganization = confirmedSavedAccount
+    ? null
+    : await findApolloOrganization(input, apiKey);
   const canonicalDiscoveredOrganization =
     providedOrganizationId &&
     discoveredOrganization?.id &&
@@ -766,39 +769,6 @@ export async function fetchApolloContactsForCompany(
     }
   }
 
-  if (
-    providedAccountId &&
-    trustedMatchedOrganization &&
-    contactsFromApollo.length === 0
-  ) {
-    const exactNameContacts =
-      (await searchApolloRelevantPeople({
-        apiKey,
-        companyName: confirmedSavedAccount?.name ?? input.companyName,
-        domain: null,
-        expectedOrganizationDomain: null,
-        organizationId: null,
-        allowPeopleSearchFallback,
-        keywordSearchLimit,
-        enforceExpectedOrganization: true,
-        savedContacts: savedContactsForProvidedOrganization,
-        contactRecovery
-      })) ?? [];
-    contactsFromApollo = filterTrustedApolloAccountNameFallback({
-      contacts: exactNameContacts,
-      companyName: confirmedSavedAccount?.name ?? input.companyName,
-      trustedDomain: confirmedAccountDomain
-    });
-    if (contactsFromApollo.length > 0 && effectiveMatchOrganization) {
-      effectiveMatchOrganization = {
-        ...effectiveMatchOrganization,
-        matchReason:
-          `${effectiveMatchOrganization.matchReason}; recovered employees through an exact-company-name ` +
-          `People Search after Apollo's organization and domain filters returned zero`
-      };
-    }
-  }
-
   let blockedByRecoveryAmbiguity = false;
   if (
     !canonicalDiscoveredOrganization &&
@@ -895,6 +865,35 @@ export async function fetchApolloContactsForCompany(
         options?.authorizePaidEmailEnrichment === true,
       contactRecovery
     });
+  }
+
+  const explicitApolloPersonIds = dedupeApolloPersonIds(
+    options?.explicitApolloPersonIds ?? []
+  );
+  if (explicitApolloPersonIds.length > 0) {
+    if (options?.authorizePaidEmailEnrichment !== true) {
+      throw new Error(
+        "Authorize email-only Apollo enrichment before resolving explicit person URLs."
+      );
+    }
+    const explicitContacts = await enrichExplicitApolloPeople({
+      personIds: explicitApolloPersonIds,
+      companyName: confirmedSavedAccount?.name ?? companyNameForSearch,
+      trustedDomain: confirmedAccountDomain ?? domainForSearch,
+      contactRecovery
+    });
+    contactsFromApollo = dedupeApolloContacts([
+      ...contactsFromApollo,
+      ...explicitContacts
+    ]);
+    if (explicitContacts.length > 0 && effectiveMatchOrganization) {
+      effectiveMatchOrganization = {
+        ...effectiveMatchOrganization,
+        matchReason:
+          `${effectiveMatchOrganization.matchReason}; recovered reviewer-selected employees through ` +
+          `explicit Apollo person URLs after the account roster was unavailable through the public search API`
+      };
+    }
   }
 
   if (!trustedMatchedOrganization && contactsFromApollo.length > 0) {
@@ -998,6 +997,46 @@ export function parseApolloCompanyReference(value: string): ApolloCompanyReferen
 
 export function parseApolloOrganizationId(value: string) {
   return parseApolloCompanyReference(value).id;
+}
+
+export function parseApolloPersonIds(value: string) {
+  const entries = value
+    .split(/[\n,]+/u)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (entries.length === 0) {
+    return [];
+  }
+
+  const personIds = dedupeApolloPersonIds(entries.map(parseApolloPersonId));
+  if (personIds.length > APOLLO_PAID_EMAIL_ENRICHMENT_LIMIT) {
+    throw new Error(
+      `Paste no more than ${APOLLO_PAID_EMAIL_ENRICHMENT_LIMIT} Apollo person URLs.`
+    );
+  }
+
+  return personIds;
+}
+
+function parseApolloPersonId(value: string) {
+  if (/^[a-f0-9]{24}$/iu.test(value)) {
+    return value;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("Each Apollo person entry must be a full Apollo person URL.");
+  }
+  if (url.protocol !== "https:" || url.hostname !== "app.apollo.io") {
+    throw new Error("Apollo person URLs must use https://app.apollo.io.");
+  }
+  const match = url.hash.match(/^#\/people\/([a-f0-9]{24})(?:[/?]|$)/iu);
+  if (!match?.[1]) {
+    throw new Error("The Apollo person URL does not contain a valid person ID.");
+  }
+  return match[1];
 }
 
 export async function fetchApolloOrganizationForMapping({
@@ -2081,7 +2120,11 @@ async function searchApolloPeople({
     per_page: DEFAULT_PAGE_SIZE,
     organization_ids: organizationId ? [organizationId] : undefined,
     q_organization_domains_list: normalizedDomain ? [normalizedDomain] : undefined,
-    q_keywords: buildApolloPeopleSearchKeywords(companyName, queryKeywords, Boolean(organizationId || normalizedDomain)),
+    q_keywords: buildApolloPeopleSearchKeywords(
+      companyName,
+      queryKeywords,
+      Boolean(organizationId || normalizedDomain)
+    ),
     person_titles: personTitles && personTitles.length > 0 ? [...personTitles] : undefined,
     include_similar_titles: personTitles && personTitles.length > 0 ? true : undefined
   };
@@ -2353,6 +2396,98 @@ async function enrichApolloPersonEmail({
         organizationId
       })
     : null;
+}
+
+async function enrichExplicitApolloPeople({
+  personIds,
+  companyName,
+  trustedDomain,
+  contactRecovery
+}: {
+  personIds: string[];
+  companyName: string;
+  trustedDomain: string | null;
+  contactRecovery: ApolloContactLookupResult["contactRecovery"];
+}) {
+  const enrichmentApiKey = readApolloMasterApiKey();
+  const recovered: ApolloContactRecord[] = [];
+
+  for (const personId of personIds.slice(0, APOLLO_PAID_EMAIL_ENRICHMENT_LIMIT)) {
+    contactRecovery.paidEmailEnrichmentsAttempted += 1;
+    const enriched = await enrichApolloPersonEmail({
+      apiKey: enrichmentApiKey,
+      person: {
+        recordSource: "PEOPLE_SEARCH",
+        apolloContactId: null,
+        apolloPersonId: personId,
+        firstName: null,
+        lastName: null,
+        lastNameObfuscated: null,
+        fullName: personId,
+        title: null,
+        department: null,
+        seniority: null,
+        email: null,
+        phone: null,
+        linkedinUrl: null,
+        hasEmailAvailable: false,
+        hasPhoneAvailable: false,
+        hasLinkedinAvailable: false,
+        city: null,
+        state: null,
+        country: null,
+        sequenceStatus: SequenceStatus.NOT_STARTED,
+        replyStatus: ReplyStatus.NO_REPLY,
+        sequenceId: null,
+        sequenceName: null,
+        sequenceOwnerName: null,
+        sequenceOwnerUserId: null,
+        lastTouchAt: null,
+        lastReplyAt: null,
+        rawPayload: {}
+      },
+      companyName,
+      domain: trustedDomain,
+      organizationId: null
+    });
+    if (
+      !enriched ||
+      !hasConcreteApolloEmail(enriched) ||
+      !isExplicitApolloPersonCompanyMatch({
+        contact: enriched,
+        companyName,
+        trustedDomain
+      })
+    ) {
+      continue;
+    }
+
+    contactRecovery.paidEmailsRecovered += 1;
+    recovered.push(enriched);
+  }
+
+  return dedupeApolloContacts(recovered);
+}
+
+function isExplicitApolloPersonCompanyMatch({
+  contact,
+  companyName,
+  trustedDomain
+}: {
+  contact: ApolloContactRecord;
+  companyName: string;
+  trustedDomain: string | null;
+}) {
+  const organization = readApolloOrganizationFromContact(contact);
+  if (!organization?.name) {
+    return false;
+  }
+
+  return filterTrustedApolloAccountNameFallback({
+    contacts: [contact],
+    companyName,
+    trustedDomain
+  }).length === 1;
 }
 
 function hasConcreteApolloEmail(contact: ApolloContactRecord) {
@@ -3095,6 +3230,23 @@ function filterApolloContactsForExpectedOrganization(
         return true;
       }
 
+      if (
+        contact.recordSource === "PEOPLE_SEARCH" &&
+        !organization.id &&
+        !organization.domain &&
+        hasSafeScopedLeadingBrandExpansion(
+          companyName,
+          organization.name
+        )
+      ) {
+        // Apollo sometimes returns only its marketing/brand label on people
+        // retrieved through an exact organization_ids[] query. The query scope
+        // is the authoritative employer identity in that response; rejecting
+        // the record because the embedded label differs would discard valid
+        // people such as YAT USA's "YAT - Your Advanced Technology" roster.
+        return true;
+      }
+
       if (!organization.name && !organization.domain) {
         return true;
       }
@@ -3125,6 +3277,19 @@ function filterApolloContactsForExpectedOrganization(
     }
 
     if (normalizedDomain) {
+      if (
+        contact.recordSource === "PEOPLE_SEARCH" &&
+        !organization.domain &&
+        hasSafeScopedLeadingBrandExpansion(
+          companyName,
+          organization.name
+        )
+      ) {
+        // The same Apollo response-shape gap occurs on exact
+        // q_organization_domains_list[] searches. Trust the documented query
+        // scope when the returned person does not contradict it with a domain.
+        return true;
+      }
       return organization.domain === normalizedDomain;
     }
 
@@ -3157,7 +3322,8 @@ function filterTrustedApolloAccountNameFallback({
     const exactCompanyName =
       hasExactAliasMatch(expectedAliases, candidateAliases) ||
       hasStrongBaseNameMatch(expectedAliases, candidateAliases) ||
-      hasSafeRegionalBrandAlias(expectedAliases, candidateAliases);
+      hasSafeRegionalBrandAlias(expectedAliases, candidateAliases) ||
+      hasSafeScopedLeadingBrandExpansion(companyName, organization.name);
     if (!exactCompanyName) {
       return false;
     }
@@ -3201,6 +3367,16 @@ function dedupeApolloContacts(entries: ApolloContactRecord[]) {
   }
 
   return deduped;
+}
+
+function dedupeApolloPersonIds(entries: string[]) {
+  return [
+    ...new Set(
+      entries
+        .map((entry) => entry.trim().toLowerCase())
+        .filter((entry) => /^[a-f0-9]{24}$/u.test(entry))
+    )
+  ];
 }
 
 function isSameApolloPerson(
@@ -4463,6 +4639,26 @@ function hasSafeScopedOrganizationAcronymMatch(
         )
       );
     })
+  );
+}
+
+function hasSafeScopedLeadingBrandExpansion(
+  companyName: string,
+  candidateName: string | null
+) {
+  if (!candidateName || !/\s[-|]\s/u.test(candidateName)) {
+    return false;
+  }
+
+  const expectedTokens = tokenizeCompanyName(companyName);
+  const candidateTokens = tokenizeCompanyName(candidateName);
+  const expectedFirstToken = companyName.trim().match(/^([A-Z0-9]{2,6})\b/u)?.[1];
+
+  return Boolean(
+    expectedFirstToken &&
+    expectedTokens.length === 1 &&
+    candidateTokens.length >= 3 &&
+    candidateTokens[0] === expectedTokens[0]
   );
 }
 

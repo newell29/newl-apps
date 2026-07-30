@@ -324,13 +324,25 @@ export async function enqueueHunterCompanyOutreachHandoff({
   tenantId,
   companyId,
   forceContactReview = true,
-  authorizePaidEmailEnrichment = false
+  authorizePaidEmailEnrichment = false,
+  explicitApolloPersonIds = []
 }: {
   tenantId: string;
   companyId: string;
   forceContactReview?: boolean;
   authorizePaidEmailEnrichment?: boolean;
+  explicitApolloPersonIds?: string[];
 }) {
+  const normalizedExplicitApolloPersonIds =
+    normalizeExplicitApolloPersonIds(explicitApolloPersonIds);
+  if (
+    normalizedExplicitApolloPersonIds.length > 0 &&
+    !authorizePaidEmailEnrichment
+  ) {
+    throw new Error(
+      "Authorize email-only Apollo enrichment before resolving explicit person URLs."
+    );
+  }
   const policy = await prisma.hunterAutomationPolicy.findUnique({
     where: { tenantId },
     select: {
@@ -472,6 +484,7 @@ export async function enqueueHunterCompanyOutreachHandoff({
         maxContactsPerCompany,
         forceContactReview,
         authorizePaidEmailEnrichment,
+        explicitApolloPersonIds: normalizedExplicitApolloPersonIds,
         items: [item]
       },
       output: emptyOutput()
@@ -490,6 +503,7 @@ export async function enqueueHunterCompanyOutreachHandoff({
         maxContactsPerCompany,
         forceContactReview,
         authorizePaidEmailEnrichment,
+        explicitApolloPersonCount: normalizedExplicitApolloPersonIds.length,
         source: "MANUAL_APOLLO_MAPPING_OR_RECHECK"
       }
     }
@@ -595,7 +609,8 @@ export async function processNextHunterOutreachHandoff({
       item,
       maxContactsPerCompany: input.maxContactsPerCompany,
       forceContactReview: input.forceContactReview,
-      authorizePaidEmailEnrichment: input.authorizePaidEmailEnrichment
+      authorizePaidEmailEnrichment: input.authorizePaidEmailEnrichment,
+      explicitApolloPersonIds: input.explicitApolloPersonIds
     });
     const nextOutput: HandoffOutput = {
       ...output,
@@ -702,7 +717,8 @@ async function processCompany({
   item,
   maxContactsPerCompany,
   forceContactReview,
-  authorizePaidEmailEnrichment
+  authorizePaidEmailEnrichment,
+  explicitApolloPersonIds
 }: {
   tenantId: string;
   jobId: string;
@@ -710,6 +726,7 @@ async function processCompany({
   maxContactsPerCompany: number;
   forceContactReview: boolean;
   authorizePaidEmailEnrichment: boolean;
+  explicitApolloPersonIds: string[];
 }): Promise<HandoffResult> {
   const company = await prisma.company.findFirst({
     where: {
@@ -823,7 +840,8 @@ async function processCompany({
       apolloAccountId: confirmedApolloAccountId
     },
     {
-      authorizePaidEmailEnrichment
+      authorizePaidEmailEnrichment,
+      explicitApolloPersonIds
     }
   );
   const recordedMatch = await recordCompanyMatch(tenantId, company.id, lookup, {
@@ -2054,8 +2072,31 @@ function parseInput(value: Prisma.JsonValue | null) {
     forceContactReview: root.forceContactReview === true,
     authorizePaidEmailEnrichment:
       root.authorizePaidEmailEnrichment === true,
+    explicitApolloPersonIds: normalizeExplicitApolloPersonIds(
+      Array.isArray(root.explicitApolloPersonIds)
+        ? root.explicitApolloPersonIds.filter(
+            (value): value is string => typeof value === "string"
+          )
+        : []
+    ),
     items
   };
+}
+
+function normalizeExplicitApolloPersonIds(values: string[]) {
+  const normalized = [
+    ...new Set(
+      values
+        .map((value) => value.trim().toLowerCase())
+        .filter((value) => /^[a-f0-9]{24}$/u.test(value))
+    )
+  ];
+  if (normalized.length > HUNTER_SELECTED_CONTACT_MAX) {
+    throw new Error(
+      `Select no more than ${HUNTER_SELECTED_CONTACT_MAX} Apollo people.`
+    );
+  }
+  return normalized;
 }
 
 function parseOutput(value: Prisma.JsonValue | null): HandoffOutput {

@@ -15,8 +15,11 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
 
 Regression coverage for Apollo contact discovery must include a reviewer-confirmed saved account whose canonical
-organization search returns zero while its exact company domain returns relevant people. Tests must also verify that
-the saved account ID survives subsequent match records so a later manual recheck does not lose the recovery path.
+organization and exact-domain searches return zero while its Apollo UI visibly shows Suggested leads. The test must
+prove that up to three exact Apollo person URLs are parsed and deduplicated, that paid email-only enrichment cannot
+run without explicit authorization, that a concrete-email person at the confirmed company is recovered, and that a
+similarly named wrong-company person is rejected. Tests must also verify that the saved account ID survives subsequent
+match records so a later manual recheck does not lose the mapped identity.
 
 ## Data model
 
