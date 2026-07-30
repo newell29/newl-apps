@@ -471,11 +471,15 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   review classification. In that case no Apollo employee request ran at all. A later queue-state bug did the inverse:
   contact discovery correctly persisted a verified `DIRECT_COMPANY` result with the zero-employee marker, but the
   exception eligibility filter discarded ordinary direct matches before honoring that marker. The failed company
-  disappeared immediately after the lookup instead of remaining available for deliberate recheck.
+  disappeared immediately after the lookup instead of remaining available for deliberate recheck. A separate identity
+  risk allowed a manually supplied account to broaden into parent, sibling, domain, or keyword searches after an empty
+  response, even though the reviewer had already selected the authoritative Apollo company.
 - Safe recovery: map/recheck again after this release. Hunter reads up to 20 relevant saved-contact pages of 100,
   targets each shortlisted masked person by name/title/confirmed company, backfills saved identity, and reports the
   recovery counts in the immutable match reason. **Recheck employees** now uses the same persisted-mapping state as
-  the exception queue and can repeat the read-only organization employee lookup. An import/export specialist is
+  the exception queue and can repeat the read-only organization employee lookup. A reviewer-confirmed account is now
+  opened directly by its immutable account ID, and only that account's linked organization ID is sent to Apollo People
+  Search. No parent, sibling, domain, or company-keyword recovery runs for a manual mapping. An import/export specialist is
   evaluated as a relevant employee, but an individual-contributor title is still not automatically selected unless
   the buyer-role gate clears it.
 - Credit boundary: saved-contact and People Search recovery is zero-credit. Paid email-only enrichment remains off
