@@ -30,6 +30,14 @@ remapping. Exact `#/people/<person-id>` URLs and explicitly authorized email-onl
 diagnostics. Hunter rejects mismatched or unverifiable employers and never calls private UI endpoints or Apollo's
 deprecated legacy People Search.
 
+A second zero-result shape is an exact reviewer-confirmed Apollo account shell with no company details, domain,
+contacts, or Suggested leads, while Apollo maintains the real roster under a separate canonical parent account. In
+that case Hunter performs one zero-credit saved-account lookup using the shell's distinctive leading brand. It
+expands only when exactly one returned canonical parent name is already present in the saved Hunter/Kimi-vetted
+identity evidence. Unmentioned parents, ambiguous candidates, logistics providers, and automatic/unreviewed matches
+still fail closed. Apollo Exceptions shows links to both the originally confirmed account and the resolved
+organization, and allows an authenticated reviewer to replace an empty shell mapping with the canonical account.
+
 ## Data model
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.
@@ -402,10 +410,11 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Cause: Apollo returned no organization, a weak/ambiguous candidate, or a logistics provider rather than the TradeMining company. The previous implementation also sent internal identity-field names instead of Apollo's documented company-name filter, which could produce effectively unfiltered results.
 - Safe recovery: open **Apollo Match Review**. Paste the correct Apollo company Overview or People URL when known,
   retry automatically only after correcting the company name/domain, or choose **Confirm no Apollo match**. Apollo
-  `/accounts/{id}` links are resolved to the nested global organization ID before employee search; the account ID is
-  never stored as `Company.apolloOrganizationId`. Explicit reviewer confirmation overrides weak automated name
-  similarity for facility, legal-entity, parent, and regional-brand differences, and that override is retained in the
-  match audit. It does not override invalid Apollo data or logistics-provider safety.
+  `/accounts/{id}` links are resolved to the nested global organization ID when Apollo supplies it. A valid sparse
+  shell retains its exact account ID for bounded recovery. Explicit reviewer confirmation is authoritative for
+  company identity and overrides automated facility, legal-entity, parent, regional-brand, and provider-name
+  similarity objections; the override and warning signals remain in the audit. Contact and outreach safety is still
+  enforced independently.
 - Credit guard: URL validation requires explicit acknowledgement of one Apollo credit. Automatic retry requires explicit acknowledgement of up to two returned organization-search pages.
 - Prevention: once the latest match is unresolved, bulk enrichment performs no Apollo lookup for that company. Confirmed-no-match rows remain visible and blocked until explicitly reopened.
 - Limitation: duplicate organization mapping is checked within the tenant in application code. A future additive unique database constraint could provide stronger protection against two simultaneous manual mappings, but requires separate migration approval.
@@ -436,6 +445,12 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   and accepts at most three reviewer-selected Apollo person URLs through separately authorized email-only enrichment.
   This covers account pages such as YAT USA whose visible Suggested leads roster is not returned by Apollo's public
   global-organization or domain indexes.
+- Domainless shell recovery: when the exact reviewer-confirmed account has no usable domain or roster, Hunter may
+  search saved accounts by its distinctive leading brand. It accepts one canonical parent only when that exact
+  parent name is present in the already-vetted Hunter/Kimi identity context. For example, the sparse
+  `PRATT (ROCK HILL CORRUGATING)` account can resolve to `Pratt Industries` because the saved identity evidence
+  explicitly states that operating relationship. A same-prefix but unmentioned company such as `Pratt & Whitney`
+  is rejected.
 - Ambiguity rule: a parent, subsidiary, sibling, or multiple exact organization candidate becomes
   `MATCH_QUALITY_REVIEW`; no contacts are imported and the AI buyer-role review is not run. Domain-wide employee
   results alone cannot authorize a match.
@@ -536,7 +551,8 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   scope remains separate. The `/people/<id>` UI route can carry a saved-contact ID rather than a global person ID.
 - Recovery: use **Search company employees and build plans** first. It searches the global organization and trusted
   domain, expands verified same-domain duplicate account organizations, runs one strict company-keyword candidate
-  fallback, reads the bounded complete roster, and merges saved contacts. Individual person URLs are a last-resort
+  fallback, and can resolve one identity-evidence-backed parent for a reviewer-confirmed domainless shell. It reads
+  the bounded complete roster and merges saved contacts. Individual person URLs are a last-resort
   diagnostic only; their IDs are checked against Contact View before any separately authorized People Enrichment.
 - Queue behavior: another complete zero result stays parked as **Mapped, no employees** and does not become a daily
   remapping task. Retry only after the Apollo identity changes or a deliberate operator recheck is requested.

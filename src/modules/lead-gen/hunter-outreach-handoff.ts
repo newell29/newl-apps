@@ -838,7 +838,13 @@ async function processCompany({
       companyName: company.name,
       domain: company.domain,
       apolloOrganizationId: company.apolloOrganizationId,
-      apolloAccountId: confirmedApolloAccountId
+      apolloAccountId: confirmedApolloAccountId,
+      verifiedIdentityContext: buildVerifiedApolloIdentityContext({
+        researchEvidence:
+          company.hunterOpportunitySignals[0]?.evidence ?? null,
+        prospectingRationale:
+          company.hunterProspectingDecisions[0]?.rationale ?? null
+      })
     },
     {
       authorizePaidEmailEnrichment,
@@ -1599,6 +1605,26 @@ function contactFitPriority(disposition: HunterContactFitReview["disposition"]) 
         : 3;
 }
 
+function buildVerifiedApolloIdentityContext({
+  researchEvidence,
+  prospectingRationale
+}: {
+  researchEvidence: unknown;
+  prospectingRationale: string | null;
+}) {
+  let serializedEvidence = "";
+  try {
+    serializedEvidence = JSON.stringify(researchEvidence ?? "");
+  } catch {
+    serializedEvidence = "";
+  }
+
+  const context = [serializedEvidence, prospectingRationale]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .join(" ");
+  return context ? context.slice(0, 30_000) : null;
+}
+
 async function recordCompanyMatch(
   tenantId: string,
   companyId: string,
@@ -1612,6 +1638,7 @@ async function recordCompanyMatch(
     `${lookup.contactRecovery.savedContactsRecovered} saved contact${lookup.contactRecovery.savedContactsRecovered === 1 ? "" : "s"} recovered, ` +
     `${lookup.contactRecovery.relatedAccountsChecked} related saved account${lookup.contactRecovery.relatedAccountsChecked === 1 ? "" : "s"} checked, ` +
     `${lookup.contactRecovery.relatedOrganizationScopesChecked} related organization scope${lookup.contactRecovery.relatedOrganizationScopesChecked === 1 ? "" : "s"} checked, ` +
+    `${lookup.contactRecovery.vettedParentAccountsChecked} vetted parent account${lookup.contactRecovery.vettedParentAccountsChecked === 1 ? "" : "s"} checked, ` +
     `${lookup.contactRecovery.companyKeywordSearches} strict company-keyword search${lookup.contactRecovery.companyKeywordSearches === 1 ? "" : "es"}, ` +
     `${lookup.contactRecovery.paidEmailsRecovered}/${lookup.contactRecovery.paidEmailEnrichmentsAttempted} ` +
     `authorized paid email enrichment${lookup.contactRecovery.paidEmailEnrichmentsAttempted === 1 ? "" : "s"} recovered`;

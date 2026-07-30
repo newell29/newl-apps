@@ -14,6 +14,8 @@ type ReviewAction = (
 export function ApolloMatchReviewActions({
   companyId,
   companyName,
+  confirmedApolloAccountUrl,
+  resolvedApolloOrganizationUrl,
   status,
   retryAction,
   mapAction,
@@ -23,6 +25,8 @@ export function ApolloMatchReviewActions({
 }: {
   companyId: string;
   companyName: string;
+  confirmedApolloAccountUrl: string | null;
+  resolvedApolloOrganizationUrl: string | null;
   status: "NEEDS_REVIEW" | "MAPPED_NO_EMPLOYEES" | "CONFIRMED_NO_MATCH";
   retryAction: ReviewAction;
   mapAction: ReviewAction;
@@ -56,6 +60,28 @@ export function ApolloMatchReviewActions({
           retries through the confirmed company domain, merges saved contacts, and lets Hunter select no more
           than three relevant buyers. You do not need to paste individual people.
         </p>
+        <div className="flex flex-wrap gap-3 text-xs font-semibold">
+          {confirmedApolloAccountUrl ? (
+            <a
+              href={confirmedApolloAccountUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-primary hover:text-primaryHover"
+            >
+              Open the confirmed Apollo account
+            </a>
+          ) : null}
+          {resolvedApolloOrganizationUrl ? (
+            <a
+              href={resolvedApolloOrganizationUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-primary hover:text-primaryHover"
+            >
+              Open the resolved Apollo organization
+            </a>
+          ) : null}
+        </div>
         <form action={mappedCompanyRecheckAction} className="mt-3 space-y-3">
           <input type="hidden" name="companyId" value={companyId} />
           <label className="flex items-start gap-2 rounded-md border border-warning/30 bg-background px-3 py-2 text-xs leading-5 text-mutedForeground">
@@ -112,6 +138,48 @@ export function ApolloMatchReviewActions({
               Verify pasted people
             </button>
           </form>
+        </details>
+        <details className="rounded-md border border-border bg-background p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-foreground">
+            Replace an empty or incorrect Apollo company mapping
+          </summary>
+          <p className="mt-2 text-xs leading-5 text-mutedForeground">
+            Use this when the confirmed account is an empty Apollo shell but a canonical parent or
+            brand account has the complete employee roster. The replacement remains reviewer-confirmed
+            and auditable.
+          </p>
+          <form action={mapFormAction} className="mt-3 space-y-3">
+            <input type="hidden" name="companyId" value={companyId} />
+            <label className="block space-y-1 text-xs font-medium text-foreground">
+              <span>Replacement Apollo company URL</span>
+              <input
+                name="apolloCompanyUrl"
+                required
+                placeholder="https://app.apollo.io/#/accounts/<account-id>"
+                className="w-full rounded-md border border-border bg-card px-3 py-2 text-xs text-foreground"
+              />
+            </label>
+            <label className="flex items-start gap-2 text-xs leading-5 text-mutedForeground">
+              <input
+                type="checkbox"
+                name="confirmApolloCredit"
+                value="yes"
+                required
+                className="mt-1"
+              />
+              <span>
+                I confirm this is the correct Apollo parent or brand account and authorize the
+                one-credit company validation.
+              </span>
+            </label>
+            <button
+              disabled={mapPending}
+              className="rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {mapPending ? "Replacing mapping…" : "Replace mapping and find contacts"}
+            </button>
+          </form>
+          <ActionMessage state={mapState} />
         </details>
       </div>
     );
