@@ -2057,6 +2057,7 @@ async function searchApolloPeople({
   companyName,
   domain,
   organizationId,
+  accountId,
   queryKeywords,
   personTitles
 }: {
@@ -2064,6 +2065,7 @@ async function searchApolloPeople({
   companyName: string;
   domain?: string | null;
   organizationId: string | null;
+  accountId?: string | null;
   queryKeywords?: string | null;
   personTitles?: readonly string[];
 }) {
@@ -2072,8 +2074,13 @@ async function searchApolloPeople({
     page: 1,
     per_page: DEFAULT_PAGE_SIZE,
     organization_ids: organizationId ? [organizationId] : undefined,
+    account_ids: accountId ? [accountId] : undefined,
     q_organization_domains_list: normalizedDomain ? [normalizedDomain] : undefined,
-    q_keywords: buildApolloPeopleSearchKeywords(companyName, queryKeywords, Boolean(organizationId || normalizedDomain)),
+    q_keywords: buildApolloPeopleSearchKeywords(
+      companyName,
+      queryKeywords,
+      Boolean(organizationId || accountId || normalizedDomain)
+    ),
     person_titles: personTitles && personTitles.length > 0 ? [...personTitles] : undefined,
     include_similar_titles: personTitles && personTitles.length > 0 ? true : undefined
   };
@@ -2103,7 +2110,8 @@ async function searchApolloConfirmedAccountPeople({
     apiKey,
     companyName,
     domain: null,
-    organizationId: accountId,
+    organizationId: null,
+    accountId,
     queryKeywords: null
   });
   const roleTitles = [
@@ -2116,7 +2124,8 @@ async function searchApolloConfirmedAccountPeople({
           apiKey,
           companyName,
           domain: null,
-          organizationId: accountId,
+          organizationId: null,
+          accountId,
           queryKeywords: null,
           personTitles: roleTitles
         })
@@ -2134,6 +2143,7 @@ function buildApolloPeopleSearchPath({
   page,
   per_page: perPage,
   organization_ids: organizationIds,
+  account_ids: accountIds,
   q_organization_domains_list: organizationDomains,
   q_keywords: queryKeywords,
   person_titles: personTitles,
@@ -2142,6 +2152,7 @@ function buildApolloPeopleSearchPath({
   page: number;
   per_page: number;
   organization_ids?: string[];
+  account_ids?: string[];
   q_organization_domains_list?: string[];
   q_keywords?: string;
   person_titles?: string[];
@@ -2154,6 +2165,9 @@ function buildApolloPeopleSearchPath({
 
   for (const organizationId of organizationIds ?? []) {
     params.append("organization_ids[]", organizationId);
+  }
+  for (const accountId of accountIds ?? []) {
+    params.append("account_ids[]", accountId);
   }
   for (const organizationDomain of organizationDomains ?? []) {
     params.append("q_organization_domains_list[]", organizationDomain);

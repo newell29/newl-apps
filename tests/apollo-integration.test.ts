@@ -565,7 +565,7 @@ describe("fetchApolloContactsForCompany", () => {
       if (url.includes("/api/v1/mixed_people/api_search")) {
         const requestUrl = new URL(url);
         const confirmedAccountQuery = requestUrl.searchParams
-          .getAll("organization_ids[]")
+          .getAll("account_ids[]")
           .includes(accountId);
 
         return {
@@ -628,9 +628,10 @@ describe("fetchApolloContactsForCompany", () => {
         const requestUrl = new URL(String(request));
         return (
           requestUrl.searchParams
-            .getAll("organization_ids[]")
+            .getAll("account_ids[]")
             .includes(accountId) &&
           requestUrl.searchParams.get("q_keywords") === null &&
+          requestUrl.searchParams.getAll("organization_ids[]").length === 0 &&
           requestUrl.searchParams.getAll("q_organization_domains_list[]").length === 0
         );
       })
