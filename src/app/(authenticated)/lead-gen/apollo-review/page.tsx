@@ -165,6 +165,8 @@ function ReviewSection({
               <ApolloMatchReviewActions
                 companyId={row.companyId}
                 companyName={row.companyName}
+                confirmedApolloAccountUrl={row.confirmedApolloAccountUrl}
+                resolvedApolloOrganizationUrl={row.resolvedApolloOrganizationUrl}
                 status={row.status}
                 retryAction={retryApolloCompanyReviewFromQueueAction}
                 mapAction={mapApolloCompanyUrlAction}

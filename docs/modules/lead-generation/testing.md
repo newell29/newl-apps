@@ -328,8 +328,9 @@ Regression coverage must prove:
     recovers only YAT USA employees and rejects a similarly named unrelated company without paid enrichment.
 24. an authenticated reviewer can explicitly confirm weak facility/parent or legal/brand name differences such as
     Roechling Industrial Gastonia to Roechling Industrial North America and Kimbrells Furniture Distributors to
-    Kimbrell's Home Furnishings; the manual override is audited, while unconfirmed weak matches and logistics
-    providers remain blocked.
+    Kimbrell's Home Furnishings; a reviewer-confirmed sparse Pratt account without a nested global organization ID is
+    retained exactly rather than rejected, and a provider-like name preserves its warning signal without vetoing the
+    confirmed identity. Unconfirmed weak matches remain blocked.
 25. the exact persisted zero-employee production shape—a current Hunter company with a `DIRECT_COMPANY` match and
     the explicit zero-employee marker—remains in **Mapped company — employee lookup needed**, while ordinary
     successful direct matches remain excluded.

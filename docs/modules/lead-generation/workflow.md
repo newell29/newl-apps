@@ -219,12 +219,12 @@ The layout is non-destructive: it does not migrate, delete, or rewrite existing 
 3. Any ambiguous, logistics-provider, or no-match result creates an `ApolloCompanyMatch` attempt and appears in **Apollo Match Review**. The same company is skipped by later bulk enrichment, preventing accidental repeat searches and credit use.
 4. A rep can resolve the row by pasting the Apollo company Overview or People URL, explicitly retrying automatic matching after company data is corrected, or confirming there is no usable match.
 5. URL mapping distinguishes Apollo account links from organization links. An account link is resolved through Account
-   View to its nested global organization ID before exact organization validation and People Search. The action records
-   the reviewer and mapping evidence, stores only the global organization ID/domain/LinkedIn URL, and then imports
-   relevant contacts. Automated similarity remains advisory in this explicit manual path: after the reviewer confirms
-   that the pasted Apollo account is the correct company or canonical parent/brand, a facility, legal entity, or
-   regional-name mismatch is accepted and recorded as a manual override. Invalid organizations and Apollo logistics
-   providers still fail closed. The completion
+   View to its nested global organization ID when Apollo exposes one. A valid sparse account shell retains the exact
+   reviewer-confirmed account ID for bounded employee/parent recovery instead of rejecting the URL. The action records
+   the reviewer and mapping evidence, then imports relevant contacts. Automated similarity is advisory in this
+   explicit manual path: after the reviewer confirms that the pasted Apollo account is the correct company or
+   canonical parent/brand, Newl Apps accepts that identity without re-questioning or silently replacing it. A
+   provider-like name remains an audit signal for later prospect safety; it is not an identity-mapping veto. The completion
    message reports employee-search, buyer-review, and QA-plan counts. A mapped-company employee recheck reports those
    counts on Apollo Exceptions and links to Outreach only when it created an actionable plan. A separate optional
    checkbox authorizes at most three email-only enrichments only after saved-contact recovery finds no usable email.

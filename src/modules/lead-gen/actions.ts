@@ -65,7 +65,10 @@ import {
   hasUsableHunterEmail,
   processNextHunterOutreachHandoff
 } from "@/modules/lead-gen/hunter-outreach-handoff";
-import { resolveApolloContactDiscoveryMatch } from "@/modules/lead-gen/apollo-contact-discovery-review";
+import {
+  isMappedApolloZeroEmployeeState,
+  resolveApolloContactDiscoveryMatch
+} from "@/modules/lead-gen/apollo-contact-discovery-review";
 import { prepareApolloContactForEnrollment } from "@/modules/lead-gen/apollo-contact-preparation";
 import { canonicalizeTradeMiningDestinationPort } from "@/modules/lead-gen/search-profile-suggestions";
 import {
@@ -1301,7 +1304,8 @@ export async function mapApolloCompanyUrlAction(
               },
               take: 1,
               select: {
-                classification: true
+                classification: true,
+                matchReason: true
               }
             }
           }
@@ -1318,7 +1322,14 @@ export async function mapApolloCompanyUrlAction(
     const latestMatch = lead.company.apolloCompanyMatches[0] ?? null;
     if (
       !latestMatch ||
-      latestMatch.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY
+      (
+        latestMatch.classification ===
+          ApolloCompanyMatchClassification.DIRECT_COMPANY &&
+        !isMappedApolloZeroEmployeeState({
+          apolloOrganizationId: lead.company.apolloOrganizationId,
+          matchReason: latestMatch.matchReason
+        })
+      )
     ) {
       throw new Error("This company no longer has an unresolved Apollo match.");
     }

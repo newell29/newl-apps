@@ -71,6 +71,7 @@ import {
   resolveApolloSequenceMappings
 } from "@/modules/settings/apollo-sequence-mapping";
 import { isOpenAiDraftGenerationConfigured } from "@/server/integrations/openai";
+import { readApolloAccountIdFromMatchQuery } from "@/server/integrations/apollo";
 
 type SearchProfileDelegate = typeof prisma.tradeMiningSearchProfile;
 
@@ -1002,7 +1003,7 @@ export async function getApolloMatchReviewQueue(
         orderBy: {
           createdAt: "desc"
         },
-        take: 1,
+        take: 25,
         select: {
           id: true,
           apolloOrganizationId: true,
@@ -1013,7 +1014,8 @@ export async function getApolloMatchReviewQueue(
           matchReason: true,
           reviewedAt: true,
           reviewedByUserId: true,
-          createdAt: true
+          createdAt: true,
+          queryJson: true
         }
       },
       hunterOpportunitySignals: {
@@ -1055,6 +1057,13 @@ export async function getApolloMatchReviewQueue(
   return companies
     .flatMap((company) => {
       const match = company.apolloCompanyMatches[0] ?? null;
+      const confirmedAccountId =
+        company.apolloCompanyMatches
+          .map((candidate) =>
+            readApolloAccountIdFromMatchQuery(candidate.queryJson)
+          )
+          .find((accountId): accountId is string => Boolean(accountId)) ??
+        null;
       const reviewStatus = resolveApolloReviewQueueStatus({
         apolloOrganizationId: company.apolloOrganizationId,
         classification: match?.classification ?? null,
@@ -1088,6 +1097,13 @@ export async function getApolloMatchReviewQueue(
           normalizedName: company.normalizedName,
           companyDomain: company.domain,
           companyLinkedinUrl: company.linkedinUrl,
+          confirmedApolloAccountId: confirmedAccountId,
+          confirmedApolloAccountUrl: confirmedAccountId
+            ? `https://app.apollo.io/#/accounts/${confirmedAccountId}`
+            : null,
+          resolvedApolloOrganizationUrl: company.apolloOrganizationId
+            ? `https://app.apollo.io/#/organizations/${company.apolloOrganizationId}`
+            : null,
           assignedRep:
             (lead?.ownerUserId ? repDirectory.get(lead.ownerUserId) : null) ??
             lead?.ownerUserId ??

@@ -2208,6 +2208,141 @@ describe("fetchApolloContactsForCompany", () => {
     ).toBe(true);
   });
 
+  it("recovers Pratt employees from the single vetted parent when a reviewer-confirmed account is an empty shell", async () => {
+    const sparseAccountId = "6888f2ad496bf4000116f03c";
+    const parentAccountId = "6351479cb4e0c000a35c49e8";
+    const parentOrganizationId = "pratt-industries-global-org";
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(
+      async (input, init) => {
+        const url = String(input);
+        const body = init?.body
+          ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+          : {};
+
+        if (url.endsWith("/api/v1/accounts/search")) {
+          if (body.q_organization_name === "pratt") {
+            return {
+              ok: true,
+              status: 200,
+              json: vi.fn().mockResolvedValue({
+                accounts: [
+                  {
+                    id: sparseAccountId,
+                    name: "PRATT (ROCK HILL CORRUGATING) LLC,"
+                  },
+                  {
+                    id: parentAccountId,
+                    name: "Pratt Industries",
+                    organization: {
+                      id: parentOrganizationId,
+                      name: "Pratt Industries",
+                      primary_domain: "prattindustries.com"
+                    }
+                  },
+                  {
+                    id: "6351479cb4e0c000a35c49e9",
+                    name: "Pratt & Whitney",
+                    organization: {
+                      id: "pratt-whitney-global-org",
+                      name: "Pratt & Whitney",
+                      primary_domain: "prattwhitney.com"
+                    }
+                  }
+                ]
+              })
+            } as unknown as Response;
+          }
+
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({
+              accounts: [
+                {
+                  id: sparseAccountId,
+                  name: "PRATT (ROCK HILL CORRUGATING) LLC,"
+                }
+              ]
+            })
+          } as unknown as Response;
+        }
+
+        if (url.endsWith("/api/v1/contacts/search")) {
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({ contacts: [] })
+          } as unknown as Response;
+        }
+
+        if (url.includes("/api/v1/mixed_people/api_search")) {
+          const requestUrl = new URL(url);
+          const organizationIds =
+            requestUrl.searchParams.getAll("organization_ids[]");
+          if (organizationIds.includes(parentOrganizationId)) {
+            return {
+              ok: true,
+              status: 200,
+              json: vi.fn().mockResolvedValue({
+                people: [
+                  {
+                    id: "pratt-logistics-manager",
+                    first_name: "Greg",
+                    last_name: "Holley",
+                    title: "Logistics Manager",
+                    email: "greg.holley@prattindustries.com",
+                    organization: {
+                      id: parentOrganizationId,
+                      name: "Pratt Industries",
+                      primary_domain: "prattindustries.com"
+                    }
+                  }
+                ]
+              })
+            } as unknown as Response;
+          }
+
+          return emptyApolloPeopleResponse();
+        }
+
+        throw new Error(`Unexpected Apollo URL in Pratt parent recovery test: ${url}`);
+      }
+    );
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "PRATT (ROCK HILL CORRUGATING) LLC,",
+      apolloOrganizationId: sparseAccountId,
+      apolloAccountId: sparseAccountId,
+      verifiedIdentityContext:
+        "Evidence confirms the entity is a manufacturing plant of Pratt Industries operating in Rock Hill."
+    });
+
+    expect(result.organizationId).toBe(parentOrganizationId);
+    expect(result.companyName).toBe("Pratt Industries");
+    expect(result.contacts).toEqual([
+      expect.objectContaining({
+        fullName: "Greg Holley",
+        title: "Logistics Manager",
+        email: "greg.holley@prattindustries.com"
+      })
+    ]);
+    expect(result.match.matchReason).toContain(
+      "vetted Hunter/Kimi parent identity"
+    );
+    expect(result.contactRecovery).toMatchObject({
+      vettedParentAccountsChecked: 1,
+      relatedOrganizationScopesChecked: 1
+    });
+    expect(
+      fetchMock.mock.calls.some(([, requestInit]) => {
+        const requestBody = requestInit?.body
+          ? (JSON.parse(String(requestInit.body)) as Record<string, unknown>)
+          : {};
+        return requestBody.q_organization_name === "pratt";
+      })
+    ).toBe(true);
+  });
+
   it("uses a strict same-company keyword fallback only after verified Apollo scopes return zero", async () => {
     const accountId = "661ec104e14548000791da78";
     const organizationId = "dansons-us-organization";
@@ -2841,6 +2976,46 @@ describe("fetchApolloContactsForCompany", () => {
     });
   });
 
+  it("treats a reviewer-confirmed sparse Apollo account URL as the authoritative mapping", async () => {
+    const accountId = "6888f2ad496bf4000116f03c";
+    const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        account: {
+          id: accountId,
+          name: "Pratt (Rock Hill Corrugating) LLC"
+        }
+      })
+    } as unknown as Response);
+
+    const mapping = await fetchApolloOrganizationForMapping({
+      companyName: "PRATT (ROCK HILL CORRUGATING) LLC",
+      apolloOrganizationId: accountId,
+      resourceType: "ACCOUNT",
+      reviewerConfirmed: true
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://api.apollo.io/api/v1/accounts/${accountId}`,
+      expect.objectContaining({ method: "GET", cache: "no-store" })
+    );
+    expect(mapping).toMatchObject({
+      organizationId: accountId,
+      companyName: "Pratt (Rock Hill Corrugating) LLC",
+      domain: null,
+      match: {
+        classification: "DIRECT_COMPANY",
+        query: expect.objectContaining({
+          resource_type: "ACCOUNT",
+          supplied_id: accountId,
+          organization_ids: [accountId]
+        })
+      }
+    });
+  });
+
   it.each([
     {
       companyName: "ROECHLING INDUSTRIAL GASTONIA",
@@ -2934,7 +3109,7 @@ describe("fetchApolloContactsForCompany", () => {
     );
   });
 
-  it("does not let reviewer confirmation override Apollo logistics-provider safety", async () => {
+  it("accepts reviewer-confirmed identity while preserving the provider signal for prospect safety", async () => {
     vi.spyOn(global, "fetch").mockResolvedValue({
       ok: true,
       status: 200,
@@ -2951,9 +3126,17 @@ describe("fetchApolloContactsForCompany", () => {
       companyName: "ROECHLING INDUSTRIAL GASTONIA",
       apolloOrganizationId: "5e66b6381e05b4008c8331c2",
       reviewerConfirmed: true
-    })).rejects.toThrow(
-      'Apollo URL resolved to logistics provider "Example Global Logistics". Provider safety cannot be overridden by company-name confirmation.'
-    );
+    })).resolves.toMatchObject({
+      organizationId: "5e66b6381e05b4008c8331c2",
+      companyName: "Example Global Logistics",
+      match: {
+        classification: "DIRECT_COMPANY",
+        logisticsProviderMatch: true,
+        query: expect.objectContaining({
+          reviewer_confirmed_identity_override: true
+        })
+      }
+    });
   });
 
   it("uses Apollo's documented query filters and reads later saved-contact pages for YAT employees", async () => {

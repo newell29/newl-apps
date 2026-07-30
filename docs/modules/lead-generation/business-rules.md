@@ -44,10 +44,12 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - Apollo organization discovery must use documented Apollo filters. A known domain uses `q_organization_domains_list`; a name-only search uses `q_organization_name` and no more than two deterministic variants.
 - Only `DIRECT_COMPANY` matches can proceed automatically. If the latest match is ambiguous, a logistics provider, or no match, bulk enrichment must skip the company until a rep resolves it in **Apollo Match Review**.
 - A manually supplied Apollo Overview or People URL may contain either an Apollo account ID or global organization
-  ID. Newl Apps must resolve an account ID to its nested global organization ID before employee search, require a
-  strong company-name match, prevent duplicate organization mapping inside the tenant, and require explicit
-  acknowledgement of the one-credit organization validation. A facility/legal account may map to the canonical
-  operating parent only when Account View proves the exact relationship and both names share a distinctive brand.
+  ID. After an authenticated reviewer confirms the exact URL, that URL is the authoritative company identity and
+  automated name similarity cannot reject or silently substitute the mapping. Newl Apps resolves an account ID to
+  its nested global organization ID when Apollo exposes one; a sparse account shell without that field retains its
+  exact account ID for bounded recovery. Duplicate mapping prevention and explicit acknowledgement of the one-credit
+  validation still apply. Provider-like identity warnings remain auditable but are evaluated separately from contact
+  and outreach safety.
 - Confirming no Apollo match keeps the latest attempt and reviewer metadata. Automatic and bulk retry remain blocked until a rep explicitly reopens the review.
 - Resolving a company mapping queues the same one-company Hunter buyer-role review used by the automated handoff. It
   never drafts from the unfiltered Apollo employee result, selects more than the saved 1-3-contact limit, or authorizes
