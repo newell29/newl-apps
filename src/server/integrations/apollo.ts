@@ -766,6 +766,39 @@ export async function fetchApolloContactsForCompany(
     }
   }
 
+  if (
+    providedAccountId &&
+    trustedMatchedOrganization &&
+    contactsFromApollo.length === 0
+  ) {
+    const exactNameContacts =
+      (await searchApolloRelevantPeople({
+        apiKey,
+        companyName: confirmedSavedAccount?.name ?? input.companyName,
+        domain: null,
+        expectedOrganizationDomain: null,
+        organizationId: null,
+        allowPeopleSearchFallback,
+        keywordSearchLimit,
+        enforceExpectedOrganization: true,
+        savedContacts: savedContactsForProvidedOrganization,
+        contactRecovery
+      })) ?? [];
+    contactsFromApollo = filterTrustedApolloAccountNameFallback({
+      contacts: exactNameContacts,
+      companyName: confirmedSavedAccount?.name ?? input.companyName,
+      trustedDomain: confirmedAccountDomain
+    });
+    if (contactsFromApollo.length > 0 && effectiveMatchOrganization) {
+      effectiveMatchOrganization = {
+        ...effectiveMatchOrganization,
+        matchReason:
+          `${effectiveMatchOrganization.matchReason}; recovered employees through an exact-company-name ` +
+          `People Search after Apollo's organization and domain filters returned zero`
+      };
+    }
+  }
+
   let blockedByRecoveryAmbiguity = false;
   if (
     !canonicalDiscoveredOrganization &&
@@ -3099,6 +3132,40 @@ function filterApolloContactsForExpectedOrganization(
     return (
       hasExactAliasMatch(expectedAliases, candidateAliases) ||
       hasStrongBaseNameMatch(expectedAliases, candidateAliases)
+    );
+  });
+}
+
+function filterTrustedApolloAccountNameFallback({
+  contacts,
+  companyName,
+  trustedDomain
+}: {
+  contacts: ApolloContactRecord[];
+  companyName: string;
+  trustedDomain: string | null;
+}) {
+  const expectedAliases = buildCompanyNameAliases(companyName);
+
+  return contacts.filter((contact) => {
+    const organization = readApolloOrganizationFromContact(contact);
+    if (!organization?.name) {
+      return false;
+    }
+
+    const candidateAliases = buildCompanyNameAliases(organization.name);
+    const exactCompanyName =
+      hasExactAliasMatch(expectedAliases, candidateAliases) ||
+      hasStrongBaseNameMatch(expectedAliases, candidateAliases) ||
+      hasSafeRegionalBrandAlias(expectedAliases, candidateAliases);
+    if (!exactCompanyName) {
+      return false;
+    }
+
+    return (
+      !trustedDomain ||
+      !organization.domain ||
+      organization.domain === trustedDomain
     );
   });
 }

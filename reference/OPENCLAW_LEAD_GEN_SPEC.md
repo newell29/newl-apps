@@ -338,7 +338,11 @@ People search:
 
 - Primary search by organization/domain plus supply-chain/logistics titles.
 - If no primary contacts, fallback search by executive/operations leadership titles.
-- Enriches each search result with `people/match`.
+- A reviewer-confirmed saved Apollo account that returns zero people through both its canonical organization ID and
+  trusted domain may run one final zero-credit exact-company-name search. Returned employer identity must match the
+  confirmed Apollo account name and any returned domain must match the trusted account domain.
+- Calls `people/match` only for a bounded selected person when the operator separately authorizes paid email
+  enrichment; zero-credit search results remain masked until then.
 - Rejects enriched people whose current organization no longer matches the expected Apollo organization.
 - Requires first and last name or a full name with at least two tokens.
 - Dedupes people by LinkedIn URL, Apollo ID, or name/title.

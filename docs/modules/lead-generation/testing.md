@@ -310,7 +310,9 @@ Regression coverage must prove:
 22. an existing masked local contact such as Isaac is backfilled with the saved Apollo name, email, and contact ID;
     unapproved plans for contacts that still lack a concrete email are archived and cannot remain in Outreach Queue.
 23. a later saved-contact page can surface a role such as YAT's import/export specialist, and a manually confirmed
-    Pratt Rock Hill Apollo account may resolve to Pratt Industries only through its explicit account relationship.
+    Pratt Rock Hill Apollo account may resolve to Pratt Industries only through its explicit account relationship;
+    when YAT's confirmed organization and domain People Search scopes both return zero, a final exact-name search
+    recovers only YAT USA employees and rejects a similarly named unrelated company without paid enrichment.
 24. an authenticated reviewer can explicitly confirm weak facility/parent or legal/brand name differences such as
     Roechling Industrial Gastonia to Roechling Industrial North America and Kimbrells Furniture Distributors to
     Kimbrell's Home Furnishings; the manual override is audited, while unconfirmed weak matches and logistics

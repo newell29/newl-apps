@@ -19,7 +19,10 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 When a reviewer maps a saved Apollo account URL, Newl Apps preserves both the account ID and Apollo's canonical
 organization ID in the match history. Employee discovery first uses Apollo's documented organization-ID People Search
 filter. If that search returns no useful people, it retries with the exact domain returned by the confirmed saved
-account. Both People Search requests are zero-credit; paid email enrichment remains separately authorized.
+account. If Apollo's account UI still exposes people that neither employer index returns, the confirmed account may
+run one final zero-credit People Search by its exact Apollo company name. Every returned person must match that exact
+company identity and, when Apollo supplies one, the trusted account domain; similarly named companies are rejected.
+Paid email enrichment remains separately authorized.
 
 ## Hunter TradeMining query mapping
 
