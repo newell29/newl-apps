@@ -54,6 +54,8 @@ Brave retrieval; replay does not rewrite a completed opportunity or authorize ou
 Apollo company mapping and employee discovery are separate states. A verified Apollo organization remains mapped
 when Apollo returns zero employees. It appears under **Mapped company — employee lookup needed**, where employees can
 be rechecked without repeating paid organization matching; it is not presented as an unmapped-company exception.
+The repeatable review procedure and the proposed next-phase automation contract are documented in
+`apollo-identity-resolution-playbook.md`.
 
 Company and contact identity resolution is tenant-wide. TradeMining ingestion reuses an existing company for a unique,
 safe legal-suffix name variant rather than creating another company row. Apollo organization ID and normalized domain

@@ -21,6 +21,11 @@ run without explicit authorization, that a concrete-email person at the confirme
 similarly named wrong-company person is rejected. Tests must also verify that the saved account ID survives subsequent
 match records so a later manual recheck does not lose the mapped identity.
 
+The next automated identity resolver must also satisfy the acceptance criteria in
+`apollo-identity-resolution-playbook.md`, including deterministic candidate evidence, immutable account/global-
+organization IDs, full-roster verification, alias deduplication, tenant scoping, explicit credit authorization, and
+no outreach side effect.
+
 ## Data model
 
 Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.

@@ -218,6 +218,11 @@ The layout is non-destructive: it does not migrate, delete, or rewrite existing 
 
 ## Apollo company-match review
 
+The operator procedure for legal-name/brand research, Apollo candidate comparison, saved-account versus global-
+organization handling, full-roster verification, contact discovery, and the proposed automated resolver is defined
+in `apollo-identity-resolution-playbook.md`. The full organization-filtered People Finder roster is the verification
+source; Quick Search and the Suggested Leads widget are not complete employee directories.
+
 1. Pipeline enrichment first searches Apollo by the stored company domain, or by at most two company-name variants when no domain is available.
 2. Only a direct-company result continues to contact discovery. Contact discovery for a direct or manually mapped company remains scoped to the confirmed Apollo organization ID.
 3. Any ambiguous, logistics-provider, or no-match result creates an `ApolloCompanyMatch` attempt and appears in **Apollo Match Review**. The same company is skipped by later bulk enrichment, preventing accidental repeat searches and credit use.
