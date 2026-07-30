@@ -20,8 +20,10 @@ When a reviewer maps a saved Apollo account URL, Newl Apps preserves both the ac
 organization ID in the match history. Employee discovery first uses Apollo's documented organization-ID People Search
 filter. If that search returns no useful people, it retries with the exact domain returned by the confirmed saved
 account. If Apollo's account UI still exposes people that neither employer index returns, the confirmed account may
-run one final zero-credit People Search by its exact Apollo company name. Every returned person must match that exact
-company identity and, when Apollo supplies one, the trusted account domain; similarly named companies are rejected.
+run one final zero-credit People Search with the reviewer-confirmed saved account ID. Every returned person must still
+match that exact company identity and, when Apollo supplies one, the trusted account domain; similarly named companies
+are rejected. Company name is not placed in People Search's generic keyword filter because Apollo does not document
+that filter as an employer-name lookup.
 Paid email enrichment remains separately authorized.
 
 ## Hunter TradeMining query mapping
@@ -139,6 +141,12 @@ Paid email enrichment remains separately authorized.
   relationship and both company names share the same distinctive brand token; a loose parent, subsidiary, sibling, or
   multiple-candidate result still routes to Apollo Match Review with no contacts selected. The validated global ID is
   persisted by the existing direct-match transaction, so later runs remain organization scoped.
+- If the exact saved account's global organization and domain filters both return zero, Hunter performs one final
+  People Search using the reviewer-confirmed account ID carried from the Apollo account URL. This mirrors the immutable
+  company scope represented by Apollo's account People page. Because an account ID is not interchangeable with a
+  canonical organization ID, Hunter does not trust the request scope alone: every returned employer name must match
+  the exact saved account identity and any returned domain must agree with the trusted account domain. Missing or
+  different employer identity is rejected.
 - If an immutable mapped account still returns at most one employee and Apollo Account Search/View does not expose
   the nested global organization ID, Hunter may recover one unique domain from a saved contact whose organization
   identity matches the exact legal/regional account. It repeats the generic and relevant-title People Search against

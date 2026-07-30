@@ -20,8 +20,9 @@ A saved Apollo account URL can resolve to a canonical global organization ID who
 returns no people even though Apollo's account page visibly lists employees. Newl Apps must carry the reviewer-confirmed
 account ID forward from match history, refresh the exact saved account, and retry People Search with the account's
 normalized domain. Apollo can also index account-page employees outside both the canonical organization and domain
-filters. In that case, one final exact-company-name People Search is allowed only for the reviewer-confirmed account;
-returned employer names and any returned domain must match the trusted account. These fallbacks remain zero-credit
+filters. In that case, one final People Search using the reviewer-confirmed saved account ID is allowed; returned
+employer names and any returned domain must match the trusted account. The generic People Search keyword parameter is
+not used as a company-name filter because Apollo does not document that behavior. These fallbacks remain zero-credit
 and must not use paid enrichment without explicit authorization.
 
 ## Data model
@@ -423,16 +424,17 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   and People Search organization metadata remain a fallback for older records. Hunter filters every candidate back
   to the resolved organization and lets the existing direct-match transaction replace the stale identifier. If an
   explicitly confirmed saved account still returns zero through both organization and domain indexes, Hunter runs
-  one exact-company-name People Search and accepts only returned employer identities that match the confirmed Apollo
-  account name and trusted domain. This covers account pages such as YAT USA whose visible roster is not returned by
-  Apollo's employer filters without opening an unbounded company search.
+  one final People Search scoped by the reviewer-confirmed account ID and accepts only returned employer identities
+  that match the confirmed Apollo account name and trusted domain. This covers account pages such as YAT USA whose
+  visible roster is not returned by Apollo's global-organization or domain indexes without opening an unbounded
+  company search.
 - Ambiguity rule: a parent, subsidiary, sibling, or multiple exact organization candidate becomes
   `MATCH_QUALITY_REVIEW`; no contacts are imported and the AI buyer-role review is not run. Domain-wide employee
   results alone cannot authorize a match.
 - Regression coverage: `tests/apollo-integration.test.ts` covers an Atlas Copco account omitted from Organization
   Search but present in the saved-account directory, domainless Stabilus and Salice account IDs, a Silfab legal-entity
   account resolving through its explicit Apollo parent relationship, a Dansons saved account with only a trusted
-  domain, an exact Dansons account omitted by name search but recovered by Account View, YAT's exact-name employee
+  domain, an exact Dansons account omitted by name search but recovered by Account View, YAT's confirmed-account employee
   recovery after both organization and domain scopes return zero, and an unrelated Hyosung parent-company result
   failing closed.
 

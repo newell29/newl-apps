@@ -769,32 +769,24 @@ export async function fetchApolloContactsForCompany(
   if (
     providedAccountId &&
     trustedMatchedOrganization &&
+    allowPeopleSearchFallback &&
     contactsFromApollo.length === 0
   ) {
-    const exactNameContacts =
-      (await searchApolloRelevantPeople({
+    const accountScopedContacts =
+      await searchApolloConfirmedAccountPeople({
         apiKey,
         companyName: confirmedSavedAccount?.name ?? input.companyName,
-        domain: null,
-        expectedOrganizationDomain: null,
-        organizationId: null,
-        allowPeopleSearchFallback,
-        keywordSearchLimit,
-        enforceExpectedOrganization: true,
-        savedContacts: savedContactsForProvidedOrganization,
-        contactRecovery
-      })) ?? [];
-    contactsFromApollo = filterTrustedApolloAccountNameFallback({
-      contacts: exactNameContacts,
-      companyName: confirmedSavedAccount?.name ?? input.companyName,
-      trustedDomain: confirmedAccountDomain
-    });
+        accountId: providedAccountId,
+        trustedDomain: confirmedAccountDomain,
+        keywordSearchLimit
+      });
+    contactsFromApollo = accountScopedContacts;
     if (contactsFromApollo.length > 0 && effectiveMatchOrganization) {
       effectiveMatchOrganization = {
         ...effectiveMatchOrganization,
         matchReason:
-          `${effectiveMatchOrganization.matchReason}; recovered employees through an exact-company-name ` +
-          `People Search after Apollo's organization and domain filters returned zero`
+          `${effectiveMatchOrganization.matchReason}; recovered employees through the reviewer-confirmed ` +
+          `Apollo account ID after Apollo's global organization and domain filters returned zero`
       };
     }
   }
@@ -2092,6 +2084,50 @@ async function searchApolloPeople({
     body
   );
   return parseApolloContacts(json, "PEOPLE_SEARCH");
+}
+
+async function searchApolloConfirmedAccountPeople({
+  apiKey,
+  companyName,
+  accountId,
+  trustedDomain,
+  keywordSearchLimit
+}: {
+  apiKey: string;
+  companyName: string;
+  accountId: string;
+  trustedDomain: string | null;
+  keywordSearchLimit: number;
+}) {
+  const genericPeople = await searchApolloPeople({
+    apiKey,
+    companyName,
+    domain: null,
+    organizationId: accountId,
+    queryKeywords: null
+  });
+  const roleTitles = [
+    ...APOLLO_PRIMARY_ROLE_KEYWORDS,
+    ...APOLLO_FALLBACK_ROLE_KEYWORDS
+  ].slice(0, Math.max(0, keywordSearchLimit));
+  const rolePeople =
+    roleTitles.length > 0
+      ? await searchApolloPeople({
+          apiKey,
+          companyName,
+          domain: null,
+          organizationId: accountId,
+          queryKeywords: null,
+          personTitles: roleTitles
+        })
+      : [];
+  const exactAccountPeople = filterTrustedApolloAccountNameFallback({
+    contacts: dedupeApolloContacts([...genericPeople, ...rolePeople]),
+    companyName,
+    trustedDomain
+  });
+
+  return rankApolloRelevantContacts(exactAccountPeople);
 }
 
 function buildApolloPeopleSearchPath({
