@@ -5,6 +5,8 @@ const DEFAULT_PAGE_SIZE = 100;
 const APOLLO_SAVED_CONTACT_MAX_PAGES = 20;
 const APOLLO_SAVED_CONTACT_RECOVERY_LIMIT = 10;
 const APOLLO_PAID_EMAIL_ENRICHMENT_LIMIT = 3;
+const APOLLO_EQUIVALENT_ACCOUNT_LIMIT = 5;
+const APOLLO_EQUIVALENT_ACCOUNT_QUERY_LIMIT = 4;
 const APOLLO_DELIVERY_FAILURE_MAX_PAGES = 10;
 const INTERNAL_SEQUENCE_KEYS = new Set([
   "hunter-email-only",
@@ -167,6 +169,8 @@ export type ApolloContactLookupResult = {
     relatedAccountsChecked: number;
     relatedOrganizationScopesChecked: number;
     confirmedAccountScopesChecked: number;
+    peopleSearchRawRecords: number;
+    peopleSearchAcceptedRecords: number;
     vettedParentAccountsChecked: number;
     companyKeywordSearches: number;
     paidEmailEnrichmentsAttempted: number;
@@ -570,6 +574,8 @@ export async function fetchApolloContactsForCompany(
     relatedAccountsChecked: 0,
     relatedOrganizationScopesChecked: 0,
     confirmedAccountScopesChecked: 0,
+    peopleSearchRawRecords: 0,
+    peopleSearchAcceptedRecords: 0,
     vettedParentAccountsChecked: 0,
     companyKeywordSearches: 0,
     paidEmailEnrichmentsAttempted: 0,
@@ -723,6 +729,95 @@ export async function fetchApolloContactsForCompany(
           `stored global organization ID linked to the reviewer-confirmed Apollo account`
       };
       contactsFromApollo = linkedOrganizationContacts;
+    }
+  }
+
+  if (
+    providedAccountId &&
+    providedOrganizationId &&
+    contactsFromApollo.length === 0
+  ) {
+    // Apollo can retain more than one saved Account row for the same global
+    // organization. The reviewer-confirmed row may be an empty legal-name
+    // shell while saved contacts live under a short operating-brand Account
+    // such as "CGT". Preserve the reviewer's mapping, but recover contacts
+    // from another saved Account only when Apollo explicitly links that
+    // Account to the exact same immutable global organization ID.
+    const equivalentAccounts =
+      await findApolloEquivalentSavedAccountsForOrganization({
+        input,
+        apiKey,
+        providedAccountId,
+        providedOrganizationId,
+        confirmedSavedAccount
+      });
+    const supportingAccountIds: string[] = [];
+
+    for (const equivalentAccount of equivalentAccounts) {
+      contactRecovery.relatedAccountsChecked += 1;
+      supportingAccountIds.push(equivalentAccount.accountId);
+      const rawEquivalentContacts =
+        (await searchApolloContacts({
+          apiKey,
+          companyName: equivalentAccount.accountName,
+          domain:
+            equivalentAccount.organization.domain ??
+            confirmedSavedContactDomain,
+          organizationId: null,
+          queryKeywords: null,
+          enforceExpectedOrganization: false,
+          contactRecovery
+        })) ?? [];
+      const equivalentContacts =
+        filterApolloSavedContactsForConfirmedMapping(
+          rawEquivalentContacts,
+          {
+            companyNames: [
+              equivalentAccount.accountName,
+              equivalentAccount.organization.name ?? "",
+              confirmedSavedContactCompanyName,
+              input.companyName
+            ],
+            normalizedDomain:
+              equivalentAccount.organization.domain ??
+              confirmedSavedContactDomain,
+            organizationIds: [
+              equivalentAccount.accountId,
+              providedAccountId,
+              providedOrganizationId
+            ]
+          }
+        );
+      contactsFromApollo = dedupeApolloContacts([
+        ...contactsFromApollo,
+        ...equivalentContacts
+      ]);
+
+      if (contactsFromApollo.length > 0) {
+        break;
+      }
+    }
+
+    if (
+      supportingAccountIds.length > 0 &&
+      effectiveMatchOrganization
+    ) {
+      effectiveMatchOrganization = {
+        ...effectiveMatchOrganization,
+        matchReason:
+          `${effectiveMatchOrganization.matchReason}; checked ` +
+          `${supportingAccountIds.length} equivalent saved Apollo account` +
+          `${supportingAccountIds.length === 1 ? "" : "s"} linked to the same global organization` +
+          `${contactsFromApollo.length > 0 ? " and recovered saved contacts" : ""}`,
+        query: {
+          ...effectiveMatchOrganization.query,
+          equivalent_saved_account_ids: supportingAccountIds
+        },
+        rawPayload: {
+          ...effectiveMatchOrganization.rawPayload,
+          newlEquivalentSavedAccountIds: supportingAccountIds
+        }
+      };
     }
   }
 
@@ -2245,6 +2340,97 @@ async function findApolloSavedAccountOrganization(
   return null;
 }
 
+async function findApolloEquivalentSavedAccountsForOrganization({
+  input,
+  apiKey,
+  providedAccountId,
+  providedOrganizationId,
+  confirmedSavedAccount
+}: {
+  input: ApolloCompanyLookupInput;
+  apiKey: string;
+  providedAccountId: string;
+  providedOrganizationId: string;
+  confirmedSavedAccount: ApolloOrganizationCandidate | null;
+}) {
+  const accounts = new Map<
+    string,
+    {
+      accountId: string;
+      accountName: string;
+      organization: ApolloOrganizationCandidate;
+    }
+  >();
+  const confirmedAccountName = readApolloString(
+    confirmedSavedAccount?.rawPayload ?? {},
+    ["name", "company_name", "organization_name"]
+  );
+  const searchQueries = buildApolloEquivalentAccountSearchQueries([
+    input.companyName,
+    confirmedAccountName,
+    confirmedSavedAccount?.name
+  ]);
+
+  for (const accountName of searchQueries) {
+    const json = await postApolloJson("/api/v1/accounts/search", apiKey, {
+      page: 1,
+      per_page: 25,
+      q_organization_name: accountName
+    });
+
+    for (const candidate of parseApolloOrganizations(json)) {
+      const accountId = readApolloString(candidate.rawPayload, ["id"]);
+      const nestedOrganization = asRecord(
+        candidate.rawPayload.organization
+      );
+      const nestedOrganizationId = readApolloString(
+        nestedOrganization ?? {},
+        ["id", "organization_id", "apollo_organization_id"]
+      );
+      const savedAccountName = readApolloString(candidate.rawPayload, [
+        "name",
+        "company_name",
+        "organization_name"
+      ]);
+
+      if (
+        !accountId ||
+        accountId === providedAccountId ||
+        !savedAccountName ||
+        nestedOrganizationId !== providedOrganizationId ||
+        accounts.has(accountId)
+      ) {
+        continue;
+      }
+
+      accounts.set(accountId, {
+        accountId,
+        accountName: savedAccountName,
+        organization: scoreApolloOrganizationCandidate(
+          candidate,
+          input.companyName,
+          normalizeDomain(input.domain),
+          {
+            source: "same-global-organization-saved-account",
+            account_id: accountId,
+            organization_id: providedOrganizationId
+          }
+        )
+      });
+
+      if (accounts.size >= APOLLO_EQUIVALENT_ACCOUNT_LIMIT) {
+        break;
+      }
+    }
+
+    if (accounts.size >= APOLLO_EQUIVALENT_ACCOUNT_LIMIT) {
+      break;
+    }
+  }
+
+  return [...accounts.values()];
+}
+
 async function viewApolloSavedAccountOrganization(
   input: ApolloCompanyLookupInput,
   apiKey: string,
@@ -2579,6 +2765,8 @@ async function searchApolloRelevantPeople({
       organizationId,
       queryKeywords: null
     });
+  contactRecovery.peopleSearchRawRecords +=
+    peopleWithoutKeywordRaw.length;
   const peopleWithoutKeyword = enforceExpectedOrganization
     ? filterApolloContactsForExpectedOrganization(peopleWithoutKeywordRaw, {
         companyName,
@@ -2586,6 +2774,8 @@ async function searchApolloRelevantPeople({
         organizationId
       })
     : peopleWithoutKeywordRaw;
+  contactRecovery.peopleSearchAcceptedRecords +=
+    peopleWithoutKeyword.length;
   collected.push(...peopleWithoutKeyword);
 
   const roleTitles = [...APOLLO_PRIMARY_ROLE_KEYWORDS, ...APOLLO_FALLBACK_ROLE_KEYWORDS].slice(
@@ -2602,6 +2792,7 @@ async function searchApolloRelevantPeople({
         queryKeywords: null,
         personTitles: roleTitles
       });
+    contactRecovery.peopleSearchRawRecords += rolePeopleRaw.length;
     const rolePeople = enforceExpectedOrganization
       ? filterApolloContactsForExpectedOrganization(rolePeopleRaw, {
           companyName,
@@ -2609,6 +2800,7 @@ async function searchApolloRelevantPeople({
           organizationId
         })
       : rolePeopleRaw;
+    contactRecovery.peopleSearchAcceptedRecords += rolePeople.length;
     collected.push(...rolePeople);
   }
 
@@ -4911,6 +5103,46 @@ function buildApolloOrganizationSearchQueries(value: string) {
     .filter((query, index, array) => array.indexOf(query) === index);
 
   return queries.slice(0, 2);
+}
+
+function buildApolloEquivalentAccountSearchQueries(
+  values: Array<string | null | undefined>
+) {
+  const queries = new Set<string>();
+
+  for (const value of values) {
+    if (!value?.trim()) {
+      continue;
+    }
+
+    for (const query of buildApolloOrganizationSearchQueries(value)) {
+      queries.add(query);
+    }
+
+    const acronym = buildApolloCompanyAcronym(value);
+    if (acronym) {
+      queries.add(acronym);
+    }
+  }
+
+  return [...queries].slice(
+    0,
+    APOLLO_EQUIVALENT_ACCOUNT_QUERY_LIMIT
+  );
+}
+
+function buildApolloCompanyAcronym(value: string) {
+  const tokens = tokenizeCompanyName(value).filter(
+    (token) => !APOLLO_REGIONAL_IDENTITY_TOKENS.has(token)
+  );
+  if (tokens.length < 2) {
+    return null;
+  }
+
+  const acronym = tokens.map((token) => token[0]).join("").toUpperCase();
+  return acronym.length >= 2 && acronym.length <= 8
+    ? acronym
+    : null;
 }
 
 function hasExactAliasMatch(leftAliases: string[], rightAliases: string[]) {

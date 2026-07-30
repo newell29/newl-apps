@@ -2320,6 +2320,286 @@ describe("fetchApolloContactsForCompany", () => {
     }
   });
 
+  it("recovers Canadian General Tower saved contacts from an equivalent account linked to the same global organization", async () => {
+    const confirmedAccountId = "68c827e245bff10001541e03";
+    const populatedAccountId = "63170f9709aa0200fa997dd5";
+    const organizationId = "61e67cd9a2fcd500a4fcca77";
+    const unrelatedOrganizationId = "61e67cd9a2fcd500a4fcca88";
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(
+      async (input, init) => {
+        const url = String(input);
+        const body = init?.body
+          ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+          : {};
+
+        if (url.endsWith(`/api/v1/accounts/${confirmedAccountId}`)) {
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({
+              account: {
+                id: confirmedAccountId,
+                name: "CANADIAN GENERAL TOWER LTD",
+                primary_domain: "cgtower.com",
+                organization: {
+                  id: organizationId,
+                  name: "CANADIAN GENERAL TOWER LTD",
+                  primary_domain: "cgtower.com"
+                }
+              }
+            })
+          } as unknown as Response;
+        }
+
+        if (url.endsWith("/api/v1/accounts/search")) {
+          if (body.q_organization_name === "CGT") {
+            return {
+              ok: true,
+              status: 200,
+              json: vi.fn().mockResolvedValue({
+                accounts: [
+                  {
+                    id: populatedAccountId,
+                    name: "CGT",
+                    primary_domain: "cgtower.com",
+                    organization: {
+                      id: organizationId,
+                      name: "CANADIAN GENERAL TOWER LTD",
+                      primary_domain: "cgtower.com"
+                    }
+                  },
+                  {
+                    id: "unsafe-cgt-account",
+                    name: "CGT",
+                    primary_domain: "cgt.example",
+                    organization: {
+                      id: unrelatedOrganizationId,
+                      name: "CGT Consulting",
+                      primary_domain: "cgt.example"
+                    }
+                  }
+                ]
+              })
+            } as unknown as Response;
+          }
+
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({
+              accounts: [
+                {
+                  id: confirmedAccountId,
+                  name: "CANADIAN GENERAL TOWER LTD",
+                  primary_domain: "cgtower.com",
+                  organization: {
+                    id: organizationId,
+                    name: "CANADIAN GENERAL TOWER LTD",
+                    primary_domain: "cgtower.com"
+                  }
+                }
+              ]
+            })
+          } as unknown as Response;
+        }
+
+        if (url.endsWith("/api/v1/contacts/search")) {
+          if (body.q_keywords === "CGT") {
+            return {
+              ok: true,
+              status: 200,
+              json: vi.fn().mockResolvedValue({
+                contacts: [
+                  {
+                    id: "cgt-saved-contact",
+                    person_id: "cgt-person",
+                    first_name: "Dawn",
+                    last_name: "Kuntz",
+                    title: "Director of Materials Management",
+                    email: "dawn.kuntz@cgtower.com",
+                    organization: {
+                      id: organizationId,
+                      name: "CANADIAN GENERAL TOWER LTD",
+                      primary_domain: "cgtower.com"
+                    }
+                  }
+                ]
+              })
+            } as unknown as Response;
+          }
+
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({ contacts: [] })
+          } as unknown as Response;
+        }
+
+        if (url.includes("/api/v1/mixed_people/api_search")) {
+          expect(
+            new URL(url).searchParams.getAll("organization_ids[]")
+          ).toEqual([organizationId]);
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({ people: [] })
+          } as unknown as Response;
+        }
+
+        throw new Error(
+          `Unexpected Apollo URL in equivalent CGT saved-account test: ${url}`
+        );
+      }
+    );
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "CANADIAN GENERAL TOWER LTD",
+      domain: "cgtower.com",
+      apolloOrganizationId: organizationId,
+      apolloAccountId: confirmedAccountId
+    });
+
+    expect(result.organizationId).toBe(organizationId);
+    expect(result.contacts).toEqual([
+      expect.objectContaining({
+        apolloContactId: "cgt-saved-contact",
+        apolloPersonId: "cgt-person",
+        fullName: "Dawn Kuntz",
+        title: "Director of Materials Management",
+        email: "dawn.kuntz@cgtower.com"
+      })
+    ]);
+    expect(result.match.matchReason).toContain(
+      "equivalent saved Apollo account linked to the same global organization and recovered saved contacts"
+    );
+    expect(result.match.query).toMatchObject({
+      apollo_account_id: confirmedAccountId,
+      equivalent_saved_account_ids: [populatedAccountId]
+    });
+    expect(result.contactRecovery).toMatchObject({
+      confirmedAccountScopesChecked: 1,
+      relatedAccountsChecked: 1,
+      peopleSearchRawRecords: 0,
+      peopleSearchAcceptedRecords: 0,
+      paidEmailEnrichmentsAttempted: 0
+    });
+    expect(
+      fetchMock.mock.calls.some(([, requestInit]) => {
+        const requestBody = requestInit?.body
+          ? (JSON.parse(String(requestInit.body)) as Record<string, unknown>)
+          : {};
+        return requestBody.q_organization_name === "CGT";
+      })
+    ).toBe(true);
+    expect(
+      fetchMock.mock.calls.some(([, requestInit]) => {
+        const requestBody = requestInit?.body
+          ? (JSON.parse(String(requestInit.body)) as Record<string, unknown>)
+          : {};
+        return requestBody.q_keywords === "CGT";
+      })
+    ).toBe(true);
+    expect(
+      fetchMock.mock.calls.some(([request]) =>
+        String(request).includes("/api/v1/people/match")
+      )
+    ).toBe(false);
+  });
+
+  it("rejects a similarly named saved account linked to a different global organization", async () => {
+    const confirmedAccountId = "68c827e245bff10001541e03";
+    const organizationId = "61e67cd9a2fcd500a4fcca77";
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(
+      async (input, init) => {
+        const url = String(input);
+        const body = init?.body
+          ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+          : {};
+
+        if (url.endsWith(`/api/v1/accounts/${confirmedAccountId}`)) {
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({
+              account: {
+                id: confirmedAccountId,
+                name: "CANADIAN GENERAL TOWER LTD",
+                primary_domain: "cgtower.com",
+                organization: {
+                  id: organizationId,
+                  name: "CANADIAN GENERAL TOWER LTD",
+                  primary_domain: "cgtower.com"
+                }
+              }
+            })
+          } as unknown as Response;
+        }
+
+        if (url.endsWith("/api/v1/accounts/search")) {
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({
+              accounts:
+                body.q_organization_name === "CGT"
+                  ? [
+                      {
+                        id: "unsafe-cgt-account",
+                        name: "CGT",
+                        primary_domain: "cgtower.com",
+                        organization: {
+                          id: "different-global-organization",
+                          name: "CGT Consulting",
+                          primary_domain: "cgtower.com"
+                        }
+                      }
+                    ]
+                  : []
+            })
+          } as unknown as Response;
+        }
+
+        if (url.endsWith("/api/v1/contacts/search")) {
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({ contacts: [] })
+          } as unknown as Response;
+        }
+
+        if (url.includes("/api/v1/mixed_people/api_search")) {
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({ people: [] })
+          } as unknown as Response;
+        }
+
+        throw new Error(
+          `Unexpected Apollo URL in unsafe equivalent-account test: ${url}`
+        );
+      }
+    );
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "CANADIAN GENERAL TOWER LTD",
+      domain: "cgtower.com",
+      apolloOrganizationId: organizationId,
+      apolloAccountId: confirmedAccountId
+    });
+
+    expect(result.contacts).toEqual([]);
+    expect(result.contactRecovery.relatedAccountsChecked).toBe(0);
+    expect(
+      fetchMock.mock.calls.some(([, requestInit]) => {
+        const requestBody = requestInit?.body
+          ? (JSON.parse(String(requestInit.body)) as Record<string, unknown>)
+          : {};
+        return requestBody.q_keywords === "CGT";
+      })
+    ).toBe(false);
+  });
+
   it("retries an exact saved account by trusted domain when Apollo exposes no nested organization ID", async () => {
     const accountId = "661ec0f545d31b00076e28e0";
     const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {

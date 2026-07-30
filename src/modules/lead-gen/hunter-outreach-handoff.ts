@@ -1640,6 +1640,8 @@ async function recordCompanyMatch(
     `${lookup.contactRecovery.relatedAccountsChecked} related saved account${lookup.contactRecovery.relatedAccountsChecked === 1 ? "" : "s"} checked, ` +
     `${lookup.contactRecovery.relatedOrganizationScopesChecked} related organization scope${lookup.contactRecovery.relatedOrganizationScopesChecked === 1 ? "" : "s"} checked, ` +
     `${lookup.contactRecovery.confirmedAccountScopesChecked} exact confirmed-account scope${lookup.contactRecovery.confirmedAccountScopesChecked === 1 ? "" : "s"} checked, ` +
+    `${lookup.contactRecovery.peopleSearchAcceptedRecords}/${lookup.contactRecovery.peopleSearchRawRecords} ` +
+    `People Search record${lookup.contactRecovery.peopleSearchRawRecords === 1 ? "" : "s"} accepted after identity filtering, ` +
     `${lookup.contactRecovery.vettedParentAccountsChecked} vetted parent account${lookup.contactRecovery.vettedParentAccountsChecked === 1 ? "" : "s"} checked, ` +
     `${lookup.contactRecovery.companyKeywordSearches} strict company-keyword search${lookup.contactRecovery.companyKeywordSearches === 1 ? "" : "es"}, ` +
     `${lookup.contactRecovery.paidEmailsRecovered}/${lookup.contactRecovery.paidEmailEnrichmentsAttempted} ` +
