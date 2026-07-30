@@ -194,6 +194,8 @@ export default async function OutreachQueuePage({
         contact is confirmed in its exact selected Apollo cadence, it moves to Active Cadences for reply monitoring.
         If Apollo accepted a push before membership became visible, Newl Apps keeps checking without sending a second
         enrollment request. Rejected, do-not-contact, bounced, finished, and sales-engaged records remain hidden.
+        Terminal delivery failures remain available in Delivery Failures for audit without returning to an actionable
+        queue.
       </div>
 
       {contactReviewMessage ? (
