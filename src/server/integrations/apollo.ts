@@ -5,6 +5,8 @@ const DEFAULT_PAGE_SIZE = 100;
 const APOLLO_SAVED_CONTACT_MAX_PAGES = 20;
 const APOLLO_SAVED_CONTACT_RECOVERY_LIMIT = 10;
 const APOLLO_PAID_EMAIL_ENRICHMENT_LIMIT = 3;
+const APOLLO_RELATED_ACCOUNT_LIMIT = 5;
+const APOLLO_COMPANY_KEYWORD_FALLBACK_LIMIT = 3;
 const APOLLO_BOUNCED_MESSAGE_MAX_PAGES = 10;
 const INTERNAL_SEQUENCE_KEYS = new Set([
   "hunter-email-only",
@@ -153,6 +155,9 @@ export type ApolloContactLookupResult = {
     savedContactPagesRead: number;
     maskedPeopleChecked: number;
     savedContactsRecovered: number;
+    relatedAccountsChecked: number;
+    relatedOrganizationScopesChecked: number;
+    companyKeywordSearches: number;
     paidEmailEnrichmentsAttempted: number;
     paidEmailsRecovered: number;
   };
@@ -551,6 +556,9 @@ export async function fetchApolloContactsForCompany(
     savedContactPagesRead: 0,
     maskedPeopleChecked: 0,
     savedContactsRecovered: 0,
+    relatedAccountsChecked: 0,
+    relatedOrganizationScopesChecked: 0,
+    companyKeywordSearches: 0,
     paidEmailEnrichmentsAttempted: 0,
     paidEmailsRecovered: 0
   };
@@ -771,6 +779,94 @@ export async function fetchApolloContactsForCompany(
             `through the confirmed account's trusted saved-contact domain`
         };
       }
+    }
+  }
+
+  if (
+    providedAccountId &&
+    confirmedAccountDomain &&
+    contactsFromApollo.length === 0
+  ) {
+    const relatedOrganizations =
+      await findApolloRelatedSavedAccountOrganizations({
+        input,
+        apiKey,
+        providedAccountId,
+        trustedDomain: confirmedAccountDomain,
+        contactRecovery
+      });
+    const searchedOrganizationIds = new Set(
+      [organizationIdForSearch, providedOrganizationId].filter(
+        (value): value is string => Boolean(value)
+      )
+    );
+
+    for (const relatedOrganization of relatedOrganizations) {
+      if (
+        !relatedOrganization.id ||
+        searchedOrganizationIds.has(relatedOrganization.id)
+      ) {
+        continue;
+      }
+      searchedOrganizationIds.add(relatedOrganization.id);
+      contactRecovery.relatedOrganizationScopesChecked += 1;
+      const relatedContacts =
+        (await searchApolloRelevantPeople({
+          apiKey,
+          companyName: relatedOrganization.name ?? input.companyName,
+          domain: null,
+          expectedOrganizationDomain: confirmedAccountDomain,
+          organizationId: relatedOrganization.id,
+          allowPeopleSearchFallback,
+          keywordSearchLimit,
+          enforceExpectedOrganization: true,
+          savedContacts: savedContactsForProvidedOrganization,
+          contactRecovery
+        })) ?? [];
+      contactsFromApollo = dedupeApolloContacts([
+        ...contactsFromApollo,
+        ...relatedContacts
+      ]);
+    }
+
+    if (contactsFromApollo.length > 0 && effectiveMatchOrganization) {
+      effectiveMatchOrganization = {
+        ...effectiveMatchOrganization,
+        domain:
+          effectiveMatchOrganization.domain ?? confirmedAccountDomain,
+        matchReason:
+          `${effectiveMatchOrganization.matchReason}; recovered employees across ` +
+          `${contactRecovery.relatedOrganizationScopesChecked} verified same-domain Apollo ` +
+          `saved-account organization scope${contactRecovery.relatedOrganizationScopesChecked === 1 ? "" : "s"}`
+      };
+    }
+  }
+
+  if (
+    providedAccountId &&
+    confirmedAccountDomain &&
+    contactsFromApollo.length === 0
+  ) {
+    const keywordContacts =
+      await searchApolloPeopleByTrustedCompanyKeywords({
+        apiKey,
+        companyName: input.companyName,
+        trustedDomain: confirmedAccountDomain,
+        contactRecovery
+      });
+    contactsFromApollo = dedupeApolloContacts([
+      ...contactsFromApollo,
+      ...keywordContacts
+    ]);
+    if (contactsFromApollo.length > 0 && effectiveMatchOrganization) {
+      effectiveMatchOrganization = {
+        ...effectiveMatchOrganization,
+        domain:
+          effectiveMatchOrganization.domain ?? confirmedAccountDomain,
+        matchReason:
+          `${effectiveMatchOrganization.matchReason}; recovered employees through a ` +
+          `strict same-company keyword fallback after verified organization and domain scopes returned zero`
+      };
     }
   }
 
@@ -1972,29 +2068,11 @@ async function findApolloSavedAccountOrganization(
   // before declaring that Apollo has no employees. Apollo documents this
   // endpoint as zero-credit.
   try {
-    const json = await getApolloJson(
-      `/api/v1/accounts/${encodeURIComponent(providedAccountId)}`,
-      apiKey
+    return await viewApolloSavedAccountOrganization(
+      input,
+      apiKey,
+      providedAccountId
     );
-    const account =
-      asRecord(json.account) ??
-      asRecord(json.data) ??
-      asRecord(json.company) ??
-      null;
-    const exactAccount = account
-      ? parseApolloOrganizations({ accounts: [account] }).find(
-          (candidate) =>
-            readApolloString(candidate.rawPayload, ["id"]) === providedAccountId
-        ) ?? null
-      : null;
-    if (exactAccount) {
-      return trustExactApolloSavedAccount(
-        input,
-        exactAccount,
-        providedAccountId,
-        "saved-account-view"
-      );
-    }
   } catch (error) {
     if (error instanceof ApolloRateLimitError) throw error;
     // Older Apollo plans may not expose Account View. Preserve the existing
@@ -2002,6 +2080,116 @@ async function findApolloSavedAccountOrganization(
   }
 
   return null;
+}
+
+async function viewApolloSavedAccountOrganization(
+  input: ApolloCompanyLookupInput,
+  apiKey: string,
+  accountId: string
+) {
+  const json = await getApolloJson(
+    `/api/v1/accounts/${encodeURIComponent(accountId)}`,
+    apiKey
+  );
+  const account =
+    asRecord(json.account) ??
+    asRecord(json.data) ??
+    asRecord(json.company) ??
+    null;
+  const exactAccount = account
+    ? parseApolloOrganizations({ accounts: [account] }).find(
+        (candidate) =>
+          readApolloString(candidate.rawPayload, ["id"]) === accountId
+      ) ?? null
+    : null;
+
+  return exactAccount
+    ? trustExactApolloSavedAccount(
+        input,
+        exactAccount,
+        accountId,
+        "saved-account-view"
+      )
+    : null;
+}
+
+async function findApolloRelatedSavedAccountOrganizations({
+  input,
+  apiKey,
+  providedAccountId,
+  trustedDomain,
+  contactRecovery
+}: {
+  input: ApolloCompanyLookupInput;
+  apiKey: string;
+  providedAccountId: string;
+  trustedDomain: string;
+  contactRecovery: ApolloContactLookupResult["contactRecovery"];
+}) {
+  const expectedAliases = buildCompanyNameAliases(input.companyName);
+  const relatedAccounts = new Map<string, ApolloOrganizationCandidate>();
+
+  for (const accountName of buildApolloRelatedAccountSearchQueries(input.companyName)) {
+    const json = await postApolloJson("/api/v1/accounts/search", apiKey, {
+      page: 1,
+      per_page: 25,
+      q_organization_name: accountName
+    });
+
+    for (const candidate of parseApolloOrganizations(json)) {
+      const accountId = readApolloString(candidate.rawPayload, ["id"]);
+      if (
+        !accountId ||
+        accountId === providedAccountId ||
+        relatedAccounts.has(accountId)
+      ) {
+        continue;
+      }
+
+      const candidateName =
+        readApolloString(candidate.rawPayload, [
+          "name",
+          "company_name",
+          "organization_name"
+        ]) ??
+        candidate.name ??
+        "";
+      const candidateAliases = buildCompanyNameAliases(candidateName);
+      const safeIdentity =
+        candidate.domain === trustedDomain &&
+        (
+          hasExactAliasMatch(expectedAliases, candidateAliases) ||
+          hasStrongBaseNameMatch(expectedAliases, candidateAliases) ||
+          hasSafeRegionalBrandAlias(expectedAliases, candidateAliases) ||
+          hasSafeScopedLeadingBrandExpansion(input.companyName, candidateName)
+        );
+      if (!safeIdentity) {
+        continue;
+      }
+
+      const trusted = trustExactApolloSavedAccount(
+        input,
+        candidate,
+        accountId,
+        "saved-account-search"
+      );
+      if (!trusted || trusted.domain !== trustedDomain) {
+        continue;
+      }
+
+      relatedAccounts.set(accountId, trusted);
+      contactRecovery.relatedAccountsChecked += 1;
+      if (relatedAccounts.size >= APOLLO_RELATED_ACCOUNT_LIMIT) {
+        break;
+      }
+    }
+
+    if (relatedAccounts.size >= APOLLO_RELATED_ACCOUNT_LIMIT) {
+      break;
+    }
+  }
+
+  return [...relatedAccounts.values()];
 }
 
 function trustExactApolloSavedAccount(
@@ -2049,6 +2237,58 @@ function trustExactApolloSavedAccount(
       `direct company; exact saved Apollo account mapping; ` +
       `resolved through Apollo's zero-credit saved-account directory`
   };
+}
+
+async function searchApolloPeopleByTrustedCompanyKeywords({
+  apiKey,
+  companyName,
+  trustedDomain,
+  contactRecovery
+}: {
+  apiKey: string;
+  companyName: string;
+  trustedDomain: string;
+  contactRecovery: ApolloContactLookupResult["contactRecovery"];
+}) {
+  const contacts: ApolloContactRecord[] = [];
+  const queries = buildApolloOrganizationSearchQueries(companyName).slice(
+    0,
+    APOLLO_COMPANY_KEYWORD_FALLBACK_LIMIT
+  );
+
+  for (const query of queries) {
+    contactRecovery.companyKeywordSearches += 1;
+    for (let page = 1; page <= 5; page += 1) {
+      const body = {
+        page,
+        per_page: DEFAULT_PAGE_SIZE,
+        q_keywords: query
+      };
+      const json = await postApolloJson(
+        buildApolloPeopleSearchPath(body),
+        apiKey,
+        body
+      );
+      const rawPageContacts = parseApolloContacts(json, "PEOPLE_SEARCH");
+      contacts.push(
+        ...filterTrustedApolloAccountNameFallback({
+          contacts: rawPageContacts,
+          companyName,
+          trustedDomain
+        })
+      );
+
+      if (rawPageContacts.length < DEFAULT_PAGE_SIZE) {
+        break;
+      }
+    }
+
+    if (contacts.length > 0) {
+      break;
+    }
+  }
+
+  return dedupeApolloContacts(contacts);
 }
 
 async function searchApolloContacts({
@@ -4580,6 +4820,17 @@ function buildApolloOrganizationSearchQueries(value: string) {
     .filter((query, index, array) => array.indexOf(query) === index);
 
   return queries.slice(0, 2);
+}
+
+function buildApolloRelatedAccountSearchQueries(value: string) {
+  const coreBrand = tokenizeCompanyName(normalizeCompanyName(value)).join(" ");
+  return [
+    ...buildApolloOrganizationSearchQueries(value),
+    coreBrand
+  ]
+    .filter((query): query is string => Boolean(query && query.trim().length >= 4))
+    .filter((query, index, queries) => queries.indexOf(query) === index)
+    .slice(0, APOLLO_COMPANY_KEYWORD_FALLBACK_LIMIT);
 }
 
 function hasExactAliasMatch(leftAliases: string[], rightAliases: string[]) {

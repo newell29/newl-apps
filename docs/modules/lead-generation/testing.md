@@ -131,6 +131,10 @@ Scoring regression coverage must also verify:
     domain filter or falling back to an unscoped search. The expected domain remains a response guard. Exact Apollo
     account-to-organization relationships may resolve a legal-entity card to its operating parent/brand, while
     unrelated parents, siblings, explicit different organization IDs, and unsafe identities still fail closed.
+    A Dansons regression covers Apollo's duplicate saved-account shape: after the confirmed organization and domain
+    return zero, a same-brand account on the exact trusted domain supplies a distinct global organization roster,
+    while a same-name account on another domain is never searched. A separate regression verifies the bounded
+    company-keyword fallback accepts only the confirmed company/domain.
 22. an unresolved latest `ApolloCompanyMatch` makes bulk enrichment skip the company before any Apollo or contact
     lookup, except for the explicit mapped-zero-employee state shown under **Mapped, no employees**. That state may
     repeat only the read-only, organization-scoped employee lookup; a stored organization ID or zero-employee reason
