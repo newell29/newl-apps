@@ -18,7 +18,7 @@ const prismaMock = vi.hoisted(() => ({
     findFirst: vi.fn(),
     update: vi.fn()
   },
-  automationJobRun: { create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn() },
+  automationJobRun: { create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn() },
   auditLog: { create: vi.fn() },
   $transaction: vi.fn()
 }));
@@ -871,8 +871,75 @@ describe("operational feedback and approved memory", () => {
           after: expect.objectContaining({
             status: "APPROVED",
             developmentJobId: "rivet-job-1",
-            developmentStarted: true
+            developmentQueued: true,
+            developmentPhase: "QUEUED"
           })
+        })
+      })
+    );
+  });
+
+  it("records approval immediately when Rivet work for the Garland workflow is already active", async () => {
+    prismaMock.developmentSuggestion.findFirst.mockResolvedValue({
+      id: "suggestion-2",
+      moduleKey: "SHIPMENT_DOCUMENTS",
+      workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+      title: "Garland Special Instructions extraction",
+      summary: "A continuation line was omitted.",
+      rationale: "One confirmed report.",
+      status: "AWAITING_APPROVAL",
+      riskLevel: "HIGH",
+      sourceFeedbackIds: ["feedback-2"],
+      proposedScope: { issueKey: "GARLAND_SPECIAL_INSTRUCTIONS" },
+      developmentThreadId: null
+    });
+    prismaMock.operationalFeedback.findMany.mockResolvedValue([{
+      id: "feedback-2",
+      moduleKey: "SHIPMENT_DOCUMENTS",
+      workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+      classification: "CHECK_RESULT",
+      subjectType: "GARLAND_CHECK",
+      subjectId: "PS123456",
+      reporterStatement: "A continuation line was omitted.",
+      expectedOutcome: "PASS",
+      observedOutcome: "FAIL",
+      status: "CONFIRMED"
+    }]);
+    prismaMock.automationJobRun.findFirst.mockResolvedValue({
+      id: "rivet-job-active",
+      status: "RUNNING",
+      output: { phase: "RUNNING" }
+    });
+    prismaMock.automationJobRun.create.mockImplementation(async ({ data }) => ({
+      id: "rivet-job-waiting",
+      ...data,
+      errorMessage: null
+    }));
+    prismaMock.developmentSuggestion.update.mockResolvedValue({
+      id: "suggestion-2",
+      status: "APPROVED",
+      developmentThreadId: "rivet-job-waiting"
+    });
+
+    const result = await decideDevelopmentSuggestion(context, "suggestion-2", {
+      status: "APPROVED",
+      decisionNotes: "Preserve the complete business instruction."
+    });
+
+    expect(result).toMatchObject({
+      status: "APPROVED",
+      developmentJob: {
+        id: "rivet-job-waiting",
+        status: "QUEUED",
+        phase: "WAITING_FOR_RIVET"
+      }
+    });
+    expect(prismaMock.developmentSuggestion.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "APPROVED",
+          decisionNotes: "Preserve the complete business instruction.",
+          developmentThreadId: "rivet-job-waiting"
         })
       })
     );
@@ -963,6 +1030,13 @@ describe("operational feedback and approved memory", () => {
         }
       })
     );
+    expect(prismaMock.automationJobRun.update).toHaveBeenCalledWith({
+      where: { id: "failed-job-1" },
+      data: {
+        status: "CANCELLED",
+        errorMessage: "This Rivet job was superseded by an administrator-approved retry."
+      }
+    });
     expect(prismaMock.auditLog.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({

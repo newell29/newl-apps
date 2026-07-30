@@ -91,6 +91,8 @@ describe("Rivet approved development jobs", () => {
     vi.resetAllMocks();
     prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
     prismaMock.codexReviewRun.create.mockResolvedValue({ id: "review-1" });
+    prismaMock.automationJobRun.findFirst.mockResolvedValue(null);
+    prismaMock.automationJobRun.findMany.mockResolvedValue([]);
   });
 
   it("queues a tenant-scoped local Codex packet with required Garland context and hard safety boundaries", async () => {
@@ -338,14 +340,19 @@ describe("Rivet approved development jobs", () => {
     );
   });
 
-  it("refuses a sibling job while the same workflow has active or blocked Rivet work", async () => {
+  it("records an approved sibling as waiting while the same workflow has active or blocked Rivet work", async () => {
     prismaMock.automationJobRun.findFirst.mockResolvedValue({
       id: "job-existing",
       status: JobStatus.ERROR,
       output: { phase: "BLOCKED" }
     });
+    prismaMock.automationJobRun.create.mockImplementation(async ({ data }) => ({
+      id: "job-waiting",
+      ...data,
+      errorMessage: null
+    }));
 
-    await expect(createRivetDevelopmentJob(
+    const job = await createRivetDevelopmentJob(
       prismaMock as never,
       context,
       {
@@ -370,19 +377,41 @@ describe("Rivet approved development jobs", () => {
         expectedOutcome: "PASS",
         observedOutcome: "FAIL"
       }]
-    )).rejects.toThrow("already has active or blocked work");
-    expect(prismaMock.automationJobRun.create).not.toHaveBeenCalled();
+    );
+
+    expect(job).toMatchObject({
+      id: "job-waiting",
+      status: JobStatus.QUEUED,
+      output: {
+        phase: "WAITING_FOR_RIVET",
+        attempt: 0,
+        blockedByJobId: "job-existing"
+      }
+    });
+    expect(prismaMock.automationJobRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        tenantId: "tenant-1",
+        status: JobStatus.QUEUED,
+        output: expect.objectContaining({
+          phase: "WAITING_FOR_RIVET",
+          blockedByJobId: "job-existing"
+        })
+      })
+    });
   });
 
   it("atomically claims at most one queued job and returns a short-lived lease", async () => {
-    prismaMock.automationJobRun.findFirst.mockResolvedValue({
+    const queuedJob = {
       id: "job-1",
       tenantId: "tenant-1",
       jobType: RIVET_DEVELOPMENT_JOB_TYPE,
       status: JobStatus.QUEUED,
       input: storedInput,
       output: { phase: "QUEUED", attempt: 0 }
-    });
+    };
+    prismaMock.automationJobRun.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([queuedJob]);
     prismaMock.automationJobRun.updateMany.mockResolvedValue({ count: 1 });
 
     const result = await claimRivetDevelopmentJob(context);
@@ -410,9 +439,10 @@ describe("Rivet approved development jobs", () => {
   });
 
   it("fails an expired lease for explicit review instead of starting a duplicate worker", async () => {
-    prismaMock.automationJobRun.findFirst.mockResolvedValue(null);
-    prismaMock.automationJobRun.findMany.mockResolvedValue([{
+    prismaMock.automationJobRun.findMany.mockResolvedValueOnce([{
       id: "job-expired",
+      status: JobStatus.RUNNING,
+      input: storedInput,
       output: {
         phase: "RUNNING",
         leaseExpiresAt: "2026-01-01T00:00:00.000Z"
@@ -436,15 +466,76 @@ describe("Rivet approved development jobs", () => {
     );
   });
 
+  it("leaves a waiting job queued until the active job in the same workflow clears", async () => {
+    const activeJob = {
+      id: "job-active",
+      status: JobStatus.RUNNING,
+      input: storedInput,
+      output: {
+        phase: "RUNNING",
+        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString()
+      }
+    };
+    const waitingJob = {
+      id: "job-waiting",
+      status: JobStatus.QUEUED,
+      input: {
+        ...storedInput,
+        suggestionId: "suggestion-2",
+        issueKey: "GARLAND_SPECIAL_INSTRUCTIONS_2"
+      },
+      output: {
+        phase: "WAITING_FOR_RIVET",
+        blockedByJobId: "job-active",
+        attempt: 0
+      }
+    };
+    prismaMock.automationJobRun.findMany
+      .mockResolvedValueOnce([activeJob])
+      .mockResolvedValueOnce([waitingJob]);
+
+    await expect(claimRivetDevelopmentJob(context)).resolves.toEqual({ state: "empty" });
+    expect(prismaMock.automationJobRun.updateMany).not.toHaveBeenCalled();
+
+    prismaMock.automationJobRun.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([waitingJob]);
+    prismaMock.automationJobRun.updateMany.mockResolvedValue({ count: 1 });
+
+    const released = await claimRivetDevelopmentJob(context);
+
+    expect(released).toMatchObject({
+      state: "claimed",
+      jobId: "job-waiting"
+    });
+    expect(prismaMock.automationJobRun.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "job-waiting",
+          status: JobStatus.QUEUED
+        }),
+        data: expect.objectContaining({
+          status: JobStatus.RUNNING,
+          output: expect.objectContaining({
+            phase: "CLAIMED"
+          })
+        })
+      })
+    );
+  });
+
   it("records only an approved-repository PR and never merges or deploys", async () => {
-    prismaMock.automationJobRun.findFirst.mockResolvedValueOnce({
+    const queuedJob = {
       id: "job-1",
       tenantId: "tenant-1",
       jobType: RIVET_DEVELOPMENT_JOB_TYPE,
       status: JobStatus.QUEUED,
       input: storedInput,
       output: { phase: "QUEUED", attempt: 0 }
-    });
+    };
+    prismaMock.automationJobRun.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([queuedJob]);
     prismaMock.automationJobRun.updateMany.mockResolvedValue({ count: 1 });
     const claim = await claimRivetDevelopmentJob(context);
     if (claim.state !== "claimed") throw new Error("Expected a claimed job.");
@@ -564,14 +655,17 @@ describe("Rivet approved development jobs", () => {
   });
 
   it("refuses to mark a PR ready when the exact commit has not passed independent review", async () => {
-    prismaMock.automationJobRun.findFirst.mockResolvedValueOnce({
+    const queuedJob = {
       id: "job-1",
       tenantId: "tenant-1",
       jobType: RIVET_DEVELOPMENT_JOB_TYPE,
       status: JobStatus.QUEUED,
       input: storedInput,
       output: { phase: "QUEUED", attempt: 0 }
-    });
+    };
+    prismaMock.automationJobRun.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([queuedJob]);
     prismaMock.automationJobRun.updateMany.mockResolvedValue({ count: 1 });
     const claim = await claimRivetDevelopmentJob(context);
     if (claim.state !== "claimed") throw new Error("Expected a claimed job.");
@@ -599,14 +693,17 @@ describe("Rivet approved development jobs", () => {
   });
 
   it("stores blocked review evidence and preserves the draft PR for Alex", async () => {
-    prismaMock.automationJobRun.findFirst.mockResolvedValueOnce({
+    const queuedJob = {
       id: "job-1",
       tenantId: "tenant-1",
       jobType: RIVET_DEVELOPMENT_JOB_TYPE,
       status: JobStatus.QUEUED,
       input: storedInput,
       output: { phase: "QUEUED", attempt: 0 }
-    });
+    };
+    prismaMock.automationJobRun.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([queuedJob]);
     prismaMock.automationJobRun.updateMany.mockResolvedValue({ count: 1 });
     const claim = await claimRivetDevelopmentJob(context);
     if (claim.state !== "claimed") throw new Error("Expected a claimed job.");

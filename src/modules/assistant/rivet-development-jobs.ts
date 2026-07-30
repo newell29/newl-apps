@@ -125,6 +125,7 @@ type RivetEvidenceManifest = {
 type RivetJobOutput = {
   phase?: string;
   attempt?: number;
+  blockedByJobId?: string;
   leaseTokenHash?: string;
   leaseExpiresAt?: string;
   claimedAt?: string;
@@ -162,7 +163,8 @@ export async function createRivetDevelopmentJob(
   context: Pick<AuthenticatedContext, "tenantId" | "userId">,
   suggestion: DevelopmentSuggestionForJob,
   sourceFeedback: SourceFeedbackForJob[],
-  approvalComments: string | null = null
+  approvalComments: string | null = null,
+  options: { excludeJobId?: string | null } = {}
 ) {
   const issueKey = readIssueKey(suggestion.proposedScope) ??
     describeDevelopmentIssue(sourceFeedback[0] ?? {
@@ -177,6 +179,7 @@ export async function createRivetDevelopmentJob(
     where: {
       tenantId: context.tenantId,
       jobType: RIVET_DEVELOPMENT_JOB_TYPE,
+      ...(options.excludeJobId ? { id: { not: options.excludeJobId } } : {}),
       input: { path: ["scopeKey"], equals: scopeKey },
       OR: [
         { status: { in: [JobStatus.QUEUED, JobStatus.RUNNING] } },
@@ -188,12 +191,6 @@ export async function createRivetDevelopmentJob(
     },
     select: { id: true, status: true, output: true }
   });
-  if (overlapping) {
-    throw new RivetDevelopmentJobError(
-      `Rivet already has active or blocked work for ${suggestion.workflowKey} (${overlapping.id}). Add the evidence to that review before starting another branch.`,
-      409
-    );
-  }
   const evidenceManifests = await buildRivetEvidenceManifests(
     tx,
     context.tenantId,
@@ -255,7 +252,19 @@ export async function createRivetDevelopmentJob(
       jobType: RIVET_DEVELOPMENT_JOB_TYPE,
       status: JobStatus.QUEUED,
       input: input as unknown as Prisma.InputJsonValue,
-      output: { phase: "QUEUED", attempt: 0 }
+      output: overlapping
+        ? {
+            phase: "WAITING_FOR_RIVET",
+            attempt: 0,
+            blockedByJobId: overlapping.id,
+            progressMessage:
+              "Approved and waiting for the current Rivet job in this workflow to finish or be resolved."
+          }
+        : {
+            phase: "QUEUED",
+            attempt: 0,
+            progressMessage: "Approved and queued for Rivet."
+          }
     }
   });
 }
@@ -431,32 +440,51 @@ async function buildRivetEvidenceManifests(
 }
 
 export async function claimRivetDevelopmentJob(context: AuthenticatedContext) {
-  const queued = await prisma.automationJobRun.findFirst({
+  const activeOrBlocked = await prisma.automationJobRun.findMany({
+    where: {
+      tenantId: context.tenantId,
+      jobType: RIVET_DEVELOPMENT_JOB_TYPE,
+      OR: [
+        { status: JobStatus.RUNNING },
+        {
+          status: JobStatus.ERROR,
+          output: { path: ["phase"], equals: "BLOCKED" }
+        }
+      ]
+    },
+    orderBy: { createdAt: "asc" },
+    take: 200
+  });
+  const expired = activeOrBlocked.find((job) => {
+    if (job.status !== JobStatus.RUNNING) return false;
+    const leaseExpiresAt = readJobOutput(job.output).leaseExpiresAt;
+    return Boolean(leaseExpiresAt && Date.parse(leaseExpiresAt) < Date.now());
+  });
+  if (expired) {
+    await markExpiredJob(context, expired);
+    return { state: "expired" as const, jobId: expired.id };
+  }
+
+  const blockedScopeKeys = new Set(
+    activeOrBlocked.flatMap((job) => {
+      const scopeKey = readJobScopeKey(job.input);
+      return scopeKey ? [scopeKey] : [];
+    })
+  );
+  const queuedJobs = await prisma.automationJobRun.findMany({
     where: {
       tenantId: context.tenantId,
       jobType: RIVET_DEVELOPMENT_JOB_TYPE,
       status: JobStatus.QUEUED
     },
-    orderBy: { createdAt: "asc" }
+    orderBy: { createdAt: "asc" },
+    take: 200
+  });
+  const queued = queuedJobs.find((job) => {
+    const scopeKey = readJobScopeKey(job.input);
+    return !scopeKey || !blockedScopeKeys.has(scopeKey);
   });
   if (!queued) {
-    const active = await prisma.automationJobRun.findMany({
-      where: {
-        tenantId: context.tenantId,
-        jobType: RIVET_DEVELOPMENT_JOB_TYPE,
-        status: JobStatus.RUNNING
-      },
-      orderBy: { createdAt: "asc" },
-      take: 20
-    });
-    const expired = active.find((job) => {
-      const leaseExpiresAt = readJobOutput(job.output).leaseExpiresAt;
-      return Boolean(leaseExpiresAt && Date.parse(leaseExpiresAt) < Date.now());
-    });
-    if (expired) {
-      await markExpiredJob(context, expired);
-      return { state: "expired" as const, jobId: expired.id };
-    }
     return { state: "empty" as const };
   }
 
@@ -526,6 +554,16 @@ export async function claimRivetDevelopmentJob(context: AuthenticatedContext) {
       branchName
     }
   };
+}
+
+function readJobScopeKey(value: Prisma.JsonValue | null) {
+  const record = readRecord(value);
+  if (typeof record.scopeKey === "string" && record.scopeKey.trim()) {
+    return record.scopeKey.trim();
+  }
+  return typeof record.moduleKey === "string" && typeof record.workflowKey === "string"
+    ? `${record.moduleKey}:${record.workflowKey}`
+    : null;
 }
 
 export async function getRivetDevelopmentEvidence(
@@ -1136,6 +1174,7 @@ function readJobOutput(value: Prisma.JsonValue | null): RivetJobOutput {
   return {
     phase: typeof record.phase === "string" ? record.phase : undefined,
     attempt: typeof record.attempt === "number" ? record.attempt : undefined,
+    blockedByJobId: typeof record.blockedByJobId === "string" ? record.blockedByJobId : undefined,
     leaseTokenHash: typeof record.leaseTokenHash === "string" ? record.leaseTokenHash : undefined,
     leaseExpiresAt: typeof record.leaseExpiresAt === "string" ? record.leaseExpiresAt : undefined,
     claimedAt: typeof record.claimedAt === "string" ? record.claimedAt : undefined,
