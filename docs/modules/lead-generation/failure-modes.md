@@ -394,7 +394,9 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   large drop identifies whether discovery, deterministic ranking, or model review caused it.
 - Also verify that `organization_ids` contains Apollo's nested global organization ID rather than the saved account
   record ID. A legacy account ID that returns no employees may be recovered only from one exact organization identity;
-  parent/sibling evidence must produce `MATCH_QUALITY_REVIEW` and an empty contact set.
+  when Account View omits its nested organization object, retry the global organization ID already stored with the
+  same reviewer-confirmed account mapping. Parent/sibling evidence must produce `MATCH_QUALITY_REVIEW` and an empty
+  contact set.
 - An HTTP 307 from the Mac-mini handoff worker means session middleware intercepted the machine route before
   ingestion authentication. `/api/lead-gen/hunter/outreach-handoff/*` is exempt from session middleware and must
   enforce its own tenant-bound ingestion token; regression coverage preserves that boundary.
