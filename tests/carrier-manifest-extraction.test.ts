@@ -6,6 +6,7 @@ import {
   parseAuthoritativePalletTotal,
   resolveManifestSkids
 } from "@/modules/shipment-documents/carrier-manifest-extraction";
+import { normalizeGarlandCarrier } from "@/modules/shipment-documents/carrier-manifest-types";
 
 describe("Garland carrier manifest pallet extraction", () => {
   it("keeps the variable-position pallet total line inside the package crop", () => {
@@ -49,5 +50,10 @@ describe("Garland carrier manifest pallet extraction", () => {
         { skids: 13, evidence: "TOTAL_LINE" }
       )
     ).toEqual({ skids: 13, evidence: "TOTAL_LINE" });
+  });
+
+  it("recognizes Clarke as a target carrier from the printed BOL carrier box", () => {
+    expect(normalizeGarlandCarrier("CLARKE")).toBe("CLARKE");
+    expect(normalizeGarlandCarrier("Clarke Transport")).toBe("CLARKE");
   });
 });

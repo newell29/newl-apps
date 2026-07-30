@@ -13,6 +13,7 @@ Shipment documents and Garland Teamship review is documented because code, route
 - Data persistence uses tenant-scoped Prisma models where a database model exists.
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
+- Garland carrier manifests support Midland, Speedy, Suretrack, and Clarke. Each detected carrier receives its own editable Excel workbook and saved-history download.
 
 ## Data model
 

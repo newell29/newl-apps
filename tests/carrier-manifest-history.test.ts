@@ -19,10 +19,11 @@ describe("Carrier manifest history", () => {
         documentLabel: "July 22, 2026",
         shipmentDate: new Date("2026-07-22T00:00:00.000Z"),
         sourceBolFileName: "bols.pdf",
-        carrierCounts: { MIDLAND: 2, SPEEDY: 1, SURETRACK: 0 },
+        carrierCounts: { MIDLAND: 2, SPEEDY: 1, SURETRACK: 0, CLARKE: 1 },
         midlandWorkbookBytes: new Uint8Array([1]),
         speedyWorkbookBytes: new Uint8Array([2]),
         suretrackWorkbookBytes: null,
+        clarkeWorkbookBytes: new Uint8Array([3]),
         signedCopyFileName: "original-signed.pdf",
         signedCopyUploadedAt: new Date("2026-07-22T15:00:00.000Z"),
         attachments: [

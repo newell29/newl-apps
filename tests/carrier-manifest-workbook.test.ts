@@ -67,4 +67,29 @@ describe("Garland carrier manifest workbook", () => {
     expect(html).toContain(">806507</td>");
     expect(html).toContain(">210245</td>");
   });
+
+  it("builds the same editable manifest layout for Clarke rows", () => {
+    const html = buildCarrierManifestWorkbookHtml({
+      carrierLabel: "Clarke",
+      documentLabel: "July 30, 2026",
+      shipmentDate: "2026-07-30",
+      rows: [
+        {
+          ...manifestRows[0],
+          carrier: "CLARKE",
+          srNumber: "812345",
+          psNumber: "PS123456",
+          cityProvince: "EDMONTON, AB",
+          skids: 1
+        }
+      ],
+      rowCount: 16,
+      palletCount: 1
+    });
+
+    expect(html).toContain("Clarke Manifest July 30, 2026");
+    expect(html).toContain(">812345</td>");
+    expect(html).toContain(">123456</td>");
+    expect(html).toContain('<td class="skids">1</td>');
+  });
 });
