@@ -587,7 +587,12 @@ export async function fetchApolloContactsForCompany(
     ? buildTrustedProvidedApolloOrganization(input, providedOrganizationId)
     : null;
   const confirmedSavedAccount = providedAccountId
-    ? await findApolloSavedAccountOrganization(input, apiKey, providedAccountId)
+    ? await findApolloSavedAccountOrganization(
+        input,
+        apiKey,
+        providedAccountId,
+        { reviewerConfirmed: true }
+      )
     : null;
   // Apollo account IDs and global organization IDs are both 24-character
   // identifiers, but People Search only returns the complete employee set for
@@ -619,17 +624,38 @@ export async function fetchApolloContactsForCompany(
   let organizationIdForSearch = trustedMatchedOrganization?.id ?? providedOrganizationId ?? null;
   let companyNameForSearch = trustedMatchedOrganization?.name ?? input.companyName;
   let domainForSearch = trustedMatchedOrganization?.domain ?? normalizeDomain(input.domain);
-  const savedContactsForProvidedOrganization = providedOrganizationId
-      ? ((await searchApolloContacts({
+  const confirmedSavedContactCompanyName =
+    trustedMatchedOrganization?.name ?? input.companyName;
+  const confirmedSavedContactDomain =
+    trustedMatchedOrganization?.domain ?? normalizeDomain(input.domain);
+  const rawSavedContactsForProvidedOrganization = providedOrganizationId
+    ? ((await searchApolloContacts({
         apiKey,
-        companyName: input.companyName,
-        domain: input.domain,
+        companyName: confirmedSavedContactCompanyName,
+        domain: confirmedSavedContactDomain,
         organizationId: null,
         queryKeywords: null,
         enforceExpectedOrganization: false,
         contactRecovery
       })) ?? [])
     : null;
+  const savedContactsForProvidedOrganization =
+    rawSavedContactsForProvidedOrganization
+      ? filterApolloSavedContactsForConfirmedMapping(
+          rawSavedContactsForProvidedOrganization,
+          {
+            companyNames: [
+              confirmedSavedContactCompanyName,
+              input.companyName
+            ],
+            normalizedDomain: confirmedSavedContactDomain,
+            organizationIds: [
+              providedAccountId,
+              trustedMatchedOrganization?.id
+            ]
+          }
+        )
+      : null;
 
   let contactsFromApollo =
     organizationIdForSearch || input.domain
@@ -932,14 +958,15 @@ export async function fetchApolloContactsForCompany(
 
   let blockedByRecoveryAmbiguity = false;
   if (
+    !providedAccountId &&
     !canonicalDiscoveredOrganization &&
     providedOrganizationId &&
     organizationIdForSearch &&
-    savedContactsForProvidedOrganization &&
-    savedContactsForProvidedOrganization.length > 0
+    rawSavedContactsForProvidedOrganization &&
+    rawSavedContactsForProvidedOrganization.length > 0
   ) {
     const recoveredOrganization = inferApolloOrganizationFromContacts(
-      savedContactsForProvidedOrganization,
+      rawSavedContactsForProvidedOrganization,
       input.companyName,
       normalizeDomain(input.domain)
     );
@@ -2232,7 +2259,10 @@ async function findApolloOrganization(input: ApolloCompanyLookupInput, apiKey: s
 async function findApolloSavedAccountOrganization(
   input: ApolloCompanyLookupInput,
   apiKey: string,
-  providedAccountId: string
+  providedAccountId: string,
+  options?: {
+    reviewerConfirmed?: boolean;
+  }
 ): Promise<ApolloOrganizationCandidate | null> {
   for (const accountName of buildApolloOrganizationSearchQueries(input.companyName)) {
     const json = await postApolloJson("/api/v1/accounts/search", apiKey, {
@@ -2251,7 +2281,8 @@ async function findApolloSavedAccountOrganization(
       input,
       exactAccount,
       providedAccountId,
-      "saved-account-search"
+      "saved-account-search",
+      options
     );
     if (trusted) return trusted;
   }
@@ -2265,7 +2296,8 @@ async function findApolloSavedAccountOrganization(
     return await viewApolloSavedAccountOrganization(
       input,
       apiKey,
-      providedAccountId
+      providedAccountId,
+      options
     );
   } catch (error) {
     if (error instanceof ApolloRateLimitError) throw error;
@@ -2279,7 +2311,10 @@ async function findApolloSavedAccountOrganization(
 async function viewApolloSavedAccountOrganization(
   input: ApolloCompanyLookupInput,
   apiKey: string,
-  accountId: string
+  accountId: string,
+  options?: {
+    reviewerConfirmed?: boolean;
+  }
 ) {
   const json = await getApolloJson(
     `/api/v1/accounts/${encodeURIComponent(accountId)}`,
@@ -2302,7 +2337,8 @@ async function viewApolloSavedAccountOrganization(
         input,
         exactAccount,
         accountId,
-        "saved-account-view"
+        "saved-account-view",
+        options
       )
     : null;
 }
@@ -2474,7 +2510,10 @@ function trustExactApolloSavedAccount(
     rawPayload: Record<string, unknown>;
   },
   providedAccountId: string,
-  source: "saved-account-search" | "saved-account-view"
+  source: "saved-account-search" | "saved-account-view",
+  options?: {
+    reviewerConfirmed?: boolean;
+  }
 ) {
   const inputAliases = buildCompanyNameAliases(input.companyName);
   const accountNameFromApollo = readApolloString(exactAccount.rawPayload, [
@@ -2484,6 +2523,7 @@ function trustExactApolloSavedAccount(
   ]);
   const accountAliases = buildCompanyNameAliases(accountNameFromApollo ?? "");
   const safeAccountIdentity =
+    options?.reviewerConfirmed === true ||
     hasExactAliasMatch(inputAliases, accountAliases) ||
     hasStrongBaseNameMatch(inputAliases, accountAliases) ||
     hasSafeRegionalBrandAlias(inputAliases, accountAliases);
@@ -2506,7 +2546,7 @@ function trustExactApolloSavedAccount(
     strongBaseNameMatch: true,
     classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
     matchReason:
-      `direct company; exact saved Apollo account mapping; ` +
+      `direct company; ${options?.reviewerConfirmed ? "reviewer-confirmed " : ""}exact saved Apollo account mapping; ` +
       `resolved through Apollo's zero-credit saved-account directory`
   };
 }
@@ -2633,6 +2673,57 @@ async function searchApolloContacts({
   return contacts.length > 0 ? contacts : null;
 }
 
+function filterApolloSavedContactsForConfirmedMapping(
+  contacts: ApolloContactRecord[],
+  {
+    companyNames,
+    normalizedDomain,
+    organizationIds
+  }: {
+    companyNames: string[];
+    normalizedDomain: string | null;
+    organizationIds: Array<string | null | undefined>;
+  }
+) {
+  const trustedOrganizationIds = new Set(
+    organizationIds.filter((value): value is string => Boolean(value))
+  );
+
+  return contacts.filter((contact) => {
+    const organization = readApolloOrganizationFromContact(contact);
+    if (!organization) {
+      return false;
+    }
+
+    if (
+      organization.id &&
+      trustedOrganizationIds.has(organization.id)
+    ) {
+      return true;
+    }
+
+    if (organization.id) {
+      return false;
+    }
+
+    if (
+      normalizedDomain &&
+      organization.domain === normalizedDomain
+    ) {
+      return true;
+    }
+
+    return companyNames.some((companyName) =>
+      hasStrictApolloOrganizationIdentityMatch({
+        companyName,
+        candidateName: organization.name,
+        normalizedDomain,
+        candidateDomain: organization.domain
+      })
+    );
+  });
+}
+
 async function searchApolloPeople({
   apiKey,
   companyName,
@@ -2753,14 +2844,8 @@ async function searchApolloRelevantPeople({
   const collected: ApolloContactRecord[] = [];
   const normalizedExpectedDomain = normalizeDomain(expectedOrganizationDomain ?? domain);
 
-  const contactsWithoutKeyword = savedContacts
-    ? enforceExpectedOrganization
-      ? filterApolloContactsForExpectedOrganization(savedContacts, {
-          companyName,
-          normalizedDomain: normalizedExpectedDomain,
-          organizationId
-        })
-      : savedContacts
+  const contactsWithoutKeyword = savedContacts !== null
+    ? savedContacts
     : ((await searchApolloContacts({
         apiKey,
         companyName,
