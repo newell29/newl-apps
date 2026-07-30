@@ -1299,6 +1299,115 @@ describe("fetchApolloContactsForCompany", () => {
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/mixed_companies/search"))).toBe(true);
   });
 
+  it("finds UNISYNC saved contacts with Apollo's confirmed account name instead of the TradeMining facility label", async () => {
+    const accountId = "6320c1e9bfbc9700a3561ccc";
+    const organizationId = "5f455799864ff40001ba9093";
+    const contactSearchKeywords: string[] = [];
+    vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : {};
+
+      if (url.endsWith("/api/v1/accounts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ accounts: [] })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith(`/api/v1/accounts/${accountId}`)) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            account: {
+              id: accountId,
+              name: "Unisync Group",
+              organization: {
+                id: organizationId,
+                name: "Unisync Group Limited",
+                primary_domain: "unisyncgroup.com"
+              }
+            }
+          })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/contacts/search")) {
+        const keywords = String(body.q_keywords ?? "");
+        contactSearchKeywords.push(keywords);
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            contacts:
+              keywords === "Unisync Group Limited"
+                ? [
+                  {
+                    id: "unisync-distribution-manager-contact",
+                    first_name: "Shelley",
+                    last_name: "Houston",
+                    title: "Distribution Manager",
+                    email: "shelley.houston@unisyncgroup.com",
+                    account: {
+                      id: accountId,
+                      name: "Unisync Group Limited",
+                      primary_domain: "unisyncgroup.com"
+                    }
+                  },
+                  {
+                    id: "unisync-supply-director-contact",
+                    first_name: "Scott",
+                    last_name: "Ireland",
+                    title: "Supply Chain Director",
+                    email: "scott.ireland@unisyncgroup.com",
+                    organization: {
+                      id: organizationId,
+                      name: "Unisync Group Limited",
+                      primary_domain: "unisyncgroup.com"
+                    }
+                  }
+                ]
+                : []
+          })
+        } as unknown as Response;
+      }
+
+      if (url.includes("/api/v1/mixed_people/api_search")) {
+        return emptyApolloPeopleResponse();
+      }
+
+      throw new Error(`Unexpected Apollo URL in UNISYNC saved-contact test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "UNISYNC GROUP:GUELPH DC",
+      apolloOrganizationId: organizationId,
+      apolloAccountId: accountId
+    });
+
+    expect(contactSearchKeywords).toContain("Unisync Group Limited");
+    expect(contactSearchKeywords).not.toContain("UNISYNC GROUP:GUELPH DC");
+    expect(result.organizationId).toBe(organizationId);
+    expect(result.contacts).toHaveLength(2);
+    expect(result.contacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        apolloContactId: "unisync-distribution-manager-contact",
+        fullName: "Shelley Houston",
+        title: "Distribution Manager",
+        email: "shelley.houston@unisyncgroup.com"
+      }),
+      expect.objectContaining({
+        apolloContactId: "unisync-supply-director-contact",
+        fullName: "Scott Ireland",
+        title: "Supply Chain Director",
+        email: "scott.ireland@unisyncgroup.com"
+      })
+    ]));
+  });
+
   it("merges saved and employee-search contacts while rejecting a sibling organization", async () => {
     vi.spyOn(global, "fetch").mockImplementation(async (input) => {
       const url = String(input);
