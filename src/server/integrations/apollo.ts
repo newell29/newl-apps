@@ -680,6 +680,53 @@ export async function fetchApolloContactsForCompany(
   const organizationScopedContactCount = contactsFromApollo.length;
 
   if (
+    providedAccountId &&
+    providedOrganization &&
+    providedOrganizationId !== organizationIdForSearch &&
+    contactsFromApollo.length === 0
+  ) {
+    // Apollo Account View can return a saved-account shell without embedding
+    // its linked global organization. In that response shape the parsed
+    // candidate ID is the account ID, while Newl already retains the global
+    // organization ID resolved when the reviewer mapped the exact account URL.
+    // Retry only that immutable stored ID. This remains inside the reviewer-
+    // confirmed account identity and never substitutes a parent, sibling,
+    // same-domain account, or keyword match.
+    contactRecovery.confirmedAccountScopesChecked += 1;
+    const linkedOrganizationContacts =
+      (await searchApolloRelevantPeople({
+        apiKey,
+        companyName: confirmedSavedAccount?.name ?? input.companyName,
+        domain: null,
+        expectedOrganizationDomain:
+          confirmedSavedAccount?.domain ?? domainForSearch,
+        organizationId: providedOrganizationId,
+        allowPeopleSearchFallback,
+        keywordSearchLimit,
+        enforceExpectedOrganization: true,
+        savedContacts: savedContactsForProvidedOrganization,
+        contactRecovery
+      })) ?? [];
+
+    if (linkedOrganizationContacts.length > 0) {
+      organizationIdForSearch = providedOrganizationId;
+      companyNameForSearch =
+        confirmedSavedAccount?.name ?? input.companyName;
+      trustedMatchedOrganization = {
+        ...(confirmedSavedAccount ?? providedOrganization),
+        id: providedOrganizationId
+      };
+      effectiveMatchOrganization = {
+        ...trustedMatchedOrganization,
+        matchReason:
+          `${trustedMatchedOrganization.matchReason}; recovered employees through the ` +
+          `stored global organization ID linked to the reviewer-confirmed Apollo account`
+      };
+      contactsFromApollo = linkedOrganizationContacts;
+    }
+  }
+
+  if (
     !providedAccountId &&
     !canonicalDiscoveredOrganization &&
     providedOrganizationId &&
