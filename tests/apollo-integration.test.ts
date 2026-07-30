@@ -2029,6 +2029,223 @@ describe("fetchApolloContactsForCompany", () => {
     })).toBe(true);
   });
 
+  it("recovers Dansons employees from a verified same-domain duplicate Apollo account", async () => {
+    const providedAccountId = "661ec104e14548000791da78";
+    const providedOrganizationId = "dansons-us-organization";
+    const relatedAccountId = "649c3a742d787d00c3ff63fa";
+    const relatedOrganizationId = "dansons-global-organization";
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/v1/accounts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            accounts: [
+              {
+                id: providedAccountId,
+                name: "DANSONS US LLC",
+                primary_domain: "dansons.com",
+                organization: {
+                  id: providedOrganizationId,
+                  name: "DANSONS US LLC",
+                  primary_domain: "dansons.com"
+                }
+              },
+              {
+                id: relatedAccountId,
+                name: "Dansons",
+                primary_domain: "dansons.com",
+                organization: {
+                  id: relatedOrganizationId,
+                  name: "Dansons",
+                  primary_domain: "dansons.com"
+                }
+              },
+              {
+                id: "unsafe-dansons-account",
+                name: "Dansons",
+                primary_domain: "unrelated.example",
+                organization: {
+                  id: "unsafe-dansons-organization",
+                  name: "Dansons",
+                  primary_domain: "unrelated.example"
+                }
+              }
+            ]
+          })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ contacts: [] })
+        } as unknown as Response;
+      }
+
+      if (url.includes("/api/v1/mixed_people/api_search")) {
+        const requestUrl = new URL(url);
+        const organizationIds = requestUrl.searchParams.getAll("organization_ids[]");
+        if (organizationIds.includes(relatedOrganizationId)) {
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({
+              people: [{
+                id: "dansons-supply-chain-director",
+                name: "Derek Serran",
+                title: "Director of Supply Chain",
+                organization: {
+                  id: relatedOrganizationId,
+                  name: "Dansons",
+                  primary_domain: "dansons.com"
+                }
+              }]
+            })
+          } as unknown as Response;
+        }
+
+        expect(organizationIds).not.toContain("unsafe-dansons-organization");
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ people: [] })
+        } as unknown as Response;
+      }
+
+      throw new Error(`Unexpected Apollo URL in Dansons duplicate-account test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "DANSONS US LLC",
+      domain: "dansons.com",
+      apolloOrganizationId: providedOrganizationId,
+      apolloAccountId: providedAccountId
+    });
+
+    expect(result.contacts).toEqual([
+      expect.objectContaining({
+        apolloPersonId: "dansons-supply-chain-director",
+        fullName: "Derek Serran",
+        title: "Director of Supply Chain"
+      })
+    ]);
+    expect(result.match.classification).toBe("DIRECT_COMPANY");
+    expect(result.match.matchReason).toContain(
+      "verified same-domain Apollo saved-account organization scope"
+    );
+    expect(result.contactRecovery).toMatchObject({
+      relatedAccountsChecked: 1,
+      relatedOrganizationScopesChecked: 1,
+      companyKeywordSearches: 0
+    });
+    expect(
+      fetchMock.mock.calls.some(([request]) =>
+        new URL(String(request)).searchParams
+          .getAll("organization_ids[]")
+          .includes(relatedOrganizationId)
+      )
+    ).toBe(true);
+  });
+
+  it("uses a strict same-company keyword fallback only after verified Apollo scopes return zero", async () => {
+    const accountId = "661ec104e14548000791da78";
+    const organizationId = "dansons-us-organization";
+    vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/v1/accounts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            accounts: [{
+              id: accountId,
+              name: "DANSONS US LLC",
+              primary_domain: "dansons.com",
+              organization: {
+                id: organizationId,
+                name: "DANSONS US LLC",
+                primary_domain: "dansons.com"
+              }
+            }]
+          })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ contacts: [] })
+        } as unknown as Response;
+      }
+
+      if (url.includes("/api/v1/mixed_people/api_search")) {
+        const requestUrl = new URL(url);
+        const query = requestUrl.searchParams.get("q_keywords");
+        if (query === "DANSONS US LLC") {
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({
+              people: [
+                {
+                  id: "dansons-keyword-person",
+                  name: "Derek Serran",
+                  title: "Director of Supply Chain",
+                  organization: {
+                    name: "Dansons",
+                    primary_domain: "dansons.com"
+                  }
+                },
+                {
+                  id: "unsafe-keyword-person",
+                  name: "Wrong Person",
+                  title: "Director of Supply Chain",
+                  organization: {
+                    name: "Dansons Consulting",
+                    primary_domain: "unrelated.example"
+                  }
+                }
+              ]
+            })
+          } as unknown as Response;
+        }
+
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ people: [] })
+        } as unknown as Response;
+      }
+
+      throw new Error(`Unexpected Apollo URL in Dansons keyword fallback test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "DANSONS US LLC",
+      domain: "dansons.com",
+      apolloOrganizationId: organizationId,
+      apolloAccountId: accountId
+    });
+
+    expect(result.contacts.map((contact) => contact.fullName)).toEqual([
+      "Derek Serran"
+    ]);
+    expect(result.match.matchReason).toContain(
+      "strict same-company keyword fallback"
+    );
+    expect(result.contactRecovery).toMatchObject({
+      relatedAccountsChecked: 0,
+      relatedOrganizationScopesChecked: 0,
+      companyKeywordSearches: 1
+    });
+  });
+
   it("views the exact saved account by ID when Apollo account name search omits it", async () => {
     const accountId = "661ec0f545d31b00076e28e0";
     const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {

@@ -1609,6 +1609,9 @@ async function recordCompanyMatch(
     `saved-contact page${lookup.contactRecovery.savedContactPagesRead === 1 ? "" : "s"} read, ` +
     `${lookup.contactRecovery.maskedPeopleChecked} masked candidate${lookup.contactRecovery.maskedPeopleChecked === 1 ? "" : "s"} checked, ` +
     `${lookup.contactRecovery.savedContactsRecovered} saved contact${lookup.contactRecovery.savedContactsRecovered === 1 ? "" : "s"} recovered, ` +
+    `${lookup.contactRecovery.relatedAccountsChecked} related saved account${lookup.contactRecovery.relatedAccountsChecked === 1 ? "" : "s"} checked, ` +
+    `${lookup.contactRecovery.relatedOrganizationScopesChecked} related organization scope${lookup.contactRecovery.relatedOrganizationScopesChecked === 1 ? "" : "s"} checked, ` +
+    `${lookup.contactRecovery.companyKeywordSearches} strict company-keyword search${lookup.contactRecovery.companyKeywordSearches === 1 ? "" : "es"}, ` +
     `${lookup.contactRecovery.paidEmailsRecovered}/${lookup.contactRecovery.paidEmailEnrichmentsAttempted} ` +
     `authorized paid email enrichment${lookup.contactRecovery.paidEmailEnrichmentsAttempted === 1 ? "" : "s"} recovered`;
   const resolvedMatch = resolveApolloContactDiscoveryMatch({

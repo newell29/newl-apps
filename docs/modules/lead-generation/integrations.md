@@ -22,7 +22,15 @@ filter. A successfully resolved saved account already supplies that canonical id
 credit-consuming Organization Search endpoint on later rechecks. If People Search returns no useful people, it
 retries with the trusted domain stored on the confirmed company even when the original saved-account ID is
 unavailable. Both scopes read up to five 100-person pages rather than treating the first page as the complete
-company roster. Apollo can return a strictly scoped employee
+company roster. Apollo can maintain duplicate or related saved accounts for one brand while its UI combines their
+employees through **Include Sub Accounts**. After the exact organization and domain return zero, Hunter searches a
+bounded set of zero-credit saved-account results, accepts only safe same-brand records on the exact trusted domain,
+and searches each distinct nested organization ID. If those verified scopes are still empty, one bounded
+company-keyword People Search may generate candidates, but every returned person's employer name and domain must
+still pass the strict confirmed-company guard. A different domain, sibling identity, or ambiguous employer is
+discarded.
+
+Apollo can return a strictly scoped employee
 with only a marketing/brand employer label and omit the
 organization ID and domain from that person record. Newl Apps accepts a safe leading uppercase brand expansion such
 as `YAT USA, INC.` / `YAT - Your Advanced Technology` only inside the exact confirmed organization/domain query;
@@ -32,8 +40,8 @@ three exact Apollo person profile URLs. Apollo can place either a saved-contact 
 route, so Newl Apps first checks zero-credit Contact View and uses separately authorized email-only People Enrichment
 only when the ID is not an existing saved contact.
 Every returned employer must match the confirmed account identity and trusted domain, and a concrete email must be
-present; similarly named or unverifiable companies are rejected. Company name is not placed in People Search's
-generic keyword filter because Apollo does not document that filter as an employer-name lookup.
+present; similarly named or unverifiable companies are rejected. The company-keyword fallback is candidate
+generation only and never overrides those identity checks.
 
 ## Hunter TradeMining query mapping
 

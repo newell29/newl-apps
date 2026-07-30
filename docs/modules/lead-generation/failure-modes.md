@@ -20,13 +20,15 @@ A saved Apollo account URL can resolve to a canonical global organization ID who
 returns no people even though Apollo's account page visibly lists employees. Newl Apps must carry the reviewer-confirmed
 account ID forward from match history, refresh the exact saved account, and retry People Search with the account's
 normalized domain. Apollo can also index account-page employees outside both the canonical organization and domain
-filters. Apollo's supported public People API does not expose the saved-account roster shown by its private Suggested
-leads UI, and `account_ids[]` is not a documented public filter. Newl Apps therefore stops automatic retries and keeps
-the mapped company in an explicit employee-resolution state. A reviewer opens up to three relevant people in Apollo,
-pastes their exact `#/people/<person-id>` URLs, and explicitly authorizes email-only enrichment. Hunter verifies the
-returned employer against the mapped account name and domain and requires a concrete email before buyer-role review.
-It rejects mismatched or unverifiable employers and never calls private UI endpoints or Apollo's deprecated legacy
-People Search.
+filters. Apollo's UI may also combine duplicate saved-account or sub-account rosters under **Include Sub Accounts**.
+Hunter therefore searches a bounded set of safe same-brand, exact-domain saved-account variants and their distinct
+global organization IDs before declaring a provider coverage gap. A final company-keyword candidate search remains
+strictly guarded by employer name and domain. Apollo's supported public People API still does not expose every roster
+shown by its private Suggested leads UI, and `account_ids[]` is not a documented public filter. Newl Apps then stops
+automatic retries and keeps the mapped company in an explicit employee-resolution state instead of asking for daily
+remapping. Exact `#/people/<person-id>` URLs and explicitly authorized email-only enrichment remain last-resort
+diagnostics. Hunter rejects mismatched or unverifiable employers and never calls private UI endpoints or Apollo's
+deprecated legacy People Search.
 
 ## Data model
 
@@ -526,11 +528,15 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Symptom: Apollo's UI shows employees for a confirmed saved account, while Newl Apps reports zero and asks for
   individual people.
 - Cause: Apollo saved-account IDs, global organization IDs, and saved-contact IDs are separate identities. A global
-  organization search can be empty even when the same confirmed company is indexed through its domain, and Apollo's
-  `/people/<id>` UI route can carry a saved-contact ID rather than a global person ID.
+  organization search can be empty even when the same confirmed company is indexed through its domain. Apollo can
+  also store duplicate same-brand accounts and combine their rosters in the UI while each public API organization
+  scope remains separate. The `/people/<id>` UI route can carry a saved-contact ID rather than a global person ID.
 - Recovery: use **Search company employees and build plans** first. It searches the global organization and trusted
-  domain, reads the bounded complete roster, and merges saved contacts. Individual person URLs are a last-resort
+  domain, expands verified same-domain duplicate account organizations, runs one strict company-keyword candidate
+  fallback, reads the bounded complete roster, and merges saved contacts. Individual person URLs are a last-resort
   diagnostic only; their IDs are checked against Contact View before any separately authorized People Enrichment.
+- Queue behavior: another complete zero result stays parked as **Mapped, no employees** and does not become a daily
+  remapping task. Retry only after the Apollo identity changes or a deliberate operator recheck is requested.
 - Safety: all recovered people still pass exact employer validation, deterministic role ranking, AI buyer-role
   review, concrete-email validation, and grounded outreach QA. A company mapping never authorizes communication.
 
