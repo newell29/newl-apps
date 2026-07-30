@@ -196,7 +196,11 @@ describe("Hunter assisted handoff queueing", () => {
     await expect(enqueueHunterCompanyOutreachHandoff({
       tenantId: "tenant-a",
       companyId: "company-target",
-      authorizePaidEmailEnrichment: true
+      authorizePaidEmailEnrichment: true,
+      explicitApolloPersonIds: [
+        "6138684489ec360001a60945",
+        "6107e3c693686100019d55e1"
+      ]
     })).resolves.toEqual({
       state: "queued",
       runId: "handoff-target",
@@ -221,6 +225,10 @@ describe("Hunter assisted handoff queueing", () => {
           maxContactsPerCompany: 3,
           forceContactReview: true,
           authorizePaidEmailEnrichment: true,
+          explicitApolloPersonIds: [
+            "6138684489ec360001a60945",
+            "6107e3c693686100019d55e1"
+          ],
           items: [{
             companyId: "company-target",
             companyName: "Target Importer",
@@ -231,6 +239,35 @@ describe("Hunter assisted handoff queueing", () => {
         })
       })
     });
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        after: expect.objectContaining({
+          explicitApolloPersonCount: 2
+        })
+      })
+    });
+  });
+
+  it("requires explicit paid authorization and caps reviewer-selected Apollo people at three", async () => {
+    await expect(enqueueHunterCompanyOutreachHandoff({
+      tenantId: "tenant-a",
+      companyId: "company-target",
+      explicitApolloPersonIds: ["6138684489ec360001a60945"]
+    })).rejects.toThrow("Authorize email-only Apollo enrichment");
+
+    await expect(enqueueHunterCompanyOutreachHandoff({
+      tenantId: "tenant-a",
+      companyId: "company-target",
+      authorizePaidEmailEnrichment: true,
+      explicitApolloPersonIds: [
+        "61718465010e6e0001cf807a",
+        "6138684489ec360001a60945",
+        "54a230b67468693825efd714",
+        "6107e3c693686100019d55e1"
+      ]
+    })).rejects.toThrow("Select no more than 3");
+
+    expect(prisma.hunterAutomationPolicy.findUnique).not.toHaveBeenCalled();
   });
 
   it("refreshes a plan from saved research before queueing current eligible opportunities", async () => {

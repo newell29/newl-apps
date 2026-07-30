@@ -7,7 +7,7 @@ import { getAuthenticatedContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function POST() {
   if (process.env.VERCEL_ENV !== "preview") {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
@@ -20,11 +20,13 @@ export async function GET() {
     const result = await fetchApolloContactsForCompany(
       {
         companyName: "YAT USA, INC.",
+        domain: "yattool.com",
         apolloAccountId: "6888f2e0496bf40001170587"
       },
       {
         allowPeopleSearchFallback: true,
-        authorizePaidEmailEnrichment: false
+        authorizePaidEmailEnrichment: true,
+        explicitApolloPersonIds: ["6138684489ec360001a60945"]
       }
     );
 
@@ -35,7 +37,8 @@ export async function GET() {
         apolloPersonId: contact.apolloPersonId,
         fullName: contact.fullName,
         title: contact.title,
-        hasEmailAvailable: contact.hasEmailAvailable
+        hasEmailAvailable: contact.hasEmailAvailable,
+        hasConcreteEmail: Boolean(contact.email)
       }))
     });
   } catch (error) {

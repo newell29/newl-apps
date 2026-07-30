@@ -59,6 +59,10 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
   deliverable address. Saved-contact lookup is zero-credit and must be exhausted before enrichment. Paid email-only
   enrichment is disabled for automatic runs and requires a separate explicit manual authorization capped at three
   people; phone, personal-email, and waterfall enrichment remain disabled.
+- Apollo's supported public People API does not expose the private Suggested leads roster shown on every saved account
+  page. When a confirmed account's organization and domain searches both return zero, the reviewer must select at
+  most three exact Apollo person profile URLs and separately authorize email-only enrichment. Returned employer
+  identity and domain must match the mapped company, and a concrete email is required before the person can advance.
 - Bulk outreach approval accepts selected contacts rather than plan IDs, resolves each contact's latest non-archived
   plan inside the authenticated tenant, and approves only current `QA_PASSED` plans for safe Luna/Kimi-vetted Hunter
   opportunities with a usable email. Eligible contacts are approved atomically and placed into one Apollo enrollment

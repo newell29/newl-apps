@@ -21,6 +21,7 @@ import { runHunterDryPlan } from "@/modules/lead-gen/hunter-planner";
 import { validateHunterAllocation } from "@/modules/lead-gen/hunter-planning-policy";
 import { requireAdmin, requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
+import { parseApolloPersonIds } from "@/server/integrations/apollo";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
 const HUNTER_PATH = "/lead-gen/hunter";
@@ -206,12 +207,24 @@ export async function recheckHunterCompanyContactsAction(formData: FormData) {
   const companyId = requiredText(formData, "companyId", 100);
   const authorizePaidEmailEnrichment =
     formData.get("authorizePaidEmailEnrichment") === "yes";
+  const explicitApolloPersonIds = parseApolloPersonIds(
+    String(formData.get("apolloPersonUrls") ?? "")
+  );
+  if (
+    explicitApolloPersonIds.length > 0 &&
+    !authorizePaidEmailEnrichment
+  ) {
+    throw new Error(
+      "Authorize email-only Apollo enrichment before resolving the selected people."
+    );
+  }
 
   const queued = await enqueueHunterCompanyOutreachHandoff({
     tenantId: context.tenantId,
     companyId,
     forceContactReview: true,
-    authorizePaidEmailEnrichment
+    authorizePaidEmailEnrichment,
+    explicitApolloPersonIds
   });
   let message: string =
     "message" in queued

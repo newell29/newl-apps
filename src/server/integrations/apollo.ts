@@ -541,6 +541,7 @@ export async function fetchApolloContactsForCompany(
     allowPeopleSearchFallback?: boolean;
     keywordSearchLimit?: number;
     authorizePaidEmailEnrichment?: boolean;
+    explicitApolloPersonIds?: string[];
   }
 ): Promise<ApolloContactLookupResult> {
   const apiKey = readApolloSearchApiKey();
@@ -766,31 +767,6 @@ export async function fetchApolloContactsForCompany(
     }
   }
 
-  if (
-    providedAccountId &&
-    trustedMatchedOrganization &&
-    allowPeopleSearchFallback &&
-    contactsFromApollo.length === 0
-  ) {
-    const accountScopedContacts =
-      await searchApolloConfirmedAccountPeople({
-        apiKey,
-        companyName: confirmedSavedAccount?.name ?? input.companyName,
-        accountId: providedAccountId,
-        trustedDomain: confirmedAccountDomain,
-        keywordSearchLimit
-      });
-    contactsFromApollo = accountScopedContacts;
-    if (contactsFromApollo.length > 0 && effectiveMatchOrganization) {
-      effectiveMatchOrganization = {
-        ...effectiveMatchOrganization,
-        matchReason:
-          `${effectiveMatchOrganization.matchReason}; recovered employees through the reviewer-confirmed ` +
-          `Apollo account ID after Apollo's global organization and domain filters returned zero`
-      };
-    }
-  }
-
   let blockedByRecoveryAmbiguity = false;
   if (
     !canonicalDiscoveredOrganization &&
@@ -887,6 +863,35 @@ export async function fetchApolloContactsForCompany(
         options?.authorizePaidEmailEnrichment === true,
       contactRecovery
     });
+  }
+
+  const explicitApolloPersonIds = dedupeApolloPersonIds(
+    options?.explicitApolloPersonIds ?? []
+  );
+  if (explicitApolloPersonIds.length > 0) {
+    if (options?.authorizePaidEmailEnrichment !== true) {
+      throw new Error(
+        "Authorize email-only Apollo enrichment before resolving explicit person URLs."
+      );
+    }
+    const explicitContacts = await enrichExplicitApolloPeople({
+      personIds: explicitApolloPersonIds,
+      companyName: confirmedSavedAccount?.name ?? companyNameForSearch,
+      trustedDomain: confirmedAccountDomain ?? domainForSearch,
+      contactRecovery
+    });
+    contactsFromApollo = dedupeApolloContacts([
+      ...contactsFromApollo,
+      ...explicitContacts
+    ]);
+    if (explicitContacts.length > 0 && effectiveMatchOrganization) {
+      effectiveMatchOrganization = {
+        ...effectiveMatchOrganization,
+        matchReason:
+          `${effectiveMatchOrganization.matchReason}; recovered reviewer-selected employees through ` +
+          `explicit Apollo person URLs after the account roster was unavailable through the public search API`
+      };
+    }
   }
 
   if (!trustedMatchedOrganization && contactsFromApollo.length > 0) {
@@ -990,6 +995,46 @@ export function parseApolloCompanyReference(value: string): ApolloCompanyReferen
 
 export function parseApolloOrganizationId(value: string) {
   return parseApolloCompanyReference(value).id;
+}
+
+export function parseApolloPersonIds(value: string) {
+  const entries = value
+    .split(/[\n,]+/u)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (entries.length === 0) {
+    return [];
+  }
+
+  const personIds = dedupeApolloPersonIds(entries.map(parseApolloPersonId));
+  if (personIds.length > APOLLO_PAID_EMAIL_ENRICHMENT_LIMIT) {
+    throw new Error(
+      `Paste no more than ${APOLLO_PAID_EMAIL_ENRICHMENT_LIMIT} Apollo person URLs.`
+    );
+  }
+
+  return personIds;
+}
+
+function parseApolloPersonId(value: string) {
+  if (/^[a-f0-9]{24}$/iu.test(value)) {
+    return value;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("Each Apollo person entry must be a full Apollo person URL.");
+  }
+  if (url.protocol !== "https:" || url.hostname !== "app.apollo.io") {
+    throw new Error("Apollo person URLs must use https://app.apollo.io.");
+  }
+  const match = url.hash.match(/^#\/people\/([a-f0-9]{24})(?:[/?]|$)/iu);
+  if (!match?.[1]) {
+    throw new Error("The Apollo person URL does not contain a valid person ID.");
+  }
+  return match[1];
 }
 
 export async function fetchApolloOrganizationForMapping({
@@ -2057,7 +2102,6 @@ async function searchApolloPeople({
   companyName,
   domain,
   organizationId,
-  accountId,
   queryKeywords,
   personTitles
 }: {
@@ -2065,7 +2109,6 @@ async function searchApolloPeople({
   companyName: string;
   domain?: string | null;
   organizationId: string | null;
-  accountId?: string | null;
   queryKeywords?: string | null;
   personTitles?: readonly string[];
 }) {
@@ -2074,12 +2117,11 @@ async function searchApolloPeople({
     page: 1,
     per_page: DEFAULT_PAGE_SIZE,
     organization_ids: organizationId ? [organizationId] : undefined,
-    account_ids: accountId ? [accountId] : undefined,
     q_organization_domains_list: normalizedDomain ? [normalizedDomain] : undefined,
     q_keywords: buildApolloPeopleSearchKeywords(
       companyName,
       queryKeywords,
-      Boolean(organizationId || accountId || normalizedDomain)
+      Boolean(organizationId || normalizedDomain)
     ),
     person_titles: personTitles && personTitles.length > 0 ? [...personTitles] : undefined,
     include_similar_titles: personTitles && personTitles.length > 0 ? true : undefined
@@ -2093,57 +2135,10 @@ async function searchApolloPeople({
   return parseApolloContacts(json, "PEOPLE_SEARCH");
 }
 
-async function searchApolloConfirmedAccountPeople({
-  apiKey,
-  companyName,
-  accountId,
-  trustedDomain,
-  keywordSearchLimit
-}: {
-  apiKey: string;
-  companyName: string;
-  accountId: string;
-  trustedDomain: string | null;
-  keywordSearchLimit: number;
-}) {
-  const genericPeople = await searchApolloPeople({
-    apiKey,
-    companyName,
-    domain: null,
-    organizationId: null,
-    accountId,
-    queryKeywords: null
-  });
-  const roleTitles = [
-    ...APOLLO_PRIMARY_ROLE_KEYWORDS,
-    ...APOLLO_FALLBACK_ROLE_KEYWORDS
-  ].slice(0, Math.max(0, keywordSearchLimit));
-  const rolePeople =
-    roleTitles.length > 0
-      ? await searchApolloPeople({
-          apiKey,
-          companyName,
-          domain: null,
-          organizationId: null,
-          accountId,
-          queryKeywords: null,
-          personTitles: roleTitles
-        })
-      : [];
-  const exactAccountPeople = filterTrustedApolloAccountNameFallback({
-    contacts: dedupeApolloContacts([...genericPeople, ...rolePeople]),
-    companyName,
-    trustedDomain
-  });
-
-  return rankApolloRelevantContacts(exactAccountPeople);
-}
-
 function buildApolloPeopleSearchPath({
   page,
   per_page: perPage,
   organization_ids: organizationIds,
-  account_ids: accountIds,
   q_organization_domains_list: organizationDomains,
   q_keywords: queryKeywords,
   person_titles: personTitles,
@@ -2152,7 +2147,6 @@ function buildApolloPeopleSearchPath({
   page: number;
   per_page: number;
   organization_ids?: string[];
-  account_ids?: string[];
   q_organization_domains_list?: string[];
   q_keywords?: string;
   person_titles?: string[];
@@ -2165,9 +2159,6 @@ function buildApolloPeopleSearchPath({
 
   for (const organizationId of organizationIds ?? []) {
     params.append("organization_ids[]", organizationId);
-  }
-  for (const accountId of accountIds ?? []) {
-    params.append("account_ids[]", accountId);
   }
   for (const organizationDomain of organizationDomains ?? []) {
     params.append("q_organization_domains_list[]", organizationDomain);
@@ -2403,6 +2394,98 @@ async function enrichApolloPersonEmail({
         organizationId
       })
     : null;
+}
+
+async function enrichExplicitApolloPeople({
+  personIds,
+  companyName,
+  trustedDomain,
+  contactRecovery
+}: {
+  personIds: string[];
+  companyName: string;
+  trustedDomain: string | null;
+  contactRecovery: ApolloContactLookupResult["contactRecovery"];
+}) {
+  const enrichmentApiKey = readApolloMasterApiKey();
+  const recovered: ApolloContactRecord[] = [];
+
+  for (const personId of personIds.slice(0, APOLLO_PAID_EMAIL_ENRICHMENT_LIMIT)) {
+    contactRecovery.paidEmailEnrichmentsAttempted += 1;
+    const enriched = await enrichApolloPersonEmail({
+      apiKey: enrichmentApiKey,
+      person: {
+        recordSource: "PEOPLE_SEARCH",
+        apolloContactId: null,
+        apolloPersonId: personId,
+        firstName: null,
+        lastName: null,
+        lastNameObfuscated: null,
+        fullName: personId,
+        title: null,
+        department: null,
+        seniority: null,
+        email: null,
+        phone: null,
+        linkedinUrl: null,
+        hasEmailAvailable: false,
+        hasPhoneAvailable: false,
+        hasLinkedinAvailable: false,
+        city: null,
+        state: null,
+        country: null,
+        sequenceStatus: SequenceStatus.NOT_STARTED,
+        replyStatus: ReplyStatus.NO_REPLY,
+        sequenceId: null,
+        sequenceName: null,
+        sequenceOwnerName: null,
+        sequenceOwnerUserId: null,
+        lastTouchAt: null,
+        lastReplyAt: null,
+        rawPayload: {}
+      },
+      companyName,
+      domain: trustedDomain,
+      organizationId: null
+    });
+    if (
+      !enriched ||
+      !hasConcreteApolloEmail(enriched) ||
+      !isExplicitApolloPersonCompanyMatch({
+        contact: enriched,
+        companyName,
+        trustedDomain
+      })
+    ) {
+      continue;
+    }
+
+    contactRecovery.paidEmailsRecovered += 1;
+    recovered.push(enriched);
+  }
+
+  return dedupeApolloContacts(recovered);
+}
+
+function isExplicitApolloPersonCompanyMatch({
+  contact,
+  companyName,
+  trustedDomain
+}: {
+  contact: ApolloContactRecord;
+  companyName: string;
+  trustedDomain: string | null;
+}) {
+  const organization = readApolloOrganizationFromContact(contact);
+  if (!organization?.name) {
+    return false;
+  }
+
+  return filterTrustedApolloAccountNameFallback({
+    contacts: [contact],
+    companyName,
+    trustedDomain
+  }).length === 1;
 }
 
 function hasConcreteApolloEmail(contact: ApolloContactRecord) {
@@ -3251,6 +3334,16 @@ function dedupeApolloContacts(entries: ApolloContactRecord[]) {
   }
 
   return deduped;
+}
+
+function dedupeApolloPersonIds(entries: string[]) {
+  return [
+    ...new Set(
+      entries
+        .map((entry) => entry.trim().toLowerCase())
+        .filter((entry) => /^[a-f0-9]{24}$/u.test(entry))
+    )
+  ];
 }
 
 function isSameApolloPerson(

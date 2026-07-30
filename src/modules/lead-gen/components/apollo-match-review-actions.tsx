@@ -52,25 +52,37 @@ export function ApolloMatchReviewActions({
       <div className="rounded-md border border-success/30 bg-success/10 p-4">
         <p className="font-semibold text-foreground">Apollo company mapping is confirmed</p>
         <p className="mt-1 text-sm leading-6 text-mutedForeground">
-          Recheck saved contacts and the organization employee directory. This keeps the existing company
-          mapping and does not repeat paid organization matching.
+          Apollo&apos;s supported API could not read the Suggested leads shown on this saved account. Open up
+          to three relevant people from the confirmed company&apos;s People page, copy each person&apos;s Apollo
+          profile URL, and paste them below. Newl Apps will verify every returned employer before continuing.
         </p>
         <form action={mappedCompanyRecheckAction} className="mt-3 space-y-3">
           <input type="hidden" name="companyId" value={companyId} />
+          <label className="block space-y-1 text-xs font-medium text-foreground">
+            <span>Apollo person URLs (one per line, maximum 3)</span>
+            <textarea
+              name="apolloPersonUrls"
+              required
+              rows={4}
+              placeholder={"https://app.apollo.io/#/people/<person-id>\nhttps://app.apollo.io/#/people/<person-id>"}
+              className="w-full rounded-md border border-border bg-card px-3 py-2 text-xs text-foreground"
+            />
+          </label>
           <label className="flex items-start gap-2 rounded-md border border-warning/30 bg-background px-3 py-2 text-xs leading-5 text-mutedForeground">
             <input
               type="checkbox"
               name="authorizePaidEmailEnrichment"
               value="yes"
+              required
               className="mt-1"
             />
             <span>
-              Optional: only if no saved Apollo contact has a usable email, authorize up to 3
-              email-only person enrichments (maximum 1 credit each).
+              I authorize email-only enrichment for the selected people (maximum 1 Apollo credit per
+              person; no phone, personal email, or waterfall lookup).
             </span>
           </label>
           <button className="rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primaryForeground">
-            Recheck employees
+            Verify selected people and build plans
           </button>
         </form>
       </div>
@@ -141,6 +153,15 @@ export function ApolloMatchReviewActions({
             Optional: if no saved Apollo contact has a usable email, authorize up to 3 email-only person
             enrichments (maximum 1 credit each; no phone or waterfall lookup).
           </span>
+        </label>
+        <label className="block space-y-1 text-xs font-medium text-foreground">
+          <span>Optional Apollo person URLs (one per line, maximum 3)</span>
+          <textarea
+            name="apolloPersonUrls"
+            rows={3}
+            placeholder="Use only when Apollo shows Suggested leads that automatic employee search cannot retrieve."
+            className="w-full rounded-md border border-border bg-card px-3 py-2 text-xs text-foreground"
+          />
         </label>
         <button
           disabled={mapPending}
