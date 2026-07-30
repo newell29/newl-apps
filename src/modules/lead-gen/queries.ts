@@ -1079,7 +1079,10 @@ export async function getApolloMatchReviewQueue(
 
       const eligibility = evaluateCurrentHunterApolloException({
         classification: match.classification,
-        mappedZeroEmployees: reviewStatus === "MAPPED_NO_EMPLOYEES",
+        mappedZeroEmployees: isMappedApolloZeroEmployeeState({
+          apolloOrganizationId: company.apolloOrganizationId,
+          matchReason: match.matchReason
+        }),
         researchSignal: company.hunterOpportunitySignals[0] ?? null,
         prospectingDecision: company.hunterProspectingDecisions[0] ?? null,
         maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
@@ -1152,7 +1155,9 @@ export function resolveApolloReviewQueueStatus({
 }) {
   if (!classification) return null;
   if (isMappedApolloZeroEmployeeState({ apolloOrganizationId, matchReason })) {
-    return "MAPPED_NO_EMPLOYEES" as const;
+    return reviewedAt
+      ? ("CONFIRMED_NO_MATCH" as const)
+      : ("MAPPED_NO_EMPLOYEES" as const);
   }
   if (!requiresApolloMatchReview(classification)) return null;
   return reviewedAt

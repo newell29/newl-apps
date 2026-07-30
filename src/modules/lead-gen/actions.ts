@@ -66,6 +66,7 @@ import {
   processNextHunterOutreachHandoff
 } from "@/modules/lead-gen/hunter-outreach-handoff";
 import {
+  allowsApolloExceptionMutation,
   isMappedApolloZeroEmployeeState,
   resolveApolloContactDiscoveryMatch
 } from "@/modules/lead-gen/apollo-contact-discovery-review";
@@ -253,6 +254,7 @@ async function ensureCurrentHunterApolloReviewLead({
     select: {
       id: true,
       name: true,
+      apolloOrganizationId: true,
       leads: {
         orderBy: {
           updatedAt: "desc"
@@ -269,7 +271,8 @@ async function ensureCurrentHunterApolloReviewLead({
         },
         take: 1,
         select: {
-          classification: true
+          classification: true,
+          matchReason: true
         }
       },
       hunterOpportunitySignals: {
@@ -315,7 +318,11 @@ async function ensureCurrentHunterApolloReviewLead({
   const latestMatch = company.apolloCompanyMatches[0] ?? null;
   if (
     !latestMatch ||
-    latestMatch.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY
+    !allowsApolloExceptionMutation({
+      classification: latestMatch.classification,
+      apolloOrganizationId: company.apolloOrganizationId,
+      matchReason: latestMatch.matchReason
+    })
   ) {
     throw new Error("This company no longer has an unresolved Apollo match.");
   }
@@ -1112,6 +1119,7 @@ export async function confirmApolloNoMatchAction(
         company: {
           select: {
             name: true,
+            apolloOrganizationId: true,
             apolloCompanyMatches: {
               orderBy: {
                 createdAt: "desc"
@@ -1119,7 +1127,8 @@ export async function confirmApolloNoMatchAction(
               take: 1,
               select: {
                 id: true,
-                classification: true
+                classification: true,
+                matchReason: true
               }
             }
           }
@@ -1132,10 +1141,24 @@ export async function confirmApolloNoMatchAction(
     }
 
     const latestMatch = lead.company.apolloCompanyMatches[0] ?? null;
-    if (!latestMatch || latestMatch.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY) {
+    if (
+      !latestMatch ||
+      !allowsApolloExceptionMutation({
+        classification: latestMatch.classification,
+        apolloOrganizationId: lead.company.apolloOrganizationId,
+        matchReason: latestMatch.matchReason
+      })
+    ) {
       throw new Error("This company no longer has an unresolved Apollo match.");
     }
 
+    const archiveReason = String(formData.get("archiveReason") ?? "")
+      .trim()
+      .slice(0, 500);
+    const mappedZeroEmployees = isMappedApolloZeroEmployeeState({
+      apolloOrganizationId: lead.company.apolloOrganizationId,
+      matchReason: latestMatch.matchReason
+    });
     const reviewedAt = new Date();
     await prisma.$transaction([
       prisma.apolloCompanyMatch.update({
@@ -1154,7 +1177,9 @@ export async function confirmApolloNoMatchAction(
         data: {
           notes: appendLeadNote(
             lead.notes,
-            `Apollo no-match confirmed by ${context.userEmail} on ${reviewedAt.toISOString()}. Automatic and bulk retries remain blocked until the review is reopened.`
+            mappedZeroEmployees
+              ? `Apollo exception archived by ${context.userEmail} on ${reviewedAt.toISOString()}. Reason: ${archiveReason || "No usable Apollo employees"}. Automatic and bulk employee retries remain blocked until the review is reopened.`
+              : `Apollo no-match confirmed by ${context.userEmail} on ${reviewedAt.toISOString()}. Reason: ${archiveReason || "No usable Apollo company match"}. Automatic and bulk retries remain blocked until the review is reopened.`
           )
         }
       })
@@ -1163,7 +1188,7 @@ export async function confirmApolloNoMatchAction(
     revalidateLeadGenSurfaces();
     return {
       status: "success",
-      message: `${lead.company.name} was moved to Confirmed no match. Automatic and bulk retries are blocked.`,
+      message: `${lead.company.name} was archived and removed from active Apollo exceptions. Automatic and bulk retries are blocked until it is reopened.`,
       completedAt: reviewedAt.toISOString()
     };
   } catch (error) {
@@ -1189,6 +1214,7 @@ export async function reopenApolloMatchReviewAction(
         company: {
           select: {
             name: true,
+            apolloOrganizationId: true,
             apolloCompanyMatches: {
               orderBy: {
                 createdAt: "desc"
@@ -1197,6 +1223,7 @@ export async function reopenApolloMatchReviewAction(
               select: {
                 id: true,
                 classification: true,
+                matchReason: true,
                 reviewedAt: true
               }
             }
@@ -1213,7 +1240,11 @@ export async function reopenApolloMatchReviewAction(
     if (
       !latestMatch ||
       !latestMatch.reviewedAt ||
-      latestMatch.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY
+      !allowsApolloExceptionMutation({
+        classification: latestMatch.classification,
+        apolloOrganizationId: lead.company.apolloOrganizationId,
+        matchReason: latestMatch.matchReason
+      })
     ) {
       throw new Error("This company is not in Confirmed no match.");
     }
@@ -1322,14 +1353,11 @@ export async function mapApolloCompanyUrlAction(
     const latestMatch = lead.company.apolloCompanyMatches[0] ?? null;
     if (
       !latestMatch ||
-      (
-        latestMatch.classification ===
-          ApolloCompanyMatchClassification.DIRECT_COMPANY &&
-        !isMappedApolloZeroEmployeeState({
-          apolloOrganizationId: lead.company.apolloOrganizationId,
-          matchReason: latestMatch.matchReason
-        })
-      )
+      !allowsApolloExceptionMutation({
+        classification: latestMatch.classification,
+        apolloOrganizationId: lead.company.apolloOrganizationId,
+        matchReason: latestMatch.matchReason
+      })
     ) {
       throw new Error("This company no longer has an unresolved Apollo match.");
     }

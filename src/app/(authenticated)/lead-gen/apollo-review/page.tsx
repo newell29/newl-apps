@@ -48,7 +48,7 @@ export default async function ApolloMatchReviewPage({
       <div className="grid gap-4 md:grid-cols-4">
         <Metric label="Needs review" value={activeRows.length} />
         <Metric label="Mapped, no employees" value={mappedNoEmployeeRows.length} />
-        <Metric label="Confirmed no match" value={confirmedRows.length} />
+        <Metric label="Archived exceptions" value={confirmedRows.length} />
         <Metric label="Protected from bulk retry" value={rows.length} />
       </div>
 
@@ -92,9 +92,10 @@ export default async function ApolloMatchReviewPage({
       />
 
       <ReviewSection
-        title="Confirmed no match"
-        description="These companies remain visible for audit, but bulk and automatic Apollo searches stay blocked until a rep explicitly reopens them."
+        title="Archived exceptions"
+        description="These companies are hidden from active work but preserved for audit and deduplication. Automatic Apollo searches stay blocked until a rep explicitly reopens them."
         rows={confirmedRows}
+        collapsed
       />
     </div>
   );
@@ -103,12 +104,29 @@ export default async function ApolloMatchReviewPage({
 function ReviewSection({
   title,
   description,
-  rows
+  rows,
+  collapsed = false
 }: {
   title: string;
   description: string;
   rows: Awaited<ReturnType<typeof getApolloMatchReviewQueue>>;
+  collapsed?: boolean;
 }) {
+  if (collapsed) {
+    return (
+      <details className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <summary className="cursor-pointer">
+          <span className="text-lg font-semibold text-foreground">{title}</span>
+          <span className="ml-2 text-sm text-mutedForeground">({rows.length})</span>
+          <p className="mt-1 text-sm leading-6 text-mutedForeground">{description}</p>
+        </summary>
+        <div className="mt-4">
+          <ReviewRows rows={rows} />
+        </div>
+      </details>
+    );
+  }
+
   return (
     <section className="space-y-4 rounded-lg border border-border bg-card p-5 shadow-sm">
       <div>
@@ -116,69 +134,77 @@ function ReviewSection({
         <p className="mt-1 text-sm leading-6 text-mutedForeground">{description}</p>
       </div>
 
-      {rows.length === 0 ? (
-        <p className="rounded-md border border-dashed border-border bg-background px-4 py-6 text-sm text-mutedForeground">
-          No companies are currently in this state.
-        </p>
-      ) : (
-        <div className="space-y-4">
-          {rows.map((row) => (
-            <article key={row.latestMatch.id} className="space-y-4 rounded-lg border border-border bg-card p-4">
-              <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr_2fr]">
-                <div>
-                  <h3 className="font-semibold text-foreground">{row.companyName}</h3>
-                  <p className="mt-1 text-xs text-mutedForeground">{row.normalizedName}</p>
-                  <p className="mt-2 text-sm text-mutedForeground">Assigned rep: {row.assignedRep}</p>
-                  <p className="mt-1 text-sm text-mutedForeground">{row.hunterQualification}</p>
-                  <Link
-                    href="/lead-gen/hunter"
-                    className="mt-2 inline-block text-sm font-semibold text-primary hover:text-primaryHover"
-                  >
-                    View Daily Opportunities
-                  </Link>
-                </div>
-                <div className="text-sm text-mutedForeground">
-                  <p>
-                    <span className="font-medium text-foreground">Last attempt:</span>{" "}
-                    {formatDate(row.latestMatch.attemptedAt)}
-                  </p>
-                  <p className="mt-1">
-                    <span className="font-medium text-foreground">Result:</span>{" "}
-                    {formatClassification(row.latestMatch.classification)}
-                  </p>
-                  <p className="mt-1">
-                    <span className="font-medium text-foreground">Score:</span> {row.latestMatch.score}
-                  </p>
-                  {row.latestMatch.companyName ? (
-                    <p className="mt-1">
-                      <span className="font-medium text-foreground">Apollo candidate:</span>{" "}
-                      {row.latestMatch.companyName}
-                    </p>
-                  ) : null}
-                </div>
-                <div className="rounded-md bg-muted/60 p-3 text-sm leading-6 text-mutedForeground">
-                  <span className="font-medium text-foreground">Why review is required:</span>{" "}
-                  {row.latestMatch.reason ?? "Apollo did not return a safe direct-company match."}
-                </div>
-              </div>
-
-              <ApolloMatchReviewActions
-                companyId={row.companyId}
-                companyName={row.companyName}
-                confirmedApolloAccountUrl={row.confirmedApolloAccountUrl}
-                resolvedApolloOrganizationUrl={row.resolvedApolloOrganizationUrl}
-                status={row.status}
-                retryAction={retryApolloCompanyReviewFromQueueAction}
-                mapAction={mapApolloCompanyUrlAction}
-                confirmNoMatchAction={confirmApolloNoMatchAction}
-                reopenAction={reopenApolloMatchReviewAction}
-                mappedCompanyRecheckAction={recheckHunterCompanyContactsAction}
-              />
-            </article>
-          ))}
-        </div>
-      )}
+      <ReviewRows rows={rows} />
     </section>
+  );
+}
+
+function ReviewRows({
+  rows
+}: {
+  rows: Awaited<ReturnType<typeof getApolloMatchReviewQueue>>;
+}) {
+  return rows.length === 0 ? (
+    <p className="rounded-md border border-dashed border-border bg-background px-4 py-6 text-sm text-mutedForeground">
+      No companies are currently in this state.
+    </p>
+  ) : (
+    <div className="space-y-4">
+      {rows.map((row) => (
+        <article key={row.latestMatch.id} className="space-y-4 rounded-lg border border-border bg-card p-4">
+          <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr_2fr]">
+            <div>
+              <h3 className="font-semibold text-foreground">{row.companyName}</h3>
+              <p className="mt-1 text-xs text-mutedForeground">{row.normalizedName}</p>
+              <p className="mt-2 text-sm text-mutedForeground">Assigned rep: {row.assignedRep}</p>
+              <p className="mt-1 text-sm text-mutedForeground">{row.hunterQualification}</p>
+              <Link
+                href="/lead-gen/hunter"
+                className="mt-2 inline-block text-sm font-semibold text-primary hover:text-primaryHover"
+              >
+                View Daily Opportunities
+              </Link>
+            </div>
+            <div className="text-sm text-mutedForeground">
+              <p>
+                <span className="font-medium text-foreground">Last attempt:</span>{" "}
+                {formatDate(row.latestMatch.attemptedAt)}
+              </p>
+              <p className="mt-1">
+                <span className="font-medium text-foreground">Result:</span>{" "}
+                {formatClassification(row.latestMatch.classification)}
+              </p>
+              <p className="mt-1">
+                <span className="font-medium text-foreground">Score:</span> {row.latestMatch.score}
+              </p>
+              {row.latestMatch.companyName ? (
+                <p className="mt-1">
+                  <span className="font-medium text-foreground">Apollo candidate:</span>{" "}
+                  {row.latestMatch.companyName}
+                </p>
+              ) : null}
+            </div>
+            <div className="rounded-md bg-muted/60 p-3 text-sm leading-6 text-mutedForeground">
+              <span className="font-medium text-foreground">Why review is required:</span>{" "}
+              {row.latestMatch.reason ?? "Apollo did not return a safe direct-company match."}
+            </div>
+          </div>
+
+          <ApolloMatchReviewActions
+            companyId={row.companyId}
+            companyName={row.companyName}
+            confirmedApolloAccountUrl={row.confirmedApolloAccountUrl}
+            resolvedApolloOrganizationUrl={row.resolvedApolloOrganizationUrl}
+            status={row.status}
+            retryAction={retryApolloCompanyReviewFromQueueAction}
+            mapAction={mapApolloCompanyUrlAction}
+            confirmNoMatchAction={confirmApolloNoMatchAction}
+            reopenAction={reopenApolloMatchReviewAction}
+            mappedCompanyRecheckAction={recheckHunterCompanyContactsAction}
+          />
+        </article>
+      ))}
+    </div>
   );
 }
 

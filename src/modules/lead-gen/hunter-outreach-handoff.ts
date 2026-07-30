@@ -819,7 +819,8 @@ async function processCompany({
     blocksApolloEmployeeLookup({
       classification: latestMatch.classification,
       apolloOrganizationId: company.apolloOrganizationId,
-      matchReason: latestMatch.matchReason
+      matchReason: latestMatch.matchReason,
+      reviewedAt: latestMatch.reviewedAt
     })
   ) {
     return terminal(

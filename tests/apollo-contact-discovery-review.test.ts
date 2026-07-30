@@ -1,6 +1,7 @@
 import { ApolloCompanyMatchClassification } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import {
+  allowsApolloExceptionMutation,
   APOLLO_ZERO_CONTACT_REVIEW_REASON,
   blocksApolloEmployeeLookup,
   isMappedApolloZeroEmployeeState,
@@ -93,6 +94,39 @@ describe("Apollo contact-discovery review", () => {
           ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW,
         apolloOrganizationId: "apollo-org-yat",
         matchReason: "Partial name match requires review."
+      })
+    ).toBe(true);
+  });
+
+  it("allows a reviewer to replace or archive a direct company mapping after zero employees", () => {
+    expect(
+      allowsApolloExceptionMutation({
+        classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
+        apolloOrganizationId: "apollo-org-celgard",
+        matchReason:
+          `direct company; ${APOLLO_ZERO_CONTACT_REVIEW_REASON}`
+      })
+    ).toBe(true);
+  });
+
+  it("does not let the exception workflow replace an ordinary resolved direct company", () => {
+    expect(
+      allowsApolloExceptionMutation({
+        classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
+        apolloOrganizationId: "apollo-org-resolved",
+        matchReason: "Direct company with employees."
+      })
+    ).toBe(false);
+  });
+
+  it("blocks repeat employee lookup after a mapped zero-employee exception is archived", () => {
+    expect(
+      blocksApolloEmployeeLookup({
+        classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
+        apolloOrganizationId: "apollo-org-celgard",
+        matchReason:
+          `direct company; ${APOLLO_ZERO_CONTACT_REVIEW_REASON}`,
+        reviewedAt: new Date("2026-07-30T20:00:00.000Z")
       })
     ).toBe(true);
   });

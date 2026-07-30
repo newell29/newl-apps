@@ -181,6 +181,41 @@ export function ApolloMatchReviewActions({
           </form>
           <ActionMessage state={mapState} />
         </details>
+        <details className="rounded-md border border-border bg-background p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-foreground">
+            Archive this exception
+          </summary>
+          <p className="mt-2 text-xs leading-5 text-mutedForeground">
+            Use this when the company has no usable employees, is a duplicate, or should not remain
+            in your active exception queue. The company and Apollo mapping are preserved for audit
+            and deduplication, and you can reopen it later.
+          </p>
+          <form action={confirmFormAction} className="mt-3 space-y-3">
+            <input type="hidden" name="companyId" value={companyId} />
+            <label className="block space-y-1 text-xs font-medium text-foreground">
+              <span>Archive reason</span>
+              <select
+                name="archiveReason"
+                required
+                defaultValue=""
+                className="w-full rounded-md border border-border bg-card px-3 py-2 text-xs text-foreground"
+              >
+                <option value="" disabled>Select a reason</option>
+                <option value="No usable Apollo employees">No usable employees</option>
+                <option value="Duplicate company">Duplicate company</option>
+                <option value="Incorrect or irrelevant company">Incorrect or irrelevant company</option>
+                <option value="Other reviewer decision">Other</option>
+              </select>
+            </label>
+            <button
+              disabled={confirmPending}
+              className="rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {confirmPending ? "Archiving…" : "Archive exception"}
+            </button>
+          </form>
+          <ActionMessage state={confirmState} />
+        </details>
       </div>
     );
   }
@@ -299,6 +334,7 @@ export function ApolloMatchReviewActions({
 
         <form action={confirmFormAction} className="space-y-2 border-t border-border pt-4">
           <input type="hidden" name="companyId" value={companyId} />
+          <input type="hidden" name="archiveReason" value="No usable Apollo company match" />
           <p className="text-xs leading-5 text-mutedForeground">
             If Apollo truly has no usable company, archive it as Confirmed no match. It can be reopened later.
           </p>
