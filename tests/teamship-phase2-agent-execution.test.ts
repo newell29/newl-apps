@@ -74,6 +74,58 @@ describe("Teamship Phase 2 agent execution", () => {
     });
   });
 
+  it("maps approved Garland ship-to location fields to Teamship API fields", () => {
+    const review = sampleReview();
+    review.reviews[0]!.fields = [
+      {
+        key: "ship_to_city",
+        label: "Ship-to city",
+        status: "DISCREPANCY",
+        pdfValue: "SYNTHETIC CITY",
+        teamshipValue: "OLD CITY",
+        message: "PDF and Teamship values do not match.",
+        botActionEnabled: true
+      },
+      {
+        key: "ship_to_state",
+        label: "Ship-to province/state",
+        status: "DISCREPANCY",
+        pdfValue: "QC",
+        teamshipValue: "ON",
+        message: "PDF and Teamship values do not match.",
+        botActionEnabled: true
+      },
+      {
+        key: "ship_to_zip",
+        label: "Postal / ZIP",
+        status: "MISSING",
+        pdfValue: "A1A 1A1",
+        teamshipValue: "",
+        message: "PDF has a value, but Teamship does not.",
+        botActionEnabled: true
+      }
+    ];
+
+    const plan = buildTeamshipPhase2DryRunPlan(review);
+    const payload = buildTeamshipUpdatePayload(plan.orders[0]!);
+    const evidence = buildDryRunEvidence({
+      job: { id: "job_1" },
+      plan,
+      agentId: "agent"
+    });
+
+    expect(payload).toMatchObject({
+      ship_city: "SYNTHETIC CITY",
+      ship_state: "QC",
+      ship_zip: "A1A 1A1"
+    });
+    expect(evidence.orders[0]?.fieldActions.map((action) => action.browserInstruction.fieldLabel)).toEqual([
+      "City",
+      "State",
+      "Zip"
+    ]);
+  });
+
   it("compacts Garland special instructions before planning bot updates", () => {
     expect(
       compactGarlandSpecialInstructions(`PLEASE DELIVER TO ARLEIGH NELLA @ 647-308-0048

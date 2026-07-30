@@ -178,14 +178,15 @@ X16 TOP PANINI GRILL PLATE
       {
         pageNumber: 1,
         text: `Ship-To Pre-Shipper Print Date
-10018968 PS210497 7/24/2026
+10000000 PS123456 7/24/2026
 Pre-Shipper
-GARLAND CUSTOMER
+SYNTHETIC GARLAND CUSTOMER
 123 TEST STREET
-QUEBEFC QC G1P 2H3
+QUEBEFC QC A1A 1A1
+., ON
 Canada
 P I C K L I S T/P R E - S H I P P E R
-Order Number SR812997 Ship To PO 12345 Frt Terms PPDG
+Order Number SR812345 Ship To PO 12345 Frt Terms PPDG
 Order Date 7/24/2026 Ship Via SPEEDY
 Ln Item Number T Site
 Location
@@ -199,11 +200,11 @@ TEST PRODUCT
     ]);
 
     expect(orders[0]).toMatchObject({
-      psNumber: "PS210497",
-      shipToAddress1: "123 TEST STREET",
-      shipToCity: "QUEBEFC",
+      psNumber: "PS123456",
+      shipToAddress1: "123 TEST STREET, ., ON",
+      shipToCity: "QUEBEC",
       shipToState: "QC",
-      shipToPostalCode: "G1P 2H3"
+      shipToPostalCode: "A1A 1A1"
     });
   });
 

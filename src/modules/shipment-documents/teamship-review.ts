@@ -255,15 +255,25 @@ function parseCityStatePostal(lines: string[]) {
       /^(.+?)[,\s]+([A-Z]{2})[,\s]+([A-Z]\d[A-Z]\s?\d[A-Z]\d|\d{5}(?:-\d{4})?)$/i
     );
     if (match) {
+      const state = match[2]?.trim().toUpperCase() ?? null;
+
       return {
-        city: match[1]?.trim() ?? null,
-        state: match[2]?.trim().toUpperCase() ?? null,
+        city: normalizeGarlandShipToCity(match[1]?.trim() ?? null, state),
+        state,
         postalCode: match[3]?.trim().toUpperCase() ?? null
       };
     }
   }
 
   return null;
+}
+
+function normalizeGarlandShipToCity(city: string | null, state: string | null) {
+  if (city?.toUpperCase() === "QUEBEFC" && state === "QC") {
+    return "QUEBEC";
+  }
+
+  return city;
 }
 
 function isCountryLine(line: string) {

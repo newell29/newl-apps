@@ -369,6 +369,104 @@ describe("Teamship Phase 2 dry-run planner", () => {
     ]);
   });
 
+  it("auto-enables and plans a partially populated Teamship ship-to location correction", () => {
+    const review = sampleReview();
+    review.reviews[0]!.fields = [
+      {
+        key: "ship_to_city",
+        label: "Ship-to city",
+        status: "DISCREPANCY",
+        pdfValue: "SYNTHETIC CITY",
+        teamshipValue: "OLD CITY",
+        message: "PDF and Teamship values do not match."
+      },
+      {
+        key: "ship_to_state",
+        label: "Ship-to province/state",
+        status: "DISCREPANCY",
+        pdfValue: "QC",
+        teamshipValue: "ON",
+        message: "PDF and Teamship values do not match."
+      },
+      {
+        key: "ship_to_zip",
+        label: "Postal / ZIP",
+        status: "MISSING",
+        pdfValue: "A1A 1A1",
+        teamshipValue: "",
+        message: "PDF has a value, but Teamship does not."
+      }
+    ];
+
+    const preparedReview = prepareReviewForAutomatedTeamshipUpdates(review);
+    const plan = buildTeamshipPhase2DryRunPlan(preparedReview);
+
+    expect(preparedReview.reviews[0]?.fields).toEqual([
+      expect.objectContaining({ key: "ship_to_city", botActionEnabled: true }),
+      expect.objectContaining({ key: "ship_to_state", botActionEnabled: true }),
+      expect.objectContaining({ key: "ship_to_zip", botActionEnabled: true })
+    ]);
+    expect(plan.orders[0]?.plannedFieldUpdates).toEqual([
+      expect.objectContaining({
+        reviewFieldKey: "ship_to_city",
+        teamshipField: "ship_city",
+        currentValue: "OLD CITY",
+        proposedValue: "SYNTHETIC CITY"
+      }),
+      expect.objectContaining({
+        reviewFieldKey: "ship_to_state",
+        teamshipField: "ship_state",
+        currentValue: "ON",
+        proposedValue: "QC"
+      }),
+      expect.objectContaining({
+        reviewFieldKey: "ship_to_zip",
+        teamshipField: "ship_zip",
+        currentValue: "",
+        proposedValue: "A1A 1A1"
+      })
+    ]);
+  });
+
+  it("plans complete ship-to location evidence when Teamship has no location values", () => {
+    const review = sampleReview();
+    review.reviews[0]!.fields = [
+      {
+        key: "ship_to_city",
+        label: "Ship-to city",
+        status: "MISSING",
+        pdfValue: "SYNTHETIC CITY",
+        teamshipValue: null,
+        message: "PDF has a value, but Teamship does not."
+      },
+      {
+        key: "ship_to_state",
+        label: "Ship-to province/state",
+        status: "MISSING",
+        pdfValue: "NB",
+        teamshipValue: null,
+        message: "PDF has a value, but Teamship does not."
+      },
+      {
+        key: "ship_to_zip",
+        label: "Postal / ZIP",
+        status: "MISSING",
+        pdfValue: "A1A 1A1",
+        teamshipValue: null,
+        message: "PDF has a value, but Teamship does not."
+      }
+    ];
+
+    const preparedReview = prepareReviewForAutomatedTeamshipUpdates(review);
+    const plan = buildTeamshipPhase2DryRunPlan(preparedReview);
+
+    expect(plan.orders[0]?.plannedFieldUpdates).toEqual([
+      expect.objectContaining({ teamshipField: "ship_city", proposedValue: "SYNTHETIC CITY" }),
+      expect.objectContaining({ teamshipField: "ship_state", proposedValue: "NB" }),
+      expect.objectContaining({ teamshipField: "ship_zip", proposedValue: "A1A 1A1" })
+    ]);
+  });
+
   it("auto-enables the full Garland ship-to name for Teamship First Name", () => {
     const review = sampleReview();
     review.pdfOrders[0]!.psNumber = "PS999910";

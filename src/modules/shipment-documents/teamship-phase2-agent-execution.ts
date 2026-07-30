@@ -454,6 +454,42 @@ const FIELD_BROWSER_INSTRUCTIONS: Record<string, TeamshipBrowserFieldInstruction
     editInstruction: "Open the Teamship shipping order, find Ship To Address, replace it with the approved Newl Apps value, then save.",
     saveInstruction: buildShippingOrderSaveInstruction()
   },
+  ship_city: {
+    preferredExecution: "TEAMSHIP_API",
+    browserFallbackPage: "TEAMSHIP_SHIPPING_ORDER",
+    routeTemplate: "/ship-inventories/{teamshipOrderId}",
+    fieldLabel: "City",
+    primaryLocator: {
+      strategy: "LABEL_OR_NAME",
+      label: "City"
+    },
+    editInstruction: "Open the Teamship shipping order, find Ship To City, replace it with the approved Garland value, then save.",
+    saveInstruction: buildShippingOrderSaveInstruction()
+  },
+  ship_state: {
+    preferredExecution: "TEAMSHIP_API",
+    browserFallbackPage: "TEAMSHIP_SHIPPING_ORDER",
+    routeTemplate: "/ship-inventories/{teamshipOrderId}",
+    fieldLabel: "State",
+    primaryLocator: {
+      strategy: "LABEL_OR_NAME",
+      label: "State"
+    },
+    editInstruction: "Open the Teamship shipping order, find Ship To State, replace it with the approved Garland value, then save.",
+    saveInstruction: buildShippingOrderSaveInstruction()
+  },
+  ship_zip: {
+    preferredExecution: "TEAMSHIP_API",
+    browserFallbackPage: "TEAMSHIP_SHIPPING_ORDER",
+    routeTemplate: "/ship-inventories/{teamshipOrderId}",
+    fieldLabel: "Zip",
+    primaryLocator: {
+      strategy: "LABEL_OR_NAME",
+      label: "Zip"
+    },
+    editInstruction: "Open the Teamship shipping order, find Ship To Zip, replace it with the approved Garland value, then save.",
+    saveInstruction: buildShippingOrderSaveInstruction()
+  },
   edi_field_4: {
     preferredExecution: "TEAMSHIP_API",
     browserFallbackPage: "TEAMSHIP_SHIPPING_ORDER",

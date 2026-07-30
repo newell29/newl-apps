@@ -708,7 +708,10 @@ async function fillOrderFieldUpdates(page: Page, order: TeamshipPhase2OrderPlan)
           poNumber: ["PO Number", "PO"],
           edi_field_3: ["Freight Terms Code", "Freight Terms"],
           edi_field_4: ["Special Instructions"],
-          carrier_value: ["Carrier"]
+          carrier_value: ["Carrier"],
+          ship_city: ["City", "Ship To City"],
+          ship_state: ["State", "Province", "Ship To State"],
+          ship_zip: ["Zip", "Postal Code", "Ship To Zip"]
         };
         const labels = aliases[teamshipField] ?? [label, teamshipField];
 

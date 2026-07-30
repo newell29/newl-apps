@@ -13,6 +13,7 @@ Shipment documents and Garland Teamship review is documented because code, route
 - Data persistence uses tenant-scoped Prisma models where a database model exists.
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
+- Garland ship-to city, province/state, and postal-code discrepancies may be included in an approval-gated Teamship update only when the parsed PDF supplies the corresponding nonblank value. The planner maps those values to `ship_city`, `ship_state`, and `ship_zip`; tenant scope, employee approval, live allowlisting, and post-update comparison remain unchanged.
 
 ## Data model
 

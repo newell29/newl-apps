@@ -25,6 +25,8 @@ Emails are classified using Garland-domain, PS-range, order/page-count, attachme
 
 When the Garland PDF ship-to name differs from Teamship, an approved update uses the complete PDF ship-to name for Teamship `ship_first_name` (the field labelled **First Name**). The planner must preserve the complete business name without abbreviating it. This approved rule does not silently clear or rewrite Teamship `ship_last_name`; any separate Last Name correction requires its own reviewed rule. The existing review and update approval gates still apply before any Teamship write.
 
+When the Garland PDF contains a complete ship-to location and the saved Teamship review identifies a city, province/state, or postal-code discrepancy, the approval-gated update plan may map those exact PDF values to Teamship `ship_city`, `ship_state`, and `ship_zip`. Missing PDF location values remain excluded, and the existing employee approval, tenant scope, allowlist, and post-update full comparison still apply before an order can pass.
+
 An approved Phase 2 update writes the reviewed Teamship API fields first and then removes generated Customer Order Information weights from the editable BOL. If the shared browser session closes during that cleanup, the worker performs at most one browser restart and retries only the interrupted cleanup order. It never repeats the preceding API update as part of browser recovery. A second browser closure stops the cleanup batch; the affected order is failed and the untouched later orders are explicitly marked skipped under the same infrastructure incident.
 
 ## Pallet and printing notes

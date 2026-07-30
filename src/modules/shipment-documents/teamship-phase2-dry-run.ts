@@ -76,6 +76,9 @@ const FIELD_UPDATE_DESTINATIONS: Record<string, string> = {
   carrier: "carrier_value",
   ship_to_name: "ship_first_name",
   ship_to_address_1: "ship_address",
+  ship_to_city: "ship_city",
+  ship_to_state: "ship_state",
+  ship_to_zip: "ship_zip",
   shipping_instructions: "edi_field_4"
 };
 
